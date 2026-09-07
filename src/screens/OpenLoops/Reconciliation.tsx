@@ -1,0 +1,63 @@
+import type { OpenLoopsData } from '../../data';
+import { BUILDER_NAMES } from '../../data';
+import {
+  EmptyState,
+  RowAction,
+  RowActions,
+  SourceLink,
+  TableFrame,
+  Th,
+} from '../../components/ui';
+import { act } from '../../lib';
+
+/** Loops the digest and the builder tables disagree about. */
+export function Reconciliation({ data }: { data: OpenLoopsData }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <p className="shrink-0 border-b border-line px-4 py-1.5 text-[11px] text-faint">
+        {data.reconciliation_note}
+      </p>
+      {data.reconciliation.length === 0 ? (
+        <EmptyState>
+          Every loop the digest names was found in exactly one builder table.
+        </EmptyState>
+      ) : (
+        <TableFrame>
+          <thead>
+            <tr>
+              <Th>loop</Th>
+              <Th>title</Th>
+              <Th>expected owner</Th>
+              <Th>found in</Th>
+              <Th>discrepancy</Th>
+              <Th>source</Th>
+              <Th />
+            </tr>
+          </thead>
+          <tbody>
+            {data.reconciliation.map((r) => (
+              <tr key={r.id}>
+                <td className="td tabular text-faint">{r.loop_id}</td>
+                <td className="td td-clip" style={{ maxWidth: '46ch' }}>{r.title}</td>
+                <td className="td text-dim">{BUILDER_NAMES[r.expected_owner] ?? r.expected_owner}</td>
+                <td className={`td ${r.found_in ? 'text-degraded' : 'text-failing'}`}>
+                  {r.found_in ?? 'no table'}
+                </td>
+                <td className="td td-clip text-faint" style={{ maxWidth: '52ch' }}>{r.discrepancy}</td>
+                <td className="td">
+                  <SourceLink source={r.source} />
+                </td>
+                <td className="td">
+                  <RowActions>
+                    <RowAction label="reassign" onClick={() => act('reconcile.reassign', r.id)} />
+                    <RowAction label="ignore" onClick={() => act('reconcile.ignore', r.id)} />
+                  </RowActions>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </TableFrame>
+      )}
+    </div>
+  );
+}

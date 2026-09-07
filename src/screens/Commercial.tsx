@@ -1,9 +1,20 @@
 import { useData } from '../app/useData';
 import { BUILDER_NAMES, getCommercial, type Readiness } from '../data';
 import {
-  Dot, EmptyState, Loading, LoadFailed, PageHeader, RowAction, RowActions,
-  SPINE_HEADERS, SourceLink, SpineCells, TableFrame, Th, act, healthText,
+  Dot,
+  EmptyState,
+  LoadFailed,
+  Loading,
+  PageHeader,
+  RowAction,
+  RowActions,
+  SPINE_HEADERS,
+  SourceLink,
+  SpineCells,
+  TableFrame,
+  Th,
 } from '../components/ui';
+import { act, healthText } from '../lib';
 
 /** Readiness states in order, so a card's position in the run-up is visible. */
 const ORDER: Readiness[] = ['idea', 'researching', 'evidence thin', 'ready to pitch', 'blocked'];

@@ -1,75 +1,19 @@
-import { Link, useParams } from 'react-router-dom';
 import { useCallback } from 'react';
-import { useData } from '../app/useData';
-import { BUILDER_NAMES, getBuilder, getBuilders, type Query } from '../data';
+import { Link, useParams } from 'react-router-dom';
+import { useData } from '../../app/useData';
+import { getBuilder, type Query } from '../../data';
 import {
-  Dot, EmptyState, Loading, LoadFailed, PageHeader, RowAction, RowActions,
-  SourceLink, TableFrame, TagRow, Th, act, healthText,
-} from '../components/ui';
-
-function ageTone(days: number): string {
-  if (days >= 30) return 'text-failing';
-  if (days >= 14) return 'text-degraded';
-  return 'text-dim';
-}
-
-export function Builders() {
-  const { status, data, error } = useData(getBuilders);
-  if (status === 'loading') return <Loading />;
-  if (status === 'error') return <LoadFailed error={error} />;
-
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <PageHeader title="Builders" subtitle="One row per person" />
-      {data.builders.length === 0 ? (
-        <EmptyState>No builders work in the selected lane.</EmptyState>
-      ) : (
-        <TableFrame>
-          <thead>
-            <tr>
-              <Th />
-              <Th>name</Th>
-              <Th>lane</Th>
-              <Th className="text-right">open loops</Th>
-              <Th className="text-right">oldest loop</Th>
-              <Th>last activity</Th>
-              <Th>contract</Th>
-              <Th className="text-right">entries this week</Th>
-              <Th>source</Th>
-              <Th />
-            </tr>
-          </thead>
-          <tbody>
-            {data.builders.map((b) => (
-              <tr key={b.id}>
-                <td className="td"><Dot health={b.health} /></td>
-                <td className="td">
-                  <Link to={`/builders/${b.id}`} className="hover:text-gold">{b.name}</Link>
-                </td>
-                <td className="td text-faint">{b.lane.toLowerCase()}</td>
-                <td className="td tabular text-right">{b.open_loops}</td>
-                <td className={`td tabular text-right ${ageTone(b.oldest_loop_days)}`}>
-                  {b.oldest_loop_days}d
-                </td>
-                <td className="td tabular text-faint">{b.last_activity}</td>
-                <td className={`td ${b.contract_status === 'signed' ? 'text-faint' : 'text-degraded'}`}>
-                  {b.contract_status}
-                </td>
-                <td className="td tabular text-right text-dim">{b.entries_this_week}</td>
-                <td className="td"><SourceLink source={b.source} /></td>
-                <td className="td">
-                  <RowActions>
-                    <RowAction label="open in Slack" onClick={() => act('builder.open-slack', b.id)} />
-                  </RowActions>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </TableFrame>
-      )}
-    </div>
-  );
-}
+  EmptyState,
+  LoadFailed,
+  Loading,
+  PageHeader,
+  RowAction,
+  RowActions,
+  SourceLink,
+  TagRow,
+  Th,
+} from '../../components/ui';
+import { act, ageTone, errorClassLabel, healthText, laneLabel } from '../../lib';
 
 export function BuilderPage() {
   const { id = '' } = useParams();
@@ -86,7 +30,7 @@ export function BuilderPage() {
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
         title={b.name}
-        subtitle={b.lane.toLowerCase()}
+        subtitle={laneLabel(b.lane)}
         right={<Link to="/builders" className="text-[12px] text-faint hover:text-ink">← all builders</Link>}
       />
 
@@ -206,7 +150,7 @@ export function BuilderPage() {
                 <tr key={i.id}>
                   <td className="td tabular">{i.id}</td>
                   <td className="td td-clip" style={{ maxWidth: '44ch' }}>{i.summary}</td>
-                  <td className={`td ${healthText(i.health)}`}>{i.error_class.toLowerCase()}</td>
+                  <td className={`td ${healthText(i.health)}`}>{errorClassLabel(i.error_class)}</td>
                   <td className={`td ${i.state === 'resolved' ? 'text-dim' : healthText(i.health)}`}>
                     {i.state}
                   </td>
@@ -221,5 +165,3 @@ export function BuilderPage() {
     </div>
   );
 }
-
-export { BUILDER_NAMES };

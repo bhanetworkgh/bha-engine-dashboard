@@ -1,9 +1,20 @@
 import { useData } from '../app/useData';
 import { BUILDER_NAMES, getCodexEntries } from '../data';
 import {
-  EmptyState, Loading, LoadFailed, PageHeader, RowAction, RowActions,
-  SPINE_HEADERS, SourceLink, SpineCells, TableFrame, TagRow, Th, act,
+  EmptyState,
+  LoadFailed,
+  Loading,
+  PageHeader,
+  RowAction,
+  RowActions,
+  SPINE_HEADERS,
+  SourceLink,
+  SpineCells,
+  TableFrame,
+  TagRow,
+  Th,
 } from '../components/ui';
+import { act } from '../lib';
 
 export default function Codex() {
   const { status, data, error } = useData(getCodexEntries);
