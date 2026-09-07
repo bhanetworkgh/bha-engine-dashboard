@@ -1,12 +1,8 @@
-import { Fragment, useState } from 'react';
-import { useData } from '../app/useData';
-import { getEngineHealth, type Incident } from '../data';
+import { Fragment } from 'react';
+import type { EngineHealthData } from '../../data';
 import {
   Dot,
   EmptyState,
-  Loading,
-  LoadFailed,
-  PageHeader,
   RowAction,
   RowActions,
   SPINE_HEADERS,
@@ -15,98 +11,25 @@ import {
   TableFrame,
   TagRow,
   Th,
-  act,
-  healthText,
-} from '../components/ui';
+} from '../../components/ui';
+import { act, errorClassLabel, healthText } from '../../lib';
+import { StateTrack } from './StateTrack';
 
-/** The state machine, drawn in order so a row's position in it is visible. */
-const STATES: Incident['state'][] = [
-  'new',
-  'triage',
-  'auto-retry pending',
-  'resolved',
-  'failed',
-  'escalated to RT',
-  'escalated to human',
-];
-
-function StateTrack({ state }: { state: Incident['state'] }) {
-  const idx = STATES.indexOf(state);
+/**
+ * Incidents, duplicates collapsed by fingerprint so one flapping error is one
+ * row. Clicking a row reveals its action footprint.
+ */
+export function IncidentTable({
+  data,
+  expanded,
+  setExpanded,
+}: {
+  data: EngineHealthData;
+  expanded: string | null;
+  setExpanded: (id: string | null) => void;
+}) {
   return (
-    <span className="inline-flex items-center gap-[3px]" title={STATES.join(' → ')}>
-      {STATES.map((s, i) => (
-        <span
-          key={s}
-          className={`h-[3px] w-[9px] ${
-            i === idx
-              ? state === 'failed' || state === 'escalated to human'
-                ? 'bg-failing'
-                : state === 'resolved'
-                  ? 'bg-dim'
-                  : 'bg-degraded'
-              : i < idx
-                ? 'bg-line-strong'
-                : 'bg-line'
-          }`}
-        />
-      ))}
-    </span>
-  );
-}
-
-export default function EngineHealth() {
-  const { status, data, error } = useData(getEngineHealth);
-  const [expanded, setExpanded] = useState<string | null>(null);
-
-  if (status === 'loading') return <Loading />;
-  if (status === 'error') return <LoadFailed error={error} />;
-
-  const m = data.metrics;
-
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <PageHeader title="Engine health" subtitle="Incidents and self-healing" />
-
-      <div className="grid shrink-0 grid-cols-6 border-b border-line">
-        <div className="border-r border-line px-4 py-2">
-          <div className="text-[11px] text-faint">Self-heal rate</div>
-          <div className="tabular text-[17px] leading-tight text-gold">{m.self_heal_rate}</div>
-        </div>
-        <div className="border-r border-line px-4 py-2">
-          <div className="text-[11px] text-faint">Retries attempted</div>
-          <div className="tabular text-[17px] leading-tight">{m.retries_attempted}</div>
-        </div>
-        <div className="border-r border-line px-4 py-2">
-          <div className="text-[11px] text-faint">Retries succeeded</div>
-          <div className="tabular text-[17px] leading-tight">{m.retries_succeeded}</div>
-        </div>
-        <div className="border-r border-line px-4 py-2">
-          <div className="text-[11px] text-faint">Mean time to resolve</div>
-          <div className="tabular text-[17px] leading-tight">{m.mean_time_to_resolve}</div>
-        </div>
-        <div className="border-r border-line px-4 py-2">
-          <div className="text-[11px] text-faint">Escalations</div>
-          <div className={`tabular text-[17px] leading-tight ${m.escalations ? 'text-degraded' : ''}`}>
-            {m.escalations}
-          </div>
-        </div>
-        <div className="px-4 py-2">
-          <div className="text-[11px] text-faint">Lanes at retry ceiling</div>
-          <div className="text-[12px]">
-            {data.lanes_at_retry_ceiling.length === 0 ? (
-              <span className="text-dim">none</span>
-            ) : (
-              data.lanes_at_retry_ceiling.map((l) => (
-                <span key={l.lane} className="mr-2 text-failing">
-                  {l.lane.toLowerCase()} {l.incidents}
-                </span>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
-      {data.incidents.length === 0 ? (
+    data.incidents.length === 0 ? (
         <EmptyState>No incidents recorded for the selected lane.</EmptyState>
       ) : (
         <TableFrame>
@@ -143,7 +66,7 @@ export default function EngineHealth() {
                     {i.summary}
                   </td>
                   <td className="td"><TagRow tags={i.tags} /></td>
-                  <td className={`td ${healthText(i.health)}`}>{i.error_class.toLowerCase()}</td>
+                  <td className={`td ${healthText(i.health)}`}>{errorClassLabel(i.error_class)}</td>
                   <td className="td">
                     <span className="flex items-center gap-2">
                       <StateTrack state={i.state} />
@@ -217,7 +140,6 @@ export default function EngineHealth() {
             ))}
           </tbody>
         </TableFrame>
-      )}
-    </div>
+      )
   );
 }

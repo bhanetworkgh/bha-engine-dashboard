@@ -1,7 +1,13 @@
 import { Link } from 'react-router-dom';
 import { useData } from '../app/useData';
 import { getOverview, type OverviewEvent } from '../data';
-import { Dot, Loading, LoadFailed, SourceLink, healthText } from '../components/ui';
+import {
+  Dot,
+  LoadFailed,
+  Loading,
+  SourceLink,
+} from '../components/ui';
+import { healthText, laneLabel } from '../lib';
 
 function EventList({ title, events }: { title: string; events: OverviewEvent[] }) {
   return (
@@ -27,7 +33,7 @@ function EventList({ title, events }: { title: string; events: OverviewEvent[] }
                 <span className={`min-w-0 flex-1 truncate ${healthText(e.health)}`}>
                   {e.detail}
                 </span>
-                <span className="shrink-0 text-faint">{e.spine.lane.toLowerCase()}</span>
+                <span className="shrink-0 text-faint">{laneLabel(e.spine.lane)}</span>
               </div>
             </div>
           ))

@@ -1,9 +1,17 @@
 import { useData } from '../app/useData';
 import { BUILDER_NAMES, getBuildPatterns } from '../data';
 import {
-  EmptyState, Loading, LoadFailed, PageHeader, RowAction, RowActions,
-  SourceLink, TableFrame, Th, act,
+  EmptyState,
+  LoadFailed,
+  Loading,
+  PageHeader,
+  RowAction,
+  RowActions,
+  SourceLink,
+  TableFrame,
+  Th,
 } from '../components/ui';
+import { act, laneLabel } from '../lib';
 
 export default function BuildPatterns() {
   const { status, data, error } = useData(getBuildPatterns);
@@ -41,7 +49,7 @@ export default function BuildPatterns() {
               <tr key={p.id}>
                 <td className="td tabular text-faint">{p.code}</td>
                 <td className="td td-clip" style={{ maxWidth: '46ch' }}>{p.title}</td>
-                <td className="td text-faint">{p.lane.toLowerCase()}</td>
+                <td className="td text-faint">{laneLabel(p.lane)}</td>
                 <td className="td text-dim">{BUILDER_NAMES[p.author] ?? p.author}</td>
                 <td className="td tabular text-right">{p.references}</td>
                 <td className="td w-[90px]">

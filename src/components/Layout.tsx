@@ -3,6 +3,7 @@ import { useSession } from '../app/session';
 import { useData } from '../app/useData';
 import { getEngineStatus, type LaneFilter } from '../data';
 import { Dot } from './ui';
+import { cx } from '../lib';
 
 const GROUPS: { group: string | null; items: { to: string; label: string; badge?: 'incidents' }[] }[] = [
   {
@@ -66,12 +67,12 @@ function Sidebar({ openIncidents }: { openIncidents: number }) {
                 to={item.to}
                 end={item.to === '/'}
                 className={({ isActive }) =>
-                  [
+                  cx(
                     'flex items-center justify-between px-4 py-[5px] border-l-2',
                     isActive
                       ? 'border-gold text-ink bg-raised'
                       : 'border-transparent text-dim hover:text-ink hover:bg-hover',
-                  ].join(' ')
+                  )
                 }
               >
                 <span>{item.label}</span>

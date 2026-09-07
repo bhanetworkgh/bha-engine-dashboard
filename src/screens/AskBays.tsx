@@ -1,7 +1,11 @@
 import { useMemo, useRef, useState } from 'react';
 import { useData } from '../app/useData';
 import { getAskBays, type ChatMessage, type ChatThread } from '../data';
-import { Loading, LoadFailed, act } from '../components/ui';
+import {
+  LoadFailed,
+  Loading,
+} from '../components/ui';
+import { act } from '../lib';
 
 export default function AskBays() {
   const { status, data, error } = useData(getAskBays);

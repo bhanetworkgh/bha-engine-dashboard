@@ -44,6 +44,56 @@ console. No per-user accounts.
 | Commercial | Opportunities and readiness |
 | Builders | Per-person lane, loops, activity, contract status |
 
+## Repo layout
+
+```
+src/
+  main.tsx            Entry point. Router + session provider.
+  App.tsx             Route table. The login gate sits in front of everything.
+  index.css           Design tokens (@theme) and base styles. All colour lives here.
+
+  app/                Application-wide state.
+    session.tsx       Shared team login and the global lane filter.
+    useData.ts        Calls a data function with the current lane; owns loading and failure.
+
+  data/               The one swap point. Nothing else knows where data comes from.
+    types.ts          The contract. Shapes the engine endpoint must return.
+    index.ts          One async function per section. Phase 2 changes these bodies only.
+    fixtures/         Phase 1 mock rows, one file per domain. Deleted in phase 2.
+
+  lib/                Pure helpers. No React, no data access.
+    format.ts         Display formatting and the age colour scale.
+    health.ts         Health-to-class mapping. Healthy returns no colour.
+    actions.ts        act() — the single row-action handler.
+    cx.ts             Class-name join.
+
+  components/
+    Layout.tsx        Sidebar, status strip, content outlet.
+    ui/               Shared primitives, one file per component, re-exported by index.ts.
+
+  screens/            One screen per route. Screens with sub-views get a folder.
+    Overview.tsx      Flat file — small enough to read in one sitting.
+    OpenLoops/        Loops, ReviewQueue, Reconciliation + index.
+    Twin/             Summary, Records, Runs, Gaps + index. Serves North Star and Research Twin.
+    VFarm/            Live, Lifecycle, Readiness + index.
+    EngineHealth/     MetricsRow, IncidentTable, StateTrack + index.
+    Builders/         List, Detail + index.
+```
+
+### Where to make each kind of change
+
+| To change | Go to |
+|---|---|
+| Where data comes from | `src/data/index.ts` — only this file |
+| The shape the engine must return | `src/data/types.ts` |
+| Mock values | `src/data/fixtures/<domain>.ts` |
+| A colour, spacing or font | `src/index.css` — tokens, not per-component classes |
+| What a screen shows | `src/screens/<Screen>/` |
+| A table cell, tag, dot or row action used on several screens | `src/components/ui/` |
+| Sidebar groups, status strip, lane filter | `src/components/Layout.tsx` |
+| Formatting or the age colour scale | `src/lib/` |
+| A new route | `src/App.tsx` and the sidebar list in `Layout.tsx` |
+
 ## Local development
 
 ```bash
@@ -62,8 +112,40 @@ Set in the host's environment settings. Never committed.
 
 ## Deployment
 
-Render, deploying from this repository's default branch. Pushes to the default
-branch trigger a deploy.
+Render static site, deploying from this repository's default branch. Pushes to
+the default branch trigger a deploy.
+
+| Setting | Value |
+|---|---|
+| Build command | `npm ci && npm run build` |
+| Publish directory | `dist` |
+
+### A rewrite rule is required
+
+This is a single-page app using client-side routing, and the build does **not**
+solve this on its own. `npm run build` emits one `index.html` plus hashed assets —
+there is no `open-loops.html`. Verified against a plain static server:
+
+```
+GET /                    200
+GET /assets/index-*.css  200
+GET /open-loops          404
+GET /vfarm               404
+GET /builders/destiny     404
+```
+
+So the site works if you land on `/` and navigate, and 404s on any deep link,
+refresh, or bookmarked URL.
+
+The fix is a host-level rewrite: serve `index.html` for any path that does not
+match a file on disk, as a **rewrite** (200, URL preserved), not a redirect —
+a redirect would rewrite the address bar and lose the route. On Render this is
+configured on the service under Redirects/Rewrites: source `/*`, destination
+`/index.html`, action Rewrite.
+
+No config file for this is committed here, because the rule belongs to the host
+and has not been verified against this service. Add it in the Render dashboard,
+then confirm by loading `/open-loops` directly.
 
 ## Working in this repo
 

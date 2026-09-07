@@ -259,3 +259,103 @@ Known:     - A browser refresh signs you out. The token is in memory by design
 
 Not done:  BUILD_LOG.md still not uploaded to Google Drive (CLAUDE.md section 9),
            pending Destiny confirming the target folder.
+
+---
+
+## 2026-09-07 17:05 — Session 3: repo organisation and deployability
+
+Intent:    No feature or visual changes. Restructure src/ so it is navigable,
+           confirm the app is deployable to Render as a static site, and report
+           on responsiveness without fixing anything.
+
+Files:     src/data/fixtures.ts split into src/data/fixtures/{common,loops,
+           incidents,twins,vfarm,codex,patterns,commercial,builders,chat,index}.
+           src/components/ui.tsx split into src/components/ui/ (11 files + barrel).
+           New src/lib/{format,health,actions,cx,index}.
+           src/screens/{Twin,OpenLoops,VFarm,EngineHealth,Builders}.tsx became
+           folders with sub-views and an index.
+           README.md: new "Repo layout" section, expanded "Deployment".
+
+Problem:   1. Splitting fixtures broke the `LoopSeed` tuple type. `owner` is typed
+              `keyof typeof BUILDER_NAMES`, and I moved BUILDER_NAMES to common.ts
+              without importing it into loops.ts:
+                `src/data/fixtures/loops.ts(17,23): error TS2304: Cannot find name
+                 'BUILDER_NAMES'.`
+              The unresolved name widened `keyof` to `string | number | symbol`,
+              which then failed against `Loop['owner']: string` — three errors from
+              one missing import.
+
+           2. Slicing JSX out of the vFarm and EngineHealth tab conditionals carried
+              the conditional's own closing token into the extracted file:
+                `src/screens/VFarm/Live.tsx(152,3): error TS1128: Declaration or
+                 statement expected.`
+              Each sub-view ended `)}\n);\n}` instead of `);\n}`.
+
+           3. EngineHealth's incident block is a JSX expression container
+              (`{cond ? (...) : (...)}`). Lifted verbatim into a `return`, the braces
+              are a syntax error:
+                `src/screens/EngineHealth/IncidentTable.tsx(32,12): error TS1005:
+                 ',' expected.`
+
+           4. My first EngineHealth/Builders split used guessed line numbers and
+              produced malformed files. I had already `rm`'d the sources, and those
+              two files carried uncommitted edits from earlier in this session, so
+              the edits were lost.
+
+           5. `npm ci` (run to verify a clean build) deleted node_modules including
+              Playwright, which was installed with `--no-save` and is therefore not
+              in package.json. The next verification run failed with
+              `ERR_MODULE_NOT_FOUND: Cannot find package 'playwright'`.
+
+Fix:       1. Imported BUILDER_NAMES into loops.ts. All three errors cleared.
+           2. Stripped the trailing `)}` from each extracted sub-view.
+           3. Removed the outer braces so the conditional is returned as an
+              expression rather than a JSX container.
+           4. Restored both files from HEAD, re-applied the lost import and label
+              edits, then re-split using boundaries *located by content*
+              (`grid shrink-0 grid-cols-6`, `data.incidents.length === 0`) rather
+              than guessed line numbers.
+           5. Reinstalled Playwright with `--no-save` and confirmed package.json and
+              package-lock.json were untouched.
+
+Decision:  - **Verified equivalence by pixel diff, not by eye.** Captured 30
+             screenshots before the refactor, repeated the identical sweep after,
+             and byte-compared. All 30 identical; character and row counts per route
+             identical too. That is the evidence that "no visual changes" holds.
+           - **Moved `healthText`, `act` and `ageTone` into src/lib/** rather than
+             re-exporting them from components/ui. `ageTone` had been copy-pasted
+             into OpenLoops and Builders; there is now one definition.
+           - **Added `laneLabel`/`subsystemLabel`/`errorClassLabel`** and replaced
+             eight inline `.toLowerCase()` calls. Same output, but the sentence-case
+             rule is now stated once instead of being re-derived at each call site.
+           - **Removed four dead exports**: `Metric` (a UI primitive nothing used),
+             and `TODAY`, `HALLOWEEN`, `sources` from the fixtures. All three
+             fixture consts were dead before this session. Dead primitives are
+             exactly what makes a repo hard to read, which is what this session was
+             for. `cx` is new and is used by Layout.
+           - **Screens under ~200 lines stayed flat.** Overview, AskBays, Codex,
+             BuildPatterns, Commercial and Login are single files; only the five
+             over the line became folders.
+           - **No Render config file committed.** The rewrite rule is a host
+             setting I cannot verify from here, so README states what is needed and
+             why, and leaves the change to the dashboard.
+
+Verified:  `npm ci && npm run build` from a wiped node_modules and dist: passes.
+           dist/ contains index.html, logo.svg and assets/ (one css, one js).
+           Route sweep after refactor: all 11 routes, all 14 sub-tabs, row actions
+           firing, builder detail, lane filter. Zero console errors.
+           Deep-link behaviour tested against a plain static server (python
+           http.server on dist): `/` and `/assets/*` return 200; `/open-loops`,
+           `/vfarm` and `/builders/destiny` return 404. Confirmed the build does
+           not solve client-side routing and a host rewrite is required.
+
+Known:     Responsiveness measured at 1920, 1440, 1024, 768 and 390, reported to
+           Destiny, deliberately not fixed. Summary: fine at 1920/1440/1024;
+           cramped but usable at 768; broken at 390. The sidebar is a fixed 188px
+           at every width and never collapses, which is the root cause at 390 —
+           it leaves 202px of content and the five-column pin grid gives each pin
+           about 40px. Overview's tile grid does drop 5→3 columns below 1024, but
+           the pin row has no breakpoint at all.
+
+Not done:  BUILD_LOG.md still not uploaded to Google Drive (CLAUDE.md section 9),
+           pending Destiny confirming the target folder.
