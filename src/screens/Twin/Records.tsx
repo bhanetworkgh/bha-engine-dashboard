@@ -37,13 +37,13 @@ export function Records({ d }: { d: TwinData }) {
       <tbody>
         {d.records.map((r) => (
           <tr key={r.id}>
-            <td className="td td-clip" style={{ maxWidth: '38ch' }} title={r.question}>
+            <td className="td card-title td-clip" style={{ maxWidth: '38ch' }} title={r.question}>
               {r.question}
             </td>
             <td className="td"><TagRow tags={r.tags} /></td>
             <td className="td text-dim">{r.asked_by}</td>
-            <td className="td tabular text-right text-dim">{r.cycle}</td>
-            <td className={`td ${healthText(OUTCOME_HEALTH[r.outcome])}`}>{r.outcome}</td>
+            <td className="td card-meta tabular text-right text-dim">{r.cycle}</td>
+            <td className={`td card-meta ${healthText(OUTCOME_HEALTH[r.outcome])}`}>{r.outcome}</td>
             <td className="td">
               {r.evidence_shape_version ? (
                 <span className="text-dim">{r.evidence_shape_version}</span>
@@ -56,7 +56,7 @@ export function Records({ d }: { d: TwinData }) {
             <td className="td">
               <SourceLink source={r.source} />
             </td>
-            <td className="td">
+            <td className="td card-actions">
               <RowActions>
                 <RowAction label="re-run" onClick={() => act('twin.rerun-ask', r.id)} />
                 <RowAction label="open in Slack" onClick={() => act('twin.open-slack', r.id)} />

@@ -28,7 +28,7 @@ export function Loops({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Grouped by owner, so where work is piling up is visible at a glance. */}
-      <div className="flex shrink-0 items-stretch border-b border-line">
+      <div className="scroll-thin flex shrink-0 items-stretch overflow-x-auto border-b border-line md:overflow-x-visible">
         <button
           type="button"
           onClick={() => setOwner('all')}
@@ -46,7 +46,7 @@ export function Loops({
             key={o.owner}
             type="button"
             onClick={() => setOwner(o.owner)}
-            className={`flex-1 border-r border-line px-3 py-1.5 text-left last:border-r-0 ${
+            className={`shrink-0 border-r border-line px-3 py-1.5 text-left last:border-r-0 md:flex-1 md:shrink ${
               owner === o.owner ? 'bg-raised' : 'hover:bg-hover'
             }`}
           >
@@ -91,16 +91,16 @@ export function Loops({
           <tbody>
             {loops.map((l) => (
               <tr key={l.id}>
-                <td className={`td tabular text-right ${ageTone(l.age_days)}`} title="Days since raised">
+                <td className={`td card-meta tabular text-right ${ageTone(l.age_days)}`} title="Days since raised">
                   {l.age_days}d
                 </td>
                 <td className="td tabular text-faint">{l.id}</td>
-                <td className="td td-clip" style={{ maxWidth: '52ch' }} title={l.title}>
+                <td className="td card-title td-clip" style={{ maxWidth: '52ch' }} title={l.title}>
                   {l.title}
                 </td>
                 <td className="td"><TagRow tags={l.tags} /></td>
-                <td className="td text-dim">{BUILDER_NAMES[l.owner] ?? l.owner}</td>
-                <td className={`td ${l.status === 'in progress' ? 'text-dim' : 'text-faint'}`}>
+                <td className="td card-meta text-dim">{BUILDER_NAMES[l.owner] ?? l.owner}</td>
+                <td className={`td card-meta ${l.status === 'in progress' ? 'text-dim' : 'text-faint'}`}>
                   {l.status}
                 </td>
                 <SpineCells spine={l.spine} />
@@ -108,7 +108,7 @@ export function Loops({
                 <td className="td">
                   <SourceLink source={l.source} />
                 </td>
-                <td className="td">
+                <td className="td card-actions">
                   <RowActions>
                     <RowAction label="close" onClick={() => act('loop.close', l.id)} />
                     <RowAction label="update" onClick={() => act('loop.update', l.id)} />

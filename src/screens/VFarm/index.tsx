@@ -22,7 +22,7 @@ export default function VFarm() {
         title="vFarm"
         subtitle={`${data.days_to_halloween} days to Halloween`}
         right={
-          <div className="flex gap-4">
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
             {TABS.map((t) => (
               <button
                 key={t}

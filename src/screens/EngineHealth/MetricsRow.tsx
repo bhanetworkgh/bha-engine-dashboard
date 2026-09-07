@@ -5,7 +5,7 @@ import { laneLabel } from '../../lib';
 export function MetricsRow({ data }: { data: EngineHealthData }) {
   const m = data.metrics;
   return (
-      <div className="grid shrink-0 grid-cols-6 border-b border-line">
+      <div className="grid shrink-0 grid-cols-2 border-b border-line md:grid-cols-6">
         <div className="border-r border-line px-4 py-2">
           <div className="text-[11px] text-faint">Self-heal rate</div>
           <div className="tabular text-[17px] leading-tight text-gold">{m.self_heal_rate}</div>

@@ -167,3 +167,101 @@
     white-space: nowrap;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Below 768px only. Nothing in this file's earlier rules changes above it, and
+   nothing here applies at or above the md breakpoint.
+   --------------------------------------------------------------------------- */
+@media (max-width: 767.98px) {
+  /*
+     A twelve-column table has no honest form on a phone, so tables marked
+     .table-cards become a stacked card list: one card per row, no horizontal
+     scroll. Cells are hidden unless a screen opts them in with card-title,
+     card-meta, card-actions or card-full — including the four spine fields,
+     which stay in the data and simply are not shown here.
+  */
+  .table-cards thead {
+    display: none;
+  }
+
+  .table-cards,
+  .table-cards tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .table-cards tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 10px;
+    border-bottom: 1px solid var(--color-line);
+    padding: 9px 12px;
+  }
+
+  .table-cards td {
+    display: none;
+    border: 0;
+    padding: 0;
+    white-space: normal;
+  }
+
+  /* The row's identity: full width, wrapping, never clipped. */
+  .table-cards td.card-title {
+    display: block;
+    order: 1;
+    flex-basis: 100%;
+    max-width: none !important;
+    overflow: visible;
+    text-overflow: clip;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  /* The two or three fields that prioritise it, on one line under the title. */
+  .table-cards td.card-meta {
+    display: inline-block;
+    order: 2;
+    font-size: 12px;
+    max-width: none !important;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  /* Anything that needs its own full-width line below the meta row. */
+  .table-cards td.card-full {
+    display: block;
+    order: 3;
+    flex-basis: 100%;
+    max-width: none !important;
+    overflow: visible;
+    text-overflow: clip;
+    margin-top: 6px;
+  }
+
+  .table-cards td.card-actions {
+    display: block;
+    order: 4;
+    flex-basis: 100%;
+    margin-top: 8px;
+  }
+
+  /* Hover does not exist on touch, so row actions are always visible here. */
+  .row-actions {
+    opacity: 1;
+  }
+
+  /* Tap targets. 44px minimum on anything a finger has to hit. */
+  .row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .row-actions button {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0 12px;
+    font-size: 12px;
+  }
+}

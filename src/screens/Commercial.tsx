@@ -33,7 +33,7 @@ export default function Commercial() {
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader title="Commercial" subtitle="Opportunities and readiness" />
 
-      <div className="grid shrink-0 grid-cols-5 border-b border-line">
+      <div className="grid shrink-0 grid-cols-2 border-b border-line md:grid-cols-5">
         {counts.map((c) => (
           <div key={c.readiness} className="border-r border-line px-4 py-2 last:border-r-0">
             <div className="text-[11px] text-faint">{c.readiness}</div>
@@ -73,14 +73,14 @@ export default function Commercial() {
               <tr key={o.id}>
                 <td className="td"><Dot health={o.health} /></td>
                 <td className="td tabular text-faint">{o.id}</td>
-                <td className="td td-clip" style={{ maxWidth: '40ch' }}>{o.title}</td>
-                <td className={`td ${healthText(o.health)}`}>{o.readiness}</td>
+                <td className="td card-title td-clip" style={{ maxWidth: '40ch' }}>{o.title}</td>
+                <td className={`td card-meta ${healthText(o.health)}`}>{o.readiness}</td>
                 <td className="td td-clip text-faint" style={{ maxWidth: '46ch' }}>{o.blocker ?? '—'}</td>
-                <td className="td text-dim">{BUILDER_NAMES[o.owner] ?? o.owner}</td>
+                <td className="td card-meta text-dim">{BUILDER_NAMES[o.owner] ?? o.owner}</td>
                 <SpineCells spine={o.spine} />
                 <td className="td tabular text-faint">{o.last_touched}</td>
                 <td className="td"><SourceLink source={o.source} /></td>
-                <td className="td">
+                <td className="td card-actions">
                   <RowActions>
                     <RowAction label="re-research" onClick={() => act('commercial.reresearch', o.id)} />
                     <RowAction label="open in Slack" onClick={() => act('commercial.open-slack', o.id)} />

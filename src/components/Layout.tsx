@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useSession } from '../app/session';
 import { useData } from '../app/useData';
@@ -45,9 +46,26 @@ const LANES: { value: LaneFilter; label: string }[] = [
   { value: 'ENGINE_INTERNAL', label: 'engine internal' },
 ];
 
-function Sidebar({ openIncidents }: { openIncidents: number }) {
+function Sidebar({
+  openIncidents,
+  open,
+  onNavigate,
+}: {
+  openIncidents: number;
+  open: boolean;
+  onNavigate: () => void;
+}) {
   return (
-    <nav className="flex w-[188px] shrink-0 flex-col border-r border-line bg-panel">
+    /*
+       Above md this is exactly what it always was: a static 188px column.
+       Below md it is hidden until the hamburger opens it as an overlay.
+    */
+    <nav
+      className={cx(
+        'w-[188px] shrink-0 flex-col border-r border-line bg-panel md:static md:flex',
+        open ? 'fixed inset-y-0 left-0 z-50 flex' : 'hidden',
+      )}
+    >
       <div className="flex items-center gap-2 border-b border-line px-4 py-3">
         <img src="/logo.svg" alt="" className="h-5 w-5 rounded-full opacity-90" />
         <span className="font-medium">BHA engine</span>
@@ -66,6 +84,7 @@ function Sidebar({ openIncidents }: { openIncidents: number }) {
                 key={item.to}
                 to={item.to}
                 end={item.to === '/'}
+                onClick={onNavigate}
                 className={({ isActive }) =>
                   cx(
                     'flex items-center justify-between px-4 py-[5px] border-l-2',
@@ -98,26 +117,59 @@ export default function Layout() {
   const { lane, setLane, signOut } = useSession();
   const status = useData(getEngineStatus);
   const s = status.data;
+  const [navOpen, setNavOpen] = useState(false);
 
   return (
     <div className="flex h-full">
-      <Sidebar openIncidents={s?.open_incidents ?? 0} />
+      <Sidebar
+        openIncidents={s?.open_incidents ?? 0}
+        open={navOpen}
+        onNavigate={() => setNavOpen(false)}
+      />
+
+      {navOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 md:hidden"
+          onClick={() => setNavOpen(false)}
+          aria-hidden
+        />
+      )}
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Status strip. Last refresh, one health dot, the global lane filter. */}
         <div className="flex h-9 shrink-0 items-center gap-4 border-b border-line bg-panel px-4 text-[11px]">
-          <span className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setNavOpen(true)}
+            aria-label="Open navigation"
+            className="-ml-1 flex h-9 w-9 shrink-0 items-center justify-center text-dim hover:text-ink md:hidden"
+          >
+            <span aria-hidden className="text-[15px] leading-none">
+              ☰
+            </span>
+          </button>
+
+          <span className="flex items-center gap-1.5 max-lg:min-w-0">
             <Dot health={s?.health ?? 'ok'} title={s?.note ?? 'Engine healthy'} />
-            <span className={s?.health === 'ok' || !s ? 'text-dim' : s.health === 'failing' ? 'text-failing' : 'text-degraded'}>
+            <span
+              className={cx(
+                'max-lg:truncate',
+                s?.health === 'ok' || !s
+                  ? 'text-dim'
+                  : s.health === 'failing'
+                    ? 'text-failing'
+                    : 'text-degraded',
+              )}
+            >
               {!s ? 'checking…' : s.health === 'ok' ? 'engine healthy' : s.note}
             </span>
           </span>
 
-          <span className="text-faint">
+          <span className="hidden shrink-0 whitespace-nowrap text-faint md:inline">
             last refresh <span className="tabular text-dim">{s?.last_refresh ?? '—'}</span>
           </span>
 
-          <label className="ml-auto flex items-center gap-1.5 text-faint">
+          <label className="ml-auto flex shrink-0 items-center gap-1.5 text-faint">
             lane
             <select
               value={lane}
@@ -135,13 +187,13 @@ export default function Layout() {
           <button
             type="button"
             onClick={signOut}
-            className="text-faint hover:text-ink"
+            className="shrink-0 whitespace-nowrap text-faint hover:text-ink"
           >
             sign out
           </button>
         </div>
 
-        <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <main className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto md:overflow-hidden">
           <Outlet />
         </main>
       </div>

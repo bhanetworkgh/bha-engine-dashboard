@@ -21,7 +21,7 @@ export function Live({ data }: { data: VFarmData }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Current rack state and last measurement. */}
-      <div className="grid shrink-0 grid-cols-6 border-b border-line">
+      <div className="grid shrink-0 grid-cols-2 border-b border-line md:grid-cols-6">
         {data.places.map((p) => (
           <div key={p.name} className="border-r border-line px-3 py-2">
             <div className="flex items-center gap-1.5 text-[11px] text-faint">
@@ -56,7 +56,7 @@ export function Live({ data }: { data: VFarmData }) {
         <EmptyState>No alerts recorded for the selected lane.</EmptyState>
       ) : (
         <div className="shrink-0 overflow-x-auto">
-          <table className="w-full text-[12px]">
+          <table className="table-cards w-full text-[12px]">
             <thead>
               <tr>
                 <Th>at</Th>
@@ -72,18 +72,18 @@ export function Live({ data }: { data: VFarmData }) {
             <tbody>
               {data.alerts.map((a) => (
                 <tr key={a.id}>
-                  <td className="td tabular text-faint">{a.at}</td>
-                  <td className="td">{a.place}</td>
-                  <td className={`td ${healthText(a.health)}`}>{a.kind}</td>
-                  <td className="td td-clip text-dim" style={{ maxWidth: '52ch' }}>{a.detail}</td>
-                  <td className={`td ${a.state === 'open' ? healthText(a.health) : 'text-faint'}`}>
+                  <td className="td card-meta tabular text-faint">{a.at}</td>
+                  <td className="td card-meta">{a.place}</td>
+                  <td className={`td card-title ${healthText(a.health)}`}>{a.kind}</td>
+                  <td className="td card-full td-clip text-dim" style={{ maxWidth: '52ch' }}>{a.detail}</td>
+                  <td className={`td card-meta ${a.state === 'open' ? healthText(a.health) : 'text-faint'}`}>
                     {a.state}
                   </td>
                   <td className="td tabular text-faint">{a.closed_at ?? '—'}</td>
                   <td className="td">
                     <SourceLink source={a.source} />
                   </td>
-                  <td className="td">
+                  <td className="td card-actions">
                     <RowActions>
                       {a.state === 'open' && (
                         <RowAction label="close" onClick={() => act('vfarm.close-alert', a.id)} />
@@ -125,19 +125,19 @@ export function Live({ data }: { data: VFarmData }) {
           <tbody>
             {data.readings.map((r) => (
               <tr key={r.id}>
-                <td className="td tabular text-faint">{r.at}</td>
-                <td className="td">{r.place}</td>
-                <td className={`td tabular text-right ${r.health === 'ok' ? '' : healthText(r.health)}`}>
+                <td className="td card-meta tabular text-faint">{r.at}</td>
+                <td className="td card-title">{r.place}</td>
+                <td className={`td card-meta tabular text-right ${r.health === 'ok' ? '' : healthText(r.health)}`}>
                   {r.ph ?? <span className="text-faint">no probe</span>}
                 </td>
-                <td className={`td tabular text-right ${r.health === 'ok' ? '' : healthText(r.health)}`}>
+                <td className={`td card-meta tabular text-right ${r.health === 'ok' ? '' : healthText(r.health)}`}>
                   {r.temp_c}
                 </td>
-                <td className="td tabular text-right">{r.humidity_pct}</td>
+                <td className="td card-meta tabular text-right">{r.humidity_pct}</td>
                 <td className="td">
                   <SourceLink source={r.source} />
                 </td>
-                <td className="td">
+                <td className="td card-actions">
                   <RowActions>
                     <RowAction label="open in n8n" onClick={() => act('vfarm.open-run', r.id)} />
                   </RowActions>

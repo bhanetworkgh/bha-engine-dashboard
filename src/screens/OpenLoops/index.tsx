@@ -28,7 +28,7 @@ export default function OpenLoops() {
         title="Open loops"
         subtitle="Oldest first"
         right={
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             {TABS.map((t) => (
               <button
                 key={t}

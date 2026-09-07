@@ -45,12 +45,12 @@ export function Builders() {
             {data.builders.map((b) => (
               <tr key={b.id}>
                 <td className="td"><Dot health={b.health} /></td>
-                <td className="td">
+                <td className="td card-title">
                   <Link to={`/builders/${b.id}`} className="hover:text-gold">{b.name}</Link>
                 </td>
-                <td className="td text-faint">{laneLabel(b.lane)}</td>
-                <td className="td tabular text-right">{b.open_loops}</td>
-                <td className={`td tabular text-right ${ageTone(b.oldest_loop_days)}`}>
+                <td className="td card-meta text-faint">{laneLabel(b.lane)}</td>
+                <td className="td card-meta tabular text-right">{b.open_loops}</td>
+                <td className={`td card-meta tabular text-right ${ageTone(b.oldest_loop_days)}`}>
                   {b.oldest_loop_days}d
                 </td>
                 <td className="td tabular text-faint">{b.last_activity}</td>
@@ -59,7 +59,7 @@ export function Builders() {
                 </td>
                 <td className="td tabular text-right text-dim">{b.entries_this_week}</td>
                 <td className="td"><SourceLink source={b.source} /></td>
-                <td className="td">
+                <td className="td card-actions">
                   <RowActions>
                     <RowAction label="open in Slack" onClick={() => act('builder.open-slack', b.id)} />
                   </RowActions>

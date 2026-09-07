@@ -359,3 +359,90 @@ Known:     Responsiveness measured at 1920, 1440, 1024, 768 and 390, reported to
 
 Not done:  BUILD_LOG.md still not uploaded to Google Drive (CLAUDE.md section 9),
            pending Destiny confirming the target folder.
+
+---
+
+## 2026-09-07 18:40 — Session 4a: responsive layout
+
+Intent:    Make the dashboard usable below 1024 without changing anything at
+           1024 and above. Layout only — no behaviour, data, copy or colour.
+
+Files:     src/index.css (a single max-width:767.98px block).
+           src/components/Layout.tsx (drawer sidebar, hamburger, status strip).
+           src/components/ui/PageHeader.tsx, src/components/ui/Table.tsx.
+           src/screens/Overview.tsx, AskBays.tsx, Codex.tsx, Commercial.tsx,
+           BuildPatterns.tsx, and the OpenLoops/, Twin/, VFarm/, EngineHealth/,
+           Builders/ folders.
+
+Problem:   The first pass failed the 1440 pixel diff: 29 of 30 screenshots
+           differed. Only the login screen matched, which localised it to
+           Layout — the one component on every other screen.
+
+           Diffing the images rather than guessing gave the answer immediately:
+
+             07-Open-loops.png  bbox=(215, 20, 216, 21) differing_px=1
+             01-Overview.png    bbox=(215, 20, 216, 21) differing_px=1
+             11-Builders.png    bbox=(215, 20, 216, 21) differing_px=1
+
+           One pixel, same coordinate on every screen: the first glyph of the
+           incident banner in the status strip. Adding `truncate` to that span
+           set `white-space: nowrap` and `overflow: hidden`, which shifted the
+           text rendering by a single subpixel even though nothing overflowed
+           at 1440.
+
+Fix:       Scoped the truncation to `max-lg:truncate` and the parent to
+           `max-lg:min-w-0`, so it applies below 1024 and not at or above it.
+           That is also what the brief actually asked for — banner truncation is
+           a 768-to-1024 fix, not a desktop change. Re-ran the diff: 30 of 30
+           byte-identical.
+
+Decision:  - **Tables become cards through CSS, not a second component tree.**
+             One `.table-cards` class on the table, and cells opt in with
+             `card-title`, `card-meta`, `card-full` or `card-actions`. Below 768
+             the rows become flex containers and any cell without one of those
+             classes is `display: none`. The four spine fields are still in the
+             DOM and still in the data; they are simply not shown on a phone.
+             `flex order` puts the title first regardless of column order, so no
+             screen had to reorder its markup.
+           - **Card fields per the brief**: open loops (age, title, owner,
+             status), engine health (id, summary, error class, state), twin
+             records (question, outcome, cycle), vFarm (place, reading, time),
+             codex (title, builder, ingested), and the equivalent three or four
+             elsewhere.
+           - **`.card-title` needs `max-width: none !important`** because the
+             clipped desktop cells carry an inline `style={{ maxWidth }}`, and a
+             stylesheet `!important` is the only thing that beats an inline
+             style.
+           - **Row actions become always-visible below 768** with 44px minimum
+             tap targets, since hover does not exist on touch. Measured live:
+             57x44, 68x44, 106x44.
+           - **Two drawers, same pattern**: the sidebar and the Ask Bays history
+             panel are `hidden` below md and `fixed` overlays when open, with
+             `md:static md:flex` restoring the desktop column exactly. Both close
+             on a backdrop tap and on selecting an item.
+           - **Metric strips drop to 2 columns below md** (engine health 6, vFarm
+             6, commercial 5, builder detail 5, twin summary 5, codex 4). Not
+             named in the brief, but a six-column strip at 390 is the same
+             failure as the pin row and the brief asked for no horizontal
+             overflow at any width.
+           - **The per-owner strip on Open loops scrolls horizontally below md**
+             rather than crushing eight buttons into 390px.
+           - **Twin Summary's two small tables stay real tables.** They are two
+             and four narrow columns and already fit a phone; carding them would
+             have made them worse.
+
+Verified:  1440 pixel diff: 30 of 30 byte-identical, before and after.
+           No horizontal body overflow at 1920, 1440, 1024, 768 or 390 —
+           document.scrollWidth equals window.innerWidth at every width.
+           At 390: nav computes to `display: none` closed and `flex` open;
+           hamburger visible; backdrop tap and link tap both close it; the chat
+           drawer opens, renders a stored thread and closes on selection;
+           `.table-cards tbody tr` computes to `display: flex`.
+           At 768: pin row is 3 columns matching the tile grid, the banner
+           ellipsises, and sign out no longer wraps.
+           Zero console errors at any width. Build passes.
+
+Known:     Engine health still reports horizontal slack inside its own table
+           container at 1024 and above (1001px at 1024). That is the intended
+           behaviour at those widths — the table scrolls in place — not overflow
+           of the page.

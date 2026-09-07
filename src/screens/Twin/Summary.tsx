@@ -6,7 +6,7 @@ export function Summary({ d }: { d: TwinData }) {
   const s = d.summary;
   return (
     <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-      <div className="grid grid-cols-5 border-b border-line">
+      <div className="grid grid-cols-2 border-b border-line md:grid-cols-5">
         {[
           { label: 'Asks', value: String(s.asks), tone: 'text-gold' },
           { label: 'Answered', value: String(s.answered), tone: 'text-ink' },

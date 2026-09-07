@@ -34,7 +34,7 @@ export function BuilderPage() {
         right={<Link to="/builders" className="text-[12px] text-faint hover:text-ink">← all builders</Link>}
       />
 
-      <div className="grid shrink-0 grid-cols-5 border-b border-line">
+      <div className="grid shrink-0 grid-cols-2 border-b border-line md:grid-cols-5">
         <div className="border-r border-line px-4 py-2">
           <div className="text-[11px] text-faint">Open loops</div>
           <div className="tabular text-[17px] leading-tight text-gold">{b.open_loops}</div>
@@ -71,7 +71,7 @@ export function BuilderPage() {
             The count above is the table total; the rows are what has been pulled through.
           </EmptyState>
         ) : (
-          <table className="w-full text-[12px]">
+          <table className="table-cards w-full text-[12px]">
             <thead>
               <tr>
                 <Th className="text-right">age</Th>
@@ -86,13 +86,13 @@ export function BuilderPage() {
             <tbody>
               {data.loops.map((l) => (
                 <tr key={l.id}>
-                  <td className={`td tabular text-right ${ageTone(l.age_days)}`}>{l.age_days}d</td>
+                  <td className={`td card-meta tabular text-right ${ageTone(l.age_days)}`}>{l.age_days}d</td>
                   <td className="td tabular text-faint">{l.id}</td>
-                  <td className="td td-clip" style={{ maxWidth: '54ch' }} title={l.title}>{l.title}</td>
+                  <td className="td card-title td-clip" style={{ maxWidth: '54ch' }} title={l.title}>{l.title}</td>
                   <td className="td"><TagRow tags={l.tags} /></td>
-                  <td className="td text-faint">{l.status}</td>
+                  <td className="td card-meta text-faint">{l.status}</td>
                   <td className="td"><SourceLink source={l.source} /></td>
-                  <td className="td">
+                  <td className="td card-actions">
                     <RowActions>
                       <RowAction label="close" onClick={() => act('loop.close', l.id)} />
                       <RowAction label="update" onClick={() => act('loop.update', l.id)} />
@@ -110,7 +110,7 @@ export function BuilderPage() {
         {data.entries.length === 0 ? (
           <EmptyState>No Codex entries from {b.name} in the selected lane.</EmptyState>
         ) : (
-          <table className="w-full text-[12px]">
+          <table className="table-cards w-full text-[12px]">
             <thead>
               <tr>
                 <Th>logged</Th><Th>week</Th><Th>type</Th><Th>title</Th><Th>ingested</Th><Th>source</Th>
@@ -121,9 +121,9 @@ export function BuilderPage() {
                 <tr key={e.id}>
                   <td className="td tabular text-faint">{e.logged_at}</td>
                   <td className="td tabular text-faint">{e.week}</td>
-                  <td className="td text-faint">{e.session_type}</td>
-                  <td className="td td-clip" style={{ maxWidth: '54ch' }}>{e.title}</td>
-                  <td className={`td ${e.ingested ? 'text-dim' : 'text-degraded'}`}>
+                  <td className="td card-meta text-faint">{e.session_type}</td>
+                  <td className="td card-title td-clip" style={{ maxWidth: '54ch' }}>{e.title}</td>
+                  <td className={`td card-meta ${e.ingested ? 'text-dim' : 'text-degraded'}`}>
                     {e.ingested ? 'yes' : 'posted only'}
                   </td>
                   <td className="td"><SourceLink source={e.source} /></td>
@@ -139,7 +139,7 @@ export function BuilderPage() {
         {data.incidents.length === 0 ? (
           <EmptyState>No incidents are attributed to {b.name} in the selected lane.</EmptyState>
         ) : (
-          <table className="w-full text-[12px]">
+          <table className="table-cards w-full text-[12px]">
             <thead>
               <tr>
                 <Th>incident</Th><Th>summary</Th><Th>class</Th><Th>state</Th><Th>opened</Th><Th>source</Th>
@@ -149,9 +149,9 @@ export function BuilderPage() {
               {data.incidents.map((i) => (
                 <tr key={i.id}>
                   <td className="td tabular">{i.id}</td>
-                  <td className="td td-clip" style={{ maxWidth: '44ch' }}>{i.summary}</td>
-                  <td className={`td ${healthText(i.health)}`}>{errorClassLabel(i.error_class)}</td>
-                  <td className={`td ${i.state === 'resolved' ? 'text-dim' : healthText(i.health)}`}>
+                  <td className="td card-title td-clip" style={{ maxWidth: '44ch' }}>{i.summary}</td>
+                  <td className={`td card-meta ${healthText(i.health)}`}>{errorClassLabel(i.error_class)}</td>
+                  <td className={`td card-meta ${i.state === 'resolved' ? 'text-dim' : healthText(i.health)}`}>
                     {i.state}
                   </td>
                   <td className="td tabular text-faint">{i.opened_at}</td>
