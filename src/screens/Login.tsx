@@ -2,22 +2,23 @@ import { useState } from 'react';
 import { useSession } from '../app/session';
 
 /**
- * One shared team login, the same pattern as BHARAG's console. Phase 1 accepts
- * any non-empty password and holds a fake token in memory — there is no auth
- * logic and no secret here.
+ * One shared team login, the same pattern as BHARAG's console.
  */
 export default function Login() {
   const { signIn } = useSession();
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   return (
     <div className="flex h-full items-center justify-center">
       <form
-        className="w-[300px]"
+        className="w-[300px] max-w-[calc(100vw-2rem)]"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!signIn(password)) setError('Enter the team password.');
+          const result = signIn(email, password);
+          if (result === 'missing') setError('Enter an email address and a password.');
+          else if (result === 'unknown-email') setError('Not a recognised account.');
         }}
       >
         <div className="mb-6 flex items-center gap-2.5">
@@ -25,13 +26,29 @@ export default function Login() {
           <span className="text-[15px] font-medium">BHA engine</span>
         </div>
 
-        <label className="block text-[11px] text-faint" htmlFor="password">
-          Team password
+        <label className="block text-[11px] text-faint" htmlFor="email">
+          Email
+        </label>
+        <input
+          id="email"
+          type="email"
+          autoFocus
+          autoComplete="username"
+          value={email}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            setError(null);
+          }}
+          className="mt-1 w-full border border-line bg-raised px-2 py-1.5 text-ink outline-none focus:border-gold-dim"
+        />
+
+        <label className="mt-3 block text-[11px] text-faint" htmlFor="password">
+          Password
         </label>
         <input
           id="password"
           type="password"
-          autoFocus
+          autoComplete="current-password"
           value={password}
           onChange={(e) => {
             setPassword(e.target.value);
@@ -48,12 +65,6 @@ export default function Login() {
         >
           Sign in
         </button>
-
-        <p className="mt-5 text-[11px] leading-relaxed text-faint">
-          One login for the whole team, matching BHARAG's console. No per-user
-          accounts. In phase 1 any password is accepted and the session is held in
-          memory only.
-        </p>
       </form>
     </div>
   );
