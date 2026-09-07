@@ -22,7 +22,7 @@ function TwinScreen({ fetcher }: { fetcher: (q: Query) => Promise<TwinData> }) {
         subtitle={data.summary.period}
         right={
           /* Sub-tabs live inside the page, not the sidebar. */
-          <div className="flex gap-4">
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
             {TABS.map((t) => (
               <button
                 key={t}

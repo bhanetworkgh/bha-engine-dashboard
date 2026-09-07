@@ -3,8 +3,8 @@ import type { ReactNode } from 'react';
 /** Scroll container for a dense table. The table itself owns its columns. */
 export function TableFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="scroll-thin min-h-0 flex-1 overflow-auto">
-      <table className="w-full border-collapse text-[12px]">{children}</table>
+    <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto md:overflow-auto">
+      <table className="table-cards w-full border-collapse text-[12px]">{children}</table>
     </div>
   );
 }

@@ -5,13 +5,14 @@ import {
   LoadFailed,
   Loading,
 } from '../components/ui';
-import { act } from '../lib';
+import { act, cx } from '../lib';
 
 export default function AskBays() {
   const { status, data, error } = useData(getAskBays);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState('');
+  const [panelOpen, setPanelOpen] = useState(false);
   /** Messages typed this session, keyed by thread. Nothing persists. */
   const [local, setLocal] = useState<Record<string, ChatMessage[]>>({});
   const inputRef = useRef<HTMLInputElement>(null);
@@ -112,12 +113,33 @@ export default function AskBays() {
             >
               Send
             </button>
+            <button
+              type="button"
+              onClick={() => setPanelOpen(true)}
+              aria-label="Open chat history"
+              className="border border-line px-2.5 py-1.5 text-dim hover:border-gold-dim hover:text-gold md:hidden"
+            >
+              Chats
+            </button>
           </div>
         </div>
       </div>
 
       {/* Right-hand panel: new chat, history, search. */}
-      <aside className="flex w-[236px] shrink-0 flex-col border-l border-line bg-panel">
+      {panelOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 md:hidden"
+          onClick={() => setPanelOpen(false)}
+          aria-hidden
+        />
+      )}
+
+      <aside
+        className={cx(
+          'w-[236px] shrink-0 flex-col border-l border-line bg-panel md:static md:flex',
+          panelOpen ? 'fixed inset-y-0 right-0 z-50 flex' : 'hidden',
+        )}
+      >
         <div className="border-b border-line p-2.5">
           <button
             type="button"
@@ -125,6 +147,7 @@ export default function AskBays() {
               setActiveId(null);
               setLocal((p) => ({ ...p, __new: [] }));
               setDraft('');
+              setPanelOpen(false);
               inputRef.current?.focus();
               act('ask-bays.new-chat', 'new');
             }}
@@ -152,6 +175,7 @@ export default function AskBays() {
                 type="button"
                 onClick={() => {
                   setActiveId(t.id);
+                  setPanelOpen(false);
                   act('ask-bays.open-thread', t.id);
                 }}
                 className={`block w-full border-b border-line px-3 py-1.5 text-left ${

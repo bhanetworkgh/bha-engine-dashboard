@@ -61,13 +61,13 @@ export function IncidentTable({
                   <td className="td">
                     <Dot health={i.health} />
                   </td>
-                  <td className="td tabular">{i.id}</td>
-                  <td className="td td-clip" style={{ maxWidth: '34ch' }} title={i.summary}>
+                  <td className="td card-meta tabular">{i.id}</td>
+                  <td className="td card-title td-clip" style={{ maxWidth: '34ch' }} title={i.summary}>
                     {i.summary}
                   </td>
                   <td className="td"><TagRow tags={i.tags} /></td>
-                  <td className={`td ${healthText(i.health)}`}>{errorClassLabel(i.error_class)}</td>
-                  <td className="td">
+                  <td className={`td card-meta ${healthText(i.health)}`}>{errorClassLabel(i.error_class)}</td>
+                  <td className="td card-meta">
                     <span className="flex items-center gap-2">
                       <StateTrack state={i.state} />
                       <span className={i.state === 'resolved' ? 'text-dim' : healthText(i.health)}>
@@ -90,7 +90,7 @@ export function IncidentTable({
                   <td className="td">
                     <SourceLink source={i.source} />
                   </td>
-                  <td className="td">
+                  <td className="td card-actions">
                     <RowActions>
                       <RowAction label="retry" onClick={() => act('incident.retry', i.id)} />
                       <RowAction label="escalate" onClick={() => act('incident.escalate', i.id)} />
@@ -104,7 +104,7 @@ export function IncidentTable({
                 {expanded === i.id && (
                   <tr>
                     <td className="td" />
-                    <td className="td td-wrap" colSpan={15}>
+                    <td className="td card-full td-wrap" colSpan={15}>
                       <div className="py-1">
                         <div className="mb-1 text-[11px] tracking-[0.08em] text-faint uppercase">
                           Action footprint

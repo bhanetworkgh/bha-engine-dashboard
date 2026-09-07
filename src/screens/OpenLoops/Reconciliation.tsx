@@ -38,16 +38,16 @@ export function Reconciliation({ data }: { data: OpenLoopsData }) {
             {data.reconciliation.map((r) => (
               <tr key={r.id}>
                 <td className="td tabular text-faint">{r.loop_id}</td>
-                <td className="td td-clip" style={{ maxWidth: '46ch' }}>{r.title}</td>
-                <td className="td text-dim">{BUILDER_NAMES[r.expected_owner] ?? r.expected_owner}</td>
-                <td className={`td ${r.found_in ? 'text-degraded' : 'text-failing'}`}>
+                <td className="td card-title td-clip" style={{ maxWidth: '46ch' }}>{r.title}</td>
+                <td className="td card-meta text-dim">{BUILDER_NAMES[r.expected_owner] ?? r.expected_owner}</td>
+                <td className={`td card-meta ${r.found_in ? 'text-degraded' : 'text-failing'}`}>
                   {r.found_in ?? 'no table'}
                 </td>
-                <td className="td td-clip text-faint" style={{ maxWidth: '52ch' }}>{r.discrepancy}</td>
+                <td className="td card-full td-clip text-faint" style={{ maxWidth: '52ch' }}>{r.discrepancy}</td>
                 <td className="td">
                   <SourceLink source={r.source} />
                 </td>
-                <td className="td">
+                <td className="td card-actions">
                   <RowActions>
                     <RowAction label="reassign" onClick={() => act('reconcile.reassign', r.id)} />
                     <RowAction label="ignore" onClick={() => act('reconcile.ignore', r.id)} />

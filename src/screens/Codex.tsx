@@ -25,7 +25,7 @@ export default function Codex() {
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader title="Codex entries" subtitle="By builder and week" />
 
-      <div className="grid shrink-0 grid-cols-4 border-b border-line">
+      <div className="grid shrink-0 grid-cols-2 border-b border-line md:grid-cols-4">
         <div className="border-r border-line px-4 py-2">
           <div className="text-[11px] text-faint">Logged this week</div>
           <div className="tabular text-[17px] leading-tight text-gold">{data.this_week}</div>
@@ -70,9 +70,9 @@ export default function Codex() {
               <tr key={e.id}>
                 <td className="td tabular text-faint">{e.logged_at}</td>
                 <td className="td tabular text-faint">{e.week}</td>
-                <td className="td text-dim">{BUILDER_NAMES[e.builder_id] ?? e.builder_id}</td>
+                <td className="td card-meta text-dim">{BUILDER_NAMES[e.builder_id] ?? e.builder_id}</td>
                 <td className="td text-faint">{e.session_type}</td>
-                <td className="td td-clip" style={{ maxWidth: '46ch' }} title={e.title}>
+                <td className="td card-title td-clip" style={{ maxWidth: '46ch' }} title={e.title}>
                   {e.title}
                 </td>
                 <td className="td"><TagRow tags={e.tags} /></td>
@@ -86,12 +86,12 @@ export default function Codex() {
                     <span className="text-degraded">not linked</span>
                   )}
                 </td>
-                <td className={`td ${e.ingested ? 'text-dim' : 'text-degraded'}`}>
+                <td className={`td card-meta ${e.ingested ? 'text-dim' : 'text-degraded'}`}>
                   {e.ingested ? 'yes' : 'posted only'}
                 </td>
                 <SpineCells spine={e.spine} />
                 <td className="td"><SourceLink source={e.source} /></td>
-                <td className="td">
+                <td className="td card-actions">
                   <RowActions>
                     <RowAction label="re-ingest" onClick={() => act('codex.reingest', e.id)} />
                     <RowAction label="open in Slack" onClick={() => act('codex.open-slack', e.id)} />

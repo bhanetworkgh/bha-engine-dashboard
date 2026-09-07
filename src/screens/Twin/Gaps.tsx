@@ -21,7 +21,7 @@ export function Gaps({ d }: { d: TwinData }) {
           Nothing came back empty or thin for the selected lane in this period.
         </EmptyState>
       ) : (
-        <table className="w-full text-[12px]">
+        <table className="table-cards w-full text-[12px]">
           <thead>
             <tr>
               <Th>question</Th>
@@ -38,17 +38,17 @@ export function Gaps({ d }: { d: TwinData }) {
           <tbody>
             {d.gaps.map((g) => (
               <tr key={g.id}>
-                <td className="td td-clip" style={{ maxWidth: '40ch' }}>{g.question}</td>
-                <td className={`td ${g.reason === 'empty' ? 'text-failing' : 'text-degraded'}`}>
+                <td className="td card-title td-clip" style={{ maxWidth: '40ch' }}>{g.question}</td>
+                <td className={`td card-meta ${g.reason === 'empty' ? 'text-failing' : 'text-degraded'}`}>
                   {g.reason}
                 </td>
-                <td className="td tabular text-right text-dim">{g.cycles}</td>
+                <td className="td card-meta tabular text-right text-dim">{g.cycles}</td>
                 <SpineCells spine={g.spine} />
                 <td className="td tabular text-faint">{g.first_seen}</td>
                 <td className="td">
                   <SourceLink source={g.source} />
                 </td>
-                <td className="td">
+                <td className="td card-actions">
                   <RowActions>
                     <RowAction label="re-run" onClick={() => act('twin.rerun-gap', g.id)} />
                   </RowActions>
@@ -68,7 +68,7 @@ export function Gaps({ d }: { d: TwinData }) {
             'No ask has gone thin and later been answered for the selected lane.'}
         </EmptyState>
       ) : (
-        <table className="w-full text-[12px]">
+        <table className="table-cards w-full text-[12px]">
           <thead>
             <tr>
               <Th>question</Th>
@@ -84,10 +84,10 @@ export function Gaps({ d }: { d: TwinData }) {
           <tbody>
             {d.transitions.map((t) => (
               <tr key={t.id}>
-                <td className="td td-clip" style={{ maxWidth: '40ch' }}>{t.question}</td>
+                <td className="td card-title td-clip" style={{ maxWidth: '40ch' }}>{t.question}</td>
                 <td className="td tabular text-faint">{t.went_thin_at}</td>
-                <td className="td tabular text-dim">{t.answered_at}</td>
-                <td className="td tabular text-right text-dim">{t.cycles}</td>
+                <td className="td card-meta tabular text-dim">{t.answered_at}</td>
+                <td className="td card-meta tabular text-right text-dim">{t.cycles}</td>
                 <SpineCells spine={t.spine} />
                 <td className="td">
                   <SourceLink source={t.source} />
