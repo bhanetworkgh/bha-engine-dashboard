@@ -150,3 +150,112 @@ Blocked:   `BHA - log_engine_event` (j4gD7onkPGLadFBY) could not be read — n8n
 
 Not done:  BUILD_LOG.md was not uploaded to Google Drive this session (CLAUDE.md
            §9). Holding until Destiny confirms the target folder.
+
+---
+
+## 2026-09-07 15:40 — Session 2: phase 1 UI against mock data
+
+Intent:    Build the whole interface — all eleven screens, navigation, styling,
+           auth gate, row interactions — against fixtures. No live wiring.
+
+Files:     Scaffolding: package.json, vite.config.ts, tsconfig*.json, index.html.
+           Design tokens and base styles: src/index.css.
+           Data module: src/data/types.ts, src/data/fixtures.ts, src/data/index.ts.
+           App shell: src/main.tsx, src/App.tsx, src/app/session.tsx,
+           src/app/useData.ts, src/components/ui.tsx, src/components/Layout.tsx.
+           Screens: src/screens/{Login,Overview,AskBays,Twin,VFarm,EngineHealth,
+           OpenLoops,Codex,BuildPatterns,Commercial,Builders}.tsx.
+
+           Stack is React 18 + Vite 6 + TypeScript + Tailwind v4 + React Router 6.
+           Static build, no backend.
+
+Problem:   1. Table rows wrapped to three and four lines, so Open loops showed
+              about ten rows on a 1440x900 screen instead of thirty. Cause was
+              `max-w-[52ch]` on a `<td>` inside a `table-layout: auto` table:
+              the browser treats that as permission to shrink the column and
+              wrap, which is the opposite of the intent.
+
+           2. The Overview page rendered correctly but left the bottom third
+              empty, because each 24-hour column held only five events.
+
+           3. Gold at #d4b063 read as warm white at 17px rather than as an
+              accent — the one value that matters per screen did not stand out.
+
+           4. The Ask Bays idle mark rendered as a bright grey disc. public/logo.svg
+              is a 68-path traced mark whose first path is a full-bleed #FDFDFD
+              background square, so on a dark screen it reads as a lit plate.
+
+           5. A first Playwright sweep reported every route as 199 characters —
+              all of them the login screen. Not a routing fault: the session token
+              is held in memory as specified, so `page.goto` on each URL reloads
+              the app and signs out.
+
+Fix:       1. Replaced wrapping cells with single-line clipped cells: new `.td-clip`
+              (overflow hidden, ellipsis, nowrap) plus an inline `maxWidth`, with
+              the full value on the `title` attribute. Row padding cut to 3px and
+              line-height to 1.35. Rows are now 25.8px: 27 fully visible at 900px
+              tall, 34 at 1080. Tags moved out of the title cell into their own
+              column so a clipped title can never eat them.
+           2. Extended both 24-hour lists to eleven events each, drawn from the
+              same incident, loop, alert and Codex fixtures already on screen
+              elsewhere, so the numbers still reconcile.
+           3. Gold to #ddaa42, gold-dim to #8a6a24. Hue stays clear of amber
+              (#e3873c) and red (#e2564d) so the three never read as one family.
+           4. Circular clip on the mark, idle animation amplitude dropped to
+              0.16–0.26 opacity. The logo file itself is untouched.
+           5. Rewrote the sweep to sign in once and navigate via the sidebar,
+              which is how the app is actually used.
+
+Decision:  - **Every data function is async and takes a `Query`.** Fixtures could
+             have been returned synchronously, but then tomorrow's swap to the
+             live endpoint would force loading and error states into all eleven
+             screens at once. Components already `await` through a `useData`
+             hook that owns loading, failure and the lane filter. Phase 2 should
+             be bodies-only inside src/data/index.ts.
+           - **The lane filter is applied inside the data module**, not in
+             components, so no screen filters by hand and the live endpoint can
+             take the lane as a query parameter without touching the UI.
+           - **Lane and subsystem vocabularies are the engine's, not invented**:
+             VFARM_CORE / VFARM_MEDIA / CLIENT_CORE / ENGINE_INTERNAL from the
+             three n8n front doors, and AGENT / CODEX / CHANNELARCHIVES /
+             COMMERCIALOPPS / BUILDPATTERNS from the Bays error handler's
+             computeSubsystem, extended with NORTHSTAR, RESEARCHTWIN, VFARM and
+             BHARAG. Error classes and the 3-retry policy match the live handler.
+           - **`evidence_shape_version` is rendered but mostly reads "not written."**
+             Session 1 established it as a gap rather than a field. Showing the
+             column empty is truer than hiding it or filling it in.
+           - **Age on Open loops is labelled "days since raised", with a sentence
+             on the page saying time in current status is not recorded.** No
+             status-change timestamp exists to compute it from.
+           - **vFarm is split three ways** — Live (sensor rollups, alerts,
+             incident closes), Lifecycle (empty, with the reason), Readiness
+             (empty, naming /clusters/:id/readiness as unbuilt) — matching what
+             the ledger actually carries rather than CLAUDE.md section 7's four
+             event types.
+           - **The reconciliation view ships as a launch feature**, seeded from
+             the real Sept 7 case where Kaiqi's digest named three loops his
+             table did not hold.
+           - Overview counts are derived from the fixture rows, not typed
+             separately, so a screen and its tile cannot disagree.
+           - Row actions all route through one `act()` helper that logs. One
+             place to swap for real calls.
+
+Verified:  `npm run build` passes (tsc -b + vite build, no errors).
+           Driven in Chromium at 1440x900: all 11 routes render, all 14 sub-tabs
+           render, row actions fire (`loop.close`, `incident.retry` observed on
+           the console), builder detail resolves, the lane filter cascades
+           through every screen and correctly empties vFarm under client core.
+           Zero console errors and zero page errors across the sweep.
+           Overview does not scroll at 900px tall.
+
+Known:     - A browser refresh signs you out. The token is in memory by design
+             for phase 1; nothing is persisted anywhere.
+           - Per-owner loop totals (268 open) are larger than the 46 individual
+             loop rows held as fixtures. The Open loops empty state and the
+             builder detail page both say so rather than implying the rows are
+             the whole set.
+           - Sub-tab selection persists when navigating away and back. Left as
+             is; it seems right for a panel someone keeps open all day.
+
+Not done:  BUILD_LOG.md still not uploaded to Google Drive (CLAUDE.md section 9),
+           pending Destiny confirming the target folder.
