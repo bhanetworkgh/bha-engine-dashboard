@@ -1,0 +1,169 @@
+@import "tailwindcss";
+
+@theme {
+  /* Surfaces — dark by default, near-black. */
+  --color-bg: #08080a;
+  --color-panel: #0e0e11;
+  --color-raised: #141418;
+  --color-hover: #17171c;
+  --color-line: #1e1e23;
+  --color-line-strong: #2c2c34;
+
+  /* Type — three levels, two weights only. */
+  --color-ink: #e8e8ea;
+  --color-dim: #93939b;
+  --color-faint: #61616a;
+
+  /* Gold. Accent for the one thing that matters on a screen. Never a fill. */
+  --color-gold: #ddaa42;
+  --color-gold-dim: #8a6a24;
+
+  /* Colour carries meaning only. Healthy states get none of these. */
+  --color-degraded: #e3873c;
+  --color-failing: #e2564d;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.45;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Two font weights. Regular and medium. Nothing heavier. */
+  b,
+  strong,
+  th,
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-weight: 500;
+  }
+
+  button {
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  input {
+    font: inherit;
+  }
+
+  ::selection {
+    background: var(--color-gold-dim);
+    color: var(--color-ink);
+  }
+}
+
+@layer utilities {
+  /* Dense scrollbars — the instrument-panel look depends on these not shouting. */
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+  .scroll-thin::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background: var(--color-line-strong);
+    border-radius: 0;
+  }
+  .scroll-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Row actions: hidden until the row is hovered or focused within. */
+  .row-actions {
+    opacity: 0;
+  }
+  tr:hover .row-actions,
+  tr:focus-within .row-actions,
+  .rowlike:hover .row-actions,
+  .rowlike:focus-within .row-actions {
+    opacity: 1;
+  }
+
+  /* The single permitted decorative animation: the idle mark on Ask Bays. */
+  @keyframes idle-breath {
+    0%,
+    100% {
+      opacity: 0.16;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.26;
+      transform: scale(1.02);
+    }
+  }
+  .idle-mark {
+    animation: idle-breath 7s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .idle-mark {
+      animation: none;
+      opacity: 0.2;
+    }
+  }
+}
+
+@layer components {
+  /* One table cell definition, used by every screen. Tight rows by default:
+     ~26px each, so roughly thirty are visible on a laptop screen. */
+  .td {
+    white-space: nowrap;
+    border-bottom: 1px solid var(--color-line);
+    padding: 3px 10px;
+    line-height: 1.35;
+    vertical-align: top;
+  }
+
+  .td-wrap {
+    white-space: normal;
+  }
+
+  tbody tr:hover {
+    background: var(--color-hover);
+  }
+
+  /* Tiles and list items that behave like rows but are not <tr>. */
+  .rowlike:hover {
+    background: var(--color-hover);
+  }
+}
+
+@layer components {
+  /* Single-line cells. Density beats completeness in a table: the full value
+     is on hover, and the row stays one line so thirty fit on screen. */
+  .td-clip {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
