@@ -446,3 +446,53 @@ Known:     Engine health still reports horizontal slack inside its own table
            container at 1024 and above (1001px at 1024). That is the intended
            behaviour at those widths — the table scrolls in place — not overflow
            of the page.
+
+---
+
+## 2026-09-07 19:20 — Session 4b: login screen
+
+Intent:    Two-field login with real validation, a persisted session, and the
+           explanatory paragraph removed. Login screen only.
+
+Files:     src/screens/Login.tsx, src/app/session.tsx.
+
+Problem:   None. The only thing worth recording is that this change deliberately
+           breaks the pixel-diff invariant used for the responsive work, so the
+           two jobs were committed separately: the responsive diff was proven at
+           30 of 30 identical first, and only then was the login touched. The
+           second diff run excludes 00-login.png and holds at 29 of 29.
+
+Fix:       Not applicable.
+
+Decision:  - **Email is checked against a constant; the password is not checked
+             at all** and is never stored. That is stated in a comment directly
+             above the check in session.tsx, so nobody reads this as security.
+             Real verification moves to the engine endpoint in phase 2, which is
+             what will return the session token.
+           - **Two distinct errors, as asked**: an empty field gives "Enter an
+             email address and a password."; a non-matching email gives "Not a
+             recognised account." The button never silently no-ops.
+           - **Email comparison is trimmed and lower-cased.** Typing
+             `Admin@BHANetwork.org` on a phone keyboard should not read as a
+             different account.
+           - **Session moved from memory to sessionStorage**, so a refresh no
+             longer signs you out. Every read and write is wrapped — sessionStorage
+             throws in some private-browsing modes, and a failed read should mean
+             "no session", not a blank screen. Sign out clears the key.
+           - **sessionStorage, not localStorage**, per the brief. It clears when
+             the tab closes, which suits a shared team credential better than a
+             login that persists on a machine indefinitely.
+           - The paragraph under the button is gone entirely: mark, two fields,
+             button.
+
+Verified:  Empty submit, email-only submit, wrong email, and correct credentials
+           all behave as specified, checked live in the browser. Refresh keeps the
+           session; a direct load of /open-loops arrives signed in and renders 46
+           rows; sign out clears both the state and the storage key.
+           Field types are email and password. No paragraph remains in the form.
+           1440 diff excluding login: 29 of 29 byte-identical. Build passes, no
+           console errors.
+
+Known:     The deep-link check passes under `vite dev` because the dev server
+           serves index.html for unknown paths. In production that still depends
+           on the host rewrite documented in README under Deployment.

@@ -1,14 +1,16 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 import type { LaneFilter } from '../data';
 
-/**
- * Shared team session. One login for everyone, matching BHARAG's console.
- * Phase 1 holds a fake token in memory and accepts any non-empty password —
- * there is no auth logic here and no secret in the repo.
- */
+/** The one account the team shares, matching BHARAG's console. */
+export const TEAM_EMAIL = 'admin@bhanetwork.org';
+
+const TOKEN_KEY = 'bha.session';
+
+export type SignInResult = 'ok' | 'unknown-email' | 'missing';
+
 interface SessionValue {
   token: string | null;
-  signIn: (password: string) => boolean;
+  signIn: (email: string, password: string) => SignInResult;
   signOut: () => void;
   lane: LaneFilter;
   setLane: (lane: LaneFilter) => void;
@@ -16,8 +18,17 @@ interface SessionValue {
 
 const Ctx = createContext<SessionValue | null>(null);
 
+/** sessionStorage can throw in a private window; a failed read is just no session. */
+function readToken(): string | null {
+  try {
+    return sessionStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(readToken);
   const [lane, setLane] = useState<LaneFilter>('all');
 
   const value = useMemo<SessionValue>(
@@ -25,12 +36,29 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       token,
       lane,
       setLane,
-      signIn: (password: string) => {
-        if (!password.trim()) return false;
-        setToken('phase1-session-token');
-        return true;
+      signIn: (email: string, password: string) => {
+        if (!email.trim() || !password.trim()) return 'missing';
+        // Phase 1 only: the email is checked against a constant and the password is
+        // not verified or stored anywhere. Real verification moves to the engine
+        // endpoint in phase 2, which returns the session token this holds.
+        if (email.trim().toLowerCase() !== TEAM_EMAIL) return 'unknown-email';
+        const next = 'phase1-session-token';
+        try {
+          sessionStorage.setItem(TOKEN_KEY, next);
+        } catch {
+          // Storage unavailable — the session still holds for this tab.
+        }
+        setToken(next);
+        return 'ok';
       },
-      signOut: () => setToken(null),
+      signOut: () => {
+        try {
+          sessionStorage.removeItem(TOKEN_KEY);
+        } catch {
+          // Nothing to clear.
+        }
+        setToken(null);
+      },
     }),
     [token, lane],
   );
