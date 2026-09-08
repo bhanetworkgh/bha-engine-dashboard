@@ -10,6 +10,9 @@ import {
   SPINE_HEADERS,
   SourceLink,
   SpineCells,
+  Stat,
+  StatCell,
+  StatStrip,
   TableFrame,
   TagRow,
   Th,
@@ -25,26 +28,24 @@ export default function Codex() {
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader title="Codex entries" subtitle="By builder and week" />
 
-      <div className="grid shrink-0 grid-cols-2 border-b border-line md:grid-cols-4">
-        <div className="border-r border-line px-4 py-2">
-          <div className="text-[11px] text-faint">Logged this week</div>
-          <div className="tabular text-[17px] leading-tight text-gold">{data.this_week}</div>
-        </div>
-        <div className="border-r border-line px-4 py-2">
-          <div className="text-[11px] text-faint">Entries held</div>
-          <div className="tabular text-[17px] leading-tight">{data.entries.length}</div>
-        </div>
-        <div className="border-r border-line px-4 py-2">
-          <div className="text-[11px] text-faint">Ingested into BHARAG</div>
-          <div className="tabular text-[17px] leading-tight">{data.ingested_rate}</div>
-        </div>
-        <div className="px-4 py-2">
-          <div className="text-[11px] text-faint">Posted only</div>
-          <div className="tabular text-[17px] leading-tight text-degraded">
-            {data.entries.filter((e) => !e.ingested).length}
-          </div>
-        </div>
-      </div>
+      <StatStrip cols={4}>
+        <StatCell>
+          <Stat label="Logged this week" value={data.this_week} tone="accent" />
+        </StatCell>
+        <StatCell>
+          <Stat label="Entries held" value={data.entries.length} />
+        </StatCell>
+        <StatCell>
+          <Stat label="Ingested into BHARAG" value={data.ingested_rate} />
+        </StatCell>
+        <StatCell>
+          <Stat
+            label="Posted only"
+            value={data.entries.filter((e) => !e.ingested).length}
+            tone={data.entries.some((e) => !e.ingested) ? 'degraded' : 'default'}
+          />
+        </StatCell>
+      </StatStrip>
 
       {data.entries.length === 0 ? (
         <EmptyState>No Codex entries recorded for the selected lane.</EmptyState>
@@ -78,9 +79,8 @@ export default function Codex() {
                 <td className="td"><TagRow tags={e.tags} /></td>
                 <td className="td">
                   {e.narration_url ? (
-                    <a href={e.narration_url} target="_blank" rel="noreferrer"
-                      className="text-faint underline decoration-line underline-offset-2 hover:text-gold hover:decoration-gold-dim">
-                      open
+                    <a href={e.narration_url} target="_blank" rel="noreferrer" className="text-faint hover:text-accent-ink">
+                      Open
                     </a>
                   ) : (
                     <span className="text-degraded">not linked</span>
@@ -91,10 +91,10 @@ export default function Codex() {
                 </td>
                 <SpineCells spine={e.spine} />
                 <td className="td"><SourceLink source={e.source} /></td>
-                <td className="td card-actions">
+                <td className="td card-actions td-actions">
                   <RowActions>
-                    <RowAction label="re-ingest" onClick={() => act('codex.reingest', e.id)} />
-                    <RowAction label="open in Slack" onClick={() => act('codex.open-slack', e.id)} />
+                    <RowAction label="Re-ingest" onClick={() => act('codex.reingest', e.id)} />
+                    <RowAction label="Open in Slack" onClick={() => act('codex.open-slack', e.id)} />
                   </RowActions>
                 </td>
               </tr>

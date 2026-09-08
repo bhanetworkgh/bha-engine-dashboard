@@ -68,7 +68,32 @@ const LOOP_SEEDS: LoopSeed[] = [
   ['LOOP-1788700771019-W9XJ', 'Decide the vision capture cadence against storage budget', 'kavin', 'open', 1, '2026-09-06', 'VFARM_CORE'],
   ['LOOP-1788787118330-A6RT', 'Reconcile Kaiqi digest count against his own loops table', 'destiny', 'open', 0, '2026-09-07', 'ENGINE_INTERNAL'],
   ['LOOP-1788787204611-K3ND', 'Point the readiness panel at a real endpoint once one exists', 'jegan', 'open', 0, '2026-09-07', 'VFARM_CORE'],
+  // Closed. A sample of the rows the per-builder tables hold as closed.
+  ['LOOP-1785590002117-Q7AD', 'Add Assert Digest Slack OK so an empty render cannot pass green', 'destiny', 'closed', 37, '2026-08-01', 'ENGINE_INTERNAL'],
+  ['LOOP-1785676411029-M4RE', 'Turn on Raw Body at the Bays webhook for Genie signatures', 'destiny', 'closed', 36, '2026-08-02', 'ENGINE_INTERNAL'],
+  ['LOOP-1785762820044-7HHT', 'Rotate the Research Twin external-ask key to the six-secret architecture', 'destiny', 'closed', 35, '2026-08-03', 'ENGINE_INTERNAL'],
+  ['LOOP-1786021801118-X2PL', 'Deliver the vFarm mechanical spec against the measured rig', 'jegan', 'closed', 32, '2026-08-06', 'VFARM_CORE'],
+  ['LOOP-1786367400021-N9SB', 'Create the Bays incidents key in the BHARAG2 console', 'destiny', 'closed', 28, '2026-08-10', 'ENGINE_INTERNAL'],
+  ['LOOP-1786885811203-V1CQ', 'Normalise Latenode MCP array queries', 'kaiqi', 'closed', 22, '2026-08-16', 'ENGINE_INTERNAL'],
+  ['LOOP-1787404400987-D8KA', 'Post the three watched-client memos from the weekly clock', 'ahad', 'closed', 16, '2026-08-22', 'CLIENT_CORE'],
+  ['LOOP-1787836500112-B5WM', 'Review the Logstream vocabulary for COMPLETED and REJECTED_POLICY', 'jason', 'closed', 11, '2026-08-27', 'ENGINE_INTERNAL'],
+  ['LOOP-1788009300415-Z3QE', 'Apply the render-safe boundary to the October assets', 'hardik', 'closed', 9, '2026-08-29', 'VFARM_MEDIA'],
+  ['LOOP-1788268600772-H6TN', 'Work out tipburn math and px/mm sizing for the first rack', 'kavin', 'closed', 6, '2026-09-01', 'VFARM_CORE'],
 ];
+
+/** When a closed seed was closed. Only the closed rows have one. */
+const CLOSED_AT: Record<string, string> = {
+  'LOOP-1785590002117-Q7AD': '2026-09-01',
+  'LOOP-1785676411029-M4RE': '2026-08-29',
+  'LOOP-1785762820044-7HHT': '2026-08-29',
+  'LOOP-1786021801118-X2PL': '2026-08-31',
+  'LOOP-1786367400021-N9SB': '2026-08-19',
+  'LOOP-1786885811203-V1CQ': '2026-09-05',
+  'LOOP-1787404400987-D8KA': '2026-09-01',
+  'LOOP-1787836500112-B5WM': '2026-09-04',
+  'LOOP-1788009300415-Z3QE': '2026-09-03',
+  'LOOP-1788268600772-H6TN': '2026-09-06',
+};
 
 const SUBSYSTEM_BY_LANE: Record<Loop['lane'], Loop['spine']['subsystem']> = {
   VFARM_CORE: 'VFARM',
@@ -85,6 +110,8 @@ export const LOOPS: Loop[] = LOOP_SEEDS.map(
     status,
     age_days: age,
     raised_at: raised,
+    closed_at: CLOSED_AT[id] ?? null,
+    note: null,
     lane,
     spine: {
       session_id: `SES-${raised.replace(/-/g, '')}-${owner.slice(0, 2).toUpperCase()}-${String((i % 6) + 1).padStart(2, '0')}`,
@@ -102,13 +129,13 @@ export const LOOPS: Loop[] = LOOP_SEEDS.map(
 
 /** Per-owner totals. The listed rows are a sample; these are the real counts. */
 export const LOOPS_BY_OWNER = [
-  { owner: 'destiny', open: 96, in_progress: 2, oldest_days: 34 },
-  { owner: 'jegan', open: 47, in_progress: 1, oldest_days: 33 },
-  { owner: 'hardik', open: 38, in_progress: 1, oldest_days: 31 },
-  { owner: 'kaiqi', open: 31, in_progress: 0, oldest_days: 23 },
-  { owner: 'ahad', open: 22, in_progress: 0, oldest_days: 19 },
-  { owner: 'jason', open: 18, in_progress: 0, oldest_days: 21 },
-  { owner: 'kavin', open: 16, in_progress: 0, oldest_days: 24 },
+  { owner: 'destiny', open: 96, in_progress: 2, closed: 41, oldest_days: 34 },
+  { owner: 'jegan', open: 47, in_progress: 1, closed: 12, oldest_days: 33 },
+  { owner: 'hardik', open: 38, in_progress: 1, closed: 7, oldest_days: 31 },
+  { owner: 'kaiqi', open: 31, in_progress: 0, closed: 9, oldest_days: 23 },
+  { owner: 'ahad', open: 22, in_progress: 0, closed: 6, oldest_days: 19 },
+  { owner: 'jason', open: 18, in_progress: 0, closed: 5, oldest_days: 21 },
+  { owner: 'kavin', open: 16, in_progress: 0, closed: 4, oldest_days: 24 },
 ];
 
 export const REVIEW_QUEUE: ProposedClose[] = [

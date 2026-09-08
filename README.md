@@ -11,10 +11,14 @@ This is that window. Internal team tooling, not a customer product.
 
 ## Status
 
-**Phase 1 — UI build against mock data.** Layout, navigation, styling and
-interactions. No live data yet.
+**Phase 1 — UI against mock data, with the write paths wired.** Layout,
+navigation, light and dark themes, and interactions are built. Reads come from
+fixtures. Sign-in, loop status changes, new loops and Ask Bays messages go to
+the engine when the matching environment variable is set, and otherwise act on
+the fixtures so the interface behaves.
 
-Phase 2 wires the live engine endpoint. Phase 3 adds chat memory for Ask Bays.
+Phase 2 wires the live engine endpoint for reads. Phase 3 adds chat memory for
+Ask Bays.
 
 ## Architecture
 
@@ -50,15 +54,17 @@ console. No per-user accounts.
 src/
   main.tsx            Entry point. Router + session provider.
   App.tsx             Route table. The login gate sits in front of everything.
-  index.css           Design tokens (@theme) and base styles. All colour lives here.
+  index.css           Design tokens for both themes, base styles, component classes.
 
   app/                Application-wide state.
-    session.tsx       Shared team login and the global lane filter.
+    session.tsx       Shared team login (token, expiry, bearer) and the global lane filter.
+    theme.tsx         Light / dark / system, stamped on <html data-theme>.
     useData.ts        Calls a data function with the current lane; owns loading and failure.
 
   data/               The one swap point. Nothing else knows where data comes from.
     types.ts          The contract. Shapes the engine endpoint must return.
-    index.ts          One async function per section. Phase 2 changes these bodies only.
+    engine.ts         The HTTP client: env config, bearer, timeouts, error shape.
+    index.ts          One async function per section, plus the write paths. Phase 2 changes these bodies only.
     fixtures/         Phase 1 mock rows, one file per domain. Deleted in phase 2.
 
   lib/                Pure helpers. No React, no data access.
@@ -68,8 +74,8 @@ src/
     cx.ts             Class-name join.
 
   components/
-    Layout.tsx        Sidebar, status strip, content outlet.
-    ui/               Shared primitives, one file per component, re-exported by index.ts.
+    Layout.tsx        Sidebar, status strip, theme toggle, content outlet.
+    ui/               Shared primitives (cards, stats, tabs, tables, tags, inline SVG charts, icons).
 
   screens/            One screen per route. Screens with sub-views get a folder.
     Overview.tsx      Flat file — small enough to read in one sitting.
@@ -87,7 +93,7 @@ src/
 | Where data comes from | `src/data/index.ts` — only this file |
 | The shape the engine must return | `src/data/types.ts` |
 | Mock values | `src/data/fixtures/<domain>.ts` |
-| A colour, spacing or font | `src/index.css` — tokens, not per-component classes |
+| A colour, spacing or font | `src/index.css` — tokens for both themes, not per-component classes |
 | What a screen shows | `src/screens/<Screen>/` |
 | A table cell, tag, dot or row action used on several screens | `src/components/ui/` |
 | Sidebar groups, status strip, lane filter | `src/components/Layout.tsx` |
@@ -103,12 +109,45 @@ npm run dev
 
 ## Environment variables
 
-Set in the host's environment settings. Never committed.
+Set in the host's environment settings. Never committed. Every one is optional;
+a feature whose variables are missing says so on screen rather than pretending.
 
 | Variable | Purpose |
 |---|---|
-| `VITE_ENGINE_API_URL` | Base URL of the engine data endpoint |
-| `VITE_ENGINE_API_TOKEN` | Token for that endpoint |
+| `VITE_ENGINE_API_URL` | Base URL of the engine data endpoint. Also the write target for loops (`PATCH /loops/:id`, `POST /loops`). |
+| `VITE_AUTH_URL` | Login endpoint. Defaults to `<VITE_ENGINE_API_URL>/auth/login` when only the API is set. |
+| `VITE_AUTH_PREVIEW` | `1` allows the preview gate (email checked, password not) outside local dev. Off by default in production. |
+| `VITE_BAYS_WEBHOOK_URL` | The Bays front door, `https://<n8n host>/webhook/bays`. |
+| `VITE_BAYS_API_KEY` | The `x-api-key` the front door expects on an external ask. |
+| `VITE_BAYS_CALLBACK_URL` | Where Bays posts its answer. Sent as `callback` on every ask. |
+| `VITE_BAYS_ANSWER_URL` | Where the dashboard reads answers back from. Polled as `GET ?session_id=…`. |
+| `VITE_BAYS_CHANNEL_ID` | Optional Slack channel for Bays to deliver to instead of, or as well as, the callback. |
+
+Anything set as a `VITE_` variable is compiled into the static bundle and is
+readable by anyone who can load the site. The shared login gates the interface,
+not the bundle. The Bays key in particular should be replaced by a proxy route
+on the engine endpoint (which attaches the key server-side) before this is
+exposed beyond the team.
+
+### Contracts the engine must meet
+
+**Sign-in.** `POST VITE_AUTH_URL` with `{ "email", "password" }`. Success is
+`200` with `{ "token", "expires_at"?, "label"? }` (`session_token` or
+`access_token` are also accepted). A `401` or `403` is shown as a rejected
+login. The token is sent as `Authorization: Bearer` on every engine call, and a
+`401` from any call signs the tab out.
+
+**Ask Bays.** The dashboard posts the front door's external-ask shape:
+`{ prompt, session_id, builder_id, lane_id, source: "engine_dashboard", callback?, channel_id? }`
+with the `x-api-key` header. The front door acks with an empty body and runs the
+agent asynchronously; the answer arrives at `callback`. The dashboard then polls
+`VITE_BAYS_ANSWER_URL?session_id=…` expecting `{ "status": "pending" }` or
+`{ "status": "answered", "answer", "at" }` (`response` or `text` also accepted)
+for up to two minutes. The workflow's loop guard drops the same `session_id`
+inside thirty seconds, so the composer enforces a thirty-second cooldown per
+thread. The answer store behind `VITE_BAYS_CALLBACK_URL` and
+`VITE_BAYS_ANSWER_URL` does not exist yet; it is the one piece of the wiring
+that needs a workflow on the engine side.
 
 ## Deployment
 

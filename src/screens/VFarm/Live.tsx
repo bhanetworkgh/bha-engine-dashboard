@@ -21,42 +21,36 @@ export function Live({ data }: { data: VFarmData }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Current rack state and last measurement. */}
-      <div className="grid shrink-0 grid-cols-2 border-b border-line md:grid-cols-6">
+      <div className="mx-6 mb-4 grid shrink-0 grid-cols-2 gap-3 md:mx-8 md:grid-cols-3 lg:grid-cols-6">
         {data.places.map((p) => (
-          <div key={p.name} className="border-r border-line px-3 py-2">
-            <div className="flex items-center gap-1.5 text-[11px] text-faint">
+          <div key={p.name} className="card px-4 py-3">
+            <div className="flex items-center gap-1.5 text-[11.5px] text-faint">
               <Dot health={p.health} />
-              {p.name}
+              <span className="truncate">{p.name}</span>
             </div>
-            <div className="tabular text-[12px] text-dim">{p.last_seen}</div>
+            <div className="tabular mt-1 text-[12.5px] text-dim">{p.last_seen}</div>
           </div>
         ))}
-        <div className="border-r border-line px-3 py-2">
-          <div className="text-[11px] text-faint">Last measurement</div>
-          <div className="tabular text-[12px] text-dim">
+        <div className="card px-4 py-3">
+          <div className="kicker">Last measurement</div>
+          <div className="tabular mt-1 text-[12.5px] text-dim">
             {latest ? `${latest.ph ?? '—'} pH · ${latest.temp_c}°C` : 'none'}
           </div>
         </div>
-        <div className="px-3 py-2">
-          <div className="text-[11px] text-faint">Open anomalies</div>
-          <div
-            className={`tabular text-[17px] leading-tight ${
-              openAlerts.length ? 'text-degraded' : 'text-ink'
-            }`}
-          >
+        <div className="card px-4 py-3">
+          <div className="kicker">Open anomalies</div>
+          <div className={`font-display tabular mt-1 text-[22px] leading-none ${openAlerts.length ? 'text-degraded' : 'text-ink'}`}>
             {openAlerts.length}
           </div>
         </div>
       </div>
 
-      <h3 className="shrink-0 border-b border-line px-4 py-1.5 text-[11px] tracking-[0.08em] text-faint uppercase">
-        Alerts and incident closes
-      </h3>
+      <h3 className="shrink-0 px-6 pb-2 text-[13px] font-medium md:px-8">Alerts and incident closes</h3>
       {data.alerts.length === 0 ? (
         <EmptyState>No alerts recorded for the selected lane.</EmptyState>
       ) : (
-        <div className="shrink-0 overflow-x-auto">
-          <table className="table-cards w-full text-[12px]">
+        <div className="card mx-6 mb-4 shrink-0 overflow-x-auto md:mx-8">
+          <table className="table-cards w-full text-[12.5px]">
             <thead>
               <tr>
                 <Th>at</Th>
@@ -83,13 +77,13 @@ export function Live({ data }: { data: VFarmData }) {
                   <td className="td">
                     <SourceLink source={a.source} />
                   </td>
-                  <td className="td card-actions">
+                  <td className="td card-actions td-actions">
                     <RowActions>
                       {a.state === 'open' && (
-                        <RowAction label="close" onClick={() => act('vfarm.close-alert', a.id)} />
+                        <RowAction label="Close" onClick={() => act('vfarm.close-alert', a.id)} />
                       )}
                       <RowAction
-                        label="open in Slack"
+                        label="Open in Slack"
                         onClick={() => act('vfarm.open-slack', a.id)}
                       />
                     </RowActions>
@@ -101,9 +95,7 @@ export function Live({ data }: { data: VFarmData }) {
         </div>
       )}
 
-      <h3 className="shrink-0 border-y border-line px-4 py-1.5 text-[11px] tracking-[0.08em] text-faint uppercase">
-        Sensor rollups, three-minute cadence
-      </h3>
+      <h3 className="shrink-0 px-6 pb-2 text-[13px] font-medium md:px-8">Sensor rollups, three-minute cadence</h3>
       {data.readings.length === 0 ? (
         <EmptyState>
           No sensor rollups for the selected lane. vFarm readings are written under
@@ -137,9 +129,9 @@ export function Live({ data }: { data: VFarmData }) {
                 <td className="td">
                   <SourceLink source={r.source} />
                 </td>
-                <td className="td card-actions">
+                <td className="td card-actions td-actions">
                   <RowActions>
-                    <RowAction label="open in n8n" onClick={() => act('vfarm.open-run', r.id)} />
+                    <RowAction label="Open in n8n" onClick={() => act('vfarm.open-run', r.id)} />
                   </RowActions>
                 </td>
               </tr>

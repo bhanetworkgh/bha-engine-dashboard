@@ -56,10 +56,10 @@ export function Records({ d }: { d: TwinData }) {
             <td className="td">
               <SourceLink source={r.source} />
             </td>
-            <td className="td card-actions">
+            <td className="td card-actions td-actions">
               <RowActions>
-                <RowAction label="re-run" onClick={() => act('twin.rerun-ask', r.id)} />
-                <RowAction label="open in Slack" onClick={() => act('twin.open-slack', r.id)} />
+                <RowAction label="Re-run" onClick={() => act('twin.rerun-ask', r.id)} />
+                <RowAction label="Open in Slack" onClick={() => act('twin.open-slack', r.id)} />
               </RowActions>
             </td>
           </tr>

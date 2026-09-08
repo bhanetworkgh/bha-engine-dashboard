@@ -10,9 +10,13 @@ export function SourceLink({ source }: { source: Source }) {
       target="_blank"
       rel="noreferrer"
       title={`${SOURCE_LABEL[source.kind]} · ${source.ref}`}
-      className="text-faint underline decoration-line underline-offset-2 hover:text-gold hover:decoration-gold-dim"
+      onClick={(e) => e.stopPropagation()}
+      className="inline-flex items-center gap-1 text-[12px] text-faint transition-colors hover:text-accent-ink"
     >
       {SOURCE_LABEL[source.kind]}
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M2 8l6-6M3.5 2H8v4.5" />
+      </svg>
     </a>
   );
 }

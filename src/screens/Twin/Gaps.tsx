@@ -12,16 +12,14 @@ import { act } from '../../lib';
 
 export function Gaps({ d }: { d: TwinData }) {
   return (
-    <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-      <h3 className="border-b border-line px-4 py-1.5 text-[11px] tracking-[0.08em] text-faint uppercase">
-        Still unanswered
-      </h3>
+    <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-6 pb-6 md:px-8">
+      <h3 className="pt-1 pb-2 text-[13px] font-medium">Still unanswered</h3>
       {d.gaps.length === 0 ? (
-        <EmptyState>
+        <EmptyState compact>
           Nothing came back empty or thin for the selected lane in this period.
         </EmptyState>
       ) : (
-        <table className="table-cards w-full text-[12px]">
+        <div className="card overflow-hidden"><table className="table-cards w-full text-[12.5px]">
           <thead>
             <tr>
               <Th>question</Th>
@@ -48,27 +46,25 @@ export function Gaps({ d }: { d: TwinData }) {
                 <td className="td">
                   <SourceLink source={g.source} />
                 </td>
-                <td className="td card-actions">
+                <td className="td card-actions td-actions">
                   <RowActions>
-                    <RowAction label="re-run" onClick={() => act('twin.rerun-gap', g.id)} />
+                    <RowAction label="Re-run" onClick={() => act('twin.rerun-gap', g.id)} />
                   </RowActions>
                 </td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
 
-      <h3 className="border-y border-line px-4 py-1.5 text-[11px] tracking-[0.08em] text-faint uppercase">
-        Went thin, later answered
-      </h3>
+      <h3 className="pt-6 pb-2 text-[13px] font-medium">Went thin, later answered</h3>
       {d.transitions.length === 0 ? (
-        <EmptyState>
+        <EmptyState compact>
           {d.notes.transitions ??
             'No ask has gone thin and later been answered for the selected lane.'}
         </EmptyState>
       ) : (
-        <table className="table-cards w-full text-[12px]">
+        <div className="card overflow-hidden"><table className="table-cards w-full text-[12.5px]">
           <thead>
             <tr>
               <Th>question</Th>
@@ -95,7 +91,7 @@ export function Gaps({ d }: { d: TwinData }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   );

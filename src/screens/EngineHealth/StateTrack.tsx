@@ -17,7 +17,7 @@ export function StateTrack({ state }: { state: Incident['state'] }) {
       {STATES.map((s, i) => (
         <span
           key={s}
-          className={`h-[3px] w-[9px] ${
+          className={`h-[4px] w-[9px] rounded-full ${
             i === idx
               ? state === 'failed' || state === 'escalated to human'
                 ? 'bg-failing'

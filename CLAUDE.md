@@ -73,27 +73,37 @@ endpoint must be a change in that module only, never in components.
 shapes to be plausible and consistent, because they become the contract.
 
 **Auth:** one shared login for the whole team, same as BHARAG's console. Not
-per-user accounts. Password is posted to the engine, which returns a session
-token the app holds for the session. No user management, no roles, no signup.
+per-user accounts. Password is posted to the engine's login endpoint
+(`VITE_AUTH_URL`), which returns a session token the app holds for the tab and
+sends as a bearer on every engine call. No user management, no roles, no
+signup. Without `VITE_AUTH_URL` the app runs a preview gate in local dev only.
 
 ---
 
 ## 5. Design
 
-**Feel:** an instrument panel. Dark, dense, quiet. Someone leaves this open on a
-second screen all day and it does not shout at them.
+**Feel:** a modern instrument panel. Calm, precise, dense where it needs to be.
+Think a collaboration between Claude and Apple: warm neutral surfaces, real
+typography, restraint. Someone leaves this open on a second screen all day and
+it does not shout at them.
 
-- **Palette:** black and gold, from BHA's letterhead. Dark surfaces by default.
-  Gold is an accent for the one thing that matters on a screen — never
-  decoration, never large fills.
+- **Two themes.** Light and dark, switchable from the sidebar, following the OS
+  by default. Every colour is a token in `src/index.css`; components never name
+  a hex value.
+- **Palette:** warm off-white paper in light mode, warm charcoal in dark. One
+  accent (terracotta) for the single thing that matters on a screen and for
+  focus. It is never decoration and never a large fill. The letterhead gold and
+  black are no longer the palette (decision 2026-09-08, Destiny).
 - **Colour carries meaning only.** Amber = degraded. Red = failing. Healthy
   states get no colour at all.
-- **Density over prettiness.** Real tables, tight rows. Thirty rows visible, not
-  eight. No large padded cards for list data.
+- **Cards on paper.** Data lives in white (or warm-dark) cards with 14px radii
+  and a hairline. One soft card shadow is allowed; no gradients, glows or
+  decorative animation beyond the idle mark on Ask Bays and a short fade-in.
+- **Density over prettiness inside a card.** Real tables, tight rows. Thirty
+  rows visible, not eight. Charts are small inline SVG, never a library.
+- **Type:** the system sans for everything, a serif display face for page
+  titles and headline numbers only. Two weights: regular and medium.
 - **Sentence case everywhere.** Never Title Case, never ALL CAPS.
-- **Two font weights.** Regular and medium. Nothing heavier.
-- **No gradients, glows, shadows or decorative animation.** One exception: the
-  idle mark on the Ask Bays screen (section 7).
 - **Every row does something.** Hover reveals its actions inline — close,
   re-run, retry, open in Slack. Never bury actions in a menu.
 
