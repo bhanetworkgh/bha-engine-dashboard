@@ -12,6 +12,7 @@ import {
   type Lane,
 } from '../data';
 import { Icon, LoadFailed, Loading } from '../components/ui';
+import { ClockChip, ThemeChip } from '../components/ClockChip';
 import { cx } from '../lib';
 
 /** The front door drops the same session_id inside this window (its loop guard). */
@@ -21,6 +22,10 @@ const ANSWER_TIMEOUT_MS = 120_000;
 const POLL_MS = 3_000;
 /** The builder_id sent with every ask from this shared login. */
 const ASKER = 'admin';
+/** Dictation stops itself after this long. */
+const DICTATION_MAX_MS = 10 * 60 * 1000;
+/** The composer grows to this height, then scrolls. */
+const COMPOSER_MAX_PX = 240;
 
 function stamp(): string {
   const d = new Date();
@@ -112,7 +117,7 @@ function ThreadMenu({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label="Thread options"
-        className={cx('btn btn-ghost h-7 w-7 rounded-full p-0 transition-opacity', open ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100')}
+        className={cx('btn btn-ghost h-7 w-7 rounded-full p-0 text-faint transition-colors hover:text-ink', open && 'bg-hover text-ink')}
       >
         <Icon.more />
       </button>
@@ -138,6 +143,7 @@ export default function AskBays() {
   const [panelHidden, setPanelHidden] = useState(false);
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
   const [listening, setListening] = useState(false);
+  const [listeningSince, setListeningSince] = useState<number | null>(null);
   const [micNote, setMicNote] = useState<string | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState<Record<string, number>>({});
   const [now, setNow] = useState(Date.now());
@@ -145,6 +151,8 @@ export default function AskBays() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pollers = useRef<Record<string, number>>({});
   const recog = useRef<Recognition | null>(null);
+  /** Text committed by dictation so far, and the draft it started from. */
+  const dictation = useRef<{ base: string; final: string; active: boolean }>({ base: '', final: '', active: false });
 
   useEffect(() => {
     if (data) setThreads(data.threads);
@@ -160,6 +168,7 @@ export default function AskBays() {
   useEffect(
     () => () => {
       Object.values(pollers.current).forEach((id) => clearInterval(id));
+      dictation.current.active = false;
       recog.current?.stop();
     },
     [],
@@ -172,6 +181,24 @@ export default function AskBays() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages.length, activeId]);
+
+  // The composer grows with its text, whether typed or dictated, up to a cap.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const h = Math.min(el.scrollHeight, COMPOSER_MAX_PX);
+    el.style.height = `${h}px`;
+    el.classList.toggle('at-max', el.scrollHeight > COMPOSER_MAX_PX);
+    if (listening) el.scrollTop = el.scrollHeight;
+  }, [draft, listening]);
+
+  // A one-second clock while dictating, for the elapsed time and the cap.
+  useEffect(() => {
+    if (!listening) return;
+    const i = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(i);
+  }, [listening]);
 
   const query = search.trim().toLowerCase();
   const visibleThreads = useMemo(() => {
@@ -297,9 +324,71 @@ export default function AskBays() {
     }
   }
 
+  function stopMic() {
+    dictation.current.active = false;
+    recog.current?.stop();
+    recog.current = null;
+    setListening(false);
+    setListeningSince(null);
+  }
+
+  /**
+   * Browsers end a recognition session after a pause. While dictation is
+   * active we start a fresh one on each end, folding finished text into the
+   * draft, until the person stops it or ten minutes pass.
+   */
+  function startRecognition(Ctor: new () => Recognition) {
+    const r = new Ctor();
+    r.lang = navigator.language || 'en-GB';
+    r.interimResults = true;
+    r.continuous = true;
+    r.onresult = (e) => {
+      let finalChunk = '';
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalChunk += t;
+        else interim += t;
+      }
+      if (finalChunk) dictation.current.final = `${dictation.current.final}${dictation.current.final ? ' ' : ''}${finalChunk.trim()}`;
+      const d = dictation.current;
+      setDraft([d.base, d.final, interim.trim()].filter(Boolean).join(' '));
+    };
+    r.onend = () => {
+      const d = dictation.current;
+      const since = listeningSinceRef.current;
+      if (!d.active) return;
+      if (since && Date.now() - since >= DICTATION_MAX_MS) {
+        stopMic();
+        setMicNote('Dictation stopped after ten minutes.');
+        setTimeout(() => setMicNote(null), 4000);
+        return;
+      }
+      // Pause detected by the browser: keep going.
+      try {
+        startRecognition(Ctor);
+      } catch {
+        stopMic();
+      }
+    };
+    r.onerror = () => {
+      if (!dictation.current.active) return;
+      stopMic();
+      setMicNote('Dictation stopped. Check the microphone permission.');
+      setTimeout(() => setMicNote(null), 4000);
+    };
+    recog.current = r;
+    r.start();
+  }
+
+  const listeningSinceRef = useRef<number | null>(null);
+  useEffect(() => {
+    listeningSinceRef.current = listeningSince;
+  }, [listeningSince]);
+
   function toggleMic() {
     if (listening) {
-      recog.current?.stop();
+      stopMic();
       return;
     }
     const Ctor = recognitionCtor();
@@ -308,25 +397,12 @@ export default function AskBays() {
       setTimeout(() => setMicNote(null), 4000);
       return;
     }
-    const r = new Ctor();
-    r.lang = navigator.language || 'en-GB';
-    r.interimResults = true;
-    r.continuous = true;
-    const base = draft;
-    r.onresult = (e) => {
-      let text = '';
-      for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
-      setDraft((base ? `${base} ` : '') + text.trim());
-    };
-    r.onend = () => setListening(false);
-    r.onerror = () => {
-      setListening(false);
-      setMicNote('Dictation stopped. Check the microphone permission.');
-      setTimeout(() => setMicNote(null), 4000);
-    };
-    recog.current = r;
+    dictation.current = { base: draft.trim(), final: '', active: true };
     setListening(true);
-    r.start();
+    const t = Date.now();
+    setListeningSince(t);
+    listeningSinceRef.current = t;
+    startRecognition(Ctor);
   }
 
   function newChat() {
@@ -396,6 +472,18 @@ export default function AskBays() {
   return (
     <div className="flex h-full min-h-0">
       <div className="flex min-w-0 flex-1 flex-col">
+        {/* Page header: the name on the left, date and theme on the right. */}
+        <div className="flex h-[72px] shrink-0 items-center gap-3 px-6 md:px-8">
+          <img src="/logo.svg" alt="" className="mark h-7 w-7 max-md:ml-8" />
+          <div className="leading-tight">
+            <div className="text-[15px] font-semibold">Ask Bays</div>
+            <div className="text-[11.5px] text-faint">{active ? active.title : 'New chat'}</div>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <ClockChip />
+            <ThemeChip />
+          </div>
+        </div>
         {started ? (
           <div ref={scrollRef} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-6 py-6">
             <div className="mx-auto max-w-[72ch] space-y-5">
@@ -449,22 +537,29 @@ export default function AskBays() {
                   }
                 }}
                 placeholder={cooldownLeft > 0 ? `Bays refuses the same session inside 30 s · ${cooldownLeft}s` : listening ? 'Listening' : 'Ask Bays anything about the engine'}
-                className="input max-h-40 min-h-[36px] flex-1 resize-none border-0 bg-transparent shadow-none focus:shadow-none"
+                className="input min-h-[36px] flex-1 resize-none border-0 bg-transparent shadow-none focus:shadow-none"
                 style={{ height: 'auto' }}
-                onInput={(e) => {
-                  const el = e.currentTarget;
-                  el.style.height = 'auto';
-                  el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-                }}
               />
               <button
                 type="button"
                 onClick={toggleMic}
                 aria-label={listening ? 'Stop dictation' : 'Dictate a message'}
                 aria-pressed={listening}
-                className={cx('btn btn-ghost h-8 w-8 rounded-full p-0', listening && 'bg-accent-soft text-accent-ink')}
+                className={cx('btn btn-ghost h-8 rounded-full p-0', listening ? 'w-auto gap-1.5 bg-accent-soft px-2.5 text-accent-ink' : 'w-8')}
               >
-                {listening ? <span className="pulse-dot"><Icon.mic /></span> : <Icon.mic />}
+                {listening ? (
+                  <>
+                    <span className="pulse-dot"><Icon.mic /></span>
+                    <span className="tabular text-[11.5px]">
+                      {(() => {
+                        const secs = Math.max(0, Math.floor((now - (listeningSince ?? now)) / 1000));
+                        return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} / 10:00`;
+                      })()}
+                    </span>
+                  </>
+                ) : (
+                  <Icon.mic />
+                )}
               </button>
               <button
                 type="button"

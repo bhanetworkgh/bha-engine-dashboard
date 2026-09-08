@@ -31,54 +31,51 @@ function CardTitle({ title, right }: { title: string; right?: React.ReactNode })
   );
 }
 
-/** The summary banner. Every number in it is read from the data at render time. */
+/** The summary banner, laid out as the reference: label, two-line headline, one line, a pill, and the orb with three tilted chips. */
 function Hero({ data }: { data: OverviewData }) {
   const pin = (label: string) => data.pins.find((p) => p.label === label)?.value ?? '—';
-  const incidents = pin('Open incidents');
-  const loops = pin('Open loops');
-  const entries = pin('Entries this week');
-  const halloween = pin('Days to Halloween');
-  const sentence = `${incidents} incident${incidents === '1' ? '' : 's'} open, ${loops} loops open across ${data.series.loops_by_owner.length} builders, ${entries} entries logged this week. ${halloween} days to Halloween.`;
-
   const chip = (cls: string, tilt: string, tint: string, I: IconName, label: string, value: string) => {
     const Ic = Icon[I];
     return (
-      <div className={`${cls} card absolute flex items-center gap-3 px-3.5 py-2.5`} style={{ ['--tilt' as string]: tilt }}>
+      <div className={`${cls} card absolute flex items-center gap-2.5 rounded-[14px] px-3 py-2`} style={{ ['--tilt' as string]: tilt }}>
         <span className={`tile tile-sm ${tint}`}>
           <Ic />
         </span>
         <span className="leading-tight">
-          <span className="block text-[11px] text-faint">{label}</span>
-          <span className="tabular block text-[15px] font-semibold">{value}</span>
+          <span className="block text-[11px] text-dim">{label}</span>
+          <span className="tabular block text-[14px] font-semibold">{value}</span>
         </span>
       </div>
     );
   };
 
   return (
-    <section className="hero flex h-full flex-col justify-center p-6 md:p-8">
-      <div className="relative z-10 max-w-[54%] md:max-w-[48%]">
-        <div className="mb-3 flex items-center gap-1.5 text-[12px] font-medium tracking-[0.02em] text-accent-ink">
-          <Icon.sparkle />
-          Bays summary
-        </div>
-        <h2 className="font-display text-[24px] leading-tight md:text-[27px]">Your engine, at a glance.</h2>
-        <p className="mt-3 max-w-[46ch] text-[14px] leading-relaxed text-dim">{sentence}</p>
-        <Link to="/ask-bays" className="btn mt-5 h-9 rounded-full bg-panel px-4 text-[13px]">
-          Ask Bays about today
+    <section className="hero flex h-full min-h-[268px] flex-col justify-center px-7 py-7 md:px-8">
+      <div className="relative z-10 max-w-[52%] md:max-w-[46%]">
+        <div className="mb-3 text-[11.5px] font-medium tracking-[0.12em] text-accent-ink uppercase">Bays summary</div>
+        <h2 className="font-display text-[26px] leading-[1.15] md:text-[28px]">
+          Your engine, live
+          <br />
+          in one window.
+        </h2>
+        <p className="mt-3 max-w-[40ch] text-[14px] leading-relaxed text-dim">
+          Incidents, loops and entries, read live across every system.
+        </p>
+        <Link to="/ask-bays" className="btn mt-5 h-9 rounded-full bg-panel px-4 text-[13px] shadow-[var(--shadow-card)]">
+          Ask Bays
         </Link>
       </div>
 
-      {/* The Bays orb and three floating chips. Numbers are live from the data. */}
-      <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[52%] md:block" aria-hidden>
-        <div className="orb absolute top-1/2 left-[10%] h-[76px] w-[76px] -translate-y-1/2">
-          <span className="spin-slow absolute inset-0 rounded-full bg-[conic-gradient(from_0deg,var(--tint-blue),var(--tint-purple),var(--tint-teal),var(--tint-pink),var(--tint-blue))] opacity-90 blur-[1px]" />
-          <span className="absolute inset-[3px] rounded-full bg-panel" />
-          <img src="/logo.svg" alt="" className="mark absolute inset-[9px] h-[58px] w-[58px]" />
+      {/* Orb to the left, three chips stepping down and across to the right. */}
+      <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[54%] md:block" aria-hidden>
+        <div className="orb absolute top-1/2 left-[6%] h-[92px] w-[92px] -translate-y-1/2 rounded-[24px] bg-panel/70 p-3 shadow-[var(--shadow-card)] backdrop-blur">
+          <span className="spin-slow absolute inset-3 rounded-full bg-[conic-gradient(from_0deg,var(--tint-blue),var(--tint-purple),var(--tint-teal),var(--tint-pink),var(--tint-blue))] opacity-90 blur-[2px]" />
+          <span className="absolute inset-[15px] rounded-full bg-panel" />
+          <img src="/logo.svg" alt="" className="mark absolute inset-[20px] h-[52px] w-[52px]" />
         </div>
-        {chip('drift top-[12%] right-[26%]', '-4deg', 'tile-red', 'pulse', 'Open incidents', incidents)}
-        {chip('drift-slow top-[42%] right-[4%]', '3deg', 'tile-teal', 'loop', 'Open loops', loops)}
-        {chip('drift-fast bottom-[10%] right-[30%]', '-2deg', 'tile-green', 'leaf', 'Days to Halloween', halloween)}
+        {chip('drift top-[13%] right-[24%]', '-5deg', 'tile-red', 'pulse', 'Open incidents', pin('Open incidents'))}
+        {chip('drift-slow top-[41%] right-[6%]', '4deg', 'tile-teal', 'loop', 'Open loops', pin('Open loops'))}
+        {chip('drift-fast bottom-[11%] right-[22%]', '-3deg', 'tile-green', 'leaf', 'Days to Halloween', pin('Days to Halloween'))}
       </div>
     </section>
   );
@@ -162,7 +159,7 @@ export default function Overview() {
       */}
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
         {/* Row 1 */}
-        <div className="min-w-0 min-h-[260px]">
+        <div className="min-w-0">
           <Hero data={data} />
         </div>
         <Card className="flex flex-col p-5">

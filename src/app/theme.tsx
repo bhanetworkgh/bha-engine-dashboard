@@ -11,12 +11,13 @@ export type Resolved = 'light' | 'dark';
 
 const KEY = 'bha.theme';
 
+/** Light on a first visit. "System" is available from Settings. */
 function readChoice(): ThemeChoice {
   try {
     const v = localStorage.getItem(KEY);
-    return v === 'light' || v === 'dark' ? v : 'system';
+    return v === 'light' || v === 'dark' || v === 'system' ? v : 'light';
   } catch {
-    return 'system';
+    return 'light';
   }
 }
 
@@ -59,8 +60,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setChoice: (c) => {
         setChoiceState(c);
         try {
-          if (c === 'system') localStorage.removeItem(KEY);
-          else localStorage.setItem(KEY, c);
+          localStorage.setItem(KEY, c);
         } catch {
           // Preference simply will not persist.
         }
