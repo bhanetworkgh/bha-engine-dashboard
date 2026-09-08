@@ -19,8 +19,9 @@ export const config = {
   apiUrl: read('VITE_ENGINE_API_URL'),
   /** Login endpoint. Defaults to <apiUrl>/auth/login when only the API is set. */
   authUrl: read('VITE_AUTH_URL') ?? (read('VITE_ENGINE_API_URL') ? `${read('VITE_ENGINE_API_URL')}/auth/login` : null),
-  /** Allows the phase-1 preview gate (email check only) outside local dev. */
-  authPreview: env.DEV || env.VITE_AUTH_PREVIEW === '1',
+  /** Optional overrides for the built-in team credential (see data/index.ts). */
+  authEmail: read('VITE_AUTH_EMAIL'),
+  authHash: read('VITE_AUTH_PASSWORD_SHA256'),
 
   /** The Bays front door: POST /webhook/bays on the n8n engine. */
   baysWebhookUrl: read('VITE_BAYS_WEBHOOK_URL'),

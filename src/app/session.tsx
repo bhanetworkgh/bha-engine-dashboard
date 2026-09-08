@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { authMode, signIn as engineSignIn, type AuthSession, type LaneFilter, type SignInResult } from '../data';
+import { signIn as engineSignIn, type AuthSession, type LaneFilter, type SignInResult } from '../data';
 import { setBearer } from '../data/engine';
 
 export { TEAM_EMAIL } from '../data';
@@ -36,8 +36,6 @@ function readSession(): AuthSession | null {
       expires_at: typeof parsed.expires_at === 'string' ? parsed.expires_at : null,
       label: typeof parsed.label === 'string' ? parsed.label : null,
     };
-    // A preview token is only honoured where preview mode is allowed.
-    if (s.token === 'preview-session' && authMode() !== 'preview') return null;
     return expired(s) ? null : s;
   } catch {
     return null;
