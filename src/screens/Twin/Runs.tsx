@@ -35,9 +35,7 @@ export function Runs({ d }: { d: TwinData }) {
                 {r.searches.map((s) => (
                   <span
                     key={s.tool}
-                    className={`border px-1 text-[11px] leading-[16px] ${
-                      s.empty ? 'border-line text-degraded' : 'border-line text-dim'
-                    }`}
+                    className={`tag ${s.empty ? 'tag-degraded' : ''}`}
                     title={s.empty ? 'returned nothing' : `${s.returned} results`}
                   >
                     {s.tool} {s.empty ? 'empty' : s.returned}
@@ -51,9 +49,9 @@ export function Runs({ d }: { d: TwinData }) {
             <td className="td">
               <SourceLink source={r.source} />
             </td>
-            <td className="td card-actions">
+            <td className="td card-actions td-actions">
               <RowActions>
-                <RowAction label="re-run" onClick={() => act('twin.rerun', r.id)} />
+                <RowAction label="Re-run" onClick={() => act('twin.rerun', r.id)} />
               </RowActions>
             </td>
           </tr>

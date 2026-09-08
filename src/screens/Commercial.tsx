@@ -11,6 +11,9 @@ import {
   SPINE_HEADERS,
   SourceLink,
   SpineCells,
+  Stat,
+  StatCell,
+  StatStrip,
   TableFrame,
   Th,
 } from '../components/ui';
@@ -33,22 +36,25 @@ export default function Commercial() {
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader title="Commercial" subtitle="Opportunities and readiness" />
 
-      <div className="grid shrink-0 grid-cols-2 border-b border-line md:grid-cols-5">
+      <StatStrip cols={5}>
         {counts.map((c) => (
-          <div key={c.readiness} className="border-r border-line px-4 py-2 last:border-r-0">
-            <div className="text-[11px] text-faint">{c.readiness}</div>
-            <div
-              className={`tabular text-[17px] leading-tight ${
-                c.readiness === 'blocked' && c.n ? 'text-failing'
-                  : c.readiness === 'evidence thin' && c.n ? 'text-degraded'
-                  : c.readiness === 'ready to pitch' && c.n ? 'text-gold' : ''
-              }`}
-            >
-              {c.n}
-            </div>
-          </div>
+          <StatCell key={c.readiness}>
+            <Stat
+              label={c.readiness}
+              value={c.n}
+              tone={
+                c.readiness === 'blocked' && c.n
+                  ? 'failing'
+                  : c.readiness === 'evidence thin' && c.n
+                    ? 'degraded'
+                    : c.readiness === 'ready to pitch' && c.n
+                      ? 'accent'
+                      : 'default'
+              }
+            />
+          </StatCell>
         ))}
-      </div>
+      </StatStrip>
 
       {data.opportunities.length === 0 ? (
         <EmptyState>No commercial opportunities recorded for the selected lane.</EmptyState>
@@ -80,10 +86,10 @@ export default function Commercial() {
                 <SpineCells spine={o.spine} />
                 <td className="td tabular text-faint">{o.last_touched}</td>
                 <td className="td"><SourceLink source={o.source} /></td>
-                <td className="td card-actions">
+                <td className="td card-actions td-actions">
                   <RowActions>
-                    <RowAction label="re-research" onClick={() => act('commercial.reresearch', o.id)} />
-                    <RowAction label="open in Slack" onClick={() => act('commercial.open-slack', o.id)} />
+                    <RowAction label="Re-research" onClick={() => act('commercial.reresearch', o.id)} />
+                    <RowAction label="Open in Slack" onClick={() => act('commercial.open-slack', o.id)} />
                   </RowActions>
                 </td>
               </tr>

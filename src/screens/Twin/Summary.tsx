@@ -1,54 +1,66 @@
 import type { TwinData } from '../../data';
-import { Th } from '../../components/ui';
+import { Band, Card, CardHeader, HBar, Stat, StatCell, StatStrip, Th } from '../../components/ui';
 import { laneLabel } from '../../lib';
 
 export function Summary({ d }: { d: TwinData }) {
   const s = d.summary;
+  const maxAsker = Math.max(1, ...s.top_askers.map((a) => a.asks));
   return (
-    <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-      <div className="grid grid-cols-2 border-b border-line md:grid-cols-5">
-        {[
-          { label: 'Asks', value: String(s.asks), tone: 'text-gold' },
-          { label: 'Answered', value: String(s.answered), tone: 'text-ink' },
-          { label: 'Thin', value: String(s.thin), tone: s.thin ? 'text-degraded' : 'text-ink' },
-          { label: 'Failed', value: String(s.failed), tone: s.failed ? 'text-failing' : 'text-ink' },
-          { label: 'Median time to answer', value: s.median_time_to_answer ?? 'not recorded', tone: 'text-dim' },
-        ].map((m) => (
-          <div key={m.label} className="border-r border-line px-4 py-2 last:border-r-0">
-            <div className="text-[11px] text-faint">{m.label}</div>
-            <div className={`tabular text-[17px] leading-tight ${m.tone}`}>{m.value}</div>
-          </div>
-        ))}
+    <div className="scroll-thin min-h-0 flex-1 overflow-y-auto pb-6">
+      <StatStrip cols={5}>
+        <StatCell>
+          <Stat label="Asks" value={s.asks} tone="accent" />
+        </StatCell>
+        <StatCell>
+          <Stat label="Answered" value={s.answered} />
+        </StatCell>
+        <StatCell>
+          <Stat label="Thin" value={s.thin} tone={s.thin ? 'degraded' : 'default'} />
+        </StatCell>
+        <StatCell>
+          <Stat label="Failed" value={s.failed} tone={s.failed ? 'failing' : 'default'} />
+        </StatCell>
+        <StatCell>
+          <Stat
+            label="Median time to answer"
+            value={s.median_time_to_answer ?? <span className="text-[16px] text-faint">not recorded</span>}
+            tone="dim"
+          />
+        </StatCell>
+      </StatStrip>
+
+      <div className="mx-6 mb-4 md:mx-8">
+        <div className="mb-1.5 flex items-center justify-between text-[11.5px] text-faint">
+          <span>Outcomes this period</span>
+          <span className="tabular">{s.asks} asks</span>
+        </div>
+        <Band
+          parts={[
+            { value: s.answered, tone: 'ink', label: 'answered' },
+            { value: s.thin, tone: 'degraded', label: 'thin' },
+            { value: s.failed, tone: 'failing', label: 'failed' },
+          ]}
+        />
+        {s.median_unavailable_reason && (
+          <p className="mt-3 max-w-[68ch] text-[11.5px] leading-relaxed text-faint">{s.median_unavailable_reason}</p>
+        )}
       </div>
 
-      {s.median_unavailable_reason && (
-        <p className="max-w-[68ch] border-b border-line px-4 py-2 text-[11px] leading-relaxed text-faint">
-          {s.median_unavailable_reason}
-        </p>
-      )}
+      <div className="mx-6 grid gap-3 md:mx-8 md:grid-cols-2">
+        <Card>
+          <CardHeader title="Top askers" />
+          <div className="space-y-2.5 px-5 pb-5">
+            {s.top_askers.length === 0 ? (
+              <p className="text-[12.5px] text-dim">No asks in the selected lane.</p>
+            ) : (
+              s.top_askers.map((a) => <HBar key={a.builder_id} label={a.builder_id} value={a.asks} max={maxAsker} />)
+            )}
+          </div>
+        </Card>
 
-      <div className="flex flex-wrap">
-        <section className="min-w-[280px] flex-1 border-r border-line">
-          <h3 className="border-b border-line px-4 py-1.5 text-[11px] tracking-[0.08em] text-faint uppercase">
-            Top askers
-          </h3>
-          <table className="w-full text-[12px]">
-            <tbody>
-              {s.top_askers.map((a) => (
-                <tr key={a.builder_id}>
-                  <td className="td">{a.builder_id}</td>
-                  <td className="td tabular w-16 text-right text-dim">{a.asks}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-
-        <section className="min-w-[360px] flex-1">
-          <h3 className="border-b border-line px-4 py-1.5 text-[11px] tracking-[0.08em] text-faint uppercase">
-            By lane
-          </h3>
-          <table className="w-full text-[12px]">
+        <Card>
+          <CardHeader title="By lane" />
+          <table className="w-full text-[12.5px]">
             <thead>
               <tr>
                 <Th>lane</Th>
@@ -68,7 +80,7 @@ export function Summary({ d }: { d: TwinData }) {
               ))}
             </tbody>
           </table>
-        </section>
+        </Card>
       </div>
     </div>
   );
