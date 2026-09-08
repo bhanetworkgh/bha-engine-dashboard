@@ -33,6 +33,8 @@ export const config = {
   baysAnswerUrl: read('VITE_BAYS_ANSWER_URL'),
   /** Optional Slack channel Bays can deliver to instead of, or as well as, the callback. */
   baysChannelId: read('VITE_BAYS_CHANNEL_ID'),
+  /** Shown under the composer: the model the Bays workflow is connected to. */
+  baysModelLabel: read('VITE_BAYS_MODEL_LABEL') ?? 'Claude Sonnet 5.0',
 } as const;
 
 export class EngineError extends Error {

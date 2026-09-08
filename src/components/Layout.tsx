@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useSession } from '../app/session';
 import { useTheme } from '../app/theme';
 import { useData } from '../app/useData';
-import { BUILDER_NAMES, getEngineStatus, type LaneFilter } from '../data';
-import { Dot, Icon, type IconName } from './ui';
+import { useWeather } from '../app/useWeather';
+import { getEngineStatus } from '../data';
+import { Icon, type IconName } from './ui';
 import { cx } from '../lib';
 
 const GROUPS: { group: string | null; items: { to: string; label: string; icon: IconName; badge?: 'incidents' }[] }[] = [
@@ -39,21 +40,12 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
   },
 ];
 
-const LANES: { value: LaneFilter; label: string }[] = [
-  { value: 'all', label: 'All lanes' },
-  { value: 'VFARM_CORE', label: 'vFarm core' },
-  { value: 'VFARM_MEDIA', label: 'vFarm media' },
-  { value: 'CLIENT_CORE', label: 'Client core' },
-  { value: 'ENGINE_INTERNAL', label: 'Engine internal' },
-];
-
-/** Who is at the keyboard, with a small menu to change it, switch theme, or sign out. */
-function UserBlock() {
-  const { me, setMe, signOut } = useSession();
-  const { resolved, setChoice } = useTheme();
+/** The shared account, with a small menu: settings and sign out. */
+function UserBlock({ onNavigate }: { onNavigate: () => void }) {
+  const { signOut } = useSession();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const name = BUILDER_NAMES[me] ?? me;
 
   useEffect(() => {
     if (!open) return;
@@ -67,37 +59,25 @@ function UserBlock() {
   return (
     <div ref={ref} className="relative px-3 pb-4">
       {open && (
-        <div className="card fade-up absolute bottom-full left-3 z-20 mb-2 w-[220px] p-1.5 shadow-[var(--shadow-pop)]">
-          <div className="kicker px-2.5 pt-1.5 pb-1">Signed in as</div>
-          {Object.entries(BUILDER_NAMES).map(([id, n]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => {
-                setMe(id);
-                setOpen(false);
-              }}
-              className={`flex w-full items-center justify-between rounded-[8px] px-2.5 py-1.5 text-left text-[13px] hover:bg-hover ${id === me ? 'text-ink' : 'text-dim'}`}
-            >
-              {n}
-              {id === me && <Icon.check className="text-accent-ink" />}
-            </button>
-          ))}
-          <div className="my-1.5 border-t border-line" />
+        <div className="card fade-up absolute bottom-full left-3 z-20 mb-2 w-[200px] p-1.5 shadow-[var(--shadow-pop)]">
           <button
             type="button"
-            onClick={() => setChoice(resolved === 'dark' ? 'light' : 'dark')}
-            className="flex w-full items-center gap-2 rounded-[8px] px-2.5 py-1.5 text-left text-[13px] text-dim hover:bg-hover"
+            onClick={() => {
+              setOpen(false);
+              onNavigate();
+              navigate('/settings');
+            }}
+            className="flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-[13px] hover:bg-hover"
           >
-            {resolved === 'dark' ? <Icon.sun /> : <Icon.moon />}
-            {resolved === 'dark' ? 'Light mode' : 'Dark mode'}
+            <Icon.settings className="text-dim" />
+            Settings
           </button>
           <button
             type="button"
             onClick={signOut}
-            className="flex w-full items-center gap-2 rounded-[8px] px-2.5 py-1.5 text-left text-[13px] text-dim hover:bg-hover"
+            className="flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-[13px] hover:bg-hover"
           >
-            <Icon.lock />
+            <Icon.lock className="text-dim" />
             Sign out
           </button>
         </div>
@@ -106,16 +86,16 @@ function UserBlock() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-3 rounded-[12px] px-2 py-2 text-left hover:bg-hover"
+        className="flex w-full items-center gap-3 rounded-[12px] px-2 py-2 text-left transition-colors hover:bg-hover active:scale-[0.98]"
       >
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[14px] font-medium text-accent-ink">
-          {name.slice(0, 1)}
+          A
         </span>
         <span className="min-w-0 flex-1 leading-tight">
-          <span className="block truncate text-[13.5px] font-medium">{name}</span>
+          <span className="block truncate text-[13.5px] font-medium">Admin</span>
           <span className="block truncate text-[11.5px] text-faint">Shared team login</span>
         </span>
-        <Icon.chevron className="shrink-0 rotate-90 text-faint" />
+        <Icon.chevron className={cx('shrink-0 text-faint transition-transform', open ? '-rotate-90' : 'rotate-90')} />
       </button>
     </div>
   );
@@ -132,7 +112,7 @@ function Sidebar({ openIncidents, open, onNavigate }: { openIncidents: number; o
     >
       <div className="flex items-center gap-3 px-6 pt-6 pb-5">
         <img src="/logo.svg" alt="" className="mark h-8 w-8" />
-        <span className="text-[15px] font-semibold">BHA engine</span>
+        <span className="text-[15px] font-semibold">BHA Engine</span>
         <button type="button" onClick={onNavigate} className="btn btn-ghost btn-sm ml-auto md:hidden" aria-label="Close navigation">
           <Icon.close />
         </button>
@@ -160,20 +140,56 @@ function Sidebar({ openIncidents, open, onNavigate }: { openIncidents: number; o
         ))}
       </div>
 
-      <UserBlock />
+      <UserBlock onNavigate={onNavigate} />
     </nav>
   );
 }
 
-function today(): string {
-  return new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+/** Date, a live clock, and the weather when the browser will share a location. */
+function ClockChip() {
+  const [now, setNow] = useState(() => new Date());
+  const weather = useWeather();
+  useEffect(() => {
+    const i = setInterval(() => setNow(new Date()), 15_000);
+    return () => clearInterval(i);
+  }, []);
+  const date = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const time = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  const W = weather?.kind === 'sun' ? Icon.sun : weather?.kind === 'rain' ? Icon.rain : Icon.cloud;
+  return (
+    <span className="chip">
+      <Icon.calendar className="text-faint" />
+      <span>{date}</span>
+      <span className="tabular text-ink">{time}</span>
+      {weather && (
+        <>
+          <span className="text-faint">·</span>
+          <W className="text-accent-ink" />
+          <span className="tabular text-ink">{weather.temp_c}°</span>
+          <span className="hidden lg:inline">{weather.label}</span>
+        </>
+      )}
+    </span>
+  );
+}
+
+function ThemeChip() {
+  const { resolved, setChoice } = useTheme();
+  const next = resolved === 'dark' ? 'light' : 'dark';
+  return (
+    <button type="button" onClick={() => setChoice(next)} className="chip h-8 w-8 justify-center px-0 transition-transform active:scale-95" aria-label={`Switch to ${next} mode`} title={`Switch to ${next} mode`}>
+      {resolved === 'dark' ? <Icon.sun /> : <Icon.moon />}
+    </button>
+  );
 }
 
 export default function Layout() {
-  const { lane, setLane } = useSession();
   const status = useData(getEngineStatus);
   const s = status.data;
   const [navOpen, setNavOpen] = useState(false);
+  const location = useLocation();
+  /* Ask Bays owns its whole column, so the top row steps aside there. */
+  const bare = location.pathname.startsWith('/ask-bays');
 
   return (
     <div className="flex h-full bg-bg">
@@ -182,41 +198,27 @@ export default function Layout() {
       {navOpen && <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setNavOpen(false)} aria-hidden />}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Top row: no bar, just the date, engine health and the lane filter on the right. */}
-        <div className="flex shrink-0 items-center gap-2 px-4 pt-4 md:px-8 md:pt-6">
-          <button type="button" onClick={() => setNavOpen(true)} aria-label="Open navigation" className="btn btn-ghost btn-sm -ml-2 md:hidden">
+        {!bare && (
+          <div className="flex shrink-0 items-center gap-2 px-4 pt-4 md:px-8 md:pt-6">
+            <button type="button" onClick={() => setNavOpen(true)} aria-label="Open navigation" className="btn btn-ghost btn-sm -ml-2 md:hidden">
+              <Icon.menu />
+            </button>
+            <div className="ml-auto flex min-w-0 items-center gap-2">
+              <ClockChip />
+              <ThemeChip />
+            </div>
+          </div>
+        )}
+        {bare && (
+          <button type="button" onClick={() => setNavOpen(true)} aria-label="Open navigation" className="btn btn-ghost btn-sm absolute top-3 left-3 z-30 md:hidden">
             <Icon.menu />
           </button>
-          <div className="ml-auto flex min-w-0 items-center gap-2">
-            <span className="chip hidden sm:inline-flex">
-              <Icon.calendar className="text-faint" />
-              {today()}
-            </span>
-            <span className="chip min-w-0" title={s?.note ?? undefined}>
-              <Dot health={s?.health ?? 'ok'} pulse />
-              <span className={cx('truncate', s?.health === 'failing' ? 'text-failing' : s?.health === 'degraded' ? 'text-degraded' : '')}>
-                {!s ? 'Checking' : s.health === 'ok' ? 'Engine healthy' : s.health === 'degraded' ? 'Engine degraded' : 'Engine failing'}
-              </span>
-              <span className="tabular hidden text-faint lg:inline">· {s?.last_refresh ?? '—'}</span>
-            </span>
-            <select
-              value={lane}
-              onChange={(e) => setLane(e.target.value as LaneFilter)}
-              className="input h-8 w-auto rounded-full pr-8 text-[12.5px] shadow-[var(--shadow-card)]"
-              style={{ boxShadow: 'var(--shadow-card)' }}
-              aria-label="Lane filter"
-            >
-              {LANES.map((l) => (
-                <option key={l.value} value={l.value}>
-                  {l.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+        )}
 
         <main className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto md:overflow-hidden">
-          <Outlet />
+          <div key={location.pathname} className="page-in flex min-h-0 flex-1 flex-col">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

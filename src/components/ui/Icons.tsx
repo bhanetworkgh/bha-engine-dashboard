@@ -158,6 +158,57 @@ export const Icon = {
       <path d="M12.5 11.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z" />
     </svg>
   ),
+  mic: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base} {...p}>
+      <rect x="5.5" y="1.5" width="5" height="8" rx="2.5" />
+      <path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2M5.5 14.5h5" />
+    </svg>
+  ),
+  settings: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base} {...p}>
+      <circle cx="8" cy="8" r="2.2" />
+      <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" />
+    </svg>
+  ),
+  pin: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base} {...p}>
+      <path d="M9.5 2l4.5 4.5-2 .5-2.5 2.5.5 3-1.5 1.5L5 10.5 2 13.5M5 10.5 2.5 8l1.5-1.5 3 .5L9.5 4.5z" />
+    </svg>
+  ),
+  more: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base} {...p} fill="currentColor" stroke="none">
+      <circle cx="3.5" cy="8" r="1.3" />
+      <circle cx="8" cy="8" r="1.3" />
+      <circle cx="12.5" cy="8" r="1.3" />
+    </svg>
+  ),
+  sidebar: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base} {...p}>
+      <rect x="2" y="3" width="12" height="10" rx="2" />
+      <path d="M10 3v10" />
+    </svg>
+  ),
+  trash: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base} {...p}>
+      <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" />
+    </svg>
+  ),
+  edit: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base} {...p}>
+      <path d="M11.5 2.5l2 2L6 12H4v-2z" />
+    </svg>
+  ),
+  cloud: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base} {...p}>
+      <path d="M5 12.5h6.5a2.75 2.75 0 0 0 .3-5.5A4 4 0 0 0 4.2 8 2.25 2.25 0 0 0 5 12.5z" />
+    </svg>
+  ),
+  rain: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base} {...p}>
+      <path d="M5 10h6.5a2.5 2.5 0 0 0 .3-5A4 4 0 0 0 4.2 5.5 2.25 2.25 0 0 0 5 10z" />
+      <path d="M6 12l-.8 2M9 12l-.8 2M12 12l-.8 2" />
+    </svg>
+  ),
   lock: (p: SVGProps<SVGSVGElement>) => (
     <svg {...base} {...p}>
       <rect x="3" y="7" width="10" height="7" rx="1.5" />

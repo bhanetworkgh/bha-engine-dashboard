@@ -181,6 +181,8 @@ export interface ChatThread {
   session_id?: string;
   /** Threads typed in this dashboard rather than seeded. */
   local?: boolean;
+  /** Pinned threads sort first. */
+  pinned?: boolean;
 }
 
 /** What the dashboard can and cannot do with Bays, given its configuration. */
@@ -199,6 +201,8 @@ export interface AskBaysData {
   threads: ChatThread[];
   /** Bays has no memory today. The UI says so rather than implying otherwise. */
   memory_note: string;
+  /** What the chat is connected to, as configured on the host. */
+  model_label: string;
   wiring: BaysWiring;
   /** Builders who can be named as the asker. */
   builders: { id: string; name: string }[];

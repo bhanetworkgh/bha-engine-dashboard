@@ -788,3 +788,87 @@ Verified:  Chromium sweep at 1440x900 in light and dark: all eleven routes
            render, loop close and create still work, Ask Bays still states its
            wiring, no page errors, no horizontal overflow. Phone at 390 renders
            the greeting, banner and systems grid. `npm run build` passes.
+
+---
+
+## 2026-09-08 14:30 — Session 8: Destiny's edit list on Home and Ask Bays
+
+Intent:    Apply the round of edits Destiny gave on the redesign: strip the
+           top-right down to date, time and weather; remove the lane dropdown
+           and the engine-health chip; theme toggle top-right; "BHA Engine";
+           the user block becomes Admin with Settings and Sign out only;
+           greeting "Good afternoon, Admin"; live numbers in the banner and a
+           fourth floating element; matched row heights; one colour per
+           system; no health words on the system tiles; Ask Bays panel full
+           height with pin / rename / delete, a working search, a hide control,
+           the model label and a microphone; soft motion throughout.
+
+Files:     src/components/Layout.tsx, src/screens/Overview.tsx,
+           src/screens/AskBays.tsx, src/screens/Settings.tsx (new),
+           src/app/useWeather.ts (new), src/app/session.tsx, src/App.tsx,
+           src/data/{index,types,engine}.ts, src/components/ui/Icons.tsx,
+           src/index.css, CLAUDE.md.
+
+Problem:   1. The banner's "Open loops" was open only, and Halloween was the
+              literal string "54". Neither would have moved.
+           2. Weather needs a location and a source; the dashboard has neither
+              and the rule is no invented data.
+           3. The builder picker was the only thing giving the greeting a name.
+           4. Chat threads seeded from fixtures could not be pinned, renamed or
+              deleted without coming back on the next load.
+           5. Removing the lane dropdown contradicts CLAUDE.md section 8, which
+              says lane must be filterable from the status strip.
+
+Fix:       1. Open loops is now open plus in progress across every builder
+              table, read at render time; closing a loop from the interface
+              moves it. Days to Halloween is computed from today's date each
+              time the Overview loads (`daysToHalloween()` in the data module).
+              Open incidents was already live.
+           2. `useWeather` asks the browser for its location and, if granted,
+              reads Open-Meteo (no key). If either is refused the chip shows
+              date and time only. The result is cached for thirty minutes in
+              sessionStorage. This is the one call the dashboard makes to a
+              third party, and it carries no engine data.
+           3. The greeting is "Good afternoon, Admin"; the banner headline is
+              "Your engine, at a glance." The `bha.me` preference is removed.
+           4. Any change to a thread marks it local and persists it; deletions
+              are remembered in `bha.chats.deleted` so a seeded thread stays
+              gone. Pinned threads sort first under their own heading.
+           5. The dropdown is removed from the shell as asked. The lane filter
+              still exists in session state (default: all lanes) and the data
+              module still honours it, so nothing downstream changed. Recorded
+              in CLAUDE.md section 8 as a deliberate departure.
+
+Decision:  - **The fourth floating element is the Bays orb**: a conic-gradient
+             ring that slowly turns behind the BHA mark, breathing gently. It
+             stands in for the Siri orb in the reference.
+           - **Row heights match by construction.** Home is one grid with two
+             columns and explicit rows, so Quick actions sits in the hero's row
+             and This week in the systems' row; each stretches to its neighbour.
+           - **Tints are one per system**: indigo, purple, green, red, teal,
+             brown, mint, cyan, blue. Engine health and incidents use red as
+             their identity colour; it is an icon tile, not a data value.
+           - **Health words are gone from the system tiles.** Destiny could not
+             tell what "degraded" was measuring. The thresholds still drive
+             "Needs a look" and the engine-health card, where the signal text
+             says what is actually wrong.
+           - **The mic is the browser's own dictation** (Web Speech API). Where
+             the browser lacks it the button says so. Nothing is recorded or
+             sent anywhere; it types into the composer.
+           - **The model label is configuration**, `VITE_BAYS_MODEL_LABEL`,
+             defaulting to "Claude Sonnet 5.0" at Destiny's instruction because
+             that is what the Ask Bays workflow he is building will use.
+           - **Motion**: a 260ms ease-in on every route change and on sign-in,
+             a press-down on buttons and tiles, a lift on hover. All of it
+             respects prefers-reduced-motion.
+           - **Settings is a real page**: theme (system / light / dark), the
+             account and its session expiry, and what the deployment is
+             connected to, all read from configuration.
+
+Verified:  Chromium sweep in light and dark: every route renders including
+           /settings; loop close and create still work; on Ask Bays a thread
+           was pinned (Pinned heading appeared), renamed (new title shown),
+           deleted (count fell from five to four), the search matched one chat
+           for "digest", the panel hid to a rail and reopened. No page errors.
+           The only console error is the Google Fonts request, which the
+           sandbox blocks. `npm run build` passes.

@@ -12,6 +12,7 @@ import Codex from './screens/Codex';
 import BuildPatterns from './screens/BuildPatterns';
 import Commercial from './screens/Commercial';
 import { Builders, BuilderPage } from './screens/Builders';
+import Settings from './screens/Settings';
 
 export default function App() {
   const { token } = useSession();
@@ -20,7 +21,8 @@ export default function App() {
   if (!token) return <Login />;
 
   return (
-    <Routes>
+    <div className="page-in h-full">
+      <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<Overview />} />
         <Route path="/ask-bays" element={<AskBays />} />
@@ -34,8 +36,10 @@ export default function App() {
         <Route path="/commercial" element={<Commercial />} />
         <Route path="/builders" element={<Builders />} />
         <Route path="/builders/:id" element={<BuilderPage />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
-    </Routes>
+      </Routes>
+    </div>
   );
 }

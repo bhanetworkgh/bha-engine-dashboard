@@ -51,6 +51,15 @@ export { config as engineConfig } from './engine';
 /** Reference date the fixtures are written against. */
 const REF_DATE = '2026-09-07';
 
+/** Whole days from today to 31 October, computed at call time. */
+export function daysToHalloween(now = new Date()): number {
+  const y = now.getFullYear();
+  let target = new Date(y, 9, 31);
+  if (target < new Date(now.getFullYear(), now.getMonth(), now.getDate())) target = new Date(y + 1, 9, 31);
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((target.getTime() - start.getTime()) / 86_400_000);
+}
+
 /** Stand-in for network latency, so loading states are real in phase 1. */
 const LATENCY_MS = 120;
 
@@ -127,8 +136,10 @@ export function getOverview(q: Query): Promise<OverviewData> {
   const incidents = bySpineLane(f.INCIDENTS, q);
   const openIncidents = incidents.filter((i) => i.state !== 'resolved' && i.state !== 'failed');
   const owners = f.LOOPS_BY_OWNER;
+  // Everything not closed: open plus in progress. Table totals when unfiltered,
+  // held rows when a lane is selected. Changes as loops close from the interface.
   const totalOpen =
-    q.lane === 'all' ? owners.reduce((n, o) => n + o.open, 0) : openLoops.filter((l) => l.status === 'open').length;
+    q.lane === 'all' ? owners.reduce((n, o) => n + o.open + o.in_progress, 0) : openLoops.length;
   const oldest = Math.max(...(openLoops.length ? openLoops.map((l) => l.age_days) : [0]));
   const entries = bySpineLane(f.CODEX_ENTRIES, q);
   const entriesThisWeek = entries.filter((e) => e.week === '2026-W36').length;
@@ -180,7 +191,7 @@ export function getOverview(q: Query): Promise<OverviewData> {
 
   return deliver({
     pins: [
-      { label: 'Days to Halloween', value: '54', health: 'ok', accent: true },
+      { label: 'Days to Halloween', value: String(daysToHalloween()), health: 'ok', accent: true },
       {
         label: 'vFarm status',
         value: vfarmVisible ? `${openAlerts.length} alerts open` : 'filtered out',
@@ -474,6 +485,28 @@ export async function signIn(email: string, password: string): Promise<SignInRes
 /* -------------------------------------------------------------- ask bays */
 
 const CHATS_KEY = 'bha.chats';
+const CHATS_DELETED_KEY = 'bha.chats.deleted';
+
+function readDeleted(): string[] {
+  try {
+    const raw = localStorage.getItem(CHATS_DELETED_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(parsed) ? (parsed as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Remembers that a thread was deleted, so a seeded one does not come back. */
+export function forgetThread(id: string): void {
+  try {
+    const ids = new Set(readDeleted());
+    ids.add(id);
+    localStorage.setItem(CHATS_DELETED_KEY, JSON.stringify([...ids]));
+  } catch {
+    // Storage unavailable.
+  }
+}
 
 function readLocalThreads(): ChatThread[] {
   try {
@@ -519,11 +552,14 @@ export function getBaysWiring(): BaysWiring {
 
 export function getAskBays(_q: Query): Promise<AskBaysData> {
   const local = readLocalThreads();
-  const seeded = f.CHAT_THREADS.filter((t) => !local.some((l) => l.id === t.id));
+  const deleted = new Set(readDeleted());
+  const seeded = f.CHAT_THREADS.filter((t) => !local.some((l) => l.id === t.id) && !deleted.has(t.id));
   return deliver({
-    threads: [...local, ...seeded].sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1)),
-    memory_note:
-      'Bays holds no memory between threads. History here is stored by this browser only.',
+    threads: [...local, ...seeded]
+      .filter((t) => !deleted.has(t.id))
+      .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || (a.updated_at < b.updated_at ? 1 : -1)),
+    memory_note: 'Bays holds no memory between threads. History here is stored by this browser only.',
+    model_label: config.baysModelLabel,
     wiring: getBaysWiring(),
     builders: f.BUILDERS.map((b) => ({ id: b.id, name: b.name })),
   });
@@ -676,7 +712,7 @@ export function getVFarm(q: Query): Promise<VFarmData> {
       'Burn-in and growth cycle events are not being emitted. vFarm currently writes sensor rollups, threshold alerts and incident closes to the ledger; no workflow writes a lifecycle event, so there is nothing to show here.',
     readiness_note:
       'Readiness is not computed anywhere yet. The endpoint that would answer it, /clusters/:id/readiness, is specced in the vFarm contract but not built. Until it exists this panel would have to guess, so it does not.',
-    days_to_halloween: 54,
+    days_to_halloween: daysToHalloween(),
   });
 }
 
