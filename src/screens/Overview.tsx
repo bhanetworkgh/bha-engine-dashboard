@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useData } from '../app/useData';
 import { BUILDER_NAMES, getOverview, type OverviewData, type OverviewEvent, type OverviewTile } from '../data';
@@ -31,51 +32,70 @@ function CardTitle({ title, right }: { title: string; right?: React.ReactNode })
   );
 }
 
-/** The summary banner, laid out as the reference: label, two-line headline, one line, a pill, and the orb with three tilted chips. */
+/** Headlines the banner rotates through. Copy, not data; the data is in the sentence beneath. */
+const HEADLINES = [
+  ['Your engine, live', 'in one window.'],
+  ['Every loop, every incident,', 'one place.'],
+  ['Your day, more', 'connected than ever.'],
+  ['Read live from the engine,', 'never typed.'],
+];
+
+/** The summary banner: label, a rotating two-line headline, the live sentence, a pill, and the orb beside three glass chips. */
 function Hero({ data }: { data: OverviewData }) {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setI((n) => (n + 1) % HEADLINES.length), 5200);
+    return () => clearInterval(t);
+  }, []);
+
   const pin = (label: string) => data.pins.find((p) => p.label === label)?.value ?? '—';
+  const incidents = pin('Open incidents');
+  const loops = pin('Open loops');
+  const entries = pin('Entries this week');
+  const halloween = pin('Days to Halloween');
+  const builders = data.series.loops_by_owner.length;
+  const sentence = `${incidents} incident${incidents === '1' ? '' : 's'} open, ${loops} loops open across ${builders} builders, and ${entries} entries logged this week, with ${halloween} days to Halloween. Every number here is read live from the engine as it changes.`;
+
   const chip = (cls: string, tilt: string, tint: string, I: IconName, label: string, value: string) => {
     const Ic = Icon[I];
     return (
-      <div className={`${cls} card absolute flex items-center gap-2.5 rounded-[14px] px-3 py-2`} style={{ ['--tilt' as string]: tilt }}>
+      <div className={`${cls} glass absolute flex h-[58px] w-[196px] items-center gap-3 rounded-[16px] px-3.5`} style={{ ['--tilt' as string]: tilt }}>
         <span className={`tile tile-sm ${tint}`}>
           <Ic />
         </span>
-        <span className="leading-tight">
-          <span className="block text-[11px] text-dim">{label}</span>
-          <span className="tabular block text-[14px] font-semibold">{value}</span>
+        <span className="min-w-0 leading-tight">
+          <span className="block truncate text-[11px] text-dim">{label}</span>
+          <span className="tabular block text-[15px] font-semibold">{value}</span>
         </span>
       </div>
     );
   };
 
   return (
-    <section className="hero flex h-full min-h-[268px] flex-col justify-center px-7 py-7 md:px-8">
-      <div className="relative z-10 max-w-[52%] md:max-w-[46%]">
+    <section className="hero flex h-full min-h-[320px] flex-col justify-center px-7 py-8 md:px-9">
+      <div className="relative z-10 max-w-[54%] md:max-w-[50%]">
         <div className="mb-3 text-[11.5px] font-medium tracking-[0.12em] text-accent-ink uppercase">Bays summary</div>
-        <h2 className="font-display text-[26px] leading-[1.15] md:text-[28px]">
-          Your engine, live
+        <h2 key={i} className="font-display headline-in text-[26px] leading-[1.15] md:text-[29px]">
+          {HEADLINES[i][0]}
           <br />
-          in one window.
+          {HEADLINES[i][1]}
         </h2>
-        <p className="mt-3 max-w-[40ch] text-[14px] leading-relaxed text-dim">
-          Incidents, loops and entries, read live across every system.
-        </p>
+        <p className="mt-3 max-w-[46ch] text-[14px] leading-relaxed text-dim">{sentence}</p>
         <Link to="/ask-bays" className="btn mt-5 h-9 rounded-full bg-panel px-4 text-[13px] shadow-[var(--shadow-card)]">
-          Ask Bays
+          Ask Bays about today
         </Link>
       </div>
 
-      {/* Orb to the left, three chips stepping down and across to the right. */}
-      <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[54%] md:block" aria-hidden>
-        <div className="orb absolute top-1/2 left-[6%] h-[92px] w-[92px] -translate-y-1/2 rounded-[24px] bg-panel/70 p-3 shadow-[var(--shadow-card)] backdrop-blur">
+      {/* The orb sits just left of three uniform glass chips that step down to the right, clear of the edge. */}
+      <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[50%] md:block" aria-hidden>
+        <div className="glass orb absolute top-1/2 right-[300px] h-[96px] w-[96px] -translate-y-1/2 rounded-[26px] p-3">
           <span className="spin-slow absolute inset-3 rounded-full bg-[conic-gradient(from_0deg,var(--tint-blue),var(--tint-purple),var(--tint-teal),var(--tint-pink),var(--tint-blue))] opacity-90 blur-[2px]" />
           <span className="absolute inset-[15px] rounded-full bg-panel" />
-          <img src="/logo.svg" alt="" className="mark absolute inset-[20px] h-[52px] w-[52px]" />
+          <img src="/logo.svg" alt="" className="mark absolute inset-[20px] h-[56px] w-[56px]" />
         </div>
-        {chip('drift top-[13%] right-[24%]', '-5deg', 'tile-red', 'pulse', 'Open incidents', pin('Open incidents'))}
-        {chip('drift-slow top-[41%] right-[6%]', '4deg', 'tile-teal', 'loop', 'Open loops', pin('Open loops'))}
-        {chip('drift-fast bottom-[11%] right-[22%]', '-3deg', 'tile-green', 'leaf', 'Days to Halloween', pin('Days to Halloween'))}
+        {chip('drift top-[13%] right-[92px]', '-4deg', 'tile-red', 'pulse', 'Open incidents', incidents)}
+        {chip('drift-slow top-[42%] right-[40px]', '3deg', 'tile-teal', 'loop', 'Open loops', loops)}
+        {chip('drift-fast bottom-[11%] right-[84px]', '-3deg', 'tile-green', 'leaf', 'Days to Halloween', halloween)}
       </div>
     </section>
   );

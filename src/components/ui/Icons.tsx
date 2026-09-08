@@ -177,9 +177,9 @@ export const Icon = {
   ),
   more: (p: SVGProps<SVGSVGElement>) => (
     <svg {...base} {...p} fill="currentColor" stroke="none">
-      <circle cx="3.5" cy="8" r="1.3" />
+      <circle cx="8" cy="3.5" r="1.3" />
       <circle cx="8" cy="8" r="1.3" />
-      <circle cx="12.5" cy="8" r="1.3" />
+      <circle cx="8" cy="12.5" r="1.3" />
     </svg>
   ),
   sidebar: (p: SVGProps<SVGSVGElement>) => (
