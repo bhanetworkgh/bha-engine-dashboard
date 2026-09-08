@@ -42,10 +42,22 @@ const HEADLINES = [
 
 /** The summary banner: label, a rotating two-line headline, the live sentence, a pill, and the orb beside three glass chips. */
 function Hero({ data }: { data: OverviewData }) {
+  // The headline crossfades: ease the current line out, swap, ease the next in.
   const [i, setI] = useState(0);
+  const [shown, setShown] = useState(true);
   useEffect(() => {
-    const t = setInterval(() => setI((n) => (n + 1) % HEADLINES.length), 5200);
-    return () => clearInterval(t);
+    let swap: number | undefined;
+    const t = window.setInterval(() => {
+      setShown(false);
+      swap = window.setTimeout(() => {
+        setI((n) => (n + 1) % HEADLINES.length);
+        setShown(true);
+      }, 700);
+    }, 7000);
+    return () => {
+      clearInterval(t);
+      if (swap) clearTimeout(swap);
+    };
   }, []);
 
   const pin = (label: string) => data.pins.find((p) => p.label === label)?.value ?? '—';
@@ -54,7 +66,7 @@ function Hero({ data }: { data: OverviewData }) {
   const entries = pin('Entries this week');
   const halloween = pin('Days to Halloween');
   const builders = data.series.loops_by_owner.length;
-  const sentence = `${incidents} incident${incidents === '1' ? '' : 's'} open, ${loops} loops open across ${builders} builders, and ${entries} entries logged this week, with ${halloween} days to Halloween. Every number here is read live from the engine as it changes.`;
+  const sentence = `${incidents} incident${incidents === '1' ? '' : 's'} open, ${loops} loops open across ${builders} builders, and ${entries} entries logged this week. ${halloween} days to Halloween.`;
 
   const chip = (cls: string, tilt: string, tint: string, I: IconName, label: string, value: string) => {
     const Ic = Icon[I];
@@ -75,7 +87,10 @@ function Hero({ data }: { data: OverviewData }) {
     <section className="hero flex h-full min-h-[320px] flex-col justify-center px-7 py-8 md:px-9">
       <div className="relative z-10 max-w-[54%] md:max-w-[50%]">
         <div className="mb-3 text-[11.5px] font-medium tracking-[0.12em] text-accent-ink uppercase">Bays summary</div>
-        <h2 key={i} className="font-display headline-in text-[26px] leading-[1.15] md:text-[29px]">
+        <h2
+          className="font-display text-[26px] leading-[1.15] transition-[opacity,transform] duration-700 ease-[cubic-bezier(0.2,0.7,0.2,1)] md:text-[29px]"
+          style={{ opacity: shown ? 1 : 0, transform: shown ? 'none' : 'translateY(6px)' }}
+        >
           {HEADLINES[i][0]}
           <br />
           {HEADLINES[i][1]}
