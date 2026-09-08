@@ -163,7 +163,10 @@ export function Ring({
           strokeDasharray={`${c * pct} ${c}`}
         />
       </svg>
-      <div className="font-display tabular absolute inset-0 flex items-center justify-center text-[15px] text-ink">
+      <div
+        className="font-display tabular absolute inset-0 flex items-center justify-center text-ink"
+        style={{ fontSize: size < 44 ? 10 : size < 60 ? 12 : 15 }}
+      >
         {total > 0 ? `${Math.round(pct * 100)}%` : '—'}
       </div>
     </div>

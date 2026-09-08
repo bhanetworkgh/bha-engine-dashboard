@@ -471,9 +471,9 @@ export default function AskBays() {
 
   return (
     <div className="flex h-full min-h-0">
-      <div className="flex min-w-0 flex-1 flex-col">
-        {/* Page header: the name on the left, date and theme on the right. */}
-        <div className="flex h-[72px] shrink-0 items-center gap-3 px-6 md:px-8">
+      <div className="relative flex min-w-0 flex-1 flex-col">
+        {/* Page header: the name on the left, date and theme on the right. Messages scroll under it. */}
+        <div className="frost-bar absolute inset-x-0 top-0 z-20 flex h-[84px] items-center gap-3 px-6 pb-3 md:px-8">
           <img src="/logo.svg" alt="" className="mark h-7 w-7 max-md:ml-8" />
           <div className="leading-tight">
             <div className="text-[15px] font-semibold">Ask Bays</div>
@@ -485,7 +485,7 @@ export default function AskBays() {
           </div>
         </div>
         {started ? (
-          <div ref={scrollRef} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-6 py-6">
+          <div ref={scrollRef} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-6 pt-[84px] pb-6">
             <div className="mx-auto max-w-[72ch] space-y-5">
               {messages.map((m) =>
                 m.role === 'user' ? (
@@ -509,7 +509,7 @@ export default function AskBays() {
             </div>
           </div>
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 pt-[72px]">
             <img src="/logo.svg" alt="BHA" className="mark idle-mark h-32 w-32" />
             <p className="font-display text-[22px] text-dim">Ask Bays</p>
           </div>
@@ -600,7 +600,7 @@ export default function AskBays() {
       ) : (
         <aside
           className={cx(
-            'w-[276px] shrink-0 flex-col border-l border-line bg-panel md:static md:flex',
+            'frost-side w-[276px] shrink-0 flex-col border-l border-line md:static md:flex',
             panelOpen ? 'fixed inset-y-0 right-0 z-50 flex shadow-[var(--shadow-pop)]' : 'hidden',
           )}
         >

@@ -967,3 +967,48 @@ Verified:  Chromium sweep in light and dark: every route renders; loop close
            growth; first visit is light. Home in light shows the white active
            nav pill and the glass chips over the gradient. No page errors.
            `npm run build` passes.
+
+---
+
+## 2026-09-08 15:05 — Session 9: frost, dock, and the last Home and Ask Bays polish
+
+Intent:    Destiny's final polish list before moving to other pages: frosted
+           glass on the Home cards and the sidebar, the header band frosted so
+           content fades under it, the orb tilted and closer to shorter chips,
+           an Apple-dock magnification on the systems row, padded rounded
+           hover rows and a legible ring in the Engine health card.
+
+Files:     src/index.css, src/components/Layout.tsx, src/screens/Overview.tsx,
+           src/screens/AskBays.tsx, src/components/ui/Charts.tsx.
+
+Problem:   1. Frosted glass over a flat grey page blurs nothing and looks like
+              a plain card with lower opacity.
+           2. The header band sat outside the scroll container, so content
+              could never pass beneath it to be blurred.
+           3. The self-heal ring's label was a fixed 15px, which overflowed a
+              36px ring.
+
+Fix:       1. A faint blue, lavender and teal wash (`.aurora`) sits behind the
+              whole app at low opacity. Cards (`.frost`), the sidebar and the
+              Ask Bays panel (`.frost-side`) and the header band (`.frost-bar`)
+              are translucent with a backdrop blur, so the wash and any content
+              behind them shows through softly. Dark mode uses the same wash at
+              lower alpha.
+           2. The band is now an absolute overlay across the top of the content
+              column, with a mask that fades its bottom edge; pages pad their
+              top so nothing starts hidden. Ask Bays got the same treatment.
+           3. Ring's label scales with its size (10, 12 or 15px) and the card
+              uses a 40px ring.
+
+Decision:  - **Dock magnification is pure CSS**: the hovered tile scales 1.3 and
+             lifts; its two neighbours scale 1.13 via sibling selectors,
+             including `:has()` for the one before. Transitions ease at 220ms.
+           - **Chips shortened to 164px** and the orb moved to 236px from the
+             right edge with a 7° tilt, so the cluster reads as one group.
+           - **The banner's own chips keep the stronger `.glass`**, cards use
+             the gentler `.frost`; two intensities, one language.
+
+Verified:  Chromium sweep in light and dark: Home at rest, scrolled 260px
+           (banner visible blurred under the header), and with the vFarm tile
+           hovered (grown, neighbours slightly grown). Ask Bays, loops, threads,
+           search and settings checks unchanged. No page errors.

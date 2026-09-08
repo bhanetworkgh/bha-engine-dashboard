@@ -59,7 +59,7 @@ function Hero({ data }: { data: OverviewData }) {
   const chip = (cls: string, tilt: string, tint: string, I: IconName, label: string, value: string) => {
     const Ic = Icon[I];
     return (
-      <div className={`${cls} glass absolute flex h-[58px] w-[196px] items-center gap-3 rounded-[16px] px-3.5`} style={{ ['--tilt' as string]: tilt }}>
+      <div className={`${cls} glass absolute flex h-[56px] w-[164px] items-center gap-2.5 rounded-[16px] px-3`} style={{ ['--tilt' as string]: tilt }}>
         <span className={`tile tile-sm ${tint}`}>
           <Ic />
         </span>
@@ -88,14 +88,14 @@ function Hero({ data }: { data: OverviewData }) {
 
       {/* The orb sits just left of three uniform glass chips that step down to the right, clear of the edge. */}
       <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[50%] md:block" aria-hidden>
-        <div className="glass orb absolute top-1/2 right-[300px] h-[96px] w-[96px] -translate-y-1/2 rounded-[26px] p-3">
+        <div className="glass orb absolute top-1/2 right-[236px] h-[96px] w-[96px] -translate-y-1/2 rotate-[7deg] rounded-[26px] p-3">
           <span className="spin-slow absolute inset-3 rounded-full bg-[conic-gradient(from_0deg,var(--tint-blue),var(--tint-purple),var(--tint-teal),var(--tint-pink),var(--tint-blue))] opacity-90 blur-[2px]" />
           <span className="absolute inset-[15px] rounded-full bg-panel" />
           <img src="/logo.svg" alt="" className="mark absolute inset-[20px] h-[56px] w-[56px]" />
         </div>
-        {chip('drift top-[13%] right-[92px]', '-4deg', 'tile-red', 'pulse', 'Open incidents', incidents)}
-        {chip('drift-slow top-[42%] right-[40px]', '3deg', 'tile-teal', 'loop', 'Open loops', loops)}
-        {chip('drift-fast bottom-[11%] right-[84px]', '-3deg', 'tile-green', 'leaf', 'Days to Halloween', halloween)}
+        {chip('drift top-[13%] right-[80px]', '-4deg', 'tile-red', 'pulse', 'Open incidents', incidents)}
+        {chip('drift-slow top-[42%] right-[36px]', '3deg', 'tile-teal', 'loop', 'Open loops', loops)}
+        {chip('drift-fast bottom-[11%] right-[72px]', '-3deg', 'tile-green', 'leaf', 'Days to Halloween', halloween)}
       </div>
     </section>
   );
@@ -105,8 +105,8 @@ function SystemTile({ t }: { t: OverviewTile }) {
   const meta = TILE_META[t.key] ?? { icon: 'overview' as IconName, tint: 'tile-graphite' };
   const I = Icon[meta.icon];
   return (
-    <Link to={t.to} className="group flex flex-col items-center rounded-[14px] px-2 py-3 text-center transition-all hover:bg-hover active:scale-[0.98]">
-      <span className={`tile ${meta.tint} h-12 w-12 rounded-[14px] transition-transform group-hover:scale-105`}>
+    <Link to={t.to} className="dock-item group flex flex-col items-center rounded-[14px] px-2 pt-4 pb-3 text-center transition-colors hover:bg-hover active:scale-[0.98]">
+      <span className={`tile dock-tile ${meta.tint} h-12 w-12 rounded-[14px]`}>
         <I className="h-6 w-6" />
       </span>
       <span className="mt-2.5 text-[13px] font-medium">{t.label}</span>
@@ -167,7 +167,7 @@ export default function Overview() {
   const attention = data.tiles.filter((t) => t.health !== 'ok');
 
   return (
-    <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 pt-2 pb-8 md:px-8">
+    <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 pb-8 md:px-8">
       <header className="mb-6">
         <h1 className="font-display text-[34px] leading-none">{greeting()}, Admin</h1>
         <p className="mt-2 text-[15px] text-dim">Here is what is happening across the engine, the loops and the builders.</p>
@@ -182,7 +182,7 @@ export default function Overview() {
         <div className="min-w-0">
           <Hero data={data} />
         </div>
-        <Card className="flex flex-col p-5">
+        <Card className="frost flex flex-col p-5">
           <CardTitle title="Quick actions" />
           <div className="flex flex-1 flex-col justify-around divide-y divide-line">
             <QuickAction to="/ask-bays" icon="chat" tint="tile-graphite" title="Ask Bays" sub="Question the engine" />
@@ -193,15 +193,15 @@ export default function Overview() {
         </Card>
 
         {/* Row 2 */}
-        <Card className="p-5">
+        <Card className="frost p-5">
           <CardTitle title="Your systems" right={<span className="text-[12.5px] text-faint">{data.tiles.length} sections</span>} />
-          <div className="grid grid-cols-3 gap-1 sm:grid-cols-5">
+          <div className="dock grid grid-cols-3 gap-1 sm:grid-cols-5">
             {data.tiles.map((t) => (
               <SystemTile key={t.key} t={t} />
             ))}
           </div>
         </Card>
-        <Card className="flex flex-col p-5">
+        <Card className="frost flex flex-col p-5">
           <CardTitle title="This week" right={<Link to="/codex" className="link">View details</Link>} />
           <div className="flex flex-1 flex-col justify-around divide-y divide-line">
             <div className="flex items-center gap-3 py-3">
@@ -250,7 +250,7 @@ export default function Overview() {
 
         {/* Row 3 */}
         <div className="grid min-w-0 gap-4 md:grid-cols-2">
-          <Card className="p-5">
+          <Card className="frost p-5">
             <CardTitle title="Loops by builder" right={<Link to="/open-loops" className="link">View all</Link>} />
             {s.loops_by_owner.length === 0 ? (
               <p className="text-[13px] text-dim">No open loops in the selected lane.</p>
@@ -277,7 +277,7 @@ export default function Overview() {
             )}
           </Card>
 
-          <Card className="p-5">
+          <Card className="frost p-5">
             <CardTitle title="Engine health" right={<Link to="/engine-health" className="link">View details</Link>} />
             <div className="flex items-center gap-4">
               <span className={`tile h-14 w-14 rounded-[16px] ${engineTile?.health === 'failing' ? 'tile-red' : engineTile?.health === 'degraded' ? 'tile-graphite' : 'tile-green'}`}>
@@ -290,16 +290,16 @@ export default function Overview() {
                 <div className="text-[12.5px] text-dim">{engineTile?.signal ?? ''}</div>
               </div>
             </div>
-            <div className="mt-4 divide-y divide-line">
-              <div className="flex items-center gap-3 py-2.5">
-                <Ring value={data.rates.self_heal.value} total={data.rates.self_heal.total} size={36} tone="accent" label="self-healed" />
+            <div className="mt-4 space-y-0.5">
+              <div className="flex items-center gap-3 px-2 py-2.5">
+                <Ring value={data.rates.self_heal.value} total={data.rates.self_heal.total} size={40} tone="accent" label="self-healed" />
                 <div className="min-w-0 flex-1 leading-tight">
                   <div className="text-[13px] font-medium">Self-heal rate</div>
                   <div className="text-[12px] text-dim">{data.rates.self_heal.value} of {data.rates.self_heal.total} resolved without a person</div>
                 </div>
               </div>
               {s.incidents_by_class.map((c) => (
-                <Link key={c.error_class} to="/engine-health" className="rowlike flex items-center gap-3 py-2.5">
+                <Link key={c.error_class} to="/engine-health" className="rowlike -mx-2 flex items-center gap-3 rounded-[12px] px-2 py-2.5">
                   <span className={`tile tile-sm ${c.open > 0 ? (c.error_class === 'BILLING_QUOTA' || c.error_class === 'CONFIG_AUTH' ? 'tile-red' : 'tile-graphite') : 'tile-soft'}`}>
                     <Icon.bolt />
                   </span>
@@ -315,7 +315,7 @@ export default function Overview() {
             </div>
           </Card>
         </div>
-        <Card className="p-5">
+        <Card className="frost p-5">
           <CardTitle title="Needs a look" />
           {attention.length === 0 ? (
             <p className="text-[13px] text-dim">Nothing is flagged right now.</p>
@@ -341,7 +341,7 @@ export default function Overview() {
 
         {/* Row 4 */}
         <div className="grid min-w-0 gap-4 md:grid-cols-2">
-          <Card className="p-5">
+          <Card className="frost p-5">
             <CardTitle title="What broke in the last 24 hours" right={<Link to="/engine-health" className="link">View all</Link>} />
             {data.broke_24h.length === 0 ? (
               <p className="text-[13px] text-dim">Nothing broke in this window.</p>
@@ -353,7 +353,7 @@ export default function Overview() {
               </div>
             )}
           </Card>
-          <Card className="p-5">
+          <Card className="frost p-5">
             <CardTitle title="What moved in the last 24 hours" right={<Link to="/codex" className="link">View all</Link>} />
             {data.moved_24h.length === 0 ? (
               <p className="text-[13px] text-dim">Nothing moved in this window.</p>

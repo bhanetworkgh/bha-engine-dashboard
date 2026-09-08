@@ -104,7 +104,7 @@ function Sidebar({ openIncidents, open, onNavigate }: { openIncidents: number; o
   return (
     <nav
       className={cx(
-        'w-[240px] shrink-0 flex-col border-r border-line bg-sidebar md:static md:flex',
+        'frost-side w-[240px] shrink-0 flex-col border-r border-line md:static md:flex',
         open ? 'fixed inset-y-0 left-0 z-50 flex shadow-[var(--shadow-pop)]' : 'hidden',
       )}
       aria-label="Primary"
@@ -153,14 +153,14 @@ export default function Layout() {
   const bare = location.pathname.startsWith('/ask-bays');
 
   return (
-    <div className="flex h-full bg-bg">
+    <div className="aurora flex h-full bg-bg">
       <Sidebar openIncidents={s?.open_incidents ?? 0} open={navOpen} onNavigate={() => setNavOpen(false)} />
 
       {navOpen && <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setNavOpen(false)} aria-hidden />}
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative flex min-w-0 flex-1 flex-col">
         {!bare && (
-          <div className="flex h-[72px] shrink-0 items-center gap-2 px-4 md:px-8">
+          <div className="frost-bar absolute inset-x-0 top-0 z-20 flex h-[84px] items-center gap-2 px-4 pb-3 md:px-8">
             <button type="button" onClick={() => setNavOpen(true)} aria-label="Open navigation" className="btn btn-ghost btn-sm -ml-2 md:hidden">
               <Icon.menu />
             </button>
@@ -176,7 +176,7 @@ export default function Layout() {
           </button>
         )}
 
-        <main className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto md:overflow-hidden">
+        <main className={cx('flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto md:overflow-hidden', !bare && '[&>div>*]:pt-[72px]')}>
           <div key={location.pathname} className="page-in flex min-h-0 flex-1 flex-col">
             <Outlet />
           </div>
