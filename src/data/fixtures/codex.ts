@@ -46,6 +46,7 @@ export const CODEX_ENTRIES: CodexEntry[] = CODEX_SEEDS.map(
     title,
     narration_url: i % 7 === 3 ? null : `https://docs.google.com/document/d/1cdx${i}narration`,
     ingested,
+    status: ingested ? 'ingested' : 'posted',
     spine: {
       session_id: `SES-${at.slice(0, 10).replace(/-/g, '')}-${builder.slice(0, 2).toUpperCase()}-0${(i % 4) + 1}`,
       builder_id: builder,

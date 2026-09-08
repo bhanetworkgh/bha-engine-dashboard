@@ -1,25 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../app/useData';
-import { useSession } from '../app/session';
-import {
-  forgetThread,
-  getAskBays,
-  pollBaysAnswer,
-  saveLocalThreads,
-  sendToBays,
-  type ChatMessage,
-  type ChatThread,
-  type Lane,
-} from '../data';
+import { askBays, forgetThread, getAskBays, saveLocalThreads, type ChatMessage, type ChatThread } from '../data';
 import { Icon, LoadFailed, Loading } from '../components/ui';
 import { ClockChip, ThemeChip } from '../components/ClockChip';
 import { cx } from '../lib';
 
-/** The front door drops the same session_id inside this window (its loop guard). */
-const COOLDOWN_MS = 30_000;
-/** How long to wait for an answer at the callback before saying so. */
-const ANSWER_TIMEOUT_MS = 120_000;
-const POLL_MS = 3_000;
 /** The builder_id sent with every ask from this shared login. */
 const ASKER = 'admin';
 /** Dictation stops itself after this long. */
@@ -38,23 +23,57 @@ function newSessionId(): string {
 }
 
 function DeliveryLine({ m }: { m: ChatMessage }) {
-  if (!m.delivery || m.delivery === 'answered') return null;
-  const text =
-    m.delivery === 'sending'
-      ? 'Sending to the Bays front door'
-      : m.delivery === 'sent'
-        ? 'Accepted by the front door'
-        : m.delivery === 'waiting'
-          ? 'Waiting for the answer'
-          : m.delivery === 'timeout'
-            ? (m.note ?? 'No answer arrived in time.')
-            : (m.note ?? 'Not sent.');
-  const tone = m.delivery === 'failed' ? 'text-failing' : m.delivery === 'timeout' ? 'text-degraded' : 'text-faint';
-  const live = m.delivery === 'sending' || m.delivery === 'waiting';
+  if (!m.delivery || m.delivery === 'answered' || m.delivery === 'sent') return null;
+  const text = m.delivery === 'sending' ? 'Sending' : (m.note ?? 'Not sent.');
+  const tone = m.delivery === 'failed' ? 'text-failing' : 'text-faint';
   return (
     <div className={`mt-1 flex items-center justify-end gap-1.5 text-[11px] ${tone}`}>
-      {live && <span className="pulse-dot h-[6px] w-[6px] rounded-full bg-current" />}
+      {m.delivery === 'sending' && <span className="pulse-dot h-[6px] w-[6px] rounded-full bg-current" />}
       {text}
+    </div>
+  );
+}
+
+/**
+ * Shown while a reply is in flight. It says only what is true: that Bays is
+ * working and for how long. What it looked at arrives with the answer, as
+ * `steps`, and is shown under the reply; nothing is guessed here.
+ */
+function Thinking({ since, now }: { since: number; now: number }) {
+  const secs = Math.max(0, Math.floor((now - since) / 1000));
+  const caption = secs < 8 ? 'Bays is thinking' : secs < 30 ? 'Still working on it' : secs < 75 ? 'Taking longer than usual' : 'Bays can take up to two minutes';
+  return (
+    <div className="fade-up flex gap-3" aria-live="polite">
+      <img src="/logo.svg" alt="" className="mark idle-mark mt-0.5 h-6 w-6 shrink-0" />
+      <div className="min-w-0">
+        <div className="mb-1 flex items-baseline gap-2 text-[11px]">
+          <span className="font-medium text-ink">Bays</span>
+          <span className="tabular text-faint">{secs}s</span>
+        </div>
+        <div className="flex items-center gap-2.5 text-[13px] text-dim">
+          <span className="thinking-dots" aria-hidden>
+            <i />
+            <i />
+            <i />
+          </span>
+          {caption}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The agent's own trace of what it looked at, under its answer. Absent when it looked at nothing. */
+function StepsTrace({ steps }: { steps?: string[] }) {
+  if (!steps || steps.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-faint">
+      <span className="mr-0.5">Looked at</span>
+      {steps.map((st, i) => (
+        <span key={`${st}-${i}`} className="chip-step">
+          {st}
+        </span>
+      ))}
     </div>
   );
 }
@@ -133,7 +152,6 @@ function ThreadMenu({
 }
 
 export default function AskBays() {
-  const { lane } = useSession();
   const { status, data, error } = useData(getAskBays);
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -145,11 +163,11 @@ export default function AskBays() {
   const [listening, setListening] = useState(false);
   const [listeningSince, setListeningSince] = useState<number | null>(null);
   const [micNote, setMicNote] = useState<string | null>(null);
-  const [cooldownUntil, setCooldownUntil] = useState<Record<string, number>>({});
+  /** The reply in flight, if any: one per thread. */
+  const [pending, setPending] = useState<Record<string, number>>({});
   const [now, setNow] = useState(Date.now());
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const pollers = useRef<Record<string, number>>({});
   const recog = useRef<Recognition | null>(null);
   /** Text committed by dictation so far, and the draft it started from. */
   const dictation = useRef<{ base: string; final: string; active: boolean }>({ base: '', final: '', active: false });
@@ -158,16 +176,15 @@ export default function AskBays() {
     if (data) setThreads(data.threads);
   }, [data]);
 
+  // A one-second clock while a reply is in flight, for the thinking indicator.
   useEffect(() => {
-    const anyActive = Object.values(cooldownUntil).some((t) => t > Date.now());
-    if (!anyActive) return;
+    if (Object.keys(pending).length === 0) return;
     const i = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(i);
-  }, [cooldownUntil]);
+  }, [pending]);
 
   useEffect(
     () => () => {
-      Object.values(pollers.current).forEach((id) => clearInterval(id));
       dictation.current.active = false;
       recog.current?.stop();
     },
@@ -177,10 +194,11 @@ export default function AskBays() {
   const active = useMemo(() => threads.find((t) => t.id === activeId) ?? null, [threads, activeId]);
   const messages = active?.messages ?? [];
   const started = messages.length > 0;
+  const thinkingSince = active ? pending[active.id] : undefined;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages.length, activeId]);
+  }, [messages.length, activeId, thinkingSince]);
 
   // The composer grows with its text, whether typed or dictated, up to a cap.
   useEffect(() => {
@@ -236,34 +254,6 @@ export default function AskBays() {
     if (activeId === id) setActiveId(null);
   }
 
-  function startPolling(threadId: string, messageId: string, sessionId: string) {
-    const startedAt = Date.now();
-    const tick = async () => {
-      const res = await pollBaysAnswer(sessionId);
-      const stop = () => {
-        clearInterval(pollers.current[threadId]);
-        delete pollers.current[threadId];
-      };
-      if (res.status === 'answered') {
-        stop();
-        patchMessage(threadId, messageId, { delivery: 'answered' });
-        appendMessage(threadId, { id: `bays-${Date.now()}`, role: 'bays', text: res.text, at: res.at });
-        return;
-      }
-      if (res.status === 'unavailable') {
-        stop();
-        patchMessage(threadId, messageId, { delivery: 'timeout', note: res.reason });
-        return;
-      }
-      if (Date.now() - startedAt > ANSWER_TIMEOUT_MS) {
-        stop();
-        patchMessage(threadId, messageId, { delivery: 'timeout', note: 'No answer reached the callback within two minutes. Bays may still reply in Slack.' });
-      }
-    };
-    pollers.current[threadId] = window.setInterval(() => void tick(), POLL_MS);
-    void tick();
-  }
-
   async function send() {
     const text = draft.trim();
     if (!text || !data) return;
@@ -282,46 +272,36 @@ export default function AskBays() {
       list = [thread, ...threads];
       setActiveId(thread.id);
     }
+    if (pending[thread.id]) return;
+    // One session_id for the life of the thread. That is what Bays remembers by.
     const sessionId = thread.session_id ?? newSessionId();
-    if ((cooldownUntil[thread.id] ?? 0) > Date.now()) return;
+    const threadId = thread.id;
 
-    const mine: ChatMessage = {
-      id: `me-${Date.now()}`,
-      role: 'user',
-      text,
-      at: stamp(),
-      delivery: data.wiring.can_send ? 'sending' : 'failed',
-      note: data.wiring.can_send ? undefined : data.wiring.note,
-    };
-    persist(
-      list.map((t) =>
-        t.id === thread!.id ? { ...t, local: true, session_id: sessionId, messages: [...t.messages, mine], updated_at: stamp() } : t,
-      ),
-    );
+    const mine: ChatMessage = { id: `me-${Date.now()}`, role: 'user', text, at: stamp(), delivery: 'sending' };
+    persist(list.map((t) => (t.id === threadId ? { ...t, local: true, session_id: sessionId, messages: [...t.messages, mine], updated_at: stamp() } : t)));
     setDraft('');
     if (inputRef.current) inputRef.current.style.height = 'auto';
 
-    if (!data.wiring.can_send) return;
-
-    const lane_id: Lane = lane === 'all' ? 'ENGINE_INTERNAL' : lane;
-    const result = await sendToBays({ session_id: sessionId, prompt: text, builder_id: ASKER, lane: lane_id });
-    if (!result.ok) {
-      patchMessage(thread.id, mine.id, { delivery: 'failed', note: result.error });
-      return;
-    }
-    setCooldownUntil((c) => ({ ...c, [thread!.id]: Date.now() + COOLDOWN_MS }));
-    if (data.wiring.can_read_answers) {
-      patchMessage(thread.id, mine.id, { delivery: 'waiting' });
-      startPolling(thread.id, mine.id, sessionId);
-    } else {
-      patchMessage(thread.id, mine.id, {
-        delivery: 'timeout',
-        note:
-          data.wiring.delivery === 'slack'
-            ? 'Accepted. The answer will be posted to the configured Slack channel; this dashboard cannot read it back.'
-            : 'Accepted. The answer goes to the configured callback; no answer endpoint is set for this dashboard to read it.',
-      });
-    }
+    const startedAt = Date.now();
+    setNow(startedAt);
+    setPending((p) => ({ ...p, [threadId]: startedAt }));
+    const reply = await askBays(text, sessionId, ASKER);
+    setPending((p) => {
+      const next = { ...p };
+      delete next[threadId];
+      return next;
+    });
+    patchMessage(threadId, mine.id, { delivery: 'answered' });
+    appendMessage(threadId, {
+      id: `bays-${Date.now()}`,
+      role: 'bays',
+      text: reply.answer,
+      at: stamp(),
+      steps: reply.steps,
+      delivery: reply.ok ? 'answered' : 'failed',
+      note: reply.ok ? undefined : 'Bays could not complete this.',
+    });
+    if (reply.session_id && reply.session_id !== sessionId) updateThread(threadId, { session_id: reply.session_id });
   }
 
   function stopMic() {
@@ -415,8 +395,7 @@ export default function AskBays() {
   if (status === 'loading') return <Loading />;
   if (status === 'error') return <LoadFailed error={error} />;
 
-  const cooldownLeft = active ? Math.max(0, Math.ceil(((cooldownUntil[active.id] ?? 0) - now) / 1000)) : 0;
-  const wiring = data.wiring;
+  const inFlight = Boolean(thinkingSince);
 
   const threadRow = (t: ChatThread) => (
     <div
@@ -500,12 +479,15 @@ export default function AskBays() {
                       <div className="mb-1 flex items-baseline gap-2 text-[11px]">
                         <span className="font-medium text-ink">Bays</span>
                         <span className="text-faint">{m.at}</span>
+                        {m.delivery === 'failed' && <span className="text-degraded">{m.note ?? 'Could not complete this.'}</span>}
                       </div>
                       <div className="text-[13.5px] leading-relaxed whitespace-pre-wrap text-ink">{m.text}</div>
+                      <StepsTrace steps={m.steps} />
                     </div>
                   </div>
                 ),
               )}
+              {thinkingSince && <Thinking since={thinkingSince} now={now} />}
             </div>
           </div>
         ) : (
@@ -517,11 +499,11 @@ export default function AskBays() {
 
         <div className="shrink-0 px-6 pb-4">
           <div className="mx-auto max-w-[72ch]">
-            {!wiring.can_send || wiring.delivery === 'none' ? (
-              <p className="mb-2 rounded-[10px] bg-degraded-soft px-3 py-2 text-[11.5px] leading-relaxed text-degraded">{wiring.note}</p>
-            ) : !wiring.can_read_answers ? (
-              <p className="mb-2 px-1 text-[11.5px] leading-relaxed text-faint">{wiring.note}</p>
-            ) : null}
+            {!data.connected && (
+              <p className="mb-2 rounded-[10px] bg-degraded-soft px-3 py-2 text-[11.5px] leading-relaxed text-degraded">
+                Ask Bays is not connected: the server has no API key for the Bays workflow. Anything sent will come back with that answer.
+              </p>
+            )}
             {micNote && <p className="fade-up mb-2 px-1 text-[11.5px] text-dim">{micNote}</p>}
 
             <div className="card flex items-end gap-1.5 p-2 transition-shadow focus-within:shadow-[var(--shadow-pop)]">
@@ -536,7 +518,7 @@ export default function AskBays() {
                     void send();
                   }
                 }}
-                placeholder={cooldownLeft > 0 ? `Bays refuses the same session inside 30 s · ${cooldownLeft}s` : listening ? 'Listening' : 'Ask Bays anything about the engine'}
+                placeholder={inFlight ? 'Bays is answering' : listening ? 'Listening' : 'Ask Bays anything about the engine'}
                 className="input min-h-[36px] flex-1 resize-none border-0 bg-transparent shadow-none focus:shadow-none"
                 style={{ height: 'auto' }}
               />
@@ -564,7 +546,7 @@ export default function AskBays() {
               <button
                 type="button"
                 onClick={() => void send()}
-                disabled={!draft.trim() || cooldownLeft > 0}
+                disabled={!draft.trim() || inFlight}
                 className="btn btn-primary h-8 w-8 rounded-full p-0"
                 aria-label="Send"
               >

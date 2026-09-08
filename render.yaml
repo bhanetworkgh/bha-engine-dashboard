@@ -1,0 +1,39 @@
+# Render blueprint for the BHA engine dashboard: one web service that serves
+# the built front end and the /api routes from the same origin.
+#
+# Secrets are set in the Render dashboard, never here. sync: false marks the
+# ones you must fill in by hand.
+services:
+  - type: web
+    name: bha-engine-dashboard
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    disk:
+      # Status-change history lives in SQLite under DATA_DIR. Without a disk
+      # the history restarts on every deploy; /api/status says which it is.
+      name: dashboard-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.0
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data
+      - key: AUTH_EMAIL
+        value: admin@bhanetwork.org
+      - key: AUTH_PASSWORD_HASH
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ASK_BAYS_URL
+        value: https://n8n.arupiautomates.cloud/webhook/dashboard-ask-bays
+      - key: ASK_BAYS_API_KEY
+        sync: false
+      - key: ASK_BAYS_MODEL_LABEL
+        value: Claude Sonnet 5.0

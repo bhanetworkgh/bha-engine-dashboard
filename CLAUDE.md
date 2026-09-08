@@ -30,10 +30,13 @@ Owner: Destiny Arupi, Engine Steward at BHA.
    Never fill a panel with plausible-looking filler to make it look complete.
 3. **Maintain `BUILD_LOG.md`** (see section 9). Append as you work, never
    rewrite earlier entries.
-4. **This app never talks to Airtable, BHARAG, Slack or n8n directly.** It calls
-   one endpoint. See section 4.
-5. **Ask before changing scope.** If a section seems to need a backend, a
-   database, or a new dependency, stop and raise it rather than building it.
+4. **The browser never talks to Airtable, BHARAG, Slack or n8n directly.** It
+   calls this repo's own server, and only the server talks to the engine. See
+   section 4. No engine key or credential is ever compiled into the bundle.
+5. **Ask before changing scope.** If a section seems to need a new dependency
+   or a new external service, stop and raise it rather than building it. The
+   server in `server/` was added on Destiny's instruction (2026-09-08) and
+   deliberately has no dependencies beyond Node.
 
 ---
 
@@ -55,30 +58,45 @@ Use them to ground your work rather than guessing:
 
 ## 4. Architecture
 
-A static front end. No backend of its own.
+A React front end and a small Node server, deployed together as one Render web
+service. The server serves the built front end and answers every `/api` call.
 
 ```
-Dashboard (this repo)  →  one JSON endpoint on the BHA engine  →  data sources
+Browser  →  server in this repo (/api, same origin)  →  one JSON endpoint on the BHA engine  →  data sources
 ```
 
-The engine endpoint fans out to Airtable, BHARAG and n8n execution history and
-returns one response. The dashboard does not know or care where anything came
-from.
+The server owns every secret: the login credential, the session signing key
+and the engine API key. It verifies sign-in, sets an HttpOnly session cookie,
+rejects any `/api` request without a live cookie, and is the only path from the
+browser to the engine. The engine endpoint fans out to Airtable, BHARAG and n8n
+execution history and returns one response. Neither side of this app knows or
+cares where anything came from.
 
-**Phase 1 (now): build against mock data.** Put every fixture behind a single
-data-access module — one file, one function per section. Swapping to the live
-endpoint must be a change in that module only, never in components.
+**Phase 1 (now): the server holds the fixtures.** Every browser read goes
+through one module, `src/data/index.ts`, to `/api`. Every server read is
+derived in `server/src/engine.ts`; records with a status live in
+`server/src/store.ts` (SQLite under `DATA_DIR`, seeded from the fixtures on
+first boot). Swapping to the live endpoint is a change in those two server
+files only, never in components.
 
 **Phase 2 (later): the live endpoint replaces the fixtures.** Design the mock
 shapes to be plausible and consistent, because they become the contract.
 
-**Auth:** one shared login for the whole team, same as BHARAG's console. Not
-per-user accounts. Password is posted to the engine's login endpoint
-(`VITE_AUTH_URL`), which returns a session token the app holds for the tab and
-sends as a bearer on every engine call. No user management, no roles, no
-signup. Without `VITE_AUTH_URL` the app runs a preview gate in local dev only.
+**Counts are computed by the server from raw rows** (decision 2026-09-08).
+Nothing upstream keeps a status-change history, so the server records one and
+derives weekly volume, open versus closed and median time to close from it. A
+metric the data cannot support is null with a note, and the note is shown.
 
----
+**Ask Bays** goes `browser → POST /api/ask → server → dashboard-ask-bays
+workflow` with the key in `x-api-key` from the server's environment. The
+thread's `session_id` is stable for its life and is Bays's memory. The reply's
+`steps` are shown under the answer; empty means nothing is shown.
+
+**Auth:** one shared login for the whole team, same as BHARAG's console. Not
+per-user accounts. The password is posted to `/api/auth/login`; the server
+checks it against `AUTH_PASSWORD_HASH` and sets a twelve-hour cookie. Five
+failures from one address lock it for thirty seconds. No user management, no
+roles, no signup.
 
 ## 5. Design
 
