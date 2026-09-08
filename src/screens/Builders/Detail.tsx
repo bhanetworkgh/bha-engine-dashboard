@@ -10,6 +10,9 @@ import {
   RowAction,
   RowActions,
   SourceLink,
+  Stat,
+  StatCell,
+  StatStrip,
   TagRow,
   Th,
 } from '../../components/ui';
@@ -22,7 +25,7 @@ export function BuilderPage() {
 
   if (status === 'loading') return <Loading />;
   if (status === 'error') return <LoadFailed error={error} />;
-  if (!data) return <EmptyState>No builder is recorded under that id.</EmptyState>;
+  if (!data) return <EmptyState compact>No builder is recorded under that id.</EmptyState>;
 
   const b = data.builder;
 
@@ -31,47 +34,36 @@ export function BuilderPage() {
       <PageHeader
         title={b.name}
         subtitle={laneLabel(b.lane)}
-        right={<Link to="/builders" className="text-[12px] text-faint hover:text-ink">← all builders</Link>}
+        right={<Link to="/builders" className="btn btn-ghost btn-sm">All builders</Link>}
       />
 
-      <div className="grid shrink-0 grid-cols-2 border-b border-line md:grid-cols-5">
-        <div className="border-r border-line px-4 py-2">
-          <div className="text-[11px] text-faint">Open loops</div>
-          <div className="tabular text-[17px] leading-tight text-gold">{b.open_loops}</div>
-        </div>
-        <div className="border-r border-line px-4 py-2">
-          <div className="text-[11px] text-faint">Oldest loop</div>
-          <div className={`tabular text-[17px] leading-tight ${ageTone(b.oldest_loop_days)}`}>
-            {b.oldest_loop_days}d
-          </div>
-        </div>
-        <div className="border-r border-line px-4 py-2">
-          <div className="text-[11px] text-faint">Entries this week</div>
-          <div className="tabular text-[17px] leading-tight">{b.entries_this_week}</div>
-        </div>
-        <div className="border-r border-line px-4 py-2">
-          <div className="text-[11px] text-faint">Contract</div>
-          <div className={`text-[17px] leading-tight ${b.contract_status === 'signed' ? '' : 'text-degraded'}`}>
-            {b.contract_status}
-          </div>
-        </div>
-        <div className="px-4 py-2">
-          <div className="text-[11px] text-faint">Last activity</div>
-          <div className="tabular text-[13px] leading-tight text-dim">{b.last_activity}</div>
-        </div>
-      </div>
+      <StatStrip cols={5}>
+        <StatCell>
+          <Stat label="Open loops" value={b.open_loops} tone="accent" />
+        </StatCell>
+        <StatCell>
+          <Stat label="Oldest loop" value={`${b.oldest_loop_days}d`} tone={b.oldest_loop_days >= 30 ? 'failing' : b.oldest_loop_days >= 14 ? 'degraded' : 'default'} />
+        </StatCell>
+        <StatCell>
+          <Stat label="Entries this week" value={b.entries_this_week} />
+        </StatCell>
+        <StatCell>
+          <Stat label="Contract" value={b.contract_status} tone={b.contract_status === 'signed' ? 'default' : 'degraded'} />
+        </StatCell>
+        <StatCell>
+          <Stat label="Last activity" value={<span className="text-[16px]">{b.last_activity}</span>} tone="dim" />
+        </StatCell>
+      </StatStrip>
 
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        <h3 className="border-b border-line px-4 py-1.5 text-[11px] tracking-[0.08em] text-faint uppercase">
-          Loops held here
-        </h3>
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-6 pb-6 md:px-8">
+        <h3 className="pb-2 text-[13px] font-medium">Loops held here</h3>
         {data.loops.length === 0 ? (
-          <EmptyState>
+          <EmptyState compact>
             This dashboard holds no individual loop rows for {b.name} in the selected lane.
             The count above is the table total; the rows are what has been pulled through.
           </EmptyState>
         ) : (
-          <table className="table-cards w-full text-[12px]">
+          <div className="card overflow-hidden"><table className="table-cards w-full text-[12.5px]">
             <thead>
               <tr>
                 <Th className="text-right">age</Th>
@@ -92,25 +84,23 @@ export function BuilderPage() {
                   <td className="td"><TagRow tags={l.tags} /></td>
                   <td className="td card-meta text-faint">{l.status}</td>
                   <td className="td"><SourceLink source={l.source} /></td>
-                  <td className="td card-actions">
+                  <td className="td card-actions td-actions">
                     <RowActions>
-                      <RowAction label="close" onClick={() => act('loop.close', l.id)} />
-                      <RowAction label="update" onClick={() => act('loop.update', l.id)} />
+                      <RowAction label="Close" onClick={() => act('loop.close', l.id)} />
+                      <RowAction label="Update" onClick={() => act('loop.update', l.id)} />
                     </RowActions>
                   </td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
 
-        <h3 className="border-y border-line px-4 py-1.5 text-[11px] tracking-[0.08em] text-faint uppercase">
-          Codex entries
-        </h3>
+        <h3 className="pt-6 pb-2 text-[13px] font-medium">Codex entries</h3>
         {data.entries.length === 0 ? (
-          <EmptyState>No Codex entries from {b.name} in the selected lane.</EmptyState>
+          <EmptyState compact>No Codex entries from {b.name} in the selected lane.</EmptyState>
         ) : (
-          <table className="table-cards w-full text-[12px]">
+          <div className="card overflow-hidden"><table className="table-cards w-full text-[12.5px]">
             <thead>
               <tr>
                 <Th>logged</Th><Th>week</Th><Th>type</Th><Th>title</Th><Th>ingested</Th><Th>source</Th>
@@ -130,16 +120,14 @@ export function BuilderPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
 
-        <h3 className="border-y border-line px-4 py-1.5 text-[11px] tracking-[0.08em] text-faint uppercase">
-          Incidents opened on their work
-        </h3>
+        <h3 className="pt-6 pb-2 text-[13px] font-medium">Incidents opened on their work</h3>
         {data.incidents.length === 0 ? (
-          <EmptyState>No incidents are attributed to {b.name} in the selected lane.</EmptyState>
+          <EmptyState compact>No incidents are attributed to {b.name} in the selected lane.</EmptyState>
         ) : (
-          <table className="table-cards w-full text-[12px]">
+          <div className="card overflow-hidden"><table className="table-cards w-full text-[12.5px]">
             <thead>
               <tr>
                 <Th>incident</Th><Th>summary</Th><Th>class</Th><Th>state</Th><Th>opened</Th><Th>source</Th>
@@ -159,7 +147,7 @@ export function BuilderPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
       </div>
     </div>

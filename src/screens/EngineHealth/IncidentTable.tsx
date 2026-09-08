@@ -90,12 +90,12 @@ export function IncidentTable({
                   <td className="td">
                     <SourceLink source={i.source} />
                   </td>
-                  <td className="td card-actions">
+                  <td className="td card-actions td-actions">
                     <RowActions>
-                      <RowAction label="retry" onClick={() => act('incident.retry', i.id)} />
-                      <RowAction label="escalate" onClick={() => act('incident.escalate', i.id)} />
+                      <RowAction label="Retry" onClick={() => act('incident.retry', i.id)} />
+                      <RowAction label="Escalate" onClick={() => act('incident.escalate', i.id)} />
                       <RowAction
-                        label="open in Slack"
+                        label="Open in Slack"
                         onClick={() => act('incident.open-slack', i.id)}
                       />
                     </RowActions>
@@ -104,11 +104,9 @@ export function IncidentTable({
                 {expanded === i.id && (
                   <tr>
                     <td className="td" />
-                    <td className="td card-full td-wrap" colSpan={15}>
+                    <td className="td card-full td-wrap bg-raised" colSpan={15}>
                       <div className="py-1">
-                        <div className="mb-1 text-[11px] tracking-[0.08em] text-faint uppercase">
-                          Action footprint
-                        </div>
+                        <div className="kicker mb-1">Action footprint</div>
                         <table className="text-[12px]">
                           <tbody>
                             {i.actions.map((a, n) => (

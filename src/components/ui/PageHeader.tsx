@@ -1,22 +1,30 @@
 import type { ReactNode } from 'react';
 
-/** Title, optional subtitle, and a slot on the right for in-page sub-tabs. */
+/**
+ * Title, optional subtitle, and a slot on the right for in-page controls.
+ * Every screen opens with this so the rhythm is identical from page to page.
+ */
 export function PageHeader({
   title,
   subtitle,
   right,
+  below,
 }: {
   title: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
   right?: ReactNode;
+  below?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-b border-line px-5 py-3">
-      <div className="flex items-baseline gap-3">
-        <h1 className="text-[15px] font-medium">{title}</h1>
-        {subtitle && <span className="text-faint">{subtitle}</span>}
+    <div className="shrink-0 px-6 pt-6 pb-3 md:px-8">
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+        <div>
+          <h1 className="font-display text-[26px] leading-none tracking-[-0.01em]">{title}</h1>
+          {subtitle && <div className="mt-2 text-[13px] text-dim">{subtitle}</div>}
+        </div>
+        {right && <div className="flex flex-wrap items-center gap-2">{right}</div>}
       </div>
-      {right}
+      {below && <div className="mt-4">{below}</div>}
     </div>
   );
 }

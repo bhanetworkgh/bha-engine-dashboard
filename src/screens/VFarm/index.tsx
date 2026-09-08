@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useData } from '../../app/useData';
 import { getVFarm } from '../../data';
-import { LoadFailed, Loading, PageHeader } from '../../components/ui';
+import { LoadFailed, Loading, PageHeader, Tabs } from '../../components/ui';
 import { Lifecycle } from './Lifecycle';
 import { Live } from './Live';
 import { Readiness } from './Readiness';
@@ -21,22 +21,7 @@ export default function VFarm() {
       <PageHeader
         title="vFarm"
         subtitle={`${data.days_to_halloween} days to Halloween`}
-        right={
-          <div className="flex flex-wrap gap-x-4 gap-y-1">
-            {TABS.map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTab(t)}
-                className={`border-b-2 pb-1 text-[12px] ${
-                  tab === t ? 'border-gold text-ink' : 'border-transparent text-faint hover:text-dim'
-                }`}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-        }
+        below={<Tabs tabs={TABS} value={tab} onChange={setTab} />}
       />
 
       {tab === 'Live' && <Live data={data} />}

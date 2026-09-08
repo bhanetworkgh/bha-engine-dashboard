@@ -496,3 +496,179 @@ Verified:  Empty submit, email-only submit, wrong email, and correct credentials
 Known:     The deep-link check passes under `vite dev` because the dev server
            serves index.html for unknown paths. In production that still depends
            on the host rewrite documented in README under Deployment.
+
+---
+
+## 2026-09-08 11:10 — Session 5: UI overhaul, auth, loop actions, Ask Bays wiring
+
+Intent:    Destiny's brief, verbatim in spirit: the dashboard "looks completely
+           horrible"; make it "ultra modern" — "as if Claude and Apple decided
+           to do a collaboration". Overview should be a real dashboard with
+           metrics, percentages and charts, each card opening its system. Open
+           loops should filter by builder and by open / in progress / closed,
+           update live, and let you open or close a loop from the page. Put
+           actual authentication in place. Wire Ask Bays to the real workflow
+           through the callback URL pattern. Add light and dark mode. The gold
+           and black palette is no longer required.
+
+Files:     Design system: src/index.css (rewritten), src/app/theme.tsx (new),
+           src/main.tsx, src/vite-env.d.ts (new).
+           Primitives: src/components/ui/{Card,Charts,Icons,Tabs}.tsx (new),
+           Dot, EmptyState, LoadFailed, Loading, PageHeader, RowActions,
+           SourceLink, Table, TagRow (restyled), index.ts.
+           Shell: src/components/Layout.tsx (rewritten).
+           Data: src/data/engine.ts (new), src/data/index.ts (overview series,
+           rates, auth, Bays send/poll, loop mutations), src/data/types.ts,
+           src/data/fixtures/loops.ts (ten closed loops, closed counts).
+           Session: src/app/session.tsx (rewritten).
+           Screens: Overview, Login, AskBays, OpenLoops/{index,Loops,NewLoop,
+           ReviewQueue,Reconciliation} rewritten; Twin/{index,Summary,Gaps,
+           Records,Runs}, VFarm/{index,Live}, EngineHealth/{MetricsRow,
+           IncidentTable,StateTrack}, Codex, BuildPatterns, Commercial,
+           Builders/{List,Detail} restyled onto the new primitives.
+           Docs: README.md (env vars, contracts, layout), CLAUDE.md section 5
+           and the auth paragraph in section 4.
+
+Problem:   1. `src/data/engine.ts(10,25): error TS2339: Property 'env' does not
+              exist on type 'ImportMeta'.` The repo had no Vite client types
+              reference, so `import.meta.env` was untyped.
+           2. `src/data/index.ts(688,34): error TS1355: A 'const' assertions can
+              only be applied to references to enum members, or string, number,
+              boolean, array, or object literals.` — an `as const` on a
+              ternary expression inside an arrow function.
+           3. First render of the Overview bottom row at 1440 gave the two chart
+              cards about 125px each: builder names truncated to "De…" and the
+              card titles wrapped to four lines.
+           4. The BHA mark (public/logo.svg carries a full-bleed #FDFDFD plate
+              as its first path) rendered as a bright grey disc on every dark
+              surface — sidebar, login, the Ask Bays idle mark.
+           5. Making the row-action column sticky with a panel-coloured
+              background hid the columns beneath it whenever the table was
+              wider than its container, because the invisible (opacity 0)
+              actions still occupied a painted 330px cell.
+           6. The Overview's "what broke" events referenced loop rows by array
+              index (`f.LOOPS[f.LOOPS.length - 2]`), which the ten appended
+              closed-loop seeds would have silently pointed at the wrong row.
+
+Fix:       1. Added src/vite-env.d.ts with `/// <reference types="vite/client" />`.
+           2. Typed the helper's return explicitly instead of asserting.
+           3. Bottom row grid is now `240px 260px 1fr 1fr` at xl; the engine
+              card's self-heal block was tightened to three short lines.
+           4. A `.mark` class: in dark mode the image gets
+              `filter: invert(1) hue-rotate(180deg)`, which turns the white
+              plate near-black and rotates the inverted gold back to warm. The
+              SVG file itself is untouched.
+           5. The sticky cell is transparent at rest and only takes the hover
+              colour when its row is hovered or focused — at which point it
+              matches the row, so covering scrolled-under cells is invisible.
+           6. Overview events now look loops up by id (`loopById`).
+
+Decision:  - **Tokens, not colours.** Every colour is a CSS variable defined once
+             for light and once for dark in index.css, exposed to Tailwind via
+             `@theme inline`. Components use `bg-panel`, `text-dim`, and so on;
+             none names a hex. `gold` and `gold-dim` remain as aliases of the
+             accent so nothing untouched breaks.
+           - **Palette.** Warm off-white paper (#f4f3ef) and warm charcoal
+             (#151412), white / warm-dark cards with 14px radii and a hairline,
+             one terracotta accent. Amber and red still carry meaning only.
+             CLAUDE.md section 5 updated to say so, with the date, so the next
+             session does not restore gold and black from the old spec.
+           - **Type.** System sans everywhere; a serif display face (Iowan Old
+             Style / Charter / Georgia) for page titles and headline numbers
+             only. Still two weights. On the Linux screenshot box it falls to
+             DejaVu Serif; on the team's Macs it will be Iowan.
+           - **Charts are inline SVG in src/components/ui/Charts.tsx**, no
+             dependency (CLAUDE.md rule 5). Sparkline, Bars, HBar, Ring, Band.
+             Every series is derived in the data module from fixture rows that
+             already exist — loops per day from `raised_at`, incidents per day
+             from `opened_at`, entries per ISO week, asks by outcome, incidents
+             by class. Nothing on the Overview is typed in as a number.
+           - **Overview still fits one screen.** Measured: `main` scrollHeight
+             equals clientHeight at 1440x900 in both themes. The bottom row
+             scrolls inside its cards, not the page.
+           - **Open loops.** Builder picker (Everyone + one per builder, with
+             count and oldest age), a segmented status filter (open / in
+             progress / closed / all, each with a count) and row actions:
+             Close, Start, Back to open, Reopen. Actions call
+             `setLoopStatus` in the data module; the page holds a working copy
+             and updates the row in place, with a toast. `createLoop` opens a
+             new loop from an inline form. When `VITE_ENGINE_API_URL` is set
+             these become `PATCH /loops/:id` and `POST /loops`; otherwise they
+             mutate the held fixtures and keep the per-owner totals in step.
+             Ten closed loops were added to the fixtures so the closed filter
+             has something to show; their `closed_at` is set explicitly.
+           - **Auth.** `signIn` in the data module posts the credential to
+             `VITE_AUTH_URL` (defaulting to `<api>/auth/login`) and returns
+             the engine's session `{token, expires_at, label}`. The session
+             provider stores it in sessionStorage, installs it as the bearer
+             on the engine client, signs out at the expiry the engine gave, and
+             signs out on any 401. Three modes, shown on the login screen:
+             `engine` when the URL is set; `preview` in local dev or with
+             `VITE_AUTH_PREVIEW=1` (email checked, password not — stated on the
+             screen); `none` otherwise, where the button is disabled and the
+             screen says which variable is missing. So a production build with
+             nothing configured admits nobody, which is what "actual auth"
+             has to mean for a static site.
+           - **No n8n workflow was created for auth.** Rule 5 says ask before
+             adding a backend. The client side and the endpoint contract are
+             done and documented in README; standing up the login endpoint is
+             Destiny's call.
+           - **Ask Bays.** Read from the live `Bays` workflow (iEiBm8vn3JANZRR2)
+             on 2026-09-08: the external-ask shape at Parse & Classify is
+             `prompt, session_id, builder_id, lane_id, source` plus a delivery
+             target — `callback` (an http(s) URL) and/or `channel_id` — gated by
+             `x-api-key`. The Respond to Webhook node fires straight off the
+             Webhook with an empty body; the Conversational Agent runs with
+             `waitForSubWorkflow: false`. So the answer never comes back on
+             the request; it goes to the callback. `sendToBays` posts exactly
+             that shape; `pollBaysAnswer` reads `VITE_BAYS_ANSWER_URL` until an
+             answer or a two-minute timeout. The Dedup Check's 30-second loop
+             guard on `session_id` is enforced as a per-thread cooldown in the
+             composer, with a countdown in the placeholder, because the
+             workflow would otherwise drop the second message silently.
+           - **Every wiring state is stated on screen**, from `getBaysWiring`:
+             not connected (no URL/key), no delivery target, connected but no
+             answer endpoint (answer goes to Slack or the callback and will not
+             appear here), and fully connected. A message that was not sent
+             says so under the bubble. Nothing pretends a reply is coming.
+           - **Chat history persists in localStorage**, seeded threads plus
+             anything typed here, because Bays holds no memory and the panel
+             said "stored by this dashboard". A session_id is minted per thread
+             (`DASH-…`) and shown under the composer.
+           - **The `x-api-key` in a VITE_ variable is in the bundle.** Flagged
+             in README. The proper shape is a proxy route on the engine
+             endpoint; the direct mode exists so the round trip can be tested
+             before that route is built. Nothing in this repo contains the key.
+           - **Sticky action column** on every table so reaching an action
+             never scrolls the title away — visible in the first sweep when
+             Playwright's hover scrolled the loop table 300px right.
+           - **Sentence case on every row action** (Close, Re-run, Open in
+             Slack); the old lower-case labels read as unfinished next to the
+             new type.
+
+Verified:  `npm run build` passes (tsc -b + vite build). Playwright sweep at
+           1440x900 in light and in dark: login, all eleven routes, all sub-tab
+           screens render; zero console errors, zero page errors, no horizontal
+           overflow on any route. Open loops: closing the first row drops the
+           open count 43 → 42 and the closed filter shows 11 (ten seeded plus
+           the one just closed); the new-loop form adds a row and the open
+           count returns to 43. Ask Bays with nothing configured: the message
+           lands in the thread with "not sent" under it and the amber wiring
+           note above the composer. Overview: `main` scrollHeight 840 =
+           clientHeight 840, both themes. Phone at 390: drawer opens and
+           closes, loops become cards, no overflow.
+
+Known:     - The answer store behind `VITE_BAYS_CALLBACK_URL` /
+             `VITE_BAYS_ANSWER_URL` does not exist on the engine. Until it
+             does, a configured front door will accept the ask and the
+             dashboard will say the answer went to the callback or Slack.
+           - The Bays front door's CORS is n8n's default; if the browser
+             preflight is refused in production the `x-api-key` header is the
+             reason, and the fix is the engine-side proxy route above.
+           - The tile grid on Overview is five across with four on the second
+             row; the empty slot is accepted rather than stretching one tile.
+           - Review queue approve/reject and reconciliation actions still log
+             through `act()`; only loop status and creation are real writes.
+
+Not done:  BUILD_LOG.md still not uploaded to Google Drive (CLAUDE.md section 9),
+           pending Destiny confirming the target folder.
