@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../app/useData';
 import { useSession } from '../app/session';
 import {
+  forgetThread,
   getAskBays,
   pollBaysAnswer,
   saveLocalThreads,
@@ -18,6 +19,8 @@ const COOLDOWN_MS = 30_000;
 /** How long to wait for an answer at the callback before saying so. */
 const ANSWER_TIMEOUT_MS = 120_000;
 const POLL_MS = 3_000;
+/** The builder_id sent with every ask from this shared login. */
+const ASKER = 'admin';
 
 function stamp(): string {
   const d = new Date();
@@ -37,7 +40,7 @@ function DeliveryLine({ m }: { m: ChatMessage }) {
       : m.delivery === 'sent'
         ? 'Accepted by the front door'
         : m.delivery === 'waiting'
-          ? 'Waiting for the answer at the callback'
+          ? 'Waiting for the answer'
           : m.delivery === 'timeout'
             ? (m.note ?? 'No answer arrived in time.')
             : (m.note ?? 'Not sent.');
@@ -51,26 +54,102 @@ function DeliveryLine({ m }: { m: ChatMessage }) {
   );
 }
 
+/** Browser dictation, where the browser offers it. Nothing is sent anywhere. */
+type Recognition = {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((e: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+function recognitionCtor(): (new () => Recognition) | null {
+  const w = window as unknown as { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
+
+/** The three-dot menu on a thread: pin, rename, delete. */
+function ThreadMenu({
+  thread,
+  onPin,
+  onRename,
+  onDelete,
+}: {
+  thread: ChatThread;
+  onPin: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+  const item = (label: string, I: React.ComponentType<React.SVGProps<SVGSVGElement>>, fn: () => void, danger?: boolean) => (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        setOpen(false);
+        fn();
+      }}
+      className={`flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-1.5 text-left text-[12.5px] hover:bg-hover ${danger ? 'text-failing' : ''}`}
+    >
+      <I className={danger ? '' : 'text-dim'} />
+      {label}
+    </button>
+  );
+  return (
+    <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Thread options"
+        className={cx('btn btn-ghost h-7 w-7 rounded-full p-0 transition-opacity', open ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100')}
+      >
+        <Icon.more />
+      </button>
+      {open && (
+        <div className="card fade-up absolute top-full right-0 z-20 mt-1 w-[150px] p-1 shadow-[var(--shadow-pop)]">
+          {item(thread.pinned ? 'Unpin' : 'Pin', Icon.pin, onPin)}
+          {item('Rename', Icon.edit, onRename)}
+          {item('Delete', Icon.trash, onDelete, true)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AskBays() {
-  const { lane, me } = useSession();
+  const { lane } = useSession();
   const { status, data, error } = useData(getAskBays);
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState('');
   const [panelOpen, setPanelOpen] = useState(false);
-  const [asker, setAsker] = useState(me);
+  const [panelHidden, setPanelHidden] = useState(false);
+  const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
+  const [listening, setListening] = useState(false);
+  const [micNote, setMicNote] = useState<string | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState<Record<string, number>>({});
   const [now, setNow] = useState(Date.now());
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pollers = useRef<Record<string, number>>({});
+  const recog = useRef<Recognition | null>(null);
 
   useEffect(() => {
     if (data) setThreads(data.threads);
   }, [data]);
 
-  // A one-second clock only while a cooldown is running.
   useEffect(() => {
     const anyActive = Object.values(cooldownUntil).some((t) => t > Date.now());
     if (!anyActive) return;
@@ -78,73 +157,80 @@ export default function AskBays() {
     return () => clearInterval(i);
   }, [cooldownUntil]);
 
-  useEffect(() => () => Object.values(pollers.current).forEach((id) => clearInterval(id)), []);
+  useEffect(
+    () => () => {
+      Object.values(pollers.current).forEach((id) => clearInterval(id));
+      recog.current?.stop();
+    },
+    [],
+  );
 
   const active = useMemo(() => threads.find((t) => t.id === activeId) ?? null, [threads, activeId]);
   const messages = active?.messages ?? [];
   const started = messages.length > 0;
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages.length, activeId]);
 
+  const query = search.trim().toLowerCase();
   const visibleThreads = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return threads;
-    return threads.filter(
-      (t) => t.title.toLowerCase().includes(q) || t.messages.some((m) => m.text.toLowerCase().includes(q)),
-    );
-  }, [threads, search]);
+    if (!query) return threads;
+    return threads.filter((t) => t.title.toLowerCase().includes(query) || t.messages.some((m) => m.text.toLowerCase().includes(query)));
+  }, [threads, query]);
+  const pinned = visibleThreads.filter((t) => t.pinned);
+  const recent = visibleThreads.filter((t) => !t.pinned);
 
   function persist(next: ChatThread[]) {
     setThreads(next);
     saveLocalThreads(next);
   }
 
-  function patchMessage(threadId: string, messageId: string, patch: Partial<ChatMessage>) {
+  /** Any change to a thread makes it local, so it persists in this browser. */
+  function updateThread(id: string, patch: Partial<ChatThread> | ((t: ChatThread) => ChatThread)) {
     setThreads((prev) => {
-      const next = prev.map((t) =>
-        t.id === threadId
-          ? { ...t, messages: t.messages.map((m) => (m.id === messageId ? { ...m, ...patch } : m)) }
-          : t,
-      );
+      const next = prev.map((t) => (t.id === id ? { ...(typeof patch === 'function' ? patch(t) : { ...t, ...patch }), local: true } : t));
       saveLocalThreads(next);
       return next;
     });
   }
 
+  function patchMessage(threadId: string, messageId: string, patch: Partial<ChatMessage>) {
+    updateThread(threadId, (t) => ({ ...t, messages: t.messages.map((m) => (m.id === messageId ? { ...m, ...patch } : m)) }));
+  }
+
   function appendMessage(threadId: string, m: ChatMessage) {
-    setThreads((prev) => {
-      const next = prev.map((t) => (t.id === threadId ? { ...t, messages: [...t.messages, m], updated_at: stamp() } : t));
-      saveLocalThreads(next);
-      return next;
-    });
+    updateThread(threadId, (t) => ({ ...t, messages: [...t.messages, m], updated_at: stamp() }));
+  }
+
+  function deleteThread(id: string) {
+    forgetThread(id);
+    persist(threads.filter((t) => t.id !== id));
+    if (activeId === id) setActiveId(null);
   }
 
   function startPolling(threadId: string, messageId: string, sessionId: string) {
     const startedAt = Date.now();
     const tick = async () => {
       const res = await pollBaysAnswer(sessionId);
-      if (res.status === 'answered') {
+      const stop = () => {
         clearInterval(pollers.current[threadId]);
         delete pollers.current[threadId];
+      };
+      if (res.status === 'answered') {
+        stop();
         patchMessage(threadId, messageId, { delivery: 'answered' });
         appendMessage(threadId, { id: `bays-${Date.now()}`, role: 'bays', text: res.text, at: res.at });
         return;
       }
       if (res.status === 'unavailable') {
-        clearInterval(pollers.current[threadId]);
-        delete pollers.current[threadId];
+        stop();
         patchMessage(threadId, messageId, { delivery: 'timeout', note: res.reason });
         return;
       }
       if (Date.now() - startedAt > ANSWER_TIMEOUT_MS) {
-        clearInterval(pollers.current[threadId]);
-        delete pollers.current[threadId];
-        patchMessage(threadId, messageId, {
-          delivery: 'timeout',
-          note: 'No answer reached the callback within two minutes. Bays may still reply in Slack.',
-        });
+        stop();
+        patchMessage(threadId, messageId, { delivery: 'timeout', note: 'No answer reached the callback within two minutes. Bays may still reply in Slack.' });
       }
     };
     pollers.current[threadId] = window.setInterval(() => void tick(), POLL_MS);
@@ -170,8 +256,7 @@ export default function AskBays() {
       setActiveId(thread.id);
     }
     const sessionId = thread.session_id ?? newSessionId();
-    const until = cooldownUntil[thread.id] ?? 0;
-    if (until > Date.now()) return;
+    if ((cooldownUntil[thread.id] ?? 0) > Date.now()) return;
 
     const mine: ChatMessage = {
       id: `me-${Date.now()}`,
@@ -183,17 +268,16 @@ export default function AskBays() {
     };
     persist(
       list.map((t) =>
-        t.id === thread!.id
-          ? { ...t, local: true, session_id: sessionId, messages: [...t.messages, mine], updated_at: stamp() }
-          : t,
+        t.id === thread!.id ? { ...t, local: true, session_id: sessionId, messages: [...t.messages, mine], updated_at: stamp() } : t,
       ),
     );
     setDraft('');
+    if (inputRef.current) inputRef.current.style.height = 'auto';
 
     if (!data.wiring.can_send) return;
 
     const lane_id: Lane = lane === 'all' ? 'ENGINE_INTERNAL' : lane;
-    const result = await sendToBays({ session_id: sessionId, prompt: text, builder_id: asker, lane: lane_id });
+    const result = await sendToBays({ session_id: sessionId, prompt: text, builder_id: ASKER, lane: lane_id });
     if (!result.ok) {
       patchMessage(thread.id, mine.id, { delivery: 'failed', note: result.error });
       return;
@@ -213,6 +297,38 @@ export default function AskBays() {
     }
   }
 
+  function toggleMic() {
+    if (listening) {
+      recog.current?.stop();
+      return;
+    }
+    const Ctor = recognitionCtor();
+    if (!Ctor) {
+      setMicNote('This browser does not offer dictation. Safari and Chrome do.');
+      setTimeout(() => setMicNote(null), 4000);
+      return;
+    }
+    const r = new Ctor();
+    r.lang = navigator.language || 'en-GB';
+    r.interimResults = true;
+    r.continuous = true;
+    const base = draft;
+    r.onresult = (e) => {
+      let text = '';
+      for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
+      setDraft((base ? `${base} ` : '') + text.trim());
+    };
+    r.onend = () => setListening(false);
+    r.onerror = () => {
+      setListening(false);
+      setMicNote('Dictation stopped. Check the microphone permission.');
+      setTimeout(() => setMicNote(null), 4000);
+    };
+    recog.current = r;
+    setListening(true);
+    r.start();
+  }
+
   function newChat() {
     setActiveId(null);
     setDraft('');
@@ -225,6 +341,57 @@ export default function AskBays() {
 
   const cooldownLeft = active ? Math.max(0, Math.ceil(((cooldownUntil[active.id] ?? 0) - now) / 1000)) : 0;
   const wiring = data.wiring;
+
+  const threadRow = (t: ChatThread) => (
+    <div
+      key={t.id}
+      role="button"
+      tabIndex={0}
+      onClick={() => {
+        setActiveId(t.id);
+        setPanelOpen(false);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') setActiveId(t.id);
+      }}
+      className={`group flex w-full items-center gap-1 rounded-[10px] px-3 py-2 text-left transition-colors ${t.id === activeId ? 'bg-raised' : 'hover:bg-hover'}`}
+    >
+      {renaming?.id === t.id ? (
+        <input
+          autoFocus
+          value={renaming.title}
+          onChange={(e) => setRenaming({ id: t.id, title: e.target.value })}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              updateThread(t.id, { title: renaming.title.trim() || t.title });
+              setRenaming(null);
+            }
+            if (e.key === 'Escape') setRenaming(null);
+          }}
+          onBlur={() => {
+            updateThread(t.id, { title: renaming.title.trim() || t.title });
+            setRenaming(null);
+          }}
+          className="input h-7 flex-1 px-2 text-[12.5px]"
+        />
+      ) : (
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            {t.pinned && <Icon.pin className="shrink-0 text-faint" width={11} height={11} />}
+            <span className="truncate text-[12.5px]">{t.title}</span>
+          </div>
+          <div className="tabular mt-0.5 text-[11px] text-faint">{t.updated_at}</div>
+        </div>
+      )}
+      <ThreadMenu
+        thread={t}
+        onPin={() => updateThread(t.id, { pinned: !t.pinned })}
+        onRename={() => setRenaming({ id: t.id, title: t.title })}
+        onDelete={() => deleteThread(t.id)}
+      />
+    </div>
+  );
 
   return (
     <div className="flex h-full min-h-0">
@@ -254,22 +421,22 @@ export default function AskBays() {
             </div>
           </div>
         ) : (
-          /* Empty state: the mark, centred and large. Nothing else until the user types. */
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5">
             <img src="/logo.svg" alt="BHA" className="mark idle-mark h-32 w-32" />
             <p className="font-display text-[22px] text-dim">Ask Bays</p>
           </div>
         )}
 
-        <div className="shrink-0 px-6 pb-5">
+        <div className="shrink-0 px-6 pb-4">
           <div className="mx-auto max-w-[72ch]">
             {!wiring.can_send || wiring.delivery === 'none' ? (
               <p className="mb-2 rounded-[10px] bg-degraded-soft px-3 py-2 text-[11.5px] leading-relaxed text-degraded">{wiring.note}</p>
             ) : !wiring.can_read_answers ? (
               <p className="mb-2 px-1 text-[11.5px] leading-relaxed text-faint">{wiring.note}</p>
             ) : null}
+            {micNote && <p className="fade-up mb-2 px-1 text-[11.5px] text-dim">{micNote}</p>}
 
-            <div className="card flex items-end gap-2 p-2">
+            <div className="card flex items-end gap-1.5 p-2 transition-shadow focus-within:shadow-[var(--shadow-pop)]">
               <textarea
                 ref={inputRef}
                 value={draft}
@@ -281,7 +448,7 @@ export default function AskBays() {
                     void send();
                   }
                 }}
-                placeholder={cooldownLeft > 0 ? `Bays refuses the same session inside 30 s · ${cooldownLeft}s` : 'Ask Bays anything about the engine'}
+                placeholder={cooldownLeft > 0 ? `Bays refuses the same session inside 30 s · ${cooldownLeft}s` : listening ? 'Listening' : 'Ask Bays anything about the engine'}
                 className="input max-h-40 min-h-[36px] flex-1 resize-none border-0 bg-transparent shadow-none focus:shadow-none"
                 style={{ height: 'auto' }}
                 onInput={(e) => {
@@ -290,19 +457,15 @@ export default function AskBays() {
                   el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
                 }}
               />
-              <select
-                value={asker}
-                onChange={(e) => setAsker(e.target.value)}
-                className="input h-8 w-auto pr-7 text-[12px]"
-                aria-label="Asking as"
-                title="builder_id sent with the ask"
+              <button
+                type="button"
+                onClick={toggleMic}
+                aria-label={listening ? 'Stop dictation' : 'Dictate a message'}
+                aria-pressed={listening}
+                className={cx('btn btn-ghost h-8 w-8 rounded-full p-0', listening && 'bg-accent-soft text-accent-ink')}
               >
-                {data.builders.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
+                {listening ? <span className="pulse-dot"><Icon.mic /></span> : <Icon.mic />}
+              </button>
               <button
                 type="button"
                 onClick={() => void send()}
@@ -312,76 +475,85 @@ export default function AskBays() {
               >
                 <Icon.send />
               </button>
-              <button
-                type="button"
-                onClick={() => setPanelOpen(true)}
-                aria-label="Open chat history"
-                className="btn btn-ghost h-8 md:hidden"
-              >
+              <button type="button" onClick={() => setPanelOpen(true)} aria-label="Open chat history" className="btn btn-ghost h-8 md:hidden">
                 Chats
               </button>
             </div>
             <div className="mt-1.5 flex items-center justify-between px-1 text-[11px] text-faint">
               <span>Enter to send · shift+enter for a new line</span>
-              <span className="tabular">
-                lane {lane === 'all' ? 'engine_internal' : lane.toLowerCase()}
-                {active?.session_id ? ` · ${active.session_id}` : ''}
+              <span className="flex items-center gap-1.5">
+                <Icon.sparkle width={11} height={11} />
+                {data.model_label}
               </span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Right-hand panel: new chat, history, search. */}
+      {/* Right-hand panel: full height. New chat, search, pinned, recents. */}
       {panelOpen && <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setPanelOpen(false)} aria-hidden />}
 
-      <aside
-        className={cx(
-          'w-[264px] shrink-0 flex-col border-l border-line bg-panel md:static md:flex',
-          panelOpen ? 'fixed inset-y-0 right-0 z-50 flex shadow-[var(--shadow-pop)]' : 'hidden',
-        )}
-      >
-        <div className="space-y-2 p-3">
-          <button type="button" onClick={newChat} className="btn w-full justify-start gap-2">
-            <Icon.plus />
-            New chat
+      {panelHidden ? (
+        <div className="hidden w-[52px] shrink-0 flex-col items-center border-l border-line bg-panel py-3 md:flex">
+          <button type="button" onClick={() => setPanelHidden(false)} className="btn btn-ghost h-8 w-8 rounded-full p-0" aria-label="Show chat history" title="Show chat history">
+            <Icon.sidebar />
           </button>
-          <div className="relative">
-            <Icon.search className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-faint" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search past chats"
-              className="input h-8 pl-8 text-[12px]"
-            />
-          </div>
+          <button type="button" onClick={newChat} className="btn btn-ghost mt-1 h-8 w-8 rounded-full p-0" aria-label="New chat" title="New chat">
+            <Icon.plus />
+          </button>
         </div>
-
-        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-          {visibleThreads.length === 0 ? (
-            <p className="px-3 py-4 text-[12px] leading-relaxed text-dim">No stored chat matches that search.</p>
-          ) : (
-            visibleThreads.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => {
-                  setActiveId(t.id);
-                  setPanelOpen(false);
-                }}
-                className={`block w-full rounded-[10px] px-3 py-2 text-left transition-colors ${
-                  t.id === activeId ? 'bg-raised' : 'hover:bg-hover'
-                }`}
-              >
-                <div className="truncate text-[12.5px]">{t.title}</div>
-                <div className="tabular mt-0.5 text-[11px] text-faint">{t.updated_at}</div>
-              </button>
-            ))
+      ) : (
+        <aside
+          className={cx(
+            'w-[276px] shrink-0 flex-col border-l border-line bg-panel md:static md:flex',
+            panelOpen ? 'fixed inset-y-0 right-0 z-50 flex shadow-[var(--shadow-pop)]' : 'hidden',
           )}
-        </div>
+        >
+          <div className="space-y-2 p-3 pt-4">
+            <button type="button" onClick={newChat} className="btn w-full justify-start gap-2">
+              <Icon.plus />
+              New chat
+            </button>
+            <div className="relative">
+              <Icon.search className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-faint" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search chats" className="input h-8 pr-7 pl-8 text-[12px]" aria-label="Search chats" />
+              {search && (
+                <button type="button" onClick={() => setSearch('')} className="absolute top-1/2 right-2 -translate-y-1/2 text-faint hover:text-ink" aria-label="Clear search">
+                  <Icon.close width={12} height={12} />
+                </button>
+              )}
+            </div>
+            {query && (
+              <p className="px-1 text-[11px] text-faint">
+                {visibleThreads.length === 0 ? 'No chat matches' : `${visibleThreads.length} chat${visibleThreads.length === 1 ? '' : 's'} match`} “{search.trim()}”
+              </p>
+            )}
+          </div>
 
-        <p className="border-t border-line px-4 py-3 text-[11px] leading-relaxed text-faint">{data.memory_note}</p>
-      </aside>
+          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+            {pinned.length > 0 && (
+              <>
+                <div className="kicker px-3 pt-1 pb-1">Pinned</div>
+                {pinned.map(threadRow)}
+                <div className="kicker px-3 pt-3 pb-1">Recent</div>
+              </>
+            )}
+            {recent.length === 0 && pinned.length === 0 ? (
+              <p className="px-3 py-4 text-[12px] leading-relaxed text-dim">{query ? 'Nothing matches that search.' : 'No chats yet. Start one below.'}</p>
+            ) : (
+              recent.map(threadRow)
+            )}
+          </div>
+
+          <div className="flex items-center justify-between border-t border-line px-3 py-2">
+            <button type="button" onClick={() => setPanelHidden(true)} className="btn btn-ghost btn-sm gap-1.5 text-faint" aria-label="Hide chat history">
+              <Icon.sidebar />
+              <span className="hidden md:inline">Hide</span>
+            </button>
+            <span className="text-[11px] text-faint">{threads.length} chat{threads.length === 1 ? '' : 's'}</span>
+          </div>
+        </aside>
+      )}
     </div>
   );
 }

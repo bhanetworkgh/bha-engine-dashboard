@@ -116,11 +116,14 @@ them. The reference is the "My Apple" mockup Destiny supplied on 2026-09-08.
 
 ## 6. Navigation
 
-Fixed left sidebar, grouped. Main content fills the rest. Thin status strip
-across the top showing last refresh time and one engine-health dot.
+Fixed left sidebar, grouped, with the shared account (Admin) at the bottom
+opening Settings and Sign out. Main content fills the rest. Top right: date,
+time, weather when the browser shares a location, and the theme toggle. No
+status strip. Ask Bays hides the top row and gives its history panel the full
+height.
 
 ```
-Overview
+Home (the Overview)
 Ask Bays
 
 SYSTEMS
@@ -226,7 +229,9 @@ status, entries this week. Click through to that person's detail page.
 ## 8. Rules that apply to every row, on every screen
 
 - **Four-field spine** on every record: `session_id`, `builder_id`,
-  `subsystem`, `lane`. Lane must be filterable globally from the status strip.
+  `subsystem`, `lane`. The lane filter lives in session state and the data
+  module honours it; the dropdown was removed from the shell on 2026-09-08
+  (Destiny) and can return as a page-level control when a screen needs it.
 - **Tags rendered where present:** `pay_eligible`, `is_incident`,
   `self_healed`. Small, quiet, consistent everywhere.
 - **Every row links back to its source** — Slack message, Airtable record, or
