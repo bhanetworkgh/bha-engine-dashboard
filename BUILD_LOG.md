@@ -925,3 +925,45 @@ Verified:  Chromium: a fresh context resolves to light before any choice is
            stored; a fourteen-line draft grows the composer to 240px and only
            then marks it scrollable; pin, rename, delete and search still pass;
            routes render in both themes; no page errors. `npm run build` passes.
+
+---
+
+## 2026-09-08 15:00 — Session 10: banner polish, glass, vertical dots, light-mode nav
+
+Intent:    Destiny's last pass on Home and Ask Bays before he moves to other
+           pages: the fuller banner copy back, a rotating headline, the orb
+           beside uniform glass chips with room from the right edge, a taller
+           banner, a glossy surface treatment, vertical three-dot menus, and a
+           visible active item in the light sidebar.
+
+Files:     src/screens/Overview.tsx, src/index.css,
+           src/components/ui/Icons.tsx.
+
+Problem:   1. In light mode the sidebar background (#ebebee) and the hover
+              colour (#ededf0) were two points apart, so the active nav item
+              was invisible. Dark mode used a distinct raised tone and was fine.
+           2. The three chips had different widths because their labels did.
+           3. Glass needs something behind it; the cards sit on a flat grey.
+
+Fix:       1. The active item is now a white pill with the card shadow in light
+              and the raised tone in dark.
+           2. Chips are a fixed 196 by 58 with a truncating label.
+           3. Real frosted glass (backdrop blur, translucent fill, an inner
+              edge and a top highlight) goes on the chips and the orb tile,
+              where the gradient shows through. Cards get only the top
+              highlight, a one-pixel glossy lip, which reads on a flat ground.
+
+Decision:  - **Four headlines rotate** every 5.2 seconds with a short rise-in:
+             "Your engine, live in one window", "Every loop, every incident,
+             one place", "Your day, more connected than ever", "Read live from
+             the engine, never typed". They are copy; the sentence beneath
+             carries the live numbers, and it now ends with a line saying so.
+           - **The orb is positioned from the right, like the chips**, so the
+             cluster stays together at any width above the breakpoint.
+           - **Vertical dots** on the thread menus, as asked.
+
+Verified:  Chromium sweep in light and dark: every route renders; loop close
+           and create; pin, rename, delete and search on Ask Bays; composer
+           growth; first visit is light. Home in light shows the white active
+           nav pill and the glass chips over the gradient. No page errors.
+           `npm run build` passes.
