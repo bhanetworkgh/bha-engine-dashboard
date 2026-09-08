@@ -86,7 +86,7 @@ function Sidebar({
         <img src="/logo.svg" alt="" className="mark h-7 w-7" />
         <div className="min-w-0 leading-tight">
           <div className="text-[13.5px] font-medium">BHA engine</div>
-          <div className="text-[11px] text-faint">{session?.label === 'Preview' ? 'Preview · mock data' : 'Phase 1 · mock data'}</div>
+          <div className="text-[11px] text-faint">{session?.label ? `${session.label} · mock data` : 'Phase 1 · mock data'}</div>
         </div>
         <button type="button" onClick={onNavigate} className="btn btn-ghost btn-sm ml-auto md:hidden" aria-label="Close navigation">
           <Icon.close />

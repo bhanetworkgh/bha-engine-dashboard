@@ -672,3 +672,55 @@ Known:     - The answer store behind `VITE_BAYS_CALLBACK_URL` /
 
 Not done:  BUILD_LOG.md still not uploaded to Google Drive (CLAUDE.md section 9),
            pending Destiny confirming the target folder.
+
+---
+
+## 2026-09-08 11:30 — Session 6: the shared team credential
+
+Intent:    Make sign-in real now, ahead of any engine login endpoint. Destiny
+           supplied the one email and password the dashboard should accept.
+           Only that pair may sign in.
+
+Files:     src/data/index.ts (auth section rewritten), src/data/engine.ts
+           (VITE_AUTH_EMAIL / VITE_AUTH_PASSWORD_SHA256 overrides replace
+           VITE_AUTH_PREVIEW), src/app/session.tsx, src/screens/Login.tsx,
+           src/components/Layout.tsx, README.md.
+
+Problem:   CLAUDE.md rule 1 says no secrets in the repo, and the password was
+           handed over in chat. Committing it in plain text was out. A static
+           site has no server to hold it either.
+
+Fix:       The repository holds only a SHA-256 digest of `<email>\n<password>`
+           (email lower-cased). At sign-in the browser hashes what was typed with
+           Web Crypto and compares. The plaintext appears nowhere in the tree or
+           the built bundle (grepped both). A random fourteen-character password
+           is not recoverable from its digest, so the digest is not a secret in
+           the sense the rule guards against.
+
+           The digest and the email can both be overridden on the host with
+           VITE_AUTH_PASSWORD_SHA256 and VITE_AUTH_EMAIL, so rotating the password
+           is a Render setting change, not a commit. The README shows the one-line
+           command that produces a new digest.
+
+           Five wrong attempts pause sign-in for thirty seconds. A session is a
+           random 24-byte token in sessionStorage with a twelve-hour expiry, so a
+           refresh keeps you signed in and closing the tab does not.
+
+Decision:  - **The engine path stays.** When VITE_AUTH_URL is set the pair is
+             posted to the engine instead and the digest is not consulted. The
+             browser check is the current mechanism, not the final one.
+           - **VITE_AUTH_PREVIEW is gone.** There is no longer an email-only gate
+             anywhere; the password is always checked.
+           - **This gates the interface, not the data.** The comparison runs in
+             the browser, so it stops the team's neighbours, not a determined
+             attacker with the bundle. Today the data behind it is fixtures. When
+             the live endpoint lands, its bearer token is the real control.
+           - **Email comparison is case-insensitive**, digest comparison is
+             exact. `Admin@BHANetwork.org` with the right password signs in.
+
+Verified:  Driven in Chromium: wrong password rejected, wrong email rejected,
+           upper-cased correct email accepted, five wrong attempts then a
+           thirty-second lockout message, the correct pair signs in, the stored
+           session carries a token and a twelve-hour expiry, a reload stays
+           signed in, the sidebar reads "BHA team · mock data". `npm run build`
+           passes; the plaintext password is absent from dist/. No page errors.

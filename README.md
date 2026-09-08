@@ -115,8 +115,9 @@ a feature whose variables are missing says so on screen rather than pretending.
 | Variable | Purpose |
 |---|---|
 | `VITE_ENGINE_API_URL` | Base URL of the engine data endpoint. Also the write target for loops (`PATCH /loops/:id`, `POST /loops`). |
-| `VITE_AUTH_URL` | Login endpoint. Defaults to `<VITE_ENGINE_API_URL>/auth/login` when only the API is set. |
-| `VITE_AUTH_PREVIEW` | `1` allows the preview gate (email checked, password not) outside local dev. Off by default in production. |
+| `VITE_AUTH_URL` | Login endpoint. Defaults to `<VITE_ENGINE_API_URL>/auth/login` when only the API is set. When unset, sign-in is checked in the browser against the team credential (below). |
+| `VITE_AUTH_EMAIL` | Overrides the built-in team email for the browser-side check. |
+| `VITE_AUTH_PASSWORD_SHA256` | Overrides the built-in credential digest: hex SHA-256 of `<email>\n<password>`, email lower-cased. Rotate the password by setting this, no code change needed. |
 | `VITE_BAYS_WEBHOOK_URL` | The Bays front door, `https://<n8n host>/webhook/bays`. |
 | `VITE_BAYS_API_KEY` | The `x-api-key` the front door expects on an external ask. |
 | `VITE_BAYS_CALLBACK_URL` | Where Bays posts its answer. Sent as `callback` on every ask. |
@@ -131,7 +132,21 @@ exposed beyond the team.
 
 ### Contracts the engine must meet
 
-**Sign-in.** `POST VITE_AUTH_URL` with `{ "email", "password" }`. Success is
+**Sign-in, browser-side (current).** With no `VITE_AUTH_URL`, the email and
+password are hashed in the browser (SHA-256 of `<email>\n<password>`) and
+compared with the team credential digest held in `src/data/index.ts`, or the
+`VITE_AUTH_PASSWORD_SHA256` override. Only that one pair signs in. The password
+is never in the repository; the digest of a random fourteen-character password
+is not recoverable. Five wrong attempts pause sign-in for thirty seconds. A
+session lasts twelve hours or until the tab closes. Because the check runs in
+the browser it gates the interface, not the data behind it — which is fixtures
+today. To generate a new digest:
+
+```bash
+printf 'admin@bhanetwork.org\n<new password>' | sha256sum
+```
+
+**Sign-in, engine-side (when `VITE_AUTH_URL` is set).** `POST VITE_AUTH_URL` with `{ "email", "password" }`. Success is
 `200` with `{ "token", "expires_at"?, "label"? }` (`session_token` or
 `access_token` are also accepted). A `401` or `403` is shown as a rejected
 login. The token is sent as `Authorization: Bearer` on every engine call, and a

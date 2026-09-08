@@ -92,7 +92,7 @@ export default function Login() {
               </div>
             )}
 
-            <button type="submit" disabled={busy || mode === 'none'} className="btn btn-primary mt-5 h-9 w-full">
+            <button type="submit" disabled={busy} className="btn btn-primary mt-5 h-9 w-full">
               {busy ? 'Signing in' : 'Sign in'}
             </button>
           </div>
@@ -100,9 +100,9 @@ export default function Login() {
           <p className="mt-4 flex items-start justify-center gap-1.5 text-center text-[11.5px] leading-relaxed text-faint">
             <Icon.lock className="mt-[2px] shrink-0" />
             <span>
-              {mode === 'engine' && 'Your password is checked by the engine, which issues a session token for this tab.'}
-              {mode === 'preview' && 'Preview mode: the email is checked, the password is not. Live verification needs VITE_AUTH_URL.'}
-              {mode === 'none' && 'Sign-in is not configured on this host. Set VITE_AUTH_URL to the engine login endpoint.'}
+              {mode === 'engine'
+                ? 'Your password is checked by the engine, which issues a session token for this tab.'
+                : 'Checked against the shared team credential. The session lasts twelve hours or until the tab closes.'}
             </span>
           </p>
         </form>

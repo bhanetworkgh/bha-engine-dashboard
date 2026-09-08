@@ -353,41 +353,88 @@ export function getOverview(q: Query): Promise<OverviewData> {
 /** The one account the team shares, matching BHARAG's console. */
 export const TEAM_EMAIL = 'admin@bhanetwork.org';
 
-/** How sign-in will be verified, given the deployment's configuration. */
-export type AuthMode = 'engine' | 'preview' | 'none';
+/**
+ * SHA-256 of `<email>\n<password>` for the shared team credential. The password
+ * itself is not in this repository; only this digest is, and a digest of a
+ * random fourteen-character password is not recoverable from it. Both the
+ * email and the digest can be overridden on the host with VITE_AUTH_EMAIL and
+ * VITE_AUTH_PASSWORD_SHA256 without a code change.
+ *
+ * This check runs in the browser, so it gates the interface rather than the
+ * data behind it. When VITE_AUTH_URL is set the engine does the verification
+ * instead and this constant is not consulted.
+ */
+const TEAM_CREDENTIAL_SHA256 = 'bd7e7179f981d8116d677eafef9da9daefd81e2d7c17142210da63b6262f3e89';
+
+/** How sign-in is verified: by the engine's login endpoint, or in this browser. */
+export type AuthMode = 'engine' | 'local';
 
 export function authMode(): AuthMode {
-  if (config.authUrl) return 'engine';
-  if (config.authPreview) return 'preview';
-  return 'none';
+  return config.authUrl ? 'engine' : 'local';
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) throw new EngineError('This browser cannot verify the credential (no Web Crypto). Use HTTPS or localhost.', null, 'network');
+  const buf = await subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function randomToken(): string {
+  const bytes = new Uint8Array(24);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Failed attempts in this tab. After five, sign-in pauses for a short while. */
+let failedAttempts = 0;
+let lockedUntil = 0;
+const LOCK_AFTER = 5;
+const LOCK_MS = 30_000;
+
+async function localSignIn(email: string, password: string): Promise<SignInResult> {
+  if (Date.now() < lockedUntil) {
+    const secs = Math.ceil((lockedUntil - Date.now()) / 1000);
+    return { ok: false, reason: 'rejected', message: `Too many attempts. Try again in ${secs} seconds.` };
+  }
+  const expectedEmail = (config.authEmail ?? TEAM_EMAIL).toLowerCase();
+  const expectedHash = (config.authHash ?? TEAM_CREDENTIAL_SHA256).toLowerCase();
+
+  let digest: string;
+  try {
+    digest = await sha256Hex(`${email}\n${password}`);
+  } catch (err) {
+    return { ok: false, reason: 'network', message: err instanceof Error ? err.message : 'Could not verify the credential.' };
+  }
+
+  // Compare both fields through the digest, so a wrong email and a wrong
+  // password produce the same answer in the same time.
+  const ok = email === expectedEmail && digest === expectedHash;
+  if (!ok) {
+    failedAttempts += 1;
+    if (failedAttempts >= LOCK_AFTER) {
+      failedAttempts = 0;
+      lockedUntil = Date.now() + LOCK_MS;
+    }
+    return { ok: false, reason: 'rejected', message: 'Email or password not recognised.' };
+  }
+  failedAttempts = 0;
+  const expires = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+  return { ok: true, session: { token: randomToken(), expires_at: expires, label: 'BHA team' } };
 }
 
 /**
- * Posts the shared credential to the engine and returns the session it hands
- * back. In preview mode (local dev, or VITE_AUTH_PREVIEW=1) the email is checked
- * against the team constant and the password is not verified — the login
- * screen says so. With neither configured, nobody can sign in.
+ * Verifies the shared credential. With VITE_AUTH_URL set the email and
+ * password are posted to the engine, which returns the session token. Without
+ * it the pair is checked in the browser against the team credential digest.
  */
 export async function signIn(email: string, password: string): Promise<SignInResult> {
   const e = email.trim().toLowerCase();
-  if (!e || !password.trim()) {
+  if (!e || !password) {
     return { ok: false, reason: 'missing', message: 'Enter an email address and a password.' };
   }
 
-  const mode = authMode();
-
-  if (mode === 'none') {
-    return {
-      ok: false,
-      reason: 'not-configured',
-      message: 'Sign-in is not configured for this deployment. Set VITE_AUTH_URL on the host.',
-    };
-  }
-
-  if (mode === 'preview') {
-    if (e !== TEAM_EMAIL) return { ok: false, reason: 'rejected', message: 'Not a recognised account.' };
-    return { ok: true, session: { token: 'preview-session', expires_at: null, label: 'Preview' } };
-  }
+  if (authMode() === 'local') return localSignIn(e, password);
 
   try {
     const res = await request<Record<string, unknown>>(config.authUrl!, {
