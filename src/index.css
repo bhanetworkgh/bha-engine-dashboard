@@ -1,38 +1,110 @@
 @import "tailwindcss";
 
-@theme {
-  /* Surfaces — dark by default, near-black. */
-  --color-bg: #08080a;
-  --color-panel: #0e0e11;
-  --color-raised: #141418;
-  --color-hover: #17171c;
-  --color-line: #1e1e23;
-  --color-line-strong: #2c2c34;
+/* ---------------------------------------------------------------------------
+   Design tokens.
 
-  /* Type — three levels, two weights only. */
-  --color-ink: #e8e8ea;
-  --color-dim: #93939b;
-  --color-faint: #61616a;
+   Two themes, one vocabulary. Every colour a component can name is a CSS
+   variable defined once for light and once for dark; Tailwind utilities read
+   the variables through @theme inline, so `bg-panel` or `text-ink` switch with
+   the theme without any component knowing.
 
-  /* Gold. Accent for the one thing that matters on a screen. Never a fill. */
-  --color-gold: #ddaa42;
-  --color-gold-dim: #8a6a24;
+   The palette is warm neutral rather than pure grey: off-white paper in light
+   mode, warm charcoal in dark. One accent, used for the single thing that
+   matters on a screen and for focus. Amber and red still carry meaning only —
+   healthy states get no colour.
+   --------------------------------------------------------------------------- */
 
-  /* Colour carries meaning only. Healthy states get none of these. */
-  --color-degraded: #e3873c;
-  --color-failing: #e2564d;
+:root {
+  color-scheme: light;
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+  --bg: #f4f3ef;
+  --panel: #ffffff;
+  --raised: #f7f6f2;
+  --hover: #f1f0ea;
+  --line: rgba(28, 25, 20, 0.08);
+  --line-strong: rgba(28, 25, 20, 0.16);
+
+  --ink: #1c1a17;
+  --dim: #6c6862;
+  --faint: #9a958d;
+
+  --accent: #c96442;
+  --accent-soft: rgba(201, 100, 66, 0.12);
+  --accent-ink: #a94f30;
+
+  --degraded: #b5731c;
+  --degraded-soft: rgba(181, 115, 28, 0.12);
+  --failing: #c8433a;
+  --failing-soft: rgba(200, 67, 58, 0.12);
+
+  --shadow-card: 0 1px 2px rgba(28, 25, 20, 0.04), 0 0 0 1px rgba(28, 25, 20, 0.05);
+  --shadow-pop: 0 12px 32px rgba(28, 25, 20, 0.14), 0 0 0 1px rgba(28, 25, 20, 0.06);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #151412;
+  --panel: #1d1c19;
+  --raised: #24231f;
+  --hover: #2a2925;
+  --line: rgba(255, 250, 240, 0.08);
+  --line-strong: rgba(255, 250, 240, 0.16);
+
+  --ink: #ebe9e3;
+  --dim: #a39f97;
+  --faint: #6f6b64;
+
+  --accent: #d9825f;
+  --accent-soft: rgba(217, 130, 95, 0.16);
+  --accent-ink: #e6a284;
+
+  --degraded: #dd9a3e;
+  --degraded-soft: rgba(221, 154, 62, 0.16);
+  --failing: #e0665b;
+  --failing-soft: rgba(224, 102, 91, 0.16);
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 250, 240, 0.06);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 250, 240, 0.08);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-hover: var(--hover);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-ink: var(--ink);
+  --color-dim: var(--dim);
+  --color-faint: var(--faint);
+
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  /* Legacy names, kept so any untouched screen still compiles. */
+  --color-gold: var(--accent);
+  --color-gold-dim: var(--accent-ink);
+
+  --color-degraded: var(--degraded);
+  --color-degraded-soft: var(--degraded-soft);
+  --color-failing: var(--failing);
+  --color-failing-soft: var(--failing-soft);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Iowan Old Style", "Charter", "Palatino", "Georgia", ui-serif, serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
     "Liberation Mono", monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
 }
 
 @layer base {
-  :root {
-    color-scheme: dark;
-  }
-
   html,
   body,
   #root {
@@ -41,13 +113,15 @@
 
   body {
     margin: 0;
-    background: var(--color-bg);
-    color: var(--color-ink);
+    background: var(--bg);
+    color: var(--ink);
     font-family: var(--font-sans);
     font-size: 13px;
     line-height: 1.45;
     font-weight: 400;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   /* Two font weights. Regular and medium. Nothing heavier. */
@@ -61,35 +135,59 @@
     font-weight: 500;
   }
 
+  h1,
+  h2,
+  h3,
+  h4,
+  p {
+    margin: 0;
+  }
+
   button {
     font: inherit;
     color: inherit;
     cursor: pointer;
+    background: none;
+    border: 0;
+    padding: 0;
   }
 
-  input {
+  input,
+  textarea,
+  select {
     font: inherit;
+    color: inherit;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
   }
 
   ::selection {
-    background: var(--color-gold-dim);
-    color: var(--color-ink);
+    background: var(--accent-soft);
+    color: var(--ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
   }
 }
 
 @layer utilities {
-  /* Dense scrollbars — the instrument-panel look depends on these not shouting. */
   .scroll-thin {
     scrollbar-width: thin;
-    scrollbar-color: var(--color-line-strong) transparent;
+    scrollbar-color: var(--line-strong) transparent;
   }
   .scroll-thin::-webkit-scrollbar {
-    width: 9px;
-    height: 9px;
+    width: 8px;
+    height: 8px;
   }
   .scroll-thin::-webkit-scrollbar-thumb {
-    background: var(--color-line-strong);
-    border-radius: 0;
+    background: var(--line-strong);
+    border-radius: 8px;
   }
   .scroll-thin::-webkit-scrollbar-track {
     background: transparent;
@@ -97,6 +195,11 @@
 
   .tabular {
     font-variant-numeric: tabular-nums;
+  }
+
+  .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
   }
 
   /* Row actions: hidden until the row is hovered or focused within. */
@@ -110,76 +213,382 @@
     opacity: 1;
   }
 
-  /* The single permitted decorative animation: the idle mark on Ask Bays. */
+  /* The idle mark on Ask Bays: the one decorative animation. */
   @keyframes idle-breath {
     0%,
     100% {
-      opacity: 0.16;
+      opacity: 0.55;
       transform: scale(1);
     }
     50% {
-      opacity: 0.26;
-      transform: scale(1.02);
+      opacity: 0.85;
+      transform: scale(1.03);
     }
   }
   .idle-mark {
-    animation: idle-breath 7s ease-in-out infinite;
+    animation: idle-breath 6s ease-in-out infinite;
   }
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .fade-up {
+    animation: fade-up 220ms ease-out both;
+  }
+
+  @keyframes pulse-dot {
+    0%,
+    100% {
+      opacity: 0.35;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+  .pulse-dot {
+    animation: pulse-dot 1.2s ease-in-out infinite;
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .idle-mark {
+    .idle-mark,
+    .fade-up,
+    .pulse-dot {
       animation: none;
-      opacity: 0.2;
+    }
+    .idle-mark {
+      opacity: 0.7;
     }
   }
 }
 
 @layer components {
-  /* One table cell definition, used by every screen. Tight rows by default:
-     ~26px each, so roughly thirty are visible on a laptop screen. */
+  /* Surfaces ---------------------------------------------------------------- */
+
+  .card {
+    background: var(--panel);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+  }
+
+  .card-hover {
+    transition:
+      transform 160ms ease,
+      box-shadow 160ms ease;
+  }
+  .card-hover:hover {
+    box-shadow: var(--shadow-pop);
+    transform: translateY(-1px);
+  }
+
+  /* Small uppercase-free section label. Sentence case, quiet. */
+  .kicker {
+    font-size: 11px;
+    color: var(--faint);
+    letter-spacing: 0.01em;
+  }
+
+  /* Controls ---------------------------------------------------------------- */
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: var(--radius-md);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--ink);
+    background: var(--panel);
+    box-shadow: 0 0 0 1px var(--line-strong) inset;
+    transition:
+      background 120ms ease,
+      box-shadow 120ms ease,
+      color 120ms ease;
+    white-space: nowrap;
+  }
+  .btn:hover {
+    background: var(--hover);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .btn-primary {
+    background: var(--ink);
+    color: var(--bg);
+    box-shadow: none;
+  }
+  .btn-primary:hover {
+    background: var(--ink);
+    opacity: 0.9;
+  }
+
+  .btn-accent {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: none;
+  }
+  .btn-accent:hover {
+    background: var(--accent);
+    opacity: 0.92;
+  }
+
+  .btn-ghost {
+    background: transparent;
+    box-shadow: none;
+    color: var(--dim);
+  }
+  .btn-ghost:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+
+  .btn-sm {
+    height: 24px;
+    padding: 0 8px;
+    font-size: 11.5px;
+    border-radius: var(--radius-sm);
+  }
+
+  .input {
+    width: 100%;
+    height: 34px;
+    padding: 0 12px;
+    border-radius: var(--radius-md);
+    background: var(--panel);
+    color: var(--ink);
+    box-shadow: 0 0 0 1px var(--line-strong) inset;
+    outline: none;
+    transition: box-shadow 120ms ease;
+  }
+  .input::placeholder {
+    color: var(--faint);
+  }
+  .input:focus {
+    box-shadow:
+      0 0 0 1px var(--accent) inset,
+      0 0 0 3px var(--accent-soft);
+  }
+  .input:focus-visible {
+    outline: none;
+  }
+
+  textarea.input {
+    height: auto;
+    padding: 9px 12px;
+    resize: none;
+    line-height: 1.5;
+  }
+
+  select.input {
+    appearance: none;
+    padding-right: 28px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%239a958d' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+  }
+
+  /* Segmented control. One selected segment, the rest quiet. */
+  .seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    border-radius: var(--radius-md);
+    background: var(--raised);
+    box-shadow: 0 0 0 1px var(--line) inset;
+  }
+  .seg > button {
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--dim);
+    white-space: nowrap;
+    transition:
+      background 120ms ease,
+      color 120ms ease,
+      box-shadow 120ms ease;
+  }
+  .seg > button:hover {
+    color: var(--ink);
+  }
+  .seg > button[aria-pressed="true"] {
+    background: var(--panel);
+    color: var(--ink);
+    box-shadow: var(--shadow-card);
+  }
+
+  /* In-page tabs: text with a hairline indicator, no boxes. */
+  .tab {
+    position: relative;
+    padding: 6px 2px;
+    font-size: 13px;
+    color: var(--dim);
+    transition: color 120ms ease;
+  }
+  .tab:hover {
+    color: var(--ink);
+  }
+  .tab[aria-selected="true"] {
+    color: var(--ink);
+  }
+  .tab[aria-selected="true"]::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--ink);
+  }
+
+  /* Tags: small, quiet, consistent everywhere. */
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 7px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    line-height: 1;
+    color: var(--dim);
+    background: var(--raised);
+    box-shadow: 0 0 0 1px var(--line) inset;
+    white-space: nowrap;
+  }
+  .tag-degraded {
+    color: var(--degraded);
+    background: var(--degraded-soft);
+    box-shadow: none;
+  }
+  .tag-failing {
+    color: var(--failing);
+    background: var(--failing-soft);
+    box-shadow: none;
+  }
+  .tag-accent {
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+    box-shadow: none;
+  }
+
+  /* Tables ------------------------------------------------------------------ */
+
   .td {
     white-space: nowrap;
-    border-bottom: 1px solid var(--color-line);
-    padding: 3px 10px;
+    border-bottom: 1px solid var(--line);
+    padding: 6px 12px;
     line-height: 1.35;
-    vertical-align: top;
+    vertical-align: middle;
   }
 
   .td-wrap {
     white-space: normal;
   }
 
-  tbody tr:hover {
-    background: var(--color-hover);
-  }
-
-  /* Tiles and list items that behave like rows but are not <tr>. */
-  .rowlike:hover {
-    background: var(--color-hover);
-  }
-}
-
-@layer components {
-  /* Single-line cells. Density beats completeness in a table: the full value
-     is on hover, and the row stays one line so thirty fit on screen. */
   .td-clip {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  tbody tr {
+    transition: background 100ms ease;
+  }
+  tbody tr:hover {
+    background: var(--hover);
+  }
+  tbody tr:last-child .td {
+    border-bottom-color: transparent;
+  }
+
+  .rowlike {
+    transition: background 100ms ease;
+  }
+  .rowlike:hover {
+    background: var(--hover);
+  }
+
+  /* Sidebar navigation ----------------------------------------------------- */
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--dim);
+    transition:
+      background 120ms ease,
+      color 120ms ease;
+  }
+  .nav-item:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+  .nav-item[aria-current="page"] {
+    background: var(--panel);
+    color: var(--ink);
+    box-shadow: var(--shadow-card);
+  }
+  .nav-item svg {
+    width: 15px;
+    height: 15px;
+    flex: none;
+    opacity: 0.8;
+  }
+
+  /* The BHA mark. The traced SVG carries a white plate; in dark mode the plate
+     is inverted so it sits on the dark surface, and the hue is rotated back. */
+  .mark {
+    border-radius: 999px;
+  }
+  :root[data-theme="dark"] .mark {
+    filter: invert(1) hue-rotate(180deg) brightness(1.05);
+  }
+
+  /* Sticky row-action column, so reaching an action never scrolls the row away. */
+  .td-actions {
+    position: sticky;
+    right: 0;
+    background: transparent;
+    text-align: right;
+  }
+  tbody tr:hover .td-actions,
+  tbody tr:focus-within .td-actions {
+    background: var(--hover);
+  }
+
+  /* Chat bubbles ------------------------------------------------------------ */
+
+  .bubble-user {
+    background: var(--raised);
+    border-radius: 18px 18px 4px 18px;
+    padding: 10px 14px;
+    box-shadow: 0 0 0 1px var(--line) inset;
+  }
 }
 
 /* ---------------------------------------------------------------------------
-   Below 768px only. Nothing in this file's earlier rules changes above it, and
-   nothing here applies at or above the md breakpoint.
+   Below 768px. Tables marked .table-cards become stacked cards; cells opt in
+   with card-title, card-meta, card-full, card-actions. Everything else here is
+   unchanged from the responsive pass and applies only on small screens.
    --------------------------------------------------------------------------- */
 @media (max-width: 767.98px) {
-  /*
-     A twelve-column table has no honest form on a phone, so tables marked
-     .table-cards become a stacked card list: one card per row, no horizontal
-     scroll. Cells are hidden unless a screen opts them in with card-title,
-     card-meta, card-actions or card-full — including the four spine fields,
-     which stay in the data and simply are not shown here.
-  */
   .table-cards thead {
     display: none;
   }
@@ -195,8 +604,8 @@
     flex-wrap: wrap;
     align-items: baseline;
     gap: 0 10px;
-    border-bottom: 1px solid var(--color-line);
-    padding: 9px 12px;
+    border-bottom: 1px solid var(--line);
+    padding: 10px 14px;
   }
 
   .table-cards td {
@@ -206,7 +615,6 @@
     white-space: normal;
   }
 
-  /* The row's identity: full width, wrapping, never clipped. */
   .table-cards td.card-title {
     display: block;
     order: 1;
@@ -218,7 +626,6 @@
     line-height: 1.4;
   }
 
-  /* The two or three fields that prioritise it, on one line under the title. */
   .table-cards td.card-meta {
     display: inline-block;
     order: 2;
@@ -228,7 +635,6 @@
     text-overflow: clip;
   }
 
-  /* Anything that needs its own full-width line below the meta row. */
   .table-cards td.card-full {
     display: block;
     order: 3;
@@ -246,20 +652,15 @@
     margin-top: 8px;
   }
 
-  /* Hover does not exist on touch, so row actions are always visible here. */
   .row-actions {
     opacity: 1;
-  }
-
-  /* Tap targets. 44px minimum on anything a finger has to hit. */
-  .row-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
   }
 
   .row-actions button {
-    min-height: 44px;
+    min-height: 40px;
     min-width: 44px;
     padding: 0 12px;
     font-size: 12px;

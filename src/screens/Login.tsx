@@ -1,71 +1,112 @@
 import { useState } from 'react';
 import { useSession } from '../app/session';
+import { useTheme } from '../app/theme';
+import { authMode } from '../data';
+import { Icon } from '../components/ui';
 
 /**
- * One shared team login, the same pattern as BHARAG's console.
+ * One shared team login, the same pattern as BHARAG's console. The password is
+ * posted to the engine, which returns the session token the app then holds.
  */
 export default function Login() {
   const { signIn } = useSession();
+  const { resolved, setChoice } = useTheme();
+  const mode = authMode();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const result = await signIn(email, password);
+    if (!result.ok) setError(result.message);
+    setBusy(false);
+  }
 
   return (
-    <div className="flex h-full items-center justify-center">
-      <form
-        className="w-[300px] max-w-[calc(100vw-2rem)]"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const result = signIn(email, password);
-          if (result === 'missing') setError('Enter an email address and a password.');
-          else if (result === 'unknown-email') setError('Not a recognised account.');
-        }}
-      >
-        <div className="mb-6 flex items-center gap-2.5">
-          <img src="/logo.svg" alt="" className="h-7 w-7 rounded-full opacity-90" />
-          <span className="text-[15px] font-medium">BHA engine</span>
-        </div>
-
-        <label className="block text-[11px] text-faint" htmlFor="email">
-          Email
-        </label>
-        <input
-          id="email"
-          type="email"
-          autoFocus
-          autoComplete="username"
-          value={email}
-          onChange={(e) => {
-            setEmail(e.target.value);
-            setError(null);
-          }}
-          className="mt-1 w-full border border-line bg-raised px-2 py-1.5 text-ink outline-none focus:border-gold-dim"
-        />
-
-        <label className="mt-3 block text-[11px] text-faint" htmlFor="password">
-          Password
-        </label>
-        <input
-          id="password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => {
-            setPassword(e.target.value);
-            setError(null);
-          }}
-          className="mt-1 w-full border border-line bg-raised px-2 py-1.5 text-ink outline-none focus:border-gold-dim"
-        />
-
-        {error && <div className="mt-2 text-[11px] text-failing">{error}</div>}
-
+    <div className="flex h-full flex-col bg-bg">
+      <div className="flex items-center justify-end px-5 py-4">
         <button
-          type="submit"
-          className="mt-3 w-full border border-gold-dim px-2 py-1.5 text-gold hover:bg-raised"
+          type="button"
+          onClick={() => setChoice(resolved === 'dark' ? 'light' : 'dark')}
+          className="btn btn-ghost btn-sm gap-1.5"
+          aria-label="Toggle theme"
         >
-          Sign in
+          {resolved === 'dark' ? <Icon.sun /> : <Icon.moon />}
         </button>
-      </form>
+      </div>
+
+      <div className="flex flex-1 items-center justify-center px-4 pb-16">
+        <form
+          className="fade-up w-[360px] max-w-full"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          <div className="mb-8 flex flex-col items-center text-center">
+            <img src="/logo.svg" alt="" className="mark h-14 w-14" />
+            <h1 className="font-display mt-5 text-[26px] leading-none">BHA engine</h1>
+            <p className="mt-2 text-[13px] text-dim">Sign in with the shared team account.</p>
+          </div>
+
+          <div className="card p-6">
+            <label className="kicker block" htmlFor="email">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              autoFocus
+              autoComplete="username"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setError(null);
+              }}
+              className="input mt-1.5"
+              placeholder="you@bhanetwork.org"
+            />
+
+            <label className="kicker mt-4 block" htmlFor="password">
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setError(null);
+              }}
+              className="input mt-1.5"
+            />
+
+            {error && (
+              <div role="alert" className="mt-3 rounded-[10px] bg-failing-soft px-3 py-2 text-[12.5px] leading-relaxed text-failing">
+                {error}
+              </div>
+            )}
+
+            <button type="submit" disabled={busy || mode === 'none'} className="btn btn-primary mt-5 h-9 w-full">
+              {busy ? 'Signing in' : 'Sign in'}
+            </button>
+          </div>
+
+          <p className="mt-4 flex items-start justify-center gap-1.5 text-center text-[11.5px] leading-relaxed text-faint">
+            <Icon.lock className="mt-[2px] shrink-0" />
+            <span>
+              {mode === 'engine' && 'Your password is checked by the engine, which issues a session token for this tab.'}
+              {mode === 'preview' && 'Preview mode: the email is checked, the password is not. Live verification needs VITE_AUTH_URL.'}
+              {mode === 'none' && 'Sign-in is not configured on this host. Set VITE_AUTH_URL to the engine login endpoint.'}
+            </span>
+          </p>
+        </form>
+      </div>
     </div>
   );
 }

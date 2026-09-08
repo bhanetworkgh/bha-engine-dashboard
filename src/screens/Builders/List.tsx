@@ -46,7 +46,7 @@ export function Builders() {
               <tr key={b.id}>
                 <td className="td"><Dot health={b.health} /></td>
                 <td className="td card-title">
-                  <Link to={`/builders/${b.id}`} className="hover:text-gold">{b.name}</Link>
+                  <Link to={`/builders/${b.id}`} className="font-medium hover:text-accent-ink">{b.name}</Link>
                 </td>
                 <td className="td card-meta text-faint">{laneLabel(b.lane)}</td>
                 <td className="td card-meta tabular text-right">{b.open_loops}</td>
@@ -59,9 +59,9 @@ export function Builders() {
                 </td>
                 <td className="td tabular text-right text-dim">{b.entries_this_week}</td>
                 <td className="td"><SourceLink source={b.source} /></td>
-                <td className="td card-actions">
+                <td className="td card-actions td-actions">
                   <RowActions>
-                    <RowAction label="open in Slack" onClick={() => act('builder.open-slack', b.id)} />
+                    <RowAction label="Open in Slack" onClick={() => act('builder.open-slack', b.id)} />
                   </RowActions>
                 </td>
               </tr>

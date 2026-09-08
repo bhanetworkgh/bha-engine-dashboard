@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useData } from '../../app/useData';
 import { getNorthStar, getResearchTwin, type Query, type TwinData } from '../../data';
-import { LoadFailed, Loading, PageHeader } from '../../components/ui';
+import { LoadFailed, Loading, PageHeader, Tabs } from '../../components/ui';
 import { Gaps } from './Gaps';
 import { Records } from './Records';
 import { Runs } from './Runs';
@@ -20,24 +20,14 @@ function TwinScreen({ fetcher }: { fetcher: (q: Query) => Promise<TwinData> }) {
       <PageHeader
         title={data.name}
         subtitle={data.summary.period}
-        right={
+        below={
           /* Sub-tabs live inside the page, not the sidebar. */
-          <div className="flex flex-wrap gap-x-4 gap-y-1">
-            {TABS.map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTab(t)}
-                className={`border-b-2 pb-1 text-[12px] ${
-                  tab === t
-                    ? 'border-gold text-ink'
-                    : 'border-transparent text-faint hover:text-dim'
-                }`}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
+          <Tabs
+            tabs={TABS}
+            value={tab}
+            onChange={setTab}
+            counts={{ Gaps: { n: data.gaps.length, tone: data.gaps.length ? 'degraded' : 'default' } }}
+          />
         }
       />
       {tab === 'Summary' && <Summary d={data} />}

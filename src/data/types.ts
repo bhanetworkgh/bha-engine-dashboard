@@ -61,6 +61,20 @@ export interface Source {
   url: string;
 }
 
+/* ------------------------------------------------------------------ auth */
+
+export interface AuthSession {
+  token: string;
+  /** ISO timestamp. Null when the engine did not say. */
+  expires_at: string | null;
+  /** What the engine calls this login, e.g. "BHA team". */
+  label: string | null;
+}
+
+export type AuthFailure = 'missing' | 'rejected' | 'network' | 'not-configured';
+
+export type SignInResult = { ok: true; session: AuthSession } | { ok: false; reason: AuthFailure; message: string };
+
 /* ---------------------------------------------------------------- status */
 
 export interface EngineStatus {
@@ -89,6 +103,39 @@ export interface OverviewTile {
   sublabel: string;
   signal: string;
   health: Health;
+  /** Optional trend over recent buckets, oldest first. Only where something records it. */
+  trend?: number[];
+  /** Optional share of a whole, e.g. ingested / total. */
+  share?: { value: number; total: number; label: string };
+}
+
+export interface SeriesPoint {
+  label: string;
+  value: number;
+}
+
+export interface OverviewSeries {
+  /** Loops raised per day over the last fourteen days, from raised_at. */
+  loops_raised_14d: SeriesPoint[];
+  /** Incidents opened per day over the last seven days, from opened_at. */
+  incidents_7d: SeriesPoint[];
+  /** Codex entries per ISO week. */
+  entries_by_week: SeriesPoint[];
+  /** Asks across both twins by outcome. */
+  asks_by_outcome: { answered: number; thin: number; failed: number };
+  /** Open loops per owner, table totals. */
+  loops_by_owner: { owner: string; open: number; in_progress: number; oldest_days: number }[];
+  /** Incidents by error class. */
+  incidents_by_class: { error_class: ErrorClass; n: number; open: number }[];
+  /** Incidents by state, in state-machine order. */
+  incidents_by_state: { state: IncidentState; n: number }[];
+}
+
+export interface OverviewRates {
+  self_heal: { value: number; total: number };
+  answered: { value: number; total: number };
+  ingested: { value: number; total: number };
+  retries: { value: number; total: number };
 }
 
 export interface OverviewEvent {
@@ -106,15 +153,23 @@ export interface OverviewData {
   tiles: OverviewTile[];
   broke_24h: OverviewEvent[];
   moved_24h: OverviewEvent[];
+  series: OverviewSeries;
+  rates: OverviewRates;
 }
 
 /* -------------------------------------------------------------- ask bays */
+
+export type ChatDelivery = 'sending' | 'sent' | 'waiting' | 'answered' | 'failed' | 'timeout';
 
 export interface ChatMessage {
   id: string;
   role: 'user' | 'bays';
   text: string;
   at: string;
+  /** Delivery state of a user message, set while it is in flight. */
+  delivery?: ChatDelivery;
+  /** Why a message failed or timed out, in a sentence. */
+  note?: string;
 }
 
 export interface ChatThread {
@@ -122,13 +177,48 @@ export interface ChatThread {
   title: string;
   updated_at: string;
   messages: ChatMessage[];
+  /** The session_id sent to Bays for every message in this thread. */
+  session_id?: string;
+  /** Threads typed in this dashboard rather than seeded. */
+  local?: boolean;
+}
+
+/** What the dashboard can and cannot do with Bays, given its configuration. */
+export interface BaysWiring {
+  /** True when the front door URL and key are both present. */
+  can_send: boolean;
+  /** True when an answer endpoint is configured for polling. */
+  can_read_answers: boolean;
+  /** Where an answer will go: the callback, a Slack channel, or nowhere readable. */
+  delivery: 'callback' | 'slack' | 'none';
+  /** One sentence for the UI, stating exactly what is and is not wired. */
+  note: string;
 }
 
 export interface AskBaysData {
   threads: ChatThread[];
   /** Bays has no memory today. The UI says so rather than implying otherwise. */
   memory_note: string;
+  wiring: BaysWiring;
+  /** Builders who can be named as the asker. */
+  builders: { id: string; name: string }[];
 }
+
+export interface BaysAsk {
+  session_id: string;
+  prompt: string;
+  builder_id: string;
+  lane: Lane;
+}
+
+export type BaysSendResult =
+  | { ok: true; session_id: string; sent_at: string }
+  | { ok: false; session_id: string; error: string };
+
+export type BaysAnswer =
+  | { status: 'pending' }
+  | { status: 'answered'; text: string; at: string }
+  | { status: 'unavailable'; reason: string };
 
 /* -------------------------------------------- north star / research twin */
 
@@ -335,10 +425,21 @@ export interface Loop {
   /** Days since the loop was raised. Time in current status is not recorded. */
   age_days: number;
   raised_at: string;
+  /** Set when the loop was closed from this interface or arrived closed. */
+  closed_at?: string | null;
+  /** Free-text note attached on the last update from this interface. */
+  note?: string | null;
   lane: Lane;
   spine: Spine;
   tags: Tags;
   source: Source;
+}
+
+export interface NewLoop {
+  title: string;
+  owner: string;
+  lane: Lane;
+  note?: string;
 }
 
 export interface ProposedClose {
@@ -363,7 +464,7 @@ export interface ReconciliationRow {
 
 export interface OpenLoopsData {
   loops: Loop[];
-  by_owner: { owner: string; open: number; in_progress: number; oldest_days: number }[];
+  by_owner: { owner: string; open: number; in_progress: number; closed: number; oldest_days: number }[];
   review_queue: ProposedClose[];
   reconciliation: ReconciliationRow[];
   reconciliation_note: string;

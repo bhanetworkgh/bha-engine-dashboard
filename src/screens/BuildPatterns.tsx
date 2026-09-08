@@ -23,9 +23,7 @@ export default function BuildPatterns() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader title="Build patterns" subtitle="By lane, and how often referenced" />
-      <p className="shrink-0 border-b border-line px-4 py-1 text-[11px] text-faint">
-        {data.reference_note}
-      </p>
+      <p className="shrink-0 px-6 pb-3 text-[11.5px] text-faint md:px-8">{data.reference_note}</p>
 
       {data.patterns.length === 0 ? (
         <EmptyState>No build patterns recorded for the selected lane.</EmptyState>
@@ -54,18 +52,18 @@ export default function BuildPatterns() {
                 <td className="td card-meta tabular text-right">{p.references}</td>
                 <td className="td w-[90px]">
                   {/* Bar, not a chart. Relative reference weight at a glance. */}
-                  <span className="block h-[3px] bg-line">
+                  <span className="block h-[5px] overflow-hidden rounded-full bg-raised">
                     <span
-                      className="block h-[3px] bg-gold-dim"
+                      className="block h-[5px] rounded-full bg-ink/55"
                       style={{ width: `${(p.references / max) * 100}%` }}
                     />
                   </span>
                 </td>
                 <td className="td tabular text-faint">{p.last_referenced ?? 'never'}</td>
                 <td className="td"><SourceLink source={p.source} /></td>
-                <td className="td card-actions">
+                <td className="td card-actions td-actions">
                   <RowActions>
-                    <RowAction label="open" onClick={() => act('pattern.open', p.id)} />
+                    <RowAction label="Open" onClick={() => act('pattern.open', p.id)} />
                   </RowActions>
                 </td>
               </tr>

@@ -6,17 +6,28 @@ const TAG_LABEL: Record<keyof Tags, string> = {
   self_healed: 'self healed',
 };
 
-/** Tags render the same way wherever they appear: small, quiet, bordered. */
+/** Tags render the same way wherever they appear: small, quiet, rounded. */
 export function TagRow({ tags }: { tags: Tags }) {
   const on = (Object.keys(TAG_LABEL) as (keyof Tags)[]).filter((k) => tags[k]);
   if (!on.length) return null;
   return (
-    <span className="inline-flex gap-1.5 align-middle">
+    <span className="inline-flex gap-1 align-middle">
       {on.map((k) => (
-        <span key={k} className="border border-line px-1 text-[10px] leading-[15px] text-faint">
+        <span key={k} className={`tag ${k === 'is_incident' ? 'tag-degraded' : ''}`}>
           {TAG_LABEL[k]}
         </span>
       ))}
     </span>
   );
+}
+
+/** A single status-style pill, for cells that need one word with a tone. */
+export function Pill({
+  children,
+  tone = 'default',
+}: {
+  children: React.ReactNode;
+  tone?: 'default' | 'degraded' | 'failing' | 'accent';
+}) {
+  return <span className={`tag ${tone === 'default' ? '' : `tag-${tone}`}`}>{children}</span>;
 }
