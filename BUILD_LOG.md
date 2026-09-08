@@ -724,3 +724,67 @@ Verified:  Driven in Chromium: wrong password rejected, wrong email rejected,
            session carries a token and a twelve-hour expiry, a reload stays
            signed in, the sidebar reads "BHA team · mock data". `npm run build`
            passes; the plaintext password is absent from dist/. No page errors.
+
+---
+
+## 2026-09-08 13:40 — Session 7: the Apple-style redesign
+
+Intent:    Destiny's verdict on session 5: it looked like a Claude clone, and
+           the terracotta and amber were everywhere. He supplied a "My Apple"
+           account-page mockup as the reference and asked for it to be applied
+           throughout: greeting header, gradient summary banner, coloured icon
+           tiles, white cards on cool grey, blue as the only accent.
+
+Files:     src/index.css (tokens, tiles, hero, chips, nav), index.html (Inter),
+           src/components/Layout.tsx (sidebar with user menu, top chips),
+           src/screens/Overview.tsx (rewritten), src/app/session.tsx ("me"),
+           src/lib/health.ts, src/components/ui/{Icons,PageHeader,TagRow}.tsx,
+           src/screens/OpenLoops/Loops.tsx, src/screens/AskBays.tsx, CLAUDE.md.
+
+Problem:   1. The mockup greets a named person, but the login is shared and
+              carries no identity.
+           2. Amber appeared on seven of nine system tiles because the health
+              thresholds are strict (any unanswered gap, any unsigned contract).
+              The data is honest; the page read as alarmed.
+           3. The Google Fonts request fails inside the sandbox browser
+              (ERR_CONNECTION_RESET), so screenshots render in the fallback
+              face. Not a code fault; the sandbox has no outbound browser
+              network.
+
+Fix:       1. A "who is at the keyboard" preference, `bha.me` in localStorage,
+              chosen from the builder list in the sidebar's user menu. It
+              drives the greeting, the banner, and the default asker on Ask
+              Bays. It is a display preference, not identity: the login stays
+              shared and nothing is attributed to it.
+           2. The dot keeps its colour; the word "Degraded" goes grey. Red text
+              is kept only for failing. Loop status pills are neutral (open),
+              blue (in progress) and green (closed). The incident tag is no
+              longer amber.
+           3. Inter is loaded with `display=swap` over a system fallback, so
+              the deployed site gets it and nothing waits on it.
+
+Decision:  - **Blue is the only accent.** Gold, terracotta and orange are gone
+             from the tokens; `--color-gold` remains only as an alias of the
+             accent so nothing compiles against a missing name.
+           - **Healthy dots are green.** CLAUDE.md said healthy carries no
+             colour; the reference uses green "Online". Green is now allowed
+             on a status dot and nowhere else. Recorded in CLAUDE.md section 5.
+           - **Coloured icon tiles are allowed on navigation-like affordances**
+             (system tiles, quick actions, list rows) and never on data values.
+             Also in section 5.
+           - **Overview scrolls now.** The one-screen rule is replaced by "the
+             first screen carries the greeting, the banner and the systems
+             row." Section 7 updated.
+           - **The summary banner is composed from the data**, not written:
+             open incidents, open loops, entries this week, how many systems
+             are not healthy, days to Halloween. Its three floating chips drift
+             a few pixels; that and the idle mark are the only motion.
+           - **No serif.** Inter semibold for titles and headline numbers.
+           - **The status strip is gone.** Date, engine health and the lane
+             filter sit as chips at the top right of the content, as in the
+             reference; theme and sign-out live in the user menu.
+
+Verified:  Chromium sweep at 1440x900 in light and dark: all eleven routes
+           render, loop close and create still work, Ask Bays still states its
+           wiring, no page errors, no horizontal overflow. Phone at 390 renders
+           the greeting, banner and systems grid. `npm run build` passes.

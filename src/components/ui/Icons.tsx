@@ -130,6 +130,34 @@ export const Icon = {
       <path d="M3 8.5l3 3 7-7" />
     </svg>
   ),
+  chevron: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base} {...p}>
+      <path d="M6 3.5L10.5 8 6 12.5" />
+    </svg>
+  ),
+  calendar: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base} {...p}>
+      <rect x="2" y="3" width="12" height="11" rx="2" />
+      <path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" />
+    </svg>
+  ),
+  bolt: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base} {...p}>
+      <path d="M9 1.5L3.5 9h4l-.5 5.5L12.5 7h-4z" />
+    </svg>
+  ),
+  shield: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base} {...p}>
+      <path d="M8 1.5l5.5 2v4c0 3.5-2.3 6-5.5 7-3.2-1-5.5-3.5-5.5-7v-4z" />
+      <path d="M5.5 8l1.8 1.8L10.8 6" />
+    </svg>
+  ),
+  sparkle: (p: SVGProps<SVGSVGElement>) => (
+    <svg {...base} {...p}>
+      <path d="M8 2l1.4 3.6L13 7l-3.6 1.4L8 12l-1.4-3.6L3 7l3.6-1.4z" />
+      <path d="M12.5 11.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z" />
+    </svg>
+  ),
   lock: (p: SVGProps<SVGSVGElement>) => (
     <svg {...base} {...p}>
       <rect x="3" y="7" width="10" height="7" rx="1.5" />

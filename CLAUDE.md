@@ -82,30 +82,35 @@ signup. Without `VITE_AUTH_URL` the app runs a preview gate in local dev only.
 
 ## 5. Design
 
-**Feel:** a modern instrument panel. Calm, precise, dense where it needs to be.
-Think a collaboration between Claude and Apple: warm neutral surfaces, real
-typography, restraint. Someone leaves this open on a second screen all day and
-it does not shout at them.
+**Feel:** a modern consumer dashboard in the manner of Apple's account pages.
+Calm, spacious, precise. Cool neutral surfaces, white cards, one blue accent.
+Someone leaves this open on a second screen all day and it does not shout at
+them. The reference is the "My Apple" mockup Destiny supplied on 2026-09-08.
 
-- **Two themes.** Light and dark, switchable from the sidebar, following the OS
-  by default. Every colour is a token in `src/index.css`; components never name
-  a hex value.
-- **Palette:** warm off-white paper in light mode, warm charcoal in dark. One
-  accent (terracotta) for the single thing that matters on a screen and for
-  focus. It is never decoration and never a large fill. The letterhead gold and
-  black are no longer the palette (decision 2026-09-08, Destiny).
-- **Colour carries meaning only.** Amber = degraded. Red = failing. Healthy
-  states get no colour at all.
-- **Cards on paper.** Data lives in white (or warm-dark) cards with 14px radii
-  and a hairline. One soft card shadow is allowed; no gradients, glows or
-  decorative animation beyond the idle mark on Ask Bays and a short fade-in.
-- **Density over prettiness inside a card.** Real tables, tight rows. Thirty
-  rows visible, not eight. Charts are small inline SVG, never a library.
-- **Type:** the system sans for everything, a serif display face for page
-  titles and headline numbers only. Two weights: regular and medium.
+- **Two themes.** Light and dark, switchable from the user menu in the sidebar,
+  following the OS by default. Every colour is a token in `src/index.css`;
+  components never name a hex value.
+- **Palette:** cool light grey page (`#f5f5f7`) with white cards in light mode,
+  near-black page with charcoal cards in dark. **One accent: system blue**, for
+  links, the active tab, primary buttons, progress and focus. No gold, no
+  terracotta, no orange as accent (decision 2026-09-08, Destiny).
+- **Colour carries meaning.** Green dot = healthy. Amber = degraded. Red =
+  failing. Amber and red appear only on a genuinely bad state, never on a
+  label, a default, or a decoration. Coloured rounded-square **icon tiles**
+  (blue, indigo, teal, green, purple, pink, graphite) are allowed on
+  navigation-like affordances — quick actions, system tiles, list rows — and
+  never on data values.
+- **Cards on paper.** 18px radii, a soft shadow, no hairline border. The
+  Overview opens with a greeting and a gradient summary banner whose numbers
+  are read from the data; the banner's floating chips may drift gently. That,
+  the idle mark on Ask Bays and a short fade-in are the only animations.
+- **Density inside a card.** Real tables, tight rows, thirty visible. Charts
+  are small inline SVG, never a library.
+- **Type:** Inter, falling back to the system sans. Semibold for titles and
+  headline numbers, medium for labels, regular for everything else. No serif.
 - **Sentence case everywhere.** Never Title Case, never ALL CAPS.
-- **Every row does something.** Hover reveals its actions inline — close,
-  re-run, retry, open in Slack. Never bury actions in a menu.
+- **Every row does something.** Hover reveals its actions inline. Never bury
+  actions in a menu.
 
 ---
 
@@ -152,7 +157,8 @@ open incidents, open loops, entries logged this week.
 Below: two columns — **what broke in the last 24 hours**, **what moved in the
 last 24 hours**.
 
-Overview must fit on one screen without scrolling. If it scrolls, cut something.
+Overview is a scrolling page: greeting, summary banner, systems, then cards.
+The first screen must carry the greeting, the banner and the systems row.
 
 ### Ask Bays
 A chat interface onto the existing Bays agent.

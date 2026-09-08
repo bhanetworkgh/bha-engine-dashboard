@@ -13,7 +13,7 @@ export function TagRow({ tags }: { tags: Tags }) {
   return (
     <span className="inline-flex gap-1 align-middle">
       {on.map((k) => (
-        <span key={k} className={`tag ${k === 'is_incident' ? 'tag-degraded' : ''}`}>
+        <span key={k} className="tag">
           {TAG_LABEL[k]}
         </span>
       ))}
@@ -27,7 +27,7 @@ export function Pill({
   tone = 'default',
 }: {
   children: React.ReactNode;
-  tone?: 'default' | 'degraded' | 'failing' | 'accent';
+  tone?: 'default' | 'degraded' | 'failing' | 'accent' | 'ok';
 }) {
   return <span className={`tag ${tone === 'default' ? '' : `tag-${tone}`}`}>{children}</span>;
 }

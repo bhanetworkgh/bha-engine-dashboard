@@ -55,9 +55,9 @@ export function OwnerPicker({
 }
 
 function StatusPill({ status }: { status: LoopStatus }) {
-  if (status === 'closed') return <Pill>closed</Pill>;
+  if (status === 'closed') return <Pill tone="ok">closed</Pill>;
   if (status === 'in progress') return <Pill tone="accent">in progress</Pill>;
-  return <Pill tone="degraded">open</Pill>;
+  return <Pill>open</Pill>;
 }
 
 /** The loop list itself, sorted oldest first. Row actions change status in place. */

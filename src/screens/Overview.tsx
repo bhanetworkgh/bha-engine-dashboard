@@ -1,209 +1,362 @@
+import { Link } from 'react-router-dom';
 import { useData } from '../app/useData';
-import { BUILDER_NAMES, getOverview, type OverviewEvent, type OverviewTile } from '../data';
-import {
-  Bars,
-  Card,
-  CardHeader,
-  Dot,
-  HBar,
-  Icon,
-  LoadFailed,
-  Loading,
-  PageHeader,
-  Ring,
-  SourceLink,
-  Sparkline,
-} from '../components/ui';
-import { ageTone, errorClassLabel, healthText, laneLabel } from '../lib';
+import { useSession } from '../app/session';
+import { BUILDER_NAMES, getOverview, type OverviewData, type OverviewEvent, type OverviewTile } from '../data';
+import { Bars, Card, Dot, Icon, LoadFailed, Loading, Ring, SourceLink, type IconName } from '../components/ui';
+import { ageTone, errorClassLabel, healthLabel, healthText, laneLabel } from '../lib';
 
-function Tile({ t }: { t: OverviewTile }) {
-  const toneForTrend = t.health === 'failing' ? 'failing' : t.health === 'degraded' ? 'degraded' : 'ink';
+const TILE_META: Record<string, { icon: IconName; tint: string }> = {
+  'north-star': { icon: 'star', tint: 'tile-indigo' },
+  'research-twin': { icon: 'twin', tint: 'tile-purple' },
+  vfarm: { icon: 'leaf', tint: 'tile-green' },
+  'engine-health': { icon: 'pulse', tint: 'tile-blue' },
+  'open-loops': { icon: 'loop', tint: 'tile-teal' },
+  codex: { icon: 'book', tint: 'tile-graphite' },
+  'build-patterns': { icon: 'pattern', tint: 'tile-graphite' },
+  commercial: { icon: 'tag', tint: 'tile-pink' },
+  builders: { icon: 'people', tint: 'tile-blue' },
+};
+
+function greeting(): string {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+}
+
+function CardTitle({ title, right }: { title: string; right?: React.ReactNode }) {
   return (
-    <Card to={t.to} className="group flex min-h-[118px] flex-col justify-between p-4">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[12.5px] font-medium text-ink">{t.label}</span>
-        <Dot health={t.health} />
-      </div>
-      <div className="mt-2 flex items-end justify-between gap-3">
-        <div className="min-w-0">
-          <div className="font-display tabular text-[30px] leading-none">{t.headline}</div>
-          <div className="mt-1 truncate text-[11.5px] text-faint">{t.sublabel}</div>
-        </div>
-        {t.share ? (
-          <div className="flex items-center gap-2">
-            <Ring value={t.share.value} total={t.share.total} size={44} tone={t.share.value === t.share.total ? 'ink' : 'accent'} label={t.share.label} />
-          </div>
-        ) : t.trend ? (
-          <Sparkline values={t.trend} width={88} height={34} tone={toneForTrend} />
-        ) : null}
-      </div>
-      <div className="mt-2 flex items-center justify-between gap-2 text-[11.5px]">
-        <span className={`truncate ${healthText(t.health)}`}>{t.share ? `${t.share.label} · ${t.signal}` : t.signal}</span>
-        <Icon.arrow className="shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100" />
-      </div>
-    </Card>
+    <div className="mb-3 flex items-center justify-between gap-3">
+      <h2 className="text-[15px]">{title}</h2>
+      {right}
+    </div>
   );
 }
 
-function EventList({ title, events, empty }: { title: string; events: OverviewEvent[]; empty: string }) {
+/** The summary banner. Every number in it is read from the data, never typed. */
+function Hero({ data, name }: { data: OverviewData; name: string }) {
+  const pin = (label: string) => data.pins.find((p) => p.label === label)?.value ?? '—';
+  const incidents = pin('Open incidents');
+  const loops = pin('Open loops');
+  const entries = pin('Entries this week');
+  const halloween = pin('Days to Halloween');
+  const worst = data.tiles.filter((t) => t.health !== 'ok');
+  const sentence =
+    worst.length === 0
+      ? `Everything is healthy. ${loops} loops open, ${entries} entries this week, ${halloween} days to Halloween.`
+      : `${incidents} incident${incidents === '1' ? '' : 's'} open, ${loops} loops open, ${entries} entries logged this week. ${worst.length} of ${data.tiles.length} systems need a look. ${halloween} days to Halloween.`;
+
   return (
-    <Card className="flex min-h-0 flex-col">
-      <CardHeader title={title} right={<span className="kicker tabular">{events.length}</span>} />
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto pb-2">
-        {events.length === 0 ? (
-          <p className="px-5 py-3 text-[12.5px] text-dim">{empty}</p>
-        ) : (
-          events.map((e) => (
-            <div key={e.id} className="rowlike px-5 py-[7px]">
-              <div className="flex items-baseline gap-2">
-                <span className="tabular w-9 shrink-0 text-[11.5px] text-faint">{e.at}</span>
-                <Dot health={e.health} />
-                <span className="min-w-0 flex-1 truncate text-[12.5px]">{e.title}</span>
-                <SourceLink source={e.source} />
-              </div>
-              <div className="flex items-baseline gap-2 pl-[52px]">
-                <span className={`min-w-0 flex-1 truncate text-[11.5px] ${healthText(e.health)}`}>{e.detail}</span>
-                <span className="shrink-0 text-[11px] text-faint">{laneLabel(e.spine.lane)}</span>
-              </div>
-            </div>
-          ))
-        )}
+    <section className="hero p-6 md:p-8">
+      <div className="relative z-10 max-w-[52%] md:max-w-[50%]">
+        <div className="mb-3 flex items-center gap-1.5 text-[12px] font-medium tracking-[0.02em] text-accent-ink">
+          <Icon.sparkle />
+          Bays summary
+        </div>
+        <h2 className="font-display text-[24px] leading-tight md:text-[27px]">
+          {name}, here is your engine right now.
+        </h2>
+        <p className="mt-3 max-w-[46ch] text-[14px] leading-relaxed text-dim">{sentence}</p>
+        <Link to="/ask-bays" className="btn mt-5 h-9 rounded-full bg-panel px-4 text-[13px]">
+          Ask Bays about today
+        </Link>
       </div>
-    </Card>
+
+      {/* Floating chips: the pinned numbers, each a small card. */}
+      <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[48%] md:block" aria-hidden>
+        <div className="drift absolute top-[14%] right-[30%] card flex items-center gap-3 px-3.5 py-2.5" style={{ ['--tilt' as string]: '-4deg' }}>
+          <span className="tile tile-sm tile-blue"><Icon.pulse /></span>
+          <span className="leading-tight"><span className="block text-[11px] text-faint">Open incidents</span><span className="tabular block text-[15px] font-semibold">{incidents}</span></span>
+        </div>
+        <div className="drift-slow absolute top-[44%] right-[6%] card flex items-center gap-3 px-3.5 py-2.5" style={{ ['--tilt' as string]: '3deg' }}>
+          <span className="tile tile-sm tile-teal"><Icon.loop /></span>
+          <span className="leading-tight"><span className="block text-[11px] text-faint">Open loops</span><span className="tabular block text-[15px] font-semibold">{loops}</span></span>
+        </div>
+        <div className="drift-fast absolute bottom-[12%] right-[34%] card flex items-center gap-3 px-3.5 py-2.5" style={{ ['--tilt' as string]: '-2deg' }}>
+          <span className="tile tile-sm tile-green"><Icon.leaf /></span>
+          <span className="leading-tight"><span className="block text-[11px] text-faint">Days to Halloween</span><span className="tabular block text-[15px] font-semibold">{halloween}</span></span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SystemTile({ t }: { t: OverviewTile }) {
+  const meta = TILE_META[t.key] ?? { icon: 'overview' as IconName, tint: 'tile-graphite' };
+  const I = Icon[meta.icon];
+  return (
+    <Link to={t.to} className="group flex flex-col items-center rounded-[14px] px-2 py-3 text-center transition-colors hover:bg-hover">
+      <span className={`tile ${meta.tint} h-12 w-12 rounded-[14px]`}>
+        <I className="h-6 w-6" />
+      </span>
+      <span className="mt-2.5 text-[13px] font-medium">{t.label}</span>
+      <span className="tabular text-[12px] text-dim">
+        {t.headline} {t.sublabel}
+      </span>
+      <span className={`mt-1.5 flex items-center gap-1.5 text-[11.5px] ${t.health === 'ok' ? 'text-ok' : t.health === 'failing' ? 'text-failing' : 'text-dim'}`}>
+        <Dot health={t.health} />
+        {healthLabel(t.health)}
+      </span>
+    </Link>
+  );
+}
+
+function EventRow({ e }: { e: OverviewEvent }) {
+  return (
+    <div className="rowlike -mx-2 flex items-start gap-3 rounded-[10px] px-2 py-2">
+      <span className={`tile tile-sm ${e.health === 'failing' ? 'tile-pink' : e.health === 'degraded' ? 'tile-graphite' : 'tile-blue'} mt-0.5`}>
+        {e.health === 'ok' ? <Icon.check /> : <Icon.bolt />}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-medium">{e.title}</div>
+        <div className={`truncate text-[12px] ${e.health === 'ok' ? 'text-dim' : healthText(e.health)}`}>{e.detail}</div>
+        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-faint">
+          <span className="tabular">{e.at}</span>
+          <span>{laneLabel(e.spine.lane)}</span>
+          <SourceLink source={e.source} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QuickAction({ to, icon, tint, title, sub }: { to: string; icon: IconName; tint: string; title: string; sub: string }) {
+  const I = Icon[icon];
+  return (
+    <Link to={to} className="rowlike -mx-2 flex items-center gap-3 rounded-[12px] px-2 py-2.5">
+      <span className={`tile ${tint}`}>
+        <I />
+      </span>
+      <span className="min-w-0 flex-1 leading-tight">
+        <span className="block text-[13.5px] font-medium">{title}</span>
+        <span className="block truncate text-[12px] text-dim">{sub}</span>
+      </span>
+      <Icon.chevron className="text-faint" />
+    </Link>
   );
 }
 
 export default function Overview() {
+  const { me } = useSession();
   const { status, data, error } = useData(getOverview);
   if (status === 'loading') return <Loading />;
   if (status === 'error') return <LoadFailed error={error} />;
 
+  const name = BUILDER_NAMES[me] ?? me;
   const s = data.series;
   const maxOwner = Math.max(1, ...s.loops_by_owner.map((o) => o.open + o.in_progress));
-  const maxClass = Math.max(1, ...s.incidents_by_class.map((c) => c.n));
   const asks = s.asks_by_outcome;
   const askTotal = asks.answered + asks.thin + asks.failed;
+  const openIncidents = data.pins.find((p) => p.label === 'Open incidents')?.value ?? '0';
+  const engineTile = data.tiles.find((t) => t.key === 'engine-health');
+  const halloween = data.pins.find((p) => p.label === 'Days to Halloween')?.value ?? '—';
 
   return (
-    <div className="flex min-h-0 flex-col gap-4 pb-6 md:h-full">
-      <PageHeader title="Overview" subtitle="Everything the engine knows about itself, on one screen. Open any system from its card." />
+    <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 pt-2 pb-8 md:px-8">
+      <header className="mb-6">
+        <h1 className="font-display text-[34px] leading-none">
+          {greeting()}, {name}
+        </h1>
+        <p className="mt-2 text-[15px] text-dim">Here is what is happening across the engine, the loops and the builders.</p>
+      </header>
 
-      {/* Pinned across the top. */}
-      <div className="card mx-6 grid shrink-0 grid-cols-2 md:mx-8 md:grid-cols-5">
-        {data.pins.map((p, i) => (
-          <div
-            key={p.label}
-            className={`px-5 py-3.5 ${i % 2 === 0 ? 'border-r border-line' : ''} ${i < data.pins.length - 2 ? 'border-b border-line' : ''} md:border-b-0 md:border-r md:border-line md:last:border-r-0`}
-          >
-            <div className="kicker truncate">{p.label}</div>
-            <div
-              className={`font-display tabular mt-1 truncate text-[24px] leading-none ${
-                p.accent ? 'text-accent-ink' : p.health === 'ok' ? 'text-ink' : healthText(p.health)
-              }`}
-            >
-              {p.value}
-            </div>
-          </div>
-        ))}
-      </div>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+        {/* Left column */}
+        <div className="min-w-0 space-y-4">
+          <Hero data={data} name={name} />
 
-      {/* One card per system. Click through. */}
-      <div className="mx-6 grid shrink-0 grid-cols-1 gap-3 sm:grid-cols-2 md:mx-8 lg:grid-cols-3 xl:grid-cols-5">
-        {data.tiles.map((t) => (
-          <Tile key={t.key} t={t} />
-        ))}
-      </div>
-
-      {/* Bottom row: where work piles up, how the engine is coping, and the last day. */}
-      <div className="mx-6 grid min-h-0 flex-1 grid-cols-1 gap-3 md:mx-8 lg:grid-cols-2 xl:grid-cols-[240px_260px_minmax(0,1fr)_minmax(0,1fr)]">
-        <Card className="flex min-h-0 flex-col">
-          <CardHeader title="Loops by builder" right={<span className="kicker">oldest</span>} />
-          <div className="scroll-thin min-h-0 flex-1 space-y-2.5 overflow-y-auto px-5 pb-4">
-            {s.loops_by_owner.length === 0 ? (
-              <p className="text-[12.5px] text-dim">No open loops in the selected lane.</p>
-            ) : (
-              s.loops_by_owner.map((o) => (
-                <HBar
-                  key={o.owner}
-                  label={BUILDER_NAMES[o.owner] ?? o.owner}
-                  value={o.open + o.in_progress}
-                  max={maxOwner}
-                  tone={o.oldest_days >= 30 ? 'failing' : o.oldest_days >= 14 ? 'degraded' : 'ink'}
-                  right={<span className={`tabular ${ageTone(o.oldest_days)}`}>{o.oldest_days}d</span>}
-                />
-              ))
-            )}
-          </div>
-        </Card>
-
-        <Card className="flex min-h-0 flex-col">
-          <CardHeader title="Engine" right={<span className="kicker">last 7 days</span>} />
-          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 pb-4">
-            <div className="flex items-center gap-3">
-              <Ring value={data.rates.self_heal.value} total={data.rates.self_heal.total} size={52} tone="ink" label="self-healed" />
-              <div className="min-w-0 flex-1 text-[11.5px] leading-snug">
-                <div className="text-[12.5px] text-ink">Self-heal rate</div>
-                <div className="text-faint">
-                  {data.rates.self_heal.value} of {data.rates.self_heal.total} resolved unaided
-                </div>
-                <div className="text-faint">
-                  retries {data.rates.retries.value} of {data.rates.retries.total} succeeded
-                </div>
-              </div>
-            </div>
-            <div className="mt-4">
-              <div className="mb-1.5 flex items-center justify-between text-[11.5px] text-faint">
-                <span>Incidents opened per day</span>
-                <span className="tabular">{s.incidents_7d.reduce((n, p) => n + p.value, 0)} total</span>
-              </div>
-              <Bars values={s.incidents_7d.map((p) => p.value)} labels={s.incidents_7d.map((p) => p.label)} height={44} tone="ink" />
-            </div>
-            <div className="mt-4 space-y-2.5">
-              {s.incidents_by_class.map((c) => (
-                <HBar
-                  key={c.error_class}
-                  label={errorClassLabel(c.error_class)}
-                  value={c.n}
-                  max={maxClass}
-                  tone={c.open > 0 ? (c.error_class === 'BILLING_QUOTA' || c.error_class === 'CONFIG_AUTH' ? 'failing' : 'degraded') : 'ink'}
-                  right={c.open > 0 ? <span className={c.error_class === 'BILLING_QUOTA' ? 'text-failing' : 'text-degraded'}>{c.open} open</span> : null}
-                />
+          <Card className="p-5">
+            <CardTitle title="Your systems" right={<span className="text-[12.5px] text-faint">{data.tiles.length} sections</span>} />
+            <div className="grid grid-cols-3 gap-1 sm:grid-cols-5 lg:grid-cols-5">
+              {data.tiles.map((t) => (
+                <SystemTile key={t.key} t={t} />
               ))}
             </div>
-            <div className="mt-4 border-t border-line pt-3">
-              <div className="mb-1.5 flex items-center justify-between text-[11.5px] text-faint">
-                <span>Asks across both twins</span>
-                <span className="tabular">{askTotal}</span>
+          </Card>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card className="p-5">
+              <CardTitle title="Loops by builder" right={<Link to="/open-loops" className="link">View all</Link>} />
+              {s.loops_by_owner.length === 0 ? (
+                <p className="text-[13px] text-dim">No open loops in the selected lane.</p>
+              ) : (
+                <div className="space-y-3">
+                  {s.loops_by_owner.map((o) => (
+                    <div key={o.owner} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5">
+                      <div className="flex items-center gap-2.5 text-[13px]">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-raised text-[11px] font-medium text-dim">
+                          {(BUILDER_NAMES[o.owner] ?? o.owner).slice(0, 1)}
+                        </span>
+                        {BUILDER_NAMES[o.owner] ?? o.owner}
+                      </div>
+                      <div className="tabular flex items-center gap-2 text-[12px] text-dim">
+                        <span>{o.open + o.in_progress} open</span>
+                        <span className={ageTone(o.oldest_days)}>{o.oldest_days}d</span>
+                      </div>
+                      <div className="col-span-2 h-[6px] overflow-hidden rounded-full bg-raised">
+                        <div className="h-full rounded-full bg-accent" style={{ width: `${((o.open + o.in_progress) / maxOwner) * 100}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            <Card className="p-5">
+              <CardTitle title="Engine health" right={<Link to="/engine-health" className="link">View details</Link>} />
+              <div className="flex items-center gap-4">
+                <span className={`tile h-14 w-14 rounded-[16px] ${engineTile?.health === 'failing' ? 'tile-pink' : engineTile?.health === 'degraded' ? 'tile-graphite' : 'tile-green'}`}>
+                  <Icon.shield className="h-7 w-7" />
+                </span>
+                <div className="min-w-0">
+                  <div className="text-[16px] font-semibold">
+                    {openIncidents === '0' ? 'All good' : `${openIncidents} open incident${openIncidents === '1' ? '' : 's'}`}
+                  </div>
+                  <div className="text-[12.5px] text-dim">
+                    {engineTile?.signal ?? ''}
+                  </div>
+                </div>
               </div>
-              <div className="flex h-[6px] w-full gap-[2px] overflow-hidden rounded-full">
-                {askTotal === 0 ? (
-                  <div className="h-full w-full bg-raised" />
-                ) : (
-                  <>
-                    <div style={{ width: `${(asks.answered / askTotal) * 100}%` }} className="bg-ink/60" title={`answered ${asks.answered}`} />
-                    <div style={{ width: `${(asks.thin / askTotal) * 100}%` }} className="bg-degraded" title={`thin ${asks.thin}`} />
-                    <div style={{ width: `${(asks.failed / askTotal) * 100}%` }} className="bg-failing" title={`failed ${asks.failed}`} />
-                  </>
-                )}
+              <div className="mt-4 divide-y divide-line">
+                <div className="flex items-center gap-3 py-2.5">
+                  <Ring value={data.rates.self_heal.value} total={data.rates.self_heal.total} size={36} tone="accent" label="self-healed" />
+                  <div className="min-w-0 flex-1 leading-tight">
+                    <div className="text-[13px] font-medium">Self-heal rate</div>
+                    <div className="text-[12px] text-dim">{data.rates.self_heal.value} of {data.rates.self_heal.total} resolved without a person</div>
+                  </div>
+                </div>
+                {s.incidents_by_class.map((c) => (
+                  <Link key={c.error_class} to="/engine-health" className="rowlike flex items-center gap-3 py-2.5">
+                    <span className={`tile tile-sm ${c.open > 0 ? (c.error_class === 'BILLING_QUOTA' || c.error_class === 'CONFIG_AUTH' ? 'tile-pink' : 'tile-graphite') : 'tile-soft'}`}>
+                      <Icon.bolt />
+                    </span>
+                    <span className="min-w-0 flex-1 leading-tight">
+                      <span className="block text-[13px] font-medium">{errorClassLabel(c.error_class)}</span>
+                      <span className={`block text-[12px] ${c.open ? healthText(c.error_class === 'BILLING_QUOTA' ? 'failing' : 'degraded') : 'text-dim'}`}>
+                        {c.open ? `${c.open} open · ${c.n} total` : `${c.n} total, none open`}
+                      </span>
+                    </span>
+                    <Icon.chevron className="text-faint" />
+                  </Link>
+                ))}
               </div>
-              <div className="mt-1.5 flex gap-4 text-[11.5px]">
-                <span className="text-dim">
-                  <span className="tabular text-ink">{asks.answered}</span> answered
-                </span>
-                <span className="text-dim">
-                  <span className={`tabular ${asks.thin ? 'text-degraded' : 'text-ink'}`}>{asks.thin}</span> thin
-                </span>
-                <span className="text-dim">
-                  <span className={`tabular ${asks.failed ? 'text-failing' : 'text-ink'}`}>{asks.failed}</span> failed
-                </span>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card className="p-5">
+              <CardTitle title="What broke in the last 24 hours" right={<Link to="/engine-health" className="link">View all</Link>} />
+              {data.broke_24h.length === 0 ? (
+                <p className="text-[13px] text-dim">Nothing broke in this window for the selected lane.</p>
+              ) : (
+                <div className="divide-y divide-line">
+                  {data.broke_24h.slice(0, 6).map((e) => (
+                    <EventRow key={e.id} e={e} />
+                  ))}
+                </div>
+              )}
+            </Card>
+            <Card className="p-5">
+              <CardTitle title="What moved in the last 24 hours" right={<Link to="/codex" className="link">View all</Link>} />
+              {data.moved_24h.length === 0 ? (
+                <p className="text-[13px] text-dim">Nothing moved in this window for the selected lane.</p>
+              ) : (
+                <div className="divide-y divide-line">
+                  {data.moved_24h.slice(0, 6).map((e) => (
+                    <EventRow key={e.id} e={e} />
+                  ))}
+                </div>
+              )}
+            </Card>
+          </div>
+        </div>
+
+        {/* Right column */}
+        <div className="min-w-0 space-y-4">
+          <Card className="p-5">
+            <CardTitle title="Quick actions" />
+            <div className="divide-y divide-line">
+              <QuickAction to="/ask-bays" icon="chat" tint="tile-blue" title="Ask Bays" sub="Question the engine" />
+              <QuickAction to="/open-loops" icon="loop" tint="tile-teal" title="Open loops" sub="Close, start or open a loop" />
+              <QuickAction to="/engine-health" icon="pulse" tint="tile-indigo" title="Engine health" sub="Incidents and retries" />
+              <QuickAction to="/vfarm" icon="leaf" tint="tile-green" title="vFarm" sub={`${halloween} days to Halloween`} />
+            </div>
+          </Card>
+
+          <Card className="p-5">
+            <CardTitle title="This week" right={<Link to="/codex" className="link">View details</Link>} />
+            <div className="divide-y divide-line">
+              <div className="flex items-center gap-3 py-3">
+                <span className="tile tile-sm tile-graphite"><Icon.book /></span>
+                <div className="min-w-0 flex-1 leading-tight">
+                  <div className="text-[12px] text-dim">Entries logged</div>
+                  <div className="tabular text-[20px] font-semibold">{data.pins.find((p) => p.label === 'Entries this week')?.value ?? '—'}</div>
+                </div>
+                <div className="w-[88px]">
+                  <Bars values={s.entries_by_week.map((p) => p.value)} labels={s.entries_by_week.map((p) => p.label)} height={30} tone="accent" highlightLast={false} />
+                </div>
+              </div>
+              <div className="flex items-center gap-3 py-3">
+                <span className="tile tile-sm tile-indigo"><Icon.star /></span>
+                <div className="min-w-0 flex-1 leading-tight">
+                  <div className="text-[12px] text-dim">Asks answered</div>
+                  <div className="tabular text-[20px] font-semibold">
+                    {asks.answered}
+                    <span className="text-[13px] font-normal text-faint"> of {askTotal}</span>
+                  </div>
+                </div>
+                <Ring value={asks.answered} total={askTotal} size={44} tone="accent" label="answered" />
+              </div>
+              <div className="flex items-center gap-3 py-3">
+                <span className="tile tile-sm tile-blue"><Icon.pulse /></span>
+                <div className="min-w-0 flex-1 leading-tight">
+                  <div className="text-[12px] text-dim">Incidents opened, 7 days</div>
+                  <div className="tabular text-[20px] font-semibold">{s.incidents_7d.reduce((n, p) => n + p.value, 0)}</div>
+                </div>
+                <div className="w-[88px]">
+                  <Bars values={s.incidents_7d.map((p) => p.value)} labels={s.incidents_7d.map((p) => p.label)} height={30} tone="accent" highlightLast={false} />
+                </div>
+              </div>
+              <div className="flex items-center gap-3 py-3">
+                <span className="tile tile-sm tile-teal"><Icon.loop /></span>
+                <div className="min-w-0 flex-1 leading-tight">
+                  <div className="text-[12px] text-dim">Loops raised, 14 days</div>
+                  <div className="tabular text-[20px] font-semibold">{s.loops_raised_14d.reduce((n, p) => n + p.value, 0)}</div>
+                </div>
+                <div className="w-[88px]">
+                  <Bars values={s.loops_raised_14d.map((p) => p.value)} labels={s.loops_raised_14d.map((p) => p.label)} height={30} tone="accent" highlightLast={false} />
+                </div>
               </div>
             </div>
-          </div>
-        </Card>
+          </Card>
 
-        <EventList title="What broke in the last 24 hours" events={data.broke_24h} empty="Nothing broke in this window for the selected lane." />
-        <EventList title="What moved in the last 24 hours" events={data.moved_24h} empty="Nothing moved in this window for the selected lane." />
+          <Card className="p-5">
+            <CardTitle title="Needs a look" />
+            {data.tiles.filter((t) => t.health !== 'ok').length === 0 ? (
+              <p className="text-[13px] text-dim">Every system is healthy in the selected lane.</p>
+            ) : (
+              <div className="divide-y divide-line">
+                {data.tiles
+                  .filter((t) => t.health !== 'ok')
+                  .map((t) => {
+                    const meta = TILE_META[t.key];
+                    const I = Icon[meta?.icon ?? 'overview'];
+                    return (
+                      <Link key={t.key} to={t.to} className="rowlike -mx-2 flex items-center gap-3 rounded-[12px] px-2 py-2.5">
+                        <span className={`tile tile-sm ${meta?.tint ?? 'tile-graphite'}`}><I /></span>
+                        <span className="min-w-0 flex-1 leading-tight">
+                          <span className="block text-[13px] font-medium">{t.label}</span>
+                          <span className={`block truncate text-[12px] ${healthText(t.health)}`}>{t.signal}</span>
+                        </span>
+                        <Icon.chevron className="text-faint" />
+                      </Link>
+                    );
+                  })}
+              </div>
+            )}
+          </Card>
+        </div>
       </div>
+
+      <p className="mt-8 text-center text-[12px] text-faint">One window onto the engine. Every number here is read, never typed.</p>
     </div>
   );
 }
