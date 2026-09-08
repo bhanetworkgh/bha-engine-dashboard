@@ -52,14 +52,14 @@ function DeliveryLine({ m }: { m: ChatMessage }) {
 }
 
 export default function AskBays() {
-  const { lane } = useSession();
+  const { lane, me } = useSession();
   const { status, data, error } = useData(getAskBays);
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState('');
   const [panelOpen, setPanelOpen] = useState(false);
-  const [asker, setAsker] = useState('destiny');
+  const [asker, setAsker] = useState(me);
   const [cooldownUntil, setCooldownUntil] = useState<Record<string, number>>({});
   const [now, setNow] = useState(Date.now());
   const inputRef = useRef<HTMLTextAreaElement>(null);

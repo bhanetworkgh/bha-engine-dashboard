@@ -5,6 +5,15 @@ import { setBearer } from '../data/engine';
 export { TEAM_EMAIL } from '../data';
 
 const SESSION_KEY = 'bha.session';
+const ME_KEY = 'bha.me';
+
+function readMe(): string {
+  try {
+    return localStorage.getItem(ME_KEY) || 'destiny';
+  } catch {
+    return 'destiny';
+  }
+}
 
 interface SessionValue {
   session: AuthSession | null;
@@ -14,6 +23,9 @@ interface SessionValue {
   signOut: () => void;
   lane: LaneFilter;
   setLane: (lane: LaneFilter) => void;
+  /** Which builder is at the keyboard. A display preference, since the login is shared. */
+  me: string;
+  setMe: (id: string) => void;
 }
 
 const Ctx = createContext<SessionValue | null>(null);
@@ -59,6 +71,15 @@ function writeSession(s: AuthSession | null) {
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(readSession);
   const [lane, setLane] = useState<LaneFilter>('all');
+  const [me, setMeState] = useState<string>(readMe);
+  const setMe = useCallback((id: string) => {
+    setMeState(id);
+    try {
+      localStorage.setItem(ME_KEY, id);
+    } catch {
+      // Preference will not persist.
+    }
+  }, []);
 
   const signOut = useCallback(() => {
     writeSession(null);
@@ -89,6 +110,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       token: session?.token ?? null,
       lane,
       setLane,
+      me,
+      setMe,
       signIn: async (email, password) => {
         const result = await engineSignIn(email, password);
         if (result.ok) {
@@ -99,7 +122,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       },
       signOut,
     }),
-    [session, lane, signOut],
+    [session, lane, me, setMe, signOut],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

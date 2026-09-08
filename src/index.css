@@ -17,55 +17,86 @@
 :root {
   color-scheme: light;
 
-  --bg: #f4f3ef;
+  --bg: #f5f5f7;
   --panel: #ffffff;
-  --raised: #f7f6f2;
-  --hover: #f1f0ea;
-  --line: rgba(28, 25, 20, 0.08);
-  --line-strong: rgba(28, 25, 20, 0.16);
+  --raised: #f2f2f4;
+  --hover: #ededf0;
+  --line: rgba(0, 0, 0, 0.06);
+  --line-strong: rgba(0, 0, 0, 0.12);
 
-  --ink: #1c1a17;
-  --dim: #6c6862;
-  --faint: #9a958d;
+  --ink: #1d1d1f;
+  --dim: #6e6e73;
+  --faint: #a1a1a6;
 
-  --accent: #c96442;
-  --accent-soft: rgba(201, 100, 66, 0.12);
-  --accent-ink: #a94f30;
+  /* One accent: system blue. Links, selection, the single active thing. */
+  --accent: #0a7aff;
+  --accent-soft: rgba(10, 122, 255, 0.12);
+  --accent-ink: #0066d6;
 
-  --degraded: #b5731c;
-  --degraded-soft: rgba(181, 115, 28, 0.12);
-  --failing: #c8433a;
-  --failing-soft: rgba(200, 67, 58, 0.12);
+  /* Colour carries meaning. Healthy is green only on a status dot. */
+  --ok: #34c759;
+  --ok-soft: rgba(52, 199, 89, 0.14);
+  --degraded: #d98a00;
+  --degraded-soft: rgba(217, 138, 0, 0.12);
+  --failing: #e03a2f;
+  --failing-soft: rgba(224, 58, 47, 0.10);
 
-  --shadow-card: 0 1px 2px rgba(28, 25, 20, 0.04), 0 0 0 1px rgba(28, 25, 20, 0.05);
-  --shadow-pop: 0 12px 32px rgba(28, 25, 20, 0.14), 0 0 0 1px rgba(28, 25, 20, 0.06);
+  /* Icon tiles: soft tints for navigation-like affordances, never for data. */
+  --tint-blue: #0a7aff;
+  --tint-indigo: #5e5ce6;
+  --tint-teal: #30b0c7;
+  --tint-green: #34c759;
+  --tint-purple: #af52de;
+  --tint-pink: #ff2d55;
+  --tint-graphite: #48484a;
+
+  --hero-a: #dfe9ff;
+  --hero-b: #e9dcff;
+  --hero-c: #cfe4ff;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.03), 0 4px 16px rgba(0, 0, 0, 0.04);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04);
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #151412;
-  --panel: #1d1c19;
-  --raised: #24231f;
-  --hover: #2a2925;
-  --line: rgba(255, 250, 240, 0.08);
-  --line-strong: rgba(255, 250, 240, 0.16);
+  --bg: #141416;
+  --panel: #1c1c1f;
+  --raised: #232327;
+  --hover: #2a2a2f;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.14);
 
-  --ink: #ebe9e3;
-  --dim: #a39f97;
-  --faint: #6f6b64;
+  --ink: #f2f2f4;
+  --dim: #a1a1a8;
+  --faint: #6b6b72;
 
-  --accent: #d9825f;
-  --accent-soft: rgba(217, 130, 95, 0.16);
-  --accent-ink: #e6a284;
+  --accent: #3d95ff;
+  --accent-soft: rgba(61, 149, 255, 0.18);
+  --accent-ink: #6aaeff;
 
-  --degraded: #dd9a3e;
-  --degraded-soft: rgba(221, 154, 62, 0.16);
-  --failing: #e0665b;
-  --failing-soft: rgba(224, 102, 91, 0.16);
+  --ok: #30d158;
+  --ok-soft: rgba(48, 209, 88, 0.16);
+  --degraded: #ffb340;
+  --degraded-soft: rgba(255, 179, 64, 0.16);
+  --failing: #ff6961;
+  --failing-soft: rgba(255, 105, 97, 0.16);
 
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 250, 240, 0.06);
-  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 250, 240, 0.08);
+  --tint-blue: #3d95ff;
+  --tint-indigo: #7d7aff;
+  --tint-teal: #40c8e0;
+  --tint-green: #30d158;
+  --tint-purple: #bf5af2;
+  --tint-pink: #ff375f;
+  --tint-graphite: #8e8e93;
+
+  --hero-a: #1f2a4a;
+  --hero-b: #2b2350;
+  --hero-c: #17304f;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 @theme inline {
@@ -83,25 +114,27 @@
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
   --color-accent-ink: var(--accent-ink);
-  /* Legacy names, kept so any untouched screen still compiles. */
+  /* Legacy names, kept so nothing compiles against a missing token. */
   --color-gold: var(--accent);
   --color-gold-dim: var(--accent-ink);
 
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
   --color-degraded: var(--degraded);
   --color-degraded-soft: var(--degraded-soft);
   --color-failing: var(--failing);
   --color-failing-soft: var(--failing-soft);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI",
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
     Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-display: "Iowan Old Style", "Charter", "Palatino", "Georgia", ui-serif, serif;
+  --font-display: var(--font-sans);
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
     "Liberation Mono", monospace;
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
 }
 
 @layer base {
@@ -124,15 +157,18 @@
     text-rendering: optimizeLegibility;
   }
 
-  /* Two font weights. Regular and medium. Nothing heavier. */
   b,
   strong,
-  th,
+  th {
+    font-weight: 500;
+  }
+
   h1,
   h2,
   h3,
   h4 {
-    font-weight: 500;
+    font-weight: 600;
+    letter-spacing: -0.01em;
   }
 
   h1,
@@ -197,9 +233,39 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Headline numbers and titles: the sans, semibold, tight. */
   .font-display {
     font-family: var(--font-display);
-    letter-spacing: -0.01em;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  @keyframes drift {
+    0%,
+    100% {
+      transform: translateY(0) rotate(var(--tilt, 0deg));
+    }
+    50% {
+      transform: translateY(-6px) rotate(var(--tilt, 0deg));
+    }
+  }
+  .drift {
+    animation: drift 6s ease-in-out infinite;
+  }
+  .drift-slow {
+    animation: drift 8s ease-in-out infinite;
+    animation-delay: -2s;
+  }
+  .drift-fast {
+    animation: drift 5s ease-in-out infinite;
+    animation-delay: -1s;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .drift,
+    .drift-slow,
+    .drift-fast {
+      animation: none;
+    }
   }
 
   /* Row actions: hidden until the row is hovered or focused within. */
@@ -277,6 +343,78 @@
     box-shadow: var(--shadow-card);
   }
 
+  /* The gradient summary banner. */
+  .hero {
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--radius-lg);
+    background:
+      radial-gradient(120% 140% at 100% 0%, var(--hero-b) 0%, transparent 55%),
+      radial-gradient(90% 120% at 0% 100%, var(--hero-c) 0%, transparent 60%),
+      linear-gradient(135deg, var(--hero-a), var(--hero-b));
+  }
+
+  /* Coloured rounded-square icon tiles, for navigation affordances only. */
+  .tile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    flex: none;
+    border-radius: 10px;
+    color: #fff;
+    background: var(--tint-graphite);
+  }
+  .tile svg {
+    width: 18px;
+    height: 18px;
+  }
+  .tile-sm {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+  }
+  .tile-sm svg {
+    width: 15px;
+    height: 15px;
+  }
+  .tile-blue { background: var(--tint-blue); }
+  .tile-indigo { background: var(--tint-indigo); }
+  .tile-teal { background: var(--tint-teal); }
+  .tile-green { background: var(--tint-green); }
+  .tile-purple { background: var(--tint-purple); }
+  .tile-pink { background: var(--tint-pink); }
+  .tile-graphite { background: var(--tint-graphite); }
+  .tile-soft {
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+  }
+
+  .link {
+    color: var(--accent-ink);
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+  .link:hover {
+    text-decoration: underline;
+  }
+
+  /* A quiet chip: date, health, small status. */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 999px;
+    background: var(--panel);
+    box-shadow: var(--shadow-card);
+    font-size: 12.5px;
+    color: var(--dim);
+    white-space: nowrap;
+  }
+
   .card-hover {
     transition:
       transform 160ms ease,
@@ -324,13 +462,13 @@
   }
 
   .btn-primary {
-    background: var(--ink);
-    color: var(--bg);
+    background: var(--accent);
+    color: #fff;
     box-shadow: none;
   }
   .btn-primary:hover {
-    background: var(--ink);
-    opacity: 0.9;
+    background: var(--accent);
+    opacity: 0.92;
   }
 
   .btn-accent {
@@ -451,7 +589,7 @@
     bottom: -1px;
     height: 2px;
     border-radius: 2px;
-    background: var(--ink);
+    background: var(--accent);
   }
 
   /* Tags: small, quiet, consistent everywhere. */
@@ -483,13 +621,18 @@
     background: var(--accent-soft);
     box-shadow: none;
   }
+  .tag-ok {
+    color: var(--ok);
+    background: var(--ok-soft);
+    box-shadow: none;
+  }
 
   /* Tables ------------------------------------------------------------------ */
 
   .td {
     white-space: nowrap;
     border-bottom: 1px solid var(--line);
-    padding: 6px 12px;
+    padding: 7px 14px;
     line-height: 1.35;
     vertical-align: middle;
   }
@@ -526,30 +669,34 @@
   .nav-item {
     display: flex;
     align-items: center;
-    gap: 9px;
-    height: 30px;
-    padding: 0 10px;
-    border-radius: 8px;
-    font-size: 13px;
-    color: var(--dim);
+    gap: 11px;
+    height: 38px;
+    padding: 0 12px;
+    border-radius: 12px;
+    font-size: 13.5px;
+    font-weight: 500;
+    color: var(--ink);
     transition:
       background 120ms ease,
       color 120ms ease;
   }
   .nav-item:hover {
     background: var(--hover);
-    color: var(--ink);
   }
   .nav-item[aria-current="page"] {
-    background: var(--panel);
-    color: var(--ink);
-    box-shadow: var(--shadow-card);
+    background: var(--hover);
+  }
+  :root[data-theme="dark"] .nav-item[aria-current="page"] {
+    background: var(--raised);
   }
   .nav-item svg {
-    width: 15px;
-    height: 15px;
+    width: 17px;
+    height: 17px;
     flex: none;
-    opacity: 0.8;
+    color: var(--dim);
+  }
+  .nav-item[aria-current="page"] svg {
+    color: var(--ink);
   }
 
   /* The BHA mark. The traced SVG carries a white plate; in dark mode the plate
