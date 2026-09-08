@@ -872,3 +872,56 @@ Verified:  Chromium sweep in light and dark: every route renders including
            for "digest", the panel hid to a rail and reopened. No page errors.
            The only console error is the Google Fonts request, which the
            sandbox blocks. `npm run build` passes.
+
+---
+
+## 2026-09-08 15:00 — Session 9: minor adjustments round
+
+Intent:    Destiny's follow-up list: light mode on a first visit; padding and
+           centring for the top-right band; the summary banner laid out like
+           the cropped reference; the Ask Bays composer growing before it
+           scrolls; dictation that runs up to ten minutes and transcribes as it
+           goes; the three-dot thread menu visible without hovering; a tinted
+           sidebar; and a header on Ask Bays with the name, date and time.
+
+Files:     src/app/theme.tsx, src/index.css, src/components/ClockChip.tsx (new,
+           shared by Layout and Ask Bays), src/components/Layout.tsx,
+           src/screens/Overview.tsx, src/screens/AskBays.tsx.
+
+Problem:   1. The composer's height was set from the input event, so text that
+              arrived from dictation (state, not typing) never resized it and
+              the scrollbar appeared at once.
+           2. Browsers end a speech-recognition session after a short pause, so
+              "record for ten minutes" cannot be a single session.
+           3. The three-dot menus existed but were opacity 0 until hover, which
+              read as absent.
+
+Fix:       1. The composer resizes from an effect on the draft, to a 240px cap;
+              below the cap the scrollbar is hidden, at the cap it appears, and
+              while dictating the view follows the newest text.
+           2. Dictation keeps an accumulator of finished text and restarts a
+              fresh recognition session on each browser-initiated end, until
+              the person stops it or ten minutes pass. The mic button shows
+              elapsed against 10:00 while it runs.
+           3. The dots are always drawn in the faint colour and darken on hover.
+
+Decision:  - **Light is the first-visit default.** "System" remains a choice in
+             Settings, so anyone who wants the OS to decide can still have it.
+           - **The header band is a fixed 72px** with the chips vertically
+             centred, so scrolled content never touches them.
+           - **The banner follows the crop**: a small tracked label ("BAYS
+             SUMMARY", the one place upper case is used, matching the
+             reference), a two-line headline, one line of copy, a white pill,
+             the orb in a rounded-square glass tile, and three chips stepping
+             diagonally. The headline is fixed copy; the live numbers stay in
+             the chips.
+           - **The sidebar is a shade darker than the body** with a hairline,
+             in both themes, so the two regions read apart.
+           - **Ask Bays gets its own header**: mark, "Ask Bays", the current
+             thread's title, then date, time and the theme toggle on the right,
+             beside the history panel.
+
+Verified:  Chromium: a fresh context resolves to light before any choice is
+           stored; a fourteen-line draft grows the composer to 240px and only
+           then marks it scrollable; pin, rename, delete and search still pass;
+           routes render in both themes; no page errors. `npm run build` passes.

@@ -18,6 +18,7 @@
   color-scheme: light;
 
   --bg: #f5f5f7;
+  --sidebar: #ececef;
   --panel: #ffffff;
   --raised: #f2f2f4;
   --hover: #ededf0;
@@ -66,6 +67,7 @@
   color-scheme: dark;
 
   --bg: #141416;
+  --sidebar: #0f0f11;
   --panel: #1c1c1f;
   --raised: #232327;
   --hover: #2a2a2f;
@@ -109,6 +111,7 @@
 
 @theme inline {
   --color-bg: var(--bg);
+  --color-sidebar: var(--sidebar);
   --color-panel: var(--panel);
   --color-raised: var(--raised);
   --color-hover: var(--hover);
@@ -591,6 +594,10 @@
     padding: 9px 12px;
     resize: none;
     line-height: 1.5;
+    overflow-y: hidden;
+  }
+  textarea.input.at-max {
+    overflow-y: auto;
   }
 
   select.input {

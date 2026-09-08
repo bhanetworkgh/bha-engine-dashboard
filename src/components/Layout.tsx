@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useSession } from '../app/session';
-import { useTheme } from '../app/theme';
 import { useData } from '../app/useData';
-import { useWeather } from '../app/useWeather';
 import { getEngineStatus } from '../data';
 import { Icon, type IconName } from './ui';
+import { ClockChip, ThemeChip } from './ClockChip';
 import { cx } from '../lib';
 
 const GROUPS: { group: string | null; items: { to: string; label: string; icon: IconName; badge?: 'incidents' }[] }[] = [
@@ -105,7 +104,7 @@ function Sidebar({ openIncidents, open, onNavigate }: { openIncidents: number; o
   return (
     <nav
       className={cx(
-        'w-[240px] shrink-0 flex-col bg-bg md:static md:flex',
+        'w-[240px] shrink-0 flex-col border-r border-line bg-sidebar md:static md:flex',
         open ? 'fixed inset-y-0 left-0 z-50 flex shadow-[var(--shadow-pop)]' : 'hidden',
       )}
       aria-label="Primary"
@@ -145,44 +144,6 @@ function Sidebar({ openIncidents, open, onNavigate }: { openIncidents: number; o
   );
 }
 
-/** Date, a live clock, and the weather when the browser will share a location. */
-function ClockChip() {
-  const [now, setNow] = useState(() => new Date());
-  const weather = useWeather();
-  useEffect(() => {
-    const i = setInterval(() => setNow(new Date()), 15_000);
-    return () => clearInterval(i);
-  }, []);
-  const date = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-  const time = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-  const W = weather?.kind === 'sun' ? Icon.sun : weather?.kind === 'rain' ? Icon.rain : Icon.cloud;
-  return (
-    <span className="chip">
-      <Icon.calendar className="text-faint" />
-      <span>{date}</span>
-      <span className="tabular text-ink">{time}</span>
-      {weather && (
-        <>
-          <span className="text-faint">·</span>
-          <W className="text-accent-ink" />
-          <span className="tabular text-ink">{weather.temp_c}°</span>
-          <span className="hidden lg:inline">{weather.label}</span>
-        </>
-      )}
-    </span>
-  );
-}
-
-function ThemeChip() {
-  const { resolved, setChoice } = useTheme();
-  const next = resolved === 'dark' ? 'light' : 'dark';
-  return (
-    <button type="button" onClick={() => setChoice(next)} className="chip h-8 w-8 justify-center px-0 transition-transform active:scale-95" aria-label={`Switch to ${next} mode`} title={`Switch to ${next} mode`}>
-      {resolved === 'dark' ? <Icon.sun /> : <Icon.moon />}
-    </button>
-  );
-}
-
 export default function Layout() {
   const status = useData(getEngineStatus);
   const s = status.data;
@@ -199,7 +160,7 @@ export default function Layout() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {!bare && (
-          <div className="flex shrink-0 items-center gap-2 px-4 pt-4 md:px-8 md:pt-6">
+          <div className="flex h-[72px] shrink-0 items-center gap-2 px-4 md:px-8">
             <button type="button" onClick={() => setNavOpen(true)} aria-label="Open navigation" className="btn btn-ghost btn-sm -ml-2 md:hidden">
               <Icon.menu />
             </button>
