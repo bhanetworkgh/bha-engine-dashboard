@@ -4,13 +4,14 @@ import { useSession } from '../../app/session';
 import {
   createLoop,
   getOpenLoops,
+  getRecordMetrics,
   setLoopStatus,
   type Loop,
   type LoopStatus,
   type NewLoop,
   type OpenLoopsData,
 } from '../../data';
-import { Icon, LoadFailed, Loading, PageHeader, Segmented, Tabs } from '../../components/ui';
+import { Icon, LoadFailed, Loading, MetricsStrip, PageHeader, Segmented, Tabs, Toast, useToast } from '../../components/ui';
 import { Loops, OwnerPicker, type StatusFilter } from './Loops';
 import { NewLoopForm } from './NewLoop';
 import { Reconciliation } from './Reconciliation';
@@ -26,20 +27,17 @@ export default function OpenLoops() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
   const [showNew, setShowNew] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ text: string; tone: 'ok' | 'failing' } | null>(null);
+  const { toast, setToast } = useToast();
   const { status, data: loaded, error } = useData(getOpenLoops);
+  /** Counts for the strip, recomputed by the server after every change. */
+  const [metricsTick, setMetricsTick] = useState(0);
+  const metrics = useData((q) => getRecordMetrics('loops', q, owner), [owner, metricsTick]);
 
   /** A working copy so a status change updates the page without a refetch. */
   const [data, setData] = useState<OpenLoopsData | null>(null);
   useEffect(() => {
     setData(loaded);
   }, [loaded]);
-
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 3200);
-    return () => clearTimeout(t);
-  }, [toast]);
 
   const counts = useMemo(() => {
     const rows = data ? data.loops.filter((l) => owner === 'all' || l.owner === owner) : [];
@@ -64,6 +62,7 @@ export default function OpenLoops() {
     try {
       const updated = await setLoopStatus(loop.id, next);
       setData((d) => (d ? { ...d, loops: d.loops.map((l) => (l.id === updated.id ? updated : l)) } : d));
+      setMetricsTick((n) => n + 1);
       setToast({
         text: next === 'closed' ? 'Loop closed.' : next === 'in progress' ? 'Loop marked in progress.' : 'Loop reopened.',
         tone: 'ok',
@@ -80,6 +79,7 @@ export default function OpenLoops() {
     try {
       const created = await createLoop(input);
       setData((d) => (d ? { ...d, loops: [created, ...d.loops] } : d));
+      setMetricsTick((n) => n + 1);
       setShowNew(false);
       setStatusFilter((s) => (s === 'closed' ? 'open' : s));
       if (owner !== 'all' && owner !== created.owner) setOwner(created.owner);
@@ -133,6 +133,9 @@ export default function OpenLoops() {
         <>
           <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
             <OwnerPicker data={data} owner={owner} setOwner={setOwner} />
+          </div>
+          <MetricsStrip metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
+          <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <Segmented
                 ariaLabel="Filter by status"
@@ -156,16 +159,7 @@ export default function OpenLoops() {
       {tab === 'Review queue' && <ReviewQueue data={data} />}
       {tab === 'Reconciliation' && <Reconciliation data={data} />}
 
-      {toast && (
-        <div
-          role="status"
-          className={`fade-up absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-[12.5px] shadow-[var(--shadow-pop)] ${
-            toast.tone === 'failing' ? 'bg-failing-soft text-failing' : 'bg-ink text-bg'
-          }`}
-        >
-          {toast.text}
-        </div>
-      )}
+      <Toast toast={toast} />
     </div>
   );
 }

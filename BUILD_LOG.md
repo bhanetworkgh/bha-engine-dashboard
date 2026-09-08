@@ -1012,3 +1012,118 @@ Verified:  Chromium sweep in light and dark: Home at rest, scrolled 260px
            (banner visible blurred under the header), and with the vFarm tile
            hovered (grown, neighbours slightly grown). Ask Bays, loops, threads,
            search and settings checks unchanged. No page errors.
+
+## 2026-09-08 19:40 — A server between the browser and the engine; Ask Bays live; records with real counts
+
+Intent:    Destiny's four-part instruction. (1) Put a small server between the
+           browser and the engine so no secret ever reaches the bundle, sign-in
+           is verified server-side with a session cookie, and every /api call
+           without a valid cookie is rejected. (2) Wire Ask Bays to the live
+           agent at n8n.arupiautomates.cloud/webhook/dashboard-ask-bays with
+           the x-api-key attached by the server. (3) A thinking indicator that
+           does not invent activity. (4) Records pages (Open loops, Codex
+           entries, Build patterns, Commercial) with builder and status
+           filters, status changes written through the server, and counts that
+           come from real history.
+
+Files:     server/src/{index,auth,ask,db,store,engine,hash}.ts (new),
+           tsconfig.server.json, render.yaml, .env.example, package.json
+           (scripts, engines), .gitignore, vite.config.ts (/api proxy),
+           src/data/{api,index,names,types}.ts, src/data/engine.ts (deleted),
+           src/data/fixtures/{codex,patterns}.ts, src/app/session.tsx,
+           src/App.tsx, src/screens/{AskBays,Login,Settings,Codex,
+           BuildPatterns,Commercial}.tsx, src/screens/OpenLoops/index.tsx,
+           src/components/ui/Records.tsx (new), src/index.css, README.md,
+           CLAUDE.md.
+
+Problem:   1. The previous sign-in compared a SHA-256 digest in the browser,
+              which gated the interface but not the data, and the Bays key was
+              a VITE_ variable compiled into the bundle.
+           2. Bays's old front door acked with an empty body and answered at a
+              callback the dashboard could not read; the thread had to poll and
+              time out.
+           3. Nothing upstream records when a loop, entry, pattern or card
+              changed status, so "volume this week vs last" and "how quickly
+              items move" had no source.
+           4. `pkill -f sweep2.mjs` killed my own shell (exit 144) because the
+              shell's command line contains the pattern; and Playwright was no
+              longer under node_modules, so the sweep failed with
+              `ERR_MODULE_NOT_FOUND: Cannot find package 'playwright'`.
+
+Fix:       1. A Node server with no dependencies beyond Node 22 (node:sqlite,
+              node:crypto, node:http). It serves dist/ and /api from one
+              origin, so the session cookie is first-party. Sign-in posts to
+              /api/auth/login; the server compares the email in constant time
+              and the password against an scrypt hash (AUTH_PASSWORD_HASH,
+              produced by `npm run hash-password`), then sets `bha_session`:
+              HMAC-signed, HttpOnly, SameSite=Lax, Secure in production,
+              twelve hours. Five failures from one address lock it for thirty
+              seconds; fifty from anywhere in a minute lock everyone. Logout
+              revokes the id. Every other /api route answers 401 without the
+              cookie, and the client returns to sign-in on any 401.
+           2. POST /api/ask forwards { message, session_id, builder_id } to
+              ASK_BAYS_URL with x-api-key from ASK_BAYS_API_KEY, waits up to
+              two minutes, and normalises { ok, answer, session_id, steps }.
+              The client's askBays() never throws; ok:false comes back as a
+              reply with a quiet "Bays could not complete this." label.
+              session_id is minted once per thread and reused for every
+              message in it. Cooldown, polling and the wiring notes are gone.
+           3. The store: a records table per kind with status, builder,
+              raised_at and closed_at; an events table written on every
+              change; a daily snapshot per kind; and `history_since` in meta.
+              Metrics are computed from those. Where a kind carries no date
+              for a metric (patterns and cards have no raised date; Codex has
+              no ingest date upstream) the value is null with a note, and the
+              MetricsStrip prints the note in place of a number.
+           4. Stop processes with `fuser -k <port>/tcp`; install playwright
+              into the scratchpad and run the sweep from there against the
+              built app on :8787.
+
+Decision:  - **The server aggregates raw rows; the engine does not hand over
+             finished numbers.** Nothing upstream keeps a status history, so
+             the only honest counts are ones this server records from the
+             moment it first boots. /api/status reports `history_since` and
+             every closed/retired/ingested metric says it is counted from
+             changes made here.
+           - **One origin.** The server serves the front end so the cookie
+             needs no cross-site handling. On Render this is one web service
+             from render.yaml, with a 1 GB disk at /var/data for the SQLite
+             file; without the disk history restarts on every deploy.
+           - **CommonJS for the server build** so the existing extensionless
+             fixture imports compile unchanged; `server-dist/package.json`
+             carries `{"type":"commonjs"}` because the root package is ESM.
+           - **Status vocabularies**: loops open · in progress · closed; codex
+             posted · ingested · archived; patterns active · retired;
+             commercial idea · researching · evidence thin · ready to pitch ·
+             blocked · closed. The terminal state of each is what "closed"
+             means in its metrics, and the strip says which word.
+           - **The thinking indicator says only what is true**: three dots, a
+             seconds counter and a caption that changes with elapsed time
+             ("Bays is thinking", "Still working on it", "Taking longer than
+             usual"). What Bays looked at arrives with the answer as `steps`
+             and is shown under it as "Looked at" chips; when steps is empty
+             nothing is shown, because the agent looked at nothing.
+           - **Chat history stays in the browser.** Threads are localStorage;
+             the server returns only the seeded ones. Bays's memory is the
+             session_id.
+           - **CLAUDE.md rule 4 and 5 and section 4 rewritten** to record the
+             server, on Destiny's instruction, rather than leaving the spec
+             saying there is no backend.
+
+Verified:  Server compiled and run locally against a mock Bays workflow on
+           :9999 that checks the key and answers with steps. Chromium sweep,
+           light and dark, against the built app on :8787: wrong password
+           rejected; cookie is HttpOnly SameSite=Lax; reload stays signed in;
+           every page renders without overflow; closing a loop moved the strip
+           from "Closed this week 0" to "1" and the median from 15d to 20d;
+           filtering by Jegan recomputed the strip from his table; marking a
+           Codex entry ingested moved it out of "Posted only" and gave the
+           median its first value; retiring a pattern and closing a card
+           counted under "changes made in this dashboard"; Ask Bays showed the
+           indicator at 1s, then the answer with three "Looked at" chips, then
+           a plain answer with no chips, then an ok:false answer labelled;
+           sign out returns to the login and stays there on reload; six bad
+           logins from one address return 401 ×5 then 429; unauthenticated
+           /api/records/loops/metrics returns 401. Phone layout of Codex
+           entries has no horizontal overflow. `grep` of dist/assets for
+           ASK_BAYS, AUTH_PASSWORD, SESSION_SECRET and x-api-key: zero hits.

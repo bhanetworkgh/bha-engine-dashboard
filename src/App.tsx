@@ -15,10 +15,13 @@ import { Builders, BuilderPage } from './screens/Builders';
 import Settings from './screens/Settings';
 
 export default function App() {
-  const { token } = useSession();
+  const { status } = useSession();
+
+  // Nothing renders until the server has said whether this browser is signed in.
+  if (status === 'checking') return <div className="h-full bg-bg" aria-busy="true" />;
 
   // One shared login sits in front of everything.
-  if (!token) return <Login />;
+  if (status === 'out') return <Login />;
 
   return (
     <div className="page-in h-full">

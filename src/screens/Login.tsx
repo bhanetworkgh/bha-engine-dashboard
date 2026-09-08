@@ -1,17 +1,16 @@
 import { useState } from 'react';
 import { useSession } from '../app/session';
 import { useTheme } from '../app/theme';
-import { authMode } from '../data';
 import { Icon } from '../components/ui';
 
 /**
- * One shared team login, the same pattern as BHARAG's console. The password is
- * posted to the engine, which returns the session token the app then holds.
+ * One shared team login, the same pattern as BHARAG's console. The password
+ * goes to this dashboard's own server, which checks it and sets a session
+ * cookie the browser cannot read. Nothing is verified here.
  */
 export default function Login() {
   const { signIn } = useSession();
   const { resolved, setChoice } = useTheme();
-  const mode = authMode();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -100,9 +99,7 @@ export default function Login() {
           <p className="mt-4 flex items-start justify-center gap-1.5 text-center text-[11.5px] leading-relaxed text-faint">
             <Icon.lock className="mt-[2px] shrink-0" />
             <span>
-              {mode === 'engine'
-                ? 'Your password is checked by the engine, which issues a session token for this tab.'
-                : 'Checked against the shared team credential. The session lasts twelve hours or until the tab closes.'}
+              Checked by the dashboard server, never in this browser. The session lasts twelve hours.
             </span>
           </p>
         </form>

@@ -1,15 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { signIn as engineSignIn, type AuthSession, type LaneFilter, type SignInResult } from '../data';
-import { setBearer } from '../data/engine';
+import { getSession, signIn as serverSignIn, signOutOnServer, type AuthSession, type LaneFilter, type SignInResult } from '../data';
+import { setUnauthorizedHandler } from '../data/api';
 
 export { TEAM_EMAIL } from '../data';
 
-const SESSION_KEY = 'bha.session';
-
 interface SessionValue {
+  /** 'checking' while the server is asked whether the cookie is live. */
+  status: 'checking' | 'in' | 'out';
   session: AuthSession | null;
-  /** Shorthand: the bearer token, or null when signed out. */
-  token: string | null;
   signIn: (email: string, password: string) => Promise<SignInResult>;
   signOut: () => void;
   lane: LaneFilter;
@@ -18,88 +16,78 @@ interface SessionValue {
 
 const Ctx = createContext<SessionValue | null>(null);
 
-function expired(s: AuthSession): boolean {
-  if (!s.expires_at) return false;
-  const t = Date.parse(s.expires_at);
-  return Number.isFinite(t) && t <= Date.now();
-}
-
-/** sessionStorage can throw in a private window; a failed read is just no session. */
-function readSession(): AuthSession | null {
-  try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<AuthSession>;
-    if (typeof parsed.token !== 'string' || !parsed.token) return null;
-    const s: AuthSession = {
-      token: parsed.token,
-      expires_at: typeof parsed.expires_at === 'string' ? parsed.expires_at : null,
-      label: typeof parsed.label === 'string' ? parsed.label : null,
-    };
-    return expired(s) ? null : s;
-  } catch {
-    return null;
-  }
-}
-
-function writeSession(s: AuthSession | null) {
-  try {
-    if (s) sessionStorage.setItem(SESSION_KEY, JSON.stringify(s));
-    else sessionStorage.removeItem(SESSION_KEY);
-  } catch {
-    // Storage unavailable — the session still holds for this tab.
-  }
-}
-
 /**
- * The shared team session. The token comes from the engine's login endpoint
- * and is sent as a bearer on every engine call; a 401 from any call, or the
- * expiry the engine gave us, signs the tab out.
+ * The shared team session. It lives in an HttpOnly cookie the server sets on
+ * sign-in; this provider only mirrors what the server says about it. A 401
+ * from any call, or the expiry the server gave, returns the app to sign-in.
  */
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<AuthSession | null>(readSession);
+  const [status, setStatus] = useState<SessionValue['status']>('checking');
+  const [session, setSession] = useState<AuthSession | null>(null);
   const [lane, setLane] = useState<LaneFilter>('all');
 
-  const signOut = useCallback(() => {
-    writeSession(null);
+  const drop = useCallback(() => {
     setSession(null);
+    setStatus('out');
   }, []);
 
-  // Install the bearer for the engine client, and let a 401 sign us out.
-  useEffect(() => {
-    setBearer(session?.token ?? null, signOut);
-  }, [session, signOut]);
+  const signOut = useCallback(() => {
+    drop();
+    void signOutOnServer();
+  }, [drop]);
 
-  // Sign out at the moment the engine said the token expires.
+  // Ask the server once on load whether we are already signed in.
+  useEffect(() => {
+    let live = true;
+    getSession()
+      .then((s) => {
+        if (!live) return;
+        setSession(s);
+        setStatus(s ? 'in' : 'out');
+      })
+      .catch(() => {
+        if (live) setStatus('out');
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setUnauthorizedHandler(drop);
+    return () => setUnauthorizedHandler(null);
+  }, [drop]);
+
+  // Return to sign-in at the moment the server said the session expires.
   useEffect(() => {
     if (!session?.expires_at) return;
     const ms = Date.parse(session.expires_at) - Date.now();
     if (!Number.isFinite(ms)) return;
     if (ms <= 0) {
-      signOut();
+      drop();
       return;
     }
-    const t = setTimeout(signOut, Math.min(ms, 2 ** 31 - 1));
+    const t = setTimeout(drop, Math.min(ms, 2 ** 31 - 1));
     return () => clearTimeout(t);
-  }, [session, signOut]);
+  }, [session, drop]);
 
   const value = useMemo<SessionValue>(
     () => ({
+      status,
       session,
-      token: session?.token ?? null,
       lane,
       setLane,
       signIn: async (email, password) => {
-        const result = await engineSignIn(email, password);
+        const result = await serverSignIn(email, password);
         if (result.ok) {
-          writeSession(result.session);
           setSession(result.session);
+          setStatus('in');
         }
         return result;
       },
       signOut,
     }),
-    [session, lane, signOut],
+    [status, session, lane, signOut],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

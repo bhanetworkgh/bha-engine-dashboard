@@ -63,17 +63,34 @@ export interface Source {
 
 /* ------------------------------------------------------------------ auth */
 
+/**
+ * The signed-in state as the server reports it. The session itself is an
+ * HttpOnly cookie the browser never reads; this is what GET /api/auth/session
+ * says about it.
+ */
 export interface AuthSession {
-  token: string;
-  /** ISO timestamp. Null when the engine did not say. */
+  /** ISO timestamp the server will stop honouring the cookie. */
   expires_at: string | null;
-  /** What the engine calls this login, e.g. "BHA team". */
-  label: string | null;
+  /** The shared account's email, for display. */
+  email: string;
 }
 
-export type AuthFailure = 'missing' | 'rejected' | 'network' | 'not-configured';
+export type AuthFailure = 'missing' | 'rejected' | 'locked' | 'network' | 'not-configured';
 
 export type SignInResult = { ok: true; session: AuthSession } | { ok: false; reason: AuthFailure; message: string };
+
+/** What the server is connected to, from GET /api/status. No secrets, only whether each is set. */
+export interface ServerStatus {
+  auth_configured: boolean;
+  session_secret_configured: boolean;
+  ask_bays_configured: boolean;
+  ask_bays_url: string;
+  model_label: string;
+  data_dir: string;
+  history_since: string | null;
+  records_held: Record<string, number>;
+  started_at: string;
+}
 
 /* ---------------------------------------------------------------- status */
 
@@ -170,6 +187,8 @@ export interface ChatMessage {
   delivery?: ChatDelivery;
   /** Why a message failed or timed out, in a sentence. */
   note?: string;
+  /** What Bays looked at before answering, from the agent's own trace. */
+  steps?: string[];
 }
 
 export interface ChatThread {
@@ -185,44 +204,28 @@ export interface ChatThread {
   pinned?: boolean;
 }
 
-/** What the dashboard can and cannot do with Bays, given its configuration. */
-export interface BaysWiring {
-  /** True when the front door URL and key are both present. */
-  can_send: boolean;
-  /** True when an answer endpoint is configured for polling. */
-  can_read_answers: boolean;
-  /** Where an answer will go: the callback, a Slack channel, or nowhere readable. */
-  delivery: 'callback' | 'slack' | 'none';
-  /** One sentence for the UI, stating exactly what is and is not wired. */
-  note: string;
-}
-
 export interface AskBaysData {
   threads: ChatThread[];
-  /** Bays has no memory today. The UI says so rather than implying otherwise. */
-  memory_note: string;
-  /** What the chat is connected to, as configured on the host. */
+  /** What the chat is connected to, as configured on the server. */
   model_label: string;
-  wiring: BaysWiring;
+  /** False when the server has no ASK_BAYS_API_KEY; the reply then says so. */
+  connected: boolean;
   /** Builders who can be named as the asker. */
   builders: { id: string; name: string }[];
 }
 
-export interface BaysAsk {
+/**
+ * One reply from the Bays agent, as the server normalises it. When `ok` is
+ * false `answer` explains why, and is shown as the reply. `steps` lists what
+ * the agent looked at, in short phrases; empty means it answered from what it
+ * already knew.
+ */
+export interface AskReply {
+  ok: boolean;
+  answer: string;
   session_id: string;
-  prompt: string;
-  builder_id: string;
-  lane: Lane;
+  steps: string[];
 }
-
-export type BaysSendResult =
-  | { ok: true; session_id: string; sent_at: string }
-  | { ok: false; session_id: string; error: string };
-
-export type BaysAnswer =
-  | { status: 'pending' }
-  | { status: 'answered'; text: string; at: string }
-  | { status: 'unavailable'; reason: string };
 
 /* -------------------------------------------- north star / research twin */
 
@@ -485,11 +488,19 @@ export interface CodexEntry {
   session_type: string;
   title: string;
   narration_url: string | null;
+  /** True when status is 'ingested'. Kept for older call sites. */
   ingested: boolean;
+  /** posted: reached Slack only. ingested: in BHARAG. archived: withdrawn. */
+  status: CodexStatus;
+  /** Date it was ingested, when that happened from this dashboard. Upstream does not record it. */
+  closed_at?: string | null;
+  note?: string | null;
   spine: Spine;
   tags: Tags;
   source: Source;
 }
+
+export type CodexStatus = 'posted' | 'ingested' | 'archived';
 
 export interface CodexData {
   entries: CodexEntry[];
@@ -505,8 +516,13 @@ export interface BuildPattern {
   references: number;
   last_referenced: string | null;
   author: string;
+  status: PatternStatus;
+  closed_at?: string | null;
+  note?: string | null;
   source: Source;
 }
+
+export type PatternStatus = 'active' | 'retired';
 
 export interface BuildPatternsData {
   patterns: BuildPattern[];
@@ -518,7 +534,8 @@ export type Readiness =
   | 'researching'
   | 'evidence thin'
   | 'ready to pitch'
-  | 'blocked';
+  | 'blocked'
+  | 'closed';
 
 export interface Opportunity {
   id: string;
@@ -529,6 +546,8 @@ export interface Opportunity {
   lane: Lane;
   last_touched: string;
   blocker: string | null;
+  closed_at?: string | null;
+  note?: string | null;
   spine: Spine;
   source: Source;
 }
@@ -559,4 +578,34 @@ export interface BuilderDetail {
   loops: Loop[];
   entries: CodexEntry[];
   incidents: Incident[];
+}
+
+/* --------------------------------------------------------------- records */
+
+export type RecordKind = 'loops' | 'codex' | 'patterns' | 'commercial';
+
+export interface Metric {
+  /** Null when nothing records what this needs; `note` then says what is missing. */
+  value: number | null;
+  /** The comparison figure (last week), where the metric has one. */
+  compare?: number | null;
+  note: string | null;
+}
+
+/**
+ * The counts on a records page. The server computes these from raw rows and
+ * its own status-change history; see server/src/store.ts for the decision.
+ */
+export interface RecordMetrics {
+  kind: RecordKind;
+  /** The word for the terminal state: closed, ingested, retired. */
+  terminal_label: string;
+  /** When the server began recording status changes. */
+  history_since: string | null;
+  week_start: string;
+  raised: Metric;
+  closed: Metric;
+  open_vs_closed: { open: number; closed: number; note: string | null };
+  median_days_to_close: Metric;
+  by_status: { status: string; n: number }[];
 }

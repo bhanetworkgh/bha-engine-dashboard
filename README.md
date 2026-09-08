@@ -11,26 +11,46 @@ This is that window. Internal team tooling, not a customer product.
 
 ## Status
 
-**Phase 1 — UI against mock data, with the write paths wired.** Layout,
+**Phase 1 — UI against mock data, behind a small server.** Layout,
 navigation, light and dark themes, and interactions are built. Reads come from
-fixtures. Sign-in, loop status changes, new loops and Ask Bays messages go to
-the engine when the matching environment variable is set, and otherwise act on
-the fixtures so the interface behaves.
+fixtures held by the server. Sign-in is verified by the server, which sets a
+session cookie. Ask Bays goes through the server to the live agent workflow.
+Status changes on the records pages (loops, Codex entries, patterns,
+commercial cards) are written to the server's store, which keeps the history
+the counts on those pages are computed from.
 
-Phase 2 wires the live engine endpoint for reads. Phase 3 adds chat memory for
-Ask Bays.
+Phase 2 replaces the server's fixture reads with calls to the engine endpoint.
+Chat history stays in the browser until Bays keeps memory of its own.
 
 ## Architecture
 
-Static front end, no backend of its own. It calls a single JSON endpoint hosted
-on the BHA n8n engine, which fans out to the underlying data sources and returns
-one response.
+```
+Browser  →  this repo's server (/api, same origin)  →  BHA engine (n8n)  →  data sources
+```
 
-All data access goes through one module. Swapping mock fixtures for the live
-endpoint is a change in that module only.
+A React front end and a small Node server, deployed together as one Render web
+service. The server serves the built front end and answers every `/api` call.
+It owns every secret: the login credential, the session signing key and the
+engine API key. The browser holds none of them and never talks to the engine.
+
+The server has no dependencies beyond Node itself (22.13 or later, for the
+built-in SQLite driver). Its state is one SQLite file under `DATA_DIR`.
+
+All browser data access goes through one module, `src/data/index.ts`, which
+calls `/api`. All server data access goes through `server/src/engine.ts`
+(reads) and `server/src/store.ts` (records and history). Swapping fixtures for
+the live engine is a change in those two server files only.
 
 Auth is a single shared team login, matching the pattern used by BHARAG's admin
 console. No per-user accounts.
+
+**Counts on the records pages are computed by the server from raw rows**, not
+handed over finished by the engine. Decision made 2026-09-08: nothing upstream
+keeps a status-change history, so the server records one (an events table, a
+daily snapshot per kind, and the date history began) and derives "this week
+versus last", "open versus closed" and "median days raised to closed" from
+it. A metric the data cannot support is returned null with a note saying what
+is missing, and the note is what the page shows.
 
 ## Sections
 
@@ -86,6 +106,19 @@ src/
     Builders/         List, Detail + index.
 ```
 
+server/
+  src/
+    index.ts          The HTTP server: /api routes, cookie guard, static dist/.
+    auth.ts           Credential check (scrypt), signed HttpOnly session cookie, lockout.
+    ask.ts            Proxy to the Bays workflow; attaches the API key server-side.
+    engine.ts         Every read, derived from fixtures and the store.
+    store.ts          Records with status, the events/snapshot history, and metrics.
+    db.ts             SQLite through node:sqlite, under DATA_DIR.
+    hash.ts           `npm run hash-password`.
+tsconfig.server.json  Compiles server/ plus src/data/{types,fixtures} to server-dist/.
+render.yaml           Render blueprint: one web service, one persistent disk.
+.env.example          Every server variable, documented.
+
 ### Where to make each kind of change
 
 | To change | Go to |
@@ -102,104 +135,107 @@ src/
 
 ## Local development
 
+Two processes: Vite for the front end (with `/api` proxied), and the server.
+
 ```bash
 npm install
-npm run dev
+cp .env.example .env            # then set AUTH_PASSWORD_HASH or AUTH_PASSWORD
+set -a; . ./.env; set +a         # or export the variables another way
+npm run dev:server               # builds and starts the server on :8787
+npm run dev                      # Vite on :5173, proxying /api to :8787
 ```
+
+To produce the credential hash:
+
+```bash
+npm run hash-password -- 'the password'
+```
+
+To run the production shape locally (server serving `dist/`):
+
+```bash
+npm run build && npm start
+```
+
+Other scripts: `npm run typecheck` checks both the front end and the server.
 
 ## Environment variables
 
-Set in the host's environment settings. Never committed. Every one is optional;
-a feature whose variables are missing says so on screen rather than pretending.
+All read by the server. Set in the host's environment settings, never
+committed. `.env.example` lists them with comments. Nothing prefixed `VITE_`
+is used any more: the bundle contains no configuration and no secrets.
 
 | Variable | Purpose |
 |---|---|
-| `VITE_ENGINE_API_URL` | Base URL of the engine data endpoint. Also the write target for loops (`PATCH /loops/:id`, `POST /loops`). |
-| `VITE_AUTH_URL` | Login endpoint. Defaults to `<VITE_ENGINE_API_URL>/auth/login` when only the API is set. When unset, sign-in is checked in the browser against the team credential (below). |
-| `VITE_AUTH_EMAIL` | Overrides the built-in team email for the browser-side check. |
-| `VITE_AUTH_PASSWORD_SHA256` | Overrides the built-in credential digest: hex SHA-256 of `<email>\n<password>`, email lower-cased. Rotate the password by setting this, no code change needed. |
-| `VITE_BAYS_WEBHOOK_URL` | The Bays front door, `https://<n8n host>/webhook/bays`. |
-| `VITE_BAYS_API_KEY` | The `x-api-key` the front door expects on an external ask. |
-| `VITE_BAYS_CALLBACK_URL` | Where Bays posts its answer. Sent as `callback` on every ask. |
-| `VITE_BAYS_ANSWER_URL` | Where the dashboard reads answers back from. Polled as `GET ?session_id=…`. |
-| `VITE_BAYS_CHANNEL_ID` | Optional Slack channel for Bays to deliver to instead of, or as well as, the callback. |
+| `AUTH_EMAIL` | The shared team email. Defaults to `admin@bhanetwork.org`. |
+| `AUTH_PASSWORD_HASH` | scrypt hash of the shared password, from `npm run hash-password`. Rotate the password by replacing this. |
+| `AUTH_PASSWORD` | Plain-text alternative for local development. Ignored when the hash is set. Without either, sign-in returns 503 and says so. |
+| `SESSION_SECRET` | Signs the session cookie. When unset a random key is generated at boot, so every session ends on restart. Render's blueprint generates one. |
+| `ASK_BAYS_URL` | The Bays agent workflow. Defaults to `https://n8n.arupiautomates.cloud/webhook/dashboard-ask-bays`. |
+| `ASK_BAYS_API_KEY` | Sent as `x-api-key` on every call to that workflow. Without it Ask Bays replies that it is not connected. |
+| `ASK_BAYS_MODEL_LABEL` | Shown under the composer. Defaults to `Claude Sonnet 5.0`. |
+| `DATA_DIR` | Where the SQLite file lives. On Render, the persistent disk mount. Defaults to `./data`. |
+| `PORT` | Listen port. Render sets it. Defaults to `8787`. |
 
-Anything set as a `VITE_` variable is compiled into the static bundle and is
-readable by anyone who can load the site. The shared login gates the interface,
-not the bundle. The Bays key in particular should be replaced by a proxy route
-on the engine endpoint (which attaches the key server-side) before this is
-exposed beyond the team.
+### Contracts
 
-### Contracts the engine must meet
+**Sign-in.** `POST /api/auth/login` with `{ "email", "password" }`. The server
+compares the email in constant time and the password against the scrypt hash,
+then sets `bha_session`: an HMAC-signed, HttpOnly, SameSite=Lax cookie (Secure
+in production) that expires twelve hours out. `401` is a wrong pair; `429` is
+the lockout (five failures from one address pause it for thirty seconds; fifty
+failures from anywhere inside a minute pause everyone); `503` means no
+credential is configured. `GET /api/auth/session` says whether the cookie is
+live; `POST /api/auth/logout` revokes it. Every other `/api` route answers
+`401` without a valid cookie, and the front end returns to sign-in on any
+`401`.
 
-**Sign-in, browser-side (current).** With no `VITE_AUTH_URL`, the email and
-password are hashed in the browser (SHA-256 of `<email>\n<password>`) and
-compared with the team credential digest held in `src/data/index.ts`, or the
-`VITE_AUTH_PASSWORD_SHA256` override. Only that one pair signs in. The password
-is never in the repository; the digest of a random fourteen-character password
-is not recoverable. Five wrong attempts pause sign-in for thirty seconds. A
-session lasts twelve hours or until the tab closes. Because the check runs in
-the browser it gates the interface, not the data behind it — which is fixtures
-today. To generate a new digest:
+**Ask Bays.** The browser posts `{ message, session_id, builder_id }` to
+`POST /api/ask`. The server forwards the same body to `ASK_BAYS_URL` with the
+`x-api-key` header and waits up to two minutes. The workflow answers
+`{ ok, answer, session_id, steps }`; the server normalises that and returns
+it. `session_id` is fixed for the life of a thread and is what gives Bays its
+memory of the conversation. When `ok` is false, `answer` explains why and is
+shown as the reply. `steps` is the agent's own trace, shown under the answer;
+when empty nothing is shown, because the agent answered without looking
+anything up. The agent can answer questions about engine state and create,
+update or close loops, nothing else.
 
-```bash
-printf 'admin@bhanetwork.org\n<new password>' | sha256sum
-```
+**Records.** `GET /api/records/:kind/metrics?lane=&builder=` returns the
+counts strip for `loops`, `codex`, `patterns` or `commercial`.
+`PATCH /api/records/:kind/:id` with `{ status, note? }` changes a status and
+records the change; `POST /api/records/loops` opens a loop. Status
+vocabularies: loops `open · in progress · closed`; codex `posted · ingested ·
+archived`; patterns `active · retired`; commercial `idea · researching ·
+evidence thin · ready to pitch · blocked · closed`.
 
-**Sign-in, engine-side (when `VITE_AUTH_URL` is set).** `POST VITE_AUTH_URL` with `{ "email", "password" }`. Success is
-`200` with `{ "token", "expires_at"?, "label"? }` (`session_token` or
-`access_token` are also accepted). A `401` or `403` is shown as a rejected
-login. The token is sent as `Authorization: Bearer` on every engine call, and a
-`401` from any call signs the tab out.
-
-**Ask Bays.** The dashboard posts the front door's external-ask shape:
-`{ prompt, session_id, builder_id, lane_id, source: "engine_dashboard", callback?, channel_id? }`
-with the `x-api-key` header. The front door acks with an empty body and runs the
-agent asynchronously; the answer arrives at `callback`. The dashboard then polls
-`VITE_BAYS_ANSWER_URL?session_id=…` expecting `{ "status": "pending" }` or
-`{ "status": "answered", "answer", "at" }` (`response` or `text` also accepted)
-for up to two minutes. The workflow's loop guard drops the same `session_id`
-inside thirty seconds, so the composer enforces a thirty-second cooldown per
-thread. The answer store behind `VITE_BAYS_CALLBACK_URL` and
-`VITE_BAYS_ANSWER_URL` does not exist yet; it is the one piece of the wiring
-that needs a workflow on the engine side.
+**Reads.** `GET /api/{overview, engine-status, north-star, research-twin,
+vfarm, engine-health, open-loops, codex, build-patterns, commercial, builders,
+builders/:id, ask-bays}?lane=` return the shapes in `src/data/types.ts`.
+`GET /api/status` reports what is configured, without values.
 
 ## Deployment
 
-Render static site, deploying from this repository's default branch. Pushes to
-the default branch trigger a deploy.
+One Render **web service** (not a static site), from `render.yaml` in this
+repository. Pushes to the default branch deploy.
 
 | Setting | Value |
 |---|---|
+| Runtime | Node 22.22 |
 | Build command | `npm ci && npm run build` |
-| Publish directory | `dist` |
+| Start command | `npm start` |
+| Health check | `/api/health` |
+| Disk | 1 GB mounted at `/var/data`, `DATA_DIR=/var/data` |
 
-### A rewrite rule is required
+Set `AUTH_PASSWORD_HASH` and `ASK_BAYS_API_KEY` in the service's environment
+by hand; the blueprint marks them `sync: false`. `SESSION_SECRET` is generated
+by the blueprint. Without the disk the server still runs, but the status
+history restarts on every deploy and `/api/status` reports `history_since`
+accordingly.
 
-This is a single-page app using client-side routing, and the build does **not**
-solve this on its own. `npm run build` emits one `index.html` plus hashed assets —
-there is no `open-loops.html`. Verified against a plain static server:
-
-```
-GET /                    200
-GET /assets/index-*.css  200
-GET /open-loops          404
-GET /vfarm               404
-GET /builders/destiny     404
-```
-
-So the site works if you land on `/` and navigate, and 404s on any deep link,
-refresh, or bookmarked URL.
-
-The fix is a host-level rewrite: serve `index.html` for any path that does not
-match a file on disk, as a **rewrite** (200, URL preserved), not a redirect —
-a redirect would rewrite the address bar and lose the route. On Render this is
-configured on the service under Redirects/Rewrites: source `/*`, destination
-`/index.html`, action Rewrite.
-
-No config file for this is committed here, because the rule belongs to the host
-and has not been verified against this service. Add it in the Render dashboard,
-then confirm by loading `/open-loops` directly.
+The server serves `index.html` for any path that is not a file in `dist/`, so
+deep links and refreshes work without a rewrite rule. Hashed assets are sent
+with a one-year cache header; everything else is `no-cache` or short-lived.
 
 ## Working in this repo
 
