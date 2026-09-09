@@ -1308,3 +1308,146 @@ Open:      The boot log says the service is running unconfigured. Four
            disk, so DATA_DIR and the 1 GB mount at /var/data need the plan
            render.yaml asks for. Not touched here: these are Destiny's
            secrets and his call on the plan. Flagged, not fixed.
+
+## 2026-09-09 11:15 — Sign-in credential, and Ask Bays wired to the live contract
+
+Intent:    Two things, in order. Produce the AUTH_PASSWORD_HASH value for the
+           shared login and prove it against the server that verifies it. Then
+           wire Ask Bays to the live dashboard-ask-bays workflow against its
+           real contract rather than an assumed one.
+
+Files:     server/src/ask.ts        (rewritten against the live contract)
+           src/data/types.ts        (AskReply gains asked_at and error;
+                                     ChatMessage gains the 'notice' role)
+           src/data/index.ts        (askBays: 100s budget, typed failures)
+           src/screens/AskBays.tsx  (a refusal renders as a notice, not as Bays)
+
+Problem:   Two, both found by reading rather than assuming.
+
+           1. **The failure path was Bays's own bubble.** The workflow answers
+              a refused key with **HTTP 200** and `ok: false`, and the screen
+              appended every reply as `role: 'bays'`. So the words "This
+              request was not authorised." would have rendered under the BHA
+              mark, with his name and timestamp on them, as though Bays had
+              said them. The gate refusing is not the agent speaking.
+
+           2. **The live endpoint cannot be reached from a build session.**
+              The egress proxy denies the host:
+
+                n8n.arupiautomates.cloud:443 — connect_rejected
+                gateway answered 403 to CONNECT (policy denial)
+
+              The proxy README is explicit that a 403 is an organisation
+              policy denial, to be reported rather than routed around. The
+              same policy denies bha-engine-dashboard.onrender.com. So the
+              live round-trip this session could not be run at all.
+
+Fix:       **The credential.** Generated with the repo's own
+           `npm run hash-password`, so the format is right by construction
+           rather than by a reimplementation of it:
+           `scrypt$<16-byte salt as 32 hex chars>$<scryptSync(password, salt,
+           64) as 128 hex chars>`, the salt passed to scrypt as the hex
+           *string* it is printed as, joined on `$`, Node's default scrypt
+           parameters. Verified structurally (scheme, 32, 128) and then
+           behaviourally, which is the part that counts.
+
+           **Ask Bays.** `server/src/ask.ts` rewritten against the contract
+           read from the live workflow (Bays — Dashboard Agent,
+           vDunZ17dxLXatcw0), with the node code quoted in the file header:
+
+           - **`json.ok === true` is the only success signal**, never the
+             status code. A 200 carrying `ok:false`, an n8n webhook-level 403
+             with no `ok` field at all, and a non-JSON body all land in one
+             failure branch.
+           - `asked_at` passed through; `steps` kept exactly as the workflow
+             sends them (already lowercased and space-separated); `[]` stays
+             `[]` so the screen renders nothing rather than an empty state.
+           - Timeout **90s**, per the brief, replacing 120s. A timeout comes
+             back as `error: 'timeout'` with its own sentence, not as a
+             refusal. The client waits 100s so the server's own answer wins
+             rather than the browser giving up first and losing the reason.
+           - Every failure carries a typed `error`: the workflow's own
+             `unauthorised` / `empty_message`, plus `not_configured`,
+             `timeout`, `unreachable`, `bad_response` for failures that never
+             got an answer out of it.
+           - `server/src/ask.ts` now imports `AskReply` from
+             `src/data/types.ts` rather than declaring its own copy, so there
+             is one contract rather than two that can drift.
+
+           `ChatMessage.role` gains `'notice'`: the app speaking, not Bays.
+           An `ok:false` reply is appended as a notice and rendered as a
+           centred line with no mark and no byline, the reason beneath it,
+           and the user's own message marked "Not delivered — key rejected."
+
+           The thinking caption said "Bays can take up to two minutes"; the
+           budget is ninety seconds, so it now says so.
+
+Decision:  - **Branch on `ok`, in one place.** The brief called it and the
+             workflow's shape demands it. Putting it in `ask.ts` means no
+             screen ever sees a refusal it could mistake for an answer.
+           - **A refusal is not a Bays message.** Marking it `delivery:
+             'failed'` while still rendering it in his bubble was not enough:
+             the text is what a reader takes away. Hence the new role rather
+             than a tone change.
+           - **The workflow was not touched.** CLAUDE.md section 3 says n8n
+             is read only. What was found there is reported, not fixed.
+
+Verified:  Clean build, `npm install && npm run build`, exit 0.
+
+           Sign-in, against the built server with the generated hash and
+           AUTH_PASSWORD deliberately unset so only the hash path could
+           satisfy it: boot says "sign-in: configured"; the right email and
+           password return 200 with a twelve-hour expiry and set
+           `bha_session; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200`; that
+           cookie opens /api/overview (200); /api/auth/session reports
+           signed_in true; a wrong password and a wrong email each return 401
+           "Email or password not recognised."
+
+           Ask Bays, against a mock replaying the workflow's node code
+           verbatim (HTTP 200 on failure included), through the real server
+           and then through a real browser:
+
+             happy path      ok:true, asked_at through, steps preserved, the
+                             same session_id returned for both messages of a
+                             thread
+             steps: []       stays [], nothing rendered
+             builder_id absent  defaults to admin
+             wrong key       HTTP 200 → ok:false, error:'unauthorised',
+                             "This request was not authorised."
+             n8n 403         no ok field → ok:false, error:'unauthorised',
+                             "The Bays workflow rejected the dashboard's API
+                             key."
+             non-JSON body   ok:false, error:'bad_response'
+             key unset       ok:false, error:'not_configured'
+             no response     ok:false, error:'timeout' at **90.004s**
+
+           Chromium, signed in, against both a refusing and an answering
+           server: the refusal renders as a centred amber notice with no mark
+           and no byline, reading "This request was not authorised." above
+           "The workflow rejected the dashboard's API key. Bays never saw
+           this.", with the sent message marked "Not delivered — key
+           rejected."; the success renders as Bays with the mark, the byline
+           and two "Looked at" chips. `x-api-key` appeared on **zero**
+           browser requests in either run.
+
+           Bundle grep: the-real-key, ASK_BAYS_API_KEY, AUTH_PASSWORD,
+           SESSION_SECRET, x-api-key, bays_dash and n8n.arupiautomates — zero
+           hits each. The only hosts the bundle names are its own /api paths.
+
+Open:      **The workflow's expected key is still a placeholder.** Its
+           Validate & Normalise Request node holds
+
+             const EXPECTED_KEY = 'bays_dash_2026_REPLACE_ME';
+
+           as a literal — not an n8n environment variable, not a credential.
+           The webhook node in front of it also has its own Header Auth
+           credential on the same header name, `x-api-key`. So one value has
+           to satisfy both gates, and unless ASK_BAYS_API_KEY is exactly that
+           placeholder string, every call returns unauthorised — which the
+           dashboard will now report honestly rather than voice as Bays. The
+           workflow has zero executions recorded, so nothing has ever got
+           through it. Destiny's to change; n8n is read only here.
+
+           The live round-trip remains unrun for the egress reason above.
+           The one-liner to run it from a machine that can reach the host is
+           in the session notes.
