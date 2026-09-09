@@ -1735,3 +1735,14 @@ Open:      - **AIRTABLE_API_KEY is not set on Render.** Until it is, the
              is a state, not a rate.
            - The engine-lane filter still exists in session state and is
              'all'; it does not apply to the Airtable-backed kinds.
+
+           On Render: deploy dep-dago7fks728c73deepqg on 8c2d063 went live in
+           50 seconds. Boot log: "sign-in: configured" (the hash from this
+           morning works), "sessions: SESSION_SECRET set", "ask bays:
+           https://n8n.arupiautomates.cloud/webhook/dashboard-ask-bays",
+           "inbound: NOT configured — set DASHBOARD_INBOUND_KEY for n8n
+           dual-write", "airtable: NOT configured — set AIRTABLE_API_KEY.
+           Loops, Codex, patterns and commercial pages will be empty." So
+           the live service is exactly in the no-key state verified in step
+           12: four empty pages that print why. The first boot after the
+           key is set will print one resync line per table.
