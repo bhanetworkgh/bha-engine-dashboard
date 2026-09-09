@@ -103,18 +103,18 @@ export function BuilderPage() {
           <div className="card overflow-hidden"><table className="table-cards w-full text-[12.5px]">
             <thead>
               <tr>
-                <Th>logged</Th><Th>week</Th><Th>type</Th><Th>title</Th><Th>ingested</Th><Th>source</Th>
+                <Th>logged</Th><Th>week</Th><Th>type</Th><Th>verdict</Th><Th>action required</Th><Th>source</Th>
               </tr>
             </thead>
             <tbody>
               {data.entries.map((e) => (
                 <tr key={e.id}>
-                  <td className="td tabular text-faint">{e.logged_at}</td>
-                  <td className="td tabular text-faint">{e.week}</td>
-                  <td className="td card-meta text-faint">{e.session_type}</td>
-                  <td className="td card-title td-clip" style={{ maxWidth: '54ch' }}>{e.title}</td>
-                  <td className={`td card-meta ${e.ingested ? 'text-dim' : 'text-degraded'}`}>
-                    {e.ingested ? 'yes' : 'posted only'}
+                  <td className="td tabular text-faint">{e.logged_at ? e.logged_at.slice(0, 10) : '—'}</td>
+                  <td className="td tabular text-faint">{e.week ?? '—'}</td>
+                  <td className="td card-meta text-faint td-clip" style={{ maxWidth: '28ch' }}>{e.session_type ?? 'not stated'}</td>
+                  <td className="td card-title td-clip" style={{ maxWidth: '30ch' }}>{e.verdict ?? '—'}</td>
+                  <td className={`td card-meta ${e.action_required ? 'text-degraded' : 'text-faint'}`}>
+                    {e.action_required ?? '—'}
                   </td>
                   <td className="td"><SourceLink source={e.source} /></td>
                 </tr>

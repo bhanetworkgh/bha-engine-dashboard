@@ -143,7 +143,7 @@ function EventRow({ e }: { e: OverviewEvent }) {
         <div className={`truncate text-[12px] ${e.health === 'ok' ? 'text-dim' : healthText(e.health)}`}>{e.detail}</div>
         <div className="mt-0.5 flex items-center gap-2 text-[11px] text-faint">
           <span className="tabular">{e.at}</span>
-          <span>{laneLabel(e.spine.lane)}</span>
+          {e.spine.lane && <span>{laneLabel(e.spine.lane)}</span>}
           <SourceLink source={e.source} />
         </div>
       </div>

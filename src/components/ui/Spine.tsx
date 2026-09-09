@@ -8,10 +8,10 @@ export const SPINE_HEADERS = ['session', 'builder', 'subsystem', 'lane'];
 export function SpineCells({ spine }: { spine: Spine }) {
   return (
     <>
-      <td className="td text-faint tabular">{spine.session_id}</td>
-      <td className="td text-dim">{spine.builder_id}</td>
-      <td className="td text-faint">{subsystemLabel(spine.subsystem)}</td>
-      <td className="td text-faint">{laneLabel(spine.lane)}</td>
+      <td className="td text-faint tabular">{spine.session_id ?? '—'}</td>
+      <td className="td text-dim">{spine.builder_id ?? '—'}</td>
+      <td className="td text-faint">{spine.subsystem ? subsystemLabel(spine.subsystem) : '—'}</td>
+      <td className="td text-faint">{spine.lane ? laneLabel(spine.lane) : '—'}</td>
     </>
   );
 }

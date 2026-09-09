@@ -37,3 +37,12 @@ services:
         sync: false
       - key: ASK_BAYS_MODEL_LABEL
         value: Claude Sonnet 5.0
+      # Airtable is the source of truth for loops, Codex, patterns and
+      # commercial cards; the token needs data.records:read and :write on the
+      # four bases. The inbound key is what n8n sends in x-dashboard-key.
+      - key: AIRTABLE_API_KEY
+        sync: false
+      - key: AIRTABLE_RESYNC_MINUTES
+        value: "30"
+      - key: DASHBOARD_INBOUND_KEY
+        generateValue: true

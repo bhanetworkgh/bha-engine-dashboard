@@ -1,8 +1,8 @@
 /**
  * The dashboard server. One Node process, no dependencies beyond Node itself.
  *
- *   /api/*   JSON, behind the session cookie (only /api/auth/login and
- *            /api/status/health are open)
+ *   /api/*   JSON, behind the session cookie (only /api/auth/*, /api/health
+ *            and, with its own key, /api/inbound/* are open)
  *   /*       the built front end from dist/, with the SPA fallback
  *
  * Secrets live in this process's environment and never reach the browser:
@@ -16,7 +16,23 @@ import { authConfigured, login, logout, readSession, sessionInfo, sessionSecretC
 import { DATA_DIR, openDb } from './db';
 import * as engine from './engine';
 import * as store from './store';
-import type { LoopStatus, NewLoop, ServerStatus } from '../../src/data/types';
+import * as sync from './sync';
+import { airtableConfigured, AIRTABLE_URL } from './airtable';
+import type { NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
+
+/**
+ * Inbound writes from n8n carry this key in x-dashboard-key. Same pattern as
+ * ASK_BAYS_API_KEY but the other way round: n8n proves itself to us. Held in
+ * this process only. Airtable stays authoritative; a push here is additive.
+ */
+const INBOUND_KEY = process.env.DASHBOARD_INBOUND_KEY || null;
+
+function inboundOk(req: IncomingMessage): boolean {
+  if (!INBOUND_KEY) return false;
+  const given = req.headers['x-dashboard-key'];
+  const v = Array.isArray(given) ? given[0] : given;
+  return typeof v === 'string' && v.length === INBOUND_KEY.length && v === INBOUND_KEY;
+}
 
 const PORT = Number(process.env.PORT || 8787);
 const DIST = path.resolve(process.cwd(), 'dist');
@@ -103,14 +119,54 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     return send(res, 200, { ok: true, started_at: STARTED_AT });
   }
 
+  // Inbound from n8n: authenticated by DASHBOARD_INBOUND_KEY, not the cookie.
+  //   POST   /api/inbound/:kind          { id, table?, builder?, record?, at? }  upsert (create or update)
+  //   PATCH  /api/inbound/:kind/:id      { table?, builder?, record?, at? }      same, id in the path
+  //   DELETE /api/inbound/:kind/:id                                               drop the held row
+  //   POST   /api/inbound/resync/:kind                                            full rebuild of that kind
+  // `record` is the Airtable record as n8n wrote it ({ id, createdTime, fields }); when absent the
+  // server reads the record from Airtable itself. Airtable stays authoritative either way.
+  const inbound = p.match(/^\/api\/inbound\/(resync\/)?([^/]+)(?:\/([^/]+))?$/);
+  if (inbound) {
+    if (!INBOUND_KEY) throw new HttpError(503, 'DASHBOARD_INBOUND_KEY is not set on the server, so inbound writes are off.');
+    if (!inboundOk(req)) throw new HttpError(401, 'The x-dashboard-key header is missing or wrong.');
+    const kind = inbound[2] as RecordKind;
+    if (!store.KINDS.includes(kind)) throw new HttpError(404, 'No such record kind.');
+    if (inbound[1]) {
+      if (method !== 'POST') throw new HttpError(405, 'POST to resync.');
+      if (!airtableConfigured()) throw new HttpError(503, 'AIRTABLE_API_KEY is not set on the server, so there is nothing to resync from.');
+      const r = await sync.resync(kind);
+      return send(res, r.ok ? 200 : 502, r);
+    }
+    const idInPath = inbound[3] ? decodeURIComponent(inbound[3]) : null;
+    try {
+      if (method === 'DELETE') {
+        if (!idInPath) throw new HttpError(400, 'An id is required.');
+        return send(res, 200, { ok: true, removed: store.removeInbound(kind, idInPath) });
+      }
+      if (method !== 'POST' && method !== 'PATCH') throw new HttpError(405, 'POST, PATCH or DELETE.');
+      const body = await readJson(req);
+      const record = body.record && typeof body.record === 'object' && !Array.isArray(body.record) ? (body.record as { id: string; createdTime: string; fields: Record<string, unknown> }) : undefined;
+      if (record && (typeof record.fields !== 'object' || record.fields === null)) throw new HttpError(400, 'record.fields must be an object.');
+      // The id can come from the path, the body, or the record itself — n8n's Airtable node returns the record with its id inside.
+      const id = idInPath ?? (str(body.id, 40) || (record ? str(record.id, 40) : ''));
+      const builder = str(body.builder, 40);
+      const tableFromBuilder = builder ? engine.loopTableFor(builder) : null;
+      const table = str(body.table, 40) || tableFromBuilder || undefined;
+      const result = await store.applyInbound(kind, { id, table, record, at: str(body.at, 40) || undefined });
+      return send(res, result.inserted ? 201 : 200, { ok: true, ...result });
+    } catch (e) {
+      if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
+      throw e;
+    }
+  }
+
   // Everything else needs the cookie.
   if (!readSession(req)) throw new HttpError(401, 'Sign in to continue.');
 
   if (method === 'GET') {
     switch (p) {
       case '/api/status': {
-        const held: Record<string, number> = {};
-        for (const k of store.KINDS) held[k] = store.metrics(k).by_status.reduce((n, s) => n + s.n, 0);
         const status: ServerStatus = {
           auth_configured: authConfigured(),
           session_secret_configured: sessionSecretConfigured,
@@ -119,8 +175,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
           model_label: MODEL_LABEL,
           data_dir: DATA_DIR,
           history_since: store.historySince(),
-          records_held: held,
+          records_held: store.held(),
           started_at: STARTED_AT,
+          airtable_configured: airtableConfigured(),
+          airtable_url: AIRTABLE_URL,
+          inbound_configured: Boolean(INBOUND_KEY),
+          resync_minutes: sync.RESYNC_MINUTES,
+          sync: Object.fromEntries(store.KINDS.map((k) => [k, store.syncInfo(k)])) as ServerStatus['sync'],
         };
         return send(res, 200, status);
       }
@@ -157,39 +218,41 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     }
     const metrics = p.match(/^\/api\/records\/([^/]+)\/metrics$/);
     if (metrics) {
-      const kind = metrics[1] as store.RecordKind;
+      const kind = metrics[1] as RecordKind;
       if (!store.KINDS.includes(kind)) throw new HttpError(404, 'No such record kind.');
       const b = url.searchParams.get('builder');
-      return send(
-        res,
-        200,
-        store.metrics(kind, { builder: b && b !== 'all' ? b : null, lanes: q.lane === 'all' ? null : [q.lane] }),
-      );
+      return send(res, 200, store.metrics(kind, { builder: b && b !== 'all' ? b : null }));
+    }
+    if (p === '/api/build-patterns/search') {
+      return send(res, 200, { patterns: store.searchPatterns(url.searchParams.get('q') ?? '') });
+    }
+    const patternDetail = p.match(/^\/api\/build-patterns\/([^/]+)$/);
+    if (patternDetail) {
+      const d = store.patternDetail(decodeURIComponent(patternDetail[1]));
+      if (!d) throw new HttpError(404, 'That pattern is not held by this dashboard.');
+      return send(res, 200, d);
+    }
+    if (p === '/api/resync') {
+      return send(res, 200, { running: store.KINDS.filter((k) => sync.isRunning(k)), sync: Object.fromEntries(store.KINDS.map((k) => [k, store.syncInfo(k)])) });
     }
   }
 
   if (method === 'PATCH') {
     const m = p.match(/^\/api\/records\/([^/]+)\/([^/]+)$/);
     if (m) {
-      const kind = m[1] as store.RecordKind;
+      const kind = m[1] as RecordKind;
       if (!store.KINDS.includes(kind)) throw new HttpError(404, 'No such record kind.');
       const body = await readJson(req);
-      const status = str(body.status, 40);
-      if (!status) throw new HttpError(400, 'A status is required.');
-      const note = typeof body.note === 'string' ? body.note.slice(0, 2000) : undefined;
+      const id = decodeURIComponent(m[2]);
       try {
-        return send(res, 200, store.setStatus(kind, decodeURIComponent(m[2]), status, note));
-      } catch (e) {
-        if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
-        throw e;
-      }
-    }
-    // Older path kept for the loop screen.
-    const loop = p.match(/^\/api\/loops\/([^/]+)$/);
-    if (loop) {
-      const body = await readJson(req);
-      try {
-        return send(res, 200, store.setStatus('loops', decodeURIComponent(loop[1]), str(body.status, 40) as LoopStatus, typeof body.note === 'string' ? body.note : undefined));
+        // Two shapes: { status, note? } changes state; { fields: {...} } edits the record's own fields.
+        if (body.fields && typeof body.fields === 'object' && !Array.isArray(body.fields)) {
+          return send(res, 200, await store.updateFields(kind, id, body.fields as Record<string, unknown>));
+        }
+        const status = str(body.status, 40);
+        if (!status) throw new HttpError(400, 'A status, or a fields object, is required.');
+        const note = typeof body.note === 'string' ? body.note.slice(0, 2000) : undefined;
+        return send(res, 200, await store.setStatus(kind, id, status, note));
       } catch (e) {
         if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
         throw e;
@@ -198,20 +261,30 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   }
 
   if (method === 'POST') {
-    if (p === '/api/records/loops' || p === '/api/loops') {
+    if (p === '/api/records/loops') {
       const body = await readJson(req);
       const input: NewLoop = {
         title: str(body.title, 400),
         owner: str(body.owner, 40),
-        lane: str(body.lane, 40) as NewLoop['lane'],
+        lane_tag: str(body.lane_tag, 40) as NewLoop['lane_tag'],
+        raised_by: typeof body.raised_by === 'string' ? body.raised_by.slice(0, 120) : undefined,
         note: typeof body.note === 'string' ? body.note.slice(0, 2000) : undefined,
       };
       try {
-        return send(res, 201, store.createLoop(input));
+        return send(res, 201, await store.createLoop(input));
       } catch (e) {
         if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
         throw e;
       }
+    }
+    // Rebuild one kind, or all, from Airtable. Session cookie or inbound key; n8n may call it too.
+    const resyncMatch = p.match(/^\/api\/resync(?:\/([^/]+))?$/);
+    if (resyncMatch) {
+      if (!airtableConfigured()) throw new HttpError(503, 'AIRTABLE_API_KEY is not set on the server, so there is nothing to resync from.');
+      const kind = resyncMatch[1] as RecordKind | undefined;
+      if (kind && !store.KINDS.includes(kind)) throw new HttpError(404, 'No such record kind.');
+      const results = kind ? [await sync.resync(kind)] : await sync.resyncAll();
+      return send(res, results.every((r) => r.ok) ? 200 : 502, { ok: results.every((r) => r.ok), results });
     }
     if (p === '/api/ask') {
       const body = await readJson(req);
@@ -271,7 +344,7 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL): void 
 /* ----------------------------------------------------------------- boot */
 
 openDb();
-store.seed();
+store.ensureSchema();
 
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
@@ -294,4 +367,6 @@ server.listen(PORT, () => {
   console.log(`  sign-in:  ${authConfigured() ? 'configured' : 'NOT configured — set AUTH_PASSWORD_HASH'}`);
   console.log(`  sessions: ${sessionSecretConfigured ? 'SESSION_SECRET set' : 'random key this boot (sessions end on restart)'}`);
   console.log(`  ask bays: ${askConfigured() ? ASK_URL : 'NOT configured — set ASK_BAYS_API_KEY'}`);
+  console.log(`  inbound:  ${INBOUND_KEY ? 'DASHBOARD_INBOUND_KEY set' : 'NOT configured — set DASHBOARD_INBOUND_KEY for n8n dual-write'}`);
+  sync.startBootSync();
 });

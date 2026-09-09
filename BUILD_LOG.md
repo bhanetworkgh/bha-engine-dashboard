@@ -1451,3 +1451,287 @@ Open:      **The workflow's expected key is still a placeholder.** Its
            The live round-trip remains unrun for the egress reason above.
            The one-liner to run it from a machine that can reach the host is
            in the session notes.
+
+## 2026-09-09 16:10 — Airtable as the source of truth: resync, dual-write, and the four records pages rebuilt
+
+Intent:    Four deliverables, in order, under one constraint. The service runs
+           on Render's free instance type with no persistent disk, so
+           DATA_DIR is ephemeral and the SQLite store is wiped on every
+           deploy and spin-down. Airtable therefore stays the source of truth
+           for every record type; this dashboard is a read model plus a
+           write-through cache and never the system of record.
+             1. Ask Bays budget to five minutes.
+             2. Open loops: purge and repopulate from Airtable through an
+                idempotent resync endpoint; authenticated inbound endpoints
+                so n8n can dual-write; the screen with filters, search,
+                inline status, per-builder views and honest metrics.
+             3. Codex entries from the Codex base, with the review sections
+                the data supports, a full entry view, editing, no delete.
+             4. Build patterns (classification, search, promotion rate) and
+                commercial (cards per lane, unresolved research questions).
+
+Files:     server/src/airtable.ts      (new — the only code that talks to Airtable)
+           server/src/sources.ts       (new — base/table ids, field names, vocabularies, mappers)
+           server/src/sync.ts          (new — resync on boot, on a timer, on demand)
+           server/src/store.ts         (rewritten — Airtable-keyed rows, write-through, metrics)
+           server/src/db.ts            (only `meta` here now; the store owns its schema)
+           server/src/index.ts         (resync, inbound, field-edit, pattern search/detail routes)
+           server/src/engine.ts        (reads off the store; fixture loop lookups gone)
+           server/src/ask.ts           (300s)
+           src/data/types.ts           (Loop, CodexEntry, BuildPattern, Opportunity, metrics, SyncInfo)
+           src/data/index.ts           (resync, updateRecordFields, getPatternDetail, searchPatterns)
+           src/data/names.ts           (LOOP_LANE_TAGS)
+           src/data/fixtures/{loops,codex,patterns,commercial}.ts   DELETED
+           src/components/ui/Records.tsx (CountUp, MetricCell, SeriesBlock, SyncLine, SearchBox)
+           src/components/ui/Table.tsx   (TableFrame `grow`)
+           src/components/ui/Spine.tsx   (null fields render as a dash)
+           src/screens/OpenLoops/{index,Loops,Metrics,NewLoop}.tsx
+           src/screens/Codex.tsx, BuildPatterns.tsx, Commercial.tsx (rewritten)
+           src/screens/AskBays.tsx, Builders/Detail.tsx, Overview.tsx (small)
+           CLAUDE.md §4, README.md, render.yaml
+
+Problem:   Read before building, and four things decided the shape.
+
+           1. **Where the data actually is.** Base appUVlBSGGPHw6DGh is
+              loops only: seven tables, one per builder (Destiny 324, Jegan
+              189, Hardik 105, Kaiqi 65, Ahad 30, Kavin 22, Jason 18 — 753),
+              identical nine-field schema. Codex is apploVyhvTYNGSGCD
+              (Codex Log, 95 rows), patterns app5ni3E8r7Lvxk22 (148), and
+              commercial appvLglfdCqOKqLpT (21). Every id, field name and
+              select choice in sources.ts came from the live schemas.
+              `Assignee Slack User ID` varies within a table (Jason's holds
+              three different ids), so the owner of a loop is the table it
+              lives in, never that field.
+
+           2. **What the loop tables do not record.** No close date. No
+              last-modified time. That one fact decides three of the seven
+              derived measures: closed per day, net raised vs closed, and
+              "no status change in fourteen days" cannot be computed from
+              the source of truth, and this dashboard's own event history
+              is wiped with the instance. They are null with the reason
+              printed, not zero.
+
+           3. **What the Codex Log does not record.** No approval field, no
+              approval time. `action_required` holds JASON_SPOTCHECK (9),
+              DESTINY_REVIEW (11), BUILDER_FOLLOWUP (26), nothing (45) and
+              four free-text asks — the nearest thing to a review state, and
+              what the sections use. `verdict` defines two tiers, not three.
+              `flag_name` is empty on all 95 rows, so no field records Layer
+              0 completeness. 35 rows name no builder at all. Sections and
+              metrics follow what the field holds; the page says approval and
+              Layer 0 are not recorded rather than inventing either.
+
+           4. **The sandbox cannot reach api.airtable.com** — the egress
+              proxy denies the host, same as n8n and the Render URL. So every
+              record was pulled through the Airtable connector (the large
+              pages landed as files), transformed into the exact shape the
+              REST API returns (fields by name, selects as plain names), and
+              served by a local stand-in of the API (same paths, same
+              `offset` pagination, same auth header, same error bodies) so
+              the server's real client could be exercised against it.
+              AIRTABLE_API_URL exists for that reason.
+
+           Two things broke in the browser sweep and were fixed:
+             - The three table pages now scroll as a whole (metrics above
+               the table), and TableFrame's own `flex-1 overflow-y-auto`
+               collapsed inside that column: rows sat under the note and a
+               hover landed on the wrong element. TableFrame gained `grow`;
+               a page that already scrolls passes `grow={false}`.
+             - The Codex entry view and pattern detail rendered inside the
+               page's animated column, whose transform makes a stacking
+               context; the layout's top bar (z-20) then intercepted clicks
+               on the dialog (z-40). Both are portals to document.body now.
+
+Fix:       **Ask Bays.** TIMEOUT_MS 90s → 300s server-side; the client waits
+           320s so a server timeout arrives as the server's own answer with
+           its reason. The elapsed indicator stays; its captions step through
+           "Bays is thinking" → "Still working on it" → "Calling tools before
+           answering" → "A multi-step answer can take a few minutes" → "Bays
+           has up to five minutes".
+
+           **The Airtable client** (airtable.ts): plain fetch, Bearer token
+           from AIRTABLE_API_KEY, `listAll` following `offset` at 100 a page
+           with a 220ms gap (Airtable allows 5 rps per base), one retry after
+           the documented 30s cool-off on 429, `updateRecord`/`createRecord`
+           with typecast, 30s per-call timeout. Nothing else imports fetch
+           against Airtable.
+
+           **The store** (store.ts). Rows keyed (kind, Airtable record id)
+           with the mapped record as JSON plus status, builder, raised_at,
+           closed_at, source, table_id, synced_at. `upsert` is idempotent
+           and writes an event only when the status differs from the held
+           row, stamped with the inbound payload's own time when it has one.
+           `purgeMissing` removes what a full read of a table no longer
+           contains — and only after that read succeeded. Schema version 2;
+           the old tables are dropped and rebuilt, which on an ephemeral
+           store is the honest migration.
+
+           **Write-through.** `setStatus`, `updateFields` and `createLoop`
+           each call Airtable first and then upsert *what Airtable returned*.
+           If Airtable refuses, the StoreError carries Airtable's message and
+           nothing here changes. With no key, every write answers 503 saying
+           so. The Airtable write path is untouched and there is no cut-over
+           path.
+
+           **Resync** (sync.ts): per kind, per table; on boot when a key is
+           present, every AIRTABLE_RESYNC_MINUTES (default 30, 0 off), and
+           on demand from each page's "Resync from Airtable" or POST
+           /api/resync[/:kind]. Concurrent calls for the same kind share the
+           run. Each table logs one line: rows, new, changed, removed, ms.
+           At each successful resync the canonical share of patterns and the
+           unresolved-question counts (total and per card) are recorded as
+           observations, so a trend becomes real the day there are two
+           observations on different days — and says so until then.
+
+           **Inbound** (index.ts): `/api/inbound/:kind` (POST upsert, PATCH
+           by id, DELETE, and `/api/inbound/resync/:kind`), authenticated by
+           DASHBOARD_INBOUND_KEY in `x-dashboard-key`, checked before the
+           cookie gate. The body carries the Airtable record as n8n's node
+           returns it; the id may be in the path, the body, or the record.
+           `builder` or `table` says which loop table. Without a record the
+           server reads it from Airtable itself. Airtable stays authoritative
+           either way; the push is additive.
+
+           **Loops metrics** (loopMetrics): open / in progress / closed;
+           close rate per builder as closed over total in that table today,
+           labelled as a state not a rate; oldest open loop with its id and
+           owner; age distribution in five buckets plus a "no date raised"
+           bucket when needed; raised per week from Date Raised, eight
+           weeks; closed per day from this instance's own close events
+           (dashboard or inbound) with the reset caveat, null until there is
+           one; net per week null; stale null, with the sentence that adding
+           a "Last modified time" field on Status would make it real.
+
+           **Codex** (codexMetrics + Codex.tsx): buckets from
+           action_required; entries per builder per week (35 unattributed
+           rows counted separately, never assigned); verdict mix across the
+           tiers the data holds with the two-not-three note; pay-eligible
+           rate with an unchecked box counted as not eligible; Layer 0 null;
+           median-to-approval null. Full entry view as a dialog; Edit writes
+           the thirteen editable fields through to the Codex Log; a field
+           outside that set answers 422; there is no delete route (404).
+
+           **Patterns** (patternMetrics + BuildPatterns.tsx): `system` and
+           `keywords` read off each pattern_id (BP-SLACK-001-BLOCK_KIT_… →
+           SLACK; block, kit, text, fallback) plus bha_system — twenty
+           systems, BAYS 34, RAG 24, INFRA 20, VFARM 20, GENIE 17. Promotion
+           rate leads the page: 15 of 148 canonical, 10%, labelled as the
+           share today because no promotion date exists; promotion over time
+           null until observed on two days. Search is server-side across
+           every text field including the long ones the list omits; the
+           detail dialog fetches them. Promote / back to draft write through.
+
+           **Commercial** (commercialMetrics + Commercial.tsx): cards grouped
+           by lane_id (21 cards, 21 lanes — every card has its own lane, which
+           is what the data says); missing_research_count summed over the 18
+           cards that carry it, with the 3 that do not named as such; the
+           pipe-separated question text split into its items and shown next
+           to the count, flagged when count and list differ; per-card and
+           total trend null until observed twice. readiness_state changes
+           write through.
+
+           **Purge.** The four phase 1 fixture files were deleted, not
+           retyped. With no AIRTABLE_API_KEY the four pages are empty and
+           print the reason. The review queue and reconciliation tabs are
+           empty with a sentence: nothing proposes closes and nothing
+           reconciles the digest against the tables yet.
+
+Decision:  - **The server reads Airtable directly**, on Destiny's instruction,
+             rather than through the engine endpoint CLAUDE.md §4 described.
+             §4 rewritten to record it and the no-disk constraint. Still no
+             dependency beyond Node.
+           - **Owner is the table, not the assignee field.** See problem 1.
+           - **The global lane filter does not apply to Airtable kinds.**
+             lane_tag / lane_id / bha_system are not the engine's Lane union;
+             mapping them would be guessing, and the filter is 'all' in
+             practice since 2026-09-08. Loops carry lane_tag verbatim and the
+             spine's lane is that string or null.
+           - **Spine fields are nullable** and render as a dash. A loop table
+             has no session_id or subsystem; saying so beats inventing one.
+           - **No fixture fallback.** Empty-with-reason is the truth when the
+             key is missing; fixtures would be invented data on screen.
+           - **A count-up animates once, on first paint,** and respects
+             prefers-reduced-motion. A number that re-animates on every
+             refetch reads as noise.
+           - **The variable name AIRTABLE_API_KEY appears in the bundle** —
+             in the sentence "Writes are off: no AIRTABLE_API_KEY." No value
+             does; the grep for the key, the inbound key, the Airtable host
+             and the inbound header are all zero.
+
+Verified:  Clean build, `npm run build`, exit 0: `tsc -b && vite build`
+           (321 kB / 92 kB gzipped) and `tsc -p tsconfig.server.json`.
+
+           verify.sh — 32 checks against the local replay of the Airtable
+           API, all passing, output kept verbatim in the session notes:
+             1. boot resync read every table: 753 loops (324/18/65/189/30/
+                105/22), 95 Codex, 148 patterns, 21 cards; ten log lines,
+                the slowest (Destiny) 1080ms.
+             2. second resync: 0 new, 0 changed, 0 removed — idempotent.
+             3. a record deleted upstream: next resync 1 removed, 21 held.
+             4. close a loop from the dashboard: Airtable (replay) holds
+                Status=Closed; the held row is closed with closed_at today.
+             5. Airtable refusing writes: 502 with Airtable's reason; the
+                held row still open.
+             6. inbound: no key 401; wrong key 401; create 201; the same
+                payload again 200 not inserted, not changed; close by PATCH
+                changed:true with the event stamped at n8n's time; DELETE
+                drops the row; an id with no record makes the server read
+                it from Airtable.
+             7. loop metrics: open 607, in progress 7, closed 138; oldest
+                LOOP-1788044070652-7Z84, 39d, Destiny; buckets 99/119/310/
+                86/0; close rates Destiny 14% (46/324) … Kaiqi 98% (64/65)
+                … Kavin 0% (0/21); raised per week 0, 23, 87, 119, 154,
+                211, 121, 37; closed per day has points (the close from
+                step 4); net per week and stale null with notes; builder
+                scope jegan rows 189 open 171 closed 14.
+             8. codex: buckets 9/11/26/4/45, verdicts 85/10, pay eligible
+                56%, Layer 0 null, median approval null; an edit landed in
+                the Codex Log first; a locked field 422; DELETE 404.
+             9. patterns: 133 draft / 15 canonical / 10%; twenty systems;
+                search "block kit" 9 hits, first BP-SLACK-001; detail
+                carries a 1047-char solution; promote written through.
+            10. commercial: 21 cards, 53 unresolved over 18 of 21 cards,
+                trend null (one day).
+            11. /api/status: airtable_configured, inbound_configured,
+                rows held.
+            12. no AIRTABLE_API_KEY: zero rows, source none, the reason
+                printed; resync 503.
+
+           Chromium against the built app: signed in; Open loops counts run
+           up to Open 607 / In progress 7 / Closed 138 with the sync line
+           naming all seven tables; stale and net show "Not recorded" with
+           their sentences; search by loop id shows 1; Kavin's table view
+           shows 21; a hover-revealed "Start" on a row produced the toast
+           "Marked in progress in Airtable."; the Codex page shows 95
+           entries, 8 awaiting Jason (one was moved to Destiny review by the
+           edit in step 8), the Layer 0 "Not recorded" and the approval
+           note; the entry dialog opens with four textareas and four selects
+           and no Delete button.
+           The patterns page leads with "Draft to canonical 11%" (16 of 148
+           after the promotion in step 9), 24 keyword chips, server search
+           "idempot" → 3, and the detail dialog for "Idempotent Corpus-Card
+           Migration with Stable Source Identity". Commercial: 21 cards in 21
+           lane sections, 53 unresolved, the trend "Not recorded" with its
+           sentence. The Overview's Open loops pin reads 614 = 605 open + 9
+           in progress, consistent with the loops page after the sweep's
+           own "Start" clicks. Console errors: five, all the Inter font from
+           fonts.googleapis.com, which this sandbox's egress denies; none to
+           the app (checked by URL, not assumed).
+
+           Not verified here, because the sandbox cannot reach
+           api.airtable.com: the real read of the real bases. That happens
+           on Render the moment AIRTABLE_API_KEY is set, and the boot log
+           prints one line per table with the count it read.
+
+Open:      - **AIRTABLE_API_KEY is not set on Render.** Until it is, the
+             four pages are empty and say so. The token needs
+             data.records:read and data.records:write on the four bases.
+           - **DASHBOARD_INBOUND_KEY** is declared in render.yaml as a
+             generated value; the service was created from the dashboard, so
+             it must be set by hand and given to n8n. No n8n workflow calls
+             /api/inbound yet — that wiring is n8n's side and read-only here.
+           - **Kaiqi's table is 98% closed (64/65)** and Kavin's 0% (0/21).
+             Both are what the tables hold today; the close-rate card says it
+             is a state, not a rate.
+           - The engine-lane filter still exists in session state and is
+             'all'; it does not apply to the Airtable-backed kinds.

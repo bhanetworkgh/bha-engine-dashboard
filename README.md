@@ -11,16 +11,20 @@ This is that window. Internal team tooling, not a customer product.
 
 ## Status
 
-**Phase 1 — UI against mock data, behind a small server.** Layout,
-navigation, light and dark themes, and interactions are built. Reads come from
-fixtures held by the server. Sign-in is verified by the server, which sets a
-session cookie. Ask Bays goes through the server to the live agent workflow.
-Status changes on the records pages (loops, Codex entries, patterns,
-commercial cards) are written to the server's store, which keeps the history
-the counts on those pages are computed from.
+**Live on Render as one Node web service.** Sign-in is verified by the
+server, which sets a session cookie. Ask Bays goes through the server to the
+live agent workflow. **Open loops, Codex entries, build patterns and
+commercial cards are read from Airtable** — the seven per-builder loop tables,
+the Codex Log, Build Patterns and Commercial Opportunities — and every change
+made on those pages is written to Airtable first and shown from what came
+back. The server resyncs from Airtable on boot, on a timer and on demand, and
+n8n can push writes to it as it writes them to Airtable.
 
-Phase 2 replaces the server's fixture reads with calls to the engine endpoint.
-Chat history stays in the browser until Bays keeps memory of its own.
+The service runs on Render's free instance type with no persistent disk, so
+the server's SQLite store is a read model that is rebuilt from Airtable after
+every deploy and spin-down. Airtable is the source of truth. Incidents, twins,
+vFarm and builders are still phase 1 fixtures. Chat history stays in the
+browser until Bays keeps memory of its own.
 
 ## Architecture
 
@@ -37,9 +41,43 @@ The server has no dependencies beyond Node itself (22.13 or later, for the
 built-in SQLite driver). Its state is one SQLite file under `DATA_DIR`.
 
 All browser data access goes through one module, `src/data/index.ts`, which
-calls `/api`. All server data access goes through `server/src/engine.ts`
-(reads) and `server/src/store.ts` (records and history). Swapping fixtures for
-the live engine is a change in those two server files only.
+calls `/api`. On the server, `engine.ts` derives every read, `store.ts` holds
+the records and the status-change history, `sync.ts` rebuilds the records from
+Airtable, `airtable.ts` is the only code that talks to Airtable, and
+`sources.ts` says where each kind lives and how a row becomes a record.
+
+### Inbound writes from n8n
+
+`DASHBOARD_INBOUND_KEY` in the `x-dashboard-key` header authenticates these;
+the session cookie is not needed. `:kind` is `loops`, `codex`, `patterns` or
+`commercial`.
+
+```
+POST   /api/inbound/:kind           { id?, builder?, table?, record?, at? }   create or update
+PATCH  /api/inbound/:kind/:id       { builder?, table?, record?, at? }        same, id in the path
+DELETE /api/inbound/:kind/:id                                                  drop the held row
+POST   /api/inbound/resync/:kind                                               full rebuild of that kind
+```
+
+`record` is the Airtable record as n8n's Airtable node returns it
+(`{ id, createdTime, fields }`); the id may be given at the top level, in the
+path, or only inside the record. For loops, `builder` (e.g. `jegan`) or
+`table` (the tbl… id) says which builder table it lives in. When `record` is
+absent the server reads the record from Airtable itself. `at` is the time of
+the change and stamps the status event; without it the server uses now. The
+call is idempotent: the same record twice is one row and no second event.
+
+### Environment
+
+| Variable | Purpose |
+|---|---|
+| `AUTH_EMAIL`, `AUTH_PASSWORD_HASH` | The shared login (`npm run hash-password`) |
+| `SESSION_SECRET` | Signs the session cookie |
+| `ASK_BAYS_API_KEY`, `ASK_BAYS_URL` | The Ask Bays workflow |
+| `AIRTABLE_API_KEY` | Personal access token with read and write on the four bases |
+| `AIRTABLE_RESYNC_MINUTES` | Timed resync; default 30, 0 disables |
+| `DASHBOARD_INBOUND_KEY` | Authenticates n8n's pushes to `/api/inbound/*` |
+| `DATA_DIR` | Where the SQLite read model lives (ephemeral on the free plan) |
 
 Auth is a single shared team login, matching the pattern used by BHARAG's admin
 console. No per-user accounts.

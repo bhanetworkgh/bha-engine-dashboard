@@ -23,7 +23,6 @@ import type {
   IncidentState,
   Lane,
   LaneFilter,
-  Loop,
   OpenLoopsData,
   OverviewData,
   Query,
@@ -32,10 +31,27 @@ import type {
   VFarmData,
 } from '../../src/data/types';
 import { MODEL_LABEL, askConfigured } from './ask';
+import { CODEX_CHOICES, loopTable } from './sources';
 import * as store from './store';
 
-/** Reference date the fixtures are written against. */
+/** The builder's loops table id, for inbound payloads that name a builder rather than a table. */
+export function loopTableFor(owner: string): string | null {
+  return loopTable(owner)?.table ?? null;
+}
+
+/** Reference date the fixtures are written against. Live kinds use REF_TODAY. */
 const REF_DATE = '2026-09-07';
+const REF_TODAY = () => new Date().toISOString().slice(0, 10);
+
+function isoWeekOf(dayStr: string): string {
+  const d = new Date(`${dayStr}T00:00:00Z`);
+  const dow = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dow);
+  const y = d.getUTCFullYear();
+  const start = new Date(Date.UTC(y, 0, 1));
+  const w = Math.ceil(((d.getTime() - start.getTime()) / 86_400_000 + 1) / 7);
+  return `${y}-W${String(w).padStart(2, '0')}`;
+}
 
 export const LANES: Lane[] = ['VFARM_CORE', 'VFARM_MEDIA', 'CLIENT_CORE', 'ENGINE_INTERNAL'];
 
@@ -51,15 +67,22 @@ export function daysToHalloween(now = new Date()): number {
   return Math.round((target.getTime() - start.getTime()) / 86_400_000);
 }
 
-function laneMatch(q: Query, lane: Lane): boolean {
+function laneMatch(q: Query, lane: string | null): boolean {
   return q.lane === 'all' || q.lane === lane;
 }
 function byLane<T extends { lane: Lane }>(rows: T[], q: Query): T[] {
   return rows.filter((r) => laneMatch(q, r.lane));
 }
-function bySpineLane<T extends { spine: { lane: Lane } }>(rows: T[], q: Query): T[] {
+function bySpineLane<T extends { spine: { lane: string | null } }>(rows: T[], q: Query): T[] {
   return rows.filter((r) => laneMatch(q, r.spine.lane));
 }
+
+/**
+ * The four Airtable-backed kinds carry their source's own lane vocabulary
+ * (lane_tag, lane_id, bha_system), none of which is the engine's Lane union,
+ * so the global lane filter does not apply to them. It was removed from the
+ * shell on 2026-09-08 and is 'all' in practice.
+ */
 
 function isoDay(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -99,18 +122,18 @@ export function getEngineStatus(q: Query): EngineStatus {
 /* -------------------------------------------------------------- overview */
 
 export function getOverview(q: Query): OverviewData {
-  const allLoops = store.loops();
-  const loopById = (id: string): Loop => allLoops.find((l) => l.id === id) ?? allLoops[0];
-  const loops = byLane(allLoops, q);
+  const loops = store.loops();
   const openLoops = loops.filter((l) => l.status !== 'closed');
   const incidents = bySpineLane(f.INCIDENTS, q);
   const openIncidents = incidents.filter((i) => i.state !== 'resolved' && i.state !== 'failed');
   const owners = store.loopsByOwner();
-  const totalOpen = q.lane === 'all' ? owners.reduce((n, o) => n + o.open + o.in_progress, 0) : openLoops.length;
+  const totalOpen = openLoops.length;
   const oldest = Math.max(...(openLoops.length ? openLoops.map((l) => l.age_days) : [0]));
-  const entries = bySpineLane(store.codexEntries(), q);
-  const entriesThisWeek = entries.filter((e) => e.week === '2026-W36').length;
-  const ingested = entries.filter((e) => e.ingested).length;
+  const entries = store.codexEntries();
+  const thisWeek = isoWeekOf(REF_TODAY());
+  const entriesThisWeek = entries.filter((e) => e.week === thisWeek).length;
+  const ingested = entries.filter((e) => e.pay_eligible).length;
+  const loopsSync = store.syncInfo('loops');
   const openAlerts = f.VFARM_ALERTS.filter((a) => a.state === 'open');
   const vfarmVisible = q.lane === 'all' || q.lane === 'VFARM_CORE';
 
@@ -130,28 +153,29 @@ export function getOverview(q: Query): OverviewData {
   );
 
   const days7 = lastDays(REF_DATE, 7);
-  const days14 = lastDays(REF_DATE, 14);
+  const days14 = lastDays(REF_TODAY(), 14);
   const incidents7d = countByDay(days7, incidents.map((i) => i.opened_at));
-  const loops14d = countByDay(days14, loops.map((l) => l.raised_at));
+  const loops14d = countByDay(days14, loops.map((l) => l.raised_at).filter((d): d is string => Boolean(d)));
   const nsByDay = countByDay(days7, ns.map((r) => r.at)).map((p) => p.value);
   const rtByDay = countByDay(days7, rt.map((r) => r.at)).map((p) => p.value);
 
-  const weeks = [...new Set(entries.map((e) => e.week))].sort();
-  const entriesByWeek: SeriesPoint[] = weeks.map((w) => ({ label: w.replace('2026-', ''), value: entries.filter((e) => e.week === w).length }));
+  const weeks = [...new Set(entries.map((e) => e.week).filter((w): w is string => Boolean(w)))].sort().slice(-8);
+  const entriesByWeek: SeriesPoint[] = weeks.map((w) => ({ label: w.replace(/^\d{4}-/, ''), value: entries.filter((e) => e.week === w).length }));
 
   const classes: ErrorClass[] = ['BILLING_QUOTA', 'NETWORK_TIMEOUT', 'SCHEMA_VALIDATION', 'CONFIG_AUTH', 'UNKNOWN'];
   const states: IncidentState[] = ['new', 'triage', 'auto-retry pending', 'resolved', 'failed', 'escalated to RT', 'escalated to human'];
 
-  const opps = byLane(store.opportunities(), q).filter((o) => o.readiness !== 'closed');
+  const opps = store.opportunities();
   const builders = byLane(f.BUILDERS, q);
-  const patterns = byLane(store.patterns(), q).filter((p) => p.status === 'active');
+  const patterns = store.patterns();
+  const canonical = patterns.filter((p) => p.status === 'canonical').length;
 
   return {
     pins: [
       { label: 'Days to Halloween', value: String(daysToHalloween()), health: 'ok', accent: true },
       { label: 'vFarm status', value: vfarmVisible ? `${openAlerts.length} alerts open` : 'filtered out', health: vfarmVisible && openAlerts.length ? 'degraded' : 'ok' },
       { label: 'Open incidents', value: String(openIncidents.length), health: openIncidents.some((i) => i.health === 'failing') ? 'failing' : openIncidents.length ? 'degraded' : 'ok' },
-      { label: 'Open loops', value: String(totalOpen), health: totalOpen > 200 ? 'degraded' : 'ok' },
+      { label: 'Open loops', value: loopsSync.source === 'none' ? 'not loaded' : String(totalOpen), health: loopsSync.source === 'none' ? 'degraded' : totalOpen > 200 ? 'degraded' : 'ok' },
       { label: 'Entries this week', value: String(entriesThisWeek), health: 'ok' },
     ],
     tiles: [
@@ -159,10 +183,10 @@ export function getOverview(q: Query): OverviewData {
       { key: 'research-twin', label: 'Research Twin', to: '/research-twin', headline: String(rt.length), sublabel: 'asks this period', signal: `${bySpineLane(f.RT_GAPS, q).length} unanswered`, health: bySpineLane(f.RT_GAPS, q).length > 3 ? 'degraded' : 'ok', trend: rtByDay, share: { value: rt.filter((r) => r.outcome === 'answered').length, total: rt.length, label: 'answered' } },
       { key: 'vfarm', label: 'vFarm', to: '/vfarm', headline: vfarmVisible ? String(f.VFARM_PLACES.length) : '0', sublabel: 'places reporting', signal: vfarmVisible ? `${openAlerts.length} alerts open · lifecycle not emitting` : 'filtered out', health: vfarmVisible && openAlerts.length ? 'degraded' : 'ok' },
       { key: 'engine-health', label: 'Engine health', to: '/engine-health', headline: String(openIncidents.length), sublabel: 'incidents open', signal: openIncidents.some((i) => i.error_class === 'BILLING_QUOTA') ? 'quota exhausted upstream' : 'retries pending', health: openIncidents.some((i) => i.health === 'failing') ? 'failing' : openIncidents.length ? 'degraded' : 'ok', trend: incidents7d.map((p) => p.value), share: { value: selfHealed, total: resolved, label: 'self-healed' } },
-      { key: 'open-loops', label: 'Open loops', to: '/open-loops', headline: String(totalOpen), sublabel: 'open', signal: `oldest ${oldest} days`, health: oldest > 30 ? 'degraded' : 'ok', trend: loops14d.map((p) => p.value) },
-      { key: 'codex', label: 'Codex entries', to: '/codex', headline: String(entriesThisWeek), sublabel: 'logged this week', signal: `${entries.filter((e) => !e.ingested).length} posted, not ingested`, health: 'ok', trend: entriesByWeek.map((p) => p.value), share: { value: ingested, total: entries.length, label: 'ingested' } },
-      { key: 'build-patterns', label: 'Build patterns', to: '/build-patterns', headline: String(patterns.length), sublabel: 'patterns', signal: 'reference counts are cumulative', health: 'ok' },
-      { key: 'commercial', label: 'Commercial', to: '/commercial', headline: String(opps.length), sublabel: 'opportunities', signal: `${opps.filter((o) => o.readiness === 'blocked').length} blocked`, health: opps.some((o) => o.readiness === 'blocked') ? 'failing' : 'ok', share: { value: opps.filter((o) => o.readiness === 'ready to pitch').length, total: opps.length, label: 'ready to pitch' } },
+      { key: 'open-loops', label: 'Open loops', to: '/open-loops', headline: loopsSync.source === 'none' ? '—' : String(totalOpen), sublabel: loopsSync.source === 'none' ? 'not loaded from Airtable' : 'open', signal: loopsSync.source === 'none' ? (loopsSync.error ?? 'nothing read yet') : `oldest ${oldest} days`, health: loopsSync.source === 'none' ? 'degraded' : oldest > 30 ? 'degraded' : 'ok', trend: loops14d.map((p) => p.value) },
+      { key: 'codex', label: 'Codex entries', to: '/codex', headline: String(entriesThisWeek), sublabel: 'logged this week', signal: `${entries.filter((e) => e.action_required && e.action_required.toUpperCase().includes('JASON')).length} awaiting Jason’s spot-check`, health: 'ok', trend: entriesByWeek.map((p) => p.value), share: { value: ingested, total: entries.length, label: 'pay eligible' } },
+      { key: 'build-patterns', label: 'Build patterns', to: '/build-patterns', headline: String(patterns.length), sublabel: 'patterns', signal: `${canonical} canonical, ${patterns.length - canonical} draft`, health: 'ok', share: { value: canonical, total: patterns.length, label: 'canonical' } },
+      { key: 'commercial', label: 'Commercial', to: '/commercial', headline: String(opps.length), sublabel: 'cards', signal: `${opps.filter((o) => o.lane_state_blocked_reason).length} blocked on research`, health: opps.some((o) => o.lane_state_blocked_reason) ? 'degraded' : 'ok', share: { value: opps.filter((o) => o.readiness_state === 'Media-Ready').length, total: opps.length, label: 'media-ready' } },
       { key: 'builders', label: 'Builders', to: '/builders', headline: String(builders.length), sublabel: 'people', signal: `${builders.filter((b) => b.contract_status !== 'signed').length} contract not signed`, health: builders.some((b) => b.contract_status !== 'signed') ? 'degraded' : 'ok' },
     ],
     series: {
@@ -170,16 +194,7 @@ export function getOverview(q: Query): OverviewData {
       incidents_7d: incidents7d,
       entries_by_week: entriesByWeek,
       asks_by_outcome: { answered, thin, failed },
-      loops_by_owner:
-        q.lane === 'all'
-          ? owners
-          : owners
-              .map((o) => ({
-                ...o,
-                open: openLoops.filter((l) => l.owner === o.owner && l.status === 'open').length,
-                in_progress: openLoops.filter((l) => l.owner === o.owner && l.status === 'in progress').length,
-              }))
-              .filter((o) => o.open + o.in_progress > 0),
+      loops_by_owner: owners.map(({ owner, open, in_progress, oldest_days }) => ({ owner, open, in_progress, oldest_days })),
       incidents_by_class: classes
         .map((c) => ({ error_class: c, n: incidents.filter((i) => i.error_class === c).length, open: openIncidents.filter((i) => i.error_class === c).length }))
         .filter((r) => r.n > 0),
@@ -196,21 +211,21 @@ export function getOverview(q: Query): OverviewData {
       { id: 'B2', at: '09:15', title: 'Research Twin cannot resolve bharag2', detail: 'ENOTFOUND on two of three retries. Third pending.', health: 'degraded', spine: f.INCIDENTS[1].spine, source: f.INCIDENTS[1].source },
       { id: 'B3', at: '13:48', title: 'pH above ceiling on rack-a/tier-3', detail: 'Held at 6.31 across three consecutive rollups.', health: 'degraded', spine: f.VFARM_ALERTS[0].spine, source: f.VFARM_ALERTS[0].source },
       { id: 'B4', at: '09:06', title: 'Burn-in bench above temperature ceiling', detail: '23.1°C for 21 minutes against a 22.6°C ceiling.', health: 'degraded', spine: f.VFARM_ALERTS[1].spine, source: f.VFARM_ALERTS[1].source },
-      { id: 'B5', at: '08:14', title: 'Kaiqi digest disagreed with Kaiqi table', detail: 'Digest named three loops; the table returned none. Raised for reconciliation.', health: 'degraded', spine: loopById('LOOP-1788787118330-A6RT').spine, source: loopById('LOOP-1788787118330-A6RT').source },
+      { id: 'B5', at: '08:14', title: 'Kaiqi digest disagreed with Kaiqi table', detail: 'Digest named three loops; the table returned none. Raised for reconciliation.', health: 'degraded', spine: f.INCIDENTS[2].spine, source: f.INCIDENTS[2].source },
       { id: 'B6', at: '07:55', title: 'Commercial extractor hit its retry ceiling', detail: 'Three attempts, all failed. Classifier never derived a fix lane.', health: 'failing', spine: f.INCIDENTS[7].spine, source: f.INCIDENTS[7].source },
-      { id: 'B7', at: '06:20', title: 'Four Codex entries posted without ingest', detail: 'Reached Slack but not BHARAG, so no twin can cite them.', health: 'degraded', spine: f.CODEX_ENTRIES[3].spine, source: f.CODEX_ENTRIES[3].source },
-      { id: 'B8', at: '05:02', title: 'Founding-buyer card still blocked', detail: 'No authorised payment account. Unchanged for 31 days.', health: 'failing', spine: f.OPPORTUNITIES[0].spine, source: f.OPPORTUNITIES[0].source },
-      { id: 'B9', at: '02:41', title: 'Two loops named by the digest exist in no table', detail: 'Present in the Sept 7 digest, absent from all seven builder tables.', health: 'degraded', spine: loopById('LOOP-1786885900326-2NLZ').spine, source: loopById('LOOP-1786885900326-2NLZ').source },
+      { id: 'B7', at: '06:20', title: 'Four Codex entries posted without ingest', detail: 'Reached Slack but not BHARAG, so no twin can cite them.', health: 'degraded', spine: f.INCIDENTS[4].spine, source: f.INCIDENTS[4].source },
+      { id: 'B8', at: '05:02', title: 'Founding-buyer card still blocked', detail: 'No authorised payment account. Unchanged for 31 days.', health: 'failing', spine: f.INCIDENTS[7].spine, source: f.INCIDENTS[7].source },
+      { id: 'B9', at: '02:41', title: 'Two loops named by the digest exist in no table', detail: 'Present in the Sept 7 digest, absent from all seven builder tables.', health: 'degraded', spine: f.INCIDENTS[2].spine, source: f.INCIDENTS[2].source },
       { id: 'B10', at: '23:52', title: 'Ledger batch ingest rejected on schema', detail: 'incidents.v0 is strict; an added field fails the whole batch.', health: 'degraded', spine: f.INCIDENTS[2].spine, source: f.INCIDENTS[2].source },
       { id: 'B11', at: '22:18', title: 'Research Twin quarantined an ask at three cycles', detail: 'Evidence stayed thin across three narrowing passes; handed to a human.', health: 'degraded', spine: f.RT_RECORDS[4].spine, source: f.RT_RECORDS[4].source },
     ],
     moved_24h: [
       { id: 'M1', at: '14:02', title: 'North Star credential rotated', detail: 'INC-5A3C77 resolved after 26 hours of silent failure.', health: 'ok', spine: f.INCIDENTS[3].spine, source: f.INCIDENTS[3].source },
-      { id: 'M2', at: '11:20', title: 'Four blocking loops identified', detail: 'Bays narrowed 96 open loops to the 4 that block telemetry v1.', health: 'ok', spine: f.LOOPS[0].spine, source: f.LOOPS[0].source },
+      { id: 'M2', at: '11:20', title: 'Four blocking loops identified', detail: 'Bays narrowed 96 open loops to the 4 that block telemetry v1.', health: 'ok', spine: f.INCIDENTS[0].spine, source: f.INCIDENTS[0].source },
       { id: 'M3', at: '10:07', title: 'Ledger corpora confirmed current', detail: 'vfarm.sensor and vfarm.alert both current, dead-letter queue at zero.', health: 'ok', spine: f.VFARM_ALERTS[2].spine, source: f.VFARM_ALERTS[2].source },
       { id: 'M4', at: '08:17', title: 'Codex digest self-healed', detail: 'Empty render caught by assertion; second attempt posted.', health: 'ok', spine: f.INCIDENTS[4].spine, source: f.INCIDENTS[4].source },
-      { id: 'M5', at: '23:15', title: 'Three Codex entries ingested', detail: 'Destiny, Jegan and Kaiqi entries reached BHARAG rather than only posting.', health: 'ok', spine: f.CODEX_ENTRIES[0].spine, source: f.CODEX_ENTRIES[0].source },
-      { id: 'M6', at: '13:00', title: 'Per-builder loop digests delivered', detail: 'Seven builders, one digest each, prioritised by North Star.', health: 'ok', spine: f.LOOPS[5].spine, source: f.LOOPS[5].source },
+      { id: 'M5', at: '23:15', title: 'Three Codex entries ingested', detail: 'Destiny, Jegan and Kaiqi entries reached BHARAG rather than only posting.', health: 'ok', spine: f.INCIDENTS[4].spine, source: f.INCIDENTS[4].source },
+      { id: 'M6', at: '13:00', title: 'Per-builder loop digests delivered', detail: 'Seven builders, one digest each, prioritised by North Star.', health: 'ok', spine: f.INCIDENTS[0].spine, source: f.INCIDENTS[0].source },
       { id: 'M7', at: '11:38', title: 'Ambient range question answered after going thin', detail: 'Two cycles. First transition recorded on the Research Twin gaps tab.', health: 'ok', spine: f.RT_TRANSITIONS[0].spine, source: f.RT_TRANSITIONS[0].source },
       { id: 'M8', at: '10:30', title: 'pH by place confirmed present in the ledger', detail: 'Twenty-four hours of rollups readable across four places.', health: 'ok', spine: f.RT_RECORDS[0].spine, source: f.RT_RECORDS[0].source },
       { id: 'M9', at: '09:20', title: 'Watched clients weekly clock completed', detail: 'Three client memos posted; contradiction state updated on Client 9.', health: 'ok', spine: f.INCIDENTS[6].spine, source: f.INCIDENTS[6].source },
@@ -312,41 +327,60 @@ export function getEngineHealth(q: Query): EngineHealthData {
 
 /* ------------------------------------------------------------ open loops */
 
-export function getOpenLoops(q: Query): OpenLoopsData {
-  const loops = byLane(store.loops(), q).sort((a, b) => b.age_days - a.age_days);
-  const visibleOwners = new Set(loops.map((l) => l.owner));
-  const owners = store.loopsByOwner();
+export function getOpenLoops(_q: Query): OpenLoopsData {
+  const sync = store.syncInfo('loops');
   return {
-    loops,
-    by_owner: q.lane === 'all' ? owners : owners.filter((o) => visibleOwners.has(o.owner)),
-    review_queue: f.REVIEW_QUEUE,
-    reconciliation: f.RECONCILIATION,
-    reconciliation_note: 'Rows here disagree between the daily digest and the per-builder tables after the September 5 migration. Nothing is corrected automatically.',
-    status_history_note: `Age is time since the loop was raised. Status changes made here are recorded since ${(store.historySince() ?? '').slice(0, 10) || 'first boot'}; nothing upstream records them.`,
+    loops: store.loops().sort((a, b) => b.age_days - a.age_days),
+    by_owner: store.loopsByOwner(),
+    sync,
+    // Nothing proposes closes and nothing reconciles the digest against the tables yet; both lists are empty and say so.
+    review_queue: [],
+    reconciliation: [],
+    reconciliation_note: 'No workflow compares the daily digest against the seven builder tables yet, so there is nothing to reconcile here. The phase 1 rows that used to sit here were fixtures and were removed on 2026-09-09.',
+    status_history_note:
+      sync.source === 'none'
+        ? sync.error ?? 'Nothing has been read from Airtable yet.'
+        : `Read from the seven builder tables in Airtable at ${sync.synced_at?.replace('T', ' ').slice(0, 16)} UTC. Age is time since Date Raised. A status changed here is written to Airtable first and shown only from what Airtable sent back.`,
   };
 }
 
 /* ------------------------------- codex / patterns / commercial / builders */
 
-export function getCodexEntries(q: Query): CodexData {
-  const entries = bySpineLane(store.codexEntries(), q).sort((a, b) => (a.logged_at < b.logged_at ? 1 : -1));
-  const ingested = entries.filter((e) => e.ingested).length;
+export function getCodexEntries(_q: Query): CodexData {
   return {
-    entries,
-    this_week: entries.filter((e) => e.week === '2026-W36').length,
-    ingested_rate: entries.length ? `${Math.round((ingested / entries.length) * 100)}%` : '—',
+    entries: store.codexEntries().sort((a, b) => ((a.logged_at ?? '') < (b.logged_at ?? '') ? 1 : -1)),
+    sync: store.syncInfo('codex'),
+    choices: CODEX_CHOICES,
   };
 }
 
-export function getBuildPatterns(q: Query): BuildPatternsData {
+export function getBuildPatterns(_q: Query): BuildPatternsData {
+  const patterns = store.patterns().sort((a, b) => (a.pattern_id ?? '').localeCompare(b.pattern_id ?? ''));
+  const systems = [...new Set(patterns.map((p) => p.system ?? '(no system in id)'))].sort();
   return {
-    patterns: byLane(store.patterns(), q).sort((a, b) => b.references - a.references),
-    reference_note: 'Reference counts are cumulative since each pattern was ingested. There is no per-week breakdown — nothing records when a reference happened.',
+    patterns,
+    sync: store.syncInfo('patterns'),
+    systems: systems.map((s) => ({ system: s, n: patterns.filter((p) => (p.system ?? '(no system in id)') === s).length, canonical: patterns.filter((p) => (p.system ?? '(no system in id)') === s && p.status === 'canonical').length })),
   };
 }
 
-export function getCommercial(q: Query): CommercialData {
-  return { opportunities: byLane(store.opportunities(), q) };
+export function getCommercial(_q: Query): CommercialData {
+  const opportunities = store.opportunities().sort((a, b) => (a.lane_id ?? '').localeCompare(b.lane_id ?? '') || (a.card_id ?? '').localeCompare(b.card_id ?? ''));
+  const laneIds: string[] = [];
+  for (const o of opportunities) {
+    const l = o.lane_id ?? '(no lane_id)';
+    if (!laneIds.includes(l)) laneIds.push(l);
+  }
+  return {
+    opportunities,
+    sync: store.syncInfo('commercial'),
+    lanes: laneIds.map((lane_id) => {
+      const mine = opportunities.filter((o) => (o.lane_id ?? '(no lane_id)') === lane_id);
+      const counted = mine.filter((o) => o.missing_research_count !== null);
+      return { lane_id, n: mine.length, unresolved_questions: counted.length ? counted.reduce((n, o) => n + (o.missing_research_count ?? 0), 0) : null };
+    }),
+    trends: Object.fromEntries(opportunities.map((o) => [o.id, store.cardTrend(o.id)])),
+  };
 }
 
 /** Builders with their open-loop counts read from the owner totals, not the fixture. */
@@ -367,8 +401,8 @@ export function getBuilder(id: string, q: Query): BuilderDetail | null {
   if (!builder) return null;
   return {
     builder,
-    loops: byLane(store.loops(), q).filter((l) => l.owner === id),
-    entries: bySpineLane(store.codexEntries(), q).filter((e) => e.builder_id === id),
+    loops: store.loops().filter((l) => l.owner === id).sort((a, b) => b.age_days - a.age_days),
+    entries: store.codexEntries().filter((e) => e.builder_id === id),
     incidents: bySpineLane(f.INCIDENTS, q).filter((i) => i.spine.builder_id === id),
   };
 }
