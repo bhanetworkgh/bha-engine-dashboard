@@ -1127,3 +1127,153 @@ Verified:  Server compiled and run locally against a mock Bays workflow on
            /api/records/loops/metrics returns 401. Phone layout of Codex
            entries has no horizontal overflow. `grep` of dist/assets for
            ASK_BAYS, AUTH_PASSWORD, SESSION_SECRET and x-api-key: zero hits.
+
+## 2026-09-09 10:35 — The Render build's type-check: two files never committed
+
+Intent:    Get the Render deploy building again. It became a web service
+           (Node) running `npm install && npm run build`, and the build fails
+           at `tsc -b` on 04a9561 with around forty errors across
+           `src/screens/Overview.tsx` and `src/screens/VFarm/index.tsx`.
+
+Files:     src/data/api.ts     (new — the generic fetch helper)
+           src/data/names.ts   (new — BUILDER_NAMES and LANE_LIST)
+           .gitignore          (anchored the rule that swallowed them)
+           package-lock.json   (npm syncing the `engines` field already in
+                               package.json; produced by the install itself)
+
+Problem:   A clean clone of 04a9561 does not compile. `npm run build` from a
+           fresh tree:
+
+             src/app/session.tsx(3,40): error TS2307: Cannot find module
+               '../data/api' or its corresponding type declarations.
+             src/data/index.ts(13,31): error TS2307: Cannot find module
+               './api' or its corresponding type declarations.
+             src/data/index.ts(231,42): error TS2307: Cannot find module
+               './names' or its corresponding type declarations.
+             src/screens/Overview.tsx(175,13): error TS18046: 'data' is of
+               type 'unknown'.
+             src/screens/Overview.tsx(198,17): error TS2322: Type 'unknown'
+               is not assignable to type 'OverviewData'.
+             src/screens/VFarm/index.tsx(27,32): error TS2322: Type 'unknown'
+               is not assignable to type 'VFarmData'.
+             … 74 errors in total.
+
+           The report named forty errors in two screens; the real count is 74
+           across ten files, and neither screen is the cause. **Two source
+           files were written last session but never committed:**
+           `src/data/api.ts` and `src/data/names.ts`. They exist on the
+           machine that built 04a9561 and are absent from git — `git ls-files
+           src/data/` lists only `index.ts`, `types.ts` and `fixtures/`.
+
+           And they were not forgotten, they were swallowed. `.gitignore`
+           line 147, added in 04a9561 with the server:
+
+             # BHA dashboard server
+             server-dist/
+             data/
+
+           `data/` has no leading slash, so git matches it at *any* depth —
+           the root SQLite directory it was written for (DATA_DIR defaults to
+           `./data`) and `src/data/` alike:
+
+             $ git check-ignore -v src/data/api.ts
+             .gitignore:147:data/	src/data/api.ts
+
+           `index.ts`, `types.ts` and `fixtures/` survived only because they
+           were already tracked when the rule landed, and git ignores nothing
+           it already tracks. The two files written in that same session were
+           new, so `git add -A` passed over them in silence and the commit
+           looked complete. Anything added under `src/data/` from then on
+           would have vanished the same way.
+
+           Everything else follows from that one absence. `src/data/index.ts`
+           imports `{ api, ApiError }` from './api'; with the module
+           unresolved, `api<OverviewData>(…)` has no signature, so
+           `getOverview` no longer returns `Promise<OverviewData>`,
+           `useData(getOverview)` infers `T = unknown`, and every `data.pins`,
+           `data.tiles`, every `.map((t) => …)` derived from it, collapses in
+           turn — hence the run of TS18046 and TS7006. The same unresolved
+           `ApiError` breaks the `err instanceof ApiError` narrowing in the
+           sign-in catch, which is why `err` reads as `unknown` there too.
+
+Fix:       Wrote the two missing modules rather than touching any consumer.
+           No call site changed, no `as` cast was added at a use, no `: any`
+           on a callback parameter, and `strict` / `noImplicitAny` are
+           untouched.
+
+           `src/data/api.ts` — `api<T = unknown>(path, opts): Promise<T>`.
+           The generic is the whole point: `api<OverviewData>('/api/overview')`
+           resolves to `OverviewData`, and the inference flows back out
+           through `getOverview` → `useData` → the screen unchanged. The one
+           unavoidable boundary cast (`payload as T`, JSON has no type) lives
+           here, in the single place a shape crosses from the wire into the
+           app, which is exactly where the type-check is meant to bite.
+           It also carries: `ApiError` with `kind` ('http' | 'network' |
+           'timeout' | 'parse') and `status`, which the sign-in and Ask Bays
+           catches already branch on; `setUnauthorizedHandler`, which
+           `src/app/session.tsx` registers so a 401 returns the app to
+           sign-in; `credentials: 'same-origin'` so the session cookie rides
+           along; a thirty-second default timeout, raised to 130s by Ask
+           Bays; `quiet401` for the two routes that must not trigger a
+           sign-out (the session check and the login itself); method
+           defaulting to POST when a body is given; and the server's
+           `{ ok: false, message }` read back as the thrown message.
+
+           `.gitignore` — the rule anchored to `/data/`, so it means the
+           repo-root SQLite directory and nothing else, with a comment saying
+           what the unanchored version cost.
+
+           `src/data/names.ts` — `BUILDER_NAMES` and `LANE_LIST`, kept out of
+           the fixtures so the client bundle stays free of fixture data. The
+           builder ids are byte-identical to `src/data/fixtures/common.ts`
+           (checked, not eyeballed), which matters because
+           `server/src/store.ts` rejects a new loop whose owner is not one of
+           them.
+
+Decision:  - **Fixed at the source, not the call sites.** Forty-odd errors,
+             one cause. Papering over Overview and VFarm with assertions
+             would have left `src/app/session.tsx` and `src/data/index.ts`
+             still unresolved and the app broken at runtime — the module was
+             missing, not mistyped.
+           - **`names.ts` duplicates the builder list rather than importing
+             the fixtures.** Importing `fixtures/common` into the browser
+             would drag the fixture data into the bundle, against section 4.
+             The list is seven fixed ids; the file says out loud that it must
+             stay in step with the store, which validates against it.
+           - **No type was forced to match.** Checked whether the declared
+             shapes and the server's actual responses disagree, per the
+             brief. They do not: `/api/overview` returns exactly
+             `broke_24h, moved_24h, pins, rates, series, tiles` and
+             `/api/vfarm` exactly `alerts, days_to_halloween, lifecycle,
+             lifecycle_note, places, readiness_note, readings` — key for key
+             against `OverviewData` and `VFarmData`. Nothing to reconcile,
+             so nothing was asserted.
+           - **Anchored the ignore rule rather than force-adding the two
+             files.** `git add -f` would have got this deploy green and left
+             the trap armed for the next file under `src/data/`. The rule was
+             always meant to mean the root `data/`; `/data/` says so.
+           - **The lockfile change is committed.** `npm install` writes the
+             `engines` field into it regardless; committing it keeps Render's
+             install from rewriting it on every deploy.
+
+Verified:  `rm -rf dist server-dist node_modules && npm install && npm run
+           build` from a clean tree — exactly what Render runs. Exit 0. Both
+           halves pass: `tsc -b && vite build` (91 modules, 285.04 kB /
+           83.10 kB gzipped) and `tsc -p tsconfig.server.json`. Zero errors,
+           down from 74.
+           Then the built server on :8791 against a real round-trip:
+           unauthenticated `/api/overview` returns HTTP 401
+           `{"ok":false,"message":"Sign in to continue."}` — the shape
+           `api()` reads its message from; login returns the session with its
+           twelve-hour expiry; `/api/overview` and `/api/vfarm` behind the
+           cookie return the key sets recorded above.
+           `grep` of `dist/assets/*.js` for ASK_BAYS, AUTH_PASSWORD,
+           SESSION_SECRET and x-api-key: zero hits. No fixture source URLs in
+           the bundle either.
+           The ignore rule checked both ways: `git check-ignore src/data/api.ts`
+           and `src/data/names.ts` now match nothing, while
+           `data/dashboard.sqlite` still matches `.gitignore:150:/data/`.
+           `git status --ignored` across the tree lists nothing under `src/`
+           or `server/` any more — only `node_modules/`, `dist/`,
+           `server-dist/` and the two `.tsbuildinfo` files — so no other
+           source file is missing for the same reason.

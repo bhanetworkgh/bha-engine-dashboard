@@ -144,4 +144,7 @@ vite.config.ts.timestamp-*
 
 # BHA dashboard server
 server-dist/
-data/
+# The local SQLite directory only (DATA_DIR defaults to ./data). Anchored:
+# unanchored `data/` also matched src/data/, which silently dropped two
+# source files from a commit and broke the Render build.
+/data/
