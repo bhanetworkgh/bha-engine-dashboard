@@ -18,6 +18,7 @@ import type {
   BuilderDetail,
   BuildersData,
   BuildPattern,
+  BuildPatternDetail,
   BuildPatternsData,
   ChatThread,
   CodexData,
@@ -34,6 +35,7 @@ import type {
   Query,
   RecordKind,
   RecordMetrics,
+  ResyncResponse,
   ServerStatus,
   SignInResult,
   TwinData,
@@ -127,14 +129,20 @@ export async function getBuilder(id: string, q: Query): Promise<BuilderDetail | 
 
 /* --------------------------------------------------------------- records */
 
-/** The counts strip on a records page. Filtered by lane and, when given, builder. */
-export function getRecordMetrics(kind: RecordKind, q: Query, builder?: string | null): Promise<RecordMetrics> {
-  return api<RecordMetrics>(withLane(`/api/records/${kind}/metrics`, q, { builder: builder && builder !== 'all' ? builder : null }));
+type MetricsOf<K extends RecordKind> = Extract<RecordMetrics, { kind: K }>;
+
+/** The figures on a records page, computed by the server from the rows it holds. Filtered by builder where the kind has one. */
+export function getRecordMetrics<K extends RecordKind>(kind: K, q: Query, builder?: string | null): Promise<MetricsOf<K>> {
+  return api<MetricsOf<K>>(withLane(`/api/records/${kind}/metrics`, q, { builder: builder && builder !== 'all' ? builder : null }));
 }
 
 type RecordOf<K extends RecordKind> = K extends 'loops' ? Loop : K extends 'codex' ? CodexEntry : K extends 'patterns' ? BuildPattern : Opportunity;
 
-/** Changes one record's status through the server, which records the change. */
+/**
+ * Changes one record's status. The server writes to Airtable first and answers
+ * with the row as Airtable now holds it; if Airtable refuses, this throws and
+ * nothing changed anywhere.
+ */
 export function setRecordStatus<K extends RecordKind>(kind: K, id: string, status: string, note?: string): Promise<RecordOf<K>> {
   return api<RecordOf<K>>(`/api/records/${kind}/${encodeURIComponent(id)}`, { method: 'PATCH', body: { status, note } });
 }
@@ -143,8 +151,27 @@ export function setLoopStatus(id: string, status: LoopStatus, note?: string): Pr
   return setRecordStatus('loops', id, status, note);
 }
 
+/** Edits a record's own fields (Codex entries). Same write-through rule as a status change. */
+export function updateRecordFields<K extends RecordKind>(kind: K, id: string, fields: Record<string, unknown>): Promise<RecordOf<K>> {
+  return api<RecordOf<K>>(`/api/records/${kind}/${encodeURIComponent(id)}`, { method: 'PATCH', body: { fields } });
+}
+
 export function createLoop(input: NewLoop): Promise<Loop> {
   return api<Loop>('/api/records/loops', { method: 'POST', body: input });
+}
+
+/** Rebuilds one kind (or every kind) from Airtable. Slow: a full read of each table. */
+export function resync(kind?: RecordKind): Promise<ResyncResponse> {
+  return api<ResyncResponse>(kind ? `/api/resync/${kind}` : '/api/resync', { method: 'POST', body: {}, timeoutMs: 180_000 });
+}
+
+export function getPatternDetail(id: string): Promise<BuildPatternDetail> {
+  return api<BuildPatternDetail>(`/api/build-patterns/${encodeURIComponent(id)}`);
+}
+
+/** Server-side search across every text field of every pattern. */
+export function searchPatterns(q: string): Promise<{ patterns: BuildPattern[] }> {
+  return api<{ patterns: BuildPattern[] }>(`/api/build-patterns/search?q=${encodeURIComponent(q)}`);
 }
 
 /* -------------------------------------------------------------- ask bays */
@@ -213,13 +240,13 @@ export async function getAskBays(q: Query): Promise<AskBaysData> {
  * ok:false reply whose answer says what happened and whose `error` says which
  * kind, so the screen can show a refusal as a refusal rather than as Bays.
  *
- * The server allows the agent ninety seconds; this waits a little longer so a
+ * The server allows the agent five minutes; this waits a little longer so a
  * server-side timeout arrives as the server's own answer rather than as this
  * request giving up first and losing the reason.
  */
 export async function askBays(message: string, sessionId: string, builderId: string): Promise<AskReply> {
   try {
-    return await api<AskReply>('/api/ask', { body: { message, session_id: sessionId, builder_id: builderId }, timeoutMs: 100_000 });
+    return await api<AskReply>('/api/ask', { body: { message, session_id: sessionId, builder_id: builderId }, timeoutMs: 320_000 });
   } catch (e) {
     if (e instanceof ApiError) {
       if (e.kind === 'timeout') return { ok: false, answer: 'Bays did not answer in time.', session_id: sessionId, steps: [], error: 'timeout' };
@@ -230,4 +257,4 @@ export async function askBays(message: string, sessionId: string, builderId: str
   }
 }
 
-export { BUILDER_NAMES, LANE_LIST } from './names';
+export { BUILDER_NAMES, LANE_LIST, LOOP_LANE_TAGS } from './names';

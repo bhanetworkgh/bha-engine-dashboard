@@ -72,25 +72,52 @@ browser to the engine. The engine endpoint fans out to Airtable, BHARAG and n8n
 execution history and returns one response. Neither side of this app knows or
 cares where anything came from.
 
-**Phase 1 (now): the server holds the fixtures.** Every browser read goes
-through one module, `src/data/index.ts`, to `/api`. Every server read is
-derived in `server/src/engine.ts`; records with a status live in
-`server/src/store.ts` (SQLite under `DATA_DIR`, seeded from the fixtures on
-first boot). Swapping to the live endpoint is a change in those two server
-files only, never in components.
+**Records come from Airtable; the server reads it directly** (decision
+2026-09-09, Destiny). Loops, Codex entries, build patterns and commercial
+cards are read by `server/src/sync.ts` from their Airtable bases through
+`server/src/airtable.ts` (plain fetch, no dependency) into SQLite under
+`DATA_DIR`, keyed by Airtable record id. The base and table ids, field names
+and select vocabularies live in `server/src/sources.ts` and were read from the
+live bases, not assumed. Their phase 1 fixture files were deleted the same
+day; with no `AIRTABLE_API_KEY` those four pages are empty and say why.
+Incidents, twins, vFarm and builders are still phase 1 fixtures.
 
-**Phase 2 (later): the live endpoint replaces the fixtures.** Design the mock
-shapes to be plausible and consistent, because they become the contract.
+**The service has no persistent disk.** It runs on Render's free instance
+type, so `DATA_DIR` is wiped on every deploy and every spin-down. Therefore:
+
+- **Airtable is the source of truth for every record type.** The dashboard is
+  a read model plus a write-through cache, never the system of record.
+- **Every write from the interface goes to Airtable first** and is shown only
+  from what Airtable sent back. If Airtable refuses, nothing changes here.
+- **Resync rebuilds the read model**: on boot, every `AIRTABLE_RESYNC_MINUTES`
+  (default 30), and on demand from each page or `POST /api/resync/:kind`. It
+  is idempotent and purges a table's rows only after a successful full read.
+- **n8n dual-writes through `/api/inbound/:kind`**, authenticated by
+  `DASHBOARD_INBOUND_KEY` in `x-dashboard-key` (the same pattern as
+  `ASK_BAYS_API_KEY`, inbound). The push is additive; the Airtable write path
+  stays. No cut-over path exists and none is to be built until the persistent
+  disk exists — that decision will be made explicitly.
+- **Do not design anything that assumes dashboard-held state survives a
+  restart.** The events table (status changes with timestamps) is real from
+  boot and resets with the instance; every metric derived from it says so.
 
 **Counts are computed by the server from raw rows** (decision 2026-09-08).
-Nothing upstream keeps a status-change history, so the server records one and
-derives weekly volume, open versus closed and median time to close from it. A
-metric the data cannot support is null with a note, and the note is shown.
+The loop tables carry no close date and no last-modified time; nothing
+upstream keeps a status-change history. A metric the data cannot support is
+null with a note, and the note is shown. A zero and an unknown must never look
+the same.
 
 **Ask Bays** goes `browser → POST /api/ask → server → dashboard-ask-bays
 workflow` with the key in `x-api-key` from the server's environment. The
 thread's `session_id` is stable for its life and is Bays's memory. The reply's
 `steps` are shown under the answer; empty means nothing is shown.
+
+**Environment (all server-side, none in the bundle):** `AUTH_EMAIL`,
+`AUTH_PASSWORD_HASH`, `SESSION_SECRET`, `ASK_BAYS_API_KEY`, `ASK_BAYS_URL`,
+`AIRTABLE_API_KEY` (a personal access token with read and write scope on the
+four bases), `AIRTABLE_RESYNC_MINUTES`, `DASHBOARD_INBOUND_KEY`, `DATA_DIR`.
+`AIRTABLE_API_URL` exists so a sandbox that cannot reach api.airtable.com can
+point the same client at a local replay.
 
 **Auth:** one shared login for the whole team, same as BHARAG's console. Not
 per-user accounts. The password is posted to `/api/auth/login`; the server

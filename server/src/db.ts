@@ -1,7 +1,11 @@
 /**
- * SQLite through Node's built-in driver. One file under DATA_DIR. On Render,
- * mount a persistent disk at that path or history restarts with each deploy;
- * the server reports which it is on /api/status.
+ * SQLite through Node's built-in driver. One file under DATA_DIR.
+ *
+ * On Render's free instance there is no persistent disk, so this file is
+ * wiped on every deploy and every spin-down; the server reports which it is on
+ * /api/status and rebuilds the record tables from Airtable at boot (sync.ts).
+ * Only `meta` is created here; the record schema is store.ts's, versioned
+ * there, because it is the thing that changes.
  */
 import { mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
@@ -17,35 +21,6 @@ export function openDb(): DatabaseSync {
   db = new DatabaseSync(path.join(DATA_DIR, 'dashboard.sqlite'));
   db.exec(`
     PRAGMA journal_mode = WAL;
-    CREATE TABLE IF NOT EXISTS records (
-      kind TEXT NOT NULL,
-      id TEXT NOT NULL,
-      json TEXT NOT NULL,
-      status TEXT NOT NULL,
-      builder TEXT,
-      raised_at TEXT,
-      closed_at TEXT,
-      updated_at TEXT NOT NULL,
-      PRIMARY KEY (kind, id)
-    );
-    CREATE TABLE IF NOT EXISTS events (
-      seq INTEGER PRIMARY KEY AUTOINCREMENT,
-      kind TEXT NOT NULL,
-      record_id TEXT NOT NULL,
-      from_status TEXT,
-      to_status TEXT NOT NULL,
-      at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS events_kind_at ON events (kind, at);
-    CREATE TABLE IF NOT EXISTS snapshots (
-      day TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      open INTEGER NOT NULL,
-      in_progress INTEGER NOT NULL,
-      closed INTEGER NOT NULL,
-      total INTEGER NOT NULL,
-      PRIMARY KEY (day, kind)
-    );
     CREATE TABLE IF NOT EXISTS meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL

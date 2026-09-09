@@ -36,12 +36,16 @@ export interface Query {
 /** Health of a thing. 'ok' deliberately carries no colour in the UI. */
 export type Health = 'ok' | 'degraded' | 'failing';
 
-/** The four-field spine carried on every record, per CLAUDE.md section 8. */
+/**
+ * The four-field spine carried on every record, per CLAUDE.md section 8. A
+ * record read from Airtable carries whichever of the four its table records;
+ * the rest are null and render as a dash, never as a guessed value.
+ */
 export interface Spine {
-  session_id: string;
-  builder_id: string;
-  subsystem: Subsystem;
-  lane: Lane;
+  session_id: string | null;
+  builder_id: string | null;
+  subsystem: Subsystem | null;
+  lane: string | null;
 }
 
 /** Tags rendered wherever present, per CLAUDE.md section 8. */
@@ -90,6 +94,14 @@ export interface ServerStatus {
   history_since: string | null;
   records_held: Record<string, number>;
   started_at: string;
+  /** Whether AIRTABLE_API_KEY is set, and where the client points (a local replay in a sandbox). */
+  airtable_configured: boolean;
+  airtable_url: string;
+  /** Whether DASHBOARD_INBOUND_KEY is set, so n8n can push writes. */
+  inbound_configured: boolean;
+  /** Minutes between timed resyncs; 0 when disabled. */
+  resync_minutes: number;
+  sync: Record<RecordKind, SyncInfo>;
 }
 
 /* ---------------------------------------------------------------- status */
@@ -451,29 +463,53 @@ export interface EngineHealthData {
 
 export type LoopStatus = 'open' | 'in progress' | 'closed';
 
+/** The locked nine-lane set plus UNASSIGNED, exactly as the loop tables' lane_tag field defines it. */
+export type LoopLaneTag = 'RT' | 'NS' | 'VFARM_HARDWARE' | 'KIOSK' | 'CAD_API' | 'MEDIA' | 'GENIE' | 'CST' | 'BAYS' | 'UNASSIGNED';
+
+/**
+ * One loop, read from the builder's own table in the loops base. The Airtable
+ * record id is the key; loop_id is the human one. There is no close date and
+ * no last-modified time on these tables, which is why several loop metrics are
+ * null with a note.
+ */
 export interface Loop {
+  /** Airtable record id. Stable, and what every write is keyed by. */
   id: string;
+  loop_id: string | null;
   title: string;
+  /** The builder whose table the loop lives in. Never the assignee field. */
   owner: string;
   status: LoopStatus;
-  /** Days since the loop was raised. Time in current status is not recorded. */
+  /** Days since Date Raised; 0 when there is no date. */
   age_days: number;
-  raised_at: string;
-  /** Set when the loop was closed from this interface or arrived closed. */
+  raised_at: string | null;
+  raised_by: string | null;
+  raised_in: string | null;
+  lane_tag: LoopLaneTag | null;
+  assignee_slack_id: string | null;
+  /** Known only when the close went through this dashboard or arrived from n8n with a timestamp. */
   closed_at?: string | null;
-  /** Free-text note attached on the last update from this interface. */
   note?: string | null;
-  lane: Lane;
   spine: Spine;
   tags: Tags;
   source: Source;
+  airtable: AirtableRef;
 }
 
 export interface NewLoop {
   title: string;
   owner: string;
-  lane: Lane;
+  lane_tag: LoopLaneTag;
+  raised_by?: string;
   note?: string;
+}
+
+/** Where a record lives in Airtable, so every row can open there. */
+export interface AirtableRef {
+  base: string;
+  table: string;
+  record_id: string;
+  url: string;
 }
 
 export interface ProposedClose {
@@ -498,89 +534,209 @@ export interface ReconciliationRow {
 
 export interface OpenLoopsData {
   loops: Loop[];
-  by_owner: { owner: string; open: number; in_progress: number; closed: number; oldest_days: number }[];
+  by_owner: OwnerTotals[];
+  sync: SyncInfo;
   review_queue: ProposedClose[];
   reconciliation: ReconciliationRow[];
   reconciliation_note: string;
   status_history_note: string;
 }
 
+export interface OwnerTotals {
+  owner: string;
+  open: number;
+  in_progress: number;
+  closed: number;
+  oldest_days: number;
+}
+
+/**
+ * How and when a kind's rows last reached this dashboard. `source` is
+ * 'airtable' after a resync, 'inbound' when the newest change came from n8n,
+ * and 'none' when nothing has been loaded (no key, or a resync that failed).
+ */
+export interface SyncInfo {
+  kind: RecordKind;
+  source: 'airtable' | 'none';
+  synced_at: string | null;
+  /** The last resync's failure, when there was one. */
+  error: string | null;
+  /** Rows held per table, as counted at the last resync. */
+  tables: { table: string; label: string; n: number }[];
+  /** Whether the server can write back to Airtable at all. */
+  write_through: boolean;
+}
+
 /* ------------------------------- codex / patterns / commercial / builders */
 
+/**
+ * One row of the Codex Log. Fields are the table's own; nothing here is
+ * derived except `builder_id` (mapped from the Slack id) and `week`. The log
+ * records no approval and no Layer 0 flag: `action_required` is the nearest
+ * thing to a review state and is shown as exactly that.
+ */
 export interface CodexEntry {
+  /** Airtable record id. */
   id: string;
-  builder_id: string;
-  week: string;
-  logged_at: string;
-  session_type: string;
-  title: string;
-  narration_url: string | null;
-  /** True when status is 'ingested'. Kept for older call sites. */
-  ingested: boolean;
-  /** posted: reached Slack only. ingested: in BHARAG. archived: withdrawn. */
-  status: CodexStatus;
-  /** Date it was ingested, when that happened from this dashboard. Upstream does not record it. */
-  closed_at?: string | null;
+  /** Dashboard builder id mapped from builder_id (a Slack user id); null when the row names no builder. */
+  builder_id: string | null;
+  builder_slack_id: string | null;
+  builder_name: string | null;
+  /** From the `timestamp` field, normalised to ISO; null when unparseable. */
+  logged_at: string | null;
+  /** ISO week of logged_at, e.g. 2026-W36. */
+  week: string | null;
+  session_type: string | null;
+  session_url: string | null;
+  verdict: string | null;
+  narration_quality: string | null;
+  pay_eligible: boolean;
+  /** JASON_SPOTCHECK, DESTINY_REVIEW, BUILDER_FOLLOWUP, free text, or null. */
+  action_required: string | null;
+  card_id: string | null;
+  lane_id: string | null;
+  pillar_tag: string | null;
+  flag_name: string | null;
+  flag_repeat_count: number | null;
+  architecture_fit: string | null;
+  engine_movement: string | null;
+  needle_moved_evidence: string | null;
+  red_flags: string | null;
   note?: string | null;
   spine: Spine;
   tags: Tags;
   source: Source;
+  airtable: AirtableRef;
 }
 
-export type CodexStatus = 'posted' | 'ingested' | 'archived';
+/** The review buckets the data supports, from action_required. */
+export type CodexBucket = 'jason' | 'destiny' | 'builder' | 'other' | 'none';
+
+/** The fields an edit may change. Everything else on the row is the log's own. */
+export type CodexEditableField =
+  | 'session_type'
+  | 'session_url'
+  | 'verdict'
+  | 'narration_quality'
+  | 'pay_eligible'
+  | 'action_required'
+  | 'card_id'
+  | 'lane_id'
+  | 'pillar_tag'
+  | 'architecture_fit'
+  | 'engine_movement'
+  | 'needle_moved_evidence'
+  | 'red_flags';
 
 export interface CodexData {
   entries: CodexEntry[];
-  this_week: number;
-  ingested_rate: string;
+  sync: SyncInfo;
+  /** Select choices as the table defines them, for the edit form. */
+  choices: { session_type: string[]; verdict: string[]; narration_quality: string[]; pillar_tag: string[] };
 }
 
+/**
+ * One build pattern. `system` and `keywords` are read off pattern_id and
+ * bha_system — classification from the record's own naming, not a model.
+ * Long text (problem, solution, context…) is not in the list payload; the
+ * detail endpoint carries it.
+ */
 export interface BuildPattern {
+  /** Airtable record id. */
   id: string;
-  code: string;
+  pattern_id: string | null;
   title: string;
-  lane: Lane;
-  references: number;
-  last_referenced: string | null;
-  author: string;
   status: PatternStatus;
-  closed_at?: string | null;
+  bha_system: string | null;
+  reusability: string | null;
+  created_at: string | null;
+  /** The second segment of pattern_id, e.g. SLACK in BP-SLACK-001-…; null when the id does not follow that shape. */
+  system: string | null;
+  /** Lower-case words from the pattern_id slug and bha_system, for classification and search. */
+  keywords: string[];
+  /** The first sentences of `problem`, for the list. */
+  excerpt: string | null;
   note?: string | null;
   source: Source;
+  airtable: AirtableRef;
 }
 
-export type PatternStatus = 'active' | 'retired';
+/** The full record, for the detail view. */
+export interface BuildPatternDetail extends BuildPattern {
+  problem: string | null;
+  solution: string | null;
+  context: string | null;
+  next_use_case: string | null;
+  commercial_impact: string | null;
+  research_production_impact: string | null;
+  learnings_gotchas: string | null;
+  readiness_gates: string | null;
+  implementation_checklist: string | null;
+  integration_points: string | null;
+  test_coverage: string | null;
+  routing_logic: string | null;
+  anti_pattern: string | null;
+  naming_note: string | null;
+  roadmap_context: string | null;
+}
+
+export type PatternStatus = 'draft' | 'canonical';
 
 export interface BuildPatternsData {
   patterns: BuildPattern[];
-  reference_note: string;
+  sync: SyncInfo;
+  /** Every system seen in pattern ids, with counts, for the classification strip. */
+  systems: { system: string; n: number; canonical: number }[];
 }
 
-export type Readiness =
-  | 'idea'
-  | 'researching'
-  | 'evidence thin'
-  | 'ready to pitch'
-  | 'blocked'
-  | 'closed';
+/** readiness_state as the Commercial Opportunities table defines it. */
+export type ReadinessState = 'INCUBATE' | 'Research-First' | 'Media-Ready';
 
+/**
+ * One commercial card. Fields are the table's own. `missing_research_questions`
+ * is the pipe-separated text split into its items; `missing_research_count` is
+ * the table's own number and may disagree with that list — both are shown.
+ */
 export interface Opportunity {
+  /** Airtable record id. */
   id: string;
+  card_id: string | null;
   title: string;
-  readiness: Readiness;
-  health: Health;
-  owner: string;
-  lane: Lane;
-  last_touched: string;
-  blocker: string | null;
-  closed_at?: string | null;
+  lane_id: string | null;
+  readiness_state: ReadinessState | null;
+  confidence: string | null;
+  pilot_state: string | null;
+  routing_state: string | null;
+  lane_state: string | null;
+  lane_state_blocked_reason: string | null;
+  engine_movement_state: string | null;
+  demand_evidence: string | null;
+  infra_readiness: string | null;
+  data_readiness: string | null;
+  media_readiness: string | null;
+  media_gate: string | null;
+  missing_research_count: number | null;
+  missing_research_questions: string[];
+  next_action: string | null;
+  pain_point: string | null;
+  offer: string | null;
+  target: string | null;
+  who_pays: string | null;
+  bha_system: string | null;
+  created_at: string | null;
   note?: string | null;
   spine: Spine;
   source: Source;
+  airtable: AirtableRef;
 }
 
 export interface CommercialData {
   opportunities: Opportunity[];
+  sync: SyncInfo;
+  /** Cards grouped by lane_id, in the order lanes first appear. */
+  lanes: { lane_id: string; n: number; unresolved_questions: number | null }[];
+  /** Per card, missing_research_count as observed at each resync — a trend only once seen on two different days. Keyed by record id. */
+  trends: Record<string, MetricSeries>;
 }
 
 export interface Builder {
@@ -619,20 +775,89 @@ export interface Metric {
   note: string | null;
 }
 
+/** A series the data supports, or the reason it does not. */
+export interface MetricSeries {
+  points: SeriesPoint[] | null;
+  note: string | null;
+}
+
 /**
- * The counts on a records page. The server computes these from raw rows and
- * its own status-change history; see server/src/store.ts for the decision.
+ * Open loops. Every figure here is computed by the server from the rows it
+ * holds, and every one the rows cannot support is null with its reason. The
+ * loop tables carry no close date and no last-modified time; that single fact
+ * decides most of the nulls.
  */
-export interface RecordMetrics {
-  kind: RecordKind;
-  /** The word for the terminal state: closed, ingested, retired. */
-  terminal_label: string;
-  /** When the server began recording status changes. */
+export interface LoopMetrics {
+  kind: 'loops';
+  computed_at: string;
+  /** Which rows these figures cover. */
+  scope: { builder: string | null; rows: number };
+  open: number;
+  in_progress: number;
+  closed: number;
+  /** Closed as a share of all loops in the builder's table, today. Not a rate over time. */
+  close_rate_by_builder: { owner: string; closed: number; total: number; rate: number | null }[];
+  close_rate_note: string;
+  closed_per_day: MetricSeries;
+  oldest_open: { loop_id: string | null; id: string | null; owner: string | null; age_days: number | null; note: string | null };
+  age_distribution: { bucket: string; n: number }[];
+  raised_per_week: MetricSeries;
+  net_per_week: MetricSeries;
+  stale: { count: number | null; note: string };
   history_since: string | null;
-  week_start: string;
-  raised: Metric;
-  closed: Metric;
-  open_vs_closed: { open: number; closed: number; note: string | null };
-  median_days_to_close: Metric;
-  by_status: { status: string; n: number }[];
+}
+
+export interface CodexMetrics {
+  kind: 'codex';
+  computed_at: string;
+  scope: { builder: string | null; rows: number };
+  entries: number;
+  unattributed: number;
+  buckets: { bucket: CodexBucket; label: string; n: number }[];
+  per_builder_per_week: { owner: string; weeks: { week: string; n: number }[] }[];
+  verdict_mix: { verdict: string; n: number }[];
+  verdict_note: string;
+  pay_eligible_rate: Metric;
+  layer0_rate: Metric;
+  median_days_to_approval: Metric;
+  approval_note: string;
+}
+
+export interface PatternMetrics {
+  kind: 'patterns';
+  computed_at: string;
+  scope: { rows: number };
+  draft: number;
+  canonical: number;
+  /** Canonical as a share of all patterns, today. */
+  promotion_rate: Metric;
+  promotion_over_time: MetricSeries;
+  by_system: { system: string; draft: number; canonical: number }[];
+  created_per_week: MetricSeries;
+}
+
+export interface CommercialMetrics {
+  kind: 'commercial';
+  computed_at: string;
+  scope: { rows: number };
+  cards: number;
+  by_lane: { lane_id: string; n: number; unresolved: number | null; blocked: number }[];
+  by_readiness: { readiness_state: string; n: number }[];
+  unresolved_questions: Metric;
+  unresolved_trend: MetricSeries;
+  demand_evidence_note: string;
+}
+
+export type RecordMetrics = LoopMetrics | CodexMetrics | PatternMetrics | CommercialMetrics;
+
+/** What POST /api/resync answers: one result per kind, one line per table. */
+export interface ResyncResponse {
+  ok: boolean;
+  results: {
+    kind: RecordKind;
+    ok: boolean;
+    started_at: string;
+    finished_at: string;
+    tables: { table: string; label: string; n: number; inserted: number; changed: number; removed: number; error: string | null; ms: number }[];
+  }[];
 }

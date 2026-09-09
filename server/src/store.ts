@@ -1,185 +1,94 @@
 /**
- * The record store: loops, Codex entries, build patterns and commercial cards,
- * each with a status the interface can change, plus the history that makes
- * the counts on the records pages real.
+ * The record store: loops, Codex entries, build patterns and commercial cards
+ * as this dashboard holds them, plus the status-change history the counts on
+ * those pages are computed from.
  *
- * Decision (2026-09-08): the engine hands over raw rows and this server
- * aggregates them. Nothing upstream keeps a status-change history, so the
- * server keeps its own — an events table written on every change, a daily
- * snapshot per kind, and the date history began — and computes "this week
- * versus last", "open versus closed" and "median days raised to closed" from
- * those. Where a kind carries no date for a metric the metric is null with a
- * note saying what is missing; the interface prints the note rather than a
- * number.
+ * Decision (2026-09-09, Destiny): the service runs on Render's free instance
+ * type, which has no persistent disk. DATA_DIR is ephemeral — this SQLite file
+ * is wiped on every deploy and every spin-down after inactivity. So:
  *
- * Phase 1 seeds the store from the fixtures on first boot. Seeding is
- * idempotent: rows already present keep whatever status they have reached.
+ *   - Airtable is the source of truth for every kind. Rows here are a read
+ *     model, keyed by Airtable record id, rebuilt by sync.ts from the bases.
+ *   - Every write from the interface goes through to Airtable first and is
+ *     recorded here only from what Airtable sent back. If Airtable refuses,
+ *     nothing changes here. Nothing is designed to survive a restart.
+ *   - The events table is the only place a status change is timestamped
+ *     (the loop tables carry no close date). It is real from the moment this
+ *     instance booted and resets with it; every metric derived from it says
+ *     so, and one the rows cannot support is null with a note.
+ *
+ * No fixture is seeded for these four kinds any more. With no AIRTABLE_API_KEY
+ * the pages are empty and say why, which is the truth.
  */
-import * as f from '../../src/data/fixtures';
-import type { BuildPattern, CodexEntry, Lane, Loop, LoopStatus, Metric, NewLoop, Opportunity, RecordKind, RecordMetrics } from '../../src/data/types';
+import type { AtRecord } from './airtable';
+import * as airtable from './airtable';
+import type {
+  BuildPattern,
+  BuildPatternDetail,
+  CodexBucket,
+  CodexEntry,
+  CodexMetrics,
+  CommercialMetrics,
+  Loop,
+  LoopMetrics,
+  LoopStatus,
+  Metric,
+  MetricSeries,
+  NewLoop,
+  Opportunity,
+  OwnerTotals,
+  PatternMetrics,
+  RecordKind,
+  RecordMetrics,
+  SeriesPoint,
+  SyncInfo,
+} from '../../src/data/types';
 import { getMeta, nowIso, openDb, setMeta, today } from './db';
+import {
+  CODEX,
+  CODEX_EDITABLE,
+  COMMERCIAL,
+  LOOP_LANE_TAGS,
+  LOOP_STATUS_TO_AIRTABLE,
+  LOOP_TABLES,
+  LOOPS_BASE,
+  PATTERNS,
+  codexBucket,
+  isoWeek,
+  loopTable,
+  loopTableById,
+  mapCodex,
+  mapLoop,
+  mapOpportunity,
+  mapPattern,
+  patternSummary,
+} from './sources';
 
 export type { RecordKind, RecordMetrics, Metric };
 export const KINDS: RecordKind[] = ['loops', 'codex', 'patterns', 'commercial'];
 
-/** Status vocabularies. The last entry of each is the terminal ("closed") state. */
+/** Status vocabularies, in the dashboard's words. Loops and patterns and cards are the table's own selects lower-cased or verbatim. */
 export const STATUSES: Record<RecordKind, readonly string[]> = {
   loops: ['open', 'in progress', 'closed'],
-  codex: ['posted', 'ingested', 'archived'],
-  patterns: ['active', 'retired'],
-  commercial: ['idea', 'researching', 'evidence thin', 'ready to pitch', 'blocked', 'closed'],
+  codex: ['jason', 'destiny', 'builder', 'other', 'none'],
+  patterns: ['draft', 'canonical'],
+  commercial: ['INCUBATE', 'Research-First', 'Media-Ready'],
 };
 
-/** What "closed" means for each kind, in the word the interface uses. */
-export const TERMINAL: Record<RecordKind, { status: string; label: string }> = {
-  loops: { status: 'closed', label: 'closed' },
-  codex: { status: 'ingested', label: 'ingested' },
-  patterns: { status: 'retired', label: 'retired' },
-  commercial: { status: 'closed', label: 'closed' },
-};
-
-interface Row {
+export interface Row {
   kind: RecordKind;
   id: string;
+  key: string | null;
   json: string;
   status: string;
   builder: string | null;
   raised_at: string | null;
   closed_at: string | null;
   updated_at: string;
+  source: string;
+  table_id: string;
+  synced_at: string;
 }
-
-/* ------------------------------------------------------------------ dates */
-
-function dayDiff(a: string, b: string): number {
-  return Math.round((Date.parse(`${b.slice(0, 10)}T00:00:00Z`) - Date.parse(`${a.slice(0, 10)}T00:00:00Z`)) / 86_400_000);
-}
-
-/** Monday of the week containing `day` (YYYY-MM-DD), as YYYY-MM-DD. */
-function weekStart(day: string): string {
-  const d = new Date(`${day}T00:00:00Z`);
-  const dow = (d.getUTCDay() + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - dow);
-  return d.toISOString().slice(0, 10);
-}
-
-function addDays(day: string, n: number): string {
-  const d = new Date(`${day}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-
-/* ------------------------------------------------------------------- seed */
-
-const SEED_VERSION = '1';
-
-function seedRow(kind: RecordKind, id: string, obj: unknown, status: string, builder: string | null, raised: string | null, closed: string | null): void {
-  openDb()
-    .prepare(
-      `INSERT OR IGNORE INTO records (kind, id, json, status, builder, raised_at, closed_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(kind, id, JSON.stringify(obj), status, builder, raised, closed, nowIso());
-}
-
-export function seed(): void {
-  const db = openDb();
-  if (!getMeta('history_since')) setMeta('history_since', nowIso());
-  if (getMeta('seed_version') === SEED_VERSION && getMeta('seeded_at')) {
-    snapshotAll();
-    return;
-  }
-  const tx = db.prepare('BEGIN');
-  tx.run();
-  try {
-    for (const l of f.LOOPS) {
-      seedRow('loops', l.id, { ...l, age_days: undefined }, l.status, l.owner, l.raised_at, l.closed_at ?? null);
-    }
-    for (const e of f.CODEX_ENTRIES) {
-      // Ingest time is not recorded anywhere upstream, so an ingested seed has
-      // no closed_at. Only rows ingested from this interface get one.
-      seedRow('codex', e.id, { ...e, status: e.ingested ? 'ingested' : 'posted' }, e.ingested ? 'ingested' : 'posted', e.builder_id, e.logged_at.slice(0, 10), null);
-    }
-    for (const p of f.BUILD_PATTERNS) {
-      // Patterns carry no creation date: the source records only the last reference.
-      seedRow('patterns', p.id, { ...p, status: 'active' }, 'active', p.author, null, null);
-    }
-    for (const o of f.OPPORTUNITIES) {
-      // Cards carry last_touched only; nothing records when one was raised.
-      seedRow('commercial', o.id, o, o.readiness, o.owner, null, null);
-    }
-    if (!getMeta('loops_by_owner')) setMeta('loops_by_owner', JSON.stringify(f.LOOPS_BY_OWNER));
-    setMeta('seed_version', SEED_VERSION);
-    setMeta('seeded_at', nowIso());
-    db.prepare('COMMIT').run();
-  } catch (e) {
-    db.prepare('ROLLBACK').run();
-    throw e;
-  }
-  snapshotAll();
-}
-
-/* ------------------------------------------------------------------ reads */
-
-function rows(kind: RecordKind): Row[] {
-  return openDb().prepare('SELECT * FROM records WHERE kind = ?').all(kind) as unknown as Row[];
-}
-
-function rowById(kind: RecordKind, id: string): Row | null {
-  return (openDb().prepare('SELECT * FROM records WHERE kind = ? AND id = ?').get(kind, id) as unknown as Row | undefined) ?? null;
-}
-
-function hydrateLoop(r: Row): Loop {
-  const base = JSON.parse(r.json) as Loop;
-  const end = r.closed_at ?? today();
-  return {
-    ...base,
-    status: r.status as LoopStatus,
-    closed_at: r.closed_at,
-    age_days: r.raised_at ? Math.max(0, dayDiff(r.raised_at, end)) : 0,
-  };
-}
-
-function hydrateCodex(r: Row): CodexEntry {
-  const base = JSON.parse(r.json) as CodexEntry;
-  return { ...base, status: r.status as CodexEntry['status'], ingested: r.status === 'ingested', closed_at: r.closed_at };
-}
-
-function hydratePattern(r: Row): BuildPattern {
-  const base = JSON.parse(r.json) as BuildPattern;
-  return { ...base, status: r.status as BuildPattern['status'], closed_at: r.closed_at };
-}
-
-function hydrateOpportunity(r: Row): Opportunity {
-  const base = JSON.parse(r.json) as Opportunity;
-  return { ...base, readiness: r.status as Opportunity['readiness'], closed_at: r.closed_at };
-}
-
-export function loops(): Loop[] {
-  return rows('loops').map(hydrateLoop);
-}
-export function codexEntries(): CodexEntry[] {
-  return rows('codex').map(hydrateCodex);
-}
-export function patterns(): BuildPattern[] {
-  return rows('patterns').map(hydratePattern);
-}
-export function opportunities(): Opportunity[] {
-  return rows('commercial').map(hydrateOpportunity);
-}
-
-export type OwnerTotals = { owner: string; open: number; in_progress: number; closed: number; oldest_days: number }[];
-
-export function loopsByOwner(): OwnerTotals {
-  const raw = getMeta('loops_by_owner');
-  return raw ? (JSON.parse(raw) as OwnerTotals) : [];
-}
-
-function saveLoopsByOwner(t: OwnerTotals): void {
-  setMeta('loops_by_owner', JSON.stringify(t));
-}
-
-/* ----------------------------------------------------------------- writes */
 
 export class StoreError extends Error {
   constructor(
@@ -190,242 +99,637 @@ export class StoreError extends Error {
   }
 }
 
-function hydrateAny(r: Row): Loop | CodexEntry | BuildPattern | Opportunity {
-  switch (r.kind) {
+/* ------------------------------------------------------------------ dates */
+
+function dayDiff(a: string, b: string): number {
+  return Math.round((Date.parse(`${b.slice(0, 10)}T00:00:00Z`) - Date.parse(`${a.slice(0, 10)}T00:00:00Z`)) / 86_400_000);
+}
+function weekStart(day: string): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  const dow = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+function addDays(day: string, n: number): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function lastWeeks(n: number): string[] {
+  const out: string[] = [];
+  let w = weekStart(today());
+  for (let i = 0; i < n; i++) {
+    out.unshift(w);
+    w = addDays(w, -7);
+  }
+  return out;
+}
+
+/* ---------------------------------------------------------------- schema */
+
+/** Bumped when the row shape changes; the store is ephemeral so a rebuild is the honest migration. */
+const SCHEMA_VERSION = '2';
+
+export function ensureSchema(): void {
+  const db = openDb();
+  if (getMeta('schema_version') !== SCHEMA_VERSION) {
+    db.exec('DROP TABLE IF EXISTS records; DROP TABLE IF EXISTS events; DROP TABLE IF EXISTS snapshots; DROP TABLE IF EXISTS observations;');
+    db.exec(`DELETE FROM meta WHERE key NOT IN ('history_since')`);
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS records (
+      kind TEXT NOT NULL,
+      id TEXT NOT NULL,
+      key TEXT,
+      json TEXT NOT NULL,
+      status TEXT NOT NULL,
+      builder TEXT,
+      raised_at TEXT,
+      closed_at TEXT,
+      updated_at TEXT NOT NULL,
+      source TEXT NOT NULL,
+      table_id TEXT NOT NULL,
+      synced_at TEXT NOT NULL,
+      PRIMARY KEY (kind, id)
+    );
+    CREATE INDEX IF NOT EXISTS records_kind_table ON records (kind, table_id);
+    CREATE TABLE IF NOT EXISTS events (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      builder TEXT,
+      from_status TEXT,
+      to_status TEXT NOT NULL,
+      via TEXT NOT NULL,
+      at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS events_kind_at ON events (kind, at);
+    CREATE TABLE IF NOT EXISTS observations (
+      kind TEXT NOT NULL,
+      metric TEXT NOT NULL,
+      at TEXT NOT NULL,
+      value REAL NOT NULL
+    );
+  `);
+  if (!getMeta('history_since')) setMeta('history_since', nowIso());
+  setMeta('schema_version', SCHEMA_VERSION);
+}
+
+/* ------------------------------------------------------------------ rows */
+
+function rows(kind: RecordKind, table?: string): Row[] {
+  const db = openDb();
+  return (table
+    ? db.prepare('SELECT * FROM records WHERE kind = ? AND table_id = ?').all(kind, table)
+    : db.prepare('SELECT * FROM records WHERE kind = ?').all(kind)) as unknown as Row[];
+}
+function rowById(kind: RecordKind, id: string): Row | null {
+  return (openDb().prepare('SELECT * FROM records WHERE kind = ? AND id = ?').get(kind, id) as unknown as Row | undefined) ?? null;
+}
+
+type Mapped =
+  | { kind: 'loops'; obj: Loop }
+  | { kind: 'codex'; obj: CodexEntry }
+  | { kind: 'patterns'; obj: BuildPatternDetail }
+  | { kind: 'commercial'; obj: Opportunity };
+
+function statusOf(m: Mapped): string {
+  switch (m.kind) {
     case 'loops':
-      return hydrateLoop(r);
+      return m.obj.status;
     case 'codex':
-      return hydrateCodex(r);
+      return codexBucket(m.obj.action_required);
     case 'patterns':
-      return hydratePattern(r);
+      return m.obj.status;
     case 'commercial':
-      return hydrateOpportunity(r);
+      return m.obj.readiness_state ?? 'unset';
+  }
+}
+function keyOf(m: Mapped): string | null {
+  switch (m.kind) {
+    case 'loops':
+      return m.obj.loop_id;
+    case 'codex':
+      return m.obj.card_id;
+    case 'patterns':
+      return m.obj.pattern_id;
+    case 'commercial':
+      return m.obj.card_id;
+  }
+}
+function builderOf(m: Mapped): string | null {
+  return m.kind === 'loops' ? m.obj.owner : m.kind === 'codex' ? m.obj.builder_id : null;
+}
+function raisedOf(m: Mapped): string | null {
+  switch (m.kind) {
+    case 'loops':
+      return m.obj.raised_at;
+    case 'codex':
+      return m.obj.logged_at ? m.obj.logged_at.slice(0, 10) : null;
+    case 'patterns':
+      return m.obj.created_at ? m.obj.created_at.slice(0, 10) : null;
+    case 'commercial':
+      return m.obj.created_at ? m.obj.created_at.slice(0, 10) : null;
+  }
+}
+const TERMINAL: Partial<Record<RecordKind, string>> = { loops: 'closed' };
+
+/**
+ * Writes one mapped record over whatever is held for it. Idempotent: the same
+ * record twice is one row. A status that differs from the held row is recorded
+ * as an event, stamped `at` (an inbound payload's own time, else now).
+ */
+export function upsert(m: Mapped, table: string, via: 'airtable' | 'inbound' | 'ui', at = nowIso()): { changed: boolean; inserted: boolean } {
+  const db = openDb();
+  const prev = rowById(m.kind, m.obj.id);
+  const status = statusOf(m);
+  const terminal = TERMINAL[m.kind];
+  let closedAt = prev?.closed_at ?? null;
+  if (terminal) {
+    if (status === terminal && prev && prev.status !== terminal) closedAt = at.slice(0, 10);
+    if (status !== terminal) closedAt = null;
+  }
+  const obj: Record<string, unknown> = { ...m.obj, closed_at: closedAt };
+  if (prev) {
+    const held = JSON.parse(prev.json) as { note?: string | null };
+    if (held.note && obj.note == null) obj.note = held.note;
+  }
+  db.prepare(
+    `INSERT INTO records (kind, id, key, json, status, builder, raised_at, closed_at, updated_at, source, table_id, synced_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(kind, id) DO UPDATE SET key = excluded.key, json = excluded.json, status = excluded.status, builder = excluded.builder,
+       raised_at = excluded.raised_at, closed_at = excluded.closed_at, updated_at = excluded.updated_at, source = excluded.source,
+       table_id = excluded.table_id, synced_at = excluded.synced_at`,
+  ).run(m.kind, m.obj.id, keyOf(m), JSON.stringify(obj), status, builderOf(m), raisedOf(m), closedAt, at, via, table, at);
+  const changed = !prev || prev.status !== status;
+  if (changed) {
+    db.prepare('INSERT INTO events (kind, record_id, builder, from_status, to_status, via, at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      m.kind,
+      m.obj.id,
+      builderOf(m),
+      prev?.status ?? null,
+      status,
+      via,
+      at,
+    );
+  }
+  return { changed: Boolean(prev) && prev!.status !== status, inserted: !prev };
+}
+
+/** Removes rows of one table that a full read of that table no longer contains. */
+export function purgeMissing(kind: RecordKind, table: string, keep: Set<string>): number {
+  const db = openDb();
+  const held = rows(kind, table);
+  let n = 0;
+  for (const r of held) {
+    if (!keep.has(r.id)) {
+      db.prepare('DELETE FROM records WHERE kind = ? AND id = ?').run(kind, r.id);
+      n++;
+    }
+  }
+  return n;
+}
+
+export function mapRecord(kind: RecordKind, rec: AtRecord, table: string): Mapped {
+  switch (kind) {
+    case 'loops': {
+      const t = loopTableById(table);
+      if (!t) throw new StoreError(`${table} is not one of the builder tables.`, 422);
+      return { kind, obj: mapLoop(rec, t.owner, table) };
+    }
+    case 'codex':
+      return { kind, obj: mapCodex(rec) };
+    case 'patterns':
+      return { kind, obj: mapPattern(rec) };
+    case 'commercial':
+      return { kind, obj: mapOpportunity(rec) };
   }
 }
 
-function ownerKey(s: string): 'open' | 'in_progress' | 'closed' {
-  return s === 'open' ? 'open' : s === 'in progress' ? 'in_progress' : 'closed';
+/* ------------------------------------------------------------------ reads */
+
+function hydrateLoop(r: Row): Loop {
+  const base = JSON.parse(r.json) as Loop;
+  const end = r.closed_at ?? today();
+  return { ...base, status: r.status as LoopStatus, closed_at: r.closed_at, age_days: r.raised_at ? Math.max(0, dayDiff(r.raised_at, end)) : 0 };
+}
+export function loops(): Loop[] {
+  return rows('loops').map(hydrateLoop);
+}
+export function codexEntries(): CodexEntry[] {
+  return rows('codex').map((r) => JSON.parse(r.json) as CodexEntry);
+}
+export function patterns(): BuildPattern[] {
+  return rows('patterns').map((r) => patternSummary(JSON.parse(r.json) as BuildPatternDetail));
+}
+export function patternDetail(id: string): BuildPatternDetail | null {
+  const r = rowById('patterns', id);
+  return r ? (JSON.parse(r.json) as BuildPatternDetail) : null;
+}
+/** Case-insensitive search across every text field of every pattern. */
+export function searchPatterns(q: string): BuildPattern[] {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return patterns();
+  const terms = needle.split(/\s+/).filter(Boolean);
+  return rows('patterns')
+    .filter((r) => {
+      const hay = r.json.toLowerCase();
+      return terms.every((t) => hay.includes(t));
+    })
+    .map((r) => patternSummary(JSON.parse(r.json) as BuildPatternDetail));
+}
+export function opportunities(): Opportunity[] {
+  return rows('commercial').map((r) => JSON.parse(r.json) as Opportunity);
 }
 
-/** Changes one record's status, records the event, and returns the record as it now stands. */
-export function setStatus(kind: RecordKind, id: string, status: string, note?: string): Loop | CodexEntry | BuildPattern | Opportunity {
+export function loopsByOwner(): OwnerTotals[] {
+  const all = loops();
+  return LOOP_TABLES.map((t) => {
+    const mine = all.filter((l) => l.owner === t.owner);
+    const open = mine.filter((l) => l.status !== 'closed');
+    return {
+      owner: t.owner,
+      open: mine.filter((l) => l.status === 'open').length,
+      in_progress: mine.filter((l) => l.status === 'in progress').length,
+      closed: mine.filter((l) => l.status === 'closed').length,
+      oldest_days: open.length ? Math.max(...open.map((l) => l.age_days)) : 0,
+    };
+  }).filter((o) => o.open + o.in_progress + o.closed > 0);
+}
+
+/* ------------------------------------------------------------------- sync */
+
+export interface SyncState {
+  synced_at: string | null;
+  error: string | null;
+  tables: { table: string; label: string; n: number }[];
+}
+export function syncState(kind: RecordKind): SyncState {
+  const raw = getMeta(`sync:${kind}`);
+  return raw ? (JSON.parse(raw) as SyncState) : { synced_at: null, error: null, tables: [] };
+}
+export function setSyncState(kind: RecordKind, s: SyncState): void {
+  setMeta(`sync:${kind}`, JSON.stringify(s));
+}
+export function syncInfo(kind: RecordKind): SyncInfo {
+  const s = syncState(kind);
+  return {
+    kind,
+    source: s.synced_at ? 'airtable' : 'none',
+    synced_at: s.synced_at,
+    error: s.error,
+    tables: s.tables,
+    write_through: airtable.airtableConfigured(),
+  };
+}
+
+export function observe(kind: RecordKind, metric: string, value: number): void {
+  openDb().prepare('INSERT INTO observations (kind, metric, at, value) VALUES (?, ?, ?, ?)').run(kind, metric, nowIso(), value);
+}
+export function cardTrend(id: string): MetricSeries {
+  const obs = observations('commercial', `unresolved:${id}`);
+  const days = new Set(obs.map((o) => o.at.slice(0, 10)));
+  return days.size >= 2
+    ? { points: obs.map((o) => ({ label: o.at.slice(5, 10), value: Math.round(o.value) })), note: 'missing_research_count as observed at each resync. Observations reset with the instance on the free plan.' }
+    : { points: null, note: obs.length ? `Seen on one day only (${[...days][0]}); a trend needs at least two.` : 'Not observed yet.' };
+}
+function observations(kind: RecordKind, metric: string): { at: string; value: number }[] {
+  return openDb().prepare('SELECT at, value FROM observations WHERE kind = ? AND metric = ? ORDER BY at').all(kind, metric) as unknown as { at: string; value: number }[];
+}
+
+/* ----------------------------------------------------------------- writes */
+
+function requireWrite(): void {
+  if (!airtable.airtableConfigured()) {
+    throw new StoreError('Airtable is the source of truth and this server has no AIRTABLE_API_KEY, so the change was not made.', 503);
+  }
+}
+
+async function writeThrough(kind: RecordKind, r: Row, fields: Record<string, unknown>): Promise<Mapped> {
+  requireWrite();
+  const base = kind === 'loops' ? LOOPS_BASE : kind === 'codex' ? CODEX.base : kind === 'patterns' ? PATTERNS.base : COMMERCIAL.base;
+  let rec: AtRecord;
+  try {
+    rec = await airtable.updateRecord(base, r.table_id, r.id, fields);
+  } catch (e) {
+    if (e instanceof airtable.AirtableError) throw new StoreError(`Airtable did not accept the change: ${e.message}`, e.status === 0 ? 502 : e.status >= 500 ? 502 : e.status);
+    throw e;
+  }
+  return mapRecord(kind, rec, r.table_id);
+}
+
+/**
+ * Changes one record's status. Airtable first; the held row is then replaced
+ * by what Airtable returned, and the change is recorded as an event.
+ */
+export async function setStatus(kind: RecordKind, id: string, status: string, note?: string): Promise<Loop | CodexEntry | BuildPattern | Opportunity> {
   if (!STATUSES[kind].includes(status)) {
     throw new StoreError(`"${status}" is not a status a ${kind === 'loops' ? 'loop' : kind === 'codex' ? 'Codex entry' : kind === 'patterns' ? 'pattern' : 'card'} can have.`, 422);
   }
   const r = rowById(kind, id);
   if (!r) throw new StoreError('That record is not held by this dashboard.', 404);
-  const db = openDb();
-  const at = nowIso();
-  const from = r.status;
-  const terminal = TERMINAL[kind].status;
-  const obj = JSON.parse(r.json) as Record<string, unknown>;
-  if (note !== undefined) obj.note = note.trim() || null;
-  if (kind === 'commercial') {
-    obj.readiness = status;
-    obj.health = status === 'blocked' ? 'failing' : status === 'evidence thin' ? 'degraded' : 'ok';
-    obj.last_touched = at.slice(0, 10);
-    if (status !== 'blocked' && status !== 'evidence thin') obj.blocker = null;
-  }
-  if (kind === 'codex') obj.ingested = status === 'ingested';
-  obj.status = status;
-
-  let closedAt = r.closed_at;
-  if (status === terminal && from !== terminal) closedAt = at.slice(0, 10);
-  if (status !== terminal && from === terminal) closedAt = null;
-
-  db.prepare('UPDATE records SET json = ?, status = ?, closed_at = ?, updated_at = ? WHERE kind = ? AND id = ?').run(
-    JSON.stringify(obj),
-    status,
-    closedAt,
-    at,
-    kind,
-    id,
-  );
-  if (from !== status) {
-    db.prepare('INSERT INTO events (kind, record_id, from_status, to_status, at) VALUES (?, ?, ?, ?, ?)').run(kind, id, from, status, at);
-    if (kind === 'loops' && r.builder) {
-      const totals = loopsByOwner();
-      const o = totals.find((x) => x.owner === r.builder);
-      if (o) {
-        o[ownerKey(from)] = Math.max(0, o[ownerKey(from)] - 1);
-        o[ownerKey(status)] += 1;
-        saveLoopsByOwner(totals);
-      }
-    }
-  }
-  snapshot(kind);
-  return hydrateAny(rowById(kind, id)!);
+  if (kind === 'codex') throw new StoreError('A Codex entry has no status of its own; change its action_required instead.', 422);
+  const fields: Record<string, unknown> =
+    kind === 'loops' ? { Status: LOOP_STATUS_TO_AIRTABLE[status as LoopStatus] } : kind === 'patterns' ? { pattern_status: status } : { readiness_state: status };
+  const m = await writeThrough(kind, r, fields);
+  if (note !== undefined) (m.obj as { note?: string | null }).note = note.trim() || null;
+  upsert(m, r.table_id, 'ui');
+  return read(kind, id)!;
 }
 
-const SUBSYSTEM_BY_LANE: Record<Lane, Loop['spine']['subsystem']> = {
-  VFARM_CORE: 'VFARM',
-  VFARM_MEDIA: 'COMMERCIALOPPS',
-  CLIENT_CORE: 'RESEARCHTWIN',
-  ENGINE_INTERNAL: 'AGENT',
-};
+/** Edits a Codex entry's own fields. Airtable first, then the held row from what came back. */
+export async function updateFields(kind: RecordKind, id: string, fields: Record<string, unknown>): Promise<CodexEntry | Opportunity | BuildPatternDetail | Loop> {
+  const r = rowById(kind, id);
+  if (!r) throw new StoreError('That record is not held by this dashboard.', 404);
+  const allowed = kind === 'codex' ? CODEX_EDITABLE : kind === 'loops' ? new Set(['What', 'lane_tag', 'raised_in', 'Raised By']) : new Set<string>();
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (!allowed.has(k)) throw new StoreError(`"${k}" is not a field this dashboard edits.`, 422);
+    if (k === 'lane_tag' && v !== null && !(LOOP_LANE_TAGS as string[]).includes(String(v))) throw new StoreError('That lane_tag is not one the loop tables define.', 422);
+    clean[k] = typeof v === 'string' ? v.trim() || null : v;
+  }
+  if (!Object.keys(clean).length) throw new StoreError('Nothing to change.', 422);
+  const m = await writeThrough(kind, r, clean);
+  upsert(m, r.table_id, 'ui');
+  const out = rowById(kind, id)!;
+  return kind === 'loops' ? hydrateLoop(out) : (JSON.parse(out.json) as CodexEntry | Opportunity | BuildPatternDetail);
+}
 
-export function createLoop(input: NewLoop): Loop {
+export async function createLoop(input: NewLoop): Promise<Loop> {
+  requireWrite();
   const title = (input.title ?? '').trim();
   if (!title) throw new StoreError('A loop needs a title.', 422);
-  if (!(input.lane in SUBSYSTEM_BY_LANE)) throw new StoreError('That lane is not one the engine knows.', 422);
-  if (!input.owner || !(input.owner in f.BUILDER_NAMES)) throw new StoreError('The owner must be one of the builders.', 422);
-  const at = nowIso();
-  const day = at.slice(0, 10);
-  const id = `LOOP-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-  const loop: Loop = {
-    id,
-    title,
-    owner: input.owner,
-    status: 'open',
-    age_days: 0,
-    raised_at: day,
-    closed_at: null,
-    note: input.note?.trim() || null,
-    lane: input.lane,
-    spine: {
-      session_id: `SES-${day.replace(/-/g, '')}-${input.owner.slice(0, 2).toUpperCase()}-UI`,
-      builder_id: input.owner,
-      subsystem: SUBSYSTEM_BY_LANE[input.lane],
-      lane: input.lane,
-    },
-    tags: {},
-    source: f.airtable(id, 'tblBJekl3ROpNZxQW'),
+  const t = loopTable(input.owner);
+  if (!t) throw new StoreError('The owner must be one of the builders with a loops table.', 422);
+  if (!(LOOP_LANE_TAGS as string[]).includes(input.lane_tag)) throw new StoreError('That lane_tag is not one the loop tables define.', 422);
+  const fields: Record<string, unknown> = {
+    What: title,
+    Status: 'Open',
+    'Date Raised': today(),
+    lane_tag: input.lane_tag,
+    loop_id: `LOOP-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+    raised_in: 'bha-engine-dashboard',
   };
-  const db = openDb();
-  db.prepare('INSERT INTO records (kind, id, json, status, builder, raised_at, closed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-    'loops',
-    id,
-    JSON.stringify({ ...loop, age_days: undefined }),
-    'open',
-    input.owner,
-    day,
-    null,
-    at,
-  );
-  db.prepare('INSERT INTO events (kind, record_id, from_status, to_status, at) VALUES (?, ?, ?, ?, ?)').run('loops', id, null, 'open', at);
-  const totals = loopsByOwner();
-  const o = totals.find((x) => x.owner === input.owner);
-  if (o) o.open += 1;
-  else totals.push({ owner: input.owner, open: 1, in_progress: 0, closed: 0, oldest_days: 0 });
-  saveLoopsByOwner(totals);
-  snapshot('loops');
-  return hydrateLoop(rowById('loops', id)!);
+  if (input.raised_by?.trim()) fields['Raised By'] = input.raised_by.trim();
+  let rec: AtRecord;
+  try {
+    rec = await airtable.createRecord(LOOPS_BASE, t.table, fields);
+  } catch (e) {
+    if (e instanceof airtable.AirtableError) throw new StoreError(`Airtable did not accept the new loop: ${e.message}`, e.status === 0 ? 502 : e.status >= 500 ? 502 : e.status);
+    throw e;
+  }
+  const m = mapRecord('loops', rec, t.table);
+  if (input.note?.trim()) (m.obj as Loop).note = input.note.trim();
+  upsert(m, t.table, 'ui');
+  return hydrateLoop(rowById('loops', rec.id)!);
 }
 
-/* -------------------------------------------------------------- snapshots */
-
-function snapshot(kind: RecordKind): void {
-  const all = rows(kind);
-  const terminal = TERMINAL[kind].status;
-  const closed = all.filter((r) => r.status === terminal).length;
-  const inProgress = kind === 'loops' ? all.filter((r) => r.status === 'in progress').length : 0;
-  openDb()
-    .prepare(
-      `INSERT INTO snapshots (day, kind, open, in_progress, closed, total) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(day, kind) DO UPDATE SET open = excluded.open, in_progress = excluded.in_progress, closed = excluded.closed, total = excluded.total`,
-    )
-    .run(today(), kind, all.length - closed - inProgress, inProgress, closed, all.length);
+/** Applies a record n8n pushed after writing it to Airtable. Idempotent by record id. */
+export async function applyInbound(kind: RecordKind, payload: { id: string; table?: string; record?: AtRecord; at?: string }): Promise<{ changed: boolean; inserted: boolean; record: unknown }> {
+  const id = payload.id;
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new StoreError('An Airtable record id (rec…) is required.', 422);
+  let table = payload.table ?? rowById(kind, id)?.table_id ?? null;
+  if (kind !== 'loops') table = kind === 'codex' ? CODEX.table : kind === 'patterns' ? PATTERNS.table : COMMERCIAL.table;
+  if (!table) throw new StoreError('Which builder table the loop lives in is required (table or builder).', 422);
+  if (kind === 'loops' && !loopTableById(table)) throw new StoreError(`${table} is not one of the builder tables.`, 422);
+  let rec = payload.record;
+  if (!rec) {
+    // The payload named the record but did not carry it: read it from Airtable, the source of truth.
+    requireWrite();
+    const base = kind === 'loops' ? LOOPS_BASE : kind === 'codex' ? CODEX.base : kind === 'patterns' ? PATTERNS.base : COMMERCIAL.base;
+    try {
+      rec = await airtable.getRecord(base, table, id);
+    } catch (e) {
+      if (e instanceof airtable.AirtableError) throw new StoreError(`Could not read ${id} from Airtable: ${e.message}`, e.status === 404 ? 404 : 502);
+      throw e;
+    }
+  }
+  if (rec.id !== id) throw new StoreError('The record in the body does not match the id.', 422);
+  const m = mapRecord(kind, rec, table);
+  const at = payload.at && Number.isFinite(Date.parse(payload.at)) ? new Date(payload.at).toISOString() : nowIso();
+  const res = upsert(m, table, 'inbound', at);
+  return { ...res, record: read(kind, id) };
 }
 
-export function snapshotAll(): void {
-  for (const k of KINDS) snapshot(k);
+export function removeInbound(kind: RecordKind, id: string): boolean {
+  const r = rowById(kind, id);
+  if (!r) return false;
+  openDb().prepare('DELETE FROM records WHERE kind = ? AND id = ?').run(kind, id);
+  return true;
+}
+
+export function read(kind: RecordKind, id: string): Loop | CodexEntry | BuildPattern | Opportunity | null {
+  const r = rowById(kind, id);
+  if (!r) return null;
+  switch (kind) {
+    case 'loops':
+      return hydrateLoop(r);
+    case 'patterns':
+      return patternSummary(JSON.parse(r.json) as BuildPatternDetail);
+    default:
+      return JSON.parse(r.json) as CodexEntry | Opportunity;
+  }
 }
 
 /* ---------------------------------------------------------------- metrics */
 
-const NOUN: Record<RecordKind, string> = { loops: 'loops', codex: 'Codex entries', patterns: 'patterns', commercial: 'cards' };
-const NOUN_ONE: Record<RecordKind, string> = { loops: 'loop', codex: 'Codex entry', patterns: 'pattern', commercial: 'card' };
+function series(points: SeriesPoint[] | null, note: string | null): MetricSeries {
+  return { points, note };
+}
 
-export function metrics(kind: RecordKind, filter: { builder?: string | null; lanes?: Lane[] | null } = {}): RecordMetrics {
-  let all = rows(kind);
-  if (filter.builder) all = all.filter((r) => r.builder === filter.builder);
-  if (filter.lanes) {
-    const lanes = new Set<string>(filter.lanes);
-    all = all.filter((r) => {
-      const o = JSON.parse(r.json) as { lane?: string; spine?: { lane?: string } };
-      return lanes.has(o.lane ?? o.spine?.lane ?? '');
-    });
-  }
-  const t = TERMINAL[kind];
-  const now = today();
-  const thisStart = weekStart(now);
-  const lastStart = addDays(thisStart, -7);
-  const inWeek = (day: string | null, start: string) => Boolean(day && day >= start && day < addDays(start, 7));
+const NO_CLOSE_DATE = 'The loop tables carry no close date. Closes are timestamped only when they pass through this dashboard, and that history resets with the instance on the free plan.';
+const NO_MODIFIED = 'The loop tables carry no last-modified time, so how long a loop has sat in its status is not recorded. Adding a "Last modified time" field on Status to each builder table would make this real.';
+
+export function loopMetrics(builder: string | null): LoopMetrics {
+  const all = loops().filter((l) => !builder || l.owner === builder);
+  const openRows = all.filter((l) => l.status !== 'closed');
   const historySince = getMeta('history_since');
-  const noun = NOUN[kind];
+  const now = today();
 
-  const hasRaised = all.some((r) => r.raised_at);
-  const raised: Metric = hasRaised
-    ? { value: all.filter((r) => inWeek(r.raised_at, thisStart)).length, compare: all.filter((r) => inWeek(r.raised_at, lastStart)).length, note: null }
-    : {
-        value: null,
-        compare: null,
-        note:
-          kind === 'patterns'
-            ? 'Patterns carry no creation date. The source records only when each was last referenced.'
-            : kind === 'commercial'
-              ? 'Cards carry a last-touched date but not a raised date, so weekly volume cannot be counted.'
-              : `Nothing records when these ${noun} were raised.`,
-      };
+  const byOwner = LOOP_TABLES.filter((t) => !builder || t.owner === builder)
+    .map((t) => {
+      const mine = all.filter((l) => l.owner === t.owner);
+      const closed = mine.filter((l) => l.status === 'closed').length;
+      return { owner: t.owner, closed, total: mine.length, rate: mine.length ? Math.round((closed / mine.length) * 100) : null };
+    })
+    .filter((o) => o.total > 0);
 
-  const closedRows = all.filter((r) => r.closed_at);
-  const closed: Metric = {
-    value: closedRows.filter((r) => inWeek(r.closed_at, thisStart)).length,
-    compare: closedRows.filter((r) => inWeek(r.closed_at, lastStart)).length,
-    note:
-      kind === 'codex'
-        ? 'Ingest time is not recorded upstream; only entries ingested from this dashboard carry a date.'
-        : kind === 'patterns' || kind === 'commercial'
-          ? `Counted from changes made in this dashboard, recorded since ${historySince ? historySince.slice(0, 10) : 'first boot'}. Nothing upstream records when a ${kind === 'patterns' ? 'pattern was retired' : 'card was closed'}.`
-          : null,
-  };
+  const closeEvents = (openDb()
+    .prepare(`SELECT at, builder FROM events WHERE kind = 'loops' AND to_status = 'closed' AND via IN ('ui', 'inbound') ORDER BY at`)
+    .all() as unknown as { at: string; builder: string | null }[]).filter((e) => !builder || e.builder === builder);
+  const closedPerDay: MetricSeries = closeEvents.length
+    ? series(
+        (() => {
+          const days: string[] = [];
+          for (let i = 13; i >= 0; i--) days.push(addDays(now, -i));
+          return days.map((d) => ({ label: d.slice(5), value: closeEvents.filter((e) => e.at.slice(0, 10) === d).length }));
+        })(),
+        `Closes made through this dashboard or pushed by n8n since ${(historySince ?? '').slice(0, 10)}. ${NO_CLOSE_DATE}`,
+      )
+    : series(null, NO_CLOSE_DATE);
 
-  let open = all.filter((r) => r.status !== t.status).length;
-  let closedCount = all.length - open;
-  let ovcNote: string | null = null;
-  if (kind === 'loops' && !filter.builder && !filter.lanes) {
-    const totals = loopsByOwner();
-    open = totals.reduce((n, o) => n + o.open + o.in_progress, 0);
-    closedCount = totals.reduce((n, o) => n + o.closed, 0);
-    ovcNote = 'Totals from the per-builder tables. The rows below are the loops this dashboard holds.';
-  } else if (kind === 'loops' && filter.builder && !filter.lanes) {
-    const o = loopsByOwner().find((x) => x.owner === filter.builder);
-    if (o) {
-      open = o.open + o.in_progress;
-      closedCount = o.closed;
-      ovcNote = 'Totals from this builder’s table. The rows below are the loops this dashboard holds.';
-    }
-  }
+  const dated = openRows.filter((l) => l.raised_at);
+  const oldest = dated.length ? dated.reduce((a, b) => (b.age_days > a.age_days ? b : a)) : null;
+  const buckets: [string, (d: number) => boolean][] = [
+    ['0–7 days', (d) => d <= 7],
+    ['8–14 days', (d) => d > 7 && d <= 14],
+    ['15–30 days', (d) => d > 14 && d <= 30],
+    ['31–60 days', (d) => d > 30 && d <= 60],
+    ['over 60 days', (d) => d > 60],
+  ];
+  const undated = openRows.length - dated.length;
+  const ageDistribution = buckets.map(([bucket, test]) => ({ bucket, n: dated.filter((l) => test(l.age_days)).length }));
+  if (undated) ageDistribution.push({ bucket: 'no date raised', n: undated });
 
-  const spans = all
-    .filter((r) => r.raised_at && r.closed_at)
-    .map((r) => dayDiff(r.raised_at!, r.closed_at!))
-    .filter((d) => d >= 0)
-    .sort((a, b) => a - b);
-  const median: Metric = spans.length
-    ? { value: spans.length % 2 ? spans[(spans.length - 1) / 2] : Math.round((spans[spans.length / 2 - 1] + spans[spans.length / 2]) / 2), note: `Over ${spans.length} ${spans.length === 1 ? NOUN_ONE[kind] : noun} with both raised and ${t.label} dates recorded.` }
-    : {
-        value: null,
-        note: !hasRaised
-          ? `Needs both a raised date and a ${t.label === 'ingested' ? 'date of ingest' : `${t.label} date`}; ${noun} carry neither.`
-          : kind === 'codex'
-            ? 'Needs an ingest date. None is recorded upstream; the first entry ingested from here will start this.'
-            : `No ${noun} have both a raised and a ${t.label} date yet.`,
-      };
+  const weeks = lastWeeks(8);
+  const raisedPerWeek = series(
+    weeks.map((w) => ({ label: w.slice(5), value: all.filter((l) => l.raised_at && weekStart(l.raised_at) === w).length })),
+    `Loops by the week they were raised (Date Raised), last eight weeks from ${weeks[0]}.`,
+  );
 
   return {
-    kind,
-    terminal_label: t.label,
+    kind: 'loops',
+    computed_at: nowIso(),
+    scope: { builder, rows: all.length },
+    open: all.filter((l) => l.status === 'open').length,
+    in_progress: all.filter((l) => l.status === 'in progress').length,
+    closed: all.filter((l) => l.status === 'closed').length,
+    close_rate_by_builder: byOwner,
+    close_rate_note: 'Closed as a share of every loop in the builder’s table today. It is a state, not a rate over time: nothing records when a loop closed.',
+    closed_per_day: closedPerDay,
+    oldest_open: oldest
+      ? { loop_id: oldest.loop_id, id: oldest.id, owner: oldest.owner, age_days: oldest.age_days, note: undated ? `${undated} open ${undated === 1 ? 'loop has' : 'loops have'} no Date Raised and cannot be aged.` : null }
+      : { loop_id: null, id: null, owner: null, age_days: null, note: openRows.length ? 'No open loop carries a Date Raised.' : 'No open loops.' },
+    age_distribution: ageDistribution,
+    raised_per_week: raisedPerWeek,
+    net_per_week: series(null, `Net needs closes per week. ${NO_CLOSE_DATE}`),
+    stale: { count: null, note: NO_MODIFIED },
     history_since: historySince,
-    week_start: thisStart,
-    raised,
-    closed,
-    open_vs_closed: { open, closed: closedCount, note: ovcNote },
-    median_days_to_close: median,
-    by_status: STATUSES[kind].map((s) => ({ status: s, n: all.filter((r) => r.status === s).length })),
   };
+}
+
+const BUCKET_LABEL: Record<CodexBucket, string> = {
+  jason: 'Awaiting Jason’s spot-check',
+  destiny: 'Destiny review',
+  builder: 'Builder follow-up',
+  other: 'Other action named',
+  none: 'No action recorded',
+};
+
+export function codexMetrics(builder: string | null): CodexMetrics {
+  const all = codexEntries().filter((e) => !builder || e.builder_id === builder);
+  const attributed = all.filter((e) => e.builder_id);
+  const buckets = (['jason', 'destiny', 'builder', 'other', 'none'] as CodexBucket[]).map((b) => ({ bucket: b, label: BUCKET_LABEL[b], n: all.filter((e) => codexBucket(e.action_required) === b).length }));
+  const owners = [...new Set(attributed.map((e) => e.builder_id as string))].sort();
+  const weeks = lastWeeks(8).map((w) => isoWeek(w));
+  const perBuilder = owners.map((o) => ({ owner: o, weeks: weeks.map((w) => ({ week: w, n: attributed.filter((e) => e.builder_id === o && e.week === w).length })) }));
+  const verdicts = [...new Set(all.map((e) => e.verdict).filter((v): v is string => Boolean(v)))];
+  const pay = all.length ? Math.round((all.filter((e) => e.pay_eligible).length / all.length) * 100) : null;
+  return {
+    kind: 'codex',
+    computed_at: nowIso(),
+    scope: { builder, rows: all.length },
+    entries: all.length,
+    unattributed: all.length - attributed.length,
+    buckets,
+    per_builder_per_week: perBuilder,
+    verdict_mix: verdicts.map((v) => ({ verdict: v, n: all.filter((e) => e.verdict === v).length })),
+    verdict_note: verdicts.length === 2 ? 'The log’s verdict field defines two tiers, not three. Both are shown; a third would have to be added to the table first.' : `The verdict field holds ${verdicts.length} distinct ${verdicts.length === 1 ? 'value' : 'values'}.`,
+    pay_eligible_rate: { value: pay, note: all.length ? `${all.filter((e) => e.pay_eligible).length} of ${all.length} entries have pay_eligible checked. An unchecked box counts as not eligible.` : 'No entries.' },
+    layer0_rate: { value: null, note: 'No field in the Codex Log records Layer 0 completeness. flag_name is empty on every entry and flag_repeat_count is 0 or blank.' },
+    median_days_to_approval: { value: null, note: 'The log records no approval and no approval time. When Jason clears an entry nothing in the table changes, so this cannot be measured until a field exists.' },
+    approval_note: 'Nothing in the Codex Log records an approval. action_required is the nearest thing to a review state and is what the sections below use.',
+  };
+}
+
+export function patternMetrics(): PatternMetrics {
+  const all = patterns();
+  const canonical = all.filter((p) => p.status === 'canonical').length;
+  const systems = [...new Set(all.map((p) => p.system ?? '(no system in id)'))].sort();
+  const weeks = lastWeeks(8);
+  const created = series(
+    weeks.map((w) => ({ label: w.slice(5), value: all.filter((p) => p.created_at && weekStart(p.created_at.slice(0, 10)) === w).length })),
+    `Patterns by the week of created_at, last eight weeks from ${weeks[0]}.`,
+  );
+  const obs = observations('patterns', 'canonical_share');
+  const distinctDays = new Set(obs.map((o) => o.at.slice(0, 10)));
+  return {
+    kind: 'patterns',
+    computed_at: nowIso(),
+    scope: { rows: all.length },
+    draft: all.length - canonical,
+    canonical,
+    promotion_rate: { value: all.length ? Math.round((canonical / all.length) * 100) : null, note: all.length ? `${canonical} of ${all.length} patterns are canonical today. A promotion date is not recorded, so this is the share now, not a rate of promotion.` : 'No patterns.' },
+    promotion_over_time:
+      distinctDays.size >= 2
+        ? series(
+            obs.map((o) => ({ label: o.at.slice(5, 10), value: Math.round(o.value) })),
+            'Canonical share as observed at each resync by this dashboard. Observations reset with the instance on the free plan.',
+          )
+        : series(null, 'Needs the canonical share observed on at least two different days. The table records no promotion date, and this dashboard’s own observations reset with the instance on the free plan.'),
+    by_system: systems.map((s) => ({ system: s, draft: all.filter((p) => (p.system ?? '(no system in id)') === s && p.status === 'draft').length, canonical: all.filter((p) => (p.system ?? '(no system in id)') === s && p.status === 'canonical').length })),
+    created_per_week: created,
+  };
+}
+
+export function commercialMetrics(): CommercialMetrics {
+  const all = opportunities();
+  const lanes = [...new Set(all.map((o) => o.lane_id ?? '(no lane_id)'))];
+  const withCount = all.filter((o) => o.missing_research_count !== null);
+  const total = withCount.reduce((n, o) => n + (o.missing_research_count ?? 0), 0);
+  const obs = observations('commercial', 'unresolved_questions');
+  const distinctDays = new Set(obs.map((o) => o.at.slice(0, 10)));
+  const readiness = [...new Set(all.map((o) => o.readiness_state ?? '(unset)'))];
+  return {
+    kind: 'commercial',
+    computed_at: nowIso(),
+    scope: { rows: all.length },
+    cards: all.length,
+    by_lane: lanes.map((lane) => {
+      const mine = all.filter((o) => (o.lane_id ?? '(no lane_id)') === lane);
+      const counted = mine.filter((o) => o.missing_research_count !== null);
+      return {
+        lane_id: lane,
+        n: mine.length,
+        unresolved: counted.length ? counted.reduce((n, o) => n + (o.missing_research_count ?? 0), 0) : null,
+        blocked: mine.filter((o) => Boolean(o.lane_state_blocked_reason)).length,
+      };
+    }),
+    by_readiness: readiness.map((r) => ({ readiness_state: r, n: all.filter((o) => (o.readiness_state ?? '(unset)') === r).length })),
+    unresolved_questions: {
+      value: withCount.length ? total : null,
+      note: withCount.length
+        ? `Sum of missing_research_count over the ${withCount.length} of ${all.length} cards that carry it. ${all.length - withCount.length} ${all.length - withCount.length === 1 ? 'card has' : 'cards have'} no count; their listed questions are shown on the card.`
+        : 'No card carries a missing_research_count.',
+    },
+    unresolved_trend:
+      distinctDays.size >= 2
+        ? series(obs.map((o) => ({ label: o.at.slice(5, 10), value: Math.round(o.value) })), 'Total unresolved research questions as observed at each resync. Observations reset with the instance on the free plan.')
+        : series(null, 'A trend needs the count observed on at least two different days. Airtable keeps no history of this field, and this dashboard’s own observations reset with the instance on the free plan.'),
+    demand_evidence_note: 'demand_evidence is a single-select whose only choice says no external demand evidence has been collected for the lane; it is shown per card, not summed.',
+  };
+}
+
+export function metrics(kind: RecordKind, filter: { builder?: string | null } = {}): RecordMetrics {
+  switch (kind) {
+    case 'loops':
+      return loopMetrics(filter.builder ?? null);
+    case 'codex':
+      return codexMetrics(filter.builder ?? null);
+    case 'patterns':
+      return patternMetrics();
+    case 'commercial':
+      return commercialMetrics();
+  }
 }
 
 export function historySince(): string | null {
   return getMeta('history_since');
+}
+
+/** Rows held per kind, for /api/status. */
+export function held(): Record<RecordKind, number> {
+  const out = {} as Record<RecordKind, number>;
+  for (const k of KINDS) out[k] = rows(k).length;
+  return out;
 }

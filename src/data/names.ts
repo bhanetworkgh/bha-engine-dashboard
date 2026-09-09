@@ -10,7 +10,7 @@
  * in types.ts, taken from the engine's own vocabulary.
  */
 
-import type { Lane } from './types';
+import type { Lane, LoopLaneTag } from './types';
 
 /** Builder id to display name. Ids are what every record's `builder_id` holds. */
 export const BUILDER_NAMES: Record<string, string> = {
@@ -23,5 +23,8 @@ export const BUILDER_NAMES: Record<string, string> = {
   kavin: 'Kavin',
 };
 
-/** Every lane, in the order they are offered in a picker. */
+/** Every engine lane, in the order they are offered in a picker. */
 export const LANE_LIST: readonly Lane[] = ['VFARM_CORE', 'VFARM_MEDIA', 'CLIENT_CORE', 'ENGINE_INTERNAL'];
+
+/** The loop tables' own lane_tag choices — the locked nine-lane set plus UNASSIGNED — in the table's order. */
+export const LOOP_LANE_TAGS: readonly LoopLaneTag[] = ['RT', 'NS', 'VFARM_HARDWARE', 'KIOSK', 'CAD_API', 'MEDIA', 'GENIE', 'CST', 'BAYS', 'UNASSIGNED'];

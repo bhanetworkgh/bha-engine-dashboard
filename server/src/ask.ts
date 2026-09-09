@@ -22,8 +22,8 @@
  * branch below turns on `json.ok === true` and nothing else.
  *
  * The agent calls tools before answering and replies synchronously, so a
- * real answer can take tens of seconds. Hence the ninety-second budget, and
- * a timeout reported as a timeout rather than as a refusal.
+ * real answer can take minutes. Hence the five-minute budget, and a timeout
+ * reported as a timeout rather than as a refusal.
  */
 
 import type { AskErrorKind, AskReply } from '../../src/data/types';
@@ -32,8 +32,14 @@ export const ASK_URL = process.env.ASK_BAYS_URL || 'https://n8n.arupiautomates.c
 const ASK_KEY = process.env.ASK_BAYS_API_KEY || null;
 export const MODEL_LABEL = process.env.ASK_BAYS_MODEL_LABEL || 'Claude Sonnet 5.0';
 
-/** The agent is synchronous and calls tools first; tens of seconds is normal. */
-const TIMEOUT_MS = 90_000;
+/**
+ * The agent is synchronous and calls tools before answering. With ten tools a
+ * multi-step answer routinely runs past three minutes (a single-tool run has
+ * taken 1m42s), so the budget is five. The browser waits a little longer than
+ * this so a timeout arrives as this server's own answer, with its reason,
+ * rather than as the browser giving up first.
+ */
+const TIMEOUT_MS = 300_000;
 
 export function askConfigured(): boolean {
   return Boolean(ASK_KEY);
@@ -84,7 +90,7 @@ export async function ask(message: string, sessionId: string, builderId: string)
   } catch (e) {
     const timedOut = e instanceof Error && e.name === 'AbortError';
     return timedOut
-      ? fail('timeout', 'Bays did not answer within ninety seconds.', sessionId)
+      ? fail('timeout', 'Bays did not answer within five minutes.', sessionId)
       : fail('unreachable', 'Could not reach the Bays workflow.', sessionId);
   } finally {
     clearTimeout(timer);

@@ -5,10 +5,13 @@ import type { ReactNode } from 'react';
  * its columns. Pass `flat` to drop the card frame when the table sits inside
  * another card already.
  */
-export function TableFrame({ children, flat }: { children: ReactNode; flat?: boolean }) {
+export function TableFrame({ children, flat, grow = true }: { children: ReactNode; flat?: boolean; grow?: boolean }) {
+  // `grow` makes the frame the page's own scroll region (fills the column).
+  // A page that already scrolls as a whole passes grow={false}: the frame
+  // then takes its content height and the sticky header sticks to the page.
   return (
     <div
-      className={`scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto md:overflow-auto ${
+      className={`scroll-thin ${grow ? 'min-h-0 flex-1 overflow-x-hidden overflow-y-auto md:overflow-auto' : 'shrink-0 overflow-x-auto'} ${
         flat ? '' : 'card mx-6 mb-6 md:mx-8'
       }`}
     >

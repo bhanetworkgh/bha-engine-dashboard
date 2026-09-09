@@ -81,7 +81,16 @@ function Notice({ m }: { m: ChatMessage }) {
  */
 function Thinking({ since, now }: { since: number; now: number }) {
   const secs = Math.max(0, Math.floor((now - since) / 1000));
-  const caption = secs < 8 ? 'Bays is thinking' : secs < 30 ? 'Still working on it' : secs < 60 ? 'Taking longer than usual' : 'Bays has up to ninety seconds';
+  const caption =
+    secs < 8
+      ? 'Bays is thinking'
+      : secs < 45
+        ? 'Still working on it'
+        : secs < 120
+          ? 'Calling tools before answering'
+          : secs < 240
+            ? 'A multi-step answer can take a few minutes'
+            : 'Bays has up to five minutes';
   return (
     <div className="fade-up flex gap-3" aria-live="polite">
       <img src="/logo.svg" alt="" className="mark idle-mark mt-0.5 h-6 w-6 shrink-0" />
