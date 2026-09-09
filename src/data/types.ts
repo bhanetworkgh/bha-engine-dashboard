@@ -180,7 +180,12 @@ export type ChatDelivery = 'sending' | 'sent' | 'waiting' | 'answered' | 'failed
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'bays';
+  /**
+   * 'notice' is the app speaking, not Bays: a refused key, a timeout, a
+   * reply that never arrived. It is rendered as a system line so a refusal
+   * is never mistaken for something Bays said.
+   */
+  role: 'user' | 'bays' | 'notice';
   text: string;
   at: string;
   /** Delivery state of a user message, set while it is in flight. */
@@ -221,11 +226,33 @@ export interface AskBaysData {
  * already knew.
  */
 export interface AskReply {
+  /**
+   * The workflow answers `ok: false` with HTTP 200, so this field — never the
+   * status code — is what says whether Bays answered. When it is false the
+   * `answer` is the gate reporting a refusal, not Bays speaking, and the UI
+   * must not attribute it to him.
+   */
   ok: boolean;
   answer: string;
   session_id: string;
   steps: string[];
+  /** When the workflow accepted the question, from its own clock. Success only. */
+  asked_at?: string;
+  /** Why it failed. Absent on success. */
+  error?: AskErrorKind;
 }
+
+/**
+ * The two the workflow itself returns, then the ones this app adds for a
+ * failure that never got an answer out of it.
+ */
+export type AskErrorKind =
+  | 'unauthorised'
+  | 'empty_message'
+  | 'not_configured'
+  | 'timeout'
+  | 'unreachable'
+  | 'bad_response';
 
 /* -------------------------------------------- north star / research twin */
 

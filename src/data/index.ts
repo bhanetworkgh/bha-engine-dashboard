@@ -210,21 +210,23 @@ export async function getAskBays(q: Query): Promise<AskBaysData> {
  * Sends one message to Bays through the server and waits for the answer. The
  * session_id is the thread's, stable for its life, which is what gives Bays
  * its memory of the conversation. Never throws: a failure comes back as an
- * ok:false reply whose answer says what happened.
+ * ok:false reply whose answer says what happened and whose `error` says which
+ * kind, so the screen can show a refusal as a refusal rather than as Bays.
+ *
+ * The server allows the agent ninety seconds; this waits a little longer so a
+ * server-side timeout arrives as the server's own answer rather than as this
+ * request giving up first and losing the reason.
  */
 export async function askBays(message: string, sessionId: string, builderId: string): Promise<AskReply> {
   try {
-    return await api<AskReply>('/api/ask', { body: { message, session_id: sessionId, builder_id: builderId }, timeoutMs: 130_000 });
+    return await api<AskReply>('/api/ask', { body: { message, session_id: sessionId, builder_id: builderId }, timeoutMs: 100_000 });
   } catch (e) {
-    const answer =
-      e instanceof ApiError
-        ? e.kind === 'timeout'
-          ? 'Bays did not answer within two minutes.'
-          : e.kind === 'network'
-            ? 'Could not reach the dashboard server.'
-            : e.message
-        : 'Something went wrong sending that.';
-    return { ok: false, answer, session_id: sessionId, steps: [] };
+    if (e instanceof ApiError) {
+      if (e.kind === 'timeout') return { ok: false, answer: 'Bays did not answer in time.', session_id: sessionId, steps: [], error: 'timeout' };
+      if (e.kind === 'network') return { ok: false, answer: 'Could not reach the dashboard server.', session_id: sessionId, steps: [], error: 'unreachable' };
+      return { ok: false, answer: e.message, session_id: sessionId, steps: [], error: 'bad_response' };
+    }
+    return { ok: false, answer: 'Something went wrong sending that.', session_id: sessionId, steps: [], error: 'bad_response' };
   }
 }
 

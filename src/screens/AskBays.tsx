@@ -35,13 +35,53 @@ function DeliveryLine({ m }: { m: ChatMessage }) {
 }
 
 /**
+ * Why a message did not get an answer, in one plain sentence each. Keyed by
+ * the `error` the data module returns, so the screen never has to guess from
+ * the text of the answer.
+ */
+const NOTICE_NOTE: Record<string, string> = {
+  unauthorised: 'The workflow rejected the dashboard’s API key. Bays never saw this.',
+  empty_message: 'The workflow received no question.',
+  not_configured: 'Ask Bays is not connected on the server.',
+  timeout: 'Bays did not answer in time.',
+  unreachable: 'Nothing answered.',
+  bad_response: 'The reply could not be read.',
+};
+
+/** The shorter form, shown under the message that failed to get through. */
+const NOT_SENT: Record<string, string> = {
+  unauthorised: 'Not delivered — key rejected.',
+  empty_message: 'Not delivered — no question received.',
+  not_configured: 'Not delivered — Ask Bays is not connected.',
+  timeout: 'No answer in time.',
+  unreachable: 'Not delivered.',
+  bad_response: 'Not delivered.',
+};
+
+/**
+ * The app speaking, not Bays. The workflow answers a refused key with HTTP
+ * 200 and a sentence, so without this the words "This request was not
+ * authorised." would sit under the BHA mark with his name on them.
+ */
+function Notice({ m }: { m: ChatMessage }) {
+  return (
+    <div className="fade-up flex justify-center">
+      <div className="max-w-[85%] rounded-[14px] bg-raised px-3.5 py-2.5 text-center">
+        <div className="text-[12.5px] leading-relaxed text-degraded">{m.text}</div>
+        {m.note && <div className="mt-1 text-[11px] text-faint">{m.note}</div>}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Shown while a reply is in flight. It says only what is true: that Bays is
  * working and for how long. What it looked at arrives with the answer, as
  * `steps`, and is shown under the reply; nothing is guessed here.
  */
 function Thinking({ since, now }: { since: number; now: number }) {
   const secs = Math.max(0, Math.floor((now - since) / 1000));
-  const caption = secs < 8 ? 'Bays is thinking' : secs < 30 ? 'Still working on it' : secs < 75 ? 'Taking longer than usual' : 'Bays can take up to two minutes';
+  const caption = secs < 8 ? 'Bays is thinking' : secs < 30 ? 'Still working on it' : secs < 60 ? 'Taking longer than usual' : 'Bays has up to ninety seconds';
   return (
     <div className="fade-up flex gap-3" aria-live="polite">
       <img src="/logo.svg" alt="" className="mark idle-mark mt-0.5 h-6 w-6 shrink-0" />
@@ -291,15 +331,18 @@ export default function AskBays() {
       delete next[threadId];
       return next;
     });
-    patchMessage(threadId, mine.id, { delivery: 'answered' });
+    patchMessage(threadId, mine.id, { delivery: reply.ok ? 'answered' : 'failed', note: reply.ok ? undefined : NOT_SENT[reply.error ?? 'bad_response'] });
+    // ok:false arrives with HTTP 200 and a sentence in `answer`, but that
+    // sentence is the gate refusing, not Bays answering. It goes in as a
+    // notice so nothing attributes it to him.
     appendMessage(threadId, {
-      id: `bays-${Date.now()}`,
-      role: 'bays',
+      id: `${reply.ok ? 'bays' : 'notice'}-${Date.now()}`,
+      role: reply.ok ? 'bays' : 'notice',
       text: reply.answer,
       at: stamp(),
-      steps: reply.steps,
+      steps: reply.ok ? reply.steps : undefined,
       delivery: reply.ok ? 'answered' : 'failed',
-      note: reply.ok ? undefined : 'Bays could not complete this.',
+      note: reply.ok ? undefined : NOTICE_NOTE[reply.error ?? 'bad_response'],
     });
     if (reply.session_id && reply.session_id !== sessionId) updateThread(threadId, { session_id: reply.session_id });
   }
@@ -472,6 +515,8 @@ export default function AskBays() {
                     <div className="bubble-user max-w-[85%] text-[13.5px] leading-relaxed whitespace-pre-wrap">{m.text}</div>
                     <DeliveryLine m={m} />
                   </div>
+                ) : m.role === 'notice' ? (
+                  <Notice key={m.id} m={m} />
                 ) : (
                   <div key={m.id} className="fade-up flex gap-3">
                     <img src="/logo.svg" alt="" className="mark mt-0.5 h-6 w-6 shrink-0" />
