@@ -487,6 +487,12 @@ export interface Loop {
   raised_in: string | null;
   lane_tag: LoopLaneTag | null;
   assignee_slack_id: string | null;
+  /**
+   * The table's last_modified formula (LAST_MODIFIED_TIME()), added 9 Sept
+   * 2026. Every loop that existed before stamps from that day, so it says
+   * nothing about history before it.
+   */
+  last_modified: string | null;
   /** Known only when the close went through this dashboard or arrived from n8n with a timestamp. */
   closed_at?: string | null;
   note?: string | null;
@@ -512,33 +518,10 @@ export interface AirtableRef {
   url: string;
 }
 
-export interface ProposedClose {
-  id: string;
-  loop_id: string;
-  title: string;
-  owner: string;
-  age_days: number;
-  reason: string;
-  citation: { text: string; source: Source };
-}
-
-export interface ReconciliationRow {
-  id: string;
-  loop_id: string;
-  title: string;
-  expected_owner: string;
-  found_in: string | null;
-  discrepancy: string;
-  source: Source;
-}
-
 export interface OpenLoopsData {
   loops: Loop[];
   by_owner: OwnerTotals[];
   sync: SyncInfo;
-  review_queue: ProposedClose[];
-  reconciliation: ReconciliationRow[];
-  reconciliation_note: string;
   status_history_note: string;
 }
 
@@ -602,6 +585,13 @@ export interface CodexEntry {
   engine_movement: string | null;
   needle_moved_evidence: string | null;
   red_flags: string | null;
+  /**
+   * This dashboard's completeness check, not a field in the log: true when
+   * the row carries a builder, a session link and type, a verdict, and the
+   * three analysis fields. `missing` names what it lacks.
+   */
+  complete: boolean;
+  missing: string[];
   note?: string | null;
   spine: Spine;
   tags: Tags;
@@ -609,8 +599,8 @@ export interface CodexEntry {
   airtable: AirtableRef;
 }
 
-/** The review buckets the data supports, from action_required. */
-export type CodexBucket = 'jason' | 'destiny' | 'builder' | 'other' | 'none';
+/** The three layers. 'approved' is defined but cannot be filled: the log records no approval. */
+export type CodexLayer = 'incomplete' | 'complete' | 'pending' | 'approved';
 
 /** The fields an edit may change. Everything else on the row is the log's own. */
 export type CodexEditableField =
@@ -790,7 +780,6 @@ export interface MetricSeries {
 export interface LoopMetrics {
   kind: 'loops';
   computed_at: string;
-  /** Which rows these figures cover. */
   scope: { builder: string | null; rows: number };
   open: number;
   in_progress: number;
@@ -799,12 +788,22 @@ export interface LoopMetrics {
   close_rate_by_builder: { owner: string; closed: number; total: number; rate: number | null }[];
   close_rate_note: string;
   closed_per_day: MetricSeries;
-  oldest_open: { loop_id: string | null; id: string | null; owner: string | null; age_days: number | null; note: string | null };
+  /** Newest first: 0–7 days, then older. */
   age_distribution: { bucket: string; n: number }[];
   raised_per_week: MetricSeries;
+  /** Raised minus closed per week; closed is by last_modified, meaningful only after 9 Sept 2026. */
   net_per_week: MetricSeries;
-  stale: { count: number | null; note: string };
+  closed_per_week: MetricSeries;
+  stale: { count: number | null; meaningful_from: string; note: string };
+  /** Open loops by lane_tag, including those with none. */
+  open_by_lane_tag: { lane_tag: string; n: number }[];
+  /** Who raises loops, from Raised By as written. */
+  top_raisers: { raised_by: string; n: number }[];
+  /** The caveat every last_modified-derived figure carries. */
+  modified_note: string;
   history_since: string | null;
+  /** Present on the unscoped response only: the same figures per builder, so a tab change needs no request. */
+  by_builder?: Record<string, LoopMetrics>;
 }
 
 export interface CodexMetrics {
@@ -812,15 +811,23 @@ export interface CodexMetrics {
   computed_at: string;
   scope: { builder: string | null; rows: number };
   entries: number;
+  /** Rows with no builder recorded in the source; they cannot be attributed. */
   unattributed: number;
-  buckets: { bucket: CodexBucket; label: string; n: number }[];
-  per_builder_per_week: { owner: string; weeks: { week: string; n: number }[] }[];
+  unattributed_note: string;
+  /** Layer 0: this dashboard's completeness check. */
+  layer0: { complete: number; incomplete: number; rate: number | null; definition: string; note: string };
+  /** Layer 1: action_required = JASON_SPOTCHECK, the nearest thing the log records. */
+  pending: { n: number; note: string };
+  /** Layer 2: cannot be filled — no approval field. */
+  approved: { n: number | null; note: string };
+  /** Rows carrying a verdict: evaluated, which is not the same as approved. */
+  evaluated: { n: number; note: string };
+  per_builder_per_week: { owner: string; weeks: { week: string; start: string; label: string; n: number }[] }[];
   verdict_mix: { verdict: string; n: number }[];
   verdict_note: string;
+  narration_quality_mix: { quality: string; n: number }[];
   pay_eligible_rate: Metric;
-  layer0_rate: Metric;
   median_days_to_approval: Metric;
-  approval_note: string;
 }
 
 export interface PatternMetrics {
@@ -831,8 +838,11 @@ export interface PatternMetrics {
   canonical: number;
   /** Canonical as a share of all patterns, today. */
   promotion_rate: Metric;
-  promotion_over_time: MetricSeries;
+  /** What the two states mean, from the table; the field defines exactly these. */
+  status_legend: { status: PatternStatus; meaning: string }[];
   by_system: { system: string; draft: number; canonical: number }[];
+  reusability_mix: { reusability: string; n: number }[];
+  reusability_note: string;
   created_per_week: MetricSeries;
 }
 
@@ -843,6 +853,7 @@ export interface CommercialMetrics {
   cards: number;
   by_lane: { lane_id: string; n: number; unresolved: number | null; blocked: number }[];
   by_readiness: { readiness_state: string; n: number }[];
+  confidence_mix: { confidence: string; n: number }[];
   unresolved_questions: Metric;
   unresolved_trend: MetricSeries;
   demand_evidence_note: string;

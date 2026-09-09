@@ -36,7 +36,7 @@ function CommercialMetricsPanel({ metrics, loading, error }: { metrics: Commerci
     );
   }
   const m = metrics;
-  const tones: ('degraded' | 'ink' | 'accent' | 'dim')[] = ['degraded', 'ink', 'accent', 'dim'];
+  const tones: ('accent' | 'ink' | 'dim')[] = ['accent', 'ink', 'dim'];
   return (
     <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
       <StatStrip cols={3}>
@@ -44,7 +44,20 @@ function CommercialMetricsPanel({ metrics, loading, error }: { metrics: Commerci
         <CountCell label="Lanes" value={m.by_lane.length} tone="dim" hint={`${m.by_lane.filter((l) => l.blocked).length} with a card blocked on research`} />
         <MetricCell label="Unresolved research questions" metric={m.unresolved_questions} />
       </StatStrip>
-      <div className="mx-6 mb-4 grid gap-4 md:mx-8 md:grid-cols-2">
+      <div className="mx-6 mb-4 grid gap-4 md:mx-8 md:grid-cols-3">
+        <div className="card px-5 py-4">
+          <div className="mb-1.5 text-[13px] font-medium text-ink">Confidence</div>
+          <Band parts={m.confidence_mix.map((c, i) => ({ value: c.n, tone: tones[i % tones.length], label: c.confidence }))} height={8} />
+          <div className="mt-2 space-y-0.5 text-[12px]">
+            {m.confidence_mix.map((c) => (
+              <div key={c.confidence} className="flex justify-between gap-3">
+                <span className="text-dim">{c.confidence}</span>
+                <span className="tabular text-ink">{c.n}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 text-[11.5px] leading-snug text-faint">From the confidence field as set on each card.</div>
+        </div>
         <div className="card px-5 py-4">
           <div className="mb-1.5 text-[13px] font-medium text-ink">Readiness state</div>
           <Band parts={m.by_readiness.map((r, i) => ({ value: r.n, tone: tones[i % tones.length], label: r.readiness_state }))} height={8} />
@@ -78,27 +91,42 @@ function CardTrend({ trend, now }: { trend: MetricSeries | undefined; now: numbe
 }
 
 function OpportunityCard({ o, trend, busy, writable, onReadiness }: { o: Opportunity; trend: MetricSeries | undefined; busy: boolean; writable: boolean; onReadiness: (o: Opportunity, r: ReadinessState) => void }) {
-  const [showQ, setShowQ] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const listed = o.missing_research_questions.length;
   const disagree = o.missing_research_count !== null && o.missing_research_count !== listed;
+  const detail: { label: string; value: string | null }[] = [
+    { label: 'Pain point', value: o.pain_point },
+    { label: 'Offer', value: o.offer },
+    { label: 'Target', value: o.target },
+    { label: 'Who pays', value: o.who_pays },
+    { label: 'BHA system', value: o.bha_system },
+    { label: 'Next action', value: o.next_action },
+  ];
   return (
-    <div className={`card flex flex-col gap-2 px-4 py-3.5 ${busy ? 'opacity-60' : ''}`}>
+    <div className={`card relative flex flex-col px-4 py-3.5 ${busy ? 'opacity-60' : ''} ${expanded ? '' : 'h-[188px] overflow-hidden'}`}>
+      {/* Collapsed: enough to scan — id, title, state, the blocked reason, the unresolved count. */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="kicker tabular truncate">{o.card_id ?? o.id}</div>
-          <div className="mt-0.5 text-[13.5px] leading-snug font-medium text-ink">{o.title}</div>
+          <div className="mt-0.5 line-clamp-2 text-[13.5px] leading-snug font-medium text-ink" title={o.title}>
+            {o.title}
+          </div>
         </div>
         <ReadinessPill state={o.readiness_state} />
       </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-faint">
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-faint">
         {o.confidence && <span>confidence {o.confidence.toLowerCase()}</span>}
         {o.pilot_state && <span>{o.pilot_state.replace(/_/g, ' ')}</span>}
         {o.routing_state && <span>{o.routing_state.replace(/_/g, ' ')}</span>}
         {o.created_at && <span className="tabular">{o.created_at.slice(0, 10)}</span>}
       </div>
-      {o.lane_state_blocked_reason && <div className="text-[12px] leading-snug text-degraded">{o.lane_state_blocked_reason}</div>}
-      <div className="flex items-center justify-between gap-3 text-[12px]">
-        <button type="button" onClick={() => setShowQ((v) => !v)} className="text-left text-dim hover:text-accent-ink" disabled={!listed}>
+      {o.lane_state_blocked_reason && (
+        <div className="mt-1.5 line-clamp-1 text-[12px] leading-snug text-degraded" title={o.lane_state_blocked_reason}>
+          {o.lane_state_blocked_reason}
+        </div>
+      )}
+      <div className="mt-1.5 flex items-center justify-between gap-3 text-[12px]">
+        <span className="text-dim">
           {o.missing_research_count === null ? (
             <span className="text-faint">missing_research_count not set</span>
           ) : (
@@ -109,35 +137,73 @@ function OpportunityCard({ o, trend, busy, writable, onReadiness }: { o: Opportu
           {listed > 0 && (
             <span className="text-faint">
               {' '}
-              · {listed} listed{disagree ? ' (count and list differ)' : ''} {showQ ? '▾' : '▸'}
+              · {listed} listed{disagree ? ' (count and list differ)' : ''}
             </span>
           )}
-        </button>
+        </span>
         <CardTrend trend={trend} now={o.missing_research_count} />
       </div>
-      {showQ && listed > 0 && (
-        <ol className="list-decimal space-y-1 pl-5 text-[12px] leading-snug text-dim">
-          {o.missing_research_questions.map((q, i) => (
-            <li key={i}>{q}</li>
-          ))}
-        </ol>
-      )}
-      {o.next_action && (
-        <div className="text-[12px] leading-snug text-dim">
-          <span className="text-faint">Next: </span>
-          {o.next_action}
+
+      {expanded && (
+        <div className="mt-3 space-y-3 border-t border-line pt-3">
+          {listed > 0 && (
+            <div>
+              <div className="mb-1 text-[11px] text-faint">Unresolved research questions</div>
+              <ol className="list-decimal space-y-1 pl-5 text-[12px] leading-snug text-dim">
+                {o.missing_research_questions.map((q, i) => (
+                  <li key={i}>{q}</li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {detail
+            .filter((d) => d.value)
+            .map((d) => (
+              <div key={d.label}>
+                <div className="mb-0.5 text-[11px] text-faint">{d.label}</div>
+                <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink">{d.value}</p>
+              </div>
+            ))}
+          <div className="grid gap-x-6 gap-y-1 text-[11.5px] md:grid-cols-2">
+            {[
+              ['lane_state', o.lane_state],
+              ['engine_movement_state', o.engine_movement_state],
+              ['infra_readiness', o.infra_readiness],
+              ['data_readiness', o.data_readiness],
+              ['media_readiness', o.media_readiness],
+              ['media_gate', o.media_gate],
+              ['demand_evidence', o.demand_evidence],
+            ].map(([k, v]) => (
+              <div key={k as string} className="flex justify-between gap-3">
+                <span className="text-faint">{k}</span>
+                <span className="truncate text-dim" title={(v as string | null) ?? ''}>
+                  {(v as string | null) ?? '—'}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between gap-2 border-t border-line pt-2">
+            <SourceLink source={o.source} />
+            <RowActions>
+              {writable &&
+                READINESS.filter((r) => r !== o.readiness_state).map((r) => (
+                  <RowAction key={r} label={`Set ${r.toLowerCase()}`} tone={r === 'Media-Ready' ? 'accent' : 'default'} disabled={busy} onClick={() => onReadiness(o, r)} />
+                ))}
+              <RowAction label="Open in Airtable" onClick={() => window.open(o.airtable.url, '_blank', 'noreferrer')} />
+            </RowActions>
+          </div>
         </div>
       )}
-      <div className="mt-1 flex items-center justify-between gap-2 border-t border-line pt-2">
-        <SourceLink source={o.source} />
-        <RowActions>
-          {writable &&
-            READINESS.filter((r) => r !== o.readiness_state).map((r) => (
-              <RowAction key={r} label={`Set ${r.toLowerCase()}`} tone={r === 'Media-Ready' ? 'accent' : 'default'} disabled={busy} onClick={() => onReadiness(o, r)} />
-            ))}
-          <RowAction label="Open in Airtable" onClick={() => window.open(o.airtable.url, '_blank', 'noreferrer')} />
-        </RowActions>
-      </div>
+
+      {/* The expand control sits on the card's bottom edge in both states. */}
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className={`${expanded ? 'mt-2 self-end' : 'absolute inset-x-0 bottom-0 bg-gradient-to-t from-panel via-panel/95 to-transparent pt-5 pb-2 text-right'} px-1 text-[11.5px] text-accent-ink hover:underline`}
+      >
+        {expanded ? 'Collapse' : 'Expand'}
+      </button>
     </div>
   );
 }

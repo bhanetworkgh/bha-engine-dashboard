@@ -4,6 +4,7 @@ import { useData } from '../app/useData';
 import { getBuildPatterns, getPatternDetail, getRecordMetrics, resync, searchPatterns, setRecordStatus, type BuildPattern, type BuildPatternDetail, type PatternMetrics, type PatternStatus } from '../data';
 import {
   CountCell,
+  CountUp,
   EmptyState,
   HBar,
   LoadFailed,
@@ -46,6 +47,7 @@ function PatternMetricsPanel({ metrics, loading, error }: { metrics: PatternMetr
   }
   const m = metrics;
   const maxSys = Math.max(1, ...m.by_system.map((s) => s.draft + s.canonical));
+  const maxReuse = Math.max(1, ...m.reusability_mix.map((r) => r.n));
   return (
     <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
       <div className="mx-6 mb-4 grid gap-4 md:mx-8 md:grid-cols-[minmax(0,1.2fr)_minmax(0,2fr)]">
@@ -55,32 +57,67 @@ function PatternMetricsPanel({ metrics, loading, error }: { metrics: PatternMetr
           <div className="min-w-0">
             <div className="kicker">Draft to canonical</div>
             <div className="mt-1 flex items-baseline gap-2">
-              <span className="font-display tabular text-[32px] leading-none text-ink">{m.promotion_rate.value === null ? '—' : m.promotion_rate.value}</span>
+              <span className="font-display tabular text-[32px] leading-none text-ink">{m.promotion_rate.value === null ? '—' : <CountUp value={m.promotion_rate.value} />}</span>
               {m.promotion_rate.value !== null && <span className="text-[14px] text-faint">%</span>}
             </div>
             <div className="mt-1.5 text-[11.5px] leading-snug text-faint">{m.promotion_rate.note}</div>
           </div>
         </div>
         <StatStrip cols={3} className="!mx-0 !mb-0">
-          <CountCell label="Draft" value={m.draft} tone="degraded" />
+          <CountCell label="Draft" value={m.draft} tone="dim" />
           <CountCell label="Canonical" value={m.canonical} tone="accent" />
           <CountCell label="Patterns" value={m.scope.rows} tone="dim" />
         </StatStrip>
       </div>
-      <div className="mx-6 mb-4 grid gap-4 md:mx-8 md:grid-cols-3">
-        <div className="card px-5 py-4">
-          <div className="mb-1.5 text-[13px] font-medium text-ink">By system, from pattern ids</div>
-          <div className="space-y-1.5">
-            {m.by_system.map((s) => (
-              <HBar key={s.system} label={s.system} value={s.draft + s.canonical} max={maxSys} right={<span className="text-faint">{s.canonical} canonical</span>} />
-            ))}
+
+      {/* What the two states mean. The pattern_status field defines exactly these two. */}
+      <div className="card mx-6 mb-4 grid gap-x-8 gap-y-2 px-5 py-4 md:mx-8 md:grid-cols-2">
+        {m.status_legend.map((l) => (
+          <div key={l.status} className="flex items-start gap-3 text-[12.5px]">
+            <span className="mt-0.5 shrink-0">{l.status === 'canonical' ? <Pill tone="accent">canonical</Pill> : <Pill tone="degraded">draft</Pill>}</span>
+            <span className="leading-snug text-dim">{l.meaning}</span>
           </div>
+        ))}
+        <div className="text-[11.5px] leading-snug text-faint md:col-span-2">The table’s pattern_status field defines these two values and no third; there is no “retired” or “archived” state in the source.</div>
+      </div>
+
+      {/* By system, full width, several columns so it stays short. */}
+      <div className="card mx-6 mb-4 px-5 py-4 md:mx-8">
+        <div className="mb-2 flex items-baseline justify-between gap-3">
+          <div className="text-[13px] font-medium text-ink">By system, from pattern ids</div>
+          <div className="text-[11px] text-faint">bar = all patterns · number = canonical / all</div>
         </div>
+        <div className="grid gap-x-8 gap-y-1.5 md:grid-cols-3 xl:grid-cols-4">
+          {m.by_system.map((s) => (
+            <HBar
+              key={s.system}
+              label={s.system.toLowerCase()}
+              value={s.draft + s.canonical}
+              max={maxSys}
+              tone={s.canonical ? 'accent' : 'ink'}
+              valueNode={
+                <span>
+                  <span className={s.canonical ? 'text-accent-ink' : 'text-faint'}>{s.canonical}</span> / {s.draft + s.canonical}
+                </span>
+              }
+            />
+          ))}
+        </div>
+        <div className="mt-2 text-[11.5px] leading-snug text-faint">The system is the second segment of each pattern_id (BP-SLACK-001-… → slack); “(no system in id)” is the count whose id does not follow that shape.</div>
+      </div>
+
+      <div className="mx-6 mb-4 grid gap-4 md:mx-8 md:grid-cols-2">
         <div className="card px-5 py-4">
           <SeriesBlock title="Created per week" series={m.created_per_week} tone="accent" total />
         </div>
         <div className="card px-5 py-4">
-          <SeriesBlock title="Promotion over time" series={m.promotion_over_time} />
+          <div className="mb-1.5 text-[13px] font-medium text-ink">Reusability</div>
+          <div className="space-y-1.5">
+            {m.reusability_mix.map((r) => (
+              <HBar key={r.reusability} label={r.reusability.startsWith('(') ? r.reusability : r.reusability.toLowerCase()} value={r.n} max={maxReuse} valueNode={<CountUp value={r.n} />} />
+            ))}
+          </div>
+          <div className="mt-2 text-[11.5px] leading-snug text-faint">{m.reusability_note}</div>
         </div>
       </div>
     </div>
