@@ -1277,3 +1277,34 @@ Verified:  `rm -rf dist server-dist node_modules && npm install && npm run
            or `server/` any more — only `node_modules/`, `dist/`,
            `server-dist/` and the two `.tsbuildinfo` files — so no other
            source file is missing for the same reason.
+
+           On Render: deploy dep-dagjdp9srm7s73fgnb1g on f0fbf80 went
+           build_in_progress → **live** in 45 seconds (10:37:25 → 10:38:10),
+           against the failed dep-dagj852jnfac73ds528g on 04a9561. The
+           service booted: "BHA engine dashboard on http://localhost:10000",
+           "Your service is live", available at
+           https://bha-engine-dashboard.onrender.com. Could not curl that URL
+           from the build session — this sandbox's egress policy refuses the
+           host — so the live check is Render's own status and boot log, not
+           a request I made.
+
+Open:      The boot log says the service is running unconfigured. Four
+           environment variables render.yaml declares are not set on the
+           service, because it was created from the dashboard rather than
+           from the blueprint (its build command is `npm install && npm run
+           build`, its health check path is empty, and its plan is free, none
+           of which match render.yaml):
+
+             sign-in:  NOT configured — set AUTH_PASSWORD_HASH
+             sessions: random key this boot (sessions end on restart)
+             ask bays: NOT configured — set ASK_BAYS_API_KEY
+             data:     /opt/render/project/src/data
+
+           So: nobody can sign in, sessions would not survive a restart even
+           if they could, Ask Bays answers with its not-connected sentence,
+           and the SQLite file sits on the ephemeral filesystem rather than a
+           disk — which means the status history the records counts are
+           derived from resets on every deploy. The free plan carries no
+           disk, so DATA_DIR and the 1 GB mount at /var/data need the plan
+           render.yaml asks for. Not touched here: these are Destiny's
+           secrets and his call on the plan. Flagged, not fixed.
