@@ -1,15 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../../app/useData';
-import { createLoop, getOpenLoops, getRecordMetrics, resync, setLoopStatus, type Loop, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
-import { Icon, LoadFailed, Loading, PageHeader, SearchBox, Segmented, SyncLine, Tabs, Toast, useToast } from '../../components/ui';
+import { createLoop, getOpenLoops, getRecordMetrics, resync, setLoopStatus, type Loop, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
+import { Icon, LoadFailed, Loading, PageHeader, SearchBox, Segmented, SyncLine, Toast, useToast } from '../../components/ui';
 import { Loops, OwnerPicker, type StatusFilter } from './Loops';
 import { LoopMetricsPanel } from './Metrics';
 import { NewLoopForm } from './NewLoop';
-import { Reconciliation } from './Reconciliation';
-import { ReviewQueue } from './ReviewQueue';
-
-const TABS = ['Loops', 'Review queue', 'Reconciliation'] as const;
-type Tab = (typeof TABS)[number];
 
 /** Case-insensitive match on loop_id, title, who raised it and where. */
 function matches(l: Loop, q: string): boolean {
@@ -18,8 +13,10 @@ function matches(l: Loop, q: string): boolean {
   return [l.loop_id, l.title, l.raised_by, l.raised_in, l.lane_tag, l.id].some((v) => v && v.toLowerCase().includes(needle));
 }
 
+/** How long the panel shows its transition state when the builder changes. */
+const SWITCH_MS = 220;
+
 export default function OpenLoops() {
-  const [tab, setTab] = useState<Tab>('Loops');
   const [owner, setOwner] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
   const [q, setQ] = useState('');
@@ -29,9 +26,31 @@ export default function OpenLoops() {
   const { toast, setToast } = useToast();
   const [reload, setReload] = useState(0);
   const { status, data: loaded, error } = useData(getOpenLoops, [reload]);
-  /** Figures for the strip, recomputed by the server after every change. */
+
+  /**
+   * The figures arrive once, unscoped, carrying every builder's figures with
+   * them (`by_builder`). A tab change picks from that in memory — no request,
+   * no recompute over the rows — and shows a short transition while the counts
+   * run up again.
+   */
   const [metricsTick, setMetricsTick] = useState(0);
-  const metrics = useData((query) => getRecordMetrics('loops', query, owner), [owner, metricsTick, reload]);
+  const metrics = useData((query) => getRecordMetrics('loops', query), [metricsTick, reload]);
+  const current: LoopMetrics | null = useMemo(() => {
+    const m = metrics.data;
+    if (!m) return null;
+    return owner === 'all' ? m : (m.by_builder?.[owner] ?? null);
+  }, [metrics.data, owner]);
+  const [switching, setSwitching] = useState(false);
+  const firstOwner = useRef(true);
+  useEffect(() => {
+    if (firstOwner.current) {
+      firstOwner.current = false;
+      return;
+    }
+    setSwitching(true);
+    const t = setTimeout(() => setSwitching(false), SWITCH_MS);
+    return () => clearTimeout(t);
+  }, [owner]);
 
   /** A working copy so a status change updates the page without a refetch. */
   const [data, setData] = useState<OpenLoopsData | null>(null);
@@ -49,7 +68,6 @@ export default function OpenLoops() {
     }),
     [scoped],
   );
-
   const loops = useMemo(
     () =>
       scoped
@@ -123,17 +141,6 @@ export default function OpenLoops() {
             New loop
           </button>
         }
-        below={
-          <Tabs
-            tabs={TABS}
-            value={tab}
-            onChange={setTab}
-            counts={{
-              'Review queue': { n: data.review_queue.length },
-              Reconciliation: { n: data.reconciliation.length, tone: 'degraded' },
-            }}
-          />
-        }
       />
 
       {showNew && (
@@ -142,39 +149,35 @@ export default function OpenLoops() {
         </div>
       )}
 
-      {tab === 'Loops' && (
-        <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
-            <SyncLine sync={data.sync} onResync={pull} busy={syncing} />
-            <OwnerPicker data={data} owner={owner} setOwner={setOwner} />
-          </div>
+      <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
+          <SyncLine sync={data.sync} onResync={pull} busy={syncing} />
+          <OwnerPicker data={data} owner={owner} setOwner={setOwner} />
+        </div>
 
-          <LoopMetricsPanel metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} onPick={(id) => setQ(id)} />
+        <LoopMetricsPanel metrics={current} loading={metrics.status === 'loading'} switching={switching} error={metrics.error} view={owner} />
 
-          <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Segmented
-                ariaLabel="Filter by status"
-                value={statusFilter}
-                onChange={setStatusFilter}
-                options={[
-                  { value: 'open', label: 'Open', count: counts.open },
-                  { value: 'in progress', label: 'In progress', count: counts['in progress'] },
-                  { value: 'closed', label: 'Closed', count: counts.closed },
-                  { value: 'all', label: 'All', count: counts.all },
-                ]}
-              />
-              <div className="flex flex-1 items-center justify-end gap-3">
-                <SearchBox value={q} onChange={setQ} placeholder="Search by loop id or text" />
-                <span className="tabular whitespace-nowrap text-[11.5px] text-faint">{loops.length} shown</span>
-              </div>
+        <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Segmented
+              ariaLabel="Filter by status"
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={[
+                { value: 'open', label: 'Open', count: counts.open },
+                { value: 'in progress', label: 'In progress', count: counts['in progress'] },
+                { value: 'closed', label: 'Closed', count: counts.closed },
+                { value: 'all', label: 'All', count: counts.all },
+              ]}
+            />
+            <div className="flex flex-1 items-center justify-end gap-3">
+              <SearchBox value={q} onChange={setQ} placeholder="Search by loop id or text" />
+              <span className="tabular whitespace-nowrap text-[11.5px] text-faint">{loops.length} shown</span>
             </div>
           </div>
-          <Loops data={data} loops={loops} busyId={busyId} onStatus={changeStatus} searching={Boolean(q.trim())} writable={data.sync.write_through} />
         </div>
-      )}
-      {tab === 'Review queue' && <ReviewQueue data={data} />}
-      {tab === 'Reconciliation' && <Reconciliation data={data} />}
+        <Loops data={data} loops={loops} busyId={busyId} onStatus={changeStatus} searching={Boolean(q.trim())} writable={data.sync.write_through} />
+      </div>
 
       <Toast toast={toast} />
     </div>

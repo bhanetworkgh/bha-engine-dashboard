@@ -1746,3 +1746,132 @@ Open:      - **AIRTABLE_API_KEY is not set on Render.** Until it is, the
            the live service is exactly in the no-key state verified in step
            12: four empty pages that print why. The first boot after the
            key is set will print one resync line per table.
+
+## 2026-09-09 19:15 — Review round: last_modified, cuts on Open loops, Codex in three layers, patterns and commercial layout
+Intent:     Destiny's review of the Airtable-backed pages. Every loop table
+            now has a `last_modified` formula (LAST_MODIFIED_TIME()) — use it
+            for net raised-vs-closed per week and stale-for-fourteen-days,
+            but every existing record stamps today, so print on any metric
+            derived from it that it is only meaningful for changes after
+            9 Sept 2026 and never present early readings as history. Open
+            loops: remove the Review queue and Reconciliation entirely, drop
+            the oversized oldest-open panel, make the age distribution read
+            newest first, count up again on every view change (including
+            the close-rate percentages and the age bars), and stop the
+            freeze on a builder tab switch. Codex: restructure (not restyle)
+            around three layers — Layer 0 completeness, pending approval
+            (only what awaits Jason), approved — with plain names, no
+            JASON_SPOTCHECK / DESTINY_REVIEW / BUILDER_FOLLOWUP sections;
+            narration in its own column; "37 with no builder" explained;
+            week labels as date ranges; keep the verdict mix. Patterns: the
+            by-system table full width, explain draft and canonical on the
+            page, promotion-over-time either obvious or gone, keep the
+            keyword chips and search. Commercial: fixed collapsed card
+            height in a grid with an expand control. Throughout: where a
+            metric cannot be computed keep saying so on the page, and add
+            only metrics the data genuinely supports.
+Files:      server/src/sources.ts (Loop.last_modified; CodexEntry.complete +
+            missing from CODEX_REQUIRED), server/src/store.ts (metrics
+            rewritten, memoised), server/src/engine.ts (OpenLoopsData
+            without the queue/reconciliation), src/data/types.ts,
+            src/components/ui/Records.tsx (CountUp replayKey),
+            src/components/ui/Charts.tsx (Bars/HBar grow + labels),
+            src/screens/OpenLoops/{index,Metrics}.tsx (rewritten),
+            src/screens/OpenLoops/{ReviewQueue,Reconciliation}.tsx (deleted),
+            src/screens/Codex.tsx (rewritten), src/screens/BuildPatterns.tsx,
+            src/screens/Commercial.tsx, scratchpad verify.sh (46 checks),
+            sweep3.js, mock-airtable.js.
+Problem:    1. The mock loops carried no last_modified, so nothing could
+               prove the new metrics. Stamped every mock loop with
+               2026-09-09T14:02:11Z (what the live tables hold today) and
+               taught the mock to stamp `last_modified` on PATCH and POST
+               in the loops base, as the formula does.
+            2. `server/src/sources.ts` imported the removed `CodexBucket`
+               from the shared types: "Module '../../src/data/types' has no
+               exported member 'CodexBucket'". Defined it locally in
+               sources.ts; the shared contract now carries `CodexLayer`.
+            3. First verify run, 5 failures, all in the script: the age
+               order check assumed a trailing "no date raised" bucket that
+               is absent when every loop has a date; the week label is
+               "7–13 Sept", not "Sep"; the last_modified logic test stamped
+               four open loops in Kaiqi's table, which has one open loop
+               (64/65 closed), so stale read 1; the codex weeks live under
+               each builder row, not at the top; and the reusability mix
+               listed nineteen free-text sentences as nineteen bars.
+            4. The Chromium sweep could not sign in: verify.sh starts the
+               server from the scratchpad, where there is no dist/, so "/"
+               answered 503 "The front end has not been built". Started a
+               second server from the repo root on 8802 for the sweep.
+Fix:        Open loops. Metrics come once, unscoped, carrying
+            `by_builder` (all seven tables computed in the same pass and
+            memoised per store version; `bumpVersion()` on every upsert,
+            purge, inbound change and status event). A tab change picks
+            from memory, shows a 220 ms dimmed state, and every count,
+            percentage and bar re-runs from zero via `replayKey`. Sweep:
+            click handled in 372 ms, Open read 89 at 60 ms and 170 at 1.1 s
+            on Jegan's tab, zero metrics requests across two tab changes.
+            Review queue, Reconciliation and the oldest-open panel are gone
+            (files deleted, types removed). Age distribution: the buckets
+            were already 0–7 first, over-60 last; each bar now carries its
+            value and label and the card says "newest → oldest".
+            last_modified. `modifiedAfterAdded()` counts a stamp only if
+            strictly after 2026-09-09. Closed per week and net per week use
+            it, start at the week the field was added (7–13 Sept) and show
+            no earlier week; stale is open loops stamped more than fourteen
+            days ago with `meaningful_from: 2026-09-23`, rendered dimmed
+            with "not yet meaningful — from 2026-09-23" until then. All
+            three notes end "…only meaningful for changes after 9 Sept 2026
+            and is not history before then." Verified: three Jegan loops
+            stamped 2026-09-10 count as closes in 7–13 Sept; four stamped
+            20 Aug read as stale; a close made today stamps 9 Sept and is
+            not counted; the cache invalidates on resync.
+            Codex. Sections: Pending approval (action_required =
+            JASON_SPOTCHECK), Incomplete, Complete, Approved, All; the
+            builder filter stays above them. Layer 0 is the dashboard's own
+            check (builder, session link, session type, verdict,
+            architecture fit, engine movement, needle-moved evidence); each
+            row carries `complete` and `missing`, and the strip prints the
+            definition. Approved is defined but empty: `approved.n` is null
+            and the section says the log records no approval — no flag, no
+            approver, no time — so an entry with no action_required could be
+            approved or never reviewed and the data cannot tell. Nothing is
+            inferred. Narration has its own 24ch column (shortened URL,
+            full link in the entry view); builder is 14ch with "none" and a
+            hover explanation; week columns are "20–26 Jul" ranges; the
+            unattributed sentence is printed under the per-builder table.
+            Patterns. Promotion ring, Draft / Canonical / Patterns counts,
+            a legend card defining the two states and saying the field
+            defines no third, the by-system grid full width in four columns
+            (1136 px of a 1200 px main, 242 px tall), created per week,
+            and a reusability mix. Promotion-over-time is dropped: the table
+            records the state, not the date, so no honest series exists.
+            Commercial. Cards collapse to 188 px with a gradient "Expand"
+            control (all 21 measured at 188 in the sweep; the first expands
+            to 1419 px because it lists its questions) and a Confidence
+            card joins the readiness band.
+            Amber is reserved for bad states (section 5): the Draft count,
+            the Pending approval count, the net-per-week bars and the
+            confidence/readiness bands are now neutral.
+Decision:   Approval is not inferred. Pending = a JASON_SPOTCHECK request;
+            Evaluated = a verdict or narration quality is written;
+            Complete = the dashboard's field check. None of those is
+            "approved", and the page says so. An `approved_at` date on the
+            Codex Log would fill the Approved section without a code change
+            to the layer model.
+            reusability on Build Patterns is free text, not a select: 129
+            of 148 rows use one word (Broad 118, Moderate 11), 19 explain
+            in a sentence. The mix counts the words and groups the prose as
+            one bar with a note, rather than nineteen bars of sentences.
+            Metrics added because the rows support them: open loops by
+            lane tag, who raises loops (Raised By as written, so "Jason"
+            and "Jason Bays" count separately and the note says so), closed
+            per week; narration quality mix; reusability mix; confidence
+            mix. Not added: time-to-close, reopen count, promotion date,
+            approval time — none is recorded upstream.
+            Verified on the local Airtable replay: verify.sh 46/46 (boot
+            753/95/148/21; idempotent resync; purge; write-through; refused
+            write; inbound 401/201/idempotent/PATCH/DELETE; the metric
+            checks above; no delete route; 422 on a locked field; no-key
+            state; bundle carries no key or host). Sweep: all four pages,
+            console errors only the Inter font this sandbox cannot fetch.
+            Live verification follows below after the push.

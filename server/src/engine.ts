@@ -333,10 +333,6 @@ export function getOpenLoops(_q: Query): OpenLoopsData {
     loops: store.loops().sort((a, b) => b.age_days - a.age_days),
     by_owner: store.loopsByOwner(),
     sync,
-    // Nothing proposes closes and nothing reconciles the digest against the tables yet; both lists are empty and say so.
-    review_queue: [],
-    reconciliation: [],
-    reconciliation_note: 'No workflow compares the daily digest against the seven builder tables yet, so there is nothing to reconcile here. The phase 1 rows that used to sit here were fixtures and were removed on 2026-09-09.',
     status_history_note:
       sync.source === 'none'
         ? sync.error ?? 'Nothing has been read from Airtable yet.'

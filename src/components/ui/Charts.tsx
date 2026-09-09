@@ -3,8 +3,32 @@
  * the theme's CSS variables so it is correct in both modes, and never shows a
  * value it was not given. Every chart takes real numbers from the data module.
  */
+import { useEffect, useState } from 'react';
 
 type Tone = 'ink' | 'accent' | 'degraded' | 'failing' | 'dim';
+
+/** True once, a frame after the signature changes, so a CSS transition can carry the bar to its size. */
+function useGrow(signature: string): boolean {
+  const [grown, setGrown] = useState(false);
+  useEffect(() => {
+    let reduce = false;
+    try {
+      reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch {
+      /* no media queries */
+    }
+    if (reduce) {
+      setGrown(true);
+      return;
+    }
+    setGrown(false);
+    const raf = requestAnimationFrame(() => requestAnimationFrame(() => setGrown(true)));
+    return () => cancelAnimationFrame(raf);
+  }, [signature]);
+  return grown;
+}
+const GROW = 'height 640ms cubic-bezier(0.2, 0.7, 0.2, 1)';
+const WIDEN = 'width 640ms cubic-bezier(0.2, 0.7, 0.2, 1)';
 
 const STROKE: Record<Tone, string> = {
   ink: 'var(--ink)',
@@ -67,32 +91,52 @@ export function Bars({
   height = 64,
   tone = 'ink',
   highlightLast = true,
+  replayKey,
+  showLabels,
 }: {
   values: number[];
   labels?: string[];
   height?: number;
   tone?: Tone;
   highlightLast?: boolean;
+  /** Bars grow again from the baseline when this changes. */
+  replayKey?: string | number;
+  /** Print every label beneath its bar, with its value. */
+  showLabels?: boolean;
 }) {
   const max = Math.max(1, ...values);
+  const grown = useGrow(`${replayKey ?? ''}|${values.join(',')}`);
   return (
-    <div className="flex w-full items-end gap-[3px]" style={{ height }} role="img" aria-label={`Bars: ${values.join(', ')}`}>
-      {values.map((v, i) => {
-        const pct = (v / max) * 100;
-        const last = highlightLast && i === values.length - 1;
-        return (
-          <div key={i} className="flex min-w-0 flex-1 flex-col items-center justify-end self-stretch" title={`${labels?.[i] ?? ''} ${v}`.trim()}>
-            <div
-              className="w-full rounded-[3px]"
-              style={{
-                height: `${Math.max(pct, v > 0 ? 6 : 2)}%`,
-                background: last ? STROKE[tone === 'ink' ? 'accent' : tone] : STROKE[tone],
-                opacity: last ? 1 : v === 0 ? 0.15 : 0.35,
-              }}
-            />
-          </div>
-        );
-      })}
+    <div>
+      <div className="flex w-full items-end gap-[3px]" style={{ height }} role="img" aria-label={`Bars: ${values.join(', ')}`}>
+        {values.map((v, i) => {
+          const pct = (v / max) * 100;
+          const last = highlightLast && i === values.length - 1;
+          return (
+            <div key={i} className="flex min-w-0 flex-1 flex-col items-center justify-end self-stretch" title={`${labels?.[i] ?? ''} ${v}`.trim()}>
+              <div
+                className="w-full rounded-[3px]"
+                style={{
+                  height: grown ? `${Math.max(pct, v > 0 ? 6 : 2)}%` : '2%',
+                  transition: GROW,
+                  background: last ? STROKE[tone === 'ink' ? 'accent' : tone] : STROKE[tone],
+                  opacity: last ? 1 : v === 0 ? 0.15 : 0.35,
+                }}
+              />
+            </div>
+          );
+        })}
+      </div>
+      {showLabels && labels && (
+        <div className="mt-1 flex w-full gap-[3px]">
+          {labels.map((l, i) => (
+            <div key={i} className="min-w-0 flex-1 text-center text-[10.5px] leading-tight text-faint" title={l}>
+              <div className="tabular text-[11.5px] text-dim">{values[i]}</div>
+              <div className="truncate">{l}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -105,6 +149,8 @@ export function HBar({
   tone = 'ink',
   suffix = '',
   right,
+  replayKey,
+  valueNode,
 }: {
   label: React.ReactNode;
   value: number;
@@ -112,20 +158,25 @@ export function HBar({
   tone?: Tone;
   suffix?: string;
   right?: React.ReactNode;
+  /** The bar widens again from zero when this changes. */
+  replayKey?: string | number;
+  /** Replaces the plain number, e.g. a CountUp. */
+  valueNode?: React.ReactNode;
 }) {
   const pct = max > 0 ? (value / max) * 100 : 0;
+  const grown = useGrow(`${replayKey ?? ''}|${value}|${max}`);
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
       <div className="truncate text-[12.5px] text-ink">{label}</div>
       <div className="tabular flex items-center gap-2 text-[12px] text-dim">
         <span>
-          {value}
+          {valueNode ?? value}
           {suffix}
         </span>
         {right}
       </div>
       <div className="col-span-2 h-[5px] overflow-hidden rounded-full bg-raised">
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: STROKE[tone], opacity: tone === 'ink' ? 0.55 : 0.85 }} />
+        <div className="h-full rounded-full" style={{ width: grown ? `${pct}%` : '0%', transition: WIDEN, background: STROKE[tone], opacity: tone === 'ink' ? 0.55 : 0.85 }} />
       </div>
     </div>
   );

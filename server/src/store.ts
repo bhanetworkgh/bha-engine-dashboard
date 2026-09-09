@@ -25,7 +25,6 @@ import * as airtable from './airtable';
 import type {
   BuildPattern,
   BuildPatternDetail,
-  CodexBucket,
   CodexEntry,
   CodexMetrics,
   CommercialMetrics,
@@ -261,6 +260,7 @@ export function upsert(m: Mapped, table: string, via: 'airtable' | 'inbound' | '
        raised_at = excluded.raised_at, closed_at = excluded.closed_at, updated_at = excluded.updated_at, source = excluded.source,
        table_id = excluded.table_id, synced_at = excluded.synced_at`,
   ).run(m.kind, m.obj.id, keyOf(m), JSON.stringify(obj), status, builderOf(m), raisedOf(m), closedAt, at, via, table, at);
+  bumpVersion();
   const changed = !prev || prev.status !== status;
   if (changed) {
     db.prepare('INSERT INTO events (kind, record_id, builder, from_status, to_status, via, at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
@@ -287,6 +287,7 @@ export function purgeMissing(kind: RecordKind, table: string, keep: Set<string>)
       n++;
     }
   }
+  if (n) bumpVersion();
   return n;
 }
 
@@ -385,6 +386,7 @@ export function syncInfo(kind: RecordKind): SyncInfo {
 
 export function observe(kind: RecordKind, metric: string, value: number): void {
   openDb().prepare('INSERT INTO observations (kind, metric, at, value) VALUES (?, ?, ?, ?)').run(kind, metric, nowIso(), value);
+  bumpVersion();
 }
 export function cardTrend(id: string): MetricSeries {
   const obs = observations('commercial', `unresolved:${id}`);
@@ -515,6 +517,7 @@ export function removeInbound(kind: RecordKind, id: string): boolean {
   const r = rowById(kind, id);
   if (!r) return false;
   openDb().prepare('DELETE FROM records WHERE kind = ? AND id = ?').run(kind, id);
+  bumpVersion();
   return true;
 }
 
@@ -537,13 +540,39 @@ function series(points: SeriesPoint[] | null, note: string | null): MetricSeries
   return { points, note };
 }
 
-const NO_CLOSE_DATE = 'The loop tables carry no close date. Closes are timestamped only when they pass through this dashboard, and that history resets with the instance on the free plan.';
-const NO_MODIFIED = 'The loop tables carry no last-modified time, so how long a loop has sat in its status is not recorded. Adding a "Last modified time" field on Status to each builder table would make this real.';
+/** "7–13 Sep" from a week-start day. */
+function weekLabel(start: string): string {
+  const a = new Date(`${start}T00:00:00Z`);
+  const b = new Date(a);
+  b.setUTCDate(a.getUTCDate() + 6);
+  const mon = (d: Date) => d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' });
+  return a.getUTCMonth() === b.getUTCMonth() ? `${a.getUTCDate()}–${b.getUTCDate()} ${mon(a)}` : `${a.getUTCDate()} ${mon(a)}–${b.getUTCDate()} ${mon(b)}`;
+}
 
-export function loopMetrics(builder: string | null): LoopMetrics {
-  const all = loops().filter((l) => !builder || l.owner === builder);
+/**
+ * last_modified (a LAST_MODIFIED_TIME() formula) was added to the loop tables
+ * on 9 Sept 2026. Every loop that existed then stamps from that day, so a
+ * stamp on or before it says nothing about when the loop really changed.
+ * Only stamps strictly after that day are treated as real changes.
+ */
+const MODIFIED_FIELD_ADDED = '2026-09-09';
+const MODIFIED_MEANINGFUL_FROM = '2026-09-23'; // fourteen days on
+const MODIFIED_NOTE = `Derived from the tables' last_modified field, added ${MODIFIED_FIELD_ADDED.slice(8)} Sept 2026. Every loop that existed that day stamps from it, so this is only meaningful for changes after 9 Sept 2026 and is not history before then.`;
+const NO_CLOSE_DATE = 'The loop tables carry no close date. Closes are timestamped only when they pass through this dashboard or are pushed by n8n, and that history resets with the instance on the free plan.';
+
+function modifiedAfterAdded(iso: string | null): boolean {
+  return Boolean(iso && iso.slice(0, 10) > MODIFIED_FIELD_ADDED);
+}
+
+/** The per-builder figures are the same computation over a subset; memoised per store version. */
+const metricsCache = new Map<string, { version: number; value: RecordMetrics }>();
+let storeVersion = 0;
+export function bumpVersion(): void {
+  storeVersion++;
+}
+
+function loopMetricsFor(all: Loop[], builder: string | null, historySince: string | null): LoopMetrics {
   const openRows = all.filter((l) => l.status !== 'closed');
-  const historySince = getMeta('history_since');
   const now = today();
 
   const byOwner = LOOP_TABLES.filter((t) => !builder || t.owner === builder)
@@ -569,7 +598,7 @@ export function loopMetrics(builder: string | null): LoopMetrics {
     : series(null, NO_CLOSE_DATE);
 
   const dated = openRows.filter((l) => l.raised_at);
-  const oldest = dated.length ? dated.reduce((a, b) => (b.age_days > a.age_days ? b : a)) : null;
+  // Newest first, oldest last.
   const buckets: [string, (d: number) => boolean][] = [
     ['0–7 days', (d) => d <= 7],
     ['8–14 days', (d) => d > 7 && d <= 14],
@@ -583,9 +612,49 @@ export function loopMetrics(builder: string | null): LoopMetrics {
 
   const weeks = lastWeeks(8);
   const raisedPerWeek = series(
-    weeks.map((w) => ({ label: w.slice(5), value: all.filter((l) => l.raised_at && weekStart(l.raised_at) === w).length })),
-    `Loops by the week they were raised (Date Raised), last eight weeks from ${weeks[0]}.`,
+    weeks.map((w) => ({ label: weekLabel(w), value: all.filter((l) => l.raised_at && weekStart(l.raised_at) === w).length })),
+    `Loops by the week they were raised (Date Raised), last eight weeks.`,
   );
+
+  // Closes by week of last_modified: a closed loop's last change is taken as its close. Only stamps
+  // after the field was added count; the backfill stamp on 9 Sept is not a close.
+  const realCloses = all.filter((l) => l.status === 'closed' && modifiedAfterAdded(l.last_modified));
+  const fromWeek = weekStart(MODIFIED_FIELD_ADDED);
+  const modWeeks = weeks.filter((w) => w >= fromWeek);
+  const closedPerWeek = series(
+    modWeeks.map((w) => ({ label: weekLabel(w), value: realCloses.filter((l) => weekStart(l.last_modified!.slice(0, 10)) === w).length })),
+    `Closed loops by the week of their last change. A closed loop's last_modified is taken as its close, which is exact only when the close was the last edit. ${MODIFIED_NOTE}`,
+  );
+  const netPerWeek = series(
+    modWeeks.map((w) => ({
+      label: weekLabel(w),
+      value: all.filter((l) => l.raised_at && weekStart(l.raised_at) === w).length - realCloses.filter((l) => weekStart(l.last_modified!.slice(0, 10)) === w).length,
+    })),
+    `Raised (Date Raised) minus closed (last_modified) per week, from the week the field was added. Weeks before it have no close count and are not shown. ${MODIFIED_NOTE}`,
+  );
+
+  const cutoff = addDays(now, -14);
+  const staleRows = openRows.filter((l) => l.last_modified && l.last_modified.slice(0, 10) < cutoff);
+  const stale = {
+    count: staleRows.length,
+    meaningful_from: MODIFIED_MEANINGFUL_FROM,
+    note:
+      now < MODIFIED_MEANINGFUL_FROM
+        ? `Open loops whose last_modified is more than fourteen days ago. Every loop stamps from 9 Sept 2026, so nothing can read as stale before 23 Sept 2026; this figure is not yet meaningful. ${MODIFIED_NOTE}`
+        : `Open loops whose last_modified is more than fourteen days ago. ${MODIFIED_NOTE}`,
+  };
+
+  const laneTags = [...LOOP_LANE_TAGS, null];
+  const openByLane = laneTags
+    .map((t) => ({ lane_tag: t ?? '(no lane_tag)', n: openRows.filter((l) => l.lane_tag === t).length }))
+    .filter((r) => r.n > 0)
+    .sort((a, b) => b.n - a.n);
+  const raisers = new Map<string, number>();
+  for (const l of all) if (l.raised_by) raisers.set(l.raised_by, (raisers.get(l.raised_by) ?? 0) + 1);
+  const topRaisers = [...raisers.entries()]
+    .map(([raised_by, n]) => ({ raised_by, n }))
+    .sort((a, b) => b.n - a.n)
+    .slice(0, 6);
 
   return {
     kind: 'loops',
@@ -597,82 +666,122 @@ export function loopMetrics(builder: string | null): LoopMetrics {
     close_rate_by_builder: byOwner,
     close_rate_note: 'Closed as a share of every loop in the builder’s table today. It is a state, not a rate over time: nothing records when a loop closed.',
     closed_per_day: closedPerDay,
-    oldest_open: oldest
-      ? { loop_id: oldest.loop_id, id: oldest.id, owner: oldest.owner, age_days: oldest.age_days, note: undated ? `${undated} open ${undated === 1 ? 'loop has' : 'loops have'} no Date Raised and cannot be aged.` : null }
-      : { loop_id: null, id: null, owner: null, age_days: null, note: openRows.length ? 'No open loop carries a Date Raised.' : 'No open loops.' },
     age_distribution: ageDistribution,
     raised_per_week: raisedPerWeek,
-    net_per_week: series(null, `Net needs closes per week. ${NO_CLOSE_DATE}`),
-    stale: { count: null, note: NO_MODIFIED },
+    net_per_week: netPerWeek,
+    closed_per_week: closedPerWeek,
+    stale,
+    open_by_lane_tag: openByLane,
+    top_raisers: topRaisers,
+    modified_note: MODIFIED_NOTE,
     history_since: historySince,
   };
 }
 
-const BUCKET_LABEL: Record<CodexBucket, string> = {
-  jason: 'Awaiting Jason’s spot-check',
-  destiny: 'Destiny review',
-  builder: 'Builder follow-up',
-  other: 'Other action named',
-  none: 'No action recorded',
-};
+export function loopMetrics(builder: string | null): LoopMetrics {
+  const key = `loops:${builder ?? '*'}`;
+  const hit = metricsCache.get(key);
+  if (hit && hit.version === storeVersion) return hit.value as LoopMetrics;
+  const all = loops();
+  const historySince = getMeta('history_since');
+  const value: LoopMetrics = builder
+    ? loopMetricsFor(all.filter((l) => l.owner === builder), builder, historySince)
+    : {
+        ...loopMetricsFor(all, null, historySince),
+        // One pass per builder, computed here once and cached, so a tab change on the page needs no request.
+        by_builder: Object.fromEntries(
+          LOOP_TABLES.filter((t) => all.some((l) => l.owner === t.owner)).map((t) => [t.owner, loopMetricsFor(all.filter((l) => l.owner === t.owner), t.owner, historySince)]),
+        ),
+      };
+  metricsCache.set(key, { version: storeVersion, value });
+  return value;
+}
+
+const LAYER0_DEFINITION = 'A log counts as complete when the row carries a builder, a session link, a session type, a verdict, and the architecture-fit, engine-movement and needle-moved-evidence fields. This is the dashboard’s own check; the Codex Log has no completeness field.';
 
 export function codexMetrics(builder: string | null): CodexMetrics {
+  const key = `codex:${builder ?? '*'}`;
+  const hit = metricsCache.get(key);
+  if (hit && hit.version === storeVersion) return hit.value as CodexMetrics;
   const all = codexEntries().filter((e) => !builder || e.builder_id === builder);
   const attributed = all.filter((e) => e.builder_id);
-  const buckets = (['jason', 'destiny', 'builder', 'other', 'none'] as CodexBucket[]).map((b) => ({ bucket: b, label: BUCKET_LABEL[b], n: all.filter((e) => codexBucket(e.action_required) === b).length }));
+  const complete = all.filter((e) => e.complete).length;
+  const pending = all.filter((e) => codexBucket(e.action_required) === 'jason').length;
+  const evaluated = all.filter((e) => e.verdict || e.narration_quality).length;
   const owners = [...new Set(attributed.map((e) => e.builder_id as string))].sort();
-  const weeks = lastWeeks(8).map((w) => isoWeek(w));
-  const perBuilder = owners.map((o) => ({ owner: o, weeks: weeks.map((w) => ({ week: w, n: attributed.filter((e) => e.builder_id === o && e.week === w).length })) }));
+  const weekStarts = lastWeeks(8);
+  const perBuilder = owners.map((o) => ({
+    owner: o,
+    weeks: weekStarts.map((w) => ({ week: isoWeek(w), start: w, label: weekLabel(w), n: attributed.filter((e) => e.builder_id === o && e.week === isoWeek(w)).length })),
+  }));
   const verdicts = [...new Set(all.map((e) => e.verdict).filter((v): v is string => Boolean(v)))];
+  const qualities = [...new Set(all.map((e) => e.narration_quality).filter((v): v is string => Boolean(v)))];
   const pay = all.length ? Math.round((all.filter((e) => e.pay_eligible).length / all.length) * 100) : null;
-  return {
+  const value: CodexMetrics = {
     kind: 'codex',
     computed_at: nowIso(),
     scope: { builder, rows: all.length },
     entries: all.length,
     unattributed: all.length - attributed.length,
-    buckets,
+    unattributed_note: `${all.length - attributed.length} ${all.length - attributed.length === 1 ? 'row has' : 'rows have'} no builder recorded in the source — builder_id and builder_name are empty, or name a test value — so they cannot be attributed to anyone. They are counted in the totals and shown under “No builder”.`,
+    layer0: { complete, incomplete: all.length - complete, rate: all.length ? Math.round((complete / all.length) * 100) : null, definition: LAYER0_DEFINITION, note: `${complete} of ${all.length} rows pass the check.` },
+    pending: { n: pending, note: 'Rows whose action_required is JASON_SPOTCHECK. That is the nearest thing the log records to “awaiting Jason”; it is a request for a spot-check, not a formal pending-approval state.' },
+    approved: { n: null, note: 'The Codex Log records no approval: no approved flag, no approver, no approval time. An entry with no action_required could be approved or never reviewed, and the data cannot tell those apart. This section fills the day the table has an approval field (for example an approved_at date).' },
+    evaluated: { n: evaluated, note: 'Rows carrying a verdict or a narration quality. Evaluated is not approved; it says a judgement was written, not that Jason cleared the entry.' },
     per_builder_per_week: perBuilder,
     verdict_mix: verdicts.map((v) => ({ verdict: v, n: all.filter((e) => e.verdict === v).length })),
     verdict_note: verdicts.length === 2 ? 'The log’s verdict field defines two tiers, not three. Both are shown; a third would have to be added to the table first.' : `The verdict field holds ${verdicts.length} distinct ${verdicts.length === 1 ? 'value' : 'values'}.`,
+    narration_quality_mix: qualities.map((q) => ({ quality: q, n: all.filter((e) => e.narration_quality === q).length })),
     pay_eligible_rate: { value: pay, note: all.length ? `${all.filter((e) => e.pay_eligible).length} of ${all.length} entries have pay_eligible checked. An unchecked box counts as not eligible.` : 'No entries.' },
-    layer0_rate: { value: null, note: 'No field in the Codex Log records Layer 0 completeness. flag_name is empty on every entry and flag_repeat_count is 0 or blank.' },
-    median_days_to_approval: { value: null, note: 'The log records no approval and no approval time. When Jason clears an entry nothing in the table changes, so this cannot be measured until a field exists.' },
-    approval_note: 'Nothing in the Codex Log records an approval. action_required is the nearest thing to a review state and is what the sections below use.',
+    median_days_to_approval: { value: null, note: 'Needs an approval time. The log records none, so this cannot be measured until a field exists.' },
   };
+  metricsCache.set(key, { version: storeVersion, value });
+  return value;
 }
 
 export function patternMetrics(): PatternMetrics {
+  const hit = metricsCache.get('patterns');
+  if (hit && hit.version === storeVersion) return hit.value as PatternMetrics;
   const all = patterns();
   const canonical = all.filter((p) => p.status === 'canonical').length;
   const systems = [...new Set(all.map((p) => p.system ?? '(no system in id)'))].sort();
   const weeks = lastWeeks(8);
   const created = series(
-    weeks.map((w) => ({ label: w.slice(5), value: all.filter((p) => p.created_at && weekStart(p.created_at.slice(0, 10)) === w).length })),
-    `Patterns by the week of created_at, last eight weeks from ${weeks[0]}.`,
+    weeks.map((w) => ({ label: weekLabel(w), value: all.filter((p) => p.created_at && weekStart(p.created_at.slice(0, 10)) === w).length })),
+    'Patterns by the week of created_at, last eight weeks.',
   );
-  const obs = observations('patterns', 'canonical_share');
-  const distinctDays = new Set(obs.map((o) => o.at.slice(0, 10)));
-  return {
+  // reusability is a free-text field. Most rows use a one-word value; the rest explain in prose,
+  // which is counted as one group rather than shown as a bar per sentence.
+  const reuseKey = (p: BuildPattern): string => {
+    const v = p.reusability?.trim();
+    if (!v) return '(not set)';
+    return v.length > 24 || /\s/.test(v) ? '(written out in prose)' : v;
+  };
+  const reuse = [...new Set(all.map(reuseKey))];
+  const prose = all.filter((p) => reuseKey(p) === '(written out in prose)').length;
+  const value: PatternMetrics = {
     kind: 'patterns',
     computed_at: nowIso(),
     scope: { rows: all.length },
     draft: all.length - canonical,
     canonical,
     promotion_rate: { value: all.length ? Math.round((canonical / all.length) * 100) : null, note: all.length ? `${canonical} of ${all.length} patterns are canonical today. A promotion date is not recorded, so this is the share now, not a rate of promotion.` : 'No patterns.' },
-    promotion_over_time:
-      distinctDays.size >= 2
-        ? series(
-            obs.map((o) => ({ label: o.at.slice(5, 10), value: Math.round(o.value) })),
-            'Canonical share as observed at each resync by this dashboard. Observations reset with the instance on the free plan.',
-          )
-        : series(null, 'Needs the canonical share observed on at least two different days. The table records no promotion date, and this dashboard’s own observations reset with the instance on the free plan.'),
+    status_legend: [
+      { status: 'draft', meaning: 'Written up but not yet accepted as the reference way of doing it. Most patterns are here.' },
+      { status: 'canonical', meaning: 'Accepted as the reference pattern other builders should follow. Promotion is the move from draft to canonical; the table records the state, not the date.' },
+    ],
     by_system: systems.map((s) => ({ system: s, draft: all.filter((p) => (p.system ?? '(no system in id)') === s && p.status === 'draft').length, canonical: all.filter((p) => (p.system ?? '(no system in id)') === s && p.status === 'canonical').length })),
+    reusability_mix: reuse.map((r) => ({ reusability: r, n: all.filter((p) => reuseKey(p) === r).length })).sort((a, b) => b.n - a.n),
+    reusability_note: `reusability is a free-text field, not a select. ${all.length - prose} of ${all.length} rows use a one-word value; ${prose} explain the reach in a sentence and are grouped as “written out in prose” — open the pattern to read it.`,
     created_per_week: created,
   };
+  metricsCache.set('patterns', { version: storeVersion, value });
+  return value;
 }
 
 export function commercialMetrics(): CommercialMetrics {
+  const hit = metricsCache.get('commercial');
+  if (hit && hit.version === storeVersion) return hit.value as CommercialMetrics;
   const all = opportunities();
   const lanes = [...new Set(all.map((o) => o.lane_id ?? '(no lane_id)'))];
   const withCount = all.filter((o) => o.missing_research_count !== null);
@@ -680,7 +789,8 @@ export function commercialMetrics(): CommercialMetrics {
   const obs = observations('commercial', 'unresolved_questions');
   const distinctDays = new Set(obs.map((o) => o.at.slice(0, 10)));
   const readiness = [...new Set(all.map((o) => o.readiness_state ?? '(unset)'))];
-  return {
+  const confidence = [...new Set(all.map((o) => o.confidence ?? '(unset)'))];
+  const value: CommercialMetrics = {
     kind: 'commercial',
     computed_at: nowIso(),
     scope: { rows: all.length },
@@ -688,14 +798,10 @@ export function commercialMetrics(): CommercialMetrics {
     by_lane: lanes.map((lane) => {
       const mine = all.filter((o) => (o.lane_id ?? '(no lane_id)') === lane);
       const counted = mine.filter((o) => o.missing_research_count !== null);
-      return {
-        lane_id: lane,
-        n: mine.length,
-        unresolved: counted.length ? counted.reduce((n, o) => n + (o.missing_research_count ?? 0), 0) : null,
-        blocked: mine.filter((o) => Boolean(o.lane_state_blocked_reason)).length,
-      };
+      return { lane_id: lane, n: mine.length, unresolved: counted.length ? counted.reduce((n, o) => n + (o.missing_research_count ?? 0), 0) : null, blocked: mine.filter((o) => Boolean(o.lane_state_blocked_reason)).length };
     }),
     by_readiness: readiness.map((r) => ({ readiness_state: r, n: all.filter((o) => (o.readiness_state ?? '(unset)') === r).length })),
+    confidence_mix: confidence.map((c) => ({ confidence: c, n: all.filter((o) => (o.confidence ?? '(unset)') === c).length })),
     unresolved_questions: {
       value: withCount.length ? total : null,
       note: withCount.length
@@ -708,6 +814,8 @@ export function commercialMetrics(): CommercialMetrics {
         : series(null, 'A trend needs the count observed on at least two different days. Airtable keeps no history of this field, and this dashboard’s own observations reset with the instance on the free plan.'),
     demand_evidence_note: 'demand_evidence is a single-select whose only choice says no external demand evidence has been collected for the lane; it is shown per card, not summed.',
   };
+  metricsCache.set('commercial', { version: storeVersion, value });
+  return value;
 }
 
 export function metrics(kind: RecordKind, filter: { builder?: string | null } = {}): RecordMetrics {

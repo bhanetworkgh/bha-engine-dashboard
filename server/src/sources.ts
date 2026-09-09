@@ -15,7 +15,10 @@
  */
 import type { AtRecord } from './airtable';
 import { recordUrl } from './airtable';
-import type { BuildPattern, BuildPatternDetail, CodexBucket, CodexEntry, Loop, LoopLaneTag, LoopStatus, Opportunity, ReadinessState, RecordKind, Source } from '../../src/data/types';
+import type { BuildPattern, BuildPatternDetail, CodexEntry, Loop, LoopLaneTag, LoopStatus, Opportunity, ReadinessState, RecordKind, Source } from '../../src/data/types';
+
+/** What action_required says, in five buckets. Only 'jason' is surfaced as a layer; the rest are held for filtering. */
+export type CodexBucket = 'jason' | 'destiny' | 'builder' | 'other' | 'none';
 
 /* ------------------------------------------------------------- locations */
 
@@ -190,6 +193,7 @@ export function mapLoop(rec: AtRecord, owner: string, table: string): Loop {
     raised_in: str(f.raised_in),
     lane_tag,
     assignee_slack_id: str(f['Assignee Slack User ID']),
+    last_modified: iso(f.last_modified),
     closed_at: null,
     note: null,
     spine: { session_id: null, builder_id: owner, subsystem: null, lane: lane_tag },
@@ -211,6 +215,17 @@ export function codexBucket(action: string | null): CodexBucket {
   return 'other';
 }
 
+/** The fields a complete log carries. This is the dashboard's check, stated on the page; the log has no completeness field. */
+export const CODEX_REQUIRED: { key: string; label: string }[] = [
+  { key: 'builder', label: 'builder' },
+  { key: 'session_url', label: 'session link' },
+  { key: 'session_type', label: 'session type' },
+  { key: 'verdict', label: 'verdict' },
+  { key: 'architecture_fit', label: 'architecture fit' },
+  { key: 'engine_movement', label: 'engine movement' },
+  { key: 'needle_moved_evidence', label: 'needle-moved evidence' },
+];
+
 export function mapCodex(rec: AtRecord): CodexEntry {
   const f = rec.fields;
   const slack = str(f.builder_id);
@@ -219,6 +234,8 @@ export function mapCodex(rec: AtRecord): CodexEntry {
   const logged = iso(f.timestamp);
   const action = str(f.action_required);
   const pay = bool(f.pay_eligible);
+  const present: Record<string, unknown> = { builder, session_url: str(f.session_url), session_type: str(f.session_type), verdict: str(f.verdict), architecture_fit: str(f.architecture_fit), engine_movement: str(f.engine_movement), needle_moved_evidence: str(f.needle_moved_evidence) };
+  const missing = CODEX_REQUIRED.filter((r) => !present[r.key]).map((r) => r.label);
   return {
     id: rec.id,
     builder_id: builder,
@@ -241,6 +258,8 @@ export function mapCodex(rec: AtRecord): CodexEntry {
     engine_movement: str(f.engine_movement),
     needle_moved_evidence: str(f.needle_moved_evidence),
     red_flags: str(f.red_flags),
+    complete: missing.length === 0,
+    missing,
     note: null,
     spine: { session_id: null, builder_id: builder, subsystem: 'CODEX', lane: str(f.lane_id) },
     tags: pay ? { pay_eligible: true } : {},
