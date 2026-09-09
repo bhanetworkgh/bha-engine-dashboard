@@ -1875,3 +1875,21 @@ Decision:   Approval is not inferred. Pending = a JASON_SPOTCHECK request;
             state; bundle carries no key or host). Sweep: all four pages,
             console errors only the Inter font this sandbox cannot fetch.
             Live verification follows below after the push.
+
+           On Render: deploy dep-dagqvp3m8hqs73fc7ncg on 927f146 built in
+           28 s and was live at 19:14:28 UTC, 48 s end to end. Boot log:
+           "sign-in: configured", "sessions: SESSION_SECRET set", "ask bays:
+           https://n8n.arupiautomates.cloud/webhook/dashboard-ask-bays",
+           "inbound: DASHBOARD_INBOUND_KEY set", "airtable:
+           https://api.airtable.com/v0 — resync on boot, then every 1440
+           min". Boot resync, one line per table: Destiny 324 (6038 ms),
+           Jason 18, Kaiqi 65, Jegan 189, Ahad 30, Hardik 106, Kavin 23 —
+           755 loops, two more than this morning's 753 (one new row each in
+           Hardik's and Kavin's tables); Codex Log 95 (2904 ms); Build
+           Patterns 148 (3620 ms); Commercial Opportunities 21 (2050 ms).
+           No error line. Not verified here, because this sandbox cannot
+           reach the Render URL: the metric panels as computed from the
+           live rows. By construction they should read closed per week 0
+           and net per week equal to this week's raised count (every live
+           loop stamps 9 Sept), and stale 0 dimmed as "not yet meaningful —
+           from 2026-09-23".
