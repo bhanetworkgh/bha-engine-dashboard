@@ -11,7 +11,7 @@
  * empties a page.
  */
 import * as airtable from './airtable';
-import { CODEX_BASE, CODEX_LAYER0, CODEX_TABLES, COMMERCIAL, LOOP_TABLES, LOOPS_BASE, PATTERNS, mapLayer0 } from './sources';
+import { CLIENTS_INDEX, CODEX_BASE, CODEX_LAYER0, CODEX_TABLES, COMMERCIAL, LOOP_TABLES, LOOPS_BASE, NORTH_STAR, PATTERNS, RESEARCH_QUEUE, mapLayer0 } from './sources';
 import * as store from './store';
 import type { RecordKind } from '../../src/data/types';
 
@@ -57,6 +57,14 @@ async function syncTable(kind: RecordKind, base: string, table: string, label: s
   }
 }
 
+/**
+ * Which tables a kind lives in.
+ *
+ * All static except `client_questions`, whose tables are named by the index
+ * rows themselves — see `clientQuestionTables`. That is deliberate: the
+ * pipeline dropped its hardcoded lane-to-table map on 2026-09-10 so that
+ * adding a lane is a row rather than a deploy, and this follows the same rule.
+ */
 function tablesFor(kind: RecordKind): { base: string; table: string; label: string }[] {
   switch (kind) {
     case 'loops':
@@ -69,7 +77,35 @@ function tablesFor(kind: RecordKind): { base: string; table: string; label: stri
       return [PATTERNS];
     case 'commercial':
       return [COMMERCIAL];
+    case 'ns':
+      return [NORTH_STAR];
+    case 'rt':
+      return [RESEARCH_QUEUE];
+    case 'clients':
+      return [CLIENTS_INDEX];
+    case 'client_questions':
+      return clientQuestionTables();
   }
+}
+
+/**
+ * The per-lane question tables, as the index currently names them.
+ *
+ * Read from the lanes already held: a `clients` resync runs first and records
+ * the mapping, so this never guesses which table belongs to which lane. A lane
+ * whose index row leaves Table ID empty is skipped and reported on the page,
+ * rather than silently dropping its questions.
+ */
+function clientQuestionTables(): { base: string; table: string; label: string }[] {
+  const map: Record<string, string> = {};
+  const out: { base: string; table: string; label: string }[] = [];
+  for (const lane of store.clientLanes()) {
+    if (!lane.questions_table) continue;
+    map[lane.questions_table] = lane.lane_id ?? lane.id;
+    out.push({ base: CLIENTS_INDEX.base, table: lane.questions_table, label: lane.name });
+  }
+  store.setQuestionTables(map);
+  return out;
 }
 
 /** One resync of one kind. Concurrent calls for the same kind share the run. */
@@ -94,6 +130,11 @@ export function resync(kind: RecordKind): Promise<ResyncResult> {
     }
     const failed = tables.filter((t) => t.error);
     const ok = failed.length === 0;
+    if (kind === 'clients' && ok) {
+      // Following the index is the point of this kind; a lane read that does
+      // not then read its questions leaves the page half-built.
+      tables.push(...(await resync('client_questions')).tables);
+    }
     const prev = store.syncState(kind);
     store.setSyncState(kind, {
       synced_at: ok ? new Date().toISOString() : prev.synced_at,
@@ -127,9 +168,19 @@ function recordObservations(kind: RecordKind): void {
   }
 }
 
+/**
+ * Every kind, in order.
+ *
+ * `client_questions` is skipped here: a `clients` resync reads the index and
+ * then follows each row's Table ID itself, so running it again in this loop
+ * would read the same four tables a second time every cycle for nothing.
+ */
 export async function resyncAll(): Promise<ResyncResult[]> {
   const out: ResyncResult[] = [];
-  for (const k of store.KINDS) out.push(await resync(k));
+  for (const k of store.KINDS) {
+    if (k === 'client_questions') continue;
+    out.push(await resync(k));
+  }
   return out;
 }
 
@@ -137,8 +188,40 @@ export function isRunning(kind: RecordKind): boolean {
   return running.has(kind);
 }
 
-/** Minutes between timed resyncs; 0 disables. Ten requests per run, well inside Airtable's limits. */
-export const RESYNC_MINUTES = Math.max(0, Number(process.env.AIRTABLE_RESYNC_MINUTES ?? 30) || 0);
+/**
+ * Minutes between timed resyncs; 0 disables.
+ *
+ * Fifteen, not the 1440 the service was running. A figure on an engine-health
+ * surface that can be a day old, with nothing on screen saying so, is worse
+ * than no figure: it reads as current and is not. Every page now prints how
+ * old its rows are, and this is how old they can get.
+ *
+ * The cost of fifteen minutes, counted against Airtable's limits:
+ *
+ *   loops        7 tables, ~773 rows      12 requests (100 rows a page)
+ *   codex        6 tables + Layer 0        7
+ *   patterns     1 table, 149 rows         2
+ *   commercial   1 table, 21 rows          1
+ *   ns           1 table, 34 rows          1
+ *   rt           1 table, 213 rows         3
+ *   clients      index + 4 lane tables     5
+ *                                         --
+ *                                         31 requests per full resync
+ *
+ * Airtable's hard limit is five requests a second per base. These 31 are
+ * spread over seven bases and paced at PACE_MS (220 ms) inside this process, so
+ * a full resync takes about seven seconds and never approaches it — the
+ * per-second limit is not the binding constraint at any interval we would
+ * choose.
+ *
+ * What is worth watching is the monthly call count, which some Airtable plans
+ * cap per workspace: 31 requests every fifteen minutes is roughly 3,000 a day
+ * and 89,000 a month from this dashboard alone, before n8n's own traffic on
+ * the same workspace. If that ceiling is a problem, this one variable is the
+ * lever — 20 minutes is ~67,000 a month, 30 minutes ~45,000 — and nothing
+ * else has to change.
+ */
+export const RESYNC_MINUTES = Math.max(0, Number(process.env.AIRTABLE_RESYNC_MINUTES ?? 15) || 0);
 
 /** Called at boot. Never throws; a failure is logged and shown on the page. */
 export function startBootSync(): void {

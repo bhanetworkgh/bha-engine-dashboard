@@ -24,12 +24,14 @@ import type {
   CodexData,
   CodexEntry,
   CodexEntryDetail,
+  ClientsData,
   CommercialData,
   EngineHealthData,
   EngineStatus,
   Loop,
   LoopStatus,
   NewLoop,
+  NsData,
   OpenLoopsData,
   Opportunity,
   OverviewData,
@@ -37,6 +39,7 @@ import type {
   RecordKind,
   RecordMetrics,
   ResyncResponse,
+  RtData,
   ServerStatus,
   SignInResult,
   TwinData,
@@ -118,6 +121,11 @@ export const getCodexEntries = (q: Query) => api<CodexData>(withLane('/api/codex
 export const getBuildPatterns = (q: Query) => api<BuildPatternsData>(withLane('/api/build-patterns', q));
 export const getCommercial = (q: Query) => api<CommercialData>(withLane('/api/commercial', q));
 export const getBuilders = (q: Query) => api<BuildersData>(withLane('/api/builders', q));
+
+/** North Star's ask log, Research Twin's queue, and the watched-client lanes. */
+export const getNsTelemetry = () => api<NsData>('/api/ns-telemetry');
+export const getRtTelemetry = () => api<RtData>('/api/rt-telemetry');
+export const getClients = () => api<ClientsData>('/api/clients');
 
 export async function getBuilder(id: string, q: Query): Promise<BuilderDetail | null> {
   try {

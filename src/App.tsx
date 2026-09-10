@@ -4,7 +4,9 @@ import { useSession } from './app/session';
 import Login from './screens/Login';
 import Overview from './screens/Overview';
 import AskBays from './screens/AskBays';
-import { NorthStar, ResearchTwin } from './screens/Twin';
+import NorthStar from './screens/NorthStar';
+import ResearchTwin from './screens/ResearchTwin';
+import Clients from './screens/Clients';
 import VFarm from './screens/VFarm';
 import EngineHealth from './screens/EngineHealth';
 import OpenLoops from './screens/OpenLoops';
@@ -37,6 +39,7 @@ export default function App() {
         <Route path="/codex" element={<Codex />} />
         <Route path="/build-patterns" element={<BuildPatterns />} />
         <Route path="/commercial" element={<Commercial />} />
+        <Route path="/clients" element={<Clients />} />
         <Route path="/builders" element={<Builders />} />
         <Route path="/builders/:id" element={<BuilderPage />} />
         <Route path="/settings" element={<Settings />} />

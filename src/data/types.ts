@@ -548,6 +548,8 @@ export interface SyncInfo {
   tables: { table: string; label: string; n: number }[];
   /** Whether the server can write back to Airtable at all. */
   write_through: boolean;
+  /** Minutes between timed resyncs, so a page can say when its rows are overdue. */
+  resync_minutes: number;
 }
 
 /* ------------------------------- codex / patterns / commercial / builders */
@@ -795,9 +797,260 @@ export interface BuilderDetail {
   incidents: Incident[];
 }
 
+/* ----------------------------------------------------------- north star */
+
+/**
+ * The outcome of one ask, as North Star's own single-select records it.
+ * These definitions are the engine's, not this dashboard's:
+ *   answered  a real answer carrying at least one [S#] citation
+ *   thin      an answer was produced with no citation behind it
+ *   failed    no answer text at all
+ * A row with the field empty is unclassified and is counted as unclassified.
+ */
+export type NsOutcome = 'answered' | 'thin' | 'failed';
+
+/** One tool call inside an ask. `used` is how many hits ended up cited. */
+export interface NsSearch {
+  tool: string;
+  hits: number;
+  used: number;
+  retrieved_at: string | null;
+}
+
+export interface NsRecord {
+  id: string;
+  trace_id: string | null;
+  lane_id: string | null;
+  workflow: string | null;
+  request: string | null;
+  answer: string | null;
+  has_answer: boolean;
+  /** Null means the row predates the outcome field, or nothing wrote one. */
+  outcome: NsOutcome | null;
+  /** From research_required: Yes / No, or null when neither. */
+  research_required: boolean | null;
+  reason: string | null;
+  session_id: string | null;
+  searches: NsSearch[];
+  /** Citation coverage 0..1, as the agent computed it. Not a model-reported probability. */
+  confidence: number | null;
+  confidence_basis: string | null;
+  asked_at: string | null;
+  week: string | null;
+  source: Source;
+  airtable: AirtableRef;
+}
+
+export interface NsData {
+  records: NsRecord[];
+  sync: SyncInfo;
+}
+
+export interface NsMetrics {
+  kind: 'ns';
+  computed_at: string;
+  scope: { rows: number };
+  /** How many rows carry an outcome at all. Everything below is over these. */
+  classified: number;
+  unclassified: number;
+  unclassified_note: string;
+  /**
+   * The headline: answers that look real and cite nothing, as a share of the
+   * classified rows. Null when nothing is classified — a thin rate computed
+   * over zero rows is not zero, it is unknown.
+   */
+  thin_rate: Metric;
+  outcome_mix: { outcome: NsOutcome | 'unclassified'; label: string; n: number }[];
+  /** Asks per week, and the same weeks split by outcome. */
+  asks_per_week: MetricSeries;
+  outcome_per_week: { label: string; week: string; answered: number; thin: number; failed: number; unclassified: number }[];
+  research_required_rate: Metric;
+  /** Tool calls: how many hits came back, and how many were actually cited. */
+  tool_usage: { tool: string; calls: number; hits: number; used: number; cited_rate: number | null }[];
+  tool_note: string;
+  /** From the searches blob's own citation-coverage figure. */
+  confidence_mix: { bucket: string; n: number }[];
+  confidence_note: string;
+  by_lane: { lane_id: string; asks: number; thin: number; unclassified: number }[];
+  /** When North Star was last asked anything. Silence is itself the signal. */
+  last_ask: { at: string | null; trace_id: string | null; note: string };
+}
+
+/* -------------------------------------------------------- research twin */
+
+/**
+ * One row of the Research Queue — one research *attempt*, not one card.
+ * `card_id` repeats across rows; anything counted per card collapses on it.
+ */
+export interface RtAttempt {
+  id: string;
+  card_id: string | null;
+  lane_id: string | null;
+  hypothesis: string | null;
+  context_snippet: string | null;
+  /** pending / completed / resolved, or null — an untriaged card. */
+  status: string | null;
+  confidence_level: string | null;
+  research_sufficiency: string | null;
+  gap_classification: string | null;
+  missing_elements: string | null;
+  target_source_types: string | null;
+  research_summary: string | null;
+  links_or_sources: string | null;
+  learnings_gotchas: string | null;
+  answer_history: string | null;
+  run_count: number | null;
+  requires_human: boolean;
+  /** When it FIRST went stuck. Deliberately not re-stamped on later attempts. */
+  first_stuck_at: string | null;
+  source_system: string | null;
+  created_at: string | null;
+  source: Source;
+  airtable: AirtableRef;
+}
+
+/** One card: its attempts collapsed, newest attempt deciding the current state. */
+export interface RtCard {
+  card_id: string;
+  lane_id: string | null;
+  hypothesis: string | null;
+  status: string | null;
+  status_label: string;
+  confidence_level: string | null;
+  gap_classification: string | null;
+  missing_elements: string | null;
+  target_source_types: string | null;
+  research_summary: string | null;
+  /** The highest run_count seen on any attempt for this card. */
+  run_count: number;
+  requires_human: boolean;
+  first_stuck_at: string | null;
+  /** Whole days since first_stuck_at; null when it has never been stuck. */
+  days_stuck: number | null;
+  source_system: string | null;
+  created_at: string | null;
+  last_attempt_at: string | null;
+  /** How many rows in the table are this one card. */
+  attempts: number;
+  source: Source;
+  airtable: AirtableRef;
+}
+
+export interface RtData {
+  cards: RtCard[];
+  sync: SyncInfo;
+  /** Rows in the table against distinct cards — the shape caveat, stated. */
+  shape: { attempts: number; cards: number; note: string };
+}
+
+export interface RtMetrics {
+  kind: 'rt';
+  computed_at: string;
+  scope: { rows: number; cards: number };
+  /** Cards needing a person, first, because that is the point of the page. */
+  requires_human: { n: number; note: string };
+  by_status: { status: string; label: string; n: number }[];
+  status_note: string;
+  /** Cards that have ever been stuck, bucketed by how long. */
+  days_stuck: { bucket: string; n: number }[];
+  days_stuck_note: string;
+  oldest_stuck: { card_id: string | null; days: number | null; note: string };
+  run_count_mix: { runs: string; n: number }[];
+  run_count_note: string;
+  gap_mix: { gap: string; n: number }[];
+  confidence_mix: { level: string; n: number }[];
+  created_per_week: MetricSeries;
+  /** Cards whose status is blank — migrated in and not yet triaged. */
+  untriaged: { n: number; note: string };
+}
+
+/* --------------------------------------------------------------- clients */
+
+export interface ClientLane {
+  id: string;
+  name: string;
+  lane_id: string | null;
+  lane_type: string | null;
+  client_id: string | null;
+  questions_table_name: string | null;
+  /** The table this lane's questions live in, read from the index row. */
+  questions_table: string | null;
+  lane_status: string | null;
+  run_state: string | null;
+  last_run_at: string | null;
+  next_run_due: string | null;
+  last_run_status: string | null;
+  consecutive_errors: number;
+  infra_fix_required: boolean;
+  first_stuck_at: string | null;
+  stuck_cycles: number;
+  quarantined: boolean;
+  commercial_hook: string | null;
+  interested_parties: string | null;
+  latest_memo: string | null;
+  source: Source;
+  airtable: AirtableRef;
+}
+
+export interface ClientQuestion {
+  id: string;
+  lane_id: string;
+  table: string;
+  question: string;
+  answer: string | null;
+  plain_summary: string | null;
+  confidence: string | null;
+  sources: string | null;
+  movement_tag: string | null;
+  answer_history: string | null;
+  last_updated: string | null;
+  missing_research: boolean;
+  research_stuck: boolean;
+  next_experiments: string | null;
+  run_count: number;
+  source: Source;
+  airtable: AirtableRef;
+}
+
+/** A lane with its questions counted. */
+export interface ClientLaneRow extends ClientLane {
+  questions: number;
+  active_questions: number;
+  needs_human: number;
+  missing_research: number;
+  /** No run in fourteen days, or never run at all. */
+  stale: boolean;
+  /** An index row with a run state but no run yet: warming up, not failing. */
+  warming_up: boolean;
+}
+
+/** One client, with every lane beneath it. */
+export interface ClientGroup {
+  client_id: string;
+  /** The shortest common name across the lanes, for the group heading. */
+  label: string;
+  lanes: ClientLaneRow[];
+  questions: number;
+  needs_human: number;
+}
+
+export interface ClientsData {
+  clients: ClientGroup[];
+  lanes: ClientLaneRow[];
+  questions: ClientQuestion[];
+  sync: SyncInfo;
+  /** Lanes whose index row names no questions table, so nothing could be read. */
+  unreadable: { lane_id: string | null; name: string; reason: string }[];
+}
+
 /* --------------------------------------------------------------- records */
 
-export type RecordKind = 'loops' | 'codex' | 'patterns' | 'commercial';
+/**
+ * Every kind the server holds as a read model rebuilt from Airtable.
+ * 'client_questions' is a child of 'clients': the index row names its own
+ * questions table and the sync follows it.
+ */
+export type RecordKind = 'loops' | 'codex' | 'patterns' | 'commercial' | 'ns' | 'rt' | 'clients' | 'client_questions';
 
 export interface Metric {
   /** Null when nothing records what this needs; `note` then says what is missing. */
@@ -911,7 +1164,7 @@ export interface CommercialMetrics {
   demand_evidence_note: string;
 }
 
-export type RecordMetrics = LoopMetrics | CodexMetrics | PatternMetrics | CommercialMetrics;
+export type RecordMetrics = LoopMetrics | CodexMetrics | PatternMetrics | CommercialMetrics | NsMetrics | RtMetrics;
 
 /** What POST /api/resync answers: one result per kind, one line per table. */
 export interface ResyncResponse {

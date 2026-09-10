@@ -205,6 +205,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
         return send(res, 200, engine.getBuildPatterns(q));
       case '/api/commercial':
         return send(res, 200, engine.getCommercial(q));
+      case '/api/ns-telemetry':
+        return send(res, 200, engine.getNorthStarTelemetry());
+      case '/api/rt-telemetry':
+        return send(res, 200, engine.getResearchTwinTelemetry());
+      case '/api/clients':
+        return send(res, 200, engine.getClients());
       case '/api/builders':
         return send(res, 200, engine.getBuilders(q));
       case '/api/ask-bays':

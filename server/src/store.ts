@@ -25,6 +25,8 @@ import * as airtable from './airtable';
 import type {
   BuildPattern,
   BuildPatternDetail,
+  ClientLane,
+  ClientQuestion,
   CodexApproval,
   CodexEntry,
   CodexEntryDetail,
@@ -38,11 +40,17 @@ import type {
   Metric,
   MetricSeries,
   NewLoop,
+  NsMetrics,
+  NsOutcome,
+  NsRecord,
   Opportunity,
   OwnerTotals,
   PatternMetrics,
   RecordKind,
   RecordMetrics,
+  RtAttempt,
+  RtCard,
+  RtMetrics,
   SeriesPoint,
   SyncInfo,
 } from '../../src/data/types';
@@ -64,8 +72,12 @@ import {
   isoWeek,
   loopTable,
   loopTableById,
+  mapClientLane,
+  mapClientQuestion,
   mapCodex,
   mapLoop,
+  mapNsRecord,
+  mapRtAttempt,
   mapOpportunity,
   mapPattern,
   missingLabel,
@@ -73,7 +85,14 @@ import {
 } from './sources';
 
 export type { RecordKind, RecordMetrics, Metric };
-export const KINDS: RecordKind[] = ['loops', 'codex', 'patterns', 'commercial'];
+
+/**
+ * Read here rather than imported from sync.ts, which imports this module —
+ * a cycle would leave the constant undefined at module-eval time. sync.ts
+ * owns the reasoning about the number; this is the same read.
+ */
+const RESYNC_MINUTES = Math.max(0, Number(process.env.AIRTABLE_RESYNC_MINUTES ?? 15) || 0);
+export const KINDS: RecordKind[] = ['loops', 'codex', 'patterns', 'commercial', 'ns', 'rt', 'clients', 'client_questions'];
 
 /** Status vocabularies, in the dashboard's words. Loops and patterns and cards are the table's own selects lower-cased or verbatim. */
 export const STATUSES: Record<RecordKind, readonly string[]> = {
@@ -82,6 +101,12 @@ export const STATUSES: Record<RecordKind, readonly string[]> = {
   codex: ['approved', 'pending', 'input added'],
   patterns: ['draft', 'canonical'],
   commercial: ['INCUBATE', 'Research-First', 'Media-Ready'],
+  // The three telemetry kinds are read-only: the engine writes them, this
+  // dashboard reads them. No status is settable from here.
+  ns: [],
+  rt: [],
+  clients: [],
+  client_questions: [],
 };
 
 export interface Row {
@@ -200,7 +225,11 @@ type Mapped =
   | { kind: 'loops'; obj: Loop }
   | { kind: 'codex'; obj: CodexEntryDetail }
   | { kind: 'patterns'; obj: BuildPatternDetail }
-  | { kind: 'commercial'; obj: Opportunity };
+  | { kind: 'commercial'; obj: Opportunity }
+  | { kind: 'ns'; obj: NsRecord }
+  | { kind: 'rt'; obj: RtAttempt }
+  | { kind: 'clients'; obj: ClientLane }
+  | { kind: 'client_questions'; obj: ClientQuestion };
 
 function statusOf(m: Mapped): string {
   switch (m.kind) {
@@ -212,6 +241,14 @@ function statusOf(m: Mapped): string {
       return m.obj.status;
     case 'commercial':
       return m.obj.readiness_state ?? 'unset';
+    case 'ns':
+      return m.obj.outcome ?? 'unclassified';
+    case 'rt':
+      return m.obj.status ?? 'untriaged';
+    case 'clients':
+      return m.obj.run_state ?? 'unset';
+    case 'client_questions':
+      return m.obj.movement_tag ?? 'unset';
   }
 }
 function keyOf(m: Mapped): string | null {
@@ -224,6 +261,14 @@ function keyOf(m: Mapped): string | null {
       return m.obj.pattern_id;
     case 'commercial':
       return m.obj.card_id;
+    case 'ns':
+      return m.obj.trace_id;
+    case 'rt':
+      return m.obj.card_id;
+    case 'clients':
+      return m.obj.lane_id;
+    case 'client_questions':
+      return m.obj.lane_id;
   }
 }
 function builderOf(m: Mapped): string | null {
@@ -239,6 +284,14 @@ function raisedOf(m: Mapped): string | null {
       return m.obj.created_at ? m.obj.created_at.slice(0, 10) : null;
     case 'commercial':
       return m.obj.created_at ? m.obj.created_at.slice(0, 10) : null;
+    case 'ns':
+      return m.obj.asked_at ? m.obj.asked_at.slice(0, 10) : null;
+    case 'rt':
+      return m.obj.created_at ? m.obj.created_at.slice(0, 10) : null;
+    case 'clients':
+      return m.obj.last_run_at ? m.obj.last_run_at.slice(0, 10) : null;
+    case 'client_questions':
+      return m.obj.last_updated ? m.obj.last_updated.slice(0, 10) : null;
   }
 }
 const TERMINAL: Partial<Record<RecordKind, string>> = { loops: 'closed' };
@@ -317,7 +370,44 @@ export function mapRecord(kind: RecordKind, rec: AtRecord, table: string): Mappe
       return { kind, obj: mapPattern(rec) };
     case 'commercial':
       return { kind, obj: mapOpportunity(rec) };
+    case 'ns':
+      return { kind, obj: mapNsRecord(rec) };
+    case 'rt':
+      return { kind, obj: mapRtAttempt(rec) };
+    case 'clients':
+      return { kind, obj: mapClientLane(rec) };
+    case 'client_questions': {
+      // The lane a question belongs to is the table it was read from; the
+      // sync records that mapping when it follows each index row's Table ID.
+      const lane = questionLaneFor(table);
+      return { kind, obj: mapClientQuestion(rec, lane ?? table, table) };
+    }
   }
+}
+
+/* ---------------------------------------------- clients: table → lane map */
+
+/**
+ * Which lane a questions table belongs to, learned from the index at sync
+ * time rather than hardcoded — the same reason the pipeline dropped its own
+ * lane-to-table map: adding a lane should be a row, not a deploy.
+ */
+export function setQuestionTables(map: Record<string, string>): void {
+  setMeta('clients:tables', JSON.stringify(map));
+  bumpVersion();
+}
+export function questionTables(): Record<string, string> {
+  const raw = getMeta('clients:tables');
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+function questionLaneFor(table: string): string | null {
+  return questionTables()[table] ?? null;
 }
 
 /* ------------------------------------------------------------------ reads */
@@ -381,6 +471,18 @@ export function searchPatterns(q: string): BuildPattern[] {
 export function opportunities(): Opportunity[] {
   return rows('commercial').map((r) => JSON.parse(r.json) as Opportunity);
 }
+export function nsRecords(): NsRecord[] {
+  return rows('ns').map((r) => JSON.parse(r.json) as NsRecord);
+}
+export function rtAttempts(): RtAttempt[] {
+  return rows('rt').map((r) => JSON.parse(r.json) as RtAttempt);
+}
+export function clientLanes(): ClientLane[] {
+  return rows('clients').map((r) => JSON.parse(r.json) as ClientLane);
+}
+export function clientQuestions(): ClientQuestion[] {
+  return rows('client_questions').map((r) => JSON.parse(r.json) as ClientQuestion);
+}
 
 export function loopsByOwner(): OwnerTotals[] {
   const all = loops();
@@ -420,6 +522,7 @@ export function syncInfo(kind: RecordKind): SyncInfo {
     error: s.error,
     tables: s.tables,
     write_through: airtable.airtableConfigured(),
+    resync_minutes: RESYNC_MINUTES,
   };
 }
 
@@ -464,6 +567,7 @@ async function writeThrough(kind: RecordKind, r: Row, fields: Record<string, unk
  * by what Airtable returned, and the change is recorded as an event.
  */
 export async function setStatus(kind: RecordKind, id: string, status: string, note?: string): Promise<Loop | CodexEntry | BuildPattern | Opportunity> {
+  if (!STATUSES[kind].length) throw new StoreError(`${kind} is read-only in this dashboard: the engine writes it.`, 422);
   if (!STATUSES[kind].includes(status)) {
     throw new StoreError(`"${status}" is not a status a ${kind === 'loops' ? 'loop' : kind === 'codex' ? 'Codex entry' : kind === 'patterns' ? 'pattern' : 'card'} can have.`, 422);
   }
@@ -483,7 +587,7 @@ export async function setStatus(kind: RecordKind, id: string, status: string, no
   const m = await writeThrough(kind, r, fields);
   if (note !== undefined) (m.obj as { note?: string | null }).note = note.trim() || null;
   upsert(m, r.table_id, 'ui');
-  return read(kind, id)!;
+  return read(kind, id) as Loop | CodexEntry | BuildPattern | Opportunity;
 }
 
 /** Edits a Codex entry's own fields. Airtable first, then the held row from what came back. */
@@ -572,7 +676,7 @@ export function removeInbound(kind: RecordKind, id: string): boolean {
   return true;
 }
 
-export function read(kind: RecordKind, id: string): Loop | CodexEntry | BuildPattern | Opportunity | null {
+export function read(kind: RecordKind, id: string): Loop | CodexEntry | BuildPattern | Opportunity | NsRecord | RtAttempt | ClientLane | ClientQuestion | null {
   const r = rowById(kind, id);
   if (!r) return null;
   switch (kind) {
@@ -1009,6 +1113,12 @@ export function metrics(kind: RecordKind, filter: { builder?: string | null } = 
       return patternMetrics();
     case 'commercial':
       return commercialMetrics();
+    case 'ns':
+      return nsMetrics();
+    case 'rt':
+      return rtMetrics();
+    default:
+      throw new StoreError(`${kind} has no metrics of its own.`, 404);
   }
 }
 
@@ -1021,4 +1131,244 @@ export function held(): Record<RecordKind, number> {
   const out = {} as Record<RecordKind, number>;
   for (const k of KINDS) out[k] = rows(k).length;
   return out;
+}
+
+/* ------------------------------------------------------- north star (NS) */
+
+const NS_OUTCOME_LABELS: Record<string, string> = { answered: 'Answered', thin: 'Thin', failed: 'Failed', unclassified: 'Unclassified' };
+
+/**
+ * North Star telemetry.
+ *
+ * Every figure below is computed over the rows that carry an `outcome`, and
+ * the count that do not is stated beside it. That distinction is the whole
+ * point: a thin rate of "0%" computed over zero classified rows would be a
+ * lie told in the most reassuring possible direction.
+ */
+export function nsMetrics(): NsMetrics {
+  const hit = metricsCache.get('ns');
+  if (hit && hit.version === storeVersion) return hit.value as NsMetrics;
+  const all = nsRecords();
+  const classified = all.filter((r) => r.outcome);
+  const thin = classified.filter((r) => r.outcome === 'thin').length;
+  const weeks = lastWeeks(8);
+
+  const outcomes: (NsOutcome | 'unclassified')[] = ['answered', 'thin', 'failed', 'unclassified'];
+  const inWeek = (r: NsRecord, w: string) => Boolean(r.asked_at) && weekStart(r.asked_at!.slice(0, 10)) === w;
+
+  // Tool usage: hits that came back against hits that ended up cited.
+  const tools = new Map<string, { calls: number; hits: number; used: number }>();
+  for (const r of all)
+    for (const sch of r.searches) {
+      const t = tools.get(sch.tool) ?? { calls: 0, hits: 0, used: 0 };
+      t.calls++;
+      t.hits += sch.hits;
+      t.used += sch.used;
+      tools.set(sch.tool, t);
+    }
+
+  const withConfidence = all.filter((r) => r.confidence !== null);
+  const buckets: [string, (c: number) => boolean][] = [
+    ['nothing cited (0)', (c) => c === 0],
+    ['partly cited (0–1)', (c) => c > 0 && c < 1],
+    ['fully cited (1)', (c) => c >= 1],
+  ];
+
+  const lanes = [...new Set(all.map((r) => r.lane_id ?? '(no lane_id)'))].sort();
+  const newest = all.filter((r) => r.asked_at).sort((a, b) => b.asked_at!.localeCompare(a.asked_at!))[0] ?? null;
+  const sinceLast = newest?.asked_at ? Math.floor((Date.now() - Date.parse(newest.asked_at)) / 86_400_000) : null;
+
+  const value: NsMetrics = {
+    kind: 'ns',
+    computed_at: nowIso(),
+    scope: { rows: all.length },
+    classified: classified.length,
+    unclassified: all.length - classified.length,
+    unclassified_note:
+      all.length - classified.length === 0
+        ? 'Every row carries an outcome.'
+        : `${all.length - classified.length} of ${all.length} rows carry no outcome. The field was added to the table on 10 Sept 2026; rows written before it, and any the agent has not classified since, are counted here and excluded from every rate below. Nothing is inferred from the answer text.`,
+    thin_rate: {
+      value: classified.length ? Math.round((thin / classified.length) * 100) : null,
+      note: classified.length
+        ? `${thin} of ${classified.length} classified asks produced an answer with no [S#] citation behind it. Computed over classified rows only; ${all.length - classified.length} rows carry no outcome and are not in this figure.`
+        : `No row carries an outcome yet, so this cannot be computed. It is the share of classified asks whose answer cites nothing — the measure of answers that look real and are not. It fills the moment North Star starts writing the outcome field.`,
+    },
+    outcome_mix: outcomes
+      .map((o) => ({ outcome: o, label: NS_OUTCOME_LABELS[o], n: o === 'unclassified' ? all.length - classified.length : all.filter((r) => r.outcome === o).length }))
+      .filter((r) => r.n > 0),
+    asks_per_week: series(
+      weeks.map((w) => ({ label: weekLabel(w), value: all.filter((r) => inWeek(r, w)).length })),
+      'Asks by the week of their timestamp, last eight weeks.',
+    ),
+    outcome_per_week: weeks.map((w) => {
+      const mine = all.filter((r) => inWeek(r, w));
+      return {
+        label: weekLabel(w),
+        week: w,
+        answered: mine.filter((r) => r.outcome === 'answered').length,
+        thin: mine.filter((r) => r.outcome === 'thin').length,
+        failed: mine.filter((r) => r.outcome === 'failed').length,
+        unclassified: mine.filter((r) => !r.outcome).length,
+      };
+    }),
+    research_required_rate: (() => {
+      const known = all.filter((r) => r.research_required !== null);
+      const yes = known.filter((r) => r.research_required).length;
+      return {
+        value: known.length ? Math.round((yes / known.length) * 100) : null,
+        note: known.length
+          ? `${yes} of ${known.length} asks were flagged as needing research. ${all.length - known.length ? `${all.length - known.length} rows record neither Yes nor No.` : ''}`.trim()
+          : 'No row records research_required.',
+      };
+    })(),
+    tool_usage: [...tools.entries()]
+      .map(([tool, t]) => ({ tool, calls: t.calls, hits: t.hits, used: t.used, cited_rate: t.hits ? Math.round((t.used / t.hits) * 100) : null }))
+      .sort((a, b) => b.calls - a.calls),
+    tool_note:
+      tools.size === 0
+        ? 'No ask records a tool call in its evidence blob.'
+        : 'From each ask’s own searches blob: calls made, hits returned, and how many of those hits ended up behind an [S#] citation. A tool with hits and no cited uses is being called and ignored.',
+    confidence_mix: buckets.map(([bucket, test]) => ({ bucket, n: withConfidence.filter((r) => test(r.confidence!)).length })).filter((b) => b.n > 0),
+    confidence_note: withConfidence.length
+      ? `Citation coverage as the agent computed it on ${withConfidence.length} of ${all.length} asks — the share of tool calls that produced a traceable citation. It is not a model-reported probability.`
+      : 'No ask records a confidence figure.',
+    by_lane: lanes
+      .map((lane_id) => {
+        const mine = all.filter((r) => (r.lane_id ?? '(no lane_id)') === lane_id);
+        return { lane_id, asks: mine.length, thin: mine.filter((r) => r.outcome === 'thin').length, unclassified: mine.filter((r) => !r.outcome).length };
+      })
+      .sort((a, b) => b.asks - a.asks),
+    last_ask: {
+      at: newest?.asked_at ?? null,
+      trace_id: newest?.trace_id ?? null,
+      note: newest?.asked_at
+        ? sinceLast === 0
+          ? 'North Star was asked something today.'
+          : `North Star has not been asked anything for ${sinceLast} ${sinceLast === 1 ? 'day' : 'days'}. Silence here is itself a signal: it means nothing is routing questions to it.`
+        : 'No ask carries a timestamp.',
+    },
+  };
+  metricsCache.set('ns', { version: storeVersion, value });
+  return value;
+}
+
+/* ---------------------------------------------------- research twin (RT) */
+
+/**
+ * Collapse the attempt log into one row per card.
+ *
+ * The Research Queue holds one row per research *attempt*, and `card_id`
+ * repeats — a single card can carry twenty rows. Queue depth, run counts and
+ * days stuck are all per-card questions, so they are answered against this
+ * collapse; the page prints both figures so the shape is never hidden.
+ *
+ * The newest attempt decides the card's current state. `run_count` takes the
+ * highest seen, and `first_stuck_at` the earliest, because that field is
+ * deliberately not re-stamped and the earliest stamp is the real watermark.
+ */
+export function rtCards(): RtCard[] {
+  const byCard = new Map<string, RtAttempt[]>();
+  for (const a of rtAttempts()) {
+    const key = a.card_id ?? a.id;
+    const held = byCard.get(key) ?? [];
+    held.push(a);
+    byCard.set(key, held);
+  }
+  const now = today();
+  return [...byCard.entries()]
+    .map(([card_id, attempts]) => {
+      const ordered = [...attempts].sort((a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''));
+      const latest = ordered[ordered.length - 1];
+      const stuckStamps = ordered.map((a) => a.first_stuck_at).filter((v): v is string => Boolean(v)).sort();
+      const firstStuck = stuckStamps[0] ?? null;
+      const runs = ordered.map((a) => a.run_count ?? 0);
+      return {
+        card_id,
+        lane_id: latest.lane_id,
+        hypothesis: ordered.find((a) => a.hypothesis)?.hypothesis ?? null,
+        status: latest.status,
+        status_label: latest.status ?? 'untriaged',
+        confidence_level: latest.confidence_level,
+        gap_classification: ordered.reverse().find((a) => a.gap_classification)?.gap_classification ?? null,
+        missing_elements: latest.missing_elements,
+        target_source_types: latest.target_source_types,
+        research_summary: latest.research_summary,
+        run_count: runs.length ? Math.max(...runs) : 0,
+        requires_human: attempts.some((a) => a.requires_human),
+        first_stuck_at: firstStuck,
+        days_stuck: firstStuck ? Math.max(0, dayDiff(firstStuck.slice(0, 10), now)) : null,
+        source_system: latest.source_system,
+        created_at: ordered[0]?.created_at ?? null,
+        last_attempt_at: latest.created_at,
+        attempts: attempts.length,
+        source: latest.source,
+        airtable: latest.airtable,
+      };
+    })
+    .sort((a, b) => (b.last_attempt_at ?? '').localeCompare(a.last_attempt_at ?? ''));
+}
+
+export function rtMetrics(): RtMetrics {
+  const hit = metricsCache.get('rt');
+  if (hit && hit.version === storeVersion) return hit.value as RtMetrics;
+  const attempts = rtAttempts();
+  const cards = rtCards();
+  const needsHuman = cards.filter((c) => c.requires_human);
+  const untriaged = cards.filter((c) => !c.status);
+  const stuck = cards.filter((c) => c.days_stuck !== null);
+  const weeks = lastWeeks(8);
+
+  const statuses = [...new Set(cards.map((c) => c.status_label))].sort();
+  const gaps = [...new Set(cards.map((c) => c.gap_classification).filter((v): v is string => Boolean(v)))].sort();
+  const levels = [...new Set(cards.map((c) => c.confidence_level).filter((v): v is string => Boolean(v)))].sort();
+  const stuckBuckets: [string, (d: number) => boolean][] = [
+    ['0–2 days', (d) => d <= 2],
+    ['3–7 days', (d) => d > 2 && d <= 7],
+    ['8–14 days', (d) => d > 7 && d <= 14],
+    ['over 14 days', (d) => d > 14],
+  ];
+  const oldest = [...stuck].sort((a, b) => (b.days_stuck ?? 0) - (a.days_stuck ?? 0))[0] ?? null;
+  const runBuckets = ['0', '1', '2', '3 (capped)', 'over 3'];
+  const runBucket = (n: number) => (n >= 4 ? 'over 3' : n === 3 ? '3 (capped)' : String(n));
+  const overCap = cards.filter((c) => c.run_count > 3).length;
+
+  const value: RtMetrics = {
+    kind: 'rt',
+    computed_at: nowIso(),
+    scope: { rows: attempts.length, cards: cards.length },
+    requires_human: {
+      n: needsHuman.length,
+      note: needsHuman.length
+        ? `${needsHuman.length} ${needsHuman.length === 1 ? 'card has' : 'cards have'} requires_human ticked — the hard stop the queue sets once a card has had three attempts. These need a person; nothing else in the queue will move them.`
+        : 'No card has reached the hard stop.',
+    },
+    by_status: statuses.map((st) => ({ status: st, label: st === 'untriaged' ? 'Untriaged' : st.charAt(0).toUpperCase() + st.slice(1), n: cards.filter((c) => c.status_label === st).length })).sort((a, b) => b.n - a.n),
+    status_note: `Queue depth by the status on each card’s newest attempt. ${untriaged.length ? `A blank status is a real state — a card migrated in and not yet triaged — and is shown as “untriaged”, not as an error.` : ''}`.trim(),
+    days_stuck: stuckBuckets.map(([bucket, test]) => ({ bucket, n: stuck.filter((c) => test(c.days_stuck!)).length })),
+    days_stuck_note: stuck.length
+      ? `${stuck.length} of ${cards.length} cards have ever been stuck. Counted from first_stuck_at — when the card FIRST went stuck, which the queue deliberately does not re-stamp on later attempts, so this is the true age of the problem rather than the age of the last retry.`
+      : 'No card carries a first_stuck_at, so nothing has been recorded as stuck.',
+    oldest_stuck: {
+      card_id: oldest?.card_id ?? null,
+      days: oldest?.days_stuck ?? null,
+      note: oldest ? `Longest-standing stuck card, ${oldest.days_stuck} days since it first went stuck.` : 'Nothing is stuck.',
+    },
+    run_count_mix: runBuckets.map((runs) => ({ runs, n: cards.filter((c) => runBucket(c.run_count) === runs).length })).filter((r) => r.n > 0),
+    run_count_note: `Attempts per card, taking the highest run_count on any of its rows. The queue caps at three and sets requires_human there.${overCap ? ` ${overCap} ${overCap === 1 ? 'card is' : 'cards are'} above the cap, which the cap alone does not explain.` : ''}`,
+    gap_mix: gaps.map((gap) => ({ gap: gap.replace(/_/g, ' '), n: cards.filter((c) => c.gap_classification === gap).length })).sort((a, b) => b.n - a.n),
+    confidence_mix: levels.map((level) => ({ level, n: cards.filter((c) => c.confidence_level === level).length })),
+    created_per_week: series(
+      weeks.map((w) => ({ label: weekLabel(w), value: cards.filter((c) => c.created_at && weekStart(c.created_at.slice(0, 10)) === w).length })),
+      'Cards by the week they first entered the queue, last eight weeks.',
+    ),
+    untriaged: {
+      n: untriaged.length,
+      note: untriaged.length
+        ? `${untriaged.length} ${untriaged.length === 1 ? 'card carries' : 'cards carry'} no status. Blank is a real state here: these were migrated in and have not been triaged.`
+        : 'Every card carries a status.',
+    },
+  };
+  metricsCache.set('rt', { version: storeVersion, value });
+  return value;
 }

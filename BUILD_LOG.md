@@ -2063,3 +2063,121 @@ Verified:   Local Airtable replay seeded from the live schemas read through the
             cannot reach. The first boot after this deploy will print six codex
             resync lines instead of one, and the Codex page will read from the
             submissions base for the first time.
+
+## 2026-09-10 19:50 — Sync cadence, North Star and Research Twin telemetry, the Clients page
+Intent:     Destiny's second brief. Shorten the resync interval and put the age
+            of the data on every page. Build North Star telemetry from its own
+            ask log, Research Twin telemetry from the Research Queue, and a
+            Clients page grouping watched lanes under the client that owns
+            them. Plus: the vFarm coming-soon state, reported as not landed.
+Files:      server/src/{sync,sources,store,engine,index}.ts; src/data/
+            {types,index}.ts; src/components/ui/Records.tsx (SyncLine,
+            relativeTime); new src/screens/{NorthStar,ResearchTwin,
+            Clients}.tsx; src/screens/Twin/* (deleted); src/screens/VFarm/
+            index.tsx; src/{App,components/Layout}.tsx; render.yaml; README.md;
+            CLAUDE.md; scratchpad mock-airtable.js.
+Problem:    1. The vFarm coming-soon state DID land, on 2026-09-10 in commit
+               4482885, on branch claude/bha-engine-dashboard-refinement-9v4t9r.
+               It is not on the live service because `origin/main` is still at
+               04a9561 — three commits behind — and render.yaml deploys from
+               the default branch on commit. The whole previous refinement pass
+               is unmerged and undeployed, not just the vFarm state.
+            2. NS Records: `outcome` is empty on all 34 rows, including the
+               ones written today. The brief said rows before 10 Sept would be
+               empty; in fact nothing has written the field at all, so the thin
+               rate — the page's headline — cannot be computed from it.
+            3. The Research Queue is an attempt log, not one row per card: 213
+               rows across ~29 distinct card_ids, one card carrying 25 rows.
+               "Queue depth" and "run-count distribution" are per-card
+               questions asked of a per-attempt table.
+            4. `run_count` reaches 4 on some rows, above the documented cap of
+               3, and `requires_human` stays ticked on cards since resolved.
+            5. Two migrations sit in the queue, not one: `watched_clients_
+               migration` (30 Aug, ids LANE-MIGRATED-*, status pending) as well
+               as the `migrated_from_watched_clients` nine (10 Sept, ids
+               RQ-MIG-*, status blank) the brief describes.
+            6. A `clients` resync read each lane's questions table twice per
+               cycle — once inside the clients run, once again when the kind
+               loop reached `client_questions`.
+Fix:        Cadence. AIRTABLE_RESYNC_MINUTES is 15, in sync.ts, render.yaml and
+            the README. A full resync is 23 tables and ~31 requests across seven
+            bases, paced
+            at 220 ms, so about seven seconds and nowhere near Airtable's five
+            requests a second per base. `resyncAll` now skips
+            `client_questions`, which `clients` already covers.
+            Freshness. `relativeTime()` and a rewritten `SyncLine`: every page
+            prints "Read from Airtable 4 min ago — 34 rows", re-rendered on a
+            30-second timer so a tab left open does not keep claiming the data
+            is four minutes old an hour later. Rows older than two resync
+            cycles go amber. A failed resync renders "Showing rows read 7 min
+            ago … · last resync failed: <reason>" — the held rows are never
+            presented as current. `SyncInfo` carries `resync_minutes` so the
+            page knows what overdue means. vFarm, still fixtures, says so
+            rather than showing a sync line it does not have.
+            North Star. New kind `ns`. The thin rate is computed over rows
+            carrying an `outcome` and no others, and renders as "Not recorded"
+            with its reason when nothing is classified. Also asks per week,
+            a stacked outcome-over-time chart, research-required rate, tool
+            hits against cited uses parsed from the searches blob, citation
+            coverage, by lane, and last ask. The entry view shows the tool
+            calls, the answer, and the prompt as sent.
+            Research Twin. New kind `rt`. `rtCards()` collapses the attempt log
+            on card_id: newest attempt decides the state, run_count takes the
+            highest, first_stuck_at the earliest. Cards at requires_human sort
+            first and are the default filter. Days stuck, run counts, gap
+            classification, confidence and created-per-week are all per card,
+            with the row count printed beside the card count.
+            Clients. New kinds `clients` and `client_questions`. The index is
+            read, then each row's `Table ID` is followed — no lane-to-table map
+            in this code. Lanes group under `Client ID`, so Client 2 appears
+            once with both lanes beneath. Needs-human reads the three existing
+            circuit breakers and recomputes none of them. A lane with no run is
+            warming up and is not counted stale.
+            vFarm. Lifecycle and Readiness were already ComingSoon panels with
+            "soon" on the tabs; unchanged, plus the fixtures note.
+Decision:   The thin rate is not derived from the answer text. The definitions
+            are mechanical enough that this dashboard could classify the rows
+            itself, and the brief's instruction not to backfill or guess is the
+            right call: a number computed here would sit in the same place on
+            the page as one North Star stands behind, and nothing on screen
+            would distinguish them. What the page shows instead is citation
+            coverage from the evidence blob — 27 of 34 asks cite nothing —
+            labelled as coverage, which is what it is.
+            The Research Twin page is per card, because that is the question
+            being asked, and it prints the row count so the collapse is visible
+            rather than assumed.
+            The old fixture-backed Summary/Records/Runs/Gaps twin screens are
+            deleted rather than kept beside the real ones. Two North Star pages,
+            one real and one invented, is worse than one.
+Verified:   Local Airtable replay extended with the three new sources, shaped
+            from the live reads: 34 NS rows with no outcome on any of them, an
+            RT attempt log of 211 rows over 29 cards including nine blank-status
+            RQ-MIG-* rows, and the four index lanes with their own question
+            tables.
+            Boot resync, one line per table, 26 reads: loops 755/7, codex 134/6,
+            patterns 149, commercial 21, ns 34, rt 211, clients index 4 plus
+            four question tables (6/4/6/6). Each table read once.
+            North Star: 34 rows, 0 classified, thin rate null and rendering as
+            "Not recorded" with its reason rather than 0%. Tool usage
+            Read_Open_Loops 16 hits / 7 cited (44%), Get_Priority_Evidence 7/7
+            (100%) — a tool being called and ignored is visible. Citation
+            coverage 27 nothing-cited, 7 fully cited.
+            Research Twin: 211 attempt rows collapse to 29 cards; 3 at
+            requires_human; 9 untriaged; 4 ever stuck, longest 21 days; run
+            counts 15/6/5 at 0/1/2 and 3 above the cap, which the page names.
+            Clients: 3 clients over 4 lanes. CLIENT-002 renders once, labelled
+            "Client 2", with both lanes beneath it. The CRE vFarm + Kiosk lane
+            reads "warming up / never" and is not counted stale; the other
+            three are stale at 17 days.
+            A failed resync, tested by stopping the replay mid-session: 34 rows
+            still held, synced_at unchanged at the last good read, and the page
+            renders "Showing rows read 7 min ago — 34 rows · last resync failed:
+            NS Records: Could not reach Airtable." in amber.
+            Chromium sweep, nine pages at 1440px and 400px: document overflow 0
+            at both widths on every page, no uncontained wide element on any of
+            the eight in scope, card rows uniform at 82–91% content fill, twenty
+            rows and a pager wherever a list is paged. No console errors beyond
+            the Inter webfont this sandbox cannot fetch.
+            Not verified here: the live service, which this sandbox cannot
+            reach — and which is running none of this, because main is three
+            commits behind.

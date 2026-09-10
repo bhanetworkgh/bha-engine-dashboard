@@ -72,6 +72,14 @@ browser to the engine. The engine endpoint fans out to Airtable, BHARAG and n8n
 execution history and returns one response. Neither side of this app knows or
 cares where anything came from.
 
+**Telemetry comes from Airtable too** (decision 2026-09-10, Destiny). North
+Star's ask log is `appkCTjhH8PtYRFI7 / tbl9OGZTyvBKrbeFm`; Research Twin's
+queue is `appud969Dw7H4tMwv / tblUl8YHhQReDgq8G` (the
+`research_twin_research_jobs` table in that base holds one test row and is
+never read); the watched clients are `appkSUSh9ijNjP2f8`, whose index row
+names its own questions table in `Table ID` — followed at sync time, never
+hardcoded.
+
 **Records come from Airtable; the server reads it directly** (decision
 2026-09-09, Destiny). Loops, Codex entries, build patterns and commercial
 cards are read by `server/src/sync.ts` from their Airtable bases through
@@ -93,8 +101,14 @@ type, so `DATA_DIR` is wiped on every deploy and every spin-down. Therefore:
 - **Every write from the interface goes to Airtable first** and is shown only
   from what Airtable sent back. If Airtable refuses, nothing changes here.
 - **Resync rebuilds the read model**: on boot, every `AIRTABLE_RESYNC_MINUTES`
-  (default 30), and on demand from each page or `POST /api/resync/:kind`. It
-  is idempotent and purges a table's rows only after a successful full read.
+  (default 15, decision 2026-09-10), and on demand from each page or
+  `POST /api/resync/:kind`. It is idempotent and purges a table's rows only
+  after a successful full read.
+- **Every page states how old its rows are**, relative ("4 min ago"), in the
+  same place. A failed resync says so and says what is on screen instead; the
+  previous rows are never presented as current. A figure that can be a day old
+  with nothing saying so is a correctness bug on an engine-health surface, not
+  a polish issue.
 - **n8n dual-writes through `/api/inbound/:kind`**, authenticated by
   `DASHBOARD_INBOUND_KEY` in `x-dashboard-key` (the same pattern as
   `ASK_BAYS_API_KEY`, inbound). The push is additive; the Airtable write path
@@ -234,15 +248,34 @@ Right-hand panel: new chat, chat history list, search past chats.
 **Note:** Bays has no memory today. Build the history and new-chat UI fully
 against fixtures. It gets wired in a later phase.
 
-### North Star / Research Twin
-- **Summary** — asks this period, split answered / thin / failed, median time to
-  answer, top askers, breakdown by lane.
-- **Records** — the ask log. Question, who asked, session, lane, cycle, outcome,
-  `evidence_shape_version`.
-- **Runs** — the attempt record. Which searches fired, what each returned, which
-  came back empty, how the run ended.
-- **Gaps** — what came back empty or thin and is still unanswered, plus the
-  transition list: items that went thin and were later answered.
+### North Star
+The ask log. **Thin rate is the headline** — answers that look real and cite
+nothing — computed over the rows carrying an `outcome` and no others, with the
+unclassified count stated beside it. `outcome` is North Star's own
+single-select (answered / thin / failed) and is authoritative; a row without
+one is *unclassified* and nothing is inferred from the answer text. Also: asks
+per week, outcome over time, research-required rate, tool hits against cited
+uses from the searches blob, citation coverage, by lane, and when it was last
+asked anything — silence there is itself the signal.
+
+### Research Twin
+The research queue. It is an **attempt log** — one row per attempt, `card_id`
+repeats — so every figure is per card, collapsed on `card_id` with the newest
+attempt deciding the state, and the row count is printed beside the card count.
+Cards at `requires_human` come first. Days stuck is counted from
+`first_stuck_at`, which is deliberately not re-stamped, so it is the age of the
+problem rather than of the last retry. A blank status is *untriaged*, a real
+state, not an error.
+
+### Clients
+One row per watched lane, **grouped under the client that owns it** by the
+index's own `Client ID`: two lanes with one id are one client with two lanes
+and appear once. Columns: client, lane, lane status, run state, last run, next
+run due, active questions, needs human, missing research, latest report,
+commercial hook. "Needs human" reads the three circuit breakers that already
+exist upstream — `Research Stuck`, `Run Count` at 3, or a quarantined lane —
+and never recomputes what they mean. A lane with no run yet is **warming up,
+not failing**.
 
 ### vFarm
 Timeline of four event types: `burn_in_cycle_started`, `burn_in_anomaly`,
