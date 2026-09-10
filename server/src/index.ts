@@ -151,7 +151,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
       // The id can come from the path, the body, or the record itself — n8n's Airtable node returns the record with its id inside.
       const id = idInPath ?? (str(body.id, 40) || (record ? str(record.id, 40) : ''));
       const builder = str(body.builder, 40);
-      const tableFromBuilder = builder ? engine.loopTableFor(builder) : null;
+      const tableFromBuilder = builder ? (kind === 'codex' ? engine.codexTableFor(builder) : engine.loopTableFor(builder)) : null;
       const table = str(body.table, 40) || tableFromBuilder || undefined;
       const result = await store.applyInbound(kind, { id, table, record, at: str(body.at, 40) || undefined });
       return send(res, result.inserted ? 201 : 200, { ok: true, ...result });
@@ -230,6 +230,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     if (patternDetail) {
       const d = store.patternDetail(decodeURIComponent(patternDetail[1]));
       if (!d) throw new HttpError(404, 'That pattern is not held by this dashboard.');
+      return send(res, 200, d);
+    }
+    // The full Codex entry (Orchestrator Layer2 Review) is thousands of words,
+    // so it is fetched one entry at a time rather than carried on the list.
+    const codexDetail = p.match(/^\/api\/codex\/([^/]+)$/);
+    if (codexDetail) {
+      const d = engine.getCodexDetail(decodeURIComponent(codexDetail[1]));
+      if (!d) throw new HttpError(404, 'That Codex entry is not held by this dashboard.');
       return send(res, 200, d);
     }
     if (p === '/api/resync') {
