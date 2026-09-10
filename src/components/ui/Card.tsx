@@ -110,3 +110,36 @@ export function StatStrip({ children, cols, className = '' }: { children: ReactN
 export function StatCell({ children }: { children: ReactNode }) {
   return <div className="border-b border-line px-5 py-4 md:border-r md:border-b-0 md:last:border-r-0 [&:nth-last-child(-n+2)]:border-b-0 md:[&:nth-last-child(-n+2)]:border-b-0">{children}</div>;
 }
+
+/**
+ * A metric card that fills its own height. Cards in one grid row are already
+ * the same height (grid stretches them); this makes their *content* fill that
+ * height rather than leaving a card of 100px holding 10px of text — the title
+ * at the top, the body growing into whatever is left, and the footnote sitting
+ * on the floor of the card.
+ */
+export function MetricCard({
+  title,
+  right,
+  note,
+  children,
+  className = '',
+}: {
+  title: ReactNode;
+  right?: ReactNode;
+  /** The caveat or definition, pinned to the bottom edge so every card in a row lines up. */
+  note?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`card flex h-full min-w-0 flex-col px-5 py-4 ${className}`}>
+      <div className="mb-2 flex items-baseline justify-between gap-3">
+        <div className="text-[13px] font-medium text-ink">{title}</div>
+        {right && <div className="shrink-0 text-[10.5px] text-faint">{right}</div>}
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col justify-center">{children}</div>
+      {note && <div className="mt-3 text-[11.5px] leading-snug text-faint">{note}</div>}
+    </div>
+  );
+}

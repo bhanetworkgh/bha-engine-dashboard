@@ -16,12 +16,17 @@ export default function VFarm() {
   if (status === 'loading') return <Loading />;
   if (status === 'error') return <LoadFailed error={error} />;
 
+  /** A tab whose capability does not exist yet, rather than one that happens to be empty. */
+  const soon: Tab[] = [...(data.lifecycle.length === 0 ? (['Lifecycle'] as Tab[]) : []), 'Readiness'];
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
         title="vFarm"
         subtitle={`${data.days_to_halloween} days to Halloween`}
-        below={<Tabs tabs={TABS} value={tab} onChange={setTab} />}
+        // Lifecycle and Readiness are marked before the reader clicks: nothing
+        // emits lifecycle events, and readiness is not computed anywhere yet.
+        below={<Tabs tabs={TABS} value={tab} onChange={setTab} soon={soon} />}
       />
 
       {tab === 'Live' && <Live data={data} />}

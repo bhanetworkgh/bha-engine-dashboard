@@ -4,7 +4,8 @@
  * from the live bases on 2026-09-09, not assumed.
  *
  *   loops       appUVlBSGGPHw6DGh   one table per builder, identical schema
- *   codex       apploVyhvTYNGSGCD   Codex Log
+ *   codex       appEmdKshNVTl64Zf   BHA Submissions & Logs, one table per
+ *                                   builder plus the Layer 0 holding table
  *   patterns    app5ni3E8r7Lvxk22   Build Patterns
  *   commercial  appvLglfdCqOKqLpT   Commercial Opportunities
  *
@@ -15,10 +16,10 @@
  */
 import type { AtRecord } from './airtable';
 import { recordUrl } from './airtable';
-import type { BuildPattern, BuildPatternDetail, CodexEntry, Loop, LoopLaneTag, LoopStatus, Opportunity, ReadinessState, RecordKind, Source } from '../../src/data/types';
+import type { BuildPattern, BuildPatternDetail, CodexEntry, CodexEntryDetail, Layer0Hold, Loop, LoopLaneTag, LoopStatus, Opportunity, ReadinessState, RecordKind, Source } from '../../src/data/types';
 
-/** What action_required says, in five buckets. Only 'jason' is surfaced as a layer; the rest are held for filtering. */
-export type CodexBucket = 'jason' | 'destiny' | 'builder' | 'other' | 'none';
+/** Jason Status as the submission tables define it, lower-cased. 'unset' is a row he has not touched. */
+export type CodexApproval = 'approved' | 'pending' | 'input added' | 'unset';
 
 /* ------------------------------------------------------------- locations */
 
@@ -35,7 +36,39 @@ export const LOOP_TABLES: { owner: string; table: string; label: string }[] = [
   { owner: 'kavin', table: 'tbltm7QUmWAZpzTKz', label: 'Kavin' },
 ];
 
-export const CODEX = { base: 'apploVyhvTYNGSGCD', table: 'tblV6GeKEtKJrS4qN', label: 'Codex Log' };
+/**
+ * Codex entries live in BHA Submissions & Logs, one table per builder. Which
+ * table a row lives in *is* its builder identity — the Builder Name field can
+ * be blank, the table never is. That is why there is no "no builder" bucket
+ * any more, and why there is no Jason table: he reviews logs, he does not
+ * submit them.
+ */
+export const CODEX_BASE = 'appEmdKshNVTl64Zf';
+
+export const CODEX_TABLES: { owner: string; table: string; label: string; sheet: string }[] = [
+  { owner: 'destiny', table: 'tblSqm5ty9QVTlmuA', label: 'Destiny', sheet: 'Destiny Arupi' },
+  { owner: 'jegan', table: 'tblTu46ZQYHrim4yI', label: 'Jegan', sheet: 'Jeganathan' },
+  { owner: 'kaiqi', table: 'tbl6QBXrgtLv9axqu', label: 'Kaiqi', sheet: 'kaiqi yang' },
+  { owner: 'hardik', table: 'tblPrGLTE6GGFIHum', label: 'Hardik', sheet: 'Hardik Bhatt' },
+  { owner: 'ahad', table: 'tblG67z5RRZyoBZSj', label: 'Ahad', sheet: 'Ahad' },
+  { owner: 'kavin', table: 'tbltOCB2DHE5FFXa6', label: 'Kavin', sheet: 'Kavin G N' },
+];
+
+/**
+ * The Layer 0 completeness-gate holding table. A submission that failed the
+ * gate is parked here until the builder answers the missing pieces; it is not
+ * a Codex entry and never appears in the entry list. It is read so the
+ * Incomplete tab can say how many submissions are sitting in the gate right
+ * now, which the builder tables alone cannot tell you.
+ */
+export const CODEX_LAYER0 = { base: CODEX_BASE, table: 'tbljoWu73vsxyL6vc', label: 'Layer 0' };
+
+export function codexTable(owner: string): { owner: string; table: string; label: string; sheet: string } | null {
+  return CODEX_TABLES.find((t) => t.owner === owner) ?? null;
+}
+export function codexTableById(table: string): { owner: string; table: string; label: string; sheet: string } | null {
+  return CODEX_TABLES.find((t) => t.table === table) ?? null;
+}
 export const PATTERNS = { base: 'app5ni3E8r7Lvxk22', table: 'tblaMXSMjmz30OvcU', label: 'Build Patterns' };
 export const COMMERCIAL = { base: 'appvLglfdCqOKqLpT', table: 'tblyXShZLOFT3jNMe', label: 'Commercial Opportunities' };
 
@@ -46,9 +79,14 @@ export function loopTableById(table: string): { owner: string; table: string; la
   return LOOP_TABLES.find((t) => t.table === table) ?? null;
 }
 
-/** Where a kind's single table is; loops resolve per owner instead. */
-export function location(kind: Exclude<RecordKind, 'loops'>): { base: string; table: string; label: string } {
-  return kind === 'codex' ? CODEX : kind === 'patterns' ? PATTERNS : COMMERCIAL;
+/** Where a kind's single table is. Loops and Codex entries resolve per builder instead. */
+export function location(kind: Exclude<RecordKind, 'loops' | 'codex'>): { base: string; table: string; label: string } {
+  return kind === 'patterns' ? PATTERNS : COMMERCIAL;
+}
+
+/** The base a kind's records live in. */
+export function baseFor(kind: RecordKind): string {
+  return kind === 'loops' ? LOOPS_BASE : kind === 'codex' ? CODEX_BASE : kind === 'patterns' ? PATTERNS.base : COMMERCIAL.base;
 }
 
 /* ------------------------------------------------------------ vocabularies */
@@ -86,28 +124,15 @@ export const LOOP_LANE_TAGS: LoopLaneTag[] = ['RT', 'NS', 'VFARM_HARDWARE', 'KIO
 export const LOOP_STATUS_TO_AIRTABLE: Record<LoopStatus, string> = { open: 'Open', 'in progress': 'In Progress', closed: 'Closed' };
 const AIRTABLE_TO_LOOP_STATUS: Record<string, LoopStatus> = { Open: 'open', 'In Progress': 'in progress', Closed: 'closed' };
 
-/** Select choices as the Codex Log defines them, for the edit form. TEST_PROBE rows are not offered. */
-export const CODEX_CHOICES = {
-  session_type: [
-    'Build',
-    'Build/Debug',
-    'Not Stated',
-    'Build and Architechture',
-    'Debug',
-    'Architecture',
-    'Build and Architecture',
-    'Coordination & Verification',
-    'Build & Correction',
-    'Build and Debug',
-    'Debug, Architecture, Full-System Audit',
-    'Build, Consolidation & Full-System Documentation',
-    'Maintenance, Pipeline Debugging & Coordination Review',
-    'Build, Migration & Full-System Cleanup',
-  ],
-  verdict: ['Aligned & Moving the Needle', 'Partially Aligned'],
-  narration_quality: ['Excellent', 'Great', 'Good'],
-  pillar_tag: ['MULTIPLE', 'RT_PT_MONITORING', 'FRONT_DOOR', 'GENIE_BHARAG1', 'ROUTING_EVIDENCE'],
-};
+/**
+ * The only Codex field this dashboard writes. Jason Status is the review
+ * decision, and it is a single-select with exactly these three choices in
+ * every builder table. Everything else on a submission row is written by the
+ * pipeline that produced it and is read-only here.
+ */
+export const CODEX_JASON_STATUS = ['Approved', 'Pending', 'Input Added'] as const;
+
+export const CODEX_CHOICES = { jason_status: [...CODEX_JASON_STATUS] };
 
 export const READINESS_STATES: ReadinessState[] = ['INCUBATE', 'Research-First', 'Media-Ready'];
 
@@ -160,6 +185,40 @@ export function builderFromName(name: unknown): string | null {
   return s ? (NAME_TO_BUILDER[s.toLowerCase()] ?? null) : null;
 }
 
+/** Display names for the builders this engine knows, keyed by builder id. */
+export const BUILDER_LABELS: Record<string, string> = {
+  destiny: 'Destiny',
+  jason: 'Jason',
+  jegan: 'Jegan',
+  kaiqi: 'Kaiqi',
+  ahad: 'Ahad',
+  hardik: 'Hardik',
+  kavin: 'Kavin',
+};
+
+/**
+ * One canonical identity per person, for free-text name fields.
+ *
+ * The loop tables' Raised By is a plain text box, so the same person is
+ * written several ways — "Jason" and "Jason Bays", "Destiny" and "Destiny
+ * Arupi", "Jegan" and "Jeganathan". Counting those as separate raisers made
+ * the page wrong, not merely untidy: one person's share of the loops was
+ * split across two bars.
+ *
+ * A name that maps to a builder collapses to that builder. A name that does
+ * not is kept as written (case- and space-normalised), because inventing an
+ * identity for a stranger would be worse than showing two spellings.
+ */
+export function canonicalPerson(raw: unknown): { key: string; label: string } | null {
+  const s = str(raw);
+  if (!s) return null;
+  const cleaned = s.replace(/^@+/, '').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return null;
+  const builder = SLACK_TO_BUILDER[cleaned] ?? NAME_TO_BUILDER[cleaned.toLowerCase()] ?? null;
+  if (builder) return { key: builder, label: BUILDER_LABELS[builder] ?? builder };
+  return { key: `raw:${cleaned.toLowerCase()}`, label: cleaned };
+}
+
 const SLACK_HOST = 'bayshorizonnetwork.slack.com';
 
 function slackSource(url: string | null, fallbackRef: string): Source | null {
@@ -205,85 +264,132 @@ export function mapLoop(rec: AtRecord, owner: string, table: string): Loop {
 
 /* ----------------------------------------------------------------- codex */
 
-export function codexBucket(action: string | null): CodexBucket {
-  if (!action) return 'none';
-  const a = action.trim().toUpperCase().replace(/\.$/, '');
-  if (a === 'JASON_SPOTCHECK') return 'jason';
-  if (a === 'DESTINY_REVIEW') return 'destiny';
-  if (a === 'BUILDER_FOLLOWUP') return 'builder';
-  if (a === 'NONE' || a === '') return 'none';
-  return 'other';
+/** Jason Status, lower-cased. An empty field is 'unset' — he has not looked at it. */
+export function codexApproval(raw: string | null): CodexApproval {
+  const a = (raw ?? '').trim().toLowerCase();
+  if (a === 'approved') return 'approved';
+  if (a === 'pending') return 'pending';
+  if (a === 'input added') return 'input added';
+  return 'unset';
 }
 
-/** The fields a complete log carries. This is the dashboard's check, stated on the page; the log has no completeness field. */
-export const CODEX_REQUIRED: { key: string; label: string }[] = [
-  { key: 'builder', label: 'builder' },
-  { key: 'session_url', label: 'session link' },
-  { key: 'session_type', label: 'session type' },
-  { key: 'verdict', label: 'verdict' },
-  { key: 'architecture_fit', label: 'architecture fit' },
-  { key: 'engine_movement', label: 'engine movement' },
-  { key: 'needle_moved_evidence', label: 'needle-moved evidence' },
-];
+/**
+ * Layer0 Missing is a JSON array of the dimensions the completeness gate
+ * found absent — mission_fit, error_fix, next_step, commercial. It is written
+ * as text, so a malformed value is treated as "nothing recorded" rather than
+ * thrown away silently or guessed at.
+ */
+export function layer0Missing(raw: unknown): string[] {
+  const text = str(raw);
+  if (!text) return [];
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (Array.isArray(parsed)) return parsed.filter((v): v is string => typeof v === 'string' && v.trim() !== '').map((v) => v.trim());
+  } catch {
+    // Not JSON: fall through to the comma-separated reading below.
+  }
+  return text
+    .replace(/^[[\]]+|[[\]]+$/g, '')
+    .split(',')
+    .map((v) => v.replace(/["']/g, '').trim())
+    .filter(Boolean);
+}
 
-export function mapCodex(rec: AtRecord): CodexEntry {
+/** mission_fit → "mission fit". The gate writes snake_case; the page is sentence case. */
+export function missingLabel(key: string): string {
+  return key.replace(/_/g, ' ').toLowerCase();
+}
+
+/** The first lines of the Layer 2 review, for the list. The whole thing is on the entry. */
+function firstLines(text: string | null, max = 220): string | null {
+  if (!text) return null;
+  const t = text.replace(/\s+/g, ' ').trim();
+  if (!t) return null;
+  return t.length <= max ? t : `${t.slice(0, max).trimEnd()}…`;
+}
+
+/**
+ * One submission row from a builder's table in BHA Submissions & Logs.
+ *
+ * The builder is the table, never a field: `Builder Name` can be blank and
+ * several rows are. `Orchestrator Layer2 Review` is the finished Codex entry
+ * — the thing this page exists to show — and is carried in full on the detail
+ * shape only, because a hundred of them in one list payload is megabytes.
+ */
+export function mapCodex(rec: AtRecord, owner: string, table: string): CodexEntryDetail {
   const f = rec.fields;
-  const slack = str(f.builder_id);
-  const name = str(f.builder_name);
-  const builder = builderFromSlack(slack) ?? builderFromName(name);
-  const logged = iso(f.timestamp);
-  const action = str(f.action_required);
-  const pay = bool(f.pay_eligible);
-  const present: Record<string, unknown> = { builder, session_url: str(f.session_url), session_type: str(f.session_type), verdict: str(f.verdict), architecture_fit: str(f.architecture_fit), engine_movement: str(f.engine_movement), needle_moved_evidence: str(f.needle_moved_evidence) };
-  const missing = CODEX_REQUIRED.filter((r) => !present[r.key]).map((r) => r.label);
+  const logged = iso(f.Timestamp);
+  const jason = str(f['Jason Status']);
+  const approval = codexApproval(jason);
+  // "Layer1 Review " carries a trailing space in every table; read both spellings.
+  const layer1 = str(f['Layer1 Review ']) ?? str(f['Layer1 Review']);
+  const layer2 = str(f['Orchestrator Layer2 Review']);
+  const flagged = bool(f['Layer0 Flagged']);
+  const missing = layer0Missing(f['Layer0 Missing']);
+  const url = str(f['Session Url']);
   return {
     id: rec.id,
-    builder_id: builder,
-    builder_slack_id: slack,
-    builder_name: name,
+    builder_id: owner,
+    table,
+    submission_id: str(f['Submission ID']),
+    codex_entry_id: str(f['Codex Entry ID']),
     logged_at: logged,
     week: logged ? isoWeek(logged) : null,
-    session_type: str(f.session_type),
-    session_url: str(f.session_url),
-    verdict: str(f.verdict),
-    narration_quality: str(f.narration_quality),
-    pay_eligible: pay,
-    action_required: action,
-    card_id: str(f.card_id),
-    lane_id: str(f.lane_id),
-    pillar_tag: str(f.pillar_tag),
-    flag_name: str(f.flag_name),
-    flag_repeat_count: num(f.flag_repeat_count),
-    architecture_fit: str(f.architecture_fit),
-    engine_movement: str(f.engine_movement),
-    needle_moved_evidence: str(f.needle_moved_evidence),
-    red_flags: str(f.red_flags),
-    complete: missing.length === 0,
-    missing,
+    session_type: str(f['Session Type']),
+    session_url: url,
+    narration_quality: str(f['Narration Quality']),
+    submission_source: str(f['Submission Source']),
+    jason_status: jason,
+    approval,
+    layer0_flagged: flagged,
+    layer0_missing: missing,
+    /** Complete exactly as specified: the gate passed it and Layer 2 wrote an entry. */
+    complete: !flagged && Boolean(layer2),
+    has_entry: Boolean(layer2),
+    entry_excerpt: firstLines(layer2),
+    processed_at: iso(f['Processed At']),
+    processed_date: day(f['Processed Date']),
     note: null,
-    spine: { session_id: null, builder_id: builder, subsystem: 'CODEX', lane: str(f.lane_id) },
-    tags: pay ? { pay_eligible: true } : {},
-    source: airtableSource(CODEX.base, CODEX.table, rec.id),
-    airtable: { base: CODEX.base, table: CODEX.table, record_id: rec.id, url: recordUrl(CODEX.base, CODEX.table, rec.id) },
+    spine: { session_id: str(f['Submission ID']), builder_id: owner, subsystem: 'CODEX', lane: null },
+    tags: {},
+    source: slackSource(url, rec.id) ?? airtableSource(CODEX_BASE, table, rec.id),
+    airtable: { base: CODEX_BASE, table, record_id: rec.id, url: recordUrl(CODEX_BASE, table, rec.id) },
+    entry: layer2,
+    layer1_review: layer1,
+    summary: str(f.Summary),
+    session_description: str(f['Session Description']),
+    jason_notes: str(f['Jason Notes']),
   };
 }
 
-/** The Airtable field names an edit may write. Same set as CodexEditableField. */
-export const CODEX_EDITABLE = new Set([
-  'session_type',
-  'session_url',
-  'verdict',
-  'narration_quality',
-  'pay_eligible',
-  'action_required',
-  'card_id',
-  'lane_id',
-  'pillar_tag',
-  'architecture_fit',
-  'engine_movement',
-  'needle_moved_evidence',
-  'red_flags',
-]);
+/** The list shape: everything but the long text. */
+export function codexSummary(e: CodexEntryDetail): CodexEntry {
+  const { entry, layer1_review, summary, session_description, jason_notes, ...rest } = e;
+  void [entry, layer1_review, summary, session_description, jason_notes];
+  return rest;
+}
+
+/** One row of the Layer 0 holding table: a submission parked at the completeness gate. */
+export function mapLayer0(rec: AtRecord): Layer0Hold {
+  const f = rec.fields;
+  const name = str(f['Builder Username']);
+  const status = str(f.Status);
+  return {
+    id: rec.id,
+    submission_id: str(f['Submission ID']),
+    builder_id: builderFromSlack(f['Builder User ID']) ?? builderFromName(name),
+    builder_name: name,
+    missing: layer0Missing(f['Missing Fields']),
+    status,
+    open: (status ?? '').toLowerCase() !== 'completed',
+    created_at: iso(f['Created At']),
+    source: airtableSource(CODEX_BASE, CODEX_LAYER0.table, rec.id),
+    airtable: { base: CODEX_BASE, table: CODEX_LAYER0.table, record_id: rec.id, url: recordUrl(CODEX_BASE, CODEX_LAYER0.table, rec.id) },
+  };
+}
+
+/** The one Airtable field an edit may write, and the one status change. */
+export const CODEX_EDITABLE = new Set(['Jason Status', 'Jason Notes']);
 
 /* -------------------------------------------------------------- patterns */
 
@@ -323,7 +429,14 @@ export function mapPattern(rec: AtRecord): BuildPatternDetail {
     id: rec.id,
     pattern_id,
     title: str(f.pattern_name) ?? pattern_id ?? '(unnamed pattern)',
-    status: statusName === 'canonical' ? 'canonical' : 'draft',
+    /**
+     * pattern_status is a single-select with exactly two choices, and a
+     * sizeable minority of rows leave it empty. Folding empty into draft was
+     * why the draft count and the total never reconciled: a pattern nobody
+     * has triaged is not a draft, it is a pattern in no state at all. Three
+     * states here, two of them writable.
+     */
+    status: statusName === 'canonical' ? 'canonical' : statusName === 'draft' ? 'draft' : 'unset',
     bha_system,
     reusability: str(f.reusability),
     created_at: iso(f.created_at),

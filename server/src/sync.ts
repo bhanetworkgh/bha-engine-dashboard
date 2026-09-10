@@ -11,7 +11,7 @@
  * empties a page.
  */
 import * as airtable from './airtable';
-import { CODEX, COMMERCIAL, LOOP_TABLES, LOOPS_BASE, PATTERNS } from './sources';
+import { CODEX_BASE, CODEX_LAYER0, CODEX_TABLES, COMMERCIAL, LOOP_TABLES, LOOPS_BASE, PATTERNS, mapLayer0 } from './sources';
 import * as store from './store';
 import type { RecordKind } from '../../src/data/types';
 
@@ -62,7 +62,9 @@ function tablesFor(kind: RecordKind): { base: string; table: string; label: stri
     case 'loops':
       return LOOP_TABLES.map((t) => ({ base: LOOPS_BASE, table: t.table, label: t.label }));
     case 'codex':
-      return [CODEX];
+      // One table per builder, exactly as for loops. Which table a submission
+      // lives in is its builder identity, so there is nothing to attribute.
+      return CODEX_TABLES.map((t) => ({ base: CODEX_BASE, table: t.table, label: t.label }));
     case 'patterns':
       return [PATTERNS];
     case 'commercial':
@@ -79,6 +81,16 @@ export function resync(kind: RecordKind): Promise<ResyncResult> {
     const tables: TableResult[] = [];
     for (const t of tablesFor(kind)) {
       tables.push(await syncTable(kind, t.base, t.table, t.label));
+    }
+    if (kind === 'codex') {
+      // The Layer 0 holding table is not a record kind — it has no status and
+      // no write path — so it is read alongside and held whole. A failure here
+      // never fails the resync: the entries themselves are what the page needs.
+      try {
+        store.setLayer0Holds((await airtable.listAll(CODEX_LAYER0.base, CODEX_LAYER0.table)).map(mapLayer0));
+      } catch (e) {
+        console.log(`resync codex/${CODEX_LAYER0.label}: FAILED — ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
     const failed = tables.filter((t) => t.error);
     const ok = failed.length === 0;

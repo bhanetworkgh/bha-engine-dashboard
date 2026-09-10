@@ -10,6 +10,8 @@ export * from './Icons';
 export * from './LoadFailed';
 export * from './Loading';
 export * from './PageHeader';
+export * from './Pagination';
+export * from './ListRow';
 export * from './RowActions';
 export * from './SourceLink';
 export * from './Spine';

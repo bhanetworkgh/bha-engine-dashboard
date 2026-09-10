@@ -759,9 +759,15 @@
 
   /* Segmented control. One selected segment, the rest quiet. */
   .seg {
-    display: inline-flex;
+    display: flex;
+    /* Wraps rather than forcing the page body to scroll sideways. A filter bar
+       with twenty systems in it becomes two or three lines; it never becomes a
+       horizontal scrollbar under the whole page. */
+    flex-wrap: wrap;
     align-items: center;
     gap: 2px;
+    max-width: 100%;
+    width: fit-content;
     padding: 2px;
     border-radius: var(--radius-md);
     background: var(--raised);

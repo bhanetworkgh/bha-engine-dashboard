@@ -25,9 +25,13 @@ import * as airtable from './airtable';
 import type {
   BuildPattern,
   BuildPatternDetail,
+  CodexApproval,
   CodexEntry,
+  CodexEntryDetail,
   CodexMetrics,
+  CodexTab,
   CommercialMetrics,
+  Layer0Hold,
   Loop,
   LoopMetrics,
   LoopStatus,
@@ -44,15 +48,19 @@ import type {
 } from '../../src/data/types';
 import { getMeta, nowIso, openDb, setMeta, today } from './db';
 import {
-  CODEX,
   CODEX_EDITABLE,
+  CODEX_JASON_STATUS,
+  CODEX_TABLES,
   COMMERCIAL,
   LOOP_LANE_TAGS,
   LOOP_STATUS_TO_AIRTABLE,
   LOOP_TABLES,
   LOOPS_BASE,
   PATTERNS,
-  codexBucket,
+  baseFor,
+  canonicalPerson,
+  codexSummary,
+  codexTableById,
   isoWeek,
   loopTable,
   loopTableById,
@@ -60,6 +68,7 @@ import {
   mapLoop,
   mapOpportunity,
   mapPattern,
+  missingLabel,
   patternSummary,
 } from './sources';
 
@@ -69,7 +78,8 @@ export const KINDS: RecordKind[] = ['loops', 'codex', 'patterns', 'commercial'];
 /** Status vocabularies, in the dashboard's words. Loops and patterns and cards are the table's own selects lower-cased or verbatim. */
 export const STATUSES: Record<RecordKind, readonly string[]> = {
   loops: ['open', 'in progress', 'closed'],
-  codex: ['jason', 'destiny', 'builder', 'other', 'none'],
+  // Codex: Jason Status, lower-cased. 'unset' is a state a row can be in but never one this dashboard writes.
+  codex: ['approved', 'pending', 'input added'],
   patterns: ['draft', 'canonical'],
   commercial: ['INCUBATE', 'Research-First', 'Media-Ready'],
 };
@@ -188,7 +198,7 @@ function rowById(kind: RecordKind, id: string): Row | null {
 
 type Mapped =
   | { kind: 'loops'; obj: Loop }
-  | { kind: 'codex'; obj: CodexEntry }
+  | { kind: 'codex'; obj: CodexEntryDetail }
   | { kind: 'patterns'; obj: BuildPatternDetail }
   | { kind: 'commercial'; obj: Opportunity };
 
@@ -197,7 +207,7 @@ function statusOf(m: Mapped): string {
     case 'loops':
       return m.obj.status;
     case 'codex':
-      return codexBucket(m.obj.action_required);
+      return m.obj.approval;
     case 'patterns':
       return m.obj.status;
     case 'commercial':
@@ -209,7 +219,7 @@ function keyOf(m: Mapped): string | null {
     case 'loops':
       return m.obj.loop_id;
     case 'codex':
-      return m.obj.card_id;
+      return m.obj.codex_entry_id ?? m.obj.submission_id;
     case 'patterns':
       return m.obj.pattern_id;
     case 'commercial':
@@ -298,8 +308,11 @@ export function mapRecord(kind: RecordKind, rec: AtRecord, table: string): Mappe
       if (!t) throw new StoreError(`${table} is not one of the builder tables.`, 422);
       return { kind, obj: mapLoop(rec, t.owner, table) };
     }
-    case 'codex':
-      return { kind, obj: mapCodex(rec) };
+    case 'codex': {
+      const t = codexTableById(table);
+      if (!t) throw new StoreError(`${table} is not one of the submission tables.`, 422);
+      return { kind, obj: mapCodex(rec, t.owner, table) };
+    }
     case 'patterns':
       return { kind, obj: mapPattern(rec) };
     case 'commercial':
@@ -318,7 +331,33 @@ export function loops(): Loop[] {
   return rows('loops').map(hydrateLoop);
 }
 export function codexEntries(): CodexEntry[] {
-  return rows('codex').map((r) => JSON.parse(r.json) as CodexEntry);
+  return rows('codex').map((r) => codexSummary(JSON.parse(r.json) as CodexEntryDetail));
+}
+export function codexDetail(id: string): CodexEntryDetail | null {
+  const r = rowById('codex', id);
+  return r ? (JSON.parse(r.json) as CodexEntryDetail) : null;
+}
+
+/* --------------------------------------------------- layer 0 holding table */
+
+/**
+ * Submissions parked at the completeness gate. They are not records of any
+ * kind — no status, no write path — so they are held in `meta` as the last
+ * full read of that table rather than in the records table.
+ */
+export function setLayer0Holds(holds: Layer0Hold[]): void {
+  setMeta('codex:layer0', JSON.stringify(holds));
+  bumpVersion();
+}
+export function layer0Holds(): Layer0Hold[] {
+  const raw = getMeta('codex:layer0');
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as Layer0Hold[]) : [];
+  } catch {
+    return [];
+  }
 }
 export function patterns(): BuildPattern[] {
   return rows('patterns').map((r) => patternSummary(JSON.parse(r.json) as BuildPatternDetail));
@@ -409,7 +448,7 @@ function requireWrite(): void {
 
 async function writeThrough(kind: RecordKind, r: Row, fields: Record<string, unknown>): Promise<Mapped> {
   requireWrite();
-  const base = kind === 'loops' ? LOOPS_BASE : kind === 'codex' ? CODEX.base : kind === 'patterns' ? PATTERNS.base : COMMERCIAL.base;
+  const base = baseFor(kind);
   let rec: AtRecord;
   try {
     rec = await airtable.updateRecord(base, r.table_id, r.id, fields);
@@ -430,9 +469,17 @@ export async function setStatus(kind: RecordKind, id: string, status: string, no
   }
   const r = rowById(kind, id);
   if (!r) throw new StoreError('That record is not held by this dashboard.', 404);
-  if (kind === 'codex') throw new StoreError('A Codex entry has no status of its own; change its action_required instead.', 422);
+  // Codex: the status is Jason Status, written back in the table's own spelling.
+  const jason = CODEX_JASON_STATUS.find((c) => c.toLowerCase() === status);
+  if (kind === 'codex' && !jason) throw new StoreError(`"${status}" is not a Jason Status the submission tables define.`, 422);
   const fields: Record<string, unknown> =
-    kind === 'loops' ? { Status: LOOP_STATUS_TO_AIRTABLE[status as LoopStatus] } : kind === 'patterns' ? { pattern_status: status } : { readiness_state: status };
+    kind === 'loops'
+      ? { Status: LOOP_STATUS_TO_AIRTABLE[status as LoopStatus] }
+      : kind === 'codex'
+        ? { 'Jason Status': jason }
+        : kind === 'patterns'
+          ? { pattern_status: status }
+          : { readiness_state: status };
   const m = await writeThrough(kind, r, fields);
   if (note !== undefined) (m.obj as { note?: string | null }).note = note.trim() || null;
   upsert(m, r.table_id, 'ui');
@@ -454,7 +501,9 @@ export async function updateFields(kind: RecordKind, id: string, fields: Record<
   const m = await writeThrough(kind, r, clean);
   upsert(m, r.table_id, 'ui');
   const out = rowById(kind, id)!;
-  return kind === 'loops' ? hydrateLoop(out) : (JSON.parse(out.json) as CodexEntry | Opportunity | BuildPatternDetail);
+  if (kind === 'loops') return hydrateLoop(out);
+  if (kind === 'codex') return codexSummary(JSON.parse(out.json) as CodexEntryDetail);
+  return JSON.parse(out.json) as Opportunity | BuildPatternDetail;
 }
 
 export async function createLoop(input: NewLoop): Promise<Loop> {
@@ -491,14 +540,16 @@ export async function applyInbound(kind: RecordKind, payload: { id: string; tabl
   const id = payload.id;
   if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new StoreError('An Airtable record id (rec…) is required.', 422);
   let table = payload.table ?? rowById(kind, id)?.table_id ?? null;
-  if (kind !== 'loops') table = kind === 'codex' ? CODEX.table : kind === 'patterns' ? PATTERNS.table : COMMERCIAL.table;
-  if (!table) throw new StoreError('Which builder table the loop lives in is required (table or builder).', 422);
+  if (kind === 'patterns') table = PATTERNS.table;
+  if (kind === 'commercial') table = COMMERCIAL.table;
+  if (!table) throw new StoreError(`Which builder table the ${kind === 'loops' ? 'loop' : 'submission'} lives in is required (table or builder).`, 422);
   if (kind === 'loops' && !loopTableById(table)) throw new StoreError(`${table} is not one of the builder tables.`, 422);
+  if (kind === 'codex' && !codexTableById(table)) throw new StoreError(`${table} is not one of the submission tables.`, 422);
   let rec = payload.record;
   if (!rec) {
     // The payload named the record but did not carry it: read it from Airtable, the source of truth.
     requireWrite();
-    const base = kind === 'loops' ? LOOPS_BASE : kind === 'codex' ? CODEX.base : kind === 'patterns' ? PATTERNS.base : COMMERCIAL.base;
+    const base = baseFor(kind);
     try {
       rec = await airtable.getRecord(base, table, id);
     } catch (e) {
@@ -529,8 +580,10 @@ export function read(kind: RecordKind, id: string): Loop | CodexEntry | BuildPat
       return hydrateLoop(r);
     case 'patterns':
       return patternSummary(JSON.parse(r.json) as BuildPatternDetail);
+    case 'codex':
+      return codexSummary(JSON.parse(r.json) as CodexEntryDetail);
     default:
-      return JSON.parse(r.json) as CodexEntry | Opportunity;
+      return JSON.parse(r.json) as Opportunity;
   }
 }
 
@@ -547,6 +600,12 @@ function weekLabel(start: string): string {
   b.setUTCDate(a.getUTCDate() + 6);
   const mon = (d: Date) => d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' });
   return a.getUTCMonth() === b.getUTCMonth() ? `${a.getUTCDate()}–${b.getUTCDate()} ${mon(a)}` : `${a.getUTCDate()} ${mon(a)}–${b.getUTCDate()} ${mon(b)}`;
+}
+
+/** "7 Sep" from a week-start day: the week start alone, for a crowded axis. */
+function shortWeekLabel(start: string): string {
+  const a = new Date(`${start}T00:00:00Z`);
+  return `${a.getUTCDate()} ${a.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' })}`;
 }
 
 /**
@@ -595,7 +654,10 @@ function loopMetricsFor(all: Loop[], builder: string | null, historySince: strin
         })(),
         `Closes made through this dashboard or pushed by n8n since ${(historySince ?? '').slice(0, 10)}. ${NO_CLOSE_DATE}`,
       )
-    : series(null, NO_CLOSE_DATE);
+    : series(
+        null,
+        `No close has been recorded since this instance started${historySince ? ` at ${historySince.replace('T', ' ').slice(0, 16)} UTC` : ''}. ${NO_CLOSE_DATE} Close a loop from this page and it appears here the same day.`,
+      );
 
   const dated = openRows.filter((l) => l.raised_at);
   // Newest first, oldest last.
@@ -621,10 +683,19 @@ function loopMetricsFor(all: Loop[], builder: string | null, historySince: strin
   const realCloses = all.filter((l) => l.status === 'closed' && modifiedAfterAdded(l.last_modified));
   const fromWeek = weekStart(MODIFIED_FIELD_ADDED);
   const modWeeks = weeks.filter((w) => w >= fromWeek);
-  const closedPerWeek = series(
-    modWeeks.map((w) => ({ label: weekLabel(w), value: realCloses.filter((l) => weekStart(l.last_modified!.slice(0, 10)) === w).length })),
-    `Closed loops by the week of their last change. A closed loop's last_modified is taken as its close, which is exact only when the close was the last edit. ${MODIFIED_NOTE}`,
-  );
+  // Same eight weeks as Raised per week so the two read as one pair of axes,
+  // rather than one chart of eight bars beside one chart of a single bar. With
+  // nothing to plot the series is null and the page prints the reason instead
+  // of an axis with no bars on it.
+  const closedPerWeek = realCloses.length
+    ? series(
+        weeks.map((w) => ({ label: weekLabel(w), value: realCloses.filter((l) => weekStart(l.last_modified!.slice(0, 10)) === w).length })),
+        `Closed loops by the week of their last change, over the same eight weeks as Raised per week. A closed loop's last_modified is taken as its close, which is exact only when the close was the last edit. ${MODIFIED_NOTE}`,
+      )
+    : series(
+        null,
+        `No close has been recorded yet. A close is dated from the tables' last_modified field, added 9 Sept 2026: every loop that existed then stamps from that day, so no loop yet carries a change late enough to read as a close. The first close made after 9 Sept 2026 appears here.`,
+      );
   const netPerWeek = series(
     modWeeks.map((w) => ({
       label: weekLabel(w),
@@ -644,17 +715,27 @@ function loopMetricsFor(all: Loop[], builder: string | null, historySince: strin
         : `Open loops whose last_modified is more than fourteen days ago. ${MODIFIED_NOTE}`,
   };
 
-  const laneTags = [...LOOP_LANE_TAGS, null];
-  const openByLane = laneTags
-    .map((t) => ({ lane_tag: t ?? '(no lane_tag)', n: openRows.filter((l) => l.lane_tag === t).length }))
-    .filter((r) => r.n > 0)
-    .sort((a, b) => b.n - a.n);
-  const raisers = new Map<string, number>();
-  for (const l of all) if (l.raised_by) raisers.set(l.raised_by, (raisers.get(l.raised_by) ?? 0) + 1);
+  /**
+   * One row per person, not one per spelling. Raised By is a free-text box and
+   * the same person appears as "Jason" and "Jason Bays", "Destiny" and
+   * "Destiny Arupi", "Jegan" and "Jeganathan". Those are collapsed to a single
+   * identity before counting, and the spellings that were merged are carried
+   * along so the merge can be seen rather than taken on trust.
+   */
+  const raisers = new Map<string, { label: string; n: number; variants: Set<string> }>();
+  for (const l of all) {
+    const person = canonicalPerson(l.raised_by);
+    if (!person) continue;
+    const held = raisers.get(person.key) ?? { label: person.label, n: 0, variants: new Set<string>() };
+    held.n++;
+    held.variants.add(l.raised_by!.trim());
+    raisers.set(person.key, held);
+  }
   const topRaisers = [...raisers.entries()]
-    .map(([raised_by, n]) => ({ raised_by, n }))
-    .sort((a, b) => b.n - a.n)
-    .slice(0, 6);
+    .map(([key, v]) => ({ key, label: v.label, n: v.n, variants: [...v.variants].sort() }))
+    .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label))
+    .slice(0, 8);
+  const merged = topRaisers.filter((r) => r.variants.length > 1);
 
   return {
     kind: 'loops',
@@ -671,8 +752,10 @@ function loopMetricsFor(all: Loop[], builder: string | null, historySince: strin
     net_per_week: netPerWeek,
     closed_per_week: closedPerWeek,
     stale,
-    open_by_lane_tag: openByLane,
     top_raisers: topRaisers,
+    top_raisers_note: merged.length
+      ? `Raised By is free text, so one person is written several ways. ${merged.map((r) => `${r.label} counts ${r.variants.map((v) => `“${v}”`).join(' and ')} as one`).join('; ')}.`
+      : 'Raised By is free text; spellings of the same name are counted as one person. No name in these tables is currently written more than one way.',
     modified_note: MODIFIED_NOTE,
     history_since: historySince,
   };
@@ -697,43 +780,88 @@ export function loopMetrics(builder: string | null): LoopMetrics {
   return value;
 }
 
-const LAYER0_DEFINITION = 'A log counts as complete when the row carries a builder, a session link, a session type, a verdict, and the architecture-fit, engine-movement and needle-moved-evidence fields. This is the dashboard’s own check; the Codex Log has no completeness field.';
+const LAYER0_DEFINITION =
+  'Layer 0 is the completeness gate the submission pipeline runs before a log reaches review. It sets Layer0 Flagged on the row and lists what it found absent in Layer0 Missing. This is the gate\u2019s own verdict, read from the row \u2014 not a check this dashboard invents.';
+
+const APPROVAL_LABELS: Record<CodexApproval, string> = {
+  approved: 'Approved',
+  pending: 'Pending',
+  'input added': 'Input added',
+  unset: 'Not set',
+};
+
+/** Which tab a row falls in, from the source's own fields. Nothing here is inferred. */
+const TAB_RULES: { tab: CodexTab; label: string; rule: string; test: (e: CodexEntry) => boolean }[] = [
+  { tab: 'approved', label: 'Approved', rule: 'Jason Status is Approved.', test: (e) => e.approval === 'approved' },
+  { tab: 'pending', label: 'Pending approval', rule: 'Jason Status is Pending, or the field is empty.', test: (e) => e.approval === 'pending' || e.approval === 'unset' },
+  { tab: 'incomplete', label: 'Incomplete', rule: 'Layer0 Flagged is ticked. Each row names what Layer0 Missing says it lacks.', test: (e) => e.layer0_flagged },
+  { tab: 'complete', label: 'Complete', rule: 'Layer0 Flagged is not ticked and Orchestrator Layer2 Review is not empty.', test: (e) => e.complete },
+];
+
+export function codexTabRule(tab: CodexTab): (e: CodexEntry) => boolean {
+  return TAB_RULES.find((r) => r.tab === tab)!.test;
+}
 
 export function codexMetrics(builder: string | null): CodexMetrics {
   const key = `codex:${builder ?? '*'}`;
   const hit = metricsCache.get(key);
   if (hit && hit.version === storeVersion) return hit.value as CodexMetrics;
   const all = codexEntries().filter((e) => !builder || e.builder_id === builder);
-  const attributed = all.filter((e) => e.builder_id);
-  const complete = all.filter((e) => e.complete).length;
-  const pending = all.filter((e) => codexBucket(e.action_required) === 'jason').length;
-  const evaluated = all.filter((e) => e.verdict || e.narration_quality).length;
-  const owners = [...new Set(attributed.map((e) => e.builder_id as string))].sort();
+  const holds = layer0Holds().filter((h) => !builder || h.builder_id === builder);
+
+  const flagged = all.filter((e) => e.layer0_flagged);
+  const withEntry = all.filter((e) => e.has_entry).length;
+
+  const missing = new Map<string, number>();
+  for (const e of flagged) for (const m of e.layer0_missing) missing.set(m, (missing.get(m) ?? 0) + 1);
+
+  const owners = CODEX_TABLES.filter((t) => (!builder || t.owner === builder) && all.some((e) => e.builder_id === t.owner)).map((t) => t.owner);
   const weekStarts = lastWeeks(8);
   const perBuilder = owners.map((o) => ({
     owner: o,
-    weeks: weekStarts.map((w) => ({ week: isoWeek(w), start: w, label: weekLabel(w), n: attributed.filter((e) => e.builder_id === o && e.week === isoWeek(w)).length })),
+    weeks: weekStarts.map((w) => ({ week: isoWeek(w), start: w, label: weekLabel(w), short: shortWeekLabel(w), n: all.filter((e) => e.builder_id === o && e.week === isoWeek(w)).length })),
   }));
-  const verdicts = [...new Set(all.map((e) => e.verdict).filter((v): v is string => Boolean(v)))];
-  const qualities = [...new Set(all.map((e) => e.narration_quality).filter((v): v is string => Boolean(v)))];
-  const pay = all.length ? Math.round((all.filter((e) => e.pay_eligible).length / all.length) * 100) : null;
+
+  const approvals: CodexApproval[] = ['approved', 'pending', 'input added', 'unset'];
+  const qualities = [...new Set(all.map((e) => e.narration_quality).filter((v): v is string => Boolean(v)))].sort();
+  const openHolds = holds.filter((h) => h.open).length;
+
   const value: CodexMetrics = {
     kind: 'codex',
     computed_at: nowIso(),
     scope: { builder, rows: all.length },
     entries: all.length,
-    unattributed: all.length - attributed.length,
-    unattributed_note: `${all.length - attributed.length} ${all.length - attributed.length === 1 ? 'row has' : 'rows have'} no builder recorded in the source — builder_id and builder_name are empty, or name a test value — so they cannot be attributed to anyone. They are counted in the totals and shown under “No builder”.`,
-    layer0: { complete, incomplete: all.length - complete, rate: all.length ? Math.round((complete / all.length) * 100) : null, definition: LAYER0_DEFINITION, note: `${complete} of ${all.length} rows pass the check.` },
-    pending: { n: pending, note: 'Rows whose action_required is JASON_SPOTCHECK. That is the nearest thing the log records to “awaiting Jason”; it is a request for a spot-check, not a formal pending-approval state.' },
-    approved: { n: null, note: 'The Codex Log records no approval: no approved flag, no approver, no approval time. An entry with no action_required could be approved or never reviewed, and the data cannot tell those apart. This section fills the day the table has an approval field (for example an approved_at date).' },
-    evaluated: { n: evaluated, note: 'Rows carrying a verdict or a narration quality. Evaluated is not approved; it says a judgement was written, not that Jason cleared the entry.' },
+    tabs: TAB_RULES.map((r) => ({ tab: r.tab, label: r.label, n: all.filter(r.test).length, rule: r.rule })),
+    with_entry: {
+      n: withEntry,
+      note: `${withEntry} of ${all.length} submissions carry a completed entry in Orchestrator Layer2 Review. The rest were submitted but the orchestrator has not written one back.`,
+    },
+    layer0: {
+      flagged: flagged.length,
+      clean: all.length - flagged.length,
+      definition: LAYER0_DEFINITION,
+      note: `${flagged.length} of ${all.length} rows are flagged. Layer 0 and Jason Status are two different axes: a row can be approved and still carry a Layer 0 flag, and both are shown on it.`,
+    },
+    missing_mix: [...missing.entries()].map(([element, n]) => ({ element: missingLabel(element), n })).sort((a, b) => b.n - a.n || a.element.localeCompare(b.element)),
+    holds: {
+      open: openHolds,
+      completed: holds.length - openHolds,
+      note: holds.length
+        ? `${openHolds} ${openHolds === 1 ? 'submission is' : 'submissions are'} parked at the Layer 0 gate waiting on the builder\u2019s answers, and never reached a builder table. ${holds.length - openHolds} ${holds.length - openHolds === 1 ? 'has' : 'have'} since been answered.`
+        : 'Nothing is parked at the Layer 0 gate.',
+    },
+    approval_mix: approvals.map((a) => ({ approval: a, label: APPROVAL_LABELS[a], n: all.filter((e) => e.approval === a).length })).filter((r) => r.n > 0),
+    approval_note:
+      'Jason Status as the submission tables set it. "Input added" means the builder answered a question on the log; it is neither approved nor waiting. An empty field is counted as pending, because nothing distinguishes it from a log he has not reached.',
     per_builder_per_week: perBuilder,
-    verdict_mix: verdicts.map((v) => ({ verdict: v, n: all.filter((e) => e.verdict === v).length })),
-    verdict_note: verdicts.length === 2 ? 'The log’s verdict field defines two tiers, not three. Both are shown; a third would have to be added to the table first.' : `The verdict field holds ${verdicts.length} distinct ${verdicts.length === 1 ? 'value' : 'values'}.`,
     narration_quality_mix: qualities.map((q) => ({ quality: q, n: all.filter((e) => e.narration_quality === q).length })),
-    pay_eligible_rate: { value: pay, note: all.length ? `${all.filter((e) => e.pay_eligible).length} of ${all.length} entries have pay_eligible checked. An unchecked box counts as not eligible.` : 'No entries.' },
-    median_days_to_approval: { value: null, note: 'Needs an approval time. The log records none, so this cannot be measured until a field exists.' },
+    narration_quality_note: qualities.length
+      ? `From the Narration Quality field, on the ${all.filter((e) => e.narration_quality).length} of ${all.length} rows that carry one.`
+      : 'No row carries a narration quality.',
+    median_days_to_approval: {
+      value: null,
+      note: 'Needs the time Jason set the status. The tables record Processed At for the pipeline\u2019s own run, not the moment of approval, so this cannot be measured until an approved-at field exists.',
+    },
   };
   metricsCache.set(key, { version: storeVersion, value });
   return value;
@@ -744,12 +872,37 @@ export function patternMetrics(): PatternMetrics {
   if (hit && hit.version === storeVersion) return hit.value as PatternMetrics;
   const all = patterns();
   const canonical = all.filter((p) => p.status === 'canonical').length;
+  const draft = all.filter((p) => p.status === 'draft').length;
+  const unset = all.filter((p) => p.status === 'unset').length;
   const systems = [...new Set(all.map((p) => p.system ?? '(no system in id)'))].sort();
   const weeks = lastWeeks(8);
   const created = series(
     weeks.map((w) => ({ label: weekLabel(w), value: all.filter((p) => p.created_at && weekStart(p.created_at.slice(0, 10)) === w).length })),
     'Patterns by the week of created_at, last eight weeks.',
   );
+
+  /**
+   * Why the figures on this page did not add up.
+   *
+   * pattern_status is a single-select with exactly two choices, draft and
+   * canonical, and a sizeable minority of rows leave it empty. Every empty row
+   * used to be counted as a draft, so "draft" was really "draft plus everything
+   * nobody has triaged" and never squared with the total in a way a reader
+   * could check. The three states are now counted separately and the sum is
+   * printed beside the total.
+   *
+   * The second reason a count can look wrong is duplicate pattern_id values:
+   * the table holds more rows than it holds distinct pattern ids, so a count of
+   * rows is not a count of patterns. Both figures are given.
+   */
+  const byId = new Map<string, number>();
+  for (const p of all) if (p.pattern_id) byId.set(p.pattern_id, (byId.get(p.pattern_id) ?? 0) + 1);
+  const repeated = [...byId.entries()]
+    .filter(([, n]) => n > 1)
+    .map(([pattern_id, n]) => ({ pattern_id, n }))
+    .sort((a, b) => b.n - a.n || a.pattern_id.localeCompare(b.pattern_id));
+  const duplicateRows = repeated.reduce((n, r) => n + (r.n - 1), 0);
+
   // reusability is a free-text field. Most rows use a one-word value; the rest explain in prose,
   // which is counted as one group rather than shown as a bar per sentence.
   const reuseKey = (p: BuildPattern): string => {
@@ -763,16 +916,44 @@ export function patternMetrics(): PatternMetrics {
     kind: 'patterns',
     computed_at: nowIso(),
     scope: { rows: all.length },
-    draft: all.length - canonical,
+    draft,
     canonical,
-    promotion_rate: { value: all.length ? Math.round((canonical / all.length) * 100) : null, note: all.length ? `${canonical} of ${all.length} patterns are canonical today. A promotion date is not recorded, so this is the share now, not a rate of promotion.` : 'No patterns.' },
+    unset,
+    reconciliation: {
+      rows: all.length,
+      draft,
+      canonical,
+      unset,
+      sums_to: draft + canonical + unset,
+      note: `${draft} draft + ${canonical} canonical + ${unset} with no status = ${draft + canonical + unset} rows. pattern_status is a single-select offering draft and canonical only; ${unset} ${unset === 1 ? 'row leaves' : 'rows leave'} it empty, and an untriaged pattern is not a draft, so it is counted on its own.`,
+    },
+    duplicates: {
+      distinct_ids: byId.size + all.filter((p) => !p.pattern_id).length,
+      duplicate_rows: duplicateRows,
+      ids: repeated,
+      note: repeated.length
+        ? `${all.length} rows carry ${byId.size} distinct pattern ids: ${repeated.length} ${repeated.length === 1 ? 'id is' : 'ids are'} written on more than one row, ${duplicateRows} ${duplicateRows === 1 ? 'row' : 'rows'} more than there are patterns. A count of rows is not a count of patterns, which is the second reason these figures move.`
+        : 'Every row carries a distinct pattern_id, so the row count is the pattern count.',
+    },
+    promotion_rate: {
+      value: all.length ? Math.round((canonical / all.length) * 100) : null,
+      note: all.length
+        ? `${canonical} of ${all.length} rows are canonical today. A promotion date is not recorded, so this is the share now, not a rate of promotion.`
+        : 'No patterns.',
+    },
     status_legend: [
-      { status: 'draft', meaning: 'Written up but not yet accepted as the reference way of doing it. Most patterns are here.' },
       { status: 'canonical', meaning: 'Accepted as the reference pattern other builders should follow. Promotion is the move from draft to canonical; the table records the state, not the date.' },
+      { status: 'draft', meaning: 'Written up and marked draft: a pattern someone has looked at and not yet accepted as the reference way of doing it.' },
+      { status: 'unset', meaning: 'pattern_status is empty. The row was written and never triaged — not the same as a draft, and the reason the draft count and the total did not previously reconcile.' },
     ],
-    by_system: systems.map((s) => ({ system: s, draft: all.filter((p) => (p.system ?? '(no system in id)') === s && p.status === 'draft').length, canonical: all.filter((p) => (p.system ?? '(no system in id)') === s && p.status === 'canonical').length })),
+    by_system: systems.map((sys) => ({
+      system: sys,
+      draft: all.filter((p) => (p.system ?? '(no system in id)') === sys && p.status === 'draft').length,
+      canonical: all.filter((p) => (p.system ?? '(no system in id)') === sys && p.status === 'canonical').length,
+      unset: all.filter((p) => (p.system ?? '(no system in id)') === sys && p.status === 'unset').length,
+    })),
     reusability_mix: reuse.map((r) => ({ reusability: r, n: all.filter((p) => reuseKey(p) === r).length })).sort((a, b) => b.n - a.n),
-    reusability_note: `reusability is a free-text field, not a select. ${all.length - prose} of ${all.length} rows use a one-word value; ${prose} explain the reach in a sentence and are grouped as “written out in prose” — open the pattern to read it.`,
+    reusability_note: `reusability is a free-text field, not a select. ${all.length - prose} of ${all.length} rows use a one-word value; ${prose} explain the reach in a sentence and are grouped as \u201cwritten out in prose\u201d \u2014 open the pattern to read it.`,
     created_per_week: created,
   };
   metricsCache.set('patterns', { version: storeVersion, value });

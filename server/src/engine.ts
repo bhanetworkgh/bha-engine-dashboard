@@ -16,6 +16,7 @@ import type {
   BuildersData,
   BuildPatternsData,
   CodexData,
+  CodexEntryDetail,
   CommercialData,
   EngineHealthData,
   EngineStatus,
@@ -31,12 +32,17 @@ import type {
   VFarmData,
 } from '../../src/data/types';
 import { MODEL_LABEL, askConfigured } from './ask';
-import { CODEX_CHOICES, loopTable } from './sources';
+import { CODEX_CHOICES, CODEX_TABLES, loopTable } from './sources';
 import * as store from './store';
 
 /** The builder's loops table id, for inbound payloads that name a builder rather than a table. */
 export function loopTableFor(owner: string): string | null {
   return loopTable(owner)?.table ?? null;
+}
+
+/** The builder's submissions table id, for the same reason. */
+export function codexTableFor(owner: string): string | null {
+  return CODEX_TABLES.find((t) => t.owner === owner)?.table ?? null;
 }
 
 /** Reference date the fixtures are written against. Live kinds use REF_TODAY. */
@@ -132,7 +138,7 @@ export function getOverview(q: Query): OverviewData {
   const entries = store.codexEntries();
   const thisWeek = isoWeekOf(REF_TODAY());
   const entriesThisWeek = entries.filter((e) => e.week === thisWeek).length;
-  const ingested = entries.filter((e) => e.pay_eligible).length;
+  const ingested = entries.filter((e) => e.has_entry).length;
   const loopsSync = store.syncInfo('loops');
   const openAlerts = f.VFARM_ALERTS.filter((a) => a.state === 'open');
   const vfarmVisible = q.lane === 'all' || q.lane === 'VFARM_CORE';
@@ -169,6 +175,7 @@ export function getOverview(q: Query): OverviewData {
   const builders = byLane(f.BUILDERS, q);
   const patterns = store.patterns();
   const canonical = patterns.filter((p) => p.status === 'canonical').length;
+  const draftPatterns = patterns.filter((p) => p.status === 'draft').length;
 
   return {
     pins: [
@@ -184,8 +191,8 @@ export function getOverview(q: Query): OverviewData {
       { key: 'vfarm', label: 'vFarm', to: '/vfarm', headline: vfarmVisible ? String(f.VFARM_PLACES.length) : '0', sublabel: 'places reporting', signal: vfarmVisible ? `${openAlerts.length} alerts open · lifecycle not emitting` : 'filtered out', health: vfarmVisible && openAlerts.length ? 'degraded' : 'ok' },
       { key: 'engine-health', label: 'Engine health', to: '/engine-health', headline: String(openIncidents.length), sublabel: 'incidents open', signal: openIncidents.some((i) => i.error_class === 'BILLING_QUOTA') ? 'quota exhausted upstream' : 'retries pending', health: openIncidents.some((i) => i.health === 'failing') ? 'failing' : openIncidents.length ? 'degraded' : 'ok', trend: incidents7d.map((p) => p.value), share: { value: selfHealed, total: resolved, label: 'self-healed' } },
       { key: 'open-loops', label: 'Open loops', to: '/open-loops', headline: loopsSync.source === 'none' ? '—' : String(totalOpen), sublabel: loopsSync.source === 'none' ? 'not loaded from Airtable' : 'open', signal: loopsSync.source === 'none' ? (loopsSync.error ?? 'nothing read yet') : `oldest ${oldest} days`, health: loopsSync.source === 'none' ? 'degraded' : oldest > 30 ? 'degraded' : 'ok', trend: loops14d.map((p) => p.value) },
-      { key: 'codex', label: 'Codex entries', to: '/codex', headline: String(entriesThisWeek), sublabel: 'logged this week', signal: `${entries.filter((e) => e.action_required && e.action_required.toUpperCase().includes('JASON')).length} awaiting Jason’s spot-check`, health: 'ok', trend: entriesByWeek.map((p) => p.value), share: { value: ingested, total: entries.length, label: 'pay eligible' } },
-      { key: 'build-patterns', label: 'Build patterns', to: '/build-patterns', headline: String(patterns.length), sublabel: 'patterns', signal: `${canonical} canonical, ${patterns.length - canonical} draft`, health: 'ok', share: { value: canonical, total: patterns.length, label: 'canonical' } },
+      { key: 'codex', label: 'Codex entries', to: '/codex', headline: String(entriesThisWeek), sublabel: 'logged this week', signal: `${entries.filter((e) => e.approval === 'pending' || e.approval === 'unset').length} awaiting Jason’s approval`, health: 'ok', trend: entriesByWeek.map((p) => p.value), share: { value: ingested, total: entries.length, label: 'with an entry written' } },
+      { key: 'build-patterns', label: 'Build patterns', to: '/build-patterns', headline: String(patterns.length), sublabel: 'patterns', signal: `${canonical} canonical, ${draftPatterns} draft, ${patterns.length - canonical - draftPatterns} with no status`, health: 'ok', share: { value: canonical, total: patterns.length, label: 'canonical' } },
       { key: 'commercial', label: 'Commercial', to: '/commercial', headline: String(opps.length), sublabel: 'cards', signal: `${opps.filter((o) => o.lane_state_blocked_reason).length} blocked on research`, health: opps.some((o) => o.lane_state_blocked_reason) ? 'degraded' : 'ok', share: { value: opps.filter((o) => o.readiness_state === 'Media-Ready').length, total: opps.length, label: 'media-ready' } },
       { key: 'builders', label: 'Builders', to: '/builders', headline: String(builders.length), sublabel: 'people', signal: `${builders.filter((b) => b.contract_status !== 'signed').length} contract not signed`, health: builders.some((b) => b.contract_status !== 'signed') ? 'degraded' : 'ok' },
     ],
@@ -330,38 +337,55 @@ export function getEngineHealth(q: Query): EngineHealthData {
 export function getOpenLoops(_q: Query): OpenLoopsData {
   const sync = store.syncInfo('loops');
   return {
-    loops: store.loops().sort((a, b) => b.age_days - a.age_days),
+    // Newest first: the loop raised today is at the top, the oldest at the
+    // bottom. Age is still on every row and still the signal; it is no longer
+    // the sort.
+    loops: store.loops().sort((a, b) => (b.raised_at ?? '').localeCompare(a.raised_at ?? '') || a.age_days - b.age_days),
     by_owner: store.loopsByOwner(),
     sync,
     status_history_note:
       sync.source === 'none'
         ? sync.error ?? 'Nothing has been read from Airtable yet.'
-        : `Read from the seven builder tables in Airtable at ${sync.synced_at?.replace('T', ' ').slice(0, 16)} UTC. Age is time since Date Raised. A status changed here is written to Airtable first and shown only from what Airtable sent back.`,
+        : `Read from the seven builder tables in Airtable at ${sync.synced_at?.replace('T', ' ').slice(0, 16)} UTC. Newest first; age is time since Date Raised. A status changed here is written to Airtable first and shown only from what Airtable sent back.`,
   };
 }
 
 /* ------------------------------- codex / patterns / commercial / builders */
 
 export function getCodexEntries(_q: Query): CodexData {
+  // Newest first: the most recent submission is the one anyone opens this page for.
+  const entries = store.codexEntries().sort((a, b) => ((a.logged_at ?? '') < (b.logged_at ?? '') ? 1 : -1));
   return {
-    entries: store.codexEntries().sort((a, b) => ((a.logged_at ?? '') < (b.logged_at ?? '') ? 1 : -1)),
+    entries,
     sync: store.syncInfo('codex'),
+    // One tab per table that exists, whether or not it has rows yet. There is
+    // no Jason tab and no "no builder" tab: the table a row lives in is its
+    // builder, and Jason reviews logs rather than submitting them.
+    builders: CODEX_TABLES.map((t) => ({ id: t.owner, label: t.label, table: t.table, n: entries.filter((e) => e.builder_id === t.owner).length })),
+    layer0_holds: store.layer0Holds().sort((a, b) => ((a.created_at ?? '') < (b.created_at ?? '') ? 1 : -1)),
     choices: CODEX_CHOICES,
   };
 }
 
+export function getCodexDetail(id: string): CodexEntryDetail | null {
+  return store.codexDetail(id);
+}
+
 export function getBuildPatterns(_q: Query): BuildPatternsData {
-  const patterns = store.patterns().sort((a, b) => (a.pattern_id ?? '').localeCompare(b.pattern_id ?? ''));
+  // Newest first, by created_at; a pattern with no date sorts last, then by id.
+  const patterns = store.patterns().sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '') || (a.pattern_id ?? '').localeCompare(b.pattern_id ?? ''));
   const systems = [...new Set(patterns.map((p) => p.system ?? '(no system in id)'))].sort();
   return {
     patterns,
     sync: store.syncInfo('patterns'),
     systems: systems.map((s) => ({ system: s, n: patterns.filter((p) => (p.system ?? '(no system in id)') === s).length, canonical: patterns.filter((p) => (p.system ?? '(no system in id)') === s && p.status === 'canonical').length })),
+    unset: patterns.filter((p) => p.status === 'unset').length,
   };
 }
 
 export function getCommercial(_q: Query): CommercialData {
-  const opportunities = store.opportunities().sort((a, b) => (a.lane_id ?? '').localeCompare(b.lane_id ?? '') || (a.card_id ?? '').localeCompare(b.card_id ?? ''));
+  // Newest first, by created_at; a card with no date sorts last, then by lane and id.
+  const opportunities = store.opportunities().sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '') || (a.lane_id ?? '').localeCompare(b.lane_id ?? '') || (a.card_id ?? '').localeCompare(b.card_id ?? ''));
   const laneIds: string[] = [];
   for (const o of opportunities) {
     const l = o.lane_id ?? '(no lane_id)';

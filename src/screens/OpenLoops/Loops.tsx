@@ -5,28 +5,30 @@ import { ageTone, laneLabel } from '../../lib';
 
 export type StatusFilter = 'all' | LoopStatus;
 
-/** Owner picker: one tile per builder table with its open count and oldest loop. Picking one is that builder's table view. */
+/**
+ * Owner picker: one tile per builder table with its open count. Picking one is
+ * that builder's table view.
+ *
+ * The oldest-loop age badge that used to sit beside each count is gone. It was
+ * red on every tab, which is exactly what amber and red are not for — a colour
+ * that is always on carries no signal, and it made every builder look like a
+ * problem. Age is still on every row, and the age distribution card is still
+ * the page's answer to "where is it piling up".
+ */
 export function OwnerPicker({ data, owner, setOwner }: { data: OpenLoopsData; owner: string; setOwner: (o: string) => void }) {
   const total = data.by_owner.reduce((n, o) => n + o.open + o.in_progress, 0);
-  const oldest = Math.max(0, ...data.by_owner.map((o) => o.oldest_days));
   const cell = (active: boolean) =>
-    `flex min-w-[124px] shrink-0 flex-col rounded-[12px] px-3.5 py-2.5 text-left transition-colors md:min-w-0 md:flex-1 ${active ? 'bg-panel shadow-[var(--shadow-card)]' : 'hover:bg-hover'}`;
+    `flex min-w-[112px] shrink-0 flex-col rounded-[12px] px-3.5 py-2.5 text-left transition-colors md:min-w-0 md:flex-1 ${active ? 'bg-panel shadow-[var(--shadow-card)]' : 'hover:bg-hover'}`;
   return (
     <div className="scroll-thin flex gap-1 overflow-x-auto rounded-[14px] bg-raised p-1 md:overflow-visible" role="group" aria-label="Builder table">
       <button type="button" onClick={() => setOwner('all')} className={cell(owner === 'all')} aria-pressed={owner === 'all'}>
         <span className="text-[11.5px] text-faint">All tables</span>
-        <span className="mt-0.5 flex items-baseline gap-2">
-          <span className="font-display tabular text-[20px] leading-none">{total}</span>
-          <span className={`tabular text-[11px] ${ageTone(oldest)}`}>{oldest}d</span>
-        </span>
+        <span className="font-display tabular mt-0.5 block text-[20px] leading-none">{total}</span>
       </button>
       {data.by_owner.map((o) => (
         <button key={o.owner} type="button" onClick={() => setOwner(o.owner)} className={cell(owner === o.owner)} aria-pressed={owner === o.owner} title={`${o.open} open, ${o.in_progress} in progress, ${o.closed} closed`}>
           <span className="truncate text-[11.5px] text-faint">{BUILDER_NAMES[o.owner] ?? o.owner}</span>
-          <span className="mt-0.5 flex items-baseline gap-2">
-            <span className="font-display tabular text-[20px] leading-none">{o.open + o.in_progress}</span>
-            <span className={`tabular text-[11px] ${ageTone(o.oldest_days)}`}>{o.oldest_days}d</span>
-          </span>
+          <span className="font-display tabular mt-0.5 block text-[20px] leading-none">{o.open + o.in_progress}</span>
         </button>
       ))}
     </div>
@@ -39,13 +41,13 @@ function StatusPill({ status }: { status: LoopStatus }) {
   return <Pill>open</Pill>;
 }
 
-/** The loop list, oldest first. Row actions change status in place — Airtable first, then here. */
-export function Loops({ data, loops, busyId, onStatus, searching, writable }: { data: OpenLoopsData; loops: Loop[]; busyId: string | null; onStatus: (loop: Loop, status: LoopStatus) => void; searching: boolean; writable: boolean }) {
+/** The loop list, newest first, twenty to a page. Row actions change status in place — Airtable first, then here. */
+export function Loops({ data, loops, total, busyId, onStatus, searching, writable }: { data: OpenLoopsData; loops: Loop[]; total: number; busyId: string | null; onStatus: (loop: Loop, status: LoopStatus) => void; searching: boolean; writable: boolean }) {
   return (
     <div className="shrink-0">
       <p className="px-6 pb-3 text-[11.5px] text-faint md:px-8">{data.status_history_note}</p>
 
-      {loops.length === 0 ? (
+      {total === 0 ? (
         <EmptyState>
           {data.sync.source === 'none'
             ? (data.sync.error ?? 'Nothing has been read from Airtable yet.')

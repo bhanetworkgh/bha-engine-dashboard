@@ -15,9 +15,9 @@ This is that window. Internal team tooling, not a customer product.
 server, which sets a session cookie. Ask Bays goes through the server to the
 live agent workflow. **Open loops, Codex entries, build patterns and
 commercial cards are read from Airtable** — the seven per-builder loop tables,
-the Codex Log, Build Patterns and Commercial Opportunities — and every change
-made on those pages is written to Airtable first and shown from what came
-back. The server resyncs from Airtable on boot, on a timer and on demand, and
+the six per-builder submission tables in BHA Submissions & Logs, Build
+Patterns and Commercial Opportunities — and every change made on those pages
+is written to Airtable first and shown from what came back. The server resyncs from Airtable on boot, on a timer and on demand, and
 n8n can push writes to it as it writes them to Airtable.
 
 The service runs on Render's free instance type with no persistent disk, so
@@ -61,7 +61,7 @@ POST   /api/inbound/resync/:kind                                               f
 
 `record` is the Airtable record as n8n's Airtable node returns it
 (`{ id, createdTime, fields }`); the id may be given at the top level, in the
-path, or only inside the record. For loops, `builder` (e.g. `jegan`) or
+path, or only inside the record. For loops and Codex entries, `builder` (e.g. `jegan`) or
 `table` (the tbl… id) says which builder table it lives in. When `record` is
 absent the server reads the record from Airtable itself. `at` is the time of
 the change and stamps the status event; without it the server uses now. The
