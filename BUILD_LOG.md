@@ -1893,3 +1893,173 @@ Decision:   Approval is not inferred. Pending = a JASON_SPOTCHECK request;
            and net per week equal to this week's raised count (every live
            loop stamps 9 Sept), and stale 0 dimmed as "not yet meaningful —
            from 2026-09-23".
+
+## 2026-09-10 18:50 — Refinement pass: Open loops, Codex on the submissions base, patterns and commercial as one page, vFarm coming soon
+Intent:     Destiny's refinement brief on four record pages plus a vFarm empty
+            state. Global rules to apply everywhere: newest first, uniform card
+            heights with content that fills the card, no horizontal scroll on
+            the page body ever, twenty rows to a page, and an explicit centred
+            message wherever a section has no data. Open loops: new subtitle,
+            drop the red age badge from every builder tab, delete the lane-tag
+            card, rebuild "Age of what's open" in the visual language of "Close
+            rate by builder", rebuild "Closed per week" to match "Raised per
+            week", populate or empty-state "Closed per day", and stop
+            double-counting people in "Who raises loops". Codex: read the real
+            source — BHA Submissions & Logs, one table per builder — and
+            surface the completed entry that already sits in Orchestrator
+            Layer2 Review. Patterns: stop the filter bar scrolling the page,
+            truncate the rows, and trace why draft/canonical/total never
+            reconciled. Commercial: rebuild as the same page as Build patterns.
+            vFarm: label what does not exist yet as coming soon.
+Files:      new src/components/ui/{Pagination,ListRow}.tsx; src/components/ui/
+            {Card,EmptyState,Records,Tabs,index}.tsx; src/index.css (.seg);
+            src/data/{types,index}.ts; server/src/{sources,store,sync,engine,
+            index}.ts; src/screens/OpenLoops/{index,Loops,Metrics}.tsx;
+            src/screens/Codex.tsx (rewritten); src/screens/BuildPatterns.tsx;
+            src/screens/Commercial.tsx (rewritten); src/screens/VFarm/{index,
+            Live,Lifecycle,Readiness}.tsx; src/screens/Builders/Detail.tsx;
+            scratchpad mock-airtable.js, sweep.js.
+Problem:    1. Codex was reading apploVyhvTYNGSGCD (Codex Log) — the wrong
+               base. The completed entry Destiny wanted on screen lives in
+               appEmdKshNVTl64Zf, in a per-builder table, in a field the page
+               never touched. The old page's "No Builder (37)" bucket was an
+               artefact of attributing rows by a field that can be blank.
+            2. The pattern figures did not reconcile because `pattern_status`
+               is a single-select with exactly two choices and a fifth of the
+               rows leave it empty. mapPattern read
+               `status === 'canonical' ? 'canonical' : 'draft'`, so every
+               untriaged row was silently counted as a draft. Verified against
+               the live table: 149 rows = 15 canonical + 114 draft + 20 with no
+               status. Second cause: 149 rows carry 147 distinct pattern_ids —
+               BP-BAYS-002-FRONT_DOOR_CALLBACK_RTNS_GATE is written on three
+               rows — so a count of rows was never a count of patterns.
+            3. "Who raises loops" split one person across two bars. Raised By
+               is a free-text box: Ahad's table alone holds "Jason" ×10 and
+               "Jason Bays" ×15, plus "Jegan" and "Jeganathan", "Destiny" and
+               "Destiny Arupi".
+            4. The new list card rendered zero pixels tall with all twenty rows
+               present in the DOM. These pages are a flex column and the card
+               clips its own overflow, so the default flex-shrink collapsed it.
+               Found by measuring the rendered geometry, not by reading it:
+               `listHeight: 0, rows: 20`.
+            5. First sweep: the ring cards on Build patterns and Commercial
+               filled 42% and 52% of their own height — exactly the "100px card
+               holding 10px of content" complaint, in a card I had just built.
+Fix:        Global. `usePaged` + `<Pagination>`: twenty rows, next/previous,
+            "1–20 of 149", the page index clamped as filters change and reset
+            when the list changes. `.seg` is now `display:flex; flex-wrap:wrap;
+            max-width:100%`, so a twenty-system filter bar becomes three lines
+            inside its own width instead of scrolling the page; every records
+            page's scroll container also carries `overflow-x-hidden`.
+            `<MetricCard>` grows its body and pins its footnote to the card's
+            floor, so cards in a row line up and their content fills them.
+            `<EmptyPanel>` and `<ComingSoon>` are the two empty states; a
+            `MetricSeries` with null points renders the panel rather than an
+            axis with no bars.
+            Open loops. Subtitle is "Every commitment BHA has made, across
+            every system". The oldest-loop age badge is gone from All tables
+            and from every builder tab — it was red on all eight, and a colour
+            that is always on is not a signal. "Open loops by lane tag" is
+            deleted. "Age of what is open" is now labelled horizontal bars,
+            count over total plus percentage, same height, padding and type
+            scale as "Close rate by builder". "Closed per week" spans the same
+            eight weeks as "Raised per week" and falls to the empty state with
+            its reason when no close has been recorded; "Closed per day" does
+            the same. Both populate the moment a loop is closed — verified.
+            `canonicalPerson()` in sources.ts collapses a free-text name to one
+            identity, and the card names the spellings it merged rather than
+            merging silently.
+            Codex. `CODEX_TABLES` is the six submission tables in
+            appEmdKshNVTl64Zf; the builder is the table, so every row is
+            attributed and "No Builder" cannot exist. No Jason tab: he reviews
+            logs, he does not submit them. Kavin's table is read. Four tabs,
+            each computed from the source's own fields and printing its rule on
+            the page: Approved (Jason Status = Approved), Pending approval
+            (Pending or empty), Incomplete (Layer0 Flagged, listing Layer0
+            Missing), Complete (not flagged and Orchestrator Layer2 Review not
+            empty). The Layer 2 review is the substance of the page: two lines
+            in the row, the whole entry in the entry view with its own section
+            headings kept. `/api/codex/:id` carries the full text so a hundred
+            entries are not shipped in one list payload. The Layer 0 holding
+            table is read alongside, so the Incomplete tab can say how many
+            submissions never reached a builder table. Week labels on the
+            per-builder chart are the week start only ("3 Aug"), with the full
+            range in the title attribute. Approving an entry writes Jason
+            Status back to Airtable.
+            Patterns. Three states, counted separately, with the sum printed
+            against the row total on the page and the duplicate-id count beside
+            it. `PatternStatus` gains 'unset'; only draft and canonical are
+            writable. The ring card carries a triage bar ("129 of 149 given a
+            status") so it fills its own height with a measure that is not
+            duplicated elsewhere. Rows are id, title, system, reusability and a
+            two-line problem summary; everything else opens on click.
+            Commercial. Rebuilt as Build patterns with different content: same
+            wrapping filter bars, same truncated rows, same detail dialog, same
+            chart treatment and spacing. The expanding square tiles are gone.
+            vFarm. Lifecycle and Readiness are `<ComingSoon>` panels, and both
+            tabs are marked "soon" before the reader clicks. Live is unchanged
+            except newest-first ordering and twenty rollups to a page.
+Decision:   Layer 0 and Jason Status are two axes, not one pipeline, and the
+            page says so. Two of Hardik's rows are Approved *and* Layer0
+            flagged; folding them into one funnel would have had to invent a
+            precedence rule the data does not carry, so both states are shown
+            on the row and the tabs are independent filters.
+            An empty `pattern_status` is its own state, not a draft. Naming it
+            is what makes the counts reconcile; folding it back into draft is
+            what broke them.
+            An empty Jason Status is counted as pending, because nothing in the
+            row distinguishes it from a log Jason has not reached.
+            Codex editing is narrowed to Jason Status and Jason Notes. Every
+            other field on a submission row is written by the pipeline that
+            produced it, and a dashboard that lets someone retype the
+            orchestrator's output is a dashboard that corrupts the record.
+            Not done, and why: the "Net raised vs closed per week" chart still
+            renders a single bar, because it starts at the week last_modified
+            was added and that is one week so far. It is listed under KEEP AS
+            IS in the brief, so it is untouched; it will fill as weeks pass.
+            The "Action required = recent spot check" line called out for
+            removal under Open loops does not exist on that page — the string
+            lived on Codex, tied to action_required, and the Codex rewrite
+            removes both the field and the line.
+Verified:   Local Airtable replay seeded from the live schemas read through the
+            connector today, including the exact rows that matter: Hardik's two
+            Layer0-flagged rows, Ahad's Raised By spellings, the twenty
+            status-less patterns and the pattern_id on three rows.
+            Boot resync, one line per table: loops 755 across seven tables;
+            codex Destiny 36 / Jegan 24 / Kaiqi 19 / Hardik 22 / Ahad 11 /
+            Kavin 22 = 134 across six; patterns 149; commercial 21.
+            Who raises loops: Jason 285 merging "Jason" and "Jason Bays",
+            Destiny 223 merging "Destiny" and "Destiny Arupi", Jegan 182
+            merging "Jegan" and "Jeganathan" — six people, not nine.
+            Codex tabs, client rule and server rule agreeing exactly: Approved
+            114, Pending 4, Incomplete 2, Complete 122.
+            The Layer 0 transition, on a real row: recaIoFukLYoZDpp4 (Hardik,
+            missing "commercial") read flagged=true, has_entry=false,
+            complete=false. The pipeline's resubmission was replayed — flag
+            cleared, Layer0 Missing emptied, Layer 2 review written — and after
+            a resync it read flagged=false, has_entry=true, complete=true, and
+            the tabs moved Incomplete 2→1, Complete 122→123.
+            Patterns: 114 draft + 15 canonical + 20 unset = 149 rows, and 147
+            distinct pattern ids across 149 rows.
+            Closing two loops through the interface moved Closed per day to
+            [.., .., 2] and Closed per week to eight points ending 2, the same
+            axis length as Raised per week.
+            Chromium sweep at 1440px and at 400px, all five pages: document
+            overflow-x 0 at both widths; every wide element inside main is a
+            self-contained scroller; card rows uniform in height with content
+            filling 84–91%; twenty rows and a working pager on all four record
+            pages. Console errors: only the Inter webfont this sandbox cannot
+            fetch.
+            Write paths: approve writes Jason Status back and reads Approved;
+            an undefined status is refused 422; inbound without the key 401,
+            with the key and a builder name 200, with a table that is not a
+            submissions table 422; no delete route (404).
+            Regression pass over Home, Builders, a builder detail page, Engine
+            health, both twins, Ask Bays and Settings: no errors, no overflow.
+            The bundle carries no key, host or base id — the one match for
+            AIRTABLE_API_KEY is the sentence "Writes are off: no
+            AIRTABLE_API_KEY." on screen.
+            Not verified here: the live Render deploy, which this sandbox
+            cannot reach. The first boot after this deploy will print six codex
+            resync lines instead of one, and the Codex page will read from the
+            submissions base for the first time.

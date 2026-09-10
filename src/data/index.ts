@@ -23,6 +23,7 @@ import type {
   ChatThread,
   CodexData,
   CodexEntry,
+  CodexEntryDetail,
   CommercialData,
   EngineHealthData,
   EngineStatus,
@@ -167,6 +168,11 @@ export function resync(kind?: RecordKind): Promise<ResyncResponse> {
 
 export function getPatternDetail(id: string): Promise<BuildPatternDetail> {
   return api<BuildPatternDetail>(`/api/build-patterns/${encodeURIComponent(id)}`);
+}
+
+/** The full Codex entry text, fetched one entry at a time. The list carries only its opening. */
+export function getCodexDetail(id: string): Promise<CodexEntryDetail> {
+  return api<CodexEntryDetail>(`/api/codex/${encodeURIComponent(id)}`);
 }
 
 /** Server-side search across every text field of every pattern. */

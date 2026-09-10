@@ -4,11 +4,14 @@ export function Tabs<T extends string>({
   value,
   onChange,
   counts,
+  soon,
 }: {
   tabs: readonly T[];
   value: T;
   onChange: (t: T) => void;
   counts?: Partial<Record<T, { n: number; tone?: 'default' | 'degraded' | 'failing' }>>;
+  /** Tabs whose capability does not exist yet. Marked before the reader clicks, not after. */
+  soon?: readonly T[];
 }) {
   return (
     <div role="tablist" className="flex items-center gap-5 border-b border-line">
@@ -24,6 +27,7 @@ export function Tabs<T extends string>({
             className="tab"
           >
             {t}
+            {soon?.includes(t) && <span className="ml-1.5 text-[10.5px] text-faint">soon</span>}
             {c && c.n > 0 && (
               <span
                 className={`tabular ml-1.5 text-[11px] ${

@@ -1,16 +1,21 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../app/useData';
-import { getBuildPatterns, getPatternDetail, getRecordMetrics, resync, searchPatterns, setRecordStatus, type BuildPattern, type BuildPatternDetail, type PatternMetrics, type PatternStatus } from '../data';
+import { getBuildPatterns, getPatternDetail, getRecordMetrics, resync, searchPatterns, setRecordStatus, type BuildPattern, type BuildPatternDetail, type PatternMetrics, type PatternStatus, type WritablePatternStatus } from '../data';
 import {
   CountCell,
   CountUp,
+  EmptyPanel,
   EmptyState,
   HBar,
   LoadFailed,
   Loading,
+  MetricCard,
   PageHeader,
+  Pagination,
   Pill,
+  RecordList,
+  RecordRow,
   Ring,
   RowAction,
   RowActions,
@@ -21,13 +26,19 @@ import {
   StatCell,
   StatStrip,
   SyncLine,
-  TableFrame,
-  Th,
   Toast,
+  usePaged,
   useToast,
 } from '../components/ui';
 
 type StatusFilter = 'all' | PatternStatus;
+
+/** The status pill, in one place, so the list and the detail view never disagree. */
+export function StatusPill({ status }: { status: PatternStatus }) {
+  if (status === 'canonical') return <Pill tone="accent">canonical</Pill>;
+  if (status === 'draft') return <Pill>draft</Pill>;
+  return <Pill>no status</Pill>;
+}
 
 /* ---------------------------------------------------------------- metrics */
 
@@ -35,8 +46,8 @@ function PatternMetricsPanel({ metrics, loading, error }: { metrics: PatternMetr
   if (error) return <div className="card mx-6 mb-4 px-5 py-4 text-[12.5px] text-failing md:mx-8">Figures unavailable: {error}</div>;
   if (!metrics) {
     return (
-      <StatStrip cols={3} className="opacity-60">
-        {['Draft', 'Canonical', 'Promotion rate'].map((l) => (
+      <StatStrip cols={4} className="opacity-60">
+        {['Patterns', 'Canonical', 'Draft', 'No status'].map((l) => (
           <StatCell key={l}>
             <div className="kicker">{l}</div>
             <div className="mt-1 text-[15px] text-faint">Counting</div>
@@ -46,79 +57,113 @@ function PatternMetricsPanel({ metrics, loading, error }: { metrics: PatternMetr
     );
   }
   const m = metrics;
-  const maxSys = Math.max(1, ...m.by_system.map((s) => s.draft + s.canonical));
+  const maxSys = Math.max(1, ...m.by_system.map((sy) => sy.draft + sy.canonical + sy.unset));
   const maxReuse = Math.max(1, ...m.reusability_mix.map((r) => r.n));
+  const triaged = m.draft + m.canonical;
   return (
     <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
-      <div className="mx-6 mb-4 grid gap-4 md:mx-8 md:grid-cols-[minmax(0,1.2fr)_minmax(0,2fr)]">
-        {/* The promotion rate is the operational signal on this page, so it leads. */}
-        <div className="card flex items-center gap-5 px-5 py-4">
-          <Ring value={m.canonical} total={m.scope.rows} size={88} tone="accent" label="canonical" />
-          <div className="min-w-0">
-            <div className="kicker">Draft to canonical</div>
-            <div className="mt-1 flex items-baseline gap-2">
-              <span className="font-display tabular text-[32px] leading-none text-ink">{m.promotion_rate.value === null ? '—' : <CountUp value={m.promotion_rate.value} />}</span>
-              {m.promotion_rate.value !== null && <span className="text-[14px] text-faint">%</span>}
+      {/*
+        Four counts that visibly add up. The three states are counted
+        separately and the reconciliation line under them prints the sum
+        against the row total, so a reader can check the arithmetic on the
+        page rather than wonder why draft and canonical did not meet the total.
+      */}
+      <StatStrip cols={4}>
+        <CountCell label="Patterns" value={m.scope.rows} hint="rows in the table" />
+        <CountCell label="Canonical" value={m.canonical} tone="accent" hint="pattern_status = canonical" />
+        <CountCell label="Draft" value={m.draft} hint="pattern_status = draft" />
+        <CountCell label="No status" value={m.unset} tone="dim" hint="pattern_status is empty" />
+      </StatStrip>
+
+      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+        <div className="card flex h-full flex-col justify-between px-5 py-4">
+          <div className="flex items-center gap-5">
+            <Ring value={m.canonical} total={m.scope.rows} size={88} tone="accent" label="canonical" />
+            <div className="min-w-0">
+              <div className="kicker">Canonical share</div>
+              <div className="mt-1 flex items-baseline gap-2">
+                <span className="font-display tabular text-[32px] leading-none text-ink">{m.promotion_rate.value === null ? '—' : <CountUp value={m.promotion_rate.value} />}</span>
+                {m.promotion_rate.value !== null && <span className="text-[14px] text-faint">%</span>}
+              </div>
+              <div className="mt-1.5 text-[11.5px] leading-snug text-faint">{m.promotion_rate.note}</div>
             </div>
-            <div className="mt-1.5 text-[11.5px] leading-snug text-faint">{m.promotion_rate.note}</div>
+          </div>
+          {/*
+            Triage rate: how much of the table has been given a status at all.
+            It is the measure the empty pattern_status rows make necessary, and
+            it is not stated anywhere else on the page.
+          */}
+          <div className="mt-4 border-t border-line pt-3">
+            <HBar
+              label="Given a status"
+              value={triaged}
+              max={Math.max(1, m.scope.rows)}
+              tone={triaged === m.scope.rows ? 'accent' : 'ink'}
+              valueNode={<CountUp value={triaged} />}
+              right={<span className="text-faint">of {m.scope.rows}</span>}
+            />
+            <div className="mt-1.5 text-[11.5px] leading-snug text-faint">
+              {m.unset === 0 ? 'Every row carries a pattern_status.' : `${m.unset} ${m.unset === 1 ? 'row has' : 'rows have'} never been triaged, so they are neither draft nor canonical.`}
+            </div>
           </div>
         </div>
-        <StatStrip cols={3} className="!mx-0 !mb-0">
-          <CountCell label="Draft" value={m.draft} tone="dim" />
-          <CountCell label="Canonical" value={m.canonical} tone="accent" />
-          <CountCell label="Patterns" value={m.scope.rows} tone="dim" />
-        </StatStrip>
-      </div>
 
-      {/* What the two states mean. The pattern_status field defines exactly these two. */}
-      <div className="card mx-6 mb-4 grid gap-x-8 gap-y-2 px-5 py-4 md:mx-8 md:grid-cols-2">
-        {m.status_legend.map((l) => (
-          <div key={l.status} className="flex items-start gap-3 text-[12.5px]">
-            <span className="mt-0.5 shrink-0">{l.status === 'canonical' ? <Pill tone="accent">canonical</Pill> : <Pill tone="degraded">draft</Pill>}</span>
-            <span className="leading-snug text-dim">{l.meaning}</span>
+        {/* What each state means, and why the figures move. */}
+        <MetricCard title="What draft and canonical mean" note={`${m.reconciliation.note} ${m.duplicates.note}`}>
+          <div className="space-y-2">
+            {m.status_legend.map((l) => (
+              <div key={l.status} className="grid grid-cols-[104px_minmax(0,1fr)] items-start gap-3 text-[12.5px]">
+                <span className="pt-0.5">
+                  <StatusPill status={l.status} />
+                </span>
+                <span className="leading-snug text-dim">{l.meaning}</span>
+              </div>
+            ))}
           </div>
-        ))}
-        <div className="text-[11.5px] leading-snug text-faint md:col-span-2">The table’s pattern_status field defines these two values and no third; there is no “retired” or “archived” state in the source.</div>
+        </MetricCard>
       </div>
 
-      {/* By system, full width, several columns so it stays short. */}
       <div className="card mx-6 mb-4 px-5 py-4 md:mx-8">
-        <div className="mb-2 flex items-baseline justify-between gap-3">
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-3">
           <div className="text-[13px] font-medium text-ink">By system, from pattern ids</div>
-          <div className="text-[11px] text-faint">bar = all patterns · number = canonical / all</div>
+          <div className="text-[11px] text-faint">bar = all rows · canonical / draft / no status</div>
         </div>
         <div className="grid gap-x-8 gap-y-1.5 md:grid-cols-3 xl:grid-cols-4">
-          {m.by_system.map((s) => (
+          {m.by_system.map((sy) => (
             <HBar
-              key={s.system}
-              label={s.system.toLowerCase()}
-              value={s.draft + s.canonical}
+              key={sy.system}
+              label={sy.system.toLowerCase()}
+              value={sy.draft + sy.canonical + sy.unset}
               max={maxSys}
-              tone={s.canonical ? 'accent' : 'ink'}
+              tone={sy.canonical ? 'accent' : 'ink'}
               valueNode={
                 <span>
-                  <span className={s.canonical ? 'text-accent-ink' : 'text-faint'}>{s.canonical}</span> / {s.draft + s.canonical}
+                  <span className={sy.canonical ? 'text-accent-ink' : 'text-faint'}>{sy.canonical}</span> <span className="text-faint">/</span> {sy.draft} <span className="text-faint">/ {sy.unset}</span>
                 </span>
               }
             />
           ))}
         </div>
-        <div className="mt-2 text-[11.5px] leading-snug text-faint">The system is the second segment of each pattern_id (BP-SLACK-001-… → slack); “(no system in id)” is the count whose id does not follow that shape.</div>
+        <div className="mt-2 text-[11.5px] leading-snug text-faint">
+          The system is the second segment of each pattern_id (BP-SLACK-001-… → slack); “(no system in id)” is the count whose id does not follow that shape.
+        </div>
       </div>
 
-      <div className="mx-6 mb-4 grid gap-4 md:mx-8 md:grid-cols-2">
-        <div className="card px-5 py-4">
-          <SeriesBlock title="Created per week" series={m.created_per_week} tone="accent" total />
-        </div>
-        <div className="card px-5 py-4">
-          <div className="mb-1.5 text-[13px] font-medium text-ink">Reusability</div>
-          <div className="space-y-1.5">
-            {m.reusability_mix.map((r) => (
-              <HBar key={r.reusability} label={r.reusability.startsWith('(') ? r.reusability : r.reusability.toLowerCase()} value={r.n} max={maxReuse} valueNode={<CountUp value={r.n} />} />
-            ))}
-          </div>
-          <div className="mt-2 text-[11.5px] leading-snug text-faint">{m.reusability_note}</div>
-        </div>
+      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-2">
+        <MetricCard title="Created per week">
+          <SeriesBlock title="" series={m.created_per_week} tone="accent" total bare />
+        </MetricCard>
+        <MetricCard title="Reusability" note={m.reusability_note}>
+          {m.reusability_mix.length === 0 ? (
+            <EmptyPanel>No pattern records a reusability.</EmptyPanel>
+          ) : (
+            <div className="space-y-2">
+              {m.reusability_mix.map((r) => (
+                <HBar key={r.reusability} label={r.reusability.startsWith('(') ? r.reusability : r.reusability.toLowerCase()} value={r.n} max={maxReuse} valueNode={<CountUp value={r.n} />} />
+              ))}
+            </div>
+          )}
+        </MetricCard>
       </div>
     </div>
   );
@@ -171,7 +216,7 @@ function PatternView({ id, onClose }: { id: string; onClose: () => void }) {
                 <div className="kicker tabular">{detail.pattern_id ?? detail.id}</div>
                 <h2 className="mt-1 text-[18px] leading-tight">{detail.title}</h2>
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-faint">
-                  {detail.status === 'canonical' ? <Pill tone="accent">canonical</Pill> : <Pill tone="degraded">draft</Pill>}
+                  <StatusPill status={detail.status} />
                   {detail.system && <span>{detail.system}</span>}
                   {detail.bha_system && <span>{detail.bha_system}</span>}
                   {detail.created_at && <span className="tabular">{detail.created_at.slice(0, 10)}</span>}
@@ -265,10 +310,16 @@ export default function BuildPatterns() {
   }, [patterns]);
 
   const scoped = useMemo(() => patterns.filter((p) => system === 'all' || (p.system ?? '(no system in id)') === system), [patterns, system]);
-  const counts = { all: scoped.length, draft: scoped.filter((p) => p.status === 'draft').length, canonical: scoped.filter((p) => p.status === 'canonical').length };
-  const rows = scoped.filter((p) => filter === 'all' || p.status === filter).filter((p) => (hits ? hits.has(p.id) : true));
+  const counts = {
+    all: scoped.length,
+    canonical: scoped.filter((p) => p.status === 'canonical').length,
+    draft: scoped.filter((p) => p.status === 'draft').length,
+    unset: scoped.filter((p) => p.status === 'unset').length,
+  };
+  const rows = useMemo(() => scoped.filter((p) => filter === 'all' || p.status === filter).filter((p) => (hits ? hits.has(p.id) : true)), [scoped, filter, hits]);
+  const paged = usePaged(rows, `${system}|${filter}|${q.trim()}`);
 
-  async function change(p: BuildPattern, next: PatternStatus) {
+  async function change(p: BuildPattern, next: WritablePatternStatus) {
     setBusyId(p.id);
     try {
       const updated = await setRecordStatus('patterns', p.id, next);
@@ -303,7 +354,8 @@ export default function BuildPatterns() {
     <div className="relative flex h-full min-h-0 flex-col">
       <PageHeader title="Build patterns" subtitle="Classified by the system in each pattern id, searchable across every field" />
 
-      <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto">
+      {/* overflow-x-hidden: nothing on this page may scroll the body sideways. */}
+      <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 px-6 pb-3 md:px-8">
           <SyncLine sync={loaded.sync} onResync={pull} busy={syncing} />
         </div>
@@ -311,7 +363,18 @@ export default function BuildPatterns() {
         <PatternMetricsPanel metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
 
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
-          <Segmented ariaLabel="Filter by system" value={system} onChange={setSystem} options={[{ value: 'all', label: 'All systems', count: patterns.length }, ...loaded.systems.map((s) => ({ value: s.system, label: s.system.toLowerCase(), count: s.n }))]} />
+          {/*
+            The system filter used to force the whole page to scroll sideways:
+            twenty-odd systems in one nowrap row. `.seg` wraps now, so it
+            becomes two or three lines inside its own width and the page body
+            never moves.
+          */}
+          <Segmented
+            ariaLabel="Filter by system"
+            value={system}
+            onChange={setSystem}
+            options={[{ value: 'all', label: 'All systems', count: patterns.length }, ...loaded.systems.map((sy) => ({ value: sy.system, label: sy.system.toLowerCase(), count: sy.n }))]}
+          />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Segmented<StatusFilter>
               ariaLabel="Filter by status"
@@ -319,13 +382,14 @@ export default function BuildPatterns() {
               onChange={setFilter}
               options={[
                 { value: 'all', label: 'All', count: counts.all },
-                { value: 'draft', label: 'Draft', count: counts.draft },
                 { value: 'canonical', label: 'Canonical', count: counts.canonical },
+                { value: 'draft', label: 'Draft', count: counts.draft },
+                { value: 'unset', label: 'No status', count: counts.unset },
               ]}
             />
             <div className="flex flex-1 items-center justify-end gap-3">
               <SearchBox value={q} onChange={setQ} placeholder="Search problem, solution, context, name" />
-              <span className="tabular whitespace-nowrap text-[11.5px] text-faint">{q.trim() && hits === null ? 'Searching…' : `${rows.length} shown`}</span>
+              {q.trim() && hits === null && <span className="tabular whitespace-nowrap text-[11.5px] text-faint">Searching…</span>}
             </div>
           </div>
           {keywordCounts.length > 0 && (
@@ -341,60 +405,55 @@ export default function BuildPatterns() {
         </div>
 
         {rows.length === 0 ? (
-          <EmptyState>{loaded.sync.source === 'none' ? (loaded.sync.error ?? 'Nothing has been read from Airtable yet.') : q.trim() ? 'No pattern matches that search in the selected system and status.' : 'No build patterns match the selected system and status.'}</EmptyState>
+          <EmptyState>
+            {loaded.sync.source === 'none'
+              ? (loaded.sync.error ?? 'Nothing has been read from Airtable yet.')
+              : q.trim()
+                ? 'No pattern matches that search in the selected system and status.'
+                : 'No build patterns match the selected system and status.'}
+          </EmptyState>
         ) : (
-          <TableFrame grow={false}>
-            <thead>
-              <tr>
-                <Th>pattern</Th>
-                <Th>name</Th>
-                <Th>status</Th>
-                <Th>system</Th>
-                <Th>bha system</Th>
-                <Th>reusability</Th>
-                <Th>created</Th>
-                <Th>problem</Th>
-                <Th>source</Th>
-                <Th />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((p) => {
+          <>
+            {/*
+              One row per pattern: id, name, system, reusability, and the first
+              lines of the problem. The rest of the record — solution, context,
+              gotchas, checklists — opens on click rather than being poured into
+              the list, which is what made the page unreadable.
+            */}
+            <RecordList>
+              {paged.rows.map((p) => {
                 const busy = busyId === p.id;
                 return (
-                  <tr key={p.id} className={`cursor-pointer ${busy ? 'opacity-60' : ''}`} onClick={() => setOpen(p.id)}>
-                    <td className="td tabular text-faint td-clip" style={{ maxWidth: '26ch' }} title={p.pattern_id ?? p.id}>
-                      {p.pattern_id ?? <span className="text-degraded">no pattern_id</span>}
-                    </td>
-                    <td className="td card-title td-clip" style={{ maxWidth: '40ch' }} title={p.title}>
-                      {p.title}
-                    </td>
-                    <td className="td card-meta">{p.status === 'canonical' ? <Pill tone="accent">canonical</Pill> : <Pill tone="degraded">draft</Pill>}</td>
-                    <td className="td card-meta text-faint">{p.system?.toLowerCase() ?? '—'}</td>
-                    <td className="td text-faint td-clip" style={{ maxWidth: '22ch' }}>
-                      {p.bha_system ?? '—'}
-                    </td>
-                    <td className="td text-faint">{p.reusability ?? '—'}</td>
-                    <td className="td tabular text-faint">{p.created_at?.slice(0, 10) ?? '—'}</td>
-                    <td className="td text-faint td-clip" style={{ maxWidth: '48ch' }} title={p.excerpt ?? ''}>
-                      {p.excerpt ?? '—'}
-                    </td>
-                    <td className="td">
-                      <SourceLink source={p.source} />
-                    </td>
-                    <td className="td card-actions td-actions">
+                  <RecordRow
+                    key={p.id}
+                    busy={busy}
+                    id={p.pattern_id ?? <span className="text-degraded">no pattern_id</span>}
+                    title={p.title}
+                    summary={p.excerpt}
+                    summaryEmpty="No problem statement written on this pattern."
+                    meta={
+                      <>
+                        <StatusPill status={p.status} />
+                        {p.system && <span>{p.system.toLowerCase()}</span>}
+                        {p.reusability && <span className="max-w-[22ch] truncate" title={p.reusability}>{p.reusability.toLowerCase()}</span>}
+                        <SourceLink source={p.source} />
+                      </>
+                    }
+                    actions={
                       <RowActions>
                         <RowAction label="View" tone="accent" onClick={() => setOpen(p.id)} />
-                        {writable && p.status === 'draft' && <RowAction label="Promote to canonical" tone="accent" disabled={busy} onClick={() => change(p, 'canonical')} />}
-                        {writable && p.status === 'canonical' && <RowAction label="Back to draft" disabled={busy} onClick={() => change(p, 'draft')} />}
+                        {writable && p.status !== 'canonical' && <RowAction label="Promote to canonical" tone="accent" disabled={busy} onClick={() => change(p, 'canonical')} />}
+                        {writable && p.status !== 'draft' && <RowAction label="Mark draft" disabled={busy} onClick={() => change(p, 'draft')} />}
                         <RowAction label="Open in Airtable" onClick={() => window.open(p.airtable.url, '_blank', 'noreferrer')} />
                       </RowActions>
-                    </td>
-                  </tr>
+                    }
+                    onOpen={() => setOpen(p.id)}
+                  />
                 );
               })}
-            </tbody>
-          </TableFrame>
+            </RecordList>
+            <Pagination paged={paged} unit="patterns" />
+          </>
         )}
       </div>
 

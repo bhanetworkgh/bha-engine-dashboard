@@ -2,11 +2,13 @@ import type { VFarmData } from '../../data';
 import {
   Dot,
   EmptyState,
+  Pagination,
   RowAction,
   RowActions,
   SourceLink,
   TableFrame,
   Th,
+  usePaged,
 } from '../../components/ui';
 import { act, healthText } from '../../lib';
 
@@ -15,8 +17,13 @@ import { act, healthText } from '../../lib';
  * threshold alerts and incident closes.
  */
 export function Live({ data }: { data: VFarmData }) {
-  const openAlerts = data.alerts.filter((a) => a.state === 'open');
-  const latest = data.readings[0] ?? null;
+  // Newest first, oldest last — on both tables and for "last measurement".
+  const alerts = [...data.alerts].sort((a, b) => b.at.localeCompare(a.at));
+  const readings = [...data.readings].sort((a, b) => b.at.localeCompare(a.at));
+  const openAlerts = alerts.filter((a) => a.state === 'open');
+  const latest = readings[0] ?? null;
+  // The rollups are a long list — twenty to a page, like every other list.
+  const pagedReadings = usePaged(readings, 'vfarm-readings');
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -46,7 +53,7 @@ export function Live({ data }: { data: VFarmData }) {
       </div>
 
       <h3 className="shrink-0 px-6 pb-2 text-[13px] font-medium md:px-8">Alerts and incident closes</h3>
-      {data.alerts.length === 0 ? (
+      {alerts.length === 0 ? (
         <EmptyState>No alerts recorded for the selected lane.</EmptyState>
       ) : (
         <div className="card mx-6 mb-4 shrink-0 overflow-x-auto md:mx-8">
@@ -64,7 +71,7 @@ export function Live({ data }: { data: VFarmData }) {
               </tr>
             </thead>
             <tbody>
-              {data.alerts.map((a) => (
+              {alerts.map((a) => (
                 <tr key={a.id}>
                   <td className="td card-meta tabular text-faint">{a.at}</td>
                   <td className="td card-meta">{a.place}</td>
@@ -96,7 +103,7 @@ export function Live({ data }: { data: VFarmData }) {
       )}
 
       <h3 className="shrink-0 px-6 pb-2 text-[13px] font-medium md:px-8">Sensor rollups, three-minute cadence</h3>
-      {data.readings.length === 0 ? (
+      {readings.length === 0 ? (
         <EmptyState>
           No sensor rollups for the selected lane. vFarm readings are written under
           the vfarm core lane only.
@@ -115,7 +122,7 @@ export function Live({ data }: { data: VFarmData }) {
             </tr>
           </thead>
           <tbody>
-            {data.readings.map((r) => (
+            {pagedReadings.rows.map((r) => (
               <tr key={r.id}>
                 <td className="td card-meta tabular text-faint">{r.at}</td>
                 <td className="td card-title">{r.place}</td>
@@ -139,6 +146,7 @@ export function Live({ data }: { data: VFarmData }) {
           </tbody>
         </TableFrame>
       )}
+      {readings.length > 0 && <Pagination paged={pagedReadings} unit="rollups" />}
     </div>
   );
 }

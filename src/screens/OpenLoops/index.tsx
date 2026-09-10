@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../../app/useData';
 import { createLoop, getOpenLoops, getRecordMetrics, resync, setLoopStatus, type Loop, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
-import { Icon, LoadFailed, Loading, PageHeader, SearchBox, Segmented, SyncLine, Toast, useToast } from '../../components/ui';
+import { Icon, LoadFailed, Loading, PageHeader, Pagination, SearchBox, Segmented, SyncLine, Toast, usePaged, useToast } from '../../components/ui';
 import { Loops, OwnerPicker, type StatusFilter } from './Loops';
 import { LoopMetricsPanel } from './Metrics';
 import { NewLoopForm } from './NewLoop';
@@ -72,10 +72,14 @@ export default function OpenLoops() {
     () =>
       scoped
         .filter((l) => statusFilter === 'all' || l.status === statusFilter)
+        // Newest first, oldest last. Age stays on every row as the signal;
+        // it is no longer what decides the order.
         .filter((l) => matches(l, q.trim()))
-        .sort((a, b) => b.age_days - a.age_days),
+        .sort((a, b) => (b.raised_at ?? '').localeCompare(a.raised_at ?? '') || a.age_days - b.age_days),
     [scoped, statusFilter, q],
   );
+
+  const paged = usePaged(loops, `${owner}|${statusFilter}|${q.trim()}`);
 
   async function changeStatus(loop: Loop, next: LoopStatus) {
     setBusyId(loop.id);
@@ -134,7 +138,7 @@ export default function OpenLoops() {
     <div className="relative flex h-full min-h-0 flex-col">
       <PageHeader
         title="Open loops"
-        subtitle="Oldest first. Age is the signal on this page."
+        subtitle="Every commitment BHA has made, across every system"
         right={
           <button type="button" onClick={() => setShowNew((v) => !v)} className="btn btn-primary gap-1.5" disabled={!data.sync.write_through}>
             <Icon.plus />
@@ -149,7 +153,7 @@ export default function OpenLoops() {
         </div>
       )}
 
-      <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
           <SyncLine sync={data.sync} onResync={pull} busy={syncing} />
           <OwnerPicker data={data} owner={owner} setOwner={setOwner} />
@@ -172,11 +176,11 @@ export default function OpenLoops() {
             />
             <div className="flex flex-1 items-center justify-end gap-3">
               <SearchBox value={q} onChange={setQ} placeholder="Search by loop id or text" />
-              <span className="tabular whitespace-nowrap text-[11.5px] text-faint">{loops.length} shown</span>
             </div>
           </div>
         </div>
-        <Loops data={data} loops={loops} busyId={busyId} onStatus={changeStatus} searching={Boolean(q.trim())} writable={data.sync.write_through} />
+        <Loops data={data} loops={paged.rows} total={loops.length} busyId={busyId} onStatus={changeStatus} searching={Boolean(q.trim())} writable={data.sync.write_through} />
+        <Pagination paged={paged} unit="loops" />
       </div>
 
       <Toast toast={toast} />
