@@ -1,7 +1,6 @@
 import type { LoopMetrics } from '../../data';
 import { BUILDER_NAMES } from '../../data';
-import { Bars, CountCell, CountUp, HBar, SeriesBlock, StatCell, StatStrip } from '../../components/ui';
-import { laneLabel } from '../../lib';
+import { CountCell, CountUp, EmptyPanel, HBar, MetricCard, SeriesBlock, StatCell, StatStrip } from '../../components/ui';
 
 /**
  * The figures across the top of Open loops. Three counts, then the derived
@@ -9,6 +8,10 @@ import { laneLabel } from '../../lib';
  * sentence saying why they do not; the two measures that read last_modified
  * carry the field's caveat, because it was added on 9 Sept 2026 and every
  * loop stamps from that day. Everything re-animates when `view` changes.
+ *
+ * The cards are laid out so each one fills its own height rather than holding
+ * a line of text in the middle of a tall empty box: MetricCard grows its body
+ * and pins its footnote to the floor, so a row of cards lines up.
  */
 export function LoopMetricsPanel({ metrics, loading, switching, error, view }: { metrics: LoopMetrics | null; loading: boolean; switching: boolean; error: string | null; view: string }) {
   if (error) return <div className="card mx-6 mb-4 px-5 py-4 text-[12.5px] text-failing md:mx-8">Figures unavailable: {error}</div>;
@@ -27,9 +30,10 @@ export function LoopMetricsPanel({ metrics, loading, switching, error, view }: {
   const m = metrics;
   const dim = loading || switching;
   const maxRate = Math.max(1, ...m.close_rate_by_builder.map((o) => o.rate ?? 0));
-  const dist = m.age_distribution;
-  const maxLane = Math.max(1, ...m.open_by_lane_tag.map((l) => l.n));
   const maxRaiser = Math.max(1, ...m.top_raisers.map((r) => r.n));
+  // "Age of what is open" is a share of the open loops, so it reads in the same
+  // language as close rate: count over total, then the percentage.
+  const openTotal = m.age_distribution.reduce((n, d) => n + d.n, 0);
   const notYet = m.stale.count !== null && new Date().toISOString().slice(0, 10) < m.stale.meaningful_from;
 
   return (
@@ -40,21 +44,48 @@ export function LoopMetricsPanel({ metrics, loading, switching, error, view }: {
         <CountCell label="Closed" value={m.closed} tone="dim" replayKey={view} />
       </StatStrip>
 
-      <div className="mx-6 mb-4 grid gap-4 md:mx-8 md:grid-cols-3">
-        <div className="card px-5 py-4">
-          <div className="mb-1.5 flex items-baseline justify-between gap-3">
-            <div className="text-[13px] font-medium text-ink">Age of what is open</div>
-            <div className="text-[10.5px] text-faint">newest → oldest</div>
-          </div>
-          <Bars values={dist.map((d) => d.n)} labels={dist.map((d) => d.bucket)} height={52} tone="ink" highlightLast={false} replayKey={view} showLabels />
-        </div>
-
-        <div className="card px-5 py-4">
-          <div className="mb-1.5 text-[13px] font-medium text-ink">Close rate by builder</div>
-          {m.close_rate_by_builder.length === 0 ? (
-            <div className="text-[12px] text-faint">No loops.</div>
+      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-2">
+        {/*
+          Age of what is open, in the same visual language as Close rate by
+          builder: a labelled horizontal bar per bucket, its count over the
+          total, then the percentage. It was a row of unlabelled vertical bars,
+          which said nothing a reader could act on.
+        */}
+        <MetricCard
+          title="Age of what is open"
+          right="newest → oldest"
+          note={`Open and in-progress loops by days since Date Raised, as a share of the ${openTotal} currently open. “No date raised” is the count with no Date Raised on the row.`}
+        >
+          {openTotal === 0 ? (
+            <EmptyPanel>Nothing is open in this table, so there is no age to distribute.</EmptyPanel>
           ) : (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
+              {m.age_distribution.map((d) => (
+                <HBar
+                  key={d.bucket}
+                  label={d.bucket}
+                  value={openTotal ? Math.round((d.n / openTotal) * 100) : 0}
+                  max={100}
+                  suffix="%"
+                  replayKey={view}
+                  valueNode={<CountUp value={openTotal ? Math.round((d.n / openTotal) * 100) : 0} replayKey={view} />}
+                  right={
+                    <span className="text-faint">
+                      {d.n}/{openTotal}
+                    </span>
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </MetricCard>
+
+        {/* The reference design for this page. */}
+        <MetricCard title="Close rate by builder" note={m.close_rate_note}>
+          {m.close_rate_by_builder.length === 0 ? (
+            <EmptyPanel>No loops in this table.</EmptyPanel>
+          ) : (
+            <div className="space-y-2">
               {m.close_rate_by_builder.map((o) => (
                 <HBar
                   key={o.owner}
@@ -73,65 +104,62 @@ export function LoopMetricsPanel({ metrics, loading, switching, error, view }: {
               ))}
             </div>
           )}
-          <div className="mt-2 text-[11.5px] leading-snug text-faint">{m.close_rate_note}</div>
-        </div>
+        </MetricCard>
+      </div>
 
-        <div className="card px-5 py-4">
-          <div className="mb-1.5 text-[13px] font-medium text-ink">Open loops by lane tag</div>
-          {m.open_by_lane_tag.length === 0 ? (
-            <div className="text-[12px] text-faint">No open loops.</div>
-          ) : (
-            <div className="space-y-1.5">
-              {m.open_by_lane_tag.map((l) => (
-                <HBar key={l.lane_tag} label={l.lane_tag.startsWith('(') ? l.lane_tag : laneLabel(l.lane_tag)} value={l.n} max={maxLane} replayKey={view} valueNode={<CountUp value={l.n} replayKey={view} />} />
-              ))}
-            </div>
-          )}
-          <div className="mt-2 text-[11.5px] leading-snug text-faint">From each loop’s lane_tag as set in its table; “(no lane_tag)” is the count with none.</div>
-        </div>
+      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-3">
+        <MetricCard title="Raised per week">
+          <SeriesBlock title="" series={m.raised_per_week} tone="accent" total replayKey={view} bare />
+        </MetricCard>
+        <MetricCard title="Closed per week">
+          <SeriesBlock title="" series={m.closed_per_week} tone="ink" total replayKey={view} bare />
+        </MetricCard>
+        <MetricCard title="Net raised vs closed per week">
+          <SeriesBlock title="" series={m.net_per_week} tone="ink" replayKey={view} bare />
+        </MetricCard>
+      </div>
 
-        <div className="card px-5 py-4">
-          <SeriesBlock title="Raised per week" series={m.raised_per_week} tone="accent" total replayKey={view} />
-        </div>
-        <div className="card px-5 py-4">
-          <SeriesBlock title="Closed per week" series={m.closed_per_week} tone="ink" total replayKey={view} />
-        </div>
-        <div className="card px-5 py-4">
-          <SeriesBlock title="Net raised vs closed per week" series={m.net_per_week} tone="ink" replayKey={view} />
-        </div>
-
-        <div className="card px-5 py-4">
+      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-3">
+        <MetricCard title="Still no change in fourteen days" note={m.stale.note}>
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <div className="text-[13px] font-medium text-ink">Stale — no change in fourteen days</div>
             {m.stale.count === null ? (
               <span className="text-[13px] text-faint">Not recorded</span>
             ) : (
-              <span className={`font-display tabular text-[22px] leading-none ${notYet ? 'text-faint' : m.stale.count ? 'text-degraded' : 'text-ink'}`}>
+              <span className={`font-display tabular text-[34px] leading-none ${notYet ? 'text-faint' : m.stale.count ? 'text-degraded' : 'text-ink'}`}>
                 <CountUp value={m.stale.count} replayKey={view} />
               </span>
             )}
             {notYet && <span className="text-[11.5px] text-faint">not yet meaningful — from {m.stale.meaningful_from}</span>}
           </div>
-          <div className="mt-1.5 text-[11.5px] leading-snug text-faint">{m.stale.note}</div>
-        </div>
+        </MetricCard>
 
-        <div className="card px-5 py-4">
-          <div className="mb-1.5 text-[13px] font-medium text-ink">Who raises loops</div>
+        <MetricCard title="Who raises loops" note={m.top_raisers_note}>
           {m.top_raisers.length === 0 ? (
-            <div className="text-[12px] text-faint">No Raised By recorded.</div>
+            <EmptyPanel>No loop records who raised it.</EmptyPanel>
           ) : (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {m.top_raisers.map((r) => (
-                <HBar key={r.raised_by} label={r.raised_by} value={r.n} max={maxRaiser} replayKey={view} valueNode={<CountUp value={r.n} replayKey={view} />} />
+                <HBar
+                  key={r.key}
+                  label={
+                    <span title={r.variants.length > 1 ? `Written as ${r.variants.join(', ')}` : undefined}>
+                      {r.label}
+                      {r.variants.length > 1 && <span className="ml-1.5 text-[10.5px] text-faint">{r.variants.length} spellings</span>}
+                    </span>
+                  }
+                  value={r.n}
+                  max={maxRaiser}
+                  replayKey={view}
+                  valueNode={<CountUp value={r.n} replayKey={view} />}
+                />
               ))}
             </div>
           )}
-          <div className="mt-2 text-[11.5px] leading-snug text-faint">Raised By as written on each loop, so “Jason” and “Jason Bays” count separately.</div>
-        </div>
+        </MetricCard>
 
-        <div className="card px-5 py-4">
-          <SeriesBlock title="Closed per day" series={m.closed_per_day} tone="ink" total replayKey={view} />
-        </div>
+        <MetricCard title="Closed per day">
+          <SeriesBlock title="" series={m.closed_per_day} tone="ink" total replayKey={view} bare />
+        </MetricCard>
       </div>
     </div>
   );

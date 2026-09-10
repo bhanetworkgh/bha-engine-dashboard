@@ -76,7 +76,10 @@ cares where anything came from.
 2026-09-09, Destiny). Loops, Codex entries, build patterns and commercial
 cards are read by `server/src/sync.ts` from their Airtable bases through
 `server/src/airtable.ts` (plain fetch, no dependency) into SQLite under
-`DATA_DIR`, keyed by Airtable record id. The base and table ids, field names
+`DATA_DIR`, keyed by Airtable record id. **Codex entries come from BHA
+Submissions & Logs (`appEmdKshNVTl64Zf`), one table per builder** (decision
+2026-09-10, Destiny) — the builder is the table a row lives in, never a field,
+and the completed entry is the `Orchestrator Layer2 Review` column. The base and table ids, field names
 and select vocabularies live in `server/src/sources.ts` and were read from the
 live bases, not assumed. Their phase 1 fixture files were deleted the same
 day; with no `AIRTABLE_API_KEY` those four pages are empty and say why.
@@ -156,6 +159,17 @@ them. The reference is the "My Apple" mockup Destiny supplied on 2026-09-08.
 - **Sentence case everywhere.** Never Title Case, never ALL CAPS.
 - **Every row does something.** Hover reveals its actions inline. Never bury
   actions in a menu.
+- **Newest first, everywhere.** Every list, every table, on every page.
+- **Cards in a row are the same height, and their content fills them.** A
+  hundred-pixel card holding ten pixels of text is a bug; fix the ratio, not
+  the card.
+- **The page body never scrolls sideways.** A filter bar too wide for the
+  column wraps, or scrolls inside its own container.
+- **Long lists are paged.** Twenty rows, next and previous. Never six hundred
+  rows in one scroll.
+- **"Coming soon" is not an empty state.** Where the data is real, show it.
+  Where the capability does not exist yet, say so plainly rather than drawing
+  an empty chart that implies it works.
 
 ---
 
@@ -261,9 +275,20 @@ The densest screen.
 - A reconciliation view for loops that went missing during data migration.
 
 ### Codex entries / Build patterns / Commercial
-Entries by builder and week, session type, link to the narration, and whether
-each was ingested into BHARAG or only posted. Patterns by lane and how often
-referenced. Commercial opportunities with their readiness state.
+Entries by builder and week, session type, link to the narration, and the
+completed entry itself. Four tabs, each defined against the source's own
+fields and printing its rule on the page: **Approved** (`Jason Status` =
+Approved), **Pending approval** (Pending or empty), **Incomplete**
+(`Layer0 Flagged`, listing what `Layer0 Missing` names), **Complete** (not
+flagged and `Orchestrator Layer2 Review` not empty). Layer 0 and Jason Status
+are two axes, not one pipeline: a row can be approved and still flagged, and
+both show on it.
+
+Build patterns and Commercial are the same page with different content —
+the same filter bars, truncated list rows with the full record on click, and
+the same chart treatment. `pattern_status` has three states, not two: draft,
+canonical, and **empty**, which is counted on its own because an untriaged
+pattern is not a draft.
 
 ### Builders
 One row per person: lane, open loops, oldest loop age, last activity, contract

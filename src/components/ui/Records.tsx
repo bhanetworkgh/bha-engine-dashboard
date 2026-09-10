@@ -3,6 +3,7 @@ import type { Metric, MetricSeries, SyncInfo } from '../../data';
 import { BUILDER_NAMES } from '../../data';
 import { Bars } from './Charts';
 import { StatCell } from './Card';
+import { EmptyPanel } from './EmptyState';
 import { Segmented } from './Tabs';
 
 /**
@@ -105,31 +106,65 @@ export function MetricCell({ label, metric, suffix, compareLabel = 'last week', 
   );
 }
 
-/** A small bar series, or the sentence saying why there is none. */
-export function SeriesBlock({ title, series, tone = 'ink', height = 44, total, replayKey, note }: { title: string; series: MetricSeries; tone?: 'ink' | 'accent' | 'degraded'; height?: number; total?: boolean; replayKey?: string | number; note?: ReactNode }) {
+/**
+ * A small bar series, or the sentence saying why there is none.
+ *
+ * A series with no points is not drawn as an empty axis: rule five of the
+ * refinement pass — a section with no data says so, in the middle of the space
+ * the chart would have filled. `bare` drops the internal title for a card that
+ * already carries one, and lets the block grow to fill that card.
+ */
+export function SeriesBlock({
+  title,
+  series,
+  tone = 'ink',
+  height = 44,
+  total,
+  replayKey,
+  note,
+  bare,
+}: {
+  title: string;
+  series: MetricSeries;
+  tone?: 'ink' | 'accent' | 'degraded';
+  height?: number;
+  total?: boolean;
+  replayKey?: string | number;
+  note?: ReactNode;
+  /** The card supplies the title; this block supplies only the body. */
+  bare?: boolean;
+}) {
   const pts = series.points;
   return (
-    <div className="min-w-0">
-      <div className="mb-1.5 flex items-baseline justify-between gap-3">
-        <div className="text-[13px] font-medium text-ink">{title}</div>
-        {pts && total && (
-          <div className="tabular text-[12px] text-dim">
-            <CountUp value={pts.reduce((n, p) => n + p.value, 0)} replayKey={replayKey} /> total
-          </div>
-        )}
-      </div>
+    <div className={`min-w-0 ${bare ? 'flex h-full flex-col' : ''}`}>
+      {!bare && (
+        <div className="mb-1.5 flex items-baseline justify-between gap-3">
+          <div className="text-[13px] font-medium text-ink">{title}</div>
+          {pts && total && (
+            <div className="tabular text-[12px] text-dim">
+              <CountUp value={pts.reduce((n, p) => n + p.value, 0)} replayKey={replayKey} /> total
+            </div>
+          )}
+        </div>
+      )}
       {pts ? (
-        <>
+        <div className={bare ? 'flex flex-1 flex-col justify-end' : ''}>
+          {bare && total && (
+            <div className="tabular mb-1 text-[12px] text-dim">
+              <CountUp value={pts.reduce((n, p) => n + p.value, 0)} replayKey={replayKey} /> total
+            </div>
+          )}
           <Bars values={pts.map((p) => p.value)} labels={pts.map((p) => p.label)} height={height} tone={tone} highlightLast={false} replayKey={replayKey} />
           <div className="mt-1 flex justify-between text-[10.5px] text-faint">
             <span>{pts[0]?.label}</span>
             <span>{pts[pts.length - 1]?.label}</span>
           </div>
-        </>
+        </div>
       ) : (
-        <div className="rounded-[10px] bg-raised px-3 py-2.5 text-[12px] leading-snug text-dim">Not recorded</div>
+        <EmptyPanel min={bare ? 84 : 56}>{series.note ?? 'Not recorded.'}</EmptyPanel>
       )}
-      {series.note && <div className="mt-1.5 text-[11.5px] leading-snug text-faint">{series.note}</div>}
+      {/* When the series is null its reason is the empty state itself, so it is not repeated underneath. */}
+      {pts && series.note && <div className="mt-2 text-[11.5px] leading-snug text-faint">{series.note}</div>}
       {note}
     </div>
   );

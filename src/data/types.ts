@@ -553,45 +553,55 @@ export interface SyncInfo {
 /* ------------------------------- codex / patterns / commercial / builders */
 
 /**
- * One row of the Codex Log. Fields are the table's own; nothing here is
- * derived except `builder_id` (mapped from the Slack id) and `week`. The log
- * records no approval and no Layer 0 flag: `action_required` is the nearest
- * thing to a review state and is shown as exactly that.
+ * One submission from a builder's table in BHA Submissions & Logs
+ * (appEmdKshNVTl64Zf) — the row a Codex entry is written onto.
+ *
+ * `builder_id` is the table the row lives in, so it is never blank; the
+ * Builder Name field is, on several rows, which is why it is not used for
+ * identity. `entry` (the Orchestrator Layer2 Review) is the finished Codex
+ * entry text and lives on the detail shape only — the list carries
+ * `entry_excerpt` and `has_entry` instead, because a hundred full entries in
+ * one payload is megabytes.
+ *
+ * Two independent axes, not one pipeline:
+ *   Jason Status   approved / pending / input added — the review decision
+ *   Layer 0        flagged / clean — the completeness gate, before review
+ * A row can be approved and still carry a Layer 0 flag; both are shown.
  */
 export interface CodexEntry {
   /** Airtable record id. */
   id: string;
-  /** Dashboard builder id mapped from builder_id (a Slack user id); null when the row names no builder. */
-  builder_id: string | null;
-  builder_slack_id: string | null;
-  builder_name: string | null;
-  /** From the `timestamp` field, normalised to ISO; null when unparseable. */
+  /** The builder whose table the row lives in. Never null. */
+  builder_id: string;
+  /** That table's id, so a write knows where to go. */
+  table: string;
+  /** The pipeline's own key, e.g. U0AEW3TBYH1_1787265422533. */
+  submission_id: string | null;
+  /** CODEX-YYYYMMDD-builder-slug, once Bays has written it back. */
+  codex_entry_id: string | null;
+  /** From the Timestamp field, normalised to ISO. */
   logged_at: string | null;
   /** ISO week of logged_at, e.g. 2026-W36. */
   week: string | null;
   session_type: string | null;
   session_url: string | null;
-  verdict: string | null;
   narration_quality: string | null;
-  pay_eligible: boolean;
-  /** JASON_SPOTCHECK, DESTINY_REVIEW, BUILDER_FOLLOWUP, free text, or null. */
-  action_required: string | null;
-  card_id: string | null;
-  lane_id: string | null;
-  pillar_tag: string | null;
-  flag_name: string | null;
-  flag_repeat_count: number | null;
-  architecture_fit: string | null;
-  engine_movement: string | null;
-  needle_moved_evidence: string | null;
-  red_flags: string | null;
-  /**
-   * This dashboard's completeness check, not a field in the log: true when
-   * the row carries a builder, a session link and type, a verdict, and the
-   * three analysis fields. `missing` names what it lacks.
-   */
+  submission_source: string | null;
+  /** Jason Status verbatim: Approved, Pending, Input Added, or null. */
+  jason_status: string | null;
+  approval: CodexApproval;
+  /** Layer0 Flagged: true when the completeness gate stopped this submission. */
+  layer0_flagged: boolean;
+  /** Layer0 Missing, parsed: which elements the gate found absent. */
+  layer0_missing: string[];
+  /** Not flagged by Layer 0, and Layer 2 has written the entry. */
   complete: boolean;
-  missing: string[];
+  /** Whether Orchestrator Layer2 Review holds anything. */
+  has_entry: boolean;
+  /** The opening of the Layer 2 review, for the list. */
+  entry_excerpt: string | null;
+  processed_at: string | null;
+  processed_date: string | null;
   note?: string | null;
   spine: Spine;
   tags: Tags;
@@ -599,30 +609,51 @@ export interface CodexEntry {
   airtable: AirtableRef;
 }
 
-/** The three layers. 'approved' is defined but cannot be filled: the log records no approval. */
-export type CodexLayer = 'incomplete' | 'complete' | 'pending' | 'approved';
+/** The full submission, for the entry view. `entry` is the completed Codex entry. */
+export interface CodexEntryDetail extends CodexEntry {
+  /** Orchestrator Layer2 Review — the full Codex entry text. */
+  entry: string | null;
+  layer1_review: string | null;
+  summary: string | null;
+  session_description: string | null;
+  jason_notes: string | null;
+}
 
-/** The fields an edit may change. Everything else on the row is the log's own. */
-export type CodexEditableField =
-  | 'session_type'
-  | 'session_url'
-  | 'verdict'
-  | 'narration_quality'
-  | 'pay_eligible'
-  | 'action_required'
-  | 'card_id'
-  | 'lane_id'
-  | 'pillar_tag'
-  | 'architecture_fit'
-  | 'engine_movement'
-  | 'needle_moved_evidence'
-  | 'red_flags';
+/** Jason Status, lower-cased. 'unset' is a row he has not touched. */
+export type CodexApproval = 'approved' | 'pending' | 'input added' | 'unset';
+
+/**
+ * A submission parked at the Layer 0 completeness gate, waiting for the
+ * builder to answer what it is missing. It is not a Codex entry and never
+ * appears in the entry list; it is counted so the Incomplete tab can say how
+ * many submissions never reached a builder's table at all.
+ */
+export interface Layer0Hold {
+  id: string;
+  submission_id: string | null;
+  builder_id: string | null;
+  builder_name: string | null;
+  missing: string[];
+  status: string | null;
+  /** Anything but "completed": still waiting on the builder. */
+  open: boolean;
+  created_at: string | null;
+  source: Source;
+  airtable: AirtableRef;
+}
+
+/** The four tabs, exactly as defined against the source's own fields. */
+export type CodexTab = 'approved' | 'pending' | 'incomplete' | 'complete';
 
 export interface CodexData {
   entries: CodexEntry[];
   sync: SyncInfo;
-  /** Select choices as the table defines them, for the edit form. */
-  choices: { session_type: string[]; verdict: string[]; narration_quality: string[]; pillar_tag: string[] };
+  /** The tables read, in the order they are offered as builder tabs. */
+  builders: { id: string; label: string; table: string; n: number }[];
+  /** Submissions sitting at the Layer 0 gate, which have no builder-table row yet. */
+  layer0_holds: Layer0Hold[];
+  /** Select choices as the tables define them, for the review control. */
+  choices: { jason_status: string[] };
 }
 
 /**
@@ -670,13 +701,24 @@ export interface BuildPatternDetail extends BuildPattern {
   roadmap_context: string | null;
 }
 
-export type PatternStatus = 'draft' | 'canonical';
+/**
+ * pattern_status as the Build Patterns table defines it — a single-select
+ * with exactly two choices — plus the state the table does not name: a row
+ * that leaves the field empty. 'unset' is never written back; it is what a
+ * row already is.
+ */
+export type PatternStatus = 'draft' | 'canonical' | 'unset';
+
+/** The two a pattern can be moved to from here. */
+export type WritablePatternStatus = 'draft' | 'canonical';
 
 export interface BuildPatternsData {
   patterns: BuildPattern[];
   sync: SyncInfo;
   /** Every system seen in pattern ids, with counts, for the classification strip. */
   systems: { system: string; n: number; canonical: number }[];
+  /** How many rows leave pattern_status empty, for the page's own explanation of the states. */
+  unset: number;
 }
 
 /** readiness_state as the Commercial Opportunities table defines it. */
@@ -795,10 +837,14 @@ export interface LoopMetrics {
   net_per_week: MetricSeries;
   closed_per_week: MetricSeries;
   stale: { count: number | null; meaningful_from: string; note: string };
-  /** Open loops by lane_tag, including those with none. */
-  open_by_lane_tag: { lane_tag: string; n: number }[];
-  /** Who raises loops, from Raised By as written. */
-  top_raisers: { raised_by: string; n: number }[];
+  /**
+   * Who raises loops, one row per person. Raised By is free text, so the
+   * spellings of one name are collapsed to a single identity before counting;
+   * `variants` names the spellings that were merged, so the merge is visible
+   * rather than silent.
+   */
+  top_raisers: { key: string; label: string; n: number; variants: string[] }[];
+  top_raisers_note: string;
   /** The caveat every last_modified-derived figure carries. */
   modified_note: string;
   history_since: string | null;
@@ -811,22 +857,22 @@ export interface CodexMetrics {
   computed_at: string;
   scope: { builder: string | null; rows: number };
   entries: number;
-  /** Rows with no builder recorded in the source; they cannot be attributed. */
-  unattributed: number;
-  unattributed_note: string;
-  /** Layer 0: this dashboard's completeness check. */
-  layer0: { complete: number; incomplete: number; rate: number | null; definition: string; note: string };
-  /** Layer 1: action_required = JASON_SPOTCHECK, the nearest thing the log records. */
-  pending: { n: number; note: string };
-  /** Layer 2: cannot be filled — no approval field. */
-  approved: { n: number | null; note: string };
-  /** Rows carrying a verdict: evaluated, which is not the same as approved. */
-  evaluated: { n: number; note: string };
-  per_builder_per_week: { owner: string; weeks: { week: string; start: string; label: string; n: number }[] }[];
-  verdict_mix: { verdict: string; n: number }[];
-  verdict_note: string;
+  /** The four tabs, each with the rule it applies, so the page never states a rule the server does not use. */
+  tabs: { tab: CodexTab; label: string; n: number; rule: string }[];
+  /** Submissions carrying a completed Layer 2 entry. */
+  with_entry: { n: number; note: string };
+  /** Layer 0: the gate's own flag, not a check this dashboard invents. */
+  layer0: { flagged: number; clean: number; definition: string; note: string };
+  /** Which elements the gate found missing, across every flagged row. */
+  missing_mix: { element: string; n: number }[];
+  /** Submissions parked at the gate with no builder-table row yet. */
+  holds: { open: number; completed: number; note: string };
+  /** Jason Status across every row. */
+  approval_mix: { approval: CodexApproval; label: string; n: number }[];
+  approval_note: string;
+  per_builder_per_week: { owner: string; weeks: { week: string; start: string; label: string; short: string; n: number }[] }[];
   narration_quality_mix: { quality: string; n: number }[];
-  pay_eligible_rate: Metric;
+  narration_quality_note: string;
   median_days_to_approval: Metric;
 }
 
@@ -836,11 +882,17 @@ export interface PatternMetrics {
   scope: { rows: number };
   draft: number;
   canonical: number;
+  /** Rows whose pattern_status is empty. Counted separately: an untriaged pattern is not a draft. */
+  unset: number;
+  /** draft + canonical + unset, and the total, so the figures visibly reconcile. */
+  reconciliation: { rows: number; draft: number; canonical: number; unset: number; sums_to: number; note: string };
+  /** Distinct pattern_id values against the row count — the second reason the figures move. */
+  duplicates: { distinct_ids: number; duplicate_rows: number; ids: { pattern_id: string; n: number }[]; note: string };
   /** Canonical as a share of all patterns, today. */
   promotion_rate: Metric;
-  /** What the two states mean, from the table; the field defines exactly these. */
+  /** What each state means. The field itself defines two; the third is the absence of a value. */
   status_legend: { status: PatternStatus; meaning: string }[];
-  by_system: { system: string; draft: number; canonical: number }[];
+  by_system: { system: string; draft: number; canonical: number; unset: number }[];
   reusability_mix: { reusability: string; n: number }[];
   reusability_note: string;
   created_per_week: MetricSeries;
