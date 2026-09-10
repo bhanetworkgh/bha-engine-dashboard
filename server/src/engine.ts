@@ -15,6 +15,8 @@ import type {
   BuilderDetail,
   BuildersData,
   BuildPatternsData,
+  ClientLaneRow,
+  ClientsData,
   CodexData,
   CodexEntryDetail,
   CommercialData,
@@ -24,15 +26,17 @@ import type {
   IncidentState,
   Lane,
   LaneFilter,
+  NsData,
   OpenLoopsData,
   OverviewData,
   Query,
+  RtData,
   SeriesPoint,
   TwinData,
   VFarmData,
 } from '../../src/data/types';
 import { MODEL_LABEL, askConfigured } from './ask';
-import { CODEX_CHOICES, CODEX_TABLES, loopTable } from './sources';
+import { CODEX_CHOICES, CODEX_TABLES, loopTable, questionNeedsHuman } from './sources';
 import * as store from './store';
 
 /** The builder's loops table id, for inbound payloads that name a builder rather than a table. */
@@ -369,6 +373,110 @@ export function getCodexEntries(_q: Query): CodexData {
 
 export function getCodexDetail(id: string): CodexEntryDetail | null {
   return store.codexDetail(id);
+}
+
+/* ----------------------------------------------- north star telemetry */
+
+export function getNorthStarTelemetry(): NsData {
+  return {
+    // Newest first: the most recent ask is the one that says whether North
+    // Star is being used at all.
+    records: store.nsRecords().sort((a, b) => (b.asked_at ?? '').localeCompare(a.asked_at ?? '')),
+    sync: store.syncInfo('ns'),
+  };
+}
+
+/* -------------------------------------------- research twin telemetry */
+
+export function getResearchTwinTelemetry(): RtData {
+  const cards = store.rtCards();
+  const attempts = store.rtAttempts().length;
+  return {
+    cards,
+    sync: store.syncInfo('rt'),
+    shape: {
+      attempts,
+      cards: cards.length,
+      note:
+        attempts === cards.length
+          ? 'One row per card in the Research Queue.'
+          : `The Research Queue holds ${attempts} rows across ${cards.length} distinct cards — it is an attempt log, one row per research attempt, and card_id repeats. Every figure on this page is per card, with the newest attempt deciding the card's state; the row count is given here so the two are never confused.`,
+    },
+  };
+}
+
+/* --------------------------------------------------------- clients */
+
+/** Fourteen days with no run, or never run at all, is stale. */
+const STALE_DAYS = 14;
+
+export function getClients(): ClientsData {
+  const lanes = store.clientLanes();
+  const questions = store.clientQuestions();
+  const now = Date.now();
+
+  const rows: ClientLaneRow[] = lanes
+    .map((lane) => {
+      const key = lane.lane_id ?? lane.id;
+      const mine = questions.filter((q) => q.lane_id === key);
+      const needsHuman = mine.filter((q) => questionNeedsHuman(q, lane)).length;
+      const everRun = Boolean(lane.last_run_at);
+      return {
+        ...lane,
+        questions: mine.length,
+        // "Active" is a question the loop is still working: it has not been
+        // parked for a human and is not already answered with enough evidence.
+        active_questions: mine.filter((q) => !questionNeedsHuman(q, lane)).length,
+        needs_human: needsHuman,
+        missing_research: mine.filter((q) => q.missing_research).length,
+        stale: everRun ? now - Date.parse(lane.last_run_at!) > STALE_DAYS * 86_400_000 : false,
+        // A lane with no run yet is warming up, not failing. The distinction
+        // matters: the vFarm lane was added today and has never run.
+        warming_up: !everRun,
+      };
+    })
+    .sort((a, b) => (b.last_run_at ?? '').localeCompare(a.last_run_at ?? '') || a.name.localeCompare(b.name));
+
+  // Group by Client ID. Two lanes sharing one id are one client with two
+  // lanes, and must appear once with both beneath — not twice.
+  const groups = new Map<string, ClientLaneRow[]>();
+  for (const r of rows) {
+    const id = r.client_id ?? `(no client id) ${r.lane_id ?? r.id}`;
+    groups.set(id, [...(groups.get(id) ?? []), r]);
+  }
+
+  return {
+    clients: [...groups.entries()]
+      .map(([client_id, ls]) => ({
+        client_id,
+        label: commonLabel(ls.map((l) => l.name)),
+        lanes: ls,
+        questions: ls.reduce((n, l) => n + l.questions, 0),
+        needs_human: ls.reduce((n, l) => n + l.needs_human, 0),
+      }))
+      .sort((a, b) => b.needs_human - a.needs_human || a.label.localeCompare(b.label)),
+    lanes: rows,
+    questions,
+    sync: store.syncInfo('clients'),
+    unreadable: lanes
+      .filter((l) => !l.questions_table)
+      .map((l) => ({
+        lane_id: l.lane_id,
+        name: l.name,
+        reason: 'The index row names no Table ID, so this lane’s questions could not be read. Add the table id to the index row and it appears on the next resync.',
+      })),
+  };
+}
+
+/**
+ * The client's name from its lanes' names: the shared prefix where there is
+ * one ("Client 2 — Rare-Earth Recycling" and "Client 2 — CRE vFarm + Kiosk
+ * Host" give "Client 2"), otherwise the first lane's name.
+ */
+function commonLabel(names: string[]): string {
+  if (names.length === 1) return names[0];
+  const parts = names.map((n) => n.split(/\s+[—-]\s+/)[0].trim());
+  return parts.every((p) => p === parts[0]) && parts[0] ? parts[0] : names[0];
 }
 
 export function getBuildPatterns(_q: Query): BuildPatternsData {

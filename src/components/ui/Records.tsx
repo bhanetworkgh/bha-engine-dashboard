@@ -170,27 +170,75 @@ export function SeriesBlock({
   );
 }
 
-/** Where the rows came from and when, with the way to pull them again. */
+/**
+ * How long ago, in words. "just now", "4 min ago", "3 h ago", "2 d ago".
+ *
+ * Relative rather than absolute because the question a reader actually has is
+ * "can I trust this number right now", and "18:27 UTC" does not answer it
+ * without arithmetic.
+ */
+export function relativeTime(iso: string | null, now = Date.now()): string | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  const secs = Math.max(0, Math.round((now - t) / 1000));
+  if (secs < 45) return 'just now';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} d ago`;
+}
+
+/**
+ * Where the rows came from and how old they are, in one line, in the same
+ * place on every page.
+ *
+ * The age re-renders on a timer, so a tab left open does not keep claiming the
+ * data is four minutes old an hour later. A failed resync is stated as a
+ * failure with the age of what is still on screen — the previous rows are
+ * never presented as if they were current.
+ */
 export function SyncLine({ sync, onResync, busy }: { sync: SyncInfo; onResync?: () => void; busy?: boolean }) {
-  const when = sync.synced_at ? sync.synced_at.replace('T', ' ').slice(0, 16) + ' UTC' : null;
+  // A minute is the smallest unit shown, so a minute is often enough to tick.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const age = relativeTime(sync.synced_at);
+  const absolute = sync.synced_at ? `${sync.synced_at.replace('T', ' ').slice(0, 16)} UTC` : null;
   const tables = sync.tables.length > 1 ? sync.tables.map((t) => `${t.label} ${t.n}`).join(' · ') : null;
+  const rows = sync.tables.reduce((n, t) => n + t.n, 0);
+  // Stale is twice the resync interval; a page that has missed two cycles is
+  // not merely old, something is wrong.
+  const stale = sync.synced_at ? Date.now() - Date.parse(sync.synced_at) > 2 * (sync.resync_minutes || 15) * 60_000 : false;
+
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11.5px] text-faint">
-      <span>
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
         {sync.source === 'airtable' ? (
           <>
-            Read from Airtable {when}
-            {tables ? ` — ${tables}` : sync.tables[0] ? ` — ${sync.tables[0].n} rows` : ''}.
-            {!sync.write_through && <span className="text-degraded"> Writes are off: no AIRTABLE_API_KEY.</span>}
+            <span className={sync.error ? 'text-degraded' : stale ? 'text-degraded' : 'text-dim'} title={absolute ?? ''}>
+              {sync.error ? 'Showing rows read' : 'Read from Airtable'} {age ?? 'at an unknown time'}
+            </span>
+            <span title={tables ?? ''}>
+              — {rows} {rows === 1 ? 'row' : 'rows'}
+              {tables ? ` across ${sync.tables.length} tables` : ''}
+            </span>
+            {/* A failed resync says so, and says what is on screen instead. */}
+            {sync.error && <span className="text-degraded">· last resync failed: {sync.error}</span>}
+            {!sync.error && stale && <span className="text-degraded">· older than two resync cycles</span>}
+            {!sync.write_through && <span className="text-degraded">· writes are off: no AIRTABLE_API_KEY</span>}
           </>
         ) : (
           <span className="text-degraded">{sync.error ?? 'Nothing has been read from Airtable yet.'}</span>
         )}
-        {sync.source === 'airtable' && sync.error && <span className="text-degraded"> Last resync failed: {sync.error}</span>}
       </span>
       {onResync && (
         <button type="button" onClick={onResync} disabled={busy} className="btn btn-ghost btn-sm">
-          {busy ? 'Reading Airtable…' : 'Resync from Airtable'}
+          {busy ? 'Reading Airtable…' : 'Resync now'}
         </button>
       )}
     </div>

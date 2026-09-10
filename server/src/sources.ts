@@ -16,7 +16,7 @@
  */
 import type { AtRecord } from './airtable';
 import { recordUrl } from './airtable';
-import type { BuildPattern, BuildPatternDetail, CodexEntry, CodexEntryDetail, Layer0Hold, Loop, LoopLaneTag, LoopStatus, Opportunity, ReadinessState, RecordKind, Source } from '../../src/data/types';
+import type { BuildPattern, BuildPatternDetail, ClientLane, ClientQuestion, CodexEntry, CodexEntryDetail, Layer0Hold, Loop, LoopLaneTag, LoopStatus, NsOutcome, NsRecord, NsSearch, Opportunity, ReadinessState, RecordKind, RtAttempt, Source } from '../../src/data/types';
 
 /** Jason Status as the submission tables define it, lower-cased. 'unset' is a row he has not touched. */
 export type CodexApproval = 'approved' | 'pending' | 'input added' | 'unset';
@@ -86,7 +86,23 @@ export function location(kind: Exclude<RecordKind, 'loops' | 'codex'>): { base: 
 
 /** The base a kind's records live in. */
 export function baseFor(kind: RecordKind): string {
-  return kind === 'loops' ? LOOPS_BASE : kind === 'codex' ? CODEX_BASE : kind === 'patterns' ? PATTERNS.base : COMMERCIAL.base;
+  switch (kind) {
+    case 'loops':
+      return LOOPS_BASE;
+    case 'codex':
+      return CODEX_BASE;
+    case 'patterns':
+      return PATTERNS.base;
+    case 'commercial':
+      return COMMERCIAL.base;
+    case 'ns':
+      return NORTH_STAR.base;
+    case 'rt':
+      return RESEARCH_QUEUE.base;
+    case 'clients':
+    case 'client_questions':
+      return CLIENTS_INDEX.base;
+  }
 }
 
 /* ------------------------------------------------------------ vocabularies */
@@ -516,4 +532,202 @@ export function mapOpportunity(rec: AtRecord): Opportunity {
     source: airtableSource(COMMERCIAL.base, COMMERCIAL.table, rec.id),
     airtable: { base: COMMERCIAL.base, table: COMMERCIAL.table, record_id: rec.id, url: recordUrl(COMMERCIAL.base, COMMERCIAL.table, rec.id) },
   };
+}
+
+/* ------------------------------------------------------- north star (NS) */
+
+/**
+ * North Star's ask log. One row per question routed through the agent.
+ *
+ * The table was cleaned on 2026-09-10: the 449 rows from the retired Priority
+ * Engine are gone and every remaining row is North Star, so nothing here
+ * filters on `workflow`.
+ *
+ * `outcome` is a single-select the agent writes — answered / thin / failed —
+ * and it is the authority. A row without one is unclassified and is counted
+ * as unclassified; nothing is inferred from the answer text, because a
+ * classification this dashboard invented would be indistinguishable on screen
+ * from one the engine stands behind.
+ */
+export const NORTH_STAR = { base: 'appkCTjhH8PtYRFI7', table: 'tbl9OGZTyvBKrbeFm', label: 'NS Records' };
+
+export const NS_OUTCOMES: NsOutcome[] = ['answered', 'thin', 'failed'];
+
+function nsOutcome(raw: string | null): NsOutcome | null {
+  const v = (raw ?? '').trim().toLowerCase();
+  return (NS_OUTCOMES as string[]).includes(v) ? (v as NsOutcome) : null;
+}
+
+/** The searches blob, as the agent writes it. A malformed blob is no searches, never a guess. */
+function nsEvidence(raw: unknown): { searches: NsSearch[]; confidence: number | null; confidence_basis: string | null; session_id: string | null } {
+  const text = str(raw);
+  const empty = { searches: [] as NsSearch[], confidence: null, confidence_basis: null, session_id: null };
+  if (!text) return empty;
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const rawSearches = Array.isArray(parsed.searches) ? parsed.searches : [];
+    const searches: NsSearch[] = rawSearches
+      .filter((s): s is Record<string, unknown> => Boolean(s) && typeof s === 'object')
+      .map((s) => ({
+        tool: str(s.tool) ?? '(unnamed tool)',
+        hits: num(s.hits) ?? 0,
+        // `used` is how many of those hits ended up behind an [S#] citation.
+        used: num(s.used) ?? 0,
+        retrieved_at: str(s.retrieved_at),
+      }));
+    return {
+      searches,
+      confidence: num(parsed.confidence),
+      confidence_basis: str(parsed.confidence_basis),
+      session_id: str(parsed.session_id),
+    };
+  } catch {
+    return empty;
+  }
+}
+
+export function mapNsRecord(rec: AtRecord): NsRecord {
+  const f = rec.fields;
+  const at = iso(f.timestamp);
+  const ev = nsEvidence(f.expected_result);
+  const answer = str(f.actual_result);
+  const required = (str(f.research_required) ?? '').trim().toLowerCase();
+  return {
+    id: rec.id,
+    trace_id: str(f.trace_id),
+    lane_id: str(f.lane_id),
+    workflow: str(f.workflow),
+    request: str(f.request),
+    answer,
+    has_answer: Boolean(answer),
+    outcome: nsOutcome(str(f.outcome)),
+    research_required: required === 'yes' ? true : required === 'no' ? false : null,
+    reason: str(f.reason),
+    session_id: ev.session_id,
+    searches: ev.searches,
+    confidence: ev.confidence,
+    confidence_basis: ev.confidence_basis,
+    asked_at: at,
+    week: at ? isoWeek(at) : null,
+    source: airtableSource(NORTH_STAR.base, NORTH_STAR.table, rec.id),
+    airtable: { base: NORTH_STAR.base, table: NORTH_STAR.table, record_id: rec.id, url: recordUrl(NORTH_STAR.base, NORTH_STAR.table, rec.id) },
+  };
+}
+
+/* ---------------------------------------------------- research twin (RT) */
+
+/**
+ * The Research Queue.
+ *
+ * Note the shape: this is an attempt log, not one row per card. `card_id`
+ * repeats — one card can carry twenty rows, one per research attempt — so
+ * anything counted per card has to collapse by `card_id` first, and the page
+ * says both figures rather than passing one off as the other.
+ *
+ * The table `research_twin_research_jobs` in the same base holds a single test
+ * row and is never written to. It is deliberately not read here.
+ */
+export const RESEARCH_QUEUE = { base: 'appud969Dw7H4tMwv', table: 'tblUl8YHhQReDgq8G', label: 'Research Queue' };
+
+export function mapRtAttempt(rec: AtRecord): RtAttempt {
+  const f = rec.fields;
+  const status = str(f.status);
+  return {
+    id: rec.id,
+    card_id: str(f.card_id),
+    lane_id: str(f.lane_id),
+    hypothesis: str(f.hypothesis_to_validate),
+    context_snippet: str(f.context_snippet),
+    /** Blank status is a real state — an untriaged card — not an error. */
+    status,
+    confidence_level: str(f.confidence_level),
+    research_sufficiency: str(f.research_sufficiency),
+    gap_classification: str(f.gap_classification),
+    missing_elements: str(f.missing_elements),
+    target_source_types: str(f.target_source_types),
+    research_summary: str(f.research_summary),
+    links_or_sources: str(f.links_or_sources),
+    learnings_gotchas: str(f.learnings_gotchas),
+    answer_history: str(f.answer_history),
+    run_count: num(f.run_count),
+    requires_human: bool(f.requires_human),
+    first_stuck_at: iso(f.first_stuck_at),
+    source_system: str(f.source),
+    created_at: iso(f.created_time),
+    source: airtableSource(RESEARCH_QUEUE.base, RESEARCH_QUEUE.table, rec.id),
+    airtable: { base: RESEARCH_QUEUE.base, table: RESEARCH_QUEUE.table, record_id: rec.id, url: recordUrl(RESEARCH_QUEUE.base, RESEARCH_QUEUE.table, rec.id) },
+  };
+}
+
+/* --------------------------------------------------------------- clients */
+
+/**
+ * The watched-clients index and the per-lane question tables.
+ *
+ * Each index row names its own questions table in `Table ID`. That field is
+ * read at sync time and followed; there is no lane-to-table map in this code,
+ * because the same hardcoded map was removed from the pipeline on 2026-09-10
+ * for the same reason — adding a lane should be a row, not a deploy.
+ */
+export const CLIENTS_INDEX = { base: 'appkSUSh9ijNjP2f8', table: 'tblFJ1yuYcuanjPdn', label: 'Index' };
+
+export function mapClientLane(rec: AtRecord): ClientLane {
+  const f = rec.fields;
+  return {
+    id: rec.id,
+    name: str(f['Lane / Client']) ?? '(unnamed lane)',
+    lane_id: str(f['Lane ID']),
+    lane_type: str(f['Lane Type']),
+    /** Groups lanes under one client. Two rows with the same id are one client with two lanes. */
+    client_id: str(f['Client ID']),
+    questions_table_name: str(f['Questions Table']),
+    questions_table: str(f['Table ID']),
+    lane_status: str(f['Lane Status']),
+    run_state: str(f['Run State']),
+    last_run_at: iso(f['Last Run At']),
+    next_run_due: iso(f['Next Run Due']),
+    last_run_status: str(f['Last Run Status']),
+    consecutive_errors: num(f['Consecutive Error Count']) ?? 0,
+    infra_fix_required: bool(f['Infra Fix Required']),
+    first_stuck_at: iso(f['First Stuck At']),
+    stuck_cycles: num(f['Stuck Cycle Count']) ?? 0,
+    quarantined: bool(f.Quarantined),
+    commercial_hook: str(f['Commercial Hook']),
+    interested_parties: str(f['Interested Parties']),
+    latest_memo: str(f['Latest Memo Link']),
+    source: airtableSource(CLIENTS_INDEX.base, CLIENTS_INDEX.table, rec.id),
+    airtable: { base: CLIENTS_INDEX.base, table: CLIENTS_INDEX.table, record_id: rec.id, url: recordUrl(CLIENTS_INDEX.base, CLIENTS_INDEX.table, rec.id) },
+  };
+}
+
+export function mapClientQuestion(rec: AtRecord, laneId: string, table: string): ClientQuestion {
+  const f = rec.fields;
+  return {
+    id: rec.id,
+    lane_id: laneId,
+    table,
+    question: str(f.Question) ?? '(no question text)',
+    answer: str(f['This Week Answer']),
+    plain_summary: str(f['Plain Summary']),
+    confidence: str(f.Confidence),
+    sources: str(f.Sources),
+    movement_tag: str(f['Movement Tag']),
+    answer_history: str(f['Answer History']),
+    last_updated: iso(f['Last Updated']),
+    missing_research: bool(f['Missing Research']),
+    research_stuck: bool(f['Research Stuck']),
+    next_experiments: str(f['Next Experiments']),
+    run_count: num(f['Run Count']) ?? 0,
+    source: airtableSource(CLIENTS_INDEX.base, table, rec.id),
+    airtable: { base: CLIENTS_INDEX.base, table, record_id: rec.id, url: recordUrl(CLIENTS_INDEX.base, table, rec.id) },
+  };
+}
+
+/**
+ * "Needs a human" on a question. All three of these circuit breakers are
+ * already computed upstream and written to the row; this reads them, it does
+ * not recompute what they mean.
+ */
+export function questionNeedsHuman(q: ClientQuestion, lane: ClientLane | undefined): boolean {
+  return q.research_stuck || q.run_count >= 3 || Boolean(lane?.quarantined);
 }

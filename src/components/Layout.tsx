@@ -31,6 +31,7 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
       { to: '/codex', label: 'Codex entries', icon: 'book' },
       { to: '/build-patterns', label: 'Build patterns', icon: 'pattern' },
       { to: '/commercial', label: 'Commercial', icon: 'tag' },
+      { to: '/clients', label: 'Clients', icon: 'people' },
     ],
   },
   {

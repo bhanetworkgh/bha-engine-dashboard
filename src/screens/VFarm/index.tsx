@@ -29,6 +29,16 @@ export default function VFarm() {
         below={<Tabs tabs={TABS} value={tab} onChange={setTab} soon={soon} />}
       />
 
+      {/*
+        vFarm is still phase 1 fixtures, not an Airtable read, so it has no
+        resync to report. Saying that is the same promise every other page's
+        sync line makes: the reader is told how old what they are looking at
+        is, including when the answer is "it is not live data at all".
+      */}
+      <div className="shrink-0 px-6 pb-3 text-[11.5px] text-faint md:px-8">
+        Live readings and alerts on this page are phase 1 fixtures, not read from Airtable — there is no resync behind them. Lifecycle and readiness are not built yet.
+      </div>
+
       {tab === 'Live' && <Live data={data} />}
       {tab === 'Lifecycle' && <Lifecycle data={data} />}
       {tab === 'Readiness' && <Readiness data={data} />}

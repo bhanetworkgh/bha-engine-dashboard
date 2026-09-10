@@ -75,7 +75,7 @@ call is idempotent: the same record twice is one row and no second event.
 | `SESSION_SECRET` | Signs the session cookie |
 | `ASK_BAYS_API_KEY`, `ASK_BAYS_URL` | The Ask Bays workflow |
 | `AIRTABLE_API_KEY` | Personal access token with read and write on the four bases |
-| `AIRTABLE_RESYNC_MINUTES` | Timed resync; default 30, 0 disables |
+| `AIRTABLE_RESYNC_MINUTES` | Timed resync; default 15, 0 disables |
 | `DASHBOARD_INBOUND_KEY` | Authenticates n8n's pushes to `/api/inbound/*` |
 | `DATA_DIR` | Where the SQLite read model lives (ephemeral on the free plan) |
 
