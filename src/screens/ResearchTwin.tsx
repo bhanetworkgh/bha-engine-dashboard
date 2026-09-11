@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom';
 import { useMemo, useState } from 'react';
 import { useData } from '../app/useData';
 import { getRecordMetrics, getRtTelemetry, resync, type RtCard, type RtMetrics } from '../data';
+import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
   CountUp,
@@ -14,8 +15,8 @@ import {
   PageHeader,
   Pagination,
   Pill,
-  RecordList,
-  RecordRow,
+  RecordId,
+  RecordTable,
   Ring,
   RowAction,
   RowActions,
@@ -292,6 +293,70 @@ function CardView({ c, onClose }: { c: RtCard; onClose: () => void }) {
 
 /* ------------------------------------------------------------------ page */
 
+/**
+ * The queue, as columns. Needs-a-human is its own column rather than a badge
+ * on the status, because it is not a status: it is the three circuit breakers
+ * upstream reporting that the card has stopped moving on its own.
+ */
+function rtColumns(open: (c: RtCard) => void): RecordColumn<RtCard>[] {
+  return [
+    {
+      key: 'card_id',
+      header: 'card id',
+      width: '28ch',
+      clip: true,
+      title: (c) => c.card_id,
+      cell: (c) => <RecordId>{c.card_id}</RecordId>,
+    },
+    { key: 'lane', header: 'lane', width: '20ch', clip: true, className: 'text-dim', title: (c) => c.lane_id ?? undefined, cell: (c) => c.lane_id ?? <span className="text-faint">no lane</span> },
+    {
+      key: 'claim',
+      header: 'claim',
+      card: 'title',
+      width: '60ch',
+      clip: true,
+      title: (c) => c.hypothesis ?? c.research_summary ?? undefined,
+      cell: (c) => c.hypothesis ?? c.research_summary ?? <span className="text-faint">No hypothesis or summary on this card.</span>,
+    },
+    { key: 'status', header: 'status', card: 'meta', className: 'card-meta', cell: (c) => <StatusPill card={c} /> },
+    {
+      key: 'needs_human',
+      header: 'needs a human',
+      card: 'meta',
+      className: 'card-meta',
+      title: (c) => (c.days_stuck !== null ? `Stuck ${c.days_stuck} days, counted from first_stuck_at` : undefined),
+      cell: (c) =>
+        c.requires_human ? (
+          <Pill tone="degraded">{c.days_stuck !== null ? `yes · ${c.days_stuck} d` : 'yes'}</Pill>
+        ) : (
+          <span className="text-faint">no</span>
+        ),
+    },
+    {
+      key: 'attempts',
+      header: 'attempts',
+      align: 'right',
+      card: 'meta',
+      className: 'card-meta tabular text-dim',
+      title: (c) => `${c.attempts} rows in the queue for this card`,
+      cell: (c) => c.run_count,
+    },
+    { key: 'source', header: 'source', cell: (c) => <SourceLink source={c.source} /> },
+    {
+      key: 'actions',
+      align: 'right',
+      card: 'actions',
+      className: 'card-actions',
+      cell: (c) => (
+        <RowActions>
+          <RowAction label="View" tone="accent" onClick={() => open(c)} />
+          <RowAction label="Open in Airtable" onClick={() => window.open(c.airtable.url, '_blank', 'noreferrer')} />
+        </RowActions>
+      ),
+    },
+  ];
+}
+
 export default function ResearchTwin() {
   const [reload, setReload] = useState(0);
   const { status, data: loaded, error } = useData(getRtTelemetry, [reload]);
@@ -396,40 +461,7 @@ export default function ResearchTwin() {
           </EmptyState>
         ) : (
           <>
-            <RecordList>
-              {paged.rows.map((c) => (
-                <RecordRow
-                  key={c.card_id}
-                  id={
-                    <span className="flex flex-wrap items-center gap-x-2">
-                      <span className="truncate">{c.card_id}</span>
-                      <span className="text-faint">{c.lane_id ?? 'no lane'}</span>
-                    </span>
-                  }
-                  title={c.hypothesis ?? c.research_summary ?? c.card_id}
-                  summary={c.missing_elements ?? c.research_summary}
-                  summaryEmpty="No hypothesis, summary or missing-evidence note on this card."
-                  meta={
-                    <>
-                      <StatusPill card={c} />
-                      {c.requires_human && <Pill tone="degraded">needs a human</Pill>}
-                      {c.days_stuck !== null && <span className={c.days_stuck > 14 ? 'text-degraded' : ''}>stuck {c.days_stuck} d</span>}
-                      <span title={`${c.attempts} rows in the queue for this card`}>
-                        {c.run_count} attempt{c.run_count === 1 ? '' : 's'}
-                      </span>
-                      <SourceLink source={c.source} />
-                    </>
-                  }
-                  actions={
-                    <RowActions>
-                      <RowAction label="View" tone="accent" onClick={() => setOpen(c.card_id)} />
-                      <RowAction label="Open in Airtable" onClick={() => window.open(c.airtable.url, '_blank', 'noreferrer')} />
-                    </RowActions>
-                  }
-                  onOpen={() => setOpen(c.card_id)}
-                />
-              ))}
-            </RecordList>
+            <RecordTable columns={rtColumns((c) => setOpen(c.card_id))} rows={paged.rows} rowKey={(c) => c.card_id} onOpen={(c) => setOpen(c.card_id)} label="Research queue" />
             <Pagination paged={paged} unit="cards" />
           </>
         )}

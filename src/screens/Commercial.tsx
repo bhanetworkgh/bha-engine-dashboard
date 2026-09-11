@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
 import { getCommercial, getRecordMetrics, resync, setRecordStatus, type CommercialMetrics, type MetricSeries, type Opportunity, type ReadinessState } from '../data';
+import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
   CountUp,
@@ -15,8 +16,8 @@ import {
   PageHeader,
   Pagination,
   Pill,
-  RecordList,
-  RecordRow,
+  RecordId,
+  RecordTable,
   Ring,
   RowAction,
   RowActions,
@@ -29,6 +30,7 @@ import {
   StatStrip,
   SyncLine,
   Toast,
+  TwoLine,
   usePaged,
   useToast,
 } from '../components/ui';
@@ -320,6 +322,72 @@ function CardView({ o, trend, busy, writable, onReadiness, onClose }: { o: Oppor
 
 /* ------------------------------------------------------------------ page */
 
+/**
+ * The card list, as columns — the same shape as Build patterns, because it is
+ * the same page with different content. Open questions is the table's own
+ * missing_research_count, red while any are unresolved, and says so plainly
+ * when the card carries no count at all.
+ */
+function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportunity, next: ReadinessState) => void, writable: boolean, busyId: string | null): RecordColumn<Opportunity>[] {
+  const unresolved = (o: Opportunity) => o.missing_research_count ?? o.missing_research_questions.length;
+  return [
+    {
+      key: 'card_id',
+      header: 'card id',
+      width: '28ch',
+      clip: true,
+      title: (o) => o.card_id ?? o.id,
+      cell: (o) => <RecordId missing="no card id">{o.card_id}</RecordId>,
+    },
+    {
+      key: 'title',
+      header: 'card',
+      card: 'title',
+      width: '62ch',
+      title: (o) => o.title,
+      cell: (o) => <TwoLine title={o.title} description={o.lane_state_blocked_reason ?? o.pain_point ?? o.offer} empty="No pain point or offer written on this card." />,
+    },
+    { key: 'readiness', header: 'readiness', card: 'meta', className: 'card-meta', cell: (o) => <ReadinessPill state={o.readiness_state} /> },
+    {
+      key: 'lane',
+      header: 'lane',
+      card: 'meta',
+      width: '22ch',
+      clip: true,
+      className: 'card-meta text-dim',
+      title: (o) => o.lane_id ?? undefined,
+      cell: (o) => (o.lane_id ? laneLabel(o.lane_id) : <span className="text-faint">no lane</span>),
+    },
+    {
+      key: 'questions',
+      header: 'open questions',
+      align: 'right',
+      card: 'meta',
+      className: 'card-meta tabular',
+      cellClass: (o) => (unresolved(o) > 0 ? 'text-degraded' : 'text-dim'),
+      title: (o) => (o.missing_research_questions.length ? o.missing_research_questions.join('\n') : undefined),
+      cell: (o) => (o.missing_research_count === null && o.missing_research_questions.length === 0 ? <span className="text-faint">no count</span> : unresolved(o)),
+    },
+    { key: 'source', header: 'source', cell: (o) => <SourceLink source={o.source} /> },
+    {
+      key: 'actions',
+      align: 'right',
+      card: 'actions',
+      className: 'card-actions',
+      cell: (o) => {
+        const busy = busyId === o.id;
+        return (
+          <RowActions>
+            <RowAction label="View" tone="accent" onClick={() => open(o)} />
+            {writable && o.readiness_state !== 'Media-Ready' && <RowAction label="Set media-ready" tone="accent" disabled={busy} onClick={() => change(o, 'Media-Ready')} />}
+            <RowAction label="Open in Airtable" onClick={() => window.open(o.airtable.url, '_blank', 'noreferrer')} />
+          </RowActions>
+        );
+      },
+    },
+  ];
+}
+
 export default function Commercial() {
   const [reload, setReload] = useState(0);
   const { status, data: loaded, error } = useData(getCommercial, [reload]);
@@ -429,40 +497,15 @@ export default function Commercial() {
           </EmptyState>
         ) : (
           <>
-            <RecordList>
-              {paged.rows.map((o) => {
-                const busy = busyId === o.id;
-                const unresolved = o.missing_research_count ?? o.missing_research_questions.length;
-                return (
-                  <RecordRow
-                    key={o.id}
-                    busy={busy}
-                    id={o.card_id ?? o.id}
-                    title={o.title}
-                    summary={o.lane_state_blocked_reason ?? o.pain_point ?? o.offer}
-                    summaryEmpty="No pain point or offer written on this card."
-                    meta={
-                      <>
-                        <ReadinessPill state={o.readiness_state} />
-                        {o.lane_id && <span>{laneLabel(o.lane_id)}</span>}
-                        <span className={unresolved > 0 ? 'text-degraded' : ''}>
-                          {o.missing_research_count === null && o.missing_research_questions.length === 0 ? 'no question count' : `${unresolved} open`}
-                        </span>
-                        <SourceLink source={o.source} />
-                      </>
-                    }
-                    actions={
-                      <RowActions>
-                        <RowAction label="View" tone="accent" onClick={() => setOpen(o.id)} />
-                        {writable && o.readiness_state !== 'Media-Ready' && <RowAction label="Set media-ready" tone="accent" disabled={busy} onClick={() => change(o, 'Media-Ready')} />}
-                        <RowAction label="Open in Airtable" onClick={() => window.open(o.airtable.url, '_blank', 'noreferrer')} />
-                      </RowActions>
-                    }
-                    onOpen={() => setOpen(o.id)}
-                  />
-                );
-              })}
-            </RecordList>
+            <RecordTable
+              columns={commercialColumns((o) => setOpen(o.id), change, writable, busyId)}
+              rows={paged.rows}
+              rowKey={(o) => o.id}
+              onOpen={(o) => setOpen(o.id)}
+              busyKey={busyId}
+              lines={2}
+              label="Commercial cards"
+            />
             <Pagination paged={paged} unit="cards" />
           </>
         )}

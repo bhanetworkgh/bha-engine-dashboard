@@ -941,6 +941,22 @@
   }
 
   /* Sticky row-action column, so reaching an action never scrolls the row away. */
+  /*
+    One row height for a whole list, so nothing jumps between rows. RecordTable
+    sets .rows-1 on a table whose rows carry a single line, .rows-2 where each
+    row carries a title and a description under it. Cell content is clipped and
+    never wrapped, so these are exact heights rather than minimums. Only above
+    768px: below that the table stacks into cards and sizes itself.
+  */
+  @media (min-width: 768px) {
+    .rows-1 tbody tr {
+      height: 38px;
+    }
+    .rows-2 tbody tr {
+      height: 56px;
+    }
+  }
+
   .td-actions {
     position: sticky;
     right: 0;

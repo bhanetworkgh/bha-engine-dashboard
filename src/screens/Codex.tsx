@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
 import { getCodexDetail, getCodexEntries, getRecordMetrics, resync, setRecordStatus, type CodexEntry, type CodexEntryDetail, type CodexMetrics, type CodexTab } from '../data';
+import type { RecordColumn } from '../components/ui';
 import {
   Bars,
   ComingSoon,
@@ -17,8 +18,8 @@ import {
   Pagination,
   PageHeader,
   Pill,
-  RecordList,
-  RecordRow,
+  RecordId,
+  RecordTable,
   RowAction,
   RowActions,
   SearchBox,
@@ -423,6 +424,73 @@ function EntryView({ id, onClose, onSaved, setToast, writable }: { id: string; o
   );
 }
 
+/**
+ * The list, as columns. Date, builder and the Codex id read first; the
+ * breakthroughs are the substance of the entry and take the wide column;
+ * flags carry the review decision and the Layer 0 state, which are two axes
+ * and both shown.
+ */
+function codexColumns(open: (e: CodexEntry) => void): RecordColumn<CodexEntry>[] {
+  return [
+    { key: 'date', header: 'date', className: 'tabular text-faint', cell: (e) => when(e.logged_at) },
+    { key: 'builder', header: 'builder', card: 'meta', className: 'card-meta capitalize text-dim', cell: (e) => e.builder_id },
+    {
+      key: 'codex_id',
+      header: 'codex id',
+      width: '22ch',
+      clip: true,
+      title: (e) => e.codex_entry_id ?? e.submission_id ?? e.id,
+      cell: (e) => <RecordId missing="no codex id">{e.codex_entry_id ?? e.submission_id}</RecordId>,
+    },
+    {
+      key: 'session_type',
+      header: 'session type',
+      width: '20ch',
+      clip: true,
+      className: 'text-dim',
+      title: (e) => e.session_type ?? undefined,
+      cell: (e) => e.session_type ?? <span className="text-faint">not stated</span>,
+    },
+    {
+      key: 'breakthroughs',
+      header: 'breakthroughs',
+      card: 'title',
+      width: '54ch',
+      clip: true,
+      title: (e) => e.breakthroughs ?? undefined,
+      cell: (e) => e.breakthroughs ?? <span className="text-faint">No Codex entry written — Orchestrator Layer2 Review is empty.</span>,
+    },
+    {
+      key: 'flags',
+      header: 'flags',
+      card: 'meta',
+      className: 'card-meta',
+      title: (e) => (e.layer0_flagged && e.layer0_missing.length ? `Layer 0 found no ${e.layer0_missing.join(', ')}` : undefined),
+      cell: (e) => (
+        <span className="inline-flex items-center gap-1">
+          <ApprovalPill entry={e} />
+          {e.layer0_flagged && <Pill tone="degraded">layer 0</Pill>}
+          {e.complete && <Pill tone="ok">complete</Pill>}
+        </span>
+      ),
+    },
+    { key: 'quality', header: 'quality', className: 'text-faint', cell: (e) => e.narration_quality?.toLowerCase() ?? '—' },
+    { key: 'source', header: 'source', cell: (e) => <SourceLink source={e.source} /> },
+    {
+      key: 'actions',
+      align: 'right',
+      card: 'actions',
+      className: 'card-actions',
+      cell: (e) => (
+        <RowActions>
+          <RowAction label="Read entry" tone="accent" onClick={() => open(e)} />
+          <RowAction label="Open in Airtable" onClick={() => window.open(e.airtable.url, '_blank', 'noreferrer')} />
+        </RowActions>
+      ),
+    },
+  ];
+}
+
 /* ------------------------------------------------------------------ page */
 
 export default function Codex() {
@@ -522,44 +590,7 @@ export default function Codex() {
           </EmptyState>
         ) : (
           <>
-            <RecordList>
-              {paged.rows.map((e) => (
-                <RecordRow
-                  key={e.id}
-                  id={
-                    <span className="flex flex-wrap items-center gap-x-2">
-                      <span>{e.codex_entry_id ?? e.submission_id ?? e.id}</span>
-                      <span className="text-faint">{when(e.logged_at)}</span>
-                    </span>
-                  }
-                  title={
-                    <span className="flex flex-wrap items-baseline gap-x-2">
-                      <span className="capitalize">{e.builder_id}</span>
-                      <span className="text-faint">·</span>
-                      <span className="font-normal text-dim">{e.session_type ?? 'session type not stated'}</span>
-                    </span>
-                  }
-                  summary={e.entry_excerpt}
-                  summaryEmpty="No Codex entry written for this submission — Orchestrator Layer2 Review is empty."
-                  meta={
-                    <>
-                      <ApprovalPill entry={e} />
-                      {e.layer0_flagged && <Pill tone="degraded">missing {e.layer0_missing.length ? e.layer0_missing.join(', ') : 'unnamed'}</Pill>}
-                      {e.complete && <Pill tone="ok">complete</Pill>}
-                      {e.narration_quality && <span>{e.narration_quality.toLowerCase()}</span>}
-                      <SourceLink source={e.source} />
-                    </>
-                  }
-                  actions={
-                    <RowActions>
-                      <RowAction label="Read entry" tone="accent" onClick={() => setOpen(e.id)} />
-                      <RowAction label="Open in Airtable" onClick={() => window.open(e.airtable.url, '_blank', 'noreferrer')} />
-                    </RowActions>
-                  }
-                  onOpen={() => setOpen(e.id)}
-                />
-              ))}
-            </RecordList>
+            <RecordTable columns={codexColumns((e) => setOpen(e.id))} rows={paged.rows} rowKey={(e) => e.id} onOpen={(e) => setOpen(e.id)} label="Codex entries" />
             <Pagination paged={paged} unit="submissions" />
           </>
         )}

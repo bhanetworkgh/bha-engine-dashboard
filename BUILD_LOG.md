@@ -2181,3 +2181,66 @@ Verified:   Local Airtable replay extended with the three new sources, shaped
             Not verified here: the live service, which this sandbox cannot
             reach — and which is running none of this, because main is three
             commits behind.
+
+## 2026-09-11 19:55 — One table for every record list
+Intent:     Open loops rendered its list as a real table and read well; Codex
+            entries, North Star, Research Twin, Build patterns and Commercial
+            each rendered a stack of cards with content anchored to four
+            different points per card, so nothing lined up between rows or
+            between pages. Convert all five to the same table component as Open
+            loops, and make Open loops itself use it, so row styling lives in
+            one place and cannot drift apart again. Nothing above the list was
+            to change on any page — stat cards, charts, filter bars, search
+            boxes and captions all stay as they were.
+Files:      src/components/ui/RecordTable.tsx (new), src/components/ui/Table.tsx,
+            src/components/ui/index.ts, src/components/ui/ListRow.tsx (deleted),
+            src/index.css, src/data/types.ts, server/src/sources.ts,
+            src/screens/OpenLoops/Loops.tsx, src/screens/Codex.tsx,
+            src/screens/NorthStar.tsx, src/screens/ResearchTwin.tsx,
+            src/screens/BuildPatterns.tsx, src/screens/Commercial.tsx
+Problem:    "Breakthroughs" was asked for as a Codex column and no such field
+            exists. Read the live schema of all six builder tables in
+            appEmdKshNVTl64Zf: 23 fields, none of them breakthroughs. Read a
+            real Orchestrator Layer2 Review from Destiny's table
+            (rec25I6C9W7289AcG) and the reason became clear — Layer 2 writes
+            every entry to a fixed section template and the first section is
+            "Breakthroughs", followed by Blockers, Ruled Out, Engine Gaps
+            Identified and eleven more.
+Fix:        A `breakthroughs` field on CodexEntry, read server-side from the
+            Layer 2 review by that heading — the section ends at the next short
+            line carrying no bullet marker — falling back to the entry's opening
+            lines when an entry is written in some other shape, and null when no
+            entry exists at all. `entry_excerpt` stays as it was, because the
+            builder detail page shows the opening of the entry and that page was
+            not in scope. Verified on three shapes: the real record's text
+            (heading found, stops before Blockers), a free-form entry with no
+            headings (falls back), and a row with no Layer 2 review (null).
+Decision:   Row height is a CSS rule, not a guess per page. `.rows-1` (38px) and
+            `.rows-2` (56px) in index.css, set by RecordTable from its `lines`
+            prop, above 768px only — below that the table stacks into cards and
+            sizes itself. Every cell is nowrap and clipped, so those are exact
+            heights rather than minimums, and the two-line cell always draws its
+            description line even when the record carries none. Measured: one
+            distinct row height per page, on every page.
+Decision:   Every table keeps a `source` column. It is not in the requested
+            column list for the five pages, but CLAUDE.md section 8 requires
+            every row to link back to its source, and Open loops — the reference
+            design here — has always carried one.
+Decision:   North Star's `reason` column falls back to the answer when a row
+            carries no reason, drawn in the muted tone with a tooltip that says
+            which it is, rather than leaving the widest column blank on rows
+            that have something to read.
+            Verified with Chromium against the local Airtable replay, 1440px and
+            400px. Every page renders one shared table: one row height per page
+            (39px outer on the five single-line pages, 56px on the three
+            two-line ones), a header row naming every column, no wrapped cell on
+            any row, the actions cell last on every row, twenty rows to a page,
+            and document overflow 0 at both widths — the frame scrolls, the page
+            body never does. Codex's column caps were trimmed after the first
+            measurement (breakthroughs 64ch → 54ch, codex id 26ch → 22ch,
+            session type 24ch → 20ch) to bring the table from 1495px to 1370px,
+            in line with Open loops at 1447px.
+Problem:    The sweep would not run: `Cannot find module 'playwright'` from the
+            scratchpad. Playwright is a dependency of this repo, not a global.
+Fix:        Ran the sweep script from the project root as a .cjs file, and
+            deleted it afterwards.

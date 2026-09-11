@@ -5,7 +5,20 @@ import type { ReactNode } from 'react';
  * its columns. Pass `flat` to drop the card frame when the table sits inside
  * another card already.
  */
-export function TableFrame({ children, flat, grow = true }: { children: ReactNode; flat?: boolean; grow?: boolean }) {
+export function TableFrame({
+  children,
+  flat,
+  grow = true,
+  tableClass = '',
+  label,
+}: {
+  children: ReactNode;
+  flat?: boolean;
+  grow?: boolean;
+  /** Extra classes on the table itself — RecordTable passes the row height here. */
+  tableClass?: string;
+  label?: string;
+}) {
   // `grow` makes the frame the page's own scroll region (fills the column).
   // A page that already scrolls as a whole passes grow={false}: the frame
   // then takes its content height and the sticky header sticks to the page.
@@ -15,7 +28,9 @@ export function TableFrame({ children, flat, grow = true }: { children: ReactNod
         flat ? '' : 'card mx-6 mb-6 md:mx-8'
       }`}
     >
-      <table className="table-cards w-full border-collapse text-[12.5px]">{children}</table>
+      <table className={`table-cards w-full border-collapse text-[12.5px] ${tableClass}`} aria-label={label}>
+        {children}
+      </table>
     </div>
   );
 }

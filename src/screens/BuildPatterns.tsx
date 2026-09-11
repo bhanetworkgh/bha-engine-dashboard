@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../app/useData';
 import { getBuildPatterns, getPatternDetail, getRecordMetrics, resync, searchPatterns, setRecordStatus, type BuildPattern, type BuildPatternDetail, type PatternMetrics, type PatternStatus, type WritablePatternStatus } from '../data';
+import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
   CountUp,
@@ -14,8 +15,8 @@ import {
   PageHeader,
   Pagination,
   Pill,
-  RecordList,
-  RecordRow,
+  RecordId,
+  RecordTable,
   Ring,
   RowAction,
   RowActions,
@@ -27,6 +28,7 @@ import {
   StatStrip,
   SyncLine,
   Toast,
+  TwoLine,
   usePaged,
   useToast,
 } from '../components/ui';
@@ -260,6 +262,61 @@ function PatternView({ id, onClose }: { id: string; onClose: () => void }) {
 
 /* ------------------------------------------------------------------ page */
 
+/**
+ * The pattern list, as columns. The title and the first lines of the problem
+ * share one column — the name alone does not tell you what a pattern is for —
+ * and everything else the record carries opens on click.
+ */
+function patternColumns(open: (p: BuildPattern) => void, change: (p: BuildPattern, next: WritablePatternStatus) => void, writable: boolean, busyId: string | null): RecordColumn<BuildPattern>[] {
+  return [
+    {
+      key: 'pattern_id',
+      header: 'pattern id',
+      width: '34ch',
+      clip: true,
+      title: (p) => p.pattern_id ?? p.id,
+      cell: (p) => <RecordId missing="no pattern_id">{p.pattern_id}</RecordId>,
+    },
+    {
+      key: 'title',
+      header: 'pattern',
+      card: 'title',
+      width: '62ch',
+      title: (p) => p.title,
+      cell: (p) => <TwoLine title={p.title} description={p.excerpt} empty="No problem statement written on this pattern." />,
+    },
+    { key: 'status', header: 'status', card: 'meta', className: 'card-meta', cell: (p) => <StatusPill status={p.status} /> },
+    { key: 'system', header: 'system', card: 'meta', className: 'card-meta text-dim', cell: (p) => p.system?.toLowerCase() ?? <span className="text-faint">—</span> },
+    {
+      key: 'reusability',
+      header: 'reusability',
+      width: '24ch',
+      clip: true,
+      className: 'text-faint',
+      title: (p) => p.reusability ?? undefined,
+      cell: (p) => p.reusability?.toLowerCase() ?? '—',
+    },
+    { key: 'source', header: 'source', cell: (p) => <SourceLink source={p.source} /> },
+    {
+      key: 'actions',
+      align: 'right',
+      card: 'actions',
+      className: 'card-actions',
+      cell: (p) => {
+        const busy = busyId === p.id;
+        return (
+          <RowActions>
+            <RowAction label="View" tone="accent" onClick={() => open(p)} />
+            {writable && p.status !== 'canonical' && <RowAction label="Promote to canonical" tone="accent" disabled={busy} onClick={() => change(p, 'canonical')} />}
+            {writable && p.status !== 'draft' && <RowAction label="Mark draft" disabled={busy} onClick={() => change(p, 'draft')} />}
+            <RowAction label="Open in Airtable" onClick={() => window.open(p.airtable.url, '_blank', 'noreferrer')} />
+          </RowActions>
+        );
+      },
+    },
+  ];
+}
+
 export default function BuildPatterns() {
   const [reload, setReload] = useState(0);
   const { status, data: loaded, error } = useData(getBuildPatterns, [reload]);
@@ -420,38 +477,15 @@ export default function BuildPatterns() {
               gotchas, checklists — opens on click rather than being poured into
               the list, which is what made the page unreadable.
             */}
-            <RecordList>
-              {paged.rows.map((p) => {
-                const busy = busyId === p.id;
-                return (
-                  <RecordRow
-                    key={p.id}
-                    busy={busy}
-                    id={p.pattern_id ?? <span className="text-degraded">no pattern_id</span>}
-                    title={p.title}
-                    summary={p.excerpt}
-                    summaryEmpty="No problem statement written on this pattern."
-                    meta={
-                      <>
-                        <StatusPill status={p.status} />
-                        {p.system && <span>{p.system.toLowerCase()}</span>}
-                        {p.reusability && <span className="max-w-[22ch] truncate" title={p.reusability}>{p.reusability.toLowerCase()}</span>}
-                        <SourceLink source={p.source} />
-                      </>
-                    }
-                    actions={
-                      <RowActions>
-                        <RowAction label="View" tone="accent" onClick={() => setOpen(p.id)} />
-                        {writable && p.status !== 'canonical' && <RowAction label="Promote to canonical" tone="accent" disabled={busy} onClick={() => change(p, 'canonical')} />}
-                        {writable && p.status !== 'draft' && <RowAction label="Mark draft" disabled={busy} onClick={() => change(p, 'draft')} />}
-                        <RowAction label="Open in Airtable" onClick={() => window.open(p.airtable.url, '_blank', 'noreferrer')} />
-                      </RowActions>
-                    }
-                    onOpen={() => setOpen(p.id)}
-                  />
-                );
-              })}
-            </RecordList>
+            <RecordTable
+              columns={patternColumns((p) => setOpen(p.id), change, writable, busyId)}
+              rows={paged.rows}
+              rowKey={(p) => p.id}
+              onOpen={(p) => setOpen(p.id)}
+              busyKey={busyId}
+              lines={2}
+              label="Build patterns"
+            />
             <Pagination paged={paged} unit="patterns" />
           </>
         )}
