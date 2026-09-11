@@ -602,6 +602,13 @@ export interface CodexEntry {
   has_entry: boolean;
   /** The opening of the Layer 2 review, for the list. */
   entry_excerpt: string | null;
+  /**
+   * The Breakthroughs section of the Layer 2 review — what the session
+   * actually moved. Every entry Layer 2 writes opens with that heading; one
+   * that does not falls back to the opening of the entry, so a written entry
+   * never shows an empty column.
+   */
+  breakthroughs: string | null;
   processed_at: string | null;
   processed_date: string | null;
   note?: string | null;

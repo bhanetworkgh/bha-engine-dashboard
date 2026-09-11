@@ -325,6 +325,31 @@ function firstLines(text: string | null, max = 220): string | null {
 }
 
 /**
+ * The Breakthroughs section of a Layer 2 Codex entry — what the session
+ * actually moved — for the Codex list column of the same name.
+ *
+ * Layer 2 writes every entry with the same section headings and opens with
+ * "Breakthroughs", so the section is read by that heading rather than guessed
+ * at. A heading is a short line carrying no bullet marker, which is what ends
+ * the section; an entry written in some other shape falls back to its opening
+ * lines so a written entry never shows an empty column.
+ */
+function breakthroughs(text: string | null, max = 220): string | null {
+  if (!text) return null;
+  const heading = /^[ \t]*breakthroughs[ \t]*:?[ \t]*$/im.exec(text);
+  if (!heading) return firstLines(text, max);
+  const items: string[] = [];
+  for (const line of text.slice(heading.index + heading[0].length).split('\n')) {
+    const t = line.trim();
+    if (!t) continue;
+    const nextHeading = items.length > 0 && t.length < 40 && !/^[\u2022\-*\d]/.test(t);
+    if (nextHeading) break;
+    items.push(t.replace(/^[\u2022\-*]\s*/, ''));
+  }
+  return firstLines(items.join(' \u00b7 '), max);
+}
+
+/**
  * One submission row from a builder's table in BHA Submissions & Logs.
  *
  * The builder is the table, never a field: `Builder Name` can be blank and
@@ -363,6 +388,7 @@ export function mapCodex(rec: AtRecord, owner: string, table: string): CodexEntr
     complete: !flagged && Boolean(layer2),
     has_entry: Boolean(layer2),
     entry_excerpt: firstLines(layer2),
+    breakthroughs: breakthroughs(layer2),
     processed_at: iso(f['Processed At']),
     processed_date: day(f['Processed Date']),
     note: null,

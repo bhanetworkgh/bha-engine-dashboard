@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom';
 import { useMemo, useState } from 'react';
 import { useData } from '../app/useData';
 import { getNsTelemetry, getRecordMetrics, resync, type NsMetrics, type NsOutcome, type NsRecord } from '../data';
+import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
   CountUp,
@@ -15,8 +16,8 @@ import {
   PageHeader,
   Pagination,
   Pill,
-  RecordList,
-  RecordRow,
+  RecordId,
+  RecordTable,
   Ring,
   RowAction,
   RowActions,
@@ -339,6 +340,63 @@ function AskView({ r, onClose }: { r: NsRecord; onClose: () => void }) {
 
 /* ------------------------------------------------------------------ page */
 
+/**
+ * The ask log, as columns. The outcome is the page's whole point, so it is a
+ * pill in its own column; coverage is the citation coverage the agent itself
+ * computed, and reads red at zero because an answer citing nothing is what
+ * thin means.
+ */
+function nsColumns(open: (r: NsRecord) => void): RecordColumn<NsRecord>[] {
+  return [
+    { key: 'date', header: 'date', className: 'tabular text-faint', cell: (r) => when(r.asked_at) },
+    {
+      key: 'trace',
+      header: 'trace id',
+      width: '24ch',
+      clip: true,
+      title: (r) => r.trace_id ?? r.id,
+      cell: (r) => <RecordId missing="no trace id">{r.trace_id}</RecordId>,
+    },
+    { key: 'lane', header: 'lane', width: '20ch', clip: true, className: 'text-dim', title: (r) => r.lane_id ?? undefined, cell: (r) => r.lane_id ?? <span className="text-faint">no lane</span> },
+    {
+      key: 'reason',
+      header: 'reason',
+      card: 'title',
+      width: '64ch',
+      clip: true,
+      title: (r) => r.reason ?? (r.answer ? `No reason on this ask — showing the answer.\n\n${r.answer}` : undefined),
+      // The reason is what North Star wrote about the ask. Rows that carry no
+      // reason fall back to the answer, quietly, so the column is never blank
+      // where there is something to read — and the tooltip says which it is.
+      cell: (r) => r.reason ?? <span className="text-faint">{r.answer ?? 'No answer and no reason recorded for this ask.'}</span>,
+    },
+    { key: 'outcome', header: 'outcome', card: 'meta', className: 'card-meta', cell: (r) => <OutcomePill outcome={r.outcome} /> },
+    {
+      key: 'coverage',
+      header: 'coverage',
+      align: 'right',
+      card: 'meta',
+      className: 'card-meta tabular',
+      cellClass: (r) => (r.confidence === 0 ? 'text-degraded' : 'text-dim'),
+      title: (r) => (r.searches.length ? r.searches.map((x) => `${x.tool}: ${x.hits} hits, ${x.used} cited`).join('\n') : undefined),
+      cell: (r) => (r.confidence === null ? <span className="text-faint">—</span> : r.confidence),
+    },
+    { key: 'source', header: 'source', cell: (r) => <SourceLink source={r.source} /> },
+    {
+      key: 'actions',
+      align: 'right',
+      card: 'actions',
+      className: 'card-actions',
+      cell: (r) => (
+        <RowActions>
+          <RowAction label="View" tone="accent" onClick={() => open(r)} />
+          <RowAction label="Open in Airtable" onClick={() => window.open(r.airtable.url, '_blank', 'noreferrer')} />
+        </RowActions>
+      ),
+    },
+  ];
+}
+
 export default function NorthStar() {
   const [reload, setReload] = useState(0);
   const { status, data: loaded, error } = useData(getNsTelemetry, [reload]);
@@ -423,41 +481,7 @@ export default function NorthStar() {
           </EmptyState>
         ) : (
           <>
-            <RecordList>
-              {paged.rows.map((r) => (
-                <RecordRow
-                  key={r.id}
-                  id={
-                    <span className="flex flex-wrap items-center gap-x-2">
-                      <span className="truncate">{r.trace_id ?? r.id}</span>
-                      <span className="text-faint">{when(r.asked_at)}</span>
-                    </span>
-                  }
-                  title={r.lane_id ?? 'no lane'}
-                  summary={r.reason ?? r.answer}
-                  summaryEmpty="No answer and no reason recorded for this ask."
-                  meta={
-                    <>
-                      <OutcomePill outcome={r.outcome} />
-                      {r.searches.length > 0 && (
-                        <span title={r.searches.map((s) => `${s.tool}: ${s.hits} hits, ${s.used} cited`).join('\n')}>
-                          {r.searches.length} tool call{r.searches.length === 1 ? '' : 's'}
-                        </span>
-                      )}
-                      {r.confidence !== null && <span className={r.confidence === 0 ? 'text-degraded' : ''}>coverage {r.confidence}</span>}
-                      <SourceLink source={r.source} />
-                    </>
-                  }
-                  actions={
-                    <RowActions>
-                      <RowAction label="View" tone="accent" onClick={() => setOpen(r.id)} />
-                      <RowAction label="Open in Airtable" onClick={() => window.open(r.airtable.url, '_blank', 'noreferrer')} />
-                    </RowActions>
-                  }
-                  onOpen={() => setOpen(r.id)}
-                />
-              ))}
-            </RecordList>
+            <RecordTable columns={nsColumns((r) => setOpen(r.id))} rows={paged.rows} rowKey={(r) => r.id} onOpen={(r) => setOpen(r.id)} label="North Star asks" />
             <Pagination paged={paged} unit="asks" />
           </>
         )}

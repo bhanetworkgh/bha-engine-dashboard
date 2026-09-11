@@ -1,6 +1,7 @@
 import type { Loop, LoopStatus, OpenLoopsData } from '../../data';
 import { BUILDER_NAMES } from '../../data';
-import { EmptyState, Pill, RowAction, RowActions, SourceLink, TableFrame, Th } from '../../components/ui';
+import type { RecordColumn } from '../../components/ui';
+import { EmptyState, Pill, RecordId, RecordTable, RowAction, RowActions, SourceLink, TwoLine } from '../../components/ui';
 import { ageTone, laneLabel } from '../../lib';
 
 export type StatusFilter = 'all' | LoopStatus;
@@ -41,8 +42,74 @@ function StatusPill({ status }: { status: LoopStatus }) {
   return <Pill>open</Pill>;
 }
 
-/** The loop list, newest first, twenty to a page. Row actions change status in place — Airtable first, then here. */
+/**
+ * The loop list, newest first, twenty to a page. Row actions change status in
+ * place — Airtable first, then here.
+ *
+ * The columns are the ones this page has always had; they are declared through
+ * the shared RecordTable now so that the other five record lists are drawn the
+ * same way and row styling only has to change in one place.
+ */
 export function Loops({ data, loops, total, busyId, onStatus, searching, writable }: { data: OpenLoopsData; loops: Loop[]; total: number; busyId: string | null; onStatus: (loop: Loop, status: LoopStatus) => void; searching: boolean; writable: boolean }) {
+  const columns: RecordColumn<Loop>[] = [
+    {
+      key: 'age',
+      header: 'age',
+      align: 'right',
+      card: 'meta',
+      className: 'card-meta tabular',
+      cellClass: (l) => (l.status === 'closed' ? 'text-faint' : ageTone(l.age_days)),
+      title: (l) => (l.raised_at ? 'Days since raised' : 'No Date Raised on this row'),
+      cell: (l) => (l.raised_at ? `${l.age_days}d` : '—'),
+    },
+    {
+      key: 'loop',
+      header: 'loop',
+      title: (l) => l.id,
+      cell: (l) => <RecordId missing="no loop_id">{l.loop_id}</RecordId>,
+    },
+    {
+      key: 'what',
+      header: 'what',
+      card: 'title',
+      width: '56ch',
+      title: (l) => l.title,
+      cell: (l) => <TwoLine title={l.title} description={l.note} empty="No note on this loop." />,
+    },
+    { key: 'status', header: 'status', card: 'meta', className: 'card-meta', cell: (l) => <StatusPill status={l.status} /> },
+    { key: 'table', header: 'table', card: 'meta', className: 'card-meta text-dim', cell: (l) => BUILDER_NAMES[l.owner] ?? l.owner },
+    { key: 'lane', header: 'lane', className: 'text-faint', cell: (l) => (l.lane_tag ? laneLabel(l.lane_tag) : '—') },
+    { key: 'raised_by', header: 'raised by', className: 'text-faint', width: '18ch', clip: true, title: (l) => l.raised_by ?? undefined, cell: (l) => l.raised_by ?? '—' },
+    { key: 'raised_in', header: 'raised in', className: 'text-faint', width: '18ch', clip: true, title: (l) => l.raised_in ?? undefined, cell: (l) => l.raised_in ?? '—' },
+    { key: 'raised', header: 'raised', className: 'tabular text-faint', cell: (l) => l.raised_at ?? '—' },
+    {
+      key: 'closed',
+      header: 'closed',
+      className: 'tabular text-faint',
+      title: (l) => (l.closed_at ? 'Closed through this dashboard or pushed by n8n' : 'Airtable records no close date'),
+      cell: (l) => l.closed_at ?? '—',
+    },
+    { key: 'source', header: 'source', cell: (l) => <SourceLink source={l.source} /> },
+    {
+      key: 'actions',
+      align: 'right',
+      card: 'actions',
+      className: 'card-actions',
+      cell: (l) => {
+        const busy = busyId === l.id;
+        return (
+          <RowActions>
+            {writable && l.status !== 'closed' && <RowAction label="Close" tone="accent" disabled={busy} onClick={() => onStatus(l, 'closed')} />}
+            {writable && l.status === 'open' && <RowAction label="Start" disabled={busy} onClick={() => onStatus(l, 'in progress')} />}
+            {writable && l.status === 'in progress' && <RowAction label="Back to open" disabled={busy} onClick={() => onStatus(l, 'open')} />}
+            {writable && l.status === 'closed' && <RowAction label="Reopen" disabled={busy} onClick={() => onStatus(l, 'open')} />}
+            <RowAction label="Open in Airtable" onClick={() => window.open(l.airtable.url, '_blank', 'noreferrer')} />
+          </RowActions>
+        );
+      },
+    },
+  ];
+
   return (
     <div className="shrink-0">
       <p className="px-6 pb-3 text-[11.5px] text-faint md:px-8">{data.status_history_note}</p>
@@ -56,76 +123,7 @@ export function Loops({ data, loops, total, busyId, onStatus, searching, writabl
               : 'No loops match the selected table and status.'}
         </EmptyState>
       ) : (
-        <TableFrame grow={false}>
-          <thead>
-            <tr>
-              <Th className="text-right">age</Th>
-              <Th>loop</Th>
-              <Th>what</Th>
-              <Th>status</Th>
-              <Th>table</Th>
-              <Th>lane</Th>
-              <Th>raised by</Th>
-              <Th>raised in</Th>
-              <Th>raised</Th>
-              <Th>closed</Th>
-              <Th>source</Th>
-              <Th />
-            </tr>
-          </thead>
-          <tbody>
-            {loops.map((l) => {
-              const busy = busyId === l.id;
-              return (
-                <tr key={l.id} className={busy ? 'opacity-60' : ''}>
-                  <td className={`td card-meta tabular text-right ${l.status === 'closed' ? 'text-faint' : ageTone(l.age_days)}`} title={l.raised_at ? 'Days since raised' : 'No Date Raised on this row'}>
-                    {l.raised_at ? `${l.age_days}d` : '—'}
-                  </td>
-                  <td className="td tabular text-faint" title={l.id}>
-                    {l.loop_id ?? <span className="text-degraded">no loop_id</span>}
-                  </td>
-                  <td className="td card-title" style={{ maxWidth: '56ch' }}>
-                    <div className="td-clip" title={l.title}>
-                      {l.title}
-                    </div>
-                    {l.note && (
-                      <div className="mt-0.5 truncate text-[11px] text-faint" title={l.note ?? ''}>
-                        {l.note}
-                      </div>
-                    )}
-                  </td>
-                  <td className="td card-meta">
-                    <StatusPill status={l.status} />
-                  </td>
-                  <td className="td card-meta text-dim">{BUILDER_NAMES[l.owner] ?? l.owner}</td>
-                  <td className="td text-faint">{l.lane_tag ? laneLabel(l.lane_tag) : '—'}</td>
-                  <td className="td text-faint td-clip" style={{ maxWidth: '18ch' }}>
-                    {l.raised_by ?? '—'}
-                  </td>
-                  <td className="td text-faint td-clip" style={{ maxWidth: '18ch' }}>
-                    {l.raised_in ?? '—'}
-                  </td>
-                  <td className="td tabular text-faint">{l.raised_at ?? '—'}</td>
-                  <td className="td tabular text-faint" title={l.closed_at ? 'Closed through this dashboard or pushed by n8n' : 'Airtable records no close date'}>
-                    {l.closed_at ?? '—'}
-                  </td>
-                  <td className="td">
-                    <SourceLink source={l.source} />
-                  </td>
-                  <td className="td card-actions td-actions">
-                    <RowActions>
-                      {writable && l.status !== 'closed' && <RowAction label="Close" tone="accent" disabled={busy} onClick={() => onStatus(l, 'closed')} />}
-                      {writable && l.status === 'open' && <RowAction label="Start" disabled={busy} onClick={() => onStatus(l, 'in progress')} />}
-                      {writable && l.status === 'in progress' && <RowAction label="Back to open" disabled={busy} onClick={() => onStatus(l, 'open')} />}
-                      {writable && l.status === 'closed' && <RowAction label="Reopen" disabled={busy} onClick={() => onStatus(l, 'open')} />}
-                      <RowAction label="Open in Airtable" onClick={() => window.open(l.airtable.url, '_blank', 'noreferrer')} />
-                    </RowActions>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </TableFrame>
+        <RecordTable columns={columns} rows={loops} rowKey={(l) => l.id} busyKey={busyId} lines={2} label="Open loops" />
       )}
     </div>
   );
