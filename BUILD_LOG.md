@@ -2244,3 +2244,189 @@ Problem:    The sweep would not run: `Cannot find module 'playwright'` from the
             scratchpad. Playwright is a dependency of this repo, not a global.
 Fix:        Ran the sweep script from the project root as a .cjs file, and
             deleted it afterwards.
+
+## 2026-09-12 17:05 — State moved from SQLite on an ephemeral disk to Postgres
+Intent:     Move every persisted read and write off the server's own
+            filesystem and into the Postgres 18 instance (bha-engine-db) now
+            attached to the same Render environment, with DATABASE_URL set on
+            the service. Keep the HTTP API surface identical so the front end
+            needs no change. Audit first, then implement; no commit, no deploy.
+Files:      server/src/pg.ts          new — pool, TLS decision, startup check
+            server/src/migrations.ts  new — forward-only numbered migrations
+            server/src/db.ts          rewritten: meta key/value over Postgres
+            server/src/store.ts       every read and write now async over pg
+            server/src/engine.ts      the reads that touch the store are async
+            server/src/sync.ts        one transaction per table per resync
+            server/src/index.ts       boot(): assert → migrate → listen
+            package.json              + pg ^8.23.0, + @types/pg (dev)
+            render.yaml               disk removed, databases: block added
+            README.md, CLAUDE.md, .env.example, .gitignore
+
+Audit:      What was persisted, and where, before this change — one SQLite file
+            at `${DATA_DIR}/dashboard.sqlite` through node:sqlite, four tables:
+              meta         history_since, schema_version, sync:<kind> (×8),
+                           clients:tables, codex:layer0
+              records      the read model for all eight kinds, PK (kind, id)
+              events       status changes with timestamps — the ONLY place a
+                           close is dated, since the loop tables carry none
+              observations a figure as seen at one resync, for the two trends
+            Write sites: store.upsert, purgeMissing, removeInbound, observe,
+            setMeta via setSyncState / setQuestionTables / setLayer0Holds /
+            ensureSchema. Read sites: rows, rowById, getMeta, observations, and
+            the events query inside loopMetricsFor.
+            In-memory only (unchanged, and correctly so): auth.ts failure
+            counters and the revoked-session set, sync.ts's `running` map,
+            store.ts's metricsCache. Browser-only (out of scope): theme,
+            weather cache, and Ask Bays chat threads in localStorage.
+
+Problem:    The conversion is not mechanical in one respect: node:sqlite's
+            DatabaseSync is synchronous and `pg` is not, so every store read
+            became a promise and the change propagated through engine.ts and
+            index.ts. Done as an explicit async conversion rather than by
+            hiding a cache behind the old synchronous signatures — a cache
+            would have reintroduced the in-memory store this move exists to
+            remove.
+
+Problem:    Five migration runners racing on a fresh database killed one of
+            them outright:
+              duplicate key value violates unique constraint
+              "pg_type_typname_nsp_index"
+            The advisory lock covered each migration but not the
+            `CREATE TABLE IF NOT EXISTS schema_migrations` bootstrap above it,
+            and that statement is not safe against a concurrent identical
+            CREATE — the two sessions race in the system catalogue. Render
+            overlaps the old and new instance on a deploy, so this is the
+            normal case, not an exotic one.
+Fix:        One session-level advisory lock held across the whole run,
+            bootstrap included, on a single checked-out client; each migration
+            still commits in its own transaction. Re-tested with eight racing
+            runners: one applies, seven report "already", no failures, five
+            tables, one row in schema_migrations.
+
+Decision:   No fallback, and the process exits rather than degrading. A missing
+            DATABASE_URL, an unparseable one, or an unreachable database each
+            print what is wrong and what to do about it, then exit 1 before the
+            listener opens. A server that started anyway would accept writes it
+            could not keep and show figures it could not stand behind — which
+            is exactly how data goes missing without anyone noticing. Verified
+            all three paths return exit 1.
+
+Decision:   `records.json` stays `text` and the timestamps stay `text` rather
+            than becoming `jsonb` and `timestamptz`. The column values are the
+            exact strings Airtable returned — 'YYYY-MM-DD' in raised_at and
+            closed_at, full ISO instants elsewhere — and the metrics compare
+            and slice them as strings. Native types would reformat them coming
+            back out and silently change what those comparisons mean. `json`
+            has a second reason: searchPatterns matches the raw record text,
+            and jsonb does not preserve it.
+
+Decision:   Migrations never drop a table. The old ensureSchema dropped and
+            rebuilt whenever SCHEMA_VERSION changed, which was honest while the
+            file was wiped every deploy regardless. It is not honest now:
+            events and observations are the first state in this system that
+            actually survives a restart. A read-model shape change is a
+            migration that alters it, or one that truncates `records` on
+            purpose and lets sync.ts refill it from Airtable.
+
+Decision:   `history_since` is written with an INSERT ... ON CONFLICT DO
+            UPDATE SET value = meta.value RETURNING value, so the first boot
+            against a fresh database stamps it and every later boot leaves it
+            alone. It now means "when this database started recording status
+            changes" rather than "when this process started". The page notes
+            that cite it were reworded to match; nothing else about them moved.
+
+Decision:   One transaction per table inside a resync, rather than per row.
+            Every row and the purge land together or not at all, so a page
+            never renders a half-rebuilt table, and ~1,600 statements for the
+            loops rebuild cost one commit instead of 800.
+
+Decision:   TLS is decided from the URL. A single-label host (Render's internal
+            dpg-…-a) gets no TLS, because enabling it there fails the
+            handshake; a public host gets TLS, verified properly when
+            DATABASE_CA_CERT is set and with verification relaxed and a printed
+            warning when it is not. `sslmode` in the URL overrides all of it.
+
+Decision:   `/api/status.data_dir` keeps its name and its type so the front end
+            is untouched, and now carries the Postgres server version, host and
+            database — never the password, since that response reaches the
+            browser. Nothing renders it today; Settings shows history_since and
+            records_held, both unchanged in shape.
+
+Decision:   `pg` is the server's first dependency past Node itself, which
+            CLAUDE.md §2.5 previously forbade. Added on Destiny's explicit
+            instruction in this session; §2.5 and the README were updated to
+            say one dependency rather than none, and to mark that as a ceiling
+            rather than a precedent.
+
+Verified:   Against a real Postgres 16 (local, 127.0.0.1:55432) with the
+            compiled server, not a mock:
+            - boot on an empty database applies migration 1; second boot
+              reports "up to date" and applies nothing; five tables created
+            - missing / malformed / unreachable DATABASE_URL each exit 1 with
+              the reason printed
+            - three loops pushed through /api/inbound/loops: correct insert,
+              a repeat reported changed=false inserted=false, a status change
+              reported changed=true and wrote one event row
+            - /api/open-loops, /api/records/loops/metrics, /api/builders/
+              destiny, /api/overview, /api/status all correct against those
+              rows: by_owner totals, age buckets 8–14 and 31–60, closed_per_day
+              09-12=1 read from the events table, records_held loops=3
+            - every GET route 200: 14 page routes, 6 metrics routes, the
+              pattern search
+            - PATCH with no AIRTABLE_API_KEY still refuses with 503 and the
+              same sentence, and changes nothing
+            - RESTART: rows, events and history_since all survived, and
+              closed_per_day still read 09-12=1 — the point of the exercise
+            - purgeMissing: removes exactly the rows a full read no longer
+              contains, is idempotent on a second call, and with an empty keep
+              set removes every row of that table, as before
+            - a throw mid-transaction rolls back with nothing left behind
+            - eight concurrent migrators: one applies, seven no-op, none fail
+            - npm run build clean (client and server); both typechecks clean
+            - nothing leaked into the bundle: the only grep hit is the literal
+              string "AIRTABLE_API_KEY" inside an existing UI message
+
+Not done:   No commit and no deploy, as asked — the diff is for review first.
+            Ask Bays chat history is still browser-local; moving it to Postgres
+            would change the API surface, which this task explicitly ruled out,
+            so it stays for the phase that wires Bays's memory.
+
+## 2026-09-12 17:40 — render.yaml corrected against the live Render API
+Intent:     Replace the plan string I had guessed with the one Render's API
+            actually reports, add the region and disk floor, and confirm no
+            service-level disk block survives anywhere in the blueprint.
+Files:      render.yaml
+Problem:    I had written `plan: basic-256mb` from the public plan naming. The
+            API reports the tier as `0.1c-256mb`. Both are accepted and mean
+            the same tier, but a blueprint should carry the canonical string
+            rather than an alias, so the file reads the same as the instance.
+Fix:        plan: 0.1c-256mb, region: oregon, diskSizeGB: 1 on the database.
+            Destiny confirmed disk autoscaling is on, so 1 GB is the floor and
+            not a cap.
+Decision:   No `region` on the web service. It is already in environment
+            evm-dai49rmq1p3s73b2al2g with the database, and declaring a region
+            on a service that exists is a way to cause a mismatch rather than
+            to prevent one. The internal connection string resolves because the
+            two share that environment; no ipAllowList entries exist and none
+            are needed, since nothing connects from outside it.
+Verified:   No `disk:`, `mountPath`, `sizeGB`, `DATA_DIR` or `/var/data`
+            anywhere in render.yaml. The only `diskSizeGB` is the database's.
+Verified:   Pre-commit audit of the two guarantees, read out of the code rather
+            than recalled:
+            - No fallback path exists. No `node:sqlite` import, no
+              `DatabaseSync`, no `DATA_DIR`, no `mkdirSync` in server/src or
+              src — the five remaining mentions are comments recording what
+              this replaced. `pg` is the only runtime dependency. Every exit
+              in the boot path is exit 1; the only exit 0 is the SIGTERM
+              handler. `assertDatabase()` is called once, at index.ts:401,
+              awaited and not caught, before `server.listen` at :405 — the
+              listener is unreachable until it returns. `getPool()` throws
+              rather than improvising if DATABASE_URL is absent.
+            - Migration 1 creates meta, records, events, observations, four
+              indexes and schema_migrations, and nothing else.
+            - The advisory lock is session-level (`pg_advisory_lock`, not the
+              transaction-scoped variant), taken on one checked-out client
+              before the schema_migrations bootstrap and released in `finally`.
+              It therefore covers the bootstrap CREATE as well as every
+              migration body — which is the fix, since the bootstrap was what
+              killed a runner in the earlier race.

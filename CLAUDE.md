@@ -35,8 +35,9 @@ Owner: Destiny Arupi, Engine Steward at BHA.
    section 4. No engine key or credential is ever compiled into the bundle.
 5. **Ask before changing scope.** If a section seems to need a new dependency
    or a new external service, stop and raise it rather than building it. The
-   server in `server/` was added on Destiny's instruction (2026-09-08) and
-   deliberately has no dependencies beyond Node.
+   server in `server/` was added on Destiny's instruction (2026-09-08). It has
+   exactly one dependency, `pg`, added on Destiny's instruction (2026-09-12)
+   when state moved to Postgres. That is the ceiling, not a precedent.
 
 ---
 
@@ -83,8 +84,8 @@ hardcoded.
 **Records come from Airtable; the server reads it directly** (decision
 2026-09-09, Destiny). Loops, Codex entries, build patterns and commercial
 cards are read by `server/src/sync.ts` from their Airtable bases through
-`server/src/airtable.ts` (plain fetch, no dependency) into SQLite under
-`DATA_DIR`, keyed by Airtable record id. **Codex entries come from BHA
+`server/src/airtable.ts` (plain fetch, no dependency) into Postgres, keyed by
+Airtable record id. **Codex entries come from BHA
 Submissions & Logs (`appEmdKshNVTl64Zf`), one table per builder** (decision
 2026-09-10, Destiny) — the builder is the table a row lives in, never a field,
 and the completed entry is the `Orchestrator Layer2 Review` column. The base and table ids, field names
@@ -93,30 +94,47 @@ live bases, not assumed. Their phase 1 fixture files were deleted the same
 day; with no `AIRTABLE_API_KEY` those four pages are empty and say why.
 Incidents, twins, vFarm and builders are still phase 1 fixtures.
 
-**The service has no persistent disk.** It runs on Render's free instance
-type, so `DATA_DIR` is wiped on every deploy and every spin-down. Therefore:
+**State lives in Postgres** (decision 2026-09-12, Destiny): `bha-engine-db` on
+the same Render environment, reached through `DATABASE_URL`. It replaces the
+SQLite file under `DATA_DIR`, which Render wiped on every deploy and every
+spin-down. `pg` is the server's one dependency past Node itself, granted
+explicitly for this. Therefore:
 
-- **Airtable is the source of truth for every record type.** The dashboard is
-  a read model plus a write-through cache, never the system of record.
+- **The server does not start without the database.** A missing
+  `DATABASE_URL`, or one it cannot reach, prints the reason and exits. There
+  is deliberately no fallback store: a silent fallback is how writes go
+  missing without anyone noticing.
+- **The schema is forward-only migrations** in `server/src/migrations.ts`, run
+  on boot, idempotent, serialised by an advisory lock. Nothing drops a table.
+  A shape change to the read model is a migration that alters it, or one that
+  truncates `records` on purpose and lets a resync refill it — never a silent
+  drop, because `events` and `observations` are real history now.
+- **Airtable is still the source of truth for every record type.** The
+  dashboard is a read model plus a write-through cache, never the system of
+  record. Durability changes where the read model lives, not who owns the
+  records.
 - **Every write from the interface goes to Airtable first** and is shown only
   from what Airtable sent back. If Airtable refuses, nothing changes here.
 - **Resync rebuilds the read model**: on boot, every `AIRTABLE_RESYNC_MINUTES`
   (default 15, decision 2026-09-10), and on demand from each page or
-  `POST /api/resync/:kind`. It is idempotent and purges a table's rows only
-  after a successful full read.
+  `POST /api/resync/:kind`. It is idempotent, runs one transaction per table,
+  and purges a table's rows only after a successful full read.
 - **Every page states how old its rows are**, relative ("4 min ago"), in the
   same place. A failed resync says so and says what is on screen instead; the
   previous rows are never presented as current. A figure that can be a day old
   with nothing saying so is a correctness bug on an engine-health surface, not
-  a polish issue.
+  a polish issue. Rows surviving a restart does not make an old row current.
 - **n8n dual-writes through `/api/inbound/:kind`**, authenticated by
   `DASHBOARD_INBOUND_KEY` in `x-dashboard-key` (the same pattern as
   `ASK_BAYS_API_KEY`, inbound). The push is additive; the Airtable write path
-  stays. No cut-over path exists and none is to be built until the persistent
-  disk exists — that decision will be made explicitly.
-- **Do not design anything that assumes dashboard-held state survives a
-  restart.** The events table (status changes with timestamps) is real from
-  boot and resets with the instance; every metric derived from it says so.
+  stays. No cut-over path exists and none is to be built without an explicit
+  decision — durable storage removes the old blocker but is not itself that
+  decision.
+- **The status-change history now accumulates.** The events table (status
+  changes with timestamps) is the only place a close is dated, and
+  `meta.history_since` is when this database began recording it — not the last
+  restart. Every metric derived from it still cites that date, and one the
+  rows cannot support is still null with a note.
 
 **Counts are computed by the server from raw rows** (decision 2026-09-08).
 The loop tables carry no close date and no last-modified time; nothing
@@ -132,7 +150,9 @@ thread's `session_id` is stable for its life and is Bays's memory. The reply's
 **Environment (all server-side, none in the bundle):** `AUTH_EMAIL`,
 `AUTH_PASSWORD_HASH`, `SESSION_SECRET`, `ASK_BAYS_API_KEY`, `ASK_BAYS_URL`,
 `AIRTABLE_API_KEY` (a personal access token with read and write scope on the
-four bases), `AIRTABLE_RESYNC_MINUTES`, `DASHBOARD_INBOUND_KEY`, `DATA_DIR`.
+four bases), `AIRTABLE_RESYNC_MINUTES`, `DASHBOARD_INBOUND_KEY`, and
+`DATABASE_URL` — the one the server refuses to start without.
+`DATABASE_CA_CERT` and `DATABASE_POOL_MAX` are optional; `DATA_DIR` is gone.
 `AIRTABLE_API_URL` exists so a sandbox that cannot reach api.airtable.com can
 point the same client at a local replay.
 

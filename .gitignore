@@ -144,7 +144,8 @@ vite.config.ts.timestamp-*
 
 # BHA dashboard server
 server-dist/
-# The local SQLite directory only (DATA_DIR defaults to ./data). Anchored:
-# unanchored `data/` also matched src/data/, which silently dropped two
-# source files from a commit and broke the Render build.
+# The old local SQLite directory. DATA_DIR is gone (state is in Postgres as of
+# 2026-09-12) but the entry stays so an existing checkout's leftover file is
+# never committed. Anchored: unanchored `data/` also matched src/data/, which
+# silently dropped two source files from a commit and broke the Render build.
 /data/
