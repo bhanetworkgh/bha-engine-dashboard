@@ -3,19 +3,20 @@
  * as this dashboard holds them, plus the status-change history the counts on
  * those pages are computed from.
  *
- * Decision (2026-09-09, Destiny): the service runs on Render's free instance
- * type, which has no persistent disk. DATA_DIR is ephemeral — this SQLite file
- * is wiped on every deploy and every spin-down after inactivity. So:
+ * Decision (2026-09-09, Destiny): Airtable is the source of truth for every
+ * kind. Rows here are a read model, keyed by Airtable record id, rebuilt by
+ * sync.ts from the bases. Every write from the interface goes through to
+ * Airtable first and is recorded here only from what Airtable sent back; if
+ * Airtable refuses, nothing changes here.
  *
- *   - Airtable is the source of truth for every kind. Rows here are a read
- *     model, keyed by Airtable record id, rebuilt by sync.ts from the bases.
- *   - Every write from the interface goes through to Airtable first and is
- *     recorded here only from what Airtable sent back. If Airtable refuses,
- *     nothing changes here. Nothing is designed to survive a restart.
- *   - The events table is the only place a status change is timestamped
- *     (the loop tables carry no close date). It is real from the moment this
- *     instance booted and resets with it; every metric derived from it says
- *     so, and one the rows cannot support is null with a note.
+ * Decision (2026-09-12, Destiny): these rows live in Postgres (bha-engine-db
+ * on Render), not in a SQLite file under DATA_DIR. The service has no
+ * persistent disk, so that file was wiped on every deploy and every spin-down
+ * — which mattered most for `events`, the only place a status change is
+ * timestamped, because the loop tables carry no close date. That history now
+ * accumulates instead of restarting, and `meta.history_since` says when the
+ * database itself started recording. A metric the rows cannot support is
+ * still null with a note.
  *
  * No fixture is seeded for these four kinds any more. With no AIRTABLE_API_KEY
  * the pages are empty and say why, which is the truth.
@@ -54,7 +55,8 @@ import type {
   SeriesPoint,
   SyncInfo,
 } from '../../src/data/types';
-import { getMeta, nowIso, openDb, setMeta, today } from './db';
+import { getMeta, nowIso, setMeta, setMetaIfAbsent, today } from './db';
+import { getPool, withTransaction, type Queryable } from './pg';
 import {
   CODEX_EDITABLE,
   CODEX_JASON_STATUS,
@@ -159,66 +161,38 @@ function lastWeeks(n: number): string[] {
   return out;
 }
 
-/* ---------------------------------------------------------------- schema */
+/* ----------------------------------------------------------------- boot */
 
-/** Bumped when the row shape changes; the store is ephemeral so a rebuild is the honest migration. */
-const SCHEMA_VERSION = '2';
+/** The pool, or one client inside a caller's transaction. */
+function db(on?: Queryable): Queryable {
+  return on ?? getPool();
+}
 
-export function ensureSchema(): void {
-  const db = openDb();
-  if (getMeta('schema_version') !== SCHEMA_VERSION) {
-    db.exec('DROP TABLE IF EXISTS records; DROP TABLE IF EXISTS events; DROP TABLE IF EXISTS snapshots; DROP TABLE IF EXISTS observations;');
-    db.exec(`DELETE FROM meta WHERE key NOT IN ('history_since')`);
-  }
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS records (
-      kind TEXT NOT NULL,
-      id TEXT NOT NULL,
-      key TEXT,
-      json TEXT NOT NULL,
-      status TEXT NOT NULL,
-      builder TEXT,
-      raised_at TEXT,
-      closed_at TEXT,
-      updated_at TEXT NOT NULL,
-      source TEXT NOT NULL,
-      table_id TEXT NOT NULL,
-      synced_at TEXT NOT NULL,
-      PRIMARY KEY (kind, id)
-    );
-    CREATE INDEX IF NOT EXISTS records_kind_table ON records (kind, table_id);
-    CREATE TABLE IF NOT EXISTS events (
-      seq INTEGER PRIMARY KEY AUTOINCREMENT,
-      kind TEXT NOT NULL,
-      record_id TEXT NOT NULL,
-      builder TEXT,
-      from_status TEXT,
-      to_status TEXT NOT NULL,
-      via TEXT NOT NULL,
-      at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS events_kind_at ON events (kind, at);
-    CREATE TABLE IF NOT EXISTS observations (
-      kind TEXT NOT NULL,
-      metric TEXT NOT NULL,
-      at TEXT NOT NULL,
-      value REAL NOT NULL
-    );
-  `);
-  if (!getMeta('history_since')) setMeta('history_since', nowIso());
-  setMeta('schema_version', SCHEMA_VERSION);
+/**
+ * Called once at boot, after migrations.
+ *
+ * The schema itself is migrations.ts's — forward-only, and it never drops a
+ * table. This only stamps when this database began recording status changes,
+ * which is what the notes on the loops page cite. `setMetaIfAbsent` so a
+ * second boot, or a second instance, leaves the original stamp alone: that
+ * date is now a real fact about the history rather than the time of the last
+ * restart.
+ */
+export async function initStore(): Promise<void> {
+  await setMetaIfAbsent('history_since', nowIso());
 }
 
 /* ------------------------------------------------------------------ rows */
 
-function rows(kind: RecordKind, table?: string): Row[] {
-  const db = openDb();
-  return (table
-    ? db.prepare('SELECT * FROM records WHERE kind = ? AND table_id = ?').all(kind, table)
-    : db.prepare('SELECT * FROM records WHERE kind = ?').all(kind)) as unknown as Row[];
+async function rows(kind: RecordKind, table?: string, on?: Queryable): Promise<Row[]> {
+  const r = table
+    ? await db(on).query<Row>('SELECT * FROM records WHERE kind = $1 AND table_id = $2', [kind, table])
+    : await db(on).query<Row>('SELECT * FROM records WHERE kind = $1', [kind]);
+  return r.rows;
 }
-function rowById(kind: RecordKind, id: string): Row | null {
-  return (openDb().prepare('SELECT * FROM records WHERE kind = ? AND id = ?').get(kind, id) as unknown as Row | undefined) ?? null;
+async function rowById(kind: RecordKind, id: string, on?: Queryable): Promise<Row | null> {
+  const r = await db(on).query<Row>('SELECT * FROM records WHERE kind = $1 AND id = $2', [kind, id]);
+  return r.rows[0] ?? null;
 }
 
 type Mapped =
@@ -301,9 +275,17 @@ const TERMINAL: Partial<Record<RecordKind, string>> = { loops: 'closed' };
  * record twice is one row. A status that differs from the held row is recorded
  * as an event, stamped `at` (an inbound payload's own time, else now).
  */
-export function upsert(m: Mapped, table: string, via: 'airtable' | 'inbound' | 'ui', at = nowIso()): { changed: boolean; inserted: boolean } {
-  const db = openDb();
-  const prev = rowById(m.kind, m.obj.id);
+export async function upsert(
+  m: Mapped,
+  table: string,
+  via: 'airtable' | 'inbound' | 'ui',
+  at = nowIso(),
+  on?: Queryable,
+): Promise<{ changed: boolean; inserted: boolean }> {
+  // The row and the event it raises are one change; without a transaction a
+  // crash between them leaves a status with no record of when it changed.
+  if (!on) return withTransaction((client) => upsert(m, table, via, at, client));
+  const prev = await rowById(m.kind, m.obj.id, on);
   const status = statusOf(m);
   const terminal = TERMINAL[m.kind];
   let closedAt = prev?.closed_at ?? null;
@@ -316,17 +298,18 @@ export function upsert(m: Mapped, table: string, via: 'airtable' | 'inbound' | '
     const held = JSON.parse(prev.json) as { note?: string | null };
     if (held.note && obj.note == null) obj.note = held.note;
   }
-  db.prepare(
+  await on.query(
     `INSERT INTO records (kind, id, key, json, status, builder, raised_at, closed_at, updated_at, source, table_id, synced_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(kind, id) DO UPDATE SET key = excluded.key, json = excluded.json, status = excluded.status, builder = excluded.builder,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+     ON CONFLICT (kind, id) DO UPDATE SET key = excluded.key, json = excluded.json, status = excluded.status, builder = excluded.builder,
        raised_at = excluded.raised_at, closed_at = excluded.closed_at, updated_at = excluded.updated_at, source = excluded.source,
        table_id = excluded.table_id, synced_at = excluded.synced_at`,
-  ).run(m.kind, m.obj.id, keyOf(m), JSON.stringify(obj), status, builderOf(m), raisedOf(m), closedAt, at, via, table, at);
+    [m.kind, m.obj.id, keyOf(m), JSON.stringify(obj), status, builderOf(m), raisedOf(m), closedAt, at, via, table, at],
+  );
   bumpVersion();
   const changed = !prev || prev.status !== status;
   if (changed) {
-    db.prepare('INSERT INTO events (kind, record_id, builder, from_status, to_status, via, at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+    await on.query('INSERT INTO events (kind, record_id, builder, from_status, to_status, via, at) VALUES ($1, $2, $3, $4, $5, $6, $7)', [
       m.kind,
       m.obj.id,
       builderOf(m),
@@ -334,27 +317,23 @@ export function upsert(m: Mapped, table: string, via: 'airtable' | 'inbound' | '
       status,
       via,
       at,
-    );
+    ]);
   }
   return { changed: Boolean(prev) && prev!.status !== status, inserted: !prev };
 }
 
 /** Removes rows of one table that a full read of that table no longer contains. */
-export function purgeMissing(kind: RecordKind, table: string, keep: Set<string>): number {
-  const db = openDb();
-  const held = rows(kind, table);
-  let n = 0;
-  for (const r of held) {
-    if (!keep.has(r.id)) {
-      db.prepare('DELETE FROM records WHERE kind = ? AND id = ?').run(kind, r.id);
-      n++;
-    }
-  }
+export async function purgeMissing(kind: RecordKind, table: string, keep: Set<string>, on?: Queryable): Promise<number> {
+  // One statement rather than a read and a delete per row. An empty `keep`
+  // removes every row of that table, as before: the caller only reaches here
+  // after a successful full read, so an empty read means an empty table.
+  const r = await db(on).query('DELETE FROM records WHERE kind = $1 AND table_id = $2 AND NOT (id = ANY($3::text[]))', [kind, table, [...keep]]);
+  const n = r.rowCount ?? 0;
   if (n) bumpVersion();
   return n;
 }
 
-export function mapRecord(kind: RecordKind, rec: AtRecord, table: string): Mapped {
+export async function mapRecord(kind: RecordKind, rec: AtRecord, table: string): Promise<Mapped> {
   switch (kind) {
     case 'loops': {
       const t = loopTableById(table);
@@ -379,7 +358,7 @@ export function mapRecord(kind: RecordKind, rec: AtRecord, table: string): Mappe
     case 'client_questions': {
       // The lane a question belongs to is the table it was read from; the
       // sync records that mapping when it follows each index row's Table ID.
-      const lane = questionLaneFor(table);
+      const lane = await questionLaneFor(table);
       return { kind, obj: mapClientQuestion(rec, lane ?? table, table) };
     }
   }
@@ -392,12 +371,27 @@ export function mapRecord(kind: RecordKind, rec: AtRecord, table: string): Mappe
  * time rather than hardcoded — the same reason the pipeline dropped its own
  * lane-to-table map: adding a lane should be a row, not a deploy.
  */
-export function setQuestionTables(map: Record<string, string>): void {
-  setMeta('clients:tables', JSON.stringify(map));
+export async function setQuestionTables(map: Record<string, string>): Promise<void> {
+  await setMeta('clients:tables', JSON.stringify(map));
+  questionTablesCache = map;
   bumpVersion();
 }
-export function questionTables(): Record<string, string> {
-  const raw = getMeta('clients:tables');
+export async function questionTables(): Promise<Record<string, string>> {
+  if (questionTablesCache) return questionTablesCache;
+  const raw = await getMeta('clients:tables');
+  questionTablesCache = parseTableMap(raw);
+  return questionTablesCache;
+}
+
+/**
+ * Held in memory after the first read, and replaced whenever a sync writes a
+ * new one. Postgres is still where it lives; this is only so that mapping a
+ * few hundred question rows does not mean a query per row. It is a map of
+ * four table ids, and a stale one cannot outlive the resync that wrote it.
+ */
+let questionTablesCache: Record<string, string> | null = null;
+
+function parseTableMap(raw: string | null): Record<string, string> {
   if (!raw) return {};
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -406,8 +400,8 @@ export function questionTables(): Record<string, string> {
     return {};
   }
 }
-function questionLaneFor(table: string): string | null {
-  return questionTables()[table] ?? null;
+async function questionLaneFor(table: string): Promise<string | null> {
+  return (await questionTables())[table] ?? null;
 }
 
 /* ------------------------------------------------------------------ reads */
@@ -417,14 +411,14 @@ function hydrateLoop(r: Row): Loop {
   const end = r.closed_at ?? today();
   return { ...base, status: r.status as LoopStatus, closed_at: r.closed_at, age_days: r.raised_at ? Math.max(0, dayDiff(r.raised_at, end)) : 0 };
 }
-export function loops(): Loop[] {
-  return rows('loops').map(hydrateLoop);
+export async function loops(): Promise<Loop[]> {
+  return (await rows('loops')).map(hydrateLoop);
 }
-export function codexEntries(): CodexEntry[] {
-  return rows('codex').map((r) => codexSummary(JSON.parse(r.json) as CodexEntryDetail));
+export async function codexEntries(): Promise<CodexEntry[]> {
+  return (await rows('codex')).map((r) => codexSummary(JSON.parse(r.json) as CodexEntryDetail));
 }
-export function codexDetail(id: string): CodexEntryDetail | null {
-  const r = rowById('codex', id);
+export async function codexDetail(id: string): Promise<CodexEntryDetail | null> {
+  const r = await rowById('codex', id);
   return r ? (JSON.parse(r.json) as CodexEntryDetail) : null;
 }
 
@@ -435,12 +429,12 @@ export function codexDetail(id: string): CodexEntryDetail | null {
  * kind — no status, no write path — so they are held in `meta` as the last
  * full read of that table rather than in the records table.
  */
-export function setLayer0Holds(holds: Layer0Hold[]): void {
-  setMeta('codex:layer0', JSON.stringify(holds));
+export async function setLayer0Holds(holds: Layer0Hold[]): Promise<void> {
+  await setMeta('codex:layer0', JSON.stringify(holds));
   bumpVersion();
 }
-export function layer0Holds(): Layer0Hold[] {
-  const raw = getMeta('codex:layer0');
+export async function layer0Holds(): Promise<Layer0Hold[]> {
+  const raw = await getMeta('codex:layer0');
   if (!raw) return [];
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -449,43 +443,43 @@ export function layer0Holds(): Layer0Hold[] {
     return [];
   }
 }
-export function patterns(): BuildPattern[] {
-  return rows('patterns').map((r) => patternSummary(JSON.parse(r.json) as BuildPatternDetail));
+export async function patterns(): Promise<BuildPattern[]> {
+  return (await rows('patterns')).map((r) => patternSummary(JSON.parse(r.json) as BuildPatternDetail));
 }
-export function patternDetail(id: string): BuildPatternDetail | null {
-  const r = rowById('patterns', id);
+export async function patternDetail(id: string): Promise<BuildPatternDetail | null> {
+  const r = await rowById('patterns', id);
   return r ? (JSON.parse(r.json) as BuildPatternDetail) : null;
 }
 /** Case-insensitive search across every text field of every pattern. */
-export function searchPatterns(q: string): BuildPattern[] {
+export async function searchPatterns(q: string): Promise<BuildPattern[]> {
   const needle = q.trim().toLowerCase();
   if (!needle) return patterns();
   const terms = needle.split(/\s+/).filter(Boolean);
-  return rows('patterns')
+  return (await rows('patterns'))
     .filter((r) => {
       const hay = r.json.toLowerCase();
       return terms.every((t) => hay.includes(t));
     })
     .map((r) => patternSummary(JSON.parse(r.json) as BuildPatternDetail));
 }
-export function opportunities(): Opportunity[] {
-  return rows('commercial').map((r) => JSON.parse(r.json) as Opportunity);
+export async function opportunities(): Promise<Opportunity[]> {
+  return (await rows('commercial')).map((r) => JSON.parse(r.json) as Opportunity);
 }
-export function nsRecords(): NsRecord[] {
-  return rows('ns').map((r) => JSON.parse(r.json) as NsRecord);
+export async function nsRecords(): Promise<NsRecord[]> {
+  return (await rows('ns')).map((r) => JSON.parse(r.json) as NsRecord);
 }
-export function rtAttempts(): RtAttempt[] {
-  return rows('rt').map((r) => JSON.parse(r.json) as RtAttempt);
+export async function rtAttempts(): Promise<RtAttempt[]> {
+  return (await rows('rt')).map((r) => JSON.parse(r.json) as RtAttempt);
 }
-export function clientLanes(): ClientLane[] {
-  return rows('clients').map((r) => JSON.parse(r.json) as ClientLane);
+export async function clientLanes(): Promise<ClientLane[]> {
+  return (await rows('clients')).map((r) => JSON.parse(r.json) as ClientLane);
 }
-export function clientQuestions(): ClientQuestion[] {
-  return rows('client_questions').map((r) => JSON.parse(r.json) as ClientQuestion);
+export async function clientQuestions(): Promise<ClientQuestion[]> {
+  return (await rows('client_questions')).map((r) => JSON.parse(r.json) as ClientQuestion);
 }
 
-export function loopsByOwner(): OwnerTotals[] {
-  const all = loops();
+export async function loopsByOwner(): Promise<OwnerTotals[]> {
+  const all = await loops();
   return LOOP_TABLES.map((t) => {
     const mine = all.filter((l) => l.owner === t.owner);
     const open = mine.filter((l) => l.status !== 'closed');
@@ -506,15 +500,15 @@ export interface SyncState {
   error: string | null;
   tables: { table: string; label: string; n: number }[];
 }
-export function syncState(kind: RecordKind): SyncState {
-  const raw = getMeta(`sync:${kind}`);
+export async function syncState(kind: RecordKind): Promise<SyncState> {
+  const raw = await getMeta(`sync:${kind}`);
   return raw ? (JSON.parse(raw) as SyncState) : { synced_at: null, error: null, tables: [] };
 }
-export function setSyncState(kind: RecordKind, s: SyncState): void {
-  setMeta(`sync:${kind}`, JSON.stringify(s));
+export async function setSyncState(kind: RecordKind, s: SyncState): Promise<void> {
+  await setMeta(`sync:${kind}`, JSON.stringify(s));
 }
-export function syncInfo(kind: RecordKind): SyncInfo {
-  const s = syncState(kind);
+export async function syncInfo(kind: RecordKind): Promise<SyncInfo> {
+  const s = await syncState(kind);
   return {
     kind,
     source: s.synced_at ? 'airtable' : 'none',
@@ -526,19 +520,20 @@ export function syncInfo(kind: RecordKind): SyncInfo {
   };
 }
 
-export function observe(kind: RecordKind, metric: string, value: number): void {
-  openDb().prepare('INSERT INTO observations (kind, metric, at, value) VALUES (?, ?, ?, ?)').run(kind, metric, nowIso(), value);
+export async function observe(kind: RecordKind, metric: string, value: number): Promise<void> {
+  await db().query('INSERT INTO observations (kind, metric, at, value) VALUES ($1, $2, $3, $4)', [kind, metric, nowIso(), value]);
   bumpVersion();
 }
-export function cardTrend(id: string): MetricSeries {
-  const obs = observations('commercial', `unresolved:${id}`);
+export async function cardTrend(id: string): Promise<MetricSeries> {
+  const obs = await observations('commercial', `unresolved:${id}`);
   const days = new Set(obs.map((o) => o.at.slice(0, 10)));
   return days.size >= 2
-    ? { points: obs.map((o) => ({ label: o.at.slice(5, 10), value: Math.round(o.value) })), note: 'missing_research_count as observed at each resync. Observations reset with the instance on the free plan.' }
+    ? { points: obs.map((o) => ({ label: o.at.slice(5, 10), value: Math.round(o.value) })), note: 'missing_research_count as observed at each resync, since this database started recording.' }
     : { points: null, note: obs.length ? `Seen on one day only (${[...days][0]}); a trend needs at least two.` : 'Not observed yet.' };
 }
-function observations(kind: RecordKind, metric: string): { at: string; value: number }[] {
-  return openDb().prepare('SELECT at, value FROM observations WHERE kind = ? AND metric = ? ORDER BY at').all(kind, metric) as unknown as { at: string; value: number }[];
+async function observations(kind: RecordKind, metric: string): Promise<{ at: string; value: number }[]> {
+  const r = await db().query<{ at: string; value: number }>('SELECT at, value FROM observations WHERE kind = $1 AND metric = $2 ORDER BY at', [kind, metric]);
+  return r.rows;
 }
 
 /* ----------------------------------------------------------------- writes */
@@ -571,7 +566,7 @@ export async function setStatus(kind: RecordKind, id: string, status: string, no
   if (!STATUSES[kind].includes(status)) {
     throw new StoreError(`"${status}" is not a status a ${kind === 'loops' ? 'loop' : kind === 'codex' ? 'Codex entry' : kind === 'patterns' ? 'pattern' : 'card'} can have.`, 422);
   }
-  const r = rowById(kind, id);
+  const r = await rowById(kind, id);
   if (!r) throw new StoreError('That record is not held by this dashboard.', 404);
   // Codex: the status is Jason Status, written back in the table's own spelling.
   const jason = CODEX_JASON_STATUS.find((c) => c.toLowerCase() === status);
@@ -586,13 +581,13 @@ export async function setStatus(kind: RecordKind, id: string, status: string, no
           : { readiness_state: status };
   const m = await writeThrough(kind, r, fields);
   if (note !== undefined) (m.obj as { note?: string | null }).note = note.trim() || null;
-  upsert(m, r.table_id, 'ui');
-  return read(kind, id) as Loop | CodexEntry | BuildPattern | Opportunity;
+  await upsert(m, r.table_id, 'ui');
+  return (await read(kind, id)) as Loop | CodexEntry | BuildPattern | Opportunity;
 }
 
 /** Edits a Codex entry's own fields. Airtable first, then the held row from what came back. */
 export async function updateFields(kind: RecordKind, id: string, fields: Record<string, unknown>): Promise<CodexEntry | Opportunity | BuildPatternDetail | Loop> {
-  const r = rowById(kind, id);
+  const r = await rowById(kind, id);
   if (!r) throw new StoreError('That record is not held by this dashboard.', 404);
   const allowed = kind === 'codex' ? CODEX_EDITABLE : kind === 'loops' ? new Set(['What', 'lane_tag', 'raised_in', 'Raised By']) : new Set<string>();
   const clean: Record<string, unknown> = {};
@@ -603,8 +598,8 @@ export async function updateFields(kind: RecordKind, id: string, fields: Record<
   }
   if (!Object.keys(clean).length) throw new StoreError('Nothing to change.', 422);
   const m = await writeThrough(kind, r, clean);
-  upsert(m, r.table_id, 'ui');
-  const out = rowById(kind, id)!;
+  await upsert(m, r.table_id, 'ui');
+  const out = (await rowById(kind, id))!;
   if (kind === 'loops') return hydrateLoop(out);
   if (kind === 'codex') return codexSummary(JSON.parse(out.json) as CodexEntryDetail);
   return JSON.parse(out.json) as Opportunity | BuildPatternDetail;
@@ -633,17 +628,17 @@ export async function createLoop(input: NewLoop): Promise<Loop> {
     if (e instanceof airtable.AirtableError) throw new StoreError(`Airtable did not accept the new loop: ${e.message}`, e.status === 0 ? 502 : e.status >= 500 ? 502 : e.status);
     throw e;
   }
-  const m = mapRecord('loops', rec, t.table);
+  const m = await mapRecord('loops', rec, t.table);
   if (input.note?.trim()) (m.obj as Loop).note = input.note.trim();
-  upsert(m, t.table, 'ui');
-  return hydrateLoop(rowById('loops', rec.id)!);
+  await upsert(m, t.table, 'ui');
+  return hydrateLoop((await rowById('loops', rec.id))!);
 }
 
 /** Applies a record n8n pushed after writing it to Airtable. Idempotent by record id. */
 export async function applyInbound(kind: RecordKind, payload: { id: string; table?: string; record?: AtRecord; at?: string }): Promise<{ changed: boolean; inserted: boolean; record: unknown }> {
   const id = payload.id;
   if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new StoreError('An Airtable record id (rec…) is required.', 422);
-  let table = payload.table ?? rowById(kind, id)?.table_id ?? null;
+  let table = payload.table ?? (await rowById(kind, id))?.table_id ?? null;
   if (kind === 'patterns') table = PATTERNS.table;
   if (kind === 'commercial') table = COMMERCIAL.table;
   if (!table) throw new StoreError(`Which builder table the ${kind === 'loops' ? 'loop' : 'submission'} lives in is required (table or builder).`, 422);
@@ -662,22 +657,24 @@ export async function applyInbound(kind: RecordKind, payload: { id: string; tabl
     }
   }
   if (rec.id !== id) throw new StoreError('The record in the body does not match the id.', 422);
-  const m = mapRecord(kind, rec, table);
+  const m = await mapRecord(kind, rec, table);
   const at = payload.at && Number.isFinite(Date.parse(payload.at)) ? new Date(payload.at).toISOString() : nowIso();
-  const res = upsert(m, table, 'inbound', at);
-  return { ...res, record: read(kind, id) };
+  const res = await upsert(m, table, 'inbound', at);
+  return { ...res, record: await read(kind, id) };
 }
 
-export function removeInbound(kind: RecordKind, id: string): boolean {
-  const r = rowById(kind, id);
-  if (!r) return false;
-  openDb().prepare('DELETE FROM records WHERE kind = ? AND id = ?').run(kind, id);
+export async function removeInbound(kind: RecordKind, id: string): Promise<boolean> {
+  const r = await db().query('DELETE FROM records WHERE kind = $1 AND id = $2', [kind, id]);
+  if (!r.rowCount) return false;
   bumpVersion();
   return true;
 }
 
-export function read(kind: RecordKind, id: string): Loop | CodexEntry | BuildPattern | Opportunity | NsRecord | RtAttempt | ClientLane | ClientQuestion | null {
-  const r = rowById(kind, id);
+export async function read(
+  kind: RecordKind,
+  id: string,
+): Promise<Loop | CodexEntry | BuildPattern | Opportunity | NsRecord | RtAttempt | ClientLane | ClientQuestion | null> {
+  const r = await rowById(kind, id);
   if (!r) return null;
   switch (kind) {
     case 'loops':
@@ -721,7 +718,7 @@ function shortWeekLabel(start: string): string {
 const MODIFIED_FIELD_ADDED = '2026-09-09';
 const MODIFIED_MEANINGFUL_FROM = '2026-09-23'; // fourteen days on
 const MODIFIED_NOTE = `Derived from the tables' last_modified field, added ${MODIFIED_FIELD_ADDED.slice(8)} Sept 2026. Every loop that existed that day stamps from it, so this is only meaningful for changes after 9 Sept 2026 and is not history before then.`;
-const NO_CLOSE_DATE = 'The loop tables carry no close date. Closes are timestamped only when they pass through this dashboard or are pushed by n8n, and that history resets with the instance on the free plan.';
+const NO_CLOSE_DATE = 'The loop tables carry no close date. Closes are timestamped only when they pass through this dashboard or are pushed by n8n, and that history starts when this database did.';
 
 function modifiedAfterAdded(iso: string | null): boolean {
   return Boolean(iso && iso.slice(0, 10) > MODIFIED_FIELD_ADDED);
@@ -734,7 +731,20 @@ export function bumpVersion(): void {
   storeVersion++;
 }
 
-function loopMetricsFor(all: Loop[], builder: string | null, historySince: string | null): LoopMetrics {
+/**
+ * Closes that passed through this dashboard or were pushed by n8n. Read once
+ * per loopMetrics() call and handed to each pass below, rather than queried
+ * again for every builder: the by-builder figures are the same computation
+ * over a subset of the same rows.
+ */
+async function loopCloseEvents(): Promise<{ at: string; builder: string | null }[]> {
+  const r = await db().query<{ at: string; builder: string | null }>(
+    `SELECT at, builder FROM events WHERE kind = 'loops' AND to_status = 'closed' AND via IN ('ui', 'inbound') ORDER BY at`,
+  );
+  return r.rows;
+}
+
+function loopMetricsFor(all: Loop[], builder: string | null, historySince: string | null, allCloseEvents: { at: string; builder: string | null }[]): LoopMetrics {
   const openRows = all.filter((l) => l.status !== 'closed');
   const now = today();
 
@@ -746,9 +756,7 @@ function loopMetricsFor(all: Loop[], builder: string | null, historySince: strin
     })
     .filter((o) => o.total > 0);
 
-  const closeEvents = (openDb()
-    .prepare(`SELECT at, builder FROM events WHERE kind = 'loops' AND to_status = 'closed' AND via IN ('ui', 'inbound') ORDER BY at`)
-    .all() as unknown as { at: string; builder: string | null }[]).filter((e) => !builder || e.builder === builder);
+  const closeEvents = allCloseEvents.filter((e) => !builder || e.builder === builder);
   const closedPerDay: MetricSeries = closeEvents.length
     ? series(
         (() => {
@@ -760,7 +768,7 @@ function loopMetricsFor(all: Loop[], builder: string | null, historySince: strin
       )
     : series(
         null,
-        `No close has been recorded since this instance started${historySince ? ` at ${historySince.replace('T', ' ').slice(0, 16)} UTC` : ''}. ${NO_CLOSE_DATE} Close a loop from this page and it appears here the same day.`,
+        `No close has been recorded since this dashboard started keeping the history${historySince ? ` on ${historySince.replace('T', ' ').slice(0, 16)} UTC` : ''}. ${NO_CLOSE_DATE} Close a loop from this page and it appears here the same day.`,
       );
 
   const dated = openRows.filter((l) => l.raised_at);
@@ -865,19 +873,23 @@ function loopMetricsFor(all: Loop[], builder: string | null, historySince: strin
   };
 }
 
-export function loopMetrics(builder: string | null): LoopMetrics {
+export async function loopMetrics(builder: string | null): Promise<LoopMetrics> {
   const key = `loops:${builder ?? '*'}`;
   const hit = metricsCache.get(key);
   if (hit && hit.version === storeVersion) return hit.value as LoopMetrics;
-  const all = loops();
-  const historySince = getMeta('history_since');
+  const all = await loops();
+  const historySince = await getMeta('history_since');
+  const closes = await loopCloseEvents();
   const value: LoopMetrics = builder
-    ? loopMetricsFor(all.filter((l) => l.owner === builder), builder, historySince)
+    ? loopMetricsFor(all.filter((l) => l.owner === builder), builder, historySince, closes)
     : {
-        ...loopMetricsFor(all, null, historySince),
+        ...loopMetricsFor(all, null, historySince, closes),
         // One pass per builder, computed here once and cached, so a tab change on the page needs no request.
         by_builder: Object.fromEntries(
-          LOOP_TABLES.filter((t) => all.some((l) => l.owner === t.owner)).map((t) => [t.owner, loopMetricsFor(all.filter((l) => l.owner === t.owner), t.owner, historySince)]),
+          LOOP_TABLES.filter((t) => all.some((l) => l.owner === t.owner)).map((t) => [
+            t.owner,
+            loopMetricsFor(all.filter((l) => l.owner === t.owner), t.owner, historySince, closes),
+          ]),
         ),
       };
   metricsCache.set(key, { version: storeVersion, value });
@@ -906,12 +918,12 @@ export function codexTabRule(tab: CodexTab): (e: CodexEntry) => boolean {
   return TAB_RULES.find((r) => r.tab === tab)!.test;
 }
 
-export function codexMetrics(builder: string | null): CodexMetrics {
+export async function codexMetrics(builder: string | null): Promise<CodexMetrics> {
   const key = `codex:${builder ?? '*'}`;
   const hit = metricsCache.get(key);
   if (hit && hit.version === storeVersion) return hit.value as CodexMetrics;
-  const all = codexEntries().filter((e) => !builder || e.builder_id === builder);
-  const holds = layer0Holds().filter((h) => !builder || h.builder_id === builder);
+  const all = (await codexEntries()).filter((e) => !builder || e.builder_id === builder);
+  const holds = (await layer0Holds()).filter((h) => !builder || h.builder_id === builder);
 
   const flagged = all.filter((e) => e.layer0_flagged);
   const withEntry = all.filter((e) => e.has_entry).length;
@@ -971,10 +983,10 @@ export function codexMetrics(builder: string | null): CodexMetrics {
   return value;
 }
 
-export function patternMetrics(): PatternMetrics {
+export async function patternMetrics(): Promise<PatternMetrics> {
   const hit = metricsCache.get('patterns');
   if (hit && hit.version === storeVersion) return hit.value as PatternMetrics;
-  const all = patterns();
+  const all = await patterns();
   const canonical = all.filter((p) => p.status === 'canonical').length;
   const draft = all.filter((p) => p.status === 'draft').length;
   const unset = all.filter((p) => p.status === 'unset').length;
@@ -1064,14 +1076,14 @@ export function patternMetrics(): PatternMetrics {
   return value;
 }
 
-export function commercialMetrics(): CommercialMetrics {
+export async function commercialMetrics(): Promise<CommercialMetrics> {
   const hit = metricsCache.get('commercial');
   if (hit && hit.version === storeVersion) return hit.value as CommercialMetrics;
-  const all = opportunities();
+  const all = await opportunities();
   const lanes = [...new Set(all.map((o) => o.lane_id ?? '(no lane_id)'))];
   const withCount = all.filter((o) => o.missing_research_count !== null);
   const total = withCount.reduce((n, o) => n + (o.missing_research_count ?? 0), 0);
-  const obs = observations('commercial', 'unresolved_questions');
+  const obs = await observations('commercial', 'unresolved_questions');
   const distinctDays = new Set(obs.map((o) => o.at.slice(0, 10)));
   const readiness = [...new Set(all.map((o) => o.readiness_state ?? '(unset)'))];
   const confidence = [...new Set(all.map((o) => o.confidence ?? '(unset)'))];
@@ -1095,15 +1107,15 @@ export function commercialMetrics(): CommercialMetrics {
     },
     unresolved_trend:
       distinctDays.size >= 2
-        ? series(obs.map((o) => ({ label: o.at.slice(5, 10), value: Math.round(o.value) })), 'Total unresolved research questions as observed at each resync. Observations reset with the instance on the free plan.')
-        : series(null, 'A trend needs the count observed on at least two different days. Airtable keeps no history of this field, and this dashboard’s own observations reset with the instance on the free plan.'),
+        ? series(obs.map((o) => ({ label: o.at.slice(5, 10), value: Math.round(o.value) })), 'Total unresolved research questions as observed at each resync, since this database started recording.')
+        : series(null, 'A trend needs the count observed on at least two different days. Airtable keeps no history of this field, so the series starts from this dashboard’s own first observation.'),
     demand_evidence_note: 'demand_evidence is a single-select whose only choice says no external demand evidence has been collected for the lane; it is shown per card, not summed.',
   };
   metricsCache.set('commercial', { version: storeVersion, value });
   return value;
 }
 
-export function metrics(kind: RecordKind, filter: { builder?: string | null } = {}): RecordMetrics {
+export async function metrics(kind: RecordKind, filter: { builder?: string | null } = {}): Promise<RecordMetrics> {
   switch (kind) {
     case 'loops':
       return loopMetrics(filter.builder ?? null);
@@ -1122,14 +1134,16 @@ export function metrics(kind: RecordKind, filter: { builder?: string | null } = 
   }
 }
 
-export function historySince(): string | null {
+export async function historySince(): Promise<string | null> {
   return getMeta('history_since');
 }
 
-/** Rows held per kind, for /api/status. */
-export function held(): Record<RecordKind, number> {
+/** Rows held per kind, for /api/status. One grouped count, not a read per kind. */
+export async function held(): Promise<Record<RecordKind, number>> {
+  const r = await db().query<{ kind: RecordKind; n: string }>('SELECT kind, count(*)::text AS n FROM records GROUP BY kind');
+  const counts = new Map(r.rows.map((row) => [row.kind, Number(row.n)]));
   const out = {} as Record<RecordKind, number>;
-  for (const k of KINDS) out[k] = rows(k).length;
+  for (const k of KINDS) out[k] = counts.get(k) ?? 0;
   return out;
 }
 
@@ -1145,10 +1159,10 @@ const NS_OUTCOME_LABELS: Record<string, string> = { answered: 'Answered', thin: 
  * point: a thin rate of "0%" computed over zero classified rows would be a
  * lie told in the most reassuring possible direction.
  */
-export function nsMetrics(): NsMetrics {
+export async function nsMetrics(): Promise<NsMetrics> {
   const hit = metricsCache.get('ns');
   if (hit && hit.version === storeVersion) return hit.value as NsMetrics;
-  const all = nsRecords();
+  const all = await nsRecords();
   const classified = all.filter((r) => r.outcome);
   const thin = classified.filter((r) => r.outcome === 'thin').length;
   const weeks = lastWeeks(8);
@@ -1267,9 +1281,9 @@ export function nsMetrics(): NsMetrics {
  * highest seen, and `first_stuck_at` the earliest, because that field is
  * deliberately not re-stamped and the earliest stamp is the real watermark.
  */
-export function rtCards(): RtCard[] {
+export async function rtCards(): Promise<RtCard[]> {
   const byCard = new Map<string, RtAttempt[]>();
-  for (const a of rtAttempts()) {
+  for (const a of await rtAttempts()) {
     const key = a.card_id ?? a.id;
     const held = byCard.get(key) ?? [];
     held.push(a);
@@ -1309,11 +1323,11 @@ export function rtCards(): RtCard[] {
     .sort((a, b) => (b.last_attempt_at ?? '').localeCompare(a.last_attempt_at ?? ''));
 }
 
-export function rtMetrics(): RtMetrics {
+export async function rtMetrics(): Promise<RtMetrics> {
   const hit = metricsCache.get('rt');
   if (hit && hit.version === storeVersion) return hit.value as RtMetrics;
-  const attempts = rtAttempts();
-  const cards = rtCards();
+  const attempts = await rtAttempts();
+  const cards = await rtCards();
   const needsHuman = cards.filter((c) => c.requires_human);
   const untriaged = cards.filter((c) => !c.status);
   const stuck = cards.filter((c) => c.days_stuck !== null);
