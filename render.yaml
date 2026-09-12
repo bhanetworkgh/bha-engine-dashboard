@@ -53,6 +53,12 @@ services:
         sync: false
       - key: ASK_BAYS_MODEL_LABEL
         value: Claude Sonnet 5.0
+      # Base for the "view execution" links on fixture-backed rows. Non-secret
+      # config, so it belongs here. Execution ids recorded before the move off
+      # n8n.arupiautomates.cloud do not exist on this instance and will 404 —
+      # known and accepted, see src/data/fixtures/common.ts.
+      - key: N8N_BASE_URL
+        value: https://bayshorizonnetwork.app.n8n.cloud
       # Airtable is the source of truth for every record kind. The token needs
       # data.records:read on all seven bases, and :write on the four the
       # dashboard writes back to:
