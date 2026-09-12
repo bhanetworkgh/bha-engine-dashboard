@@ -1,16 +1,18 @@
 /**
  * Resync: rebuilds the read model from Airtable. One full read per table,
  * upsert by record id, then remove whatever that table no longer contains.
- * Idempotent — running it twice leaves the same rows — and it is the
- * mechanism that rebuilds the dashboard after an ephemeral reset, so it runs
- * on boot whenever a key is present, again on demand (POST /api/resync/:kind),
+ * Idempotent — running it twice leaves the same rows — and it is how the
+ * dashboard picks up anything written to Airtable outside it, so it runs on
+ * boot whenever a key is present, again on demand (POST /api/resync/:kind),
  * and on a timer.
  *
- * A table that fails to read keeps the rows it had: the purge only happens
- * after a successful full read of that table, so a bad network minute never
- * empties a page.
+ * A table that fails to read keeps the rows it had: one transaction per
+ * table, and the purge only happens after a successful full read of that
+ * table, so a bad network minute never empties a page and never leaves a page
+ * half-rebuilt.
  */
 import * as airtable from './airtable';
+import { withTransaction } from './pg';
 import { CLIENTS_INDEX, CODEX_BASE, CODEX_LAYER0, CODEX_TABLES, COMMERCIAL, LOOP_TABLES, LOOPS_BASE, NORTH_STAR, PATTERNS, RESEARCH_QUEUE, mapLayer0 } from './sources';
 import * as store from './store';
 import type { RecordKind } from '../../src/data/types';
@@ -38,18 +40,24 @@ const running = new Map<RecordKind, Promise<ResyncResult>>();
 async function syncTable(kind: RecordKind, base: string, table: string, label: string): Promise<TableResult> {
   const t0 = Date.now();
   try {
+    // Read the whole table before touching the store. A partial read must not
+    // reach the purge, which is what makes the rebuild safe.
     const records = await airtable.listAll(base, table);
     const keep = new Set<string>();
     let inserted = 0;
     let changed = 0;
-    for (const rec of records) {
-      const m = store.mapRecord(kind, rec, table);
-      const r = store.upsert(m, table, 'airtable');
-      keep.add(rec.id);
-      if (r.inserted) inserted++;
-      if (r.changed) changed++;
-    }
-    const removed = store.purgeMissing(kind, table, keep);
+    // One transaction for the table: every row and the purge land together, or
+    // none of them do, and the page never renders a half-rebuilt table.
+    const removed = await withTransaction(async (db) => {
+      for (const rec of records) {
+        const m = await store.mapRecord(kind, rec, table);
+        const r = await store.upsert(m, table, 'airtable', undefined, db);
+        keep.add(rec.id);
+        if (r.inserted) inserted++;
+        if (r.changed) changed++;
+      }
+      return store.purgeMissing(kind, table, keep, db);
+    });
     return { table, label, n: records.length, inserted, changed, removed, error: null, ms: Date.now() - t0 };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -65,7 +73,7 @@ async function syncTable(kind: RecordKind, base: string, table: string, label: s
  * pipeline dropped its hardcoded lane-to-table map on 2026-09-10 so that
  * adding a lane is a row rather than a deploy, and this follows the same rule.
  */
-function tablesFor(kind: RecordKind): { base: string; table: string; label: string }[] {
+async function tablesFor(kind: RecordKind): Promise<{ base: string; table: string; label: string }[]> {
   switch (kind) {
     case 'loops':
       return LOOP_TABLES.map((t) => ({ base: LOOPS_BASE, table: t.table, label: t.label }));
@@ -96,15 +104,15 @@ function tablesFor(kind: RecordKind): { base: string; table: string; label: stri
  * whose index row leaves Table ID empty is skipped and reported on the page,
  * rather than silently dropping its questions.
  */
-function clientQuestionTables(): { base: string; table: string; label: string }[] {
+async function clientQuestionTables(): Promise<{ base: string; table: string; label: string }[]> {
   const map: Record<string, string> = {};
   const out: { base: string; table: string; label: string }[] = [];
-  for (const lane of store.clientLanes()) {
+  for (const lane of await store.clientLanes()) {
     if (!lane.questions_table) continue;
     map[lane.questions_table] = lane.lane_id ?? lane.id;
     out.push({ base: CLIENTS_INDEX.base, table: lane.questions_table, label: lane.name });
   }
-  store.setQuestionTables(map);
+  await store.setQuestionTables(map);
   return out;
 }
 
@@ -115,7 +123,7 @@ export function resync(kind: RecordKind): Promise<ResyncResult> {
   const p = (async () => {
     const started_at = new Date().toISOString();
     const tables: TableResult[] = [];
-    for (const t of tablesFor(kind)) {
+    for (const t of await tablesFor(kind)) {
       tables.push(await syncTable(kind, t.base, t.table, t.label));
     }
     if (kind === 'codex') {
@@ -123,7 +131,7 @@ export function resync(kind: RecordKind): Promise<ResyncResult> {
       // no write path — so it is read alongside and held whole. A failure here
       // never fails the resync: the entries themselves are what the page needs.
       try {
-        store.setLayer0Holds((await airtable.listAll(CODEX_LAYER0.base, CODEX_LAYER0.table)).map(mapLayer0));
+        await store.setLayer0Holds((await airtable.listAll(CODEX_LAYER0.base, CODEX_LAYER0.table)).map(mapLayer0));
       } catch (e) {
         console.log(`resync codex/${CODEX_LAYER0.label}: FAILED — ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -135,13 +143,13 @@ export function resync(kind: RecordKind): Promise<ResyncResult> {
       // not then read its questions leaves the page half-built.
       tables.push(...(await resync('client_questions')).tables);
     }
-    const prev = store.syncState(kind);
-    store.setSyncState(kind, {
+    const prev = await store.syncState(kind);
+    await store.setSyncState(kind, {
       synced_at: ok ? new Date().toISOString() : prev.synced_at,
       error: ok ? null : failed.map((t) => `${t.label}: ${t.error}`).join(' · '),
       tables: tables.map((t) => ({ table: t.table, label: t.label, n: t.error ? (prev.tables.find((p) => p.table === t.table)?.n ?? 0) : t.n })),
     });
-    if (ok) recordObservations(kind);
+    if (ok) await recordObservations(kind);
     for (const t of tables) {
       console.log(
         t.error
@@ -156,15 +164,15 @@ export function resync(kind: RecordKind): Promise<ResyncResult> {
 }
 
 /** The two figures a trend needs history for, observed at each successful resync. */
-function recordObservations(kind: RecordKind): void {
+async function recordObservations(kind: RecordKind): Promise<void> {
   if (kind === 'patterns') {
-    const m = store.patternMetrics();
-    if (m.scope.rows) store.observe('patterns', 'canonical_share', (m.canonical / m.scope.rows) * 100);
+    const m = await store.patternMetrics();
+    if (m.scope.rows) await store.observe('patterns', 'canonical_share', (m.canonical / m.scope.rows) * 100);
   }
   if (kind === 'commercial') {
-    const m = store.commercialMetrics();
-    if (m.unresolved_questions.value !== null) store.observe('commercial', 'unresolved_questions', m.unresolved_questions.value);
-    for (const o of store.opportunities()) if (o.missing_research_count !== null) store.observe('commercial', `unresolved:${o.id}`, o.missing_research_count);
+    const m = await store.commercialMetrics();
+    if (m.unresolved_questions.value !== null) await store.observe('commercial', 'unresolved_questions', m.unresolved_questions.value);
+    for (const o of await store.opportunities()) if (o.missing_research_count !== null) await store.observe('commercial', `unresolved:${o.id}`, o.missing_research_count);
   }
 }
 
@@ -194,7 +202,10 @@ export function isRunning(kind: RecordKind): boolean {
  * Fifteen, not the 1440 the service was running. A figure on an engine-health
  * surface that can be a day old, with nothing on screen saying so, is worse
  * than no figure: it reads as current and is not. Every page now prints how
- * old its rows are, and this is how old they can get.
+ * old its rows are, and this is how old they can get. The rows survive a
+ * restart since 2026-09-12 (they are in Postgres), which changes nothing
+ * here: a row written four hours ago is stale whether or not it was written
+ * by this process.
  *
  * The cost of fifteen minutes, counted against Airtable's limits:
  *
@@ -224,12 +235,12 @@ export function isRunning(kind: RecordKind): boolean {
 export const RESYNC_MINUTES = Math.max(0, Number(process.env.AIRTABLE_RESYNC_MINUTES ?? 15) || 0);
 
 /** Called at boot. Never throws; a failure is logged and shown on the page. */
-export function startBootSync(): void {
+export async function startBootSync(): Promise<void> {
   if (!airtable.airtableConfigured()) {
     console.log('  airtable:  NOT configured — set AIRTABLE_API_KEY. Loops, Codex, patterns and commercial pages will be empty.');
     for (const k of store.KINDS) {
-      const s = store.syncState(k);
-      if (!s.synced_at) store.setSyncState(k, { ...s, error: 'AIRTABLE_API_KEY is not set on the server, so nothing has been read from Airtable.' });
+      const s = await store.syncState(k);
+      if (!s.synced_at) await store.setSyncState(k, { ...s, error: 'AIRTABLE_API_KEY is not set on the server, so nothing has been read from Airtable.' });
     }
     return;
   }

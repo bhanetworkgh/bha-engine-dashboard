@@ -1,19 +1,28 @@
 /**
- * The dashboard server. One Node process, no dependencies beyond Node itself.
+ * The dashboard server. One Node process, one dependency: `pg`.
  *
  *   /api/*   JSON, behind the session cookie (only /api/auth/*, /api/health
  *            and, with its own key, /api/inbound/* are open)
  *   /*       the built front end from dist/, with the SPA fallback
  *
  * Secrets live in this process's environment and never reach the browser:
- * the login credential, the session signing key and the Ask Bays API key.
+ * the login credential, the session signing key, the Ask Bays API key, the
+ * Airtable token and DATABASE_URL.
+ *
+ * `pg` (2026-09-12, on Destiny's instruction) is the one dependency past Node
+ * itself. Until then the store was SQLite through node:sqlite, under a
+ * DATA_DIR that Render wipes on every deploy and every spin-down; the state is
+ * in Postgres now and there is no other store to fall back to. The process
+ * refuses to start without it — see boot() at the bottom of this file.
  */
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import path from 'node:path';
 import { ask, ASK_URL, askConfigured, MODEL_LABEL } from './ask';
 import { authConfigured, login, logout, readSession, sessionInfo, sessionSecretConfigured } from './auth';
-import { DATA_DIR, openDb } from './db';
+import { databaseIdentity } from './db';
+import { migrate, MIGRATION_COUNT } from './migrations';
+import { assertDatabase, closePool, DATABASE_URL } from './pg';
 import * as engine from './engine';
 import * as store from './store';
 import * as sync from './sync';
@@ -142,7 +151,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     try {
       if (method === 'DELETE') {
         if (!idInPath) throw new HttpError(400, 'An id is required.');
-        return send(res, 200, { ok: true, removed: store.removeInbound(kind, idInPath) });
+        return send(res, 200, { ok: true, removed: await store.removeInbound(kind, idInPath) });
       }
       if (method !== 'POST' && method !== 'PATCH') throw new HttpError(405, 'POST, PATCH or DELETE.');
       const body = await readJson(req);
@@ -167,26 +176,29 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   if (method === 'GET') {
     switch (p) {
       case '/api/status': {
+        const db = databaseIdentity();
         const status: ServerStatus = {
           auth_configured: authConfigured(),
           session_secret_configured: sessionSecretConfigured,
           ask_bays_configured: askConfigured(),
           ask_bays_url: ASK_URL,
           model_label: MODEL_LABEL,
-          data_dir: DATA_DIR,
-          history_since: store.historySince(),
-          records_held: store.held(),
+          // Where the rows actually are. Host and database only — the URL
+          // carries the password and this response reaches the browser.
+          data_dir: db ? `postgres ${db.server_version} · ${db.host}/${db.database}${db.internal ? ' (internal)' : ''}` : 'postgres (not connected)',
+          history_since: await store.historySince(),
+          records_held: await store.held(),
           started_at: STARTED_AT,
           airtable_configured: airtableConfigured(),
           airtable_url: AIRTABLE_URL,
           inbound_configured: Boolean(INBOUND_KEY),
           resync_minutes: sync.RESYNC_MINUTES,
-          sync: Object.fromEntries(store.KINDS.map((k) => [k, store.syncInfo(k)])) as ServerStatus['sync'],
+          sync: Object.fromEntries(await Promise.all(store.KINDS.map(async (k) => [k, await store.syncInfo(k)] as const))) as ServerStatus['sync'],
         };
         return send(res, 200, status);
       }
       case '/api/overview':
-        return send(res, 200, engine.getOverview(q));
+        return send(res, 200, await engine.getOverview(q));
       case '/api/engine-status':
         return send(res, 200, engine.getEngineStatus(q));
       case '/api/north-star':
@@ -198,27 +210,27 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
       case '/api/engine-health':
         return send(res, 200, engine.getEngineHealth(q));
       case '/api/open-loops':
-        return send(res, 200, engine.getOpenLoops(q));
+        return send(res, 200, await engine.getOpenLoops(q));
       case '/api/codex':
-        return send(res, 200, engine.getCodexEntries(q));
+        return send(res, 200, await engine.getCodexEntries(q));
       case '/api/build-patterns':
-        return send(res, 200, engine.getBuildPatterns(q));
+        return send(res, 200, await engine.getBuildPatterns(q));
       case '/api/commercial':
-        return send(res, 200, engine.getCommercial(q));
+        return send(res, 200, await engine.getCommercial(q));
       case '/api/ns-telemetry':
-        return send(res, 200, engine.getNorthStarTelemetry());
+        return send(res, 200, await engine.getNorthStarTelemetry());
       case '/api/rt-telemetry':
-        return send(res, 200, engine.getResearchTwinTelemetry());
+        return send(res, 200, await engine.getResearchTwinTelemetry());
       case '/api/clients':
-        return send(res, 200, engine.getClients());
+        return send(res, 200, await engine.getClients());
       case '/api/builders':
-        return send(res, 200, engine.getBuilders(q));
+        return send(res, 200, await engine.getBuilders(q));
       case '/api/ask-bays':
         return send(res, 200, engine.getAskBays(q));
     }
     const builder = p.match(/^\/api\/builders\/([^/]+)$/);
     if (builder) {
-      const d = engine.getBuilder(decodeURIComponent(builder[1]), q);
+      const d = await engine.getBuilder(decodeURIComponent(builder[1]), q);
       if (!d) throw new HttpError(404, 'No builder with that id.');
       return send(res, 200, d);
     }
@@ -227,14 +239,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
       const kind = metrics[1] as RecordKind;
       if (!store.KINDS.includes(kind)) throw new HttpError(404, 'No such record kind.');
       const b = url.searchParams.get('builder');
-      return send(res, 200, store.metrics(kind, { builder: b && b !== 'all' ? b : null }));
+      return send(res, 200, await store.metrics(kind, { builder: b && b !== 'all' ? b : null }));
     }
     if (p === '/api/build-patterns/search') {
-      return send(res, 200, { patterns: store.searchPatterns(url.searchParams.get('q') ?? '') });
+      return send(res, 200, { patterns: await store.searchPatterns(url.searchParams.get('q') ?? '') });
     }
     const patternDetail = p.match(/^\/api\/build-patterns\/([^/]+)$/);
     if (patternDetail) {
-      const d = store.patternDetail(decodeURIComponent(patternDetail[1]));
+      const d = await store.patternDetail(decodeURIComponent(patternDetail[1]));
       if (!d) throw new HttpError(404, 'That pattern is not held by this dashboard.');
       return send(res, 200, d);
     }
@@ -242,12 +254,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     // so it is fetched one entry at a time rather than carried on the list.
     const codexDetail = p.match(/^\/api\/codex\/([^/]+)$/);
     if (codexDetail) {
-      const d = engine.getCodexDetail(decodeURIComponent(codexDetail[1]));
+      const d = await engine.getCodexDetail(decodeURIComponent(codexDetail[1]));
       if (!d) throw new HttpError(404, 'That Codex entry is not held by this dashboard.');
       return send(res, 200, d);
     }
     if (p === '/api/resync') {
-      return send(res, 200, { running: store.KINDS.filter((k) => sync.isRunning(k)), sync: Object.fromEntries(store.KINDS.map((k) => [k, store.syncInfo(k)])) });
+      return send(res, 200, {
+        running: store.KINDS.filter((k) => sync.isRunning(k)),
+        sync: Object.fromEntries(await Promise.all(store.KINDS.map(async (k) => [k, await store.syncInfo(k)] as const))),
+      });
     }
   }
 
@@ -357,9 +372,6 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL): void 
 
 /* ----------------------------------------------------------------- boot */
 
-openDb();
-store.ensureSchema();
-
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -375,12 +387,48 @@ const server = createServer((req, res) => {
   serveStatic(req, res, url);
 });
 
-server.listen(PORT, () => {
-  console.log(`BHA engine dashboard on http://localhost:${PORT}`);
-  console.log(`  data:     ${DATA_DIR}`);
-  console.log(`  sign-in:  ${authConfigured() ? 'configured' : 'NOT configured — set AUTH_PASSWORD_HASH'}`);
-  console.log(`  sessions: ${sessionSecretConfigured ? 'SESSION_SECRET set' : 'random key this boot (sessions end on restart)'}`);
-  console.log(`  ask bays: ${askConfigured() ? ASK_URL : 'NOT configured — set ASK_BAYS_API_KEY'}`);
-  console.log(`  inbound:  ${INBOUND_KEY ? 'DASHBOARD_INBOUND_KEY set' : 'NOT configured — set DASHBOARD_INBOUND_KEY for n8n dual-write'}`);
-  sync.startBootSync();
+/**
+ * Nothing is served until Postgres answers and the migrations have run.
+ *
+ * The order matters and the first step is the point of it: `assertDatabase`
+ * exits the process if DATABASE_URL is missing or the database is
+ * unreachable. There is deliberately no fallback store — a server that
+ * started anyway would accept writes it could not keep and show figures it
+ * could not stand behind, which is exactly how data goes missing without
+ * anyone noticing.
+ */
+async function boot(): Promise<void> {
+  const db = await assertDatabase();
+  const m = await migrate();
+  await store.initStore();
+
+  server.listen(PORT, () => {
+    console.log(`BHA engine dashboard on http://localhost:${PORT}`);
+    console.log(`  database: postgres ${db.server_version} at ${db.host}:${db.port}/${db.database}${db.internal ? ' (internal network, no TLS)' : ' (TLS)'}`);
+    console.log(`  schema:   ${m.applied.length ? `applied ${m.applied.length} migration(s): ${m.applied.join(', ')}` : `up to date (${MIGRATION_COUNT} migration(s))`}`);
+    console.log(`  sign-in:  ${authConfigured() ? 'configured' : 'NOT configured — set AUTH_PASSWORD_HASH'}`);
+    console.log(`  sessions: ${sessionSecretConfigured ? 'SESSION_SECRET set' : 'random key this boot (sessions end on restart)'}`);
+    console.log(`  ask bays: ${askConfigured() ? ASK_URL : 'NOT configured — set ASK_BAYS_API_KEY'}`);
+    console.log(`  inbound:  ${INBOUND_KEY ? 'DASHBOARD_INBOUND_KEY set' : 'NOT configured — set DASHBOARD_INBOUND_KEY for n8n dual-write'}`);
+    void sync.startBootSync();
+  });
+}
+
+// Render sends SIGTERM on deploy and on spin-down; drain the pool so an
+// in-flight transaction is not cut mid-statement.
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, () => {
+    server.close(() => void closePool().finally(() => process.exit(0)));
+  });
+}
+
+void boot().catch((e: unknown) => {
+  // assertDatabase and migrate report their own failures and exit; anything
+  // reaching here is unexpected, and still not a reason to serve.
+  console.error('');
+  console.error('FATAL: the server could not start.');
+  console.error(`  ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
+  if (!DATABASE_URL) console.error('  DATABASE_URL is not set.');
+  console.error('');
+  process.exit(1);
 });

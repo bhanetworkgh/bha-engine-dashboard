@@ -1,42 +1,49 @@
 /**
- * SQLite through Node's built-in driver. One file under DATA_DIR.
+ * The small key/value state, and the two date helpers everything uses.
  *
- * On Render's free instance there is no persistent disk, so this file is
- * wiped on every deploy and every spin-down; the server reports which it is on
- * /api/status and rebuilds the record tables from Airtable at boot (sync.ts).
- * Only `meta` is created here; the record schema is store.ts's, versioned
- * there, because it is the thing that changes.
+ * Until 2026-09-12 this opened a SQLite file under DATA_DIR. It is Postgres
+ * now (see pg.ts and migrations.ts): the service has no persistent disk, so
+ * that file was wiped on every deploy and every spin-down, and anything
+ * derived from it — the status-change history above all — could not be
+ * trusted across a restart. The schema lives in migrations.ts, forward-only;
+ * nothing here creates or drops a table.
  */
-import { mkdirSync, existsSync } from 'node:fs';
-import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { query, type Queryable } from './pg';
+import { getPool } from './pg';
 
-export const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve(process.cwd(), 'data');
+/** Where the rows live, for /api/status. Host and database only, never the password. */
+export { databaseIdentity } from './pg';
 
-let db: DatabaseSync | null = null;
-
-export function openDb(): DatabaseSync {
-  if (db) return db;
-  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-  db = new DatabaseSync(path.join(DATA_DIR, 'dashboard.sqlite'));
-  db.exec(`
-    PRAGMA journal_mode = WAL;
-    CREATE TABLE IF NOT EXISTS meta (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
-  return db;
+function db(on?: Queryable): Queryable {
+  return on ?? getPool();
 }
 
-export function getMeta(key: string): string | null {
-  const row = openDb().prepare('SELECT value FROM meta WHERE key = ?').get(key) as { value: string } | undefined;
-  return row?.value ?? null;
+export async function getMeta(key: string, on?: Queryable): Promise<string | null> {
+  const r = await db(on).query<{ value: string }>('SELECT value FROM meta WHERE key = $1', [key]);
+  return r.rows[0]?.value ?? null;
 }
 
-export function setMeta(key: string, value: string): void {
-  openDb().prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+export async function setMeta(key: string, value: string, on?: Queryable): Promise<void> {
+  await db(on).query('INSERT INTO meta (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value', [key, value]);
 }
+
+/**
+ * Sets a key only if it is not already there, and returns what the key holds
+ * afterwards. `history_since` needs exactly this: the first boot against a
+ * fresh database stamps it, every later boot leaves it alone, and two
+ * instances booting together cannot race to two different answers.
+ */
+export async function setMetaIfAbsent(key: string, value: string, on?: Queryable): Promise<string> {
+  const r = await db(on).query<{ value: string }>(
+    `INSERT INTO meta (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = meta.value
+     RETURNING value`,
+    [key, value],
+  );
+  return r.rows[0].value;
+}
+
+export { query };
 
 export function nowIso(): string {
   return new Date().toISOString();
