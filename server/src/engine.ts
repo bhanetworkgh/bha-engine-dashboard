@@ -131,19 +131,19 @@ export function getEngineStatus(q: Query): EngineStatus {
 
 /* -------------------------------------------------------------- overview */
 
-export function getOverview(q: Query): OverviewData {
-  const loops = store.loops();
+export async function getOverview(q: Query): Promise<OverviewData> {
+  const loops = await store.loops();
   const openLoops = loops.filter((l) => l.status !== 'closed');
   const incidents = bySpineLane(f.INCIDENTS, q);
   const openIncidents = incidents.filter((i) => i.state !== 'resolved' && i.state !== 'failed');
-  const owners = store.loopsByOwner();
+  const owners = await store.loopsByOwner();
   const totalOpen = openLoops.length;
   const oldest = Math.max(...(openLoops.length ? openLoops.map((l) => l.age_days) : [0]));
-  const entries = store.codexEntries();
+  const entries = await store.codexEntries();
   const thisWeek = isoWeekOf(REF_TODAY());
   const entriesThisWeek = entries.filter((e) => e.week === thisWeek).length;
   const ingested = entries.filter((e) => e.has_entry).length;
-  const loopsSync = store.syncInfo('loops');
+  const loopsSync = await store.syncInfo('loops');
   const openAlerts = f.VFARM_ALERTS.filter((a) => a.state === 'open');
   const vfarmVisible = q.lane === 'all' || q.lane === 'VFARM_CORE';
 
@@ -175,9 +175,9 @@ export function getOverview(q: Query): OverviewData {
   const classes: ErrorClass[] = ['BILLING_QUOTA', 'NETWORK_TIMEOUT', 'SCHEMA_VALIDATION', 'CONFIG_AUTH', 'UNKNOWN'];
   const states: IncidentState[] = ['new', 'triage', 'auto-retry pending', 'resolved', 'failed', 'escalated to RT', 'escalated to human'];
 
-  const opps = store.opportunities();
+  const opps = await store.opportunities();
   const builders = byLane(f.BUILDERS, q);
-  const patterns = store.patterns();
+  const patterns = await store.patterns();
   const canonical = patterns.filter((p) => p.status === 'canonical').length;
   const draftPatterns = patterns.filter((p) => p.status === 'draft').length;
 
@@ -338,14 +338,14 @@ export function getEngineHealth(q: Query): EngineHealthData {
 
 /* ------------------------------------------------------------ open loops */
 
-export function getOpenLoops(_q: Query): OpenLoopsData {
-  const sync = store.syncInfo('loops');
+export async function getOpenLoops(_q: Query): Promise<OpenLoopsData> {
+  const sync = await store.syncInfo('loops');
   return {
     // Newest first: the loop raised today is at the top, the oldest at the
     // bottom. Age is still on every row and still the signal; it is no longer
     // the sort.
-    loops: store.loops().sort((a, b) => (b.raised_at ?? '').localeCompare(a.raised_at ?? '') || a.age_days - b.age_days),
-    by_owner: store.loopsByOwner(),
+    loops: (await store.loops()).sort((a, b) => (b.raised_at ?? '').localeCompare(a.raised_at ?? '') || a.age_days - b.age_days),
+    by_owner: await store.loopsByOwner(),
     sync,
     status_history_note:
       sync.source === 'none'
@@ -356,44 +356,44 @@ export function getOpenLoops(_q: Query): OpenLoopsData {
 
 /* ------------------------------- codex / patterns / commercial / builders */
 
-export function getCodexEntries(_q: Query): CodexData {
+export async function getCodexEntries(_q: Query): Promise<CodexData> {
   // Newest first: the most recent submission is the one anyone opens this page for.
-  const entries = store.codexEntries().sort((a, b) => ((a.logged_at ?? '') < (b.logged_at ?? '') ? 1 : -1));
+  const entries = (await store.codexEntries()).sort((a, b) => ((a.logged_at ?? '') < (b.logged_at ?? '') ? 1 : -1));
   return {
     entries,
-    sync: store.syncInfo('codex'),
+    sync: await store.syncInfo('codex'),
     // One tab per table that exists, whether or not it has rows yet. There is
     // no Jason tab and no "no builder" tab: the table a row lives in is its
     // builder, and Jason reviews logs rather than submitting them.
     builders: CODEX_TABLES.map((t) => ({ id: t.owner, label: t.label, table: t.table, n: entries.filter((e) => e.builder_id === t.owner).length })),
-    layer0_holds: store.layer0Holds().sort((a, b) => ((a.created_at ?? '') < (b.created_at ?? '') ? 1 : -1)),
+    layer0_holds: (await store.layer0Holds()).sort((a, b) => ((a.created_at ?? '') < (b.created_at ?? '') ? 1 : -1)),
     choices: CODEX_CHOICES,
   };
 }
 
-export function getCodexDetail(id: string): CodexEntryDetail | null {
+export function getCodexDetail(id: string): Promise<CodexEntryDetail | null> {
   return store.codexDetail(id);
 }
 
 /* ----------------------------------------------- north star telemetry */
 
-export function getNorthStarTelemetry(): NsData {
+export async function getNorthStarTelemetry(): Promise<NsData> {
   return {
     // Newest first: the most recent ask is the one that says whether North
     // Star is being used at all.
-    records: store.nsRecords().sort((a, b) => (b.asked_at ?? '').localeCompare(a.asked_at ?? '')),
-    sync: store.syncInfo('ns'),
+    records: (await store.nsRecords()).sort((a, b) => (b.asked_at ?? '').localeCompare(a.asked_at ?? '')),
+    sync: await store.syncInfo('ns'),
   };
 }
 
 /* -------------------------------------------- research twin telemetry */
 
-export function getResearchTwinTelemetry(): RtData {
-  const cards = store.rtCards();
-  const attempts = store.rtAttempts().length;
+export async function getResearchTwinTelemetry(): Promise<RtData> {
+  const cards = await store.rtCards();
+  const attempts = (await store.rtAttempts()).length;
   return {
     cards,
-    sync: store.syncInfo('rt'),
+    sync: await store.syncInfo('rt'),
     shape: {
       attempts,
       cards: cards.length,
@@ -410,9 +410,9 @@ export function getResearchTwinTelemetry(): RtData {
 /** Fourteen days with no run, or never run at all, is stale. */
 const STALE_DAYS = 14;
 
-export function getClients(): ClientsData {
-  const lanes = store.clientLanes();
-  const questions = store.clientQuestions();
+export async function getClients(): Promise<ClientsData> {
+  const lanes = await store.clientLanes();
+  const questions = await store.clientQuestions();
   const now = Date.now();
 
   const rows: ClientLaneRow[] = lanes
@@ -457,7 +457,7 @@ export function getClients(): ClientsData {
       .sort((a, b) => b.needs_human - a.needs_human || a.label.localeCompare(b.label)),
     lanes: rows,
     questions,
-    sync: store.syncInfo('clients'),
+    sync: await store.syncInfo('clients'),
     unreadable: lanes
       .filter((l) => !l.questions_table)
       .map((l) => ({
@@ -479,21 +479,21 @@ function commonLabel(names: string[]): string {
   return parts.every((p) => p === parts[0]) && parts[0] ? parts[0] : names[0];
 }
 
-export function getBuildPatterns(_q: Query): BuildPatternsData {
+export async function getBuildPatterns(_q: Query): Promise<BuildPatternsData> {
   // Newest first, by created_at; a pattern with no date sorts last, then by id.
-  const patterns = store.patterns().sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '') || (a.pattern_id ?? '').localeCompare(b.pattern_id ?? ''));
+  const patterns = (await store.patterns()).sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '') || (a.pattern_id ?? '').localeCompare(b.pattern_id ?? ''));
   const systems = [...new Set(patterns.map((p) => p.system ?? '(no system in id)'))].sort();
   return {
     patterns,
-    sync: store.syncInfo('patterns'),
+    sync: await store.syncInfo('patterns'),
     systems: systems.map((s) => ({ system: s, n: patterns.filter((p) => (p.system ?? '(no system in id)') === s).length, canonical: patterns.filter((p) => (p.system ?? '(no system in id)') === s && p.status === 'canonical').length })),
     unset: patterns.filter((p) => p.status === 'unset').length,
   };
 }
 
-export function getCommercial(_q: Query): CommercialData {
+export async function getCommercial(_q: Query): Promise<CommercialData> {
   // Newest first, by created_at; a card with no date sorts last, then by lane and id.
-  const opportunities = store.opportunities().sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '') || (a.lane_id ?? '').localeCompare(b.lane_id ?? '') || (a.card_id ?? '').localeCompare(b.card_id ?? ''));
+  const opportunities = (await store.opportunities()).sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '') || (a.lane_id ?? '').localeCompare(b.lane_id ?? '') || (a.card_id ?? '').localeCompare(b.card_id ?? ''));
   const laneIds: string[] = [];
   for (const o of opportunities) {
     const l = o.lane_id ?? '(no lane_id)';
@@ -501,36 +501,36 @@ export function getCommercial(_q: Query): CommercialData {
   }
   return {
     opportunities,
-    sync: store.syncInfo('commercial'),
+    sync: await store.syncInfo('commercial'),
     lanes: laneIds.map((lane_id) => {
       const mine = opportunities.filter((o) => (o.lane_id ?? '(no lane_id)') === lane_id);
       const counted = mine.filter((o) => o.missing_research_count !== null);
       return { lane_id, n: mine.length, unresolved_questions: counted.length ? counted.reduce((n, o) => n + (o.missing_research_count ?? 0), 0) : null };
     }),
-    trends: Object.fromEntries(opportunities.map((o) => [o.id, store.cardTrend(o.id)])),
+    trends: Object.fromEntries(await Promise.all(opportunities.map(async (o) => [o.id, await store.cardTrend(o.id)] as const))),
   };
 }
 
 /** Builders with their open-loop counts read from the owner totals, not the fixture. */
-function buildersLive() {
-  const owners = store.loopsByOwner();
+async function buildersLive() {
+  const owners = await store.loopsByOwner();
   return f.BUILDERS.map((b) => {
     const o = owners.find((x) => x.owner === b.id);
     return o ? { ...b, open_loops: o.open + o.in_progress, oldest_loop_days: o.oldest_days } : b;
   });
 }
 
-export function getBuilders(q: Query): BuildersData {
-  return { builders: byLane(buildersLive(), q) };
+export async function getBuilders(q: Query): Promise<BuildersData> {
+  return { builders: byLane(await buildersLive(), q) };
 }
 
-export function getBuilder(id: string, q: Query): BuilderDetail | null {
-  const builder = buildersLive().find((b) => b.id === id);
+export async function getBuilder(id: string, q: Query): Promise<BuilderDetail | null> {
+  const builder = (await buildersLive()).find((b) => b.id === id);
   if (!builder) return null;
   return {
     builder,
-    loops: store.loops().filter((l) => l.owner === id).sort((a, b) => b.age_days - a.age_days),
-    entries: store.codexEntries().filter((e) => e.builder_id === id),
+    loops: (await store.loops()).filter((l) => l.owner === id).sort((a, b) => b.age_days - a.age_days),
+    entries: (await store.codexEntries()).filter((e) => e.builder_id === id),
     incidents: bySpineLane(f.INCIDENTS, q).filter((i) => i.spine.builder_id === id),
   };
 }

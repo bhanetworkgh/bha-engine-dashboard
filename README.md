@@ -20,11 +20,15 @@ Patterns and Commercial Opportunities — and every change made on those pages
 is written to Airtable first and shown from what came back. The server resyncs from Airtable on boot, on a timer and on demand, and
 n8n can push writes to it as it writes them to Airtable.
 
-The service runs on Render's free instance type with no persistent disk, so
-the server's SQLite store is a read model that is rebuilt from Airtable after
-every deploy and spin-down. Airtable is the source of truth. Incidents, twins,
-vFarm and builders are still phase 1 fixtures. Chat history stays in the
-browser until Bays keeps memory of its own.
+The server's state is in Postgres (`bha-engine-db` on Render, attached as
+`DATABASE_URL`). Airtable stays the source of truth for every record kind and
+the store is a read model over it, rebuilt on boot and on a timer — but the
+status-change history, which nothing upstream keeps, now survives a deploy and
+a restart rather than starting again each time. The server will not start
+without the database: there is no fallback store, because one would lose writes
+without saying so. Incidents, twins, vFarm and builders are still phase 1
+fixtures. Chat history stays in the browser until Bays keeps memory of its
+own.
 
 ## Architecture
 
@@ -37,8 +41,11 @@ service. The server serves the built front end and answers every `/api` call.
 It owns every secret: the login credential, the session signing key and the
 engine API key. The browser holds none of them and never talks to the engine.
 
-The server has no dependencies beyond Node itself (22.13 or later, for the
-built-in SQLite driver). Its state is one SQLite file under `DATA_DIR`.
+The server has one dependency, `pg`. Its state is in Postgres, reached through
+a connection pool over `DATABASE_URL`; the schema is applied by a forward-only
+migration runner on every boot, idempotently. Until 2026-09-12 it was a SQLite
+file under `DATA_DIR` and that is gone: Render wiped the file on every deploy
+and every spin-down, so nothing derived from it survived a restart.
 
 All browser data access goes through one module, `src/data/index.ts`, which
 calls `/api`. On the server, `engine.ts` derives every read, `store.ts` holds
@@ -77,7 +84,7 @@ call is idempotent: the same record twice is one row and no second event.
 | `AIRTABLE_API_KEY` | Personal access token with read and write on the four bases |
 | `AIRTABLE_RESYNC_MINUTES` | Timed resync; default 15, 0 disables |
 | `DASHBOARD_INBOUND_KEY` | Authenticates n8n's pushes to `/api/inbound/*` |
-| `DATA_DIR` | Where the SQLite read model lives (ephemeral on the free plan) |
+| `DATABASE_URL` | Postgres. **Required** — the server exits if it is missing or unreachable |
 
 Auth is a single shared team login, matching the pattern used by BHARAG's admin
 console. No per-user accounts.
@@ -150,11 +157,13 @@ server/
     auth.ts           Credential check (scrypt), signed HttpOnly session cookie, lockout.
     ask.ts            Proxy to the Bays workflow; attaches the API key server-side.
     engine.ts         Every read, derived from fixtures and the store.
-    store.ts          Records with status, the events/snapshot history, and metrics.
-    db.ts             SQLite through node:sqlite, under DATA_DIR.
+    store.ts          Records with status, the events/observation history, and metrics.
+    pg.ts             The connection pool, TLS, and the startup check that refuses to serve without it.
+    migrations.ts     Forward-only numbered migrations, run on boot under an advisory lock.
+    db.ts             The meta key/value state and the date helpers.
     hash.ts           `npm run hash-password`.
 tsconfig.server.json  Compiles server/ plus src/data/{types,fixtures} to server-dist/.
-render.yaml           Render blueprint: one web service, one persistent disk.
+render.yaml           Render blueprint: one web service, one Postgres instance.
 .env.example          Every server variable, documented.
 
 ### Where to make each kind of change
@@ -212,7 +221,9 @@ is used any more: the bundle contains no configuration and no secrets.
 | `ASK_BAYS_URL` | The Bays agent workflow. Defaults to `https://n8n.arupiautomates.cloud/webhook/dashboard-ask-bays`. |
 | `ASK_BAYS_API_KEY` | Sent as `x-api-key` on every call to that workflow. Without it Ask Bays replies that it is not connected. |
 | `ASK_BAYS_MODEL_LABEL` | Shown under the composer. Defaults to `Claude Sonnet 5.0`. |
-| `DATA_DIR` | Where the SQLite file lives. On Render, the persistent disk mount. Defaults to `./data`. |
+| `DATABASE_URL` | Postgres connection string. **Required**: with it missing, or the database unreachable, the server prints why and exits 1 rather than starting on a store that cannot keep anything. On Render use the *internal* URL — a single-label host (`dpg-…-a`) that carries no TLS and resolves only from a service in the same region. |
+| `DATABASE_CA_CERT` | PEM of the CA for a TLS connection, when using an external Postgres URL. Without it TLS is still used but the certificate is not verified, and the server says so at boot. |
+| `DATABASE_POOL_MAX` | Pool size. Defaults to 8. |
 | `PORT` | Listen port. Render sets it. Defaults to `8787`. |
 
 ### Contracts
@@ -263,13 +274,17 @@ repository. Pushes to the default branch deploy.
 | Build command | `npm ci && npm run build` |
 | Start command | `npm start` |
 | Health check | `/api/health` |
-| Disk | 1 GB mounted at `/var/data`, `DATA_DIR=/var/data` |
+| Database | `bha-engine-db` (Postgres 18), `DATABASE_URL` from its internal connection string |
 
 Set `AUTH_PASSWORD_HASH` and `ASK_BAYS_API_KEY` in the service's environment
 by hand; the blueprint marks them `sync: false`. `SESSION_SECRET` is generated
-by the blueprint. Without the disk the server still runs, but the status
-history restarts on every deploy and `/api/status` reports `history_since`
-accordingly.
+by the blueprint. No disk is mounted: state is in Postgres.
+
+`DATABASE_URL` is the one variable the service cannot start without. A deploy
+with it missing, or pointing at a database this service cannot reach, fails in
+the log with the reason and the fix rather than booting into a degraded mode.
+Migrations run on boot and are idempotent, so a deploy that changes nothing
+about the schema applies nothing.
 
 The server serves `index.html` for any path that is not a file in `dist/`, so
 deep links and refreshes work without a rewrite rule. Hashed assets are sent
