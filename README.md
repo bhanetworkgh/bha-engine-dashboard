@@ -218,7 +218,8 @@ is used any more: the bundle contains no configuration and no secrets.
 | `AUTH_PASSWORD_HASH` | scrypt hash of the shared password, from `npm run hash-password`. Rotate the password by replacing this. |
 | `AUTH_PASSWORD` | Plain-text alternative for local development. Ignored when the hash is set. Without either, sign-in returns 503 and says so. |
 | `SESSION_SECRET` | Signs the session cookie. When unset a random key is generated at boot, so every session ends on restart. Render's blueprint generates one. |
-| `ASK_BAYS_URL` | The Bays agent workflow. Defaults to `https://n8n.arupiautomates.cloud/webhook/dashboard-ask-bays`. |
+| `ASK_BAYS_URL` | The Bays agent workflow. Defaults to `https://bayshorizonnetwork.app.n8n.cloud/webhook/dashboard-ask-bays`. The boot log says whether the URL came from this variable or from that built-in default. |
+| `N8N_BASE_URL` | Base for the "view execution" links on fixture-backed rows. Defaults to `https://bayshorizonnetwork.app.n8n.cloud`. Execution ids predating the move off `n8n.arupiautomates.cloud` do not exist on the company instance and will 404. |
 | `ASK_BAYS_API_KEY` | Sent as `x-api-key` on every call to that workflow. Without it Ask Bays replies that it is not connected. |
 | `ASK_BAYS_MODEL_LABEL` | Shown under the composer. Defaults to `Claude Sonnet 5.0`. |
 | `DATABASE_URL` | Postgres connection string. **Required**: with it missing, or the database unreachable, the server prints why and exits 1 rather than starting on a store that cannot keep anything. On Render use the *internal* URL — a single-label host (`dpg-…-a`) that carries no TLS and resolves only from a service in the same region. |

@@ -2430,3 +2430,87 @@ Verified:   Pre-commit audit of the two guarantees, read out of the code rather
               It therefore covers the bootstrap CREATE as well as every
               migration body — which is the fix, since the bootstrap was what
               killed a runner in the earlier race.
+
+## 2026-09-12 18:20 — Ask Bays pointed at a retired n8n host; config untangled
+Intent:     Move every live reference off n8n.arupiautomates.cloud, which is
+            retired, onto the company instance; stop the URL being invisible
+            when it is wrong; and settle the four render.yaml decisions.
+Files:      server/src/ask.ts, server/src/index.ts, render.yaml,
+            src/data/fixtures/common.ts, .env.example, README.md
+
+Problem:    The boot log printed
+              ask bays: https://n8n.arupiautomates.cloud/webhook/dashboard-ask-bays
+            against a dead instance. The premise that the URL was not an
+            environment variable turned out to be half right, and the half that
+            was wrong is the interesting half: ask.ts already read
+            process.env.ASK_BAYS_URL. What was hardcoded was the FALLBACK. No
+            ASK_BAYS_URL is set on the service, so the fallback is what ran.
+            The mechanism existed, nothing used it, and the log printed a
+            real-looking URL either way.
+Fix:        ASK_URL_FALLBACK now names the company instance, and ASK_URL reads
+            ASK_BAYS_URL first (trimmed, so a whitespace-only value does not
+            beat the default). ASK_URL_FROM_ENV is exported and the boot log
+            prints which source won:
+              ask bays: https://bayshorizonnetwork.app.n8n.cloud/webhook/dashboard-ask-bays (ASK_BAYS_URL)
+              ask bays: https://bayshorizonnetwork.app.n8n.cloud/webhook/dashboard-ask-bays (built-in default — ASK_BAYS_URL is not set on this service)
+            Both branches verified against the compiled server. A URL alone
+            cannot tell you that nobody chose it, which is why this line went
+            wrong quietly for as long as it did.
+
+Decision:   render.yaml no longer declares DATABASE_URL at all (Destiny,
+            2026-09-12). The manual value, set via Add from database, tracks
+            the instance through a credential rotation; a blueprint literal
+            cannot, and two sources on one key is how a value silently flips
+            back on a later redeploy. A comment names the variable and says it
+            is set on the service, so its absence does not read as an
+            oversight. The rule, in Destiny's words: secrets and linked
+            resources stay out of the blueprint, non-secret config stays in it.
+            ASK_BAYS_URL is therefore kept in the blueprint, with the host
+            corrected.
+Decision:   databaseName corrected bha_engine → bha_engine_db, the value the
+            live instance reports. I had guessed it from the instance name in
+            the earlier commit and never verified it; the Render API says
+            otherwise.
+
+Problem:    Destiny flagged that src/data/fixtures/common.ts is client-side and
+            asked me to confirm process.env is available there before using it,
+            rather than reaching for a workaround.
+Fix:        Checked rather than assumed, and it is server-side. The only
+            importer of src/data/fixtures anywhere is server/src/engine.ts;
+            `grep -c arupiautomates dist/assets/*.js` is 0 both before and
+            after this change, so the module has never been in the browser
+            bundle. It lives under src/ and tsconfig.app.json type-checks it,
+            but Vite bundles by import graph, not by tsconfig include, so
+            nothing pulls it in. process.env is Node's here and is read at run
+            time. No workaround was needed and none was added.
+            The fragility is real but latent, and is written at the line: if a
+            client module ever imports these fixtures, the page breaks with
+            "process is not defined", because Vite does not shim process.env —
+            the replacement would be an import.meta.env.VITE_ variable read at
+            build time.
+Decision:   The execution links take the base from N8N_BASE_URL, defaulting to
+            the company instance, and the host was NOT simply swapped. Every
+            execution id in fixture data predates the migration: the old
+            instance was numbering in the 90,000s and the company instance
+            restarted at 1, so those ids do not exist on the new host and will
+            404. Executions recorded after the move resolve. This is accepted
+            and expected, and the comment at that line says so in those terms,
+            including not to "fix" it by pointing the host back at the retired
+            instance — a link that looks right and fails is worse than one that
+            is visibly stale.
+
+Verified:   npm run typecheck and npm run build clean. After the change the
+            browser bundle contains neither "arupiautomates" (0) nor
+            "N8N_BASE_URL" (0), confirming the fixtures are still server-only.
+            n8n('91234').url resolves to the company host by default and
+            follows N8N_BASE_URL when set. render.yaml parses: DATABASE_URL
+            absent from envVars, ASK_BAYS_URL on the new host, database block
+            reading bha_engine_db / 0.1c-256mb / 18 / oregon / 1 GB.
+            Every remaining "arupiautomates" hit in the repo is either
+            BUILD_LOG history or a comment explaining the retirement. No live
+            URL names the old host anywhere.
+Not done:   BUILD_LOG history untouched, per section 9 and Destiny's
+            instruction — those lines were true when written. N8N_BASE_URL is
+            documented in .env.example and README but is NOT declared in
+            render.yaml; by the rule above it could be, and that is Destiny's
+            call rather than mine. No merge: this stays on the branch.

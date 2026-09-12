@@ -18,7 +18,7 @@
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import path from 'node:path';
-import { ask, ASK_URL, askConfigured, MODEL_LABEL } from './ask';
+import { ask, ASK_URL, ASK_URL_FROM_ENV, askConfigured, MODEL_LABEL } from './ask';
 import { authConfigured, login, logout, readSession, sessionInfo, sessionSecretConfigured } from './auth';
 import { databaseIdentity } from './db';
 import { migrate, MIGRATION_COUNT } from './migrations';
@@ -408,7 +408,10 @@ async function boot(): Promise<void> {
     console.log(`  schema:   ${m.applied.length ? `applied ${m.applied.length} migration(s): ${m.applied.join(', ')}` : `up to date (${MIGRATION_COUNT} migration(s))`}`);
     console.log(`  sign-in:  ${authConfigured() ? 'configured' : 'NOT configured — set AUTH_PASSWORD_HASH'}`);
     console.log(`  sessions: ${sessionSecretConfigured ? 'SESSION_SECRET set' : 'random key this boot (sessions end on restart)'}`);
-    console.log(`  ask bays: ${askConfigured() ? ASK_URL : 'NOT configured — set ASK_BAYS_API_KEY'}`);
+    // Say where the URL came from, not just what it is. The line printed the
+    // retired host for as long as it was wrong and read exactly like a
+    // configured one, because a URL on its own cannot tell you nobody chose it.
+    console.log(`  ask bays: ${askConfigured() ? `${ASK_URL} ${ASK_URL_FROM_ENV ? '(ASK_BAYS_URL)' : '(built-in default — ASK_BAYS_URL is not set on this service)'}` : 'NOT configured — set ASK_BAYS_API_KEY'}`);
     console.log(`  inbound:  ${INBOUND_KEY ? 'DASHBOARD_INBOUND_KEY set' : 'NOT configured — set DASHBOARD_INBOUND_KEY for n8n dual-write'}`);
     void sync.startBootSync();
   });
