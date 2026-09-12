@@ -2514,3 +2514,57 @@ Not done:   BUILD_LOG history untouched, per section 9 and Destiny's
             documented in .env.example and README but is NOT declared in
             render.yaml; by the rule above it could be, and that is Destiny's
             call rather than mine. No merge: this stays on the branch.
+
+## 2026-09-12 18:45 — N8N_BASE_URL declared; a reasoning note on what ships to the browser
+Intent:     Finish the config rule — non-secret config lives in the blueprint —
+            and record why the bundle question was answered the way it was.
+Files:      render.yaml
+Fix:        N8N_BASE_URL declared with
+            https://bayshorizonnetwork.app.n8n.cloud, placed after the
+            ASK_BAYS_* group so those keys stay together. Validated: twelve
+            envVars, DATABASE_URL still absent by design.
+
+Decision:   Reasoning note, kept because the next person will make the same
+            inference (Destiny, recording his own, 2026-09-12).
+
+            The question was whether src/data/fixtures/common.ts ships to the
+            browser, which decides whether process.env can be read there at
+            all. Destiny read it as client-side, from two signals that both
+            point that way: the file sits under src/, and tsconfig.app.json
+            has "include": ["src"], so TypeScript type-checks it as part of the
+            front-end project. Reasonable, and wrong.
+
+            **Vite bundles by import graph, not by tsconfig include.** A file
+            being type-checked by the app project says nothing about whether it
+            reaches the bundle; only whether some module reachable from the
+            entry point imports it does. Here nothing in the browser does —
+            server/src/engine.ts is the sole importer of src/data/fixtures
+            anywhere in the repo — so the module is compiled twice by two
+            tsconfigs and bundled by neither Vite entry.
+
+            What settled it was not reading the config but checking the two
+            things that are actually load-bearing: the import graph, and the
+            built artefact. `grep -c arupiautomates dist/assets/*.js` was 0
+            before the change and `grep -c N8N_BASE_URL dist/assets/*.js` is 0
+            after it. Both greps, not either alone — the first proves the
+            module was never bundled, the second proves this change did not
+            start bundling it.
+
+            The generalisation worth keeping: to know whether something ships
+            to the browser, grep the built bundle. Directory layout and
+            tsconfig coverage are both circumstantial, and they were both
+            misleading here.
+
+            The latent risk stands and is written at that line: the day a
+            client module imports these fixtures, process.env is suddenly in
+            the bundle and the page dies with "process is not defined", because
+            Vite does not shim it. The replacement would be an
+            import.meta.env.VITE_ variable, read at build time rather than run
+            time — a different mechanism, not a tweak.
+
+Not done:   Still no merge. DATABASE_URL is not set on bha-engine-dashboard —
+            Destiny checked the service environment directly: eight variables,
+            none of them the database. Merging would put the startup check
+            straight into the failure it is designed to produce, which is the
+            check working rather than a bug, but a failed deploy either way.
+            Merging waits on that variable being set.
