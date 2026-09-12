@@ -21,23 +21,34 @@ services:
         value: 22.22.0
       - key: NODE_ENV
         value: production
-      # The one thing the server cannot start without. It refuses to boot if
-      # this is missing or the database is unreachable, rather than falling
-      # back to a store that loses writes silently. Use the INTERNAL URL: the
-      # host is a single label (dpg-…-a), carries no TLS, and only resolves
-      # from a service in the same Render region.
-      - key: DATABASE_URL
-        fromDatabase:
-          name: bha-engine-db
-          property: connectionString
+      # DATABASE_URL is deliberately NOT declared here.
+      #
+      # It is set on the service by hand, via Add from database against
+      # bha-engine-db. That link tracks the database: if the credentials
+      # rotate, the service's value follows. A blueprint literal cannot, and
+      # two sources on the same key is how a value silently flips back on a
+      # later redeploy.
+      #
+      # The server refuses to boot without it — a missing or unreachable
+      # DATABASE_URL prints the reason and exits rather than falling back to a
+      # store that loses writes. So its absence from this file is not an
+      # oversight: it is the one variable this blueprint must not own.
+      #
+      # The rule this follows: secrets and linked resources stay out of the
+      # blueprint; non-secret config stays in it.
       - key: AUTH_EMAIL
         value: admin@bhanetwork.org
       - key: AUTH_PASSWORD_HASH
         sync: false
       - key: SESSION_SECRET
         generateValue: true
+      # The company n8n instance. n8n.arupiautomates.cloud is retired; the
+      # dashboard pointed at it until 2026-09-12 because nothing set this
+      # variable and the code's own fallback still named the old host. The
+      # fallback in server/src/ask.ts now names this same instance, so a
+      # process that sets nothing still reaches a live host.
       - key: ASK_BAYS_URL
-        value: https://n8n.arupiautomates.cloud/webhook/dashboard-ask-bays
+        value: https://bayshorizonnetwork.app.n8n.cloud/webhook/dashboard-ask-bays
       - key: ASK_BAYS_API_KEY
         sync: false
       - key: ASK_BAYS_MODEL_LABEL
@@ -74,7 +85,7 @@ services:
 # needed, because nothing connects from outside that environment.
 databases:
   - name: bha-engine-db
-    databaseName: bha_engine
+    databaseName: bha_engine_db
     plan: 0.1c-256mb
     postgresMajorVersion: "18"
     region: oregon

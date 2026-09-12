@@ -28,7 +28,28 @@
 
 import type { AskErrorKind, AskReply } from '../../src/data/types';
 
-export const ASK_URL = process.env.ASK_BAYS_URL || 'https://n8n.arupiautomates.cloud/webhook/dashboard-ask-bays';
+/**
+ * Where the Bays workflow lives.
+ *
+ * ASK_BAYS_URL wins; the constant below is only the fallback for a process
+ * that sets nothing. It was `n8n.arupiautomates.cloud` until 2026-09-12 —
+ * that instance is retired, and with no ASK_BAYS_URL set on the service the
+ * fallback was what the server actually used, so Ask Bays was pointed at a
+ * dead host while the boot log dutifully printed the address it was failing
+ * to reach.
+ *
+ * The host is now the company instance. Keeping a real default rather than
+ * throwing is deliberate: a local run should work without setting anything.
+ * But the default is a convenience, not the configuration — set
+ * ASK_BAYS_URL on the service and this line stops mattering, which is the
+ * point of the whole arrangement.
+ */
+const ASK_URL_FALLBACK = 'https://bayshorizonnetwork.app.n8n.cloud/webhook/dashboard-ask-bays';
+
+export const ASK_URL = process.env.ASK_BAYS_URL?.trim() || ASK_URL_FALLBACK;
+
+/** Whether the URL came from the environment or from the fallback above, for /api/status and the boot log. */
+export const ASK_URL_FROM_ENV = Boolean(process.env.ASK_BAYS_URL?.trim());
 const ASK_KEY = process.env.ASK_BAYS_API_KEY || null;
 export const MODEL_LABEL = process.env.ASK_BAYS_MODEL_LABEL || 'Claude Sonnet 5.0';
 
