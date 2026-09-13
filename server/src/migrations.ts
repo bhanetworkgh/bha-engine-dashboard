@@ -465,6 +465,44 @@ const MIGRATIONS: Migration[] = [
           AND what_it_is_for = 'The error_counts table the three error handlers share.'`,
     ],
   },
+  {
+    id: 4,
+    name: 'notes move out of the records read model',
+    statements: [
+      /**
+       * Step 3 of the Airtable → Postgres migration (2026-09-13, Destiny).
+       * The pages read the `engine_*` mirror tables directly now, and the
+       * Airtable sync that filled `records` is gone.
+       *
+       * One thing lived only in `records`: the note a person types on a loop
+       * when they close it, or in the new-loop form. Airtable never carried
+       * it — `mapLoop` returns `note: null` — so it was carried forward inside
+       * `records.json` by every upsert and would have disappeared with the
+       * read model. It gets its own table, which is also where it belonged:
+       * it is this dashboard's own annotation on someone else's record, not a
+       * field of that record.
+       *
+       * `records` itself is left exactly as it is. It stops being read, and
+       * nothing drops a table here — its rows are the last state the Airtable
+       * sync saw, and `events`, which is real history, references the same
+       * record ids.
+       */
+      `CREATE TABLE IF NOT EXISTS record_notes (
+         kind        text NOT NULL,
+         record_id   text NOT NULL,
+         note        text NOT NULL,
+         updated_at  text NOT NULL,
+         PRIMARY KEY (kind, record_id)
+       )`,
+      // Carry across every note the read model was holding. Idempotent, and a
+      // note someone has since edited through the new table wins.
+      `INSERT INTO record_notes (kind, record_id, note, updated_at)
+       SELECT kind, id, json::jsonb->>'note', updated_at
+         FROM records
+        WHERE json::jsonb->>'note' IS NOT NULL AND json::jsonb->>'note' <> ''
+       ON CONFLICT (kind, record_id) DO NOTHING`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
