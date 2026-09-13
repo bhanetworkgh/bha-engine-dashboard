@@ -28,6 +28,7 @@ import * as store from './store';
 import * as sync from './sync';
 import * as registry from './registry';
 import * as mirror from './mirror';
+import * as backfill from './backfill';
 import { airtableConfigured, AIRTABLE_URL } from './airtable';
 import type { NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
 
@@ -196,6 +197,41 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     if (!inboundOk(req)) {
       await mirror.logWrite({ endpoint, kind: '-', method, key_label: null, outcome: 'unauthorised', detail: 'missing or wrong x-dashboard-key' });
       throw new HttpError(401, 'The x-dashboard-key header is missing or wrong.');
+    }
+
+    /**
+     * The backfill, over HTTP as well as on the command line.
+     *
+     * `npm run backfill` needs a shell on the box, and this is a Render web
+     * service — so on the deployed instance the command is only reachable over
+     * SSH. The same run is exposed here behind the same service key so it can
+     * be triggered with one curl, or put on a schedule in n8n. Identical code
+     * path; the CLI is unchanged and remains the way to run it locally.
+     */
+    if (p === '/api/engine/backfill') {
+      if (method !== 'POST') throw new HttpError(405, 'POST to run the backfill.');
+      if (!airtableConfigured()) throw new HttpError(503, 'AIRTABLE_API_KEY is not set on the server, so there is nothing to backfill from.');
+      const body = await readJson(req);
+      const asked = Array.isArray(body.kinds) ? body.kinds.map((k) => str(k, 40)) : [];
+      const unknown = asked.filter((k) => !mirror.isKind(k));
+      if (unknown.length) throw new HttpError(422, `"kinds": ${unknown.join(', ')} — not a kind. One of: ${mirror.KIND_LIST.join(', ')}.`);
+      const already = backfill.isRunning();
+      const results = await backfill.backfillOnce(asked.length ? (asked as mirror.MirrorKind[]) : undefined, body.dry === true);
+      const tables = results.flatMap((r) => r.tables);
+      const totals = tables.reduce(
+        (a, t) => ({ read: a.read + t.read, inserted: a.inserted + t.inserted, updated: a.updated + t.updated, unchanged: a.unchanged + t.unchanged, failed: a.failed + t.failed }),
+        { read: 0, inserted: 0, updated: 0, unchanged: 0, failed: 0 },
+      );
+      await mirror.logWrite({
+        endpoint: p,
+        kind: asked.length ? asked.join(',') : 'all',
+        method,
+        key_label: 'DASHBOARD_INBOUND_KEY',
+        outcome: totals.failed ? 'rejected' : 'updated',
+        detail: `backfill ${totals.read} read, ${totals.inserted} new, ${totals.updated} changed, ${totals.unchanged} current, ${totals.failed} failed`,
+        ms: Date.now() - t0,
+      });
+      return send(res, totals.failed ? 502 : 200, { ok: totals.failed === 0, joined_run_in_flight: already, totals, results });
     }
 
     const m = p.match(/^\/api\/engine\/([^/]+)$/);
