@@ -38,6 +38,9 @@ import type {
   Query,
   RecordKind,
   RecordMetrics,
+  RegistryData,
+  RegistryKind,
+  RegistryRowOf,
   ResyncResponse,
   RtData,
   ServerStatus,
@@ -272,3 +275,32 @@ export async function askBays(message: string, sessionId: string, builderId: str
 }
 
 export { BUILDER_NAMES, LANE_LIST, LOOP_LANE_TAGS } from './names';
+
+/* -------------------------------------------------------------- registry */
+
+/**
+ * The System Registry. Unlike the record kinds above, this dashboard is the
+ * system of record: a write here goes straight to Postgres, because there is no
+ * Airtable base behind these tables to write through to first.
+ */
+export function getRegistry(includeDeleted = false): Promise<RegistryData> {
+  return api<RegistryData>(includeDeleted ? '/api/registry?deleted=true' : '/api/registry');
+}
+
+export function createRegistryRow<K extends RegistryKind>(kind: K, fields: Record<string, unknown>): Promise<RegistryRowOf[K]> {
+  return api<RegistryRowOf[K]>(`/api/registry/${kind}`, { method: 'POST', body: fields });
+}
+
+/** Edits the fields named and leaves every other one alone. */
+export function updateRegistryRow<K extends RegistryKind>(kind: K, id: string, fields: Record<string, unknown>): Promise<RegistryRowOf[K]> {
+  return api<RegistryRowOf[K]>(`/api/registry/${kind}/${encodeURIComponent(id)}`, { method: 'PATCH', body: fields });
+}
+
+/** Soft delete: the row keeps its id and can be restored. Nothing here deletes outright. */
+export function deleteRegistryRow<K extends RegistryKind>(kind: K, id: string): Promise<RegistryRowOf[K]> {
+  return api<RegistryRowOf[K]>(`/api/registry/${kind}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export function restoreRegistryRow<K extends RegistryKind>(kind: K, id: string): Promise<RegistryRowOf[K]> {
+  return api<RegistryRowOf[K]>(`/api/registry/${kind}/${encodeURIComponent(id)}`, { method: 'POST', body: { restore: true } });
+}
