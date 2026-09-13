@@ -30,7 +30,7 @@ export default function VFarm() {
       />
 
       {/*
-        vFarm is still phase 1 fixtures, not an Airtable read, so it has no
+        vFarm is still phase 1 fixtures, not an engine table, so it has no
         resync to report. Saying that is the same promise every other page's
         sync line makes: the reader is told how old what they are looking at
         is, including when the answer is "it is not live data at all".

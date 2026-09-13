@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { Metric, MetricSeries, SyncInfo } from '../../data';
+import type { Metric, MetricSeries, Freshness } from '../../data';
 import { BUILDER_NAMES } from '../../data';
 import { Bars } from './Charts';
 import { StatCell } from './Card';
@@ -191,15 +191,20 @@ export function relativeTime(iso: string | null, now = Date.now()): string | nul
 }
 
 /**
- * Where the rows came from and how old they are, in one line, in the same
+ * How old the rows are and where they came from, in one line, in the same
  * place on every page.
  *
- * The age re-renders on a timer, so a tab left open does not keep claiming the
- * data is four minutes old an hour later. A failed resync is stated as a
- * failure with the age of what is still on screen — the previous rows are
- * never presented as if they were current.
+ * There is nothing to resync and no "last synced" to print (13 Sep 2026): the
+ * engine writes these rows into this database and the page reads the same row,
+ * so the only honest age is when one of them last changed here. The age
+ * re-renders on a timer, so a tab left open does not keep claiming the rows
+ * changed four minutes ago an hour later.
+ *
+ * `from_engine` is the count the engine or this interface has written since
+ * the migration backfill. A kind still sitting entirely on backfilled rows is
+ * a kind nothing is feeding, and it says so rather than looking current.
  */
-export function SyncLine({ sync, onResync, busy }: { sync: SyncInfo; onResync?: () => void; busy?: boolean }) {
+export function RowsLine({ freshness }: { freshness: Freshness }) {
   // A minute is the smallest unit shown, so a minute is often enough to tick.
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -207,39 +212,26 @@ export function SyncLine({ sync, onResync, busy }: { sync: SyncInfo; onResync?: 
     return () => clearInterval(t);
   }, []);
 
-  const age = relativeTime(sync.synced_at);
-  const absolute = sync.synced_at ? `${sync.synced_at.replace('T', ' ').slice(0, 16)} UTC` : null;
-  const tables = sync.tables.length > 1 ? sync.tables.map((t) => `${t.label} ${t.n}`).join(' · ') : null;
-  const rows = sync.tables.reduce((n, t) => n + t.n, 0);
-  // Stale is twice the resync interval; a page that has missed two cycles is
-  // not merely old, something is wrong.
-  const stale = sync.synced_at ? Date.now() - Date.parse(sync.synced_at) > 2 * (sync.resync_minutes || 15) * 60_000 : false;
+  if (freshness.source === 'none') {
+    return <div className="text-[11.5px] text-degraded">{freshness.note ?? 'No rows of this kind are held.'}</div>;
+  }
+  const age = relativeTime(freshness.changed_at);
+  const absolute = freshness.changed_at ? `${freshness.changed_at.replace('T', ' ').slice(0, 16)} UTC` : null;
+  const tables = freshness.tables.length > 1 ? freshness.tables.map((t) => `${t.label} ${t.n}`).join(' · ') : null;
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11.5px] text-faint">
-      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        {sync.source === 'airtable' ? (
-          <>
-            <span className={sync.error ? 'text-degraded' : stale ? 'text-degraded' : 'text-dim'} title={absolute ?? ''}>
-              {sync.error ? 'Showing rows read' : 'Read from Airtable'} {age ?? 'at an unknown time'}
-            </span>
-            <span title={tables ?? ''}>
-              — {rows} {rows === 1 ? 'row' : 'rows'}
-              {tables ? ` across ${sync.tables.length} tables` : ''}
-            </span>
-            {/* A failed resync says so, and says what is on screen instead. */}
-            {sync.error && <span className="text-degraded">· last resync failed: {sync.error}</span>}
-            {!sync.error && stale && <span className="text-degraded">· older than two resync cycles</span>}
-            {!sync.write_through && <span className="text-degraded">· writes are off: no AIRTABLE_API_KEY</span>}
-          </>
-        ) : (
-          <span className="text-degraded">{sync.error ?? 'Nothing has been read from Airtable yet.'}</span>
-        )}
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-faint">
+      <span title={tables ?? ''}>
+        {freshness.rows} {freshness.rows === 1 ? 'row' : 'rows'}
+        {tables ? ` across ${freshness.tables.length} tables` : ''}
       </span>
-      {onResync && (
-        <button type="button" onClick={onResync} disabled={busy} className="btn btn-ghost btn-sm">
-          {busy ? 'Reading Airtable…' : 'Resync now'}
-        </button>
+      <span className="text-dim" title={absolute ?? ''}>
+        — newest change {age ?? 'at an unknown time'}
+      </span>
+      {freshness.from_engine === 0 ? (
+        <span className="text-degraded">· none written since the migration backfill on 13 Sep 2026</span>
+      ) : (
+        <span>· {freshness.from_engine} written since the backfill</span>
       )}
     </div>
   );

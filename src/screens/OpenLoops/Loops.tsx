@@ -44,13 +44,13 @@ function StatusPill({ status }: { status: LoopStatus }) {
 
 /**
  * The loop list, newest first, twenty to a page. Row actions change status in
- * place — Airtable first, then here.
+ * place.
  *
  * The columns are the ones this page has always had; they are declared through
  * the shared RecordTable now so that the other five record lists are drawn the
  * same way and row styling only has to change in one place.
  */
-export function Loops({ data, loops, total, busyId, onStatus, searching, writable }: { data: OpenLoopsData; loops: Loop[]; total: number; busyId: string | null; onStatus: (loop: Loop, status: LoopStatus) => void; searching: boolean; writable: boolean }) {
+export function Loops({ data, loops, total, busyId, onStatus, searching }: { data: OpenLoopsData; loops: Loop[]; total: number; busyId: string | null; onStatus: (loop: Loop, status: LoopStatus) => void; searching: boolean }) {
   const columns: RecordColumn<Loop>[] = [
     {
       key: 'age',
@@ -86,7 +86,7 @@ export function Loops({ data, loops, total, busyId, onStatus, searching, writabl
       key: 'closed',
       header: 'closed',
       className: 'tabular text-faint',
-      title: (l) => (l.closed_at ? 'Closed through this dashboard or pushed by n8n' : 'Airtable records no close date'),
+      title: (l) => (l.closed_at ? 'Closed through this dashboard or pushed by the engine' : 'Nothing records when this loop was closed'),
       cell: (l) => l.closed_at ?? '—',
     },
     { key: 'source', header: 'source', cell: (l) => <SourceLink source={l.source} /> },
@@ -99,10 +99,10 @@ export function Loops({ data, loops, total, busyId, onStatus, searching, writabl
         const busy = busyId === l.id;
         return (
           <RowActions>
-            {writable && l.status !== 'closed' && <RowAction label="Close" tone="accent" disabled={busy} onClick={() => onStatus(l, 'closed')} />}
-            {writable && l.status === 'open' && <RowAction label="Start" disabled={busy} onClick={() => onStatus(l, 'in progress')} />}
-            {writable && l.status === 'in progress' && <RowAction label="Back to open" disabled={busy} onClick={() => onStatus(l, 'open')} />}
-            {writable && l.status === 'closed' && <RowAction label="Reopen" disabled={busy} onClick={() => onStatus(l, 'open')} />}
+            {l.status !== 'closed' && <RowAction label="Close" tone="accent" disabled={busy} onClick={() => onStatus(l, 'closed')} />}
+            {l.status === 'open' && <RowAction label="Start" disabled={busy} onClick={() => onStatus(l, 'in progress')} />}
+            {l.status === 'in progress' && <RowAction label="Back to open" disabled={busy} onClick={() => onStatus(l, 'open')} />}
+            {l.status === 'closed' && <RowAction label="Reopen" disabled={busy} onClick={() => onStatus(l, 'open')} />}
             <RowAction label="Open in Airtable" onClick={() => window.open(l.airtable.url, '_blank', 'noreferrer')} />
           </RowActions>
         );
@@ -116,8 +116,8 @@ export function Loops({ data, loops, total, busyId, onStatus, searching, writabl
 
       {total === 0 ? (
         <EmptyState>
-          {data.sync.source === 'none'
-            ? (data.sync.error ?? 'Nothing has been read from Airtable yet.')
+          {data.freshness.source === 'none'
+            ? (data.freshness.note ?? 'No loops are held.')
             : searching
               ? 'No loop matches that search in the selected table and status.'
               : 'No loops match the selected table and status.'}

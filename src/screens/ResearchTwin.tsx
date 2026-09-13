@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { getRecordMetrics, getRtTelemetry, resync, type RtCard, type RtMetrics } from '../data';
+import { getRecordMetrics, getRtTelemetry, type RtCard, type RtMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
@@ -26,10 +26,8 @@ import {
   SourceLink,
   StatCell,
   StatStrip,
-  SyncLine,
-  Toast,
+  RowsLine,
   usePaged,
-  useToast,
 } from '../components/ui';
 
 /**
@@ -358,14 +356,11 @@ function rtColumns(open: (c: RtCard) => void): RecordColumn<RtCard>[] {
 }
 
 export default function ResearchTwin() {
-  const [reload, setReload] = useState(0);
-  const { status, data: loaded, error } = useData(getRtTelemetry, [reload]);
+  const { status, data: loaded, error } = useData(getRtTelemetry, []);
   const [filter, setFilter] = useState<Filter>('needs-human');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const { toast, setToast } = useToast();
-  const metrics = useData(() => getRecordMetrics('rt', { lane: 'all' }), [reload]);
+  const metrics = useData(() => getRecordMetrics('rt', { lane: 'all' }), []);
 
   const cards = loaded?.cards ?? [];
   const statuses = useMemo(() => [...new Set(cards.map((c) => c.status).filter((v): v is string => Boolean(v)))].sort(), [cards]);
@@ -390,20 +385,6 @@ export default function ResearchTwin() {
   );
   const paged = usePaged(rows, `${filter}|${q.trim()}`);
 
-  async function pull() {
-    setSyncing(true);
-    try {
-      const r = await resync('rt');
-      const t = r.results[0]?.tables[0];
-      setToast(t?.error ? { text: `Resync failed: ${t.error}`, tone: 'failing' } : { text: `Resync read ${t?.n ?? 0} queue rows.`, tone: 'ok' });
-      setReload((n) => n + 1);
-    } catch (e) {
-      setToast({ text: e instanceof Error ? e.message : 'The resync did not run.', tone: 'failing' });
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
   const current = open ? cards.find((c) => c.card_id === open) : null;
   const counts = {
@@ -419,7 +400,7 @@ export default function ResearchTwin() {
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 px-6 pb-3 md:px-8">
-          <SyncLine sync={loaded.sync} onResync={pull} busy={syncing} />
+          <RowsLine freshness={loaded.freshness} />
         </div>
 
         <RtMetricsPanel metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
@@ -447,8 +428,8 @@ export default function ResearchTwin() {
 
         {rows.length === 0 ? (
           <EmptyState>
-            {loaded.sync.source === 'none'
-              ? (loaded.sync.error ?? 'Nothing has been read from Airtable yet.')
+            {loaded.freshness.source === 'none'
+              ? (loaded.freshness.note ?? 'No research attempts are held.')
               : q.trim()
                 ? 'No card matches that search in this filter.'
                 : filter === 'needs-human'
@@ -468,7 +449,6 @@ export default function ResearchTwin() {
       </div>
 
       {current && <CardView c={current} onClose={() => setOpen(null)} />}
-      <Toast toast={toast} />
     </div>
   );
 }
