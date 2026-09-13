@@ -159,6 +159,27 @@ async function backfillTable(kind: MirrorKind, src: SourceTable, dry: boolean): 
   return out;
 }
 
+/**
+ * One run at a time.
+ *
+ * A backfill is twenty-two full table reads against Airtable; two at once would
+ * double that traffic for no benefit and race each other's upserts. Concurrent
+ * callers share the run in flight, exactly as sync.ts does for a resync.
+ */
+let inflight: Promise<KindOutcome[]> | null = null;
+
+export function isRunning(): boolean {
+  return inflight !== null;
+}
+
+export function backfillOnce(kinds: MirrorKind[] = KIND_LIST, dry = false): Promise<KindOutcome[]> {
+  if (inflight) return inflight;
+  inflight = backfill(kinds, dry).finally(() => {
+    inflight = null;
+  });
+  return inflight;
+}
+
 export async function backfill(kinds: MirrorKind[] = KIND_LIST, dry = false): Promise<KindOutcome[]> {
   const results: KindOutcome[] = [];
   // client_lanes before client_questions: the index names the question tables.

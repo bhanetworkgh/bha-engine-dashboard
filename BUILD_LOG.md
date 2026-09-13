@@ -2926,3 +2926,24 @@ Not done:   No page reads a mirror table. No Airtable read was removed, changed
             workflow that writes it is new — so its panel shows the
             "nothing recorded" branch rather than a zero, which is the honest
             state and not a bug.
+
+## 2026-09-13 20:55 — The backfill over HTTP, so it can actually be run here
+Intent:     `npm run backfill` needs a shell on the box. This is a Render web
+            service, so on the deployed instance that means SSH — and the thing
+            most likely to be wanted is "run it again now", from a curl or from
+            n8n on a schedule.
+Files:      server/src/backfill.ts, server/src/index.ts, README.md
+Decision:   POST /api/engine/backfill, same DASHBOARD_INBOUND_KEY, same code
+            path, CLI unchanged. One run at a time: a backfill is twenty-two
+            full table reads against Airtable and two at once would double that
+            traffic and race each other's upserts, so a second caller joins the
+            run in flight — the same sharing sync.ts already does for a resync.
+Verified:   Unauthenticated 401. An unknown kind named in the message. Run 1
+            over the replay: 1164 read, 1164 inserted. Run 2: 1164 already
+            current, nothing written. One named kind: 149 read, 149 current.
+            The CLI run immediately afterwards agrees exactly. Endpoint and
+            command are the same function.
+Not done:   The production tables are created and empty. I hold neither the
+            Airtable token nor DASHBOARD_INBOUND_KEY, so the first real backfill
+            has to be triggered by Destiny — one curl, or `npm run backfill`
+            over SSH.

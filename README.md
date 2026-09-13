@@ -181,6 +181,19 @@ and Airtable disagree.
 It reads Airtable and writes the `engine_*` tables. It touches no Airtable data
 and does not go near `records`, the read model the pages render from.
 
+The same run is available over HTTP behind the same service key, because on the
+deployed service the command needs an SSH shell and this needs one curl:
+
+```
+POST /api/engine/backfill        x-dashboard-key: <DASHBOARD_INBOUND_KEY>
+{ "kinds": ["loops", "codex"], "dry": false }     # both optional
+```
+
+Identical code path, one run at a time — a second caller joins the run already
+in flight rather than starting a second set of twenty-two table reads. It
+answers with the same per-table report the command prints, and 502 if any row
+failed.
+
 ### Environment
 
 | Variable | Purpose |
