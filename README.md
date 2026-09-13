@@ -82,6 +82,105 @@ absent the server reads the record from Airtable itself. `at` is the time of
 the change and stamps the status event; without it the server uses now. The
 call is idempotent: the same record twice is one row and no second event.
 
+### Engine writes — n8n straight into Postgres
+
+Steps 1 and 2 of moving off Airtable (2026-09-13). The engine now writes records
+directly into this dashboard's own tables **as well as** to Airtable. Both paths
+run; nothing has been switched over. Airtable is still the source of truth, the
+resync above still rebuilds the read model every page renders from, and none of
+that changes until step 3, which is a separate decision on a later day.
+
+**Auth.** The same service key as the inbound routes above: `DASHBOARD_INBOUND_KEY`
+in the `x-dashboard-key` header. One key for the engine, already set on the
+service. It is checked before the router looks at the kind or reads the body, so
+an unauthenticated request never reaches a handler, and it never reaches the
+browser bundle.
+
+```
+POST /api/engine/:kind          x-dashboard-key: <DASHBOARD_INBOUND_KEY>
+```
+
+**Body.** Airtable's own envelope. The values go under `fields`, with Airtable's
+own field names — `What`, `Jason Status`, `Layer1 Review ` including its trailing
+space. Sending the record's top level instead of `.fields` stores nothing, and is
+refused with a message saying so.
+
+```json
+{
+  "record_id": "recXXXXXXXXXXXXXX",
+  "created_time": "2026-08-29T22:54:48.000Z",
+  "builder_id": "destiny",
+  "fields": { "loop_id": "LOOP-1788044070646-QNNK", "What": "…", "Status": "Open" }
+}
+```
+
+`record_id` is Airtable's id and is optional wherever the row has a natural id —
+leave it out when the engine is writing a row Airtable does not have yet, and
+send it once it does; the row is adopted, not duplicated.
+
+**Upserts.** Every endpoint is an upsert. The same row twice updates rather than
+duplicating, so n8n retrying is safe. The response says which happened.
+
+| kind | required besides `fields` | matched on |
+|---|---|---|
+| `loops` | `builder_id` or `table_id` | `loop_id`, else `record_id` |
+| `codex` | `builder_id` or `table_id` | `Submission ID`, else `record_id` |
+| `layer0` | — | `Submission ID`, else `record_id` |
+| `patterns` | — | `pattern_id`, else `record_id` |
+| `commercial` | — | `card_id`, else `record_id` |
+| `ns` | — | `trace_id`, else `record_id` |
+| `rt` | `record_id` | `record_id` only |
+| `client_lanes` | — | `Lane ID`, else `record_id` |
+| `client_questions` | `table_id`, `record_id` | `record_id` only |
+| `digests` | — | `session_id`, else `record_id` |
+
+`rt` and `client_questions` require `record_id`: the Research Queue is an attempt
+log where `card_id` repeats across attempts, and a client question carries no id
+of its own. Matching either on a natural id would fold separate rows into one.
+
+For `loops` and `codex`, **`builder_id` is which builder's table the row lives in,
+and that is what decides ownership** — not `Assignee Slack User ID`, which
+disagrees on real rows. Send `destiny`, `jason`, `kaiqi`, `jegan`, `ahad`,
+`hardik` or `kavin`, or the `tbl…` id itself.
+
+**Responses.**
+
+```json
+{ "ok": true, "id": 577, "kind": "loops", "airtable_record_id": "rec…",
+  "natural_id": "LOOP-…", "outcome": "inserted", "matched_on": "insert" }
+```
+
+`outcome` is `inserted`, `updated` or `unchanged` — a re-send of identical data
+reports `unchanged` and writes nothing. A refusal is a 4xx whose `message` names
+the field and says what was wrong with it:
+
+```json
+{ "ok": false, "message": "\"builder_id\" is required for loops: which builder's table this row lives in decides who owns it. …" }
+```
+
+**Every write is logged**, accepted or refused, to the `engine_writes` table and
+to stdout: endpoint, kind, which key authenticated it, the row id, the outcome
+and the reason for a refusal. It is on the **Engine writes** tab of the System
+Registry, alongside a row count per mirror table split by whether the backfill or
+the engine wrote each row last — which is how the two paths get compared while
+both are live.
+
+### Backfilling from Airtable
+
+```
+npm run backfill                 every kind
+npm run backfill -- loops codex  named kinds
+npm run backfill -- --dry        read and report, write nothing
+```
+
+Re-runnable by design and meant to be run again: it is how dual-write gets
+checked. A second run over unchanged data reports every row `already current`
+and writes nothing, so any row it reports as changed is a row where the engine
+and Airtable disagree.
+
+It reads Airtable and writes the `engine_*` tables. It touches no Airtable data
+and does not go near `records`, the read model the pages render from.
+
 ### Environment
 
 | Variable | Purpose |
@@ -91,7 +190,7 @@ call is idempotent: the same record twice is one row and no second event.
 | `ASK_BAYS_API_KEY`, `ASK_BAYS_URL` | The Ask Bays workflow |
 | `AIRTABLE_API_KEY` | Personal access token with read and write on the four bases |
 | `AIRTABLE_RESYNC_MINUTES` | Timed resync; default 15, 0 disables |
-| `DASHBOARD_INBOUND_KEY` | Authenticates n8n's pushes to `/api/inbound/*` |
+| `DASHBOARD_INBOUND_KEY` | Authenticates n8n’s pushes to `/api/inbound/*` and `/api/engine/*` |
 | `DATABASE_URL` | Postgres. **Required** — the server exits if it is missing or unreachable |
 
 Auth is a single shared team login, matching the pattern used by BHARAG's admin

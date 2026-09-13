@@ -2806,3 +2806,123 @@ Decision:   Nine tables in, ten with digest_deliveries. Twenty-two physical
             Airtable tables collapse to ten Postgres tables, because the seven
             loop tables and six submission tables are one schema each and the
             builder is carried as a column.
+
+## 2026-09-13 20:45 — Dual-write: the engine writes into Postgres, and the backfill that seeds it
+Intent:     Steps 1 and 2 of moving off Airtable. Mirror every Airtable table
+            the dashboard reads into Postgres, backfill it, and open an
+            authenticated write path so n8n can post records straight here.
+            Step 3 — cutting the pages over and retiring the sync — is
+            deliberately not in this task.
+
+Files:      server/src/migrations.ts   migration 3: ten mirror tables + engine_writes
+            server/src/mirror.ts       the table spec, the one upsert, the log (new)
+            server/src/backfill.ts     the runnable backfill command (new)
+            server/src/index.ts        POST /api/engine/:kind, GET /api/engine-writes
+            server/src/registrySeed.ts the Digest Delivery Check workflow
+            src/data/types.ts, src/data/index.ts
+            src/screens/Registry/index.tsx  the Engine writes tab, digest health
+            package.json               npm run backfill
+            README.md                  the endpoint contract
+
+Decision:   **Nothing in the Airtable read path was touched.** sources.ts,
+            sync.ts, store.ts and airtable.ts are byte-identical; `records` is
+            still the read model, the fifteen-minute resync still rebuilds it,
+            and every page still renders from it. Verified after the change:
+            /api/open-loops 576, /api/codex 150, /api/build-patterns 149,
+            /api/commercial 21, /api/clients 3, all still source=airtable.
+            Removing any of it now would empty the dashboard, which is the
+            whole reason step 3 is a separate day.
+
+Decision:   **Ten Postgres tables for twenty-two Airtable tables.** The seven
+            loop tables and six submission tables are one schema each, so they
+            collapse with a `builder_id` column — and the column is filled from
+            *which table the row was read from*, never from
+            `Assignee Slack User ID`, which disagrees on real rows and caused a
+            live mis-delivery on 7 Sep. The write endpoint takes `builder_id`
+            or `table_id` for the same reason and refuses without one.
+
+Decision:   **Airtable's `fields` object is stored verbatim as jsonb, names
+            untouched.** `What`, `Jason Status`, `Layer1 Review ` with its
+            trailing space. A hand-written column list would silently drop any
+            field I forgot or anyone adds to a base later, and silent field
+            loss is the failure this engine has already hit three times. Columns
+            are promoted out of the blob only where something keys or filters on
+            them, and always derived from the payload so they cannot drift.
+            Verified in Postgres: the trailing-space key is present and the
+            trimmed spelling is absent.
+
+Decision:   **`airtable_record_id` is UNIQUE but nullable; the natural id is
+            indexed and deliberately NOT unique.** The Research Queue is an
+            attempt log — 213 attempts across 12 `card_id`s in the test data —
+            so a unique constraint on the natural id would reject real rows.
+            `rt` and `client_questions` therefore key on the record id alone and
+            say so when a caller omits it.
+
+Decision:   **One upsert function for both paths.** The backfill and the write
+            endpoint call the same `mirror.upsert`, so a row read from Airtable
+            and the same row written by n8n land identically. It also gives
+            adoption for free: a loop the engine creates by `loop_id` with no
+            record id is *adopted* when Airtable's id later arrives, rather than
+            inserted a second time. Verified — row id 577 throughout, one row.
+
+Problem:    The second backfill run reported all 1164 rows as `updated` when it
+            should have reported them unchanged. `changed` was computed by
+            comparing `JSON.stringify` of the stored fields against the incoming
+            fields — but jsonb does not preserve key order and normalises
+            numbers, so a round trip reorders the object and the two strings
+            never match. An idempotency check that always says "changed" is
+            worse than none: the whole point of re-running the backfill during
+            dual-write is that a reported change means a real disagreement.
+Fix:        Postgres decides, not this process. The UPDATE joins a `before` CTE
+            and returns `b.fields IS DISTINCT FROM t.fields`, which compares
+            jsonb by value. Three consecutive runs now read 1164 and report
+            1164 already current, 0 changed.
+
+Problem:    `column reference "airtable_record_id" is ambiguous` on every update
+            once that CTE was added — `before` carries the same columns as the
+            target.
+Fix:        Qualified the right-hand side of the SET clauses with the target
+            alias.
+
+Problem:    On a fresh database the registry's engine_events row kept its old
+            description. Migration 3's guarded UPDATE runs *before*
+            seedRegistry, so on a database with no registry rows yet it matched
+            nothing, and the seed then inserted the old wording. Production —
+            where the rows already exist — would have got the new text, so the
+            two would have disagreed depending on install date.
+Fix:        The seed carries the new wording *and* the migration keeps its
+            guarded UPDATE for databases already seeded with the old one. Both
+            paths converge. Verified both ways: a fresh database seeds the new
+            text, and a database rewound to the old text and rebooted has
+            migration 3 apply it. The guard is an equality check on the original
+            string, so a row Destiny has reworded himself is left alone —
+            verified too.
+
+Verified:   npm run typecheck and npm run build clean. Against Postgres 16 with
+            a local replay of the Airtable REST API (AIRTABLE_API_URL, the hook
+            already in airtable.ts) serving the live field names and record
+            envelope, 1164 records across 22 tables including a 336-row table so
+            the pagination loop runs:
+            - backfill run 1: 1164 inserted, 0 failed. Runs 2 and 3: 1164
+              already current, 0 inserted, 0 updated, 0 failed.
+            - 7 loop tables → 576 rows, 7 builders. 6 submission tables → 150
+              rows, 6 builders. rt 213 attempts / 12 cards.
+            - a lane whose index row names no Table ID is skipped and reported,
+              never guessed.
+            - auth: no key and a wrong key both 401 before any handler runs.
+            - validation, each naming the field: missing `fields`; the record's
+              top level sent instead of `.fields`; missing `builder_id`; an
+              unknown builder; `codex` for Jason (he has no submissions table);
+              `rt` without a record id; a malformed rec… or tbl… id.
+            - insert → unchanged → updated → adoption, all on one row.
+            - every write recorded in engine_writes with its outcome and, for a
+              refusal, the reason.
+            In Chromium: the Engine writes tab renders the per-table split and
+            the recent writes; the digest figure reads "1 of 2 sent" when there
+            are rows and "Not recorded" when there are none.
+
+Not done:   No page reads a mirror table. No Airtable read was removed, changed
+            or disabled. digest_deliveries is empty in the live base — the
+            workflow that writes it is new — so its panel shows the
+            "nothing recorded" branch rather than a zero, which is the honest
+            state and not a bug.
