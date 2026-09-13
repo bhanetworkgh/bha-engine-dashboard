@@ -2696,3 +2696,113 @@ Not done:   Cost, currency, billing cycle, renewal date and billing owner are
             off. Per-Render-service billing rows were not created; the live
             eight-resource inventory is recorded in the Render row's notes
             instead, so the spend denominator stays the ten briefed services.
+
+## 2026-09-13 20:10 — Inventory: what the dashboard reads from Airtable today
+Intent:     Before mirroring anything into Postgres, write down exactly what is
+            read, from where, by which page. Everything in the dual-write build
+            is scoped to this list; a table nothing reads does not get mirrored.
+            Read from server/src/sources.ts and server/src/sync.ts, and each
+            base's schema re-checked live on 2026-09-13.
+
+**Read, and therefore in scope (nine tables, five of them fanned out):**
+
+1. Open Loops — `appUVlBSGGPHw6DGh`, seven per-builder tables, identical schema.
+   `tblBJekl3ROpNZxQW` Destiny · `tblVOLhWULskNiIUt` Jason ·
+   `tblOhjIS8t0dtCQmt` Kaiqi · `tblqMepD3XGZY4tZz` Jegan ·
+   `tbl3bTRcuUcbYXgDc` Ahad · `tblaloC4JIRdBq5EM` Hardik ·
+   `tbltm7QUmWAZpzTKz` Kavin.
+   Fields: What · Raised By · Date Raised · Source Link · Status ·
+   Assignee Slack User ID · loop_id · lane_tag · raised_in · last_modified.
+   Sync kind `loops`. Pages: Open loops, Builders (list and detail), Overview.
+   **The table a row sits in is its owner.** `Assignee Slack User ID` disagrees
+   with the table on real rows and is not the owner — that mismatch was a live
+   bug in the daily sweep on 7 Sep.
+
+2. BHA Submissions & Logs — `appEmdKshNVTl64Zf`, six per-builder tables.
+   `tblSqm5ty9QVTlmuA` Destiny · `tblTu46ZQYHrim4yI` Jegan ·
+   `tbl6QBXrgtLv9axqu` Kaiqi · `tblPrGLTE6GGFIHum` Hardik ·
+   `tblG67z5RRZyoBZSj` Ahad · `tbltOCB2DHE5FFXa6` Kavin. No Jason table — he
+   reviews logs, he does not submit them.
+   Fields read: Submission ID · Codex Entry ID · Timestamp · Session Type ·
+   Session Url · Narration Quality · Submission Source · Jason Status ·
+   Jason Notes · Layer0 Flagged · Layer0 Missing · Orchestrator Layer2 Review ·
+   `Layer1 Review ` (trailing space, in every table) · Processed At ·
+   Processed Date · Summary · Session Description · Builder Name.
+   Sync kind `codex`. Pages: Codex entries, Builders, Overview.
+
+3. Layer 0 holding table — `appEmdKshNVTl64Zf` / `tbljoWu73vsxyL6vc`.
+   Fields: Submission ID · Builder User ID · Builder Username · Missing Fields ·
+   Status · Created At · Session Description · Session URL · Channel ID.
+   Not a record kind — no status, no write path — held whole by
+   `store.setLayer0Holds`. Page: Codex, Incomplete tab.
+
+4. Build Patterns — `app5ni3E8r7Lvxk22` / `tblaMXSMjmz30OvcU`.
+   pattern_id · pattern_name · pattern_status · bha_system · reusability ·
+   created_at · problem · solution · context · next_use_case ·
+   commercial_impact · research_production_impact · learnings_gotchas ·
+   readiness_gates · implementation_checklist · integration_points ·
+   test_coverage · routing_logic · anti_pattern · naming_note · roadmap_context.
+   Sync kind `patterns`. Page: Build patterns.
+
+5. Commercial Opportunities — `appvLglfdCqOKqLpT` / `tblyXShZLOFT3jNMe`.
+   card_id · opportunity_title · lane_id · readiness_state · confidence ·
+   pilot_state · routing_state · lane_state · lane_state_blocked_reason ·
+   engine_movement_state · demand_evidence · infra_readiness · data_readiness ·
+   media_readiness · media_gate · missing_research_count ·
+   missing_research_questions · next_action · pain_point · offer · target ·
+   who_pays · bha_system · created_at.
+   Sync kind `commercial`. Page: Commercial.
+
+6. NS Records (North Star ask log) — `appkCTjhH8PtYRFI7` / `tbl9OGZTyvBKrbeFm`.
+   trace_id · lane_id · workflow · request · actual_result · expected_result
+   (a JSON blob carrying searches, confidence, session_id) · outcome ·
+   research_required · reason · timestamp.
+   Sync kind `ns`. Page: North Star.
+
+7. Research Queue — `appud969Dw7H4tMwv` / `tblUl8YHhQReDgq8G`.
+   card_id · lane_id · hypothesis_to_validate · context_snippet · status ·
+   confidence_level · research_sufficiency · gap_classification ·
+   missing_elements · target_source_types · research_summary ·
+   links_or_sources · learnings_gotchas · answer_history · run_count ·
+   requires_human · first_stuck_at · source · created_time.
+   Sync kind `rt`. Page: Research Twin. **An attempt log — card_id repeats.**
+
+8. Watched Clients index — `appkSUSh9ijNjP2f8` / `tblFJ1yuYcuanjPdn`.
+   Lane / Client · Lane ID · Lane Type · Client ID · Questions Table ·
+   Table ID · Lane Status · Run State · Last Run At · Next Run Due ·
+   Last Run Status · Consecutive Error Count · Infra Fix Required ·
+   First Stuck At · Stuck Cycle Count · Quarantined · Commercial Hook ·
+   Interested Parties · Latest Memo Link.
+   Sync kind `clients`. Page: Clients.
+
+9. Per-lane question tables — `appkSUSh9ijNjP2f8`, table ids **not hardcoded**:
+   each index row names its own in `Table ID`, followed at sync time.
+   Question · This Week Answer · Plain Summary · Confidence · Sources ·
+   Movement Tag · Answer History · Last Updated · Missing Research ·
+   Research Stuck · Next Experiments · Run Count.
+   Sync kind `client_questions`. Page: Clients.
+
+**Deliberately NOT mirrored — nothing in the dashboard reads them:**
+
+- `appud969Dw7H4tMwv` / research_twin_research_jobs — one test row, never read.
+- `appINvgEoZjuYQI2O` / error_counts (`tblnvhKOnuOoiB1RX`) — written by the
+  three error handlers, read only by them.
+- `appINvgEoZjuYQI2O` / Table 1 (`tblFirFiPmUcINkBh`) — engine events, unread.
+- `apprzpppxE2yV0q84` Channel Tracking, `appMNvZsFRb9isRRq` Bays Tools Router,
+  `appSoakKvs7MLkRnX` Priority Ledger, `appxkIgnLL1zBsXqD` Lane_status — all
+  registered in the System Registry as bases the engine uses, none of them read
+  by this dashboard.
+
+**One addition, in scope only because Part 3 makes it read:**
+
+- `appINvgEoZjuYQI2O` / digest_deliveries (`tblNuMju8l1kL3Sd1`).
+  session_id (primary, and the key the Callback Receiver matches on) · kind ·
+  builder_id · builder_name · channel_id · loop_count · sent_at ·
+  delivered_at · status (sent / delivered / missing) · flagged_at · notes.
+  Mirrored because the delivery-health figure asked for on the registry reads
+  it. It was not read before today.
+
+Decision:   Nine tables in, ten with digest_deliveries. Twenty-two physical
+            Airtable tables collapse to ten Postgres tables, because the seven
+            loop tables and six submission tables are one schema each and the
+            builder is carried as a column.
