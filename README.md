@@ -13,28 +13,33 @@ This is that window. Internal team tooling, not a customer product.
 
 **Live on Render as one Node web service.** Sign-in is verified by the
 server, which sets a session cookie. Ask Bays goes through the server to the
-live agent workflow. **Open loops, Codex entries, build patterns and
-commercial cards are read from Airtable** — the seven per-builder loop tables,
-the six per-builder submission tables in BHA Submissions & Logs, Build
-Patterns and Commercial Opportunities — and every change made on those pages
-is written to Airtable first and shown from what came back. The server resyncs from Airtable on boot, on a timer and on demand, and
-n8n can push writes to it as it writes them to Airtable.
+live agent workflow. **Open loops, Codex entries, build patterns, commercial
+cards, North Star's ask log, the research queue and the watched clients are
+read out of this server's own Postgres tables**, which the engine writes to
+through `/api/engine/:kind`. A change made on a page is written to the same
+row. There is no Airtable read path left: the sync that used to rebuild a read
+model from Airtable, the Airtable client and `AIRTABLE_API_KEY` were removed on
+13 September 2026 (step 3 of the migration), after the tables were backfilled
+and the engine's writes proved out.
+
+Airtable's own field names are kept verbatim inside each row — `What`,
+`Jason Status`, `Layer1 Review ` with its trailing space — because that is what
+n8n writes, and a rename would break the engine's writes with no error.
 
 **The System Registry** is the exception to all of that: six tables — workflows,
 services and their billing, credentials, endpoints, Airtable bases and people —
 that this dashboard owns outright. Nothing upstream records who manages Otter.ai
-or what a workflow is for, so there is no read model and no resync; rows are
-created and edited in the interface and stored in Postgres. Credentials there
+or what a workflow is for; rows are created and edited in the interface and
+stored in Postgres. Credentials there
 hold names, types and ownership only, and the schema has no column a secret
 value could go in.
 
 The server's state is in Postgres (`bha-engine-db` on Render, attached as
-`DATABASE_URL`). Airtable stays the source of truth for every record kind and
-the store is a read model over it, rebuilt on boot and on a timer — but the
-status-change history, which nothing upstream keeps, now survives a deploy and
-a restart rather than starting again each time. The server will not start
-without the database: there is no fallback store, because one would lose writes
-without saying so. Incidents, twins, vFarm and builders are still phase 1
+`DATABASE_URL`) and there is no second copy of anything: the engine writes a
+row, the page reads that row. The status-change history nothing upstream keeps
+is recorded here as each change lands and survives a deploy and a restart. The
+server will not start without the database: there is no fallback store, because
+one would lose writes without saying so. Incidents, twins, vFarm and builders are still phase 1
 fixtures. Chat history stays in the browser until Bays keeps memory of its
 own.
 
@@ -56,10 +61,10 @@ file under `DATA_DIR` and that is gone: Render wiped the file on every deploy
 and every spin-down, so nothing derived from it survived a restart.
 
 All browser data access goes through one module, `src/data/index.ts`, which
-calls `/api`. On the server, `engine.ts` derives every read, `store.ts` holds
-the records and the status-change history, `sync.ts` rebuilds the records from
-Airtable, `airtable.ts` is the only code that talks to Airtable, and
-`sources.ts` says where each kind lives and how a row becomes a record.
+calls `/api`. On the server, `engine.ts` derives every read, `store.ts` reads
+the `engine_*` tables and owns the status-change history and the write paths,
+`mirror.ts` is the one way a row gets into those tables, and `sources.ts` says
+where each kind came from in Airtable and how its fields become a record.
 
 ### Inbound writes from n8n
 
@@ -68,27 +73,32 @@ the session cookie is not needed. `:kind` is `loops`, `codex`, `patterns` or
 `commercial`.
 
 ```
-POST   /api/inbound/:kind           { id?, builder?, table?, record?, at? }   create or update
-PATCH  /api/inbound/:kind/:id       { builder?, table?, record?, at? }        same, id in the path
-DELETE /api/inbound/:kind/:id                                                  drop the held row
-POST   /api/inbound/resync/:kind                                               full rebuild of that kind
+POST   /api/inbound/:kind           { id, record, builder?, table?, at? }   create or update
+PATCH  /api/inbound/:kind/:id       { record, builder?, table?, at? }       same, id in the path
+DELETE /api/inbound/:kind/:id                                                drop the row
 ```
 
 `record` is the Airtable record as n8n's Airtable node returns it
 (`{ id, createdTime, fields }`); the id may be given at the top level, in the
 path, or only inside the record. For loops and Codex entries, `builder` (e.g. `jegan`) or
-`table` (the tbl… id) says which builder table it lives in. When `record` is
-absent the server reads the record from Airtable itself. `at` is the time of
+`table` (the tbl… id) says which builder table it lives in. `at` is the time of
 the change and stamps the status event; without it the server uses now. The
 call is idempotent: the same record twice is one row and no second event.
 
+Two things changed on 13 September 2026. `record` is now **required** — this
+server no longer reads Airtable, so a payload that only names a record has
+nothing to fetch it from, and it says so rather than storing nothing.
+`POST /api/inbound/resync/:kind` answers 410: there is no read model to
+rebuild. Prefer `/api/engine/:kind` below; this route writes the same rows.
+
 ### Engine writes — n8n straight into Postgres
 
-Steps 1 and 2 of moving off Airtable (2026-09-13). The engine now writes records
-directly into this dashboard's own tables **as well as** to Airtable. Both paths
-run; nothing has been switched over. Airtable is still the source of truth, the
-resync above still rebuilds the read model every page renders from, and none of
-that changes until step 3, which is a separate decision on a later day.
+This is how every record reaches the dashboard (2026-09-13, all three steps
+done). The engine writes a record here and the page reads that row; there is no
+sync in between and nothing to rebuild. A kind n8n has not been pointed at is
+not stale — it is stopped, and its rows stay exactly as the migration backfill
+left them. The **Engine writes** tab of the System Registry names any kind in
+that state.
 
 **Auth.** The same service key as the inbound routes above: `DASHBOARD_INBOUND_KEY`
 in the `x-dashboard-key` header. One key for the engine, already set on the
@@ -161,38 +171,16 @@ the field and says what was wrong with it:
 **Every write is logged**, accepted or refused, to the `engine_writes` table and
 to stdout: endpoint, kind, which key authenticated it, the row id, the outcome
 and the reason for a refusal. It is on the **Engine writes** tab of the System
-Registry, alongside a row count per mirror table split by whether the backfill or
-the engine wrote each row last — which is how the two paths get compared while
-both are live.
+Registry, alongside a row count per record table split by whether the migration
+backfill, the engine or a page wrote each row last — which is how you see that a
+kind has stopped being fed.
 
-### Backfilling from Airtable
+### The migration backfill
 
-```
-npm run backfill                 every kind
-npm run backfill -- loops codex  named kinds
-npm run backfill -- --dry        read and report, write nothing
-```
-
-Re-runnable by design and meant to be run again: it is how dual-write gets
-checked. A second run over unchanged data reports every row `already current`
-and writes nothing, so any row it reports as changed is a row where the engine
-and Airtable disagree.
-
-It reads Airtable and writes the `engine_*` tables. It touches no Airtable data
-and does not go near `records`, the read model the pages render from.
-
-The same run is available over HTTP behind the same service key, because on the
-deployed service the command needs an SSH shell and this needs one curl:
-
-```
-POST /api/engine/backfill        x-dashboard-key: <DASHBOARD_INBOUND_KEY>
-{ "kinds": ["loops", "codex"], "dry": false }     # both optional
-```
-
-Identical code path, one run at a time — a second caller joins the run already
-in flight rather than starting a second set of twenty-two table reads. It
-answers with the same per-table report the command prints, and 502 if any row
-failed.
+Gone, with the Airtable client it read through (13 September 2026).
+`npm run backfill` and `POST /api/engine/backfill` no longer exist; the endpoint
+answers 410. It ran on 13 September 2026 and brought 1,425 rows across from
+Airtable; those rows are in `git log` if it is ever needed again.
 
 ### Environment
 
@@ -201,9 +189,7 @@ failed.
 | `AUTH_EMAIL`, `AUTH_PASSWORD_HASH` | The shared login (`npm run hash-password`) |
 | `SESSION_SECRET` | Signs the session cookie |
 | `ASK_BAYS_API_KEY`, `ASK_BAYS_URL` | The Ask Bays workflow |
-| `AIRTABLE_API_KEY` | Personal access token with read and write on the four bases |
-| `AIRTABLE_RESYNC_MINUTES` | Timed resync; default 15, 0 disables |
-| `DASHBOARD_INBOUND_KEY` | Authenticates n8n’s pushes to `/api/inbound/*` and `/api/engine/*` |
+| `DASHBOARD_INBOUND_KEY` | Authenticates the engine’s writes to `/api/engine/*` and `/api/inbound/*`. **Required** in practice — nothing can reach the record tables without it |
 | `DATABASE_URL` | Postgres. **Required** — the server exits if it is missing or unreachable |
 
 Auth is a single shared team login, matching the pattern used by BHARAG's admin

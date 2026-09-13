@@ -2947,3 +2947,174 @@ Not done:   The production tables are created and empty. I hold neither the
             Airtable token nor DASHBOARD_INBOUND_KEY, so the first real backfill
             has to be triggered by Destiny — one curl, or `npm run backfill`
             over SSH.
+
+## 2026-09-13 21:20 — Step 3, pre-flight: do the mirror tables actually have rows
+Intent:     Destiny's instruction was to confirm the mirror tables hold rows
+            before cutting their source, and to stop and say so if any kind the
+            UI depends on is empty.
+Problem:    mcp__Render__query_render_postgres failed again, the same way it did
+            during steps 1 and 2:
+              FATAL: SSL/TLS required (SQLSTATE 28000)
+Fix:        Read it out of the service logs instead. The backfill was run over
+            HTTP at 2026-09-13T21:19 and reported, verbatim:
+              backfill 1425 read, 1421 new, 0 changed, 4 current, 0 failed
+            Per kind: loops 798, codex 161, layer0 7, patterns 149,
+            commercial 21, ns 59, rt 213, client_lanes 4, client_questions 13,
+            digests 0.
+Decision:   Proceed. Every kind a page reads has rows. `digests` is at 0 and is
+            the one exception that is not a blocker: it was never fed by the
+            Airtable sync — its source is the engine write path, which stays —
+            and its panel already renders "Not recorded" rather than a zero.
+            Cutting the sync does not cut its source.
+Also:       Dual-write is proved, not assumed. Four POST /api/engine/loops
+            writes carrying real rec… ids landed at 20:58 and 21:05, and the
+            21:19 backfill read Airtable and reported exactly those four as
+            "already current" — Airtable's copy already matched what n8n had
+            pushed.
+
+## 2026-09-13 22:05 — Step 3: the Airtable sync is gone; the pages read the engine tables
+Intent:     Remove the Airtable sync entirely. Every page that read the synced
+            store now reads its mirror table directly, keeping Airtable's own
+            field names because n8n writes those names.
+Files:      deleted server/src/sync.ts, server/src/airtable.ts,
+            server/src/backfill.ts
+            server/src/store.ts (the read path, the write path and the ledger
+            rewritten), server/src/sources.ts, server/src/mirror.ts,
+            server/src/engine.ts, server/src/index.ts,
+            server/src/migrations.ts (migration 4), package.json, render.yaml,
+            src/data/types.ts, src/data/index.ts,
+            src/components/ui/Records.tsx, the seven record screens,
+            src/screens/Settings.tsx, src/screens/Registry/index.tsx,
+            README.md, CLAUDE.md
+
+Decision:   **Reuse the mappers, do not rewrite them.** A mirror row stores
+            { airtable_record_id, created_time, fields } — exactly the AtRecord
+            shape sources.ts already consumes. So store.rows() rebuilds an
+            AtRecord from each mirror row and hands it to the same mapLoop,
+            mapCodex, mapPattern and the rest, untouched. That is what makes
+            "keep the field names as they are" true by construction rather than
+            by discipline: `What`, `Jason Status`, `Layer1 Review ` with its
+            trailing space are read by exactly the code that read them before.
+            AtRecord and recordUrl moved out of the deleted airtable.ts into
+            sources.ts; nothing else about the mappers changed.
+
+Decision:   **No projection step.** The alternative was to keep `records` and
+            refill it from the mirror tables on a timer, which would have been
+            a smaller diff. Rejected: it is the same two-copies-that-can-drift
+            shape the sync had, and "reads its mirror table directly" is the
+            instruction. `records` is left in place and unread — nothing drops
+            a table — because `events` references the same record ids.
+
+Decision:   **`events` is the whole status ledger now.** A record's previous
+            status used to be a column on the read-model row; it is now the
+            last event recorded for that record. An engine write records its
+            own event as it lands (store.recordEngineWrite, called from the
+            /api/engine handler, and deliberately never able to fail the write).
+            store.reconcile() at boot writes down anything that changed while
+            the process was not running, stamped via = 'mirror', and those are
+            excluded from close-rate figures because a change noticed after the
+            fact cannot be dated — the same rule the old via = 'airtable'
+            events followed. The first event for a record is stamped with the
+            row's first_seen_at, not with the time of the reconcile, so a
+            restart cannot re-date the history.
+            closed_at is derived from the ledger and keeps the old rule exactly:
+            only a transition dates a close, so a loop that was already closed
+            when it arrived still has no close date. The loop tables carry none.
+
+Problem:    A note typed on a loop lived only inside records.json — mapLoop
+            returns `note: null` and every upsert carried the held note
+            forward. It would have vanished with the read model.
+Fix:        Migration 4 creates record_notes (kind, record_id, note,
+            updated_at) and carries across every note the read model held:
+              INSERT INTO record_notes … SELECT kind, id, json::jsonb->>'note'
+              FROM records WHERE json::jsonb->>'note' IS NOT NULL AND <> ''
+            Verified on a database rewound to before migration 4 with two
+            records rows, one with a note and one with a null note: the note
+            came across, the null was skipped.
+
+Problem:    A loop opened on this dashboard now exists here before Airtable has
+            it, so it has no rec… id and is addressed as `row-<pk>`. When the
+            engine later writes the same loop back with its rec id,
+            mirror.upsert adopts the row on its loop_id — and everything keyed
+            on the old id (its events, its note) would have been orphaned
+            silently. Nothing would have errored, which is precisely why.
+Fix:        store.adopt() moves the events and the note onto the Airtable id as
+            part of that write, and logs what it moved. Verified end to end: a
+            loop created in the interface as row-4 with a note, then pushed
+            back as recADOPTEDAAAAAA1, came out with both its events and its
+            note under the new id and one line in the log saying so.
+
+Decision:   **Writes from the interface are Postgres-only now**, which is the
+            real consequence of removing the Airtable client and is worth
+            stating plainly. setStatus, updateFields and createLoop merge into
+            the row's existing `fields` — never replace it, or the fields the
+            interface does not know about would be dropped — and write through
+            mirror.upsert with source = 'ui'. If n8n later pushes the same
+            record carrying Airtable's copy of those fields, that push wins. It
+            is the newer statement about the record, and there is no longer any
+            path by which a change made here reaches Airtable.
+
+Decision:   **backfill.ts deleted too.** It was not on the list, but it reads
+            Airtable through the client and cannot run without
+            AIRTABLE_API_KEY, so keeping it would have meant keeping both. Its
+            npm script is gone and POST /api/engine/backfill answers 410 naming
+            what happened. It is in git history if it is ever wanted.
+
+Decision:   **/api/inbound/:kind kept, repointed.** It writes the same mirror
+            rows /api/engine/:kind writes, so whatever in n8n still calls it
+            keeps working. Two changes: `record` is now required — there is no
+            Airtable to fetch a named record from, and the 422 says exactly
+            that — and POST /api/inbound/resync/:kind answers 410.
+
+Decision:   **SyncLine became RowsLine**, because every word of it was about to
+            become a lie. It said "Read from Airtable 4 min ago", offered
+            "Resync now", warned when a resync had failed and when rows were
+            older than two resync cycles. None of those exist. It now says how
+            many rows are held, across how many tables, when one of them last
+            changed, and — the figure that replaced staleness — how many have
+            been written since the migration backfill. Zero there is shown in
+            amber: those rows are not stale, they are stopped.
+            SyncInfo became Freshness; ResyncResponse and the resync client
+            function are gone; the Registry's Engine writes tab gained a
+            "last from a page" column and lost the dual-write framing.
+
+Problem:    `writable` on five screens was `sync.write_through`, i.e. "is
+            AIRTABLE_API_KEY set". Every row action was gated on it.
+Fix:        Removed. The server does not start without its database, so a write
+            path that is reachable at all is a write path that works. Leaving a
+            permanently-true flag behind would have been dead branching on
+            every row.
+
+Verified:   Against a real Postgres 16 in this sandbox, not a mock.
+            - Boot on an empty database: 4 migrations, registry seeded,
+              "ledger: up to date (0 rows)".
+            - Sixteen records posted through POST /api/engine/:kind across all
+              ten kinds, using Airtable's own field names.
+            - Every page endpoint: open-loops, codex, ns-telemetry,
+              rt-telemetry, clients, build-patterns, commercial — all render
+              from the mirror tables, all carry a freshness block.
+            - Every metrics endpoint computes: thin rate over classified rows
+              only, the RT attempt-log collapse (2 rows, 1 card, both stated),
+              pattern reconciliation summing to the row count.
+            - Close a loop with a note → closed_at 2026-09-13, note held.
+              Edit a field → the other fields survive. Create a loop → row-4,
+              source reads "not in Airtable" rather than linking to a record
+              page that would 404.
+            - Restart → "ledger: up to date (15 rows)", nothing rewritten.
+              reconcile is idempotent.
+            - POST and GET /api/resync → 404. /api/inbound/resync/loops → 410.
+              /api/engine/backfill → 410, each naming what replaced it.
+            - Chromium at 1440px over all ten routes and at 400px over two:
+              zero horizontal overflow anywhere, no console error but the
+              weather fetch this sandbox cannot reach, and no page still
+              containing the words "Resync", "Read from Airtable" or
+              "Nothing has been read from Airtable yet".
+
+Not done:   Only `loops` has ever received an engine write in production. The
+            other eight kinds hold exactly what the 21:19 backfill left and
+            will not change until n8n is pointed at them — the Engine writes
+            tab names each one, and each page says so in amber. That is the
+            outstanding work this cut creates, and it is n8n-side, not here.
+            AIRTABLE_API_KEY and AIRTABLE_RESYNC_MINUTES are dropped from
+            render.yaml but Render leaves a removed key on the service; they
+            want deleting by hand.

@@ -38,6 +38,9 @@ Owner: Destiny Arupi, Engine Steward at BHA.
    server in `server/` was added on Destiny's instruction (2026-09-08). It has
    exactly one dependency, `pg`, added on Destiny's instruction (2026-09-12)
    when state moved to Postgres. That is the ceiling, not a precedent.
+6. **Never rename a field the engine writes.** Rows carry Airtable's own field
+   names verbatim and n8n writes those names; a rename breaks the engine's
+   writes silently, which is the failure this migration existed to end.
 
 ---
 
@@ -73,25 +76,35 @@ browser to the engine. The engine endpoint fans out to Airtable, BHARAG and n8n
 execution history and returns one response. Neither side of this app knows or
 cares where anything came from.
 
-**Telemetry comes from Airtable too** (decision 2026-09-10, Destiny). North
-Star's ask log is `appkCTjhH8PtYRFI7 / tbl9OGZTyvBKrbeFm`; Research Twin's
-queue is `appud969Dw7H4tMwv / tblUl8YHhQReDgq8G` (the
-`research_twin_research_jobs` table in that base holds one test row and is
-never read); the watched clients are `appkSUSh9ijNjP2f8`, whose index row
-names its own questions table in `Table ID` — followed at sync time, never
-hardcoded.
+**Every record comes from the engine, into Postgres** (decision 2026-09-13,
+Destiny — step 3 of the migration). n8n writes each record to
+`POST /api/engine/:kind` and it lands in that kind's `engine_*` table; the page
+reads that row. There is no Airtable read path: `sync.ts`, `airtable.ts`, the
+backfill and `AIRTABLE_API_KEY` were removed the same day, after the tables
+were backfilled (1,425 rows) and the engine's writes were proved correct
+against Airtable's copy. A kind n8n has not been pointed at is not stale, it is
+stopped, and the **Engine writes** tab of the System Registry names it.
 
-**Records come from Airtable; the server reads it directly** (decision
-2026-09-09, Destiny). Loops, Codex entries, build patterns and commercial
-cards are read by `server/src/sync.ts` from their Airtable bases through
-`server/src/airtable.ts` (plain fetch, no dependency) into Postgres, keyed by
-Airtable record id. **Codex entries come from BHA
-Submissions & Logs (`appEmdKshNVTl64Zf`), one table per builder** (decision
-2026-09-10, Destiny) — the builder is the table a row lives in, never a field,
-and the completed entry is the `Orchestrator Layer2 Review` column. The base and table ids, field names
-and select vocabularies live in `server/src/sources.ts` and were read from the
-live bases, not assumed. Their phase 1 fixture files were deleted the same
-day; with no `AIRTABLE_API_KEY` those four pages are empty and say why.
+**Airtable's own field names are kept verbatim.** Each row stores
+`{ airtable_record_id, created_time, fields }` with `fields` exactly as the
+Airtable REST API shapes it — `What`, `Jason Status`, `Layer1 Review ` with its
+trailing space. n8n writes those names and a rename breaks its writes with no
+error. `server/src/sources.ts` still holds where each kind came from, its field
+names and its select vocabularies, all read from the live bases rather than
+assumed, and its mappers are what turn a row into a record. The base and table
+ids stay so every row can still link back to Airtable.
+
+Where each kind came from, and still links to: loops `appUVlBSGGPHw6DGh`, one
+table per builder. **Codex entries, BHA Submissions & Logs
+(`appEmdKshNVTl64Zf`), one table per builder** (decision 2026-09-10, Destiny) —
+the builder is the table a row lives in, never a field, and the completed entry
+is the `Orchestrator Layer2 Review` column. Build patterns `app5ni3E8r7Lvxk22`,
+commercial `appvLglfdCqOKqLpT`. Telemetry (decision 2026-09-10, Destiny): North
+Star's ask log `appkCTjhH8PtYRFI7 / tbl9OGZTyvBKrbeFm`; Research Twin's queue
+`appud969Dw7H4tMwv / tblUl8YHhQReDgq8G` (the `research_twin_research_jobs`
+table in that base holds one test row and is never read); the watched clients
+`appkSUSh9ijNjP2f8`, whose index row names its own questions table in
+`Table ID` — carried on each question row, never hardcoded.
 Incidents, twins, vFarm and builders are still phase 1 fixtures.
 
 **State lives in Postgres** (decision 2026-09-12, Destiny): `bha-engine-db` on
@@ -106,35 +119,40 @@ explicitly for this. Therefore:
   missing without anyone noticing.
 - **The schema is forward-only migrations** in `server/src/migrations.ts`, run
   on boot, idempotent, serialised by an advisory lock. Nothing drops a table.
-  A shape change to the read model is a migration that alters it, or one that
-  truncates `records` on purpose and lets a resync refill it — never a silent
-  drop, because `events` and `observations` are real history now.
-- **Airtable is still the source of truth for every record type.** The
-  dashboard is a read model plus a write-through cache, never the system of
-  record. Durability changes where the read model lives, not who owns the
-  records.
-- **Every write from the interface goes to Airtable first** and is shown only
-  from what Airtable sent back. If Airtable refuses, nothing changes here.
-- **Resync rebuilds the read model**: on boot, every `AIRTABLE_RESYNC_MINUTES`
-  (default 15, decision 2026-09-10), and on demand from each page or
-  `POST /api/resync/:kind`. It is idempotent, runs one transaction per table,
-  and purges a table's rows only after a successful full read.
+  A shape change is a migration that alters a table — never a silent drop,
+  because `events` and `observations` are real history. The old `records` read
+  model is still there, unread, for the same reason.
+- **These tables are the record.** There is no second copy and nothing to
+  resync. `mirror.ts` is the one way a row gets in; `store.ts` reads the tables
+  and maps them through `sources.ts`.
+- **Every write from the interface goes to the same row**, keeping every field
+  it already had — `fields` is stored whole, so a write that replaced it with
+  the two keys the interface knows about would drop the rest. Airtable is no
+  longer written to. If n8n later pushes the same record carrying Airtable's
+  copy of those fields, that push wins: it is the newer statement.
 - **Every page states how old its rows are**, relative ("4 min ago"), in the
-  same place. A failed resync says so and says what is on screen instead; the
-  previous rows are never presented as current. A figure that can be a day old
-  with nothing saying so is a correctness bug on an engine-health surface, not
-  a polish issue. Rows surviving a restart does not make an old row current.
-- **n8n dual-writes through `/api/inbound/:kind`**, authenticated by
-  `DASHBOARD_INBOUND_KEY` in `x-dashboard-key` (the same pattern as
-  `ASK_BAYS_API_KEY`, inbound). The push is additive; the Airtable write path
-  stays. No cut-over path exists and none is to be built without an explicit
-  decision — durable storage removes the old blocker but is not itself that
-  decision.
-- **The status-change history now accumulates.** The events table (status
-  changes with timestamps) is the only place a close is dated, and
-  `meta.history_since` is when this database began recording it — not the last
-  restart. Every metric derived from it still cites that date, and one the
-  rows cannot support is still null with a note.
+  same place, along with how many the engine has written since the migration
+  backfill. A kind sitting entirely on backfilled rows says so in amber, because
+  nothing is feeding it. A figure that can be a day old with nothing saying so
+  is a correctness bug on an engine-health surface, not a polish issue.
+- **`/api/engine/:kind` is authenticated by `DASHBOARD_INBOUND_KEY`** in
+  `x-dashboard-key` (the same pattern as `ASK_BAYS_API_KEY`, inbound), checked
+  before the router reads the body. `/api/inbound/:kind` is the older route and
+  still writes the same rows, but `record` is required there now. Every write —
+  accepted or refused, with the reason — lands in `engine_writes` and on the
+  Engine writes tab.
+- **The status-change history accumulates, and is now the whole ledger.** The
+  events table (status changes with timestamps) is the only place a close is
+  dated, and a record's previous status is its last event. An engine write
+  records its own event as it lands; a reconcile at boot writes down anything
+  that changed while the process was not running, stamped `via = 'mirror'` and
+  left out of close-rate figures because it cannot be dated. `meta.history_since`
+  is when this database began recording — not the last restart. Every metric
+  derived from it still cites that date, and one the rows cannot support is
+  still null with a note.
+- **Notes are this dashboard's own.** A note typed on a loop was never an
+  Airtable field; it lives in `record_notes`, keyed by record id, and moves with
+  the row if Airtable later gives it an id.
 
 **Counts are computed by the server from raw rows** (decision 2026-09-08).
 The loop tables carry no close date and no last-modified time; nothing
@@ -149,12 +167,11 @@ thread's `session_id` is stable for its life and is Bays's memory. The reply's
 
 **Environment (all server-side, none in the bundle):** `AUTH_EMAIL`,
 `AUTH_PASSWORD_HASH`, `SESSION_SECRET`, `ASK_BAYS_API_KEY`, `ASK_BAYS_URL`,
-`AIRTABLE_API_KEY` (a personal access token with read and write scope on the
-four bases), `AIRTABLE_RESYNC_MINUTES`, `DASHBOARD_INBOUND_KEY`, and
+`DASHBOARD_INBOUND_KEY` (nothing reaches the record tables without it), and
 `DATABASE_URL` — the one the server refuses to start without.
-`DATABASE_CA_CERT` and `DATABASE_POOL_MAX` are optional; `DATA_DIR` is gone.
-`AIRTABLE_API_URL` exists so a sandbox that cannot reach api.airtable.com can
-point the same client at a local replay.
+`DATABASE_CA_CERT` and `DATABASE_POOL_MAX` are optional. `DATA_DIR` is gone,
+and so are `AIRTABLE_API_KEY`, `AIRTABLE_RESYNC_MINUTES` and
+`AIRTABLE_API_URL` (2026-09-13) — nothing in this server reads Airtable.
 
 **Auth:** one shared login for the whole team, same as BHARAG's console. Not
 per-user accounts. The password is posted to `/api/auth/login`; the server
