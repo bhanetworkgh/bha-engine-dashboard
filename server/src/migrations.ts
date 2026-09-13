@@ -114,6 +114,121 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS observations_kind_metric_at ON observations (kind, metric, at)`,
     ],
   },
+  {
+    id: 2,
+    name: 'system registry',
+    statements: [
+      /**
+       * The System Registry (decision 2026-09-13, Destiny): which workflow does
+       * what and who owns it, and what BHA pays for.
+       *
+       * These six tables are the exception to "Airtable is the source of truth".
+       * Nothing upstream records any of this — there is no Airtable base holding
+       * the billing owner of Otter.ai — so the dashboard is where these rows are
+       * created and edited, and a resync would have nothing to read. That is why
+       * they sit beside `records` rather than in it.
+       *
+       * Every table carries created_at, updated_at and deleted_at as text ISO
+       * instants, matching the rest of this schema: the values are compared and
+       * sliced as strings everywhere they are read.
+       *
+       * `deleted_at` is a soft delete and there is no hard one. A registry whose
+       * answer to "did we ever pay for that" is a missing row is not a registry.
+       *
+       * NOTE on registry_credentials: there is deliberately **no column a secret
+       * value could be written to**. Names, types, owners and uses only. Adding
+       * one would take a migration and a decision, which is the point.
+       */
+      `CREATE TABLE IF NOT EXISTS registry_workflows (
+         id             text PRIMARY KEY,
+         name           text NOT NULL,
+         system         text,
+         folder         text,
+         pillar         text,
+         owner          text,
+         trigger_type   text,
+         trigger_detail text,
+         status         text,
+         purpose        text,
+         n8n_url        text,
+         notes          text,
+         created_at     text NOT NULL,
+         updated_at     text NOT NULL,
+         deleted_at     text
+       )`,
+      `CREATE INDEX IF NOT EXISTS registry_workflows_system ON registry_workflows (system)`,
+
+      `CREATE TABLE IF NOT EXISTS registry_services (
+         id             text PRIMARY KEY,
+         name           text NOT NULL,
+         category       text,
+         what_it_is_for text,
+         url            text,
+         managed_by     text,
+         plan           text,
+         billing_owner  text,
+         cost_amount    double precision,
+         cost_currency  text,
+         billing_cycle  text,
+         renewal_date   text,
+         status         text,
+         notes          text,
+         created_at     text NOT NULL,
+         updated_at     text NOT NULL,
+         deleted_at     text
+       )`,
+
+      `CREATE TABLE IF NOT EXISTS registry_credentials (
+         id         text PRIMARY KEY,
+         name       text NOT NULL,
+         type       text,
+         used_by    text[],
+         owner      text,
+         notes      text,
+         created_at text NOT NULL,
+         updated_at text NOT NULL,
+         deleted_at text
+       )`,
+
+      `CREATE TABLE IF NOT EXISTS registry_endpoints (
+         id               text PRIMARY KEY,
+         name             text NOT NULL,
+         url              text NOT NULL,
+         method           text,
+         auth_type        text,
+         owned_by_service text,
+         what_calls_it    text,
+         notes            text,
+         created_at       text NOT NULL,
+         updated_at       text NOT NULL,
+         deleted_at       text
+       )`,
+
+      `CREATE TABLE IF NOT EXISTS registry_airtable_bases (
+         id             text PRIMARY KEY,
+         name           text NOT NULL,
+         what_it_is_for text,
+         url            text,
+         notes          text,
+         created_at     text NOT NULL,
+         updated_at     text NOT NULL,
+         deleted_at     text
+       )`,
+
+      `CREATE TABLE IF NOT EXISTS registry_people (
+         id            text PRIMARY KEY,
+         name          text NOT NULL,
+         slack_user_id text,
+         email         text,
+         role          text,
+         lanes_owned   text[],
+         notes         text,
+         created_at    text NOT NULL,
+         updated_at    text NOT NULL,
+         deleted_at    text
+       )`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
