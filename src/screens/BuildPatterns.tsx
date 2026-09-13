@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../app/useData';
-import { getBuildPatterns, getPatternDetail, getRecordMetrics, resync, searchPatterns, setRecordStatus, type BuildPattern, type BuildPatternDetail, type PatternMetrics, type PatternStatus, type WritablePatternStatus } from '../data';
+import { getBuildPatterns, getPatternDetail, getRecordMetrics, searchPatterns, setRecordStatus, type BuildPattern, type BuildPatternDetail, type PatternMetrics, type PatternStatus, type WritablePatternStatus } from '../data';
 import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
@@ -26,7 +26,7 @@ import {
   SourceLink,
   StatCell,
   StatStrip,
-  SyncLine,
+  RowsLine,
   Toast,
   TwoLine,
   usePaged,
@@ -267,7 +267,7 @@ function PatternView({ id, onClose }: { id: string; onClose: () => void }) {
  * share one column — the name alone does not tell you what a pattern is for —
  * and everything else the record carries opens on click.
  */
-function patternColumns(open: (p: BuildPattern) => void, change: (p: BuildPattern, next: WritablePatternStatus) => void, writable: boolean, busyId: string | null): RecordColumn<BuildPattern>[] {
+function patternColumns(open: (p: BuildPattern) => void, change: (p: BuildPattern, next: WritablePatternStatus) => void, busyId: string | null): RecordColumn<BuildPattern>[] {
   return [
     {
       key: 'pattern_id',
@@ -307,8 +307,8 @@ function patternColumns(open: (p: BuildPattern) => void, change: (p: BuildPatter
         return (
           <RowActions>
             <RowAction label="View" tone="accent" onClick={() => open(p)} />
-            {writable && p.status !== 'canonical' && <RowAction label="Promote to canonical" tone="accent" disabled={busy} onClick={() => change(p, 'canonical')} />}
-            {writable && p.status !== 'draft' && <RowAction label="Mark draft" disabled={busy} onClick={() => change(p, 'draft')} />}
+            {p.status !== 'canonical' && <RowAction label="Promote to canonical" tone="accent" disabled={busy} onClick={() => change(p, 'canonical')} />}
+            {p.status !== 'draft' && <RowAction label="Mark draft" disabled={busy} onClick={() => change(p, 'draft')} />}
             <RowAction label="Open in Airtable" onClick={() => window.open(p.airtable.url, '_blank', 'noreferrer')} />
           </RowActions>
         );
@@ -318,8 +318,7 @@ function patternColumns(open: (p: BuildPattern) => void, change: (p: BuildPatter
 }
 
 export default function BuildPatterns() {
-  const [reload, setReload] = useState(0);
-  const { status, data: loaded, error } = useData(getBuildPatterns, [reload]);
+  const { status, data: loaded, error } = useData(getBuildPatterns, []);
   const [patterns, setPatterns] = useState<BuildPattern[]>([]);
   const [system, setSystem] = useState('all');
   const [filter, setFilter] = useState<StatusFilter>('all');
@@ -327,10 +326,9 @@ export default function BuildPatterns() {
   const [hits, setHits] = useState<Set<string> | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
   const [tick, setTick] = useState(0);
   const { toast, setToast } = useToast();
-  const metrics = useData((query) => getRecordMetrics('patterns', query), [tick, reload]);
+  const metrics = useData((query) => getRecordMetrics('patterns', query), [tick]);
   const searchSeq = useRef(0);
 
   useEffect(() => {
@@ -390,22 +388,7 @@ export default function BuildPatterns() {
     }
   }
 
-  async function pull() {
-    setSyncing(true);
-    try {
-      const r = await resync('patterns');
-      const t = r.results[0]?.tables[0];
-      setToast(t?.error ? { text: `Resync failed: ${t.error}`, tone: 'failing' } : { text: `Resync read ${t?.n ?? 0} patterns.`, tone: 'ok' });
-      setReload((n) => n + 1);
-    } catch (e) {
-      setToast({ text: e instanceof Error ? e.message : 'The resync did not run.', tone: 'failing' });
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
-  const writable = loaded.sync.write_through;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -414,7 +397,7 @@ export default function BuildPatterns() {
       {/* overflow-x-hidden: nothing on this page may scroll the body sideways. */}
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 px-6 pb-3 md:px-8">
-          <SyncLine sync={loaded.sync} onResync={pull} busy={syncing} />
+          <RowsLine freshness={loaded.freshness} />
         </div>
 
         <PatternMetricsPanel metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
@@ -463,8 +446,8 @@ export default function BuildPatterns() {
 
         {rows.length === 0 ? (
           <EmptyState>
-            {loaded.sync.source === 'none'
-              ? (loaded.sync.error ?? 'Nothing has been read from Airtable yet.')
+            {loaded.freshness.source === 'none'
+              ? (loaded.freshness.note ?? 'No build patterns are held.')
               : q.trim()
                 ? 'No pattern matches that search in the selected system and status.'
                 : 'No build patterns match the selected system and status.'}
@@ -478,7 +461,7 @@ export default function BuildPatterns() {
               the list, which is what made the page unreadable.
             */}
             <RecordTable
-              columns={patternColumns((p) => setOpen(p.id), change, writable, busyId)}
+              columns={patternColumns((p) => setOpen(p.id), change, busyId)}
               rows={paged.rows}
               rowKey={(p) => p.id}
               onOpen={(p) => setOpen(p.id)}

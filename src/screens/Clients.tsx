@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { getClients, resync, type ClientLaneRow, type ClientQuestion, type ClientsData } from '../data';
+import { getClients, type ClientLaneRow, type ClientQuestion, type ClientsData } from '../data';
 import {
   CountCell,
   EmptyPanel,
@@ -18,11 +18,9 @@ import {
   Segmented,
   SourceLink,
   StatStrip,
-  SyncLine,
-  Toast,
+  RowsLine,
   relativeTime,
   usePaged,
-  useToast,
 } from '../components/ui';
 
 /**
@@ -153,14 +151,11 @@ function LaneView({ lane, questions, onClose }: { lane: ClientLaneRow; questions
 /* ------------------------------------------------------------------ page */
 
 export default function Clients() {
-  const [reload, setReload] = useState(0);
-  const { status, data: loaded, error } = useData(getClients, [reload]);
+  const { status, data: loaded, error } = useData(getClients, []);
   const [client, setClient] = useState('all');
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const { toast, setToast } = useToast();
 
   const d: ClientsData | null = loaded;
   const lanes = d?.lanes ?? [];
@@ -175,25 +170,6 @@ export default function Clients() {
     [lanes, client, filter, q],
   );
   const paged = usePaged(rows, `${client}|${filter}|${q.trim()}`);
-
-  async function pull() {
-    setSyncing(true);
-    try {
-      const r = await resync('clients');
-      const t = r.results[0]?.tables ?? [];
-      const failed = t.filter((x) => x.error);
-      setToast(
-        failed.length
-          ? { text: `Resync failed on ${failed.map((x) => x.label).join(', ')}: ${failed[0].error}`, tone: 'failing' }
-          : { text: `Resync read ${t.length} tables — the index and each lane's questions.`, tone: 'ok' },
-      );
-      setReload((n) => n + 1);
-    } catch (e) {
-      setToast({ text: e instanceof Error ? e.message : 'The resync did not run.', tone: 'failing' });
-    } finally {
-      setSyncing(false);
-    }
-  }
 
   if (status === 'loading' || !d) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
   const current = open ? lanes.find((l) => l.id === open) : null;
@@ -212,7 +188,7 @@ export default function Clients() {
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 px-6 pb-3 md:px-8">
-          <SyncLine sync={d.sync} onResync={pull} busy={syncing} />
+          <RowsLine freshness={d.freshness} />
         </div>
 
         <StatStrip cols={5}>
@@ -264,8 +240,8 @@ export default function Clients() {
 
         {rows.length === 0 ? (
           <EmptyState>
-            {d.sync.source === 'none'
-              ? (d.sync.error ?? 'Nothing has been read from Airtable yet.')
+            {d.freshness.source === 'none'
+              ? (d.freshness.note ?? 'No watched-client lanes are held.')
               : q.trim()
                 ? 'No lane matches that search in the selected client and filter.'
                 : filter === 'needs-human'
@@ -357,7 +333,6 @@ export default function Clients() {
       </div>
 
       {current && <LaneView lane={current} questions={d.questions.filter((qq) => qq.lane_id === (current.lane_id ?? current.id))} onClose={() => setOpen(null)} />}
-      <Toast toast={toast} />
     </div>
   );
 }

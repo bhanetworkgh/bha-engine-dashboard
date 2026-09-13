@@ -3,8 +3,9 @@ import { BUILDER_NAMES, LOOP_LANE_TAGS, type LoopLaneTag, type NewLoop } from '.
 import { laneLabel } from '../../lib';
 
 /**
- * Opens a loop. The server creates the record in the builder's table in
- * Airtable first and shows it here only from what Airtable sent back.
+ * Opens a loop. The server writes it into the builder's own loops table in
+ * this database, which is where the page reads it back from — Airtable is no
+ * longer in the path (13 Sep 2026).
  */
 export function NewLoopForm({ defaultOwner, busy, onSubmit, onCancel }: { defaultOwner: string; busy: boolean; onSubmit: (input: NewLoop) => void; onCancel: () => void }) {
   const [title, setTitle] = useState('');
@@ -63,7 +64,7 @@ export function NewLoopForm({ defaultOwner, busy, onSubmit, onCancel }: { defaul
       </div>
       <div className="mt-3">
         <label className="kicker block" htmlFor="loop-note">
-          Note <span className="text-faint">(optional, held here only — not an Airtable field)</span>
+          Note <span className="text-faint">(optional, this dashboard's own — not a field on the loop)</span>
         </label>
         <input id="loop-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Context, a link, who asked" className="input mt-1.5" />
       </div>
@@ -72,7 +73,7 @@ export function NewLoopForm({ defaultOwner, busy, onSubmit, onCancel }: { defaul
           Cancel
         </button>
         <button type="submit" disabled={!title.trim() || busy} className="btn btn-primary btn-sm">
-          {busy ? 'Writing to Airtable…' : 'Open loop'}
+          {busy ? 'Opening…' : 'Open loop'}
         </button>
       </div>
     </form>

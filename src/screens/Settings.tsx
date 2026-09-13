@@ -71,7 +71,13 @@ export default function Settings() {
                 <Row label="Ask Bays" value={s.ask_bays_configured ? 'Connected' : 'No API key on the server'} tone={s.ask_bays_configured ? 'ok' : 'off'} />
                 <Row label="Bays workflow" value={<span className="break-all">{s.ask_bays_url}</span>} />
                 <Row label="Bays model" value={s.model_label} />
-                <Row label="Engine data" value="Phase 1 fixtures, served by this server" tone="off" />
+                <Row
+                  label="Engine writes"
+                  value={s.inbound_configured ? 'Key set · the engine can write to /api/engine' : 'No DASHBOARD_INBOUND_KEY · nothing can reach the record tables'}
+                  tone={s.inbound_configured ? 'ok' : 'off'}
+                />
+                <Row label="Records editable here" value={s.writable.join(' · ')} />
+                <Row label="Incidents, twins, vFarm, builders" value="Phase 1 fixtures, served by this server" tone="off" />
                 <Row label="Status history since" value={s.history_since ? new Date(s.history_since).toLocaleString() : 'not started'} />
                 <Row
                   label="Records held"

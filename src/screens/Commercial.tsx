@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { getCommercial, getRecordMetrics, resync, setRecordStatus, type CommercialMetrics, type MetricSeries, type Opportunity, type ReadinessState } from '../data';
+import { getCommercial, getRecordMetrics, setRecordStatus, type CommercialMetrics, type MetricSeries, type Opportunity, type ReadinessState } from '../data';
 import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
@@ -28,7 +28,7 @@ import {
   Sparkline,
   StatCell,
   StatStrip,
-  SyncLine,
+  RowsLine,
   Toast,
   TwoLine,
   usePaged,
@@ -209,7 +209,7 @@ function CardTrend({ trend, now }: { trend: MetricSeries | undefined; now: numbe
 }
 
 /** The whole card, on click — the same shape as a build pattern's detail view. */
-function CardView({ o, trend, busy, writable, onReadiness, onClose }: { o: Opportunity; trend: MetricSeries | undefined; busy: boolean; writable: boolean; onReadiness: (o: Opportunity, r: ReadinessState) => void; onClose: () => void }) {
+function CardView({ o, trend, busy, onReadiness, onClose }: { o: Opportunity; trend: MetricSeries | undefined; busy: boolean; onReadiness: (o: Opportunity, r: ReadinessState) => void; onClose: () => void }) {
   const listed = o.missing_research_questions.length;
   const disagree = o.missing_research_count !== null && o.missing_research_count !== listed;
   const detail: { label: string; value: string | null }[] = [
@@ -305,8 +305,7 @@ function CardView({ o, trend, busy, writable, onReadiness, onClose }: { o: Oppor
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
             <SourceLink source={o.source} />
             <div className="flex flex-wrap gap-2">
-              {writable &&
-                READINESS.filter((r) => r !== o.readiness_state).map((r) => (
+              {                READINESS.filter((r) => r !== o.readiness_state).map((r) => (
                   <button key={r} type="button" className={`btn btn-sm ${r === 'Media-Ready' ? 'btn-primary' : 'btn-ghost'}`} disabled={busy} onClick={() => onReadiness(o, r)}>
                     {busy ? 'Writing…' : `Set ${r.toLowerCase()}`}
                   </button>
@@ -328,7 +327,7 @@ function CardView({ o, trend, busy, writable, onReadiness, onClose }: { o: Oppor
  * missing_research_count, red while any are unresolved, and says so plainly
  * when the card carries no count at all.
  */
-function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportunity, next: ReadinessState) => void, writable: boolean, busyId: string | null): RecordColumn<Opportunity>[] {
+function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportunity, next: ReadinessState) => void, busyId: string | null): RecordColumn<Opportunity>[] {
   const unresolved = (o: Opportunity) => o.missing_research_count ?? o.missing_research_questions.length;
   return [
     {
@@ -379,7 +378,7 @@ function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportuni
         return (
           <RowActions>
             <RowAction label="View" tone="accent" onClick={() => open(o)} />
-            {writable && o.readiness_state !== 'Media-Ready' && <RowAction label="Set media-ready" tone="accent" disabled={busy} onClick={() => change(o, 'Media-Ready')} />}
+            {o.readiness_state !== 'Media-Ready' && <RowAction label="Set media-ready" tone="accent" disabled={busy} onClick={() => change(o, 'Media-Ready')} />}
             <RowAction label="Open in Airtable" onClick={() => window.open(o.airtable.url, '_blank', 'noreferrer')} />
           </RowActions>
         );
@@ -389,18 +388,16 @@ function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportuni
 }
 
 export default function Commercial() {
-  const [reload, setReload] = useState(0);
-  const { status, data: loaded, error } = useData(getCommercial, [reload]);
+  const { status, data: loaded, error } = useData(getCommercial, []);
   const [cards, setCards] = useState<Opportunity[]>([]);
   const [lane, setLane] = useState('all');
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
   const [tick, setTick] = useState(0);
   const { toast, setToast } = useToast();
-  const metrics = useData((query) => getRecordMetrics('commercial', query), [tick, reload]);
+  const metrics = useData((query) => getRecordMetrics('commercial', query), [tick]);
 
   useEffect(() => {
     if (loaded) setCards(loaded.opportunities);
@@ -424,7 +421,7 @@ export default function Commercial() {
       const updated = await setRecordStatus('commercial', o.id, next);
       setCards((list) => list.map((x) => (x.id === updated.id ? updated : x)));
       setTick((n) => n + 1);
-      setToast({ text: `readiness_state set to ${next} in Airtable.`, tone: 'ok' });
+      setToast({ text: `readiness_state set to ${next}.`, tone: 'ok' });
     } catch (err) {
       setToast({ text: err instanceof Error ? err.message : 'The change did not save.', tone: 'failing' });
     } finally {
@@ -432,22 +429,7 @@ export default function Commercial() {
     }
   }
 
-  async function pull() {
-    setSyncing(true);
-    try {
-      const r = await resync('commercial');
-      const t = r.results[0]?.tables[0];
-      setToast(t?.error ? { text: `Resync failed: ${t.error}`, tone: 'failing' } : { text: `Resync read ${t?.n ?? 0} cards.`, tone: 'ok' });
-      setReload((n) => n + 1);
-    } catch (e) {
-      setToast({ text: e instanceof Error ? e.message : 'The resync did not run.', tone: 'failing' });
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
-  const writable = loaded.sync.write_through;
   const current = open ? cards.find((o) => o.id === open) : null;
 
   return (
@@ -457,7 +439,7 @@ export default function Commercial() {
       {/* overflow-x-hidden: nothing on this page may scroll the body sideways. */}
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 px-6 pb-3 md:px-8">
-          <SyncLine sync={loaded.sync} onResync={pull} busy={syncing} />
+          <RowsLine freshness={loaded.freshness} />
         </div>
 
         <CommercialMetricsPanel metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
@@ -489,8 +471,8 @@ export default function Commercial() {
 
         {rows.length === 0 ? (
           <EmptyState>
-            {loaded.sync.source === 'none'
-              ? (loaded.sync.error ?? 'Nothing has been read from Airtable yet.')
+            {loaded.freshness.source === 'none'
+              ? (loaded.freshness.note ?? 'No commercial cards are held.')
               : q.trim()
                 ? 'No commercial card matches that search in the selected lane and readiness.'
                 : 'No commercial cards match the selected lane and readiness.'}
@@ -498,7 +480,7 @@ export default function Commercial() {
         ) : (
           <>
             <RecordTable
-              columns={commercialColumns((o) => setOpen(o.id), change, writable, busyId)}
+              columns={commercialColumns((o) => setOpen(o.id), change, busyId)}
               rows={paged.rows}
               rowKey={(o) => o.id}
               onOpen={(o) => setOpen(o.id)}
@@ -511,7 +493,7 @@ export default function Commercial() {
         )}
       </div>
 
-      {current && <CardView o={current} trend={loaded.trends[current.id]} busy={busyId === current.id} writable={writable} onReadiness={change} onClose={() => setOpen(null)} />}
+      {current && <CardView o={current} trend={loaded.trends[current.id]} busy={busyId === current.id} onReadiness={change} onClose={() => setOpen(null)} />}
       <Toast toast={toast} />
     </div>
   );

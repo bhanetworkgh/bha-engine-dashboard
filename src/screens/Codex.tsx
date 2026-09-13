@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { getCodexDetail, getCodexEntries, getRecordMetrics, resync, setRecordStatus, type CodexEntry, type CodexEntryDetail, type CodexMetrics, type CodexTab } from '../data';
+import { getCodexDetail, getCodexEntries, getRecordMetrics, setRecordStatus, type CodexEntry, type CodexEntryDetail, type CodexMetrics, type CodexTab } from '../data';
 import type { RecordColumn } from '../components/ui';
 import {
   Bars,
@@ -27,7 +27,7 @@ import {
   SourceLink,
   StatCell,
   StatStrip,
-  SyncLine,
+  RowsLine,
   Toast,
   usePaged,
   useToast,
@@ -287,7 +287,7 @@ function EntryText({ text }: { text: string }) {
   );
 }
 
-function EntryView({ id, onClose, onSaved, setToast, writable }: { id: string; onClose: () => void; onSaved: (e: CodexEntry) => void; setToast: (t: { text: string; tone: 'ok' | 'failing' }) => void; writable: boolean }) {
+function EntryView({ id, onClose, onSaved, setToast }: { id: string; onClose: () => void; onSaved: (e: CodexEntry) => void; setToast: (t: { text: string; tone: 'ok' | 'failing' }) => void }) {
   const [detail, setDetail] = useState<CodexEntryDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -346,12 +346,12 @@ function EntryView({ id, onClose, onSaved, setToast, writable }: { id: string; o
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {writable && detail.approval !== 'approved' && (
+                {detail.approval !== 'approved' && (
                   <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => review('approved')}>
                     {busy ? 'Writing…' : 'Approve'}
                   </button>
                 )}
-                {writable && detail.approval === 'approved' && (
+                {detail.approval === 'approved' && (
                   <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => review('pending')}>
                     Back to pending
                   </button>
@@ -494,17 +494,15 @@ function codexColumns(open: (e: CodexEntry) => void): RecordColumn<CodexEntry>[]
 /* ------------------------------------------------------------------ page */
 
 export default function Codex() {
-  const [reload, setReload] = useState(0);
-  const { status, data: loaded, error } = useData(getCodexEntries, [reload]);
+  const { status, data: loaded, error } = useData(getCodexEntries, []);
   const [entries, setEntries] = useState<CodexEntry[]>([]);
   const [builder, setBuilder] = useState('all');
   const [tab, setTab] = useState<CodexTab>('approved');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
   const [tick, setTick] = useState(0);
   const { toast, setToast } = useToast();
-  const metrics = useData((query) => getRecordMetrics('codex', query, builder), [builder, tick, reload]);
+  const metrics = useData((query) => getRecordMetrics('codex', query, builder), [builder, tick]);
 
   useEffect(() => {
     if (loaded) setEntries(loaded.entries);
@@ -514,29 +512,8 @@ export default function Codex() {
   const rows = useMemo(() => scoped.filter((e) => inTab(e, tab)).filter((e) => matches(e, q.trim())), [scoped, tab, q]);
   const paged = usePaged(rows, `${builder}|${tab}|${q.trim()}`);
 
-  async function pull() {
-    setSyncing(true);
-    try {
-      const r = await resync('codex');
-      const t = r.results[0]?.tables ?? [];
-      const n = t.reduce((s2, x) => s2 + x.n, 0);
-      const failed = t.filter((x) => x.error);
-      setToast(
-        failed.length
-          ? { text: `Resync read ${n} submissions but ${failed.map((x) => x.label).join(', ')} failed: ${failed[0].error}`, tone: 'failing' }
-          : { text: `Resync read ${n} submissions across ${t.length} builder tables.`, tone: 'ok' },
-      );
-      setReload((v) => v + 1);
-    } catch (e) {
-      setToast({ text: e instanceof Error ? e.message : 'The resync did not run.', tone: 'failing' });
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
   const m = metrics.data;
-  const writable = loaded.sync.write_through;
   const rule = m?.tabs.find((t) => t.tab === tab)?.rule;
   const holds = loaded.layer0_holds.filter((h) => (builder === 'all' ? true : h.builder_id === builder) && h.open);
 
@@ -546,7 +523,7 @@ export default function Codex() {
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 px-6 pb-3 md:px-8">
-          <SyncLine sync={loaded.sync} onResync={pull} busy={syncing} />
+          <RowsLine freshness={loaded.freshness} />
         </div>
 
         <CodexMetricsPanel metrics={m} loading={metrics.status === 'loading'} error={metrics.error} view={builder} />
@@ -578,8 +555,8 @@ export default function Codex() {
 
         {rows.length === 0 ? (
           <EmptyState>
-            {loaded.sync.source === 'none'
-              ? (loaded.sync.error ?? 'Nothing has been read from Airtable yet.')
+            {loaded.freshness.source === 'none'
+              ? (loaded.freshness.note ?? 'No Codex submissions are held.')
               : q.trim()
                 ? 'No submission matches that search in the selected builder and tab.'
                 : tab === 'incomplete'
@@ -605,7 +582,6 @@ export default function Codex() {
       {open && (
         <EntryView
           id={open}
-          writable={writable}
           onClose={() => setOpen(null)}
           onSaved={(u) => {
             setEntries((list) => list.map((x) => (x.id === u.id ? u : x)));

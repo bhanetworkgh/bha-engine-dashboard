@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../../app/useData';
-import { createLoop, getOpenLoops, getRecordMetrics, resync, setLoopStatus, type Loop, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
-import { Icon, LoadFailed, Loading, PageHeader, Pagination, SearchBox, Segmented, SyncLine, Toast, usePaged, useToast } from '../../components/ui';
+import { createLoop, getOpenLoops, getRecordMetrics, setLoopStatus, type Loop, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
+import { Icon, LoadFailed, Loading, PageHeader, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useToast } from '../../components/ui';
 import { Loops, OwnerPicker, type StatusFilter } from './Loops';
 import { LoopMetricsPanel } from './Metrics';
 import { NewLoopForm } from './NewLoop';
@@ -22,10 +22,8 @@ export default function OpenLoops() {
   const [q, setQ] = useState('');
   const [showNew, setShowNew] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
   const { toast, setToast } = useToast();
-  const [reload, setReload] = useState(0);
-  const { status, data: loaded, error } = useData(getOpenLoops, [reload]);
+  const { status, data: loaded, error } = useData(getOpenLoops, []);
 
   /**
    * The figures arrive once, unscoped, carrying every builder's figures with
@@ -34,7 +32,7 @@ export default function OpenLoops() {
    * run up again.
    */
   const [metricsTick, setMetricsTick] = useState(0);
-  const metrics = useData((query) => getRecordMetrics('loops', query), [metricsTick, reload]);
+  const metrics = useData((query) => getRecordMetrics('loops', query), [metricsTick]);
   const current: LoopMetrics | null = useMemo(() => {
     const m = metrics.data;
     if (!m) return null;
@@ -87,7 +85,7 @@ export default function OpenLoops() {
       const updated = await setLoopStatus(loop.id, next);
       setData((d) => (d ? { ...d, loops: d.loops.map((l) => (l.id === updated.id ? updated : l)) } : d));
       setMetricsTick((n) => n + 1);
-      setToast({ text: next === 'closed' ? 'Closed in Airtable.' : next === 'in progress' ? 'Marked in progress in Airtable.' : 'Reopened in Airtable.', tone: 'ok' });
+      setToast({ text: next === 'closed' ? 'Closed.' : next === 'in progress' ? 'Marked in progress.' : 'Reopened.', tone: 'ok' });
     } catch (e) {
       setToast({ text: e instanceof Error ? e.message : 'The change did not save.', tone: 'failing' });
     } finally {
@@ -104,31 +102,11 @@ export default function OpenLoops() {
       setShowNew(false);
       setStatusFilter((s) => (s === 'closed' ? 'open' : s));
       if (owner !== 'all' && owner !== created.owner) setOwner(created.owner);
-      setToast({ text: `Loop created in ${created.owner}’s table in Airtable.`, tone: 'ok' });
+      setToast({ text: `Loop created in ${created.owner}’s loops.`, tone: 'ok' });
     } catch (e) {
       setToast({ text: e instanceof Error ? e.message : 'The loop was not created.', tone: 'failing' });
     } finally {
       setBusyId(null);
-    }
-  }
-
-  async function pull() {
-    setSyncing(true);
-    try {
-      const r = await resync('loops');
-      const t = r.results[0]?.tables ?? [];
-      const n = t.reduce((s, x) => s + x.n, 0);
-      const failed = t.filter((x) => x.error);
-      setToast(
-        failed.length
-          ? { text: `Resync read ${n} loops but ${failed.map((x) => x.label).join(', ')} failed: ${failed[0].error}`, tone: 'failing' }
-          : { text: `Resync read ${n} loops across ${t.length} tables (${t.reduce((s, x) => s + x.changed, 0)} status changes, ${t.reduce((s, x) => s + x.removed, 0)} removed).`, tone: 'ok' },
-      );
-      setReload((n) => n + 1);
-    } catch (e) {
-      setToast({ text: e instanceof Error ? e.message : 'The resync did not run.', tone: 'failing' });
-    } finally {
-      setSyncing(false);
     }
   }
 
@@ -140,7 +118,7 @@ export default function OpenLoops() {
         title="Open loops"
         subtitle="Every commitment BHA has made, across every system"
         right={
-          <button type="button" onClick={() => setShowNew((v) => !v)} className="btn btn-primary gap-1.5" disabled={!data.sync.write_through}>
+          <button type="button" onClick={() => setShowNew((v) => !v)} className="btn btn-primary gap-1.5">
             <Icon.plus />
             New loop
           </button>
@@ -155,7 +133,7 @@ export default function OpenLoops() {
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
-          <SyncLine sync={data.sync} onResync={pull} busy={syncing} />
+          <RowsLine freshness={data.freshness} />
           <OwnerPicker data={data} owner={owner} setOwner={setOwner} />
         </div>
 
@@ -179,7 +157,7 @@ export default function OpenLoops() {
             </div>
           </div>
         </div>
-        <Loops data={data} loops={paged.rows} total={loops.length} busyId={busyId} onStatus={changeStatus} searching={Boolean(q.trim())} writable={data.sync.write_through} />
+        <Loops data={data} loops={paged.rows} total={loops.length} busyId={busyId} onStatus={changeStatus} searching={Boolean(q.trim())} />
         <Pagination paged={paged} unit="loops" />
       </div>
 

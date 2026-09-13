@@ -45,12 +45,11 @@ import { DASH, EditableCell, NewRow, type CellType } from './Editable';
  * anywhere before this, which is why the billing tab leads with a total that
  * states in the same breath how much of itself is missing.
  *
- * **This dashboard is the system of record here.** Every other records page in
- * this app is a read model over Airtable and writes through to it first; these
- * six tables have no upstream, so a change made in a cell goes straight to
- * Postgres and stays there. That is the one place this page deliberately does
- * not follow the pattern the rest of the app follows, and it is why there is no
- * "resync" control on it.
+ * **Nobody writes these but us.** Every other records page in this app shows
+ * rows the engine writes through /api/engine, and a change made there is a
+ * change to a row n8n also writes; these six tables have no upstream at all, so
+ * a change made in a cell is the only statement there will ever be about it.
+ * That is why every one of them is editable in place.
  *
  * Nothing here holds a secret. The credentials table has names, types, owners
  * and uses, and no column a value could go in — see the banner on that tab and
@@ -220,7 +219,7 @@ export default function Registry() {
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 px-6 pb-3 text-[11.5px] leading-snug text-faint md:px-8">
           Every cell here is editable — click one, type, press Enter. This dashboard is the system of record for these
-          tables: there is no Airtable base behind them, so a change is saved to Postgres and stays there. A field nobody
+          tables: nothing upstream writes them, so a change is saved to Postgres and stays there. A field nobody
           has filled in shows a dash rather than a guess.
         </div>
 
@@ -1062,20 +1061,17 @@ const OUTCOME_TONE: Record<string, string> = {
 };
 
 /**
- * What the engine has written straight into this dashboard, and what each
- * mirror table currently holds.
+ * What the engine has written into this dashboard, and what each record table
+ * currently holds.
  *
- * This tab exists for the dual-write period and is meant to be read against
- * Airtable, not instead of it. Both paths are live: Airtable is still the
- * source of truth, every page still renders from the read model that syncs
- * from it, and nothing here has replaced any of that. The question this tab
- * answers is the only one that matters before step 3 — is the engine's own
- * write path actually receiving what Airtable receives, and is anything being
- * refused.
+ * Since 13 Sep 2026 these are not a mirror of anything: the Airtable sync is
+ * gone and every page reads these tables directly. So this tab has become the
+ * page that answers whether the engine is still feeding them — and a kind
+ * whose `from_engine` is zero now matters more than it did, because its rows
+ * are frozen at the migration backfill and nothing is refreshing them.
  *
- * A kind whose `from_engine` is zero is a kind n8n has not been pointed at
- * yet. That is a fact about the wiring, not a fault, and the column says so
- * rather than colouring it as one.
+ * That is a fact about the wiring, not a fault of any row, so the column says
+ * it plainly rather than colouring the whole table as broken.
  */
 function EngineWritesTab() {
   const [reload, setReload] = useState(0);
@@ -1106,21 +1102,21 @@ function EngineWritesTab() {
       <StatStrip cols={4}>
         <CountCell label="Writes accepted" value={accepted} hint={`in the last ${d.window_hours} hours`} />
         <CountCell label="Refused" value={refused} tone={refused ? 'failing' : 'dim'} hint="rejected, unauthorised or errored" />
-        <CountCell label="Kinds receiving writes" value={wired} hint={`of ${d.held.length} mirrored tables`} />
+        <CountCell label="Kinds receiving writes" value={wired} tone={wired < d.held.length ? 'failing' : 'dim'} hint={`of ${d.held.length} record tables`} />
         <CountCell label="Writes recorded, all time" value={d.total} hint={d.last_at ? `newest ${when(d.last_at)}` : 'none yet'} />
       </StatStrip>
 
       <div className="shrink-0 px-6 pb-3 md:px-8">
         <p className="max-w-[86ch] text-[11.5px] leading-relaxed text-faint">
-          Dual-write is on and nothing has been switched over. Airtable is still the source of truth, every page still
-          renders from the read model that syncs from it, and these tables are filled alongside so the two can be
-          compared. Retiring the Airtable read path is a separate decision for a later day.
+          These tables are the record. The Airtable sync was removed on 13 September 2026 and every page reads them
+          directly, so a kind the engine is not writing is not stale — it is stopped, and its rows will stay exactly as
+          the migration backfill left them until n8n is pointed at it.
         </p>
       </div>
 
       <div className="shrink-0 px-6 pb-2 md:px-8">
         <div className="flex items-baseline justify-between gap-3 pt-2">
-          <span className="text-[13px] font-medium text-ink">What each mirror table holds</span>
+          <span className="text-[13px] font-medium text-ink">What each record table holds</span>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setReload((n) => n + 1)}>
             Refresh
           </button>
@@ -1128,15 +1124,16 @@ function EngineWritesTab() {
       </div>
 
       <Grid
-        label="Mirror tables"
-        min={1000}
+        label="Record tables"
+        min={1080}
         head={
           <>
-            <Th width="18%">Airtable table</Th>
+            <Th width="18%">what it holds</Th>
             <Th>postgres table</Th>
             <Th right>rows</Th>
-            <Th right>last from backfill</Th>
+            <Th right>last from the backfill</Th>
             <Th right>last from the engine</Th>
+            <Th right>last from a page</Th>
             <Th>newest row</Th>
           </>
         }
@@ -1147,9 +1144,10 @@ function EngineWritesTab() {
             <td className="td tabular text-faint">{h.table}</td>
             <td className="td tabular text-right text-ink">{h.rows}</td>
             <td className="td tabular text-right text-dim">{h.from_airtable}</td>
-            <td className={`td tabular text-right ${h.from_engine ? 'text-ink' : 'text-faint'}`}>
-              {h.from_engine || <span title="n8n has not been pointed at this kind yet">not wired yet</span>}
+            <td className={`td tabular text-right ${h.from_engine ? 'text-ink' : 'text-degraded'}`}>
+              {h.from_engine || <span title="n8n has not been pointed at this kind, so these rows are frozen at the backfill">not wired yet</span>}
             </td>
+            <td className="td tabular text-right text-dim">{h.from_ui}</td>
             <td className="td tabular whitespace-nowrap text-faint" title={h.latest ?? ''}>
               {when(h.latest)}
             </td>

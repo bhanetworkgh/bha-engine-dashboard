@@ -42,7 +42,6 @@ import type {
   RegistryData,
   RegistryKind,
   RegistryRowOf,
-  ResyncResponse,
   RtData,
   ServerStatus,
   SignInResult,
@@ -171,11 +170,6 @@ export function updateRecordFields<K extends RecordKind>(kind: K, id: string, fi
 
 export function createLoop(input: NewLoop): Promise<Loop> {
   return api<Loop>('/api/records/loops', { method: 'POST', body: input });
-}
-
-/** Rebuilds one kind (or every kind) from Airtable. Slow: a full read of each table. */
-export function resync(kind?: RecordKind): Promise<ResyncResponse> {
-  return api<ResyncResponse>(kind ? `/api/resync/${kind}` : '/api/resync', { method: 'POST', body: {}, timeoutMs: 180_000 });
 }
 
 export function getPatternDetail(id: string): Promise<BuildPatternDetail> {
