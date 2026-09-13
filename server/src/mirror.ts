@@ -1,20 +1,18 @@
 /**
- * The engine's own copy of every Airtable table this dashboard reads.
+ * The engine's own copy of every table this dashboard shows, and the only way
+ * a row gets into one.
  *
- * Steps 1 and 2 of the Airtable → Postgres migration (2026-09-13, Destiny).
- * Two ways in, one way through:
+ * Steps 1 and 2 of the Airtable → Postgres migration created these tables and
+ * filled them (2026-09-13, Destiny); step 3, the same day, cut the pages over
+ * to read them and removed the Airtable sync, the Airtable client and the
+ * backfill that read it. So there is now exactly one way in:
  *
- *   backfill.ts   reads Airtable and calls upsert() per record
- *   /api/engine/* n8n posts a record and calls upsert() per record
+ *   /api/engine/*   n8n posts a record and calls upsert() per record
+ *   the interface   a status change or an edit calls upsert() per record
  *
- * One function, so a row written by the engine and the same row read back from
- * Airtable land identically and cannot drift into two shapes.
- *
- * **This module reads nothing on any page yet and replaces nothing.** `records`
- * is still the read model, sync.ts still rebuilds it from Airtable, and every
- * page still reads that. These tables are filled alongside so the two can be
- * compared. Cutting the pages over is step 3, a separate decision on a later
- * day; doing it here would empty the dashboard.
+ * One function, so a row the engine writes and a row someone changes on a page
+ * land identically and cannot drift into two shapes. store.ts reads these
+ * tables directly; there is no second copy and nothing to resync.
  *
  * **Airtable's field names are kept exactly.** `fields` is the object Airtable
  * returns, stored verbatim: `What`, `Jason Status`, `Layer1 Review ` with its
@@ -24,10 +22,9 @@
  * promoted out of the blob only where something keys or filters on them, and
  * always derived from the payload, so they cannot disagree with it.
  */
-import type { AtRecord } from './airtable';
 import { nowIso } from './db';
 import { query, withTransaction, type Queryable } from './pg';
-import { CODEX_TABLES, LOOP_TABLES } from './sources';
+import { CODEX_TABLES, LOOP_TABLES, type AtRecord } from './sources';
 
 export class MirrorError extends Error {
   constructor(
@@ -247,7 +244,7 @@ function prepare(kind: MirrorKind, input: MirrorInput): {
  * `changed: false`, which is what makes both the backfill and n8n's retries
  * safe to repeat.
  */
-export async function upsert(kind: MirrorKind, input: MirrorInput, source: 'airtable' | 'engine', on?: Queryable): Promise<MirrorResult> {
+export async function upsert(kind: MirrorKind, input: MirrorInput, source: 'airtable' | 'engine' | 'ui', on?: Queryable): Promise<MirrorResult> {
   const spec = KINDS[kind];
   const p = prepare(kind, input);
   const at = nowIso();
@@ -390,31 +387,34 @@ export interface HeldCount {
   table: string;
   rows: number;
   /**
-   * Who wrote the row *last* — the backfill reading Airtable, or the engine
-   * posting to /api/engine. Not who created it: a backfilled row the engine
-   * then updates counts as the engine's, which is the signal wanted here.
+   * Who wrote the row *last* — the migration backfill that read Airtable, the
+   * engine posting to /api/engine, or someone changing it on a page. Not who
+   * created it: a backfilled row the engine then updates counts as the
+   * engine's, which is the signal wanted here.
    */
   from_airtable: number;
   from_engine: number;
+  from_ui: number;
   latest: string | null;
 }
 
 /**
  * How many rows each mirror table holds, and which path put them there.
  *
- * This is the comparison surface: run the backfill, let n8n write, and a kind
- * whose `from_engine` stays at zero is a kind n8n is not writing yet. Nothing
- * here reads Airtable — comparing against Airtable itself is what the backfill
- * does when it reports rows it had to change on a second run.
+ * This is the surface that says whether the engine is actually feeding a kind.
+ * `from_airtable` is what the migration backfill left on 13 Sep 2026 and can
+ * only shrink from here; a kind whose `from_engine` stays at zero is a kind
+ * n8n is not writing yet, and its rows are frozen at that backfill.
  */
 export async function held(): Promise<HeldCount[]> {
   const out: HeldCount[] = [];
   for (const kind of KIND_LIST) {
     const spec = KINDS[kind];
-    const r = await query<{ rows: string; from_airtable: string; from_engine: string; latest: string | null }>(
+    const r = await query<{ rows: string; from_airtable: string; from_engine: string; from_ui: string; latest: string | null }>(
       `SELECT count(*) AS rows,
               count(*) FILTER (WHERE source = 'airtable') AS from_airtable,
               count(*) FILTER (WHERE source = 'engine')   AS from_engine,
+              count(*) FILTER (WHERE source = 'ui')       AS from_ui,
               max(updated_at) AS latest
          FROM ${spec.table}`,
     );
@@ -426,6 +426,7 @@ export async function held(): Promise<HeldCount[]> {
       rows: Number(row?.rows ?? 0),
       from_airtable: Number(row?.from_airtable ?? 0),
       from_engine: Number(row?.from_engine ?? 0),
+      from_ui: Number(row?.from_ui ?? 0),
       latest: row?.latest ?? null,
     });
   }

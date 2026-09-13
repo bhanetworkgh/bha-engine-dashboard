@@ -143,7 +143,7 @@ export async function getOverview(q: Query): Promise<OverviewData> {
   const thisWeek = isoWeekOf(REF_TODAY());
   const entriesThisWeek = entries.filter((e) => e.week === thisWeek).length;
   const ingested = entries.filter((e) => e.has_entry).length;
-  const loopsSync = await store.syncInfo('loops');
+  const loopsFreshness = await store.freshness('loops');
   const openAlerts = f.VFARM_ALERTS.filter((a) => a.state === 'open');
   const vfarmVisible = q.lane === 'all' || q.lane === 'VFARM_CORE';
 
@@ -186,7 +186,7 @@ export async function getOverview(q: Query): Promise<OverviewData> {
       { label: 'Days to Halloween', value: String(daysToHalloween()), health: 'ok', accent: true },
       { label: 'vFarm status', value: vfarmVisible ? `${openAlerts.length} alerts open` : 'filtered out', health: vfarmVisible && openAlerts.length ? 'degraded' : 'ok' },
       { label: 'Open incidents', value: String(openIncidents.length), health: openIncidents.some((i) => i.health === 'failing') ? 'failing' : openIncidents.length ? 'degraded' : 'ok' },
-      { label: 'Open loops', value: loopsSync.source === 'none' ? 'not loaded' : String(totalOpen), health: loopsSync.source === 'none' ? 'degraded' : totalOpen > 200 ? 'degraded' : 'ok' },
+      { label: 'Open loops', value: loopsFreshness.source === 'none' ? 'none held' : String(totalOpen), health: loopsFreshness.source === 'none' ? 'degraded' : totalOpen > 200 ? 'degraded' : 'ok' },
       { label: 'Entries this week', value: String(entriesThisWeek), health: 'ok' },
     ],
     tiles: [
@@ -194,7 +194,16 @@ export async function getOverview(q: Query): Promise<OverviewData> {
       { key: 'research-twin', label: 'Research Twin', to: '/research-twin', headline: String(rt.length), sublabel: 'asks this period', signal: `${bySpineLane(f.RT_GAPS, q).length} unanswered`, health: bySpineLane(f.RT_GAPS, q).length > 3 ? 'degraded' : 'ok', trend: rtByDay, share: { value: rt.filter((r) => r.outcome === 'answered').length, total: rt.length, label: 'answered' } },
       { key: 'vfarm', label: 'vFarm', to: '/vfarm', headline: vfarmVisible ? String(f.VFARM_PLACES.length) : '0', sublabel: 'places reporting', signal: vfarmVisible ? `${openAlerts.length} alerts open · lifecycle not emitting` : 'filtered out', health: vfarmVisible && openAlerts.length ? 'degraded' : 'ok' },
       { key: 'engine-health', label: 'Engine health', to: '/engine-health', headline: String(openIncidents.length), sublabel: 'incidents open', signal: openIncidents.some((i) => i.error_class === 'BILLING_QUOTA') ? 'quota exhausted upstream' : 'retries pending', health: openIncidents.some((i) => i.health === 'failing') ? 'failing' : openIncidents.length ? 'degraded' : 'ok', trend: incidents7d.map((p) => p.value), share: { value: selfHealed, total: resolved, label: 'self-healed' } },
-      { key: 'open-loops', label: 'Open loops', to: '/open-loops', headline: loopsSync.source === 'none' ? '—' : String(totalOpen), sublabel: loopsSync.source === 'none' ? 'not loaded from Airtable' : 'open', signal: loopsSync.source === 'none' ? (loopsSync.error ?? 'nothing read yet') : `oldest ${oldest} days`, health: loopsSync.source === 'none' ? 'degraded' : oldest > 30 ? 'degraded' : 'ok', trend: loops14d.map((p) => p.value) },
+      {
+        key: 'open-loops',
+        label: 'Open loops',
+        to: '/open-loops',
+        headline: loopsFreshness.source === 'none' ? '—' : String(totalOpen),
+        sublabel: loopsFreshness.source === 'none' ? 'none held' : 'open',
+        signal: loopsFreshness.source === 'none' ? (loopsFreshness.note ?? 'nothing held') : `oldest ${oldest} days`,
+        health: loopsFreshness.source === 'none' ? 'degraded' : oldest > 30 ? 'degraded' : 'ok',
+        trend: loops14d.map((p) => p.value),
+      },
       { key: 'codex', label: 'Codex entries', to: '/codex', headline: String(entriesThisWeek), sublabel: 'logged this week', signal: `${entries.filter((e) => e.approval === 'pending' || e.approval === 'unset').length} awaiting Jason’s approval`, health: 'ok', trend: entriesByWeek.map((p) => p.value), share: { value: ingested, total: entries.length, label: 'with an entry written' } },
       { key: 'build-patterns', label: 'Build patterns', to: '/build-patterns', headline: String(patterns.length), sublabel: 'patterns', signal: `${canonical} canonical, ${draftPatterns} draft, ${patterns.length - canonical - draftPatterns} with no status`, health: 'ok', share: { value: canonical, total: patterns.length, label: 'canonical' } },
       { key: 'commercial', label: 'Commercial', to: '/commercial', headline: String(opps.length), sublabel: 'cards', signal: `${opps.filter((o) => o.lane_state_blocked_reason).length} blocked on research`, health: opps.some((o) => o.lane_state_blocked_reason) ? 'degraded' : 'ok', share: { value: opps.filter((o) => o.readiness_state === 'Media-Ready').length, total: opps.length, label: 'media-ready' } },
@@ -339,18 +348,18 @@ export function getEngineHealth(q: Query): EngineHealthData {
 /* ------------------------------------------------------------ open loops */
 
 export async function getOpenLoops(_q: Query): Promise<OpenLoopsData> {
-  const sync = await store.syncInfo('loops');
+  const freshness = await store.freshness('loops');
   return {
     // Newest first: the loop raised today is at the top, the oldest at the
     // bottom. Age is still on every row and still the signal; it is no longer
     // the sort.
     loops: (await store.loops()).sort((a, b) => (b.raised_at ?? '').localeCompare(a.raised_at ?? '') || a.age_days - b.age_days),
     by_owner: await store.loopsByOwner(),
-    sync,
+    freshness,
     status_history_note:
-      sync.source === 'none'
-        ? sync.error ?? 'Nothing has been read from Airtable yet.'
-        : `Read from the seven builder tables in Airtable at ${sync.synced_at?.replace('T', ' ').slice(0, 16)} UTC. Newest first; age is time since Date Raised. A status changed here is written to Airtable first and shown only from what Airtable sent back.`,
+      freshness.source === 'none'
+        ? (freshness.note ?? 'No loops are held.')
+        : `${freshness.rows} loops across ${freshness.tables.length} builder tables, as the engine has written them into this database. Newest first; age is time since Date Raised. A status changed here is written straight to that row — Airtable is no longer in the path.`,
   };
 }
 
@@ -361,7 +370,7 @@ export async function getCodexEntries(_q: Query): Promise<CodexData> {
   const entries = (await store.codexEntries()).sort((a, b) => ((a.logged_at ?? '') < (b.logged_at ?? '') ? 1 : -1));
   return {
     entries,
-    sync: await store.syncInfo('codex'),
+    freshness: await store.freshness('codex'),
     // One tab per table that exists, whether or not it has rows yet. There is
     // no Jason tab and no "no builder" tab: the table a row lives in is its
     // builder, and Jason reviews logs rather than submitting them.
@@ -382,7 +391,7 @@ export async function getNorthStarTelemetry(): Promise<NsData> {
     // Newest first: the most recent ask is the one that says whether North
     // Star is being used at all.
     records: (await store.nsRecords()).sort((a, b) => (b.asked_at ?? '').localeCompare(a.asked_at ?? '')),
-    sync: await store.syncInfo('ns'),
+    freshness: await store.freshness('ns'),
   };
 }
 
@@ -393,7 +402,7 @@ export async function getResearchTwinTelemetry(): Promise<RtData> {
   const attempts = (await store.rtAttempts()).length;
   return {
     cards,
-    sync: await store.syncInfo('rt'),
+    freshness: await store.freshness('rt'),
     shape: {
       attempts,
       cards: cards.length,
@@ -457,13 +466,13 @@ export async function getClients(): Promise<ClientsData> {
       .sort((a, b) => b.needs_human - a.needs_human || a.label.localeCompare(b.label)),
     lanes: rows,
     questions,
-    sync: await store.syncInfo('clients'),
+    freshness: await store.freshness('clients'),
     unreadable: lanes
       .filter((l) => !l.questions_table)
       .map((l) => ({
         lane_id: l.lane_id,
         name: l.name,
-        reason: 'The index row names no Table ID, so this lane’s questions could not be read. Add the table id to the index row and it appears on the next resync.',
+        reason: 'The index row names no Table ID, so this lane’s questions have nowhere to arrive from. Add the table id to the index row and point the engine at it.',
       })),
   };
 }
@@ -485,7 +494,7 @@ export async function getBuildPatterns(_q: Query): Promise<BuildPatternsData> {
   const systems = [...new Set(patterns.map((p) => p.system ?? '(no system in id)'))].sort();
   return {
     patterns,
-    sync: await store.syncInfo('patterns'),
+    freshness: await store.freshness('patterns'),
     systems: systems.map((s) => ({ system: s, n: patterns.filter((p) => (p.system ?? '(no system in id)') === s).length, canonical: patterns.filter((p) => (p.system ?? '(no system in id)') === s && p.status === 'canonical').length })),
     unset: patterns.filter((p) => p.status === 'unset').length,
   };
@@ -501,7 +510,7 @@ export async function getCommercial(_q: Query): Promise<CommercialData> {
   }
   return {
     opportunities,
-    sync: await store.syncInfo('commercial'),
+    freshness: await store.freshness('commercial'),
     lanes: laneIds.map((lane_id) => {
       const mine = opportunities.filter((o) => (o.lane_id ?? '(no lane_id)') === lane_id);
       const counted = mine.filter((o) => o.missing_research_count !== null);

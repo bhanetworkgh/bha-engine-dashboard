@@ -94,14 +94,11 @@ export interface ServerStatus {
   history_since: string | null;
   records_held: Record<string, number>;
   started_at: string;
-  /** Whether AIRTABLE_API_KEY is set, and where the client points (a local replay in a sandbox). */
-  airtable_configured: boolean;
-  airtable_url: string;
-  /** Whether DASHBOARD_INBOUND_KEY is set, so n8n can push writes. */
+  /** Whether DASHBOARD_INBOUND_KEY is set, so the engine can write. */
   inbound_configured: boolean;
-  /** Minutes between timed resyncs; 0 when disabled. */
-  resync_minutes: number;
-  sync: Record<RecordKind, SyncInfo>;
+  /** The kinds the interface can change. The rest are the engine's to write. */
+  writable: RecordKind[];
+  freshness: Record<RecordKind, Freshness>;
 }
 
 /* ---------------------------------------------------------------- status */
@@ -521,7 +518,7 @@ export interface AirtableRef {
 export interface OpenLoopsData {
   loops: Loop[];
   by_owner: OwnerTotals[];
-  sync: SyncInfo;
+  freshness: Freshness;
   status_history_note: string;
 }
 
@@ -534,22 +531,28 @@ export interface OwnerTotals {
 }
 
 /**
- * How and when a kind's rows last reached this dashboard. `source` is
- * 'airtable' after a resync, 'inbound' when the newest change came from n8n,
- * and 'none' when nothing has been loaded (no key, or a resync that failed).
+ * How old a kind's rows are, and where they came from.
+ *
+ * There is no sync behind these rows any more (2026-09-13): the engine writes
+ * them into this database and the page reads the same row. So there is no
+ * "last synced" to report and nothing that can be behind a source — what a
+ * page can honestly say is when one of its rows last changed here, how many
+ * there are, and how many the engine has written since the migration.
  */
-export interface SyncInfo {
+export interface Freshness {
   kind: RecordKind;
-  source: 'airtable' | 'none';
-  synced_at: string | null;
-  /** The last resync's failure, when there was one. */
-  error: string | null;
-  /** Rows held per table, as counted at the last resync. */
+  /** 'engine' once any row of this kind is held, 'none' when none is. */
+  source: 'engine' | 'none';
+  /** When a row of this kind last changed in this database. */
+  changed_at: string | null;
+  /** Rows held. */
+  rows: number;
+  /** Of those, how many the engine or the interface has written since the migration backfill. */
+  from_engine: number;
+  /** Rows per source table, where the kind spans several. */
   tables: { table: string; label: string; n: number }[];
-  /** Whether the server can write back to Airtable at all. */
-  write_through: boolean;
-  /** Minutes between timed resyncs, so a page can say when its rows are overdue. */
-  resync_minutes: number;
+  /** Why nothing is held, when nothing is. */
+  note: string | null;
 }
 
 /* ------------------------------- codex / patterns / commercial / builders */
@@ -656,7 +659,7 @@ export type CodexTab = 'approved' | 'pending' | 'incomplete' | 'complete';
 
 export interface CodexData {
   entries: CodexEntry[];
-  sync: SyncInfo;
+  freshness: Freshness;
   /** The tables read, in the order they are offered as builder tabs. */
   builders: { id: string; label: string; table: string; n: number }[];
   /** Submissions sitting at the Layer 0 gate, which have no builder-table row yet. */
@@ -723,7 +726,7 @@ export type WritablePatternStatus = 'draft' | 'canonical';
 
 export interface BuildPatternsData {
   patterns: BuildPattern[];
-  sync: SyncInfo;
+  freshness: Freshness;
   /** Every system seen in pattern ids, with counts, for the classification strip. */
   systems: { system: string; n: number; canonical: number }[];
   /** How many rows leave pattern_status empty, for the page's own explanation of the states. */
@@ -773,10 +776,10 @@ export interface Opportunity {
 
 export interface CommercialData {
   opportunities: Opportunity[];
-  sync: SyncInfo;
+  freshness: Freshness;
   /** Cards grouped by lane_id, in the order lanes first appear. */
   lanes: { lane_id: string; n: number; unresolved_questions: number | null }[];
-  /** Per card, missing_research_count as observed at each resync — a trend only once seen on two different days. Keyed by record id. */
+  /** Per card, missing_research_count as observed at each boot — a trend only once seen on two different days. Keyed by record id. */
   trends: Record<string, MetricSeries>;
 }
 
@@ -850,7 +853,7 @@ export interface NsRecord {
 
 export interface NsData {
   records: NsRecord[];
-  sync: SyncInfo;
+  freshness: Freshness;
 }
 
 export interface NsMetrics {
@@ -945,7 +948,7 @@ export interface RtCard {
 
 export interface RtData {
   cards: RtCard[];
-  sync: SyncInfo;
+  freshness: Freshness;
   /** Rows in the table against distinct cards — the shape caveat, stated. */
   shape: { attempts: number; cards: number; note: string };
 }
@@ -1045,7 +1048,7 @@ export interface ClientsData {
   clients: ClientGroup[];
   lanes: ClientLaneRow[];
   questions: ClientQuestion[];
-  sync: SyncInfo;
+  freshness: Freshness;
   /** Lanes whose index row names no questions table, so nothing could be read. */
   unreadable: { lane_id: string | null; name: string; reason: string }[];
 }
@@ -1053,9 +1056,10 @@ export interface ClientsData {
 /* --------------------------------------------------------------- records */
 
 /**
- * Every kind the server holds as a read model rebuilt from Airtable.
+ * Every kind the server holds, one per mirror table the engine writes.
  * 'client_questions' is a child of 'clients': the index row names its own
- * questions table and the sync follows it.
+ * questions table and the lane it belongs to, and each question row carries
+ * both.
  */
 export type RecordKind = 'loops' | 'codex' | 'patterns' | 'commercial' | 'ns' | 'rt' | 'clients' | 'client_questions';
 
@@ -1172,18 +1176,6 @@ export interface CommercialMetrics {
 }
 
 export type RecordMetrics = LoopMetrics | CodexMetrics | PatternMetrics | CommercialMetrics | NsMetrics | RtMetrics;
-
-/** What POST /api/resync answers: one result per kind, one line per table. */
-export interface ResyncResponse {
-  ok: boolean;
-  results: {
-    kind: RecordKind;
-    ok: boolean;
-    started_at: string;
-    finished_at: string;
-    tables: { table: string; label: string; n: number; inserted: number; changed: number; removed: number; error: string | null; ms: number }[];
-  }[];
-}
 
 /* ------------------------------------------------------------- registry */
 
@@ -1328,22 +1320,24 @@ export interface RegistryRowOf {
 /* --------------------------------------------------------- engine writes */
 
 /**
- * The dual-write period (2026-09-13 → step 3).
+ * What the engine has written, and what each record table holds.
  *
- * The engine now writes records straight into this dashboard's own tables at
- * the same time as it writes them to Airtable. Both paths are live and neither
- * is authoritative yet; these shapes are what makes the two comparable, which
- * is the only thing that can justify turning the Airtable read path off later.
+ * The Airtable sync went on 13 September 2026 (step 3) and these tables are
+ * the record now — every page reads them directly. So these shapes answer the
+ * question that replaced "do the two agree": is the engine still writing this
+ * kind at all, and is anything being refused.
  */
 export interface MirrorHeld {
   kind: string;
   label: string;
   table: string;
   rows: number;
-  /** Written last by the backfill reading Airtable. */
+  /** Written last by the migration backfill that read Airtable. Can only shrink from here. */
   from_airtable: number;
-  /** Written last by n8n posting to /api/engine. Still zero means not wired yet. */
+  /** Written last by n8n posting to /api/engine. Still zero means the kind is not wired yet. */
   from_engine: number;
+  /** Written last by someone changing the row on a page. */
+  from_ui: number;
   latest: string | null;
 }
 
