@@ -1,28 +1,38 @@
 /**
- * The record store: loops, Codex entries, build patterns and commercial cards
- * as this dashboard holds them, plus the status-change history the counts on
- * those pages are computed from.
+ * The record store: loops, Codex entries, build patterns, commercial cards and
+ * the three telemetry kinds as this dashboard holds them, plus the
+ * status-change history the counts on those pages are computed from.
  *
- * Decision (2026-09-09, Destiny): Airtable is the source of truth for every
- * kind. Rows here are a read model, keyed by Airtable record id, rebuilt by
- * sync.ts from the bases. Every write from the interface goes through to
- * Airtable first and is recorded here only from what Airtable sent back; if
- * Airtable refuses, nothing changes here.
+ * Decision (2026-09-13, Destiny): **this reads the mirror tables directly.**
+ * Step 3 of the Airtable → Postgres migration. Until today the rows on every
+ * page were a read model in `records`, rebuilt from Airtable every fifteen
+ * minutes by sync.ts. The engine now writes into the `engine_*` tables through
+ * /api/engine/:kind, those tables were backfilled from Airtable on 13 Sep, and
+ * so the sync, the Airtable client and the AIRTABLE_API_KEY are gone. There is
+ * no Airtable read path left in this server.
  *
- * Decision (2026-09-12, Destiny): these rows live in Postgres (bha-engine-db
- * on Render), not in a SQLite file under DATA_DIR. The service has no
- * persistent disk, so that file was wiped on every deploy and every spin-down
- * — which mattered most for `events`, the only place a status change is
- * timestamped, because the loop tables carry no close date. That history now
- * accumulates instead of restarting, and `meta.history_since` says when the
- * database itself started recording. A metric the rows cannot support is
- * still null with a note.
+ * What that changes here, and what it does not:
  *
- * No fixture is seeded for these four kinds any more. With no AIRTABLE_API_KEY
- * the pages are empty and say why, which is the truth.
+ *   - A mirror row is `{ airtable_record_id, created_time, fields }` — exactly
+ *     the shape Airtable's REST API returns, with Airtable's own field names
+ *     kept verbatim inside `fields`. So the mappers in sources.ts are unchanged
+ *     and still read `What`, `Jason Status`, `Layer1 Review ` and the rest by
+ *     the names the engine writes. A rename here would break the engine's
+ *     writes silently, which is the one thing this migration must not do.
+ *   - There is no second copy and nothing to resync: a page reads the same row
+ *     the engine wrote, in the same database, in the same request. `records`
+ *     is left in place, unread — nothing drops a table — and `events` and
+ *     `observations` carry on as they were.
+ *   - `events` is now the whole status ledger. The previous status of a record
+ *     is the last event recorded for it, not a column on a read-model row, and
+ *     reconcile() below is what notices a status that changed while this
+ *     process was not looking.
+ *   - Writes from the interface go to the mirror table and nowhere else.
+ *     Airtable is no longer written to. See setStatus.
  */
-import type { AtRecord } from './airtable';
-import * as airtable from './airtable';
+import { getMeta, nowIso, setMetaIfAbsent, today } from './db';
+import * as mirror from './mirror';
+import { getPool, withTransaction, type Queryable } from './pg';
 import type {
   BuildPattern,
   BuildPatternDetail,
@@ -34,6 +44,7 @@ import type {
   CodexMetrics,
   CodexTab,
   CommercialMetrics,
+  Freshness,
   Layer0Hold,
   Loop,
   LoopMetrics,
@@ -53,11 +64,10 @@ import type {
   RtCard,
   RtMetrics,
   SeriesPoint,
-  SyncInfo,
 } from '../../src/data/types';
-import { getMeta, nowIso, setMeta, setMetaIfAbsent, today } from './db';
-import { getPool, withTransaction, type Queryable } from './pg';
 import {
+  CLIENTS_INDEX,
+  CODEX_BASE,
   CODEX_EDITABLE,
   CODEX_JASON_STATUS,
   CODEX_TABLES,
@@ -66,8 +76,10 @@ import {
   LOOP_STATUS_TO_AIRTABLE,
   LOOP_TABLES,
   LOOPS_BASE,
+  NORTH_STAR,
   PATTERNS,
-  baseFor,
+  RESEARCH_QUEUE,
+  type AtRecord,
   canonicalPerson,
   codexSummary,
   codexTableById,
@@ -77,23 +89,18 @@ import {
   mapClientLane,
   mapClientQuestion,
   mapCodex,
+  mapLayer0,
   mapLoop,
   mapNsRecord,
-  mapRtAttempt,
   mapOpportunity,
   mapPattern,
+  mapRtAttempt,
   missingLabel,
   patternSummary,
 } from './sources';
 
 export type { RecordKind, RecordMetrics, Metric };
 
-/**
- * Read here rather than imported from sync.ts, which imports this module —
- * a cycle would leave the constant undefined at module-eval time. sync.ts
- * owns the reasoning about the number; this is the same read.
- */
-const RESYNC_MINUTES = Math.max(0, Number(process.env.AIRTABLE_RESYNC_MINUTES ?? 15) || 0);
 export const KINDS: RecordKind[] = ['loops', 'codex', 'patterns', 'commercial', 'ns', 'rt', 'clients', 'client_questions'];
 
 /** Status vocabularies, in the dashboard's words. Loops and patterns and cards are the table's own selects lower-cased or verbatim. */
@@ -111,19 +118,24 @@ export const STATUSES: Record<RecordKind, readonly string[]> = {
   client_questions: [],
 };
 
+/**
+ * One record as the pages want it: the mapped object as JSON, plus the few
+ * things that are not in the record itself — the status ledger's view of its
+ * state, and this dashboard's own note on it.
+ */
 export interface Row {
   kind: RecordKind;
   id: string;
-  key: string | null;
   json: string;
   status: string;
   builder: string | null;
   raised_at: string | null;
   closed_at: string | null;
-  updated_at: string;
-  source: string;
   table_id: string;
-  synced_at: string;
+  /** When the mirror row last changed. */
+  updated_at: string;
+  /** Who wrote it last: 'airtable' (the migration backfill), 'engine', or 'ui'. */
+  source: string;
 }
 
 export class StoreError extends Error {
@@ -182,17 +194,96 @@ export async function initStore(): Promise<void> {
   await setMetaIfAbsent('history_since', nowIso());
 }
 
-/* ------------------------------------------------------------------ rows */
+/* ------------------------------------------------------- the mirror tables */
 
-async function rows(kind: RecordKind, table?: string, on?: Queryable): Promise<Row[]> {
-  const r = table
-    ? await db(on).query<Row>('SELECT * FROM records WHERE kind = $1 AND table_id = $2', [kind, table])
-    : await db(on).query<Row>('SELECT * FROM records WHERE kind = $1', [kind]);
-  return r.rows;
+/**
+ * Which mirror table holds each kind, and where its rows live in Airtable so
+ * every row can still link back to its source.
+ *
+ * `table` is null where the kind spans several Airtable tables — loops and
+ * Codex entries are one table per builder, client questions one per lane — and
+ * the row carries its own `table_id` in that case. The table a row sits in is
+ * its owner in this engine, which is why it is stored per row rather than
+ * derived from a field.
+ */
+const MIRROR: Record<RecordKind, { table: string; base: string; at_table: string | null }> = {
+  loops: { table: 'engine_loops', base: LOOPS_BASE, at_table: null },
+  codex: { table: 'engine_codex_submissions', base: CODEX_BASE, at_table: null },
+  patterns: { table: 'engine_build_patterns', base: PATTERNS.base, at_table: PATTERNS.table },
+  commercial: { table: 'engine_commercial_cards', base: COMMERCIAL.base, at_table: COMMERCIAL.table },
+  ns: { table: 'engine_ns_records', base: NORTH_STAR.base, at_table: NORTH_STAR.table },
+  rt: { table: 'engine_rt_attempts', base: RESEARCH_QUEUE.base, at_table: RESEARCH_QUEUE.table },
+  clients: { table: 'engine_client_lanes', base: CLIENTS_INDEX.base, at_table: CLIENTS_INDEX.table },
+  client_questions: { table: 'engine_client_questions', base: CLIENTS_INDEX.base, at_table: null },
+};
+
+/** Which kind is which in mirror.ts's vocabulary, for the write path. */
+const MIRROR_KIND: Record<RecordKind, mirror.MirrorKind> = {
+  loops: 'loops',
+  codex: 'codex',
+  patterns: 'patterns',
+  commercial: 'commercial',
+  ns: 'ns',
+  rt: 'rt',
+  clients: 'client_lanes',
+  client_questions: 'client_questions',
+};
+
+const HAS_BUILDER = new Set<RecordKind>(['loops', 'codex']);
+const HAS_TABLE = new Set<RecordKind>(['loops', 'codex', 'client_questions']);
+const HAS_LANE = new Set<RecordKind>(['commercial', 'ns', 'rt', 'client_questions']);
+
+interface MirrorRow {
+  pk: string;
+  airtable_record_id: string | null;
+  created_time: string | null;
+  fields: Record<string, unknown> | null;
+  table_id: string | null;
+  builder_id: string | null;
+  lane_id: string | null;
+  source: string;
+  first_seen_at: string;
+  updated_at: string;
 }
-async function rowById(kind: RecordKind, id: string, on?: Queryable): Promise<Row | null> {
-  const r = await db(on).query<Row>('SELECT * FROM records WHERE kind = $1 AND id = $2', [kind, id]);
-  return r.rows[0] ?? null;
+
+/**
+ * The same nine things from every mirror table, whether or not that table has
+ * the column. Only the ones something keys or groups on were promoted out of
+ * the payload, so the missing ones are selected as null rather than guessed at.
+ */
+function selectFor(kind: RecordKind): string {
+  return `SELECT id::text AS pk, airtable_record_id, created_time, fields,
+                 ${HAS_TABLE.has(kind) ? 'table_id' : 'NULL::text AS table_id'},
+                 ${HAS_BUILDER.has(kind) ? 'builder_id' : 'NULL::text AS builder_id'},
+                 ${HAS_LANE.has(kind) ? 'lane_id' : 'NULL::text AS lane_id'},
+                 source, first_seen_at, updated_at
+            FROM ${MIRROR[kind].table}`;
+}
+
+/**
+ * The id the rest of the dashboard knows a record by.
+ *
+ * Airtable's record id where there is one — every row the backfill brought has
+ * one, and so does every engine write that names it. A row the engine created
+ * here before Airtable had it has none, and gets this database's own key
+ * instead, so that a detail page, a status change and a note can still address
+ * it. It is stable: the primary key never changes, and adopting the row when
+ * Airtable's id arrives is the one case where a record's id moves.
+ */
+function idOf(mr: MirrorRow): string {
+  return mr.airtable_record_id ?? `row-${mr.pk}`;
+}
+
+/** Which Airtable table this row is from: its own where the kind spans several, the kind's otherwise. */
+function tableOf(kind: RecordKind, mr: MirrorRow): string {
+  if (mr.table_id) return mr.table_id;
+  if (kind === 'loops') return loopTable(mr.builder_id ?? '')?.table ?? '';
+  if (kind === 'codex') return CODEX_TABLES.find((t) => t.owner === mr.builder_id)?.table ?? '';
+  return MIRROR[kind].at_table ?? '';
+}
+
+function asRecord(mr: MirrorRow): AtRecord {
+  return { id: idOf(mr), createdTime: mr.created_time ?? '', fields: mr.fields ?? {} };
 }
 
 type Mapped =
@@ -204,6 +295,36 @@ type Mapped =
   | { kind: 'rt'; obj: RtAttempt }
   | { kind: 'clients'; obj: ClientLane }
   | { kind: 'client_questions'; obj: ClientQuestion };
+
+export function mapRecord(kind: RecordKind, rec: AtRecord, table: string, lane?: string | null): Mapped {
+  switch (kind) {
+    case 'loops': {
+      const t = loopTableById(table);
+      if (!t) throw new StoreError(`${table} is not one of the builder tables.`, 422);
+      return { kind, obj: mapLoop(rec, t.owner, table) };
+    }
+    case 'codex': {
+      const t = codexTableById(table);
+      if (!t) throw new StoreError(`${table} is not one of the submission tables.`, 422);
+      return { kind, obj: mapCodex(rec, t.owner, table) };
+    }
+    case 'patterns':
+      return { kind, obj: mapPattern(rec) };
+    case 'commercial':
+      return { kind, obj: mapOpportunity(rec) };
+    case 'ns':
+      return { kind, obj: mapNsRecord(rec) };
+    case 'rt':
+      return { kind, obj: mapRtAttempt(rec) };
+    case 'clients':
+      return { kind, obj: mapClientLane(rec) };
+    case 'client_questions':
+      // The lane a question belongs to is carried on the row: the index names
+      // the per-lane table and the lane it belongs to, and the write path
+      // records both. Nothing is hardcoded and nothing is inferred.
+      return { kind, obj: mapClientQuestion(rec, lane ?? table, table) };
+  }
+}
 
 function statusOf(m: Mapped): string {
   switch (m.kind) {
@@ -223,26 +344,6 @@ function statusOf(m: Mapped): string {
       return m.obj.run_state ?? 'unset';
     case 'client_questions':
       return m.obj.movement_tag ?? 'unset';
-  }
-}
-function keyOf(m: Mapped): string | null {
-  switch (m.kind) {
-    case 'loops':
-      return m.obj.loop_id;
-    case 'codex':
-      return m.obj.codex_entry_id ?? m.obj.submission_id;
-    case 'patterns':
-      return m.obj.pattern_id;
-    case 'commercial':
-      return m.obj.card_id;
-    case 'ns':
-      return m.obj.trace_id;
-    case 'rt':
-      return m.obj.card_id;
-    case 'clients':
-      return m.obj.lane_id;
-    case 'client_questions':
-      return m.obj.lane_id;
   }
 }
 function builderOf(m: Mapped): string | null {
@@ -268,140 +369,236 @@ function raisedOf(m: Mapped): string | null {
       return m.obj.last_updated ? m.obj.last_updated.slice(0, 10) : null;
   }
 }
+
+/** The status that means a record is done. Only loops have one. */
 const TERMINAL: Partial<Record<RecordKind, string>> = { loops: 'closed' };
 
-/**
- * Writes one mapped record over whatever is held for it. Idempotent: the same
- * record twice is one row. A status that differs from the held row is recorded
- * as an event, stamped `at` (an inbound payload's own time, else now).
- */
-export async function upsert(
-  m: Mapped,
-  table: string,
-  via: 'airtable' | 'inbound' | 'ui',
-  at = nowIso(),
-  on?: Queryable,
-): Promise<{ changed: boolean; inserted: boolean }> {
-  // The row and the event it raises are one change; without a transaction a
-  // crash between them leaves a status with no record of when it changed.
-  if (!on) return withTransaction((client) => upsert(m, table, via, at, client));
-  const prev = await rowById(m.kind, m.obj.id, on);
-  const status = statusOf(m);
-  const terminal = TERMINAL[m.kind];
-  let closedAt = prev?.closed_at ?? null;
-  if (terminal) {
-    if (status === terminal && prev && prev.status !== terminal) closedAt = at.slice(0, 10);
-    if (status !== terminal) closedAt = null;
-  }
-  const obj: Record<string, unknown> = { ...m.obj, closed_at: closedAt };
-  if (prev) {
-    const held = JSON.parse(prev.json) as { note?: string | null };
-    if (held.note && obj.note == null) obj.note = held.note;
-  }
-  await on.query(
-    `INSERT INTO records (kind, id, key, json, status, builder, raised_at, closed_at, updated_at, source, table_id, synced_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-     ON CONFLICT (kind, id) DO UPDATE SET key = excluded.key, json = excluded.json, status = excluded.status, builder = excluded.builder,
-       raised_at = excluded.raised_at, closed_at = excluded.closed_at, updated_at = excluded.updated_at, source = excluded.source,
-       table_id = excluded.table_id, synced_at = excluded.synced_at`,
-    [m.kind, m.obj.id, keyOf(m), JSON.stringify(obj), status, builderOf(m), raisedOf(m), closedAt, at, via, table, at],
+/* --------------------------------------------------------- status ledger */
+
+interface LastEvent {
+  record_id: string;
+  from_status: string | null;
+  to_status: string;
+  at: string;
+}
+
+/** The newest event for one record — its state as this database last saw it. */
+async function lastEventFor(kind: RecordKind, id: string, on?: Queryable): Promise<LastEvent | undefined> {
+  const r = await db(on).query<LastEvent>('SELECT record_id, from_status, to_status, at FROM events WHERE kind = $1 AND record_id = $2 ORDER BY at DESC, seq DESC LIMIT 1', [kind, id]);
+  return r.rows[0];
+}
+
+/** The newest event for every record of a kind — which is that record's state as this database last saw it. */
+async function lastEvents(kind: RecordKind, on?: Queryable): Promise<Map<string, LastEvent>> {
+  const r = await db(on).query<LastEvent>(
+    `SELECT DISTINCT ON (record_id) record_id, from_status, to_status, at
+       FROM events WHERE kind = $1 ORDER BY record_id, at DESC, seq DESC`,
+    [kind],
   );
-  bumpVersion();
-  const changed = !prev || prev.status !== status;
-  if (changed) {
-    await on.query('INSERT INTO events (kind, record_id, builder, from_status, to_status, via, at) VALUES ($1, $2, $3, $4, $5, $6, $7)', [
-      m.kind,
-      m.obj.id,
-      builderOf(m),
-      prev?.status ?? null,
-      status,
-      via,
-      at,
-    ]);
-  }
-  return { changed: Boolean(prev) && prev!.status !== status, inserted: !prev };
-}
-
-/** Removes rows of one table that a full read of that table no longer contains. */
-export async function purgeMissing(kind: RecordKind, table: string, keep: Set<string>, on?: Queryable): Promise<number> {
-  // One statement rather than a read and a delete per row. An empty `keep`
-  // removes every row of that table, as before: the caller only reaches here
-  // after a successful full read, so an empty read means an empty table.
-  const r = await db(on).query('DELETE FROM records WHERE kind = $1 AND table_id = $2 AND NOT (id = ANY($3::text[]))', [kind, table, [...keep]]);
-  const n = r.rowCount ?? 0;
-  if (n) bumpVersion();
-  return n;
-}
-
-export async function mapRecord(kind: RecordKind, rec: AtRecord, table: string): Promise<Mapped> {
-  switch (kind) {
-    case 'loops': {
-      const t = loopTableById(table);
-      if (!t) throw new StoreError(`${table} is not one of the builder tables.`, 422);
-      return { kind, obj: mapLoop(rec, t.owner, table) };
-    }
-    case 'codex': {
-      const t = codexTableById(table);
-      if (!t) throw new StoreError(`${table} is not one of the submission tables.`, 422);
-      return { kind, obj: mapCodex(rec, t.owner, table) };
-    }
-    case 'patterns':
-      return { kind, obj: mapPattern(rec) };
-    case 'commercial':
-      return { kind, obj: mapOpportunity(rec) };
-    case 'ns':
-      return { kind, obj: mapNsRecord(rec) };
-    case 'rt':
-      return { kind, obj: mapRtAttempt(rec) };
-    case 'clients':
-      return { kind, obj: mapClientLane(rec) };
-    case 'client_questions': {
-      // The lane a question belongs to is the table it was read from; the
-      // sync records that mapping when it follows each index row's Table ID.
-      const lane = await questionLaneFor(table);
-      return { kind, obj: mapClientQuestion(rec, lane ?? table, table) };
-    }
-  }
-}
-
-/* ---------------------------------------------- clients: table → lane map */
-
-/**
- * Which lane a questions table belongs to, learned from the index at sync
- * time rather than hardcoded — the same reason the pipeline dropped its own
- * lane-to-table map: adding a lane should be a row, not a deploy.
- */
-export async function setQuestionTables(map: Record<string, string>): Promise<void> {
-  await setMeta('clients:tables', JSON.stringify(map));
-  questionTablesCache = map;
-  bumpVersion();
-}
-export async function questionTables(): Promise<Record<string, string>> {
-  if (questionTablesCache) return questionTablesCache;
-  const raw = await getMeta('clients:tables');
-  questionTablesCache = parseTableMap(raw);
-  return questionTablesCache;
+  return new Map(r.rows.map((e) => [e.record_id, e]));
 }
 
 /**
- * Held in memory after the first read, and replaced whenever a sync writes a
- * new one. Postgres is still where it lives; this is only so that mapping a
- * few hundred question rows does not mean a query per row. It is a map of
- * four table ids, and a stale one cannot outlive the resync that wrote it.
+ * When a record reached its terminal status, where the ledger can say.
+ *
+ * Only a *transition* dates a close: an event with no `from_status` is the
+ * first time this database saw the record at all, and a loop that was already
+ * closed when it arrived has no close date anywhere — the loop tables carry
+ * none. That is the same rule the read model applied before the cut, kept
+ * deliberately, so a backfill date never reads as a close date.
  */
-let questionTablesCache: Record<string, string> | null = null;
-
-function parseTableMap(raw: string | null): Record<string, string> {
-  if (!raw) return {};
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, string>) : {};
-  } catch {
-    return {};
-  }
+function terminalDates(kind: RecordKind, last: Map<string, LastEvent>): Map<string, string> {
+  const terminal = TERMINAL[kind];
+  const out = new Map<string, string>();
+  if (!terminal) return out;
+  for (const [id, e] of last) if (e.to_status === terminal && e.from_status !== null) out.set(id, e.at.slice(0, 10));
+  return out;
 }
-async function questionLaneFor(table: string): Promise<string | null> {
-  return (await questionTables())[table] ?? null;
+
+/** This dashboard's own note on someone else's record. Airtable never carried it; see migration 4. */
+async function notesFor(kind: RecordKind, on?: Queryable): Promise<Map<string, string>> {
+  const r = await db(on).query<{ record_id: string; note: string }>('SELECT record_id, note FROM record_notes WHERE kind = $1', [kind]);
+  return new Map(r.rows.map((n) => [n.record_id, n.note]));
+}
+
+export async function setNote(kind: RecordKind, id: string, note: string | null): Promise<void> {
+  const text = (note ?? '').trim();
+  if (!text) await db().query('DELETE FROM record_notes WHERE kind = $1 AND record_id = $2', [kind, id]);
+  else {
+    await db().query(
+      `INSERT INTO record_notes (kind, record_id, note, updated_at) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (kind, record_id) DO UPDATE SET note = excluded.note, updated_at = excluded.updated_at`,
+      [kind, id, text.slice(0, 2000), nowIso()],
+    );
+  }
+  bumpVersion();
+}
+
+/**
+ * Records a status this database had not seen for a record.
+ *
+ * The previous status is the last event, not a column: `events` is the ledger
+ * now. `via` says how we learned of the change and is what the close-rate
+ * figures filter on — 'engine' and 'ui' are changes with a real timestamp,
+ * 'mirror' is one reconcile() noticed after the fact and cannot date.
+ */
+async function recordState(kind: RecordKind, m: Mapped, via: 'engine' | 'ui' | 'mirror', at: string, prev: LastEvent | undefined, on?: Queryable): Promise<{ changed: boolean; inserted: boolean }> {
+  const status = statusOf(m);
+  if (prev && prev.to_status === status) return { changed: false, inserted: false };
+  await db(on).query('INSERT INTO events (kind, record_id, builder, from_status, to_status, via, at) VALUES ($1, $2, $3, $4, $5, $6, $7)', [
+    kind,
+    m.obj.id,
+    builderOf(m),
+    prev?.to_status ?? null,
+    status,
+    via,
+    at,
+  ]);
+  bumpVersion();
+  return { changed: Boolean(prev), inserted: !prev };
+}
+
+/* ------------------------------------------------------------------ rows */
+
+/**
+ * Mapped rows are memoised for three seconds, keyed by the store version.
+ *
+ * A page asks for the same kind several times over one request — the list, the
+ * metrics, the by-builder pass — and mapping a few hundred records each time is
+ * work for nothing. Every write in this process bumps the version and drops the
+ * memo immediately; the three seconds is the ceiling on how long a write made
+ * somewhere else could take to appear. It is a cache of this process's own
+ * reads, never a store: there is one row for a record and it is in Postgres.
+ */
+const rowsCache = new Map<string, { version: number; at: number; value: Row[] }>();
+const ROWS_TTL_MS = 3_000;
+
+async function rows(kind: RecordKind, table?: string, on?: Queryable): Promise<Row[]> {
+  const key = `${kind}:${table ?? '*'}`;
+  const hit = rowsCache.get(key);
+  if (!on && hit && hit.version === storeVersion && Date.now() - hit.at < ROWS_TTL_MS) return hit.value;
+
+  const sql = table ? `${selectFor(kind)} WHERE table_id = $1` : selectFor(kind);
+  const r = await db(on).query<MirrorRow>(sql, table ? [table] : []);
+  const last = await lastEvents(kind, on);
+  const closes = terminalDates(kind, last);
+  const notes = await notesFor(kind, on);
+
+  const out: Row[] = [];
+  for (const mr of r.rows) {
+    const id = idOf(mr);
+    let m: Mapped;
+    try {
+      m = mapRecord(kind, asRecord(mr), tableOf(kind, mr), mr.lane_id);
+    } catch (e) {
+      // A row whose table this server does not recognise cannot be mapped. It
+      // is named rather than swallowed, and the other rows still render.
+      console.log(`store: skipped ${kind} ${id} — ${e instanceof Error ? e.message : String(e)}`);
+      continue;
+    }
+    const closed_at = closes.get(id) ?? null;
+    const note = notes.get(id) ?? null;
+    out.push({
+      kind,
+      id,
+      json: JSON.stringify({ ...m.obj, closed_at, note }),
+      status: statusOf(m),
+      builder: builderOf(m),
+      raised_at: raisedOf(m),
+      closed_at,
+      table_id: tableOf(kind, mr),
+      updated_at: mr.updated_at,
+      source: mr.source,
+    });
+  }
+  if (!on) rowsCache.set(key, { version: storeVersion, at: Date.now(), value: out });
+  return out;
+}
+
+/** The mirror row behind one record id, by Airtable's id or by this database's own. */
+async function mirrorRowById(kind: RecordKind, id: string, on?: Queryable): Promise<MirrorRow | null> {
+  const local = /^row-(\d+)$/.exec(id);
+  const r = local
+    ? await db(on).query<MirrorRow>(`${selectFor(kind)} WHERE id = $1`, [local[1]])
+    : await db(on).query<MirrorRow>(`${selectFor(kind)} WHERE airtable_record_id = $1`, [id]);
+  return r.rows[0] ?? null;
+}
+
+async function rowById(kind: RecordKind, id: string, on?: Queryable): Promise<Row | null> {
+  const mr = await mirrorRowById(kind, id, on);
+  if (!mr) return null;
+  const m = mapRecord(kind, asRecord(mr), tableOf(kind, mr), mr.lane_id);
+  const last = (await lastEvents(kind, on)).get(id);
+  const closed_at = last && last.to_status === TERMINAL[kind] && last.from_status !== null ? last.at.slice(0, 10) : null;
+  const n = await db(on).query<{ note: string }>('SELECT note FROM record_notes WHERE kind = $1 AND record_id = $2', [kind, id]);
+  const note = n.rows[0]?.note ?? null;
+  return {
+    kind,
+    id,
+    json: JSON.stringify({ ...m.obj, closed_at, note }),
+    status: statusOf(m),
+    builder: builderOf(m),
+    raised_at: raisedOf(m),
+    closed_at,
+    table_id: tableOf(kind, mr),
+    updated_at: mr.updated_at,
+    source: mr.source,
+  };
+}
+
+/* ------------------------------------------------------------ reconcile */
+
+export interface ReconcileResult {
+  kind: RecordKind;
+  rows: number;
+  first_seen: number;
+  changed: number;
+}
+
+/**
+ * Brings the status ledger up to date with the mirror tables.
+ *
+ * Every status change this dashboard can date has to be written down at the
+ * moment it is learned, because nothing upstream keeps a status-change history
+ * — the loop tables carry no close date at all. A write through
+ * /api/engine/:kind or through the interface records its own event as it lands.
+ * This is for everything else: rows the backfill brought, and anything that
+ * changed in the database while this process was not running.
+ *
+ * Idempotent — a second run writes nothing — and cheap, because it is one read
+ * of tables that are in this same database. Runs at boot.
+ */
+export async function reconcile(only?: RecordKind): Promise<ReconcileResult[]> {
+  const out: ReconcileResult[] = [];
+  for (const kind of only ? [only] : KINDS) {
+    const all = await rows(kind);
+    const last = await lastEvents(kind);
+    let first_seen = 0;
+    let changed = 0;
+    await withTransaction(async (client) => {
+      for (const row of all) {
+        const prev = last.get(row.id);
+        if (prev && prev.to_status === row.status) continue;
+        // A record seen for the first time is stamped when this database first
+        // held it, not when this reconcile ran — otherwise every restart would
+        // date the whole history to the restart.
+        await client.query('INSERT INTO events (kind, record_id, builder, from_status, to_status, via, at) VALUES ($1, $2, $3, $4, $5, $6, $7)', [
+          kind,
+          row.id,
+          row.builder,
+          prev?.to_status ?? null,
+          row.status,
+          'mirror',
+          prev ? nowIso() : row.updated_at,
+        ]);
+        if (prev) changed++;
+        else first_seen++;
+      }
+    });
+    if (first_seen || changed) bumpVersion();
+    out.push({ kind, rows: all.length, first_seen, changed });
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ reads */
@@ -426,22 +623,15 @@ export async function codexDetail(id: string): Promise<CodexEntryDetail | null> 
 
 /**
  * Submissions parked at the completeness gate. They are not records of any
- * kind — no status, no write path — so they are held in `meta` as the last
- * full read of that table rather than in the records table.
+ * kind — no status, no write path — so they are read straight off their own
+ * mirror table rather than going through the row machinery above.
  */
-export async function setLayer0Holds(holds: Layer0Hold[]): Promise<void> {
-  await setMeta('codex:layer0', JSON.stringify(holds));
-  bumpVersion();
-}
 export async function layer0Holds(): Promise<Layer0Hold[]> {
-  const raw = await getMeta('codex:layer0');
-  if (!raw) return [];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as Layer0Hold[]) : [];
-  } catch {
-    return [];
-  }
+  const r = await db().query<MirrorRow>(
+    `SELECT id::text AS pk, airtable_record_id, created_time, fields, NULL::text AS table_id, NULL::text AS builder_id,
+            NULL::text AS lane_id, source, first_seen_at, updated_at FROM engine_layer0_holds`,
+  );
+  return r.rows.map((mr) => mapLayer0(asRecord(mr)));
 }
 export async function patterns(): Promise<BuildPattern[]> {
   return (await rows('patterns')).map((r) => patternSummary(JSON.parse(r.json) as BuildPatternDetail));
@@ -493,31 +683,51 @@ export async function loopsByOwner(): Promise<OwnerTotals[]> {
   }).filter((o) => o.open + o.in_progress + o.closed > 0);
 }
 
-/* ------------------------------------------------------------------- sync */
+/* ------------------------------------------------------------- freshness */
 
-export interface SyncState {
-  synced_at: string | null;
-  error: string | null;
-  tables: { table: string; label: string; n: number }[];
-}
-export async function syncState(kind: RecordKind): Promise<SyncState> {
-  const raw = await getMeta(`sync:${kind}`);
-  return raw ? (JSON.parse(raw) as SyncState) : { synced_at: null, error: null, tables: [] };
-}
-export async function setSyncState(kind: RecordKind, s: SyncState): Promise<void> {
-  await setMeta(`sync:${kind}`, JSON.stringify(s));
-}
-export async function syncInfo(kind: RecordKind): Promise<SyncInfo> {
-  const s = await syncState(kind);
+/**
+ * How old the rows on a page are, and where they came from.
+ *
+ * There is no sync any more, so there is no "last synced" to report and
+ * nothing that could be behind a source. What a page can honestly say is when
+ * one of its rows last changed in this database, how many there are, and how
+ * many of them the engine has written since the migration — which is the one
+ * number that says whether this kind is still being fed.
+ */
+export async function freshness(kind: RecordKind): Promise<Freshness> {
+  const m = MIRROR[kind];
+  const grouped = HAS_TABLE.has(kind);
+  const r = await db().query<{ table_id: string | null; n: string; changed_at: string | null; from_engine: string }>(
+    grouped
+      ? `SELECT table_id, count(*)::text AS n, max(updated_at) AS changed_at,
+                count(*) FILTER (WHERE source <> 'airtable')::text AS from_engine
+           FROM ${m.table} GROUP BY table_id`
+      : `SELECT NULL::text AS table_id, count(*)::text AS n, max(updated_at) AS changed_at,
+                count(*) FILTER (WHERE source <> 'airtable')::text AS from_engine
+           FROM ${m.table}`,
+  );
+  const tables = r.rows
+    .filter((row) => Number(row.n) > 0)
+    .map((row) => ({ table: row.table_id ?? (m.at_table ?? m.table), label: labelForTable(kind, row.table_id), n: Number(row.n) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const total = r.rows.reduce((n, row) => n + Number(row.n), 0);
+  const changed_at = r.rows.reduce<string | null>((a, row) => (row.changed_at && (!a || row.changed_at > a) ? row.changed_at : a), null);
   return {
     kind,
-    source: s.synced_at ? 'airtable' : 'none',
-    synced_at: s.synced_at,
-    error: s.error,
-    tables: s.tables,
-    write_through: airtable.airtableConfigured(),
-    resync_minutes: RESYNC_MINUTES,
+    source: total ? 'engine' : 'none',
+    changed_at,
+    rows: total,
+    from_engine: r.rows.reduce((n, row) => n + Number(row.from_engine), 0),
+    tables,
+    note: total ? null : 'Nothing of this kind is held. The engine writes these rows to /api/engine/' + MIRROR_KIND[kind] + '; nothing has arrived yet.',
   };
+}
+
+function labelForTable(kind: RecordKind, table: string | null): string {
+  if (kind === 'loops') return loopTableById(table ?? '')?.label ?? table ?? 'Unknown table';
+  if (kind === 'codex') return codexTableById(table ?? '')?.label ?? table ?? 'Unknown table';
+  if (kind === 'client_questions') return table ?? 'Unknown table';
+  return mirror.KINDS[MIRROR_KIND[kind]].label;
 }
 
 export async function observe(kind: RecordKind, metric: string, value: number): Promise<void> {
@@ -528,7 +738,7 @@ export async function cardTrend(id: string): Promise<MetricSeries> {
   const obs = await observations('commercial', `unresolved:${id}`);
   const days = new Set(obs.map((o) => o.at.slice(0, 10)));
   return days.size >= 2
-    ? { points: obs.map((o) => ({ label: o.at.slice(5, 10), value: Math.round(o.value) })), note: 'missing_research_count as observed at each resync, since this database started recording.' }
+    ? { points: obs.map((o) => ({ label: o.at.slice(5, 10), value: Math.round(o.value) })), note: 'missing_research_count as observed at each boot, since this database started recording.' }
     : { points: null, note: obs.length ? `Seen on one day only (${[...days][0]}); a trend needs at least two.` : 'Not observed yet.' };
 }
 async function observations(kind: RecordKind, metric: string): Promise<{ at: string; value: number }[]> {
@@ -536,42 +746,55 @@ async function observations(kind: RecordKind, metric: string): Promise<{ at: str
   return r.rows;
 }
 
+/** The two figures a trend needs history for. Observed once a boot, after reconcile. */
+export async function recordObservations(): Promise<void> {
+  const p = await patternMetrics();
+  if (p.scope.rows) await observe('patterns', 'canonical_share', (p.canonical / p.scope.rows) * 100);
+  const c = await commercialMetrics();
+  if (c.unresolved_questions.value !== null) await observe('commercial', 'unresolved_questions', c.unresolved_questions.value);
+  for (const o of await opportunities()) if (o.missing_research_count !== null) await observe('commercial', `unresolved:${o.id}`, o.missing_research_count);
+}
+
 /* ----------------------------------------------------------------- writes */
 
-function requireWrite(): void {
-  if (!airtable.airtableConfigured()) {
-    throw new StoreError('Airtable is the source of truth and this server has no AIRTABLE_API_KEY, so the change was not made.', 503);
-  }
-}
-
-async function writeThrough(kind: RecordKind, r: Row, fields: Record<string, unknown>): Promise<Mapped> {
-  requireWrite();
-  const base = baseFor(kind);
-  let rec: AtRecord;
-  try {
-    rec = await airtable.updateRecord(base, r.table_id, r.id, fields);
-  } catch (e) {
-    if (e instanceof airtable.AirtableError) throw new StoreError(`Airtable did not accept the change: ${e.message}`, e.status === 0 ? 502 : e.status >= 500 ? 502 : e.status);
-    throw e;
-  }
-  return mapRecord(kind, rec, r.table_id);
-}
-
 /**
- * Changes one record's status. Airtable first; the held row is then replaced
- * by what Airtable returned, and the change is recorded as an event.
+ * Writes one record's own fields, keeping every field it already had.
+ *
+ * Airtable's PATCH left untouched fields alone and this keeps that behaviour,
+ * which matters more now than it did: `fields` is stored whole, so replacing it
+ * with the two keys the interface knows about would drop every other field on
+ * the row — the exact silent data loss this migration was meant to end.
+ *
+ * Decision (2026-09-13, Destiny): this is the write, not a write-through.
+ * Airtable is no longer written to from this dashboard. A change made here is
+ * in the mirror table the engine reads and writes; if n8n later pushes the same
+ * record carrying Airtable's copy of these fields, that push wins, because a
+ * push is the newer statement about the record.
  */
+async function writeFields(kind: RecordKind, mr: MirrorRow, patch: Record<string, unknown>): Promise<Mapped> {
+  const fields = { ...(mr.fields ?? {}), ...patch };
+  for (const [k, v] of Object.entries(patch)) if (v === null) delete fields[k];
+  await mirror.upsert(
+    MIRROR_KIND[kind],
+    { record_id: mr.airtable_record_id, created_time: mr.created_time, fields, builder_id: mr.builder_id, table_id: mr.table_id, lane_id: mr.lane_id },
+    'ui',
+  );
+  bumpVersion();
+  return mapRecord(kind, { id: idOf(mr), createdTime: mr.created_time ?? '', fields }, tableOf(kind, mr), mr.lane_id);
+}
+
+/** Changes one record's status, and records the change in the ledger. */
 export async function setStatus(kind: RecordKind, id: string, status: string, note?: string): Promise<Loop | CodexEntry | BuildPattern | Opportunity> {
   if (!STATUSES[kind].length) throw new StoreError(`${kind} is read-only in this dashboard: the engine writes it.`, 422);
   if (!STATUSES[kind].includes(status)) {
     throw new StoreError(`"${status}" is not a status a ${kind === 'loops' ? 'loop' : kind === 'codex' ? 'Codex entry' : kind === 'patterns' ? 'pattern' : 'card'} can have.`, 422);
   }
-  const r = await rowById(kind, id);
-  if (!r) throw new StoreError('That record is not held by this dashboard.', 404);
-  // Codex: the status is Jason Status, written back in the table's own spelling.
+  const mr = await mirrorRowById(kind, id);
+  if (!mr) throw new StoreError('That record is not held by this dashboard.', 404);
+  // Codex: the status is Jason Status, written in the table's own spelling.
   const jason = CODEX_JASON_STATUS.find((c) => c.toLowerCase() === status);
   if (kind === 'codex' && !jason) throw new StoreError(`"${status}" is not a Jason Status the submission tables define.`, 422);
-  const fields: Record<string, unknown> =
+  const patch: Record<string, unknown> =
     kind === 'loops'
       ? { Status: LOOP_STATUS_TO_AIRTABLE[status as LoopStatus] }
       : kind === 'codex'
@@ -579,16 +802,16 @@ export async function setStatus(kind: RecordKind, id: string, status: string, no
         : kind === 'patterns'
           ? { pattern_status: status }
           : { readiness_state: status };
-  const m = await writeThrough(kind, r, fields);
-  if (note !== undefined) (m.obj as { note?: string | null }).note = note.trim() || null;
-  await upsert(m, r.table_id, 'ui');
+  const m = await writeFields(kind, mr, patch);
+  await recordState(kind, m, 'ui', nowIso(), await lastEventFor(kind, id));
+  if (note !== undefined) await setNote(kind, id, note);
   return (await read(kind, id)) as Loop | CodexEntry | BuildPattern | Opportunity;
 }
 
-/** Edits a Codex entry's own fields. Airtable first, then the held row from what came back. */
+/** Edits a record's own fields, by the names the source spells them. */
 export async function updateFields(kind: RecordKind, id: string, fields: Record<string, unknown>): Promise<CodexEntry | Opportunity | BuildPatternDetail | Loop> {
-  const r = await rowById(kind, id);
-  if (!r) throw new StoreError('That record is not held by this dashboard.', 404);
+  const mr = await mirrorRowById(kind, id);
+  if (!mr) throw new StoreError('That record is not held by this dashboard.', 404);
   const allowed = kind === 'codex' ? CODEX_EDITABLE : kind === 'loops' ? new Set(['What', 'lane_tag', 'raised_in', 'Raised By']) : new Set<string>();
   const clean: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(fields)) {
@@ -597,8 +820,8 @@ export async function updateFields(kind: RecordKind, id: string, fields: Record<
     clean[k] = typeof v === 'string' ? v.trim() || null : v;
   }
   if (!Object.keys(clean).length) throw new StoreError('Nothing to change.', 422);
-  const m = await writeThrough(kind, r, clean);
-  await upsert(m, r.table_id, 'ui');
+  const m = await writeFields(kind, mr, clean);
+  await recordState(kind, m, 'ui', nowIso(), await lastEventFor(kind, id));
   const out = (await rowById(kind, id))!;
   if (kind === 'loops') return hydrateLoop(out);
   if (kind === 'codex') return codexSummary(JSON.parse(out.json) as CodexEntryDetail);
@@ -606,7 +829,6 @@ export async function updateFields(kind: RecordKind, id: string, fields: Record<
 }
 
 export async function createLoop(input: NewLoop): Promise<Loop> {
-  requireWrite();
   const title = (input.title ?? '').trim();
   if (!title) throw new StoreError('A loop needs a title.', 422);
   const t = loopTable(input.owner);
@@ -621,50 +843,135 @@ export async function createLoop(input: NewLoop): Promise<Loop> {
     raised_in: 'bha-engine-dashboard',
   };
   if (input.raised_by?.trim()) fields['Raised By'] = input.raised_by.trim();
-  let rec: AtRecord;
-  try {
-    rec = await airtable.createRecord(LOOPS_BASE, t.table, fields);
-  } catch (e) {
-    if (e instanceof airtable.AirtableError) throw new StoreError(`Airtable did not accept the new loop: ${e.message}`, e.status === 0 ? 502 : e.status >= 500 ? 502 : e.status);
-    throw e;
-  }
-  const m = await mapRecord('loops', rec, t.table);
-  if (input.note?.trim()) (m.obj as Loop).note = input.note.trim();
-  await upsert(m, t.table, 'ui');
-  return hydrateLoop((await rowById('loops', rec.id))!);
+  // No Airtable record id: this loop exists here first. `loop_id` is what the
+  // engine matches on when it writes the same loop back with Airtable's id,
+  // and mirror.upsert adopts the row rather than inserting a second one.
+  const r = await mirror.upsert('loops', { fields, builder_id: t.owner, table_id: t.table }, 'ui');
+  bumpVersion();
+  const id = r.airtable_record_id ?? `row-${r.id}`;
+  const m = mapRecord('loops', { id, createdTime: nowIso(), fields }, t.table);
+  await recordState('loops', m, 'ui', nowIso(), undefined);
+  if (input.note?.trim()) await setNote('loops', id, input.note);
+  const row = await rowById('loops', id);
+  if (!row) throw new StoreError('The loop was written but could not be read back.', 500);
+  return hydrateLoop(row);
 }
 
-/** Applies a record n8n pushed after writing it to Airtable. Idempotent by record id. */
+/**
+ * The record kinds the interface can write, for /api/status. Read-only kinds
+ * are read-only because the engine owns them, not because a key is missing.
+ */
+export function writable(): RecordKind[] {
+  return KINDS.filter((k) => STATUSES[k].length > 0);
+}
+
+/** Which record kind a mirror kind is. Null for the two that are not records: Layer 0 holds and digest deliveries. */
+const RECORD_KIND: Record<mirror.MirrorKind, RecordKind | null> = {
+  loops: 'loops',
+  codex: 'codex',
+  layer0: null,
+  patterns: 'patterns',
+  commercial: 'commercial',
+  ns: 'ns',
+  rt: 'rt',
+  client_lanes: 'clients',
+  client_questions: 'client_questions',
+  digests: null,
+};
+
+/**
+ * Records the status a write from the engine left a row in.
+ *
+ * The engine write itself lands in mirror.ts, which knows nothing about
+ * statuses — it stores Airtable's fields and nothing else. This is what turns
+ * that into a dated line in the ledger, and it is the only place a status
+ * change gets a timestamp anyone can stand behind: nothing upstream keeps a
+ * status-change history, and the loop tables carry no close date at all.
+ *
+ * Never throws into the write path. A row that arrived is a row that arrived;
+ * failing the engine's POST because the ledger could not be updated would turn
+ * a bookkeeping problem into lost data.
+ */
+/**
+ * Moves a row's history onto Airtable's id once Airtable has one.
+ *
+ * A loop opened on this dashboard exists here before it exists in Airtable, so
+ * it is addressed by this database's own key until the engine writes the same
+ * loop back carrying the rec id — mirror.upsert then adopts the row on its
+ * `loop_id` rather than inserting a second one. Everything keyed on the old id
+ * has to come with it: the status events that date its close, and the note
+ * someone typed when they opened it. Missing this would not error, which is
+ * exactly why it is done here rather than left to be noticed.
+ *
+ * A no-op for every row that already had an Airtable id, which is almost all
+ * of them.
+ */
+async function adopt(kind: RecordKind, pk: number, recordId: string): Promise<void> {
+  const old = `row-${pk}`;
+  const e = await db().query('UPDATE events SET record_id = $1 WHERE kind = $2 AND record_id = $3', [recordId, kind, old]);
+  // A note already under the new id wins: it is the later statement of the two.
+  await db().query(
+    `INSERT INTO record_notes (kind, record_id, note, updated_at)
+     SELECT kind, $1, note, updated_at FROM record_notes WHERE kind = $2 AND record_id = $3
+     ON CONFLICT (kind, record_id) DO NOTHING`,
+    [recordId, kind, old],
+  );
+  const n = await db().query('DELETE FROM record_notes WHERE kind = $1 AND record_id = $2', [kind, old]);
+  if (e.rowCount || n.rowCount) console.log(`store: ${old} is now ${recordId} — carried ${e.rowCount ?? 0} event(s) and ${n.rowCount ?? 0} note(s) across`);
+}
+
+export async function recordEngineWrite(kind: mirror.MirrorKind, pk: number, at = nowIso()): Promise<void> {
+  const rk = RECORD_KIND[kind];
+  if (!rk) return;
+  try {
+    const r = await db().query<MirrorRow>(`${selectFor(rk)} WHERE id = $1`, [String(pk)]);
+    const mr = r.rows[0];
+    if (!mr) return;
+    if (mr.airtable_record_id) await adopt(rk, pk, mr.airtable_record_id);
+    const m = mapRecord(rk, asRecord(mr), tableOf(rk, mr), mr.lane_id);
+    await recordState(rk, m, 'engine', at, await lastEventFor(rk, idOf(mr)));
+    bumpVersion();
+  } catch (e) {
+    console.log(`store: could not record the status of ${kind} row ${pk} — ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/**
+ * A record n8n pushed, in the Airtable envelope the older /api/inbound route
+ * takes. Kept working after the cut by writing to the same mirror table
+ * /api/engine/:kind writes to; there is no Airtable to read from any more, so
+ * the record itself has to be in the body.
+ */
 export async function applyInbound(kind: RecordKind, payload: { id: string; table?: string; record?: AtRecord; at?: string }): Promise<{ changed: boolean; inserted: boolean; record: unknown }> {
   const id = payload.id;
   if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new StoreError('An Airtable record id (rec…) is required.', 422);
-  let table = payload.table ?? (await rowById(kind, id))?.table_id ?? null;
+  if (!payload.record) {
+    throw new StoreError('"record" is required: this server no longer reads Airtable, so the record must be in the body — { "id": "rec…", "record": { "id": "rec…", "fields": { … } } }.', 422);
+  }
+  if (payload.record.id !== id) throw new StoreError('The record in the body does not match the id.', 422);
+  let table = payload.table ?? (await mirrorRowById(kind, id))?.table_id ?? null;
   if (kind === 'patterns') table = PATTERNS.table;
   if (kind === 'commercial') table = COMMERCIAL.table;
-  if (!table) throw new StoreError(`Which builder table the ${kind === 'loops' ? 'loop' : 'submission'} lives in is required (table or builder).`, 422);
-  if (kind === 'loops' && !loopTableById(table)) throw new StoreError(`${table} is not one of the builder tables.`, 422);
-  if (kind === 'codex' && !codexTableById(table)) throw new StoreError(`${table} is not one of the submission tables.`, 422);
-  let rec = payload.record;
-  if (!rec) {
-    // The payload named the record but did not carry it: read it from Airtable, the source of truth.
-    requireWrite();
-    const base = baseFor(kind);
-    try {
-      rec = await airtable.getRecord(base, table, id);
-    } catch (e) {
-      if (e instanceof airtable.AirtableError) throw new StoreError(`Could not read ${id} from Airtable: ${e.message}`, e.status === 404 ? 404 : 502);
-      throw e;
-    }
-  }
-  if (rec.id !== id) throw new StoreError('The record in the body does not match the id.', 422);
-  const m = await mapRecord(kind, rec, table);
+  if (kind === 'loops' && table && !loopTableById(table)) throw new StoreError(`${table} is not one of the builder tables.`, 422);
+  if (kind === 'codex' && table && !codexTableById(table)) throw new StoreError(`${table} is not one of the submission tables.`, 422);
   const at = payload.at && Number.isFinite(Date.parse(payload.at)) ? new Date(payload.at).toISOString() : nowIso();
-  const res = await upsert(m, table, 'inbound', at);
-  return { ...res, record: await read(kind, id) };
+  try {
+    const r = await mirror.upsert(MIRROR_KIND[kind], { record_id: id, created_time: payload.record.createdTime, fields: payload.record.fields, table_id: table, lane_id: null }, 'engine');
+    bumpVersion();
+    const m = mapRecord(kind, payload.record, table ?? MIRROR[kind].at_table ?? '');
+    const state = await recordState(kind, m, 'engine', at, await lastEventFor(kind, id));
+    return { changed: state.changed, inserted: r.inserted, record: await read(kind, id) };
+  } catch (e) {
+    if (e instanceof mirror.MirrorError) throw new StoreError(e.message, e.status);
+    throw e;
+  }
 }
 
 export async function removeInbound(kind: RecordKind, id: string): Promise<boolean> {
-  const r = await db().query('DELETE FROM records WHERE kind = $1 AND id = $2', [kind, id]);
+  const local = /^row-(\d+)$/.exec(id);
+  const r = local
+    ? await db().query(`DELETE FROM ${MIRROR[kind].table} WHERE id = $1`, [local[1]])
+    : await db().query(`DELETE FROM ${MIRROR[kind].table} WHERE airtable_record_id = $1`, [id]);
   if (!r.rowCount) return false;
   bumpVersion();
   return true;
@@ -718,7 +1025,7 @@ function shortWeekLabel(start: string): string {
 const MODIFIED_FIELD_ADDED = '2026-09-09';
 const MODIFIED_MEANINGFUL_FROM = '2026-09-23'; // fourteen days on
 const MODIFIED_NOTE = `Derived from the tables' last_modified field, added ${MODIFIED_FIELD_ADDED.slice(8)} Sept 2026. Every loop that existed that day stamps from it, so this is only meaningful for changes after 9 Sept 2026 and is not history before then.`;
-const NO_CLOSE_DATE = 'The loop tables carry no close date. Closes are timestamped only when they pass through this dashboard or are pushed by n8n, and that history starts when this database did.';
+const NO_CLOSE_DATE = 'The loop tables carry no close date. Closes are timestamped only when they pass through this dashboard or are pushed by the engine, and that history starts when this database did.';
 
 function modifiedAfterAdded(iso: string | null): boolean {
   return Boolean(iso && iso.slice(0, 10) > MODIFIED_FIELD_ADDED);
@@ -739,7 +1046,10 @@ export function bumpVersion(): void {
  */
 async function loopCloseEvents(): Promise<{ at: string; builder: string | null }[]> {
   const r = await db().query<{ at: string; builder: string | null }>(
-    `SELECT at, builder FROM events WHERE kind = 'loops' AND to_status = 'closed' AND via IN ('ui', 'inbound') ORDER BY at`,
+    // Closes with a real timestamp: made here, or pushed by the engine when it
+    // made them. A 'mirror' event is one reconcile() noticed afterwards and
+    // cannot date, so it is left out rather than counted on the day we looked.
+    `SELECT at, builder FROM events WHERE kind = 'loops' AND to_status = 'closed' AND via IN ('ui', 'inbound', 'engine') ORDER BY at`,
   );
   return r.rows;
 }
@@ -1140,7 +1450,9 @@ export async function historySince(): Promise<string | null> {
 
 /** Rows held per kind, for /api/status. One grouped count, not a read per kind. */
 export async function held(): Promise<Record<RecordKind, number>> {
-  const r = await db().query<{ kind: RecordKind; n: string }>('SELECT kind, count(*)::text AS n FROM records GROUP BY kind');
+  // One statement across the eight mirror tables rather than a query per kind.
+  const sql = KINDS.map((k) => `SELECT '${k}' AS kind, count(*)::text AS n FROM ${MIRROR[k].table}`).join(' UNION ALL ');
+  const r = await db().query<{ kind: RecordKind; n: string }>(sql);
   const counts = new Map(r.rows.map((row) => [row.kind, Number(row.n)]));
   const out = {} as Record<RecordKind, number>;
   for (const k of KINDS) out[k] = counts.get(k) ?? 0;

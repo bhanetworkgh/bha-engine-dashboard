@@ -2,12 +2,13 @@
  * The dashboard server. One Node process, one dependency: `pg`.
  *
  *   /api/*   JSON, behind the session cookie (only /api/auth/*, /api/health
- *            and, with its own key, /api/inbound/* are open)
+ *            and, with their own key, /api/engine/* and /api/inbound/* are open)
  *   /*       the built front end from dist/, with the SPA fallback
  *
  * Secrets live in this process's environment and never reach the browser:
  * the login credential, the session signing key, the Ask Bays API key, the
- * Airtable token and DATABASE_URL.
+ * engine's inbound key and DATABASE_URL. There is no Airtable token any more —
+ * step 3 of the migration (2026-09-13) removed the last Airtable read path.
  *
  * `pg` (2026-09-12, on Destiny's instruction) is the one dependency past Node
  * itself. Until then the store was SQLite through node:sqlite, under a
@@ -25,19 +26,23 @@ import { migrate, MIGRATION_COUNT } from './migrations';
 import { assertDatabase, closePool, DATABASE_URL } from './pg';
 import * as engine from './engine';
 import * as store from './store';
-import * as sync from './sync';
 import * as registry from './registry';
 import * as mirror from './mirror';
-import * as backfill from './backfill';
-import { airtableConfigured, AIRTABLE_URL } from './airtable';
-import type { NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
+import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
 
 /**
  * Inbound writes from n8n carry this key in x-dashboard-key. Same pattern as
  * ASK_BAYS_API_KEY but the other way round: n8n proves itself to us. Held in
- * this process only. Airtable stays authoritative; a push here is additive.
+ * this process only. Since step 3 of the migration these tables are where the
+ * rows on the pages come from, so a push here is the record, not a copy of one.
  */
 const INBOUND_KEY = process.env.DASHBOARD_INBOUND_KEY || null;
+
+/** Every kind's row count and age, for /api/status and for the line each page prints. */
+async function freshnessAll(): Promise<Record<RecordKind, Freshness>> {
+  const pairs = await Promise.all(store.KINDS.map(async (k) => [k, await store.freshness(k)] as const));
+  return Object.fromEntries(pairs) as Record<RecordKind, Freshness>;
+}
 
 function inboundOk(req: IncomingMessage): boolean {
   if (!INBOUND_KEY) return false;
@@ -131,25 +136,27 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     return send(res, 200, { ok: true, started_at: STARTED_AT });
   }
 
-  // Inbound from n8n: authenticated by DASHBOARD_INBOUND_KEY, not the cookie.
-  //   POST   /api/inbound/:kind          { id, table?, builder?, record?, at? }  upsert (create or update)
-  //   PATCH  /api/inbound/:kind/:id      { table?, builder?, record?, at? }      same, id in the path
-  //   DELETE /api/inbound/:kind/:id                                               drop the held row
-  //   POST   /api/inbound/resync/:kind                                            full rebuild of that kind
-  // `record` is the Airtable record as n8n wrote it ({ id, createdTime, fields }); when absent the
-  // server reads the record from Airtable itself. Airtable stays authoritative either way.
+  /**
+   * The older inbound route, kept working for whatever in n8n still calls it.
+   *
+   *   POST   /api/inbound/:kind          { id, record: { id, createdTime, fields }, table?, builder?, at? }
+   *   PATCH  /api/inbound/:kind/:id      the same, with the id in the path
+   *   DELETE /api/inbound/:kind/:id      drop the row
+   *
+   * It writes to the same mirror tables as /api/engine/:kind below, which is
+   * the route to use. The one thing that changed on 13 Sep is that `record`
+   * is now required: this server no longer reads Airtable, so a payload that
+   * only names a record has nothing to fetch it from and says so.
+   */
   const inbound = p.match(/^\/api\/inbound\/(resync\/)?([^/]+)(?:\/([^/]+))?$/);
   if (inbound) {
     if (!INBOUND_KEY) throw new HttpError(503, 'DASHBOARD_INBOUND_KEY is not set on the server, so inbound writes are off.');
     if (!inboundOk(req)) throw new HttpError(401, 'The x-dashboard-key header is missing or wrong.');
     const kind = inbound[2] as RecordKind;
-    if (!store.KINDS.includes(kind)) throw new HttpError(404, 'No such record kind.');
     if (inbound[1]) {
-      if (method !== 'POST') throw new HttpError(405, 'POST to resync.');
-      if (!airtableConfigured()) throw new HttpError(503, 'AIRTABLE_API_KEY is not set on the server, so there is nothing to resync from.');
-      const r = await sync.resync(kind);
-      return send(res, r.ok ? 200 : 502, r);
+      throw new HttpError(410, 'There is no resync any more: the pages read the engine tables directly, so there is nothing to rebuild them from. Post the record to /api/engine/:kind instead.');
     }
+    if (!store.KINDS.includes(kind)) throw new HttpError(404, 'No such record kind.');
     const idInPath = inbound[3] ? decodeURIComponent(inbound[3]) : null;
     try {
       if (method === 'DELETE') {
@@ -157,7 +164,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
         return send(res, 200, { ok: true, removed: await store.removeInbound(kind, idInPath) });
       }
       if (method !== 'POST' && method !== 'PATCH') throw new HttpError(405, 'POST, PATCH or DELETE.');
-      const body = await readJson(req);
+      const body = await readJson(req, 256 * 1024);
       const record = body.record && typeof body.record === 'object' && !Array.isArray(body.record) ? (body.record as { id: string; createdTime: string; fields: Record<string, unknown> }) : undefined;
       if (record && (typeof record.fields !== 'object' || record.fields === null)) throw new HttpError(400, 'record.fields must be an object.');
       // The id can come from the path, the body, or the record itself — n8n's Airtable node returns the record with its id inside.
@@ -175,9 +182,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
 
   /**
    * The engine's own write surface: n8n POSTs a record here and it lands in
-   * the mirror tables (see mirror.ts). Steps 1 and 2 of the Airtable →
-   * Postgres migration — the Airtable read path above is untouched and still
-   * runs, so for now both are true at once and can be compared.
+   * the mirror tables (see mirror.ts) — which, since step 3 of the migration,
+   * are the tables every page reads. A row that arrives here is on screen on
+   * the next request; there is no sync in between and nothing to rebuild.
    *
    * Authenticated by the same DASHBOARD_INBOUND_KEY in the same x-dashboard-key
    * header as /api/inbound above: one service key for the engine, already set
@@ -199,39 +206,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
       throw new HttpError(401, 'The x-dashboard-key header is missing or wrong.');
     }
 
-    /**
-     * The backfill, over HTTP as well as on the command line.
-     *
-     * `npm run backfill` needs a shell on the box, and this is a Render web
-     * service — so on the deployed instance the command is only reachable over
-     * SSH. The same run is exposed here behind the same service key so it can
-     * be triggered with one curl, or put on a schedule in n8n. Identical code
-     * path; the CLI is unchanged and remains the way to run it locally.
-     */
     if (p === '/api/engine/backfill') {
-      if (method !== 'POST') throw new HttpError(405, 'POST to run the backfill.');
-      if (!airtableConfigured()) throw new HttpError(503, 'AIRTABLE_API_KEY is not set on the server, so there is nothing to backfill from.');
-      const body = await readJson(req);
-      const asked = Array.isArray(body.kinds) ? body.kinds.map((k) => str(k, 40)) : [];
-      const unknown = asked.filter((k) => !mirror.isKind(k));
-      if (unknown.length) throw new HttpError(422, `"kinds": ${unknown.join(', ')} — not a kind. One of: ${mirror.KIND_LIST.join(', ')}.`);
-      const already = backfill.isRunning();
-      const results = await backfill.backfillOnce(asked.length ? (asked as mirror.MirrorKind[]) : undefined, body.dry === true);
-      const tables = results.flatMap((r) => r.tables);
-      const totals = tables.reduce(
-        (a, t) => ({ read: a.read + t.read, inserted: a.inserted + t.inserted, updated: a.updated + t.updated, unchanged: a.unchanged + t.unchanged, failed: a.failed + t.failed }),
-        { read: 0, inserted: 0, updated: 0, unchanged: 0, failed: 0 },
+      throw new HttpError(
+        410,
+        'The backfill is gone with the Airtable client it read through (13 Sep 2026, step 3 of the migration). The engine tables are the record now; post rows to /api/engine/:kind.',
       );
-      await mirror.logWrite({
-        endpoint: p,
-        kind: asked.length ? asked.join(',') : 'all',
-        method,
-        key_label: 'DASHBOARD_INBOUND_KEY',
-        outcome: totals.failed ? 'rejected' : 'updated',
-        detail: `backfill ${totals.read} read, ${totals.inserted} new, ${totals.updated} changed, ${totals.unchanged} current, ${totals.failed} failed`,
-        ms: Date.now() - t0,
-      });
-      return send(res, totals.failed ? 502 : 200, { ok: totals.failed === 0, joined_run_in_flight: already, totals, results });
     }
 
     const m = p.match(/^\/api\/engine\/([^/]+)$/);
@@ -246,6 +225,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     const body = await readJson(req, 256 * 1024);
     try {
       const result = await mirror.upsert(kind, body as mirror.MirrorInput, 'engine');
+      // The row is stored; this dates the status it left the record in. It is
+      // the only place a status change is timestamped, so it happens on the
+      // write rather than being noticed later, and it never fails the write.
+      await store.recordEngineWrite(kind, result.id);
       await mirror.logWrite({
         endpoint,
         kind,
@@ -294,11 +277,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
           history_since: await store.historySince(),
           records_held: await store.held(),
           started_at: STARTED_AT,
-          airtable_configured: airtableConfigured(),
-          airtable_url: AIRTABLE_URL,
           inbound_configured: Boolean(INBOUND_KEY),
-          resync_minutes: sync.RESYNC_MINUTES,
-          sync: Object.fromEntries(await Promise.all(store.KINDS.map(async (k) => [k, await store.syncInfo(k)] as const))) as ServerStatus['sync'],
+          writable: store.writable(),
+          freshness: await freshnessAll(),
         };
         return send(res, 200, status);
       }
@@ -392,12 +373,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
       if (!d) throw new HttpError(404, 'That Codex entry is not held by this dashboard.');
       return send(res, 200, d);
     }
-    if (p === '/api/resync') {
-      return send(res, 200, {
-        running: store.KINDS.filter((k) => sync.isRunning(k)),
-        sync: Object.fromEntries(await Promise.all(store.KINDS.map(async (k) => [k, await store.syncInfo(k)] as const))),
-      });
-    }
   }
 
   if (method === 'PATCH') {
@@ -467,15 +442,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
         if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
         throw e;
       }
-    }
-    // Rebuild one kind, or all, from Airtable. Session cookie or inbound key; n8n may call it too.
-    const resyncMatch = p.match(/^\/api\/resync(?:\/([^/]+))?$/);
-    if (resyncMatch) {
-      if (!airtableConfigured()) throw new HttpError(503, 'AIRTABLE_API_KEY is not set on the server, so there is nothing to resync from.');
-      const kind = resyncMatch[1] as RecordKind | undefined;
-      if (kind && !store.KINDS.includes(kind)) throw new HttpError(404, 'No such record kind.');
-      const results = kind ? [await sync.resync(kind)] : await sync.resyncAll();
-      return send(res, results.every((r) => r.ok) ? 200 : 502, { ok: results.every((r) => r.ok), results });
     }
     if (p === '/api/ask') {
       const body = await readJson(req);
@@ -579,9 +545,36 @@ async function boot(): Promise<void> {
     // retired host for as long as it was wrong and read exactly like a
     // configured one, because a URL on its own cannot tell you nobody chose it.
     console.log(`  ask bays: ${askConfigured() ? `${ASK_URL} ${ASK_URL_FROM_ENV ? '(ASK_BAYS_URL)' : '(built-in default — ASK_BAYS_URL is not set on this service)'}` : 'NOT configured — set ASK_BAYS_API_KEY'}`);
-    console.log(`  inbound:  ${INBOUND_KEY ? 'DASHBOARD_INBOUND_KEY set' : 'NOT configured — set DASHBOARD_INBOUND_KEY for n8n dual-write'}`);
-    void sync.startBootSync();
+    console.log(`  inbound:  ${INBOUND_KEY ? 'DASHBOARD_INBOUND_KEY set' : 'NOT configured — set DASHBOARD_INBOUND_KEY so the engine can write'}`);
+    // Rows are read straight out of the engine tables, so there is nothing to
+    // load at boot. What does run is the ledger catch-up: any status that
+    // changed in the database while this process was not running has to be
+    // written down, because nothing upstream keeps that history.
+    void catchUp();
   });
+}
+
+/**
+ * Brings the status ledger up to date and takes the day's observations.
+ *
+ * Both used to hang off a successful resync. With the sync gone they run once
+ * a boot: reconcile writes down statuses that changed while this process was
+ * not looking, and the observations are the two figures whose trends need a
+ * history nothing else keeps. Never throws — neither is a reason not to serve.
+ */
+async function catchUp(): Promise<void> {
+  try {
+    const results = await store.reconcile();
+    const noticed = results.filter((r) => r.first_seen || r.changed);
+    console.log(
+      noticed.length
+        ? `  ledger:   ${noticed.map((r) => `${r.kind} ${r.first_seen} first seen, ${r.changed} changed`).join(' · ')}`
+        : `  ledger:   up to date (${results.reduce((n, r) => n + r.rows, 0)} rows)`,
+    );
+    await store.recordObservations();
+  } catch (e) {
+    console.error('the status ledger could not be brought up to date', e);
+  }
 }
 
 // Render sends SIGTERM on deploy and on spin-down; drain the pool so an

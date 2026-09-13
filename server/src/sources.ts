@@ -14,8 +14,29 @@
  * date; `system` and `keywords` are read off a pattern's own id. Everything
  * else is the field, or null.
  */
-import type { AtRecord } from './airtable';
-import { recordUrl } from './airtable';
+
+/**
+ * A record in the shape Airtable's REST API returns it: the id, the
+ * createdTime, and the values under `fields` — never at the top level.
+ *
+ * This shape outlived the Airtable client it came from. The mirror tables
+ * store exactly these three things per row (see mirror.ts), so a mirror row
+ * is turned back into one of these and handed to the mappers below, which is
+ * why every field name here is still Airtable's own.
+ */
+export interface AtRecord {
+  id: string;
+  createdTime: string;
+  fields: Record<string, unknown>;
+}
+
+/** The record's own page in Airtable, for "open in Airtable" on every row. */
+export function recordUrl(base: string, table: string, id: string): string {
+  return `https://airtable.com/${base}/${table}/${id}`;
+}
+
+/** Airtable's record id, as a shape. A row the engine wrote before Airtable had one carries none. */
+const REC_ID = /^rec[A-Za-z0-9]{14}$/;
 import type { BuildPattern, BuildPatternDetail, ClientLane, ClientQuestion, CodexEntry, CodexEntryDetail, Layer0Hold, Loop, LoopLaneTag, LoopStatus, NsOutcome, NsRecord, NsSearch, Opportunity, ReadinessState, RecordKind, RtAttempt, Source } from '../../src/data/types';
 
 /** Jason Status as the submission tables define it, lower-cased. 'unset' is a row he has not touched. */
@@ -242,8 +263,16 @@ function slackSource(url: string | null, fallbackRef: string): Source | null {
   const ref = url.split('/').pop() || fallbackRef;
   return { kind: 'slack', ref, url };
 }
+/**
+ * Where the row is in Airtable.
+ *
+ * A row the engine wrote into this database before Airtable had one has no
+ * record id, so there is no record page to open; the link goes to the table
+ * it belongs to and the reference says the row is not in Airtable, rather
+ * than pointing at a record page that would 404.
+ */
 function airtableSource(base: string, table: string, id: string): Source {
-  return { kind: 'airtable', ref: id, url: recordUrl(base, table, id) };
+  return REC_ID.test(id) ? { kind: 'airtable', ref: id, url: recordUrl(base, table, id) } : { kind: 'airtable', ref: 'not in Airtable', url: `https://airtable.com/${base}/${table}` };
 }
 
 /* ----------------------------------------------------------------- loops */
