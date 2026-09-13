@@ -229,6 +229,242 @@ const MIGRATIONS: Migration[] = [
        )`,
     ],
   },
+{
+    id: 3,
+    name: 'engine mirror tables and the write log',
+    statements: [
+      /**
+       * Step 1 and 2 of the Airtable → Postgres migration (2026-09-13,
+       * Destiny). One Postgres table per Airtable table the dashboard
+       * actually reads — see the inventory in BUILD_LOG for the list and for
+       * the four bases deliberately left out.
+       *
+       * **Nothing here replaces the Airtable read path.** `records` still
+       * holds the read model, sync.ts still rebuilds it from Airtable, and
+       * every page still reads it. These tables are filled in parallel, by a
+       * backfill and by the engine writing to /api/engine/*, so that the two
+       * can be compared for as long as it takes to trust them. Step 3 —
+       * cutting the pages over and retiring the sync — is a separate decision
+       * on a later day, and doing it now would empty the dashboard.
+       *
+       * **Shape.** Each row keeps Airtable's own record id, Airtable's own
+       * `createdTime`, and Airtable's `fields` object stored verbatim as
+       * jsonb with its field names untouched — `What`, `Jason Status`,
+       * `Layer1 Review ` with its trailing space and all. That last part is
+       * the whole point: n8n writes those names, and a column list of my own
+       * would drop any field I forgot or that someone adds to the base later,
+       * silently, which is the exact failure this engine has hit three times.
+       * jsonb cannot lose a field it was never told about.
+       *
+       * Columns are promoted out of `fields` only where something keys, joins
+       * or filters on them, and they are derived from the payload on every
+       * write so they cannot drift from what is inside the blob.
+       *
+       * `airtable_record_id` is UNIQUE so the backfill can be a plain
+       * ON CONFLICT DO UPDATE and running it twice changes nothing. It is
+       * nullable, because the engine may write a row here before Airtable has
+       * one — `natural_id` is what matches those, and it is indexed but NOT
+       * unique: the Research Queue is an attempt log where card_id genuinely
+       * repeats, and a unique constraint there would reject real rows.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_loops (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         builder_id          text NOT NULL,
+         table_id            text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_loops_natural ON engine_loops (natural_id)`,
+      `CREATE INDEX IF NOT EXISTS engine_loops_builder ON engine_loops (builder_id)`,
+
+      `CREATE TABLE IF NOT EXISTS engine_codex_submissions (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         builder_id          text NOT NULL,
+         table_id            text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_codex_natural ON engine_codex_submissions (natural_id)`,
+      `CREATE INDEX IF NOT EXISTS engine_codex_builder ON engine_codex_submissions (builder_id)`,
+
+      `CREATE TABLE IF NOT EXISTS engine_layer0_holds (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_layer0_natural ON engine_layer0_holds (natural_id)`,
+
+      `CREATE TABLE IF NOT EXISTS engine_build_patterns (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_patterns_natural ON engine_build_patterns (natural_id)`,
+
+      `CREATE TABLE IF NOT EXISTS engine_commercial_cards (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         lane_id             text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_commercial_natural ON engine_commercial_cards (natural_id)`,
+
+      `CREATE TABLE IF NOT EXISTS engine_ns_records (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         lane_id             text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_ns_natural ON engine_ns_records (natural_id)`,
+
+      /**
+       * The Research Queue is an attempt log: one row per attempt, and
+       * `card_id` repeats — one card carries twenty rows. So `natural_id`
+       * holds card_id for reading and grouping, and the write path keys this
+       * kind on airtable_record_id alone. Keying it on card_id would fold
+       * twenty attempts into one row.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_rt_attempts (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         lane_id             text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_rt_natural ON engine_rt_attempts (natural_id)`,
+
+      `CREATE TABLE IF NOT EXISTS engine_client_lanes (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_lanes_natural ON engine_client_lanes (natural_id)`,
+
+      /**
+       * A question carries no id of its own, so this keys on the record id.
+       * `table_id` is which per-lane table it came from and `lane_id` is the
+       * lane that table belongs to — the index names both, and neither is
+       * hardcoded anywhere.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_client_questions (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         lane_id             text,
+         table_id            text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_questions_table ON engine_client_questions (table_id)`,
+
+      /**
+       * digest_deliveries. Not read by this dashboard before today: it is
+       * mirrored because the delivery-health figure on the registry reads it,
+       * and that figure is the engine's only honest measure of whether a
+       * builder actually received what was sent. `session_id` is the key the
+       * Callback Receiver matches a delivery to a send on, so it is the
+       * natural id here.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_digest_deliveries (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         builder_id          text,
+         status              text,
+         sent_at             text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_digests_natural ON engine_digest_deliveries (natural_id)`,
+      `CREATE INDEX IF NOT EXISTS engine_digests_status ON engine_digest_deliveries (status, sent_at)`,
+
+      /**
+       * Every write the engine makes, whether it succeeded or not.
+       *
+       * This exists for the dual-write period specifically: while both paths
+       * run, the only way to know the engine's writes are landing correctly is
+       * to be able to see what arrived and compare it against Airtable. A
+       * rejected write is recorded too — a 422 nobody can see is the same as
+       * silence, and silence is what this whole migration is trying to remove.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_writes (
+         seq                 bigserial PRIMARY KEY,
+         at                  text NOT NULL,
+         endpoint            text NOT NULL,
+         kind                text NOT NULL,
+         method              text NOT NULL,
+         key_label           text,
+         airtable_record_id  text,
+         natural_id          text,
+         outcome             text NOT NULL,
+         detail              text,
+         ms                  integer
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_writes_at ON engine_writes (at DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_writes_outcome ON engine_writes (outcome, at DESC)`,
+
+      /**
+       * The registry's entry for engine_events predates digest_deliveries
+       * existing. Updated here rather than in the seed, because seeding is
+       * ON CONFLICT DO NOTHING and would never reach an existing row.
+       *
+       * Guarded on the original seeded text so an edit made in the interface
+       * is never overwritten: if Destiny has already reworded this row, the
+       * WHERE matches nothing and his wording stands.
+       */
+      `UPDATE registry_airtable_bases
+          SET what_it_is_for = 'The error_counts table the three error handlers share, and digest_deliveries — the send-and-arrival record for the daily open-loops digest and the 3-day check-in.',
+              notes = 'digest_deliveries (tblNuMju8l1kL3Sd1) was added on 13 Sep 2026. A row is written when a digest is handed to North Star and updated when the Callback Receiver posts it; status missing means the delivery check found one that never arrived.',
+              updated_at = to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = 'appINvgEoZjuYQI2O'
+          AND what_it_is_for = 'The error_counts table the three error handlers share.'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
