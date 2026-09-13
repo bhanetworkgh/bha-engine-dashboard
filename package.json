@@ -12,8 +12,7 @@
     "start": "node --no-warnings=ExperimentalWarning server-dist/server/src/index.js",
     "hash-password": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server-dist/server/src/hash.js",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit && tsc -p tsconfig.server.json --noEmit",
-    "backfill": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server-dist/server/src/backfill.js"
+    "typecheck": "tsc -b --noEmit && tsc -p tsconfig.server.json --noEmit"
   },
   "dependencies": {
     "pg": "^8.23.0",

@@ -59,27 +59,14 @@ services:
       # known and accepted, see src/data/fixtures/common.ts.
       - key: N8N_BASE_URL
         value: https://bayshorizonnetwork.app.n8n.cloud
-      # Airtable is the source of truth for every record kind. The token needs
-      # data.records:read on all seven bases, and :write on the four the
-      # dashboard writes back to:
-      #   appUVlBSGGPHw6DGh  loops               read + write
-      #   appEmdKshNVTl64Zf  Codex submissions   read + write
-      #   app5ni3E8r7Lvxk22  build patterns      read + write
-      #   appvLglfdCqOKqLpT  commercial          read + write
-      #   appkCTjhH8PtYRFI7  NS Records          read
-      #   appud969Dw7H4tMwv  Research Queue      read
-      #   appkSUSh9ijNjP2f8  watched clients     read
-      # The last three were added on 2026-09-10; a token scoped to only the
-      # original four leaves North Star, Research Twin and Clients showing a
-      # resync error rather than data.
-      # The inbound key is what n8n sends in x-dashboard-key.
-      - key: AIRTABLE_API_KEY
-        sync: false
-      # Fifteen minutes: ~31 Airtable requests a cycle across seven bases, far
-      # under the five-per-second-per-base limit. Raise it if the workspace's
-      # monthly API call ceiling becomes the binding constraint.
-      - key: AIRTABLE_RESYNC_MINUTES
-        value: "15"
+      # The engine's own service key. n8n sends it in x-dashboard-key on every
+      # write to /api/engine/*, and it is the only way a record reaches this
+      # dashboard since the Airtable sync was removed on 2026-09-13 — without
+      # it the record tables stay exactly as the migration backfill left them.
+      # AIRTABLE_API_KEY and AIRTABLE_RESYNC_MINUTES went with that sync; they
+      # can be removed from the service's environment by hand, since a key
+      # dropped from this blueprint is left in place on Render rather than
+      # deleted.
       - key: DASHBOARD_INBOUND_KEY
         generateValue: true
 
