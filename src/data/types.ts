@@ -1184,3 +1184,141 @@ export interface ResyncResponse {
     tables: { table: string; label: string; n: number; inserted: number; changed: number; removed: number; error: string | null; ms: number }[];
   }[];
 }
+
+/* ------------------------------------------------------------- registry */
+
+/**
+ * The System Registry. Six small tables this dashboard owns outright — there is
+ * no Airtable base behind them, so unlike every other record kind here these
+ * rows are created and edited in the interface and nowhere else.
+ *
+ * Every field is nullable on purpose. A value nobody has supplied stays null
+ * and renders as "—"; the page never fills a gap with something plausible, and
+ * the spend total states how many services are unpriced beside the figure.
+ */
+export type RegistryKind = 'workflows' | 'services' | 'credentials' | 'endpoints' | 'bases' | 'people';
+
+interface RegistryBase {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  /** Soft delete. A row keeps its id and its history; it just stops being listed. */
+  deleted_at: string | null;
+  notes: string | null;
+}
+
+export type WorkflowStatus = 'production' | 'experimental' | 'retired';
+
+export interface RegistryWorkflow extends RegistryBase {
+  /** The n8n workflow id, which is also this row's primary key. */
+  name: string;
+  system: string | null;
+  folder: string | null;
+  pillar: string | null;
+  owner: string | null;
+  trigger_type: string | null;
+  trigger_detail: string | null;
+  status: WorkflowStatus | null;
+  purpose: string | null;
+  n8n_url: string | null;
+}
+
+export type ServiceStatus = 'active' | 'trial' | 'retired';
+export type ServiceCategory = 'hosting' | 'automation' | 'data' | 'ai' | 'comms' | 'storage' | 'other';
+export type BillingCycle = 'monthly' | 'quarterly' | 'yearly' | 'one-off';
+
+export interface RegistryService extends RegistryBase {
+  name: string;
+  category: ServiceCategory | null;
+  what_it_is_for: string | null;
+  url: string | null;
+  managed_by: string | null;
+  plan: string | null;
+  billing_owner: string | null;
+  cost_amount: number | null;
+  cost_currency: string | null;
+  billing_cycle: BillingCycle | null;
+  /** YYYY-MM-DD, or null when nobody has recorded one. */
+  renewal_date: string | null;
+  status: ServiceStatus | null;
+}
+
+/** Names and ownership only. No secret value is stored here, ever. */
+export interface RegistryCredential extends RegistryBase {
+  name: string;
+  type: string | null;
+  /** Workflow ids this credential was found on. Empty means none was found, not that none exists. */
+  used_by: string[];
+  owner: string | null;
+}
+
+export interface RegistryEndpoint extends RegistryBase {
+  name: string;
+  url: string;
+  method: string | null;
+  auth_type: string | null;
+  owned_by_service: string | null;
+  what_calls_it: string | null;
+}
+
+export interface RegistryBaseRow extends RegistryBase {
+  name: string;
+  what_it_is_for: string | null;
+  url: string | null;
+}
+
+export interface RegistryPerson extends RegistryBase {
+  name: string;
+  slack_user_id: string | null;
+  email: string | null;
+  role: string | null;
+  lanes_owned: string[];
+}
+
+/**
+ * Monthly spend, computed by the server from the rows it holds.
+ *
+ * `totals` is one figure per currency and never a sum across them. The three
+ * counts beside it are what stop an incomplete total reading as a complete
+ * one, and the page prints them next to the number rather than under it.
+ */
+export interface SpendTotal {
+  currency: string;
+  monthly: number;
+  services: number;
+}
+
+export interface Spend {
+  totals: SpendTotal[];
+  active: number;
+  priced: number;
+  unpriced: number;
+  /** Priced, but one-off or with no cycle, so not part of a monthly figure. */
+  not_monthly: number;
+  renewing_soon: string[];
+  overdue: string[];
+  with_renewal_date: number;
+  /** The server's date, so one clock decides what "within thirty days" means. */
+  today: string;
+}
+
+export interface RegistryData {
+  workflows: RegistryWorkflow[];
+  services: RegistryService[];
+  credentials: RegistryCredential[];
+  endpoints: RegistryEndpoint[];
+  bases: RegistryBaseRow[];
+  people: RegistryPerson[];
+  spend: Spend;
+  includes_deleted: boolean;
+}
+
+/** What a row of each kind looks like, keyed by the kind that holds it. */
+export interface RegistryRowOf {
+  workflows: RegistryWorkflow;
+  services: RegistryService;
+  credentials: RegistryCredential;
+  endpoints: RegistryEndpoint;
+  bases: RegistryBaseRow;
+  people: RegistryPerson;
+}

@@ -26,6 +26,7 @@ import { assertDatabase, closePool, DATABASE_URL } from './pg';
 import * as engine from './engine';
 import * as store from './store';
 import * as sync from './sync';
+import * as registry from './registry';
 import { airtableConfigured, AIRTABLE_URL } from './airtable';
 import type { NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
 
@@ -227,6 +228,25 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
         return send(res, 200, await engine.getBuilders(q));
       case '/api/ask-bays':
         return send(res, 200, engine.getAskBays(q));
+      case '/api/registry': {
+        // Everything the page shows, in one response. Six small tables; a
+        // request per tab would only make the age of each one harder to state.
+        const deleted = url.searchParams.get('deleted') === 'true';
+        const [workflows, services, credentials, endpoints, bases, people] = await Promise.all(
+          registry.KIND_LIST.map((k) => registry.list(k, deleted)),
+        );
+        return send(res, 200, {
+          workflows,
+          services,
+          credentials,
+          endpoints,
+          bases,
+          people,
+          // Computed by the server from the rows, per CLAUDE.md section 4.
+          spend: registry.spendOf(services),
+          includes_deleted: deleted,
+        });
+      }
     }
     const builder = p.match(/^\/api\/builders\/([^/]+)$/);
     if (builder) {
@@ -286,6 +306,34 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
         if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
         throw e;
       }
+    }
+  }
+
+  // The registry: this dashboard is the system of record for these six tables,
+  // so unlike every other kind here the write goes straight to Postgres and
+  // there is no Airtable round trip to make first.
+  const reg = p.match(/^\/api\/registry\/([^/]+)(?:\/([^/]+))?$/);
+  if (reg && (method === 'POST' || method === 'PATCH' || method === 'DELETE')) {
+    const kind = reg[1];
+    if (!registry.isKind(kind)) throw new HttpError(404, 'No such registry kind.');
+    const id = reg[2] ? decodeURIComponent(reg[2]) : null;
+    try {
+      if (method === 'POST') {
+        if (id) {
+          // POST to a row is the undelete: /api/registry/:kind/:id/... is not a
+          // shape this router has, so the body says what to do instead.
+          const body = await readJson(req);
+          if (body.restore === true) return send(res, 200, await registry.setDeleted(kind, id, false));
+          throw new HttpError(400, 'Send { restore: true } to restore a row.');
+        }
+        return send(res, 201, await registry.create(kind, await readJson(req)));
+      }
+      if (!id) throw new HttpError(400, 'An id is required.');
+      if (method === 'DELETE') return send(res, 200, await registry.setDeleted(kind, id, true));
+      return send(res, 200, await registry.update(kind, id, await readJson(req)));
+    } catch (e) {
+      if (e instanceof registry.RegistryError) throw new HttpError(e.status, e.message);
+      throw e;
     }
   }
 
@@ -401,11 +449,16 @@ async function boot(): Promise<void> {
   const db = await assertDatabase();
   const m = await migrate();
   await store.initStore();
+  // Idempotent: a row that already exists is left exactly as it is, edits and
+  // soft deletes included. See registry.seedRegistry.
+  const seeded = await registry.seedRegistry();
 
   server.listen(PORT, () => {
     console.log(`BHA engine dashboard on http://localhost:${PORT}`);
     console.log(`  database: postgres ${db.server_version} at ${db.host}:${db.port}/${db.database}${db.internal ? ' (internal network, no TLS)' : ' (TLS)'}`);
     console.log(`  schema:   ${m.applied.length ? `applied ${m.applied.length} migration(s): ${m.applied.join(', ')}` : `up to date (${MIGRATION_COUNT} migration(s))`}`);
+    const newRows = Object.values(seeded).reduce((n, c) => n + c, 0);
+    console.log(`  registry: ${newRows ? `seeded ${newRows} row(s): ${registry.KIND_LIST.filter((k) => seeded[k]).map((k) => `${k} ${seeded[k]}`).join(', ')}` : 'already populated'}`);
     console.log(`  sign-in:  ${authConfigured() ? 'configured' : 'NOT configured — set AUTH_PASSWORD_HASH'}`);
     console.log(`  sessions: ${sessionSecretConfigured ? 'SESSION_SECRET set' : 'random key this boot (sessions end on restart)'}`);
     // Say where the URL came from, not just what it is. The line printed the
