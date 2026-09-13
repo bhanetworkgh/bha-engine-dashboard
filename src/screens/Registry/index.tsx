@@ -3,9 +3,12 @@ import { useData } from '../../app/useData';
 import {
   createRegistryRow,
   deleteRegistryRow,
+  getEngineWrites,
   getRegistry,
   restoreRegistryRow,
   updateRegistryRow,
+  type DigestHealth,
+  type EngineWrites,
   type RegistryData,
   type RegistryKind,
   type RegistryRowOf,
@@ -54,7 +57,7 @@ import { DASH, EditableCell, NewRow, type CellType } from './Editable';
  * the schema in server/src/registry.ts.
  */
 
-const TABS = ['Workflows', 'Services & billing', 'Credentials', 'Endpoints', 'People'] as const;
+const TABS = ['Workflows', 'Services & billing', 'Credentials', 'Endpoints', 'People', 'Engine writes'] as const;
 type Tab = (typeof TABS)[number];
 
 const WORKFLOW_STATUS = ['production', 'experimental', 'retired'] as const;
@@ -224,8 +227,9 @@ export default function Registry() {
         {tab === 'Workflows' && <WorkflowsTab rows={d.workflows} {...shared} />}
         {tab === 'Services & billing' && <ServicesTab rows={d.services} spend={d.spend} {...shared} />}
         {tab === 'Credentials' && <CredentialsTab rows={d.credentials} workflows={d.workflows} {...shared} />}
-        {tab === 'Endpoints' && <EndpointsTab rows={d.endpoints} bases={d.bases} {...shared} />}
+        {tab === 'Endpoints' && <EndpointsTab rows={d.endpoints} bases={d.bases} digests={d.digest_health} {...shared} />}
         {tab === 'People' && <PeopleTab rows={d.people} {...shared} />}
+        {tab === 'Engine writes' && <EngineWritesTab />}
       </div>
 
       <Toast toast={toast} />
@@ -785,7 +789,7 @@ function CredentialsTab({ rows, workflows, ...p }: TabProps & { rows: RegistryDa
 
 /* ------------------------------------------------- endpoints and bases */
 
-function EndpointsTab({ rows, bases, ...p }: TabProps & { rows: RegistryData['endpoints']; bases: RegistryData['bases'] }) {
+function EndpointsTab({ rows, bases, digests, ...p }: TabProps & { rows: RegistryData['endpoints']; bases: RegistryData['bases']; digests: DigestHealth }) {
   const [q, setQ] = useState('');
   const term = q.trim().toLowerCase();
   const shown = rows.filter((e) => !term || [e.name, e.url, e.owned_by_service, e.what_calls_it].some((v) => v && v.toLowerCase().includes(term)));
@@ -793,6 +797,29 @@ function EndpointsTab({ rows, bases, ...p }: TabProps & { rows: RegistryData['en
 
   return (
     <>
+      <div className="mx-6 mb-4 md:mx-8">
+        <MetricCard
+          title="Digests that never arrived"
+          right={`last ${digests.window_days} days`}
+          note={
+            digests.rows === 0
+              ? 'Nothing has been read into digest_deliveries yet, so this is not a count of zero — it is nothing to count. Run the backfill, or let Bays — Digest Delivery Check write its first row.'
+              : `${digests.sent} digest${digests.sent === 1 ? '' : 's'} sent in the window, ${digests.delivered} confirmed in Slack. Every other signal in the stack stops at North Star accepting the hand-off, which is four hops short of a builder reading it — this is the only measure that goes the rest of the way.`
+          }
+        >
+          {digests.rows === 0 ? (
+            <div className="text-[15px] leading-relaxed text-faint">Not recorded</div>
+          ) : (
+            <div className="flex items-baseline gap-3">
+              <span className={`font-display tabular text-[34px] leading-none ${digests.missing ? 'text-failing' : 'text-ink'}`}>{digests.missing}</span>
+              <span className="text-[12px] text-faint">
+                of {digests.sent} sent{digests.latest_sent_at ? ` · newest ${digests.latest_sent_at.slice(0, 10)}` : ''}
+              </span>
+            </div>
+          )}
+        </MetricCard>
+      </div>
+
       <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
         <div className="flex flex-wrap items-center justify-end gap-2">
           <SearchBox value={q} onChange={setQ} placeholder="Search endpoints" />
@@ -1018,6 +1045,169 @@ function PeopleTab({ rows, ...p }: TabProps & { rows: RegistryData['people'] }) 
             </div>
           </MetricCard>
         </div>
+      )}
+    </>
+  );
+}
+
+/* --------------------------------------------------------- engine writes */
+
+const OUTCOME_TONE: Record<string, string> = {
+  inserted: 'text-ink',
+  updated: 'text-ink',
+  unchanged: 'text-faint',
+  rejected: 'text-degraded',
+  unauthorised: 'text-failing',
+  error: 'text-failing',
+};
+
+/**
+ * What the engine has written straight into this dashboard, and what each
+ * mirror table currently holds.
+ *
+ * This tab exists for the dual-write period and is meant to be read against
+ * Airtable, not instead of it. Both paths are live: Airtable is still the
+ * source of truth, every page still renders from the read model that syncs
+ * from it, and nothing here has replaced any of that. The question this tab
+ * answers is the only one that matters before step 3 — is the engine's own
+ * write path actually receiving what Airtable receives, and is anything being
+ * refused.
+ *
+ * A kind whose `from_engine` is zero is a kind n8n has not been pointed at
+ * yet. That is a fact about the wiring, not a fault, and the column says so
+ * rather than colouring it as one.
+ */
+function EngineWritesTab() {
+  const [reload, setReload] = useState(0);
+  const { status, data, error } = useData(() => getEngineWrites(50), [reload]);
+
+  if (status === 'loading') return <Loading />;
+  if (status === 'error') return <LoadFailed error={error} />;
+  const d: EngineWrites = data;
+
+  const refused = (d.tally.rejected ?? 0) + (d.tally.unauthorised ?? 0) + (d.tally.error ?? 0);
+  const accepted = (d.tally.inserted ?? 0) + (d.tally.updated ?? 0) + (d.tally.unchanged ?? 0);
+  const wired = d.held.filter((h) => h.from_engine > 0).length;
+
+  return (
+    <>
+      {!d.configured && (
+        <div className="mx-6 mb-4 md:mx-8">
+          <div className="flex items-start gap-3 rounded-[14px] bg-failing-soft px-4 py-3">
+            <span className="mt-[6px] h-[7px] w-[7px] shrink-0 rounded-full bg-failing" />
+            <p className="text-[12.5px] leading-relaxed text-failing">
+              <span className="font-medium">DASHBOARD_INBOUND_KEY is not set on this server</span>, so every engine write is
+              refused before it reaches a handler. Nothing can arrive until it is set.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <StatStrip cols={4}>
+        <CountCell label="Writes accepted" value={accepted} hint={`in the last ${d.window_hours} hours`} />
+        <CountCell label="Refused" value={refused} tone={refused ? 'failing' : 'dim'} hint="rejected, unauthorised or errored" />
+        <CountCell label="Kinds receiving writes" value={wired} hint={`of ${d.held.length} mirrored tables`} />
+        <CountCell label="Writes recorded, all time" value={d.total} hint={d.last_at ? `newest ${when(d.last_at)}` : 'none yet'} />
+      </StatStrip>
+
+      <div className="shrink-0 px-6 pb-3 md:px-8">
+        <p className="max-w-[86ch] text-[11.5px] leading-relaxed text-faint">
+          Dual-write is on and nothing has been switched over. Airtable is still the source of truth, every page still
+          renders from the read model that syncs from it, and these tables are filled alongside so the two can be
+          compared. Retiring the Airtable read path is a separate decision for a later day.
+        </p>
+      </div>
+
+      <div className="shrink-0 px-6 pb-2 md:px-8">
+        <div className="flex items-baseline justify-between gap-3 pt-2">
+          <span className="text-[13px] font-medium text-ink">What each mirror table holds</span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setReload((n) => n + 1)}>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <Grid
+        label="Mirror tables"
+        min={1000}
+        head={
+          <>
+            <Th width="18%">Airtable table</Th>
+            <Th>postgres table</Th>
+            <Th right>rows</Th>
+            <Th right>last from backfill</Th>
+            <Th right>last from the engine</Th>
+            <Th>newest row</Th>
+          </>
+        }
+      >
+        {d.held.map((h) => (
+          <tr key={h.kind}>
+            <td className="td card-title">{h.label}</td>
+            <td className="td tabular text-faint">{h.table}</td>
+            <td className="td tabular text-right text-ink">{h.rows}</td>
+            <td className="td tabular text-right text-dim">{h.from_airtable}</td>
+            <td className={`td tabular text-right ${h.from_engine ? 'text-ink' : 'text-faint'}`}>
+              {h.from_engine || <span title="n8n has not been pointed at this kind yet">not wired yet</span>}
+            </td>
+            <td className="td tabular whitespace-nowrap text-faint" title={h.latest ?? ''}>
+              {when(h.latest)}
+            </td>
+          </tr>
+        ))}
+      </Grid>
+
+      <div className="shrink-0 px-6 pb-2 md:px-8">
+        <div className="flex items-baseline gap-2 pt-2">
+          <span className="text-[13px] font-medium text-ink">Recent writes</span>
+          <span className="tabular text-[11.5px] text-faint">{d.recent.length} newest</span>
+        </div>
+        <p className="mt-1 mb-2 max-w-[86ch] text-[11.5px] leading-relaxed text-faint">
+          Every write the engine attempted, accepted or refused. A refusal carries the reason it was refused — a 422
+          nobody can see is the same as silence, which is what this migration exists to remove.
+        </p>
+      </div>
+
+      {d.recent.length === 0 ? (
+        <EmptyState>
+          No engine write has reached this server yet. Point n8n at{' '}
+          <span className="text-ink">POST /api/engine/&lt;kind&gt;</span> with the{' '}
+          <span className="text-ink">x-dashboard-key</span> header and the first one will appear here.
+        </EmptyState>
+      ) : (
+        <Grid
+          label="Recent engine writes"
+          min={1120}
+          head={
+            <>
+              <Th>when</Th>
+              <Th>kind</Th>
+              <Th>outcome</Th>
+              <Th>row</Th>
+              <Th width="34%">detail</Th>
+              <Th>key</Th>
+              <Th right>ms</Th>
+            </>
+          }
+        >
+          {d.recent.map((w) => (
+            <tr key={w.seq}>
+              <td className="td tabular whitespace-nowrap text-faint" title={w.at}>
+                {when(w.at)}
+              </td>
+              <td className="td card-meta text-dim">{w.kind}</td>
+              <td className={`td card-meta ${OUTCOME_TONE[w.outcome] ?? 'text-dim'}`}>{w.outcome}</td>
+              <td className="td tabular td-clip text-faint" style={{ maxWidth: '24ch' }} title={w.airtable_record_id ?? w.natural_id ?? ''}>
+                {w.airtable_record_id ?? w.natural_id ?? DASH}
+              </td>
+              <td className="td td-clip text-dim" style={{ maxWidth: '52ch' }} title={w.detail ?? ''}>
+                {w.detail ?? DASH}
+              </td>
+              <td className="td text-faint">{w.key_label ?? DASH}</td>
+              <td className="td tabular text-right text-faint">{w.ms ?? DASH}</td>
+            </tr>
+          ))}
+        </Grid>
       )}
     </>
   );

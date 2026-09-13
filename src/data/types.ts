@@ -1310,6 +1310,8 @@ export interface RegistryData {
   bases: RegistryBaseRow[];
   people: RegistryPerson[];
   spend: Spend;
+  /** Digests flagged missing in the last seven days. See DigestHealth. */
+  digest_health: DigestHealth;
   includes_deleted: boolean;
 }
 
@@ -1321,4 +1323,66 @@ export interface RegistryRowOf {
   endpoints: RegistryEndpoint;
   bases: RegistryBaseRow;
   people: RegistryPerson;
+}
+
+/* --------------------------------------------------------- engine writes */
+
+/**
+ * The dual-write period (2026-09-13 → step 3).
+ *
+ * The engine now writes records straight into this dashboard's own tables at
+ * the same time as it writes them to Airtable. Both paths are live and neither
+ * is authoritative yet; these shapes are what makes the two comparable, which
+ * is the only thing that can justify turning the Airtable read path off later.
+ */
+export interface MirrorHeld {
+  kind: string;
+  label: string;
+  table: string;
+  rows: number;
+  /** Written last by the backfill reading Airtable. */
+  from_airtable: number;
+  /** Written last by n8n posting to /api/engine. Still zero means not wired yet. */
+  from_engine: number;
+  latest: string | null;
+}
+
+export interface EngineWriteRow {
+  seq: number;
+  at: string;
+  endpoint: string;
+  kind: string;
+  method: string;
+  key_label: string | null;
+  airtable_record_id: string | null;
+  natural_id: string | null;
+  outcome: string;
+  detail: string | null;
+  ms: number | null;
+}
+
+export interface EngineWrites {
+  total: number;
+  window_hours: number;
+  tally: Record<string, number>;
+  recent: EngineWriteRow[];
+  first_at: string | null;
+  last_at: string | null;
+  held: MirrorHeld[];
+  /** Whether DASHBOARD_INBOUND_KEY is set. Without it the engine cannot write at all. */
+  configured: boolean;
+}
+
+/**
+ * Digest delivery health. `rows` is load-bearing: with nothing read in yet,
+ * `missing: 0` would read as "no digest went missing", which is a different
+ * claim from "nothing is recorded".
+ */
+export interface DigestHealth {
+  rows: number;
+  window_days: number;
+  sent: number;
+  delivered: number;
+  missing: number;
+  latest_sent_at: string | null;
 }
