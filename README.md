@@ -20,6 +20,14 @@ Patterns and Commercial Opportunities — and every change made on those pages
 is written to Airtable first and shown from what came back. The server resyncs from Airtable on boot, on a timer and on demand, and
 n8n can push writes to it as it writes them to Airtable.
 
+**The System Registry** is the exception to all of that: six tables — workflows,
+services and their billing, credentials, endpoints, Airtable bases and people —
+that this dashboard owns outright. Nothing upstream records who manages Otter.ai
+or what a workflow is for, so there is no read model and no resync; rows are
+created and edited in the interface and stored in Postgres. Credentials there
+hold names, types and ownership only, and the schema has no column a secret
+value could go in.
+
 The server's state is in Postgres (`bha-engine-db` on Render, attached as
 `DATABASE_URL`). Airtable stays the source of truth for every record kind and
 the store is a read model over it, rebuilt on boot and on a timer — but the

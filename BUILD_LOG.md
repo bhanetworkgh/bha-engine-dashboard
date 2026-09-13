@@ -2568,3 +2568,131 @@ Not done:   Still no merge. DATABASE_URL is not set on bha-engine-dashboard —
             straight into the failure it is designed to produce, which is the
             check working rather than a bug, but a failed deploy either way.
             Merging waits on that variable being set.
+
+## 2026-09-13 19:45 — System Registry: workflows, services and the billing behind them
+Intent:     Build a new page answering the two questions nobody can answer
+            without asking Destiny: which workflow does X, who owns it and
+            where do I look when it breaks; and what does BHA pay for, who
+            manages it, what does it cost, when does it renew. Six Postgres
+            tables, seeded, read from the database, every row editable inline.
+
+Files:      server/src/migrations.ts       migration 2, six registry tables
+            server/src/registry.ts         schema spec, CRUD, spend, seeding
+            server/src/registrySeed.ts     the opening contents (new)
+            server/src/index.ts            /api/registry routes, boot seeding
+            src/data/types.ts              registry shapes
+            src/data/index.ts              registry data functions
+            src/screens/Registry/index.tsx the page, five tabs
+            src/screens/Registry/Editable.tsx inline cell + add-row form
+            src/App.tsx, src/components/Layout.tsx  route and sidebar entry
+
+Decision:   **Patterned on Clients.tsx**, which was the closest existing
+            screen: one read through useData, a card-framed dense table with
+            a sticky action column, Segmented filters plus SearchBox above it,
+            StatStrip for the headline counts, usePaged/Pagination, and Toast
+            for write feedback. No new dependency, no new state library, no new
+            styling approach; every colour is an existing token.
+
+Decision:   **This dashboard is the system of record for these six tables**,
+            which is the one place this page deliberately departs from the rule
+            in CLAUDE.md section 4 that Airtable owns every record kind. There
+            is no upstream table holding the billing owner of Otter.ai or the
+            pillar of a workflow, so a read model would have nothing to read
+            and a resync nothing to resync. Writes go straight to Postgres and
+            stay there; there is no resync control on the page, and the page
+            says so in its own words at the top rather than leaving the reader
+            to infer it from an absence.
+
+Decision:   **Deletes are soft and there is no hard one.** A registry whose
+            answer to "did we ever pay for that" is a missing row is not a
+            registry. `deleted_at` hides a row from the default listing; "show
+            removed" brings it back with a Restore action. A seeded row that
+            was removed is *not* resurrected by a restart — seeding is
+            `ON CONFLICT (id) DO NOTHING`, and a soft-deleted row still holds
+            its id, so the conflict fires and nothing is written. Verified by
+            deleting a row, restarting, and reading it back still deleted.
+
+Decision:   **No column exists that a secret value could be written to.**
+            registry_credentials holds name, type, used_by, owner and notes.
+            Adding a value column would take a migration and a decision, which
+            is the point; the tab carries a banner saying so, because that
+            table is exactly where someone would reach to "keep the key safe".
+            The seed was read from the live n8n credential list — names only.
+
+Decision:   **The monthly total never appears without the count of what is
+            missing from it.** A figure built from one of ten services is not
+            what BHA spends. The server returns `priced`, `unpriced` and
+            `not_monthly` alongside the totals and the card prints them in the
+            same note; with nothing priced there is no number at all, just the
+            sentence saying a zero there would claim BHA spends nothing, which
+            is a different thing entirely. Totals are per currency and are
+            never summed across currencies — GBP 1500/yr and USD 50/mo render
+            as two figures, not one. One-off and no-cycle rows count as priced
+            but are excluded from the monthly figure and counted separately.
+
+Decision:   **Airtable bases live on the Endpoints tab, not Services.** They
+            are the other set of addresses the engine talks to, and nobody is
+            billed for a base — Airtable is one service. Ten unpriced base rows
+            in the services table would have inflated the spend denominator
+            from ten to twenty and made an already-incomplete total read as far
+            worse than it is.
+
+Decision:   Seed data was **read back from the live sources rather than taken
+            on trust**, per CLAUDE.md section 3. The n8n BHA Engine project
+            supplied folder, pillar, owner, status, trigger type, trigger
+            detail and purpose for 29 of the 30 workflows, read from each
+            workflow's own overview sticky note and trigger configuration —
+            none of it inferred from a name. The Render API supplied the live
+            service inventory. Where a field could not be read it is null and
+            renders as a dash; where the live source disagreed with the brief,
+            the row's notes records both readings rather than silently picking
+            one.
+
+Problem:    Thirteen columns in a fixed-width table crushed the short ones:
+            "active" rendered as "a…" and a null plan as "—…", because the
+            editable cell carried `truncate` and `w-full` and collapsed to
+            whatever width was left.
+Fix:        The cell only clips when it was given an explicit width; short
+            fields are `whitespace-nowrap` and read whole. Each table declares
+            a min-width and the card scrolls sideways inside itself when the
+            column is narrower — permitted by section 5, which forbids the page
+            *body* scrolling sideways, not a table in its own container.
+            Verified at 400px: document horizontal overflow is 0.
+
+Problem:    A service created from the interface had a null status while
+            `spendOf` counted a null status as active — so a new row was in the
+            spend denominator while displaying as "not recorded".
+Fix:        A `defaultOnCreate` on the field spec, applied only where the
+            caller named no value at all. Services default to `active`,
+            workflows to `production`. Stated defaults, not inferred ones.
+
+Verified:   npm run typecheck and npm run build clean. Against a local
+            Postgres 16: boot applied migrations 1 and 2 and seeded 95 rows
+            (workflows 30, services 10, credentials 29, endpoints 9, bases 10,
+            people 7); a second boot reported "already populated" and wrote
+            nothing. Through the API — create with a derived id, patch, soft
+            delete, restore, and a re-create colliding with the soft-deleted id
+            answering 409 with the restore hint. Validation refuses an unknown
+            field ("secret_value" is not a field a service has), a select value
+            outside its vocabulary, a date that is not YYYY-MM-DD, a negative
+            cost and a URL with no scheme. Clearing a cell stores null, not "".
+            An edit and a soft delete both survived a restart. Spend: USD 50/mo
+            plus GBP 1500/yr rendered as two totals (USD 50, GBP 125), a
+            one-off counted as priced but not monthly, renewal 12 days out
+            flagged soon and one in the past flagged overdue. In Chromium:
+            signed in, opened the page, edited a cost, currency and cycle
+            inline and watched the total go from "Not recorded" to "USD 42 per
+            month · 1 service / Computed from 1 of 10 active services. 9 have
+            no cost recorded. This is not the whole bill." Escape discarded a
+            draft instead of committing it. No console or page errors on any
+            tab, in light or dark.
+
+Not done:   Cost, currency, billing cycle, renewal date and billing owner are
+            null on every one of the ten services — nobody supplied them and
+            this build will not invent one. Two workflows could not be read
+            from n8n and carry null pillar, trigger and purpose with a note
+            saying why: North Star — Capacity Intelligence is archived and the
+            API refuses it, and the vFarm funnel workflow has MCP access turned
+            off. Per-Render-service billing rows were not created; the live
+            eight-resource inventory is recorded in the Render row's notes
+            instead, so the spend denominator stays the ten briefed services.
