@@ -27,6 +27,7 @@ import * as engine from './engine';
 import * as store from './store';
 import * as sync from './sync';
 import * as registry from './registry';
+import * as mirror from './mirror';
 import { airtableConfigured, AIRTABLE_URL } from './airtable';
 import type { NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
 
@@ -171,6 +172,73 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     }
   }
 
+  /**
+   * The engine's own write surface: n8n POSTs a record here and it lands in
+   * the mirror tables (see mirror.ts). Steps 1 and 2 of the Airtable →
+   * Postgres migration — the Airtable read path above is untouched and still
+   * runs, so for now both are true at once and can be compared.
+   *
+   * Authenticated by the same DASHBOARD_INBOUND_KEY in the same x-dashboard-key
+   * header as /api/inbound above: one service key for the engine, already set
+   * on this service and already in n8n's hands. A second key would be a second
+   * thing to rotate and a second thing to get wrong.
+   *
+   * The key is checked here, before the router looks at the kind or reads the
+   * body, so an unauthenticated request never reaches a handler.
+   */
+  if (p === '/api/engine' || p.startsWith('/api/engine/')) {
+    const t0 = Date.now();
+    const endpoint = p;
+    if (!INBOUND_KEY) {
+      await mirror.logWrite({ endpoint, kind: '-', method, key_label: null, outcome: 'unauthorised', detail: 'DASHBOARD_INBOUND_KEY is not set on the server' });
+      throw new HttpError(503, 'DASHBOARD_INBOUND_KEY is not set on the server, so engine writes are off.');
+    }
+    if (!inboundOk(req)) {
+      await mirror.logWrite({ endpoint, kind: '-', method, key_label: null, outcome: 'unauthorised', detail: 'missing or wrong x-dashboard-key' });
+      throw new HttpError(401, 'The x-dashboard-key header is missing or wrong.');
+    }
+
+    const m = p.match(/^\/api\/engine\/([^/]+)$/);
+    if (!m) throw new HttpError(404, `POST /api/engine/:kind, where :kind is one of: ${mirror.KIND_LIST.join(', ')}.`);
+    const kind = m[1];
+    if (!mirror.isKind(kind)) {
+      await mirror.logWrite({ endpoint, kind, method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: 'unknown kind' });
+      throw new HttpError(404, `"${kind}" is not a kind this engine holds. One of: ${mirror.KIND_LIST.join(', ')}.`);
+    }
+    if (method !== 'POST') throw new HttpError(405, 'POST. An upsert, so the same row twice updates rather than duplicating.');
+
+    const body = await readJson(req, 256 * 1024);
+    try {
+      const result = await mirror.upsert(kind, body as mirror.MirrorInput, 'engine');
+      await mirror.logWrite({
+        endpoint,
+        kind,
+        method,
+        key_label: 'DASHBOARD_INBOUND_KEY',
+        airtable_record_id: result.airtable_record_id,
+        natural_id: result.natural_id,
+        outcome: result.inserted ? 'inserted' : result.changed ? 'updated' : 'unchanged',
+        detail: `matched on ${result.matched_on}`,
+        ms: Date.now() - t0,
+      });
+      return send(res, 200, {
+        ok: true,
+        id: result.id,
+        kind: result.kind,
+        airtable_record_id: result.airtable_record_id,
+        natural_id: result.natural_id,
+        // Said plainly so a caller can tell a real change from a repeat.
+        outcome: result.inserted ? 'inserted' : result.changed ? 'updated' : 'unchanged',
+        matched_on: result.matched_on,
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      const status = e instanceof mirror.MirrorError ? e.status : 500;
+      await mirror.logWrite({ endpoint, kind, method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: status >= 500 ? 'error' : 'rejected', detail: message, ms: Date.now() - t0 });
+      throw new HttpError(status, message);
+    }
+  }
+
   // Everything else needs the cookie.
   if (!readSession(req)) throw new HttpError(401, 'Sign in to continue.');
 
@@ -228,6 +296,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
         return send(res, 200, await engine.getBuilders(q));
       case '/api/ask-bays':
         return send(res, 200, engine.getAskBays(q));
+      case '/api/engine-writes': {
+        // The dual-write comparison surface. Behind the cookie, not the
+        // service key: this is for a person looking at the page, and the
+        // service key is n8n's alone.
+        const limit = Number(url.searchParams.get('limit') ?? 50);
+        return send(res, 200, await mirror.writesView(Number.isFinite(limit) ? limit : 50, 24, Boolean(INBOUND_KEY)));
+      }
       case '/api/registry': {
         // Everything the page shows, in one response. Six small tables; a
         // request per tab would only make the age of each one harder to state.
@@ -244,6 +319,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
           people,
           // Computed by the server from the rows, per CLAUDE.md section 4.
           spend: registry.spendOf(services),
+          // Digest delivery health sits with the registry because the base it
+          // is read from is described on the same page.
+          digest_health: await mirror.digestHealth(),
           includes_deleted: deleted,
         });
       }
