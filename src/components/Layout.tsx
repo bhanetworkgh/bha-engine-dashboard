@@ -38,6 +38,12 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
     group: 'People',
     items: [{ to: '/builders', label: 'Builders', icon: 'people' }],
   },
+  {
+    // Not a system and not a record kind: the registry is the reference shelf —
+    // what exists, who owns it, and what it costs.
+    group: 'Reference',
+    items: [{ to: '/registry', label: 'System registry', icon: 'book' }],
+  },
 ];
 
 /** The shared account, with a small menu: settings and sign out. */
