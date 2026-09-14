@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../../app/useData';
-import { BUILDER_NAMES, createLoop, getOpenLoops, getRecordMetrics, saveLoop, type Loop, type LoopEdit, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
+import { BUILDER_NAMES, createLoop, getOpenLoops, getRecordMetrics, removeLoopDuplicate, saveLoop, type Loop, type LoopEdit, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
 import { Icon, LoadFailed, Loading, PageHeader, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useToast } from '../../components/ui';
 import { LoopPanel } from './LoopPanel';
 import { Loops, OwnerPicker, type StatusFilter } from './Loops';
@@ -113,6 +113,32 @@ export default function OpenLoops() {
     }
   }
 
+  /**
+   * The one repair for a half-landed move: delete the copy left in the source
+   * table. It is not a save — nothing about the loop changes — so it does not
+   * go through save() and never re-runs the move.
+   *
+   * A retry that fails leaves the loop where it was, in two tables, and comes
+   * back still `duplicate` with the new reason on it. The action stays.
+   */
+  async function removeDuplicate(loop: Loop) {
+    setBusyId(loop.id);
+    try {
+      const updated = await removeLoopDuplicate(loop.id);
+      setData((d) => (d ? { ...d, loops: d.loops.map((l) => (l.id === loop.id ? updated : l)) } : d));
+      const wb = updated.writeback;
+      setToast(
+        wb?.state === 'duplicate'
+          ? { text: wb.reason ?? 'The copy is still there.', tone: 'failing' }
+          : { text: 'The copy is gone. This loop is in one table again.', tone: 'ok' },
+      );
+    } catch (e) {
+      setToast({ text: e instanceof Error ? e.message : 'The copy was not removed.', tone: 'failing' });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   function changeStatus(loop: Loop, next: LoopStatus) {
     return save(loop, { status: next }, next === 'closed' ? 'Closed.' : next === 'in progress' ? 'Marked in progress.' : 'Reopened.');
   }
@@ -184,7 +210,16 @@ export default function OpenLoops() {
             </div>
           </div>
         </div>
-        <Loops data={data} loops={paged.rows} total={loops.length} busyId={busyId} onStatus={changeStatus} onOpen={(l) => setOpenId(l.id)} searching={Boolean(q.trim())} />
+        <Loops
+          data={data}
+          loops={paged.rows}
+          total={loops.length}
+          busyId={busyId}
+          onStatus={changeStatus}
+          onOpen={(l) => setOpenId(l.id)}
+          onRemoveDuplicate={(l) => void removeDuplicate(l)}
+          searching={Boolean(q.trim())}
+        />
         <Pagination paged={paged} unit="loops" />
       </div>
 
@@ -194,6 +229,7 @@ export default function OpenLoops() {
           busy={busyId === panelLoop.id}
           onClose={() => setOpenId(null)}
           onSave={(edit) => void save(panelLoop, edit, edit.builder && edit.builder !== panelLoop.owner ? `Moved to ${BUILDER_NAMES[edit.builder] ?? edit.builder}.` : 'Saved.')}
+          onRemoveDuplicate={() => void removeDuplicate(panelLoop)}
         />
       )}
 

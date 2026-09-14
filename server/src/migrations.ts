@@ -645,6 +645,23 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS record_deletions_at ON record_deletions (at DESC)`,
     ],
   },
+  {
+    id: 8,
+    name: 'the write log remembers the row a move left behind',
+    statements: [
+      /**
+       * A move that creates the destination row and fails to delete the source
+       * leaves the loop in two tables. The log said which two, but not *which
+       * row* — and by then the loop's own record id is the new one, so the copy
+       * could be named and not removed. This is the id of that copy, written on
+       * the duplicate line and read back when the delete is retried.
+       *
+       * Null on every other line, including the retry that succeeds: there is
+       * then no copy left to point at.
+       */
+      `ALTER TABLE record_writes ADD COLUMN IF NOT EXISTS from_record_id text`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

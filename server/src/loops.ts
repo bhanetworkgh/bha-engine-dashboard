@@ -94,6 +94,12 @@ export interface LoopWriteResult {
   steps: string[];
   from_table: string | null;
   to_table: string | null;
+  /**
+   * The record the move read from, kept only when it is still there: a
+   * duplicate is exactly "this id, in from_table, was never deleted", and
+   * without it the copy can be named but not removed.
+   */
+  from_record_id?: string | null;
 }
 
 /** Validates a patch before anything is written anywhere. Throws with the field named. */
@@ -255,8 +261,69 @@ async function move(input: ApplyInput, toTable: string, toBuilder: string, steps
       steps,
       from_table: from,
       to_table: toTable,
+      // The id of the copy left behind, so the delete can be retried against
+      // exactly that row rather than searched for later.
+      from_record_id: input.record_id,
     };
   }
 
   return ok(created.id, steps, from, toTable);
+}
+
+/**
+ * Deletes the copy a half-landed move left behind, and nothing else.
+ *
+ * Only the source row, by the record id the move read from, in the table it
+ * read it from. It never re-creates anything and never touches the destination
+ * row: the loop already lives there, Postgres already says so, and a retry
+ * that re-ran the move would make a third copy out of a second one.
+ *
+ * A source record that is already gone is a success, not an error — somebody
+ * deleting it in Airtable by hand is the other way this ends, and the state it
+ * leaves behind is the state this was trying to reach.
+ */
+export async function retryDelete(input: { table: string; record_id: string; to_table: string | null }): Promise<LoopWriteResult> {
+  const steps: string[] = [];
+  const fromName = LOOP_TABLES.find((t) => t.table === input.table)?.label ?? input.table;
+
+  const toName = input.to_table ? (LOOP_TABLES.find((t) => t.table === input.to_table)?.label ?? input.to_table) : null;
+  /**
+   * A retry that does not land leaves the loop exactly as it was — in two
+   * tables — so it stays `duplicate` rather than becoming `failed`. The row
+   * keeps its marker, the action stays on offer, and the reason is replaced
+   * with what happened this time.
+   */
+  const stillTwo = (reason: string, http: number | null): LoopWriteResult => ({
+    state: 'duplicate',
+    record_id: null,
+    reason: `This loop is still in both ${fromName}${toName ? ` and ${toName}` : ''} — the copy in ${fromName} needs deleting, and removing it failed again: ${reason}`,
+    http,
+    steps,
+    from_table: input.table,
+    to_table: input.to_table,
+    from_record_id: input.record_id,
+  });
+
+  if (!airtable.airtableConfigured()) {
+    return stillTwo('AIRTABLE_TOKEN is not set on this server, so nothing was sent to Airtable.', null);
+  }
+  if (!airtable.LOOPS_BASE_ID) {
+    return stillTwo(`${airtable.OPEN_LOOPS_BASE_VAR} is not set on this server, so there is no base to delete it from.`, null);
+  }
+
+  try {
+    await airtable.deleteRecord(airtable.loopsBase(), input.table, input.record_id);
+    steps.push(`deleted ${input.record_id} from ${fromName}`);
+    return { state: 'ok', record_id: null, reason: null, http: null, steps, from_table: input.table, to_table: input.to_table, from_record_id: null };
+  } catch (e) {
+    const { reason, http } = why(e);
+    // 404 is the record already being gone. Airtable answers the same way
+    // whether we deleted it a moment ago or somebody did it by hand this
+    // morning, and in both cases the copy this was sent to remove is not there.
+    if (http === 404) {
+      steps.push(`${input.record_id} was already gone from ${fromName}`);
+      return { state: 'ok', record_id: null, reason: null, http: null, steps, from_table: input.table, to_table: input.to_table, from_record_id: null };
+    }
+    return stillTwo(reason, http);
+  }
 }

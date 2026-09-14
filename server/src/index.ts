@@ -499,6 +499,21 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   }
 
   if (method === 'POST') {
+    /**
+     * Remove the copy a half-landed move left behind. Its own route rather than
+     * a field on the PATCH: it is a repair to Airtable alone, it changes
+     * nothing about the loop, and it must never be reachable by a save that
+     * happens to carry the wrong body.
+     */
+    const dup = p.match(/^\/api\/loops\/([^/]+)\/duplicate$/);
+    if (dup) {
+      try {
+        return send(res, 200, await store.resolveDuplicate(decodeURIComponent(dup[1]), sessionInfo(req).email));
+      } catch (e) {
+        if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
+        throw e;
+      }
+    }
     if (p === '/api/records/loops') {
       const body = await readJson(req);
       const input: NewLoop = {
