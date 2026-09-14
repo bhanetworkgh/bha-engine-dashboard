@@ -69,15 +69,20 @@ services:
       # deleted.
       - key: DASHBOARD_INBOUND_KEY
         generateValue: true
-      # The write-back key. n8n holds the Airtable token; the dashboard posts a
-      # loop status change to BHA — Dashboard Loop Write-Back and n8n does the
-      # write. Without this, a loop closed in the dashboard never reaches
-      # Airtable and the 08:00 Open Loops digest raises it again the next
-      # morning — so the server says it is missing at boot and on every
-      # attempt. Set by hand: it is the value on the workflow's own header-auth
-      # credential, so it cannot be generated here.
-      - key: N8N_WRITEBACK_KEY
+      # The Airtable token, for loop edits only (2026-09-14). The n8n write-back
+      # that stood here for a day is retired: the loop panel edits four fields
+      # and can move a row between builder tables, and routing that through a
+      # webhook left no way to see where a half-completed move stopped. Needs
+      # data.records:read and :write on the Open Loops base and nothing else.
+      #
+      # Note the name: the client deleted on 13 Sep read AIRTABLE_API_KEY. This
+      # reads AIRTABLE_TOKEN, which is the variable actually set on the service.
+      # Without it the server says so at boot and every loop edit is marked as
+      # not having reached Airtable.
+      - key: AIRTABLE_TOKEN
         sync: false
+      - key: AIRTABLE_BASE_ID
+        value: appUVlBSGGPHw6DGh
 
 # Confirmed against the live Render API (2026-09-12), not inferred: the plan
 # string is the one the API reports. basic-256mb is an accepted alias for the

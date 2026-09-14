@@ -130,17 +130,33 @@ explicitly for this. Therefore:
   the two keys the interface knows about would drop the rest. If n8n later
   pushes the same record carrying Airtable's copy of those fields, that push
   wins: it is the newer statement.
-- **A loop's status is pushed back to Airtable through n8n** (decision
-  2026-09-14, Destiny). Not a return to write-through and not a returning
-  Airtable token: the dashboard posts an intent to
-  `POST /webhook/dashboard-loop-writeback` with `N8N_WRITEBACK_KEY` in
-  `x-api-key`, and n8n — which already holds the Airtable credential — does
-  the write. It exists because the 08:00 Open Loops digest reads Airtable, so
-  a close that stopped at Postgres came back the next morning as though
-  nothing had happened. **Postgres first, then the push.** The push never
-  blocks or rolls back the Postgres write, and a push that fails is stored on
-  the loop and shown on it — a loop the dashboard calls closed while Airtable
-  still says open must never look cleanly closed. See `server/src/writeback.ts`.
+- **Loop edits are written straight to Airtable** (decision 2026-09-14,
+  Destiny). `AIRTABLE_TOKEN` on the Open Loops base and nothing else — no other
+  record kind is read from or written to Airtable, and the pages still read
+  Postgres. It exists because the 08:00 Open Loops digest reads Airtable, so a
+  close that stopped at Postgres came back the next morning as though nothing
+  had happened. The n8n write-back that stood here for a day is retired: it
+  handled the status only, and two paths writing the same field is the thing
+  worth avoiding. **Postgres first, then Airtable.** The Airtable write never
+  blocks or rolls back the Postgres write, and a write that does not land is
+  stored on the loop and shown on it — a loop the dashboard calls closed while
+  Airtable still says open must never look cleanly closed. See
+  `server/src/loops.ts` and `server/src/airtable.ts`.
+- **Changing a loop's builder is a move, not an edit.** There is no builder
+  field: the builder *is* which of the seven tables the row sits in. Read the
+  source row, create in the destination, confirm a record id came back, and
+  only then delete the source — create before delete, so the worst case is a
+  duplicate rather than a lost loop. A failed delete is not retried and is its
+  own outcome, naming both tables. `loop_id` travels unchanged;
+  `Assignee Slack User ID` is never copied but set from the destination,
+  because the digest routes by table. The new record id is stored against the
+  loop and the events, note and write log are re-keyed onto it. **The move
+  lands in Postgres only once Airtable has made it** — which table a row sits
+  in is a fact about Airtable, not a field this dashboard owns, and claiming it
+  early leaves nothing that knows where the row really is.
+- **Every loop write is logged** to `loop_writebacks`, append-only: what
+  changed, the source and destination table on a move, the steps that
+  completed, and the outcome. The newest line per loop is what the page marks.
 - **Every page states how old its rows are**, relative ("4 min ago"), in the
   same place, along with how many the engine has written since the migration
   backfill. A kind sitting entirely on backfilled rows says so in amber, because
@@ -179,13 +195,13 @@ thread's `session_id` is stable for its life and is Bays's memory. The reply's
 **Environment (all server-side, none in the bundle):** `AUTH_EMAIL`,
 `AUTH_PASSWORD_HASH`, `SESSION_SECRET`, `ASK_BAYS_API_KEY`, `ASK_BAYS_URL`,
 `DASHBOARD_INBOUND_KEY` (nothing reaches the record tables without it),
-`N8N_WRITEBACK_KEY` (without it no loop closed here reaches Airtable, and the
-server says so at boot and on every attempt; `N8N_WRITEBACK_URL` overrides the
-built-in workflow address), and
-`DATABASE_URL` — the one the server refuses to start without.
-`DATABASE_CA_CERT` and `DATABASE_POOL_MAX` are optional. `DATA_DIR` is gone,
-and so are `AIRTABLE_API_KEY`, `AIRTABLE_RESYNC_MINUTES` and
-`AIRTABLE_API_URL` (2026-09-13) — nothing in this server reads Airtable.
+`AIRTABLE_TOKEN` and `AIRTABLE_BASE_ID` (loop edits only; without the token no
+loop edited here reaches Airtable and the server says so at boot and on every
+write), and `DATABASE_URL` — the one the server refuses to start without.
+`DATABASE_CA_CERT`, `DATABASE_POOL_MAX` and `AIRTABLE_API_URL` are optional.
+`DATA_DIR` is gone, and so are `AIRTABLE_RESYNC_MINUTES` and the
+`N8N_WRITEBACK_*` pair. **The token variable is `AIRTABLE_TOKEN`** — the client
+deleted on 13 Sep read `AIRTABLE_API_KEY`, and that name is not in use.
 
 **Auth:** one shared login for the whole team, same as BHARAG's console. Not
 per-user accounts. The password is posted to `/api/auth/login`; the server
@@ -349,8 +365,10 @@ Incidents and self-healing.
 ### Open loops
 The densest screen.
 
-- Every loop with **time-in-status**, sorted oldest first. That number is the
-  headline signal on this page.
+- Every loop with **time-in-status**, newest first. That number is the headline
+  signal on this page.
+- **Click a loop to edit it**: What, Status, Lane and Builder, in one save.
+  `loop_id`, `Raised By`, `Date Raised` and `Source Link` are read-only.
 - Grouped by owner, so you can see where work is piling up and on whom.
 - Open, update and close a loop directly from the interface.
 - A separate **review queue** for stale loops: each proposed close carries its

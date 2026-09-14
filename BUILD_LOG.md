@@ -3242,3 +3242,132 @@ Not done:   No retry affordance on the row — a failed write-back clears when
             N8N_WRITEBACK_KEY is in render.yaml as sync:false and has to be set
             by hand: it is the value on the workflow's own header-auth
             credential and cannot be generated.
+
+## 2026-09-14 10:55 — The loop panel, and edits written straight to Airtable
+Intent:     Two things on Open loops. Visual cleanup of the cards and the
+            table, and a detail panel that edits a loop — What, Status, Lane
+            and Builder — writing straight to Airtable rather than through the
+            n8n write-back built this morning.
+Files:      server/src/airtable.ts   restored, on AIRTABLE_TOKEN (new)
+            server/src/loops.ts      field names, validation, the move (new)
+            server/src/writeback.ts  deleted
+            server/src/store.ts      editLoop; the log; adopt → rekey
+            server/src/migrations.ts migration 6: loop_writebacks becomes a log
+            server/src/index.ts      PATCH /api/loops/:id; boot line; status
+            server/src/engine.ts     the page note, stale within a day
+            src/data/types.ts, src/data/index.ts
+            src/components/ui/Records.tsx        RowsLine writes={false}
+            src/screens/OpenLoops/Metrics.tsx    the card changes
+            src/screens/OpenLoops/Loops.tsx      click to open, Builder, clip
+            src/screens/OpenLoops/LoopPanel.tsx  the panel (new)
+            src/screens/OpenLoops/index.tsx      one save path
+            src/screens/Settings.tsx, render.yaml, .env.example, README.md,
+            CLAUDE.md
+
+Problem:    The brief named the lane field `Lane`. There is no field called
+            `Lane` in any of the seven tables. Read live from
+            appUVlBSGGPHw6DGh on 2026-09-14, all seven identical:
+              What · Raised By · Date Raised · Source Link · Status ·
+              Assignee Slack User ID · loop_id · lane_tag · raised_in ·
+              last_modified
+Fix:        Wrote `lane_tag`. With typecast on, `Lane` would have been created
+            as a second field that nothing reads, while the real lane silently
+            never changed — the exact silent-divergence failure the
+            never-rename rule exists for.
+
+Problem:    `raised_in` is a real field carrying data (the Slack channel a loop
+            was raised in, distinct from Source Link) and the brief's move list
+            left it out. Not carrying it would have dropped it on every move.
+Fix:        Carried. CARRIED in loops.ts is loop_id, What, Status, lane_tag,
+            Raised By, Date Raised, Source Link, raised_in.
+
+Decision:   **The env var is AIRTABLE_TOKEN, and it does not match.** The
+            client deleted on 13 Sep read `AIRTABLE_API_KEY` (confirmed at
+            7d6e58c^:server/src/airtable.ts:18). The variable set on the
+            service is `AIRTABLE_TOKEN`, so that is what this reads, and
+            `AIRTABLE_API_KEY` is now unused anywhere. Raised with Destiny.
+
+Decision:   **setStatus for loops delegates to editLoop.** The row actions and
+            the panel are the same call, so there is exactly one path that
+            writes a loop's status — which was the reason for retiring the
+            write-back in the first place.
+
+Problem:    The first cut wrote the destination builder and table to Postgres
+            before Airtable had moved anything, per "Postgres first". When the
+            create failed, this database said Ahad while the row was still in
+            Kaiqi's table — and nothing was left that knew where it really was.
+            The retry then looked in Ahad's table, found nothing, and the loop
+            was stuck.
+Fix:        The field edits still go to Postgres first and still stand whatever
+            Airtable does. The *move* lands in Postgres only after Airtable
+            confirms the create. Which table a row sits in is a fact about
+            Airtable, not a field this dashboard owns. Nothing is rolled back
+            by this; the move simply is not claimed until it is true. Verified:
+            a failed create leaves the edit applied, the builder unchanged and
+            truthful, and the retry then works.
+
+Decision:   **`duplicate` is its own outcome, not a kind of failure.** The save
+            landed; the loop is in two tables and one copy needs deleting.
+            Calling it failed would say the change did not happen, which is the
+            opposite of the truth, and the recovery is different and specific.
+            The move is never retried after a failed delete.
+
+Decision:   **loop_writebacks becomes append-only** (migration 6) rather than
+            one row per loop. A move that half-lands has to show where it
+            stopped, and one row per loop overwrites exactly that. The primary
+            key moves from record_id to a sequence; every existing row is kept;
+            the newest line per loop drives the page marker.
+
+Decision:   **"N written since the backfill" is dropped from Open loops only**,
+            not from the other six pages. It stops meaning "the engine is still
+            feeding this" the moment anyone edits a loop here — one edit turns
+            the amber warning off whether or not n8n has gone quiet. On the six
+            read-only kinds it still says exactly what it says, so RowsLine
+            took a `writes` prop rather than losing the signal everywhere.
+
+Problem:    With the second line removed from the What column, the text ran
+            straight through the status, Builder and lane columns. `td-clip` is
+            overflow/ellipsis/nowrap and needs a block box; a `<span>` stays
+            inline and clips nothing.
+Fix:        The column's own `clip: true`, which wraps the cell in the div
+            td-clip expects. Verified in Chromium: scrollWidth > clientWidth.
+
+Verified:   Against Postgres 16 and a replay of the Airtable REST API shaped
+            from the live schema — ten fields, the real select vocabularies,
+            last_modified rejected as computed, unknown field names rejected —
+            which can be told to fail a specific verb.
+            - edit in place: PATCH carrying What, Status and lane_tag. Nothing
+              else sent; last_modified never written.
+            - move: GET source → POST destination → DELETE source, in that
+              order. loop_id unchanged, raised_in carried, assignee set to the
+              destination builder's own id and not the source's.
+            - edit + move in one save: the edits arrive in the create.
+            - DELETE fails: state `duplicate`, both tables named, steps showing
+              the create landed and the delete did not, new record id stored so
+              the next edit finds the live row.
+            - CREATE fails: nothing deleted, the loop still in the source
+              table, Postgres still naming the source builder, and the retry
+              succeeds once Airtable answers.
+            - rejected before any write: an unknown builder, a lane the tables
+              do not define, an empty What — zero Airtable calls for all three.
+            - a record deleted in Airtable: failed, HTTP 404, marked.
+            - no AIRTABLE_TOKEN: zero calls, failed, reason names the variable,
+              boot line says it.
+            - a loop opened in the dashboard: skipped, zero calls.
+            - the three row actions: same endpoint, Airtable followed each.
+            In Chromium at 1440 and 400px, zero overflow, no console errors:
+            the two cards removed, close rate left and the age card right and
+            renamed, the four time-series cards all 294px, the What column
+            ellipsised, the Builder header, and a full edit-and-move driven
+            through the panel end to end.
+
+            **Row actions were reachable, not dead code.** `.row-actions` is
+            opacity 0 and `tr:hover .row-actions` is opacity 1 — measured 0 →
+            1 on hover. They were only ever discoverable by hovering, which is
+            why the panel now carries Close loop as a labelled button.
+
+Not done:   No way to delete the stale copy after a duplicate; it is named and
+            has to be removed in Airtable by hand. No bulk edit. The other six
+            record kinds still have no write path to their sources — loops are
+            the only kind this server writes to Airtable, because the 08:00
+            digest is the only reader that needs it.
