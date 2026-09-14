@@ -27,7 +27,8 @@ import { assertDatabase, closePool, DATABASE_URL } from './pg';
 import * as engine from './engine';
 import * as store from './store';
 import * as registry from './registry';
-import { WRITEBACK_URL, WRITEBACK_URL_FROM_ENV, writebackConfigured } from './writeback';
+import { BASE_ID_FROM_ENV, LOOPS_BASE_ID, airtableConfigured } from './airtable';
+import * as loops from './loops';
 import * as mirror from './mirror';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
 
@@ -279,8 +280,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
           records_held: await store.held(),
           started_at: STARTED_AT,
           inbound_configured: Boolean(INBOUND_KEY),
-          writeback_configured: writebackConfigured(),
-          writeback_url: WRITEBACK_URL,
+          airtable_configured: airtableConfigured(),
+          airtable_base: LOOPS_BASE_ID,
           writeback_failures: await store.writebackFailures(),
           writable: store.writable(),
           freshness: await freshnessAll(),
@@ -380,6 +381,31 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   }
 
   if (method === 'PATCH') {
+    /**
+     * One loop, edited. What, status, lane and the builder — which is a move,
+     * not a field, because the builder is which table the row sits in.
+     *
+     * Airtable's own field names are not used on the wire: the browser sends
+     * this dashboard's vocabulary and the server maps it in one place
+     * (loops.asFields), so a field name lives in exactly one file.
+     */
+    const loop = p.match(/^\/api\/loops\/([^/]+)$/);
+    if (loop) {
+      const body = await readJson(req);
+      const patch: loops.LoopPatch = {};
+      if (typeof body.title === 'string') patch.title = body.title.slice(0, 4000);
+      if (typeof body.status === 'string') patch.status = str(body.status, 40) as loops.LoopPatch['status'];
+      if (body.lane_tag === null || typeof body.lane_tag === 'string') patch.lane_tag = body.lane_tag === null ? null : str(body.lane_tag, 40);
+      if (typeof body.builder === 'string') patch.builder = str(body.builder, 40);
+      try {
+        return send(res, 200, await store.editLoop(decodeURIComponent(loop[1]), patch, sessionInfo(req).email));
+      } catch (e) {
+        if (e instanceof loops.LoopError) throw new HttpError(e.status, e.message);
+        if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
+        throw e;
+      }
+    }
+
     const m = p.match(/^\/api\/records\/([^/]+)\/([^/]+)$/);
     if (m) {
       const kind = m[1] as RecordKind;
@@ -553,13 +579,13 @@ async function boot(): Promise<void> {
     // configured one, because a URL on its own cannot tell you nobody chose it.
     console.log(`  ask bays: ${askConfigured() ? `${ASK_URL} ${ASK_URL_FROM_ENV ? '(ASK_BAYS_URL)' : '(built-in default — ASK_BAYS_URL is not set on this service)'}` : 'NOT configured — set ASK_BAYS_API_KEY'}`);
     console.log(`  inbound:  ${INBOUND_KEY ? 'DASHBOARD_INBOUND_KEY set' : 'NOT configured — set DASHBOARD_INBOUND_KEY so the engine can write'}`);
-    // Said loudly and by name. Without the key a loop closed here never reaches
-    // Airtable, and the 08:00 digest raises it again tomorrow morning — so this
-    // is a line worth reading on every boot, not a quiet default.
+    // Said loudly and by name. Without the token a loop edited here never
+    // reaches Airtable, and the 08:00 digest reads Airtable — so this is a line
+    // worth reading on every boot, not a quiet default.
     console.log(
-      writebackConfigured()
-        ? `  writeback: ${WRITEBACK_URL} ${WRITEBACK_URL_FROM_ENV ? '(N8N_WRITEBACK_URL)' : '(built-in default — N8N_WRITEBACK_URL is not set)'}`
-        : '  writeback: NOT configured — N8N_WRITEBACK_KEY is not set on this server. Loop status changes made here will NOT reach Airtable, and the 08:00 Open Loops digest will raise closed loops again.',
+      airtableConfigured()
+        ? `  airtable: loops base ${LOOPS_BASE_ID} ${BASE_ID_FROM_ENV ? '(AIRTABLE_BASE_ID)' : '(built-in default — AIRTABLE_BASE_ID is not set)'}`
+        : '  airtable: NOT configured — AIRTABLE_TOKEN is not set on this server. Loop edits made here will NOT reach Airtable, and the 08:00 Open Loops digest reads Airtable.',
     );
     // Rows are read straight out of the engine tables, so there is nothing to
     // load at boot. What does run is the ledger catch-up: any status that

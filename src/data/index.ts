@@ -29,6 +29,7 @@ import type {
   EngineHealthData,
   EngineStatus,
   Loop,
+  LoopEdit,
   LoopStatus,
   NewLoop,
   NsData,
@@ -166,6 +167,15 @@ export function setLoopStatus(id: string, status: LoopStatus, note?: string): Pr
 /** Edits a record's own fields (Codex entries). Same write-through rule as a status change. */
 export function updateRecordFields<K extends RecordKind>(kind: K, id: string, fields: Record<string, unknown>): Promise<RecordOf<K>> {
   return api<RecordOf<K>>(`/api/records/${kind}/${encodeURIComponent(id)}`, { method: 'PATCH', body: { fields } });
+}
+
+/**
+ * Saves one loop: its What, status, lane, and which builder's table it lives in.
+ * The last is a move, not a field — the server recreates the row in the
+ * destination table and removes it from the source.
+ */
+export function saveLoop(id: string, edit: LoopEdit): Promise<Loop> {
+  return api<Loop>(`/api/loops/${encodeURIComponent(id)}`, { method: 'PATCH', body: edit, timeoutMs: 60_000 });
 }
 
 export function createLoop(input: NewLoop): Promise<Loop> {
