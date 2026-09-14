@@ -503,6 +503,37 @@ const MIGRATIONS: Migration[] = [
        ON CONFLICT (kind, record_id) DO NOTHING`,
     ],
   },
+  {
+    id: 5,
+    name: 'the loop write-back record',
+    statements: [
+      /**
+       * What happened the last time this dashboard pushed a loop's status back
+       * to Airtable through n8n (2026-09-14, Destiny).
+       *
+       * The dashboard holds no Airtable token and is not getting one back. But
+       * the 08:00 Open Loops digest reads Airtable, so a close that does not
+       * reach Airtable reappears tomorrow morning as though it never happened —
+       * and the person who closed it has no way to know. One row per loop, the
+       * latest attempt only: this is the current state of "did the last change
+       * land", not a history, and it is read straight onto the loop so the
+       * failure is on screen next to the status it contradicts.
+       */
+      `CREATE TABLE IF NOT EXISTS loop_writebacks (
+         record_id   text PRIMARY KEY,
+         loop_id     text,
+         state       text NOT NULL,
+         status      text NOT NULL,
+         reason      text,
+         http        integer,
+         changed     boolean,
+         at          text NOT NULL
+       )`,
+      // Every read of the loops page asks for the failures; the count is small
+      // and the index keeps it from being a scan of the whole table to find them.
+      `CREATE INDEX IF NOT EXISTS loop_writebacks_state ON loop_writebacks (state)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
