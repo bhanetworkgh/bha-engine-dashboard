@@ -132,7 +132,10 @@ explicitly for this. Therefore:
   wins: it is the newer statement.
 - **Loop and Codex edits are written straight to Airtable** (decisions
   2026-09-14, Destiny). `AIRTABLE_TOKEN` on the Open Loops base
-  (`AIRTABLE_BASE_ID`) and BHA Submissions (`AIRTABLE_SUBMISSIONS_BASE_ID`) —
+  (`AIRTABLE_OPEN_LOOPS_BASE_ID`) and BHA Submissions
+  (`AIRTABLE_SUBMISSIONS_BASE_ID`) — one variable per base, each named for its
+  base, and no built-in default on the loops one, because a default is a guess
+  about which base real loops are written to —
   no other record kind is read from or written to Airtable, and the pages still
   read Postgres. It exists because the 08:00 Open Loops digest reads Airtable, so a
   close that stopped at Postgres came back the next morning as though nothing
@@ -148,7 +151,14 @@ explicitly for this. Therefore:
   source row, create in the destination, confirm a record id came back, and
   only then delete the source — create before delete, so the worst case is a
   duplicate rather than a lost loop. A failed delete is not retried and is its
-  own outcome, naming both tables. `loop_id` travels unchanged;
+  own outcome, naming both tables. **The copy left behind can be removed from
+  the interface** (decision 2026-09-14, Destiny): the duplicate banner and the
+  loop panel offer it, and it retries that one delete against the source table
+  and the record id the move wrote down. Never a re-created row, never the
+  destination row — the loop lives there now, and re-running the move would
+  make a third copy out of a second. A source record already gone is success;
+  a retry that fails again stays a duplicate, with the new reason, and the
+  action stays. `loop_id` travels unchanged;
   `Assignee Slack User ID` is never copied but set from the destination,
   because the digest routes by table. The new record id is stored against the
   loop and the events, note and write log are re-keyed onto it. **The move
@@ -223,15 +233,19 @@ thread's `session_id` is stable for its life and is Bays's memory. The reply's
 **Environment (all server-side, none in the bundle):** `AUTH_EMAIL`,
 `AUTH_PASSWORD_HASH`, `SESSION_SECRET`, `ASK_BAYS_API_KEY`, `ASK_BAYS_URL`,
 `DASHBOARD_INBOUND_KEY` (nothing reaches the record tables without it),
-`AIRTABLE_TOKEN`, `AIRTABLE_BASE_ID` (Open Loops) and
+`AIRTABLE_TOKEN`, `AIRTABLE_OPEN_LOOPS_BASE_ID` (Open Loops) and
 `AIRTABLE_SUBMISSIONS_BASE_ID` (BHA Submissions) — one token, two bases, loop
 and Codex edits only; without the token nothing edited here reaches Airtable and
 the server says so at boot and on every write — and `DATABASE_URL`, the one the
 server refuses to start without.
 `DATABASE_CA_CERT`, `DATABASE_POOL_MAX` and `AIRTABLE_API_URL` are optional.
-`DATA_DIR` is gone, and so are `AIRTABLE_RESYNC_MINUTES` and the
-`N8N_WRITEBACK_*` pair. **The token variable is `AIRTABLE_TOKEN`** — the client
-deleted on 13 Sep read `AIRTABLE_API_KEY`, and that name is not in use.
+`DATA_DIR` is gone, and so are `AIRTABLE_RESYNC_MINUTES`, the
+`N8N_WRITEBACK_*` pair and `AIRTABLE_BASE_ID` (renamed 2026-09-14; **a base
+variable is named for its base**, so the next one cannot be mistaken for it).
+**The token variable is `AIRTABLE_TOKEN`** — the client deleted on 13 Sep read
+`AIRTABLE_API_KEY`, and that name is not in use. The loops base has **no
+default**: unset, the boot line names the variable and every loop edit is
+refused and marked, rather than real loops being written to a guessed base.
 
 **Auth:** one shared login for the whole team, same as BHARAG's console. Not
 per-user accounts. The password is posted to `/api/auth/login`; the server

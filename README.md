@@ -190,9 +190,12 @@ panel edits four things at once and can move a row between builder tables, and
 routing that through a webhook left no way to see where a half-completed move
 stopped.
 
-`AIRTABLE_TOKEN` on the Open Loops base (`AIRTABLE_BASE_ID`, default
-`appUVlBSGGPHw6DGh`) and nothing else. No other record kind is read from or
-written to Airtable by this server; the pages still read Postgres.
+`AIRTABLE_TOKEN` on the Open Loops base (`AIRTABLE_OPEN_LOOPS_BASE_ID`) and
+nothing else. No other record kind is read from or written to Airtable by this
+server; the pages still read Postgres. **One variable per base, named for its
+base**, and no built-in default on this one: a default is a guess about which
+base real loops are written to. Unset, the server names it at boot and refuses
+every loop edit with the same sentence.
 
 **Click a loop to edit it.** What, Status, Lane and Builder. `loop_id`,
 `Raised By`, `Date Raised` and `Source Link` are shown and read-only.
@@ -215,6 +218,16 @@ fixable — rather than gone with nothing to recover from. If step 4 fails the
 move is **not** retried: the outcome is `duplicate`, and it says *this loop now
 exists in both X and Y — the copy in X needs deleting*, with the steps that
 completed.
+
+**The copy can be removed from here** (2026-09-14). The duplicate banner and the
+loop panel carry *Remove the copy in X's table*, which retries that one delete
+against the source table and the record id the move wrote down — migration 8
+keeps it on the duplicate line, because by then the loop's own record id is the
+new one. It never re-creates anything and never touches the destination row: the
+loop already lives there, so re-running the move would make a third copy out of
+a second. A source record that is already gone counts as done — somebody
+deleting it in Airtable by hand reaches the same state. A retry that fails again
+stays `duplicate` with the new reason on it and the action still offered.
 
 `loop_id` travels unchanged; it is the identity. `What`, `Status`, `lane_tag`,
 `Raised By`, `Date Raised`, `Source Link` and `raised_in` are carried.
@@ -425,8 +438,8 @@ Airtable; those rows are in `git log` if it is ever needed again.
 | `ASK_BAYS_API_KEY`, `ASK_BAYS_URL` | The Ask Bays workflow |
 | `DASHBOARD_INBOUND_KEY` | Authenticates the engine’s writes to `/api/engine/*` and `/api/inbound/*`. **Required** in practice — nothing can reach the record tables without it |
 | `AIRTABLE_TOKEN` | Read and write on the Open Loops base, for loop edits. Without it no loop edited here reaches Airtable; the server says so at boot and on every write. **Note the name** — the client deleted on 13 Sep read `AIRTABLE_API_KEY` |
-| `AIRTABLE_BASE_ID` | The Open Loops base. Defaults to `appUVlBSGGPHw6DGh` |
-| `AIRTABLE_SUBMISSIONS_BASE_ID` | BHA Submissions, for Codex entries. Defaults to `appEmdKshNVTl64Zf`. Its own variable rather than overloading the one above |
+| `AIRTABLE_OPEN_LOOPS_BASE_ID` | The Open Loops base (`appUVlBSGGPHw6DGh`). **No default** — unset, the boot line says so by name and every loop edit is refused and marked. Called `AIRTABLE_BASE_ID` until 14 Sep 2026; that name is read by nothing |
+| `AIRTABLE_SUBMISSIONS_BASE_ID` | BHA Submissions, for Codex entries. Defaults to `appEmdKshNVTl64Zf` |
 | `AIRTABLE_API_URL` | Points the same client at a local replay of the API in a sandbox |
 | `DATABASE_URL` | Postgres. **Required** — the server exits if it is missing or unreachable |
 

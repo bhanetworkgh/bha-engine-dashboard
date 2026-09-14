@@ -3504,3 +3504,107 @@ Not done:   Narration Quality in Kavin G N's table is free text rather than a
             select, so nothing stops a fourth value appearing there. The page
             shows whatever is written rather than dropping it, but the field
             wants converting to a select to match the other five.
+
+## 2026-09-14 13:45 — Four cards that read as one row, the duplicate repair, and a base named for its base
+Intent:     Three things on Open loops: even out the four time-series footnotes
+            and line the cards up, add a way to remove the copy a half-landed
+            move leaves behind, and rename AIRTABLE_BASE_ID to
+            AIRTABLE_OPEN_LOOPS_BASE_ID with no default.
+Files:      server/src/airtable.ts    OPEN_LOOPS_BASE_VAR, loopsBase(), no default
+            server/src/loops.ts       retryDelete; the base guard; from_record_id
+            server/src/store.ts       resolveDuplicate; the four footnotes;
+                                      from_record_id through the write log
+            server/src/migrations.ts  migration 8
+            server/src/index.ts       POST /api/loops/:id/duplicate; boot line
+            src/data/types.ts         from_builder on RecordWrite; airtable_base
+                                      is nullable
+            src/data/index.ts         removeLoopDuplicate
+            src/components/ui/Card.tsx     MetricCard noteMinLines
+            src/components/ui/Records.tsx  SeriesBlock layout + footnote
+            src/screens/OpenLoops/{Metrics,Loops,LoopPanel,index}.tsx
+            src/screens/Settings.tsx, render.yaml, .env.example, README.md,
+            CLAUDE.md
+
+Decision:   **The footnotes are the same length because they say less, not
+            because one was padded.** Raised per week was one line and 67
+            characters; Closed per week was 430 with MODIFIED_NOTE appended
+            whole. They are now 94, 102, 104 and 111 — three lines each at the
+            four-up width, two at every width below it. Nothing true was cut:
+            the 9 Sept 2026 caveat is on both measures that read last_modified,
+            Net still says it is Date Raised minus last_modified, and Closed per
+            day still says closes are only dated when they pass through here or
+            are pushed by the engine.
+
+Problem:    Same length is not the same height. At 272px the notes wrapped to 4,
+            4, 5 and 4 lines, and since the footnote sits on the floor of a card
+            whose height the grid has already equalised, the five-line one
+            pushed its chart 16px higher than the other three. The cards were
+            the same size and still did not line up.
+Fix:        Three things together. The note is the *card's* footnote rather than
+            the chart's (SeriesBlock takes `footnote={false}`), `noteMinLines`
+            holds a two-line floor under it, and `layout="spread"` puts the
+            total at the top of the body and the chart on the bottom. Measured
+            in Chromium: at 1440, 1024 and 400 the four cards agree on height,
+            on the total's y, on the chart's baseline and on the footnote's top
+            — to the hundredth of a pixel at 400.
+
+Decision:   **The duplicate repair deletes the source row and nothing else.**
+            Not a re-run of the move: the loop already lives in the destination
+            row and Postgres already says so, so re-running it would turn two
+            copies into three. Not a Postgres change either — there is none to
+            make. Airtable only, one DELETE, against the record id the move
+            wrote down.
+Problem:    That id was not written down. The log had from_table and to_table,
+            but after a move the loop's own record id is the *new* one, so the
+            copy could be named and not removed.
+Fix:        Migration 8 adds `from_record_id` to record_writes; the duplicate
+            line carries it and the retry reads it back. A duplicate logged
+            before this migration says so and asks for Airtable by hand rather
+            than deleting a guess.
+Decision:   **A retry that fails stays `duplicate`, not `failed`.** The loop is
+            still in two tables, which is what duplicate means; calling it
+            failed would drop the marker's meaning and take the action away.
+            The reason is replaced with what happened this time and the action
+            stays. A source record already gone (HTTP 404) is success — someone
+            deleting it by hand reaches the same state the retry was aiming at.
+
+Decision:   **AIRTABLE_OPEN_LOOPS_BASE_ID, with no default.** A base variable is
+            named for its base, so the next one cannot be mistaken for it. The
+            default went with the rename: a default is a guess about which base
+            real loops are written to, and a wrong guess writes them there
+            rather than failing. Missing is missing — the boot line names it,
+            `/api/status` returns null, Settings says which variable, and every
+            loop edit and every retry is refused with the same sentence.
+            Not fatal at boot: CLAUDE.md reserves refusing to start for
+            DATABASE_URL, and taking the whole dashboard down over a base id
+            would be worse than the loud refusal. Set on the service before the
+            deploy, so the rename never left a window where loop edits stopped
+            reaching Airtable; AIRTABLE_BASE_ID is now read by nothing and can
+            be deleted in Render by hand.
+
+Verified:   Against Postgres 16 and the Airtable replay, with fifteen seeded
+            loops across the seven tables.
+            - migrations 1–8 on a fresh database, in order.
+            - move with DELETE failing: duplicate, from_record_id on the line,
+              both rows present in the replay.
+            - retry while DELETE still fails: still duplicate, new reason, the
+              action still offered, and from_record_id kept for the next try.
+            - retry with Airtable healthy: ok, source row gone, destination row
+              untouched, and the marker cleared on the row and in the banner.
+            - retry when the copy was deleted in Airtable by hand: ok, and the
+              step says it was already gone.
+            - retry on a loop that is not a duplicate: 422, "This loop is not in
+              two tables, so there is no copy to remove."
+            - no AIRTABLE_TOKEN, and no AIRTABLE_OPEN_LOOPS_BASE_ID: the retry
+              stays duplicate and names the variable; an ordinary edit is saved
+              here, marked, and names it too; both boot lines say it.
+            In Chromium at 1440 and 400: the action in the banner and in the
+            panel, a failed retry and a successful one driven through the
+            interface end to end, the four cards aligned at 1440, 1024 and 400,
+            zero overflow, no console errors.
+
+Not done:   The banner offers the action on the three loops it names; a fourth
+            is reached by clicking the loop, where the panel carries the same
+            action. No bulk repair, deliberately — each one is a delete against
+            a named record, and a button that removes several is a button that
+            removes the wrong one.

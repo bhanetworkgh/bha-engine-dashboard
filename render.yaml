@@ -81,11 +81,18 @@ services:
       # not having reached Airtable.
       - key: AIRTABLE_TOKEN
         sync: false
-      - key: AIRTABLE_BASE_ID
+      # One variable per base, each named for its base (2026-09-14, Destiny), so
+      # the next Airtable base to arrive cannot be mistaken for one of these.
+      # AIRTABLE_BASE_ID is the old name of the first one and is read by
+      # nothing now; a key dropped from this blueprint is left in place on
+      # Render rather than deleted, so remove it there by hand.
+      #
+      # The server has no built-in default for the loops base: a default is a
+      # guess about which base real loops are written to. Without this variable
+      # the boot line says so by name and every loop edit is refused and marked.
+      - key: AIRTABLE_OPEN_LOOPS_BASE_ID
         value: appUVlBSGGPHw6DGh
-      # BHA Submissions & Logs — the Codex base. Its own variable rather than
-      # overloading AIRTABLE_BASE_ID, which is the Open Loops base. Same token
-      # covers both.
+      # BHA Submissions & Logs — the Codex base. Same token covers both.
       - key: AIRTABLE_SUBMISSIONS_BASE_ID
         value: appEmdKshNVTl64Zf
 
