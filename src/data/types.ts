@@ -1259,6 +1259,17 @@ export type RecordMetrics = LoopMetrics | CodexMetrics | PatternMetrics | Commer
  */
 export type RegistryKind = 'workflows' | 'services' | 'credentials' | 'endpoints' | 'bases' | 'people';
 
+/**
+ * The kinds the registry page reads and writes.
+ *
+ * `credentials` is a kind the server still knows — the table is not dropped,
+ * because nothing drops a table — but there is no credentials registry
+ * (decision 2026-09-14, Destiny), so it is not served and the page cannot name
+ * it. Keeping the two apart is what makes that a type error rather than an
+ * undefined at runtime.
+ */
+export type ShownKind = Exclude<RegistryKind, 'credentials'>;
+
 interface RegistryBase {
   id: string;
   created_at: string;
@@ -1363,13 +1374,27 @@ export interface Spend {
   today: string;
 }
 
+/**
+ * The live figures beside a person on the Builders registry, read from the
+ * record tables. Null is not zero: Jason has an Open Loops table but no
+ * submissions table, so his entries this week is null rather than 0, and the
+ * oldest of no open loops is not zero days.
+ */
+export interface BuilderFigures {
+  id: string;
+  open_loops: number | null;
+  oldest_loop_days: number | null;
+  entries_this_week: number | null;
+}
+
 export interface RegistryData {
   workflows: RegistryWorkflow[];
   services: RegistryService[];
-  credentials: RegistryCredential[];
   endpoints: RegistryEndpoint[];
   bases: RegistryBaseRow[];
   people: RegistryPerson[];
+  /** Keyed to a person's id, which is the builder id the record tables use. */
+  builders: BuilderFigures[];
   spend: Spend;
   /** Digests flagged missing in the last seven days. See DigestHealth. */
   digest_health: DigestHealth;

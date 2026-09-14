@@ -30,22 +30,27 @@ Airtable's own field names are kept verbatim inside each row — `What`,
 `Jason Status`, `Layer1 Review ` with its trailing space — because that is what
 n8n writes, and a rename would break the engine's writes with no error.
 
-**The System Registry** is the exception to all of that: six tables — workflows,
-services and their billing, credentials, endpoints, Airtable bases and people —
-that this dashboard owns outright. Nothing upstream records who manages Otter.ai
-or what a workflow is for; rows are created and edited in the interface and
-stored in Postgres. Credentials there
-hold names, types and ownership only, and the schema has no column a secret
-value could go in.
+**The System Registry** is the exception to all of that: four registries on one
+page — Builders, Tools, Endpoint and Workflow — that this dashboard owns
+outright. Nothing upstream records who manages Otter.ai or what a workflow is
+for; rows are created and edited in the interface and stored in Postgres. The
+Builders registry adds three figures it does not own: open loops, oldest loop
+age and entries this week, read from the record tables on every load.
+
+**There is no credentials registry** (2026-09-14). The table is not dropped,
+because nothing drops a table, but it is neither served nor shown: it held names
+and owners with no column a secret could go in, and it was still the place
+somebody would reach for when they wanted somewhere to keep a key.
 
 The server's state is in Postgres (`bha-engine-db` on Render, attached as
 `DATABASE_URL`) and there is no second copy of anything: the engine writes a
 row, the page reads that row. The status-change history nothing upstream keeps
 is recorded here as each change lands and survives a deploy and a restart. The
 server will not start without the database: there is no fallback store, because
-one would lose writes without saying so. Incidents, twins, vFarm and builders are still phase 1
-fixtures. Chat history stays in the browser until Bays keeps memory of its
-own.
+one would lose writes without saying so. The twins are still phase 1 fixtures;
+**vFarm and Engine health are placeholders** (2026-09-14) because every figure
+they drew was one, and the Builders page is gone into the registry. Chat history
+stays in the browser until Bays keeps memory of its own.
 
 ## Architecture
 
@@ -451,13 +456,14 @@ is missing, and the note is what the page shows.
 | Ask Bays | Chat interface onto the Bays agent |
 | North Star | Asks routed through NS — records, runs, gaps |
 | Research Twin | Research jobs — records, runs, gaps |
-| vFarm | Rack events, anomalies, Halloween readiness |
-| Engine health | Incidents, self-healing state machine, retry metrics |
+| vFarm | Placeholder — nothing on the rack writes here yet |
+| Engine health | Placeholder — no incident reaches this dashboard yet |
 | Open loops | Loops by age and owner, close from the interface |
 | Codex entries | Session logs by builder and week |
 | Build patterns | Patterns by lane |
 | Commercial | Opportunities and readiness |
-| Builders | Per-person lane, loops, activity, contract status |
+| Clients | Watched client lanes, grouped by client |
+| System registry | Builders, Tools, Endpoint, Workflow, and the engine-writes surface |
 
 ## Repo layout
 
@@ -492,9 +498,9 @@ src/
     Overview.tsx      Flat file — small enough to read in one sitting.
     OpenLoops/        Loops, ReviewQueue, Reconciliation + index.
     Twin/             Summary, Records, Runs, Gaps + index. Serves North Star and Research Twin.
-    VFarm/            Live, Lifecycle, Readiness + index.
-    EngineHealth/     MetricsRow, IncidentTable, StateTrack + index.
-    Builders/         List, Detail + index.
+    VFarm/            index only — the page is a placeholder.
+    EngineHealth/     index only — the page is a placeholder.
+    Registry/         The four registries, the engine-writes tab, and Editable.
 ```
 
 server/

@@ -13,7 +13,10 @@
  *
  *   1. **No secret value is ever stored.** The credentials table carries names,
  *      types, owners and what uses them. There is no column a value could go
- *      in, and adding one needs a migration and a decision, not a patch.
+ *      in, and adding one needs a migration and a decision, not a patch. As of
+ *      2026-09-14 (Destiny) it is not served or shown either: there is no
+ *      credentials registry, and there is not to be one. The table stays, and
+ *      keeps its rows, because nothing drops a table.
  *   2. **A field nobody has filled in stays null.** Null renders as "—" and is
  *      counted separately from zero everywhere it matters — above all in the
  *      monthly spend total, which states how many services carry no cost so an
