@@ -204,7 +204,7 @@ export function relativeTime(iso: string | null, now = Date.now()): string | nul
  * the migration backfill. A kind still sitting entirely on backfilled rows is
  * a kind nothing is feeding, and it says so rather than looking current.
  */
-export function RowsLine({ freshness }: { freshness: Freshness }) {
+export function RowsLine({ freshness, writes = true }: { freshness: Freshness; writes?: boolean }) {
   // A minute is the smallest unit shown, so a minute is often enough to tick.
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -228,11 +228,19 @@ export function RowsLine({ freshness }: { freshness: Freshness }) {
       <span className="text-dim" title={absolute ?? ''}>
         — newest change {age ?? 'at an unknown time'}
       </span>
-      {freshness.from_engine === 0 ? (
-        <span className="text-degraded">· none written since the migration backfill on 13 Sep 2026</span>
-      ) : (
-        <span>· {freshness.from_engine} written since the backfill</span>
-      )}
+      {/*
+        Open loops passes writes={false}. It is the one kind this dashboard
+        writes itself, so the count stops meaning "the engine is still feeding
+        this" the moment anyone edits a loop here — one edit turns the warning
+        off whether or not n8n has gone quiet. On the six read-only kinds it
+        still says exactly what it says.
+      */}
+      {writes &&
+        (freshness.from_engine === 0 ? (
+          <span className="text-degraded">· none written since the migration backfill on 13 Sep 2026</span>
+        ) : (
+          <span>· {freshness.from_engine} written since the backfill</span>
+        ))}
     </div>
   );
 }
