@@ -74,6 +74,7 @@ import type {
   SeriesPoint,
 } from '../../src/data/types';
 import {
+  LAYER0_PENDING,
   CLIENTS_INDEX,
   SLACK_TO_BUILDER,
   CODEX_BASE,
@@ -305,7 +306,17 @@ type Mapped =
   | { kind: 'clients'; obj: ClientLane }
   | { kind: 'client_questions'; obj: ClientQuestion };
 
-export function mapRecord(kind: RecordKind, rec: AtRecord, table: string, lane?: string | null): Mapped {
+/**
+ * What a mapper needs that is not on the record itself. Today that is one
+ * thing: which submissions are parked at `pending_builder_input` in the Layer 0
+ * table, which is what places a Codex log at Needs input. It is optional, and
+ * the paths that only want a record's status (the events ledger) leave it off.
+ */
+export interface MapContext {
+  layer0Pending: ReadonlySet<string>;
+}
+
+export function mapRecord(kind: RecordKind, rec: AtRecord, table: string, lane?: string | null, ctx?: MapContext): Mapped {
   switch (kind) {
     case 'loops': {
       const t = loopTableById(table);
@@ -315,7 +326,7 @@ export function mapRecord(kind: RecordKind, rec: AtRecord, table: string, lane?:
     case 'codex': {
       const t = codexTableById(table);
       if (!t) throw new StoreError(`${table} is not one of the submission tables.`, 422);
-      return { kind, obj: mapCodex(rec, t.owner, table) };
+      return { kind, obj: mapCodex(rec, t.owner, table, ctx?.layer0Pending) };
     }
     case 'patterns':
       return { kind, obj: mapPattern(rec) };
@@ -570,13 +581,14 @@ async function rows(kind: RecordKind, table?: string, on?: Queryable): Promise<R
   const closes = terminalDates(kind, last);
   const notes = await notesFor(kind, on);
   const writebacks = await writebacksFor(kind, on);
+  const ctx = kind === 'codex' ? { layer0Pending: await layer0PendingIds(on) } : undefined;
 
   const out: Row[] = [];
   for (const mr of r.rows) {
     const id = idOf(mr);
     let m: Mapped;
     try {
-      m = mapRecord(kind, asRecord(mr), tableOf(kind, mr), mr.lane_id);
+      m = mapRecord(kind, asRecord(mr), tableOf(kind, mr), mr.lane_id, ctx);
     } catch (e) {
       // A row whose table this server does not recognise cannot be mapped. It
       // is named rather than swallowed, and the other rows still render.
@@ -615,7 +627,8 @@ async function mirrorRowById(kind: RecordKind, id: string, on?: Queryable): Prom
 async function rowById(kind: RecordKind, id: string, on?: Queryable): Promise<Row | null> {
   const mr = await mirrorRowById(kind, id, on);
   if (!mr) return null;
-  const m = mapRecord(kind, asRecord(mr), tableOf(kind, mr), mr.lane_id);
+  const ctx = kind === 'codex' ? { layer0Pending: await layer0PendingIds(on) } : undefined;
+  const m = mapRecord(kind, asRecord(mr), tableOf(kind, mr), mr.lane_id, ctx);
   const last = (await lastEvents(kind, on)).get(id);
   const closed_at = last && last.to_status === TERMINAL[kind] && last.from_status !== null ? last.at.slice(0, 10) : null;
   const n = await db(on).query<{ note: string }>('SELECT note FROM record_notes WHERE kind = $1 AND record_id = $2', [kind, id]);
@@ -715,6 +728,23 @@ export async function codexDetail(id: string): Promise<CodexEntryDetail | null> 
  * kind — no status, no write path — so they are read straight off their own
  * mirror table rather than going through the row machinery above.
  */
+/**
+ * The `Submission ID`s waiting on their builder, read in one query.
+ *
+ * `fields->>'Status'` is Airtable's own value, kept verbatim like every other
+ * field, and the comparison names `pending_builder_input` literally rather than
+ * taking "not completed" to mean the same thing — it does not, and reading it
+ * that way is the class of bug this replaced.
+ */
+export async function layer0PendingIds(on?: Queryable): Promise<ReadonlySet<string>> {
+  const r = await db(on).query<{ submission_id: string | null }>(
+    `SELECT fields->>'Submission ID' AS submission_id FROM engine_layer0_holds
+      WHERE lower(coalesce(fields->>'Status', '')) = $1`,
+    [LAYER0_PENDING],
+  );
+  return new Set(r.rows.map((x) => x.submission_id).filter((x): x is string => Boolean(x)));
+}
+
 export async function layer0Holds(): Promise<Layer0Hold[]> {
   const r = await db().query<MirrorRow>(
     `SELECT id::text AS pk, airtable_record_id, created_time, fields, NULL::text AS table_id, NULL::text AS builder_id,
@@ -890,7 +920,8 @@ async function writeFields(kind: RecordKind, mr: MirrorRow, patch: Record<string
     throw e;
   }
   bumpVersion();
-  return mapRecord(kind, { id: idOf(mr), createdTime: mr.created_time ?? '', fields }, move?.table_id ?? tableOf(kind, mr), mr.lane_id);
+  const ctx = kind === 'codex' ? { layer0Pending: await layer0PendingIds() } : undefined;
+  return mapRecord(kind, { id: idOf(mr), createdTime: mr.created_time ?? '', fields }, move?.table_id ?? tableOf(kind, mr), mr.lane_id, ctx);
 }
 
 /**
@@ -2001,10 +2032,11 @@ const APPROVAL_LABELS: Record<CodexApproval, string> = {
 /**
  * The three stages, one per layer.
  *
- * Mutually exclusive by one rule, applied in `mapCodex`: Layer0 Flagged wins,
- * and otherwise Jason Status decides. So every submission is in exactly one
- * stage and the three sum to the total — which the row that came before did
- * not, because it asked two different questions at once.
+ * Mutually exclusive by one rule, applied in `mapCodex`: a Layer 0 row at
+ * `pending_builder_input` wins, and otherwise Jason Status decides. So every
+ * submission is in exactly one stage and the three sum to the total — which the
+ * row that came before did not, because it asked two different questions at
+ * once.
  *
  * Ordered approved first (decision 2026-09-14, Destiny), which is where almost
  * every log ends up and so where a reader starts. The card that shows the split
@@ -2073,7 +2105,7 @@ export async function codexMetrics(builder: string | null): Promise<CodexMetrics
         sums_to: sums,
         note:
           sums === all.length
-            ? `${TAB_RULES.map((r) => all.filter(r.test).length).join(' + ')} = ${all.length}, in the order above and each log in exactly one: Layer0 Flagged decides, then Jason Status.`
+            ? `${TAB_RULES.map((r) => all.filter(r.test).length).join(' + ')} = ${all.length}, in the order above and each log in exactly one: a Layer 0 row at pending_builder_input decides, then Jason Status.`
             : `${sums} across the three stages against ${all.length} submissions — they should be equal, and this is a bug rather than a fact about the data.`,
       };
     })(),

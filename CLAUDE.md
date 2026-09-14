@@ -174,11 +174,21 @@ explicitly for this. Therefore:
   the page marks. One table and one marker for both kinds — a second would
   drift from the first.
 - **A Codex log is at exactly one of three stages, one per step** (decision
-  2026-09-14, Destiny): **Approved** (`Jason Status` is Approved **or Input
-  Added**, and not flagged), **Awaiting approval** (not flagged, and Jason
-  Status is Pending or empty), **Needs input** (`Layer0 Flagged` is ticked,
-  which wins whatever Jason Status says, because that check runs first). They
-  sum to the submission count.
+  2026-09-14, Destiny): **Needs input** (the log has a row in the Layer 0
+  parking table whose own `Status` is `pending_builder_input`, which wins
+  whatever Jason Status says), **Awaiting approval** (not that, and `Jason
+  Status` is Pending or empty), **Approved** (not that, and Jason Status is
+  Approved **or Input Added**). They sum to the submission count.
+  **`Layer0 Flagged` does not place a log** (decision 2026-09-14, Destiny).
+  That box means *was flagged once, ever* — nothing clears it when the builder
+  answers — so it held eight logs (Ahad 4, Hardik 2, Kavin 2) in the queue of
+  work owed after every one had been answered, merged and approved. It is still
+  read, still shown on the entry, and still what the completeness card counts,
+  because it is a true fact about the log's history. The Layer 0 table's own
+  `Status` is the only field that says a builder is being waited on **now**, and
+  the join is on `Submission ID`. The comparison names `pending_builder_input`
+  literally: `Layer0Hold.open` is everything that is not `completed`, which is a
+  wider set, and reading one as the other is the same class of bug.
   **"Input Added" counts as approved** (decision 2026-09-14, Destiny): Jason
   adding input means he has read the log and responded, which is a form of
   having dealt with it, not a state of waiting for him. It sat at Awaiting
