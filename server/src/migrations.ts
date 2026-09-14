@@ -534,6 +534,49 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS loop_writebacks_state ON loop_writebacks (state)`,
     ],
   },
+  {
+    id: 6,
+    name: 'loop_writebacks becomes a log of every loop write',
+    statements: [
+      /**
+       * Edits go straight to Airtable now (2026-09-14, Destiny) and the n8n
+       * write-back is retired — but the table it wrote to stays and gets
+       * widened rather than replaced. Its rows are the record of what this
+       * dashboard has and has not managed to push, and the marker on the loops
+       * page reads from it.
+       *
+       * Two changes. It becomes **append-only**: a move that half-lands has to
+       * show where it stopped, and one row per loop overwrites exactly the
+       * history that would answer that. And it carries what a move needs — the
+       * source and destination table, the steps that actually completed, and
+       * the record id the loop ended up under, which is a new one after a move.
+       *
+       * The primary key moves from record_id to a sequence. Every existing row
+       * is kept; nothing here drops a table.
+       */
+      `ALTER TABLE loop_writebacks DROP CONSTRAINT IF EXISTS loop_writebacks_pkey`,
+      `ALTER TABLE loop_writebacks ADD COLUMN IF NOT EXISTS seq bigserial`,
+      `DO $$ BEGIN
+         IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'loop_writebacks_pkey') THEN
+           ALTER TABLE loop_writebacks ADD CONSTRAINT loop_writebacks_pkey PRIMARY KEY (seq);
+         END IF;
+       END $$`,
+      // What the write was, and what it did. `steps` is the list that
+      // completed, in order — on a duplicate it is what says the create landed
+      // and the delete did not.
+      `ALTER TABLE loop_writebacks ADD COLUMN IF NOT EXISTS action        text`,
+      `ALTER TABLE loop_writebacks ADD COLUMN IF NOT EXISTS detail        text`,
+      `ALTER TABLE loop_writebacks ADD COLUMN IF NOT EXISTS from_table    text`,
+      `ALTER TABLE loop_writebacks ADD COLUMN IF NOT EXISTS to_table      text`,
+      `ALTER TABLE loop_writebacks ADD COLUMN IF NOT EXISTS steps         text`,
+      `ALTER TABLE loop_writebacks ADD COLUMN IF NOT EXISTS new_record_id text`,
+      `ALTER TABLE loop_writebacks ADD COLUMN IF NOT EXISTS actor         text`,
+      // The page wants the newest write per loop, and the log will only grow.
+      `CREATE INDEX IF NOT EXISTS loop_writebacks_record_seq ON loop_writebacks (record_id, seq DESC)`,
+      // Rows written before today were one per loop with no action recorded.
+      `UPDATE loop_writebacks SET action = 'status' WHERE action IS NULL`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
