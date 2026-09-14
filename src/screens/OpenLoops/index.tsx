@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../../app/useData';
-import { createLoop, getOpenLoops, getRecordMetrics, setLoopStatus, type Loop, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
+import { BUILDER_NAMES, createLoop, getOpenLoops, getRecordMetrics, saveLoop, type Loop, type LoopEdit, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
 import { Icon, LoadFailed, Loading, PageHeader, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useToast } from '../../components/ui';
+import { LoopPanel } from './LoopPanel';
 import { Loops, OwnerPicker, type StatusFilter } from './Loops';
 import { LoopMetricsPanel } from './Metrics';
 import { NewLoopForm } from './NewLoop';
@@ -22,6 +23,7 @@ export default function OpenLoops() {
   const [q, setQ] = useState('');
   const [showNew, setShowNew] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
   const { toast, setToast } = useToast();
   const { status, data: loaded, error } = useData(getOpenLoops, []);
 
@@ -79,26 +81,40 @@ export default function OpenLoops() {
 
   const paged = usePaged(loops, `${owner}|${statusFilter}|${q.trim()}`);
 
-  async function changeStatus(loop: Loop, next: LoopStatus) {
+  /**
+   * One save, whether it came from a row action or the panel.
+   *
+   * A move gives the loop a new Airtable record id, so the row that comes back
+   * may not have the id that went in — the list is keyed by id and so is the
+   * open panel, and both follow the returned loop rather than the one clicked.
+   */
+  async function save(loop: Loop, edit: LoopEdit, said: string) {
     setBusyId(loop.id);
     try {
-      const updated = await setLoopStatus(loop.id, next);
-      setData((d) => (d ? { ...d, loops: d.loops.map((l) => (l.id === updated.id ? updated : l)) } : d));
+      const updated = await saveLoop(loop.id, edit);
+      setData((d) => (d ? { ...d, loops: d.loops.map((l) => (l.id === loop.id ? updated : l)) } : d));
+      if (openId === loop.id) setOpenId(updated.id);
       setMetricsTick((n) => n + 1);
-      // The change saved here either way — but if it did not reach Airtable,
-      // saying "Closed." and nothing else is the lie this whole path exists to
-      // stop telling. The row carries the detail; this says look at it.
+      // The change saved here either way — but if it did not land in Airtable,
+      // saying "Closed." and nothing else is the lie this path exists to stop
+      // telling. The row and the panel carry the detail; this says look at it.
       const wb = updated.writeback;
       setToast(
-        wb?.state === 'failed'
-          ? { text: `Saved here, but it did not reach Airtable: ${wb.reason ?? 'no reason given'}`, tone: 'failing' }
-          : { text: next === 'closed' ? 'Closed.' : next === 'in progress' ? 'Marked in progress.' : 'Reopened.', tone: 'ok' },
+        wb?.state === 'duplicate'
+          ? { text: wb.reason ?? 'The loop is now in two tables.', tone: 'failing' }
+          : wb?.state === 'failed'
+            ? { text: `Saved here, but Airtable did not take it: ${wb.reason ?? 'no reason given'}`, tone: 'failing' }
+            : { text: said, tone: 'ok' },
       );
     } catch (e) {
       setToast({ text: e instanceof Error ? e.message : 'The change did not save.', tone: 'failing' });
     } finally {
       setBusyId(null);
     }
+  }
+
+  function changeStatus(loop: Loop, next: LoopStatus) {
+    return save(loop, { status: next }, next === 'closed' ? 'Closed.' : next === 'in progress' ? 'Marked in progress.' : 'Reopened.');
   }
 
   async function openLoop(input: NewLoop) {
@@ -119,6 +135,9 @@ export default function OpenLoops() {
   }
 
   if (status === 'loading' || !data) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
+  // The panel follows the list's own copy, so a save redraws it with what came
+  // back rather than with what was on screen when it opened.
+  const panelLoop = openId ? (data.loops.find((l) => l.id === openId) ?? null) : null;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -141,7 +160,7 @@ export default function OpenLoops() {
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
-          <RowsLine freshness={data.freshness} />
+          <RowsLine freshness={data.freshness} writes={false} />
           <OwnerPicker data={data} owner={owner} setOwner={setOwner} />
         </div>
 
@@ -165,9 +184,18 @@ export default function OpenLoops() {
             </div>
           </div>
         </div>
-        <Loops data={data} loops={paged.rows} total={loops.length} busyId={busyId} onStatus={changeStatus} searching={Boolean(q.trim())} />
+        <Loops data={data} loops={paged.rows} total={loops.length} busyId={busyId} onStatus={changeStatus} onOpen={(l) => setOpenId(l.id)} searching={Boolean(q.trim())} />
         <Pagination paged={paged} unit="loops" />
       </div>
+
+      {panelLoop && (
+        <LoopPanel
+          loop={panelLoop}
+          busy={busyId === panelLoop.id}
+          onClose={() => setOpenId(null)}
+          onSave={(edit) => void save(panelLoop, edit, edit.builder && edit.builder !== panelLoop.owner ? `Moved to ${BUILDER_NAMES[edit.builder] ?? edit.builder}.` : 'Saved.')}
+        />
+      )}
 
       <Toast toast={toast} />
     </div>
