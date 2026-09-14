@@ -1246,6 +1246,9 @@ export async function deleteCodex(id: string, confirm: string, actor = 'dashboar
   // row nobody can delete from either side.
   await db().query(`DELETE FROM ${MIRROR.codex.table} WHERE id = $1`, [mr.pk]);
   bumpVersion();
+  // The next page load asks Airtable again rather than answering out of a pass
+  // taken before this row existed on neither side.
+  forgetReconcile();
 
   await logRecordWrite({
     kind: 'codex',
@@ -1285,11 +1288,76 @@ export async function deleteCodex(id: string, confirm: string, actor = 'dashboar
  */
 let reconciling: Promise<CodexReconciliation> | null = null;
 
+/**
+ * The last pass, and how long one stands for.
+ *
+ * Seven Airtable reads on every page load is seven reads for every refresh —
+ * five loads in half an hour was thirty-five of them, to answer a question
+ * whose answer changes when somebody deletes a row by hand. Two minutes is
+ * short enough that a hand-deleted row goes on the next look, and long enough
+ * that reading the page is not a load test.
+ *
+ * A write or a delete made here drops it, so this dashboard's own delete is
+ * never answered out of a pass that predates it.
+ */
+const RECONCILE_TTL_MS = 120_000;
+/**
+ * A pass that failed is held for far less time. Holding it as long as a good
+ * one would mean a token fixed at 10:00 still reading as broken at 10:02, and
+ * a failure is the state somebody is actively trying to clear.
+ */
+const RECONCILE_FAILED_TTL_MS = 20_000;
+let lastReconcile: { at: number; value: CodexReconciliation } | null = null;
+
+export function forgetReconcile(): void {
+  lastReconcile = null;
+}
+
 export function reconcileCodex(): Promise<CodexReconciliation> {
-  reconciling ??= runReconcile().finally(() => {
-    reconciling = null;
-  });
+  const ttl = lastReconcile?.value.ran ? RECONCILE_TTL_MS : RECONCILE_FAILED_TTL_MS;
+  if (lastReconcile && Date.now() - lastReconcile.at < ttl) return Promise.resolve(lastReconcile.value);
+  reconciling ??= runReconcile()
+    .then((v) => {
+      lastReconcile = { at: Date.now(), value: v };
+      return v;
+    })
+    .finally(() => {
+      reconciling = null;
+    });
   return reconciling;
+}
+
+/**
+ * The tables the pass ran out of time before asking. Not a failure — nothing
+ * was asked of them — but it has to be said, because rows under them were not
+ * checked and a reader would otherwise read "checked" as "all of them".
+ */
+function unreachedNote(unreached: string[]): string {
+  if (!unreached.length) return '';
+  return ` ${unreached.length} ${unreached.length === 1 ? 'table was' : 'tables were'} not reached inside the time this check is given (${unreached.map((t) => codex_.tableLabel(t)).join(', ')}); ${unreached.length === 1 ? 'it is' : 'they are'} checked on the next pass.`;
+}
+
+/**
+ * What Airtable actually said — once per distinct reason, commonest first, and
+ * bounded.
+ *
+ * These tables share one base and one token, so they usually fail for one
+ * reason and it is worth saying plainly. When they do not, two reasons is as
+ * much as a line under a heading can carry; the rest are counted. A reason that
+ * covers every table is not followed by a list of all seven.
+ */
+function reasonsOf(blocked: { label: string; reason: string }[], total = blocked.length): string {
+  const byReason = new Map<string, string[]>();
+  for (const b of blocked) byReason.set(b.reason, [...(byReason.get(b.reason) ?? []), b.label]);
+  const ranked = [...byReason.entries()].sort((a, b) => b[1].length - a[1].length);
+  const said = ranked
+    .slice(0, 2)
+    // Airtable's own messages sometimes end in a full stop and sometimes do
+    // not; one is added here, so neither shape gives us two.
+    .map(([reason, labels]) => `Airtable answered: ${reason.replace(/\.$/, '')}${labels.length === total ? '' : ` (${labels.join(', ')})`}`)
+    .join('. ');
+  const rest = ranked.length - 2;
+  return `${said}.${rest > 0 ? ` And ${rest} other ${rest === 1 ? 'reason' : 'reasons'} across the remaining tables.` : ''}`;
 }
 
 async function runReconcile(): Promise<CodexReconciliation> {
@@ -1303,15 +1371,19 @@ async function runReconcile(): Promise<CodexReconciliation> {
     return { ran: false, checked: 0, removed: 0, removed_ids: [], blocked: [], at, note: `Airtable could not be reached, so nothing was removed and the page is showing what this database holds. ${reason}` };
   }
   if (!live.read.length) {
-    return {
-      ran: false,
-      checked: 0,
-      removed: 0,
-      removed_ids: [],
-      blocked: live.failed.map((f) => ({ table: f.table, label: codexTableById(f.table)?.label ?? f.table, reason: f.reason })),
-      at,
-      note: 'No submission table could be read, so nothing was removed and the page is showing what this database holds.',
-    };
+    const blocked = live.failed.map((f) => ({ table: f.table, label: codex_.tableLabel(f.table), reason: f.reason }));
+    /**
+     * Say what Airtable said.
+     *
+     * This branch used to print "no submission table could be read" and stop,
+     * with the reason sitting in `blocked` unread and nothing in the logs —
+     * which is a sentence that cannot be acted on. Every table here shares one
+     * base and one token, so they nearly always fail for the same reason and
+     * it is worth saying once.
+     */
+    const note = `Every submission table refused this check, so nothing was removed. ${reasonsOf(blocked)} The list below is complete and unaffected; the one thing this misses is a submission deleted in Airtable by hand, which would still be shown here.`;
+    console.error(`codex reconcile: no table could be read (${blocked.length} of ${blocked.length + live.unreached.length}) — ${[...new Set(blocked.map((b) => b.reason))].join(' · ')}`);
+    return { ran: false, checked: 0, removed: 0, removed_ids: [], blocked, at, note };
   }
 
   const held = await db().query<{ id: string; airtable_record_id: string | null; table_id: string | null }>(
@@ -1358,7 +1430,7 @@ async function runReconcile(): Promise<CodexReconciliation> {
     console.log(`codex reconcile: ${gone.length} row(s) no longer in Airtable, removed — ${gone.map((g) => g.record).join(', ')}`);
   }
 
-  const blocked = live.failed.map((f) => ({ table: f.table, label: codexTableById(f.table)?.label ?? (f.table === codex_.LAYER0.table ? codex_.LAYER0.label : f.table), reason: f.reason }));
+  const blocked = live.failed.map((f) => ({ table: f.table, label: codex_.tableLabel(f.table), reason: f.reason }));
   return {
     ran: true,
     checked,
@@ -1366,9 +1438,10 @@ async function runReconcile(): Promise<CodexReconciliation> {
     removed_ids: gone.map((g) => g.record),
     blocked,
     at,
-    note: blocked.length
-      ? `Checked ${checked} of the rows held here against Airtable and removed ${gone.length}. ${blocked.length} ${blocked.length === 1 ? 'table' : 'tables'} could not be read (${blocked.map((b) => b.label).join(', ')}), so nothing held under ${blocked.length === 1 ? 'it' : 'them'} was touched.`
-      : `Checked ${checked} rows against Airtable${gone.length ? ` and removed ${gone.length} that no longer exist there` : '; every one is still there'}.`,
+    note:
+      (blocked.length
+        ? `Checked ${checked} of the rows held here against Airtable and removed ${gone.length}. ${blocked.length} ${blocked.length === 1 ? 'table' : 'tables'} could not be read (${blocked.map((b) => b.label).join(', ')}), so nothing held under ${blocked.length === 1 ? 'it' : 'them'} was touched. ${reasonsOf(blocked)}`
+        : `Checked ${checked} rows against Airtable${gone.length ? ` and removed ${gone.length} that no longer exist there` : '; every one is still there'}.`) + unreachedNote(live.unreached),
   };
 }
 

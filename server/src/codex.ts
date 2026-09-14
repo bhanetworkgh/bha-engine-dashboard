@@ -150,8 +150,23 @@ export interface LiveIds {
   byTable: Map<string, Set<string>>;
   /** Tables that answered. A table that did not is absent, and nothing under it may be removed. */
   read: string[];
+  /** Tables that answered with an error, and what Airtable said. */
   failed: { table: string; reason: string }[];
+  /** Tables the pass ran out of time before reaching. Not a failure — nothing was asked of them. */
+  unreached: string[];
 }
+
+/**
+ * How long one table's read may take, and how long the whole pass may take.
+ *
+ * This runs while somebody waits for the page. Seven tables at the client's
+ * fifteen-second write timeout is a page that can hang for ninety seconds to do
+ * housekeeping, and a load that took twenty-two seconds is what prompted these.
+ * The budget is checked between tables, so the worst case is the budget plus
+ * one read.
+ */
+const READ_TIMEOUT_MS = 5_000;
+const PASS_BUDGET_MS = 8_000;
 
 /**
  * Every record id across the six builder tables and the Layer 0 table.
@@ -165,16 +180,28 @@ export async function liveIds(): Promise<LiveIds> {
   const byTable = new Map<string, Set<string>>();
   const read: string[] = [];
   const failed: { table: string; reason: string }[] = [];
+  const unreached: string[] = [];
+  const started = Date.now();
   for (const t of [...CODEX_TABLES.map((t) => ({ table: t.table, label: t.label })), { table: LAYER0.table, label: LAYER0.label }]) {
+    if (Date.now() - started > PASS_BUDGET_MS) {
+      unreached.push(t.table);
+      continue;
+    }
     try {
-      const ids = await airtable.listRecordIds(airtable.SUBMISSIONS_BASE_ID, t.table);
+      const ids = await airtable.listRecordIds(airtable.SUBMISSIONS_BASE_ID, t.table, READ_TIMEOUT_MS);
       byTable.set(t.table, new Set(ids));
       read.push(t.table);
     } catch (e) {
       failed.push({ table: t.table, reason: why(e).reason });
     }
   }
-  return { byTable, read, failed };
+  return { byTable, read, failed, unreached };
+}
+
+/** The label a table is known by, for a sentence a person reads. Covers Layer 0, which is not a builder. */
+export function tableLabel(table: string): string {
+  if (table === LAYER0.table) return LAYER0.label;
+  return CODEX_TABLES.find((t) => t.table === table)?.label ?? table;
 }
 
 export { CODEX_BASE, CODEX_TABLES };
