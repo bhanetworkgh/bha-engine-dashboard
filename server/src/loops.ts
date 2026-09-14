@@ -157,6 +157,9 @@ export async function apply(input: ApplyInput): Promise<LoopWriteResult> {
   if (!airtable.airtableConfigured()) {
     return failed('AIRTABLE_TOKEN is not set on this server, so nothing was written to Airtable and the row there still holds the old values.', null, steps, input.table, null);
   }
+  if (!airtable.LOOPS_BASE_ID) {
+    return failed(`${airtable.OPEN_LOOPS_BASE_VAR} is not set on this server, so there is no Open Loops base to write to and the row there still holds the old values.`, null, steps, input.table, null);
+  }
   // A loop opened in the dashboard has no Airtable row until the engine writes
   // one and pushes it back. There is nothing to update and nothing to move.
   if (!input.record_id) {
@@ -170,7 +173,7 @@ export async function apply(input: ApplyInput): Promise<LoopWriteResult> {
   // A "move" to the table the row is already in is an ordinary edit.
   if (!destination || destination.table === input.table) {
     try {
-      const rec = await airtable.updateRecord(airtable.LOOPS_BASE_ID, input.table, input.record_id, input.fields);
+      const rec = await airtable.updateRecord(airtable.loopsBase(), input.table, input.record_id, input.fields);
       steps.push('updated the row');
       return ok(rec.id, steps, input.table, input.table);
     } catch (e) {
@@ -197,7 +200,7 @@ async function move(input: ApplyInput, toTable: string, toBuilder: string, steps
   //    a stale copy would silently write yesterday's values into the new table.
   let source: AtRecord;
   try {
-    source = await airtable.getRecord(airtable.LOOPS_BASE_ID, from, input.record_id!);
+    source = await airtable.getRecord(airtable.loopsBase(), from, input.record_id!);
     steps.push('read the source row');
   } catch (e) {
     const { reason, http } = why(e);
@@ -217,7 +220,7 @@ async function move(input: ApplyInput, toTable: string, toBuilder: string, steps
 
   let created: AtRecord;
   try {
-    created = await airtable.createRecord(airtable.LOOPS_BASE_ID, toTable, fields);
+    created = await airtable.createRecord(airtable.loopsBase(), toTable, fields);
   } catch (e) {
     const { reason, http } = why(e);
     const fromName = LOOP_TABLES.find((t) => t.table === from)?.label ?? from;
@@ -234,7 +237,7 @@ async function move(input: ApplyInput, toTable: string, toBuilder: string, steps
 
   // 4. Only now the source copy goes.
   try {
-    await airtable.deleteRecord(airtable.LOOPS_BASE_ID, from, input.record_id!);
+    await airtable.deleteRecord(airtable.loopsBase(), from, input.record_id!);
     steps.push('deleted the source row');
   } catch (e) {
     const { reason, http } = why(e);
