@@ -1,7 +1,7 @@
 import type { Loop, LoopStatus, LoopWriteback, OpenLoopsData } from '../../data';
 import { BUILDER_NAMES } from '../../data';
 import type { RecordColumn } from '../../components/ui';
-import { EmptyState, Pill, RecordId, RecordTable, RowAction, RowActions, SourceLink, TwoLine } from '../../components/ui';
+import { EmptyState, Pill, RecordId, RecordTable, RowAction, RowActions, SourceLink } from '../../components/ui';
 import { ageTone, laneLabel } from '../../lib';
 
 export type StatusFilter = 'all' | LoopStatus;
@@ -42,9 +42,16 @@ function StatusPill({ status }: { status: LoopStatus }) {
   return <Pill>open</Pill>;
 }
 
-/** The sentence a failed write-back puts on the row, in full. */
+/** The sentence an unlanded write puts on the row, in full. */
 export function writebackWarning(w: LoopWriteback): string {
-  return `Airtable still says ${w.status === 'Closed' ? 'this is not closed' : 'something else'}: the change did not reach it${w.http ? ` (HTTP ${w.http})` : ''}. ${w.reason ?? 'No reason was given.'} The 8am Open Loops digest reads Airtable, so this loop will be raised again tomorrow morning.`;
+  const tail = w.steps ? ` Completed: ${w.steps}.` : '';
+  if (w.state === 'duplicate') return `${w.reason ?? 'This loop exists in two tables.'}${tail}`;
+  return `The change did not reach Airtable${w.http ? ` (HTTP ${w.http})` : ''}, so it still holds the old values. ${w.reason ?? 'No reason was given.'}${tail} The 8am Open Loops digest reads Airtable, so this loop will be raised again tomorrow morning.`;
+}
+
+/** The two states that mean the dashboard and Airtable disagree about this loop. */
+export function unlanded(w: Loop['writeback']): boolean {
+  return w?.state === 'failed' || w?.state === 'duplicate';
 }
 
 /**
@@ -58,13 +65,13 @@ export function writebackWarning(w: LoopWriteback): string {
  */
 function LoopStatusCell({ loop }: { loop: Loop }) {
   const w = loop.writeback;
-  if (w?.state !== 'failed') return <StatusPill status={loop.status} />;
+  if (!unlanded(w)) return <StatusPill status={loop.status} />;
   return (
-    <span className="inline-flex flex-col items-start gap-1" title={writebackWarning(w)}>
+    <span className="inline-flex items-center gap-1.5" title={writebackWarning(w!)}>
       <StatusPill status={loop.status} />
-      <span className="inline-flex items-center gap-1 text-[11px] leading-tight text-failing">
+      <span className="inline-flex items-center gap-1 text-[11px] leading-tight whitespace-nowrap text-failing">
         <span aria-hidden className="h-[6px] w-[6px] shrink-0 rounded-full bg-failing" />
-        not in Airtable
+        {w!.state === 'duplicate' ? 'in two tables' : 'not in Airtable'}
       </span>
     </span>
   );
@@ -78,7 +85,7 @@ function LoopStatusCell({ loop }: { loop: Loop }) {
  * the shared RecordTable now so that the other five record lists are drawn the
  * same way and row styling only has to change in one place.
  */
-export function Loops({ data, loops, total, busyId, onStatus, searching }: { data: OpenLoopsData; loops: Loop[]; total: number; busyId: string | null; onStatus: (loop: Loop, status: LoopStatus) => void; searching: boolean }) {
+export function Loops({ data, loops, total, busyId, onStatus, onOpen, searching }: { data: OpenLoopsData; loops: Loop[]; total: number; busyId: string | null; onStatus: (loop: Loop, status: LoopStatus) => void; onOpen: (loop: Loop) => void; searching: boolean }) {
   const columns: RecordColumn<Loop>[] = [
     {
       key: 'age',
@@ -101,11 +108,20 @@ export function Loops({ data, loops, total, busyId, onStatus, searching }: { dat
       header: 'what',
       card: 'title',
       width: '56ch',
+      // `clip` rather than a class of our own: it is what wraps the cell in the
+      // block element td-clip needs to actually ellipsis. A span stays inline
+      // and the text runs straight through the next three columns.
+      clip: true,
+      className: 'font-medium text-ink',
       title: (l) => l.title,
-      cell: (l) => <TwoLine title={l.title} description={l.note} empty="No note on this loop." />,
+      // The What is the note. A second line repeating "no note on this loop"
+      // under every row was furniture, not information.
+      cell: (l) => l.title,
     },
     { key: 'status', header: 'status', card: 'meta', className: 'card-meta', cell: (l) => <LoopStatusCell loop={l} /> },
-    { key: 'table', header: 'table', card: 'meta', className: 'card-meta text-dim', cell: (l) => BUILDER_NAMES[l.owner] ?? l.owner },
+    // Named for what it holds. It was "table" because the builder *is* the
+    // table in Airtable, but the reader is looking at a person.
+    { key: 'table', header: 'Builder', card: 'meta', className: 'card-meta text-dim', cell: (l) => BUILDER_NAMES[l.owner] ?? l.owner },
     { key: 'lane', header: 'lane', className: 'text-faint', cell: (l) => (l.lane_tag ? laneLabel(l.lane_tag) : '—') },
     { key: 'raised_by', header: 'raised by', className: 'text-faint', width: '18ch', clip: true, title: (l) => l.raised_by ?? undefined, cell: (l) => l.raised_by ?? '—' },
     { key: 'raised_in', header: 'raised in', className: 'text-faint', width: '18ch', clip: true, title: (l) => l.raised_in ?? undefined, cell: (l) => l.raised_in ?? '—' },
@@ -117,12 +133,12 @@ export function Loops({ data, loops, total, busyId, onStatus, searching }: { dat
       // fighting `text-faint` on the same element for which one wins.
       className: 'tabular',
       title: (l) =>
-        l.writeback?.state === 'failed'
-          ? writebackWarning(l.writeback)
+        unlanded(l.writeback)
+          ? writebackWarning(l.writeback!)
           : l.closed_at
             ? 'Closed through this dashboard or pushed by the engine'
             : 'Nothing records when this loop was closed',
-      cellClass: (l) => (l.writeback?.state === 'failed' ? 'text-failing' : 'text-faint'),
+      cellClass: (l) => (unlanded(l.writeback) ? 'text-failing' : 'text-faint'),
       cell: (l) => l.closed_at ?? '—',
     },
     { key: 'source', header: 'source', cell: (l) => <SourceLink source={l.source} /> },
@@ -148,7 +164,7 @@ export function Loops({ data, loops, total, busyId, onStatus, searching }: { dat
 
   // Every loop held, not the visible twenty: a close stranded on page four is
   // raised by tomorrow's digest exactly like one on page one.
-  const stranded = data.loops.filter((l) => l.writeback?.state === 'failed');
+  const stranded = data.loops.filter((l) => unlanded(l.writeback));
 
   return (
     <div className="shrink-0">
@@ -165,10 +181,10 @@ export function Loops({ data, loops, total, busyId, onStatus, searching }: { dat
             <span aria-hidden className="mt-[6px] h-[7px] w-[7px] shrink-0 rounded-full bg-failing" />
             <div className="text-[12.5px] leading-relaxed text-failing">
               <span className="font-medium">
-                {stranded.length} {stranded.length === 1 ? 'loop did' : 'loops did'} not reach Airtable.
+                {stranded.length} {stranded.length === 1 ? 'loop did' : 'loops did'} not land in Airtable.
               </span>{' '}
-              The 8am Open Loops digest reads Airtable, not this dashboard, so {stranded.length === 1 ? 'it will be raised' : 'they will be raised'} again
-              tomorrow morning as though nothing changed. Marked <span className="font-medium">not in Airtable</span> in the status column.
+              The 8am Open Loops digest reads Airtable, not this dashboard, so what is on screen here and what it sends
+              tomorrow morning disagree. Marked in the status column; open the loop for the reason and what completed.
               <div className="mt-1.5 space-y-0.5 text-[11.5px] text-failing/90">
                 {stranded.slice(0, 3).map((l) => (
                   <div key={l.id}>
@@ -193,7 +209,7 @@ export function Loops({ data, loops, total, busyId, onStatus, searching }: { dat
               : 'No loops match the selected table and status.'}
         </EmptyState>
       ) : (
-        <RecordTable columns={columns} rows={loops} rowKey={(l) => l.id} busyKey={busyId} lines={2} label="Open loops" />
+        <RecordTable columns={columns} rows={loops} rowKey={(l) => l.id} onOpen={onOpen} busyKey={busyId} lines={1} label="Open loops" />
       )}
     </div>
   );
