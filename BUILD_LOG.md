@@ -3731,3 +3731,125 @@ Not done:   Nothing deletes a Layer 0 row once the builder's answers are merged;
             that is n8n's, and the dashboard now just stops counting the
             answered ones. The submissions base still has a built-in default
             where the loops base has none.
+
+## 2026-09-14 17:20 — The malformed read, a two-way resync, and Input Added where it belongs
+Intent:     Six things on the Codex page, the first of them a bug I shipped
+            yesterday and then misdiagnosed.
+Files:      server/src/airtable.ts   the field name; listRecords
+            server/src/codex.ts      liveRecords, allTables, its own budget
+            server/src/store.ts      resyncCodex; removeCodexRows shared;
+                                     recordEngineWrite takes a via; TAB_RULES
+                                     loses its rule strings
+            server/src/sources.ts    Input Added counts as approved
+            server/src/engine.ts     the reconciliation result stops being returned
+            server/src/index.ts      POST /api/codex/resync
+            src/data/{index,types}.ts, src/screens/Codex.tsx
+            CLAUDE.md, README.md, /tmp/claude-0/fakecodex.js
+
+Problem:    **`Unknown field name: ""`, on every table, and it was mine.**
+            `listRecordIds` sent `fields[]=` with no field named, and the
+            comment above it asserted that this "asks Airtable for the ids
+            alone". It does not. Airtable reads it as a request for a field
+            whose name is the empty string and refuses the whole request. All
+            seven tables answered identically, which is exactly what a
+            base-wide permissions failure looks like — so yesterday I read it
+            as the token's scope and shipped a docs correction instead of a fix.
+            Destiny read the message properly: the token authenticated and
+            reached the base; the request was malformed.
+Fix:        Ask for one small real field. `Submission ID` is the one spelling
+            present in all six builder tables *and* the Layer 0 table, checked
+            against the live schema rather than assumed — the habit that should
+            have caught the original.
+
+Problem:    **The test harness agreed with me.** `/tmp/claude-0/fakecodex.js`
+            treated an empty `fields[]` as "ids only" and returned empty field
+            objects, because I wrote it from the same belief as the code. Nine
+            reconciliation cases went green yesterday against a stand-in that
+            shared the bug.
+Fix:        The replay refuses an empty field name, and an unknown one, exactly
+            as Airtable does, and returns only the fields actually asked for.
+            Verified by replaying the old query shape against it: it now answers
+            the production error verbatim. A harness that agrees with the code
+            it is testing is worse than no harness.
+
+Decision:   **The reconciliation says nothing on the page any more** (Destiny).
+            A standing amber line about a background check, on a page whose rows
+            were never in doubt, is a banner nobody can act on. The pass still
+            runs on load, still removes rows deleted in Airtable, and still logs
+            the reason work from yesterday — which is the part that was actually
+            missing. `reconciliation` is off the payload and the type too, so it
+            cannot creep back as a banner.
+
+Decision:   **Resync from Airtable, on a button, with Airtable winning.** The
+            gap it closes: reconciliation only ever *removed*. Nothing inserted
+            a row Airtable had and we did not, and nothing picked up a changed
+            field — so the copy here could only fall behind. Measured against
+            the live base before the work: Airtable 151 Approved / 14 Input
+            Added / 0 Pending / 165 rows against 148 / 14 / 2 / 164 here.
+            Rows go in through `mirror.upsert` with `source = 'airtable'` —
+            already an accepted value, and `MirrorResult` already reports
+            `inserted` and `changed`, so the per-table counts come off the
+            return rather than from counting of my own. Deletes go through the
+            same `removeCodexRows` the reconciliation now uses, so a row can
+            only leave that table one way.
+Decision:   **The status change is dated `via = 'mirror'`, not `'engine'`.**
+            A resync learns that something changed; it has no idea when it
+            changed in Airtable. That is exactly what 'mirror' has always meant
+            here, and it is already left out of close-rate figures.
+Decision:   **An overwritten local change is never silent.** A row whose newest
+            `record_writes` line is failed or duplicate carries a change that
+            never reached Airtable, and a resync reverts it. Correct, and named:
+            counted in the result and printed in the log with its Codex entry
+            id. The unlanded set is read *before* anything is written, because
+            afterwards the newest line is the resync itself.
+Decision:   **The log carries the whole outcome**, per table and in total,
+            including what both sides hold afterwards. Nobody in this sandbox
+            can press the button, so "do the two sides agree now" has to be
+            answerable from the log alone.
+
+Decision:   **Input Added counts as Approved** (Destiny). Jason adding input
+            means he has read the log and responded — a form of having dealt
+            with it, not a state of waiting for him. One line in mapCodex. The
+            three stages stay exclusive and still sum: `Layer0 Flagged` still
+            wins outright, so an Input Added row that is also flagged is still
+            Needs input.
+
+Decision:   **The three rule paragraphs come off the screen** (Destiny) and the
+            `rule` strings come out of TAB_RULES and the payload with them, so
+            there is nothing left to render. They live in CLAUDE.md §4, as spec
+            rather than caption.
+
+Problem:    "commercial 4 of 4" and "next step 1 of 4" read as fractions of
+            something and are not: they are how many of the flagged submissions
+            lacked that one thing, and a submission can lack several.
+Fix:        A quiet line above them — "of the 4 flagged, what was missing" — and
+            the right-hand figure is a share of the flagged count rather than a
+            bare "of N".
+
+Verified:   Against Postgres 16 and the corrected replay, twenty submissions and
+            seven Layer 0 rows.
+            - the old query shape now fails in the replay exactly as it fails in
+              production; the new one returns real records, one field each.
+            - stages 13 + 3 + 4 = 20 before the resync, 14 + 2 + 4 = 20 after,
+              with the Input Added row in Approved.
+            - **one resync against all four kinds of divergence at once**: a row
+              only Airtable had, a row changed to Approved there, a row only
+              Postgres had, and a row carrying a failed local write. Result:
+              1 inserted, 2 updated, 1 deleted, 24 already matching, and the
+              overwritten row named by its Codex entry id.
+            - a second run immediately after: 0/0/0, 27 already matching.
+            - one table refusing with a 403: named with its reason, its three
+              rows untouched, nothing deleted under it.
+            - the deletion log holds the removed row whole, with the resync's
+              own reason and the actor.
+            In Chromium at 1440, 1024 and 400: no banner, no rule paragraph, the
+            breakdown labelled, the button and the result panel, zero overflow,
+            no console errors. The header cells and the three cards still share
+            a height and a footnote line at 1440 and 1024. At 400 the cards are
+            one per row and size to their own content, which is what stacking
+            means — the same-height rule is about cards beside each other.
+
+Not done:   The resync is the only path that pulls; nothing schedules it, by
+            instruction — Destiny wants to watch what it does before it does it
+            on its own. Nothing in this sandbox can press the button, so the
+            first production run and its numbers come from the Render log.

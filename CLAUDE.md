@@ -174,14 +174,21 @@ explicitly for this. Therefore:
   the page marks. One table and one marker for both kinds — a second would
   drift from the first.
 - **A Codex log is at exactly one of three stages, one per step** (decision
-  2026-09-14, Destiny): **Approved** (the builder codex stands), **Awaiting
-  approval** (pending review — codex written, not yet approved), **Needs
-  input** (the completeness check found something missing). One rule makes them
-  exclusive: `Layer0 Flagged` wins, whatever Jason Status says, because that
-  check runs first; otherwise Jason Status decides. They sum to the submission
-  count. There is no "Input added" stage — Jason asking happens while a log
-  sits at Awaiting approval and the builder answers in thread. A log whose
-  missing answers are supplied goes back to review, not through the check again.
+  2026-09-14, Destiny): **Approved** (`Jason Status` is Approved **or Input
+  Added**, and not flagged), **Awaiting approval** (not flagged, and Jason
+  Status is Pending or empty), **Needs input** (`Layer0 Flagged` is ticked,
+  which wins whatever Jason Status says, because that check runs first). They
+  sum to the submission count.
+  **"Input Added" counts as approved** (decision 2026-09-14, Destiny): Jason
+  adding input means he has read the log and responded, which is a form of
+  having dealt with it, not a state of waiting for him. It sat at Awaiting
+  approval until then, which put fourteen logs he had already answered in the
+  queue of ones he had not reached. A log whose missing answers are supplied
+  goes back to review, not through the check again.
+- **The three rules are not printed on the page** (decision 2026-09-14,
+  Destiny). The tab label carries the meaning; a paragraph under it restating
+  the rule is furniture. They live here, in this section, where they are the
+  spec rather than a caption.
 - **The steps are named, never numbered, on screen** (decision 2026-09-14,
   Destiny): **completeness check**, **pending review**, **builder codex**.
   "Layer 0" told a reader nothing. The Airtable fields keep their own names —
@@ -211,12 +218,38 @@ explicitly for this. Therefore:
   in Airtable notifies nothing, so one pass compares the record ids across the
   six builder tables and the Layer 0 table against the rows held and removes
   what is genuinely gone. **A table whose read fails is never treated as an
-  emptied table**: nothing under it is touched, and the page says which table
+  emptied table**: nothing under it is touched, and the log says which table
   could not be read **and what Airtable said** — a failure that does not name
   its reason, and logs nothing, is a sentence nobody can act on. The pass is
   bounded: five seconds a read, eight seconds in total, tables not reached
   named as not reached rather than failed, and the result held for two minutes
   (twenty seconds when it failed) so reading the page is not a load test.
+  **It says nothing on the page** (decision 2026-09-14, Destiny): a standing
+  amber line about a background check, on a page whose rows were never in
+  doubt, is a banner nobody can act on either. It goes to the server log.
+- **There is no way to ask Airtable for record ids alone.** `fields[]=` with no
+  field named is read as a request for a field called `""` and refuses the
+  whole request — which is how every table on the Codex page came to answer
+  `Unknown field name: ""` and read as a permissions problem. Ask for one small
+  real field instead; `Submission ID` is the one spelling that exists in all
+  seven tables. **The replay used for testing must refuse exactly what Airtable
+  refuses**: it implemented the assumption instead, so every test passed
+  against a stand-in that shared the bug.
+- **Resync from Airtable is a button, and Airtable wins** (decision 2026-09-14,
+  Destiny). The reconciliation only ever *removed* rows, so this dashboard's
+  copy could only fall behind: a log approved in Airtable stayed "awaiting
+  approval" here, and one created without the engine pushing it never arrived.
+  The resync reads all seven tables whole and makes Postgres match — insert
+  what Airtable has and we do not, update what changed there, delete what is
+  gone. **Airtable is the source of truth for every field it owns and this
+  dashboard does not win a disagreement.** The one case that is never silent is
+  a row whose own change never reached Airtable: reverting it is correct, and
+  it is counted and named in the result and the log, because a decision made
+  here disappearing without mention is the thing this dashboard exists to stop.
+  Rows go in through `mirror.upsert` with `source = 'airtable'` and their
+  status change is dated `via = 'mirror'` — this database learned of it when it
+  looked and has no idea when it happened. **Manual only**: not on load, not on
+  a schedule. It reads every field of every row, and it deletes.
 - **Every page states how old its rows are**, relative ("4 min ago"), in the
   same place, along with how many the engine has written since the migration
   backfill. A kind sitting entirely on backfilled rows says so in amber, because

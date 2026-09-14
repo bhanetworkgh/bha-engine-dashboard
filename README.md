@@ -291,8 +291,8 @@ their own names, and the page still quotes those wherever it states a rule.
 
 | Stage | Step | Rule |
 |---|---|---|
-| Approved | builder codex | not flagged, and `Jason Status` is Approved |
-| Awaiting approval | pending review | not flagged, and `Jason Status` is not Approved |
+| Approved | builder codex | not flagged, and `Jason Status` is Approved **or Input Added** |
+| Awaiting approval | pending review | not flagged, and `Jason Status` is Pending or empty |
 | Needs input | completeness check | `Layer0 Flagged` is ticked |
 
 **`Layer0 Flagged` wins.** A flagged log needs input whatever Jason Status says,
@@ -306,6 +306,14 @@ up approved, so that is where the page opens. A fourth tab that was the sum of
 the other three earned nothing; the three counts are printed together on the
 card above the list, which is where the sum belongs. One consequence: the search
 box filters inside the selected stage.
+
+**"Input Added" counts as approved** (2026-09-14, Destiny). Jason adding input
+means he has read the log and responded. It sat at Awaiting approval until then,
+which put fourteen logs he had already answered in the queue of ones he had not
+reached.
+
+**The rules are not printed under the tabs.** The tab label carries the meaning;
+they live in CLAUDE.md §4, as spec rather than caption.
 
 There is no "Input added" stage. Jason adding input happens while a log sits at
 Awaiting approval — he either approves or asks, and the builder answers in
@@ -358,13 +366,42 @@ longer has, and logging what went.
 is left out entirely, nothing under it is touched, and the page names it. With
 Airtable unreachable the page renders from Postgres and removes nothing.
 
-**It says what Airtable said** (2026-09-14). A pass that could read nothing used
+**It says what Airtable said — in the log.** A pass that could read nothing used
 to print "no submission table could be read" and stop, with the reason sitting
-unread and nothing in the logs — a sentence nobody could act on. The page now
-carries Airtable's own message, commonest reason first and bounded at two, and
-the server logs it. The line also says plainly that the list itself is complete
-and unaffected, because "showing what this database holds" reads like a warning
-about the rows and is not one.
+unread and nothing in the logs. It now carries Airtable's own message, commonest
+reason first and bounded at two. **It says nothing on the page** (2026-09-14,
+Destiny): a standing amber line about a background check, on a page whose rows
+were never in doubt, is a banner nobody can act on either.
+
+**There is no ids-only read.** This asked for `fields[]=` with no field named,
+on the belief that an empty list meant "none of them". Airtable reads it as a
+request for a field called `""` and refuses the whole request — which is how all
+seven tables came to answer `Unknown field name: ""` and read as a permissions
+problem. It asks for `Submission ID` now, the one spelling present in all seven
+tables. The replay used for testing implemented the assumption rather than
+Airtable's behaviour, so every test passed against a stand-in that shared the
+bug; it refuses an empty field name now, exactly as Airtable does.
+
+#### Resync from Airtable
+
+The reconciliation only ever removed rows, so this dashboard's copy could only
+fall behind: a log approved in Airtable stayed *awaiting approval* here, and one
+created without the engine pushing it never arrived. A button on the Codex page
+reads all seven tables whole and makes Postgres match — inserting what Airtable
+has and we do not, updating what changed there, deleting what is gone.
+
+**Airtable wins every disagreement.** It owns these fields; this dashboard does
+not get to keep a value it contradicts. The one case that is never silent is a
+row whose own change never reached Airtable — approved here while Airtable
+refused the write. Reverting it is correct, and it is counted and named, in the
+result panel and in the log.
+
+Rows go in through `mirror.upsert` with `source = 'airtable'`, and the status
+change is dated `via = 'mirror'`: this database learned of it when it looked and
+has no idea when it happened. A table that cannot be read changes nothing under
+it and is named with its reason. **Manual only** — not on load, not scheduled.
+The log carries the whole outcome, per table and in total, including what both
+sides hold afterwards, so "do they agree now" is answerable from the log alone.
 
 **And it is bounded.** Seven reads at the client's fifteen-second write timeout
 is a page that can hang for a minute and a half doing housekeeping; one load
