@@ -124,6 +124,7 @@ export function MetricCard({
   note,
   children,
   className = '',
+  align = 'center',
 }: {
   title: ReactNode;
   right?: ReactNode;
@@ -131,6 +132,13 @@ export function MetricCard({
   note?: ReactNode;
   children: ReactNode;
   className?: string;
+  /**
+   * Where the body sits when the card is taller than its content. Centred
+   * suits a single headline figure. A row of cards that are all bar stacks
+   * wants `top`: centring makes a three-bar card start lower than a four-bar
+   * one beside it, and they stop reading as one set.
+   */
+  align?: 'center' | 'top';
 }) {
   return (
     <div className={`card flex h-full min-w-0 flex-col px-5 py-4 ${className}`}>
@@ -138,7 +146,7 @@ export function MetricCard({
         <div className="text-[13px] font-medium text-ink">{title}</div>
         {right && <div className="shrink-0 text-[10.5px] text-faint">{right}</div>}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col justify-center">{children}</div>
+      <div className={`flex min-h-0 flex-1 flex-col ${align === 'top' ? 'justify-start' : 'justify-center'}`}>{children}</div>
       {note && <div className="mt-3 text-[11.5px] leading-snug text-faint">{note}</div>}
     </div>
   );

@@ -1,7 +1,7 @@
-import type { Loop, LoopStatus, LoopWriteback, OpenLoopsData } from '../../data';
+import type { Loop, LoopStatus, RecordWrite, OpenLoopsData } from '../../data';
 import { BUILDER_NAMES } from '../../data';
 import type { RecordColumn } from '../../components/ui';
-import { EmptyState, Pill, RecordId, RecordTable, RowAction, RowActions, SourceLink } from '../../components/ui';
+import { EmptyState, NotLanded, Pill, RecordId, RecordTable, RowAction, RowActions, SourceLink, unlanded, writeWarning } from '../../components/ui';
 import { ageTone, laneLabel } from '../../lib';
 
 export type StatusFilter = 'all' | LoopStatus;
@@ -42,16 +42,11 @@ function StatusPill({ status }: { status: LoopStatus }) {
   return <Pill>open</Pill>;
 }
 
-/** The sentence an unlanded write puts on the row, in full. */
-export function writebackWarning(w: LoopWriteback): string {
-  const tail = w.steps ? ` Completed: ${w.steps}.` : '';
-  if (w.state === 'duplicate') return `${w.reason ?? 'This loop exists in two tables.'}${tail}`;
-  return `The change did not reach Airtable${w.http ? ` (HTTP ${w.http})` : ''}, so it still holds the old values. ${w.reason ?? 'No reason was given.'}${tail} The 8am Open Loops digest reads Airtable, so this loop will be raised again tomorrow morning.`;
-}
+/** The loop-specific consequence, appended to the shared sentence. */
+const DIGEST_NOTE = 'The 8am Open Loops digest reads Airtable, so this loop will be raised again tomorrow morning.';
 
-/** The two states that mean the dashboard and Airtable disagree about this loop. */
-export function unlanded(w: Loop['writeback']): boolean {
-  return w?.state === 'failed' || w?.state === 'duplicate';
+export function writebackWarning(w: RecordWrite): string {
+  return writeWarning(w, DIGEST_NOTE);
 }
 
 /**
@@ -69,10 +64,7 @@ function LoopStatusCell({ loop }: { loop: Loop }) {
   return (
     <span className="inline-flex items-center gap-1.5" title={writebackWarning(w!)}>
       <StatusPill status={loop.status} />
-      <span className="inline-flex items-center gap-1 text-[11px] leading-tight whitespace-nowrap text-failing">
-        <span aria-hidden className="h-[6px] w-[6px] shrink-0 rounded-full bg-failing" />
-        {w!.state === 'duplicate' ? 'in two tables' : 'not in Airtable'}
-      </span>
+      <NotLanded write={w!} />
     </span>
   );
 }

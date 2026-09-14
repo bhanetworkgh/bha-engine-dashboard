@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { Metric, MetricSeries, Freshness } from '../../data';
+import type { Metric, MetricSeries, Freshness, RecordWrite } from '../../data';
 import { BUILDER_NAMES } from '../../data';
 import { Bars } from './Charts';
 import { StatCell } from './Card';
@@ -242,6 +242,40 @@ export function RowsLine({ freshness, writes = true }: { freshness: Freshness; w
           <span>· {freshness.from_engine} written since the backfill</span>
         ))}
     </div>
+  );
+}
+
+/* ------------------------------------------------ writes that did not land */
+
+/**
+ * The two states that mean this dashboard and Airtable disagree about a record.
+ *
+ * `duplicate` only happens to a loop — a move whose create landed and whose
+ * delete did not — but it belongs here with `failed` because the reader's
+ * problem is the same either way: what is on screen is not what Airtable holds.
+ */
+export function unlanded(w: RecordWrite | null | undefined): boolean {
+  return w?.state === 'failed' || w?.state === 'duplicate';
+}
+
+/** The whole sentence, for the tooltip and the panel. */
+export function writeWarning(w: RecordWrite, digestNote?: string): string {
+  const tail = w.steps ? ` Completed: ${w.steps}.` : '';
+  if (w.state === 'duplicate') return `${w.reason ?? 'This record exists in two tables.'}${tail}`;
+  return `The change did not reach Airtable${w.http ? ` (HTTP ${w.http})` : ''}, so it still holds the old values. ${w.reason ?? 'No reason was given.'}${tail}${digestNote ? ` ${digestNote}` : ''}`;
+}
+
+/**
+ * The marker that sits beside a record's status when its last write did not
+ * land. Small, red, and never on anything else — the dashboard showing one
+ * thing while Airtable holds another is a genuinely bad state.
+ */
+export function NotLanded({ write }: { write: RecordWrite }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] leading-tight whitespace-nowrap text-failing">
+      <span aria-hidden className="h-[6px] w-[6px] shrink-0 rounded-full bg-failing" />
+      {write.state === 'duplicate' ? 'in two tables' : 'not in Airtable'}
+    </span>
   );
 }
 

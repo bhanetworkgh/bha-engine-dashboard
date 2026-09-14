@@ -178,6 +178,19 @@ export function saveLoop(id: string, edit: LoopEdit): Promise<Loop> {
   return api<Loop>(`/api/loops/${encodeURIComponent(id)}`, { method: 'PATCH', body: edit, timeoutMs: 60_000 });
 }
 
+/** Sets Jason Status on one submission: Approved or Pending. */
+export function setCodexStatus(id: string, jasonStatus: string): Promise<CodexEntry> {
+  return api<CodexEntry>(`/api/codex/${encodeURIComponent(id)}`, { method: 'PATCH', body: { jason_status: jasonStatus }, timeoutMs: 60_000 });
+}
+
+/**
+ * Deletes one submission from Airtable and from here. `confirm` is the Codex
+ * entry id typed back — the server refuses anything else.
+ */
+export function deleteCodexEntry(id: string, confirm: string): Promise<{ ok: true; identifier: string }> {
+  return api<{ ok: true; identifier: string }>(`/api/codex/${encodeURIComponent(id)}`, { method: 'DELETE', body: { confirm }, timeoutMs: 60_000 });
+}
+
 export function createLoop(input: NewLoop): Promise<Loop> {
   return api<Loop>('/api/records/loops', { method: 'POST', body: input });
 }
