@@ -123,6 +123,8 @@ export function SeriesBlock({
   replayKey,
   note,
   bare,
+  layout = 'bottom',
+  footnote = true,
 }: {
   title: string;
   series: MetricSeries;
@@ -133,6 +135,19 @@ export function SeriesBlock({
   note?: ReactNode;
   /** The card supplies the title; this block supplies only the body. */
   bare?: boolean;
+  /**
+   * How the body uses a card taller than it is. `bottom` keeps the total sitting
+   * on the chart, which is right for a lone card. `spread` puts the total at the
+   * top and the chart on the floor, so a row of these cards has its totals on
+   * one line and its charts on one baseline.
+   */
+  layout?: 'bottom' | 'spread';
+  /**
+   * Whether the series' own note is drawn under the chart. A card that pins the
+   * same sentence to its own floor passes false — otherwise it appears twice,
+   * and the one under the chart is what puts the charts on different baselines.
+   */
+  footnote?: boolean;
 }) {
   const pts = series.points;
   return (
@@ -148,7 +163,7 @@ export function SeriesBlock({
         </div>
       )}
       {pts ? (
-        <div className={bare ? 'flex flex-1 flex-col justify-end' : ''}>
+        <div className={bare ? `flex flex-1 flex-col ${layout === 'spread' ? 'justify-between' : 'justify-end'}` : ''}>
           {bare && total && (
             <div className="tabular mb-1 text-[12px] text-dim">
               <CountUp value={pts.reduce((n, p) => n + p.value, 0)} replayKey={replayKey} /> total
@@ -164,7 +179,7 @@ export function SeriesBlock({
         <EmptyPanel min={bare ? 84 : 56}>{series.note ?? 'Not recorded.'}</EmptyPanel>
       )}
       {/* When the series is null its reason is the empty state itself, so it is not repeated underneath. */}
-      {pts && series.note && <div className="mt-2 text-[11.5px] leading-snug text-faint">{series.note}</div>}
+      {pts && footnote && series.note && <div className="mt-2 text-[11.5px] leading-snug text-faint">{series.note}</div>}
       {note}
     </div>
   );

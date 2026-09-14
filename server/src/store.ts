@@ -1600,7 +1600,7 @@ function loopMetricsFor(all: Loop[], builder: string | null, historySince: strin
           for (let i = 13; i >= 0; i--) days.push(addDays(now, -i));
           return days.map((d) => ({ label: d.slice(5), value: closeEvents.filter((e) => e.at.slice(0, 10) === d).length }));
         })(),
-        `Closes made through this dashboard or pushed by n8n since ${(historySince ?? '').slice(0, 10)}. ${NO_CLOSE_DATE}`,
+        `Closes are dated only when made here or pushed by the engine, so this starts with this database, on ${(historySince ?? '').slice(0, 10)}.`,
       )
     : series(
         null,
@@ -1623,7 +1623,7 @@ function loopMetricsFor(all: Loop[], builder: string | null, historySince: strin
   const weeks = lastWeeks(8);
   const raisedPerWeek = series(
     weeks.map((w) => ({ label: weekLabel(w), value: all.filter((l) => l.raised_at && weekStart(l.raised_at) === w).length })),
-    `Loops by the week they were raised (Date Raised), last eight weeks.`,
+    `Every loop by the week of its Date Raised — open and closed alike — over the last eight weeks.`,
   );
 
   // Closes by week of last_modified: a closed loop's last change is taken as its close. Only stamps
@@ -1638,7 +1638,7 @@ function loopMetricsFor(all: Loop[], builder: string | null, historySince: strin
   const closedPerWeek = realCloses.length
     ? series(
         weeks.map((w) => ({ label: weekLabel(w), value: realCloses.filter((l) => weekStart(l.last_modified!.slice(0, 10)) === w).length })),
-        `Closed loops by the week of their last change, over the same eight weeks as Raised per week. A closed loop's last_modified is taken as its close, which is exact only when the close was the last edit. ${MODIFIED_NOTE}`,
+        `Closed loops by last_modified, added 9 Sept 2026 and read as the close; earlier weeks carry no closes.`,
       )
     : series(
         null,
@@ -1649,7 +1649,7 @@ function loopMetricsFor(all: Loop[], builder: string | null, historySince: strin
       label: weekLabel(w),
       value: all.filter((l) => l.raised_at && weekStart(l.raised_at) === w).length - realCloses.filter((l) => weekStart(l.last_modified!.slice(0, 10)) === w).length,
     })),
-    `Raised (Date Raised) minus closed (last_modified) per week, from the week the field was added. Weeks before it have no close count and are not shown. ${MODIFIED_NOTE}`,
+    `Date Raised minus last_modified per week, from 9 Sept 2026: before that there are no closes to subtract.`,
   );
 
   const cutoff = addDays(now, -14);
