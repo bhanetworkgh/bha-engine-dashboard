@@ -148,23 +148,61 @@ const PACE_MS = 220;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Every record id in a table, and nothing else.
+ * Every record id in a table, and as little else as Airtable will allow.
  *
- * `fields[]=` with no field named asks Airtable for the ids alone, so a
- * reconciliation over seven tables moves a few kilobytes rather than every
- * transcript in the base. Follows `offset` to the end: a partial read would
- * look exactly like a table someone had emptied, which is the one mistake this
- * must never make.
+ * **There is no way to ask for ids alone.** This sent `fields[]=` — no field
+ * named — on the belief that an empty list meant "none of them". Airtable reads
+ * it as a request for a field whose name is the empty string and refuses the
+ * whole request with `Unknown field name: ""`, which is what every one of the
+ * seven tables answered in production while this read as a permissions problem.
+ * Asking for one small real field is the way to keep the payload down: an id
+ * and a short string per record rather than every transcript in the base.
+ *
+ * `Submission ID` is the field, and it is the one spelling that exists in all
+ * six builder tables *and* in the Layer 0 table — checked against the live
+ * schema, not assumed, which is the habit that should have caught the original.
+ *
+ * Follows `offset` to the end: a partial read would look exactly like a table
+ * someone had emptied, which is the one mistake this must never make.
  */
+export const ID_PROBE_FIELD = 'Submission ID';
+
 export async function listRecordIds(base: string, table: string, timeoutMs?: number): Promise<string[]> {
   const out: string[] = [];
   let offset: string | undefined;
   do {
     const q = new URLSearchParams({ pageSize: '100' });
-    q.append('fields[]', '');
+    q.append('fields[]', ID_PROBE_FIELD);
     if (offset) q.set('offset', offset);
     const page = await call<{ records: { id: string }[]; offset?: string }>('GET', `/${base}/${table}?${q.toString()}`, undefined, timeoutMs);
     for (const r of page.records) out.push(r.id);
+    offset = page.offset;
+    if (offset) await sleep(PACE_MS);
+  } while (offset);
+  return out;
+}
+
+/**
+ * Every record in a table, whole.
+ *
+ * The counterpart of `listRecordIds`: that one asks for as little as Airtable
+ * allows because it only needs to know what exists, and this one needs the
+ * fields themselves because it is what a resync writes into Postgres. It costs
+ * what it costs — transcripts included — which is why it runs on a button and
+ * not on a page load.
+ *
+ * Same rule about `offset`: followed to the end or not trusted at all. A
+ * half-read table would look like a table with rows missing, and the caller
+ * would delete the ones it did not see.
+ */
+export async function listRecords(base: string, table: string, timeoutMs?: number): Promise<AtRecord[]> {
+  const out: AtRecord[] = [];
+  let offset: string | undefined;
+  do {
+    const q = new URLSearchParams({ pageSize: '100' });
+    if (offset) q.set('offset', offset);
+    const page = await call<{ records: AtRecord[]; offset?: string }>('GET', `/${base}/${table}?${q.toString()}`, undefined, timeoutMs);
+    for (const r of page.records) out.push(r);
     offset = page.offset;
     if (offset) await sleep(PACE_MS);
   } while (offset);
