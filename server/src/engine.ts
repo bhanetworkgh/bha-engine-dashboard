@@ -366,9 +366,20 @@ export async function getOpenLoops(_q: Query): Promise<OpenLoopsData> {
 /* ------------------------------- codex / patterns / commercial / builders */
 
 export async function getCodexEntries(_q: Query): Promise<CodexData> {
+  /**
+   * Reconciled first, then read.
+   *
+   * A row deleted by hand in Airtable notifies nothing, so this compares the
+   * record ids Airtable holds against the rows here and removes what is gone
+   * before the list is built — otherwise the page would show it, and a click
+   * on it would fail against a record that does not exist. One pass, on load,
+   * no background job. A failed read removes nothing.
+   */
+  const reconciliation = await store.reconcileCodex();
   // Newest first: the most recent submission is the one anyone opens this page for.
   const entries = (await store.codexEntries()).sort((a, b) => ((a.logged_at ?? '') < (b.logged_at ?? '') ? 1 : -1));
   return {
+    reconciliation,
     entries,
     freshness: await store.freshness('codex'),
     // One tab per table that exists, whether or not it has rows yet. There is

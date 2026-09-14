@@ -577,6 +577,74 @@ const MIGRATIONS: Migration[] = [
       `UPDATE loop_writebacks SET action = 'status' WHERE action IS NULL`,
     ],
   },
+  {
+    id: 7,
+    name: 'the loop write log becomes the record write log',
+    statements: [
+      /**
+       * Codex entries are written to Airtable from here too now (2026-09-14,
+       * Destiny), and they need exactly what loops needed: a line per write,
+       * and a marker on the row when one did not land. Rather than a second
+       * table with the same columns and a second marker component that drifts
+       * from the first, the loop log becomes the record log.
+       *
+       * A rename, not a drop — every row is kept and carries `kind = 'loops'`,
+       * which is what they all were.
+       */
+      `DO $$ BEGIN
+         IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'loop_writebacks')
+            AND NOT EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'record_writes') THEN
+           ALTER TABLE loop_writebacks RENAME TO record_writes;
+         END IF;
+       END $$`,
+      `CREATE TABLE IF NOT EXISTS record_writes (
+         seq           bigserial PRIMARY KEY,
+         record_id     text NOT NULL,
+         natural_id    text,
+         state         text NOT NULL,
+         status        text NOT NULL,
+         reason        text,
+         http          integer,
+         changed       boolean,
+         at            text NOT NULL
+       )`,
+      `ALTER TABLE record_writes ADD COLUMN IF NOT EXISTS kind text`,
+      // The column held a loop_id when only loops were written. It now holds a
+      // Codex entry id as often as not, and a column named for one of the two
+      // things it carries is how the next reader gets it wrong.
+      `DO $$ BEGIN
+         IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'record_writes' AND column_name = 'loop_id')
+            AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'record_writes' AND column_name = 'natural_id') THEN
+           ALTER TABLE record_writes RENAME COLUMN loop_id TO natural_id;
+         END IF;
+       END $$`,
+      `ALTER TABLE record_writes ADD COLUMN IF NOT EXISTS natural_id text`,
+      `UPDATE record_writes SET kind = 'loops' WHERE kind IS NULL`,
+      `CREATE INDEX IF NOT EXISTS record_writes_kind_record_seq ON record_writes (kind, record_id, seq DESC)`,
+      /**
+       * Every delete made from this dashboard, kept whole.
+       *
+       * Deleting exists for production testing — driving a log through Layer 0,
+       * Layer 1 and approval deliberately, then clearing the fixtures. A row
+       * removed from Airtable and from here is gone from both, so the only
+       * place it can still be read is this table, and it holds the full record
+       * as it was rather than a summary of it. Append-only; nothing prunes it.
+       */
+      `CREATE TABLE IF NOT EXISTS record_deletions (
+         seq         bigserial PRIMARY KEY,
+         kind        text NOT NULL,
+         record_id   text NOT NULL,
+         natural_id  text,
+         builder_id  text,
+         table_id    text,
+         reason      text NOT NULL,
+         fields      jsonb NOT NULL DEFAULT '{}'::jsonb,
+         actor       text,
+         at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS record_deletions_at ON record_deletions (at DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

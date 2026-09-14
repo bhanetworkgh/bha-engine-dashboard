@@ -170,7 +170,7 @@ export async function apply(input: ApplyInput): Promise<LoopWriteResult> {
   // A "move" to the table the row is already in is an ordinary edit.
   if (!destination || destination.table === input.table) {
     try {
-      const rec = await airtable.updateRecord(input.table, input.record_id, input.fields);
+      const rec = await airtable.updateRecord(airtable.LOOPS_BASE_ID, input.table, input.record_id, input.fields);
       steps.push('updated the row');
       return ok(rec.id, steps, input.table, input.table);
     } catch (e) {
@@ -197,7 +197,7 @@ async function move(input: ApplyInput, toTable: string, toBuilder: string, steps
   //    a stale copy would silently write yesterday's values into the new table.
   let source: AtRecord;
   try {
-    source = await airtable.getRecord(from, input.record_id!);
+    source = await airtable.getRecord(airtable.LOOPS_BASE_ID, from, input.record_id!);
     steps.push('read the source row');
   } catch (e) {
     const { reason, http } = why(e);
@@ -217,7 +217,7 @@ async function move(input: ApplyInput, toTable: string, toBuilder: string, steps
 
   let created: AtRecord;
   try {
-    created = await airtable.createRecord(toTable, fields);
+    created = await airtable.createRecord(airtable.LOOPS_BASE_ID, toTable, fields);
   } catch (e) {
     const { reason, http } = why(e);
     const fromName = LOOP_TABLES.find((t) => t.table === from)?.label ?? from;
@@ -234,7 +234,7 @@ async function move(input: ApplyInput, toTable: string, toBuilder: string, steps
 
   // 4. Only now the source copy goes.
   try {
-    await airtable.deleteRecord(from, input.record_id!);
+    await airtable.deleteRecord(airtable.LOOPS_BASE_ID, from, input.record_id!);
     steps.push('deleted the source row');
   } catch (e) {
     const { reason, http } = why(e);
