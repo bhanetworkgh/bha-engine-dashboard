@@ -110,12 +110,14 @@ export function LoopMetricsPanel({ metrics, loading, switching, error, view }: {
       {/*
         One set, not four charts that happen to sit together — and read as one
         set, which needs two things beyond the same card and the same grid.
-        
+
         The footnotes are the same length. They were one short line, two dense
         paragraphs and a middling one, so the eye read four different objects;
-        they are now about two lines each, saying the same things in fewer
-        words. The substance is in the series' own `note`, server-side, because
-        the sentence and the figure it qualifies belong together.
+        they are now the same two lines each where the row is one or two
+        across, and the same three where it is four across, saying what they
+        said in fewer words. The sentences live in the series' own `note`,
+        server-side, because a caveat and the figure it qualifies belong
+        together.
 
         And the parts line up. The note is the card's footnote rather than the
         chart's, so it sits on the floor of the card; `noteMinLines` holds a
