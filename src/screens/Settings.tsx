@@ -77,6 +77,16 @@ export default function Settings() {
                   tone={s.inbound_configured ? 'ok' : 'off'}
                 />
                 <Row label="Records editable here" value={s.writable.join(' · ')} />
+                <Row
+                  label="Loop write-back to Airtable"
+                  value={
+                    s.writeback_configured
+                      ? `Key set · through n8n${s.writeback_failures ? ` · ${s.writeback_failures} loop${s.writeback_failures === 1 ? '' : 's'} did not reach Airtable` : ''}`
+                      : 'No N8N_WRITEBACK_KEY · loops closed here will not reach Airtable'
+                  }
+                  tone={s.writeback_configured && !s.writeback_failures ? 'ok' : 'off'}
+                />
+                <Row label="Write-back workflow" value={<span className="break-all">{s.writeback_url}</span>} />
                 <Row label="Incidents, twins, vFarm, builders" value="Phase 1 fixtures, served by this server" tone="off" />
                 <Row label="Status history since" value={s.history_since ? new Date(s.history_since).toLocaleString() : 'not started'} />
                 <Row

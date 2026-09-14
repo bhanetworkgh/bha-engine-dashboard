@@ -1,4 +1,4 @@
-import type { Loop, LoopStatus, OpenLoopsData } from '../../data';
+import type { Loop, LoopStatus, LoopWriteback, OpenLoopsData } from '../../data';
 import { BUILDER_NAMES } from '../../data';
 import type { RecordColumn } from '../../components/ui';
 import { EmptyState, Pill, RecordId, RecordTable, RowAction, RowActions, SourceLink, TwoLine } from '../../components/ui';
@@ -42,6 +42,34 @@ function StatusPill({ status }: { status: LoopStatus }) {
   return <Pill>open</Pill>;
 }
 
+/** The sentence a failed write-back puts on the row, in full. */
+export function writebackWarning(w: LoopWriteback): string {
+  return `Airtable still says ${w.status === 'Closed' ? 'this is not closed' : 'something else'}: the change did not reach it${w.http ? ` (HTTP ${w.http})` : ''}. ${w.reason ?? 'No reason was given.'} The 8am Open Loops digest reads Airtable, so this loop will be raised again tomorrow morning.`;
+}
+
+/**
+ * The status of a loop whose last change did not reach Airtable.
+ *
+ * The dashboard's own status is still shown — it is what this database holds,
+ * and it is true here — but never on its own, because on its own it says the
+ * loop is dealt with and Airtable disagrees. The marker beside it is the whole
+ * point of the write-back work: the person who closed it has to be able to see
+ * that the close did not land, on the row, at the moment they look at it.
+ */
+function LoopStatusCell({ loop }: { loop: Loop }) {
+  const w = loop.writeback;
+  if (w?.state !== 'failed') return <StatusPill status={loop.status} />;
+  return (
+    <span className="inline-flex flex-col items-start gap-1" title={writebackWarning(w)}>
+      <StatusPill status={loop.status} />
+      <span className="inline-flex items-center gap-1 text-[11px] leading-tight text-failing">
+        <span aria-hidden className="h-[6px] w-[6px] shrink-0 rounded-full bg-failing" />
+        not in Airtable
+      </span>
+    </span>
+  );
+}
+
 /**
  * The loop list, newest first, twenty to a page. Row actions change status in
  * place.
@@ -76,7 +104,7 @@ export function Loops({ data, loops, total, busyId, onStatus, searching }: { dat
       title: (l) => l.title,
       cell: (l) => <TwoLine title={l.title} description={l.note} empty="No note on this loop." />,
     },
-    { key: 'status', header: 'status', card: 'meta', className: 'card-meta', cell: (l) => <StatusPill status={l.status} /> },
+    { key: 'status', header: 'status', card: 'meta', className: 'card-meta', cell: (l) => <LoopStatusCell loop={l} /> },
     { key: 'table', header: 'table', card: 'meta', className: 'card-meta text-dim', cell: (l) => BUILDER_NAMES[l.owner] ?? l.owner },
     { key: 'lane', header: 'lane', className: 'text-faint', cell: (l) => (l.lane_tag ? laneLabel(l.lane_tag) : '—') },
     { key: 'raised_by', header: 'raised by', className: 'text-faint', width: '18ch', clip: true, title: (l) => l.raised_by ?? undefined, cell: (l) => l.raised_by ?? '—' },
@@ -85,8 +113,16 @@ export function Loops({ data, loops, total, busyId, onStatus, searching }: { dat
     {
       key: 'closed',
       header: 'closed',
-      className: 'tabular text-faint',
-      title: (l) => (l.closed_at ? 'Closed through this dashboard or pushed by the engine' : 'Nothing records when this loop was closed'),
+      // The colour lives in cellClass alone, so a failed write-back is not
+      // fighting `text-faint` on the same element for which one wins.
+      className: 'tabular',
+      title: (l) =>
+        l.writeback?.state === 'failed'
+          ? writebackWarning(l.writeback)
+          : l.closed_at
+            ? 'Closed through this dashboard or pushed by the engine'
+            : 'Nothing records when this loop was closed',
+      cellClass: (l) => (l.writeback?.state === 'failed' ? 'text-failing' : 'text-faint'),
       cell: (l) => l.closed_at ?? '—',
     },
     { key: 'source', header: 'source', cell: (l) => <SourceLink source={l.source} /> },
@@ -110,8 +146,42 @@ export function Loops({ data, loops, total, busyId, onStatus, searching }: { dat
     },
   ];
 
+  // Every loop held, not the visible twenty: a close stranded on page four is
+  // raised by tomorrow's digest exactly like one on page one.
+  const stranded = data.loops.filter((l) => l.writeback?.state === 'failed');
+
   return (
     <div className="shrink-0">
+      {/*
+        Said once at the top, not only on the row. A loop whose close did not
+        reach Airtable is on page four as often as page one, and the digest that
+        raises it again tomorrow does not care which. Red, because this is a
+        genuinely bad state and not a label: the dashboard and Airtable disagree
+        about work someone believes they have finished.
+      */}
+      {stranded.length > 0 && (
+        <div className="px-6 pb-3 md:px-8">
+          <div className="flex items-start gap-3 rounded-[14px] bg-failing-soft px-4 py-3">
+            <span aria-hidden className="mt-[6px] h-[7px] w-[7px] shrink-0 rounded-full bg-failing" />
+            <div className="text-[12.5px] leading-relaxed text-failing">
+              <span className="font-medium">
+                {stranded.length} {stranded.length === 1 ? 'loop did' : 'loops did'} not reach Airtable.
+              </span>{' '}
+              The 8am Open Loops digest reads Airtable, not this dashboard, so {stranded.length === 1 ? 'it will be raised' : 'they will be raised'} again
+              tomorrow morning as though nothing changed. Marked <span className="font-medium">not in Airtable</span> in the status column.
+              <div className="mt-1.5 space-y-0.5 text-[11.5px] text-failing/90">
+                {stranded.slice(0, 3).map((l) => (
+                  <div key={l.id}>
+                    <span className="tabular">{l.loop_id ?? l.id}</span> — {l.writeback?.reason ?? 'no reason was given'}
+                  </div>
+                ))}
+                {stranded.length > 3 && <div>…and {stranded.length - 3} more.</div>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <p className="px-6 pb-3 text-[11.5px] text-faint md:px-8">{data.status_history_note}</p>
 
       {total === 0 ? (

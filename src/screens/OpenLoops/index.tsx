@@ -85,7 +85,15 @@ export default function OpenLoops() {
       const updated = await setLoopStatus(loop.id, next);
       setData((d) => (d ? { ...d, loops: d.loops.map((l) => (l.id === updated.id ? updated : l)) } : d));
       setMetricsTick((n) => n + 1);
-      setToast({ text: next === 'closed' ? 'Closed.' : next === 'in progress' ? 'Marked in progress.' : 'Reopened.', tone: 'ok' });
+      // The change saved here either way — but if it did not reach Airtable,
+      // saying "Closed." and nothing else is the lie this whole path exists to
+      // stop telling. The row carries the detail; this says look at it.
+      const wb = updated.writeback;
+      setToast(
+        wb?.state === 'failed'
+          ? { text: `Saved here, but it did not reach Airtable: ${wb.reason ?? 'no reason given'}`, tone: 'failing' }
+          : { text: next === 'closed' ? 'Closed.' : next === 'in progress' ? 'Marked in progress.' : 'Reopened.', tone: 'ok' },
+      );
     } catch (e) {
       setToast({ text: e instanceof Error ? e.message : 'The change did not save.', tone: 'failing' });
     } finally {
