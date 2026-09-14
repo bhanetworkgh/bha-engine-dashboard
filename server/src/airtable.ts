@@ -26,16 +26,25 @@ import type { AtRecord } from './sources';
 
 export const AIRTABLE_URL = (process.env.AIRTABLE_API_URL || 'https://api.airtable.com/v0').replace(/\/+$/, '');
 
-/** The loops base. Env first; the constant is the base this dashboard has always meant. */
-export const LOOPS_BASE_ID = process.env.AIRTABLE_BASE_ID?.trim() || 'appUVlBSGGPHw6DGh';
-export const BASE_ID_FROM_ENV = Boolean(process.env.AIRTABLE_BASE_ID?.trim());
-
 /**
- * BHA Submissions & Logs — the Codex base. Its own variable rather than
- * overloading AIRTABLE_BASE_ID, which is the loops base and is already set.
+ * One variable per base, each named for its base (decision 2026-09-14,
+ * Destiny), so that the next base to arrive cannot be mistaken for one of
+ * these two.
+ *
+ * **No built-in default on the loops base.** A default is a guess about which
+ * base this server writes to, and a wrong guess writes real loops into the
+ * wrong Airtable base rather than failing. Missing is missing: the boot line
+ * names the variable, and every loop edit is refused and marked, naming it
+ * again.
  */
+export const OPEN_LOOPS_BASE_VAR = 'AIRTABLE_OPEN_LOOPS_BASE_ID';
+export const LOOPS_BASE_ID: string | null = process.env.AIRTABLE_OPEN_LOOPS_BASE_ID?.trim() || null;
+
+/** BHA Submissions & Logs — the Codex base, named the same way. */
+export const SUBMISSIONS_BASE_VAR = 'AIRTABLE_SUBMISSIONS_BASE_ID';
 export const SUBMISSIONS_BASE_ID = process.env.AIRTABLE_SUBMISSIONS_BASE_ID?.trim() || 'appEmdKshNVTl64Zf';
 export const SUBMISSIONS_BASE_FROM_ENV = Boolean(process.env.AIRTABLE_SUBMISSIONS_BASE_ID?.trim());
+
 
 /**
  * No fallback and no default. A guessed token comes back as a 401, which reads
@@ -56,6 +65,16 @@ export class AirtableError extends Error {
     super(message);
     this.name = 'AirtableError';
   }
+}
+
+/**
+ * The loops base, or the refusal that names the variable. Every loop write
+ * goes through this rather than reading the constant, so there is one sentence
+ * for a missing base and it cannot be half-applied.
+ */
+export function loopsBase(): string {
+  if (!LOOPS_BASE_ID) throw new AirtableError(`${OPEN_LOOPS_BASE_VAR} is not set on this server, so there is no Open Loops base to write to.`, 503);
+  return LOOPS_BASE_ID;
 }
 
 /**

@@ -86,7 +86,11 @@ export default function Settings() {
                   }
                   tone={s.airtable_configured && !s.writeback_failures ? 'ok' : 'off'}
                 />
-                <Row label="Open Loops base" value={<span className="break-all tabular">{s.airtable_base}</span>} />
+                <Row
+                  label="Open Loops base"
+                  value={s.airtable_base ? <span className="break-all tabular">{s.airtable_base}</span> : 'Not set — AIRTABLE_OPEN_LOOPS_BASE_ID · loop edits have no base to write to'}
+                  tone={s.airtable_base ? undefined : 'off'}
+                />
                 <Row label="Incidents, twins, vFarm, builders" value="Phase 1 fixtures, served by this server" tone="off" />
                 <Row label="Status history since" value={s.history_since ? new Date(s.history_since).toLocaleString() : 'not started'} />
                 <Row

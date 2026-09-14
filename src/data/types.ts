@@ -99,7 +99,8 @@ export interface ServerStatus {
   /** Whether AIRTABLE_TOKEN is set, so a loop edited here can reach Airtable. */
   airtable_configured: boolean;
   /** The Open Loops base this server writes to. */
-  airtable_base: string;
+  /** The Open Loops base, from AIRTABLE_OPEN_LOOPS_BASE_ID. Null when that variable is not set — there is no default. */
+  airtable_base: string | null;
   /** The BHA Submissions base, for Codex entries. Its own variable, not AIRTABLE_BASE_ID. */
   airtable_submissions_base: string;
   /** Loops whose newest write to Airtable failed, or left the loop in two tables. */

@@ -27,7 +27,7 @@ import { assertDatabase, closePool, DATABASE_URL } from './pg';
 import * as engine from './engine';
 import * as store from './store';
 import * as registry from './registry';
-import { BASE_ID_FROM_ENV, LOOPS_BASE_ID, SUBMISSIONS_BASE_FROM_ENV, SUBMISSIONS_BASE_ID, airtableConfigured } from './airtable';
+import { LOOPS_BASE_ID, OPEN_LOOPS_BASE_VAR, SUBMISSIONS_BASE_FROM_ENV, SUBMISSIONS_BASE_ID, SUBMISSIONS_BASE_VAR, airtableConfigured } from './airtable';
 import * as codex from './codex';
 import * as loops from './loops';
 import * as mirror from './mirror';
@@ -623,7 +623,7 @@ async function boot(): Promise<void> {
     // worth reading on every boot, not a quiet default.
     console.log(
       airtableConfigured()
-        ? `  airtable: loops ${LOOPS_BASE_ID} ${BASE_ID_FROM_ENV ? '(AIRTABLE_BASE_ID)' : '(default)'} · submissions ${SUBMISSIONS_BASE_ID} ${SUBMISSIONS_BASE_FROM_ENV ? '(AIRTABLE_SUBMISSIONS_BASE_ID)' : '(default)'}`
+        ? `  airtable: loops ${LOOPS_BASE_ID ? `${LOOPS_BASE_ID} (${OPEN_LOOPS_BASE_VAR})` : `NOT SET — ${OPEN_LOOPS_BASE_VAR} is missing, so no loop edited here will reach Airtable`} · submissions ${SUBMISSIONS_BASE_ID} ${SUBMISSIONS_BASE_FROM_ENV ? `(${SUBMISSIONS_BASE_VAR})` : '(default)'}`
         : '  airtable: NOT configured — AIRTABLE_TOKEN is not set on this server. Loop and Codex edits made here will NOT reach Airtable.',
     );
     // Rows are read straight out of the engine tables, so there is nothing to
