@@ -3978,3 +3978,24 @@ Not done:   The Overview's "what broke" and "what moved" columns are still the
             vocabulary. And still outstanding from this morning: nobody in this
             sandbox can press Resync, so the first production run's per-table
             numbers come from the Render log.
+
+## 2026-09-14 18:20 — After the deploy: what the two sides hold
+Intent:     Record the numbers, since the page itself cannot be read from here.
+Verified:   Deploy live at 18:11. Boot line clean: schema up to date (8
+            migrations), registry already populated, both Airtable bases named,
+            ledger 1442 rows. No errors since.
+            Live Airtable, read again after the deploy, all six builder tables
+            in full — 165 rows: Destiny 38, Jegan 25, Kaiqi 36, Hardik 26,
+            Ahad 15, Kavin 25. Jason Status: **151 Approved, 14 Input Added, 0
+            Pending, 0 blank**. 8 rows flagged (Hardik 2, Ahad 4, Kavin 2).
+            `Jason Reviewed At`: 0 rows carry a value, which is what the field's
+            own description says to expect. The Layer 0 table: **0 records**.
+Problem:    So Airtable says Approved 165 / Awaiting 0 / Needs input 0. The page
+            reads Postgres, and Postgres has not been resynced: this morning it
+            held 164 rows with 2 still Pending, so it will read 162 / 2 / 0
+            until somebody presses the button. Needs input is 0 either way — the
+            seven Layer 0 rows still in Postgres are parked submissions that
+            never reached a builder table, so nothing joins to them.
+Not done:   The resync. It is manual by instruction and nothing in this sandbox
+            can press it, so the first production run's per-table numbers still
+            come from the Render log afterwards.
