@@ -125,6 +125,7 @@ export function MetricCard({
   children,
   className = '',
   align = 'center',
+  noteMinLines,
 }: {
   title: ReactNode;
   right?: ReactNode;
@@ -139,6 +140,14 @@ export function MetricCard({
    * one beside it, and they stop reading as one set.
    */
   align?: 'center' | 'top';
+  /**
+   * A floor under the footnote, in lines, so a row of cards shares one body
+   * height. The cards in a row are already the same height; their *bodies* are
+   * not, because a footnote that wraps to two lines where its neighbour takes
+   * three leaves the charts above them on different baselines. Set it to the
+   * longest footnote in the row.
+   */
+  noteMinLines?: number;
 }) {
   return (
     <div className={`card flex h-full min-w-0 flex-col px-5 py-4 ${className}`}>
@@ -147,7 +156,12 @@ export function MetricCard({
         {right && <div className="shrink-0 text-[10.5px] text-faint">{right}</div>}
       </div>
       <div className={`flex min-h-0 flex-1 flex-col ${align === 'top' ? 'justify-start' : 'justify-center'}`}>{children}</div>
-      {note && <div className="mt-3 text-[11.5px] leading-snug text-faint">{note}</div>}
+      {note && (
+        // 1.375 is leading-snug; the floor is that many lines of it.
+        <div className="mt-3 text-[11.5px] leading-snug text-faint" style={noteMinLines ? { minHeight: `${noteMinLines * 1.375}em` } : undefined}>
+          {note}
+        </div>
+      )}
     </div>
   );
 }
