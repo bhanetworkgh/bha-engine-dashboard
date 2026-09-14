@@ -3118,3 +3118,127 @@ Not done:   Only `loops` has ever received an engine write in production. The
             AIRTABLE_API_KEY and AIRTABLE_RESYNC_MINUTES are dropped from
             render.yaml but Render leaves a removed key on the service; they
             want deleting by hand.
+
+## 2026-09-14 06:30 — Loop write-back: the dashboard's closes reach Airtable again, through n8n
+Intent:     Close the gap step 3 left. Removing airtable.ts on 13 Sep was
+            right — this server should not hold an Airtable token — but
+            `Bays — Daily Open Loops Sweep` reads Airtable, so a loop closed
+            here updated Postgres, left Airtable saying Open, and came back in
+            the next 08:00 digest as though nothing had happened. The write
+            goes through n8n, which already holds the token.
+Files:      server/src/writeback.ts    the helper (new)
+            server/src/migrations.ts   migration 5: loop_writebacks
+            server/src/store.ts        pushStatus + the read path + adopt()
+            server/src/index.ts        the actor, /api/status, the boot line
+            server/src/engine.ts       the page note, which had gone stale
+            src/data/types.ts          LoopWriteback, on Loop and ServerStatus
+            src/screens/OpenLoops/Loops.tsx, index.tsx   how it shows
+            src/screens/Settings.tsx, render.yaml, .env.example, README.md,
+            CLAUDE.md
+
+Decision:   **The contract was read from the live workflow, not the brief.**
+            BHA — Dashboard Loop Write-Back (GES8UIM3dJRbrLSx), created 06:06
+            today, active. Header auth on x-api-key; source_table preferred
+            over builder_id; status must be exactly Open / In Progress /
+            Closed; 200 carries previous_status and changed, 400 carries a
+            reason naming every problem at once, 404 is loop_not_found. Its
+            builder-id → table roster is seven literals, and all seven match
+            LOOP_TABLES here exactly — checked id by id, because that roster
+            being hardcoded in two places is the thing most likely to drift.
+
+Decision:   **source_table is what we send, and builder_id alongside it.**
+            engine_loops records both: `table_id` (the tbl… the row was
+            mirrored from) and `builder_id` (our slug — 'destiny', not a Slack
+            id). table_id is populated on every row, because mirror.prepare
+            refuses a loop write without resolving one. builder_id is
+            converted to the Slack id the workflow's roster keys on by
+            inverting SLACK_TO_BUILDER. Where table_id is somehow null the
+            builder's own table is used instead — verified.
+
+            Worth naming: this is derived from **the table the row sits in**,
+            never from `Assignee Slack User ID`. LOOP-1001 in the test set
+            carries assignee U0A9V97949F (Jason) while sitting in Destiny's
+            table, and the payload correctly went out as U0AEW3TBYH1. Reading
+            the assignee instead is the mis-delivery this engine already had
+            on 7 Sep.
+
+Problem:    The brief's rule for skipping — "if loop_id is missing or does not
+            start with LOOP-" — does not catch the case it is meant to catch.
+            createLoop generates `LOOP-<ts>-<rand>`, so a loop opened in the
+            dashboard *does* have a LOOP- id; it just has no Airtable row. That
+            rule would have sent it and collected a 404 for every new loop,
+            which is exactly the "do not send it and collect a 400" the brief
+            rules out.
+Fix:        Skip on both: the LOOP- check as asked, and `airtable_record_id IS
+            NULL`, which is the actual signal for "Airtable has no row". The
+            skip is recorded with its reason and shown as a skip, not a
+            failure. It self-resolves: when the engine writes the loop to
+            Airtable and pushes it back, mirror.upsert adopts the row and the
+            next change is sent for real. Verified end to end.
+
+Problem:    Adoption would have orphaned the write-back record. It is keyed by
+            the id the row is addressed by, and that id changes from row-<pk>
+            to the rec… id — and the loop it is about is precisely the one
+            adoption concerns. Nothing would have errored.
+Fix:        adopt() carries it across with the events and the note. Verified:
+            "store: row-4 is now recADOPTED0000001 — carried 2 event(s), 1
+            note(s) and 1 write-back record(s) across".
+
+Decision:   **Postgres first, then the push, and the push is awaited.** It
+            never throws, never rolls back, never blocks the Postgres write —
+            a working close must not be undone because a webhook was slow.
+            Awaited rather than fired and forgotten because the answer belongs
+            on the row the user just clicked: the returned Loop already carries
+            the failure, so the optimistic update shows it immediately. Worst
+            case is 10s on the PATCH (5s timeout, one retry).
+
+Decision:   **N8N_WRITEBACK_KEY is not fatal at startup.** "Fail loudly at
+            startup or on first use" — first use, plus a boot line. Exiting
+            would take the whole dashboard down for a missing loop write-back,
+            and CLAUDE.md reserves refusing to start for DATABASE_URL. So: a
+            boot line naming the variable and what it costs, a failed
+            write-back naming it on every attempt, a console.error per
+            attempt, and a row on Settings. No fallback value, ever — a guessed
+            key comes back as an unauthorised request, which reads on the page
+            like the workflow rejecting the loop rather than like this server
+            being misconfigured.
+
+Problem:    A loop whose row had no table_id *and* an unknown builder_id got
+            "The server hit an error handling that request." mirror.upsert's
+            MirrorError was not caught in the Postgres write path. Pre-existing
+            since 13 Sep, and unreachable through any write path, but it is on
+            the line I was changing.
+Fix:        writeFields translates MirrorError to StoreError, so the refusal
+            names the field: `"builder_id": "nobody" is not a builder this
+            engine knows. One of: ahad, destiny, …`.
+
+Verified:   Against a real Postgres 16 and a stand-in for the workflow that
+            mirrors its validation and responses (read from the workflow
+            itself) and can be told to misbehave. Fifteen cases:
+            - Open→Closed on a loop Airtable has: ok, changed true.
+            - Closed again: ok, changed **false** — shown as success, not error.
+            - Reopen, and In Progress: both ok.
+            - A loop Airtable has lost: failed, HTTP 404, loop_not_found.
+            - Workflow 500: two attempts, then failed.
+            - Connection reset: two attempts, then failed.
+            - n8n's own 403 with a non-JSON body: one attempt, no retry.
+            - Never answers: 5s timeout, two attempts, 10s total, failed.
+            - No N8N_WRITEBACK_KEY: nothing sent, failed, reason names the
+              variable, and the change still saved in Postgres.
+            - A loop opened in the dashboard, then closed: nothing sent either
+              time, recorded as skipped with why.
+            - table_id null, builder known: falls back to the builder's table.
+            - Adoption carries the write-back record across.
+            - Every failure left the Postgres row and the events ledger intact.
+            In Chromium at 1440 and 400px, zero overflow, no console errors:
+            the banner above the table naming the count and the reasons, the
+            red "not in Airtable" marker under the status pill, the closed
+            column in red, and the Settings rows.
+
+Not done:   No retry affordance on the row — a failed write-back clears when
+            the status is changed again, and nothing re-sends it on its own. If
+            a run of these ever happens at once (a key rotation, an n8n
+            outage), that is the thing to add next.
+            N8N_WRITEBACK_KEY is in render.yaml as sync:false and has to be set
+            by hand: it is the value on the workflow's own header-auth
+            credential and cannot be generated.

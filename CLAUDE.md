@@ -127,9 +127,20 @@ explicitly for this. Therefore:
   and maps them through `sources.ts`.
 - **Every write from the interface goes to the same row**, keeping every field
   it already had — `fields` is stored whole, so a write that replaced it with
-  the two keys the interface knows about would drop the rest. Airtable is no
-  longer written to. If n8n later pushes the same record carrying Airtable's
-  copy of those fields, that push wins: it is the newer statement.
+  the two keys the interface knows about would drop the rest. If n8n later
+  pushes the same record carrying Airtable's copy of those fields, that push
+  wins: it is the newer statement.
+- **A loop's status is pushed back to Airtable through n8n** (decision
+  2026-09-14, Destiny). Not a return to write-through and not a returning
+  Airtable token: the dashboard posts an intent to
+  `POST /webhook/dashboard-loop-writeback` with `N8N_WRITEBACK_KEY` in
+  `x-api-key`, and n8n — which already holds the Airtable credential — does
+  the write. It exists because the 08:00 Open Loops digest reads Airtable, so
+  a close that stopped at Postgres came back the next morning as though
+  nothing had happened. **Postgres first, then the push.** The push never
+  blocks or rolls back the Postgres write, and a push that fails is stored on
+  the loop and shown on it — a loop the dashboard calls closed while Airtable
+  still says open must never look cleanly closed. See `server/src/writeback.ts`.
 - **Every page states how old its rows are**, relative ("4 min ago"), in the
   same place, along with how many the engine has written since the migration
   backfill. A kind sitting entirely on backfilled rows says so in amber, because
@@ -167,7 +178,10 @@ thread's `session_id` is stable for its life and is Bays's memory. The reply's
 
 **Environment (all server-side, none in the bundle):** `AUTH_EMAIL`,
 `AUTH_PASSWORD_HASH`, `SESSION_SECRET`, `ASK_BAYS_API_KEY`, `ASK_BAYS_URL`,
-`DASHBOARD_INBOUND_KEY` (nothing reaches the record tables without it), and
+`DASHBOARD_INBOUND_KEY` (nothing reaches the record tables without it),
+`N8N_WRITEBACK_KEY` (without it no loop closed here reaches Airtable, and the
+server says so at boot and on every attempt; `N8N_WRITEBACK_URL` overrides the
+built-in workflow address), and
 `DATABASE_URL` — the one the server refuses to start without.
 `DATABASE_CA_CERT` and `DATABASE_POOL_MAX` are optional. `DATA_DIR` is gone,
 and so are `AIRTABLE_API_KEY`, `AIRTABLE_RESYNC_MINUTES` and
