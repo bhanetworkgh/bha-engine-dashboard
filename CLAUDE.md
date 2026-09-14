@@ -135,7 +135,10 @@ explicitly for this. Therefore:
   (`AIRTABLE_OPEN_LOOPS_BASE_ID`) and BHA Submissions
   (`AIRTABLE_SUBMISSIONS_BASE_ID`) — one variable per base, each named for its
   base, and no built-in default on the loops one, because a default is a guess
-  about which base real loops are written to —
+  about which base real loops are written to. **The token needs read and write
+  on both bases**; render.yaml and .env.example said "the Open Loops base and
+  nothing else" until 14 Sep, and a token scoped that way authenticates and
+  then refuses every read of the submissions base —
   no other record kind is read from or written to Airtable, and the pages still
   read Postgres. It exists because the 08:00 Open Loops digest reads Airtable, so a
   close that stopped at Postgres came back the next morning as though nothing
@@ -170,19 +173,34 @@ explicitly for this. Therefore:
   the steps that completed, and the outcome. The newest line per record is what
   the page marks. One table and one marker for both kinds — a second would
   drift from the first.
-- **A Codex log is at exactly one of three stages, one per layer** (decision
-  2026-09-14, Destiny): **Needs input** (Layer 0 — the gate found something
-  missing), **Awaiting approval** (Layer 1 — codex generated, not yet
-  approved), **Approved** (Layer 2). One rule makes them exclusive:
-  `Layer0 Flagged` wins, whatever Jason Status says, because the gate runs
-  first; otherwise Jason Status decides. They sum to the submission count.
-  There is no "Input added" stage — Jason asking happens while a log sits at
-  Awaiting approval and the builder answers in thread. A log whose Layer 0
-  answers are supplied re-enters Layer 1, not Layer 0.
+- **A Codex log is at exactly one of three stages, one per step** (decision
+  2026-09-14, Destiny): **Approved** (the builder codex stands), **Awaiting
+  approval** (pending review — codex written, not yet approved), **Needs
+  input** (the completeness check found something missing). One rule makes them
+  exclusive: `Layer0 Flagged` wins, whatever Jason Status says, because that
+  check runs first; otherwise Jason Status decides. They sum to the submission
+  count. There is no "Input added" stage — Jason asking happens while a log
+  sits at Awaiting approval and the builder answers in thread. A log whose
+  missing answers are supplied goes back to review, not through the check again.
+- **The steps are named, never numbered, on screen** (decision 2026-09-14,
+  Destiny): **completeness check**, **pending review**, **builder codex**.
+  "Layer 0" told a reader nothing. The Airtable fields keep their own names —
+  `Layer0 Flagged`, `Layer1 Review `, `Orchestrator Layer2 Review` — and the
+  page still quotes those wherever it states a rule, so the rule stays
+  checkable against the source.
+- **Approved is the first tab and there is no All tab** (decision 2026-09-14,
+  Destiny). Almost every log ends up approved, so that is where the page opens.
+  A fourth tab that is the sum of the other three earns nothing; the sum is
+  printed on the card above the list, where it belongs. The stage card reads
+  the same order, so the page states one order rather than two.
 - **The Layer 0 parking table (`tbljoWu73vsxyL6vc`) is a different table with a
   different schema** — no Jason Status, no Layer 2 review, no Codex Entry ID —
   holding submissions that never reached a builder table. Its rows are counted
-  on their own and never inside the stage counts, and the page says so.
+  on their own and never inside the stage counts, and the page says so. They
+  are **not** drawn as a bar in the completeness card: everything in that table
+  is parked by definition, so the bar restated its own table's name. A row
+  there whose answers have been merged is the engine's to delete — this
+  dashboard never deletes an engine row it was not asked to touch.
 - **Deleting a Codex submission removes it from Airtable and from here**, for
   production testing. Confirmed by typing the Codex entry id back, never a
   yes/no dialog: mid-test several near-identical rows are on screen and the id
@@ -194,7 +212,11 @@ explicitly for this. Therefore:
   six builder tables and the Layer 0 table against the rows held and removes
   what is genuinely gone. **A table whose read fails is never treated as an
   emptied table**: nothing under it is touched, and the page says which table
-  could not be read.
+  could not be read **and what Airtable said** — a failure that does not name
+  its reason, and logs nothing, is a sentence nobody can act on. The pass is
+  bounded: five seconds a read, eight seconds in total, tables not reached
+  named as not reached rather than failed, and the result held for two minutes
+  (twenty seconds when it failed) so reading the page is not a load test.
 - **Every page states how old its rows are**, relative ("4 min ago"), in the
   same place, along with how many the engine has written since the migration
   backfill. A kind sitting entirely on backfilled rows says so in amber, because
@@ -422,13 +444,13 @@ The densest screen.
 
 ### Codex entries / Build patterns / Commercial
 Entries by builder and week, session type, link to the narration, and the
-generated codex itself. **Three stages plus All**, one per layer, each printing
-its rule on the page — see section 4. They are mutually exclusive and sum to the
+generated codex itself. **Three stages**, one per step, ordered Approved first
+and each printing its rule on the page — see section 4. They are mutually exclusive and sum to the
 total, which the four tabs that came before did not: those asked a review
 question and a gate question in one row, so "Complete" overlapped "Approved".
-Clicking a row opens the whole entry: the generated codex and the Layer 1
-review in full and collapsible, Jason Status and notes, the Layer 0 verdict with
-what it found missing, and Approve / Send back to pending / Delete.
+Clicking a row opens the whole entry: the generated codex and the review in
+full and collapsible, Jason Status and notes, the completeness verdict with what
+it found missing, and Approve / Send back to pending / Delete.
 
 Build patterns and Commercial are the same page with different content —
 the same filter bars, truncated list rows with the full record on click, and

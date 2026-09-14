@@ -190,9 +190,10 @@ panel edits four things at once and can move a row between builder tables, and
 routing that through a webhook left no way to see where a half-completed move
 stopped.
 
-`AIRTABLE_TOKEN` on the Open Loops base (`AIRTABLE_OPEN_LOOPS_BASE_ID`) and
-nothing else. No other record kind is read from or written to Airtable by this
-server; the pages still read Postgres. **One variable per base, named for its
+`AIRTABLE_TOKEN` on the Open Loops base (`AIRTABLE_OPEN_LOOPS_BASE_ID`) and, for
+Codex, BHA Submissions (`AIRTABLE_SUBMISSIONS_BASE_ID`) — **the one token needs
+read and write on both**. No other record kind is read from or written to
+Airtable by this server; the pages still read Postgres. **One variable per base, named for its
 base**, and no built-in default on this one: a default is a guess about which
 base real loops are written to. Unset, the server names it at boot and refuses
 every loop edit with the same sentence.
@@ -284,19 +285,27 @@ failure recorded on the row and shown there. `AIRTABLE_TOKEN` again, on
 
 #### The three stages
 
-A log is at exactly one, one per layer:
+A log is at exactly one, one per step. **The steps are named, not numbered**
+(2026-09-14, Destiny): "Layer 0" told a reader nothing. The Airtable fields keep
+their own names, and the page still quotes those wherever it states a rule.
 
-| Stage | Layer | Rule |
+| Stage | Step | Rule |
 |---|---|---|
-| Needs input | 0 | `Layer0 Flagged` is ticked |
-| Awaiting approval | 1 | not flagged, and `Jason Status` is not Approved |
-| Approved | 2 | not flagged, and `Jason Status` is Approved |
+| Approved | builder codex | not flagged, and `Jason Status` is Approved |
+| Awaiting approval | pending review | not flagged, and `Jason Status` is not Approved |
+| Needs input | completeness check | `Layer0 Flagged` is ticked |
 
 **`Layer0 Flagged` wins.** A flagged log needs input whatever Jason Status says,
-because the gate runs first. That one rule is what makes the three exclusive and
-what makes them sum to the submission count — the four tabs before this asked a
-review question and a gate question in the same row, so "Complete" overlapped
-"Approved" and the counts did not add up.
+because that check runs first. That one rule is what makes the three exclusive
+and what makes them sum to the submission count — the four tabs before this
+asked a review question and a gate question in the same row, so "Complete"
+overlapped "Approved" and the counts did not add up.
+
+**Approved first, and no All tab** (2026-09-14, Destiny). Almost every log ends
+up approved, so that is where the page opens. A fourth tab that was the sum of
+the other three earned nothing; the three counts are printed together on the
+card above the list, which is where the sum belongs. One consequence: the search
+box filters inside the selected stage.
 
 There is no "Input added" stage. Jason adding input happens while a log sits at
 Awaiting approval — he either approves or asks, and the builder answers in
@@ -349,78 +358,21 @@ longer has, and logging what went.
 is left out entirely, nothing under it is touched, and the page names it. With
 Airtable unreachable the page renders from Postgres and removes nothing.
 
-### The migration backfill### Codex entries — three stages, edits and delete
+**It says what Airtable said** (2026-09-14). A pass that could read nothing used
+to print "no submission table could be read" and stop, with the reason sitting
+unread and nothing in the logs — a sentence nobody could act on. The page now
+carries Airtable's own message, commonest reason first and bounded at two, and
+the server logs it. The line also says plainly that the list itself is complete
+and unaffected, because "showing what this database holds" reads like a warning
+about the rows and is not one.
 
-Same pattern as the loops work: Postgres first, then Airtable, directly, with a
-failure recorded on the row and shown there. `AIRTABLE_TOKEN` again, on
-`AIRTABLE_SUBMISSIONS_BASE_ID` (BHA Submissions, `appEmdKshNVTl64Zf`).
-
-#### The three stages
-
-A log is at exactly one, one per layer:
-
-| Stage | Layer | Rule |
-|---|---|---|
-| Needs input | 0 | `Layer0 Flagged` is ticked |
-| Awaiting approval | 1 | not flagged, and `Jason Status` is not Approved |
-| Approved | 2 | not flagged, and `Jason Status` is Approved |
-
-**`Layer0 Flagged` wins.** A flagged log needs input whatever Jason Status says,
-because the gate runs first. That one rule is what makes the three exclusive and
-what makes them sum to the submission count — the four tabs before this asked a
-review question and a gate question in the same row, so "Complete" overlapped
-"Approved" and the counts did not add up.
-
-There is no "Input added" stage. Jason adding input happens while a log sits at
-Awaiting approval — he either approves or asks, and the builder answers in
-thread — so those logs stay there, with a small "input added" tag on the row.
-
-#### Field names
-
-Read from the live base on 2026-09-14; all six builder tables carry the same 23:
-
-```
-Submission ID · Timestamp · Builder Name · Builder User ID · Builder Channel ID ·
-Sheet Name · Session Url · Session Description · Summary · Transcript ·
-Narration Quality · Session Type · `Layer1 Review ` · Jason Status ·
-Jason Notes · Processed At · Orchestrator Layer2 Review · Builder Channel Post ·
-Submission Source · Processed Date · Layer0 Flagged · Layer0 Missing ·
-Codex Entry ID
-```
-
-`Layer1 Review ` ends in a space, in all six. `Session Url` is spelled that way
-here and `Session URL` in the Layer 0 table, which has a different schema
-entirely. `Jason Status` is a single select of exactly three — Approved,
-Pending, Input Added — and this dashboard writes only the first two; Input Added
-is the pipeline's.
-
-#### The Layer 0 parking table
-
-`tbljoWu73vsxyL6vc`, a different table with a different schema: no Jason Status,
-no Layer 2 review, no Codex Entry ID. It holds submissions that never reached a
-builder table. **Its rows are not in the stage counts** and the page says so
-rather than leaving it to be inferred.
-
-#### Delete
-
-For production testing: driving a log through Layer 0, Layer 1 and approval
-deliberately, then clearing the fixtures. It removes the Airtable row and the
-Postgres row, and is confirmed by typing the Codex entry id back rather than by
-a yes/no dialog — mid-test there are several near-identical rows on screen and
-the id is the only thing that tells them apart. The whole record goes to
-`record_deletions` first: once both sides have let go, that log is the only
-place it can be read. There is no add; entries are created through Slack.
-
-#### Rows deleted in Airtable
-
-A row deleted by hand in Airtable notifies nothing, so the Codex page reconciles
-on load: one pass over the record ids of the six builder tables and the Layer 0
-table — ids only, a few kilobytes — removing any row here that Airtable no
-longer has, and logging what went.
-
-**A failed fetch is never read as an emptied table.** A table whose read fails
-is left out entirely, nothing under it is touched, and the page names it. With
-Airtable unreachable the page renders from Postgres and removes nothing.
+**And it is bounded.** Seven reads at the client's fifteen-second write timeout
+is a page that can hang for a minute and a half doing housekeeping; one load
+took twenty-two seconds before this. A reconciliation read gets five seconds,
+the whole pass gets eight, and tables the budget did not reach are named as
+not reached rather than counted as failed — they are checked next time. A pass
+is held for two minutes (twenty seconds if it failed, since that is the state
+someone is trying to clear), and a delete made here drops it immediately.
 
 ### The migration backfill
 
@@ -437,7 +389,7 @@ Airtable; those rows are in `git log` if it is ever needed again.
 | `SESSION_SECRET` | Signs the session cookie |
 | `ASK_BAYS_API_KEY`, `ASK_BAYS_URL` | The Ask Bays workflow |
 | `DASHBOARD_INBOUND_KEY` | Authenticates the engine’s writes to `/api/engine/*` and `/api/inbound/*`. **Required** in practice — nothing can reach the record tables without it |
-| `AIRTABLE_TOKEN` | Read and write on the Open Loops base, for loop edits. Without it no loop edited here reaches Airtable; the server says so at boot and on every write. **Note the name** — the client deleted on 13 Sep read `AIRTABLE_API_KEY` |
+| `AIRTABLE_TOKEN` | Read and write on **both** bases — Open Loops and BHA Submissions — for loop and Codex edits. Without it nothing edited here reaches Airtable; the server says so at boot and on every write. **Note the name** — the client deleted on 13 Sep read `AIRTABLE_API_KEY` |
 | `AIRTABLE_OPEN_LOOPS_BASE_ID` | The Open Loops base (`appUVlBSGGPHw6DGh`). **No default** — unset, the boot line says so by name and every loop edit is refused and marked. Called `AIRTABLE_BASE_ID` until 14 Sep 2026; that name is read by nothing |
 | `AIRTABLE_SUBMISSIONS_BASE_ID` | BHA Submissions, for Codex entries. Defaults to `appEmdKshNVTl64Zf` |
 | `AIRTABLE_API_URL` | Points the same client at a local replay of the API in a sandbox |

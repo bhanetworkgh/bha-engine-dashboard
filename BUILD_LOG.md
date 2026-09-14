@@ -3608,3 +3608,126 @@ Not done:   The banner offers the action on the three loops it names; a fourth
             action. No bulk repair, deliberately — each one is a delete against
             a named record, and a button that removes several is a button that
             removes the wrong one.
+
+## 2026-09-14 16:10 — Codex: the amber line says why, one strip, named steps
+Intent:     Answer the amber line Destiny was looking at, give the header strip
+            and the three cards the Open Loops treatment, name the layers,
+            reorder the tabs and drop All, and take "Parked at the gate" off the
+            completeness card.
+Files:      server/src/store.ts       reconciliation reasons, logging, cache,
+                                      TAB_RULES names and order, the shortened
+                                      metric strings
+            server/src/codex.ts       liveIds budget, per-read timeout, unreached,
+                                      tableLabel
+            server/src/airtable.ts    per-call timeout on the client
+            src/components/ui/Records.tsx  CountCell hintMinLines
+            src/screens/Codex.tsx     strip, cards, tabs, panel prose
+            render.yaml, .env.example, README.md, CLAUDE.md
+
+Problem:    **The amber line could not be acted on.** "No submission table could
+            be read, so nothing was removed and the page is showing what this
+            database holds." The reason was already in hand — `liveIds` catches
+            each table's error into `failed` with Airtable's own message — and
+            `runReconcile` threw it away when every table failed. Nothing was
+            logged either: five Codex page loads in production and not one app
+            log line, confirmed against the Render logs.
+Fix:        The note carries Airtable's message, commonest reason first, bounded
+            at two with the rest counted, and a reason that covers every table
+            is not followed by a list of all seven. A `console.error` beside it.
+            The same reasons are added to the partial-failure note, which named
+            tables but not reasons.
+Decision:   **The sentence also says the list is fine.** "Showing what this
+            database holds" reads like a warning about the rows and is not one:
+            the page always reads Postgres, every row is real, and the only
+            thing a failed pass misses is a submission deleted in Airtable by
+            hand still being listed. It says that now.
+
+Problem:    Most likely cause, and the reason it took a page to notice:
+            **render.yaml, .env.example and the README env table all said the
+            token needs the Open Loops base "and nothing else"** — the three
+            files someone follows when creating it — while the code, CLAUDE.md
+            and two other README passages said one token covers both bases. A
+            token made from the instructions authenticates fine and then refuses
+            every read of appEmdKshNVTl64Zf.
+Fix:        All three corrected to say read and write on both bases. Verified
+            read-only today that the base and all seven table ids are right, so
+            a wrong id is not the cause.
+
+Decision:   **The pass is bounded.** Seven sequential reads at the client's
+            15s write timeout is ninety seconds of housekeeping with a person
+            waiting; one production load took twenty-two seconds. A
+            reconciliation read now gets 5s, the pass 8s, and tables the budget
+            did not reach are reported as *not reached* rather than failed —
+            they are not evidence of anything and nothing under them is touched.
+            The result is held two minutes, twenty seconds if it failed (that is
+            the state somebody is trying to clear), and a delete made here drops
+            it so this dashboard's own delete is never answered from an older
+            pass.
+
+Decision:   **The steps are named: completeness check, pending review, builder
+            codex** (Destiny). The Airtable fields keep their names and the page
+            still quotes `Layer0 Flagged` and `Orchestrator Layer2 Review` where
+            it states a rule — a rule you cannot check against the source is
+            decoration. The header cell reads "Completeness flagged"; "Codex
+            generated" keeps the name Destiny chose this morning, since it
+            counts codexes written rather than naming the step.
+
+Decision:   **Approved first, no All tab** (Destiny), default Approved. The
+            stage card reads the same order, so the page states one order
+            rather than two. Dropped with it: the `'all'` member of the tab
+            type, its branch in `inTab`, and its rule line. One consequence
+            worth knowing — the search box filters inside the selected stage,
+            so searching now means being on the right stage first.
+
+Decision:   **"Parked at the gate" comes off the completeness card** (Destiny):
+            everything in that table is parked by definition, so the bar
+            restated its own table's name. The count still shows in that card's
+            footnote and under the Needs input tab. The completed parked rows
+            stopped being mentioned at all — a row whose answers were merged is
+            the engine's to delete, and until n8n does it the dashboard simply
+            does not count it.
+
+Problem:    Same length is not the same height, again. The four hints were 25,
+            150, 50 and 32 characters and the three card footnotes 107, 205 and
+            104; at 1024 the completeness note wrapped one line further than its
+            neighbours even once the lengths matched, because `Layer0 Flagged`
+            and `Layer0 Missing` are long unbreakable tokens that move the wrap.
+Fix:        `CountCell` gained `hintMinLines`, the counterpart of MetricCard's
+            `noteMinLines`, and every footnote was cut until the wrap agreed.
+            Measured: at 1440, 1024 and 400 the four cells share a height and a
+            hint height, and the three cards share height, footnote top and
+            footnote height exactly. The one difference left is a 1px hairline
+            between the strip's two rows at phone width, which is the separator.
+
+Verified:   Against Postgres 16 and the submissions replay, twenty seeded
+            submissions across six tables and seven Layer 0 rows (six answered,
+            one still waiting — the live shape).
+            - stages 12 + 4 + 4 = 20, tabs Approved · Awaiting approval · Needs
+              input, opening on Approved, each printing its own rule.
+            - every table refuses (403): ran=false, nothing removed, all seven
+              reasons carried to the page and one line in the log.
+            - every table refuses for the same reason: said once, not seven
+              times.
+            - one table refuses: 17 of 20 checked, Hardik named, its rows left
+              alone, the reason printed.
+            - no AIRTABLE_TOKEN: same shape, the variable named.
+            - a slow Airtable (3s a read): the page answered in 9.1s rather than
+              21s, named the four tables it did not reach, and removed only
+              within the three it read — ten rows, each logged whole to
+              record_deletions.
+            - delete: wrong id refused naming the id, right id removes both
+              sides, and the next load reconciles fresh rather than from cache.
+            In Chromium at 1440, 1024 and 400: zero overflow, no console errors,
+            the strip and the cards aligned at every width, the parked bar gone,
+            and no "Layer 0/1/2" left on screen except the field names in their
+            captions.
+
+Also:       The README carried the entire Codex section twice, the second copy
+            glued onto the "### The migration backfill" heading — a botched
+            insertion from this morning. The duplicate is removed; the two
+            copies were byte-identical, so nothing was lost.
+
+Not done:   Nothing deletes a Layer 0 row once the builder's answers are merged;
+            that is n8n's, and the dashboard now just stops counting the
+            answered ones. The submissions base still has a built-in default
+            where the loops base has none.
