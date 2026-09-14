@@ -69,11 +69,17 @@ services:
       # deleted.
       - key: DASHBOARD_INBOUND_KEY
         generateValue: true
-      # The Airtable token, for loop edits only (2026-09-14). The n8n write-back
-      # that stood here for a day is retired: the loop panel edits four fields
-      # and can move a row between builder tables, and routing that through a
-      # webhook left no way to see where a half-completed move stopped. Needs
-      # data.records:read and :write on the Open Loops base and nothing else.
+      # The Airtable token, for loop and Codex edits (2026-09-14). The n8n
+      # write-back that stood here for a day is retired: the loop panel edits
+      # four fields and can move a row between builder tables, and routing that
+      # through a webhook left no way to see where a half-completed move
+      # stopped.
+      #
+      # **It needs data.records:read and :write on BOTH bases** — Open Loops
+      # AND BHA Submissions (appEmdKshNVTl64Zf). This comment said "the Open
+      # Loops base and nothing else" until 14 Sep, which is what a token made
+      # from these instructions would have been scoped to; the Codex page's
+      # reconciliation then failed on every one of its seven table reads.
       #
       # Note the name: the client deleted on 13 Sep read AIRTABLE_API_KEY. This
       # reads AIRTABLE_TOKEN, which is the variable actually set on the service.
