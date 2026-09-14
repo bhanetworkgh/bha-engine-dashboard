@@ -78,16 +78,21 @@ export function loopsBase(): string {
 }
 
 /**
- * Ten seconds. A single-record read, create, update or delete is one round trip
- * to api.airtable.com; a move is four of them in sequence, and a person is
- * waiting on the save.
+ * Fifteen seconds for a write. A single-record read, create, update or delete
+ * is one round trip to api.airtable.com; a move is four of them in sequence,
+ * and a person is waiting on the save.
+ *
+ * A read done on a page load passes something shorter — see `listRecordIds`.
+ * Seven tables at fifteen seconds each is a page that hangs for a minute and a
+ * half, which is not a wait anybody should be asked to sit through for a
+ * housekeeping pass.
  */
 const TIMEOUT_MS = 15_000;
 
-async function call<T>(method: 'GET' | 'PATCH' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
-  if (!TOKEN) throw new AirtableError('AIRTABLE_TOKEN is not set on this server, so nothing could be written to Airtable.', 503);
+async function call<T>(method: 'GET' | 'PATCH' | 'POST' | 'DELETE', path: string, body?: unknown, timeoutMs = TIMEOUT_MS): Promise<T> {
+  if (!TOKEN) throw new AirtableError('AIRTABLE_TOKEN is not set on this server, so nothing could be sent to Airtable.', 503);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   let text: string;
   try {
@@ -100,7 +105,7 @@ async function call<T>(method: 'GET' | 'PATCH' | 'POST' | 'DELETE', path: string
     text = await res.text();
   } catch (e) {
     const timedOut = e instanceof Error && e.name === 'AbortError';
-    throw new AirtableError(timedOut ? 'Airtable did not answer within ten seconds.' : 'Could not reach Airtable.', 0);
+    throw new AirtableError(timedOut ? `Airtable did not answer within ${Math.round(timeoutMs / 1000)} seconds.` : 'Could not reach Airtable.', 0);
   } finally {
     clearTimeout(timer);
   }
@@ -151,14 +156,14 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * look exactly like a table someone had emptied, which is the one mistake this
  * must never make.
  */
-export async function listRecordIds(base: string, table: string): Promise<string[]> {
+export async function listRecordIds(base: string, table: string, timeoutMs?: number): Promise<string[]> {
   const out: string[] = [];
   let offset: string | undefined;
   do {
     const q = new URLSearchParams({ pageSize: '100' });
     q.append('fields[]', '');
     if (offset) q.set('offset', offset);
-    const page = await call<{ records: { id: string }[]; offset?: string }>('GET', `/${base}/${table}?${q.toString()}`);
+    const page = await call<{ records: { id: string }[]; offset?: string }>('GET', `/${base}/${table}?${q.toString()}`, undefined, timeoutMs);
     for (const r of page.records) out.push(r.id);
     offset = page.offset;
     if (offset) await sleep(PACE_MS);
