@@ -55,6 +55,7 @@ export function RecordTable<T>({
   busyKey,
   lines = 1,
   label,
+  empty,
 }: {
   columns: RecordColumn<T>[];
   rows: T[];
@@ -66,6 +67,12 @@ export function RecordTable<T>({
   /** 1 for a single line of text per row, 2 where rows carry a title and a description. */
   lines?: 1 | 2;
   label?: string;
+  /**
+   * What to say when there are no rows, drawn centred inside the table rather
+   * than instead of it. The frame and its headers stay, so a page whose filter
+   * empties a list keeps its shape instead of collapsing under the reader.
+   */
+  empty?: ReactNode;
 }) {
   return (
     <TableFrame grow={false} tableClass={lines === 2 ? 'rows-2' : 'rows-1'} label={label}>
@@ -79,6 +86,13 @@ export function RecordTable<T>({
         </tr>
       </thead>
       <tbody>
+        {rows.length === 0 && empty !== undefined && (
+          <tr className="row-empty">
+            <td colSpan={columns.length} className="td td-empty px-6 text-center align-middle text-[13px] text-dim">
+              {empty}
+            </td>
+          </tr>
+        )}
         {rows.map((row) => {
           const key = rowKey(row);
           const busy = busyKey === key;
