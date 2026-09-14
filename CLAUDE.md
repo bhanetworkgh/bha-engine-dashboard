@@ -130,10 +130,11 @@ explicitly for this. Therefore:
   the two keys the interface knows about would drop the rest. If n8n later
   pushes the same record carrying Airtable's copy of those fields, that push
   wins: it is the newer statement.
-- **Loop edits are written straight to Airtable** (decision 2026-09-14,
-  Destiny). `AIRTABLE_TOKEN` on the Open Loops base and nothing else — no other
-  record kind is read from or written to Airtable, and the pages still read
-  Postgres. It exists because the 08:00 Open Loops digest reads Airtable, so a
+- **Loop and Codex edits are written straight to Airtable** (decisions
+  2026-09-14, Destiny). `AIRTABLE_TOKEN` on the Open Loops base
+  (`AIRTABLE_BASE_ID`) and BHA Submissions (`AIRTABLE_SUBMISSIONS_BASE_ID`) —
+  no other record kind is read from or written to Airtable, and the pages still
+  read Postgres. It exists because the 08:00 Open Loops digest reads Airtable, so a
   close that stopped at Postgres came back the next morning as though nothing
   had happened. The n8n write-back that stood here for a day is retired: it
   handled the status only, and two paths writing the same field is the thing
@@ -154,9 +155,36 @@ explicitly for this. Therefore:
   lands in Postgres only once Airtable has made it** — which table a row sits
   in is a fact about Airtable, not a field this dashboard owns, and claiming it
   early leaves nothing that knows where the row really is.
-- **Every loop write is logged** to `loop_writebacks`, append-only: what
-  changed, the source and destination table on a move, the steps that
-  completed, and the outcome. The newest line per loop is what the page marks.
+- **Every write to Airtable is logged** to `record_writes`, append-only and
+  keyed by kind: what changed, the source and destination table on a loop move,
+  the steps that completed, and the outcome. The newest line per record is what
+  the page marks. One table and one marker for both kinds — a second would
+  drift from the first.
+- **A Codex log is at exactly one of three stages, one per layer** (decision
+  2026-09-14, Destiny): **Needs input** (Layer 0 — the gate found something
+  missing), **Awaiting approval** (Layer 1 — codex generated, not yet
+  approved), **Approved** (Layer 2). One rule makes them exclusive:
+  `Layer0 Flagged` wins, whatever Jason Status says, because the gate runs
+  first; otherwise Jason Status decides. They sum to the submission count.
+  There is no "Input added" stage — Jason asking happens while a log sits at
+  Awaiting approval and the builder answers in thread. A log whose Layer 0
+  answers are supplied re-enters Layer 1, not Layer 0.
+- **The Layer 0 parking table (`tbljoWu73vsxyL6vc`) is a different table with a
+  different schema** — no Jason Status, no Layer 2 review, no Codex Entry ID —
+  holding submissions that never reached a builder table. Its rows are counted
+  on their own and never inside the stage counts, and the page says so.
+- **Deleting a Codex submission removes it from Airtable and from here**, for
+  production testing. Confirmed by typing the Codex entry id back, never a
+  yes/no dialog: mid-test several near-identical rows are on screen and the id
+  is the only thing that tells them apart. The whole row goes to
+  `record_deletions` first — once both sides let go that log is the only place
+  it can be read. There is no add; entries are created through Slack.
+- **The Codex page reconciles against Airtable on load.** A row deleted by hand
+  in Airtable notifies nothing, so one pass compares the record ids across the
+  six builder tables and the Layer 0 table against the rows held and removes
+  what is genuinely gone. **A table whose read fails is never treated as an
+  emptied table**: nothing under it is touched, and the page says which table
+  could not be read.
 - **Every page states how old its rows are**, relative ("4 min ago"), in the
   same place, along with how many the engine has written since the migration
   backfill. A kind sitting entirely on backfilled rows says so in amber, because
@@ -195,9 +223,11 @@ thread's `session_id` is stable for its life and is Bays's memory. The reply's
 **Environment (all server-side, none in the bundle):** `AUTH_EMAIL`,
 `AUTH_PASSWORD_HASH`, `SESSION_SECRET`, `ASK_BAYS_API_KEY`, `ASK_BAYS_URL`,
 `DASHBOARD_INBOUND_KEY` (nothing reaches the record tables without it),
-`AIRTABLE_TOKEN` and `AIRTABLE_BASE_ID` (loop edits only; without the token no
-loop edited here reaches Airtable and the server says so at boot and on every
-write), and `DATABASE_URL` — the one the server refuses to start without.
+`AIRTABLE_TOKEN`, `AIRTABLE_BASE_ID` (Open Loops) and
+`AIRTABLE_SUBMISSIONS_BASE_ID` (BHA Submissions) — one token, two bases, loop
+and Codex edits only; without the token nothing edited here reaches Airtable and
+the server says so at boot and on every write — and `DATABASE_URL`, the one the
+server refuses to start without.
 `DATABASE_CA_CERT`, `DATABASE_POOL_MAX` and `AIRTABLE_API_URL` are optional.
 `DATA_DIR` is gone, and so are `AIRTABLE_RESYNC_MINUTES` and the
 `N8N_WRITEBACK_*` pair. **The token variable is `AIRTABLE_TOKEN`** — the client
@@ -378,13 +408,13 @@ The densest screen.
 
 ### Codex entries / Build patterns / Commercial
 Entries by builder and week, session type, link to the narration, and the
-completed entry itself. Four tabs, each defined against the source's own
-fields and printing its rule on the page: **Approved** (`Jason Status` =
-Approved), **Pending approval** (Pending or empty), **Incomplete**
-(`Layer0 Flagged`, listing what `Layer0 Missing` names), **Complete** (not
-flagged and `Orchestrator Layer2 Review` not empty). Layer 0 and Jason Status
-are two axes, not one pipeline: a row can be approved and still flagged, and
-both show on it.
+generated codex itself. **Three stages plus All**, one per layer, each printing
+its rule on the page — see section 4. They are mutually exclusive and sum to the
+total, which the four tabs that came before did not: those asked a review
+question and a gate question in one row, so "Complete" overlapped "Approved".
+Clicking a row opens the whole entry: the generated codex and the Layer 1
+review in full and collapsible, Jason Status and notes, the Layer 0 verdict with
+what it found missing, and Approve / Send back to pending / Delete.
 
 Build patterns and Commercial are the same page with different content —
 the same filter bars, truncated list rows with the full record on click, and

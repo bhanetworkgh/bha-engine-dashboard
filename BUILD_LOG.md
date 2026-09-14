@@ -3371,3 +3371,136 @@ Not done:   No way to delete the stale copy after a duplicate; it is named and
             record kinds still have no write path to their sources — loops are
             the only kind this server writes to Airtable, because the 08:00
             digest is the only reader that needs it.
+
+## 2026-09-14 11:30 — Codex entries: three stages, a detail panel, direct writes and delete
+Intent:     Layout cleanup, a stage model that reconciles, an expandable entry
+            with Approve / Send back / Delete, writes straight to Airtable, and
+            a reconciliation against rows deleted there by hand.
+Files:      server/src/codex.ts       field names, status, delete, live ids (new)
+            server/src/airtable.ts    every call now names its base
+            server/src/loops.ts       call sites follow
+            server/src/store.ts       stages, setJasonStatus, deleteCodex,
+                                      reconcileCodex; the write log generalised
+            server/src/migrations.ts  migration 7
+            server/src/index.ts       PATCH and DELETE /api/codex/:id
+            server/src/engine.ts      reconcile before the list is built
+            server/src/sources.ts     `stage` on the mapped record
+            src/data/types.ts, src/data/index.ts
+            src/components/ui/Records.tsx  unlanded/writeWarning/NotLanded shared
+            src/components/ui/Card.tsx     MetricCard align
+            src/screens/Codex.tsx, src/screens/OpenLoops/{Loops,Metrics}.tsx
+            render.yaml, .env.example, README.md, CLAUDE.md
+
+Decision:   **Every field name read from the live base first, per the brief.**
+            appEmdKshNVTl64Zf on 2026-09-14; all six builder tables carry the
+            same 23 fields. `Layer1 Review ` does end in a space, in all six —
+            the existing mapper already read both spellings and still does.
+Problem:    Two schema facts the prompt did not have. The Layer 0 parking table
+            spells it `Session URL`, where the builder tables spell it
+            `Session Url` — different tables, different schemas, and the
+            parking table has no Jason Status, no Layer 2 review and no Codex
+            Entry ID at all. And `Narration Quality` is a singleSelect in five
+            tables but **multilineText in Kavin G N's**, so that column is free
+            text there and nothing constrains it to the three tiers.
+Fix:        The Layer 0 table is read through its own shape and never through
+            the builder-table field names. The narration tiers are ordered by
+            the pipeline's definition rather than by what any one table's select
+            happens to offer, and a value outside the three is appended rather
+            than dropped.
+
+Decision:   **The tier order is hardcoded, not sorted.** Excellent, Great, Good.
+            Sorting gave Excellent, Good, Great — alphabetical, which reads as
+            Good outranking Great. Airtable's own option order is the same
+            alphabetical one, so it could not be the source either. Destiny's
+            table does not even define a "Good" option; Ahad's, Kaiqi's,
+            Hardik's and Jegan's do.
+
+Decision:   **One rule makes the three stages exclusive**, applied in mapCodex
+            rather than in each consumer: Layer0 Flagged wins, otherwise Jason
+            Status decides. So `stage` is on the row, the tabs and the list read
+            the same field, and they cannot answer differently. The page prints
+            the reconciliation sentence — "7 + 16 + 141 = 164" — so the figures
+            are visibly closed rather than asserted.
+            "Input Added" is not a stage: it is Jason asking while the log waits,
+            so those logs sit at Awaiting approval with a small tag. "Complete"
+            is gone; it was Layer 2 having written something, not a decision,
+            and it overlapped Approved.
+
+Decision:   **`loop_writebacks` becomes `record_writes` with a `kind`**
+            (migration 7) rather than a second table for Codex. A second table
+            would have meant a second marker component drifting from the first,
+            and the brief asked for the Open Loops pattern reused. A rename, not
+            a drop; every row is kept as `kind = 'loops'`. Its `loop_id` column
+            is renamed `natural_id` in the same migration — it now holds a Codex
+            entry id as often as a loop id, and a column named for one of two
+            things it carries is how the next reader gets it wrong.
+
+Decision:   **AIRTABLE_SUBMISSIONS_BASE_ID**, a separate variable, as asked.
+            AIRTABLE_BASE_ID stays the Open Loops base. The Airtable client now
+            takes a base per call rather than holding one.
+
+Decision:   **Delete is confirmed by typing the Codex entry id**, and the whole
+            row is written to `record_deletions` before either side lets go.
+            Once Airtable and Postgres have both removed it, that log is the
+            only place it can be read — so it holds the record, not a summary.
+            A row with no Codex entry id yet (one still at Layer 0) is confirmed
+            by its Submission ID instead, so the guard is never unsatisfiable.
+            The Postgres row goes whether or not Airtable let go: the
+            alternative is a row nobody can delete from either side, and the log
+            carries what happened.
+
+Decision:   **The reconciliation removes only what is genuinely absent.** A
+            table whose read fails is left out of the comparison entirely and
+            nothing under it is touched — a failed fetch and an emptied table
+            are indistinguishable from here, and reading one as the other would
+            clear the page. Single-flight, so two page loads share one pass.
+
+Problem:    The three cards were the same height but their bars did not start on
+            the same line: MetricCard centres its body, so a three-bar card sat
+            lower than the four-bar one beside it and they stopped reading as a
+            set.
+Fix:        MetricCard takes `align`; centred stays the default for a single
+            headline figure, and the bar-stack rows on Codex and Open loops pass
+            `align="top"`.
+
+Verified:   Against Postgres 16 and a replay of the Airtable REST API shaped
+            from the live schema — the real 23 field names including the
+            trailing space, the real select vocabularies, unknown field names
+            and bad options rejected the way Airtable rejects them.
+            - stage model over ten seeded logs: 2 needs input + 4 awaiting +
+              4 approved = 10, and a log that is Approved *and* flagged lands in
+              Needs input, which is the rule.
+            - approve, send back to pending: PATCH carrying only Jason Status.
+            - "Input Added" from the interface refused, naming the two it does
+              set and why.
+            - Airtable refuses the write: saved here, marked, reason and http on
+              the row, `kind = 'codex'` in the log.
+            - no AIRTABLE_TOKEN: nothing sent, marked, boot line says it.
+            - delete with a wrong id and with no id: both refused, naming the id
+              to type. With the right id: gone from both sides, and the deletion
+              log holds the full record including `Layer1 Review ` and the
+              generated codex.
+            - reconciliation: a clean pass removes nothing; two rows deleted in
+              Airtable are removed and logged with the reason; one table failing
+              its read leaves its rows alone and names the table; Airtable
+              entirely down removes nothing and the page still renders all six.
+            - migration 7 applied both on a fresh database (1–7 in order) and on
+              one already at 6, with the rename preserving every row.
+            In Chromium at 1440 and 400px, zero overflow, no console errors: the
+            four-cell header strip, the three cards uniform at 346px with their
+            bars aligned, Excellent/Great/Good on screen in that order, the
+            stage tabs summing to All, the panel with both collapsible sections,
+            and a delete driven through the id-confirmation field end to end.
+
+Live counts (Airtable, 2026-09-14):
+            Destiny 38 = 0 / 1 / 37      Jegan  25 = 0 / 1 / 24
+            Kaiqi   36 = 0 / 1 / 35      Hardik 26 = 2 / 5 / 19
+            Ahad    15 = 4 / 7 / 4       Kavin  24 = 1 / 1 / 22
+            needs input 7 + awaiting 16 + approved 141 = 164 submissions.
+            Layer 0 parking table: 7 rows, 1 still pending_builder_input
+            (Kavin G N, missing commercial). Not in the 164.
+
+Not done:   Narration Quality in Kavin G N's table is free text rather than a
+            select, so nothing stops a fourth value appearing there. The page
+            shows whatever is written rather than dropping it, but the field
+            wants converting to a select to match the other five.

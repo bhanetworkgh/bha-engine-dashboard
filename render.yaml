@@ -83,6 +83,11 @@ services:
         sync: false
       - key: AIRTABLE_BASE_ID
         value: appUVlBSGGPHw6DGh
+      # BHA Submissions & Logs — the Codex base. Its own variable rather than
+      # overloading AIRTABLE_BASE_ID, which is the Open Loops base. Same token
+      # covers both.
+      - key: AIRTABLE_SUBMISSIONS_BASE_ID
+        value: appEmdKshNVTl64Zf
 
 # Confirmed against the live Render API (2026-09-12), not inferred: the plan
 # string is the one the API reports. basic-256mb is an accepted alias for the
