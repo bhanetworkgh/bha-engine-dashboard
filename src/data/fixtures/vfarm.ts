@@ -1,42 +1,18 @@
 /**
- * Phase 1 fixtures — vFarm sensor rollups, alerts and lifecycle events.
+ * Phase 1 fixtures — vFarm alerts and the racks they come from.
  *
  * Values here are invented but internally consistent, and the lane, subsystem
  * and error-class vocabularies match the live engine. When the endpoint lands
  * this whole directory goes; nothing outside src/data/ should notice.
  *
+ * The sensor rollups and the (empty) lifecycle list went with the vFarm page
+ * on 2026-09-14; what is left is what the Overview still reads.
+ *
  * Reference date for every relative figure: 2026-09-07.
  */
 
-import type { LifecycleEvent, SensorReading, VFarmAlert } from '../types';
+import type { VFarmAlert } from '../types';
 import { n8n } from './common';
-
-const PLACES = ['rack-a/tier-1', 'rack-a/tier-2', 'rack-a/tier-3', 'bench/burn-in'];
-
-export const VFARM_READINGS: SensorReading[] = Array.from({ length: 48 }, (_, i) => {
-  const place = PLACES[i % PLACES.length];
-  const minutesAgo = i * 3;
-  const hh = 14 - Math.floor(minutesAgo / 60);
-  const mm = 12 - (minutesAgo % 60);
-  const at = `2026-09-07 ${String(hh + (mm < 0 ? -1 : 0)).padStart(2, '0')}:${String((mm + 60) % 60).padStart(2, '0')}`;
-  // The burn-in bench has no pH probe fitted. That reads as null, not zero.
-  const isBench = place === 'bench/burn-in';
-  const ph = isBench ? null : Number((5.8 + ((i * 7) % 11) / 20).toFixed(2));
-  const temp = Number((20.4 + ((i * 5) % 13) / 5).toFixed(1));
-  const hum = Number((58 + ((i * 3) % 17)).toFixed(0));
-  const health: SensorReading['health'] =
-    ph !== null && ph > 6.25 ? 'degraded' : temp > 22.6 ? 'degraded' : 'ok';
-  return {
-    id: `RD-${String(i + 1).padStart(3, '0')}`,
-    at,
-    place,
-    ph,
-    temp_c: temp,
-    humidity_pct: hum,
-    health,
-    source: n8n(String(92100 + i)),
-  };
-});
 
 export const VFARM_ALERTS: VFarmAlert[] = [
   {
@@ -107,6 +83,3 @@ export const VFARM_PLACES = [
   { name: 'rack-a/tier-3', last_seen: '2026-09-07 14:06', health: 'degraded' as const },
   { name: 'bench/burn-in', last_seen: '2026-09-07 14:03', health: 'degraded' as const },
 ];
-
-/** Deliberately empty. Nothing emits these yet. */
-export const VFARM_LIFECYCLE: LifecycleEvent[] = [];

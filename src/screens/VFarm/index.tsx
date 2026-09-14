@@ -1,47 +1,26 @@
-import { useState } from 'react';
-import { useData } from '../../app/useData';
-import { getVFarm } from '../../data';
-import { LoadFailed, Loading, PageHeader, Tabs } from '../../components/ui';
-import { Lifecycle } from './Lifecycle';
-import { Live } from './Live';
-import { Readiness } from './Readiness';
+import { ComingSoon, PageHeader } from '../../components/ui';
 
-const TABS = ['Live', 'Lifecycle', 'Readiness'] as const;
-type Tab = (typeof TABS)[number];
-
+/**
+ * vFarm, as a placeholder (decision 2026-09-14, Destiny).
+ *
+ * The page held a live-readings table, a lifecycle timeline and a readiness
+ * panel, all drawn from phase 1 fixtures — no rack has ever written a row to
+ * this dashboard. A page that looks like instrumentation and is not one is the
+ * thing the no-invented-data rule exists to stop, so it says so plainly instead
+ * and the fetch behind it is gone rather than left running under a hidden page.
+ *
+ * It keeps its place in the sidebar. The removed code is in git history.
+ */
 export default function VFarm() {
-  const [tab, setTab] = useState<Tab>('Live');
-  const { status, data, error } = useData(getVFarm);
-
-  if (status === 'loading') return <Loading />;
-  if (status === 'error') return <LoadFailed error={error} />;
-
-  /** A tab whose capability does not exist yet, rather than one that happens to be empty. */
-  const soon: Tab[] = [...(data.lifecycle.length === 0 ? (['Lifecycle'] as Tab[]) : []), 'Readiness'];
-
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <PageHeader
-        title="vFarm"
-        subtitle={`${data.days_to_halloween} days to Halloween`}
-        // Lifecycle and Readiness are marked before the reader clicks: nothing
-        // emits lifecycle events, and readiness is not computed anywhere yet.
-        below={<Tabs tabs={TABS} value={tab} onChange={setTab} soon={soon} />}
-      />
-
-      {/*
-        vFarm is still phase 1 fixtures, not an engine table, so it has no
-        resync to report. Saying that is the same promise every other page's
-        sync line makes: the reader is told how old what they are looking at
-        is, including when the answer is "it is not live data at all".
-      */}
-      <div className="shrink-0 px-6 pb-3 text-[11.5px] text-faint md:px-8">
-        Live readings and alerts on this page are phase 1 fixtures, not read from Airtable — there is no resync behind them. Lifecycle and readiness are not built yet.
+      <PageHeader title="vFarm" subtitle="The vertical-farm product" />
+      <div className="flex min-h-0 flex-1 items-center justify-center px-6 pb-8 md:px-8">
+        <ComingSoon title="vFarm is not wired to the engine yet" min={200}>
+          Nothing on the rack writes to this dashboard today. When burn-in cycles, anomalies, growth cycles and measurements start
+          arriving, they will be shown here as they are recorded rather than reconstructed.
+        </ComingSoon>
       </div>
-
-      {tab === 'Live' && <Live data={data} />}
-      {tab === 'Lifecycle' && <Lifecycle data={data} />}
-      {tab === 'Readiness' && <Readiness data={data} />}
     </div>
   );
 }

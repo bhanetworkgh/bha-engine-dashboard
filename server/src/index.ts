@@ -292,16 +292,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
       }
       case '/api/overview':
         return send(res, 200, await engine.getOverview(q));
-      case '/api/engine-status':
-        return send(res, 200, engine.getEngineStatus(q));
       case '/api/north-star':
         return send(res, 200, engine.getNorthStar(q));
       case '/api/research-twin':
         return send(res, 200, engine.getResearchTwin(q));
-      case '/api/vfarm':
-        return send(res, 200, engine.getVFarm(q));
-      case '/api/engine-health':
-        return send(res, 200, engine.getEngineHealth(q));
       case '/api/open-loops':
         return send(res, 200, await engine.getOpenLoops(q));
       case '/api/codex':
@@ -316,8 +310,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
         return send(res, 200, await engine.getResearchTwinTelemetry());
       case '/api/clients':
         return send(res, 200, await engine.getClients());
-      case '/api/builders':
-        return send(res, 200, await engine.getBuilders(q));
       case '/api/ask-bays':
         return send(res, 200, engine.getAskBays(q));
       case '/api/engine-writes': {
@@ -349,12 +341,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
           includes_deleted: deleted,
         });
       }
-    }
-    const builder = p.match(/^\/api\/builders\/([^/]+)$/);
-    if (builder) {
-      const d = await engine.getBuilder(decodeURIComponent(builder[1]), q);
-      if (!d) throw new HttpError(404, 'No builder with that id.');
-      return send(res, 200, d);
     }
     const metrics = p.match(/^\/api\/records\/([^/]+)\/metrics$/);
     if (metrics) {
