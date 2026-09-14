@@ -428,9 +428,18 @@ async function notesFor(kind: RecordKind, on?: Queryable): Promise<Map<string, s
   return new Map(r.rows.map((n) => [n.record_id, n.note]));
 }
 
-type WritebackRow = RecordWrite & { record_id: string };
+type WritebackRow = RecordWrite & { record_id: string; from_record_id: string | null };
 
-const WB_COLS = 'record_id, state, status, reason, http, action, detail, from_table, to_table, steps, at';
+const WB_COLS = 'record_id, state, status, reason, http, action, detail, from_table, to_table, from_record_id, steps, at';
+
+/**
+ * The write as the page reads it: the stranded copy's record id stays on the
+ * server, and the builder whose table still holds it comes out instead, because
+ * that is what an action on the row has to be able to name.
+ */
+function asWrite({ record_id: _id, from_record_id: _copy, ...w }: WritebackRow): RecordWrite {
+  return { ...w, from_builder: w.state === 'duplicate' && w.from_table ? (loopTableById(w.from_table)?.owner ?? null) : null };
+}
 
 /** The two kinds this dashboard writes to Airtable, and so the two that can fail to land. */
 const WRITES_TO_AIRTABLE = new Set<RecordKind>(['loops', 'codex']);
@@ -443,15 +452,19 @@ const WRITES_TO_AIRTABLE = new Set<RecordKind>(['loops', 'codex']);
 async function writebacksFor(kind: RecordKind, on?: Queryable): Promise<Map<string, RecordWrite>> {
   if (!WRITES_TO_AIRTABLE.has(kind)) return new Map();
   const r = await db(on).query<WritebackRow>(`SELECT DISTINCT ON (record_id) ${WB_COLS} FROM record_writes WHERE kind = $1 ORDER BY record_id, seq DESC`, [kind]);
-  return new Map(r.rows.map(({ record_id, ...w }) => [record_id, w]));
+  return new Map(r.rows.map((row) => [row.record_id, asWrite(row)]));
 }
 
 async function writebackFor(kind: RecordKind, id: string, on?: Queryable): Promise<RecordWrite | null> {
   const r = await db(on).query<WritebackRow>(`SELECT ${WB_COLS} FROM record_writes WHERE kind = $1 AND record_id = $2 ORDER BY seq DESC LIMIT 1`, [kind, id]);
   const row = r.rows[0];
-  if (!row) return null;
-  const { record_id: _ignored, ...w } = row;
-  return w;
+  return row ? asWrite(row) : null;
+}
+
+/** The same line with the stranded copy's id still on it, for the retry that deletes it. */
+async function lastWriteRow(kind: RecordKind, id: string): Promise<WritebackRow | null> {
+  const r = await db().query<WritebackRow>(`SELECT ${WB_COLS} FROM record_writes WHERE kind = $1 AND record_id = $2 ORDER BY seq DESC LIMIT 1`, [kind, id]);
+  return r.rows[0] ?? null;
 }
 
 export interface RecordWriteLog {
@@ -468,6 +481,8 @@ export interface RecordWriteLog {
   steps: string[];
   from_table: string | null;
   to_table: string | null;
+  /** The source row a half-landed move left behind, so the delete can be retried against it. */
+  from_record_id?: string | null;
   new_record_id: string | null;
   actor: string;
 }
@@ -480,9 +495,9 @@ export interface RecordWriteLog {
  */
 export async function logRecordWrite(e: RecordWriteLog): Promise<void> {
   await db().query(
-    `INSERT INTO record_writes (kind, record_id, natural_id, state, status, reason, http, action, detail, from_table, to_table, steps, new_record_id, actor, at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-    [e.kind, e.record_id, e.natural_id, e.state, e.status, e.reason, e.http, e.action, e.detail, e.from_table, e.to_table, e.steps.join(' · ') || null, e.new_record_id, e.actor, nowIso()],
+    `INSERT INTO record_writes (kind, record_id, natural_id, state, status, reason, http, action, detail, from_table, to_table, from_record_id, steps, new_record_id, actor, at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+    [e.kind, e.record_id, e.natural_id, e.state, e.status, e.reason, e.http, e.action, e.detail, e.from_table, e.to_table, e.from_record_id ?? null, e.steps.join(' · ') || null, e.new_record_id, e.actor, nowIso()],
   );
   const where = `${e.kind} ${e.natural_id ?? e.record_id} ${e.action}`;
   if (e.state === 'ok' || e.state === 'skipped') console.log(`${where}: ${e.state}${e.detail ? ` — ${e.detail}` : ''}${e.steps.length ? ` (${e.steps.join(', ')})` : ''}`);
@@ -964,12 +979,66 @@ export async function editLoop(id: string, patch: loops_.LoopPatch, actor = 'das
     steps: r.steps,
     from_table: r.from_table,
     to_table: r.to_table,
+    from_record_id: r.from_record_id ?? null,
     new_record_id: r.record_id && r.record_id !== mr.airtable_record_id ? r.record_id : null,
     actor,
   });
 
   const out = await rowById('loops', nowId);
   if (!out) throw new StoreError('The loop was saved but could not be read back.', 500);
+  return hydrateLoop(out);
+}
+
+/**
+ * Removes the copy a half-landed move left in the source table.
+ *
+ * The one repair this dashboard can make to a duplicate, and deliberately the
+ * whole of it: it deletes the source row the move read from, by the id the move
+ * recorded, and does nothing else. The destination row is where the loop lives,
+ * Postgres already says so, and nothing here re-creates or re-moves anything —
+ * a retry that re-ran the move would turn two copies into three.
+ *
+ * Airtable only. There is no Postgres change to make: this database has held
+ * one row for this loop all along, pointing at the destination record.
+ */
+export async function resolveDuplicate(id: string, actor = 'dashboard'): Promise<Loop> {
+  const mr = await mirrorRowById('loops', id);
+  if (!mr) throw new StoreError('That loop is not held by this dashboard.', 404);
+
+  const last = await lastWriteRow('loops', id);
+  if (!last || last.state !== 'duplicate') {
+    throw new StoreError('This loop is not in two tables, so there is no copy to remove.', 422);
+  }
+  if (!last.from_table || !last.from_record_id) {
+    // Only a move logged before migration 8 can be here: it named the table but
+    // not the row. Said plainly rather than deleting a guess.
+    throw new StoreError('This loop was left in two tables before this dashboard recorded which row the copy was, so it has to be deleted in Airtable by hand.', 422);
+  }
+
+  const before = await rowById('loops', id);
+  const r = await loops_.retryDelete({ table: last.from_table, record_id: last.from_record_id, to_table: last.to_table });
+  const loopId = typeof mr.fields?.loop_id === 'string' ? mr.fields.loop_id : null;
+
+  await logRecordWrite({
+    kind: 'loops',
+    record_id: id,
+    natural_id: loopId,
+    state: r.state,
+    status: LOOP_STATUS_TO_AIRTABLE[(before?.status ?? 'open') as LoopStatus],
+    action: 'remove duplicate',
+    detail: `${r.state === 'ok' ? 'removed' : 'tried to remove'} the copy left in ${loopTableById(last.from_table)?.label ?? last.from_table}`,
+    reason: r.reason,
+    http: r.http,
+    steps: r.steps,
+    from_table: r.from_table,
+    to_table: r.to_table,
+    from_record_id: r.from_record_id ?? null,
+    new_record_id: null,
+    actor,
+  });
+
+  const out = await rowById('loops', id);
+  if (!out) throw new StoreError('The copy was removed but the loop could not be read back.', 500);
   return hydrateLoop(out);
 }
 

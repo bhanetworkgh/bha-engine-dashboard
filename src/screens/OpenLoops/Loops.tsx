@@ -2,6 +2,7 @@ import type { Loop, LoopStatus, RecordWrite, OpenLoopsData } from '../../data';
 import { BUILDER_NAMES } from '../../data';
 import type { RecordColumn } from '../../components/ui';
 import { EmptyState, NotLanded, Pill, RecordId, RecordTable, RowAction, RowActions, SourceLink, unlanded, writeWarning } from '../../components/ui';
+import { duplicateSource } from './LoopPanel';
 import { ageTone, laneLabel } from '../../lib';
 
 export type StatusFilter = 'all' | LoopStatus;
@@ -77,7 +78,7 @@ function LoopStatusCell({ loop }: { loop: Loop }) {
  * the shared RecordTable now so that the other five record lists are drawn the
  * same way and row styling only has to change in one place.
  */
-export function Loops({ data, loops, total, busyId, onStatus, onOpen, searching }: { data: OpenLoopsData; loops: Loop[]; total: number; busyId: string | null; onStatus: (loop: Loop, status: LoopStatus) => void; onOpen: (loop: Loop) => void; searching: boolean }) {
+export function Loops({ data, loops, total, busyId, onStatus, onOpen, onRemoveDuplicate, searching }: { data: OpenLoopsData; loops: Loop[]; total: number; busyId: string | null; onStatus: (loop: Loop, status: LoopStatus) => void; onOpen: (loop: Loop) => void; onRemoveDuplicate: (loop: Loop) => void; searching: boolean }) {
   const columns: RecordColumn<Loop>[] = [
     {
       key: 'age',
@@ -177,10 +178,27 @@ export function Loops({ data, loops, total, busyId, onStatus, onOpen, searching 
               </span>{' '}
               The 8am Open Loops digest reads Airtable, not this dashboard, so what is on screen here and what it sends
               tomorrow morning disagree. Marked in the status column; open the loop for the reason and what completed.
-              <div className="mt-1.5 space-y-0.5 text-[11.5px] text-failing/90">
+              {/*
+                Three, with the repair on the ones that have one. A duplicate is
+                the single case here this dashboard can fix by itself — the copy
+                in the source table is deleted and nothing else is touched — so
+                the action sits on the line that names it rather than only in
+                the panel behind it.
+              */}
+              <div className="mt-1.5 space-y-1 text-[11.5px] text-failing/90">
                 {stranded.slice(0, 3).map((l) => (
                   <div key={l.id}>
                     <span className="tabular">{l.loop_id ?? l.id}</span> — {l.writeback?.reason ?? 'no reason was given'}
+                    {l.writeback?.state === 'duplicate' && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm ml-2 align-baseline"
+                        disabled={busyId === l.id}
+                        onClick={() => onRemoveDuplicate(l)}
+                      >
+                        {busyId === l.id ? 'Removing…' : `Remove the copy in ${duplicateSource(l.writeback.from_builder)}`}
+                      </button>
+                    )}
                   </div>
                 ))}
                 {stranded.length > 3 && <div>…and {stranded.length - 3} more.</div>}

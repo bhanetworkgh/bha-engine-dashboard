@@ -22,6 +22,15 @@ import { laneLabel } from '../../lib';
 
 const STATUSES: LoopStatus[] = ['open', 'in progress', 'closed'];
 
+/**
+ * Whose table still holds the copy. The server names the builder on the write;
+ * where it cannot (a move logged before that was recorded) the action says
+ * "the source table" rather than naming the wrong person.
+ */
+export function duplicateSource(builder: string | null | undefined): string {
+  return builder ? `${BUILDER_NAMES[builder] ?? builder}’s table` : 'the source table';
+}
+
 function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
     <label className="block min-w-0">
@@ -57,11 +66,14 @@ export function LoopPanel({
   loop,
   busy,
   onSave,
+  onRemoveDuplicate,
   onClose,
 }: {
   loop: Loop;
   busy: boolean;
   onSave: (edit: LoopEdit) => void;
+  /** Retries the delete a half-landed move never made. Only the source copy; nothing is re-created. */
+  onRemoveDuplicate: () => void;
   onClose: () => void;
 }) {
   const [title, setTitle] = useState(loop.title);
@@ -132,10 +144,23 @@ export function LoopPanel({
         {wb && (wb.state === 'failed' || wb.state === 'duplicate') && (
           <div className="mt-4 flex items-start gap-3 rounded-[14px] bg-failing-soft px-4 py-3">
             <span aria-hidden className="mt-[6px] h-[7px] w-[7px] shrink-0 rounded-full bg-failing" />
-            <div className="text-[12.5px] leading-relaxed text-failing">
+            <div className="min-w-0 text-[12.5px] leading-relaxed text-failing">
               <span className="font-medium">{wb.state === 'duplicate' ? 'This loop is in two tables.' : 'The last change did not reach Airtable.'}</span>{' '}
               {wb.reason}
               {wb.steps && <div className="mt-1 text-[11.5px] text-failing/90">Completed: {wb.steps}.</div>}
+              {/*
+                The repair, where the state says one is needed. It deletes the
+                source copy and nothing else — the loop already lives in the
+                destination row, so re-running the move would make a third copy
+                out of a second one.
+              */}
+              {wb.state === 'duplicate' && (
+                <div className="mt-2">
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={onRemoveDuplicate}>
+                    {busy ? 'Removing…' : `Remove the copy in ${duplicateSource(wb.from_builder)}`}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}

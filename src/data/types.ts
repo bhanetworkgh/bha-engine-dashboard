@@ -511,6 +511,12 @@ export interface RecordWrite {
   to_table: string | null;
   /** The steps that actually completed, in order. On a half-landed move this is what says where it stopped. */
   steps: string | null;
+  /**
+   * On a `duplicate`, the builder whose table still holds the copy — what an
+   * action offering to remove it has to be able to name. Null on everything
+   * else. The copy's record id stays on the server.
+   */
+  from_builder?: string | null;
   at: string;
 }
 

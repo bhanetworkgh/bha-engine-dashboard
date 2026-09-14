@@ -178,6 +178,15 @@ export function saveLoop(id: string, edit: LoopEdit): Promise<Loop> {
   return api<Loop>(`/api/loops/${encodeURIComponent(id)}`, { method: 'PATCH', body: edit, timeoutMs: 60_000 });
 }
 
+/**
+ * Removes the copy a half-landed move left in the source table, and only that.
+ * Nothing is re-created and the destination row is untouched: the loop already
+ * lives there.
+ */
+export function removeLoopDuplicate(id: string): Promise<Loop> {
+  return api<Loop>(`/api/loops/${encodeURIComponent(id)}/duplicate`, { method: 'POST', timeoutMs: 60_000 });
+}
+
 /** Sets Jason Status on one submission: Approved or Pending. */
 export function setCodexStatus(id: string, jasonStatus: string): Promise<CodexEntry> {
   return api<CodexEntry>(`/api/codex/${encodeURIComponent(id)}`, { method: 'PATCH', body: { jason_status: jasonStatus }, timeoutMs: 60_000 });
