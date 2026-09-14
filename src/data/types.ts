@@ -763,6 +763,43 @@ export interface CodexData {
  * it is removed and `blocked` names it, because a failed fetch and a table
  * someone cleared look identical from here.
  */
+/**
+ * What one resync did, per table and in total.
+ *
+ * Airtable is the source of truth for every field it owns, so a resync only
+ * ever moves rows in one direction. `overwritten` is the exception worth
+ * naming: a row whose own change never reached Airtable and has now been
+ * reverted to Airtable's copy. Silence there would be this dashboard losing a
+ * decision somebody made in it.
+ */
+export interface CodexResyncTable {
+  table: string;
+  label: string;
+  /** False when Airtable refused or the budget ran out. Nothing under it was touched. */
+  read: boolean;
+  reason: string | null;
+  /** How many rows Airtable holds in this table. Null when it could not be read. */
+  rows: number | null;
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  deleted: number;
+}
+
+export interface CodexResync {
+  ran: boolean;
+  at: string;
+  ms: number;
+  tables: CodexResyncTable[];
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  deleted: number;
+  /** Rows whose local change never landed in Airtable and has now been overwritten. */
+  overwritten: { record_id: string; natural_id: string | null }[];
+  note: string;
+}
+
 export interface CodexReconciliation {
   ran: boolean;
   checked: number;
