@@ -27,6 +27,7 @@ import { assertDatabase, closePool, DATABASE_URL } from './pg';
 import * as engine from './engine';
 import * as store from './store';
 import * as registry from './registry';
+import { WRITEBACK_URL, WRITEBACK_URL_FROM_ENV, writebackConfigured } from './writeback';
 import * as mirror from './mirror';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
 
@@ -278,6 +279,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
           records_held: await store.held(),
           started_at: STARTED_AT,
           inbound_configured: Boolean(INBOUND_KEY),
+          writeback_configured: writebackConfigured(),
+          writeback_url: WRITEBACK_URL,
+          writeback_failures: await store.writebackFailures(),
           writable: store.writable(),
           freshness: await freshnessAll(),
         };
@@ -390,7 +394,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
         const status = str(body.status, 40);
         if (!status) throw new HttpError(400, 'A status, or a fields object, is required.');
         const note = typeof body.note === 'string' ? body.note.slice(0, 2000) : undefined;
-        return send(res, 200, await store.setStatus(kind, id, status, note));
+        // Who made the change, for the write-back's `actor`. One shared login,
+        // so this is that account rather than a person — which is the truth,
+        // and better than a literal "dashboard" that says nothing at all.
+        return send(res, 200, await store.setStatus(kind, id, status, note, sessionInfo(req).email));
       } catch (e) {
         if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
         throw e;
@@ -437,7 +444,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
         note: typeof body.note === 'string' ? body.note.slice(0, 2000) : undefined,
       };
       try {
-        return send(res, 201, await store.createLoop(input));
+        return send(res, 201, await store.createLoop(input, sessionInfo(req).email));
       } catch (e) {
         if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
         throw e;
@@ -546,6 +553,14 @@ async function boot(): Promise<void> {
     // configured one, because a URL on its own cannot tell you nobody chose it.
     console.log(`  ask bays: ${askConfigured() ? `${ASK_URL} ${ASK_URL_FROM_ENV ? '(ASK_BAYS_URL)' : '(built-in default — ASK_BAYS_URL is not set on this service)'}` : 'NOT configured — set ASK_BAYS_API_KEY'}`);
     console.log(`  inbound:  ${INBOUND_KEY ? 'DASHBOARD_INBOUND_KEY set' : 'NOT configured — set DASHBOARD_INBOUND_KEY so the engine can write'}`);
+    // Said loudly and by name. Without the key a loop closed here never reaches
+    // Airtable, and the 08:00 digest raises it again tomorrow morning — so this
+    // is a line worth reading on every boot, not a quiet default.
+    console.log(
+      writebackConfigured()
+        ? `  writeback: ${WRITEBACK_URL} ${WRITEBACK_URL_FROM_ENV ? '(N8N_WRITEBACK_URL)' : '(built-in default — N8N_WRITEBACK_URL is not set)'}`
+        : '  writeback: NOT configured — N8N_WRITEBACK_KEY is not set on this server. Loop status changes made here will NOT reach Airtable, and the 08:00 Open Loops digest will raise closed loops again.',
+    );
     // Rows are read straight out of the engine tables, so there is nothing to
     // load at boot. What does run is the ledger catch-up: any status that
     // changed in the database while this process was not running has to be

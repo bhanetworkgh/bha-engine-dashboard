@@ -27,11 +27,14 @@
  *     is the last event recorded for it, not a column on a read-model row, and
  *     reconcile() below is what notices a status that changed while this
  *     process was not looking.
- *   - Writes from the interface go to the mirror table and nowhere else.
- *     Airtable is no longer written to. See setStatus.
+ *   - Writes from the interface go to the mirror table first, and are then
+ *     pushed to Airtable through n8n, which holds the token — see
+ *     writeback.ts. Postgres is the write; the push is a second system being
+ *     told, and a push that fails is recorded on the loop, never rolled back.
  */
 import { getMeta, nowIso, setMetaIfAbsent, today } from './db';
 import * as mirror from './mirror';
+import * as writeback from './writeback';
 import { getPool, withTransaction, type Queryable } from './pg';
 import type {
   BuildPattern,
@@ -49,6 +52,7 @@ import type {
   Loop,
   LoopMetrics,
   LoopStatus,
+  LoopWriteback,
   Metric,
   MetricSeries,
   NewLoop,
@@ -421,6 +425,38 @@ async function notesFor(kind: RecordKind, on?: Queryable): Promise<Map<string, s
   return new Map(r.rows.map((n) => [n.record_id, n.note]));
 }
 
+type WritebackRow = LoopWriteback & { record_id: string };
+
+/**
+ * The last write-back attempt per loop, so the list can say which closes did
+ * not reach Airtable. Loops only — they are the only kind n8n writes back.
+ */
+async function writebacksFor(kind: RecordKind, on?: Queryable): Promise<Map<string, LoopWriteback>> {
+  if (kind !== 'loops') return new Map();
+  const r = await db(on).query<WritebackRow>('SELECT record_id, state, status, reason, http, changed, at FROM loop_writebacks');
+  return new Map(r.rows.map(({ record_id, ...w }) => [record_id, w]));
+}
+
+async function writebackFor(id: string, on?: Queryable): Promise<LoopWriteback | null> {
+  const r = await db(on).query<WritebackRow>('SELECT record_id, state, status, reason, http, changed, at FROM loop_writebacks WHERE record_id = $1', [id]);
+  const row = r.rows[0];
+  if (!row) return null;
+  const { record_id: _ignored, ...w } = row;
+  return w;
+}
+
+/** Replaces the loop's write-back state with this attempt. The latest is the only one that means anything. */
+async function saveWriteback(recordId: string, loopId: string | null, w: LoopWriteback): Promise<void> {
+  await db().query(
+    `INSERT INTO loop_writebacks (record_id, loop_id, state, status, reason, http, changed, at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (record_id) DO UPDATE SET loop_id = excluded.loop_id, state = excluded.state, status = excluded.status,
+       reason = excluded.reason, http = excluded.http, changed = excluded.changed, at = excluded.at`,
+    [recordId, loopId, w.state, w.status, w.reason, w.http, w.changed, w.at],
+  );
+  bumpVersion();
+}
+
 export async function setNote(kind: RecordKind, id: string, note: string | null): Promise<void> {
   const text = (note ?? '').trim();
   if (!text) await db().query('DELETE FROM record_notes WHERE kind = $1 AND record_id = $2', [kind, id]);
@@ -483,6 +519,7 @@ async function rows(kind: RecordKind, table?: string, on?: Queryable): Promise<R
   const last = await lastEvents(kind, on);
   const closes = terminalDates(kind, last);
   const notes = await notesFor(kind, on);
+  const writebacks = await writebacksFor(kind, on);
 
   const out: Row[] = [];
   for (const mr of r.rows) {
@@ -498,10 +535,11 @@ async function rows(kind: RecordKind, table?: string, on?: Queryable): Promise<R
     }
     const closed_at = closes.get(id) ?? null;
     const note = notes.get(id) ?? null;
+    const wb = writebacks.get(id) ?? null;
     out.push({
       kind,
       id,
-      json: JSON.stringify({ ...m.obj, closed_at, note }),
+      json: JSON.stringify(kind === 'loops' ? { ...m.obj, closed_at, note, writeback: wb } : { ...m.obj, closed_at, note }),
       status: statusOf(m),
       builder: builderOf(m),
       raised_at: raisedOf(m),
@@ -532,10 +570,11 @@ async function rowById(kind: RecordKind, id: string, on?: Queryable): Promise<Ro
   const closed_at = last && last.to_status === TERMINAL[kind] && last.from_status !== null ? last.at.slice(0, 10) : null;
   const n = await db(on).query<{ note: string }>('SELECT note FROM record_notes WHERE kind = $1 AND record_id = $2', [kind, id]);
   const note = n.rows[0]?.note ?? null;
+  const wb = kind === 'loops' ? await writebackFor(id, on) : null;
   return {
     kind,
     id,
-    json: JSON.stringify({ ...m.obj, closed_at, note }),
+    json: JSON.stringify(kind === 'loops' ? { ...m.obj, closed_at, note, writeback: wb } : { ...m.obj, closed_at, note }),
     status: statusOf(m),
     builder: builderOf(m),
     raised_at: raisedOf(m),
@@ -765,26 +804,72 @@ export async function recordObservations(): Promise<void> {
  * with the two keys the interface knows about would drop every other field on
  * the row — the exact silent data loss this migration was meant to end.
  *
- * Decision (2026-09-13, Destiny): this is the write, not a write-through.
- * Airtable is no longer written to from this dashboard. A change made here is
- * in the mirror table the engine reads and writes; if n8n later pushes the same
- * record carrying Airtable's copy of these fields, that push wins, because a
- * push is the newer statement about the record.
+ * Decision (2026-09-13, Destiny): this is the write, not a write-through. A
+ * change made here is in the mirror table the engine reads and writes; if n8n
+ * later pushes the same record carrying Airtable's copy of these fields, that
+ * push wins, because a push is the newer statement about the record.
+ *
+ * Decision (2026-09-14, Destiny): a loop's *status* is additionally pushed to
+ * Airtable, through n8n rather than from here — see writeback.ts and
+ * pushStatus. That is not a return to write-through: Postgres is still written
+ * first and is still what this dashboard shows. It exists because the 08:00
+ * Open Loops digest reads Airtable, so a close that stops here comes back
+ * tomorrow morning as though it never happened.
  */
 async function writeFields(kind: RecordKind, mr: MirrorRow, patch: Record<string, unknown>): Promise<Mapped> {
   const fields = { ...(mr.fields ?? {}), ...patch };
   for (const [k, v] of Object.entries(patch)) if (v === null) delete fields[k];
-  await mirror.upsert(
-    MIRROR_KIND[kind],
-    { record_id: mr.airtable_record_id, created_time: mr.created_time, fields, builder_id: mr.builder_id, table_id: mr.table_id, lane_id: mr.lane_id },
-    'ui',
-  );
+  try {
+    await mirror.upsert(
+      MIRROR_KIND[kind],
+      { record_id: mr.airtable_record_id, created_time: mr.created_time, fields, builder_id: mr.builder_id, table_id: mr.table_id, lane_id: mr.lane_id },
+      'ui',
+    );
+  } catch (e) {
+    // mirror.upsert's refusals name the field that was wrong. Passing that
+    // through beats "the server hit an error handling that request", which is
+    // what a row whose builder the engine no longer recognises used to get.
+    if (e instanceof mirror.MirrorError) throw new StoreError(e.message, e.status);
+    throw e;
+  }
   bumpVersion();
   return mapRecord(kind, { id: idOf(mr), createdTime: mr.created_time ?? '', fields }, tableOf(kind, mr), mr.lane_id);
 }
 
+/**
+ * Pushes a loop's new status back to Airtable, through n8n, and records what
+ * happened on the loop.
+ *
+ * **Postgres first, then this.** By the time it is called the change is already
+ * this dashboard's own record; the write-back is a second system being told.
+ * So it never throws, never rolls anything back, and a failure is stored rather
+ * than raised — the change stands, and the loop says the change has not reached
+ * Airtable yet. Anything else would mean a working close being undone because a
+ * webhook was slow.
+ *
+ * Awaited rather than left running, because the answer belongs on the row the
+ * user just clicked: a close that did not land has to be visible on the loop
+ * before the list redraws, not a second later.
+ */
+async function pushStatus(mr: MirrorRow, status: LoopStatus, actor: string): Promise<void> {
+  const id = idOf(mr);
+  const loopId = typeof mr.fields?.loop_id === 'string' ? mr.fields.loop_id : null;
+  const r = await writeback.writeLoopStatus({
+    record_id: id,
+    loop_id: loopId,
+    status,
+    builder: mr.builder_id,
+    table_id: mr.table_id,
+    // Airtable has a row only where it gave this one a record id. A loop opened
+    // here has none until the engine writes it to Airtable and pushes it back.
+    in_airtable: Boolean(mr.airtable_record_id),
+    actor,
+  });
+  await saveWriteback(id, loopId, r);
+}
+
 /** Changes one record's status, and records the change in the ledger. */
-export async function setStatus(kind: RecordKind, id: string, status: string, note?: string): Promise<Loop | CodexEntry | BuildPattern | Opportunity> {
+export async function setStatus(kind: RecordKind, id: string, status: string, note?: string, actor = 'dashboard'): Promise<Loop | CodexEntry | BuildPattern | Opportunity> {
   if (!STATUSES[kind].length) throw new StoreError(`${kind} is read-only in this dashboard: the engine writes it.`, 422);
   if (!STATUSES[kind].includes(status)) {
     throw new StoreError(`"${status}" is not a status a ${kind === 'loops' ? 'loop' : kind === 'codex' ? 'Codex entry' : kind === 'patterns' ? 'pattern' : 'card'} can have.`, 422);
@@ -805,6 +890,8 @@ export async function setStatus(kind: RecordKind, id: string, status: string, no
   const m = await writeFields(kind, mr, patch);
   await recordState(kind, m, 'ui', nowIso(), await lastEventFor(kind, id));
   if (note !== undefined) await setNote(kind, id, note);
+  // Postgres is written. Now tell Airtable, through n8n — see pushStatus.
+  if (kind === 'loops') await pushStatus(mr, status as LoopStatus, actor);
   return (await read(kind, id)) as Loop | CodexEntry | BuildPattern | Opportunity;
 }
 
@@ -828,7 +915,7 @@ export async function updateFields(kind: RecordKind, id: string, fields: Record<
   return JSON.parse(out.json) as Opportunity | BuildPatternDetail;
 }
 
-export async function createLoop(input: NewLoop): Promise<Loop> {
+export async function createLoop(input: NewLoop, actor = 'dashboard'): Promise<Loop> {
   const title = (input.title ?? '').trim();
   if (!title) throw new StoreError('A loop needs a title.', 422);
   const t = loopTable(input.owner);
@@ -852,9 +939,20 @@ export async function createLoop(input: NewLoop): Promise<Loop> {
   const m = mapRecord('loops', { id, createdTime: nowIso(), fields }, t.table);
   await recordState('loops', m, 'ui', nowIso(), undefined);
   if (input.note?.trim()) await setNote('loops', id, input.note);
+  // This sets a status too, so it goes through the same helper as every other
+  // status change — which records the skip and why, rather than leaving the
+  // one loop on the page with nothing said about its write-back at all.
+  const created = (await mirrorRowById('loops', id))!;
+  await pushStatus(created, 'open', actor);
   const row = await rowById('loops', id);
   if (!row) throw new StoreError('The loop was written but could not be read back.', 500);
   return hydrateLoop(row);
+}
+
+/** How many loops this dashboard changed and could not get back to Airtable. */
+export async function writebackFailures(): Promise<number> {
+  const r = await db().query<{ n: string }>(`SELECT count(*)::text AS n FROM loop_writebacks WHERE state = 'failed'`);
+  return Number(r.rows[0]?.n ?? 0);
 }
 
 /**
@@ -917,7 +1015,21 @@ async function adopt(kind: RecordKind, pk: number, recordId: string): Promise<vo
     [recordId, kind, old],
   );
   const n = await db().query('DELETE FROM record_notes WHERE kind = $1 AND record_id = $2', [kind, old]);
-  if (e.rowCount || n.rowCount) console.log(`store: ${old} is now ${recordId} — carried ${e.rowCount ?? 0} event(s) and ${n.rowCount ?? 0} note(s) across`);
+  // The write-back record moves with it for the same reason: it is keyed by the
+  // id the row is addressed by, and the loop that was skipped as "not in
+  // Airtable yet" is exactly the loop this adoption is about.
+  let w = 0;
+  if (kind === 'loops') {
+    const r = await db().query(
+      `UPDATE loop_writebacks SET record_id = $1 WHERE record_id = $2
+        AND NOT EXISTS (SELECT 1 FROM loop_writebacks WHERE record_id = $1)`,
+      [recordId, old],
+    );
+    w = r.rowCount ?? 0;
+    await db().query('DELETE FROM loop_writebacks WHERE record_id = $1', [old]);
+  }
+  if (e.rowCount || n.rowCount || w)
+    console.log(`store: ${old} is now ${recordId} — carried ${e.rowCount ?? 0} event(s), ${n.rowCount ?? 0} note(s) and ${w} write-back record(s) across`);
 }
 
 export async function recordEngineWrite(kind: mirror.MirrorKind, pk: number, at = nowIso()): Promise<void> {

@@ -359,7 +359,7 @@ export async function getOpenLoops(_q: Query): Promise<OpenLoopsData> {
     status_history_note:
       freshness.source === 'none'
         ? (freshness.note ?? 'No loops are held.')
-        : `${freshness.rows} loops across ${freshness.tables.length} builder tables, as the engine has written them into this database. Newest first; age is time since Date Raised. A status changed here is written straight to that row — Airtable is no longer in the path.`,
+        : `${freshness.rows} loops across ${freshness.tables.length} builder tables, as the engine has written them into this database. Newest first; age is time since Date Raised. A status changed here is written to that row and then pushed to Airtable through n8n, which holds the token; a loop marked "not in Airtable" is one that push did not reach.`,
   };
 }
 
