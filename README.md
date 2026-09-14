@@ -22,6 +22,10 @@ model from Airtable, the Airtable client and `AIRTABLE_API_KEY` were removed on
 13 September 2026 (step 3 of the migration), after the tables were backfilled
 and the engine's writes proved out.
 
+**A loop's status also goes back to Airtable, through n8n** (14 September
+2026). The dashboard still holds no Airtable token; it posts the change to a
+workflow that does. See *Loop write-back* below.
+
 Airtable's own field names are kept verbatim inside each row — `What`,
 `Jason Status`, `Layer1 Review ` with its trailing space — because that is what
 n8n writes, and a rename would break the engine's writes with no error.
@@ -175,6 +179,44 @@ Registry, alongside a row count per record table split by whether the migration
 backfill, the engine or a page wrote each row last — which is how you see that a
 kind has stopped being fed.
 
+### Loop write-back — the dashboard's status changes reach Airtable
+
+Removing the Airtable client on 13 September left one real gap. `Bays — Daily
+Open Loops Sweep` reads **Airtable**, so a loop closed in the dashboard updated
+Postgres, left Airtable saying `Open`, and came back in the next 08:00 digest as
+though nothing had happened.
+
+This closes it without putting a token back. n8n already holds one.
+
+```
+POST https://bayshorizonnetwork.app.n8n.cloud/webhook/dashboard-loop-writeback
+x-api-key: <N8N_WRITEBACK_KEY>
+{ "loop_id": "LOOP-…", "status": "Open" | "In Progress" | "Closed",
+  "builder_id": "U0…", "source_table": "tbl…", "actor": "…" }
+```
+
+`source_table` is read off the loop's own row — it records the Airtable table it
+was mirrored from — and is the half the workflow prefers; `builder_id` is the
+Slack id of that table's owner, sent alongside. The workflow answers explicitly
+every time: **200** with `previous_status`, `new_status` and `changed`
+(`changed: false` means Airtable already held that status — a success); **400**
+`invalid_request` with a `reason` naming every problem at once; **404**
+`loop_not_found`.
+
+**Postgres first, then the push.** The push never blocks or rolls back the
+Postgres write. Five-second timeout, one retry on a network error or a 5xx and
+none on a 400 or 404, since those will fail identically.
+
+**A push that fails is shown on the loop.** It is stored in `loop_writebacks`,
+read onto the loop, and the Open loops page marks the row *not in Airtable*
+beside its status, names the reason in a banner above the table, and says so in
+the toast on the change itself. A loop this dashboard calls closed while
+Airtable still says open never looks cleanly closed.
+
+Loops opened in the dashboard are skipped rather than sent: Airtable has no row
+for them until the engine writes one and pushes it back. The skip is recorded
+with its reason, and is not shown as a failure.
+
 ### The migration backfill
 
 Gone, with the Airtable client it read through (13 September 2026).
@@ -190,6 +232,8 @@ Airtable; those rows are in `git log` if it is ever needed again.
 | `SESSION_SECRET` | Signs the session cookie |
 | `ASK_BAYS_API_KEY`, `ASK_BAYS_URL` | The Ask Bays workflow |
 | `DASHBOARD_INBOUND_KEY` | Authenticates the engine’s writes to `/api/engine/*` and `/api/inbound/*`. **Required** in practice — nothing can reach the record tables without it |
+| `N8N_WRITEBACK_KEY` | Authenticates this server to the loop write-back workflow. Without it no loop closed here reaches Airtable; the server says so at boot and on every attempt |
+| `N8N_WRITEBACK_URL` | Overrides the built-in write-back workflow address |
 | `DATABASE_URL` | Postgres. **Required** — the server exits if it is missing or unreachable |
 
 Auth is a single shared team login, matching the pattern used by BHARAG's admin
