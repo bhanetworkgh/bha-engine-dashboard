@@ -45,7 +45,7 @@ export function LoopMetricsPanel({ metrics, loading, switching, error, view }: {
 
       <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-2">
         {/* The reference design for this page. */}
-        <MetricCard title="Close rate by builder" note={m.close_rate_note}>
+        <MetricCard title="Close rate by builder" align="top" note={m.close_rate_note}>
           {m.close_rate_by_builder.length === 0 ? (
             <EmptyPanel>No loops in this table.</EmptyPanel>
           ) : (
@@ -77,6 +77,7 @@ export function LoopMetricsPanel({ metrics, loading, switching, error, view }: {
         */}
         <MetricCard
           title="How long these have been sitting"
+          align="top"
           right="newest → oldest"
           note={`Open and in-progress loops by days since Date Raised, as a share of the ${openTotal} currently open. “No date raised” is the count with no Date Raised on the row.`}
         >

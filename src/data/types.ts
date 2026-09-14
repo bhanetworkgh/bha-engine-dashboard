@@ -100,6 +100,8 @@ export interface ServerStatus {
   airtable_configured: boolean;
   /** The Open Loops base this server writes to. */
   airtable_base: string;
+  /** The BHA Submissions base, for Codex entries. Its own variable, not AIRTABLE_BASE_ID. */
+  airtable_submissions_base: string;
   /** Loops whose newest write to Airtable failed, or left the loop in two tables. */
   writeback_failures: number;
   /** The kinds the interface can change. The rest are the engine's to write. */
@@ -476,19 +478,16 @@ export type LoopLaneTag = 'RT' | 'NS' | 'VFARM_HARDWARE' | 'KIOSK' | 'CAD_API' |
  * null with a note.
  */
 /**
- * What happened the last time this dashboard tried to push a loop's status
- * back to Airtable, through n8n.
+ * What happened the last time this dashboard wrote this record to Airtable.
  *
- * The dashboard holds no Airtable token (2026-09-13) but the 08:00 Open Loops
- * digest reads Airtable, so a close that does not reach Airtable comes back
- * tomorrow morning as though it never happened. That is why a failure is a
- * field on the loop and not only a log line: the person who closed it has to
- * be able to see that it did not land.
+ * One shape for loops and Codex entries, because the reader's problem is the
+ * same either way: the dashboard says one thing and Airtable says another, and
+ * whoever made the change has to be able to see that it did not land. A
+ * failure is therefore a field on the record and not only a log line.
  *
- * `ok` with `changed: false` is a success — Airtable already held that status.
- * `skipped` is a loop Airtable has no row for, which is not a failure either.
+ * `skipped` is a record Airtable has no row for, which is not a failure.
  */
-export interface LoopWriteback {
+export interface RecordWrite {
   /**
    * `duplicate` is its own state, not a kind of failure: the save landed, and
    * the loop now exists in two tables with one copy needing deletion. Calling
@@ -539,7 +538,7 @@ export interface Loop {
   closed_at?: string | null;
   note?: string | null;
   /** The last write-back to Airtable, when this dashboard has attempted one. */
-  writeback?: LoopWriteback | null;
+  writeback?: RecordWrite | null;
   spine: Spine;
   tags: Tags;
   source: Source;
@@ -655,8 +654,12 @@ export interface CodexEntry {
   layer0_flagged: boolean;
   /** Layer0 Missing, parsed: which elements the gate found absent. */
   layer0_missing: string[];
-  /** Not flagged by Layer 0, and Layer 2 has written the entry. */
+  /** Not flagged by Layer 0, and Layer 2 has generated the codex. */
   complete: boolean;
+  /** Which of the three stages this log is at. Layer0 Flagged wins; otherwise Jason Status decides. */
+  stage: CodexTab;
+  /** The last write of this record to Airtable, when this dashboard has attempted one. */
+  writeback?: RecordWrite | null;
   /** Whether Orchestrator Layer2 Review holds anything. */
   has_entry: boolean;
   /** The opening of the Layer 2 review, for the list. */
@@ -711,7 +714,25 @@ export interface Layer0Hold {
 }
 
 /** The four tabs, exactly as defined against the source's own fields. */
-export type CodexTab = 'approved' | 'pending' | 'incomplete' | 'complete';
+/**
+ * The three stages a log passes through, one per layer, plus All.
+ *
+ * They are mutually exclusive by one rule: `Layer0 Flagged` wins. A flagged log
+ * is at `needs_input` whatever Jason Status says, because the gate ran first
+ * and the builder has to answer before anything else can happen to it.
+ * Otherwise Jason Status decides. So every submission is in exactly one stage
+ * and the three sum to the total.
+ *
+ * The row that replaced this had "Approved / Pending approval" against
+ * "Incomplete / Complete" — a review decision and a gate verdict in one row,
+ * two different questions, which is why the counts overlapped. "Complete" is
+ * gone: it was not a decision, it was Layer 2 having written something.
+ *
+ * There is no "Input added" stage. Jason adding input happens while a log sits
+ * at Awaiting approval — he either approves or asks, and the builder answers in
+ * thread — so those logs stay there.
+ */
+export type CodexTab = 'needs_input' | 'awaiting' | 'approved';
 
 export interface CodexData {
   entries: CodexEntry[];
@@ -722,6 +743,29 @@ export interface CodexData {
   layer0_holds: Layer0Hold[];
   /** Select choices as the tables define them, for the review control. */
   choices: { jason_status: string[] };
+  /** What the reconciliation against Airtable did on this load. */
+  reconciliation: CodexReconciliation;
+}
+
+/**
+ * A row deleted by hand in Airtable notifies nothing, so this dashboard would
+ * go on showing it. Every Codex page load compares the record ids Airtable
+ * holds against the rows here and removes what is genuinely gone.
+ *
+ * A table whose read failed is never treated as an emptied table: nothing under
+ * it is removed and `blocked` names it, because a failed fetch and a table
+ * someone cleared look identical from here.
+ */
+export interface CodexReconciliation {
+  ran: boolean;
+  checked: number;
+  removed: number;
+  /** Which rows went, for the line the page prints. */
+  removed_ids: string[];
+  /** Tables that could not be read, and why. Nothing under them was touched. */
+  blocked: { table: string; label: string; reason: string }[];
+  at: string | null;
+  note: string;
 }
 
 /**
@@ -1177,9 +1221,11 @@ export interface CodexMetrics {
   computed_at: string;
   scope: { builder: string | null; rows: number };
   entries: number;
-  /** The four tabs, each with the rule it applies, so the page never states a rule the server does not use. */
-  tabs: { tab: CodexTab; label: string; n: number; rule: string }[];
-  /** Submissions carrying a completed Layer 2 entry. */
+  /** The three stages, each with the rule it applies and the layer it belongs to. */
+  tabs: { tab: CodexTab; label: string; layer: string; n: number; rule: string }[];
+  /** The three stages against the total, so the figures visibly reconcile. */
+  stage_reconciliation: { rows: number; sums_to: number; note: string };
+  /** Submissions carrying a generated Layer 2 codex. */
   with_entry: { n: number; note: string };
   /** Layer 0: the gate's own flag, not a check this dashboard invents. */
   layer0: { flagged: number; clean: number; definition: string; note: string };
@@ -1193,7 +1239,6 @@ export interface CodexMetrics {
   per_builder_per_week: { owner: string; weeks: { week: string; start: string; label: string; short: string; n: number }[] }[];
   narration_quality_mix: { quality: string; n: number }[];
   narration_quality_note: string;
-  median_days_to_approval: Metric;
 }
 
 export interface PatternMetrics {
