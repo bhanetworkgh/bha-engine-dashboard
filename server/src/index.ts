@@ -320,19 +320,34 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
         return send(res, 200, await mirror.writesView(Number.isFinite(limit) ? limit : 50, 24, Boolean(INBOUND_KEY)));
       }
       case '/api/registry': {
-        // Everything the page shows, in one response. Six small tables; a
+        // Everything the page shows, in one response. Five small tables; a
         // request per tab would only make the age of each one harder to state.
+        //
+        // Named rather than positional. It read the kinds off KIND_LIST and
+        // destructured them in order, so adding or removing a kind silently
+        // swapped two tabs' contents; each one now asks for itself.
+        //
+        // `credentials` is deliberately not among them (decision 2026-09-14,
+        // Destiny): there is no credentials registry. The table is not dropped,
+        // because nothing drops a table, but it is neither read nor served.
         const deleted = url.searchParams.get('deleted') === 'true';
-        const [workflows, services, credentials, endpoints, bases, people] = await Promise.all(
-          registry.KIND_LIST.map((k) => registry.list(k, deleted)),
-        );
+        const [workflows, services, endpoints, bases, people, builders] = await Promise.all([
+          registry.list('workflows', deleted),
+          registry.list('services', deleted),
+          registry.list('endpoints', deleted),
+          registry.list('bases', deleted),
+          registry.list('people', deleted),
+          // The Builders registry is the roster with its live figures beside
+          // it, read from the record tables rather than from a fixture.
+          store.builderFigures(),
+        ]);
         return send(res, 200, {
           workflows,
           services,
-          credentials,
           endpoints,
           bases,
           people,
+          builders,
           // Computed by the server from the rows, per CLAUDE.md section 4.
           spend: registry.spendOf(services),
           // Digest delivery health sits with the registry because the base it

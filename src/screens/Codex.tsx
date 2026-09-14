@@ -211,14 +211,14 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
         {/* The builder codex is what Layer 2 writes. The footnote is the count
             that has none, which is the figure worth acting on. */}
         <CountCell label="Codex generated" value={m.with_entry.n} tone="accent" replayKey={view} hintMinLines={2} hint={m.with_entry.note} />
-        <CountCell label="Approved" value={tab('approved')} replayKey={view} hintMinLines={2} hint="Jason Status is Approved or Input Added, and the check did not flag it." />
+        <CountCell label="Approved" value={tab('approved')} replayKey={view} hintMinLines={2} hint="Jason Status is Approved or Input Added, and nothing is parked waiting on the builder." />
         <CountCell
           label="Completeness flagged"
           value={m.layer0.flagged}
           tone={m.layer0.flagged ? 'degraded' : 'dim'}
           replayKey={view}
           hintMinLines={2}
-          hint="Layer0 Flagged is ticked: something was missing on the way in."
+          hint="Layer0 Flagged is ticked: something was missing on the way in. It no longer places a log at Needs input."
         />
       </StatStrip>
 
@@ -256,8 +256,11 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
         </MetricCard>
 
         <MetricCard title="Completeness check" align="top" noteMinLines={2} note={`${m.layer0.definition} ${m.holds.note}`}>
-          {m.layer0.flagged === 0 && m.holds.open === 0 ? (
-            <EmptyPanel>Nothing is flagged and nothing is parked. Every submission read here passed the completeness check clean.</EmptyPanel>
+          {/* Nothing flagged means no bars to draw, whatever is parked — the
+              parked count is in the footnote. Drawing one bar at zero left the
+              card mostly empty beside two full ones. */}
+          {m.layer0.flagged === 0 ? (
+            <EmptyPanel>Every submission read here passed the completeness check clean.</EmptyPanel>
           ) : (
             <div className="space-y-2">
               <HBar

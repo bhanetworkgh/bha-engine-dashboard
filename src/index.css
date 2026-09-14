@@ -998,6 +998,16 @@
     display: none;
   }
 
+  /*
+     A table that sets a min-width so its columns keep their shape is describing
+     a table. Once it is a stack of cards there are no columns to keep, and the
+     min-width only made every card as wide as the table would have been, so
+     each one had to be scrolled sideways to be read.
+  */
+  .table-cards {
+    min-width: 0 !important;
+  }
+
   .table-cards,
   .table-cards tbody {
     display: block;

@@ -802,6 +802,45 @@ export async function loopsByOwner(): Promise<OwnerTotals[]> {
   }).filter((o) => o.open + o.in_progress + o.closed > 0);
 }
 
+/**
+ * The live figures beside a person on the Builders registry.
+ *
+ * Read from the record tables, never from a fixture. The distinction that
+ * matters here is between a zero and an absence: Jason has an Open Loops table
+ * but no submissions table — he reviews logs, he does not write them — so his
+ * entries this week is **null**, not 0, and the page says so rather than
+ * printing a zero that reads as "wrote nothing". Anyone with no table of a kind
+ * at all gets null for that figure for the same reason.
+ *
+ * `oldest_loop_days` is null when nothing is open: the oldest of nothing is not
+ * zero days.
+ */
+export interface BuilderFigures {
+  id: string;
+  open_loops: number | null;
+  oldest_loop_days: number | null;
+  entries_this_week: number | null;
+}
+
+export async function builderFigures(): Promise<BuilderFigures[]> {
+  const owners = await loopsByOwner();
+  const entries = await codexEntries();
+  const week = isoWeek(today());
+  const ids = [...new Set([...LOOP_TABLES.map((t) => t.owner), ...CODEX_TABLES.map((t) => t.owner)])];
+  return ids.map((id) => {
+    const hasLoops = LOOP_TABLES.some((t) => t.owner === id);
+    const hasCodex = CODEX_TABLES.some((t) => t.owner === id);
+    const o = owners.find((x) => x.owner === id);
+    const open = o ? o.open + o.in_progress : 0;
+    return {
+      id,
+      open_loops: hasLoops ? open : null,
+      oldest_loop_days: hasLoops && open > 0 ? (o?.oldest_days ?? null) : null,
+      entries_this_week: hasCodex ? entries.filter((e) => e.builder_id === id && e.week === week).length : null,
+    };
+  });
+}
+
 /* ------------------------------------------------------------- freshness */
 
 /**

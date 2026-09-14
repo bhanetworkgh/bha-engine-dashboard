@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useData } from '../../app/useData';
 import {
   createRegistryRow,
@@ -10,7 +10,7 @@ import {
   type DigestHealth,
   type EngineWrites,
   type RegistryData,
-  type RegistryKind,
+  type ShownKind,
   type RegistryRowOf,
   type Spend,
 } from '../../data';
@@ -34,29 +34,46 @@ import {
   usePaged,
   useToast,
 } from '../../components/ui';
+import { ageTone } from '../../lib';
 import { DASH, EditableCell, NewRow, type CellType } from './Editable';
 
 /**
- * The System Registry: which workflow does what and who owns it, and what BHA
- * pays for.
+ * The System Registry: four registries on one page — who the builders are, what
+ * BHA pays for, what it calls, and what runs.
  *
- * Two questions nobody could answer without asking Destiny, on one page. The
- * second half — services, plans, cost, renewal, who pays — did not exist
- * anywhere before this, which is why the billing tab leads with a total that
- * states in the same breath how much of itself is missing.
+ * Questions nobody could answer without asking Destiny. Services, plans, cost,
+ * renewal and who pays did not exist anywhere before this, which is why the
+ * Tools tab leads with a total that states in the same breath how much of
+ * itself is missing.
  *
  * **Nobody writes these but us.** Every other records page in this app shows
  * rows the engine writes through /api/engine, and a change made there is a
- * change to a row n8n also writes; these six tables have no upstream at all, so
- * a change made in a cell is the only statement there will ever be about it.
- * That is why every one of them is editable in place.
+ * change to a row n8n also writes; these tables have no upstream at all, so a
+ * change made in a cell is the only statement there will ever be about it. That
+ * is why they are editable in place. The three live figures on Builders are the
+ * exception in the other direction — they are read from the record tables on
+ * every load, so there is nothing to type.
  *
- * Nothing here holds a secret. The credentials table has names, types, owners
- * and uses, and no column a value could go in — see the banner on that tab and
- * the schema in server/src/registry.ts.
+ * **Nothing here holds a secret, and there is no credentials registry**
+ * (decision 2026-09-14, Destiny). The tab that listed credential names, types
+ * and owners is gone rather than carried over: it had no column a value could
+ * go in and was still the place somebody would reach for when they wanted
+ * somewhere to keep a key.
  */
 
-const TABS = ['Workflows', 'Services & billing', 'Credentials', 'Endpoints', 'People', 'Engine writes'] as const;
+/**
+ * Four registries and one surface (decision 2026-09-14, Destiny). Builders
+ * first, because it is the one a person looks up most and the one that absorbed
+ * the Builders page. **Engine writes is not a registry** — it is the dual-write
+ * comparison surface — which is why it sits last and behind a different source.
+ *
+ * There is no credentials registry and there is not to be one. The tab that
+ * stood here listed names, types and owners with no column a value could go in,
+ * and it was still the place somebody would reach for when they wanted
+ * somewhere to keep a key. The table is not dropped, because nothing drops a
+ * table; it is simply neither read nor served.
+ */
+const TABS = ['Builders', 'Tools', 'Endpoint', 'Workflow', 'Engine writes'] as const;
 type Tab = (typeof TABS)[number];
 
 const WORKFLOW_STATUS = ['production', 'experimental', 'retired'] as const;
@@ -91,14 +108,46 @@ function Th({ children, right, width }: { children?: React.ReactNode; right?: bo
  * an ellipsis on one word is not a column, it is a gap. The page body still
  * never scrolls sideways; only this card does.
  */
-function Grid({ head, children, label, min }: { head: React.ReactNode; children: React.ReactNode; label: string; min: number }) {
+function Grid({
+  head,
+  children,
+  label,
+  min,
+  empty,
+  cols,
+}: {
+  head: React.ReactNode;
+  children: React.ReactNode;
+  label: string;
+  min: number;
+  /**
+   * What this registry says when it holds nothing, drawn inside the table
+   * rather than instead of it. The frame and its headers stay, so a registry
+   * with no source yet reads as a registry with nothing in it rather than as a
+   * page that failed to load.
+   */
+  empty?: React.ReactNode;
+  /** Column count, so the empty line can span the header. */
+  cols?: number;
+}) {
+  const rows = React.Children.toArray(children);
   return (
     <div className="scroll-thin card mx-6 mb-4 shrink-0 overflow-x-auto md:mx-8">
       <table className="table-cards w-full border-collapse text-[12.5px]" style={{ minWidth: min }} aria-label={label}>
         <thead>
           <tr>{head}</tr>
         </thead>
-        <tbody>{children}</tbody>
+        <tbody>
+          {rows.length === 0 && empty !== undefined ? (
+            <tr className="row-empty">
+              <td colSpan={cols ?? 1} className="td td-empty px-6 text-center align-middle text-[13px] text-dim">
+                {empty}
+              </td>
+            </tr>
+          ) : (
+            rows
+          )}
+        </tbody>
       </table>
     </div>
   );
@@ -118,7 +167,7 @@ export default function Registry() {
     if (loaded) setD(loaded);
   }, [loaded]);
 
-  const [tab, setTab] = useState<Tab>('Workflows');
+  const [tab, setTab] = useState<Tab>('Builders');
   const { toast, setToast } = useToast();
   const fail = useCallback((message: string) => setToast({ text: message, tone: 'failing' }), [setToast]);
 
@@ -133,7 +182,7 @@ export default function Registry() {
 
   /** Writes one field and folds the row the server sent back into the mirror. */
   const save = useCallback(
-    async <K extends RegistryKind>(kind: K, id: string, field: string, value: unknown) => {
+    async <K extends ShownKind>(kind: K, id: string, field: string, value: unknown) => {
       const row = await updateRegistryRow(kind, id, { [field]: value });
       setD((prev) => (prev ? { ...prev, [kind]: (prev[kind] as AnyRow[]).map((r) => (r.id === id ? row : r)) } : prev));
       // The monthly total is computed by the server from these five fields.
@@ -144,7 +193,7 @@ export default function Registry() {
   );
 
   const add = useCallback(
-    async (kind: RegistryKind, values: Record<string, unknown>) => {
+    async (kind: ShownKind, values: Record<string, unknown>) => {
       const row = await createRegistryRow(kind, values);
       setD((prev) => (prev ? { ...prev, [kind]: [...(prev[kind] as AnyRow[]), row] } : prev));
       if (kind === 'services') void refresh();
@@ -154,7 +203,7 @@ export default function Registry() {
   );
 
   const remove = useCallback(
-    async (kind: RegistryKind, id: string) => {
+    async (kind: ShownKind, id: string) => {
       try {
         const row = await deleteRegistryRow(kind, id);
         setD((prev) =>
@@ -177,7 +226,7 @@ export default function Registry() {
   );
 
   const restore = useCallback(
-    async (kind: RegistryKind, id: string) => {
+    async (kind: ShownKind, id: string) => {
       try {
         const row = await restoreRegistryRow(kind, id);
         setD((prev) => (prev ? { ...prev, [kind]: (prev[kind] as AnyRow[]).map((r) => (r.id === id ? row : r)) } : prev));
@@ -193,11 +242,10 @@ export default function Registry() {
   if (status === 'loading' || !d) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
 
   const counts = {
-    Workflows: { n: d.workflows.filter((w) => !w.deleted_at).length },
-    'Services & billing': { n: d.services.filter((s) => !s.deleted_at).length },
-    Credentials: { n: d.credentials.filter((c) => !c.deleted_at).length },
-    Endpoints: { n: d.endpoints.filter((e) => !e.deleted_at).length + d.bases.filter((b) => !b.deleted_at).length },
-    People: { n: d.people.filter((p) => !p.deleted_at).length },
+    Builders: { n: d.people.filter((p) => !p.deleted_at).length },
+    Tools: { n: d.services.filter((s) => !s.deleted_at).length },
+    Endpoint: { n: d.endpoints.filter((e) => !e.deleted_at).length + d.bases.filter((b) => !b.deleted_at).length },
+    Workflow: { n: d.workflows.filter((w) => !w.deleted_at).length },
   } as Partial<Record<Tab, { n: number }>>;
 
   const shared = { save, remove, restore, fail, add, showDeleted };
@@ -206,7 +254,7 @@ export default function Registry() {
     <div className="relative flex h-full min-h-0 flex-col">
       <PageHeader
         title="System registry"
-        subtitle="Which workflow does what and who owns it, and what BHA pays for"
+        subtitle="Who the builders are, what BHA pays for, what it calls, and what runs"
         right={
           <label className="flex cursor-pointer items-center gap-2 text-[12px] text-dim">
             <input type="checkbox" checked={showDeleted} onChange={(e) => setShowDeleted(e.target.checked)} className="accent-[var(--accent)]" />
@@ -218,16 +266,16 @@ export default function Registry() {
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 px-6 pb-3 text-[11.5px] leading-snug text-faint md:px-8">
-          Every cell here is editable — click one, type, press Enter. This dashboard is the system of record for these
-          tables: nothing upstream writes them, so a change is saved to Postgres and stays there. A field nobody
-          has filled in shows a dash rather than a guess.
+          Every typed cell here is editable — click one, type, press Enter. This dashboard is the system of record for
+          these tables: nothing upstream writes them, so a change is saved to Postgres and stays there. A field nobody
+          has filled in shows a dash rather than a guess. The open-loop, oldest-loop and entries-this-week figures on
+          Builders are the exception: they are read from the record tables, so they are shown rather than typed.
         </div>
 
-        {tab === 'Workflows' && <WorkflowsTab rows={d.workflows} {...shared} />}
-        {tab === 'Services & billing' && <ServicesTab rows={d.services} spend={d.spend} {...shared} />}
-        {tab === 'Credentials' && <CredentialsTab rows={d.credentials} workflows={d.workflows} {...shared} />}
-        {tab === 'Endpoints' && <EndpointsTab rows={d.endpoints} bases={d.bases} digests={d.digest_health} {...shared} />}
-        {tab === 'People' && <PeopleTab rows={d.people} {...shared} />}
+        {tab === 'Builders' && <BuildersTab rows={d.people} figures={d.builders} {...shared} />}
+        {tab === 'Tools' && <ServicesTab rows={d.services} spend={d.spend} {...shared} />}
+        {tab === 'Endpoint' && <EndpointsTab rows={d.endpoints} bases={d.bases} digests={d.digest_health} {...shared} />}
+        {tab === 'Workflow' && <WorkflowsTab rows={d.workflows} {...shared} />}
         {tab === 'Engine writes' && <EngineWritesTab />}
       </div>
 
@@ -239,16 +287,16 @@ export default function Registry() {
 /* ------------------------------------------------------------------ tabs */
 
 interface TabProps {
-  save: <K extends RegistryKind>(kind: K, id: string, field: string, value: unknown) => Promise<RegistryRowOf[K]>;
-  add: (kind: RegistryKind, values: Record<string, unknown>) => Promise<unknown>;
-  remove: (kind: RegistryKind, id: string) => Promise<void>;
-  restore: (kind: RegistryKind, id: string) => Promise<void>;
+  save: <K extends ShownKind>(kind: K, id: string, field: string, value: unknown) => Promise<RegistryRowOf[K]>;
+  add: (kind: ShownKind, values: Record<string, unknown>) => Promise<unknown>;
+  remove: (kind: ShownKind, id: string) => Promise<void>;
+  restore: (kind: ShownKind, id: string) => Promise<void>;
   fail: (message: string) => void;
   showDeleted: boolean;
 }
 
 /** The remove / restore pair every row carries, revealed on hover like every other row in the app. */
-function RowTools({ kind, row, extra, ...p }: TabProps & { kind: RegistryKind; row: AnyRow; extra?: React.ReactNode }) {
+function RowTools({ kind, row, extra, ...p }: TabProps & { kind: ShownKind; row: AnyRow; extra?: React.ReactNode }) {
   return (
     <RowActions>
       {extra}
@@ -261,7 +309,7 @@ function RowTools({ kind, row, extra, ...p }: TabProps & { kind: RegistryKind; r
   );
 }
 
-function cell<K extends RegistryKind>(
+function cell<K extends ShownKind>(
   p: TabProps,
   kind: K,
   row: AnyRow,
@@ -400,6 +448,9 @@ function WorkflowsTab({ rows, ...p }: TabProps & { rows: RegistryData['workflows
               <Grid
                 label={`${name} workflows`}
                 min={1320}
+                cols={9}
+                empty="No workflow is registered under this pillar."
+
                 head={
                   <>
                     <Th width="22%">workflow</Th>
@@ -591,8 +642,11 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
       </div>
 
       <Grid
-        label="Services and billing"
+        label="Tools"
         min={1400}
+        cols={13}
+        empty="No tool is registered yet."
+
         head={
           <>
             <Th width="16%">service</Th>
@@ -677,115 +731,6 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
   );
 }
 
-/* ----------------------------------------------------------- credentials */
-
-function CredentialsTab({ rows, workflows, ...p }: TabProps & { rows: RegistryData['credentials']; workflows: RegistryData['workflows'] }) {
-  const [q, setQ] = useState('');
-  const term = q.trim().toLowerCase();
-  const nameOf = useMemo(() => new Map(workflows.map((w) => [w.id, w.name])), [workflows]);
-
-  const shown = rows.filter((c) => !term || [c.name, c.type, c.owner].some((v) => v && v.toLowerCase().includes(term)));
-  const paged = usePaged(shown, term);
-  const unused = rows.filter((c) => !c.deleted_at && c.used_by.length === 0).length;
-
-  return (
-    <>
-      {/*
-        The banner is not decoration. This table is exactly the place someone
-        would reach for when they want somewhere to "keep the key safe", and the
-        schema has no column to put one in — saying so here is what stops the
-        attempt before it becomes a request to add one.
-      */}
-      <div className="mx-6 mb-4 md:mx-8">
-        <div className="flex items-start gap-3 rounded-[14px] bg-accent-soft px-4 py-3">
-          <span className="mt-[6px] h-[7px] w-[7px] shrink-0 rounded-full bg-accent" />
-          <p className="text-[12.5px] leading-relaxed text-ink">
-            <span className="font-medium">No secret value is stored here, and none is ever to be added.</span> This table
-            holds names, types, owners and what uses them — there is no column a key, token or password could go in, and
-            adding one would take a schema migration and a decision, not an edit. Values live in n8n credentials and in
-            instance Variables. If you need to share one, share it the way you already do; never here.
-          </p>
-        </div>
-      </div>
-
-      <StatStrip cols={3}>
-        <CountCell label="Credentials" value={rows.filter((c) => !c.deleted_at).length} hint="read from the n8n BHA Engine project" />
-        <CountCell label="No workflow uses it" value={unused} tone={unused ? 'degraded' : 'dim'} hint="none found across the readable workflows" />
-        <CountCell label="Types" value={new Set(rows.map((c) => c.type).filter(Boolean)).size} />
-      </StatStrip>
-
-      <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <SearchBox value={q} onChange={setQ} placeholder="Search credentials" />
-        </div>
-        <NewRow
-          label="credential"
-          onError={p.fail}
-          onCreate={(v) => p.add('credentials', v)}
-          fields={[
-            { name: 'name', label: 'name', required: true },
-            { name: 'type', label: 'type', placeholder: 'httpHeaderAuth' },
-            { name: 'owner', label: 'owner' },
-            { name: 'used_by', label: 'used by (workflow ids, comma separated)', type: 'array' },
-          ]}
-        />
-      </div>
-
-      <Grid
-        label="Credentials"
-        min={1120}
-        head={
-          <>
-            <Th width="20%">name</Th>
-            <Th>type</Th>
-            <Th>owner</Th>
-            <Th right>uses</Th>
-            <Th width="34%">what uses it</Th>
-            <Th>updated</Th>
-            <Th />
-          </>
-        }
-      >
-        {paged.rows.map((c) => (
-          <tr key={c.id} className={c.deleted_at ? 'opacity-50' : ''}>
-            <td className="td card-title td-clip" style={{ maxWidth: '26ch' }}>
-              {cell(p, 'credentials', c, 'name')}
-            </td>
-            <td className="td tabular text-faint">{cell(p, 'credentials', c, 'type')}</td>
-            <td className="td text-dim">{cell(p, 'credentials', c, 'owner')}</td>
-            <td className={`td tabular text-right ${c.used_by.length ? 'text-ink' : 'text-degraded'}`}>{c.used_by.length}</td>
-            <td className="td td-clip text-dim" style={{ maxWidth: '54ch' }}>
-              {c.used_by.length === 0 ? (
-                <span className="text-faint">no workflow found using it</span>
-              ) : (
-                <span title={c.used_by.map((id) => nameOf.get(id) ?? id).join(', ')}>
-                  {c.used_by.map((id) => nameOf.get(id) ?? id).join(', ')}
-                </span>
-              )}
-            </td>
-            <td className="td tabular whitespace-nowrap text-faint" title={c.updated_at}>
-              {when(c.updated_at)}
-            </td>
-            <td className="td card-actions td-actions">
-              <RowTools {...p} kind="credentials" row={c} />
-            </td>
-          </tr>
-        ))}
-      </Grid>
-      <Pagination paged={paged} unit="credentials" />
-
-      <div className="shrink-0 px-6 pb-6 md:px-8">
-        <p className="max-w-[80ch] text-[11.5px] leading-relaxed text-faint">
-          “What uses it” was read from the n8n BHA Engine project on 13 September 2026, across the twenty-nine workflows
-          that could be read. An empty list means no use was found — not that none exists. Two workflows could not be
-          read at all: the archived North Star — Capacity Intelligence, and the vFarm funnel workflow, which has MCP
-          access turned off.
-        </p>
-      </div>
-    </>
-  );
-}
-
 /* ------------------------------------------------- endpoints and bases */
 
 function EndpointsTab({ rows, bases, digests, ...p }: TabProps & { rows: RegistryData['endpoints']; bases: RegistryData['bases']; digests: DigestHealth }) {
@@ -840,6 +785,9 @@ function EndpointsTab({ rows, bases, digests, ...p }: TabProps & { rows: Registr
       <Grid
         label="Endpoints"
         min={1280}
+        cols={8}
+        empty="No endpoint is registered yet."
+
         head={
           <>
             <Th>method</Th>
@@ -892,13 +840,16 @@ function EndpointsTab({ rows, bases, digests, ...p }: TabProps & { rows: Registr
         </div>
         <p className="mt-1 mb-2 max-w-[80ch] text-[11.5px] leading-relaxed text-faint">
           The other set of addresses the engine reads and writes. They are not billed separately — Airtable is one
-          service on the billing tab — so they are listed here rather than there.
+          service on the Tools tab — so they are listed here rather than there.
         </p>
       </div>
 
       <Grid
         label="Airtable bases"
         min={1100}
+        cols={5}
+        empty="No Airtable base is registered yet."
+
         head={
           <>
             <Th width="18%">base</Th>
@@ -949,11 +900,35 @@ function EndpointsTab({ rows, bases, digests, ...p }: TabProps & { rows: Registr
   );
 }
 
-/* ---------------------------------------------------------------- people */
+/* -------------------------------------------------------------- builders */
 
-function PeopleTab({ rows, ...p }: TabProps & { rows: RegistryData['people'] }) {
+/**
+ * The roster, with the live figures beside it.
+ *
+ * This is where the Builders page went (decision 2026-09-14, Destiny). Of
+ * everything that page showed only the open-loop count and the oldest-loop age
+ * were real; the rest — lane, last activity, contract status, entries this week
+ * — was a fixture. So the three figures here are read from the record tables
+ * and nothing else is invented: a person with no submissions table shows a dash
+ * for entries this week rather than a zero, because he writes none rather than
+ * having written none.
+ */
+function BuildersTab({ rows, figures, ...p }: TabProps & { rows: RegistryData['people']; figures: RegistryData['builders'] }) {
+  const fig = new Map(figures.map((f) => [f.id, f]));
+  const num = (v: number | null) => (v === null ? <span className="text-faint">{DASH}</span> : <span className="tabular">{v}</span>);
+  const live = rows.filter((r) => !r.deleted_at);
+  const openLoops = figures.reduce((n, f) => n + (f.open_loops ?? 0), 0);
+  const thisWeek = figures.reduce((n, f) => n + (f.entries_this_week ?? 0), 0);
+  const oldest = Math.max(0, ...figures.map((f) => f.oldest_loop_days ?? 0));
   return (
     <>
+      <StatStrip cols={4}>
+        <CountCell label="People" value={live.length} hint="the roster, typed here and nowhere else" />
+        <CountCell label="Open loops" value={openLoops} hint="across every builder table, read from Postgres" />
+        <CountCell label="Oldest open loop, days" value={oldest} tone={oldest >= 30 ? 'failing' : oldest >= 14 ? 'degraded' : 'dim'} hint="the age of the oldest loop still open in any builder table" />
+        <CountCell label="Entries this week" value={thisWeek} hint="Codex submissions logged in the current ISO week" />
+      </StatStrip>
+
       <div className="shrink-0 px-6 pb-3 md:px-8">
         <NewRow
           label="person"
@@ -970,13 +945,19 @@ function PeopleTab({ rows, ...p }: TabProps & { rows: RegistryData['people'] }) 
       </div>
 
       <Grid
-        label="People"
-        min={1080}
+        label="Builders"
+        min={1380}
+        cols={10}
+        empty="Nobody is on the roster yet."
+
         head={
           <>
-            <Th width="18%">name</Th>
-            <Th width="20%">role</Th>
-            <Th width="20%">lanes owned</Th>
+            <Th width="16%">name</Th>
+            <Th width="18%">role</Th>
+            <Th width="16%">lanes owned</Th>
+            <Th right>open loops</Th>
+            <Th right>oldest</Th>
+            <Th right>entries this week</Th>
             <Th>slack id</Th>
             <Th>email</Th>
             <Th>updated</Th>
@@ -984,12 +965,14 @@ function PeopleTab({ rows, ...p }: TabProps & { rows: RegistryData['people'] }) 
           </>
         }
       >
-        {rows.map((person) => (
+        {rows.map((person) => {
+          const f = fig.get(person.id);
+          return (
           <tr key={person.id} className={person.deleted_at ? 'opacity-50' : ''}>
             <td className="td card-title td-clip" style={{ maxWidth: '26ch' }}>
               {cell(p, 'people', person, 'name')}
             </td>
-            <td className="td text-dim">{cell(p, 'people', person, 'role')}</td>
+            <td className="td card-meta text-dim">{cell(p, 'people', person, 'role')}</td>
             <td className="td card-meta">
               {person.lanes_owned.length === 0 ? (
                 <EditableCell
@@ -1016,9 +999,29 @@ function PeopleTab({ rows, ...p }: TabProps & { rows: RegistryData['people'] }) 
                 </span>
               )}
             </td>
+            {/* Read from the record tables on every load, never typed in and
+                never a fixture — so these three are the only cells on this page
+                that are not editable. A dash is "there is no table of that kind
+                for this person", which is not a zero.
+
+                Each carries its own label under 768px, where the table becomes
+                cards and the column headers are gone: three bare numbers in a
+                row say nothing without them. */}
+            <td className="td card-meta text-right">
+              {num(f?.open_loops ?? null)}
+              <span className="text-faint md:hidden"> open</span>
+            </td>
+            <td className={`td card-meta text-right ${f?.oldest_loop_days ? ageTone(f.oldest_loop_days) : ''}`}>
+              {f?.oldest_loop_days ? <span className="tabular">{f.oldest_loop_days}d</span> : <span className="text-faint">{DASH}</span>}
+              <span className="text-faint md:hidden"> oldest</span>
+            </td>
+            <td className="td card-meta text-right">
+              {num(f?.entries_this_week ?? null)}
+              <span className="text-faint md:hidden"> this week</span>
+            </td>
             <td className="td tabular text-faint">{cell(p, 'people', person, 'slack_user_id')}</td>
-            <td className="td td-clip text-dim" style={{ maxWidth: '28ch' }}>
-              {cell(p, 'people', person, 'email', { width: '28ch' })}
+            <td className="td td-clip text-dim" style={{ maxWidth: '26ch' }}>
+              {cell(p, 'people', person, 'email', { width: '26ch' })}
             </td>
             <td className="td tabular whitespace-nowrap text-faint" title={person.updated_at}>
               {when(person.updated_at)}
@@ -1027,7 +1030,8 @@ function PeopleTab({ rows, ...p }: TabProps & { rows: RegistryData['people'] }) 
               <RowTools {...p} kind="people" row={person} />
             </td>
           </tr>
-        ))}
+          );
+        })}
       </Grid>
 
       {rows.some((x) => x.notes) && (

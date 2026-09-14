@@ -14,7 +14,9 @@ export function Tabs<T extends string>({
   soon?: readonly T[];
 }) {
   return (
-    <div role="tablist" className="flex items-center gap-5 border-b border-line">
+    // Scrolls inside itself rather than clipping: five tabs do not fit across a
+    // phone, and a tab whose label is cut in half is a tab nobody can read.
+    <div role="tablist" className="scroll-thin flex items-center gap-5 overflow-x-auto border-b border-line">
       {tabs.map((t) => {
         const c = counts?.[t];
         return (
