@@ -3853,3 +3853,128 @@ Not done:   The resync is the only path that pulls; nothing schedules it, by
             instruction — Destiny wants to watch what it does before it does it
             on its own. Nothing in this sandbox can press the button, so the
             first production run and its numbers come from the Render log.
+
+## 2026-09-14 18:15 — Needs input reads the right field; two pages become placeholders; the registry becomes four
+Intent:     Eight things from Destiny. The first is the only one that changes
+            what the page means: Needs input was driven by `Layer0 Flagged`,
+            which means "was flagged once, ever" and is never cleared, so eight
+            logs (Ahad 4, Hardik 2, Kavin 2) sat in the queue of work owed after
+            every one had been answered, merged and approved. Then: the resync
+            result becomes a toast, empty stages get a sentence, the
+            completeness sub-heading goes, `Jason Reviewed At` starts
+            accumulating, vFarm and Engine health become placeholders, the
+            Builders page goes, and the System registry becomes four registries.
+
+Files:      server/src/sources.ts, store.ts, engine.ts, index.ts, registry.ts;
+            src/data/{types,index}.ts; src/screens/Codex.tsx, Overview.tsx,
+            Registry/index.tsx, VFarm/index.tsx, EngineHealth/index.tsx;
+            src/components/Layout.tsx, ui/RecordTable.tsx, ui/Tabs.tsx;
+            src/App.tsx, src/index.css, src/lib/format.ts,
+            src/data/fixtures/vfarm.ts; CLAUDE.md, README.md.
+            Deleted: src/screens/Builders/ (3 files), VFarm/{Live,Lifecycle,
+            Readiness}.tsx, EngineHealth/{IncidentTable,MetricsRow,
+            StateTrack}.tsx.
+
+Problem:    `mapCodex` maps one record and cannot see another table, and the
+            fact that decides Needs input lives in the Layer 0 parking table.
+            `Layer0Hold.open` was already there and looked like the answer — it
+            is `status !== 'completed'`, which is wider than
+            `pending_builder_input` and would have re-introduced the same class
+            of bug one field along.
+
+            Second: the Layer 0 table upstream is **empty — 0 records**, checked
+            twice against the live base. It held seven this morning, six
+            `completed` and one `pending_builder_input`. So the count Destiny
+            expected to drop from 8 to 1 lands on 0 instead.
+
+            Third: `/api/engine-status` had no reader left once the sidebar
+            badge went — a live fetch on every page answering nobody.
+
+Fix:        The pending set is read in one query beside `layer0Holds()`, once
+            per read, and threaded through `mapRecord` as an optional context.
+            The comparison names `pending_builder_input` literally rather than
+            inferring it from the absence of `completed`. `Layer0 Flagged` is
+            still read, still on the entry and still what the completeness card
+            counts — it just no longer places a log. The paths that only want a
+            record's status for the events ledger pass no context and place
+            nothing, which is right: `statusOf` reads `approval`, never `stage`.
+
+            The engine-status route, its server function, its client fetcher and
+            its type are all gone, with the incident-derived Overview payload
+            (`incidents_7d`, `incidents_by_class`, `incidents_by_state`,
+            `rates.self_heal`, `rates.retries`) that nothing rendered any more.
+
+Decision:   **Airtable wins uniformly on the resync, including Layer 0.** The
+            brief said completed Layer 0 rows are never deleted — they are the
+            record of what failed the check. Asked directly, with the
+            consequence spelled out, Destiny chose the other way: "resync pulls
+            what's in airtable, if they've been deleted, pull zero cuz its
+            empty, airtable and postgres must match." So the resync keeps
+            deleting them and the seven rows in `engine_layer0_holds` go on its
+            next production run. Naming the conflict here because the brief and
+            the code now disagree on purpose.
+
+Decision:   **The completeness card keeps reading the builder rows** (Destiny),
+            so it will say 8 flagged while Needs input says 0. Two different
+            questions — what failed the check at some point, and who is owed an
+            answer now — and the page stops conflating them. The stat card's
+            footnote says so.
+
+Decision:   **`Jason Reviewed At` needs no code.** It is on all six builder
+            tables (dateTime, UTC) and `mirror.prepare` stores `fields` whole
+            with no whitelist, so the resync already carries it. Proved by
+            round-trip: written through `/api/engine/codex`, read back out of
+            `engine_codex_submissions.fields` unchanged.
+
+Decision:   **Home loses every figure it drew from the incident and vFarm
+            fixtures**, not only the two pages. The vFarm-status and
+            open-incidents pins, the incidents chip, the Engine health card with
+            its self-heal rate and incidents by class, and the seven-day
+            incident count. The two tiles stay as navigation with a dash where
+            the number was. Left alone and still fixtures: the two 24-hour
+            columns, which are what section 7 asks for and predate this.
+
+Decision:   **No credentials registry, and the table is not dropped.** It is
+            neither read nor served. `ShownKind = Exclude<RegistryKind,
+            'credentials'>` makes naming it from the page a type error rather
+            than an undefined at runtime.
+
+Decision:   **The Builders registry shows a dash, not a zero, where a person has
+            no table of that kind.** Jason has an Open Loops table and no
+            submissions table, so his entries this week is null. A zero and an
+            unknown must never look the same.
+
+Verified:   `npm run typecheck && npm run build` clean.
+            Against the local rig, the stage rule in all three shapes:
+            - a flagged log with no Layer 0 row and Jason Status Approved →
+              **Approved**. That is the eight-log case, fixed.
+            - a log with a hold at `pending_builder_input` → **Needs input**,
+              whatever Jason Status says.
+            - a log with a hold at `completed` → placed by Jason Status alone.
+            - 13 + 6 + 1 = 20, and 2 + 1 + 0 = 3 scoped to one builder.
+            The resync toast, both ways: "Resync complete in 0.1s · 0 inserted,
+            0 updated, 0 deleted", and with one table forced to 403, "Resync
+            finished in 0.1s · 0 inserted, 0 updated, 0 deleted · Ahad could not
+            be read, so nothing under it changed". The per-table breakdown is
+            still in the server log in full, with Airtable's own reason.
+            An empty stage keeps its frame, headers, tabs and search box with
+            one centred line in the table.
+            In Chromium at 1440 and 400: Codex, Home, vFarm, Engine health and
+            all five registry tabs, zero page overflow, no console errors.
+
+Problem:    At 400px the Builders rows read "0 — 0" with no labels: the table
+            stacks into cards and the column headers are gone. Worse, the cards
+            were as wide as the table's own min-width and had to be scrolled
+            sideways — true of every registry tab, not just this one.
+Fix:        Each live figure carries a label under 768px. `.table-cards` drops
+            its min-width in card mode, and the tab row scrolls inside itself
+            rather than clipping a label in half. Both apply everywhere.
+
+Not done:   The Overview's "what broke" and "what moved" columns are still the
+            hardcoded phase 1 fixtures they have always been; they are what
+            section 7 asks for and were not in this brief. The generic
+            `/api/registry/:kind` write routes still accept `credentials` — the
+            kind is gone from the page and the payload, not from the server's
+            vocabulary. And still outstanding from this morning: nobody in this
+            sandbox can press Resync, so the first production run's per-table
+            numbers come from the Render log.
