@@ -750,8 +750,6 @@ export interface CodexData {
   layer0_holds: Layer0Hold[];
   /** Select choices as the tables define them, for the review control. */
   choices: { jason_status: string[] };
-  /** What the reconciliation against Airtable did on this load. */
-  reconciliation: CodexReconciliation;
 }
 
 /**
@@ -1266,7 +1264,8 @@ export interface CodexMetrics {
   scope: { builder: string | null; rows: number };
   entries: number;
   /** The three stages, each with the rule it applies and the layer it belongs to. */
-  tabs: { tab: CodexTab; label: string; layer: string; n: number; rule: string }[];
+  /** The three stages, approved first. `layer` is the step's name; the rule for each lives in CLAUDE.md, not on screen. */
+  tabs: { tab: CodexTab; label: string; layer: string; n: number }[];
   /** The three stages against the total, so the figures visibly reconcile. */
   stage_reconciliation: { rows: number; sums_to: number; note: string };
   /** Submissions carrying a generated Layer 2 codex. */

@@ -374,12 +374,17 @@ export async function getCodexEntries(_q: Query): Promise<CodexData> {
    * before the list is built — otherwise the page would show it, and a click
    * on it would fail against a record that does not exist. One pass, on load,
    * no background job. A failed read removes nothing.
+   *
+   * Its result is deliberately not returned any more (2026-09-14, Destiny).
+   * The page carried it as a standing amber line, which is a banner about
+   * housekeeping on a page whose rows were never in doubt. It goes to the
+   * server log, where the reason belongs, and the Resync button is what a
+   * person uses when they want to see what the two sides hold.
    */
-  const reconciliation = await store.reconcileCodex();
+  await store.reconcileCodex();
   // Newest first: the most recent submission is the one anyone opens this page for.
   const entries = (await store.codexEntries()).sort((a, b) => ((a.logged_at ?? '') < (b.logged_at ?? '') ? 1 : -1));
   return {
-    reconciliation,
     entries,
     freshness: await store.freshness('codex'),
     // One tab per table that exists, whether or not it has rows yet. There is

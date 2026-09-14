@@ -417,12 +417,17 @@ export function mapCodex(rec: AtRecord, owner: string, table: string): CodexEntr
     complete: !flagged && Boolean(layer2),
     /**
      * The one rule that makes the three stages mutually exclusive: a flagged
-     * log is at Needs input whatever Jason Status says, because Layer 0 ran
-     * first and the builder has to answer before the log can move. Otherwise
-     * Jason Status decides, and "Input Added" is not a stage of its own —
-     * Jason asking happens while the log sits at Awaiting approval.
+     * log is at Needs input whatever Jason Status says, because the
+     * completeness check ran first and the builder has to answer before the log
+     * can move. Otherwise Jason Status decides.
+     *
+     * **"Input Added" counts as approved** (decision 2026-09-14, Destiny).
+     * Jason adding input means he has read the log and responded; it is a form
+     * of having dealt with it, not a state of waiting for him. It sat at
+     * Awaiting approval until now, which put fourteen logs he had already
+     * answered in the queue of ones he had not reached.
      */
-    stage: flagged ? 'needs_input' : approval === 'approved' ? 'approved' : 'awaiting',
+    stage: flagged ? 'needs_input' : approval === 'approved' || approval === 'input added' ? 'approved' : 'awaiting',
     has_entry: Boolean(layer2),
     entry_excerpt: firstLines(layer2),
     breakthroughs: breakthroughs(layer2),

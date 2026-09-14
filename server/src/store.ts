@@ -2011,29 +2011,16 @@ const APPROVAL_LABELS: Record<CodexApproval, string> = {
  * reads the same order, so the page states one order rather than two. The
  * `layer` beside each is the step's name, not its number — "Layer 0" told a
  * reader nothing.
+ *
+ * Each rule used to be carried here as a paragraph the page printed under the
+ * tabs. They are gone from the screen (decision 2026-09-14, Destiny): the tab
+ * label carries the meaning, and three paragraphs restating it are furniture.
+ * The rules live in CLAUDE.md §4, where they are the spec rather than a caption.
  */
-const TAB_RULES: { tab: CodexTab; label: string; layer: string; rule: string; test: (e: CodexEntry) => boolean }[] = [
-  {
-    tab: 'approved',
-    label: 'Approved',
-    layer: 'Builder codex',
-    rule: 'The completeness check did not flag it and Jason Status is Approved. Through, and the builder codex stands.',
-    test: (e) => e.stage === 'approved',
-  },
-  {
-    tab: 'awaiting',
-    label: 'Awaiting approval',
-    layer: 'Pending review',
-    rule: 'Not flagged by the completeness check, and Jason Status is not Approved. "Input Added" sits here too — Jason asking a question happens while the log waits, and the builder answers in thread. An empty status sits here as well: nothing distinguishes it from a log he has not reached.',
-    test: (e) => e.stage === 'awaiting',
-  },
-  {
-    tab: 'needs_input',
-    label: 'Needs input',
-    layer: 'Completeness check',
-    rule: 'Layer0 Flagged is ticked: the completeness check found something missing and the builder has to fill it in. This wins over Jason Status, because that check runs first. Each row names what Layer0 Missing says it lacks.',
-    test: (e) => e.stage === 'needs_input',
-  },
+const TAB_RULES: { tab: CodexTab; label: string; layer: string; test: (e: CodexEntry) => boolean }[] = [
+  { tab: 'approved', label: 'Approved', layer: 'Builder codex', test: (e) => e.stage === 'approved' },
+  { tab: 'awaiting', label: 'Awaiting approval', layer: 'Pending review', test: (e) => e.stage === 'awaiting' },
+  { tab: 'needs_input', label: 'Needs input', layer: 'Completeness check', test: (e) => e.stage === 'needs_input' },
 ];
 
 export function codexTabRule(tab: CodexTab): (e: CodexEntry) => boolean {
@@ -2078,7 +2065,7 @@ export async function codexMetrics(builder: string | null): Promise<CodexMetrics
     computed_at: nowIso(),
     scope: { builder, rows: all.length },
     entries: all.length,
-    tabs: TAB_RULES.map((r) => ({ tab: r.tab, label: r.label, layer: r.layer, n: all.filter(r.test).length, rule: r.rule })),
+    tabs: TAB_RULES.map((r) => ({ tab: r.tab, label: r.label, layer: r.layer, n: all.filter(r.test).length })),
     stage_reconciliation: (() => {
       const sums = TAB_RULES.reduce((n, r) => n + all.filter(r.test).length, 0);
       return {
