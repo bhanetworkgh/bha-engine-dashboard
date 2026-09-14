@@ -215,7 +215,7 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
         {/* The builder codex is what Layer 2 writes. The footnote is the count
             that has none, which is the figure worth acting on. */}
         <CountCell label="Codex generated" value={m.with_entry.n} tone="accent" replayKey={view} hintMinLines={2} hint={m.with_entry.note} />
-        <CountCell label="Approved" value={tab('approved')} replayKey={view} hintMinLines={2} hint="Jason Status is Approved, and the check did not flag it." />
+        <CountCell label="Approved" value={tab('approved')} replayKey={view} hintMinLines={2} hint="Jason Status is Approved or Input Added, and the check did not flag it." />
         <CountCell
           label="Completeness flagged"
           value={m.layer0.flagged}
@@ -273,6 +273,18 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
                 valueNode={<CountUp value={m.layer0.flagged} replayKey={view} />}
                 right={<span className="text-faint">{m.entries ? Math.round((m.layer0.flagged / m.entries) * 100) : 0}%</span>}
               />
+              {/*
+                What the check found missing, under a line that says what the
+                numbers are counting. They read "commercial 4 of 4" before,
+                which looks like a fraction of something and is not: it is how
+                many of the flagged submissions lacked that one thing, and a
+                submission can lack several.
+              */}
+              {m.missing_mix.length > 0 && (
+                <div className="pt-1 text-[11px] leading-snug text-faint">
+                  of the {m.layer0.flagged} flagged, what was missing
+                </div>
+              )}
               {m.missing_mix.map((x) => (
                 <HBar
                   key={x.element}
@@ -281,7 +293,7 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
                   max={maxMissing}
                   replayKey={view}
                   valueNode={<CountUp value={x.n} replayKey={view} />}
-                  right={<span className="text-faint">of {m.layer0.flagged}</span>}
+                  right={<span className="text-faint">{m.layer0.flagged ? Math.round((x.n / m.layer0.flagged) * 100) : 0}%</span>}
                 />
               ))}
               {/* "Parked at the gate" was a fourth bar here and is gone
