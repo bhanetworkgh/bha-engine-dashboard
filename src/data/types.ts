@@ -96,10 +96,11 @@ export interface ServerStatus {
   started_at: string;
   /** Whether DASHBOARD_INBOUND_KEY is set, so the engine can write. */
   inbound_configured: boolean;
-  /** Whether N8N_WRITEBACK_KEY is set, so a loop closed here can reach Airtable. */
-  writeback_configured: boolean;
-  writeback_url: string;
-  /** Loops whose last write-back to Airtable failed. */
+  /** Whether AIRTABLE_TOKEN is set, so a loop edited here can reach Airtable. */
+  airtable_configured: boolean;
+  /** The Open Loops base this server writes to. */
+  airtable_base: string;
+  /** Loops whose newest write to Airtable failed, or left the loop in two tables. */
   writeback_failures: number;
   /** The kinds the interface can change. The rest are the engine's to write. */
   writable: RecordKind[];
@@ -488,15 +489,28 @@ export type LoopLaneTag = 'RT' | 'NS' | 'VFARM_HARDWARE' | 'KIOSK' | 'CAD_API' |
  * `skipped` is a loop Airtable has no row for, which is not a failure either.
  */
 export interface LoopWriteback {
-  state: 'ok' | 'skipped' | 'failed';
-  /** The status this dashboard tried to write, in Airtable's own spelling. */
+  /**
+   * `duplicate` is its own state, not a kind of failure: the save landed, and
+   * the loop now exists in two tables with one copy needing deletion. Calling
+   * that "failed" would say the change did not happen, which is the opposite
+   * of the truth, and the recovery is different and specific.
+   */
+  state: 'ok' | 'skipped' | 'failed' | 'duplicate';
+  /** The status the loop was left in, in Airtable's own spelling. */
   status: string;
-  /** Why it was skipped, or why it failed — the workflow's own reason where it gave one. */
+  /** Why it was skipped, or why it failed — Airtable's own message where there is one. */
   reason: string | null;
-  /** The workflow's status code, where the request got that far. */
+  /** Airtable's status code, where the request got that far. */
   http: number | null;
-  /** Whether Airtable's row actually changed. Null when it was never asked. */
-  changed: boolean | null;
+  /** What the write was: 'edit', 'move', 'create', or 'status' for the retired n8n path. */
+  action: string | null;
+  /** Which fields changed, and the builder move where there was one. */
+  detail: string | null;
+  /** On a move, the tables it went between. */
+  from_table: string | null;
+  to_table: string | null;
+  /** The steps that actually completed, in order. On a half-landed move this is what says where it stopped. */
+  steps: string | null;
   at: string;
 }
 
@@ -530,6 +544,15 @@ export interface Loop {
   tags: Tags;
   source: Source;
   airtable: AirtableRef;
+}
+
+/** What the loop panel can change. Everything else on the row is read-only. */
+export interface LoopEdit {
+  title?: string;
+  status?: LoopStatus;
+  lane_tag?: LoopLaneTag | null;
+  /** Not a field — the builder is which table the row sits in, so this is a move. */
+  builder?: string;
 }
 
 export interface NewLoop {
