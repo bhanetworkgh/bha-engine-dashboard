@@ -96,6 +96,11 @@ export interface ServerStatus {
   started_at: string;
   /** Whether DASHBOARD_INBOUND_KEY is set, so the engine can write. */
   inbound_configured: boolean;
+  /** Whether N8N_WRITEBACK_KEY is set, so a loop closed here can reach Airtable. */
+  writeback_configured: boolean;
+  writeback_url: string;
+  /** Loops whose last write-back to Airtable failed. */
+  writeback_failures: number;
   /** The kinds the interface can change. The rest are the engine's to write. */
   writable: RecordKind[];
   freshness: Record<RecordKind, Freshness>;
@@ -469,6 +474,32 @@ export type LoopLaneTag = 'RT' | 'NS' | 'VFARM_HARDWARE' | 'KIOSK' | 'CAD_API' |
  * no last-modified time on these tables, which is why several loop metrics are
  * null with a note.
  */
+/**
+ * What happened the last time this dashboard tried to push a loop's status
+ * back to Airtable, through n8n.
+ *
+ * The dashboard holds no Airtable token (2026-09-13) but the 08:00 Open Loops
+ * digest reads Airtable, so a close that does not reach Airtable comes back
+ * tomorrow morning as though it never happened. That is why a failure is a
+ * field on the loop and not only a log line: the person who closed it has to
+ * be able to see that it did not land.
+ *
+ * `ok` with `changed: false` is a success — Airtable already held that status.
+ * `skipped` is a loop Airtable has no row for, which is not a failure either.
+ */
+export interface LoopWriteback {
+  state: 'ok' | 'skipped' | 'failed';
+  /** The status this dashboard tried to write, in Airtable's own spelling. */
+  status: string;
+  /** Why it was skipped, or why it failed — the workflow's own reason where it gave one. */
+  reason: string | null;
+  /** The workflow's status code, where the request got that far. */
+  http: number | null;
+  /** Whether Airtable's row actually changed. Null when it was never asked. */
+  changed: boolean | null;
+  at: string;
+}
+
 export interface Loop {
   /** Airtable record id. Stable, and what every write is keyed by. */
   id: string;
@@ -493,6 +524,8 @@ export interface Loop {
   /** Known only when the close went through this dashboard or arrived from n8n with a timestamp. */
   closed_at?: string | null;
   note?: string | null;
+  /** The last write-back to Airtable, when this dashboard has attempted one. */
+  writeback?: LoopWriteback | null;
   spine: Spine;
   tags: Tags;
   source: Source;
