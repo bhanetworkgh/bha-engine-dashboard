@@ -245,6 +245,15 @@ explicitly for this. Therefore:
   seven tables. **The replay used for testing must refuse exactly what Airtable
   refuses**: it implemented the assumption instead, so every test passed
   against a stand-in that shared the bug.
+- **The resync's outcome is a toast, not a table** (decision 2026-09-14,
+  Destiny): how long it took and three totals — inserted, updated, deleted. The
+  per-table breakdown stays in the server log, in full, where somebody goes when
+  a total looks wrong. A table that could not be read is named in the toast and
+  the run reads as a failure; it is never folded into a zero.
+- **An empty stage keeps its table** (decision 2026-09-14, Destiny): the frame,
+  the headers, the tabs and the search box stay and one centred sentence sits
+  where the rows would be, so the page holds its shape. An empty stage and a
+  search that matched nothing are different sentences.
 - **Resync from Airtable is a button, and Airtable wins** (decision 2026-09-14,
   Destiny). The reconciliation only ever *removed* rows, so this dashboard's
   copy could only fall behind: a log approved in Airtable stayed "awaiting

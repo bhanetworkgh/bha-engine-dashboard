@@ -9,6 +9,7 @@ import {
   resyncCodex as resyncCodexFromAirtable,
   setCodexStatus,
   type CodexEntry,
+  type CodexData,
   type CodexEntryDetail,
   type CodexMetrics,
   type CodexResync,
@@ -20,7 +21,6 @@ import {
   CountCell,
   CountUp,
   EmptyPanel,
-  EmptyState,
   HBar,
   NotLanded,
   LoadFailed,
@@ -47,65 +47,59 @@ import {
 } from '../components/ui';
 
 /**
- * What one resync did, per table.
+ * What a stage says when it holds nothing.
  *
- * Shown rather than toasted because a run that inserted four rows and deleted
- * one has changed what the page holds, and a person needs to see which tables
- * it touched — and, more importantly, which it could not read. A table that
- * refused is not an empty table, and this is where that distinction is made
- * visible rather than assumed.
+ * One sentence per stage, because the three mean different things: nobody is
+ * waiting on Jason, nobody owes an answer, nothing has been approved. A search
+ * that matched nothing gets its own line — the stage is not empty, the filter
+ * is — and a kind nothing has ever written to says that instead of either.
  */
-function ResyncResult({ result, onDismiss }: { result: CodexResync; onDismiss: () => void }) {
-  const bad = !result.ran || result.tables.some((t) => !t.read);
-  return (
-    <div className="mx-6 mb-4 md:mx-8">
-      <div className={`card px-5 py-4 ${bad ? 'bg-failing-soft' : ''}`}>
-        <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <div className="text-[13px] font-medium text-ink">
-            Resync from Airtable — {(result.ms / 1000).toFixed(1)}s
-          </div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onDismiss}>
-            Dismiss
-          </button>
-        </div>
-        <p className={`mt-1.5 text-[12.5px] leading-relaxed ${bad ? 'text-failing' : 'text-dim'}`}>{result.note}</p>
-        <div className="scroll-thin mt-3 overflow-x-auto">
-          <table className="w-full border-collapse text-[12px]">
-            <thead>
-              <tr className="text-left text-[11px] text-faint">
-                <th className="py-1 pr-3 font-medium">table</th>
-                <th className="py-1 pr-3 font-medium">in Airtable</th>
-                <th className="py-1 pr-3 font-medium">inserted</th>
-                <th className="py-1 pr-3 font-medium">updated</th>
-                <th className="py-1 pr-3 font-medium">deleted</th>
-                <th className="py-1 pr-3 font-medium">already matching</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.tables.map((t) => (
-                <tr key={t.table} className="border-t border-line">
-                  <td className="py-1.5 pr-3 text-ink">{t.label}</td>
-                  {t.read ? (
-                    <>
-                      <td className="tabular py-1.5 pr-3 text-dim">{t.rows}</td>
-                      <td className={`tabular py-1.5 pr-3 ${t.inserted ? 'text-ink' : 'text-faint'}`}>{t.inserted}</td>
-                      <td className={`tabular py-1.5 pr-3 ${t.updated ? 'text-ink' : 'text-faint'}`}>{t.updated}</td>
-                      <td className={`tabular py-1.5 pr-3 ${t.deleted ? 'text-failing' : 'text-faint'}`}>{t.deleted}</td>
-                      <td className="tabular py-1.5 pr-3 text-faint">{t.unchanged}</td>
-                    </>
-                  ) : (
-                    <td colSpan={5} className="py-1.5 pr-3 text-failing">
-                      not read, so nothing under it was touched — {t.reason}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
+function emptyLine({
+  freshness,
+  q,
+  tab,
+  builder,
+  holds,
+}: {
+  freshness: CodexData['freshness'];
+  q: string;
+  tab: Tab;
+  builder: string;
+  holds: number;
+}): string {
+  if (freshness.source === 'none') return freshness.note ?? 'No Codex submissions are held.';
+  if (q) return 'No submission matches that search in the selected builder and stage.';
+  const here = builder === 'all' ? '' : ' in this builder\u2019s table';
+  if (tab === 'needs_input') {
+    const parked = holds ? ` ${holds} ${holds === 1 ? 'is' : 'are'} still parked at the completeness check with no row here yet.` : '';
+    return `No logs need input${here}.${parked}`;
+  }
+  if (tab === 'awaiting') return `No logs are waiting on Jason${here}.`;
+  return `Nothing approved yet${here}.`;
+}
+
+/**
+ * One resync, as the line that appears in the corner.
+ *
+ * Three totals and an elapsed time, and nothing else: a run that changed
+ * nothing says so in the same shape as one that changed everything. A table
+ * that could not be read is never folded into a zero — it is counted and named
+ * in the line, and the run reads as a failure, because "not read" and "empty"
+ * are the distinction this whole pass exists to keep.
+ */
+function resyncToast(r: CodexResync): { text: string; tone: 'ok' | 'failing' } {
+  const secs = `${(r.ms / 1000).toFixed(1)}s`;
+  const unread = r.tables.filter((t) => !t.read);
+  const totals = `${r.inserted} inserted, ${r.updated} updated, ${r.deleted} deleted`;
+  if (!r.ran) return { text: `Resync failed after ${secs} \u00b7 ${r.note}`, tone: 'failing' };
+  if (unread.length) {
+    const named = unread.map((t) => t.label).join(', ');
+    return {
+      text: `Resync finished in ${secs} \u00b7 ${totals} \u00b7 ${named} could not be read, so nothing under ${unread.length === 1 ? 'it' : 'them'} changed`,
+      tone: 'failing',
+    };
+  }
+  return { text: `Resync complete in ${secs} \u00b7 ${totals}`, tone: 'ok' };
 }
 
 /**
@@ -119,17 +113,20 @@ function ResyncResult({ result, onDismiss }: { result: CodexResync; onDismiss: (
  *
  *   Approved           builder codex       through and approved
  *   Awaiting approval  pending review      codex written, Jason has not approved
- *   Needs input        completeness check  something was missing on the way in
+ *   Needs input        completeness check  parked, still owed an answer
  *
  * The steps are named rather than numbered (2026-09-14, Destiny): "Layer 0"
  * told a reader nothing. The Airtable fields keep their own names — Layer0
  * Flagged, Layer1 Review, Orchestrator Layer2 Review — and the page still
  * quotes those where it states a rule, so the rule stays checkable.
  *
- * Layer0 Flagged wins — a flagged log needs input whatever Jason Status says,
- * because that check runs first. Otherwise Jason Status decides. The server
- * computes `stage` on the row and the page reads it, so the tabs and the list
- * cannot answer differently.
+ * A Layer 0 row at `pending_builder_input` wins — that log needs input whatever
+ * Jason Status says. Otherwise Jason Status decides. Not `Layer0 Flagged`
+ * (2026-09-14, Destiny): that box means "was flagged once, ever" and nothing
+ * clears it, so it held eight answered logs in a queue of work owed. It is
+ * still shown on the entry, it just no longer places one. The server computes
+ * `stage` on the row and the page reads it, so the tabs and the list cannot
+ * answer differently.
  *
  * Approved sits first and there is no All tab (2026-09-14, Destiny): almost
  * every log ends up approved, so that is where a reader starts, and a fourth
@@ -162,9 +159,8 @@ function matches(e: CodexEntry, q: string): boolean {
 
 /**
  * The stage, as one pill. Jason Status is shown beside it only where it adds
- * something the stage does not say: "input added" means he has asked a
- * question and the log is waiting on the builder, which is worth seeing while
- * it sits in Awaiting approval.
+ * something the stage does not say — "input added" sits inside Approved and is
+ * worth distinguishing from a plain approval.
  */
 function StagePill({ entry }: { entry: CodexEntry }) {
   if (entry.stage === 'approved') return <Pill tone="ok">approved</Pill>;
@@ -273,18 +269,10 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
                 valueNode={<CountUp value={m.layer0.flagged} replayKey={view} />}
                 right={<span className="text-faint">{m.entries ? Math.round((m.layer0.flagged / m.entries) * 100) : 0}%</span>}
               />
-              {/*
-                What the check found missing, under a line that says what the
-                numbers are counting. They read "commercial 4 of 4" before,
-                which looks like a fraction of something and is not: it is how
-                many of the flagged submissions lacked that one thing, and a
-                submission can lack several.
-              */}
-              {m.missing_mix.length > 0 && (
-                <div className="pt-1 text-[11px] leading-snug text-faint">
-                  of the {m.layer0.flagged} flagged, what was missing
-                </div>
-              )}
+              {/* The sub-heading that stood here is gone (2026-09-14,
+                  Destiny). Two bars with their own labels and counts say it;
+                  a line above them restating what the card is already called
+                  is furniture. */}
               {m.missing_mix.map((x) => (
                 <HBar
                   key={x.element}
@@ -750,7 +738,6 @@ export default function Codex() {
   const [open, setOpen] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [resyncing, setResyncing] = useState(false);
-  const [resync, setResync] = useState<CodexResync | null>(null);
   const { toast, setToast } = useToast();
   const metrics = useData((query) => getRecordMetrics('codex', query, builder), [builder, tick]);
 
@@ -761,20 +748,21 @@ export default function Codex() {
   /**
    * Pull from Airtable and make this database match it.
    *
-   * The whole outcome is shown rather than a toast: a run that inserts four
-   * rows and deletes one has changed what is on the page, and "done" would not
-   * say which. The page then refetches, so what is on screen is what the
-   * resync left behind.
+   * The outcome is a toast in the corner rather than a table on the page
+   * (decision 2026-09-14, Destiny): how long it took and the three totals is
+   * what a person standing at the button needs. The per-table breakdown is
+   * still written in full to the server log, which is where somebody goes when
+   * a total looks wrong. The page then refetches, so what is on screen is what
+   * the resync left behind.
    */
   async function runResync() {
     setResyncing(true);
     try {
       const r = await resyncCodexFromAirtable();
-      setResync(r);
       setTick((n) => n + 1);
       const fresh = await getCodexEntries({ lane: 'all' });
       setEntries(fresh.entries);
-      if (!r.ran) setToast({ text: 'Airtable could not be read, so nothing changed.', tone: 'failing' });
+      setToast(resyncToast(r));
     } catch (e) {
       setToast({ text: e instanceof Error ? e.message : 'The resync did not run.', tone: 'failing' });
     } finally {
@@ -814,8 +802,6 @@ export default function Codex() {
           */}
         </div>
 
-        {resync && <ResyncResult result={resync} onDismiss={() => setResync(null)} />}
-
         <CodexMetricsPanel metrics={m} loading={metrics.status === 'loading'} error={metrics.error} view={builder} />
 
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
@@ -842,26 +828,23 @@ export default function Codex() {
           )}
         </div>
 
-        {rows.length === 0 ? (
-          <EmptyState>
-            {loaded.freshness.source === 'none'
-              ? (loaded.freshness.note ?? 'No Codex submissions are held.')
-              : q.trim()
-                ? 'No submission matches that search in the selected builder and stage.'
-                : tab === 'needs_input'
-                  ? `No submission is flagged by the completeness check${builder === 'all' ? '' : ' in this builder’s table'}. ${holds.length ? `${holds.length} ${holds.length === 1 ? 'is' : 'are'} still parked there with no row here yet.` : 'Every submission read passed it clean.'}`
-                  : tab === 'awaiting'
-                    ? 'Nothing is waiting on Jason in this selection.'
-                    : tab === 'approved'
-                      ? 'No submission is approved in this selection.'
-                      : 'No submission is held in this selection.'}
-          </EmptyState>
-        ) : (
-          <>
-            <RecordTable columns={codexColumns((e) => setOpen(e.id))} rows={paged.rows} rowKey={(e) => e.id} onOpen={(e) => setOpen(e.id)} label="Codex entries" />
-            <Pagination paged={paged} unit="submissions" />
-          </>
-        )}
+        {/*
+          An empty stage keeps the table (decision 2026-09-14, Destiny): the
+          frame, the headers, the tabs and the search box stay where they were
+          and one centred sentence sits where the rows would be, so the page
+          holds its shape instead of collapsing under the reader. An empty stage
+          and a search that matched nothing are different sentences, because
+          they are different facts.
+        */}
+        <RecordTable
+          columns={codexColumns((e) => setOpen(e.id))}
+          rows={paged.rows}
+          rowKey={(e) => e.id}
+          onOpen={(e) => setOpen(e.id)}
+          label="Codex entries"
+          empty={emptyLine({ freshness: loaded.freshness, q: q.trim(), tab, builder, holds: holds.length })}
+        />
+        {rows.length > 0 && <Pagination paged={paged} unit="submissions" />}
 
       </div>
 

@@ -955,6 +955,16 @@
     .rows-2 tbody tr {
       height: 56px;
     }
+    /*
+      The sentence a list shows when it holds nothing. It is not a row of data
+      and is not clipped to a row's height: the frame and its headers stay put
+      so a page whose filter empties a list keeps its shape, and the reader gets
+      a sentence in the space the rows would have filled.
+    */
+    .rows-1 tbody tr.row-empty,
+    .rows-2 tbody tr.row-empty {
+      height: 132px;
+    }
   }
 
   .td-actions {
@@ -1045,6 +1055,14 @@
     order: 4;
     flex-basis: 100%;
     margin-top: 8px;
+  }
+
+  /* The empty sentence is not a card and carries no role; it is the one cell
+     that still shows when the table stacks. */
+  .table-cards td.td-empty {
+    display: block;
+    flex-basis: 100%;
+    padding: 28px 4px;
   }
 
   .row-actions {
