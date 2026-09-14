@@ -41,29 +41,37 @@ import {
  * exists in Airtable for most rows and was not being shown anywhere; it is now
  * the substance of every row and of the entry view.
  *
- * A log moves through three stages, one per layer, and is in exactly one:
+ * A log moves through three stages, one per step, and is in exactly one:
  *
- *   Needs input        Layer 0  the gate found something missing
- *   Awaiting approval  Layer 1  codex generated, Jason has not approved
- *   Approved           Layer 2  through and approved
+ *   Approved           builder codex       through and approved
+ *   Awaiting approval  pending review      codex written, Jason has not approved
+ *   Needs input        completeness check  something was missing on the way in
+ *
+ * The steps are named rather than numbered (2026-09-14, Destiny): "Layer 0"
+ * told a reader nothing. The Airtable fields keep their own names — Layer0
+ * Flagged, Layer1 Review, Orchestrator Layer2 Review — and the page still
+ * quotes those where it states a rule, so the rule stays checkable.
  *
  * Layer0 Flagged wins — a flagged log needs input whatever Jason Status says,
- * because the gate runs first. Otherwise Jason Status decides. The server
+ * because that check runs first. Otherwise Jason Status decides. The server
  * computes `stage` on the row and the page reads it, so the tabs and the list
  * cannot answer differently.
+ *
+ * Approved sits first and there is no All tab (2026-09-14, Destiny): almost
+ * every log ends up approved, so that is where a reader starts, and a fourth
+ * tab that is the sum of the other three earns nothing.
  */
 
-const TABS: { value: CodexTab | 'all'; label: string }[] = [
-  { value: 'needs_input', label: 'Needs input' },
-  { value: 'awaiting', label: 'Awaiting approval' },
+const TABS: { value: CodexTab; label: string }[] = [
   { value: 'approved', label: 'Approved' },
-  { value: 'all', label: 'All' },
+  { value: 'awaiting', label: 'Awaiting approval' },
+  { value: 'needs_input', label: 'Needs input' },
 ];
 
-type Tab = CodexTab | 'all';
+type Tab = CodexTab;
 
 function inTab(e: CodexEntry, tab: Tab): boolean {
-  return tab === 'all' || e.stage === tab;
+  return e.stage === tab;
 }
 
 function when(iso: string | null): string {
@@ -98,7 +106,7 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
   if (!metrics) {
     return (
       <StatStrip cols={4} className="opacity-60">
-        {['Submissions', 'Codex generated', 'Approved', 'Layer 0 flagged'].map((l) => (
+        {['Submissions', 'Codex generated', 'Approved', 'Completeness flagged'].map((l) => (
           <StatCell key={l}>
             <div className="kicker truncate">{l}</div>
             <div className="mt-1 text-[15px] text-faint">{loading ? 'Counting' : 'No figures'}</div>
@@ -117,14 +125,31 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
 
   return (
     <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
+      {/*
+        Four cells, four footnotes of about the same length, on a two-line
+        floor. They were one line, four lines, two and one, which read as four
+        unrelated facts rather than one strip.
+      */}
       <StatStrip cols={4}>
-        <CountCell label="Submissions" value={m.entries} replayKey={view} hint={m.scope.builder ? 'In this builder’s table' : `Across ${m.per_builder_per_week.length} builder tables`} />
-        {/* Layer 2 is the codex being generated, not a review of it. The
-            footnote is the count that is missing one, which is the figure
-            worth acting on. */}
-        <CountCell label="Codex generated" value={m.with_entry.n} tone="accent" replayKey={view} hint={m.with_entry.note} />
-        <CountCell label="Approved" value={tab('approved')} replayKey={view} hint="Jason Status = Approved, and not flagged by Layer 0" />
-        <CountCell label="Layer 0 flagged" value={m.layer0.flagged} tone={m.layer0.flagged ? 'degraded' : 'dim'} replayKey={view} hint="the gate found something missing" />
+        <CountCell
+          label="Submissions"
+          value={m.entries}
+          replayKey={view}
+          hintMinLines={2}
+          hint={m.scope.builder ? 'One builder’s table. The table a row sits in is what makes it theirs.' : 'The six builder tables. The table a row sits in is its builder.'}
+        />
+        {/* The builder codex is what Layer 2 writes. The footnote is the count
+            that has none, which is the figure worth acting on. */}
+        <CountCell label="Codex generated" value={m.with_entry.n} tone="accent" replayKey={view} hintMinLines={2} hint={m.with_entry.note} />
+        <CountCell label="Approved" value={tab('approved')} replayKey={view} hintMinLines={2} hint="Jason Status is Approved, and the check did not flag it." />
+        <CountCell
+          label="Completeness flagged"
+          value={m.layer0.flagged}
+          tone={m.layer0.flagged ? 'degraded' : 'dim'}
+          replayKey={view}
+          hintMinLines={2}
+          hint="Layer0 Flagged is ticked: something was missing on the way in."
+        />
       </StatStrip>
 
       {/*
@@ -139,7 +164,7 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
         disagree.
       */}
       <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-3">
-        <MetricCard title="Where logs are" align="top" note={m.stage_reconciliation.note}>
+        <MetricCard title="Where logs are" align="top" noteMinLines={2} note={m.stage_reconciliation.note}>
           <div className="space-y-2">
             {m.tabs.map((t) => (
               <HBar
@@ -160,9 +185,9 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
           </div>
         </MetricCard>
 
-        <MetricCard title="Layer 0 completeness" align="top" note={`${m.layer0.definition} ${m.holds.note}`}>
+        <MetricCard title="Completeness check" align="top" noteMinLines={2} note={`${m.layer0.definition} ${m.holds.note}`}>
           {m.layer0.flagged === 0 && m.holds.open === 0 ? (
-            <EmptyPanel>Nothing is flagged and nothing is waiting at the gate. Every submission read here passed Layer 0 clean.</EmptyPanel>
+            <EmptyPanel>Nothing is flagged and nothing is parked. Every submission read here passed the completeness check clean.</EmptyPanel>
           ) : (
             <div className="space-y-2">
               <HBar
@@ -185,22 +210,16 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
                   right={<span className="text-faint">of {m.layer0.flagged}</span>}
                 />
               ))}
-              {m.holds.open > 0 && (
-                <HBar
-                  label={<span className="text-degraded">Parked at the gate</span>}
-                  value={m.holds.open}
-                  max={Math.max(1, m.entries)}
-                  tone="degraded"
-                  replayKey={view}
-                  valueNode={<CountUp value={m.holds.open} replayKey={view} />}
-                  right={<span className="text-faint">not counted above</span>}
-                />
-              )}
+              {/* "Parked at the gate" was a fourth bar here and is gone
+                  (2026-09-14, Destiny): everything in that table is parked by
+                  definition, so the bar restated its own table's name. The
+                  count still shows — in this card's footnote, and under the
+                  Needs input tab where somebody can act on it. */}
             </div>
           )}
         </MetricCard>
 
-        <MetricCard title="Narration quality" align="top" note={m.narration_quality_note}>
+        <MetricCard title="Narration quality" align="top" noteMinLines={2} note={m.narration_quality_note}>
           {m.narration_quality_mix.length === 0 ? (
             <EmptyPanel>No submission carries a narration quality.</EmptyPanel>
           ) : (
@@ -462,14 +481,14 @@ function EntryView({
               <div className="mt-4 flex items-start gap-3 rounded-[14px] bg-degraded-soft px-4 py-3">
                 <span aria-hidden className="mt-[6px] h-[7px] w-[7px] shrink-0 rounded-full bg-degraded" />
                 <div className="text-[12.5px] leading-relaxed text-degraded">
-                  <span className="font-medium">Layer 0 flagged this log.</span>{' '}
+                  <span className="font-medium">The completeness check flagged this log.</span>{' '}
                   {detail.layer0_missing.length ? (
                     <>
-                      The gate found no <span className="font-medium">{detail.layer0_missing.join(', ')}</span>. The builder fills those in and the log re-enters Layer 1 — it does not go back
-                      through Layer 0.
+                      The check found no <span className="font-medium">{detail.layer0_missing.join(', ')}</span>. The builder fills those in and the log goes back to review — it does not go
+                      through the check again.
                     </>
                   ) : (
-                    'Layer0 Missing does not name what it found absent, so this row says only that the gate stopped it.'
+                    'Layer0 Missing does not name what it found absent, so this row says only that the check stopped it.'
                   )}
                 </div>
               </div>
@@ -483,7 +502,7 @@ function EntryView({
             )}
 
             {/* Both long fields collapse. The generated codex opens by default —
-                it is what the page exists to show — and the Layer 1 review does
+                it is what the page exists to show — and the review does
                 not, because it is the reasoning behind it rather than the thing
                 itself. */}
             <details open className="mt-5 border-t border-line pt-4">
@@ -496,8 +515,8 @@ function EntryView({
                   <EntryText text={detail.entry} />
                 ) : (
                   <p className="text-[12.5px] leading-relaxed text-dim">
-                    Layer 2 has not generated a codex for this submission. The row exists — the log was submitted — but Orchestrator Layer2 Review is empty.{' '}
-                    {detail.layer0_flagged ? 'Layer 0 flagged it, which is why it never reached Layer 2.' : ''}
+                    No builder codex has been written for this submission. The row exists — the log was submitted — but Orchestrator Layer2 Review is empty.{' '}
+                    {detail.layer0_flagged ? 'The completeness check flagged it, which is why no codex was written.' : ''}
                   </p>
                 )}
               </div>
@@ -505,17 +524,17 @@ function EntryView({
 
             <details className="mt-5 border-t border-line pt-4">
               <summary className="flex cursor-pointer items-baseline justify-between gap-3">
-                <span className="text-[13px] font-medium text-ink">Layer 1 review</span>
+                <span className="text-[13px] font-medium text-ink">Review</span>
                 <span className="text-[11px] text-faint">{detail.layer1_review ? 'Layer1 Review' : 'not written'}</span>
               </summary>
               <p className="mt-3 text-[12.5px] leading-relaxed whitespace-pre-wrap text-dim">
-                {detail.layer1_review ?? 'Layer 1 has not written a review for this submission.'}
+                {detail.layer1_review ?? 'No review has been written for this submission.'}
               </p>
             </details>
 
             {/*
               Delete exists for production testing: driving a log through
-              Layer 0, Layer 1 and approval deliberately, then clearing the
+              the completeness check, review and approval deliberately, then clearing the
               fixtures. Confirmed by typing the id back rather than by a yes/no
               dialog — mid-test there are several near-identical rows on screen
               and the id is the only thing that tells them apart.
@@ -565,7 +584,7 @@ function EntryView({
 /**
  * The list, as columns. Date, builder and the Codex id read first; the
  * breakthroughs are the substance of the entry and take the wide column;
- * flags carry the review decision and the Layer 0 state, which are two axes
+ * flags carry the review decision and the completeness verdict, two axes
  * and both shown.
  */
 function codexColumns(open: (e: CodexEntry) => void): RecordColumn<CodexEntry>[] {
@@ -607,7 +626,7 @@ function codexColumns(open: (e: CodexEntry) => void): RecordColumn<CodexEntry>[]
         unlanded(e.writeback)
           ? writeWarning(e.writeback!)
           : e.layer0_flagged && e.layer0_missing.length
-            ? `Layer 0 found no ${e.layer0_missing.join(', ')}`
+            ? `The completeness check found no ${e.layer0_missing.join(', ')}`
             : undefined,
       cell: (e) => (
         <span className="inline-flex items-center gap-1.5">
@@ -640,7 +659,7 @@ export default function Codex() {
   const { status, data: loaded, error } = useData(getCodexEntries, []);
   const [entries, setEntries] = useState<CodexEntry[]>([]);
   const [builder, setBuilder] = useState('all');
-  const [tab, setTab] = useState<Tab>('needs_input');
+  const [tab, setTab] = useState<Tab>('approved');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -657,7 +676,7 @@ export default function Codex() {
 
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
   const m = metrics.data;
-  const rule = tab === 'all' ? 'Every submission held, in all three stages.' : m?.tabs.find((t) => t.tab === tab)?.rule;
+  const rule = m?.tabs.find((t) => t.tab === tab)?.rule;
   const holds = loaded.layer0_holds.filter((h) => (builder === 'all' ? true : h.builder_id === builder) && h.open);
 
   return (
@@ -699,7 +718,7 @@ export default function Codex() {
           {rule && <p className="text-[11.5px] leading-snug text-faint">{rule}</p>}
           {tab === 'needs_input' && holds.length > 0 && (
             <p className="text-[11.5px] leading-snug text-faint">
-              {holds.length} further {holds.length === 1 ? 'submission is' : 'submissions are'} parked at the Layer 0 gate with no row in a builder table yet
+              {holds.length} further {holds.length === 1 ? 'submission is' : 'submissions are'} parked at the completeness check with no row in a builder table yet
               {holds.some((h) => h.missing.length) ? `, waiting on ${[...new Set(holds.flatMap((h) => h.missing))].join(', ')}` : ''}. They appear here once the builder resubmits.
             </p>
           )}
@@ -712,7 +731,7 @@ export default function Codex() {
               : q.trim()
                 ? 'No submission matches that search in the selected builder and stage.'
                 : tab === 'needs_input'
-                  ? `No submission is flagged by Layer 0${builder === 'all' ? '' : ' in this builder’s table'}. ${holds.length ? `${holds.length} ${holds.length === 1 ? 'is' : 'are'} still parked at the gate with no row here yet.` : 'Every submission read passed the completeness gate clean.'}`
+                  ? `No submission is flagged by the completeness check${builder === 'all' ? '' : ' in this builder’s table'}. ${holds.length ? `${holds.length} ${holds.length === 1 ? 'is' : 'are'} still parked there with no row here yet.` : 'Every submission read passed it clean.'}`
                   : tab === 'awaiting'
                     ? 'Nothing is waiting on Jason in this selection.'
                     : tab === 'approved'
