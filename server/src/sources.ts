@@ -385,8 +385,15 @@ function breakthroughs(text: string | null, max = 220): string | null {
  * several rows are. `Orchestrator Layer2 Review` is the finished Codex entry
  * — the thing this page exists to show — and is carried in full on the detail
  * shape only, because a hundred of them in one list payload is megabytes.
+ *
+ * `pending` is the set of `Submission ID`s sitting at `pending_builder_input`
+ * in the Layer 0 parking table — the only thing that says a log is waiting on
+ * its builder right now. It is passed in because that fact lives in another
+ * table and this mapper reads one record; the caller fetches it once per read.
+ * Without it no log is placed at Needs input, which is the right answer for
+ * the paths that only want a record's approval state.
  */
-export function mapCodex(rec: AtRecord, owner: string, table: string): CodexEntryDetail {
+export function mapCodex(rec: AtRecord, owner: string, table: string, pending?: ReadonlySet<string>): CodexEntryDetail {
   const f = rec.fields;
   const logged = iso(f.Timestamp);
   const jason = str(f['Jason Status']);
@@ -397,11 +404,13 @@ export function mapCodex(rec: AtRecord, owner: string, table: string): CodexEntr
   const flagged = bool(f['Layer0 Flagged']);
   const missing = layer0Missing(f['Layer0 Missing']);
   const url = str(f['Session Url']);
+  const submission = str(f['Submission ID']);
+  const needsInput = Boolean(submission && pending?.has(submission));
   return {
     id: rec.id,
     builder_id: owner,
     table,
-    submission_id: str(f['Submission ID']),
+    submission_id: submission,
     codex_entry_id: str(f['Codex Entry ID']),
     logged_at: logged,
     week: logged ? isoWeek(logged) : null,
@@ -416,18 +425,22 @@ export function mapCodex(rec: AtRecord, owner: string, table: string): CodexEntr
     /** Complete exactly as specified: the gate passed it and Layer 2 generated the codex. */
     complete: !flagged && Boolean(layer2),
     /**
-     * The one rule that makes the three stages mutually exclusive: a flagged
-     * log is at Needs input whatever Jason Status says, because the
-     * completeness check ran first and the builder has to answer before the log
-     * can move. Otherwise Jason Status decides.
+     * The one rule that makes the three stages mutually exclusive: a log with a
+     * Layer 0 row at `pending_builder_input` is at Needs input whatever Jason
+     * Status says, because the builder has to answer before the log can move.
+     * Otherwise Jason Status decides.
+     *
+     * **Not `Layer0 Flagged`** (decision 2026-09-14, Destiny). That box means
+     * *was flagged once, ever* — nothing clears it when the builder answers —
+     * so it held eight answered, merged and approved logs in a queue of work
+     * owed. It is still read and still shown, because it is a true fact about
+     * the log, but it no longer places one anywhere.
      *
      * **"Input Added" counts as approved** (decision 2026-09-14, Destiny).
      * Jason adding input means he has read the log and responded; it is a form
-     * of having dealt with it, not a state of waiting for him. It sat at
-     * Awaiting approval until now, which put fourteen logs he had already
-     * answered in the queue of ones he had not reached.
+     * of having dealt with it, not a state of waiting for him.
      */
-    stage: flagged ? 'needs_input' : approval === 'approved' || approval === 'input added' ? 'approved' : 'awaiting',
+    stage: needsInput ? 'needs_input' : approval === 'approved' || approval === 'input added' ? 'approved' : 'awaiting',
     has_entry: Boolean(layer2),
     entry_excerpt: firstLines(layer2),
     breakthroughs: breakthroughs(layer2),
@@ -453,6 +466,9 @@ export function codexSummary(e: CodexEntryDetail): CodexEntry {
   return rest;
 }
 
+/** The Layer 0 `Status` value that means the builder still owes an answer. */
+export const LAYER0_PENDING = 'pending_builder_input';
+
 /** One row of the Layer 0 holding table: a submission parked at the completeness gate. */
 export function mapLayer0(rec: AtRecord): Layer0Hold {
   const f = rec.fields;
@@ -466,6 +482,13 @@ export function mapLayer0(rec: AtRecord): Layer0Hold {
     missing: layer0Missing(f['Missing Fields']),
     status,
     open: (status ?? '').toLowerCase() !== 'completed',
+    /**
+     * The one state that means a builder is being waited on. Deliberately
+     * narrower than `open`, which is everything that is not `completed`: it is
+     * what places a log at Needs input, so it names the state literally rather
+     * than inferring it from the absence of another.
+     */
+    pending_builder_input: (status ?? '').toLowerCase() === LAYER0_PENDING,
     created_at: iso(f['Created At']),
     source: airtableSource(CODEX_BASE, CODEX_LAYER0.table, rec.id),
     airtable: { base: CODEX_BASE, table: CODEX_LAYER0.table, record_id: rec.id, url: recordUrl(CODEX_BASE, CODEX_LAYER0.table, rec.id) },

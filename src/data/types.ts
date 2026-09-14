@@ -713,8 +713,10 @@ export interface Layer0Hold {
   builder_name: string | null;
   missing: string[];
   status: string | null;
-  /** Anything but "completed": still waiting on the builder. */
+  /** Anything but "completed". */
   open: boolean;
+  /** Exactly `pending_builder_input`: the builder still owes an answer. */
+  pending_builder_input: boolean;
   created_at: string | null;
   source: Source;
   airtable: AirtableRef;
