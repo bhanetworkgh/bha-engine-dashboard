@@ -15,8 +15,6 @@ import type {
   AskBaysData,
   AskReply,
   AuthSession,
-  BuilderDetail,
-  BuildersData,
   BuildPattern,
   BuildPatternDetail,
   BuildPatternsData,
@@ -27,8 +25,6 @@ import type {
   CodexResync,
   ClientsData,
   CommercialData,
-  EngineHealthData,
-  EngineStatus,
   Loop,
   LoopEdit,
   LoopStatus,
@@ -48,7 +44,6 @@ import type {
   ServerStatus,
   SignInResult,
   TwinData,
-  VFarmData,
 } from './types';
 
 export * from './types';
@@ -115,31 +110,18 @@ export function getServerStatus(): Promise<ServerStatus> {
 
 /* ----------------------------------------------------------------- reads */
 
-export const getEngineStatus = (q: Query) => api<EngineStatus>(withLane('/api/engine-status', q));
 export const getOverview = (q: Query) => api<OverviewData>(withLane('/api/overview', q));
 export const getNorthStar = (q: Query) => api<TwinData>(withLane('/api/north-star', q));
 export const getResearchTwin = (q: Query) => api<TwinData>(withLane('/api/research-twin', q));
-export const getVFarm = (q: Query) => api<VFarmData>(withLane('/api/vfarm', q));
-export const getEngineHealth = (q: Query) => api<EngineHealthData>(withLane('/api/engine-health', q));
 export const getOpenLoops = (q: Query) => api<OpenLoopsData>(withLane('/api/open-loops', q));
 export const getCodexEntries = (q: Query) => api<CodexData>(withLane('/api/codex', q));
 export const getBuildPatterns = (q: Query) => api<BuildPatternsData>(withLane('/api/build-patterns', q));
 export const getCommercial = (q: Query) => api<CommercialData>(withLane('/api/commercial', q));
-export const getBuilders = (q: Query) => api<BuildersData>(withLane('/api/builders', q));
 
 /** North Star's ask log, Research Twin's queue, and the watched-client lanes. */
 export const getNsTelemetry = () => api<NsData>('/api/ns-telemetry');
 export const getRtTelemetry = () => api<RtData>('/api/rt-telemetry');
 export const getClients = () => api<ClientsData>('/api/clients');
-
-export async function getBuilder(id: string, q: Query): Promise<BuilderDetail | null> {
-  try {
-    return await api<BuilderDetail>(withLane(`/api/builders/${encodeURIComponent(id)}`, q));
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return null;
-    throw e;
-  }
-}
 
 /* --------------------------------------------------------------- records */
 

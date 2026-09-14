@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useSession } from '../app/session';
-import { useData } from '../app/useData';
-import { getEngineStatus } from '../data';
 import { Icon, type IconName } from './ui';
 import { ClockChip, ThemeChip } from './ClockChip';
 import { cx } from '../lib';
 
-const GROUPS: { group: string | null; items: { to: string; label: string; icon: IconName; badge?: 'incidents' }[] }[] = [
+const GROUPS: { group: string | null; items: { to: string; label: string; icon: IconName }[] }[] = [
   {
     group: null,
     items: [
@@ -21,7 +19,10 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
       { to: '/north-star', label: 'North Star', icon: 'star' },
       { to: '/research-twin', label: 'Research Twin', icon: 'twin' },
       { to: '/vfarm', label: 'vFarm', icon: 'leaf' },
-      { to: '/engine-health', label: 'Engine health', icon: 'pulse', badge: 'incidents' },
+      // No red count beside this one any more (2026-09-14, Destiny). The page
+      // is a placeholder and the badge was counting phase 1 fixtures, so it was
+      // a red number about nothing.
+      { to: '/engine-health', label: 'Engine health', icon: 'pulse' },
     ],
   },
   {
@@ -34,10 +35,9 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
       { to: '/clients', label: 'Clients', icon: 'people' },
     ],
   },
-  {
-    group: 'People',
-    items: [{ to: '/builders', label: 'Builders', icon: 'people' }],
-  },
+  // People is gone (2026-09-14, Destiny). Builders was its only item, and
+  // almost everything on that page was a fixture; the roster and the two real
+  // figures it carried are a registry now.
   {
     // Not a system and not a record kind: the registry is the reference shelf —
     // what exists, who owns it, and what it costs.
@@ -107,7 +107,7 @@ function UserBlock({ onNavigate }: { onNavigate: () => void }) {
   );
 }
 
-function Sidebar({ openIncidents, open, onNavigate }: { openIncidents: number; open: boolean; onNavigate: () => void }) {
+function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
   return (
     <nav
       className={cx(
@@ -135,9 +135,6 @@ function Sidebar({ openIncidents, open, onNavigate }: { openIncidents: number; o
                   <NavLink key={item.to} to={item.to} end={item.to === '/'} onClick={onNavigate} className="nav-item">
                     <I />
                     <span className="flex-1 truncate">{item.label}</span>
-                    {item.badge === 'incidents' && openIncidents > 0 && (
-                      <span className="tag tag-failing tabular">{openIncidents}</span>
-                    )}
                   </NavLink>
                 );
               })}
@@ -152,8 +149,6 @@ function Sidebar({ openIncidents, open, onNavigate }: { openIncidents: number; o
 }
 
 export default function Layout() {
-  const status = useData(getEngineStatus);
-  const s = status.data;
   const [navOpen, setNavOpen] = useState(false);
   const location = useLocation();
   /* Ask Bays owns its whole column, so the top row steps aside there. */
@@ -161,7 +156,7 @@ export default function Layout() {
 
   return (
     <div className="aurora flex h-full bg-bg">
-      <Sidebar openIncidents={s?.open_incidents ?? 0} open={navOpen} onNavigate={() => setNavOpen(false)} />
+      <Sidebar open={navOpen} onNavigate={() => setNavOpen(false)} />
 
       {navOpen && <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setNavOpen(false)} aria-hidden />}
 

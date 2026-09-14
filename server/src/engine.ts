@@ -12,18 +12,12 @@
 import * as f from '../../src/data/fixtures';
 import type {
   AskBaysData,
-  BuilderDetail,
-  BuildersData,
   BuildPatternsData,
   ClientLaneRow,
   ClientsData,
   CodexData,
   CodexEntryDetail,
   CommercialData,
-  EngineHealthData,
-  EngineStatus,
-  ErrorClass,
-  IncidentState,
   Lane,
   LaneFilter,
   NsData,
@@ -33,7 +27,6 @@ import type {
   RtData,
   SeriesPoint,
   TwinData,
-  VFarmData,
 } from '../../src/data/types';
 import { MODEL_LABEL, askConfigured } from './ask';
 import { CODEX_CHOICES, CODEX_TABLES, loopTable, questionNeedsHuman } from './sources';
@@ -80,9 +73,6 @@ export function daysToHalloween(now = new Date()): number {
 function laneMatch(q: Query, lane: string | null): boolean {
   return q.lane === 'all' || q.lane === lane;
 }
-function byLane<T extends { lane: Lane }>(rows: T[], q: Query): T[] {
-  return rows.filter((r) => laneMatch(q, r.lane));
-}
 function bySpineLane<T extends { spine: { lane: string | null } }>(rows: T[], q: Query): T[] {
   return rows.filter((r) => laneMatch(q, r.spine.lane));
 }
@@ -111,31 +101,11 @@ function countByDay(days: string[], dates: string[]): SeriesPoint[] {
   return days.map((day) => ({ label: day.slice(5), value: dates.filter((d) => d.slice(0, 10) === day).length }));
 }
 
-/* ---------------------------------------------------------------- status */
-
-export function getEngineStatus(q: Query): EngineStatus {
-  const inc = bySpineLane(f.INCIDENTS, q);
-  const open = inc.filter((i) => i.state !== 'resolved' && i.state !== 'failed').length;
-  const failing = inc.some((i) => i.health === 'failing' && i.state !== 'resolved');
-  return {
-    last_refresh: '2026-09-07 14:12',
-    health: failing ? 'failing' : open > 0 ? 'degraded' : 'ok',
-    note: failing
-      ? 'Ask Cluster is returning a wrapped 402 — BHARAG credit exhausted.'
-      : open > 0
-        ? 'Retries pending on the Research Twin BHARAG call.'
-        : null,
-    open_incidents: open,
-  };
-}
-
 /* -------------------------------------------------------------- overview */
 
 export async function getOverview(q: Query): Promise<OverviewData> {
   const loops = await store.loops();
   const openLoops = loops.filter((l) => l.status !== 'closed');
-  const incidents = bySpineLane(f.INCIDENTS, q);
-  const openIncidents = incidents.filter((i) => i.state !== 'resolved' && i.state !== 'failed');
   const owners = await store.loopsByOwner();
   const totalOpen = openLoops.length;
   const oldest = Math.max(...(openLoops.length ? openLoops.map((l) => l.age_days) : [0]));
@@ -144,8 +114,6 @@ export async function getOverview(q: Query): Promise<OverviewData> {
   const entriesThisWeek = entries.filter((e) => e.week === thisWeek).length;
   const ingested = entries.filter((e) => e.has_entry).length;
   const loopsFreshness = await store.freshness('loops');
-  const openAlerts = f.VFARM_ALERTS.filter((a) => a.state === 'open');
-  const vfarmVisible = q.lane === 'all' || q.lane === 'VFARM_CORE';
 
   const ns = bySpineLane(f.NS_RECORDS, q);
   const rt = bySpineLane(f.RT_RECORDS, q);
@@ -154,17 +122,8 @@ export async function getOverview(q: Query): Promise<OverviewData> {
   const thin = asks.filter((a) => a.outcome === 'thin').length;
   const failed = asks.filter((a) => a.outcome === 'failed').length;
 
-  const resolved = incidents.filter((i) => i.state === 'resolved').length;
-  const selfHealed = incidents.filter((i) => i.tags.self_healed).length;
-  const retriesAttempted = incidents.reduce((n, i) => n + i.retries_attempted, 0);
-  const retriesSucceeded = incidents.reduce(
-    (n, i) => n + i.actions.filter((a) => a.action_type === 'retry' && a.outcome === 'ok').length,
-    0,
-  );
-
   const days7 = lastDays(REF_DATE, 7);
   const days14 = lastDays(REF_TODAY(), 14);
-  const incidents7d = countByDay(days7, incidents.map((i) => i.opened_at));
   const loops14d = countByDay(days14, loops.map((l) => l.raised_at).filter((d): d is string => Boolean(d)));
   const nsByDay = countByDay(days7, ns.map((r) => r.at)).map((p) => p.value);
   const rtByDay = countByDay(days7, rt.map((r) => r.at)).map((p) => p.value);
@@ -172,11 +131,7 @@ export async function getOverview(q: Query): Promise<OverviewData> {
   const weeks = [...new Set(entries.map((e) => e.week).filter((w): w is string => Boolean(w)))].sort().slice(-8);
   const entriesByWeek: SeriesPoint[] = weeks.map((w) => ({ label: w.replace(/^\d{4}-/, ''), value: entries.filter((e) => e.week === w).length }));
 
-  const classes: ErrorClass[] = ['BILLING_QUOTA', 'NETWORK_TIMEOUT', 'SCHEMA_VALIDATION', 'CONFIG_AUTH', 'UNKNOWN'];
-  const states: IncidentState[] = ['new', 'triage', 'auto-retry pending', 'resolved', 'failed', 'escalated to RT', 'escalated to human'];
-
   const opps = await store.opportunities();
-  const builders = byLane(f.BUILDERS, q);
   const patterns = await store.patterns();
   const canonical = patterns.filter((p) => p.status === 'canonical').length;
   const draftPatterns = patterns.filter((p) => p.status === 'draft').length;
@@ -184,16 +139,18 @@ export async function getOverview(q: Query): Promise<OverviewData> {
   return {
     pins: [
       { label: 'Days to Halloween', value: String(daysToHalloween()), health: 'ok', accent: true },
-      { label: 'vFarm status', value: vfarmVisible ? `${openAlerts.length} alerts open` : 'filtered out', health: vfarmVisible && openAlerts.length ? 'degraded' : 'ok' },
-      { label: 'Open incidents', value: String(openIncidents.length), health: openIncidents.some((i) => i.health === 'failing') ? 'failing' : openIncidents.length ? 'degraded' : 'ok' },
       { label: 'Open loops', value: loopsFreshness.source === 'none' ? 'none held' : String(totalOpen), health: loopsFreshness.source === 'none' ? 'degraded' : totalOpen > 200 ? 'degraded' : 'ok' },
       { label: 'Entries this week', value: String(entriesThisWeek), health: 'ok' },
     ],
     tiles: [
       { key: 'north-star', label: 'North Star', to: '/north-star', headline: String(ns.length), sublabel: 'asks this period', signal: `${bySpineLane(f.NS_GAPS, q).length} unanswered`, health: bySpineLane(f.NS_GAPS, q).length > 3 ? 'degraded' : 'ok', trend: nsByDay, share: { value: ns.filter((r) => r.outcome === 'answered').length, total: ns.length, label: 'answered' } },
       { key: 'research-twin', label: 'Research Twin', to: '/research-twin', headline: String(rt.length), sublabel: 'asks this period', signal: `${bySpineLane(f.RT_GAPS, q).length} unanswered`, health: bySpineLane(f.RT_GAPS, q).length > 3 ? 'degraded' : 'ok', trend: rtByDay, share: { value: rt.filter((r) => r.outcome === 'answered').length, total: rt.length, label: 'answered' } },
-      { key: 'vfarm', label: 'vFarm', to: '/vfarm', headline: vfarmVisible ? String(f.VFARM_PLACES.length) : '0', sublabel: 'places reporting', signal: vfarmVisible ? `${openAlerts.length} alerts open · lifecycle not emitting` : 'filtered out', health: vfarmVisible && openAlerts.length ? 'degraded' : 'ok' },
-      { key: 'engine-health', label: 'Engine health', to: '/engine-health', headline: String(openIncidents.length), sublabel: 'incidents open', signal: openIncidents.some((i) => i.error_class === 'BILLING_QUOTA') ? 'quota exhausted upstream' : 'retries pending', health: openIncidents.some((i) => i.health === 'failing') ? 'failing' : openIncidents.length ? 'degraded' : 'ok', trend: incidents7d.map((p) => p.value), share: { value: selfHealed, total: resolved, label: 'self-healed' } },
+      // vFarm and Engine health are placeholders (2026-09-14, Destiny), so
+      // their tiles carry no number. A headline figure for a page that says
+      // "coming soon" would be a figure about nothing, which is the rule in
+      // section 2 rather than a matter of taste.
+      { key: 'vfarm', label: 'vFarm', to: '/vfarm', headline: '—', sublabel: 'not wired up', signal: 'nothing on the rack writes here yet', health: 'ok' },
+      { key: 'engine-health', label: 'Engine health', to: '/engine-health', headline: '—', sublabel: 'not wired up', signal: 'no incident reaches this dashboard yet', health: 'ok' },
       {
         key: 'open-loops',
         label: 'Open loops',
@@ -207,24 +164,16 @@ export async function getOverview(q: Query): Promise<OverviewData> {
       { key: 'codex', label: 'Codex entries', to: '/codex', headline: String(entriesThisWeek), sublabel: 'logged this week', signal: `${entries.filter((e) => e.approval === 'pending' || e.approval === 'unset').length} awaiting Jason’s approval`, health: 'ok', trend: entriesByWeek.map((p) => p.value), share: { value: ingested, total: entries.length, label: 'with an entry written' } },
       { key: 'build-patterns', label: 'Build patterns', to: '/build-patterns', headline: String(patterns.length), sublabel: 'patterns', signal: `${canonical} canonical, ${draftPatterns} draft, ${patterns.length - canonical - draftPatterns} with no status`, health: 'ok', share: { value: canonical, total: patterns.length, label: 'canonical' } },
       { key: 'commercial', label: 'Commercial', to: '/commercial', headline: String(opps.length), sublabel: 'cards', signal: `${opps.filter((o) => o.lane_state_blocked_reason).length} blocked on research`, health: opps.some((o) => o.lane_state_blocked_reason) ? 'degraded' : 'ok', share: { value: opps.filter((o) => o.readiness_state === 'Media-Ready').length, total: opps.length, label: 'media-ready' } },
-      { key: 'builders', label: 'Builders', to: '/builders', headline: String(builders.length), sublabel: 'people', signal: `${builders.filter((b) => b.contract_status !== 'signed').length} contract not signed`, health: builders.some((b) => b.contract_status !== 'signed') ? 'degraded' : 'ok' },
     ],
     series: {
       loops_raised_14d: loops14d,
-      incidents_7d: incidents7d,
       entries_by_week: entriesByWeek,
       asks_by_outcome: { answered, thin, failed },
       loops_by_owner: owners.map(({ owner, open, in_progress, oldest_days }) => ({ owner, open, in_progress, oldest_days })),
-      incidents_by_class: classes
-        .map((c) => ({ error_class: c, n: incidents.filter((i) => i.error_class === c).length, open: openIncidents.filter((i) => i.error_class === c).length }))
-        .filter((r) => r.n > 0),
-      incidents_by_state: states.map((s) => ({ state: s, n: incidents.filter((i) => i.state === s).length })).filter((r) => r.n > 0),
     },
     rates: {
-      self_heal: { value: selfHealed, total: resolved },
       answered: { value: answered, total: asks.length },
       ingested: { value: ingested, total: entries.length },
-      retries: { value: retriesSucceeded, total: retriesAttempted },
     },
     broke_24h: [
       { id: 'B1', at: '11:42', title: 'Ask Cluster returning a wrapped 402', detail: 'BHARAG credit exhausted. No retry attempted — billing never auto-retries.', health: 'failing', spine: f.INCIDENTS[0].spine, source: f.INCIDENTS[0].source },
@@ -305,44 +254,6 @@ export function getNorthStar(q: Query): TwinData {
 }
 export function getResearchTwin(q: Query): TwinData {
   return twin('Research Twin', f.RT_RECORDS, f.RT_RUNS, f.RT_GAPS, f.RT_TRANSITIONS, q);
-}
-
-/* ----------------------------------------------------------------- vfarm */
-
-export function getVFarm(q: Query): VFarmData {
-  const visible = q.lane === 'all' || q.lane === 'VFARM_CORE';
-  return {
-    readings: visible ? f.VFARM_READINGS : [],
-    alerts: visible ? f.VFARM_ALERTS : [],
-    places: visible ? f.VFARM_PLACES : [],
-    lifecycle: f.VFARM_LIFECYCLE,
-    lifecycle_note:
-      'Burn-in and growth cycle events are not being emitted. vFarm currently writes sensor rollups, threshold alerts and incident closes to the ledger; no workflow writes a lifecycle event, so there is nothing to show here.',
-    readiness_note:
-      'Readiness is not computed anywhere yet. The endpoint that would answer it, /clusters/:id/readiness, is specced in the vFarm contract but not built. Until it exists this panel would have to guess, so it does not.',
-    days_to_halloween: daysToHalloween(),
-  };
-}
-
-/* --------------------------------------------------------- engine health */
-
-export function getEngineHealth(q: Query): EngineHealthData {
-  const incidents = bySpineLane(f.INCIDENTS, q);
-  const retriesAttempted = incidents.reduce((n, i) => n + i.retries_attempted, 0);
-  const retriesSucceeded = incidents.reduce((n, i) => n + i.actions.filter((a) => a.action_type === 'retry' && a.outcome === 'ok').length, 0);
-  const selfHealed = incidents.filter((i) => i.tags.self_healed).length;
-  const resolved = incidents.filter((i) => i.state === 'resolved').length;
-  return {
-    incidents,
-    metrics: {
-      self_heal_rate: resolved ? `${Math.round((selfHealed / resolved) * 100)}%` : '—',
-      retries_attempted: retriesAttempted,
-      retries_succeeded: retriesSucceeded,
-      mean_time_to_resolve: '3h 41m',
-      escalations: incidents.filter((i) => i.state.startsWith('escalated')).length,
-    },
-    lanes_at_retry_ceiling: LANES.map((lane) => ({ lane, incidents: incidents.filter((i) => i.spine.lane === lane && i.retries_attempted >= i.max_retries).length })).filter((row) => row.incidents > 0),
-  };
 }
 
 /* ------------------------------------------------------------ open loops */
@@ -536,26 +447,3 @@ export async function getCommercial(_q: Query): Promise<CommercialData> {
   };
 }
 
-/** Builders with their open-loop counts read from the owner totals, not the fixture. */
-async function buildersLive() {
-  const owners = await store.loopsByOwner();
-  return f.BUILDERS.map((b) => {
-    const o = owners.find((x) => x.owner === b.id);
-    return o ? { ...b, open_loops: o.open + o.in_progress, oldest_loop_days: o.oldest_days } : b;
-  });
-}
-
-export async function getBuilders(q: Query): Promise<BuildersData> {
-  return { builders: byLane(await buildersLive(), q) };
-}
-
-export async function getBuilder(id: string, q: Query): Promise<BuilderDetail | null> {
-  const builder = (await buildersLive()).find((b) => b.id === id);
-  if (!builder) return null;
-  return {
-    builder,
-    loops: (await store.loops()).filter((l) => l.owner === id).sort((a, b) => b.age_days - a.age_days),
-    entries: (await store.codexEntries()).filter((e) => e.builder_id === id),
-    incidents: bySpineLane(f.INCIDENTS, q).filter((i) => i.spine.builder_id === id),
-  };
-}

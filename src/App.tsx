@@ -13,7 +13,6 @@ import OpenLoops from './screens/OpenLoops';
 import Codex from './screens/Codex';
 import BuildPatterns from './screens/BuildPatterns';
 import Commercial from './screens/Commercial';
-import { Builders, BuilderPage } from './screens/Builders';
 import Registry from './screens/Registry';
 import Settings from './screens/Settings';
 
@@ -41,8 +40,6 @@ export default function App() {
         <Route path="/build-patterns" element={<BuildPatterns />} />
         <Route path="/commercial" element={<Commercial />} />
         <Route path="/clients" element={<Clients />} />
-        <Route path="/builders" element={<Builders />} />
-        <Route path="/builders/:id" element={<BuilderPage />} />
         <Route path="/registry" element={<Registry />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />

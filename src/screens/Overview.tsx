@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useData } from '../app/useData';
 import { BUILDER_NAMES, getOverview, type OverviewData, type OverviewEvent, type OverviewTile } from '../data';
 import { Bars, Card, Icon, LoadFailed, Loading, Ring, SourceLink, type IconName } from '../components/ui';
-import { ageTone, errorClassLabel, healthText, laneLabel } from '../lib';
+import { ageTone, healthText, laneLabel } from '../lib';
 
 /** One colour per system, so no two neighbours share a tint. */
 const TILE_META: Record<string, { icon: IconName; tint: string }> = {
@@ -61,12 +61,13 @@ function Hero({ data }: { data: OverviewData }) {
   }, []);
 
   const pin = (label: string) => data.pins.find((p) => p.label === label)?.value ?? '—';
-  const incidents = pin('Open incidents');
   const loops = pin('Open loops');
   const entries = pin('Entries this week');
   const halloween = pin('Days to Halloween');
   const builders = data.series.loops_by_owner.length;
-  const sentence = `${incidents} incident${incidents === '1' ? '' : 's'} open, ${loops} loops open across ${builders} builders, and ${entries} entries logged this week. ${halloween} days to Halloween.`;
+  // Incidents came out of the summary and the chips on 2026-09-14: the count
+  // was read from phase 1 fixtures and the page behind it is a placeholder now.
+  const sentence = `${loops} loops open across ${builders} builders, and ${entries} entries logged this week. ${halloween} days to Halloween.`;
 
   const chip = (cls: string, tilt: string, tint: string, I: IconName, label: string, value: string) => {
     const Ic = Icon[I];
@@ -108,7 +109,7 @@ function Hero({ data }: { data: OverviewData }) {
           <span className="absolute inset-[15px] rounded-full bg-panel" />
           <img src="/logo.svg" alt="" className="mark absolute inset-[20px] h-[56px] w-[56px]" />
         </div>
-        {chip('drift top-[13%] right-[80px]', '-4deg', 'tile-red', 'pulse', 'Open incidents', incidents)}
+        {chip('drift top-[13%] right-[80px]', '-4deg', 'tile-brown', 'book', 'Entries this week', entries)}
         {chip('drift-slow top-[42%] right-[36px]', '3deg', 'tile-teal', 'loop', 'Open loops', loops)}
         {chip('drift-fast bottom-[11%] right-[72px]', '-3deg', 'tile-green', 'leaf', 'Days to Halloween', halloween)}
       </div>
@@ -176,8 +177,6 @@ export default function Overview() {
   const maxOwner = Math.max(1, ...s.loops_by_owner.map((o) => o.open + o.in_progress));
   const asks = s.asks_by_outcome;
   const askTotal = asks.answered + asks.thin + asks.failed;
-  const openIncidents = data.pins.find((p) => p.label === 'Open incidents')?.value ?? '0';
-  const engineTile = data.tiles.find((t) => t.key === 'engine-health');
   const halloween = data.pins.find((p) => p.label === 'Days to Halloween')?.value ?? '—';
   const attention = data.tiles.filter((t) => t.health !== 'ok');
 
@@ -241,16 +240,6 @@ export default function Overview() {
               <Ring value={asks.answered} total={askTotal} size={44} tone="accent" label="answered" />
             </div>
             <div className="flex items-center gap-3 py-3">
-              <span className="tile tile-sm tile-red"><Icon.pulse /></span>
-              <div className="min-w-0 flex-1 leading-tight">
-                <div className="text-[12px] text-dim">Incidents opened, 7 days</div>
-                <div className="tabular text-[20px] font-semibold">{s.incidents_7d.reduce((n, p) => n + p.value, 0)}</div>
-              </div>
-              <div className="w-[88px]">
-                <Bars values={s.incidents_7d.map((p) => p.value)} labels={s.incidents_7d.map((p) => p.label)} height={30} tone="accent" highlightLast={false} />
-              </div>
-            </div>
-            <div className="flex items-center gap-3 py-3">
               <span className="tile tile-sm tile-teal"><Icon.loop /></span>
               <div className="min-w-0 flex-1 leading-tight">
                 <div className="text-[12px] text-dim">Loops raised, 14 days</div>
@@ -263,8 +252,11 @@ export default function Overview() {
           </div>
         </Card>
 
-        {/* Row 3 */}
-        <div className="grid min-w-0 gap-4 md:grid-cols-2">
+        {/* Row 3. The Engine health card that sat beside this one is gone
+            (2026-09-14, Destiny): its self-heal rate and its incidents by class
+            were computed from phase 1 fixtures, and the page it linked to is a
+            placeholder now. Loops by builder takes the row. */}
+        <div className="min-w-0">
           <Card className="frost p-5">
             <CardTitle title="Loops by builder" right={<Link to="/open-loops" className="link">View all</Link>} />
             {s.loops_by_owner.length === 0 ? (
@@ -292,43 +284,6 @@ export default function Overview() {
             )}
           </Card>
 
-          <Card className="frost p-5">
-            <CardTitle title="Engine health" right={<Link to="/engine-health" className="link">View details</Link>} />
-            <div className="flex items-center gap-4">
-              <span className={`tile h-14 w-14 rounded-[16px] ${engineTile?.health === 'failing' ? 'tile-red' : engineTile?.health === 'degraded' ? 'tile-graphite' : 'tile-green'}`}>
-                <Icon.shield className="h-7 w-7" />
-              </span>
-              <div className="min-w-0">
-                <div className="text-[16px] font-semibold">
-                  {openIncidents === '0' ? 'All good' : `${openIncidents} open incident${openIncidents === '1' ? '' : 's'}`}
-                </div>
-                <div className="text-[12.5px] text-dim">{engineTile?.signal ?? ''}</div>
-              </div>
-            </div>
-            <div className="mt-4 space-y-0.5">
-              <div className="flex items-center gap-3 px-2 py-2.5">
-                <Ring value={data.rates.self_heal.value} total={data.rates.self_heal.total} size={40} tone="accent" label="self-healed" />
-                <div className="min-w-0 flex-1 leading-tight">
-                  <div className="text-[13px] font-medium">Self-heal rate</div>
-                  <div className="text-[12px] text-dim">{data.rates.self_heal.value} of {data.rates.self_heal.total} resolved without a person</div>
-                </div>
-              </div>
-              {s.incidents_by_class.map((c) => (
-                <Link key={c.error_class} to="/engine-health" className="rowlike -mx-2 flex items-center gap-3 rounded-[12px] px-2 py-2.5">
-                  <span className={`tile tile-sm ${c.open > 0 ? (c.error_class === 'BILLING_QUOTA' || c.error_class === 'CONFIG_AUTH' ? 'tile-red' : 'tile-graphite') : 'tile-soft'}`}>
-                    <Icon.bolt />
-                  </span>
-                  <span className="min-w-0 flex-1 leading-tight">
-                    <span className="block text-[13px] font-medium">{errorClassLabel(c.error_class)}</span>
-                    <span className={`block text-[12px] ${c.open ? healthText(c.error_class === 'BILLING_QUOTA' ? 'failing' : 'degraded') : 'text-dim'}`}>
-                      {c.open ? `${c.open} open · ${c.n} total` : `${c.n} total, none open`}
-                    </span>
-                  </span>
-                  <Icon.chevron className="text-faint" />
-                </Link>
-              ))}
-            </div>
-          </Card>
         </div>
         <Card className="frost p-5">
           <CardTitle title="Needs a look" />

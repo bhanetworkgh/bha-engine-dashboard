@@ -110,16 +110,6 @@ export interface ServerStatus {
   freshness: Record<RecordKind, Freshness>;
 }
 
-/* ---------------------------------------------------------------- status */
-
-export interface EngineStatus {
-  last_refresh: string;
-  health: Health;
-  /** Why it is degraded or failing. Null when healthy. */
-  note: string | null;
-  open_incidents: number;
-}
-
 /* -------------------------------------------------------------- overview */
 
 export interface OverviewPin {
@@ -152,25 +142,17 @@ export interface SeriesPoint {
 export interface OverviewSeries {
   /** Loops raised per day over the last fourteen days, from raised_at. */
   loops_raised_14d: SeriesPoint[];
-  /** Incidents opened per day over the last seven days, from opened_at. */
-  incidents_7d: SeriesPoint[];
   /** Codex entries per ISO week. */
   entries_by_week: SeriesPoint[];
   /** Asks across both twins by outcome. */
   asks_by_outcome: { answered: number; thin: number; failed: number };
   /** Open loops per owner, table totals. */
   loops_by_owner: { owner: string; open: number; in_progress: number; oldest_days: number }[];
-  /** Incidents by error class. */
-  incidents_by_class: { error_class: ErrorClass; n: number; open: number }[];
-  /** Incidents by state, in state-machine order. */
-  incidents_by_state: { state: IncidentState; n: number }[];
 }
 
 export interface OverviewRates {
-  self_heal: { value: number; total: number };
   answered: { value: number; total: number };
   ingested: { value: number; total: number };
-  retries: { value: number; total: number };
 }
 
 export interface OverviewEvent {
@@ -358,17 +340,6 @@ export interface TwinData {
 
 /* ----------------------------------------------------------------- vfarm */
 
-export interface SensorReading {
-  id: string;
-  at: string;
-  place: string;
-  ph: number | null;
-  temp_c: number | null;
-  humidity_pct: number | null;
-  health: Health;
-  source: Source;
-}
-
 export interface VFarmAlert {
   id: string;
   at: string;
@@ -380,31 +351,6 @@ export interface VFarmAlert {
   closed_at: string | null;
   spine: Spine;
   source: Source;
-}
-
-export interface LifecycleEvent {
-  id: string;
-  at: string;
-  type:
-    | 'burn_in_cycle_started'
-    | 'burn_in_anomaly'
-    | 'growth_cycle_started'
-    | 'growth_cycle_measurement_logged';
-  detail: string;
-  spine: Spine;
-  source: Source;
-}
-
-export interface VFarmData {
-  /** Live half: sensor rollups plus alerts. */
-  readings: SensorReading[];
-  alerts: VFarmAlert[];
-  places: { name: string; last_seen: string; health: Health }[];
-  /** Not-yet-emitting half. Empty, with a reason. */
-  lifecycle: LifecycleEvent[];
-  lifecycle_note: string;
-  readiness_note: string;
-  days_to_halloween: number;
 }
 
 /* --------------------------------------------------------- engine health */
@@ -451,18 +397,6 @@ export interface Incident {
   spine: Spine;
   tags: Tags;
   source: Source;
-}
-
-export interface EngineHealthData {
-  incidents: Incident[];
-  metrics: {
-    self_heal_rate: string;
-    retries_attempted: number;
-    retries_succeeded: number;
-    mean_time_to_resolve: string;
-    escalations: number;
-  };
-  lanes_at_retry_ceiling: { lane: Lane; incidents: number }[];
 }
 
 /* ------------------------------------------------------------ open loops */
@@ -938,17 +872,6 @@ export interface Builder {
   entries_this_week: number;
   health: Health;
   source: Source;
-}
-
-export interface BuildersData {
-  builders: Builder[];
-}
-
-export interface BuilderDetail {
-  builder: Builder;
-  loops: Loop[];
-  entries: CodexEntry[];
-  incidents: Incident[];
 }
 
 /* ----------------------------------------------------------- north star */

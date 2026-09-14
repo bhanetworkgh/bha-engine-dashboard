@@ -105,7 +105,9 @@ Star's ask log `appkCTjhH8PtYRFI7 / tbl9OGZTyvBKrbeFm`; Research Twin's queue
 table in that base holds one test row and is never read); the watched clients
 `appkSUSh9ijNjP2f8`, whose index row names its own questions table in
 `Table ID` — carried on each question row, never hardcoded.
-Incidents, twins, vFarm and builders are still phase 1 fixtures.
+The twins are still phase 1 fixtures. The incident and vFarm fixtures are read
+only by the Overview's two 24-hour columns now; their own pages are placeholders
+and the Builders page is gone (2026-09-14, Destiny).
 
 **State lives in Postgres** (decision 2026-09-12, Destiny): `bha-engine-db` on
 the same Render environment, reached through `DATABASE_URL`. It replaces the
@@ -387,18 +389,24 @@ Ask Bays
 SYSTEMS
   North Star
   Research Twin
-  vFarm
-  Engine health          ← red count badge when incidents are open
+  vFarm                  ← placeholder
+  Engine health          ← placeholder, no badge
 
 RECORDS
   Open loops
   Codex entries
   Build patterns
   Commercial
+  Clients
 
-PEOPLE
-  Builders
+REFERENCE
+  System registry
 ```
+
+**There is no People section** (decision 2026-09-14, Destiny). Builders was its
+only item and almost everything on that page was a fixture; the roster and the
+two figures that were real are the **Builders** registry now. The Overview's
+Builders tile went with it, per the tile-per-section rule.
 
 North Star, Research Twin and vFarm each have four in-page sub-tabs:
 **Summary · Records · Runs · Gaps**. Sub-tabs live inside the page, not as
@@ -412,8 +420,17 @@ sidebar dropdowns.
 One tile per sidebar section, each showing its headline number and its worst
 current signal. Clicking a tile navigates into that section.
 
-Pinned across the top: days to Halloween (the vFarm deadline), vFarm status,
-open incidents, open loops, entries logged this week.
+Pinned across the top: days to Halloween (the vFarm deadline), open loops,
+entries logged this week.
+
+**Nothing on this page counts an incident or a rack** (decision 2026-09-14,
+Destiny). The vFarm-status and open-incidents pins, the incidents chip, the
+Engine health card with its self-heal rate and its incidents by class, and the
+seven-day incident count all read phase 1 fixtures, and the pages behind them
+are placeholders now; a headline figure for a page that says "coming soon" is a
+figure about nothing. The vFarm and Engine health tiles stay as navigation, with
+a dash where the number was. The two 24-hour columns are still the phase 1
+fixtures they have always been.
 
 Below: two columns — **what broke in the last 24 hours**, **what moved in the
 last 24 hours**.
@@ -462,23 +479,19 @@ exist upstream — `Research Stuck`, `Run Count` at 3, or a quarantined lane —
 and never recomputes what they mean. A lane with no run yet is **warming up,
 not failing**.
 
-### vFarm
-Timeline of four event types: `burn_in_cycle_started`, `burn_in_anomaly`,
-`growth_cycle_started`, `growth_cycle_measurement_logged`.
+### vFarm and Engine health
+**Both are a single centred "coming soon" and nothing else** (decision
+2026-09-14, Destiny). Every card, table and figure they held was computed from
+phase 1 fixtures: vFarm's live readings, rack state and readiness panel, and
+Engine health's incident list, state track, self-heal rate and retry counts.
+Nothing on the rack and no incident has ever written a row to this dashboard, so
+the pages looked like instrumentation without being any. Their fetches and their
+routes are gone rather than left running behind a hidden page, and the removed
+code lives in git history rather than commented out.
 
-Current rack state, last measurement, open anomalies, and a readiness panel that
-answers "is vFarm on track for Halloween" directly.
-
-### Engine health
-Incidents and self-healing.
-
-- Incident list, each showing its position in the state machine: new → triage →
-  auto-retry pending → resolved / failed → escalated to RT / escalated to human.
-- Duplicates collapsed by fingerprint so one flapping error doesn't flood the
-  list.
-- Metrics row: self-heal rate, retries attempted vs succeeded, mean time to
-  resolve, escalation count, lanes that have hit their retry ceiling.
-- Per incident, the action footprint: action type, actor, outcome, reason.
+They keep their places in the sidebar, and Engine health keeps no badge. When
+the engine starts writing these rows, what each page should show is the spec
+that stood here before this entry — read it out of git.
 
 ### Open loops
 The densest screen.
@@ -510,9 +523,18 @@ the same chart treatment. `pattern_status` has three states, not two: draft,
 canonical, and **empty**, which is counted on its own because an untriaged
 pattern is not a draft.
 
-### Builders
-One row per person: lane, open loops, oldest loop age, last activity, contract
-status, entries this week. Click through to that person's detail page.
+### System registry
+**Four registries on one page** (decision 2026-09-14, Destiny) — Builders,
+Tools, Endpoint, Workflow — plus **Engine writes** as a fifth tab, which is the
+dual-write surface rather than a registry.
+
+**There is no credentials registry.** The `registry_credentials` table is not
+dropped, because nothing drops a table, but it is neither read nor served.
+
+**Builders** is the roster with the live figures beside it: who they are and
+what they own from `registry_people`, and open loops, oldest loop age and
+entries this week read from Postgres. Nothing on it comes from a fixture, and a
+figure the rows cannot support is null with a note rather than a zero.
 
 ---
 
