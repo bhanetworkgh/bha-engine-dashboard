@@ -13,11 +13,14 @@
  * `AIRTABLE_API_KEY`; the variable set on the service is `AIRTABLE_TOKEN`. This
  * reads the one that is actually set. See the note in README.
  *
- * Scope: the Open Loops base and nothing else. Every other record kind still
- * reaches this dashboard only through `/api/engine/:kind`, and nothing here
- * reads Airtable to build a page — the pages read Postgres, as they have since
- * the migration. This is a write path with one read on it (the source row of a
- * move), not a return of the sync.
+ * Scope: the Open Loops base and the BHA Submissions base, and nothing else.
+ * Every other record kind still reaches this dashboard only through
+ * `/api/engine/:kind`, and nothing here reads Airtable to build a page — the
+ * pages read Postgres, as they have since the migration. These are write paths
+ * with reads on them (the source row of a move; the record ids a Codex
+ * reconciliation compares against), not a return of the sync.
+ *
+ * Every call names its base. One token covers both.
  */
 import type { AtRecord } from './sources';
 
@@ -26,6 +29,13 @@ export const AIRTABLE_URL = (process.env.AIRTABLE_API_URL || 'https://api.airtab
 /** The loops base. Env first; the constant is the base this dashboard has always meant. */
 export const LOOPS_BASE_ID = process.env.AIRTABLE_BASE_ID?.trim() || 'appUVlBSGGPHw6DGh';
 export const BASE_ID_FROM_ENV = Boolean(process.env.AIRTABLE_BASE_ID?.trim());
+
+/**
+ * BHA Submissions & Logs — the Codex base. Its own variable rather than
+ * overloading AIRTABLE_BASE_ID, which is the loops base and is already set.
+ */
+export const SUBMISSIONS_BASE_ID = process.env.AIRTABLE_SUBMISSIONS_BASE_ID?.trim() || 'appEmdKshNVTl64Zf';
+export const SUBMISSIONS_BASE_FROM_ENV = Boolean(process.env.AIRTABLE_SUBMISSIONS_BASE_ID?.trim());
 
 /**
  * No fallback and no default. A guessed token comes back as a 401, which reads
@@ -53,7 +63,7 @@ export class AirtableError extends Error {
  * to api.airtable.com; a move is four of them in sequence, and a person is
  * waiting on the save.
  */
-const TIMEOUT_MS = 10_000;
+const TIMEOUT_MS = 15_000;
 
 async function call<T>(method: 'GET' | 'PATCH' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
   if (!TOKEN) throw new AirtableError('AIRTABLE_TOKEN is not set on this server, so nothing could be written to Airtable.', 503);
@@ -89,22 +99,50 @@ async function call<T>(method: 'GET' | 'PATCH' | 'POST' | 'DELETE', path: string
   return json as T;
 }
 
-export function getRecord(table: string, id: string): Promise<AtRecord> {
-  return call<AtRecord>('GET', `/${LOOPS_BASE_ID}/${table}/${encodeURIComponent(id)}`);
+export function getRecord(base: string, table: string, id: string): Promise<AtRecord> {
+  return call<AtRecord>('GET', `/${base}/${table}/${encodeURIComponent(id)}`);
 }
 
 /**
  * Writes only the fields given; everything else on the record is left alone.
  * `typecast` so a select value arrives as its name rather than an option id.
  */
-export function updateRecord(table: string, id: string, fields: Record<string, unknown>): Promise<AtRecord> {
-  return call<AtRecord>('PATCH', `/${LOOPS_BASE_ID}/${table}/${encodeURIComponent(id)}`, { fields, typecast: true });
+export function updateRecord(base: string, table: string, id: string, fields: Record<string, unknown>): Promise<AtRecord> {
+  return call<AtRecord>('PATCH', `/${base}/${table}/${encodeURIComponent(id)}`, { fields, typecast: true });
 }
 
-export function createRecord(table: string, fields: Record<string, unknown>): Promise<AtRecord> {
-  return call<AtRecord>('POST', `/${LOOPS_BASE_ID}/${table}`, { fields, typecast: true });
+export function createRecord(base: string, table: string, fields: Record<string, unknown>): Promise<AtRecord> {
+  return call<AtRecord>('POST', `/${base}/${table}`, { fields, typecast: true });
 }
 
-export function deleteRecord(table: string, id: string): Promise<{ id: string; deleted: boolean }> {
-  return call<{ id: string; deleted: boolean }>('DELETE', `/${LOOPS_BASE_ID}/${table}/${encodeURIComponent(id)}`);
+export function deleteRecord(base: string, table: string, id: string): Promise<{ id: string; deleted: boolean }> {
+  return call<{ id: string; deleted: boolean }>('DELETE', `/${base}/${table}/${encodeURIComponent(id)}`);
+}
+
+/** Airtable allows five requests a second per base; this keeps well under it. */
+const PACE_MS = 220;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Every record id in a table, and nothing else.
+ *
+ * `fields[]=` with no field named asks Airtable for the ids alone, so a
+ * reconciliation over seven tables moves a few kilobytes rather than every
+ * transcript in the base. Follows `offset` to the end: a partial read would
+ * look exactly like a table someone had emptied, which is the one mistake this
+ * must never make.
+ */
+export async function listRecordIds(base: string, table: string): Promise<string[]> {
+  const out: string[] = [];
+  let offset: string | undefined;
+  do {
+    const q = new URLSearchParams({ pageSize: '100' });
+    q.append('fields[]', '');
+    if (offset) q.set('offset', offset);
+    const page = await call<{ records: { id: string }[]; offset?: string }>('GET', `/${base}/${table}?${q.toString()}`);
+    for (const r of page.records) out.push(r.id);
+    offset = page.offset;
+    if (offset) await sleep(PACE_MS);
+  } while (offset);
+  return out;
 }

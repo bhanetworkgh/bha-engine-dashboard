@@ -27,7 +27,8 @@ import { assertDatabase, closePool, DATABASE_URL } from './pg';
 import * as engine from './engine';
 import * as store from './store';
 import * as registry from './registry';
-import { BASE_ID_FROM_ENV, LOOPS_BASE_ID, airtableConfigured } from './airtable';
+import { BASE_ID_FROM_ENV, LOOPS_BASE_ID, SUBMISSIONS_BASE_FROM_ENV, SUBMISSIONS_BASE_ID, airtableConfigured } from './airtable';
+import * as codex from './codex';
 import * as loops from './loops';
 import * as mirror from './mirror';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
@@ -282,6 +283,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
           inbound_configured: Boolean(INBOUND_KEY),
           airtable_configured: airtableConfigured(),
           airtable_base: LOOPS_BASE_ID,
+          airtable_submissions_base: SUBMISSIONS_BASE_ID,
           writeback_failures: await store.writebackFailures(),
           writable: store.writable(),
           freshness: await freshnessAll(),
@@ -406,6 +408,23 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
       }
     }
 
+    /**
+     * One Codex submission's review decision. Approve, or send it back to
+     * pending; "Input Added" is the pipeline's to set and is never a button
+     * here, so it is not accepted.
+     */
+    const codexEdit = p.match(/^\/api\/codex\/([^/]+)$/);
+    if (codexEdit) {
+      const body = await readJson(req);
+      try {
+        return send(res, 200, await store.setJasonStatus(decodeURIComponent(codexEdit[1]), str(body.jason_status, 40), sessionInfo(req).email));
+      } catch (e) {
+        if (e instanceof codex.CodexError) throw new HttpError(e.status, e.message);
+        if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
+        throw e;
+      }
+    }
+
     const m = p.match(/^\/api\/records\/([^/]+)\/([^/]+)$/);
     if (m) {
       const kind = m[1] as RecordKind;
@@ -428,6 +447,26 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
         if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
         throw e;
       }
+    }
+  }
+
+  /**
+   * Deleting one Codex submission, from Airtable and from here.
+   *
+   * The body has to carry the Codex entry id back. Mid-test there are several
+   * near-identical rows on screen and the id is the only thing that tells them
+   * apart, which is what a yes/no dialog would not ask about. The whole row is
+   * written to the deletion log before either side lets go.
+   */
+  const codexDelete = p.match(/^\/api\/codex\/([^/]+)$/);
+  if (codexDelete && method === 'DELETE') {
+    const body = await readJson(req);
+    try {
+      const r = await store.deleteCodex(decodeURIComponent(codexDelete[1]), str(body.confirm, 120), sessionInfo(req).email);
+      return send(res, 200, { ok: true, ...r });
+    } catch (e) {
+      if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
+      throw e;
     }
   }
 
@@ -584,8 +623,8 @@ async function boot(): Promise<void> {
     // worth reading on every boot, not a quiet default.
     console.log(
       airtableConfigured()
-        ? `  airtable: loops base ${LOOPS_BASE_ID} ${BASE_ID_FROM_ENV ? '(AIRTABLE_BASE_ID)' : '(built-in default — AIRTABLE_BASE_ID is not set)'}`
-        : '  airtable: NOT configured — AIRTABLE_TOKEN is not set on this server. Loop edits made here will NOT reach Airtable, and the 08:00 Open Loops digest reads Airtable.',
+        ? `  airtable: loops ${LOOPS_BASE_ID} ${BASE_ID_FROM_ENV ? '(AIRTABLE_BASE_ID)' : '(default)'} · submissions ${SUBMISSIONS_BASE_ID} ${SUBMISSIONS_BASE_FROM_ENV ? '(AIRTABLE_SUBMISSIONS_BASE_ID)' : '(default)'}`
+        : '  airtable: NOT configured — AIRTABLE_TOKEN is not set on this server. Loop and Codex edits made here will NOT reach Airtable.',
     );
     // Rows are read straight out of the engine tables, so there is nothing to
     // load at boot. What does run is the ledger catch-up: any status that

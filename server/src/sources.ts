@@ -413,8 +413,16 @@ export function mapCodex(rec: AtRecord, owner: string, table: string): CodexEntr
     approval,
     layer0_flagged: flagged,
     layer0_missing: missing,
-    /** Complete exactly as specified: the gate passed it and Layer 2 wrote an entry. */
+    /** Complete exactly as specified: the gate passed it and Layer 2 generated the codex. */
     complete: !flagged && Boolean(layer2),
+    /**
+     * The one rule that makes the three stages mutually exclusive: a flagged
+     * log is at Needs input whatever Jason Status says, because Layer 0 ran
+     * first and the builder has to answer before the log can move. Otherwise
+     * Jason Status decides, and "Input Added" is not a stage of its own —
+     * Jason asking happens while the log sits at Awaiting approval.
+     */
+    stage: flagged ? 'needs_input' : approval === 'approved' ? 'approved' : 'awaiting',
     has_entry: Boolean(layer2),
     entry_excerpt: firstLines(layer2),
     breakthroughs: breakthroughs(layer2),

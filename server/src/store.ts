@@ -33,6 +33,7 @@
  *     fails is recorded on the loop, never rolled back.
  */
 import { getMeta, nowIso, setMetaIfAbsent, today } from './db';
+import * as codex_ from './codex';
 import * as loops_ from './loops';
 import * as mirror from './mirror';
 import { getPool, withTransaction, type Queryable } from './pg';
@@ -49,10 +50,11 @@ import type {
   CommercialMetrics,
   Freshness,
   Layer0Hold,
+  CodexReconciliation,
   Loop,
   LoopMetrics,
   LoopStatus,
-  LoopWriteback,
+  RecordWrite,
   Metric,
   MetricSeries,
   NewLoop,
@@ -426,33 +428,38 @@ async function notesFor(kind: RecordKind, on?: Queryable): Promise<Map<string, s
   return new Map(r.rows.map((n) => [n.record_id, n.note]));
 }
 
-type WritebackRow = LoopWriteback & { record_id: string };
+type WritebackRow = RecordWrite & { record_id: string };
 
 const WB_COLS = 'record_id, state, status, reason, http, action, detail, from_table, to_table, steps, at';
 
+/** The two kinds this dashboard writes to Airtable, and so the two that can fail to land. */
+const WRITES_TO_AIRTABLE = new Set<RecordKind>(['loops', 'codex']);
+
 /**
- * The newest write per loop, so the list can say which changes did not reach
+ * The newest write per record, so a list can say which changes did not reach
  * Airtable. The table is a log and only grows; this is the latest line of each
- * loop's own history, which is what the row has to show.
+ * record's own history, which is what the row has to show.
  */
-async function writebacksFor(kind: RecordKind, on?: Queryable): Promise<Map<string, LoopWriteback>> {
-  if (kind !== 'loops') return new Map();
-  const r = await db(on).query<WritebackRow>(`SELECT DISTINCT ON (record_id) ${WB_COLS} FROM loop_writebacks ORDER BY record_id, seq DESC`);
+async function writebacksFor(kind: RecordKind, on?: Queryable): Promise<Map<string, RecordWrite>> {
+  if (!WRITES_TO_AIRTABLE.has(kind)) return new Map();
+  const r = await db(on).query<WritebackRow>(`SELECT DISTINCT ON (record_id) ${WB_COLS} FROM record_writes WHERE kind = $1 ORDER BY record_id, seq DESC`, [kind]);
   return new Map(r.rows.map(({ record_id, ...w }) => [record_id, w]));
 }
 
-async function writebackFor(id: string, on?: Queryable): Promise<LoopWriteback | null> {
-  const r = await db(on).query<WritebackRow>(`SELECT ${WB_COLS} FROM loop_writebacks WHERE record_id = $1 ORDER BY seq DESC LIMIT 1`, [id]);
+async function writebackFor(kind: RecordKind, id: string, on?: Queryable): Promise<RecordWrite | null> {
+  const r = await db(on).query<WritebackRow>(`SELECT ${WB_COLS} FROM record_writes WHERE kind = $1 AND record_id = $2 ORDER BY seq DESC LIMIT 1`, [kind, id]);
   const row = r.rows[0];
   if (!row) return null;
   const { record_id: _ignored, ...w } = row;
   return w;
 }
 
-export interface LoopWriteLog {
+export interface RecordWriteLog {
+  kind: RecordKind;
   record_id: string;
-  loop_id: string | null;
-  state: LoopWriteback['state'];
+  /** The record's own id in its source — a loop_id, a Codex entry id. */
+  natural_id: string | null;
+  state: RecordWrite['state'];
   status: string;
   action: string;
   detail: string | null;
@@ -466,19 +473,20 @@ export interface LoopWriteLog {
 }
 
 /**
- * One line per write, kept. A move that half-lands is the case this exists for:
- * `steps` says the create landed and the delete did not, and nothing later
- * overwrites that.
+ * One line per write, kept. A loop move that half-lands is the case this was
+ * built for — `steps` says the create landed and the delete did not, and
+ * nothing later overwrites that — and a Codex write uses the same shape rather
+ * than a second table that would drift from this one.
  */
-export async function logLoopWrite(e: LoopWriteLog): Promise<void> {
+export async function logRecordWrite(e: RecordWriteLog): Promise<void> {
   await db().query(
-    `INSERT INTO loop_writebacks (record_id, loop_id, state, status, reason, http, action, detail, from_table, to_table, steps, new_record_id, actor, at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-    [e.record_id, e.loop_id, e.state, e.status, e.reason, e.http, e.action, e.detail, e.from_table, e.to_table, e.steps.join(' · ') || null, e.new_record_id, e.actor, nowIso()],
+    `INSERT INTO record_writes (kind, record_id, natural_id, state, status, reason, http, action, detail, from_table, to_table, steps, new_record_id, actor, at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+    [e.kind, e.record_id, e.natural_id, e.state, e.status, e.reason, e.http, e.action, e.detail, e.from_table, e.to_table, e.steps.join(' · ') || null, e.new_record_id, e.actor, nowIso()],
   );
-  const where = `${e.loop_id ?? e.record_id} ${e.action}`;
-  if (e.state === 'ok' || e.state === 'skipped') console.log(`loop ${where}: ${e.state}${e.detail ? ` — ${e.detail}` : ''}${e.steps.length ? ` (${e.steps.join(', ')})` : ''}`);
-  else console.error(`loop ${where}: ${e.state.toUpperCase()}${e.http ? ` (HTTP ${e.http})` : ''} — ${e.reason ?? 'no reason given'}${e.steps.length ? ` · completed: ${e.steps.join(', ')}` : ' · nothing completed'}`);
+  const where = `${e.kind} ${e.natural_id ?? e.record_id} ${e.action}`;
+  if (e.state === 'ok' || e.state === 'skipped') console.log(`${where}: ${e.state}${e.detail ? ` — ${e.detail}` : ''}${e.steps.length ? ` (${e.steps.join(', ')})` : ''}`);
+  else console.error(`${where}: ${e.state.toUpperCase()}${e.http ? ` (HTTP ${e.http})` : ''} — ${e.reason ?? 'no reason given'}${e.steps.length ? ` · completed: ${e.steps.join(', ')}` : ' · nothing completed'}`);
   bumpVersion();
 }
 
@@ -564,7 +572,7 @@ async function rows(kind: RecordKind, table?: string, on?: Queryable): Promise<R
     out.push({
       kind,
       id,
-      json: JSON.stringify(kind === 'loops' ? { ...m.obj, closed_at, note, writeback: wb } : { ...m.obj, closed_at, note }),
+      json: JSON.stringify(WRITES_TO_AIRTABLE.has(kind) ? { ...m.obj, closed_at, note, writeback: wb } : { ...m.obj, closed_at, note }),
       status: statusOf(m),
       builder: builderOf(m),
       raised_at: raisedOf(m),
@@ -595,11 +603,11 @@ async function rowById(kind: RecordKind, id: string, on?: Queryable): Promise<Ro
   const closed_at = last && last.to_status === TERMINAL[kind] && last.from_status !== null ? last.at.slice(0, 10) : null;
   const n = await db(on).query<{ note: string }>('SELECT note FROM record_notes WHERE kind = $1 AND record_id = $2', [kind, id]);
   const note = n.rows[0]?.note ?? null;
-  const wb = kind === 'loops' ? await writebackFor(id, on) : null;
+  const wb = WRITES_TO_AIRTABLE.has(kind) ? await writebackFor(kind, id, on) : null;
   return {
     kind,
     id,
-    json: JSON.stringify(kind === 'loops' ? { ...m.obj, closed_at, note, writeback: wb } : { ...m.obj, closed_at, note }),
+    json: JSON.stringify(WRITES_TO_AIRTABLE.has(kind) ? { ...m.obj, closed_at, note, writeback: wb } : { ...m.obj, closed_at, note }),
     status: statusOf(m),
     builder: builderOf(m),
     raised_at: raisedOf(m),
@@ -943,9 +951,10 @@ export async function editLoop(id: string, patch: loops_.LoopPatch, actor = 'das
     bumpVersion();
   }
 
-  await logLoopWrite({
+  await logRecordWrite({
+    kind: 'loops',
     record_id: nowId,
-    loop_id: loopId,
+    natural_id: loopId,
     state: r.state,
     status: LOOP_STATUS_TO_AIRTABLE[(patch.status ?? (m.kind === 'loops' ? m.obj.status : 'open')) as LoopStatus],
     action: destination ? 'move' : 'edit',
@@ -1046,9 +1055,10 @@ export async function createLoop(input: NewLoop, actor = 'dashboard'): Promise<L
   // for a loop opened here, so there is nothing to create against. It stops
   // being a skip the moment the engine writes it to Airtable and pushes it
   // back, and the next edit goes through for real.
-  await logLoopWrite({
+  await logRecordWrite({
+    kind: 'loops',
     record_id: id,
-    loop_id: String(fields.loop_id),
+    natural_id: String(fields.loop_id),
     state: 'skipped',
     status: 'Open',
     action: 'create',
@@ -1074,13 +1084,223 @@ export async function createLoop(input: NewLoop, actor = 'dashboard'): Promise<L
  * A half-landed move counts: it is not a failed save, but it does leave the
  * loop in two tables and somebody has to remove one.
  */
-export async function writebackFailures(): Promise<number> {
+export async function writebackFailures(kind?: RecordKind): Promise<number> {
   const r = await db().query<{ n: string }>(
     `SELECT count(*)::text AS n FROM (
-       SELECT DISTINCT ON (record_id) state FROM loop_writebacks ORDER BY record_id, seq DESC
+       SELECT DISTINCT ON (kind, record_id) state FROM record_writes
+        ${kind ? 'WHERE kind = $1' : ''}
+        ORDER BY kind, record_id, seq DESC
      ) latest WHERE state IN ('failed', 'duplicate')`,
+    kind ? [kind] : [],
   );
   return Number(r.rows[0]?.n ?? 0);
+}
+
+/* ------------------------------------------------------------- codex */
+
+/**
+ * Sets Jason Status on one submission.
+ *
+ * Postgres first, then Airtable, and the Airtable write never throws — same
+ * arrangement as a loop edit, and recorded in the same log so the row marks
+ * itself the same way when it does not land.
+ */
+export async function setJasonStatus(id: string, status: string, actor = 'dashboard'): Promise<CodexEntry> {
+  const want = codex_.asJasonStatus(status);
+  const mr = await mirrorRowById('codex', id);
+  if (!mr) throw new StoreError('That submission is not held by this dashboard.', 404);
+  const table = tableOf('codex', mr);
+  const codexId = typeof mr.fields?.[codex_.FIELD.codexEntryId] === 'string' ? (mr.fields[codex_.FIELD.codexEntryId] as string) : null;
+
+  const m = await writeFields('codex', mr, { [codex_.FIELD.jasonStatus]: want });
+  await recordState('codex', m, 'ui', nowIso(), await lastEventFor('codex', id));
+
+  const r = await codex_.setStatus(table, mr.airtable_record_id, want);
+  await logRecordWrite({
+    kind: 'codex',
+    record_id: id,
+    natural_id: codexId ?? (typeof mr.fields?.[codex_.FIELD.submissionId] === 'string' ? (mr.fields[codex_.FIELD.submissionId] as string) : null),
+    state: r.state,
+    status: want,
+    action: 'status',
+    detail: `${codex_.FIELD.jasonStatus} → ${want}`,
+    reason: r.reason,
+    http: r.http,
+    steps: r.steps,
+    from_table: table,
+    to_table: null,
+    new_record_id: null,
+    actor,
+  });
+  const out = await rowById('codex', id);
+  if (!out) throw new StoreError('The submission was saved but could not be read back.', 500);
+  return codexSummary(JSON.parse(out.json) as CodexEntryDetail);
+}
+
+/**
+ * Deletes one submission from Airtable and from here.
+ *
+ * This exists for production testing: driving a log through Layer 0, Layer 1
+ * and approval deliberately, then clearing the fixtures. Two guards, both
+ * deliberate. The caller has to type the Codex entry id back — mid-test there
+ * are several near-identical rows on screen and the id is the only thing that
+ * tells them apart, which a yes/no dialog would not ask about. And the whole
+ * row is written to `record_deletions` first: once Airtable and Postgres have
+ * both let go, that log is the only place it can still be read.
+ */
+export async function deleteCodex(id: string, confirm: string, actor = 'dashboard'): Promise<{ removed: boolean; airtable: codex_.CodexWriteResult; identifier: string }> {
+  const mr = await mirrorRowById('codex', id);
+  if (!mr) throw new StoreError('That submission is not held by this dashboard.', 404);
+  const fields = mr.fields ?? {};
+  const codexId = typeof fields[codex_.FIELD.codexEntryId] === 'string' ? (fields[codex_.FIELD.codexEntryId] as string).trim() : '';
+  const submissionId = typeof fields[codex_.FIELD.submissionId] === 'string' ? (fields[codex_.FIELD.submissionId] as string).trim() : '';
+  // The id to type back. A row with no Codex entry id yet — one still at
+  // Layer 0 — is identified by its submission id instead, so the guard is
+  // never something nobody can satisfy.
+  const identifier = codexId || submissionId;
+  if (!identifier) throw new StoreError('This submission carries neither a Codex entry id nor a submission id, so there is nothing to confirm it by. Delete it in Airtable.', 422);
+  if (confirm.trim() !== identifier) {
+    throw new StoreError(`That does not match. Type ${identifier} exactly to delete this submission.`, 422);
+  }
+
+  const table = tableOf('codex', mr);
+  await db().query(
+    `INSERT INTO record_deletions (kind, record_id, natural_id, builder_id, table_id, reason, fields, actor, at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    ['codex', id, identifier, mr.builder_id, table, 'deleted from the dashboard', JSON.stringify(fields), actor, nowIso()],
+  );
+
+  const r = await codex_.remove(table, mr.airtable_record_id);
+  // The Postgres row goes whether or not Airtable let go. If it did not, the
+  // next reconciliation would find the Airtable row still there and nothing
+  // here to match it — which is visible in the log, and the alternative is a
+  // row nobody can delete from either side.
+  await db().query(`DELETE FROM ${MIRROR.codex.table} WHERE id = $1`, [mr.pk]);
+  bumpVersion();
+
+  await logRecordWrite({
+    kind: 'codex',
+    record_id: id,
+    natural_id: identifier,
+    state: r.state,
+    status: 'deleted',
+    action: 'delete',
+    detail: `${identifier} removed from ${codexTableById(table)?.label ?? table}`,
+    reason: r.reason,
+    http: r.http,
+    steps: [...r.steps, 'removed the row held here'],
+    from_table: table,
+    to_table: null,
+    new_record_id: null,
+    actor,
+  });
+  console.log(`codex ${identifier}: deleted by ${actor} from ${table} — airtable ${r.state}${r.reason ? ` (${r.reason})` : ''}`);
+  return { removed: true, airtable: r, identifier };
+}
+
+/**
+ * Removes rows Airtable no longer has.
+ *
+ * A row deleted by hand in Airtable notifies nothing, so this dashboard would
+ * go on showing it. One pass over the seven tables' record ids — ids only, a
+ * few kilobytes — comparing against what is held here.
+ *
+ * **Only rows genuinely absent are removed.** A table whose read failed is not
+ * in `byTable` at all and nothing under it is touched: a failed fetch and a
+ * table someone emptied look identical from here, and treating one as the
+ * other would clear the page. Rows with no Airtable record id are skipped for
+ * the same reason — there is nothing to compare them against.
+ *
+ * Single-flight: two page loads at once share one pass rather than running
+ * fourteen table reads between them.
+ */
+let reconciling: Promise<CodexReconciliation> | null = null;
+
+export function reconcileCodex(): Promise<CodexReconciliation> {
+  reconciling ??= runReconcile().finally(() => {
+    reconciling = null;
+  });
+  return reconciling;
+}
+
+async function runReconcile(): Promise<CodexReconciliation> {
+  const at = nowIso();
+  if (!codex_.CODEX_TABLES.length) return { ran: false, checked: 0, removed: 0, removed_ids: [], blocked: [], at, note: 'No submission tables are configured.' };
+  let live: Awaited<ReturnType<typeof codex_.liveIds>>;
+  try {
+    live = await codex_.liveIds();
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    return { ran: false, checked: 0, removed: 0, removed_ids: [], blocked: [], at, note: `Airtable could not be reached, so nothing was removed and the page is showing what this database holds. ${reason}` };
+  }
+  if (!live.read.length) {
+    return {
+      ran: false,
+      checked: 0,
+      removed: 0,
+      removed_ids: [],
+      blocked: live.failed.map((f) => ({ table: f.table, label: codexTableById(f.table)?.label ?? f.table, reason: f.reason })),
+      at,
+      note: 'No submission table could be read, so nothing was removed and the page is showing what this database holds.',
+    };
+  }
+
+  const held = await db().query<{ id: string; airtable_record_id: string | null; table_id: string | null }>(
+    `SELECT id, airtable_record_id, table_id FROM ${MIRROR.codex.table} WHERE airtable_record_id IS NOT NULL`,
+  );
+  const gone: { pk: string; record: string }[] = [];
+  let checked = 0;
+  for (const row of held.rows) {
+    const table = row.table_id ?? '';
+    const ids = live.byTable.get(table);
+    // Not read, or in a table this pass could not see: left alone.
+    if (!ids) continue;
+    checked++;
+    if (!ids.has(row.airtable_record_id!)) gone.push({ pk: row.id, record: row.airtable_record_id! });
+  }
+
+  if (gone.length) {
+    await withTransaction(async (client) => {
+      for (const g of gone) {
+        const r = await client.query<{ fields: Record<string, unknown>; builder_id: string; table_id: string | null }>(
+          `SELECT fields, builder_id, table_id FROM ${MIRROR.codex.table} WHERE id = $1`,
+          [g.pk],
+        );
+        const row = r.rows[0];
+        await client.query(
+          `INSERT INTO record_deletions (kind, record_id, natural_id, builder_id, table_id, reason, fields, actor, at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [
+            'codex',
+            g.record,
+            (row?.fields?.[codex_.FIELD.codexEntryId] as string) ?? (row?.fields?.[codex_.FIELD.submissionId] as string) ?? null,
+            row?.builder_id ?? null,
+            row?.table_id ?? null,
+            'removed in Airtable; found missing by the reconciliation on page load',
+            JSON.stringify(row?.fields ?? {}),
+            'reconciliation',
+            at,
+          ],
+        );
+        await client.query(`DELETE FROM ${MIRROR.codex.table} WHERE id = $1`, [g.pk]);
+      }
+    });
+    bumpVersion();
+    console.log(`codex reconcile: ${gone.length} row(s) no longer in Airtable, removed — ${gone.map((g) => g.record).join(', ')}`);
+  }
+
+  const blocked = live.failed.map((f) => ({ table: f.table, label: codexTableById(f.table)?.label ?? (f.table === codex_.LAYER0.table ? codex_.LAYER0.label : f.table), reason: f.reason }));
+  return {
+    ran: true,
+    checked,
+    removed: gone.length,
+    removed_ids: gone.map((g) => g.record),
+    blocked,
+    at,
+    note: blocked.length
+      ? `Checked ${checked} of the rows held here against Airtable and removed ${gone.length}. ${blocked.length} ${blocked.length === 1 ? 'table' : 'tables'} could not be read (${blocked.map((b) => b.label).join(', ')}), so nothing held under ${blocked.length === 1 ? 'it' : 'them'} was touched.`
+      : `Checked ${checked} rows against Airtable${gone.length ? ` and removed ${gone.length} that no longer exist there` : '; every one is still there'}.`,
+  };
 }
 
 /**
@@ -1146,11 +1366,11 @@ async function rekey(kind: RecordKind, old: string, recordId: string): Promise<v
   // id the row is addressed by, and the loop that was skipped as "not in
   // Airtable yet" is exactly the loop this adoption is about.
   let w = 0;
-  if (kind === 'loops') {
+  if (WRITES_TO_AIRTABLE.has(kind)) {
     // Every line of the loop's history follows it, not just the newest: the log
     // is append-only and the point of it is being able to read back what
     // happened, including under the id the loop used to have.
-    const r = await db().query('UPDATE loop_writebacks SET record_id = $1 WHERE record_id = $2', [recordId, old]);
+    const r = await db().query('UPDATE record_writes SET record_id = $1 WHERE kind = $2 AND record_id = $3', [recordId, kind, old]);
     w = r.rowCount ?? 0;
   }
   if (e.rowCount || n.rowCount || w)
@@ -1453,12 +1673,36 @@ const APPROVAL_LABELS: Record<CodexApproval, string> = {
   unset: 'Not set',
 };
 
-/** Which tab a row falls in, from the source's own fields. Nothing here is inferred. */
-const TAB_RULES: { tab: CodexTab; label: string; rule: string; test: (e: CodexEntry) => boolean }[] = [
-  { tab: 'approved', label: 'Approved', rule: 'Jason Status is Approved.', test: (e) => e.approval === 'approved' },
-  { tab: 'pending', label: 'Pending approval', rule: 'Jason Status is Pending, or the field is empty.', test: (e) => e.approval === 'pending' || e.approval === 'unset' },
-  { tab: 'incomplete', label: 'Incomplete', rule: 'Layer0 Flagged is ticked. Each row names what Layer0 Missing says it lacks.', test: (e) => e.layer0_flagged },
-  { tab: 'complete', label: 'Complete', rule: 'Layer0 Flagged is not ticked and Orchestrator Layer2 Review is not empty.', test: (e) => e.complete },
+/**
+ * The three stages, one per layer, in the order a log passes through them.
+ *
+ * Mutually exclusive by one rule, applied in `mapCodex`: Layer0 Flagged wins,
+ * and otherwise Jason Status decides. So every submission is in exactly one
+ * stage and the three sum to the total — which the row that came before did
+ * not, because it asked two different questions at once.
+ */
+const TAB_RULES: { tab: CodexTab; label: string; layer: string; rule: string; test: (e: CodexEntry) => boolean }[] = [
+  {
+    tab: 'needs_input',
+    label: 'Needs input',
+    layer: 'Layer 0',
+    rule: 'Layer0 Flagged is ticked: the completeness gate found something missing and the builder has to fill it in. This wins over Jason Status, because the gate runs first. Each row names what Layer0 Missing says it lacks.',
+    test: (e) => e.stage === 'needs_input',
+  },
+  {
+    tab: 'awaiting',
+    label: 'Awaiting approval',
+    layer: 'Layer 1',
+    rule: 'Not flagged by Layer 0, and Jason Status is not Approved. "Input Added" sits here too — Jason asking a question happens while the log waits, and the builder answers in thread. An empty status sits here as well: nothing distinguishes it from a log he has not reached.',
+    test: (e) => e.stage === 'awaiting',
+  },
+  {
+    tab: 'approved',
+    label: 'Approved',
+    layer: 'Layer 2',
+    rule: 'Not flagged by Layer 0, and Jason Status is Approved. Through and approved.',
+    test: (e) => e.stage === 'approved',
+  },
 ];
 
 export function codexTabRule(tab: CodexTab): (e: CodexEntry) => boolean {
@@ -1486,7 +1730,16 @@ export async function codexMetrics(builder: string | null): Promise<CodexMetrics
   }));
 
   const approvals: CodexApproval[] = ['approved', 'pending', 'input added', 'unset'];
-  const qualities = [...new Set(all.map((e) => e.narration_quality).filter((v): v is string => Boolean(v)))].sort();
+  /**
+   * The pipeline's three tiers, highest to lowest. Not sorted: sorting gave
+   * Excellent, Good, Great — alphabetical, which reads as Good outranking
+   * Great. "Good" is the lowest tier; it replaced an older "Weak". Anything a
+   * table carries that is not one of the three is appended rather than
+   * dropped, so a value nobody planned for is still visible.
+   */
+  const TIERS = ['Excellent', 'Great', 'Good'];
+  const present = new Set(all.map((e) => e.narration_quality).filter((v): v is string => Boolean(v)));
+  const qualities = [...TIERS.filter((t) => present.has(t)), ...[...present].filter((q) => !TIERS.includes(q)).sort()];
   const openHolds = holds.filter((h) => h.open).length;
 
   const value: CodexMetrics = {
@@ -1494,10 +1747,21 @@ export async function codexMetrics(builder: string | null): Promise<CodexMetrics
     computed_at: nowIso(),
     scope: { builder, rows: all.length },
     entries: all.length,
-    tabs: TAB_RULES.map((r) => ({ tab: r.tab, label: r.label, n: all.filter(r.test).length, rule: r.rule })),
+    tabs: TAB_RULES.map((r) => ({ tab: r.tab, label: r.label, layer: r.layer, n: all.filter(r.test).length, rule: r.rule })),
+    stage_reconciliation: (() => {
+      const sums = TAB_RULES.reduce((n, r) => n + all.filter(r.test).length, 0);
+      return {
+        rows: all.length,
+        sums_to: sums,
+        note:
+          sums === all.length
+            ? `${TAB_RULES.map((r) => `${all.filter(r.test).length} ${r.label.toLowerCase()}`).join(' + ')} = ${all.length} submissions. Every log is in exactly one stage: Layer0 Flagged decides, and Jason Status decides the rest.`
+            : `${sums} across the three stages against ${all.length} submissions — they should be equal, and this is a bug rather than a fact about the data.`,
+      };
+    })(),
     with_entry: {
       n: withEntry,
-      note: `${withEntry} of ${all.length} submissions carry a completed entry in Orchestrator Layer2 Review. The rest were submitted but the orchestrator has not written one back.`,
+      note: `${all.length - withEntry} of ${all.length} ${all.length - withEntry === 1 ? 'submission has' : 'submissions have'} no generated codex: Orchestrator Layer2 Review is empty. Layer 2 is the codex being written, not a review of it.`,
     },
     layer0: {
       flagged: flagged.length,
@@ -1509,9 +1773,16 @@ export async function codexMetrics(builder: string | null): Promise<CodexMetrics
     holds: {
       open: openHolds,
       completed: holds.length - openHolds,
+      /**
+       * Said plainly, because the number it is not part of is the one every
+       * other figure on this page uses. The Layer 0 parking table is a separate
+       * table with a different schema — no Jason Status, no Layer 2 review, no
+       * Codex Entry ID — holding submissions that never reached a builder
+       * table. They are counted here and nowhere else.
+       */
       note: holds.length
-        ? `${openHolds} ${openHolds === 1 ? 'submission is' : 'submissions are'} parked at the Layer 0 gate waiting on the builder\u2019s answers, and never reached a builder table. ${holds.length - openHolds} ${holds.length - openHolds === 1 ? 'has' : 'have'} since been answered.`
-        : 'Nothing is parked at the Layer 0 gate.',
+        ? `${openHolds} ${openHolds === 1 ? 'submission is' : 'submissions are'} parked at the Layer 0 gate waiting on the builder\u2019s answers, with no row in a builder table yet. ${holds.length - openHolds} ${holds.length - openHolds === 1 ? 'has' : 'have'} since been answered. Parked submissions are NOT in the ${all.length} counted above or in any stage \u2014 they are a different table and carry none of the fields those figures read.`
+        : `Nothing is parked at the Layer 0 gate. Parked submissions would not be in the ${all.length} counted above: they are a separate table and never reached a builder table.`,
     },
     approval_mix: approvals.map((a) => ({ approval: a, label: APPROVAL_LABELS[a], n: all.filter((e) => e.approval === a).length })).filter((r) => r.n > 0),
     approval_note:
@@ -1521,10 +1792,6 @@ export async function codexMetrics(builder: string | null): Promise<CodexMetrics
     narration_quality_note: qualities.length
       ? `From the Narration Quality field, on the ${all.filter((e) => e.narration_quality).length} of ${all.length} rows that carry one.`
       : 'No row carries a narration quality.',
-    median_days_to_approval: {
-      value: null,
-      note: 'Needs the time Jason set the status. The tables record Processed At for the pipeline\u2019s own run, not the moment of approval, so this cannot be measured until an approved-at field exists.',
-    },
   };
   metricsCache.set(key, { version: storeVersion, value });
   return value;
