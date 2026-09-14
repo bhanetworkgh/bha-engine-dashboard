@@ -51,6 +51,8 @@ import type {
   Freshness,
   Layer0Hold,
   CodexReconciliation,
+  CodexResync,
+  CodexResyncTable,
   Loop,
   LoopMetrics,
   LoopStatus,
@@ -1338,6 +1340,207 @@ function unreachedNote(unreached: string[]): string {
 }
 
 /**
+ * Pulls every Codex row from Airtable and makes this database match it.
+ *
+ * The thing this dashboard has never had. The reconciliation on page load only
+ * ever *removed* rows: nothing inserted a submission Airtable had and we did
+ * not, and nothing picked up a field changed there. A log approved in Airtable
+ * stayed "awaiting approval" here for as long as nobody re-pushed it, and one
+ * created without the engine pushing it never arrived at all.
+ *
+ * **Airtable wins every disagreement** (decision 2026-09-14, Destiny). It owns
+ * every field on these rows; this dashboard does not get to keep a value
+ * Airtable contradicts. The one case worth naming is a row whose own change
+ * never landed in Airtable — approved here while Airtable refused the write —
+ * because resyncing reverts it. Those are counted and named rather than
+ * quietly undone, and the write log keeps the original failure.
+ *
+ * Manual only, on a button. Not on load, not on a schedule: it reads every
+ * field of every row, transcripts included, and it deletes.
+ */
+export async function resyncCodex(actor = 'dashboard'): Promise<CodexResync> {
+  const started = Date.now();
+  const at = nowIso();
+  const live = await codex_.liveRecords();
+  const tables: CodexResyncTable[] = [];
+
+  if (!live.read.length) {
+    const blocked = live.failed.map((f) => ({ label: codex_.tableLabel(f.table), reason: f.reason }));
+    const note = `Nothing was read, so nothing was changed. ${reasonsOf(blocked)}`;
+    console.error(`codex resync: no table could be read — ${[...new Set(blocked.map((b) => b.reason))].join(' · ')}`);
+    return {
+      ran: false,
+      at,
+      ms: Date.now() - started,
+      tables: codex_.allTables().map((t) => ({
+        table: t.table,
+        label: t.label,
+        read: false,
+        reason: live.failed.find((f) => f.table === t.table)?.reason ?? 'not reached',
+        rows: null,
+        inserted: 0,
+        updated: 0,
+        unchanged: 0,
+        deleted: 0,
+      })),
+      inserted: 0,
+      updated: 0,
+      unchanged: 0,
+      deleted: 0,
+      overwritten: [],
+      note,
+    };
+  }
+
+  /**
+   * Rows carrying a change of our own that never reached Airtable, read before
+   * anything is written. After the resync their newest write line is this pass,
+   * so asking afterwards would find nothing.
+   */
+  const unlanded = new Map<string, string | null>();
+  {
+    const r = await db().query<{ record_id: string; natural_id: string | null }>(
+      `SELECT DISTINCT ON (record_id) record_id, natural_id, state FROM record_writes WHERE kind = 'codex' ORDER BY record_id, seq DESC`,
+    );
+    for (const row of r.rows as unknown as { record_id: string; natural_id: string | null; state: string }[]) {
+      if (row.state === 'failed' || row.state === 'duplicate') unlanded.set(row.record_id, row.natural_id);
+    }
+  }
+
+  const overwritten: { record_id: string; natural_id: string | null }[] = [];
+
+  for (const t of codex_.allTables()) {
+    const records = live.byTable.get(t.table);
+    if (!records) {
+      tables.push({
+        table: t.table,
+        label: t.label,
+        read: false,
+        reason: live.failed.find((f) => f.table === t.table)?.reason ?? 'not reached inside the time this is given',
+        rows: null,
+        inserted: 0,
+        updated: 0,
+        unchanged: 0,
+        deleted: 0,
+      });
+      continue;
+    }
+
+    const kind: mirror.MirrorKind = t.owner ? 'codex' : 'layer0';
+    let inserted = 0;
+    let updated = 0;
+    let unchanged = 0;
+
+    for (const rec of records) {
+      try {
+        const result = await mirror.upsert(
+          kind,
+          { record_id: rec.id, created_time: rec.createdTime ?? null, fields: rec.fields ?? {}, table_id: t.owner ? t.table : null, builder_id: t.owner },
+          'airtable',
+        );
+        if (result.inserted) inserted++;
+        else if (result.changed) updated++;
+        else unchanged++;
+        if (result.inserted || result.changed) {
+          // Dated as 'mirror', not 'engine': this database learned of the
+          // change when it looked, and has no idea when it actually happened
+          // in Airtable. The same honesty the boot reconcile uses.
+          await recordEngineWrite(kind, result.id, at, 'mirror');
+          if (result.changed && unlanded.has(rec.id)) overwritten.push({ record_id: rec.id, natural_id: unlanded.get(rec.id) ?? null });
+        }
+      } catch (e) {
+        // One unreadable row must not abandon the other 164. Named in the log.
+        console.error(`codex resync: ${t.label} ${rec.id} refused — ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    // Only within a table that was actually read: not read is never empty.
+    const held = await db().query<{ id: string; airtable_record_id: string }>(
+      `SELECT id, airtable_record_id FROM ${kind === 'codex' ? MIRROR.codex.table : 'engine_layer0_holds'}
+        WHERE airtable_record_id IS NOT NULL ${kind === 'codex' ? 'AND table_id = $1' : ''}`,
+      kind === 'codex' ? [t.table] : [],
+    );
+    const liveIdSet = new Set(records.map((r) => r.id));
+    const gone = held.rows.filter((row) => !liveIdSet.has(row.airtable_record_id)).map((row) => ({ pk: row.id, record: row.airtable_record_id }));
+    if (kind === 'codex') await removeCodexRows(gone, 'removed in Airtable; found missing by a resync', actor, at);
+    else if (gone.length) {
+      await db().query(`DELETE FROM engine_layer0_holds WHERE id = ANY($1::bigint[])`, [gone.map((g) => g.pk)]);
+      bumpVersion();
+    }
+
+    tables.push({ table: t.table, label: t.label, read: true, reason: null, rows: records.length, inserted, updated, unchanged, deleted: gone.length });
+  }
+
+  const sum = (k: 'inserted' | 'updated' | 'unchanged' | 'deleted') => tables.reduce((n, t) => n + t[k], 0);
+  const blocked = tables.filter((t) => !t.read);
+  const note = [
+    `${sum('inserted')} inserted, ${sum('updated')} updated, ${sum('deleted')} deleted, ${sum('unchanged')} already matching.`,
+    overwritten.length ? `${overwritten.length} of those updates overwrote a change made here that never reached Airtable — ${overwritten.map((o) => o.natural_id ?? o.record_id).join(', ')}.` : '',
+    blocked.length ? `${blocked.length} ${blocked.length === 1 ? 'table' : 'tables'} could not be read (${blocked.map((b) => b.label).join(', ')}), so nothing under ${blocked.length === 1 ? 'it' : 'them'} was touched. ${reasonsOf(blocked.map((b) => ({ label: b.label, reason: b.reason ?? 'no reason given' })))}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  forgetReconcile();
+
+  /**
+   * The whole outcome in one line, including what the two sides now hold.
+   * Deliberate: the person who can press this button and the person reading
+   * the logs are not always the same, and "do they agree now" has to be
+   * answerable from the log alone.
+   */
+  const after = await codexEntries();
+  const byStage = (stage: string) => after.filter((e) => e.stage === stage).length;
+  const byJason = (v: string) => after.filter((e) => (e.jason_status ?? '').trim().toLowerCase() === v).length;
+  console.log(
+    `codex resync by ${actor}: ${note} | after: ${after.length} submissions (Layer 0 counted separately above) — ${byStage('approved')} approved, ${byStage('awaiting')} awaiting, ${byStage('needs_input')} needs input; ` +
+      `Jason Status ${byJason('approved')} Approved, ${byJason('input added')} Input Added, ${byJason('pending')} Pending, ${after.filter((e) => !e.jason_status).length} empty | ` +
+      tables.map((t) => `${t.label} ${t.read ? `${t.rows} rows +${t.inserted}/~${t.updated}/-${t.deleted}` : `UNREAD (${t.reason})`}`).join(' · '),
+  );
+
+  return { ran: true, at, ms: Date.now() - started, tables, inserted: sum('inserted'), updated: sum('updated'), unchanged: sum('unchanged'), deleted: sum('deleted'), overwritten, note };
+}
+
+/**
+ * Removes rows Airtable no longer has, keeping each one whole first.
+ *
+ * The reconciliation on page load and the resync both end here, so a row can
+ * only ever leave this table one way and the deletion log has one shape. The
+ * record goes to `record_deletions` before the delete, in the same
+ * transaction: once both sides have let go, that log is the only place it can
+ * still be read.
+ */
+async function removeCodexRows(gone: { pk: string; record: string }[], reason: string, actor: string, at: string): Promise<void> {
+  if (!gone.length) return;
+  await withTransaction(async (client) => {
+    for (const g of gone) {
+      const r = await client.query<{ fields: Record<string, unknown>; builder_id: string; table_id: string | null }>(
+        `SELECT fields, builder_id, table_id FROM ${MIRROR.codex.table} WHERE id = $1`,
+        [g.pk],
+      );
+      const row = r.rows[0];
+      await client.query(
+        `INSERT INTO record_deletions (kind, record_id, natural_id, builder_id, table_id, reason, fields, actor, at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [
+          'codex',
+          g.record,
+          (row?.fields?.[codex_.FIELD.codexEntryId] as string) ?? (row?.fields?.[codex_.FIELD.submissionId] as string) ?? null,
+          row?.builder_id ?? null,
+          row?.table_id ?? null,
+          reason,
+          JSON.stringify(row?.fields ?? {}),
+          actor,
+          at,
+        ],
+      );
+      await client.query(`DELETE FROM ${MIRROR.codex.table} WHERE id = $1`, [g.pk]);
+    }
+  });
+  bumpVersion();
+}
+
+/**
  * What Airtable actually said — once per distinct reason, commonest first, and
  * bounded.
  *
@@ -1401,32 +1604,7 @@ async function runReconcile(): Promise<CodexReconciliation> {
   }
 
   if (gone.length) {
-    await withTransaction(async (client) => {
-      for (const g of gone) {
-        const r = await client.query<{ fields: Record<string, unknown>; builder_id: string; table_id: string | null }>(
-          `SELECT fields, builder_id, table_id FROM ${MIRROR.codex.table} WHERE id = $1`,
-          [g.pk],
-        );
-        const row = r.rows[0];
-        await client.query(
-          `INSERT INTO record_deletions (kind, record_id, natural_id, builder_id, table_id, reason, fields, actor, at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-          [
-            'codex',
-            g.record,
-            (row?.fields?.[codex_.FIELD.codexEntryId] as string) ?? (row?.fields?.[codex_.FIELD.submissionId] as string) ?? null,
-            row?.builder_id ?? null,
-            row?.table_id ?? null,
-            'removed in Airtable; found missing by the reconciliation on page load',
-            JSON.stringify(row?.fields ?? {}),
-            'reconciliation',
-            at,
-          ],
-        );
-        await client.query(`DELETE FROM ${MIRROR.codex.table} WHERE id = $1`, [g.pk]);
-      }
-    });
-    bumpVersion();
+    await removeCodexRows(gone, 'removed in Airtable; found missing by the reconciliation on page load', 'reconciliation', at);
     console.log(`codex reconcile: ${gone.length} row(s) no longer in Airtable, removed — ${gone.map((g) => g.record).join(', ')}`);
   }
 
@@ -1519,7 +1697,7 @@ async function rekey(kind: RecordKind, old: string, recordId: string): Promise<v
     console.log(`store: ${old} is now ${recordId} — carried ${e.rowCount ?? 0} event(s), ${n.rowCount ?? 0} note(s) and ${w} write log line(s) across`);
 }
 
-export async function recordEngineWrite(kind: mirror.MirrorKind, pk: number, at = nowIso()): Promise<void> {
+export async function recordEngineWrite(kind: mirror.MirrorKind, pk: number, at = nowIso(), via: 'engine' | 'mirror' = 'engine'): Promise<void> {
   const rk = RECORD_KIND[kind];
   if (!rk) return;
   try {
@@ -1528,7 +1706,7 @@ export async function recordEngineWrite(kind: mirror.MirrorKind, pk: number, at 
     if (!mr) return;
     if (mr.airtable_record_id) await rekey(rk, `row-${pk}`, mr.airtable_record_id);
     const m = mapRecord(rk, asRecord(mr), tableOf(rk, mr), mr.lane_id);
-    await recordState(rk, m, 'engine', at, await lastEventFor(rk, idOf(mr)));
+    await recordState(rk, m, via, at, await lastEventFor(rk, idOf(mr)));
     bumpVersion();
   } catch (e) {
     console.log(`store: could not record the status of ${kind} row ${pk} — ${e instanceof Error ? e.message : String(e)}`);

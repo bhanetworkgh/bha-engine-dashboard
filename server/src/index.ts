@@ -505,6 +505,17 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
      * nothing about the loop, and it must never be reachable by a save that
      * happens to carry the wrong body.
      */
+    /**
+     * Pull every Codex row from Airtable and make this database match it.
+     *
+     * Manual only — never on load, never scheduled — because it reads every
+     * field of every row and it deletes. Slow by nature: the client gives it
+     * its own timeout.
+     */
+    if (p === '/api/codex/resync') {
+      return send(res, 200, await store.resyncCodex(sessionInfo(req).email));
+    }
+
     const dup = p.match(/^\/api\/loops\/([^/]+)\/duplicate$/);
     if (dup) {
       try {

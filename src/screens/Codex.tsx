@@ -1,7 +1,19 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { deleteCodexEntry, getCodexDetail, getCodexEntries, getRecordMetrics, setCodexStatus, type CodexEntry, type CodexEntryDetail, type CodexMetrics, type CodexTab } from '../data';
+import {
+  deleteCodexEntry,
+  getCodexDetail,
+  getCodexEntries,
+  getRecordMetrics,
+  resyncCodex as resyncCodexFromAirtable,
+  setCodexStatus,
+  type CodexEntry,
+  type CodexEntryDetail,
+  type CodexMetrics,
+  type CodexResync,
+  type CodexTab,
+} from '../data';
 import type { RecordColumn } from '../components/ui';
 import {
   Bars,
@@ -33,6 +45,68 @@ import {
   useToast,
   writeWarning,
 } from '../components/ui';
+
+/**
+ * What one resync did, per table.
+ *
+ * Shown rather than toasted because a run that inserted four rows and deleted
+ * one has changed what the page holds, and a person needs to see which tables
+ * it touched — and, more importantly, which it could not read. A table that
+ * refused is not an empty table, and this is where that distinction is made
+ * visible rather than assumed.
+ */
+function ResyncResult({ result, onDismiss }: { result: CodexResync; onDismiss: () => void }) {
+  const bad = !result.ran || result.tables.some((t) => !t.read);
+  return (
+    <div className="mx-6 mb-4 md:mx-8">
+      <div className={`card px-5 py-4 ${bad ? 'bg-failing-soft' : ''}`}>
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <div className="text-[13px] font-medium text-ink">
+            Resync from Airtable — {(result.ms / 1000).toFixed(1)}s
+          </div>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onDismiss}>
+            Dismiss
+          </button>
+        </div>
+        <p className={`mt-1.5 text-[12.5px] leading-relaxed ${bad ? 'text-failing' : 'text-dim'}`}>{result.note}</p>
+        <div className="scroll-thin mt-3 overflow-x-auto">
+          <table className="w-full border-collapse text-[12px]">
+            <thead>
+              <tr className="text-left text-[11px] text-faint">
+                <th className="py-1 pr-3 font-medium">table</th>
+                <th className="py-1 pr-3 font-medium">in Airtable</th>
+                <th className="py-1 pr-3 font-medium">inserted</th>
+                <th className="py-1 pr-3 font-medium">updated</th>
+                <th className="py-1 pr-3 font-medium">deleted</th>
+                <th className="py-1 pr-3 font-medium">already matching</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.tables.map((t) => (
+                <tr key={t.table} className="border-t border-line">
+                  <td className="py-1.5 pr-3 text-ink">{t.label}</td>
+                  {t.read ? (
+                    <>
+                      <td className="tabular py-1.5 pr-3 text-dim">{t.rows}</td>
+                      <td className={`tabular py-1.5 pr-3 ${t.inserted ? 'text-ink' : 'text-faint'}`}>{t.inserted}</td>
+                      <td className={`tabular py-1.5 pr-3 ${t.updated ? 'text-ink' : 'text-faint'}`}>{t.updated}</td>
+                      <td className={`tabular py-1.5 pr-3 ${t.deleted ? 'text-failing' : 'text-faint'}`}>{t.deleted}</td>
+                      <td className="tabular py-1.5 pr-3 text-faint">{t.unchanged}</td>
+                    </>
+                  ) : (
+                    <td colSpan={5} className="py-1.5 pr-3 text-failing">
+                      not read, so nothing under it was touched — {t.reason}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Codex entries, read from BHA Submissions & Logs — one table per builder.
@@ -663,6 +737,8 @@ export default function Codex() {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  const [resyncing, setResyncing] = useState(false);
+  const [resync, setResync] = useState<CodexResync | null>(null);
   const { toast, setToast } = useToast();
   const metrics = useData((query) => getRecordMetrics('codex', query, builder), [builder, tick]);
 
@@ -670,32 +746,63 @@ export default function Codex() {
     if (loaded) setEntries(loaded.entries);
   }, [loaded]);
 
+  /**
+   * Pull from Airtable and make this database match it.
+   *
+   * The whole outcome is shown rather than a toast: a run that inserts four
+   * rows and deletes one has changed what is on the page, and "done" would not
+   * say which. The page then refetches, so what is on screen is what the
+   * resync left behind.
+   */
+  async function runResync() {
+    setResyncing(true);
+    try {
+      const r = await resyncCodexFromAirtable();
+      setResync(r);
+      setTick((n) => n + 1);
+      const fresh = await getCodexEntries({ lane: 'all' });
+      setEntries(fresh.entries);
+      if (!r.ran) setToast({ text: 'Airtable could not be read, so nothing changed.', tone: 'failing' });
+    } catch (e) {
+      setToast({ text: e instanceof Error ? e.message : 'The resync did not run.', tone: 'failing' });
+    } finally {
+      setResyncing(false);
+    }
+  }
+
   const scoped = useMemo(() => entries.filter((e) => builder === 'all' || e.builder_id === builder), [entries, builder]);
   const rows = useMemo(() => scoped.filter((e) => inTab(e, tab)).filter((e) => matches(e, q.trim())), [scoped, tab, q]);
   const paged = usePaged(rows, `${builder}|${tab}|${q.trim()}`);
 
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
   const m = metrics.data;
-  const rule = m?.tabs.find((t) => t.tab === tab)?.rule;
   const holds = loaded.layer0_holds.filter((h) => (builder === 'all' ? true : h.builder_id === builder) && h.open);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      <PageHeader title="Codex entries" subtitle="Every session BHA has logged, as the orchestrator wrote it up" />
+      <PageHeader
+        title="Codex entries"
+        subtitle="Every session BHA has logged, as the orchestrator wrote it up"
+        right={
+          <button type="button" onClick={() => void runResync()} disabled={resyncing} className="btn btn-primary gap-1.5">
+            {resyncing ? 'Reading Airtable…' : 'Resync from Airtable'}
+          </button>
+        }
+      />
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 px-6 pb-3 md:px-8">
           <RowsLine freshness={loaded.freshness} writes={false} />
-          {/* What the pass against Airtable did on this load. Silent when it
-              found nothing and everything answered; a removal or a table it
-              could not read is worth a line, because both change what is on
-              screen. */}
-          {(loaded.reconciliation.removed > 0 || loaded.reconciliation.blocked.length > 0 || !loaded.reconciliation.ran) && (
-            <p className={`mt-1 text-[11.5px] leading-snug ${loaded.reconciliation.blocked.length || !loaded.reconciliation.ran ? 'text-degraded' : 'text-faint'}`}>
-              {loaded.reconciliation.note}
-            </p>
-          )}
+          {/*
+            The reconciliation that runs on load no longer says anything here.
+            It only ever removes rows Airtable has lost, it keeps a full line in
+            the server log including Airtable's own reason, and a standing
+            yellow banner for a background check was furniture on a page whose
+            rows were never in doubt (decision 2026-09-14, Destiny).
+          */}
         </div>
+
+        {resync && <ResyncResult result={resync} onDismiss={() => setResync(null)} />}
 
         <CodexMetricsPanel metrics={m} loading={metrics.status === 'loading'} error={metrics.error} view={builder} />
 
@@ -715,7 +822,6 @@ export default function Codex() {
               <SearchBox value={q} onChange={setQ} placeholder="Search entries" />
             </div>
           </div>
-          {rule && <p className="text-[11.5px] leading-snug text-faint">{rule}</p>}
           {tab === 'needs_input' && holds.length > 0 && (
             <p className="text-[11.5px] leading-snug text-faint">
               {holds.length} further {holds.length === 1 ? 'submission is' : 'submissions are'} parked at the completeness check with no row in a builder table yet

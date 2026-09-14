@@ -25,7 +25,7 @@
  * pipeline's own and is never written from here.
  */
 import * as airtable from './airtable';
-import { CODEX_BASE, CODEX_LAYER0, CODEX_TABLES, codexTableById } from './sources';
+import { CODEX_BASE, CODEX_LAYER0, CODEX_TABLES, codexTableById, type AtRecord } from './sources';
 
 /** Every field this module names, spelled as Airtable spells it. */
 export const FIELD = {
@@ -190,6 +190,50 @@ export async function liveIds(): Promise<LiveIds> {
     try {
       const ids = await airtable.listRecordIds(airtable.SUBMISSIONS_BASE_ID, t.table, READ_TIMEOUT_MS);
       byTable.set(t.table, new Set(ids));
+      read.push(t.table);
+    } catch (e) {
+      failed.push({ table: t.table, reason: why(e).reason });
+    }
+  }
+  return { byTable, read, failed, unreached };
+}
+
+/** Every table a resync or a reconciliation walks: the six builder tables, then Layer 0. */
+export function allTables(): { table: string; label: string; owner: string | null }[] {
+  return [...CODEX_TABLES.map((t) => ({ table: t.table, label: t.label, owner: t.owner })), { table: LAYER0.table, label: LAYER0.label, owner: null }];
+}
+
+/**
+ * Every record in every table, whole, for a resync.
+ *
+ * A different budget from `liveIds` on purpose. That one runs while a page
+ * loads and is bounded to seconds; this one runs because somebody pressed a
+ * button and is waiting for an answer, so it is allowed to take the time seven
+ * tables of full records actually take.
+ */
+const RESYNC_READ_TIMEOUT_MS = 20_000;
+const RESYNC_BUDGET_MS = 120_000;
+
+export interface LiveRecords {
+  byTable: Map<string, AtRecord[]>;
+  read: string[];
+  failed: { table: string; reason: string }[];
+  unreached: string[];
+}
+
+export async function liveRecords(): Promise<LiveRecords> {
+  const byTable = new Map<string, AtRecord[]>();
+  const read: string[] = [];
+  const failed: { table: string; reason: string }[] = [];
+  const unreached: string[] = [];
+  const started = Date.now();
+  for (const t of allTables()) {
+    if (Date.now() - started > RESYNC_BUDGET_MS) {
+      unreached.push(t.table);
+      continue;
+    }
+    try {
+      byTable.set(t.table, await airtable.listRecords(airtable.SUBMISSIONS_BASE_ID, t.table, RESYNC_READ_TIMEOUT_MS));
       read.push(t.table);
     } catch (e) {
       failed.push({ table: t.table, reason: why(e).reason });

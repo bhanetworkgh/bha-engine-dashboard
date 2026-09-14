@@ -24,6 +24,7 @@ import type {
   CodexData,
   CodexEntry,
   CodexEntryDetail,
+  CodexResync,
   ClientsData,
   CommercialData,
   EngineHealthData,
@@ -185,6 +186,18 @@ export function saveLoop(id: string, edit: LoopEdit): Promise<Loop> {
  */
 export function removeLoopDuplicate(id: string): Promise<Loop> {
   return api<Loop>(`/api/loops/${encodeURIComponent(id)}/duplicate`, { method: 'POST', timeoutMs: 60_000 });
+}
+
+/**
+ * Pulls every Codex row from Airtable and makes the dashboard match it:
+ * inserts what Airtable has and we do not, updates what changed there, removes
+ * what is gone. Airtable wins every disagreement.
+ *
+ * Slow on purpose — it reads every field of every row — so it gets its own
+ * timeout rather than the default.
+ */
+export function resyncCodex(): Promise<CodexResync> {
+  return api<CodexResync>('/api/codex/resync', { method: 'POST', timeoutMs: 180_000 });
 }
 
 /** Sets Jason Status on one submission: Approved or Pending. */
