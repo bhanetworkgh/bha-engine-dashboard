@@ -1805,8 +1805,13 @@ export async function loopMetrics(builder: string | null): Promise<LoopMetrics> 
   return value;
 }
 
+/**
+ * Short on purpose. It is one of three footnotes that have to sit at the same
+ * height, and the long version said three times over that this is the gate's
+ * verdict rather than ours.
+ */
 const LAYER0_DEFINITION =
-  'Layer 0 is the completeness gate the submission pipeline runs before a log reaches review. It sets Layer0 Flagged on the row and lists what it found absent in Layer0 Missing. This is the gate\u2019s own verdict, read from the row \u2014 not a check this dashboard invents.';
+  'The check\u2019s own verdict, from Layer0 Flagged and Layer0 Missing.';
 
 const APPROVAL_LABELS: Record<CodexApproval, string> = {
   approved: 'Approved',
@@ -1816,34 +1821,40 @@ const APPROVAL_LABELS: Record<CodexApproval, string> = {
 };
 
 /**
- * The three stages, one per layer, in the order a log passes through them.
+ * The three stages, one per layer.
  *
  * Mutually exclusive by one rule, applied in `mapCodex`: Layer0 Flagged wins,
  * and otherwise Jason Status decides. So every submission is in exactly one
  * stage and the three sum to the total — which the row that came before did
  * not, because it asked two different questions at once.
+ *
+ * Ordered approved first (decision 2026-09-14, Destiny), which is where almost
+ * every log ends up and so where a reader starts. The card that shows the split
+ * reads the same order, so the page states one order rather than two. The
+ * `layer` beside each is the step's name, not its number — "Layer 0" told a
+ * reader nothing.
  */
 const TAB_RULES: { tab: CodexTab; label: string; layer: string; rule: string; test: (e: CodexEntry) => boolean }[] = [
   {
-    tab: 'needs_input',
-    label: 'Needs input',
-    layer: 'Layer 0',
-    rule: 'Layer0 Flagged is ticked: the completeness gate found something missing and the builder has to fill it in. This wins over Jason Status, because the gate runs first. Each row names what Layer0 Missing says it lacks.',
-    test: (e) => e.stage === 'needs_input',
+    tab: 'approved',
+    label: 'Approved',
+    layer: 'Builder codex',
+    rule: 'The completeness check did not flag it and Jason Status is Approved. Through, and the builder codex stands.',
+    test: (e) => e.stage === 'approved',
   },
   {
     tab: 'awaiting',
     label: 'Awaiting approval',
-    layer: 'Layer 1',
-    rule: 'Not flagged by Layer 0, and Jason Status is not Approved. "Input Added" sits here too — Jason asking a question happens while the log waits, and the builder answers in thread. An empty status sits here as well: nothing distinguishes it from a log he has not reached.',
+    layer: 'Pending review',
+    rule: 'Not flagged by the completeness check, and Jason Status is not Approved. "Input Added" sits here too — Jason asking a question happens while the log waits, and the builder answers in thread. An empty status sits here as well: nothing distinguishes it from a log he has not reached.',
     test: (e) => e.stage === 'awaiting',
   },
   {
-    tab: 'approved',
-    label: 'Approved',
-    layer: 'Layer 2',
-    rule: 'Not flagged by Layer 0, and Jason Status is Approved. Through and approved.',
-    test: (e) => e.stage === 'approved',
+    tab: 'needs_input',
+    label: 'Needs input',
+    layer: 'Completeness check',
+    rule: 'Layer0 Flagged is ticked: the completeness check found something missing and the builder has to fill it in. This wins over Jason Status, because that check runs first. Each row names what Layer0 Missing says it lacks.',
+    test: (e) => e.stage === 'needs_input',
   },
 ];
 
@@ -1897,19 +1908,19 @@ export async function codexMetrics(builder: string | null): Promise<CodexMetrics
         sums_to: sums,
         note:
           sums === all.length
-            ? `${TAB_RULES.map((r) => `${all.filter(r.test).length} ${r.label.toLowerCase()}`).join(' + ')} = ${all.length} submissions. Every log is in exactly one stage: Layer0 Flagged decides, and Jason Status decides the rest.`
+            ? `${TAB_RULES.map((r) => all.filter(r.test).length).join(' + ')} = ${all.length}, in the order above and each log in exactly one: Layer0 Flagged decides, then Jason Status.`
             : `${sums} across the three stages against ${all.length} submissions — they should be equal, and this is a bug rather than a fact about the data.`,
       };
     })(),
     with_entry: {
       n: withEntry,
-      note: `${all.length - withEntry} of ${all.length} ${all.length - withEntry === 1 ? 'submission has' : 'submissions have'} no generated codex: Orchestrator Layer2 Review is empty. Layer 2 is the codex being written, not a review of it.`,
+      note: `${all.length - withEntry} of ${all.length} ${all.length - withEntry === 1 ? 'has' : 'have'} none: Orchestrator Layer2 Review is empty.`,
     },
     layer0: {
       flagged: flagged.length,
       clean: all.length - flagged.length,
       definition: LAYER0_DEFINITION,
-      note: `${flagged.length} of ${all.length} rows are flagged. Layer 0 and Jason Status are two different axes: a row can be approved and still carry a Layer 0 flag, and both are shown on it.`,
+      note: `${flagged.length} of ${all.length} rows are flagged. The check and Jason Status are two different axes: a row can be approved and still carry a flag, and both are shown on it.`,
     },
     missing_mix: [...missing.entries()].map(([element, n]) => ({ element: missingLabel(element), n })).sort((a, b) => b.n - a.n || a.element.localeCompare(b.element)),
     holds: {
@@ -1922,9 +1933,9 @@ export async function codexMetrics(builder: string | null): Promise<CodexMetrics
        * Codex Entry ID — holding submissions that never reached a builder
        * table. They are counted here and nowhere else.
        */
-      note: holds.length
-        ? `${openHolds} ${openHolds === 1 ? 'submission is' : 'submissions are'} parked at the Layer 0 gate waiting on the builder\u2019s answers, with no row in a builder table yet. ${holds.length - openHolds} ${holds.length - openHolds === 1 ? 'has' : 'have'} since been answered. Parked submissions are NOT in the ${all.length} counted above or in any stage \u2014 they are a different table and carry none of the fields those figures read.`
-        : `Nothing is parked at the Layer 0 gate. Parked submissions would not be in the ${all.length} counted above: they are a separate table and never reached a builder table.`,
+      note: openHolds
+        ? `${openHolds} more ${openHolds === 1 ? 'is' : 'are'} parked, not counted here.`
+        : 'Nothing is parked; parked rows are never counted here.',
     },
     approval_mix: approvals.map((a) => ({ approval: a, label: APPROVAL_LABELS[a], n: all.filter((e) => e.approval === a).length })).filter((r) => r.n > 0),
     approval_note:
@@ -1932,8 +1943,8 @@ export async function codexMetrics(builder: string | null): Promise<CodexMetrics
     per_builder_per_week: perBuilder,
     narration_quality_mix: qualities.map((q) => ({ quality: q, n: all.filter((e) => e.narration_quality === q).length })),
     narration_quality_note: qualities.length
-      ? `From the Narration Quality field, on the ${all.filter((e) => e.narration_quality).length} of ${all.length} rows that carry one.`
-      : 'No row carries a narration quality.',
+      ? `From the Narration Quality field, on the ${all.filter((e) => e.narration_quality).length} of ${all.length} rows carrying one. Best first: Excellent, Great, Good.`
+      : 'No row carries a narration quality. The field is set by the review step, so an empty one means no review has run.',
   };
   metricsCache.set(key, { version: storeVersion, value });
   return value;

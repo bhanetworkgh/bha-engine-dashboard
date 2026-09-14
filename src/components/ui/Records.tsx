@@ -57,8 +57,28 @@ export function CountUp({ value, duration = 720, replayKey }: { value: number; d
   return <>{shown}</>;
 }
 
-/** A headline count with its label; animates on load. */
-export function CountCell({ label, value, tone = 'default', hint, replayKey }: { label: string; value: number; tone?: 'default' | 'accent' | 'degraded' | 'failing' | 'dim'; hint?: ReactNode; replayKey?: string | number }) {
+/**
+ * A headline count with its label; animates on load.
+ *
+ * `hintMinLines` is the counterpart of MetricCard's `noteMinLines`: a floor
+ * under the footnote so a row of these cells is one block of text rather than
+ * four of different depths. Set it to the longest hint in the row.
+ */
+export function CountCell({
+  label,
+  value,
+  tone = 'default',
+  hint,
+  hintMinLines,
+  replayKey,
+}: {
+  label: string;
+  value: number;
+  tone?: 'default' | 'accent' | 'degraded' | 'failing' | 'dim';
+  hint?: ReactNode;
+  hintMinLines?: number;
+  replayKey?: string | number;
+}) {
   const toneClass = tone === 'accent' ? 'text-accent-ink' : tone === 'degraded' ? 'text-degraded' : tone === 'failing' ? 'text-failing' : tone === 'dim' ? 'text-dim' : 'text-ink';
   return (
     <StatCell>
@@ -67,7 +87,12 @@ export function CountCell({ label, value, tone = 'default', hint, replayKey }: {
         <div className={`font-display tabular mt-1 text-[28px] leading-none ${toneClass}`}>
           <CountUp value={value} replayKey={replayKey} />
         </div>
-        {hint && <div className="mt-1.5 text-[11.5px] leading-snug text-faint">{hint}</div>}
+        {hint && (
+          // 1.375 is leading-snug; the floor is that many lines of it.
+          <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={hintMinLines ? { minHeight: `${hintMinLines * 1.375}em` } : undefined}>
+            {hint}
+          </div>
+        )}
       </div>
     </StatCell>
   );
