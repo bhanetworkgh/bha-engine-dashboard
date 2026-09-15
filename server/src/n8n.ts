@@ -165,6 +165,15 @@ export async function execution(id: string): Promise<N8nExecution | null> {
  */
 export interface ExecutionRead {
   executions: N8nExecution[];
+  /**
+   * What n8n says it holds in total, from the `count` on the first page.
+   *
+   * Kept so a pass can check itself: if this database ends up holding fewer
+   * executions than n8n reports, something was not read, and saying so beats
+   * a total that looks plausible. Holding *more* is expected and fine — rows
+   * stay here after n8n loses them, which is why they are copied at all.
+   */
+  reported: number | null;
   /** True where the walk ran out of pages before reaching `afterId` — there is more above it. */
   truncated: boolean;
   /** True where a page failed to move below the previous one, which means the cursor is not working. */
@@ -178,13 +187,15 @@ export async function executionsAfter(afterId: number, maxPages = MAX_PAGES): Pr
   let cursor: string | undefined;
   let lowest = Number.POSITIVE_INFINITY;
   let pages = 0;
+  let reported: number | null = null;
 
   for (; pages < maxPages; pages++) {
     const q = new URLSearchParams({ limit: String(PAGE) });
     if (cursor) q.set('cursor', cursor);
-    const r = await call<{ data: N8nExecution[]; nextCursor?: string | null }>(`/executions?${q.toString()}`);
+    const r = await call<{ data: N8nExecution[]; nextCursor?: string | null; count?: number }>(`/executions?${q.toString()}`);
     const rows = r.data ?? [];
-    if (rows.length === 0) return { executions: out, truncated: false, stalled: false, pages: pages + 1 };
+    if (reported === null && typeof r.count === 'number') reported = r.count;
+    if (rows.length === 0) return { executions: out, truncated: false, stalled: false, pages: pages + 1, reported };
 
     let crossed = false;
     let advanced = false;
@@ -205,16 +216,16 @@ export async function executionsAfter(afterId: number, maxPages = MAX_PAGES): Pr
         out.push(e);
       }
     }
-    if (crossed) return { executions: out, truncated: false, stalled: false, pages: pages + 1 };
-    if (!advanced) return { executions: out, truncated: true, stalled: true, pages: pages + 1 };
+    if (crossed) return { executions: out, truncated: false, stalled: false, pages: pages + 1, reported };
+    if (!advanced) return { executions: out, truncated: true, stalled: true, pages: pages + 1, reported };
 
     cursor = r.nextCursor ?? undefined;
-    if (!cursor) return { executions: out, truncated: false, stalled: false, pages: pages + 1 };
+    if (!cursor) return { executions: out, truncated: false, stalled: false, pages: pages + 1, reported };
   }
 
   // Ran out of pages before reaching the watermark. The caller still commits
   // what it read — and says so, rather than pretending it saw everything.
-  return { executions: out, truncated: true, stalled: false, pages };
+  return { executions: out, truncated: true, stalled: false, pages, reported };
 }
 
 /**

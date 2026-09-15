@@ -99,6 +99,10 @@ export interface SyncResult {
   highest: number | null;
   pages: number;
   full: boolean;
+  /** How many executions this database holds after the pass. */
+  held: number;
+  /** How many n8n says it holds. Null where it did not say. */
+  reported: number | null;
   note: string;
   /** Anything that makes the pass less than complete: a stalled cursor, a page ceiling, a failed read. */
   warning: string | null;
@@ -196,7 +200,7 @@ async function put(rows: n8n.N8nExecution[], name: (id: string, fallback: string
 export async function sync(full = false): Promise<SyncResult> {
   const started = Date.now();
   const at = nowIso();
-  const blank: SyncResult = { ran: false, at, ms: 0, read: 0, inserted: 0, updated: 0, resolved: 0, open: 0, highest: null, pages: 0, full, note: '', warning: null };
+  const blank: SyncResult = { ran: false, at, ms: 0, read: 0, inserted: 0, updated: 0, resolved: 0, open: 0, highest: null, pages: 0, full, held: 0, reported: null, note: '', warning: null };
   if (!n8n.n8nConfigured()) {
     return { ...blank, note: `${n8n.N8N_API_VAR} is not set on this server, so no execution has ever been read.` };
   }
@@ -253,16 +257,31 @@ export async function sync(full = false): Promise<SyncResult> {
     }
   }
 
-  const after = await query<{ open: string; highest: string | null }>(
+  const after = await query<{ open: string; highest: string | null; held: string }>(
     `SELECT count(*) FILTER (WHERE status NOT IN ('success','error','crashed','canceled','unknown'))::text AS open,
-            max(execution_id)::text AS highest
+            max(execution_id)::text AS highest,
+            count(*)::text AS held
        FROM engine_execution_runs`,
   );
   const open = Number(after.rows[0]?.open ?? 0);
   const highest = after.rows[0]?.highest ? Number(after.rows[0].highest) : null;
+  const heldNow = Number(after.rows[0]?.held ?? 0);
+
+  /**
+   * The pass checking itself against n8n's own total.
+   *
+   * Holding **more** than n8n reports is expected and is the point: rows stay
+   * here after n8n stops returning them. Holding **fewer** means something was
+   * not read, and that is worth saying rather than leaving a plausible-looking
+   * total on the page. Only a full read can make the comparison — an
+   * incremental one has read only the top of the list.
+   */
+  const shortBy = full && read.reported !== null && heldNow < read.reported ? read.reported - heldNow : 0;
 
   const warning =
-    read.stalled
+    shortBy
+      ? `n8n reports holding ${read.reported} executions and this database holds ${heldNow} after reading everything — ${shortBy} short. Something was not read; the figures below are of what is here, not of what ran.`
+      : read.stalled
       ? `n8n's paging did not advance: page ${read.pages} of this read came back no older than the one before it, so this pass saw only what it could reach. Nothing was double counted — rows are keyed on the execution id — but there may be executions this database has not seen.`
       : read.truncated
         ? `The read stopped at its ${read.pages}-page ceiling before reaching the ids already held, so there may be more above what was stored. The next pass continues from the highest id stored.`
@@ -276,10 +295,11 @@ export async function sync(full = false): Promise<SyncResult> {
 
   const note =
     `${read.executions.length} read from n8n over ${read.pages} page${read.pages === 1 ? '' : 's'}, ` +
-    `${inserted} new, ${updated} already held${resolved ? `, ${resolved} that had not finished before now resolved` : ''}${open ? `, ${open} still running` : ''}.`;
+    `${inserted} new, ${updated} already held${resolved ? `, ${resolved} that had not finished before now resolved` : ''}${open ? `, ${open} still running` : ''}. ` +
+    `This database now holds ${heldNow}${read.reported === null ? '' : `; n8n reports holding ${read.reported}`}.`;
   if (read.executions.length || resolved || full) console.log(`executions ${full ? 'backfill' : 'sync'}: ${note}${warning ? ` ${warning}` : ''}`);
 
-  return { ran: true, at, ms: Date.now() - started, read: read.executions.length, inserted, updated, resolved, open, highest, pages: read.pages, full, note, warning };
+  return { ran: true, at, ms: Date.now() - started, read: read.executions.length, inserted, updated, resolved, open, highest, pages: read.pages, full, held: heldNow, reported: read.reported, note, warning };
 }
 
 /* ------------------------------------------------------------------ poll */

@@ -4575,3 +4575,52 @@ Not done:   The figures above are the rig's, against a replay shaped like the
             ("3,895 executions held, from 2026-09-12 · newest id 3931").
             The Engine Registry's clipped Workflow column, reported at 11:55 and
             again at 13:40, is still reported and still not fixed.
+
+## 2026-09-15 14:45 — The backfill checks itself against n8n's own total
+
+Intent:     Report the production backfill against the brief's verification
+            targets, and reconcile a difference rather than round past it.
+
+Problem:    The production backfill logged **"4009 read from n8n over 21 pages,
+            4009 new, 0 already held"** at 14:27:52. n8n's own API, read through
+            MCP minutes either side, reports `count: 3973` with the newest id
+            4009, 51 failures and 31 workflows. So the rows stored exceed what
+            n8n says it holds by 36 — 0.9%, not a multiple of anything, and not
+            the old fault (every row is a unique primary key, and three full
+            re-reads in the rig left the table unchanged). The list endpoint
+            plainly has gaps in its id sequence — 3421 then 3427 on one page —
+            so "no gaps, 4,009 ids" is unlikely; the likeliest readings are that
+            the MCP connection and the dashboard's instance API key do not see
+            the same set, or that n8n's `count` excludes rows its list still
+            returns. Neither is checkable from this sandbox: the Render Postgres
+            MCP cannot connect (`FATAL: SSL/TLS required`).
+
+Fix:        Make the server answer the question itself, every time, instead of
+            me guessing at it. `n8n.executionsAfter` now keeps the `count` n8n
+            returns on the first page, and a full read compares it with what the
+            database holds afterwards. Holding **more** than n8n reports is
+            expected and silent — rows stay here after n8n stops returning them,
+            which is the whole reason they are copied. Holding **fewer** is a
+            warning, named in the log, in the backfill toast and on the page:
+            "n8n reports holding N and this database holds M after reading
+            everything — X short. Something was not read."
+
+Decision:   That check is the cheap general form of this morning's bug. A pass
+            that had read 200 of 3,673 would have said so in one line instead of
+            presenting a total that looked plausible. It runs only on a full
+            read, because an incremental pass has deliberately read only the top
+            of the list.
+
+Verified:   In the rig: a clean backfill reads "holds 3895; n8n reports holding
+            3895" with no warning; after n8n itself drops 500, the database holds
+            3,895 against a reported 3,395 and stays silent, which is the
+            expected direction; and a deliberately crippled read stores 200 of
+            3,395 and warns "3195 short. Something was not read". The replay now
+            answers `count`, as the real API does, so the check is tested against
+            the behaviour rather than against an assumption.
+
+Not done:   The 36-row difference itself is still open. The next production
+            backfill after this deploy prints both numbers in one line, which
+            settles whether this database is ahead of n8n's count (fine) or
+            behind it (not fine), without anybody having to read two systems and
+            subtract.
