@@ -967,6 +967,35 @@
     }
   }
 
+  /*
+    A heading row inside a table: the client a run of lanes belongs to, on the
+    Clients page. It is not a record and never opens anything — it is quieter
+    than a row, sits on the raised surface so the lanes under it read as
+    nested, and keeps no row height, so one client with one lane costs one line
+    rather than a whole repeated table.
+  */
+  tbody tr.row-group {
+    background: var(--raised);
+  }
+  tbody tr.row-group:hover {
+    background: var(--raised);
+  }
+  tbody tr.row-group td {
+    padding-top: 7px;
+    padding-bottom: 7px;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  tbody tr.row-group:first-child td {
+    border-top: 0;
+  }
+  @media (min-width: 768px) {
+    .rows-1 tbody tr.row-group,
+    .rows-2 tbody tr.row-group {
+      height: auto;
+    }
+  }
+
   .td-actions {
     position: sticky;
     right: 0;

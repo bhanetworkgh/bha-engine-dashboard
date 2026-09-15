@@ -33,6 +33,7 @@
  *     fails is recorded on the loop, never rolled back.
  */
 import { getMeta, nowIso, setMetaIfAbsent, today } from './db';
+import * as airtable from './airtable';
 import * as codex_ from './codex';
 import * as loops_ from './loops';
 import * as mirror from './mirror';
@@ -51,8 +52,8 @@ import type {
   Freshness,
   Layer0Hold,
   CodexReconciliation,
-  CodexResync,
-  CodexResyncTable,
+  Resync,
+  ResyncTable,
   Loop,
   LoopMetrics,
   LoopStatus,
@@ -93,6 +94,7 @@ import {
   canonicalPerson,
   codexSummary,
   codexTableById,
+  incompleteFields,
   isoWeek,
   loopTable,
   loopTableById,
@@ -118,7 +120,10 @@ export const STATUSES: Record<RecordKind, readonly string[]> = {
   loops: ['open', 'in progress', 'closed'],
   // Codex: Jason Status, lower-cased. 'unset' is a state a row can be in but never one this dashboard writes.
   codex: ['approved', 'pending', 'input added'],
-  patterns: ['draft', 'canonical'],
+  // Patterns are read-only from here (2026-09-15, Destiny): pattern_status was
+  // deleted from the Build Patterns base, so there is no status to set and a
+  // write would be to a column that no longer exists.
+  patterns: [],
   commercial: ['INCUBATE', 'Research-First', 'Media-Ready'],
   // The three telemetry kinds are read-only: the engine writes them, this
   // dashboard reads them. No status is settable from here.
@@ -353,7 +358,10 @@ function statusOf(m: Mapped): string {
     case 'codex':
       return m.obj.approval;
     case 'patterns':
-      return m.obj.status;
+      // pattern_status is gone from the base, so a pattern has no state to move
+      // between. The ledger still records the one fact left — that this
+      // database has seen the row — and never writes a second event for it.
+      return 'held';
     case 'commercial':
       return m.obj.readiness_state ?? 'unset';
     case 'ns':
@@ -904,10 +912,14 @@ async function observations(kind: RecordKind, metric: string): Promise<{ at: str
   return r.rows;
 }
 
-/** The two figures a trend needs history for. Observed once a boot, after reconcile. */
+/**
+ * The figures a trend needs history for. Observed once a boot, after reconcile.
+ *
+ * The canonical-share series that stood here is gone with `pattern_status`
+ * (2026-09-15). The `observations` rows it already wrote are left in the table
+ * — nothing here drops history — they are simply neither added to nor read.
+ */
 export async function recordObservations(): Promise<void> {
-  const p = await patternMetrics();
-  if (p.scope.rows) await observe('patterns', 'canonical_share', (p.canonical / p.scope.rows) * 100);
   const c = await commercialMetrics();
   if (c.unresolved_questions.value !== null) await observe('commercial', 'unresolved_questions', c.unresolved_questions.value);
   for (const o of await opportunities()) if (o.missing_research_count !== null) await observe('commercial', `unresolved:${o.id}`, o.missing_research_count);
@@ -1133,15 +1145,14 @@ export async function setStatus(kind: RecordKind, id: string, status: string, no
     }
   }
   if (!STATUSES[kind].includes(status)) {
-    throw new StoreError(`"${status}" is not a status a ${kind === 'codex' ? 'Codex entry' : kind === 'patterns' ? 'pattern' : 'card'} can have.`, 422);
+    throw new StoreError(`"${status}" is not a status a ${kind === 'codex' ? 'Codex entry' : 'card'} can have.`, 422);
   }
   const mr = await mirrorRowById(kind, id);
   if (!mr) throw new StoreError('That record is not held by this dashboard.', 404);
   // Codex: the status is Jason Status, written in the table's own spelling.
   const jason = CODEX_JASON_STATUS.find((c) => c.toLowerCase() === status);
   if (kind === 'codex' && !jason) throw new StoreError(`"${status}" is not a Jason Status the submission tables define.`, 422);
-  const patch: Record<string, unknown> =
-    kind === 'codex' ? { 'Jason Status': jason } : kind === 'patterns' ? { pattern_status: status } : { readiness_state: status };
+  const patch: Record<string, unknown> = kind === 'codex' ? { 'Jason Status': jason } : { readiness_state: status };
   const m = await writeFields(kind, mr, patch);
   await recordState(kind, m, 'ui', nowIso(), await lastEventFor(kind, id));
   if (note !== undefined) await setNote(kind, id, note);
@@ -1428,11 +1439,11 @@ function unreachedNote(unreached: string[]): string {
  * Manual only, on a button. Not on load, not on a schedule: it reads every
  * field of every row, transcripts included, and it deletes.
  */
-export async function resyncCodex(actor = 'dashboard'): Promise<CodexResync> {
+export async function resyncCodex(actor = 'dashboard'): Promise<Resync> {
   const started = Date.now();
   const at = nowIso();
   const live = await codex_.liveRecords();
-  const tables: CodexResyncTable[] = [];
+  const tables: ResyncTable[] = [];
 
   if (!live.read.length) {
     const blocked = live.failed.map((f) => ({ label: codex_.tableLabel(f.table), reason: f.reason }));
@@ -1452,11 +1463,13 @@ export async function resyncCodex(actor = 'dashboard'): Promise<CodexResync> {
         updated: 0,
         unchanged: 0,
         deleted: 0,
+        refused: 0,
       })),
       inserted: 0,
       updated: 0,
       unchanged: 0,
       deleted: 0,
+      refused: 0,
       overwritten: [],
       note,
     };
@@ -1492,6 +1505,7 @@ export async function resyncCodex(actor = 'dashboard'): Promise<CodexResync> {
         updated: 0,
         unchanged: 0,
         deleted: 0,
+        refused: 0,
       });
       continue;
     }
@@ -1500,6 +1514,7 @@ export async function resyncCodex(actor = 'dashboard'): Promise<CodexResync> {
     let inserted = 0;
     let updated = 0;
     let unchanged = 0;
+    let refused = 0;
 
     for (const rec of records) {
       try {
@@ -1519,7 +1534,10 @@ export async function resyncCodex(actor = 'dashboard'): Promise<CodexResync> {
           if (result.changed && unlanded.has(rec.id)) overwritten.push({ record_id: rec.id, natural_id: unlanded.get(rec.id) ?? null });
         }
       } catch (e) {
-        // One unreadable row must not abandon the other 164. Named in the log.
+        // One row this database will not store must not abandon the other 164,
+        // and must not vanish either: the reason goes to the log and the count
+        // comes back on the table.
+        refused++;
         console.error(`codex resync: ${t.label} ${rec.id} refused — ${e instanceof Error ? e.message : String(e)}`);
       }
     }
@@ -1538,13 +1556,14 @@ export async function resyncCodex(actor = 'dashboard'): Promise<CodexResync> {
       bumpVersion();
     }
 
-    tables.push({ table: t.table, label: t.label, read: true, reason: null, rows: records.length, inserted, updated, unchanged, deleted: gone.length });
+    tables.push({ table: t.table, label: t.label, read: true, reason: null, rows: records.length, inserted, updated, unchanged, deleted: gone.length, refused });
   }
 
-  const sum = (k: 'inserted' | 'updated' | 'unchanged' | 'deleted') => tables.reduce((n, t) => n + t[k], 0);
+  const sum = (k: 'inserted' | 'updated' | 'unchanged' | 'deleted' | 'refused') => tables.reduce((n, t) => n + t[k], 0);
   const blocked = tables.filter((t) => !t.read);
   const note = [
     `${sum('inserted')} inserted, ${sum('updated')} updated, ${sum('deleted')} deleted, ${sum('unchanged')} already matching.`,
+    sum('refused') ? `${sum('refused')} ${sum('refused') === 1 ? 'row was' : 'rows were'} read from Airtable and refused by this database; the server log names each one and why.` : '',
     overwritten.length ? `${overwritten.length} of those updates overwrote a change made here that never reached Airtable — ${overwritten.map((o) => o.natural_id ?? o.record_id).join(', ')}.` : '',
     blocked.length ? `${blocked.length} ${blocked.length === 1 ? 'table' : 'tables'} could not be read (${blocked.map((b) => b.label).join(', ')}), so nothing under ${blocked.length === 1 ? 'it' : 'them'} was touched. ${reasonsOf(blocked.map((b) => ({ label: b.label, reason: b.reason ?? 'no reason given' })))}` : '',
   ]
@@ -1568,7 +1587,7 @@ export async function resyncCodex(actor = 'dashboard'): Promise<CodexResync> {
       tables.map((t) => `${t.label} ${t.read ? `${t.rows} rows +${t.inserted}/~${t.updated}/-${t.deleted}` : `UNREAD (${t.reason})`}`).join(' · '),
   );
 
-  return { ran: true, at, ms: Date.now() - started, tables, inserted: sum('inserted'), updated: sum('updated'), unchanged: sum('unchanged'), deleted: sum('deleted'), overwritten, note };
+  return { ran: true, at, ms: Date.now() - started, tables, inserted: sum('inserted'), updated: sum('updated'), unchanged: sum('unchanged'), deleted: sum('deleted'), refused: sum('refused'), overwritten, note };
 }
 
 /**
@@ -1631,6 +1650,271 @@ function reasonsOf(blocked: { label: string; reason: string }[], total = blocked
     .join('. ');
   const rest = ranked.length - 2;
   return `${said}.${rest > 0 ? ` And ${rest} other ${rest === 1 ? 'reason' : 'reasons'} across the remaining tables.` : ''}`;
+}
+
+/* ------------------------------------- resync: patterns, commercial, clients */
+
+/**
+ * The three pages that resync one base each, in the same shape the Codex page
+ * has resynced seven tables since 14 Sep.
+ *
+ * **Airtable is the source of truth for every field it owns and this dashboard
+ * does not win a disagreement.** Insert what Airtable has and we do not, update
+ * what changed there, delete what is gone. A pass that only deleted is the bug
+ * that put the Codex page permanently behind its own base; it is not repeated
+ * here.
+ *
+ * The rule that makes the delete safe is the same one: **a table that could not
+ * be read is never treated as an emptied table.** Nothing under it is touched,
+ * it is named in the result and in the log with what Airtable said, and the run
+ * reads as a failure rather than folding into a zero.
+ *
+ * Manual only — not on load, not on a schedule — because it reads every field
+ * of every row and it deletes.
+ */
+export type ResyncKind = 'patterns' | 'commercial' | 'clients';
+
+interface ResyncSource {
+  base: string;
+  table: string;
+  label: string;
+  kind: mirror.MirrorKind;
+  /** Client questions only: the lane whose index row named this table. */
+  lane_id?: string | null;
+}
+
+/**
+ * A read on this path is allowed to take the time a whole table takes, unlike
+ * the bounded pass that used to run on the Codex page's load: somebody pressed
+ * a button and is waiting for the answer. The budget is checked between tables,
+ * so the worst case is the budget plus one read.
+ */
+const SWEEP_READ_TIMEOUT_MS = 20_000;
+const SWEEP_BUDGET_MS = 120_000;
+
+/** Which mirror table a kind's rows live in, and whether the sweep is scoped to one Airtable table. */
+function sweepScope(source: ResyncSource): { table: string; perTable: boolean } {
+  return { table: mirror.KINDS[source.kind].table, perTable: source.kind === 'client_questions' };
+}
+
+/**
+ * Rows this database holds that Airtable no longer has.
+ *
+ * The whole row goes to `record_deletions` before it goes: Airtable has already
+ * let go of it, so once this row is deleted that log is the only place it can
+ * be read. Same rule as a Codex delete, for the same reason.
+ */
+async function removeMirrorRows(source: ResyncSource, recordKind: RecordKind, gone: { pk: string; record: string }[], reason: string, actor: string, at: string): Promise<void> {
+  if (!gone.length) return;
+  const { table } = sweepScope(source);
+  await withTransaction(async (client) => {
+    for (const g of gone) {
+      const r = await client.query<{ fields: Record<string, unknown> | null; natural_id: string | null }>(`SELECT fields, natural_id FROM ${table} WHERE id = $1`, [g.pk]);
+      const row = r.rows[0];
+      await client.query(
+        `INSERT INTO record_deletions (kind, record_id, natural_id, builder_id, table_id, reason, fields, actor, at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [recordKind, g.record, row?.natural_id ?? null, null, source.table, reason, JSON.stringify(row?.fields ?? {}), actor, at],
+      );
+      await client.query(`DELETE FROM ${table} WHERE id = $1`, [g.pk]);
+    }
+  });
+  bumpVersion();
+}
+
+function whyAirtable(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * The record ids whose last write came from this interface rather than from
+ * Airtable or the engine.
+ *
+ * A change made here that Airtable never learned about is the one thing a
+ * resync can quietly undo, and reverting it is correct — Airtable owns the
+ * field — but it is never silent. These three kinds write no line to
+ * `record_writes` (only loops and Codex go to Airtable from here), so the
+ * signal is the mirror row's own `source` column, which is exactly what it
+ * records.
+ */
+async function uiWritten(source: ResyncSource): Promise<Map<string, string | null>> {
+  const { table, perTable } = sweepScope(source);
+  const r = await db().query<{ airtable_record_id: string; natural_id: string | null }>(
+    `SELECT airtable_record_id, natural_id FROM ${table} WHERE source = 'ui' AND airtable_record_id IS NOT NULL ${perTable ? 'AND table_id = $1' : ''}`,
+    perTable ? [source.table] : [],
+  );
+  return new Map(r.rows.map((row) => [row.airtable_record_id, row.natural_id]));
+}
+
+/** Where each kind reads from. Clients is the only one that learns its tables while it runs. */
+function firstSources(kind: ResyncKind): ResyncSource[] {
+  if (kind === 'patterns') return [{ base: PATTERNS.base, table: PATTERNS.table, label: PATTERNS.label, kind: 'patterns' }];
+  if (kind === 'commercial') return [{ base: COMMERCIAL.base, table: COMMERCIAL.table, label: COMMERCIAL.label, kind: 'commercial' }];
+  return [{ base: CLIENTS_INDEX.base, table: CLIENTS_INDEX.table, label: CLIENTS_INDEX.label, kind: 'client_lanes' }];
+}
+
+export async function resync(kind: ResyncKind, actor = 'dashboard'): Promise<Resync> {
+  if (!airtable.airtableConfigured()) {
+    return {
+      ran: false,
+      at: nowIso(),
+      ms: 0,
+      tables: [],
+      inserted: 0,
+      updated: 0,
+      unchanged: 0,
+      deleted: 0,
+      refused: 0,
+      overwritten: [],
+      note: 'AIRTABLE_TOKEN is not set on this server, so nothing was read and nothing was changed.',
+    };
+  }
+
+  const started = Date.now();
+  const at = nowIso();
+  const tables: ResyncTable[] = [];
+  const overwritten: { record_id: string; natural_id: string | null }[] = [];
+  /** Appended to while it is walked: the clients index names the rest. */
+  const queue = firstSources(kind);
+  /** Every questions table the index named, so an orphan table's rows can be removed once. */
+  const namedQuestionTables: string[] = [];
+  let indexRead = false;
+
+  for (let i = 0; i < queue.length; i++) {
+    const source = queue[i];
+    if (Date.now() - started > SWEEP_BUDGET_MS) {
+      tables.push({ table: source.table, label: source.label, read: false, reason: 'not reached inside the time this is given', rows: null, inserted: 0, updated: 0, unchanged: 0, deleted: 0, refused: 0 });
+      continue;
+    }
+
+    let records: AtRecord[];
+    try {
+      records = await airtable.listRecords(source.base, source.table, SWEEP_READ_TIMEOUT_MS);
+    } catch (e) {
+      const reason = whyAirtable(e);
+      console.error(`${kind} resync: ${source.label} (${source.table}) could not be read — ${reason}`);
+      tables.push({ table: source.table, label: source.label, read: false, reason, rows: null, inserted: 0, updated: 0, unchanged: 0, deleted: 0, refused: 0 });
+      continue;
+    }
+
+    // The index names every lane's own questions table in `Table ID`, and only
+    // the index does. A questions table with no index row is an orphan — it is
+    // being deleted upstream — and is never followed, so it can never appear.
+    if (source.kind === 'client_lanes') {
+      indexRead = true;
+      for (const rec of records) {
+        const lane = mapClientLane(rec);
+        if (!lane.questions_table) continue;
+        namedQuestionTables.push(lane.questions_table);
+        queue.push({ base: CLIENTS_INDEX.base, table: lane.questions_table, label: lane.name, kind: 'client_questions', lane_id: lane.lane_id ?? lane.id });
+      }
+    }
+
+    const ui = await uiWritten(source);
+    let inserted = 0;
+    let updated = 0;
+    let unchanged = 0;
+    let refused = 0;
+    for (const rec of records) {
+      try {
+        const result = await mirror.upsert(
+          source.kind,
+          {
+            record_id: rec.id,
+            created_time: rec.createdTime ?? null,
+            fields: rec.fields ?? {},
+            table_id: source.kind === 'client_questions' ? source.table : null,
+            lane_id: source.lane_id ?? null,
+          },
+          'airtable',
+        );
+        if (result.inserted) inserted++;
+        else if (result.changed) updated++;
+        else unchanged++;
+        if (result.inserted || result.changed) {
+          // Dated 'mirror', never 'engine': this database learned of the change
+          // when it looked, and has no idea when it happened in Airtable.
+          await recordEngineWrite(source.kind, result.id, at, 'mirror');
+          if (result.changed && ui.has(rec.id)) overwritten.push({ record_id: rec.id, natural_id: ui.get(rec.id) ?? null });
+        }
+      } catch (e) {
+        // One row this database will not store must not abandon the rest of the
+        // table — and must not vanish either. The reason goes to the log, the
+        // count comes back on the table, so "read five, stored none" can never
+        // read as "five already matched".
+        refused++;
+        console.error(`${kind} resync: ${source.label} ${rec.id} refused — ${whyAirtable(e)}`);
+      }
+    }
+
+    // Only inside a table that was actually read. Not read is never empty.
+    const { table: mirrorTable, perTable } = sweepScope(source);
+    const held = await db().query<{ id: string; airtable_record_id: string }>(
+      `SELECT id, airtable_record_id FROM ${mirrorTable} WHERE airtable_record_id IS NOT NULL ${perTable ? 'AND table_id = $1' : ''}`,
+      perTable ? [source.table] : [],
+    );
+    const live = new Set(records.map((r) => r.id));
+    const gone = held.rows.filter((row) => !live.has(row.airtable_record_id)).map((row) => ({ pk: row.id, record: row.airtable_record_id }));
+    await removeMirrorRows(source, RECORD_KIND[source.kind] ?? (kind as RecordKind), gone, 'removed in Airtable; found missing by a resync', actor, at);
+
+    tables.push({ table: source.table, label: source.label, read: true, reason: null, rows: records.length, inserted, updated, unchanged, deleted: gone.length, refused });
+  }
+
+  /**
+   * Questions held against a table the index does not name any more. They are
+   * orphans — the lane was removed from the index, or the table never had a row
+   * there — and the page renders what the index holds, so they have nowhere to
+   * appear. Guarded on the index having actually been read: without that, this
+   * would empty the whole kind the first time Airtable refused one request.
+   */
+  let orphaned = 0;
+  if (kind === 'clients' && indexRead) {
+    const r = await db().query<{ id: string; airtable_record_id: string; table_id: string | null }>(
+      `SELECT id, airtable_record_id, table_id FROM engine_client_questions WHERE airtable_record_id IS NOT NULL AND NOT (table_id = ANY($1::text[]))`,
+      [namedQuestionTables],
+    );
+    if (r.rows.length) {
+      const byTable = new Map<string, { pk: string; record: string }[]>();
+      for (const row of r.rows) byTable.set(row.table_id ?? '', [...(byTable.get(row.table_id ?? '') ?? []), { pk: row.id, record: row.airtable_record_id }]);
+      for (const [table, rows] of byTable) {
+        await removeMirrorRows(
+          { base: CLIENTS_INDEX.base, table, label: table, kind: 'client_questions' },
+          'client_questions',
+          rows,
+          'the watched-clients index names no lane for this table, so its questions belong to no lane',
+          actor,
+          at,
+        );
+        orphaned += rows.length;
+        console.log(`clients resync: removed ${rows.length} question row(s) held against ${table}, which the index does not name`);
+      }
+    }
+  }
+
+  const sum = (k: 'inserted' | 'updated' | 'unchanged' | 'deleted' | 'refused') => tables.reduce((n, t) => n + t[k], 0);
+  const blocked = tables.filter((t) => !t.read);
+  const ran = tables.some((t) => t.read);
+  const deleted = sum('deleted') + orphaned;
+  const refused = sum('refused');
+  const note = [
+    ran ? '' : 'Nothing was read, so nothing was changed.',
+    ran ? `${sum('inserted')} inserted, ${sum('updated')} updated, ${deleted} deleted, ${sum('unchanged')} already matching.` : '',
+    orphaned ? `${orphaned} of those deletions were questions held against a table the index does not name.` : '',
+    refused ? `${refused} ${refused === 1 ? 'row was' : 'rows were'} read from Airtable and refused by this database; the server log names each one and why.` : '',
+    overwritten.length ? `${overwritten.length} of those updates overwrote a change made here that Airtable never had — ${overwritten.map((o) => o.natural_id ?? o.record_id).join(', ')}.` : '',
+    blocked.length
+      ? `${blocked.length} ${blocked.length === 1 ? 'table' : 'tables'} could not be read (${blocked.map((b) => b.label).join(', ')}), so nothing under ${blocked.length === 1 ? 'it' : 'them'} was touched. ${reasonsOf(blocked.map((b) => ({ label: b.label, reason: b.reason ?? 'no reason given' })))}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  // The per-table breakdown goes to the log in full; the page gets the totals.
+  console.log(
+    `${kind} resync by ${actor}: ${note} | ` + tables.map((t) => `${t.label} ${t.read ? `${t.rows} rows +${t.inserted}/~${t.updated}/-${t.deleted}` : `UNREAD (${t.reason})`}`).join(' · '),
+  );
+
+  return { ran, at, ms: Date.now() - started, tables, inserted: sum('inserted'), updated: sum('updated'), unchanged: sum('unchanged'), deleted, refused, overwritten, note };
 }
 
 async function runReconcile(): Promise<CodexReconciliation> {
@@ -2190,10 +2474,6 @@ export async function patternMetrics(): Promise<PatternMetrics> {
   const hit = metricsCache.get('patterns');
   if (hit && hit.version === storeVersion) return hit.value as PatternMetrics;
   const all = await patterns();
-  const canonical = all.filter((p) => p.status === 'canonical').length;
-  const draft = all.filter((p) => p.status === 'draft').length;
-  const unset = all.filter((p) => p.status === 'unset').length;
-  const systems = [...new Set(all.map((p) => p.system ?? '(no system in id)'))].sort();
   const weeks = lastWeeks(8);
   const created = series(
     weeks.map((w) => ({ label: weekLabel(w), value: all.filter((p) => p.created_at && weekStart(p.created_at.slice(0, 10)) === w).length })),
@@ -2201,18 +2481,13 @@ export async function patternMetrics(): Promise<PatternMetrics> {
   );
 
   /**
-   * Why the figures on this page did not add up.
+   * Why a count of rows is not a count of patterns: the table holds more rows
+   * than distinct pattern ids. Both figures are given rather than one passed
+   * off as the other.
    *
-   * pattern_status is a single-select with exactly two choices, draft and
-   * canonical, and a sizeable minority of rows leave it empty. Every empty row
-   * used to be counted as a draft, so "draft" was really "draft plus everything
-   * nobody has triaged" and never squared with the total in a way a reader
-   * could check. The three states are now counted separately and the sum is
-   * printed beside the total.
-   *
-   * The second reason a count can look wrong is duplicate pattern_id values:
-   * the table holds more rows than it holds distinct pattern ids, so a count of
-   * rows is not a count of patterns. Both figures are given.
+   * The draft / canonical / no-status reconciliation that stood here is gone
+   * with the field it counted — `pattern_status` was deleted from the base
+   * (2026-09-15, Destiny), so there is nothing left to reconcile.
    */
   const byId = new Map<string, number>();
   for (const p of all) if (p.pattern_id) byId.set(p.pattern_id, (byId.get(p.pattern_id) ?? 0) + 1);
@@ -2222,8 +2497,9 @@ export async function patternMetrics(): Promise<PatternMetrics> {
     .sort((a, b) => b.n - a.n || a.pattern_id.localeCompare(b.pattern_id));
   const duplicateRows = repeated.reduce((n, r) => n + (r.n - 1), 0);
 
-  // reusability is a free-text field. Most rows use a one-word value; the rest explain in prose,
-  // which is counted as one group rather than shown as a bar per sentence.
+  // reusability is a free-text field. Most rows use one of Narrow / Moderate /
+  // Broad; the rest explain the reach in a sentence, which is counted as one
+  // group rather than drawn as a bar per sentence.
   const reuseKey = (p: BuildPattern): string => {
     const v = p.reusability?.trim();
     if (!v) return '(not set)';
@@ -2235,73 +2511,82 @@ export async function patternMetrics(): Promise<PatternMetrics> {
     kind: 'patterns',
     computed_at: nowIso(),
     scope: { rows: all.length },
-    draft,
-    canonical,
-    unset,
-    reconciliation: {
-      rows: all.length,
-      draft,
-      canonical,
-      unset,
-      sums_to: draft + canonical + unset,
-      note: `${draft} draft + ${canonical} canonical + ${unset} with no status = ${draft + canonical + unset} rows. pattern_status is a single-select offering draft and canonical only; ${unset} ${unset === 1 ? 'row leaves' : 'rows leave'} it empty, and an untriaged pattern is not a draft, so it is counted on its own.`,
-    },
+    /**
+     * The figure and the sentence have to agree, so `distinct_ids` is the count
+     * of distinct pattern ids and nothing else: rows carrying no pattern_id at
+     * all are named separately rather than folded in as one id each, which is
+     * what made the card read 4 beside a note that said 3.
+     *
+     * rows = distinct ids + duplicate rows + rows with no id, and the note
+     * prints that arithmetic so a reader can check it on the page.
+     */
     duplicates: {
-      distinct_ids: byId.size + all.filter((p) => !p.pattern_id).length,
+      distinct_ids: byId.size,
       duplicate_rows: duplicateRows,
       ids: repeated,
-      note: repeated.length
-        ? `${all.length} rows carry ${byId.size} distinct pattern ids: ${repeated.length} ${repeated.length === 1 ? 'id is' : 'ids are'} written on more than one row, ${duplicateRows} ${duplicateRows === 1 ? 'row' : 'rows'} more than there are patterns. A count of rows is not a count of patterns, which is the second reason these figures move.`
-        : 'Every row carries a distinct pattern_id, so the row count is the pattern count.',
+      note: (() => {
+        const noId = all.filter((p) => !p.pattern_id).length;
+        if (!repeated.length && !noId) return 'Every row carries a distinct pattern_id, so the row count is the pattern count.';
+        const parts = [`${byId.size} distinct pattern ${byId.size === 1 ? 'id' : 'ids'}`];
+        if (duplicateRows) parts.push(`${duplicateRows} duplicate ${duplicateRows === 1 ? 'row' : 'rows'} (${repeated.map((r) => r.pattern_id).join(', ')})`);
+        if (noId) parts.push(`${noId} ${noId === 1 ? 'row carrying' : 'rows carrying'} no pattern_id`);
+        return `${all.length} rows: ${parts.join(' + ')}. A count of rows is not a count of patterns.`;
+      })(),
     },
-    promotion_rate: {
-      value: all.length ? Math.round((canonical / all.length) * 100) : null,
-      note: all.length
-        ? `${canonical} of ${all.length} rows are canonical today. A promotion date is not recorded, so this is the share now, not a rate of promotion.`
-        : 'No patterns.',
-    },
-    status_legend: [
-      { status: 'canonical', meaning: 'Accepted as the reference pattern other builders should follow. Promotion is the move from draft to canonical; the table records the state, not the date.' },
-      { status: 'draft', meaning: 'Written up and marked draft: a pattern someone has looked at and not yet accepted as the reference way of doing it.' },
-      { status: 'unset', meaning: 'pattern_status is empty. The row was written and never triaged — not the same as a draft, and the reason the draft count and the total did not previously reconcile.' },
-    ],
-    by_system: systems.map((sys) => ({
-      system: sys,
-      draft: all.filter((p) => (p.system ?? '(no system in id)') === sys && p.status === 'draft').length,
-      canonical: all.filter((p) => (p.system ?? '(no system in id)') === sys && p.status === 'canonical').length,
-      unset: all.filter((p) => (p.system ?? '(no system in id)') === sys && p.status === 'unset').length,
-    })),
     reusability_mix: reuse.map((r) => ({ reusability: r, n: all.filter((p) => reuseKey(p) === r).length })).sort((a, b) => b.n - a.n),
-    reusability_note: `reusability is a free-text field, not a select. ${all.length - prose} of ${all.length} rows use a one-word value; ${prose} explain the reach in a sentence and are grouped as \u201cwritten out in prose\u201d \u2014 open the pattern to read it.`,
+    reusability_note: `reusability is free text rather than a select. ${all.length - prose} of ${all.length} rows answer in one word; ${prose} explain the reach in a sentence and are grouped as \u201cwritten out in prose\u201d \u2014 open the pattern to read it.`,
     created_per_week: created,
   };
   metricsCache.set('patterns', { version: storeVersion, value });
   return value;
 }
 
+/**
+ * High before Medium before Low, and anything else — an unset value, a word
+ * this list does not know — last rather than first, which is where a bare
+ * indexOf of -1 would have put it.
+ */
+export const LEVEL_ORDER = ['High', 'Medium', 'Low'];
+function levelRank(v: string): number {
+  const i = LEVEL_ORDER.findIndex((l) => l.toLowerCase() === v.trim().toLowerCase());
+  return i === -1 ? LEVEL_ORDER.length : i;
+}
+
 export async function commercialMetrics(): Promise<CommercialMetrics> {
   const hit = metricsCache.get('commercial');
   if (hit && hit.version === storeVersion) return hit.value as CommercialMetrics;
   const all = await opportunities();
-  const lanes = [...new Set(all.map((o) => o.lane_id ?? '(no lane_id)'))];
   const withCount = all.filter((o) => o.missing_research_count !== null);
   const total = withCount.reduce((n, o) => n + (o.missing_research_count ?? 0), 0);
   const obs = await observations('commercial', 'unresolved_questions');
   const distinctDays = new Set(obs.map((o) => o.at.slice(0, 10)));
-  const readiness = [...new Set(all.map((o) => o.readiness_state ?? '(unset)'))];
   const confidence = [...new Set(all.map((o) => o.confidence ?? '(unset)'))];
+  const mediaMix = [...new Set(all.map((o) => o.media_readiness ?? '(unset)'))];
+  const open = (o: Opportunity) => o.missing_research_count ?? o.missing_research_questions.length;
+  const incomplete = all.map((o) => ({ id: o.id, card_id: o.card_id, missing: incompleteFields(o) })).filter((c) => c.missing.length > 0);
+
+  /**
+   * There is deliberately nothing here grouped by lane, readiness, pilot state,
+   * routing state, media gate or lane state (2026-09-15, Destiny). Every one of
+   * those was checked against all 21 records: lane_id is 1:1 with the card, the
+   * other four are a single hardcoded value on every row, and readiness_state
+   * is 19 Research-First to 1 Media-Ready to 1 blank. A bucket that holds
+   * everything, or one that holds exactly one card, sorts nothing.
+   */
   const value: CommercialMetrics = {
     kind: 'commercial',
     computed_at: nowIso(),
     scope: { rows: all.length },
     cards: all.length,
-    by_lane: lanes.map((lane) => {
-      const mine = all.filter((o) => (o.lane_id ?? '(no lane_id)') === lane);
-      const counted = mine.filter((o) => o.missing_research_count !== null);
-      return { lane_id: lane, n: mine.length, unresolved: counted.length ? counted.reduce((n, o) => n + (o.missing_research_count ?? 0), 0) : null, blocked: mine.filter((o) => Boolean(o.lane_state_blocked_reason)).length };
-    }),
-    by_readiness: readiness.map((r) => ({ readiness_state: r, n: all.filter((o) => (o.readiness_state ?? '(unset)') === r).length })),
-    confidence_mix: confidence.map((c) => ({ confidence: c, n: all.filter((o) => (o.confidence ?? '(unset)') === c).length })),
+    clear: all.filter((o) => open(o) === 0).length,
+    media_ready: all.filter((o) => o.readiness_state === 'Media-Ready').length,
+    // Both mixes read strongest first, which is what their cards say they do.
+    confidence_mix: confidence
+      .map((c) => ({ confidence: c, n: all.filter((o) => (o.confidence ?? '(unset)') === c).length }))
+      .sort((a, b) => levelRank(a.confidence) - levelRank(b.confidence) || a.confidence.localeCompare(b.confidence)),
+    media_readiness_mix: mediaMix
+      .map((m) => ({ media_readiness: m, n: all.filter((o) => (o.media_readiness ?? '(unset)') === m).length }))
+      .sort((a, b) => levelRank(a.media_readiness) - levelRank(b.media_readiness) || a.media_readiness.localeCompare(b.media_readiness)),
     unresolved_questions: {
       value: withCount.length ? total : null,
       note: withCount.length
@@ -2311,8 +2596,14 @@ export async function commercialMetrics(): Promise<CommercialMetrics> {
     unresolved_trend:
       distinctDays.size >= 2
         ? series(obs.map((o) => ({ label: o.at.slice(5, 10), value: Math.round(o.value) })), 'Total unresolved research questions as observed at each resync, since this database started recording.')
-        : series(null, 'A trend needs the count observed on at least two different days. Airtable keeps no history of this field, so the series starts from this dashboard’s own first observation.'),
-    demand_evidence_note: 'demand_evidence is a single-select whose only choice says no external demand evidence has been collected for the lane; it is shown per card, not summed.',
+        : series(null, 'A trend needs the count observed on at least two different days. Airtable keeps no history of this field, so the series starts from this dashboard\u2019s own first observation.'),
+    incomplete: {
+      n: incomplete.length,
+      cards: incomplete,
+      note: incomplete.length
+        ? `${incomplete.length} ${incomplete.length === 1 ? 'card is' : 'cards are'} missing fields a complete extractor run writes. That is a malformed record, not a state: it is not counted as a readiness of its own.`
+        : 'Every card carries the fields a complete extractor run writes.',
+    },
   };
   metricsCache.set('commercial', { version: storeVersion, value });
   return value;

@@ -12,7 +12,6 @@ import {
   type CodexData,
   type CodexEntryDetail,
   type CodexMetrics,
-  type CodexResync,
   type CodexTab,
 } from '../data';
 import type { RecordColumn } from '../components/ui';
@@ -38,10 +37,12 @@ import {
   SourceLink,
   StatCell,
   StatStrip,
+  ResyncButton,
   RowsLine,
   Toast,
   unlanded,
   usePaged,
+  useResync,
   useToast,
   writeWarning,
 } from '../components/ui';
@@ -76,30 +77,6 @@ function emptyLine({
   }
   if (tab === 'awaiting') return `No logs are waiting on Jason${here}.`;
   return `Nothing approved yet${here}.`;
-}
-
-/**
- * One resync, as the line that appears in the corner.
- *
- * Three totals and an elapsed time, and nothing else: a run that changed
- * nothing says so in the same shape as one that changed everything. A table
- * that could not be read is never folded into a zero — it is counted and named
- * in the line, and the run reads as a failure, because "not read" and "empty"
- * are the distinction this whole pass exists to keep.
- */
-function resyncToast(r: CodexResync): { text: string; tone: 'ok' | 'failing' } {
-  const secs = `${(r.ms / 1000).toFixed(1)}s`;
-  const unread = r.tables.filter((t) => !t.read);
-  const totals = `${r.inserted} inserted, ${r.updated} updated, ${r.deleted} deleted`;
-  if (!r.ran) return { text: `Resync failed after ${secs} \u00b7 ${r.note}`, tone: 'failing' };
-  if (unread.length) {
-    const named = unread.map((t) => t.label).join(', ');
-    return {
-      text: `Resync finished in ${secs} \u00b7 ${totals} \u00b7 ${named} could not be read, so nothing under ${unread.length === 1 ? 'it' : 'them'} changed`,
-      tone: 'failing',
-    };
-  }
-  return { text: `Resync complete in ${secs} \u00b7 ${totals}`, tone: 'ok' };
 }
 
 /**
@@ -740,7 +717,6 @@ export default function Codex() {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
-  const [resyncing, setResyncing] = useState(false);
   const { toast, setToast } = useToast();
   const metrics = useData((query) => getRecordMetrics('codex', query, builder), [builder, tick]);
 
@@ -751,27 +727,20 @@ export default function Codex() {
   /**
    * Pull from Airtable and make this database match it.
    *
-   * The outcome is a toast in the corner rather than a table on the page
-   * (decision 2026-09-14, Destiny): how long it took and the three totals is
-   * what a person standing at the button needs. The per-table breakdown is
-   * still written in full to the server log, which is where somebody goes when
-   * a total looks wrong. The page then refetches, so what is on screen is what
-   * the resync left behind.
+   * The button, the toast and the refetch are shared with Build patterns,
+   * Commercial and Clients (see components/ui/Resync.tsx), so the four pages
+   * cannot word the same outcome differently. The per-table breakdown is still
+   * written in full to the server log, which is where somebody goes when a
+   * total looks wrong.
    */
-  async function runResync() {
-    setResyncing(true);
-    try {
-      const r = await resyncCodexFromAirtable();
+  const resync = useResync({
+    run: resyncCodexFromAirtable,
+    reload: async () => {
       setTick((n) => n + 1);
-      const fresh = await getCodexEntries({ lane: 'all' });
-      setEntries(fresh.entries);
-      setToast(resyncToast(r));
-    } catch (e) {
-      setToast({ text: e instanceof Error ? e.message : 'The resync did not run.', tone: 'failing' });
-    } finally {
-      setResyncing(false);
-    }
-  }
+      setEntries((await getCodexEntries({ lane: 'all' })).entries);
+    },
+    setToast,
+  });
 
   const scoped = useMemo(() => entries.filter((e) => builder === 'all' || e.builder_id === builder), [entries, builder]);
   const rows = useMemo(() => scoped.filter((e) => inTab(e, tab)).filter((e) => matches(e, q.trim())), [scoped, tab, q]);
@@ -787,9 +756,7 @@ export default function Codex() {
         title="Codex entries"
         subtitle="Every session BHA has logged, as the orchestrator wrote it up"
         right={
-          <button type="button" onClick={() => void runResync()} disabled={resyncing} className="btn btn-primary gap-1.5">
-            {resyncing ? 'Reading Airtable…' : 'Resync from Airtable'}
-          </button>
+          <ResyncButton busy={resync.busy} onClick={resync.start} />
         }
       />
 

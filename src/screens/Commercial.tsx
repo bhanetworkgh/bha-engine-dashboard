@@ -1,11 +1,10 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { getCommercial, getRecordMetrics, setRecordStatus, type CommercialMetrics, type MetricSeries, type Opportunity, type ReadinessState } from '../data';
+import { getCommercial, getRecordMetrics, resyncRecords, setRecordStatus, type CommercialMetrics, type MetricSeries, type Opportunity, type ReadinessState } from '../data';
 import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
-  CountUp,
   EmptyPanel,
   EmptyState,
   HBar,
@@ -18,7 +17,7 @@ import {
   Pill,
   RecordId,
   RecordTable,
-  Ring,
+  ResyncButton,
   RowAction,
   RowActions,
   SearchBox,
@@ -32,22 +31,49 @@ import {
   Toast,
   TwoLine,
   usePaged,
+  useResync,
   useToast,
 } from '../components/ui';
 
 /**
- * Commercial cards.
+ * Commercial opportunity cards. 21 of them.
  *
- * This is the Build patterns page with different content, and deliberately so:
- * the same filter bars, the same truncated list rows with the full record one
- * click away, the same chart treatment and the same spacing. They were square
- * expanding tiles, which was a layout chosen because the records are called
- * "cards" — not because a grid of tiles is a better way to read twenty-one
- * records than a list is.
+ * **Nothing on this page groups the corpus** (2026-09-15, Destiny). Every
+ * candidate axis was checked against all 21 records and every one of them
+ * failed, in one of two ways:
+ *
+ *   lane_id          21 distinct values across 21 cards — 1:1 with the card
+ *   readiness_state  19 Research-First, 1 Media-Ready, 1 blank; INCUBATE is a
+ *                    valid option that has never once been used
+ *   pilot_state      research_only on all 21
+ *   routing_state    research_loop on all 21
+ *   media_gate       CLOSED on all 21
+ *   lane_state       research_first wherever present
+ *
+ * The last four are hardcoded by the extractor workflow and Process Twin is the
+ * only system that would ever advance them, which it never has. So the lane
+ * tab, the readiness tab, the card-name tab and the per-lane strip are gone,
+ * and what replaces them is one sortable table.
+ *
+ * The strip read "1.3 open", "1.5 open", "1.8 open" per lane and looked like an
+ * average of something. It was not: it was `{n} · {unresolved} open` with a
+ * middot between two integers, and because every lane holds exactly one card
+ * the first number was always 1. "1.5 open" meant one card with five open
+ * research questions. Nothing computed a decimal; the separator read as one.
+ *
+ * Default sort is missing_research_count ascending then media_readiness
+ * descending — closest-to-ready at the top, which is the question the page
+ * answers.
  */
 
 const READINESS: ReadinessState[] = ['INCUBATE', 'Research-First', 'Media-Ready'];
-type Filter = 'all' | ReadinessState | 'unset';
+
+/** High before Medium before Low, and an absent value last. Used for the sort and the filter. */
+const LEVELS = ['High', 'Medium', 'Low'];
+function level(v: string | null): number {
+  const i = LEVELS.findIndex((l) => l.toLowerCase() === (v ?? '').trim().toLowerCase());
+  return i === -1 ? LEVELS.length : i;
+}
 
 function ReadinessPill({ state }: { state: ReadinessState | null }) {
   if (state === 'Media-Ready') return <Pill tone="accent">media-ready</Pill>;
@@ -56,14 +82,78 @@ function ReadinessPill({ state }: { state: ReadinessState | null }) {
   return <Pill>no readiness</Pill>;
 }
 
+/** Open research questions on a card: the table's own count, or the listed questions, or genuinely nothing. */
+function openQuestions(o: Opportunity): number | null {
+  if (o.missing_research_count !== null) return o.missing_research_count;
+  return o.missing_research_questions.length ? o.missing_research_questions.length : null;
+}
+
 function matches(o: Opportunity, q: string): boolean {
   if (!q) return true;
   const n = q.toLowerCase();
   return [o.card_id, o.title, o.lane_id, o.pain_point, o.offer, o.target, o.who_pays, o.next_action, o.bha_system, ...o.missing_research_questions].some((v) => v && v.toLowerCase().includes(n));
 }
 
-function laneLabel(lane: string): string {
-  return lane.replace(/^LANE-/, '').toLowerCase().replace(/_/g, ' ');
+/* ------------------------------------------------------------------ sort */
+
+type SortKey = 'open' | 'confidence' | 'media' | 'created' | 'title';
+
+/** Where a value that is absent goes: last, whichever way the column is sorted. */
+function nullsLast(a: number | null, b: number | null): number {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a - b;
+}
+
+function compare(key: SortKey, dir: 1 | -1, a: Opportunity, b: Opportunity): number {
+  switch (key) {
+    case 'open':
+      return dir * nullsLast(openQuestions(a), openQuestions(b));
+    case 'confidence':
+      return dir * (level(a.confidence) - level(b.confidence));
+    case 'media':
+      return dir * (level(a.media_readiness) - level(b.media_readiness));
+    case 'created':
+      return dir * (a.created_at ?? '').localeCompare(b.created_at ?? '');
+    case 'title':
+      return dir * a.title.localeCompare(b.title);
+  }
+}
+
+/**
+ * What settles a tie, whichever column is sorted: the most media-ready first,
+ * then the card id so the order is stable between renders.
+ *
+ * It is also the second half of the page's own default — open questions
+ * ascending, then media readiness descending — which is why the page opens with
+ * the arrow on "open questions" rather than on an order no column names.
+ */
+function tiebreak(a: Opportunity, b: Opportunity): number {
+  return level(a.media_readiness) - level(b.media_readiness) || (a.card_id ?? '').localeCompare(b.card_id ?? '');
+}
+
+/**
+ * A column header that sorts.
+ *
+ * Every sortable header carries an arrow, faint until it is the one in force,
+ * so a reader can see which columns sort without having to click one to find
+ * out. Clicking the active column reverses it.
+ */
+function SortHeader({ label, k, sort, onSort }: { label: string; k: SortKey; sort: { key: SortKey; dir: 1 | -1 }; onSort: (k: SortKey) => void }) {
+  const on = sort.key === k;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(k)}
+      aria-label={`Sort by ${label}`}
+      aria-sort={on ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}
+      className={`inline-flex items-center gap-1 hover:text-ink ${on ? 'text-ink' : ''}`}
+    >
+      {label}
+      <span className={`text-[8px] ${on ? 'text-accent-ink' : 'text-faint opacity-40'}`}>{on && sort.dir === -1 ? '▲' : '▼'}</span>
+    </button>
+  );
 }
 
 /* ---------------------------------------------------------------- metrics */
@@ -73,7 +163,7 @@ function CommercialMetricsPanel({ metrics, loading, error }: { metrics: Commerci
   if (!metrics) {
     return (
       <StatStrip cols={4} className="opacity-60">
-        {['Cards', 'Media-ready', 'Lanes', 'Unresolved research questions'].map((l) => (
+        {['Cards', 'Nothing left to answer', 'Media-ready', 'Open research questions'].map((l) => (
           <StatCell key={l}>
             <div className="kicker truncate">{l}</div>
             <div className="mt-1 text-[15px] text-faint">Counting</div>
@@ -83,113 +173,72 @@ function CommercialMetricsPanel({ metrics, loading, error }: { metrics: Commerci
     );
   }
   const m = metrics;
-  const mediaReady = m.by_readiness.find((r) => r.readiness_state === 'Media-Ready')?.n ?? 0;
-  const maxReadiness = Math.max(1, ...m.by_readiness.map((r) => r.n));
   const maxConfidence = Math.max(1, ...m.confidence_mix.map((c) => c.n));
-  const maxLane = Math.max(1, ...m.by_lane.map((l) => l.n));
-  const blocked = m.by_lane.reduce((n, l) => n + l.blocked, 0);
+  const maxMedia = Math.max(1, ...m.media_readiness_mix.map((c) => c.n));
 
   return (
     <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
       <StatStrip cols={4}>
-        <CountCell label="Cards" value={m.cards} hint="rows in the table" />
-        <CountCell label="Media-ready" value={mediaReady} tone="accent" hint="readiness_state = Media-Ready" />
-        <CountCell label="Lanes" value={m.by_lane.length} tone="dim" hint={blocked ? `${blocked} ${blocked === 1 ? 'card is' : 'cards are'} blocked on research` : 'no card is blocked on research'} />
-        <MetricCell label="Unresolved research questions" metric={m.unresolved_questions} />
+        <CountCell label="Cards" value={m.cards} hint="rows in the table" hintMinLines={2} />
+        <CountCell label="Nothing left to answer" value={m.clear} tone={m.clear ? 'accent' : 'dim'} hint="no open research question on the card" hintMinLines={2} />
+        <CountCell label="Media-ready" value={m.media_ready} tone={m.media_ready ? 'accent' : 'dim'} hint="readiness_state = Media-Ready" hintMinLines={2} />
+        <MetricCell label="Open research questions" metric={m.unresolved_questions} />
       </StatStrip>
 
-      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-        <div className="card flex h-full flex-col justify-between px-5 py-4">
-          <div className="flex items-center gap-5">
-            <Ring value={mediaReady} total={m.cards} size={88} tone="accent" label="media-ready" />
-            <div className="min-w-0">
-              <div className="kicker">Media-ready share</div>
-              <div className="mt-1 flex items-baseline gap-2">
-                <span className="font-display tabular text-[32px] leading-none text-ink">{m.cards ? <CountUp value={Math.round((mediaReady / m.cards) * 100)} /> : '—'}</span>
-                {m.cards > 0 && <span className="text-[14px] text-faint">%</span>}
-              </div>
-              <div className="mt-1.5 text-[11.5px] leading-snug text-faint">
-                {mediaReady} of {m.cards} cards are marked media-ready today. readiness_state records the state, not the date it was reached, so this is the share now, not a rate over time.
-              </div>
-            </div>
-          </div>
-          {/* How much of the table is answerable at all: the cards blocked on research. */}
-          <div className="mt-4 border-t border-line pt-3">
-            <HBar
-              label="Not blocked on research"
-              value={m.cards - blocked}
-              max={Math.max(1, m.cards)}
-              tone={blocked ? 'ink' : 'accent'}
-              valueNode={<CountUp value={m.cards - blocked} />}
-              right={<span className="text-faint">of {m.cards}</span>}
-            />
-            <div className="mt-1.5 text-[11.5px] leading-snug text-faint">
-              {blocked === 0 ? 'No card carries a lane_state_blocked_reason.' : `${blocked} ${blocked === 1 ? 'card names' : 'cards name'} a lane_state_blocked_reason and cannot move until the research lands.`}
-            </div>
-          </div>
-        </div>
-
-        <MetricCard title="Readiness state" note="readiness_state as the Commercial Opportunities table defines it. A card with the field empty is counted on its own rather than folded into incubate.">
-          {m.by_readiness.length === 0 ? (
-            <EmptyPanel>No card records a readiness state.</EmptyPanel>
-          ) : (
-            <div className="space-y-2">
-              {m.by_readiness.map((r) => (
-                <HBar
-                  key={r.readiness_state}
-                  label={r.readiness_state === '(unset)' ? 'no readiness set' : r.readiness_state}
-                  value={r.n}
-                  max={maxReadiness}
-                  tone={r.readiness_state === 'Media-Ready' ? 'accent' : 'ink'}
-                  valueNode={<CountUp value={r.n} />}
-                  right={<span className="text-faint">{m.cards ? Math.round((r.n / m.cards) * 100) : 0}%</span>}
-                />
+      {/* One malformed record, named. Not a fourth readiness and not a bucket. */}
+      {m.incomplete.n > 0 && (
+        <div className="mx-6 mb-4 md:mx-8">
+          <MetricCard title="Cards a complete extractor run did not finish" note={m.incomplete.note}>
+            <div className="space-y-1.5 text-[12.5px]">
+              {m.incomplete.cards.map((c) => (
+                <div key={c.id} className="text-dim">
+                  <span className="tabular text-ink">{c.card_id ?? c.id}</span> — no {c.missing.join(', no ')}
+                </div>
               ))}
             </div>
-          )}
-        </MetricCard>
-      </div>
+          </MetricCard>
+        </div>
+      )}
 
-      <div className="card mx-6 mb-4 px-5 py-4 md:mx-8">
-        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-3">
-          <div className="text-[13px] font-medium text-ink">By lane</div>
-          <div className="text-[11px] text-faint">bar = all cards · number = unresolved questions</div>
-        </div>
-        <div className="grid gap-x-8 gap-y-1.5 md:grid-cols-3 xl:grid-cols-4">
-          {m.by_lane.map((l) => (
-            <HBar
-              key={l.lane_id}
-              label={laneLabel(l.lane_id)}
-              value={l.n}
-              max={maxLane}
-              tone={l.blocked ? 'degraded' : 'ink'}
-              valueNode={
-                <span>
-                  {l.n} <span className="text-faint">· {l.unresolved === null ? 'count not set' : `${l.unresolved} open`}</span>
-                </span>
-              }
-            />
-          ))}
-        </div>
-        <div className="mt-2 text-[11.5px] leading-snug text-faint">
-          Cards grouped by lane_id. A lane is amber when one of its cards carries a lane_state_blocked_reason; “count not set” is a lane where no card records a missing_research_count.
-        </div>
-      </div>
-
-      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-2">
-        <MetricCard title="Unresolved research questions over time">
-          <SeriesBlock title="" series={m.unresolved_trend} tone="accent" bare />
-        </MetricCard>
-        <MetricCard title="Confidence" note={`From the confidence field as set on each card. ${m.demand_evidence_note}`}>
+      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-3">
+        <MetricCard title="Confidence" note="The confidence field as set on each card, strongest first.">
           {m.confidence_mix.length === 0 ? (
             <EmptyPanel>No card records a confidence.</EmptyPanel>
           ) : (
             <div className="space-y-2">
               {m.confidence_mix.map((c) => (
-                <HBar key={c.confidence} label={c.confidence === '(unset)' ? 'no confidence set' : c.confidence.toLowerCase()} value={c.n} max={maxConfidence} valueNode={<CountUp value={c.n} />} />
+                <HBar
+                  key={c.confidence}
+                  label={c.confidence === '(unset)' ? 'no confidence set' : c.confidence.toLowerCase()}
+                  value={c.n}
+                  max={maxConfidence}
+                  tone={c.confidence === 'High' ? 'accent' : 'ink'}
+                  valueNode={<span>{c.n}</span>}
+                />
               ))}
             </div>
           )}
+        </MetricCard>
+        <MetricCard title="Media readiness" note="media_readiness per card. The second half of the page's default order, after the open research count.">
+          {m.media_readiness_mix.length === 0 ? (
+            <EmptyPanel>No card records a media readiness.</EmptyPanel>
+          ) : (
+            <div className="space-y-2">
+              {m.media_readiness_mix.map((c) => (
+                <HBar
+                  key={c.media_readiness}
+                  label={c.media_readiness === '(unset)' ? 'no media readiness set' : c.media_readiness.toLowerCase()}
+                  value={c.n}
+                  max={maxMedia}
+                  tone={c.media_readiness === 'High' ? 'accent' : 'ink'}
+                  valueNode={<span>{c.n}</span>}
+                />
+              ))}
+            </div>
+          )}
+        </MetricCard>
+        <MetricCard title="Open research questions over time">
+          <SeriesBlock title="" series={m.unresolved_trend} tone="accent" bare />
         </MetricCard>
       </div>
     </div>
@@ -208,18 +257,40 @@ function CardTrend({ trend, now }: { trend: MetricSeries | undefined; now: numbe
   );
 }
 
+/**
+ * The prose the table carries beyond the headline fields. Every one of these is
+ * absent on roughly half the corpus — the schema grew over months — so each is
+ * drawn where it exists and simply left out where it does not, rather than the
+ * page narrowing itself to the fields every row happens to have.
+ */
+const PROSE: { key: keyof Opportunity; label: string }[] = [
+  { key: 'pain_point', label: 'Pain point' },
+  { key: 'offer', label: 'Offer' },
+  { key: 'target', label: 'Target' },
+  { key: 'who_pays', label: 'Who pays' },
+  { key: 'bha_system', label: 'BHA system' },
+  { key: 'next_action', label: 'Next action' },
+  { key: 'metrics_hypothesis', label: 'Metrics hypothesis' },
+  { key: 'demand_strength_hypothesis', label: 'Demand strength hypothesis' },
+  { key: 'competing_offers_snapshot', label: 'Competing offers' },
+  { key: 'offer_shapes_gates', label: 'Offer shapes and gates' },
+  { key: 'missing_proof', label: 'Missing proof' },
+  { key: 'implementation_constraints', label: 'Implementation constraints' },
+  { key: 'infra_gaps', label: 'Infrastructure gaps' },
+  { key: 'reuse_patterns', label: 'Reuse patterns' },
+  { key: 'next_experiments', label: 'Next experiments' },
+  { key: 'experiment_results', label: 'Experiment results' },
+  { key: 'research_gleanings', label: 'Research gleanings' },
+  { key: 'commercial_impact', label: 'Commercial impact' },
+  { key: 'commercial_ready_v1_checklist', label: 'Commercial-ready v1 checklist' },
+  { key: 'hypothesis_rejection_note', label: 'Hypothesis rejection note' },
+  { key: 'source_logs', label: 'Source logs' },
+];
+
 /** The whole card, on click — the same shape as a build pattern's detail view. */
 function CardView({ o, trend, busy, onReadiness, onClose }: { o: Opportunity; trend: MetricSeries | undefined; busy: boolean; onReadiness: (o: Opportunity, r: ReadinessState) => void; onClose: () => void }) {
   const listed = o.missing_research_questions.length;
   const disagree = o.missing_research_count !== null && o.missing_research_count !== listed;
-  const detail: { label: string; value: string | null }[] = [
-    { label: 'Pain point', value: o.pain_point },
-    { label: 'Offer', value: o.offer },
-    { label: 'Target', value: o.target },
-    { label: 'Who pays', value: o.who_pays },
-    { label: 'BHA system', value: o.bha_system },
-    { label: 'Next action', value: o.next_action },
-  ];
   return createPortal(
     <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/30 p-4 md:p-10" onClick={onClose}>
       <div className="card fade-up w-full max-w-[880px] px-6 py-5" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Commercial card">
@@ -229,9 +300,9 @@ function CardView({ o, trend, busy, onReadiness, onClose }: { o: Opportunity; tr
             <h2 className="mt-1 text-[18px] leading-tight">{o.title}</h2>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-faint">
               <ReadinessPill state={o.readiness_state} />
-              {o.lane_id && <span>{laneLabel(o.lane_id)}</span>}
               {o.confidence && <span>confidence {o.confidence.toLowerCase()}</span>}
-              {o.created_at && <span className="tabular">{o.created_at.slice(0, 10)}</span>}
+              {o.media_readiness && <span>media {o.media_readiness.toLowerCase()}</span>}
+              {o.created_at ? <span className="tabular">{o.created_at.slice(0, 10)}</span> : <span className="text-degraded">no created_at</span>}
               <CardTrend trend={trend} now={o.missing_research_count} />
             </div>
           </div>
@@ -245,13 +316,11 @@ function CardView({ o, trend, busy, onReadiness, onClose }: { o: Opportunity; tr
           </div>
         </div>
 
-        {o.lane_state_blocked_reason && <p className="mt-3 text-[12.5px] leading-snug text-degraded">{o.lane_state_blocked_reason}</p>}
-
         <div className="mt-4 space-y-4 border-t border-line pt-4">
           {listed > 0 ? (
             <div>
               <div className="mb-1 text-[11px] text-faint">
-                Unresolved research questions
+                Open research questions
                 {o.missing_research_count !== null && (
                   <span className="ml-2">
                     missing_research_count says {o.missing_research_count}; {listed} {listed === 1 ? 'is' : 'are'} listed{disagree ? ' — the two disagree, and both are shown as written' : ''}
@@ -270,46 +339,51 @@ function CardView({ o, trend, busy, onReadiness, onClose }: { o: Opportunity; tr
             </p>
           )}
 
-          {detail
-            .filter((d) => d.value)
-            .map((d) => (
-              <div key={d.label}>
-                <div className="mb-0.5 text-[11px] text-faint">{d.label}</div>
-                <p className="text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink">{d.value}</p>
-              </div>
-            ))}
+          {PROSE.filter((d) => o[d.key]).map((d) => (
+            <div key={d.key}>
+              <div className="mb-0.5 text-[11px] text-faint">{d.label}</div>
+              <p className="text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink">{String(o[d.key])}</p>
+            </div>
+          ))}
 
-          <div className="grid gap-x-6 gap-y-1 text-[11.5px] md:grid-cols-2">
-            {(
-              [
-                ['pilot_state', o.pilot_state],
-                ['routing_state', o.routing_state],
-                ['lane_state', o.lane_state],
-                ['engine_movement_state', o.engine_movement_state],
-                ['infra_readiness', o.infra_readiness],
-                ['data_readiness', o.data_readiness],
-                ['media_readiness', o.media_readiness],
-                ['media_gate', o.media_gate],
-                ['demand_evidence', o.demand_evidence],
-              ] as [string, string | null][]
-            ).map(([k, v]) => (
-              <div key={k} className="flex justify-between gap-3">
-                <span className="text-faint">{k}</span>
-                <span className="truncate text-dim" title={v ?? ''}>
-                  {v ?? '—'}
-                </span>
-              </div>
-            ))}
+          {/*
+            The four the extractor hardcodes, plus the two other readiness
+            selects. They are on the card because they are what the row says;
+            they are never a tab or a chart, because all four are the same value
+            on all 21 records and a bucket holding everything sorts nothing.
+          */}
+          <div>
+            <div className="mb-1 text-[11px] text-faint">Pipeline state — written once by the extractor; Process Twin is the only thing that would advance it</div>
+            <div className="grid gap-x-6 gap-y-1 text-[11.5px] md:grid-cols-2">
+              {(
+                [
+                  ['pilot_state', o.pilot_state],
+                  ['routing_state', o.routing_state],
+                  ['lane_state', o.lane_state],
+                  ['media_gate', o.media_gate],
+                  ['infra_readiness', o.infra_readiness],
+                  ['data_readiness', o.data_readiness],
+                  ['lane_id', o.lane_id],
+                ] as [string, string | null][]
+              ).map(([k, v]) => (
+                <div key={k} className="flex justify-between gap-3">
+                  <span className="text-faint">{k}</span>
+                  <span className="truncate text-dim" title={v ?? ''}>
+                    {v ?? '—'}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
             <SourceLink source={o.source} />
             <div className="flex flex-wrap gap-2">
-              {                READINESS.filter((r) => r !== o.readiness_state).map((r) => (
-                  <button key={r} type="button" className={`btn btn-sm ${r === 'Media-Ready' ? 'btn-primary' : 'btn-ghost'}`} disabled={busy} onClick={() => onReadiness(o, r)}>
-                    {busy ? 'Writing…' : `Set ${r.toLowerCase()}`}
-                  </button>
-                ))}
+              {READINESS.filter((r) => r !== o.readiness_state).map((r) => (
+                <button key={r} type="button" className={`btn btn-sm ${r === 'Media-Ready' ? 'btn-primary' : 'btn-ghost'}`} disabled={busy} onClick={() => onReadiness(o, r)}>
+                  {busy ? 'Writing…' : `Set ${r.toLowerCase()}`}
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -322,13 +396,11 @@ function CardView({ o, trend, busy, onReadiness, onClose }: { o: Opportunity; tr
 /* ------------------------------------------------------------------ page */
 
 /**
- * The card list, as columns — the same shape as Build patterns, because it is
- * the same page with different content. Open questions is the table's own
- * missing_research_count, red while any are unresolved, and says so plainly
- * when the card carries no count at all.
+ * The card list, as one sortable table. Every column here is a field with real
+ * variation across the 21 records; the ones that do not vary are on the card,
+ * not in the list.
  */
-function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportunity, next: ReadinessState) => void, busyId: string | null): RecordColumn<Opportunity>[] {
-  const unresolved = (o: Opportunity) => o.missing_research_count ?? o.missing_research_questions.length;
+function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportunity, next: ReadinessState) => void, busyId: string | null, sort: { key: SortKey; dir: 1 | -1 }, onSort: (k: SortKey) => void): RecordColumn<Opportunity>[] {
   return [
     {
       key: 'card_id',
@@ -340,32 +412,50 @@ function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportuni
     },
     {
       key: 'title',
-      header: 'card',
+      header: <SortHeader label="card" k="title" sort={sort} onSort={onSort} />,
       card: 'title',
-      width: '62ch',
+      width: '58ch',
       title: (o) => o.title,
-      cell: (o) => <TwoLine title={o.title} description={o.lane_state_blocked_reason ?? o.pain_point ?? o.offer} empty="No pain point or offer written on this card." />,
+      cell: (o) => <TwoLine title={o.title} description={o.pain_point ?? o.offer} empty="No pain point or offer written on this card." />,
     },
-    { key: 'readiness', header: 'readiness', card: 'meta', className: 'card-meta', cell: (o) => <ReadinessPill state={o.readiness_state} /> },
     {
-      key: 'lane',
-      header: 'lane',
+      key: 'confidence',
+      header: <SortHeader label="confidence" k="confidence" sort={sort} onSort={onSort} />,
       card: 'meta',
-      width: '22ch',
-      clip: true,
-      className: 'card-meta text-dim',
-      title: (o) => o.lane_id ?? undefined,
-      cell: (o) => (o.lane_id ? laneLabel(o.lane_id) : <span className="text-faint">no lane</span>),
+      width: '16ch',
+      className: 'card-meta',
+      cellClass: (o) => (o.confidence === 'High' ? 'text-accent-ink' : 'text-dim'),
+      cell: (o) => o.confidence?.toLowerCase() ?? <span className="text-faint">not set</span>,
+    },
+    {
+      key: 'media',
+      header: <SortHeader label="media readiness" k="media" sort={sort} onSort={onSort} />,
+      card: 'meta',
+      width: '18ch',
+      className: 'card-meta',
+      cellClass: (o) => (o.media_readiness === 'High' ? 'text-accent-ink' : 'text-dim'),
+      cell: (o) => o.media_readiness?.toLowerCase() ?? <span className="text-faint">not set</span>,
     },
     {
       key: 'questions',
-      header: 'open questions',
+      header: <SortHeader label="open questions" k="open" sort={sort} onSort={onSort} />,
       align: 'right',
       card: 'meta',
       className: 'card-meta tabular',
-      cellClass: (o) => (unresolved(o) > 0 ? 'text-degraded' : 'text-dim'),
+      cellClass: (o) => ((openQuestions(o) ?? 0) > 0 ? 'text-degraded' : 'text-dim'),
       title: (o) => (o.missing_research_questions.length ? o.missing_research_questions.join('\n') : undefined),
-      cell: (o) => (o.missing_research_count === null && o.missing_research_questions.length === 0 ? <span className="text-faint">no count</span> : unresolved(o)),
+      cell: (o) => {
+        const n = openQuestions(o);
+        return n === null ? <span className="text-faint">no count</span> : n;
+      },
+    },
+    {
+      key: 'created',
+      header: <SortHeader label="created" k="created" sort={sort} onSort={onSort} />,
+      width: '14ch',
+      className: 'tabular text-faint',
+      // No date is rendered as no date. A card that never got one is not dated today.
+      cell: (o) => o.created_at?.slice(0, 10) ?? <span className="text-degraded">no date</span>,
     },
     { key: 'source', header: 'source', cell: (o) => <SourceLink source={o.source} /> },
     {
@@ -390,12 +480,15 @@ function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportuni
 export default function Commercial() {
   const { status, data: loaded, error } = useData(getCommercial, []);
   const [cards, setCards] = useState<Opportunity[]>([]);
-  const [lane, setLane] = useState('all');
-  const [filter, setFilter] = useState<Filter>('all');
+  const [confidence, setConfidence] = useState('all');
+  const [media, setMedia] = useState('all');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  // missing_research_count ascending, then media_readiness descending: the
+  // closest to ready at the top, which is the question this page answers.
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'open', dir: 1 });
   const { toast, setToast } = useToast();
   const metrics = useData((query) => getRecordMetrics('commercial', query), [tick]);
 
@@ -403,17 +496,41 @@ export default function Commercial() {
     if (loaded) setCards(loaded.opportunities);
   }, [loaded]);
 
-  const scoped = useMemo(() => cards.filter((o) => lane === 'all' || (o.lane_id ?? '(no lane_id)') === lane), [cards, lane]);
-  const counts = {
-    all: scoped.length,
-    ...Object.fromEntries(READINESS.map((r) => [r, scoped.filter((o) => o.readiness_state === r).length])),
-    unset: scoped.filter((o) => !o.readiness_state).length,
-  } as Record<string, number>;
+  const resync = useResync({
+    run: () => resyncRecords('commercial'),
+    reload: async () => {
+      setTick((n) => n + 1);
+      setCards((await getCommercial({ lane: 'all' })).opportunities);
+    },
+    setToast,
+  });
+
+  function onSort(k: SortKey) {
+    setSort((s) => (s.key === k ? { key: k, dir: s.dir === 1 ? -1 : 1 } : { key: k, dir: k === 'created' ? -1 : 1 }));
+  }
+
+  const values = (pick: (o: Opportunity) => string | null) => {
+    const c = new Map<string, number>();
+    for (const o of cards) {
+      const v = pick(o) ?? '(not set)';
+      c.set(v, (c.get(v) ?? 0) + 1);
+    }
+    return [...c.entries()].sort((a, b) => level(a[0]) - level(b[0]) || a[0].localeCompare(b[0]));
+  };
+  const confidenceOptions = useMemo(() => values((o) => o.confidence), [cards]);
+  const mediaOptions = useMemo(() => values((o) => o.media_readiness), [cards]);
+
   const rows = useMemo(
-    () => scoped.filter((o) => (filter === 'all' ? true : filter === 'unset' ? !o.readiness_state : o.readiness_state === filter)).filter((o) => matches(o, q.trim())),
-    [scoped, filter, q],
+    () =>
+      cards
+        .filter((o) => confidence === 'all' || (o.confidence ?? '(not set)') === confidence)
+        .filter((o) => media === 'all' || (o.media_readiness ?? '(not set)') === media)
+        .filter((o) => matches(o, q.trim()))
+        .slice()
+        .sort((a, b) => compare(sort.key, sort.dir, a, b) || tiebreak(a, b)),
+    [cards, confidence, media, q, sort],
   );
-  const paged = usePaged(rows, `${lane}|${filter}|${q.trim()}`);
+  const paged = usePaged(rows, `${confidence}|${media}|${q.trim()}|${sort.key}|${sort.dir}`);
 
   async function change(o: Opportunity, next: ReadinessState) {
     setBusyId(o.id);
@@ -421,7 +538,7 @@ export default function Commercial() {
       const updated = await setRecordStatus('commercial', o.id, next);
       setCards((list) => list.map((x) => (x.id === updated.id ? updated : x)));
       setTick((n) => n + 1);
-      setToast({ text: `readiness_state set to ${next}.`, tone: 'ok' });
+      setToast({ text: `readiness_state set to ${next}. It is held here; a resync takes Airtable's value back.`, tone: 'ok' });
     } catch (err) {
       setToast({ text: err instanceof Error ? err.message : 'The change did not save.', tone: 'failing' });
     } finally {
@@ -434,59 +551,56 @@ export default function Commercial() {
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      <PageHeader title="Commercial" subtitle="Opportunity cards per lane, and what each still needs answered" />
+      <PageHeader
+        title="Commercial"
+        subtitle="Every opportunity card, closest to ready first"
+        right={<ResyncButton busy={resync.busy} onClick={resync.start} />}
+      />
 
       {/* overflow-x-hidden: nothing on this page may scroll the body sideways. */}
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 px-6 pb-3 md:px-8">
-          <RowsLine freshness={loaded.freshness} />
+          <RowsLine freshness={loaded.freshness} writes={false} />
         </div>
 
         <CommercialMetricsPanel metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
 
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
-          {/* Same filter bar behaviour as Build patterns: it wraps inside its own width. */}
-          <Segmented
-            ariaLabel="Filter by lane"
-            value={lane}
-            onChange={setLane}
-            options={[{ value: 'all', label: 'All lanes', count: cards.length }, ...loaded.lanes.map((l) => ({ value: l.lane_id, label: laneLabel(l.lane_id), count: l.n }))]}
-          />
+          {/* Two filters, both on fields that genuinely vary. No tabs. */}
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Segmented<Filter>
-              ariaLabel="Filter by readiness"
-              value={filter}
-              onChange={setFilter}
-              options={[
-                { value: 'all', label: 'All', count: counts.all },
-                ...READINESS.map((r) => ({ value: r, label: r.toLowerCase(), count: counts[r] })),
-                ...(counts.unset ? [{ value: 'unset' as Filter, label: 'No readiness', count: counts.unset }] : []),
-              ]}
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Segmented
+                ariaLabel="Filter by confidence"
+                value={confidence}
+                onChange={setConfidence}
+                options={[{ value: 'all', label: 'All confidence', count: cards.length }, ...confidenceOptions.map(([v, n]) => ({ value: v, label: v === '(not set)' ? 'not set' : v.toLowerCase(), count: n }))]}
+              />
+              <Segmented
+                ariaLabel="Filter by media readiness"
+                value={media}
+                onChange={setMedia}
+                options={[{ value: 'all', label: 'All media readiness', count: cards.length }, ...mediaOptions.map(([v, n]) => ({ value: v, label: v === '(not set)' ? 'not set' : v.toLowerCase(), count: n }))]}
+              />
+            </div>
             <div className="flex flex-1 items-center justify-end gap-3">
               <SearchBox value={q} onChange={setQ} placeholder="Search cards and research questions" />
             </div>
           </div>
         </div>
 
-        {rows.length === 0 ? (
-          <EmptyState>
-            {loaded.freshness.source === 'none'
-              ? (loaded.freshness.note ?? 'No commercial cards are held.')
-              : q.trim()
-                ? 'No commercial card matches that search in the selected lane and readiness.'
-                : 'No commercial cards match the selected lane and readiness.'}
-          </EmptyState>
+        {cards.length === 0 ? (
+          <EmptyState>{loaded.freshness.source === 'none' ? (loaded.freshness.note ?? 'No commercial cards are held.') : 'No commercial cards are held.'}</EmptyState>
         ) : (
           <>
             <RecordTable
-              columns={commercialColumns((o) => setOpen(o.id), change, busyId)}
+              columns={commercialColumns((o) => setOpen(o.id), change, busyId, sort, onSort)}
               rows={paged.rows}
               rowKey={(o) => o.id}
               onOpen={(o) => setOpen(o.id)}
               busyKey={busyId}
               lines={2}
               label="Commercial cards"
+              empty={q.trim() ? 'No card matches that search at the selected confidence and media readiness.' : 'No card carries that combination of confidence and media readiness.'}
             />
             <Pagination paged={paged} unit="cards" />
           </>

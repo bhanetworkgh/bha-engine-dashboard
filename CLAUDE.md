@@ -256,8 +256,8 @@ explicitly for this. Therefore:
   the headers, the tabs and the search box stay and one centred sentence sits
   where the rows would be, so the page holds its shape. An empty stage and a
   search that matched nothing are different sentences.
-- **Resync from Airtable is a button, and Airtable wins** (decision 2026-09-14,
-  Destiny). The reconciliation only ever *removed* rows, so this dashboard's
+- **Resync from Airtable is a button on four pages, and Airtable wins**
+  (decisions 2026-09-14 and 2026-09-15, Destiny). The reconciliation only ever *removed* rows, so this dashboard's
   copy could only fall behind: a log approved in Airtable stayed "awaiting
   approval" here, and one created without the engine pushing it never arrived.
   The resync reads all seven tables whole and makes Postgres match — insert
@@ -271,6 +271,29 @@ explicitly for this. Therefore:
   status change is dated `via = 'mirror'` — this database learned of it when it
   looked and has no idea when it happened. **Manual only**: not on load, not on
   a schedule. It reads every field of every row, and it deletes.
+- **Build patterns, Commercial and Clients resync the same way** (decision
+  2026-09-15, Destiny), through one shared pass (`store.resync`,
+  `POST /api/{patterns|commercial|clients}/resync`) and one shared control
+  (`src/components/ui/Resync.tsx`), which the Codex page uses too so the four
+  cannot word the same outcome differently. Build patterns
+  (`app5ni3E8r7Lvxk22 / tblaMXSMjmz30OvcU`) and Commercial
+  (`appvLglfdCqOKqLpT / tblyXShZLOFT3jNMe`) are **one shared table each**, not
+  one per builder, so each is a single sweep. Clients reads the watched-clients
+  index and then the table each index row names in `Table ID`; **a questions
+  table no index row names is never read**, and a question row held against one
+  is removed — but only once the index itself has been read, because without
+  that guard the first refusal would empty the whole kind. Two things every
+  resync now says: a row Airtable handed over that this database **refused** is
+  counted rather than only logged, since reading five rows and storing none is
+  not the same as five already matching; and a change made here that Airtable
+  never had is named when it is reverted, found through the mirror row's own
+  `source = 'ui'`, because only loops and Codex write to `record_writes`.
+- **The token reads five bases and writes two.** `AIRTABLE_TOKEN` needs read and
+  write on Open Loops and BHA Submissions as before, and **read only** on Build
+  Patterns, Commercial Opportunities and BHA Client Research Loop for the three
+  resyncs. Those three get **no base variable of their own**: this server never
+  writes to them, so it can never write to a guess, and their ids stay in
+  `sources.ts` where the record links already read them.
 - **Every page states how old its rows are**, relative ("4 min ago"), in the
   same place, along with how many the engine has written since the migration
   backfill. A kind sitting entirely on backfilled rows says so in amber, because
@@ -310,9 +333,12 @@ thread's `session_id` is stable for its life and is Bays's memory. The reply's
 `AUTH_PASSWORD_HASH`, `SESSION_SECRET`, `ASK_BAYS_API_KEY`, `ASK_BAYS_URL`,
 `DASHBOARD_INBOUND_KEY` (nothing reaches the record tables without it),
 `AIRTABLE_TOKEN`, `AIRTABLE_OPEN_LOOPS_BASE_ID` (Open Loops) and
-`AIRTABLE_SUBMISSIONS_BASE_ID` (BHA Submissions) — one token, two bases, loop
-and Codex edits only; without the token nothing edited here reaches Airtable and
-the server says so at boot and on every write — and `DATABASE_URL`, the one the
+`AIRTABLE_SUBMISSIONS_BASE_ID` (BHA Submissions) — one token: read and write on
+those two bases for loop and Codex edits, and read only on Build Patterns,
+Commercial Opportunities and BHA Client Research Loop for the three resyncs,
+which have no base variable because nothing is ever written to them. Without the
+token nothing edited here reaches Airtable and no page can resync, and the
+server says so at boot and on every write — and `DATABASE_URL`, the one the
 server refuses to start without.
 `DATABASE_CA_CERT`, `DATABASE_POOL_MAX` and `AIRTABLE_API_URL` are optional.
 `DATA_DIR` is gone, and so are `AIRTABLE_RESYNC_MINUTES`, the
@@ -471,13 +497,40 @@ state, not an error.
 
 ### Clients
 One row per watched lane, **grouped under the client that owns it** by the
-index's own `Client ID`: two lanes with one id are one client with two lanes
-and appear once. Columns: client, lane, lane status, run state, last run, next
-run due, active questions, needs human, missing research, latest report,
-commercial hook. "Needs human" reads the three circuit breakers that already
-exist upstream — `Research Stuck`, `Run Count` at 3, or a quarantined lane —
-and never recomputes what they mean. A lane with no run yet is **warming up,
-not failing**.
+index's own `Client ID`: two lanes with one id are one client with two lanes and
+appear once, with the lanes nested beneath a heading row inside one table — one
+set of columns, so the lanes line up down the whole page. Clients are ordered by
+the **number** in the Client ID (2, 9, 12), not by its string, and the label is
+"Client 9" from that id rather than a lane's full name.
+
+**The page renders what the `Index` table holds, never what tables exist in the
+base** (`appkSUSh9ijNjP2f8 / tblFJ1yuYcuanjPdn`, four rows). Question tables with
+no index row are orphans, are being deleted upstream, and never appear. Each
+lane's questions table is read from its index row's `Table ID`; there is no
+lane-to-table map in this code, so adding a client is a row, not a deploy.
+
+**`Lane Status` and `Run State` are two different questions and get two
+columns** (decision 2026-09-15, Destiny). Lane Status is onboarding maturity —
+`warm_running`, `warming_up` — and moves with the calendar. Run State is the
+outcome of the last research run — `contradicted`, `stuck`, `idle` — and is set
+by Research Twin, not by the clock. A lane can be both at once, and the single
+pill that mixed them could only say one.
+
+**Staleness is `Next Run Due` against today**, because that is the field the
+weekly clock reads; the age of the last run only says how long ago something
+happened. Those stamps were frozen for weeks because nothing wrote them back,
+fixed in n8n on 15 Sep, so they become real from the next weekly run — until
+then the page shows every running lane overdue since 31 Aug, which is the
+history and not a page fault.
+
+"Needs human" reads the three circuit breakers that already exist upstream —
+`Research Stuck`, `Run Count` at 3, or a quarantined lane — and never recomputes
+what they mean. `Quarantined` is the real one: it flips true only when
+`Stuck Cycle Count` reaches 3, and `Consecutive Error Count` and
+`Infra Fix Required` are its infrastructure equivalents. `Run Count` caps at 3,
+so a question at 3 is skipped by the weekly clock and is counted in its own
+column. `Plain Summary` is deliberately jargon-free and is shown first. A lane
+with no run yet is **warming up, not failing**.
 
 ### vFarm and Engine health
 **Both are a single centred "coming soon" and nothing else** (decision
@@ -517,11 +570,61 @@ Clicking a row opens the whole entry: the generated codex and the review in
 full and collapsible, Jason Status and notes, the completeness verdict with what
 it found missing, and Approve / Send back to pending / Delete.
 
-Build patterns and Commercial are the same page with different content —
-the same filter bars, truncated list rows with the full record on click, and
-the same chart treatment. `pattern_status` has three states, not two: draft,
-canonical, and **empty**, which is counted on its own because an untriaged
-pattern is not a draft.
+Build patterns and Commercial share the Codex page's shape — the same filter
+bar, the same truncated list rows with the full record on click, the same chart
+treatment, the same resync control in the same place.
+
+**Build patterns has no status** (decision 2026-09-15, Destiny). `pattern_status`
+was deleted from the base and removed from every workflow that wrote it, so the
+canonical / draft / no-status split, its tabs, its pill, its filter and the two
+row actions that wrote it are gone, and the page neither reads nor writes that
+column. The all-systems strip — BP-BHARAG, BP-CAPACITY, BP-CST — is gone too: it
+grouped rows by the domain segment of their own id, which the id already says on
+the row. What is left that varies is `reusability` (Narrow / Moderate / Broad,
+and the rows that answer in a sentence), and that is the page's one grouping.
+`implementation_checklist` is a pipe-separated string, split on ` | ` for
+display. The amber "none written since the migration backfill" line comes off,
+same as Codex: it says n8n has gone quiet, which is not what it means on a page
+kept current by a button.
+
+**Nothing on Commercial groups the corpus** (decision 2026-09-15, Destiny). All
+21 records were checked against every candidate axis: `lane_id` is 1:1 with the
+card (21 values, 21 cards); `readiness_state` is 19 Research-First to 1
+Media-Ready to 1 blank, and `INCUBATE` has never been used; `pilot_state`,
+`routing_state`, `media_gate` and `lane_state` are a single hardcoded value on
+every row, written by the extractor, and Process Twin is the only thing that
+would ever advance them. So the lane tab, the readiness tab, the card-name tab
+and the per-lane strip are gone, replaced by **one sortable table** defaulting
+to `missing_research_count` ascending then `media_readiness` descending —
+closest to ready first, which is the question the page answers. Four figures
+above it: cards, cards with no open research question, cards at Media-Ready,
+open research questions across the corpus. The four constants are still shown on
+the card, because they are what the row says; they are never a tab or a chart,
+because a bucket holding everything sorts nothing.
+
+**The per-lane strip read "1.3 open" and nothing computed it.** It was
+`{n} · {unresolved} open` — a middot between two integers — and because every
+lane holds exactly one card the first number was always 1. "1.5 open" was one
+card with five open research questions. It went with the grouping.
+
+**Eight columns are dead scaffold and are not mapped at all**:
+`demand_signal_sources`, `demand_evidence`, `cta_surface_plan`,
+`media_twin_integration_plan`, `subscription_flow_state`,
+`infra_readiness_state`, `engine_movement_state`, `lane_state_blocked_reason` —
+single-selects whose only options are whole English sentences, written once as
+placeholders and never populated, on roughly half the records; the last has an
+option whose name is the empty string. They stay in Airtable and inside the
+stored `fields` blob, because nothing here removes a column the engine owns, but
+they have no way onto the page.
+
+**The schema grew over months, so absence is rendered as absence.** July and
+early-August cards lack `lane_state`, `engine_movement_state`,
+`missing_research_count`, `infra_gaps` and `reuse_patterns` entirely, and the
+card shows what a record has rather than narrowing to the fields every record
+carries — which is why the page used to show so much less than the table holds.
+The one record missing what a complete extractor run writes
+(`CARD-1783965721620-1RJX`, no `created_at`, `media_readiness`, `pilot_state` or
+`readiness_state`) is surfaced as **incomplete**, never as a bucket of its own.
 
 ### System registry
 **Four registries on one page** (decision 2026-09-14, Destiny) — Builders,

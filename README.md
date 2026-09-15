@@ -416,6 +416,34 @@ not reached rather than counted as failed — they are checked next time. A pass
 is held for two minutes (twenty seconds if it failed, since that is the state
 someone is trying to clear), and a delete made here drops it immediately.
 
+#### Resync on Build patterns, Commercial and Clients
+
+The same button, the same semantics and the same toast, on the other three
+record pages (2026-09-15, Destiny). It is one shared pass — `store.resync`,
+`POST /api/{patterns|commercial|clients}/resync` — and one shared control,
+`components/ui/Resync.tsx`, which the Codex page now uses too, so the four pages
+cannot word the same outcome differently.
+
+| Page | Base | Reads |
+|---|---|---|
+| Build patterns | `app5ni3E8r7Lvxk22` | `tblaMXSMjmz30OvcU`, one shared table |
+| Commercial | `appvLglfdCqOKqLpT` | `tblyXShZLOFT3jNMe`, one shared table |
+| Clients | `appkSUSh9ijNjP2f8` | the `Index` (`tblFJ1yuYcuanjPdn`), then the table each index row names in `Table ID` |
+
+Build patterns and Commercial are a single shared table each, not one per
+builder, so their sweep is one read. **Clients follows the index and only the
+index**: a questions table that no index row names is an orphan, is being
+deleted upstream, and is never read — and any question row this database still
+holds against one is removed and logged, but only once the index has actually
+been read, since without that the first refusal would empty the whole kind.
+
+Two things the pass says that the Codex one did not, and which it now says too:
+a row Airtable handed over that this database **refused** is counted rather than
+only logged — read five rows and store none is not the same as five already
+matching — and a change made here that Airtable never had is named when it is
+reverted, found through the mirror row's own `source = 'ui'` rather than through
+`record_writes`, which only loops and Codex write to.
+
 ### The migration backfill
 
 Gone, with the Airtable client it read through (13 September 2026).
@@ -431,7 +459,7 @@ Airtable; those rows are in `git log` if it is ever needed again.
 | `SESSION_SECRET` | Signs the session cookie |
 | `ASK_BAYS_API_KEY`, `ASK_BAYS_URL` | The Ask Bays workflow |
 | `DASHBOARD_INBOUND_KEY` | Authenticates the engine’s writes to `/api/engine/*` and `/api/inbound/*`. **Required** in practice — nothing can reach the record tables without it |
-| `AIRTABLE_TOKEN` | Read and write on **both** bases — Open Loops and BHA Submissions — for loop and Codex edits. Without it nothing edited here reaches Airtable; the server says so at boot and on every write. **Note the name** — the client deleted on 13 Sep read `AIRTABLE_API_KEY` |
+| `AIRTABLE_TOKEN` | Read **and** write on Open Loops and BHA Submissions, for loop and Codex edits; read on Build Patterns (`app5ni3E8r7Lvxk22`), Commercial Opportunities (`appvLglfdCqOKqLpT`) and BHA Client Research Loop (`appkSUSh9ijNjP2f8`), for the resync those three pages gained on 15 Sep. Five bases, one token; nothing is ever written to the last three. Without it nothing edited here reaches Airtable and no page can resync; the server says so at boot and on every write. **Note the name** — the client deleted on 13 Sep read `AIRTABLE_API_KEY` |
 | `AIRTABLE_OPEN_LOOPS_BASE_ID` | The Open Loops base (`appUVlBSGGPHw6DGh`). **No default** — unset, the boot line says so by name and every loop edit is refused and marked. Called `AIRTABLE_BASE_ID` until 14 Sep 2026; that name is read by nothing |
 | `AIRTABLE_SUBMISSIONS_BASE_ID` | BHA Submissions, for Codex entries. Defaults to `appEmdKshNVTl64Zf` |
 | `AIRTABLE_API_URL` | Points the same client at a local replay of the API in a sandbox |
@@ -460,9 +488,9 @@ is missing, and the note is what the page shows.
 | Engine health | Placeholder — no incident reaches this dashboard yet |
 | Open loops | Loops by age and owner, close from the interface |
 | Codex entries | Session logs by builder and week |
-| Build patterns | Patterns by lane |
-| Commercial | Opportunities and readiness |
-| Clients | Watched client lanes, grouped by client |
+| Build patterns | Every pattern, by reusability. No `pattern_status` — the field was deleted from the base on 15 Sep |
+| Commercial | One sortable table of opportunity cards, closest to ready first. Nothing on it groups the corpus: every candidate axis is constant or 1:1 with the card |
+| Clients | Watched client lanes grouped under the client that owns them, ordered by `Client ID` |
 | System registry | Builders, Tools, Endpoint, Workflow, and the engine-writes surface |
 
 ## Repo layout

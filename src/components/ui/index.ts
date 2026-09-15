@@ -19,3 +19,4 @@ export * from './RecordTable';
 export * from './Tabs';
 export * from './TagRow';
 export * from './Records';
+export * from './Resync';

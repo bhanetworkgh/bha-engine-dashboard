@@ -133,8 +133,13 @@ export async function getOverview(q: Query): Promise<OverviewData> {
 
   const opps = await store.opportunities();
   const patterns = await store.patterns();
-  const canonical = patterns.filter((p) => p.status === 'canonical').length;
-  const draftPatterns = patterns.filter((p) => p.status === 'draft').length;
+  // pattern_status is gone from the base (2026-09-15), so the tile's signal is
+  // reusability — the field on that table that actually varies.
+  const broad = patterns.filter((p) => p.reusability?.trim().toLowerCase() === 'broad').length;
+  // Cards blocked on research used to read lane_state_blocked_reason, which is
+  // dead scaffold: a single-select whose only options are English sentences and
+  // which the extractor has never populated. The open research count is real.
+  const openQuestions = opps.reduce((n, o) => n + (o.missing_research_count ?? o.missing_research_questions.length), 0);
 
   return {
     pins: [
@@ -162,8 +167,8 @@ export async function getOverview(q: Query): Promise<OverviewData> {
         trend: loops14d.map((p) => p.value),
       },
       { key: 'codex', label: 'Codex entries', to: '/codex', headline: String(entriesThisWeek), sublabel: 'logged this week', signal: `${entries.filter((e) => e.approval === 'pending' || e.approval === 'unset').length} awaiting Jason’s approval`, health: 'ok', trend: entriesByWeek.map((p) => p.value), share: { value: ingested, total: entries.length, label: 'with an entry written' } },
-      { key: 'build-patterns', label: 'Build patterns', to: '/build-patterns', headline: String(patterns.length), sublabel: 'patterns', signal: `${canonical} canonical, ${draftPatterns} draft, ${patterns.length - canonical - draftPatterns} with no status`, health: 'ok', share: { value: canonical, total: patterns.length, label: 'canonical' } },
-      { key: 'commercial', label: 'Commercial', to: '/commercial', headline: String(opps.length), sublabel: 'cards', signal: `${opps.filter((o) => o.lane_state_blocked_reason).length} blocked on research`, health: opps.some((o) => o.lane_state_blocked_reason) ? 'degraded' : 'ok', share: { value: opps.filter((o) => o.readiness_state === 'Media-Ready').length, total: opps.length, label: 'media-ready' } },
+      { key: 'build-patterns', label: 'Build patterns', to: '/build-patterns', headline: String(patterns.length), sublabel: 'patterns', signal: `${broad} broadly reusable`, health: 'ok', share: { value: broad, total: patterns.length, label: 'broadly reusable' } },
+      { key: 'commercial', label: 'Commercial', to: '/commercial', headline: String(opps.length), sublabel: 'cards', signal: `${openQuestions} open research ${openQuestions === 1 ? 'question' : 'questions'}`, health: 'ok', share: { value: opps.filter((o) => o.readiness_state === 'Media-Ready').length, total: opps.length, label: 'media-ready' } },
     ],
     series: {
       loops_raised_14d: loops14d,
@@ -343,13 +348,16 @@ export async function getResearchTwinTelemetry(): Promise<RtData> {
 
 /* --------------------------------------------------------- clients */
 
-/** Fourteen days with no run, or never run at all, is stale. */
-const STALE_DAYS = 14;
+/** Midnight today, in whole days, for the overdue comparison. */
+function startOfToday(): number {
+  const d = new Date();
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
 
 export async function getClients(): Promise<ClientsData> {
   const lanes = await store.clientLanes();
   const questions = await store.clientQuestions();
-  const now = Date.now();
+  const today = startOfToday();
 
   const rows: ClientLaneRow[] = lanes
     .map((lane) => {
@@ -357,6 +365,18 @@ export async function getClients(): Promise<ClientsData> {
       const mine = questions.filter((q) => q.lane_id === key);
       const needsHuman = mine.filter((q) => questionNeedsHuman(q, lane)).length;
       const everRun = Boolean(lane.last_run_at);
+      /**
+       * Overdue is `Next Run Due` against today, not the age of the last run.
+       * That field is what the weekly clock reads, so it is the one that says a
+       * lane is late; a lane with no due date is not overdue, it is undated.
+       *
+       * Those stamps were frozen for weeks because nothing wrote them back.
+       * That was fixed upstream on 15 Sep, so they become real from the next
+       * weekly run; until then the page shows the history, which is every
+       * running lane overdue since 31 Aug.
+       */
+      const due = lane.next_run_due ? Date.parse(lane.next_run_due) : null;
+      const overdue = due !== null && Number.isFinite(due) && due < today;
       return {
         ...lane,
         questions: mine.length,
@@ -365,9 +385,11 @@ export async function getClients(): Promise<ClientsData> {
         active_questions: mine.filter((q) => !questionNeedsHuman(q, lane)).length,
         needs_human: needsHuman,
         missing_research: mine.filter((q) => q.missing_research).length,
-        stale: everRun ? now - Date.parse(lane.last_run_at!) > STALE_DAYS * 86_400_000 : false,
+        capped: mine.filter((q) => q.run_count >= 3).length,
+        overdue,
+        days_overdue: overdue && due !== null ? Math.floor((today - due) / 86_400_000) : null,
         // A lane with no run yet is warming up, not failing. The distinction
-        // matters: the vFarm lane was added today and has never run.
+        // matters: Client 2's kiosk lane was added on 10 Sep and has never run.
         warming_up: !everRun,
       };
     })
@@ -383,14 +405,21 @@ export async function getClients(): Promise<ClientsData> {
 
   return {
     clients: [...groups.entries()]
-      .map(([client_id, ls]) => ({
-        client_id,
-        label: commonLabel(ls.map((l) => l.name)),
-        lanes: ls,
-        questions: ls.reduce((n, l) => n + l.questions, 0),
-        needs_human: ls.reduce((n, l) => n + l.needs_human, 0),
-      }))
-      .sort((a, b) => b.needs_human - a.needs_human || a.label.localeCompare(b.label)),
+      .map(([client_id, ls]) => {
+        const number = clientNumber(client_id);
+        return {
+          client_id,
+          label: number === null ? (ls.length === 1 ? ls[0].name : client_id) : `Client ${number}`,
+          number,
+          lanes: ls,
+          questions: ls.reduce((n, l) => n + l.questions, 0),
+          needs_human: ls.reduce((n, l) => n + l.needs_human, 0),
+        };
+      })
+      // Numerically, so the page reads Client 2, Client 9, Client 12 — and not
+      // the 002 / 009 / 012 order a string sort would give, which happens to
+      // agree today and would stop agreeing at Client 100.
+      .sort((a, b) => (a.number ?? Number.MAX_SAFE_INTEGER) - (b.number ?? Number.MAX_SAFE_INTEGER) || a.label.localeCompare(b.label)),
     lanes: rows,
     questions,
     freshness: await store.freshness('clients'),
@@ -405,44 +434,44 @@ export async function getClients(): Promise<ClientsData> {
 }
 
 /**
- * The client's name from its lanes' names: the shared prefix where there is
- * one ("Client 2 — Rare-Earth Recycling" and "Client 2 — CRE vFarm + Kiosk
- * Host" give "Client 2"), otherwise the first lane's name.
+ * The number inside a Client ID — CLIENT-009 gives 9 — and null where the id
+ * does not carry one. The id is the grouping key and the label both, because it
+ * is the field that actually says which client a lane belongs to; the lane's
+ * own name is prose and two lanes of one client do not share it.
  */
-function commonLabel(names: string[]): string {
-  if (names.length === 1) return names[0];
-  const parts = names.map((n) => n.split(/\s+[—-]\s+/)[0].trim());
-  return parts.every((p) => p === parts[0]) && parts[0] ? parts[0] : names[0];
+function clientNumber(clientId: string): number | null {
+  const m = /(\d+)/.exec(clientId);
+  return m ? Number(m[1]) : null;
 }
 
+/**
+ * Build patterns, newest first.
+ *
+ * No `systems` list any more (2026-09-15, Destiny): the strip of BP-BHARAG,
+ * BP-CAPACITY, BP-CST and the rest grouped rows by the domain segment of their
+ * own id, which tells a reader nothing they cannot see in the id itself. And no
+ * `unset` count, because `pattern_status` no longer exists to be unset.
+ */
 export async function getBuildPatterns(_q: Query): Promise<BuildPatternsData> {
   // Newest first, by created_at; a pattern with no date sorts last, then by id.
   const patterns = (await store.patterns()).sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '') || (a.pattern_id ?? '').localeCompare(b.pattern_id ?? ''));
-  const systems = [...new Set(patterns.map((p) => p.system ?? '(no system in id)'))].sort();
-  return {
-    patterns,
-    freshness: await store.freshness('patterns'),
-    systems: systems.map((s) => ({ system: s, n: patterns.filter((p) => (p.system ?? '(no system in id)') === s).length, canonical: patterns.filter((p) => (p.system ?? '(no system in id)') === s && p.status === 'canonical').length })),
-    unset: patterns.filter((p) => p.status === 'unset').length,
-  };
+  return { patterns, freshness: await store.freshness('patterns') };
 }
 
+/**
+ * Commercial cards.
+ *
+ * No `lanes` list any more (2026-09-15, Destiny): lane_id is 1:1 with the card
+ * — 21 distinct lanes across 21 records — so grouping by it grouped nothing,
+ * and the per-lane strip it fed read "1 · 3 open" per lane, which is one card
+ * and three open questions rather than any kind of average.
+ */
 export async function getCommercial(_q: Query): Promise<CommercialData> {
-  // Newest first, by created_at; a card with no date sorts last, then by lane and id.
-  const opportunities = (await store.opportunities()).sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '') || (a.lane_id ?? '').localeCompare(b.lane_id ?? '') || (a.card_id ?? '').localeCompare(b.card_id ?? ''));
-  const laneIds: string[] = [];
-  for (const o of opportunities) {
-    const l = o.lane_id ?? '(no lane_id)';
-    if (!laneIds.includes(l)) laneIds.push(l);
-  }
+  // Newest first, by created_at; a card with no date sorts last, then by id.
+  const opportunities = (await store.opportunities()).sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '') || (a.card_id ?? '').localeCompare(b.card_id ?? ''));
   return {
     opportunities,
     freshness: await store.freshness('commercial'),
-    lanes: laneIds.map((lane_id) => {
-      const mine = opportunities.filter((o) => (o.lane_id ?? '(no lane_id)') === lane_id);
-      const counted = mine.filter((o) => o.missing_research_count !== null);
-      return { lane_id, n: mine.length, unresolved_questions: counted.length ? counted.reduce((n, o) => n + (o.missing_research_count ?? 0), 0) : null };
-    }),
     trends: Object.fromEntries(await Promise.all(opportunities.map(async (o) => [o.id, await store.cardTrend(o.id)] as const))),
   };
 }

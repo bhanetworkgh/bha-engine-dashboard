@@ -706,7 +706,7 @@ export interface CodexData {
  * reverted to Airtable's copy. Silence there would be this dashboard losing a
  * decision somebody made in it.
  */
-export interface CodexResyncTable {
+export interface ResyncTable {
   table: string;
   label: string;
   /** False when Airtable refused or the budget ran out. Nothing under it was touched. */
@@ -718,21 +718,42 @@ export interface CodexResyncTable {
   updated: number;
   unchanged: number;
   deleted: number;
+  /**
+   * Rows Airtable returned that this database refused to store, with the
+   * reason in the server log. Counted rather than swallowed: a table that read
+   * five rows and stored none is not a table that already matched, and without
+   * this the two look identical on the page.
+   */
+  refused: number;
 }
 
-export interface CodexResync {
+/**
+ * One resync, whichever page pressed the button.
+ *
+ * The same shape for every kind on purpose: Codex reads seven tables, Clients
+ * reads the index and then one table per lane, and Build patterns and
+ * Commercial read exactly one each — but "what did it change, and what could it
+ * not read" is the same question in all four cases, and the toast that answers
+ * it is the same line.
+ */
+export interface Resync {
   ran: boolean;
   at: string;
   ms: number;
-  tables: CodexResyncTable[];
+  tables: ResyncTable[];
   inserted: number;
   updated: number;
   unchanged: number;
   deleted: number;
+  refused: number;
   /** Rows whose local change never landed in Airtable and has now been overwritten. */
   overwritten: { record_id: string; natural_id: string | null }[];
   note: string;
 }
+
+/** The Codex page's own name for it, from before the other three pages had one. */
+export type CodexResync = Resync;
+export type CodexResyncTable = ResyncTable;
 
 export interface CodexReconciliation {
   ran: boolean;
@@ -757,7 +778,6 @@ export interface BuildPattern {
   id: string;
   pattern_id: string | null;
   title: string;
-  status: PatternStatus;
   bha_system: string | null;
   reusability: string | null;
   created_at: string | null;
@@ -792,23 +812,15 @@ export interface BuildPatternDetail extends BuildPattern {
 }
 
 /**
- * pattern_status as the Build Patterns table defines it — a single-select
- * with exactly two choices — plus the state the table does not name: a row
- * that leaves the field empty. 'unset' is never written back; it is what a
- * row already is.
+ * `pattern_status` is gone (2026-09-15, Destiny). It was deleted from the Build
+ * Patterns base and removed from every workflow that wrote it, so there is no
+ * draft, no canonical and no "no status" — the table has twenty columns and
+ * none of them is a state. The page reads nothing for it and writes nothing to
+ * it; a pattern is a pattern.
  */
-export type PatternStatus = 'draft' | 'canonical' | 'unset';
-
-/** The two a pattern can be moved to from here. */
-export type WritablePatternStatus = 'draft' | 'canonical';
-
 export interface BuildPatternsData {
   patterns: BuildPattern[];
   freshness: Freshness;
-  /** Every system seen in pattern ids, with counts, for the classification strip. */
-  systems: { system: string; n: number; canonical: number }[];
-  /** How many rows leave pattern_status empty, for the page's own explanation of the states. */
-  unset: number;
 }
 
 /** readiness_state as the Commercial Opportunities table defines it. */
@@ -824,19 +836,13 @@ export interface Opportunity {
   id: string;
   card_id: string | null;
   title: string;
+  /** One per card — 21 lane_ids across 21 cards — so it names a card, it does not group them. */
   lane_id: string | null;
   readiness_state: ReadinessState | null;
   confidence: string | null;
-  pilot_state: string | null;
-  routing_state: string | null;
-  lane_state: string | null;
-  lane_state_blocked_reason: string | null;
-  engine_movement_state: string | null;
-  demand_evidence: string | null;
   infra_readiness: string | null;
   data_readiness: string | null;
   media_readiness: string | null;
-  media_gate: string | null;
   missing_research_count: number | null;
   missing_research_questions: string[];
   next_action: string | null;
@@ -845,6 +851,41 @@ export interface Opportunity {
   target: string | null;
   who_pays: string | null;
   bha_system: string | null;
+  /**
+   * The rest of the prose the table carries. Every one of these is absent on
+   * roughly half the corpus — the schema grew over months and the July and
+   * early-August cards predate the deeper half of it — so each is rendered
+   * where present and left out where not. Filtering the page down to the
+   * fields every row carries is why it showed so much less than the table
+   * holds.
+   */
+  metrics_hypothesis: string | null;
+  missing_proof: string | null;
+  implementation_constraints: string | null;
+  commercial_impact: string | null;
+  offer_shapes_gates: string | null;
+  next_experiments: string | null;
+  experiment_results: string | null;
+  research_gleanings: string | null;
+  demand_strength_hypothesis: string | null;
+  competing_offers_snapshot: string | null;
+  hypothesis_rejection_note: string | null;
+  commercial_ready_v1_checklist: string | null;
+  infra_gaps: string | null;
+  reuse_patterns: string | null;
+  source_logs: string | null;
+  /**
+   * The four the extractor hardcodes on every card it writes: pilot_state
+   * research_only, routing_state research_loop, media_gate CLOSED, lane_state
+   * research_first. Process Twin is the only thing that would ever advance
+   * them and it never has, so they are constant across all 21 records. Shown on
+   * the card, because they are what the row says; never a grouping, a tab or a
+   * chart, because a bucket holding everything sorts nothing.
+   */
+  pilot_state: string | null;
+  routing_state: string | null;
+  lane_state: string | null;
+  media_gate: string | null;
   created_at: string | null;
   note?: string | null;
   spine: Spine;
@@ -855,8 +896,6 @@ export interface Opportunity {
 export interface CommercialData {
   opportunities: Opportunity[];
   freshness: Freshness;
-  /** Cards grouped by lane_id, in the order lanes first appear. */
-  lanes: { lane_id: string; n: number; unresolved_questions: number | null }[];
   /** Per card, missing_research_count as observed at each boot — a trend only once seen on two different days. Keyed by record id. */
   trends: Record<string, MetricSeries>;
 }
@@ -1095,17 +1134,27 @@ export interface ClientLaneRow extends ClientLane {
   active_questions: number;
   needs_human: number;
   missing_research: number;
-  /** No run in fourteen days, or never run at all. */
-  stale: boolean;
-  /** An index row with a run state but no run yet: warming up, not failing. */
+  /** Questions already at three runs: the weekly clock skips them and a person is owed. */
+  capped: number;
+  /**
+   * `Next Run Due` is in the past. That field is what the weekly clock reads,
+   * so it is what says a lane is late — not the age of the last run, which only
+   * says how long ago something happened.
+   */
+  overdue: boolean;
+  /** How many days past `Next Run Due`, or null when the lane has no due date. */
+  days_overdue: number | null;
+  /** An index row with a lane status but no run yet: warming up, not failing. */
   warming_up: boolean;
 }
 
 /** One client, with every lane beneath it. */
 export interface ClientGroup {
   client_id: string;
-  /** The shortest common name across the lanes, for the group heading. */
+  /** "Client 2", from the index row's own Client ID. Never a lane's full name. */
   label: string;
+  /** The number inside the Client ID, so the page can order 2, 9, 12 rather than 002, 009, 012. */
+  number: number | null;
   lanes: ClientLaneRow[];
   questions: number;
   needs_human: number;
@@ -1213,19 +1262,13 @@ export interface PatternMetrics {
   kind: 'patterns';
   computed_at: string;
   scope: { rows: number };
-  draft: number;
-  canonical: number;
-  /** Rows whose pattern_status is empty. Counted separately: an untriaged pattern is not a draft. */
-  unset: number;
-  /** draft + canonical + unset, and the total, so the figures visibly reconcile. */
-  reconciliation: { rows: number; draft: number; canonical: number; unset: number; sums_to: number; note: string };
-  /** Distinct pattern_id values against the row count — the second reason the figures move. */
+  /** Distinct pattern_id values against the row count: a count of rows is not a count of patterns. */
   duplicates: { distinct_ids: number; duplicate_rows: number; ids: { pattern_id: string; n: number }[]; note: string };
-  /** Canonical as a share of all patterns, today. */
-  promotion_rate: Metric;
-  /** What each state means. The field itself defines two; the third is the absence of a value. */
-  status_legend: { status: PatternStatus; meaning: string }[];
-  by_system: { system: string; draft: number; canonical: number; unset: number }[];
+  /**
+   * Narrow / Moderate / Broad, and the rows that answer in a sentence instead.
+   * The one field on this table with variation worth grouping by — which is why
+   * it is the only grouping left on the page.
+   */
   reusability_mix: { reusability: string; n: number }[];
   reusability_note: string;
   created_per_week: MetricSeries;
@@ -1236,12 +1279,20 @@ export interface CommercialMetrics {
   computed_at: string;
   scope: { rows: number };
   cards: number;
-  by_lane: { lane_id: string; n: number; unresolved: number | null; blocked: number }[];
-  by_readiness: { readiness_state: string; n: number }[];
+  /** Cards carrying no open research question — the closest-to-ready end of the table. */
+  clear: number;
+  /** Cards at readiness_state Media-Ready. A figure, never a tab: 19 of 21 are Research-First. */
+  media_ready: number;
   confidence_mix: { confidence: string; n: number }[];
+  media_readiness_mix: { media_readiness: string; n: number }[];
   unresolved_questions: Metric;
   unresolved_trend: MetricSeries;
-  demand_evidence_note: string;
+  /**
+   * Cards missing the fields the extractor writes on every complete run. Not a
+   * bucket and not a state — one malformed record, surfaced as incomplete so it
+   * is not read as a category of its own.
+   */
+  incomplete: { n: number; cards: { id: string; card_id: string | null; missing: string[] }[]; note: string };
 }
 
 export type RecordMetrics = LoopMetrics | CodexMetrics | PatternMetrics | CommercialMetrics | NsMetrics | RtMetrics;
