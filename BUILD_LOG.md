@@ -4624,3 +4624,26 @@ Not done:   The 36-row difference itself is still open. The next production
             settles whether this database is ahead of n8n's count (fine) or
             behind it (not fine), without anybody having to read two systems and
             subtract.
+
+## 2026-09-15 14:50 — The self-check runs on every pass, not only a full read
+
+Intent:     Get the held-against-reported comparison in front of somebody within
+            45 seconds rather than at the next backfill anybody remembers to run.
+
+Problem:    The check as written only ran on a full read, on the reasoning that
+            an incremental pass has read only the top of the list. That was
+            wrong about what the comparison needs: the total comes from the
+            `count` n8n returns on the **first page**, which every pass fetches
+            whether or not anything is new above the watermark. A quiet poll
+            knows both numbers and was throwing one of them away — and on a
+            deploy where the table is already populated, the boot pass is
+            incremental, so the check would not have run at all.
+
+Fix:        The comparison runs on every pass. A pass that is short of n8n now
+            logs even when it read nothing new; one that agrees and found
+            nothing stays silent, as it should.
+
+Verified:   In the rig: every seventh row deleted from the table by hand, and the
+            next quiet poll — "0 read from n8n over 1 page, 0 new" — reported
+            "this database holds 3342 — 553 short. Something has not been read."
+            No full read, no restart, 45 seconds.
