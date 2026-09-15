@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../../app/useData';
-import { BUILDER_NAMES, createLoop, getOpenLoops, getRecordMetrics, removeLoopDuplicate, saveLoop, type Loop, type LoopEdit, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
-import { Icon, LoadFailed, Loading, PageHeader, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useToast } from '../../components/ui';
+import { BUILDER_NAMES, createLoop, getMonthly, getOpenLoops, getRecordMetrics, removeLoopDuplicate, saveLoop, type Loop, type LoopEdit, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
+import { Icon, LoadFailed, Loading, MonthlyPanel, PageHeader, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useToast } from '../../components/ui';
 import { LoopPanel } from './LoopPanel';
 import { Loops, OwnerPicker, type StatusFilter } from './Loops';
 import { LoopMetricsPanel } from './Metrics';
@@ -21,6 +21,7 @@ export default function OpenLoops() {
   const [owner, setOwner] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
   const [q, setQ] = useState('');
+  const [month, setMonth] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -35,6 +36,7 @@ export default function OpenLoops() {
    */
   const [metricsTick, setMetricsTick] = useState(0);
   const metrics = useData((query) => getRecordMetrics('loops', query), [metricsTick]);
+  const monthly = useData(() => getMonthly('loops'), [metricsTick]);
   const current: LoopMetrics | null = useMemo(() => {
     const m = metrics.data;
     if (!m) return null;
@@ -75,11 +77,15 @@ export default function OpenLoops() {
         // Newest first, oldest last. Age stays on every row as the signal;
         // it is no longer what decides the order.
         .filter((l) => matches(l, q.trim()))
+        // The month selection is a filter like any other, so the list, the
+        // count and the CSV all see the same rows. It reads Date Raised, which
+        // is the field the chart's raised bars count.
+        .filter((l) => !month || l.raised_at?.slice(0, 7) === month)
         .sort((a, b) => (b.raised_at ?? '').localeCompare(a.raised_at ?? '') || a.age_days - b.age_days),
-    [scoped, statusFilter, q],
+    [scoped, statusFilter, q, month],
   );
 
-  const paged = usePaged(loops, `${owner}|${statusFilter}|${q.trim()}`);
+  const paged = usePaged(loops, `${owner}|${statusFilter}|${q.trim()}|${month ?? ''}`);
 
   /**
    * One save, whether it came from a row action or the panel.
@@ -191,6 +197,29 @@ export default function OpenLoops() {
         </div>
 
         <LoopMetricsPanel metrics={current} loading={metrics.status === 'loading'} switching={switching} error={metrics.error} view={owner} />
+
+        {monthly.data && (
+          <MonthlyPanel
+            series={monthly.data}
+            selected={month}
+            onSelect={setMonth}
+            rows={loops}
+            csvLabel="open-loops"
+            columns={[
+              { header: 'loop_id', value: (l) => l.loop_id },
+              { header: 'airtable_record_id', value: (l) => l.id },
+              { header: 'what', value: (l) => l.title },
+              { header: 'owner', value: (l) => l.owner },
+              { header: 'status', value: (l) => l.status },
+              { header: 'lane_tag', value: (l) => l.lane_tag },
+              { header: 'raised_by', value: (l) => l.raised_by },
+              { header: 'date_raised', value: (l) => l.raised_at },
+              { header: 'closed_at', value: (l) => l.closed_at },
+              { header: 'age_days', value: (l) => l.age_days },
+              { header: 'airtable_url', value: (l) => l.airtable.url },
+            ]}
+          />
+        )}
 
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
           <div className="flex flex-wrap items-center justify-between gap-2">

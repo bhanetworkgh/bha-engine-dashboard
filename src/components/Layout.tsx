@@ -16,6 +16,11 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
   {
     group: 'Systems',
     items: [
+      // Bays gets a page of its own (2026-09-15, Destiny). Its *output* is still
+      // split across four record pages and is linked from there rather than
+      // copied; what it had nowhere to show was its own execution health, and
+      // it owns seventeen workflows — the largest set in the engine.
+      { to: '/bays', label: 'Bays', icon: 'chat' },
       { to: '/north-star', label: 'North Star', icon: 'star' },
       { to: '/research-twin', label: 'Research Twin', icon: 'twin' },
       { to: '/vfarm', label: 'vFarm', icon: 'leaf' },

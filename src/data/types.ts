@@ -582,6 +582,12 @@ export interface CodexEntry {
   codex_entry_id: string | null;
   /** From the Timestamp field, normalised to ISO. */
   logged_at: string | null;
+  /**
+   * When Jason approved or added input. `Jason Reviewed At` was created on
+   * 14 Sep 2026 with no backfill, so this is null on every log before then —
+   * which is why days-to-approval has a boundary and approval rate does not.
+   */
+  reviewed_at: string | null;
   /** ISO week of logged_at, e.g. 2026-W36. */
   week: string | null;
   session_type: string | null;
@@ -1524,4 +1530,160 @@ export interface DigestHealth {
   delivered: number;
   missing: number;
   latest_sent_at: string | null;
+}
+
+/* ---------------------------------------------------------- monthly rollups */
+
+/**
+ * How much of a month the metric was actually instrumented for.
+ *
+ * This is the whole point of the monthly charts. Several of the date fields
+ * behind them only started being written recently, and a month that renders as
+ * a low bar because the data did not exist yet reads as a quiet month rather
+ * than as a gap in instrumentation — which is worse than no chart at all.
+ *
+ *   full     the metric was recording for the whole month
+ *   partial  it was recording for part of it, or the records are known to
+ *            undercount; the bar is drawn and marked
+ *   none     nothing was recording; **no bar is drawn**, the boundary is
+ *            labelled instead
+ */
+export type MonthCoverage = 'full' | 'partial' | 'none';
+
+export interface MonthPoint {
+  /** YYYY-MM. */
+  month: string;
+  /** "Jul", and "Jul 26" where the series crosses a year. */
+  label: string;
+  created: number;
+  /** Closed, approved, resolved — whatever this page's `advanced_label` says. */
+  advanced: number;
+  rate: number | null;
+  /** How well `created` was instrumented in this month. */
+  coverage: MonthCoverage;
+  /**
+   * How well `advanced` was, which is often not the same thing. A loop's
+   * raised date has always existed; the date it closed exists only from the
+   * day this database started keeping the status ledger. One month can
+   * therefore have a trustworthy raised count and no closed count at all, and
+   * drawing that as "closed: 0" would be the lie this whole shape exists to
+   * prevent.
+   */
+  advanced_coverage: MonthCoverage;
+  /** Why this month is partial or absent. Null when it is full. */
+  note: string | null;
+  /**
+   * Rows dated into this month whose row arrived materially later — a bulk
+   * import backdating its own records. Counted so a month of imported history
+   * cannot be read as a month of output.
+   */
+  backfilled: number;
+  /** Clients only: the movement-tag mix inside the month. */
+  segments: Record<string, number> | null;
+}
+
+export interface MonthlyBoundary {
+  /** The first month the metric can be trusted. */
+  month: string;
+  /** What began then, and why nothing before it counts. */
+  note: string;
+}
+
+/**
+ * A second metric on the same page with its own, later boundary — Codex's days
+ * to approval, which only exists from the day `Jason Reviewed At` was created.
+ */
+export interface MonthlySecondary {
+  label: string;
+  unit: string;
+  points: { month: string; label: string; value: number | null; n: number; coverage: MonthCoverage }[];
+  boundary: MonthlyBoundary;
+  note: string;
+}
+
+export interface MonthlySeries {
+  kind: RecordKind;
+  created_label: string;
+  /** The source field, spelled as the source spells it, so the rule stays checkable. */
+  created_field: string;
+  /** Null on a kind with nothing to advance to — patterns do not close. */
+  advanced_label: string | null;
+  advanced_field: string | null;
+  rate_label: string | null;
+  months: MonthPoint[];
+  boundary: MonthlyBoundary | null;
+  /** Records with no usable date: counted and named, never dropped or re-bucketed. */
+  undated: { n: number; ids: string[]; note: string };
+  secondary: MonthlySecondary | null;
+  /** Clients only: the movement tags, in the order they are drawn. */
+  segment_keys: string[] | null;
+  /** The month the page opens on — the newest with any data, or this one. */
+  current: string;
+}
+
+/* ------------------------------------------------------ execution tracking */
+
+/**
+ * One workflow's executions inside one month, as the snapshot holds them.
+ *
+ * Never read live for a past month: n8n's execution history ages off, so a
+ * live query would show a clean past that is only missing data. The snapshot
+ * job accumulates these forward and nothing prunes them.
+ */
+export interface ExecutionWorkflow {
+  workflow_id: string;
+  workflow_name: string;
+  /** From the workflow registry. Null where n8n reports a workflow no row names. */
+  system: string | null;
+  executions: number;
+  failures: number;
+  /** The failing execution ids, so each one opens in n8n. */
+  failed_ids: string[];
+  n8n_url: string | null;
+}
+
+export interface ExecutionMonth {
+  month: string;
+  label: string;
+  executions: number;
+  failures: number;
+  /** failures ÷ executions, or null on a month with no executions at all. */
+  failure_rate: number | null;
+  coverage: MonthCoverage;
+  note: string | null;
+}
+
+/** One system's execution health: the months, and the current month's workflows. */
+export interface ExecutionSystem {
+  /** The registry's own `system` value, which is the join key. */
+  system: string;
+  /** What the sidebar calls it — "North Star", not "North Star Twin". */
+  label: string;
+  /** The page this system's executions belong to, for the roll-up's link. */
+  to: string;
+  months: ExecutionMonth[];
+  workflows: ExecutionWorkflow[];
+  /** The month `workflows` describes. */
+  month: string;
+  executions: number;
+  failures: number;
+  failure_rate: number | null;
+}
+
+export interface ExecutionsData {
+  systems: ExecutionSystem[];
+  /**
+   * The first month the snapshot covers whole. Everything before it is partial
+   * by construction: n8n had already aged executions off, or the job was not
+   * running yet.
+   */
+  boundary: MonthlyBoundary | null;
+  /**
+   * When the snapshot last ran, whether it can run at all, and the n8n host a
+   * failing execution opens on. The host comes from the server because nothing
+   * configured reaches the bundle — see README, section 2 rule 4.
+   */
+  snapshot: { at: string | null; configured: boolean; note: string; n8n_base: string | null };
+  /** Workflows n8n reports that the registry names no system for. */
+  unregistered: ExecutionWorkflow[];
 }

@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../app/useData';
-import { getBuildPatterns, getPatternDetail, getRecordMetrics, resyncRecords, searchPatterns, type BuildPattern, type BuildPatternDetail, type PatternMetrics } from '../data';
+import { getBuildPatterns, getMonthly, getPatternDetail, getRecordMetrics, resyncRecords, searchPatterns, type BuildPattern, type BuildPatternDetail, type PatternMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
@@ -11,6 +11,7 @@ import {
   LoadFailed,
   Loading,
   MetricCard,
+  MonthlyPanel,
   PageHeader,
   Pagination,
   RecordId,
@@ -294,12 +295,15 @@ export default function BuildPatterns() {
   const { status, data: loaded, error } = useData(getBuildPatterns, []);
   const [patterns, setPatterns] = useState<BuildPattern[]>([]);
   const [reuse, setReuse] = useState('all');
+  const [month, setMonth] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<Set<string> | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const { toast, setToast } = useToast();
   const metrics = useData((query) => getRecordMetrics('patterns', query), [tick]);
+  // Re-read after a resync: the months change when the rows do.
+  const monthly = useData(() => getMonthly('patterns'), [tick]);
   const searchSeq = useRef(0);
 
   useEffect(() => {
@@ -350,8 +354,17 @@ export default function BuildPatterns() {
     return [...c.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [patterns]);
 
-  const rows = useMemo(() => patterns.filter((p) => reuse === 'all' || reuseKey(p) === reuse).filter((p) => (hits ? hits.has(p.id) : true)), [patterns, reuse, hits]);
-  const paged = usePaged(rows, `${reuse}|${q.trim()}`);
+  const rows = useMemo(
+    () =>
+      patterns
+        .filter((p) => reuse === 'all' || reuseKey(p) === reuse)
+        .filter((p) => (hits ? hits.has(p.id) : true))
+        // The month selection is a filter like any other, so the list, the
+        // count and the CSV all see the same rows.
+        .filter((p) => !month || p.created_at?.slice(0, 7) === month),
+    [patterns, reuse, hits, month],
+  );
+  const paged = usePaged(rows, `${reuse}|${q.trim()}|${month ?? ''}`);
 
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
 
@@ -376,6 +389,26 @@ export default function BuildPatterns() {
         </div>
 
         <PatternMetricsPanel metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
+
+        {monthly.data && (
+          <MonthlyPanel
+            series={monthly.data}
+            selected={month}
+            onSelect={setMonth}
+            rows={rows}
+            csvLabel="build-patterns"
+            columns={[
+              { header: 'pattern_id', value: (p) => p.pattern_id },
+              { header: 'airtable_record_id', value: (p) => p.id },
+              { header: 'pattern_name', value: (p) => p.title },
+              { header: 'bha_system', value: (p) => p.bha_system },
+              { header: 'reusability', value: (p) => p.reusability },
+              { header: 'created_at', value: (p) => p.created_at },
+              { header: 'problem', value: (p) => p.excerpt },
+              { header: 'airtable_url', value: (p) => p.airtable.url },
+            ]}
+          />
+        )}
 
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
           <div className="flex flex-wrap items-center justify-between gap-2">

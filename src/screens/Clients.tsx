@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { Fragment, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { getClients, resyncRecords, type ClientGroup, type ClientLaneRow, type ClientQuestion, type ClientsData } from '../data';
+import { getClients, getMonthly, resyncRecords, type ClientGroup, type ClientLaneRow, type ClientQuestion, type ClientsData } from '../data';
 import {
   CountCell,
   EmptyPanel,
@@ -9,6 +9,7 @@ import {
   LoadFailed,
   Loading,
   MetricCard,
+  MonthlyPanel,
   PageHeader,
   Pill,
   ResyncButton,
@@ -330,6 +331,8 @@ export default function Clients() {
   const { status, data: loaded, error } = useData(getClients, []);
   const [live, setLive] = useState<ClientsData | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
+  const [month, setMonth] = useState<string | null>(null);
+  const monthly = useData(() => getMonthly('clients'), []);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const { toast, setToast } = useToast();
@@ -351,6 +354,15 @@ export default function Clients() {
     [lanes, filter, q],
   );
   const shown = useMemo(() => new Set(rows.map((l) => l.id)), [rows]);
+  /**
+   * The questions the export carries: those belonging to a lane still in view,
+   * narrowed to the selected month by the same `Last Updated` the chart counts.
+   */
+  const laneIds = useMemo(() => new Set(rows.map((l) => l.lane_id ?? l.id)), [rows]);
+  const questionRows = useMemo(
+    () => (d?.questions ?? []).filter((q) => laneIds.has(q.lane_id)).filter((q) => !month || q.last_updated?.slice(0, 7) === month),
+    [d, laneIds, month],
+  );
 
   if (status === 'loading' || !d) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
   const current = open ? lanes.find((l) => l.id === open) : null;
@@ -383,6 +395,36 @@ export default function Clients() {
           <CountCell label="Overdue" value={totals.overdue} tone={totals.overdue ? 'degraded' : 'dim'} hint="Next Run Due is in the past" hintMinLines={2} />
           <CountCell label="Warming up" value={totals.warming} hint="added, never run — not failing" hintMinLines={2} />
         </StatStrip>
+
+        {/*
+          The monthly panel counts questions rather than lanes: `Last Updated`
+          on each question has always been written correctly, while the index's
+          own `Last Run At` was frozen at 24 Aug because nothing wrote it back.
+          The CSV therefore exports the questions in view, not the lanes.
+        */}
+        {monthly.data && (
+          <MonthlyPanel
+            series={monthly.data}
+            selected={month}
+            onSelect={setMonth}
+            rows={questionRows}
+            csvLabel="client-questions"
+            columns={[
+              { header: 'record_id', value: (q) => q.id },
+              { header: 'table_id', value: (q) => q.table },
+              { header: 'lane_id', value: (q) => q.lane_id },
+              { header: 'question', value: (q) => q.question },
+              { header: 'plain_summary', value: (q) => q.plain_summary },
+              { header: 'confidence', value: (q) => q.confidence },
+              { header: 'movement_tag', value: (q) => q.movement_tag },
+              { header: 'run_count', value: (q) => q.run_count },
+              { header: 'missing_research', value: (q) => q.missing_research },
+              { header: 'research_stuck', value: (q) => q.research_stuck },
+              { header: 'last_updated', value: (q) => q.last_updated },
+              { header: 'airtable_url', value: (q) => q.airtable.url },
+            ]}
+          />
+        )}
 
         {d.unreadable.length > 0 && (
           <div className="mx-6 mb-4 md:mx-8">

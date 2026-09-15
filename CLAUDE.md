@@ -294,6 +294,21 @@ explicitly for this. Therefore:
   resyncs. Those three get **no base variable of their own**: this server never
   writes to them, so it can never write to a guess, and their ids stay in
   `sources.ts` where the record links already read them.
+- **Execution counts are snapshotted into Postgres, never queried live for a
+  past month** (decision 2026-09-15, Destiny). `engine_executions` holds one row
+  per workflow per month and nothing prunes it. **n8n's execution history does
+  not persist** — read on 15 Sep 2026 the instance held 3,673 executions and
+  none older than the 12th — so a page that asked the API about August would be
+  told, honestly, that August held nothing and would draw a clean past that is
+  only missing data. Counts are **accumulated forward, never recomputed**: each
+  pass reads only executions above a watermark and adds them, so a month keeps
+  the count it had when its executions still existed. An execution still running
+  is not counted and its id is deferred for individual resolution; holding the
+  watermark below it instead double-counts everything above it and lets one
+  Wait node freeze all counting. A workflow's system comes from the **workflow
+  registry**, so pointing a new workflow at a system is a registry edit and not
+  a deploy. `N8N_API_KEY` is read-only and is a different credential from
+  `ASK_BAYS_API_KEY`.
 - **Every page states how old its rows are**, relative ("4 min ago"), in the
   same place, along with how many the engine has written since the migration
   backfill. A kind sitting entirely on backfilled rows says so in amber, because
@@ -340,7 +355,12 @@ which have no base variable because nothing is ever written to them. Without the
 token nothing edited here reaches Airtable and no page can resync, and the
 server says so at boot and on every write — and `DATABASE_URL`, the one the
 server refuses to start without.
-`DATABASE_CA_CERT`, `DATABASE_POOL_MAX` and `AIRTABLE_API_URL` are optional.
+`N8N_API_KEY` — the n8n **instance** API key, read only, one endpoint
+(`GET /api/v1/executions`), for the execution snapshot; not the same credential
+as `ASK_BAYS_API_KEY`, which is a webhook header. Without it no execution is
+ever counted and the system pages say so rather than reading zero.
+`DATABASE_CA_CERT`, `DATABASE_POOL_MAX`, `N8N_API_URL` and `AIRTABLE_API_URL`
+are optional.
 `DATA_DIR` is gone, and so are `AIRTABLE_RESYNC_MINUTES`, the
 `N8N_WRITEBACK_*` pair and `AIRTABLE_BASE_ID` (renamed 2026-09-14; **a base
 variable is named for its base**, so the next one cannot be mistaken for it).
@@ -413,10 +433,11 @@ Home (the Overview)
 Ask Bays
 
 SYSTEMS
+  Bays                   ← execution health
   North Star
   Research Twin
   vFarm                  ← placeholder
-  Engine health          ← placeholder, no badge
+  Engine health          ← the execution roll-up; incidents still a placeholder
 
 RECORDS
   Open loops
@@ -532,9 +553,75 @@ so a question at 3 is skipped by the weekly clock and is counted in its own
 column. `Plain Summary` is deliberately jargon-free and is shown first. A lane
 with no run yet is **warming up, not failing**.
 
+### Monthly tracking, on every record page
+Three components, same order, same styling on all five (decision 2026-09-15,
+Destiny): **the month in view as figures**, a **month-over-month chart**, and a
+**CSV export of exactly the rows on screen**. A month is selected by clicking
+it; the page's list filters to it and the export follows that selection and
+every other filter. Every export carries the record's natural key — `loop_id`,
+`pattern_id`, `card_id`, the question's `record_id` — so a row traces back to
+Airtable.
+
+**A chart bar is never drawn for a month whose metric had no instrumentation.**
+Every month carries its own coverage, separately for what was created and what
+advanced, because the two are usually instrumented from different dates: `full`
+is a solid bar, `partial` a hatched one marked "part", and `none` **no bar at
+all** — a dashed boundary rule and a sentence saying what began when. A zero and
+an absence must never look the same, which is the same rule as section 4's.
+
+The boundaries, each a fact about the engine:
+
+- **Open loops** — raised has always been dated by `Date Raised`. **Closed is
+  dated only by this dashboard's own status ledger** (`meta.history_since`): the
+  loop tables carry no close date and nothing upstream keeps a status-change
+  history, so before that month there is no closed figure and no close rate.
+- **Codex** — the approval **rate** is honest for the whole history because it
+  counts a cohort's state today rather than a dated event. **Median days to
+  approval is not**: `Jason Reviewed At` was created on **14 Sep 2026**, there is
+  no backfill and never will be, so Sep 2026 is partial and **Oct 2026 is the
+  first honest month**. It is drawn as its own panel with its own boundary.
+- **Build patterns** and **Commercial** — Sep 2026 is partial on both. The
+  extractor received empty payloads and correctly produced nothing until the
+  upstream fix on 15 Sep; Commercial's card creation stopped on 9 Sep. The low
+  bar is the outage, not a fall in output.
+- **Clients** — counts questions by their own `Last Updated`, which has always
+  been written correctly, and shows the `Movement Tag` mix per month. The
+  index's `Last Run At` was frozen at 24 Aug because nothing wrote it back and is
+  deliberately not the source.
+
+**A record with no usable date is counted as undated, by name** — never dropped
+and never re-bucketed into the earliest month. And **a month whose rows mostly
+arrived later is marked partial**: Build Patterns holds 152 rows, most written
+to Airtable in one go on 12 Aug 2026 carrying `created_at` values spread back
+through July. Those dates are real and belong on the chart, but a bar of a
+hundred backdated rows is not a hundred patterns' worth of output that month.
+
+### Bays
+Its own page (decision 2026-09-15, Destiny), and **execution health is the whole
+of it**. The reasoning for having no Bays page held for *output* — the logs are
+Codex entries, the loops are Open loops, and the two extractors write Build
+patterns and Commercial — and does not hold for health. Executions are the
+system's own, Bays owns seventeen workflows (the largest set in the engine), and
+there was nowhere any of them could surface. The output keeps its own pages and
+is linked rather than copied.
+
+### Execution health, on each system page
+**Inside the system's own page, never pooled** (decision 2026-09-15, Destiny): a
+workflow belongs to exactly one system and the system page is where somebody
+goes to debug it. Bays, North Star and Research Twin each show, per month: total
+executions, failures, failure rate, a per-workflow breakdown, and **the failing
+execution ids**, so a failure opens directly in n8n. The chart labels its
+boundary the same way the record pages label theirs — see section 4 for why the
+counts are snapshotted rather than read live.
+
 ### vFarm and Engine health
-**Both are a single centred "coming soon" and nothing else** (decision
-2026-09-14, Destiny). Every card, table and figure they held was computed from
+**vFarm is a single centred "coming soon" and nothing else** (decision
+2026-09-14, Destiny). **Engine health now carries the execution roll-up** —
+one figure per system and a link through (decision 2026-09-15, Destiny) — and
+its incident half is still the placeholder that decision made it. It answers
+"is something failing somewhere"; the system page answers "what, and which",
+and the per-workflow detail is deliberately not repeated on it. The rest of
+this entry is the 14 Sep decision, unchanged: Every card, table and figure they held was computed from
 phase 1 fixtures: vFarm's live readings, rack state and readiness panel, and
 Engine health's incident list, state track, self-heal rate and retry counts.
 Nothing on the rack and no incident has ever written a row to this dashboard, so

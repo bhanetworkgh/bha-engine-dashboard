@@ -265,7 +265,7 @@ export default function Registry() {
       />
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <div className="shrink-0 px-6 pb-3 text-[11.5px] leading-snug text-faint md:px-8">
+        <div className="shrink-0 max-w-[104ch] px-6 pb-3 text-[11.5px] leading-snug text-faint md:px-8">
           Every typed cell here is editable — click one, type, press Enter. This dashboard is the system of record for
           these tables: nothing upstream writes them, so a change is saved to Postgres and stays there. A field nobody
           has filled in shows a dash rather than a guess. The open-loop, oldest-loop and entries-this-week figures on
@@ -371,10 +371,10 @@ function WorkflowsTab({ rows, ...p }: TabProps & { rows: RegistryData['workflows
   return (
     <>
       <StatStrip cols={4}>
-        <CountCell label="Workflows" value={rows.filter((w) => !w.deleted_at).length} hint={`${systems.length} systems`} />
-        <CountCell label="Production" value={rows.filter((w) => w.status === 'production' && !w.deleted_at).length} />
-        <CountCell label="Retired" value={rows.filter((w) => w.status === 'retired').length} tone="dim" />
-        <CountCell label="No pillar set" value={withoutPillar} tone={withoutPillar ? 'degraded' : 'dim'} hint="left blank rather than guessed" />
+        <CountCell label="Workflows" value={rows.filter((w) => !w.deleted_at).length} hint={`${systems.length} systems`} hintMinLines={2} />
+        <CountCell label="Production" value={rows.filter((w) => w.status === 'production' && !w.deleted_at).length} hintMinLines={2} />
+        <CountCell label="Retired" value={rows.filter((w) => w.status === 'retired').length} tone="dim" hintMinLines={2} />
+        <CountCell label="No pillar set" value={withoutPillar} tone={withoutPillar ? 'degraded' : 'dim'} hint="left blank rather than guessed" hintMinLines={2} />
       </StatStrip>
 
       <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
@@ -923,10 +923,10 @@ function BuildersTab({ rows, figures, ...p }: TabProps & { rows: RegistryData['p
   return (
     <>
       <StatStrip cols={4}>
-        <CountCell label="People" value={live.length} hint="the roster, typed here and nowhere else" />
-        <CountCell label="Open loops" value={openLoops} hint="across every builder table, read from Postgres" />
-        <CountCell label="Oldest open loop, days" value={oldest} tone={oldest >= 30 ? 'failing' : oldest >= 14 ? 'degraded' : 'dim'} hint="the age of the oldest loop still open in any builder table" />
-        <CountCell label="Entries this week" value={thisWeek} hint="Codex submissions logged in the current ISO week" />
+        <CountCell label="People" value={live.length} hint="the roster, typed here and nowhere else" hintMinLines={2} />
+        <CountCell label="Open loops" value={openLoops} hint="across every builder table, read from Postgres" hintMinLines={2} />
+        <CountCell label="Oldest open loop, days" value={oldest} tone={oldest >= 30 ? 'failing' : oldest >= 14 ? 'degraded' : 'dim'} hint="the age of the oldest loop still open in any builder table" hintMinLines={2} />
+        <CountCell label="Entries this week" value={thisWeek} hint="Codex submissions logged in the current ISO week" hintMinLines={2} />
       </StatStrip>
 
       <div className="shrink-0 px-6 pb-3 md:px-8">
@@ -1104,10 +1104,10 @@ function EngineWritesTab() {
       )}
 
       <StatStrip cols={4}>
-        <CountCell label="Writes accepted" value={accepted} hint={`in the last ${d.window_hours} hours`} />
-        <CountCell label="Refused" value={refused} tone={refused ? 'failing' : 'dim'} hint="rejected, unauthorised or errored" />
-        <CountCell label="Kinds receiving writes" value={wired} tone={wired < d.held.length ? 'failing' : 'dim'} hint={`of ${d.held.length} record tables`} />
-        <CountCell label="Writes recorded, all time" value={d.total} hint={d.last_at ? `newest ${when(d.last_at)}` : 'none yet'} />
+        <CountCell label="Writes accepted" value={accepted} hint={`in the last ${d.window_hours} hours`} hintMinLines={2} />
+        <CountCell label="Refused" value={refused} tone={refused ? 'failing' : 'dim'} hint="rejected, unauthorised or errored" hintMinLines={2} />
+        <CountCell label="Kinds receiving writes" value={wired} tone={wired < d.held.length ? 'failing' : 'dim'} hint={`of ${d.held.length} record tables`} hintMinLines={2} />
+        <CountCell label="Writes recorded, all time" value={d.total} hint={d.last_at ? `newest ${when(d.last_at)}` : 'none yet'} hintMinLines={2} />
       </StatStrip>
 
       <div className="shrink-0 px-6 pb-3 md:px-8">
