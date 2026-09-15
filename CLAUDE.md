@@ -295,8 +295,15 @@ explicitly for this. Therefore:
   writes to them, so it can never write to a guess, and their ids stay in
   `sources.ts` where the record links already read them.
 - **Execution counts are snapshotted into Postgres, never queried live for a
-  past month** (decision 2026-09-15, Destiny). `engine_executions` holds one row
-  per workflow per month and nothing prunes it. **n8n's execution history does
+  past period** (decision 2026-09-15, Destiny). `engine_execution_days` holds one
+  row per workflow per **day** and nothing prunes it. The grain is a day because
+  the Executions page reports weekly, monthly and yearly and a month cannot be
+  divided into weeks after the fact; every larger period is a sum over days, so
+  one table answers all three and they cannot disagree. Each row also carries
+  `duration_ms` and `duration_counted` — a sum and a count, never an average —
+  so a mean over any span is exact rather than an average of averages, and is
+  always over the number of runs it says it is. `engine_executions`, the monthly
+  table this replaced, is left in place unread, like the `records` read model. **n8n's execution history does
   not persist** — read on 15 Sep 2026 the instance held 3,673 executions and
   none older than the 12th — so a page that asked the API about August would be
   told, honestly, that August held nothing and would draw a clean past that is
@@ -309,6 +316,16 @@ explicitly for this. Therefore:
   registry**, so pointing a new workflow at a system is a registry edit and not
   a deploy. `N8N_API_KEY` is read-only and is a different credential from
   `ASK_BAYS_API_KEY`.
+- **A period still running is never compared against a whole one.** Week on week
+  and month on month would report a collapse every Monday morning if this week's
+  partial total were set against the whole of last week, so the previous period
+  is cut to the same elapsed point and the page says which days it used. And the
+  comparison is refused outright where that **window** falls before counting
+  started — not merely where the previous period does. Counting began on the
+  24th of a month, so comparing the first fortnight of this month against the
+  first fortnight of last would read "0 → 890" and look like the engine started
+  from nothing. It says instead that those days were not quiet, they were not
+  recorded.
 - **Every page states how old its rows are**, relative ("4 min ago"), in the
   same place, along with how many the engine has written since the migration
   backfill. A kind sitting entirely on backfilled rows says so in amber, because
@@ -433,7 +450,6 @@ Home (the Overview)
 Ask Bays
 
 SYSTEMS
-  Bays                   ← execution health
   North Star
   Research Twin
   vFarm                  ← placeholder
@@ -445,6 +461,7 @@ RECORDS
   Build patterns
   Commercial
   Clients
+  Executions             ← every run of every workflow, tabbed by system
 
 REFERENCE
   System registry
@@ -596,30 +613,46 @@ to Airtable in one go on 12 Aug 2026 carrying `created_at` values spread back
 through July. Those dates are real and belong on the chart, but a bar of a
 hundred backdated rows is not a hundred patterns' worth of output that month.
 
-### Bays
-Its own page (decision 2026-09-15, Destiny), and **execution health is the whole
-of it**. The reasoning for having no Bays page held for *output* — the logs are
-Codex entries, the loops are Open loops, and the two extractors write Build
-patterns and Commercial — and does not hold for health. Executions are the
-system's own, Bays owns seventeen workflows (the largest set in the engine), and
-there was nowhere any of them could surface. The output keeps its own pages and
-is linked rather than copied.
+### Executions
+**Every run of every workflow in the engine, as a record kind** (decision
+2026-09-15, Destiny). It replaced a Bays page that held only Bays' executions,
+and the execution sections that briefly sat on North Star and Research Twin: a
+run is a record like any other and it is the same record whichever system
+produced it, so one page with a tab per system beats a section repeated on
+three.
 
-### Execution health, on each system page
-**Inside the system's own page, never pooled** (decision 2026-09-15, Destiny): a
-workflow belongs to exactly one system and the system page is where somebody
-goes to debug it. Bays, North Star and Research Twin each show, per month: total
-executions, failures, failure rate, a per-workflow breakdown, and **the failing
-execution ids**, so a failure opens directly in n8n. The chart labels its
-boundary the same way the record pages label theirs — see section 4 for why the
-counts are snapshotted rather than read live.
+**Tabs, like the System registry's**: All systems · Bays · North Star · Research
+Twin. Those three are the systems running anything today. **All systems leads**,
+because "every execution across the engine" is what the page is for and the
+per-system tabs are how a reader narrows it — and because a workflow the
+registry names no system for is counted there and under no tab, which is how it
+gets noticed.
+
+**Weekly, monthly and yearly**, from the same daily rows, so the three can never
+disagree. Yearly holds one partial year today and says so rather than drawing a
+year of bar from four days.
+
+Per period, per tab: **executions, succeeded, failed, failure rate and average
+time**, each with its change against the same period before it; a chart over
+periods with failures drawn inside the bar; and a per-workflow breakdown —
+name, executions, failures, failure rate, average time and **the failing
+execution ids**, so a failure opens directly in n8n.
+
+**A change is only coloured where the direction is news.** More executions is up
+and means nothing on its own; more failures is up and is bad; a faster average
+is down and is good. A change against nought prints both figures rather than an
+infinity dressed as a percentage. And see section 4 for the two rules that keep
+a comparison honest: a running period is cut against the same elapsed point of
+the last one, and a comparison whose window predates counting is refused rather
+than drawn as a rise from nothing.
 
 ### vFarm and Engine health
 **vFarm is a single centred "coming soon" and nothing else** (decision
 2026-09-14, Destiny). **Engine health now carries the execution roll-up** —
-one figure per system and a link through (decision 2026-09-15, Destiny) — and
+one figure per system for the current week, each linking through to the
+Executions page (decision 2026-09-15, Destiny) — and
 its incident half is still the placeholder that decision made it. It answers
-"is something failing somewhere"; the system page answers "what, and which",
+"is something failing somewhere"; the Executions page answers "what, and which",
 and the per-workflow detail is deliberately not repeated on it. The rest of
 this entry is the 14 Sep decision, unchanged: Every card, table and figure they held was computed from
 phase 1 fixtures: vFarm's live readings, rack state and readiness panel, and

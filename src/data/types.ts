@@ -1624,11 +1624,12 @@ export interface MonthlySeries {
 /* ------------------------------------------------------ execution tracking */
 
 /**
- * One workflow's executions inside one month, as the snapshot holds them.
+ * One workflow's executions inside one period, as the snapshot holds them.
  *
- * Never read live for a past month: n8n's execution history ages off, so a
+ * Never read live for a past period: n8n's execution history ages off, so a
  * live query would show a clean past that is only missing data. The snapshot
- * job accumulates these forward and nothing prunes them.
+ * job accumulates these forward, one row per day per workflow, and nothing
+ * prunes them.
  */
 export interface ExecutionWorkflow {
   workflow_id: string;
@@ -1637,52 +1638,101 @@ export interface ExecutionWorkflow {
   system: string | null;
   executions: number;
   failures: number;
+  /** Mean wall-clock time, in milliseconds. Null where no execution recorded an end. */
+  avg_ms: number | null;
+  /** How many executions carried both a start and an end, so the mean can be checked. */
+  timed: number;
   /** The failing execution ids, so each one opens in n8n. */
   failed_ids: string[];
   n8n_url: string | null;
 }
 
-export interface ExecutionMonth {
-  month: string;
+/** Which calendar grain the page is reporting on. */
+export type ExecutionGrain = 'week' | 'month' | 'year';
+
+/** One period's totals. `key` is 2026-W38, 2026-09 or 2026, by grain. */
+export interface ExecutionPeriod {
+  key: string;
   label: string;
+  /** Inclusive, YYYY-MM-DD. */
+  start: string;
+  end: string;
   executions: number;
+  successes: number;
   failures: number;
-  /** failures ÷ executions, or null on a month with no executions at all. */
   failure_rate: number | null;
+  avg_ms: number | null;
+  timed: number;
   coverage: MonthCoverage;
   note: string | null;
+  /** True for the period that has not finished yet. */
+  current: boolean;
 }
 
-/** One system's execution health: the months, and the current month's workflows. */
+/**
+ * One figure against the same figure last period.
+ *
+ * `better` is whether the movement is good news, which is not the same as up:
+ * more executions is up and neutral, more failures is up and bad, a faster
+ * average is down and good. Null where the direction carries no judgement.
+ */
+export interface ExecutionDelta {
+  from: number;
+  to: number;
+  /** Percentage change, or null where the previous figure was nought and a ratio has no meaning. */
+  pct: number | null;
+  direction: 'up' | 'down' | 'flat';
+  better: boolean | null;
+}
+
+export interface ExecutionComparison {
+  /** The period compared against, and what it is called. */
+  against: string;
+  against_label: string;
+  executions: ExecutionDelta | null;
+  successes: ExecutionDelta | null;
+  failures: ExecutionDelta | null;
+  /** In percentage points, not a ratio of a ratio. */
+  failure_rate: ExecutionDelta | null;
+  avg_ms: ExecutionDelta | null;
+  /**
+   * True when the current period is still running and the previous one was cut
+   * to the same elapsed point, so the totals are comparable. False when the
+   * comparison is whole period against whole period.
+   */
+  like_for_like: boolean;
+  note: string;
+}
+
+/** One system's execution health at one grain. */
 export interface ExecutionSystem {
-  /** The registry's own `system` value, which is the join key. */
+  /** The registry's own `system` value, which is the join key. `all` is every system together. */
   system: string;
-  /** What the sidebar calls it — "North Star", not "North Star Twin". */
+  /** What the page calls it — "North Star", not "North Star Twin". */
   label: string;
-  /** The page this system's executions belong to, for the roll-up's link. */
-  to: string;
-  months: ExecutionMonth[];
+  periods: ExecutionPeriod[];
+  /** The period `workflows` and `comparison` describe: the newest with anything in it. */
+  period: string;
   workflows: ExecutionWorkflow[];
-  /** The month `workflows` describes. */
-  month: string;
   executions: number;
+  successes: number;
   failures: number;
   failure_rate: number | null;
+  avg_ms: number | null;
+  timed: number;
+  comparison: ExecutionComparison | null;
 }
 
 export interface ExecutionsData {
+  grain: ExecutionGrain;
   systems: ExecutionSystem[];
   /**
-   * The first month the snapshot covers whole. Everything before it is partial
+   * The first period the snapshot covers whole. Everything before it is partial
    * by construction: n8n had already aged executions off, or the job was not
    * running yet.
    */
   boundary: MonthlyBoundary | null;
-  /**
-   * When the snapshot last ran, whether it can run at all, and the n8n host a
-   * failing execution opens on. The host comes from the server because nothing
-   * configured reaches the bundle — see README, section 2 rule 4.
-   */
+  /** When the snapshot last ran, whether it can run at all, and the n8n host a failing execution opens on. */
   snapshot: { at: string | null; configured: boolean; note: string; n8n_base: string | null };
   /** Workflows n8n reports that the registry names no system for. */
   unregistered: ExecutionWorkflow[];

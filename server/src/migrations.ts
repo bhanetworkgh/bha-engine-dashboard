@@ -701,6 +701,52 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_executions_system ON engine_executions (system, period DESC)`,
     ],
   },
+  {
+    id: 10,
+    name: 'execution counts go to a daily grain, and carry duration',
+    statements: [
+      /**
+       * The same snapshot, one row per **day** per workflow rather than per
+       * month, and carrying how long the executions took.
+       *
+       * Why the grain changed (2026-09-15, Destiny): the Executions page reports
+       * weekly, monthly and yearly, and a month is not divisible into weeks
+       * after the fact. A day is the smallest period anyone asked for, and every
+       * larger one is a sum over days, so one table answers all three and a
+       * fourth would not need a migration.
+       *
+       * `duration_ms` is the total across `duration_counted` executions, kept as
+       * a sum and a count rather than an average so that averages over any span
+       * are exact. They are separate from `executions` because an execution can
+       * finish without a `stoppedAt`, and an average over a different number of
+       * rows than it claims is the kind of quiet wrong figure this dashboard
+       * exists to avoid.
+       *
+       * **`engine_executions` is left in place, unread** — nothing here drops a
+       * table, same as the `records` read model. Its monthly rows cannot be
+       * split into days, so this starts from its own watermark and re-reads what
+       * n8n still holds. That costs nothing: n8n keeps about three days of
+       * history and the monthly table is hours old, so everything it could have
+       * counted is still there to count again.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_execution_days (
+         day             text NOT NULL,
+         workflow_id     text NOT NULL,
+         workflow_name   text,
+         system          text,
+         executions      integer NOT NULL DEFAULT 0,
+         failures        integer NOT NULL DEFAULT 0,
+         duration_ms     bigint  NOT NULL DEFAULT 0,
+         duration_counted integer NOT NULL DEFAULT 0,
+         failed_ids      jsonb NOT NULL DEFAULT '[]'::jsonb,
+         first_seen_at   text NOT NULL,
+         updated_at      text NOT NULL,
+         PRIMARY KEY (day, workflow_id)
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_execution_days_day ON engine_execution_days (day DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_execution_days_system ON engine_execution_days (system, day DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

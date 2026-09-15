@@ -494,7 +494,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
    */
   if (p === '/api/executions' && method === 'GET') {
     await executions.refreshIfStale();
-    return send(res, 200, await executions.read());
+    const grain = url.searchParams.get('grain') ?? 'week';
+    if (!executions.isGrain(grain)) throw new HttpError(400, 'grain must be week, month or year.');
+    return send(res, 200, await executions.read(grain));
   }
 
   const codexDelete = p.match(/^\/api\/codex\/([^/]+)$/);

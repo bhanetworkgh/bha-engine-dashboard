@@ -1,12 +1,11 @@
 import { createPortal } from 'react-dom';
 import { useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { getExecutions, getNsTelemetry, getRecordMetrics, type NsMetrics, type NsOutcome, type NsRecord } from '../data';
+import { getNsTelemetry, getRecordMetrics, type NsMetrics, type NsOutcome, type NsRecord } from '../data';
 import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
   CountUp,
-  ExecutionHealth,
   EmptyPanel,
   EmptyState,
   HBar,
@@ -396,28 +395,6 @@ function nsColumns(open: (r: NsRecord) => void): RecordColumn<NsRecord>[] {
   ];
 }
 
-/**
- * Execution health for this system, from the snapshot (2026-09-15, Destiny).
- *
- * It lives on the system's own page rather than pooled on Engine Health,
- * because a workflow belongs to exactly one system and this is where somebody
- * comes to debug it. Engine Health keeps a roll-up and a link, and none of the
- * per-workflow detail.
- */
-function SystemExecutions({ system }: { system: string }) {
-  const { status, data } = useData(getExecutions, []);
-  if (status !== 'ready' || !data) return null;
-  return (
-    <>
-      <div className="shrink-0 px-6 pt-2 pb-2 md:px-8">
-        <h2 className="text-[15px] font-medium text-ink">Workflow executions</h2>
-        <p className="mt-0.5 text-[12px] text-faint">How this system’s workflows are running, counted from n8n into this database.</p>
-      </div>
-      <ExecutionHealth system={data.systems.find((s) => s.system === system)} data={data} base={data.snapshot.n8n_base} />
-    </>
-  );
-}
-
 export default function NorthStar() {
   const { status, data: loaded, error } = useData(getNsTelemetry, []);
   const [filter, setFilter] = useState<Filter>('all');
@@ -489,7 +466,6 @@ export default function NorthStar() {
             <Pagination paged={paged} unit="asks" />
           </>
         )}
-        <SystemExecutions system="North Star Twin" />
       </div>
 
       {current && <AskView r={current} onClose={() => setOpen(null)} />}

@@ -485,20 +485,52 @@ rows is not a hundred patterns' worth of output that month.
 
 ### Execution tracking
 
-Per-system visibility into n8n workflow executions, on **Bays, North Star and
-Research Twin** — each inside its own page, because a workflow belongs to
-exactly one system and the system page is where somebody goes to debug it. Each
-shows total executions, failures, failure rate, a per-workflow breakdown and
-**the failing execution ids**, so a failure opens directly in n8n.
+**One Executions page**, under RECORDS, tabbed by system exactly as the System
+registry is tabbed: **all systems, Bays, North Star, Research Twin** — the three
+that are active. Each tab shows, for the period in view, total executions,
+successes, failures, failure rate, average execution time, a per-workflow
+breakdown and **the failing execution ids**, so a failure opens directly in n8n.
 
-**Engine health keeps a roll-up only**: one figure per system and a link
-through. It answers "is something failing somewhere"; the system page answers
-"what, and which". The per-workflow detail is deliberately not repeated there.
+It replaces the per-system execution sections and the Bays page that carried
+them for a day. Executions are one question asked of every workflow in the
+engine, and answering it meant opening three pages and holding three numbers in
+your head; a workflow still belongs to exactly one system, which is what the
+tabs are for. Bays's *output* keeps its own pages — Codex entries, Open loops,
+Build patterns, Commercial — and is linked, never copied.
 
-Bays has a page for the first time. Its *output* is still split across Codex
-entries, Open loops, Build patterns and Commercial and is linked rather than
-copied; what it had nowhere to show was its own health, and it owns seventeen
-workflows — the largest set in the engine.
+**Weekly, monthly and yearly.** One segmented control, and every figure on the
+page follows it. Weeks are ISO weeks, Monday to Sunday; months and years are
+calendar. Yearly holds one bar and no comparison until this database has two
+years in it, which it says rather than drawing an empty one.
+
+#### Comparing to the period before
+
+The point of the three grains: *failures are down 20% on last week*. Each
+period prints its deltas against the one before it — executions, successes,
+failures, failure rate and average execution time — with the direction that is
+*better* marked, so a fall in failures and a rise in successes both read as
+good.
+
+Two rules keep the comparison honest, and both were bugs first:
+
+- **A running period is cut to the same elapsed point.** Three days into a
+  month, the comparison is against the previous month's first three days, not
+  its whole. Otherwise every period reads catastrophic until the last day of
+  it.
+- **A comparison whose window predates counting is refused, by name.** Counting
+  began on a date this database knows (`meta.executions.since_day`). If the
+  period being compared against falls before it, the page does not print a
+  delta against a number it does not have — it says that those days were not
+  quiet, they were not recorded. A change measured against nought prints both
+  figures rather than an infinity.
+
+#### Average execution time
+
+Stored as **a sum and a count, never an average**: an execution that finished
+adds its duration and one to the count, and the mean over any span is that sum
+over that count. Averaging a week's averages would weight a quiet Sunday the
+same as a busy Tuesday. An execution still running contributes neither, so the
+average is of executions that actually finished.
 
 #### Why it is snapshotted rather than queried
 
@@ -508,13 +540,21 @@ that queried the API live would be told, honestly, that August held nothing, and
 would draw a clean past that is only missing data. That is the exact failure
 this dashboard exists to prevent.
 
-So a job snapshots counts into `engine_executions` hourly and the pages read
-that table. Nothing prunes it. The counts are **accumulated forward, never
-recomputed**: each pass reads only executions above a watermark and adds them,
-so a month whose executions have since aged out of n8n keeps the count it had
-when they existed. The current month is allowed to be fresher — a page read
-refreshes the snapshot when it is more than five minutes old, which runs the
-same accumulating pass rather than a second, divergent live path.
+So a job snapshots counts into `engine_execution_days` hourly and the page reads
+that table. Nothing prunes it. **The grain is a day**, one row per workflow per
+day: a month can be divided into weeks after the fact and a week cannot be
+divided out of a month, so the finest grain n8n's own timestamps support is the
+one stored. (The old monthly table, `engine_executions`, is left in place and
+unread, like the `records` read model — nothing here drops a table. The reset
+cost nothing: n8n holds three days, so everything the monthly table knew was
+re-read within a day of the change.)
+
+The counts are **accumulated forward, never recomputed**: each pass reads only
+executions above a watermark and adds them, so a day whose executions have since
+aged out of n8n keeps the count it had when they existed. The current period is
+allowed to be fresher — a page read refreshes the snapshot when it is more than
+five minutes old, which runs the same accumulating pass rather than a second,
+divergent live path.
 
 An execution still running when a pass goes by is **not** counted, and its id
 goes on a deferred list to be resolved individually later. The obvious
@@ -530,7 +570,12 @@ a system is a registry edit, not a deploy. A workflow n8n reports that no
 registry row names is counted and listed on Engine health as unregistered,
 rather than filed under a guess.
 
-Whichever month the job first runs in is partial by construction, and that
+**Engine health keeps a roll-up only**: one figure per system for the current
+week and a link through. It answers "is something failing somewhere"; the
+Executions page answers "what, and which". The per-workflow detail is
+deliberately not repeated there.
+
+Whichever period the job first ran in is partial by construction, and that
 boundary is labelled on every execution chart exactly as the record pages label
 theirs.
 
@@ -576,14 +621,14 @@ is missing, and the note is what the page shows.
 | Ask Bays | Chat interface onto the Bays agent |
 | North Star | Asks routed through NS — records, runs, gaps |
 | Research Twin | Research jobs — records, runs, gaps |
-| Bays | The Slack-facing agent's own execution health. Its output lives on the record pages and is linked, not copied |
 | vFarm | Placeholder — nothing on the rack writes here yet |
-| Engine health | The execution roll-up, one figure per system with a link through. Incidents are still a placeholder — nothing upstream records one |
+| Engine health | The execution roll-up, one figure per system for this week, with a link through to Executions. Incidents are still a placeholder — nothing upstream records one |
 | Open loops | Loops by age and owner, close from the interface |
 | Codex entries | Session logs by builder and week |
 | Build patterns | Every pattern, by reusability. No `pattern_status` — the field was deleted from the base on 15 Sep |
 | Commercial | One sortable table of opportunity cards, closest to ready first. Nothing on it groups the corpus: every candidate axis is constant or 1:1 with the card |
 | Clients | Watched client lanes grouped under the client that owns them, ordered by `Client ID` |
+| Executions | Every execution of every workflow, tabbed by system, weekly / monthly / yearly, against the period before |
 | System registry | Builders, Tools, Endpoint, Workflow, and the engine-writes surface |
 
 ## Repo layout
@@ -620,7 +665,8 @@ src/
     OpenLoops/        Loops, ReviewQueue, Reconciliation + index.
     Twin/             Summary, Records, Runs, Gaps + index. Serves North Star and Research Twin.
     VFarm/            index only — the page is a placeholder.
-    EngineHealth/     index only — the page is a placeholder.
+    EngineHealth/     index only — the execution roll-up; incidents are still a placeholder.
+    Executions/       index only — every workflow execution, tabbed by system, by week / month / year.
     Registry/         The four registries, the engine-writes tab, and Editable.
 ```
 
@@ -631,6 +677,8 @@ server/
     ask.ts            Proxy to the Bays workflow; attaches the API key server-side.
     engine.ts         Every read, derived from fixtures and the store.
     store.ts          Records with status, the events/observation history, and metrics.
+    executions.ts     The hourly n8n snapshot into engine_execution_days, and the page's periods and comparisons.
+    n8n.ts            Read-only n8n client — one endpoint, GET /api/v1/executions.
     pg.ts             The connection pool, TLS, and the startup check that refuses to serve without it.
     migrations.ts     Forward-only numbered migrations, run on boot under an advisory lock.
     db.ts             The meta key/value state and the date helpers.
@@ -735,6 +783,9 @@ evidence thin · ready to pitch · blocked · closed`.
 **Reads.** `GET /api/{overview, engine-status, north-star, research-twin,
 vfarm, engine-health, open-loops, codex, build-patterns, commercial, builders,
 builders/:id, ask-bays}?lane=` return the shapes in `src/data/types.ts`.
+`GET /api/executions?grain={week|month|year}` returns the Executions page —
+every system, every period held, and each period's comparison with the one
+before it.
 `GET /api/status` reports what is configured, without values.
 
 ## Deployment

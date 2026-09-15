@@ -4288,3 +4288,136 @@ Not done:   **The Engine Registry's Workflow tab clips its last column.** The
             whichever month it first runs in is partial by construction —
             October 2026 if it deploys today. Nothing in this sandbox can run it
             against the real instance.
+
+## 2026-09-15 13:40 — One Executions page: day grain, three periods, and comparisons that refuse to lie
+
+Intent:     Destiny, dictated: delete the Bays page built ninety minutes ago and
+            replace the whole per-system execution treatment with one Records
+            page called **Executions** — "where we keep track of every execution
+            across every workflow across the motherfucking system". Tabbed by
+            system the way the Engine registry is tabbed: Bays, North Star,
+            Research Twin, "because those are the only systems that really
+            matter right now or that are active on anything right now". Keep the
+            structure that already worked (workflow, executions, failure rate).
+            Add weekly, monthly and yearly tracking, "although we don't have data
+            for yearly yet". Add average execution time. And add comparisons
+            against the period before: "in comparison to last week, our
+            executions were 2% faster... we had 20% less failures this month, we
+            had 100% more successes this month, and we had a 2 percent or
+            3 percent increase in workflow executions this month."
+
+Files:      server/src/migrations.ts       migration 10, engine_execution_days
+            server/src/executions.ts       rewritten: day grain, duration, periods, comparison
+            server/src/index.ts            /api/executions?grain=
+            src/screens/Executions/index.tsx   new page
+            src/screens/Bays/                  deleted
+            src/components/ui/Executions.tsx   deleted
+            src/components/ui/index.ts         export removed
+            src/screens/NorthStar.tsx          execution section removed
+            src/screens/ResearchTwin.tsx       execution section removed
+            src/screens/EngineHealth/index.tsx repointed at the week grain
+            src/components/Layout.tsx          Bays out of SYSTEMS, Executions into RECORDS
+            src/App.tsx                        route swapped
+            src/data/types.ts, src/data/index.ts
+            CLAUDE.md, README.md
+
+Problem:    **The stored grain could not answer the question.** `engine_executions`
+            held one row per workflow per *month*, which was right for a monthly
+            page and useless for this one: a month can be divided into weeks
+            after the fact only if the rows are finer than a month, and they were
+            not. There is no honest way to split 890 executions across the four
+            weeks of August once the executions themselves have aged out of n8n.
+
+Fix:        Migration 10 adds `engine_execution_days` — one row per workflow per
+            **day**, which is the finest grain n8n's own `startedAt` supports, and
+            weeks, months and years are all sums over it. `engine_executions` is
+            left in place and unread, like the `records` read model; nothing here
+            drops a table. The reset cost nothing to verify: n8n holds three days
+            of history, so everything the monthly table knew was re-read within a
+            day of the change.
+
+Problem:    **An average of averages is not an average.** Storing `avg_ms` per
+            day and meaning it per month weights a quiet Sunday the same as a
+            busy Tuesday.
+
+Fix:        Each day row stores `duration_ms` (a sum) and `duration_counted` (a
+            count), never a mean. The mean over any span is the sum over the
+            count, which is exact. An execution with no `stoppedAt` contributes
+            neither, so the figure is of executions that actually finished, and
+            the page prints how many were timed beside it.
+
+Problem:    **Every running period read as a collapse.** Three days into
+            September the comparison was September-so-far against the whole of
+            August: 42 executions against 890, "−95%". True arithmetic, useless
+            sentence.
+
+Fix:        A period still running is compared against the previous period **cut
+            to the same elapsed point** — three days in, against the previous
+            month's first three days — and the page says so. Found an off-by-one
+            in the wording while testing it: a two-day-old week printed "its
+            first 1 day", because elapsed was a difference rather than a count.
+            `elapsed = diff + 1`, cut at `addDays(start, elapsed - 1)`.
+
+Problem:    **The monthly comparison read "0 → 890, +∞".** Counting began on
+            24 Aug. Comparing the first fortnight of September against the first
+            fortnight of August compared it against days nobody counted, and
+            printed the silence as a rise.
+
+Fix:        The comparison checks the **window's** start against
+            `meta.executions.since_day` — not the whole previous period, which
+            would wrongly refuse a comparison whose counted tail is real — and
+            when the window predates counting it refuses the delta and says why:
+            "counting only started on 2026-08-24, and 2026-08-01 to 2026-08-15 is
+            before that". Those days were not quiet, they were not recorded.
+            Separately, `delta()` returns a null percentage when the previous
+            figure is nought and prints both figures instead, because a change
+            against nothing has no percentage.
+
+Problem:    The first chart label was clipped at the left edge of its SVG, and
+            month labels carrying a year read as dates ("Aug 26" beside "24 Aug").
+
+Fix:        A 16px gutter on the chart, and the year suffix only when the span
+            being drawn crosses years.
+
+Decision:   **The tabs are the three active systems plus all.** vFarm has no
+            workflow and Codex is not a system that executes; a tab that is
+            always empty is furniture. A workflow no registry row claims is still
+            counted, and still named on Engine health as unregistered, because
+            that is a registry row somebody needs to add.
+
+Decision:   **Engine health keeps the roll-up and loses nothing else.** It now
+            reads the week grain and links to Executions. Two drawings of the
+            same counts drift, and the one a person opens first becomes the one
+            they trust.
+
+Decision:   **Yearly ships with no data and says so** rather than being hidden.
+            The grain exists, 2026 is the only year, and there is no 2025 to
+            compare against — which the page states. Hiding it until January
+            would mean shipping it in January.
+
+Verified:   Against the rig — real Postgres, an n8n replay holding 1,086
+            executions across four weeks, five registered workflows and one
+            unregistered:
+            - Weekly, all systems: 196 executions, 192 ok, 4 failed, 3.7 s avg.
+              Against the week of 7 Sep, like-for-like: executions 108→196
+              (+81.5%), successes 103→192 (+86.4%, better), failures 5→4
+              (−20%, better), failure rate 4.6%→2% (−56.5%, better), average
+              3,744 ms→3,661 ms (−2.2%, better).
+            - Monthly: 890 / 854 / 36, and the comparison correctly **refused** —
+              "counting only started on 2026-08-24".
+            - Yearly: 1,086 / 1,041 / 45, comparison refused; 2025 was never
+              recorded.
+            - Tabs: Bays 151, North Star 26, Research Twin 17. Failing execution
+              ids link through to n8n.
+            - Two passes with nothing new between them left every total
+              unchanged, which is the double-count regression test.
+            In Chromium at 1440 and 400: no console errors, no page errors, zero
+            horizontal overflow. `npm run typecheck && npm run build` clean.
+
+Not done:   The first production snapshot after this deploy stamps the coverage
+            boundary and `since_day`, so the period it first runs in is partial
+            by construction and every earlier period is refused a comparison
+            until a full one exists. Nothing in this sandbox can run it against
+            the real instance.
+            The Engine Registry's clipped Workflow column, reported at 11:55, is
+            still reported and still not fixed.

@@ -1,12 +1,11 @@
 import { createPortal } from 'react-dom';
 import { useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { getExecutions, getRecordMetrics, getRtTelemetry, type RtCard, type RtMetrics } from '../data';
+import { getRecordMetrics, getRtTelemetry, type RtCard, type RtMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
   CountUp,
-  ExecutionHealth,
   EmptyPanel,
   EmptyState,
   HBar,
@@ -356,28 +355,6 @@ function rtColumns(open: (c: RtCard) => void): RecordColumn<RtCard>[] {
   ];
 }
 
-/**
- * Execution health for this system, from the snapshot (2026-09-15, Destiny).
- *
- * It lives on the system's own page rather than pooled on Engine Health,
- * because a workflow belongs to exactly one system and this is where somebody
- * comes to debug it. Engine Health keeps a roll-up and a link, and none of the
- * per-workflow detail.
- */
-function SystemExecutions({ system }: { system: string }) {
-  const { status, data } = useData(getExecutions, []);
-  if (status !== 'ready' || !data) return null;
-  return (
-    <>
-      <div className="shrink-0 px-6 pt-2 pb-2 md:px-8">
-        <h2 className="text-[15px] font-medium text-ink">Workflow executions</h2>
-        <p className="mt-0.5 text-[12px] text-faint">How this system’s workflows are running, counted from n8n into this database.</p>
-      </div>
-      <ExecutionHealth system={data.systems.find((s) => s.system === system)} data={data} base={data.snapshot.n8n_base} />
-    </>
-  );
-}
-
 export default function ResearchTwin() {
   const { status, data: loaded, error } = useData(getRtTelemetry, []);
   const [filter, setFilter] = useState<Filter>('needs-human');
@@ -469,7 +446,6 @@ export default function ResearchTwin() {
             <Pagination paged={paged} unit="cards" />
           </>
         )}
-        <SystemExecutions system="Research Twin" />
       </div>
 
       {current && <CardView c={current} onClose={() => setOpen(null)} />}
