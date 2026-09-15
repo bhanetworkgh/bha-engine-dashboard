@@ -4715,3 +4715,33 @@ Verified:   Rig, with 36 ids deliberately absent: "holds 3895 across 31
             not here". Production, 14:54:41: "holds 4044, ids 1 to 4045 with 1
             of that range not here", growing by 8 and then 11 executions across
             two consecutive 45-second polls, each over one page.
+
+## 2026-09-15 15:05 — Production, against the brief's four targets
+
+The line the production server printed at 15:01:18, which answers all four:
+
+    executions sync: 1 read from n8n over 1 page, 1 new, 0 already held.
+    This database now holds 4053 across 32 workflows, 60 of them failed,
+    ids 1 to 4054 with 1 of that range not here.
+
+Against the brief:
+- **Ids 1 to approximately 3902** → ids 1 to 4054, and the sequence is dense:
+  one id of 4,054 is absent. Nothing was skipped.
+- **Total approximately 3,900, and materially more means double-counting** →
+  4,053, and it is not double counting: the id span bounds it. 4,053 rows
+  cannot be 4,054 ids counted twice.
+- **31 workflows** → 32 distinct workflows have executions here.
+- **At least 2 failures (3396, 3413)** → 60 failures held, both of those among
+  them.
+
+The two figures that read high are the same difference as the 36-row one, and
+it is a difference between **views of n8n rather than between counts**. The n8n
+MCP connector — where the brief's targets came from, and where I checked them —
+reports 51 failures with its newest at 03:14, while the dashboard holds 60 and
+is still finding more; it reports 31 workflows where the dashboard sees 32 with
+executions; and its execution list is 36 short of its own id range where the
+dashboard's is dense. The consistent reading is that the MCP sees one project's
+worth and the instance API key the dashboard uses sees the instance. **Worth
+one look on the page**: the 32nd workflow and those extra failures are real runs
+that this view could not see at all, and they will be sitting under Unregistered
+or under their own system tab.
