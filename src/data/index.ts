@@ -22,7 +22,9 @@ import type {
   CodexData,
   CodexEntry,
   CodexEntryDetail,
+  ExecutionBackfill,
   ExecutionGrain,
+  ExecutionWorkflowDetail,
   ExecutionsData,
   MonthlySeries,
   Resync,
@@ -127,12 +129,22 @@ export const getRtTelemetry = () => api<RtData>('/api/rt-telemetry');
 export const getClients = () => api<ClientsData>('/api/clients');
 
 /**
- * n8n execution health, read from the snapshot this dashboard keeps rather than
- * from n8n's own history: n8n holds about three days of executions and then
- * discards them, so a live query for a past month would report a clean past
- * that is only missing data.
+ * Executions, read from the rows this database holds — one row per n8n
+ * execution, keyed on n8n's own id.
+ *
+ * `period` is the week, month or year in view; selecting one on the chart
+ * re-reads at that key, so the figures, the workflow table, the comparison and
+ * the exported report all describe the same span.
  */
-export const getExecutions = (grain: ExecutionGrain = 'week') => api<ExecutionsData>(`/api/executions?grain=${grain}`);
+export const getExecutions = (grain: ExecutionGrain = 'week', period?: string) =>
+  api<ExecutionsData>(`/api/executions?grain=${grain}${period ? `&period=${encodeURIComponent(period)}` : ''}`);
+
+/** One workflow opened up: its days inside the period, and its individual runs. */
+export const getExecutionWorkflow = (workflowId: string, grain: ExecutionGrain, period?: string) =>
+  api<ExecutionWorkflowDetail>(`/api/executions/workflow/${encodeURIComponent(workflowId)}?grain=${grain}${period ? `&period=${encodeURIComponent(period)}` : ''}`);
+
+/** Reads n8n's whole history again. Idempotent — every row is keyed on the execution id. */
+export const backfillExecutions = () => api<ExecutionBackfill>('/api/executions/backfill', { method: 'POST' });
 
 /** The monthly rollup behind a record page's tracking panel. */
 export const getMonthly = (kind: RecordKind) => api<MonthlySeries>(`/api/records/${kind}/monthly`);

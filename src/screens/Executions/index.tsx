@@ -1,31 +1,47 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useData } from '../../app/useData';
-import { getExecutions, type ExecutionDelta, type ExecutionGrain, type ExecutionPeriod, type ExecutionSystem, type ExecutionWorkflow, type ExecutionsData } from '../../data';
-import { EmptyPanel, LoadFailed, Loading, MetricCard, PageHeader, Segmented, StatCell, StatStrip, Tabs, relativeTime } from '../../components/ui';
+import {
+  backfillExecutions,
+  getExecutionWorkflow,
+  getExecutions,
+  type ExecutionDelta,
+  type ExecutionGrain,
+  type ExecutionPeriod,
+  type ExecutionRun,
+  type ExecutionSystem,
+  type ExecutionWorkflow,
+  type ExecutionWorkflowDetail,
+  type ExecutionsData,
+} from '../../data';
+import { buildReport, reportName } from '../../lib/executionReport';
+import { downloadCsv } from '../../lib/csv';
+import { EmptyPanel, LoadFailed, Loading, MetricCard, PageHeader, Segmented, StatCell, StatStrip, Tabs, Toast, relativeTime, useToast } from '../../components/ui';
 
 /**
- * Executions — every run of every workflow in the engine, as a record kind.
+ * Executions — every run of every workflow in the engine, one row per run.
  *
- * It replaced a Bays page that held only Bays' executions (decision
- * 2026-09-15, Destiny). A run is a record like any other and it is the same
- * record whichever system produced it, so one page with a tab per system beats
- * a section repeated on three. Bays, North Star and Research Twin are the tabs
- * because those are the systems running anything today; **All systems** leads,
- * because "every execution across the engine" is what the page is for and the
- * per-system tabs are how you narrow it.
+ * **The figures here are queries over stored executions, not counters.** The
+ * page that shipped this morning kept per-day totals and every number on it was
+ * wrong: each figure read sixty times what n8n held, failures read nought, and
+ * seven workflows of thirty-one appeared. One paging bug in the reader caused
+ * all three, and a counter cannot notice it is being told the same execution
+ * twice. Keyed on the execution id, none of that is expressible.
  *
- * **The counts are read from a snapshot in Postgres, never from n8n's own
- * history for a past period.** n8n keeps about three days of executions and
- * then discards them; on 15 Sep 2026 it held 3,673 and none older than the
- * 12th. A live query would answer honestly that August held nothing, and the
- * chart would draw an empty period for one that was busy. So a period before
- * counting started carries no bar at all and the boundary is labelled, exactly
- * as the record pages label theirs.
+ * **It is a poll, not a live feed.** n8n has nothing to push when an execution
+ * finishes, and instrumenting each workflow to report its own runs would make
+ * every workflow somebody forgets a silent gap. So the server reads what is
+ * above the highest id it holds every 45 seconds, this page re-reads on the
+ * same interval, and both say so rather than implying the numbers are live.
  *
- * **Weekly, monthly and yearly** come from the same daily rows, so they cannot
- * disagree. Yearly has one partial year in it today, and says so rather than
- * drawing a year's worth of bar from four days.
+ * **Tabs are systems, and Unregistered is one of them.** A workflow the
+ * registry names no system for is counted in All systems and listed under its
+ * own tab — never dropped, never filed under a guess. A workflow must not be
+ * invisible because a registry row is missing.
  */
+
+/** The page re-reads on the same interval the server polls on. */
+const REFRESH_MS = 45_000;
 
 const GRAINS: { value: ExecutionGrain; label: string }[] = [
   { value: 'week', label: 'Weekly' },
@@ -49,6 +65,11 @@ function duration(ms: number | null): string {
   return `${m} m ${s} s`;
 }
 
+function clock(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toISOString().slice(11, 19).replace('T', ' ');
+}
+
 function rateTone(rate: number | null): string {
   if (rate === null) return 'text-dim';
   if (rate >= 0.1) return 'text-failing';
@@ -57,7 +78,20 @@ function rateTone(rate: number | null): string {
 }
 
 /**
- * A change against last period.
+ * n8n's own word for how a run ended, coloured only where the word is bad news.
+ *
+ * Success is the ordinary case and gets no colour: a column of green on a page
+ * where almost everything succeeds is decoration, and decoration in the colours
+ * that mean "failing" and "degraded" is exactly what the palette rule forbids.
+ */
+function statusTone(status: string): string {
+  if (status === 'error' || status === 'crashed') return 'text-failing';
+  if (status === 'running' || status === 'waiting' || status === 'new') return 'text-degraded';
+  return 'text-dim';
+}
+
+/**
+ * A change against the previous period.
  *
  * Amber and red only where the movement is genuinely bad news, never on a
  * direction for its own sake: more executions is up and means nothing on its
@@ -85,7 +119,7 @@ const H = 96;
 /** A gutter so the first period's label is not clipped by the edge of the svg. */
 const PAD = 16;
 
-/** Executions and failures per period. A period nothing was counted in draws no bar. */
+/** Executions and failures per period. A period nothing is held for draws no bar at all. */
 function PeriodChart({ periods, grain, selected, onSelect }: { periods: ExecutionPeriod[]; grain: ExecutionGrain; selected: string; onSelect: (key: string) => void }) {
   const shown = periods.slice(-18);
   const max = Math.max(1, ...shown.map((p) => p.executions));
@@ -105,7 +139,7 @@ function PeriodChart({ periods, grain, selected, onSelect }: { periods: Executio
           <g>
             <line x1={PAD + firstCovered * (BAR + GAP) - GAP / 2} y1="2" x2={PAD + firstCovered * (BAR + GAP) - GAP / 2} y2={H} stroke="var(--degraded)" strokeWidth="1" strokeDasharray="3 3" />
             <text x={PAD + firstCovered * (BAR + GAP) - GAP / 2 + 4} y="11" fontSize="9.5" fill="var(--degraded)">
-              counting starts
+              history begins
             </text>
           </g>
         )}
@@ -113,7 +147,7 @@ function PeriodChart({ periods, grain, selected, onSelect }: { periods: Executio
           const x = PAD + i * (BAR + GAP);
           const on = selected === p.key;
           const h = p.coverage === 'none' ? 0 : Math.round((p.executions / max) * (H - 16));
-          const fh = p.coverage === 'none' || !p.executions ? 0 : Math.round((p.failures / max) * (H - 16));
+          const fh = p.coverage === 'none' || !p.executions ? 0 : Math.round((p.failed / max) * (H - 16));
           return (
             <g key={p.key} className="cursor-pointer" onClick={() => onSelect(p.key)}>
               <rect x={x - GAP / 2} y="0" width={BAR + GAP} height={H + 30} fill={on ? 'var(--hover)' : 'transparent'} />
@@ -136,8 +170,8 @@ function PeriodChart({ periods, grain, selected, onSelect }: { periods: Executio
               )}
               <title>
                 {p.coverage === 'none'
-                  ? `${p.label}: nothing was being counted. ${p.note ?? ''}`
-                  : `${p.label} (${p.start} to ${p.end}): ${p.executions} executions, ${p.failures} failed, average ${duration(p.avg_ms)}${p.note ? ` — ${p.note}` : ''}`}
+                  ? `${p.label}: nothing is held. ${p.note ?? ''}`
+                  : `${p.label} (${p.start} to ${p.end}): ${p.executions} executions, ${p.failed} failed, average ${duration(p.avg_ms)}${p.note ? ` — ${p.note}` : ''}`}
               </title>
             </g>
           );
@@ -147,133 +181,261 @@ function PeriodChart({ periods, grain, selected, onSelect }: { periods: Executio
   );
 }
 
+/* ------------------------------------------------------- one workflow */
+
+/**
+ * A workflow opened up: its days inside the period, and its own executions with
+ * ids, start times, durations and outcomes.
+ *
+ * This is the capability the counter tables could not support at all, and the
+ * reason every execution is stored as its own row.
+ */
+function WorkflowPanel({ workflowId, grain, period, onClose }: { workflowId: string; grain: ExecutionGrain; period: string; onClose: () => void }) {
+  const [detail, setDetail] = useState<ExecutionWorkflowDetail | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [failedOnly, setFailedOnly] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    setDetail(null);
+    getExecutionWorkflow(workflowId, grain, period)
+      .then((d) => live && setDetail(d))
+      .catch((e: unknown) => live && setErr(e instanceof Error ? e.message : 'Could not load the workflow.'));
+    return () => {
+      live = false;
+    };
+  }, [workflowId, grain, period]);
+
+  const runs: ExecutionRun[] = (detail?.runs ?? []).filter((r) => !failedOnly || r.status === 'error' || r.status === 'crashed');
+  const maxDay = Math.max(1, ...(detail?.days ?? []).map((d) => d.executions));
+
+  return createPortal(
+    <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/30 p-4 md:p-10" onClick={onClose}>
+      <div className="card fade-up w-full max-w-[880px] px-6 py-5" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Workflow executions">
+        {err ? (
+          <div className="text-[13px] text-failing">{err}</div>
+        ) : !detail ? (
+          <div className="text-[13px] text-faint">Loading…</div>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="kicker tabular">{detail.workflow.system ?? 'no system in the workflow registry'}</div>
+                <h2 className="mt-0.5 truncate text-[17px] font-semibold text-ink">{detail.workflow.workflow_name}</h2>
+                <div className="tabular mt-1 text-[11.5px] text-faint">
+                  {detail.period.label} · {detail.period.start} to {detail.period.end} · workflow {detail.workflow.workflow_id}
+                </div>
+              </div>
+              <button type="button" className="btn" onClick={onClose}>
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+              {[
+                { k: 'executions', v: String(detail.workflow.executions), tone: 'text-ink' },
+                { k: 'succeeded', v: String(detail.workflow.succeeded), tone: 'text-ink' },
+                { k: 'failed', v: String(detail.workflow.failed), tone: detail.workflow.failed ? 'text-failing' : 'text-dim' },
+                { k: 'failure rate', v: pct(detail.workflow.failure_rate), tone: rateTone(detail.workflow.failure_rate) },
+                { k: 'average time', v: duration(detail.workflow.avg_ms), tone: 'text-ink' },
+              ].map((f) => (
+                <div key={f.k} className="rounded-[12px] bg-raised px-3 py-2.5">
+                  <div className="kicker truncate">{f.k}</div>
+                  <div className={`font-display tabular mt-1 text-[19px] leading-none ${f.tone}`}>{f.v}</div>
+                </div>
+              ))}
+            </div>
+
+            {detail.days.length > 0 && (
+              <div className="mt-5">
+                <div className="text-[12.5px] font-medium text-ink">By day</div>
+                <div className="mt-2 space-y-1">
+                  {detail.days.map((d) => (
+                    <div key={d.day} className="flex items-center gap-3">
+                      <span className="tabular w-[84px] shrink-0 text-[11.5px] text-faint">{d.day}</span>
+                      <span className="flex h-3 flex-1 items-center gap-0.5">
+                        <span className="h-3 rounded-[2px] bg-ink/80" style={{ width: `${Math.round(((d.executions - d.failed) / maxDay) * 100)}%` }} />
+                        {d.failed > 0 && <span className="h-3 rounded-[2px] bg-failing" style={{ width: `${Math.round((d.failed / maxDay) * 100)}%` }} />}
+                      </span>
+                      <span className="tabular w-[150px] shrink-0 text-right text-[11.5px] text-faint">
+                        {d.executions} run{d.executions === 1 ? '' : 's'}
+                        {d.failed ? <span className="text-failing"> · {d.failed} failed</span> : ''} · {duration(d.avg_ms)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-5 flex flex-wrap items-baseline justify-between gap-2">
+              <div className="text-[12.5px] font-medium text-ink">Executions</div>
+              <div className="flex items-center gap-3 text-[11.5px] text-faint">
+                {detail.workflow.failed > 0 && (
+                  <button type="button" className="hover:text-accent-ink" onClick={() => setFailedOnly((v) => !v)}>
+                    {failedOnly ? 'show all' : 'failures only'}
+                  </button>
+                )}
+                <span className="tabular">
+                  {runs.length} shown{detail.runs_total > detail.runs.length ? ` of ${detail.runs_total}, newest first` : ''}
+                </span>
+              </div>
+            </div>
+            <div className="scroll-thin mt-2 max-h-[340px] overflow-y-auto">
+              <table className="w-full border-collapse text-[12px]">
+                <thead>
+                  <tr>
+                    {['execution', 'started', 'duration', 'how it ran', 'outcome'].map((h, i) => (
+                      <th key={h} className={`sticky top-0 border-b border-line bg-panel px-2 py-1.5 text-left text-[11px] font-medium whitespace-nowrap text-faint ${i > 1 ? 'text-right' : ''}`}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {runs.map((r) => (
+                    <tr key={r.execution_id} className="border-b border-line/60">
+                      <td className="tabular px-2 py-1.5">
+                        {detail.n8n_base ? (
+                          <a href={`${detail.n8n_base}/workflow/${detail.workflow.workflow_id}/executions/${r.execution_id}`} target="_blank" rel="noreferrer" className="hover:text-accent-ink">
+                            {r.execution_id}
+                          </a>
+                        ) : (
+                          r.execution_id
+                        )}
+                      </td>
+                      <td className="tabular px-2 py-1.5 text-dim">
+                        {r.started_at.slice(0, 10)} {clock(r.started_at)}
+                      </td>
+                      <td className="tabular px-2 py-1.5 text-right text-dim">{r.duration_ms === null ? 'no end recorded' : duration(r.duration_ms)}</td>
+                      <td className="px-2 py-1.5 text-right text-faint">{r.mode ?? '—'}</td>
+                      <td className={`px-2 py-1.5 text-right ${statusTone(r.status)}`}>{r.status}</td>
+                    </tr>
+                  ))}
+                  {runs.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-2 py-6 text-center text-[12.5px] text-dim">
+                        {failedOnly ? 'No execution of this workflow failed in this period.' : 'This workflow ran nothing in this period.'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 /* ------------------------------------------------------------- workflows */
 
-function WorkflowRow({ w, base }: { w: ExecutionWorkflow; base: string | null }) {
-  const [open, setOpen] = useState(false);
-  const rate = w.executions ? w.failures / w.executions : null;
+function WorkflowRow({ w, onOpen }: { w: ExecutionWorkflow; onOpen: () => void }) {
   return (
-    <>
-      <tr className={w.failures ? 'cursor-pointer' : ''} onClick={() => w.failures && setOpen((v) => !v)}>
-        <td className="td card-title td-clip" style={{ maxWidth: '36ch' }} title={w.workflow_name}>
-          {w.n8n_url ? (
-            <a href={w.n8n_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="hover:text-accent-ink">
-              {w.workflow_name}
-            </a>
-          ) : (
-            w.workflow_name
-          )}
-        </td>
-        <td className="td card-meta tabular text-right text-ink">
-          {w.executions}
-          <span className="text-faint md:hidden"> executions</span>
-        </td>
-        <td className={`td card-meta tabular text-right ${w.failures ? 'text-failing' : 'text-faint'}`}>
-          {w.failures}
-          <span className="text-faint md:hidden"> failed</span>
-        </td>
-        <td className={`td card-meta tabular text-right ${rateTone(rate)}`}>
-          {pct(rate)}
-          <span className="text-faint md:hidden"> failure rate</span>
-        </td>
-        <td className="td card-meta tabular text-right text-dim" title={w.timed ? `Mean over the ${w.timed} of ${w.executions} runs that recorded an end` : 'No run recorded an end, so there is no average'}>
-          {duration(w.avg_ms)}
-          <span className="text-faint md:hidden"> average</span>
-        </td>
-        <td className="td card-meta text-right text-[11px] text-faint">{w.failures ? (open ? 'hide ids' : 'show ids') : ''}</td>
-      </tr>
-      {open && w.failures > 0 && (
-        <tr>
-          <td colSpan={6} className="td card-full">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 py-1 text-[11.5px]">
-              <span className="text-faint">failing executions</span>
-              {w.failed_ids.map((id) => (
-                <a
-                  key={id}
-                  href={base ? `${base}/workflow/${w.workflow_id}/executions/${id}` : undefined}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="tabular tag hover:text-accent-ink"
-                  title="Open this execution in n8n"
-                >
-                  {id}
-                </a>
-              ))}
-              {w.failed_ids.length < w.failures && (
-                <span className="text-faint">
-                  — the newest {w.failed_ids.length} of {w.failures}; n8n discards an execution a few days after it runs, so an older id may no longer open.
-                </span>
-              )}
-            </div>
-          </td>
-        </tr>
-      )}
-    </>
+    <tr className="cursor-pointer" onClick={onOpen}>
+      <td className="td card-title td-clip" style={{ maxWidth: '36ch' }} title={w.registered ? w.workflow_name : `${w.workflow_name} — no workflow registry row names a system for this one`}>
+        {w.workflow_name}
+        {!w.registered && <span className="ml-1.5 text-[10.5px] text-degraded">unregistered</span>}
+      </td>
+      <td className="td card-meta tabular text-right text-ink">
+        {w.executions}
+        <span className="text-faint md:hidden"> executions</span>
+      </td>
+      <td className={`td card-meta tabular text-right ${w.failed ? 'text-failing' : 'text-faint'}`}>
+        {w.failed}
+        <span className="text-faint md:hidden"> failed</span>
+      </td>
+      <td className={`td card-meta tabular text-right ${rateTone(w.failure_rate)}`}>
+        {pct(w.failure_rate)}
+        <span className="text-faint md:hidden"> failure rate</span>
+      </td>
+      <td className="td card-meta tabular text-right text-dim" title={w.timed ? `Mean over the ${w.timed} of ${w.executions} runs that recorded an end` : 'No run recorded an end, so there is no average'}>
+        {duration(w.avg_ms)}
+        <span className="text-faint md:hidden"> average</span>
+      </td>
+      <td className="td card-meta text-right text-[11px] text-faint">open</td>
+    </tr>
   );
 }
 
 /* ------------------------------------------------------------------ page */
 
-function SystemView({ system, data, grain }: { system: ExecutionSystem; data: ExecutionsData; grain: ExecutionGrain }) {
-  const [selected, setSelected] = useState<string | null>(null);
-  const key = selected ?? system.period;
-  const period = system.periods.find((p) => p.key === key) ?? system.periods[system.periods.length - 1];
-  // The comparison is computed for the system's own newest period; selecting an
-  // older one shows that period's figures without pretending the comparison
-  // moved with it.
-  const comparing = key === system.period ? system.comparison : null;
+function SystemView({
+  system,
+  data,
+  grain,
+  onSelectPeriod,
+  onOpenWorkflow,
+}: {
+  system: ExecutionSystem;
+  data: ExecutionsData;
+  grain: ExecutionGrain;
+  onSelectPeriod: (key: string) => void;
+  onOpenWorkflow: (id: string) => void;
+}) {
+  const period = system.period;
+  const c = system.comparison;
   const nothing = system.periods.every((p) => p.executions === 0);
-  const base = data.snapshot.n8n_base;
   const noun = NOUN[grain];
 
   return (
     <>
+      {/*
+        The period in words, above the figures, because "failures down 40%" is
+        how somebody reads a change and "12 against 20" is not. Written by the
+        server so this and the downloaded report cannot word it differently.
+      */}
+      <div className="mx-6 mb-4 md:mx-8">
+        <div className="card px-5 py-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <div className="text-[13px] font-medium text-ink">
+              {period.label} · {system.label}
+            </div>
+            <div className="tabular text-[11.5px] text-faint">
+              {period.start} to {period.end}
+              {period.current ? ` · still running` : ''}
+            </div>
+          </div>
+          <p className={`mt-1.5 text-[13px] leading-relaxed ${c.covered ? 'text-ink' : 'text-degraded'}`}>{c.prose}</p>
+          <p className="mt-1 text-[11.5px] leading-snug text-faint">{c.note}</p>
+        </div>
+      </div>
+
       <StatStrip cols={4}>
         <StatCell>
           <div className="kicker truncate">Executions</div>
-          <div className="font-display tabular mt-1 text-[28px] leading-none text-ink">{nothing ? '—' : (period?.executions ?? 0)}</div>
+          <div className="font-display tabular mt-1 text-[28px] leading-none text-ink">{nothing ? '—' : period.executions}</div>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[11.5px] leading-snug text-faint">
-            {comparing?.executions ? <Delta d={comparing.executions} /> : null}
-            <span>{period ? `${period.start} to ${period.end}` : `this ${noun}`}</span>
+            <Delta d={c.executions} />
+            <span>{period.unfinished ? `${period.unfinished} still running` : `across ${system.workflows.length} workflow${system.workflows.length === 1 ? '' : 's'}`}</span>
           </div>
         </StatCell>
         <StatCell>
           <div className="kicker truncate">Succeeded</div>
-          <div className="font-display tabular mt-1 text-[28px] leading-none text-ink">{nothing ? '—' : (period?.successes ?? 0)}</div>
+          <div className="font-display tabular mt-1 text-[28px] leading-none text-ink">{nothing ? '—' : period.succeeded}</div>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[11.5px] leading-snug text-faint">
-            {comparing?.successes ? <Delta d={comparing.successes} /> : null}
-            <span>finished without an error</span>
+            <Delta d={c.successes} />
+            <span>{period.canceled ? `${period.canceled} canceled by hand` : 'finished without an error'}</span>
           </div>
         </StatCell>
         <StatCell>
           <div className="kicker truncate">Failed</div>
-          <div className={`font-display tabular mt-1 text-[28px] leading-none ${period?.failures ? 'text-failing' : 'text-dim'}`}>{nothing ? '—' : (period?.failures ?? 0)}</div>
+          <div className={`font-display tabular mt-1 text-[28px] leading-none ${period.failed ? 'text-failing' : 'text-dim'}`}>{nothing ? '—' : period.failed}</div>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[11.5px] leading-snug text-faint">
-            {comparing?.failures ? <Delta d={comparing.failures} /> : null}
-            <span>{pct(period?.failure_rate ?? null)} of runs</span>
+            <Delta d={c.failures} />
+            <span>{pct(period.failure_rate)} of {period.finished} finished runs</span>
           </div>
         </StatCell>
         <StatCell>
           <div className="kicker truncate">Average time</div>
-          <div className="font-display tabular mt-1 text-[28px] leading-none text-ink">{duration(period?.avg_ms ?? null)}</div>
+          <div className="font-display tabular mt-1 text-[28px] leading-none text-ink">{duration(period.avg_ms)}</div>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[11.5px] leading-snug text-faint">
-            {comparing?.avg_ms ? <Delta d={comparing.avg_ms} format={(n) => duration(n)} /> : null}
-            <span>
-              {period?.timed ? `over the ${period.timed} of ${period.executions} runs that recorded an end` : 'no run recorded an end'}
-            </span>
+            <Delta d={c.avg_ms} format={(n) => duration(n)} />
+            <span>{period.timed ? `over the ${period.timed} of ${period.executions} runs that recorded an end` : 'no run recorded an end'}</span>
           </div>
         </StatCell>
       </StatStrip>
-
-      {/* What the comparison is actually against. Said once, plainly. */}
-      {comparing && (
-        <div className="mx-6 mb-4 md:mx-8">
-          <p className="text-[11.5px] leading-snug text-faint">
-            <span className="text-dim">Compared with last {noun}:</span> {comparing.note}
-            {comparing.like_for_like && comparing.executions && ' A whole period against a part of one would read as a collapse every time a new one started.'}
-          </p>
-        </div>
-      )}
 
       <div className="mx-6 mb-4 md:mx-8">
         <MetricCard
@@ -281,14 +443,21 @@ function SystemView({ system, data, grain }: { system: ExecutionSystem; data: Ex
           right={<span className="text-[11px] text-faint">bar = executions · red = failures · click one to read it</span>}
           note={
             <span className="block space-y-1">
-              {period?.note && <span className="block text-[11px] leading-snug text-degraded">{period.note}</span>}
-              <span className="block text-[11px] leading-snug text-faint">{data.snapshot.note}</span>
+              {period.note && <span className="block text-[11px] leading-snug text-degraded">{period.note}</span>}
+              <span className="block text-[11px] leading-snug text-faint">{data.source.note}</span>
               {data.boundary && <span className="block text-[11px] leading-snug text-degraded">{data.boundary.note}</span>}
-              {data.snapshot.at && <span className="block text-[11px] leading-snug text-faint">Last counted {relativeTime(data.snapshot.at) ?? data.snapshot.at}.</span>}
+              {data.source.warning && <span className="block text-[11px] leading-snug text-failing">{data.source.warning}</span>}
+              {data.source.at && (
+                <span className="block text-[11px] leading-snug text-faint">
+                  Last read {relativeTime(data.source.at) ?? data.source.at} · {data.source.held} executions held
+                  {data.source.oldest ? `, from ${data.source.oldest}` : ''}
+                  {data.source.highest_id ? ` · newest id ${data.source.highest_id}` : ''}.
+                </span>
+              )}
             </span>
           }
         >
-          {nothing ? <EmptyPanel>{data.snapshot.note}</EmptyPanel> : <PeriodChart periods={system.periods} grain={grain} selected={key} onSelect={setSelected} />}
+          {nothing ? <EmptyPanel>{data.source.note}</EmptyPanel> : <PeriodChart periods={system.periods} grain={grain} selected={period.key} onSelect={onSelectPeriod} />}
         </MetricCard>
       </div>
 
@@ -297,16 +466,12 @@ function SystemView({ system, data, grain }: { system: ExecutionSystem; data: Ex
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-line px-5 py-3">
             <div className="text-[13px] font-medium text-ink">By workflow</div>
             <div className="tabular text-[11.5px] text-faint">
-              {period ? `${period.label} · ${period.start} to ${period.end}` : ''}
+              {period.label} · click a workflow for its own executions
             </div>
           </div>
-          {system.workflows.length === 0 || key !== system.period ? (
+          {system.workflows.length === 0 ? (
             <div className="px-5 py-8 text-center text-[13px] text-dim">
-              {nothing
-                ? data.snapshot.note
-                : key !== system.period
-                  ? `The per-workflow breakdown is kept for ${system.periods.find((p) => p.key === system.period)?.label ?? 'the newest period'}, the newest with anything in it. Clear the selection on the chart to see it.`
-                  : `No ${system.label === 'All systems' ? '' : `${system.label} `}workflow ran in this ${noun}.`}
+              {nothing ? data.source.note : `No ${system.label === 'All systems' ? '' : `${system.label} `}workflow ran in this ${noun}.`}
             </div>
           ) : (
             <div className="scroll-thin overflow-x-auto">
@@ -322,7 +487,7 @@ function SystemView({ system, data, grain }: { system: ExecutionSystem; data: Ex
                 </thead>
                 <tbody>
                   {system.workflows.map((w) => (
-                    <WorkflowRow key={w.workflow_id} w={w} base={base} />
+                    <WorkflowRow key={w.workflow_id} w={w} onOpen={() => onOpenWorkflow(w.workflow_id)} />
                   ))}
                 </tbody>
               </table>
@@ -336,58 +501,91 @@ function SystemView({ system, data, grain }: { system: ExecutionSystem; data: Ex
 
 export default function Executions() {
   const [grain, setGrain] = useState<ExecutionGrain>('week');
+  const [period, setPeriod] = useState<string | null>(null);
   const [tab, setTab] = useState('All systems');
-  const { status, data, error } = useData(() => getExecutions(grain), [grain]);
+  const [open, setOpen] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [tick, setTick] = useState(0);
+  const { toast, setToast } = useToast();
+
+  const { status, data, error } = useData(() => getExecutions(grain, period ?? undefined), [grain, period, tick], REFRESH_MS);
 
   if (status === 'loading' || !data) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
 
-  const tabs = data.systems.map((s) => s.label);
   const system = data.systems.find((s) => s.label === tab) ?? data.systems[0];
   const counts = Object.fromEntries(
     data.systems.map((s) => [
       s.label,
-      { n: s.executions, tone: s.failure_rate !== null && s.failure_rate >= 0.1 ? ('failing' as const) : s.failure_rate ? ('degraded' as const) : ('default' as const) },
+      { n: s.period.executions, tone: s.period.failure_rate !== null && s.period.failure_rate >= 0.1 ? ('failing' as const) : s.period.failure_rate ? ('degraded' as const) : ('default' as const) },
     ]),
   );
+
+  /** Reads n8n's whole history again. Idempotent — every row is keyed on the execution id. */
+  const reread = () => {
+    if (busy) return;
+    setBusy(true);
+    void (async () => {
+      try {
+        const r = await backfillExecutions();
+        setTick((n) => n + 1);
+        setToast(
+          r.ran
+            ? { text: `Read ${r.read} executions from n8n in ${(r.ms / 1000).toFixed(1)}s · ${r.inserted} new, ${r.updated} already held${r.warning ? ` · ${r.warning}` : ''}`, tone: r.warning ? 'failing' : 'ok' }
+            : { text: r.note, tone: 'failing' },
+        );
+      } catch (e) {
+        setToast({ text: e instanceof Error ? e.message : 'The read did not run.', tone: 'failing' });
+      } finally {
+        setBusy(false);
+      }
+    })();
+  };
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <PageHeader
         title="Executions"
-        subtitle="Every run of every workflow in the engine, and how it went"
-        right={<Segmented<ExecutionGrain> ariaLabel="Period" value={grain} onChange={setGrain} options={GRAINS} />}
-        below={<Tabs tabs={tabs} value={tab} onChange={setTab} counts={counts} />}
+        subtitle={`Every run of every workflow in the engine — read from n8n every ${data.source.poll_seconds} seconds, not live`}
+        right={
+          <div className="flex flex-wrap items-center gap-2">
+            <Segmented<ExecutionGrain>
+              ariaLabel="Period"
+              value={grain}
+              onChange={(g) => {
+                // A period key belongs to its grain: 2026-W38 means nothing to a
+                // monthly view, so changing the grain returns to the current one.
+                setPeriod(null);
+                setGrain(g);
+              }}
+              options={GRAINS}
+            />
+            <button type="button" className="btn" onClick={() => downloadCsv(reportName(system, data.period), buildReport(data, system))}>
+              Download report
+            </button>
+            <button type="button" className="btn" disabled={busy} onClick={reread} title="Reads every execution n8n holds again. Safe to run at any time: each row is keyed on its n8n execution id.">
+              {busy ? 'Reading n8n…' : 'Read n8n again'}
+            </button>
+          </div>
+        }
+        below={<Tabs tabs={data.systems.map((s) => s.label)} value={tab} onChange={setTab} counts={counts} />}
       />
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <SystemView key={`${system.system}-${grain}`} system={system} data={data} grain={grain} />
+        <SystemView key={`${system.system}-${grain}-${data.period}`} system={system} data={data} grain={grain} onSelectPeriod={setPeriod} onOpenWorkflow={setOpen} />
 
         {/*
-          A workflow n8n is running that no registry row names a system for. It
-          is counted in All systems and listed here rather than filed under a
-          guess: it is a registry row somebody needs to add, which is
-          actionable, and the wrong heading would not be.
+          Said once, at the foot of the page: these numbers are as fresh as the
+          last poll and no fresher. A dashboard that implies it is live when it
+          is not is worse than one that admits the delay.
         */}
-        {tab === 'All systems' && data.unregistered.length > 0 && (
-          <div className="mx-6 mb-6 md:mx-8">
-            <MetricCard
-              title="Workflows in no system"
-              note="Each of these is running in n8n and has no row in the workflow registry naming its system, so it is counted in All systems and appears under no tab. Adding the registry row files it under the right one — the mapping is a row, not a deploy."
-            >
-              <div className="space-y-1.5 text-[12.5px]">
-                {data.unregistered.map((w) => (
-                  <div key={w.workflow_id} className="flex items-baseline justify-between gap-3">
-                    <span className="truncate text-dim">{w.workflow_name}</span>
-                    <span className="tabular shrink-0 text-faint">
-                      {w.executions} executions{w.failures ? <span className="text-failing"> · {w.failures} failed</span> : ''}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </MetricCard>
-          </div>
-        )}
+        <div className="mx-6 mb-8 text-[11px] leading-snug text-faint md:mx-8">
+          n8n has no way to tell this dashboard when an execution finishes, so it is asked every {data.source.poll_seconds} seconds and this page re-reads on the same interval. Nothing here is
+          live. Executions are copied into this database, one row per execution, so the record does not depend on what n8n keeps.
+        </div>
       </div>
+
+      {open && <WorkflowPanel workflowId={open} grain={grain} period={data.period} onClose={() => setOpen(null)} />}
+      <Toast toast={toast} />
     </div>
   );
 }

@@ -1,85 +1,65 @@
 /**
- * n8n execution health, snapshotted into Postgres and read from there.
+ * Every execution of every workflow, stored one row per execution.
  *
- * **The constraint that shapes all of this: n8n's execution history does not
- * persist.** On 15 Sep 2026 the instance held 3,673 executions and none older
- * than 12 Sep — three days. Asking the API for August would get an honest
- * "nothing", and the chart would draw an empty month for a month that was
- * busy. So the API is the feed and `engine_execution_days` is the record.
+ * **This replaced two counter tables, and it replaced them because counters
+ * were the fault.** The first shipped version kept a total per workflow per
+ * month, the second a total per workflow per day, and both were wrong on the
+ * live page in ways that had nothing to do with the arithmetic on screen: every
+ * figure read exactly sixty times what n8n held, failures read nought, and
+ * seven workflows of thirty-one appeared. One paging bug in the reader caused
+ * all three — see `n8n.executionsAfter` — and a counter has no way to notice
+ * that it is being told the same execution twice.
  *
- * The counts are **accumulated forward, never recomputed.** Each run reads only
- * the executions above a watermark and adds them to their day's row. A period
- * whose executions have since aged out of n8n therefore keeps the count it had
- * when they existed, which is the whole point.
+ * Keyed on n8n's own execution id, none of those faults is expressible. Reading
+ * the same page twice is an upsert that changes nothing. A failure is a row
+ * whose `status` is `error` or `crashed`, or it is not there. A month is a
+ * `GROUP BY`. There is no watermark arithmetic and nothing accumulates.
  *
- * **The grain is a day** (2026-09-15, Destiny). The page reports weekly,
- * monthly and yearly, and a month cannot be divided into weeks after the fact.
- * A day is the smallest period anyone asked for and every larger one is a sum
- * over days, so one table answers all three.
+ * **Why the rows are copied here at all**, given they can be read from n8n: not
+ * because n8n discards them. That was asserted here on 15 Sep and never
+ * verified — the instance's history begins on 12 Sep because that is when it
+ * was migrated, and nothing has been observed ageing off. The real reason is
+ * that a record of the engine's history should not depend on another system's
+ * retention policy, whatever that policy turns out to be. What is here stays
+ * here.
  *
- * Two consequences of accumulating, both deliberate:
+ * **New executions arrive by poll, not by push.** n8n has no completion
+ * webhook, and the alternative — a reporting node added to each workflow —
+ * makes every workflow somebody forgets to instrument a silent gap, which is
+ * the failure this dashboard exists to remove. So every 45 seconds this reads
+ * what is above the highest id it holds. The page says so plainly; it is not
+ * live.
  *
- *   - An execution still running when the job passes is not counted yet. Its id
- *     goes on a deferred list and is resolved individually later, so it is
- *     counted once, with its real outcome, and nothing above it is read twice.
- *   - Whichever day the job first ran on is partial by construction —
- *     everything before it was already ageing off or never seen. That boundary
- *     is stored and every chart that reads this labels it.
- *
- * A workflow's system comes from the workflow registry, which already holds one
- * row per workflow with its `system`. So pointing a new workflow at a system is
- * a registry edit, not a deploy — the same rule as the watched-clients index.
- * A workflow n8n reports that no registry row names is counted and listed as
- * unregistered rather than being filed under a guess.
+ * A workflow's system comes from the workflow registry **at read time**, by
+ * join, so pointing a workflow at a system is a registry edit that re-files its
+ * whole history rather than only its future. A workflow no registry row claims
+ * is not dropped and not guessed at: it is counted in All systems and listed
+ * under Unregistered, which is a tab rather than a footnote, because a workflow
+ * must never be invisible because a registry row is missing.
  */
-import { getMeta, nowIso, setMeta, setMetaIfAbsent } from './db';
+import { getMeta, nowIso, setMeta } from './db';
 import { query } from './pg';
 import * as n8n from './n8n';
-import * as registry from './registry';
 import type {
   ExecutionComparison,
   ExecutionDelta,
   ExecutionGrain,
   ExecutionPeriod,
+  ExecutionRun,
   ExecutionSystem,
   ExecutionWorkflow,
+  ExecutionWorkflowDetail,
   ExecutionsData,
   MonthCoverage,
   MonthlyBoundary,
 } from '../../src/data/types';
 
-/**
- * The highest execution id already accumulated into the daily table.
- *
- * A key of its own rather than the monthly table's: `engine_executions` holds
- * months that cannot be split into days, so this starts from nought and re-reads
- * what n8n still has. That costs nothing — n8n keeps about three days and the
- * monthly table is hours old — and it leaves the old table exactly as it was,
- * unread, because nothing here drops a table.
- */
-const WATERMARK = 'executions.day_watermark';
-/** The first day the snapshot covers. Stamped once, on the first run that reads anything. */
-const SINCE = 'executions.since_day';
-/** When the snapshot last completed, for the line the pages print. */
-const RAN_AT = 'executions.ran_at';
-/**
- * Executions that were still running when the pass went past them, by id.
- *
- * They are **not** counted and the watermark moves past them anyway; each is
- * looked up individually on later passes until it has finished, and only then
- * counted. The obvious alternative — holding the watermark below the oldest
- * unfinished execution — was tried and is wrong twice over: everything above it
- * gets counted again on every pass (a September total of 2 read 4 after two
- * passes with nothing new), and one execution parked in `waiting` on a Wait
- * node would freeze all counting behind it indefinitely.
- */
-const DEFERRED = 'executions.deferred';
-
-/** As many unfinished executions as this will carry before it starts forgetting the oldest. */
-const MAX_DEFERRED = 500;
-
-/** Separates the two halves of a bucket key. Neither a day nor an n8n id contains one. */
-const SEP = '|';
+/** When the last poll finished, for the line every page prints. */
+const SYNC_AT = 'executions.synced_at';
+/** What the last pass had to report about itself, where it was not clean. */
+const SYNC_WARNING = 'executions.warning';
+/** When the history was last read whole, rather than from the highest id held. */
+const BACKFILL_AT = 'executions.backfilled_at';
 
 /** Every system with a tab of its own, in the order the page draws them. */
 export const SYSTEMS: { system: string; label: string }[] = [
@@ -90,235 +70,257 @@ export const SYSTEMS: { system: string; label: string }[] = [
 
 /** The key for "every system at once", which is what the page opens on. */
 export const ALL = 'all';
+/** The bucket for a workflow the registry names no system for. A tab, not a footnote. */
+export const UNREGISTERED = 'unregistered';
 
-export interface SnapshotResult {
+/** How often new executions are read. A poll — n8n has nothing to push. */
+export const POLL_EVERY_MS = 45_000;
+/** How long a cached set of workflow names is good for. Names change rarely; ids never. */
+const NAMES_FOR_MS = 10 * 60 * 1000;
+/** Unfinished rows re-read per pass, oldest first. More than this and the pass would stall on lookups. */
+const RESOLVE_PER_PASS = 100;
+/** Rows written per statement. Keeps a backfill to a handful of round trips. */
+const CHUNK = 500;
+
+/* ------------------------------------------------------------------ write */
+
+export interface SyncResult {
   ran: boolean;
   at: string;
   ms: number;
-  counted: number;
-  pending: number;
-  watermark: number;
-  truncated: boolean;
+  /** Executions the walk read from n8n. */
+  read: number;
+  inserted: number;
+  updated: number;
+  /** Rows that had not finished before and have now, resolved by id. */
+  resolved: number;
+  /** Rows still not finished after this pass. */
+  open: number;
+  highest: number | null;
+  pages: number;
+  full: boolean;
   note: string;
+  /** Anything that makes the pass less than complete: a stalled cursor, a page ceiling, a failed read. */
+  warning: string | null;
+}
+
+let names: { at: number; byId: Map<string, string> } = { at: 0, byId: new Map() };
+
+/** Workflow names, for rows whose workflow the registry does not carry. Cached; ids are what matter. */
+async function workflowNames(force = false): Promise<Map<string, string>> {
+  if (!force && names.at && Date.now() - names.at < NAMES_FOR_MS) return names.byId;
+  try {
+    const r = await n8n.workflows();
+    names = { at: Date.now(), byId: new Map(r.workflows.map((w) => [w.id, w.name])) };
+  } catch (e) {
+    // A name is a nicety; an id is the fact. A failed read keeps whatever was
+    // cached and says so once, rather than failing the pass.
+    console.error(`executions: could not read workflow names — ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return names.byId;
+}
+
+/** The registry's own name for a workflow, which wins over n8n's where it exists. */
+async function registryNames(): Promise<Map<string, string>> {
+  const r = await query<{ id: string; name: string }>(`SELECT id, name FROM registry_workflows WHERE deleted_at IS NULL`);
+  return new Map(r.rows.map((x) => [String(x.id), String(x.name)]));
+}
+
+function durationOf(e: n8n.N8nExecution): number | null {
+  if (!e.startedAt || !e.stoppedAt) return null;
+  const ms = Date.parse(e.stoppedAt) - Date.parse(e.startedAt);
+  // Null, never nought: a run of unknown length and a run of no length are
+  // different facts, and an average must not be dragged down by the first.
+  return Number.isFinite(ms) && ms >= 0 ? ms : null;
 }
 
 /**
- * Reads everything n8n has above the watermark and adds it to the table.
+ * Writes executions into the table, keyed on the execution id.
  *
- * Safe to run as often as you like: it is keyed on the execution id, so an
- * execution is counted exactly once however many times this runs.
+ * Returns how many rows were new. `xmax = 0` is true only for a row this
+ * statement inserted, which is how an insert is told from an update without a
+ * second query.
  */
-export async function snapshot(): Promise<SnapshotResult> {
+async function put(rows: n8n.N8nExecution[], name: (id: string, fallback: string) => string, at: string): Promise<{ inserted: number; updated: number }> {
+  let inserted = 0;
+  let updated = 0;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    const values: unknown[] = [];
+    const tuples = chunk.map((e, n) => {
+      const b = n * 10;
+      values.push(
+        Number(e.id),
+        String(e.workflowId),
+        name(String(e.workflowId), String(e.workflowId)),
+        String(e.status),
+        e.mode ?? null,
+        (e.startedAt as string).slice(0, 10),
+        e.startedAt,
+        e.stoppedAt ?? null,
+        durationOf(e),
+        at,
+      );
+      return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9},$${b + 10},$${b + 10})`;
+    });
+    const r = await query<{ inserted: boolean }>(
+      `INSERT INTO engine_execution_runs
+         (execution_id, workflow_id, workflow_name, status, mode, day, started_at, stopped_at, duration_ms, first_seen_at, updated_at)
+       VALUES ${tuples.join(',')}
+       ON CONFLICT (execution_id) DO UPDATE SET
+         workflow_id   = EXCLUDED.workflow_id,
+         workflow_name = EXCLUDED.workflow_name,
+         status        = EXCLUDED.status,
+         mode          = COALESCE(EXCLUDED.mode, engine_execution_runs.mode),
+         day           = EXCLUDED.day,
+         started_at    = EXCLUDED.started_at,
+         stopped_at    = EXCLUDED.stopped_at,
+         duration_ms   = EXCLUDED.duration_ms,
+         updated_at    = EXCLUDED.updated_at
+       RETURNING (xmax = 0) AS inserted`,
+      values,
+    );
+    for (const row of r.rows) (row.inserted ? inserted++ : updated++);
+  }
+  return { inserted, updated };
+}
+
+/**
+ * Reads n8n and stores what it finds.
+ *
+ * `full` reads the whole history the instance holds; otherwise the walk stops
+ * at the highest id already stored. Either way it is an upsert on the execution
+ * id, so a full pass and a poll cannot disagree and running both changes
+ * nothing twice.
+ */
+export async function sync(full = false): Promise<SyncResult> {
   const started = Date.now();
   const at = nowIso();
+  const blank: SyncResult = { ran: false, at, ms: 0, read: 0, inserted: 0, updated: 0, resolved: 0, open: 0, highest: null, pages: 0, full, note: '', warning: null };
   if (!n8n.n8nConfigured()) {
-    return { ran: false, at, ms: 0, counted: 0, pending: 0, watermark: 0, truncated: false, note: `${n8n.N8N_API_VAR} is not set on this server, so no execution has ever been counted.` };
+    return { ...blank, note: `${n8n.N8N_API_VAR} is not set on this server, so no execution has ever been read.` };
   }
 
-  const from = Number((await getMeta(WATERMARK)) ?? 0);
-  let read: Awaited<ReturnType<typeof n8n.executionsAfter>>;
+  const held = await query<{ highest: string | null }>(`SELECT max(execution_id)::text AS highest FROM engine_execution_runs`);
+  const from = full ? 0 : Number(held.rows[0]?.highest ?? 0);
+
+  let read: n8n.ExecutionRead;
   try {
     read = await n8n.executionsAfter(from);
   } catch (e) {
     const note = e instanceof Error ? e.message : String(e);
-    console.error(`executions snapshot: ${note}`);
-    return { ran: false, at, ms: Date.now() - started, counted: 0, pending: 0, watermark: from, truncated: false, note };
+    console.error(`executions sync: ${note}`);
+    await setMeta(SYNC_WARNING, `The last read of n8n failed at ${at}: ${note}`);
+    return { ...blank, ms: Date.now() - started, note, warning: note };
   }
 
-  // Which system each workflow belongs to, from the registry rather than from
-  // anything hardcoded here.
-  const workflows = await registry.list('workflows');
-  const byId = new Map<string, { name: string; system: string | null }>();
-  for (const w of workflows) byId.set(String(w.id), { name: String(w.name ?? w.id), system: (w.system as string | null) ?? null });
+  const reg = await registryNames();
+  const n8nNames = await workflowNames(full);
+  const name = (id: string, fallback: string) => reg.get(id) ?? n8nNames.get(id) ?? fallback;
 
-  let highestSeen = from;
-  const deferred = new Set<string>(JSON.parse((await getMeta(DEFERRED)) ?? '[]') as string[]);
-
-  interface Bucket {
-    executions: number;
-    failures: number;
-    duration_ms: number;
-    duration_counted: number;
-    failed: string[];
-    name: string;
-    system: string | null;
-  }
-  const buckets = new Map<string, Bucket>();
-
-  const count = (e: n8n.N8nExecution): boolean => {
-    // An execution with no start time cannot be placed on a day, and is not
-    // filed under today to make it fit.
-    if (!e.startedAt) return false;
-    const day = e.startedAt.slice(0, 10);
-    const known = byId.get(e.workflowId);
-    const key = `${day}${SEP}${e.workflowId}`;
-    const b = buckets.get(key) ?? { executions: 0, failures: 0, duration_ms: 0, duration_counted: 0, failed: [], name: known?.name ?? e.workflowId, system: known?.system ?? null };
-    b.executions++;
-    /**
-     * Duration is kept as a sum and a count, never as an average, so a mean
-     * over any span of days is exact rather than an average of averages. An
-     * execution that finished without a `stoppedAt` is left out of both, so the
-     * mean is always over the number of runs it says it is.
-     */
-    if (e.stoppedAt) {
-      const ms = Date.parse(e.stoppedAt) - Date.parse(e.startedAt);
-      if (Number.isFinite(ms) && ms >= 0) {
-        b.duration_ms += ms;
-        b.duration_counted++;
-      }
-    }
-    if (n8n.FAILED.has(e.status)) {
-      b.failures++;
-      b.failed.push(e.id);
-    }
-    buckets.set(key, b);
-    return true;
-  };
-
-  for (const e of read.executions) {
-    highestSeen = Math.max(highestSeen, Number(e.id));
-    if (!n8n.TERMINAL.has(e.status) || !e.startedAt) {
-      deferred.add(e.id);
-      continue;
-    }
-    count(e);
-  }
+  // An execution with no start time cannot be placed on a day and is not filed
+  // under today to make it fit. It is named rather than dropped silently.
+  const usable = read.executions.filter((e) => Boolean(e.startedAt));
+  const undated = read.executions.length - usable.length;
+  const { inserted, updated } = usable.length ? await put(usable, name, at) : { inserted: 0, updated: 0 };
 
   /**
-   * Everything set aside on an earlier pass, looked up one at a time. Normally
-   * a handful; each one either finishes and is counted exactly once, or has
-   * aged out of n8n before finishing, in which case nothing knows how it ended
-   * and it is dropped rather than guessed at.
+   * Anything stored without a final status, read again one at a time.
+   *
+   * The row is its own to-do list: there is no separate list of ids to keep in
+   * step with it. An execution n8n no longer has cannot be resolved and is
+   * marked `unknown` — which is what it is. Nothing guesses at how it ended.
    */
+  const openRows = await query<{ execution_id: string }>(
+    `SELECT execution_id::text AS execution_id FROM engine_execution_runs
+      WHERE status NOT IN ('success','error','crashed','canceled','unknown')
+      ORDER BY execution_id ASC LIMIT $1`,
+    [RESOLVE_PER_PASS],
+  );
   let resolved = 0;
-  let dropped = 0;
-  for (const id of [...deferred]) {
-    if (Number(id) > highestSeen) continue;
+  for (const row of openRows.rows) {
     try {
-      const e = await n8n.execution(id);
+      const e = await n8n.execution(row.execution_id);
       if (!e) {
-        deferred.delete(id);
-        dropped++;
+        await query(`UPDATE engine_execution_runs SET status = 'unknown', updated_at = $2 WHERE execution_id = $1`, [Number(row.execution_id), at]);
         continue;
       }
-      if (!n8n.TERMINAL.has(e.status)) continue;
-      if (count(e)) resolved++;
-      deferred.delete(id);
+      if (!e.startedAt) continue;
+      await put([e], name, at);
+      if (n8n.TERMINAL.has(e.status)) resolved++;
     } catch {
-      // Leave it deferred; a read that failed is not an outcome.
+      // A read that failed is not an outcome. It stays open and is tried again.
     }
   }
 
-  // Bounded, oldest first, so a long-lived `waiting` execution cannot grow this
-  // without limit. What falls off is named in the log rather than lost quietly.
-  const kept = [...deferred].sort((a, b) => Number(a) - Number(b));
-  if (kept.length > MAX_DEFERRED) {
-    const forgotten = kept.splice(0, kept.length - MAX_DEFERRED);
-    console.error(`executions snapshot: giving up on ${forgotten.length} execution(s) that never finished — ${forgotten.slice(0, 10).join(', ')}`);
-  }
-  await setMeta(DEFERRED, JSON.stringify(kept));
-  const pending = kept.length;
+  const after = await query<{ open: string; highest: string | null }>(
+    `SELECT count(*) FILTER (WHERE status NOT IN ('success','error','crashed','canceled','unknown'))::text AS open,
+            max(execution_id)::text AS highest
+       FROM engine_execution_runs`,
+  );
+  const open = Number(after.rows[0]?.open ?? 0);
+  const highest = after.rows[0]?.highest ? Number(after.rows[0].highest) : null;
 
-  for (const [key, b] of buckets) {
-    const day = key.slice(0, key.indexOf(SEP));
-    const workflowId = key.slice(key.indexOf(SEP) + 1);
-    await query(
-      `INSERT INTO engine_execution_days (day, workflow_id, workflow_name, system, executions, failures, duration_ms, duration_counted, failed_ids, first_seen_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$10)
-       ON CONFLICT (day, workflow_id) DO UPDATE SET
-         workflow_name    = EXCLUDED.workflow_name,
-         system           = EXCLUDED.system,
-         executions       = engine_execution_days.executions + EXCLUDED.executions,
-         failures         = engine_execution_days.failures + EXCLUDED.failures,
-         duration_ms      = engine_execution_days.duration_ms + EXCLUDED.duration_ms,
-         duration_counted = engine_execution_days.duration_counted + EXCLUDED.duration_counted,
-         failed_ids       = (SELECT COALESCE(jsonb_agg(v), '[]'::jsonb) FROM (
-                               SELECT v FROM jsonb_array_elements(EXCLUDED.failed_ids || engine_execution_days.failed_ids) AS t(v) LIMIT 200
-                             ) s),
-         updated_at       = EXCLUDED.updated_at`,
-      [day, workflowId, b.name, b.system, b.executions, b.failures, b.duration_ms, b.duration_counted, JSON.stringify(b.failed.sort((x, y) => Number(y) - Number(x))), at],
-    );
-  }
+  const warning =
+    read.stalled
+      ? `n8n's paging did not advance: page ${read.pages} of this read came back no older than the one before it, so this pass saw only what it could reach. Nothing was double counted — rows are keyed on the execution id — but there may be executions this database has not seen.`
+      : read.truncated
+        ? `The read stopped at its ${read.pages}-page ceiling before reaching the ids already held, so there may be more above what was stored. The next pass continues from the highest id stored.`
+        : undated
+          ? `${undated} execution${undated === 1 ? '' : 's'} came back with no start time and could not be placed on a day, so ${undated === 1 ? 'it was' : 'they were'} not stored.`
+          : null;
 
-  // The watermark moves past everything that was read, finished or not: an
-  // unfinished one is on the deferred list and is resolved by id, so nothing
-  // needs to be read a second time to catch it.
-  const watermark = highestSeen;
-  if (watermark > from) await setMeta(WATERMARK, String(watermark));
-  await setMeta(RAN_AT, at);
-  // The first day anything was counted on. Stamped once and never moved.
-  if (buckets.size) await setMetaIfAbsent(SINCE, [...buckets.keys()].map((k) => k.slice(0, k.indexOf(SEP))).sort()[0]);
+  await setMeta(SYNC_AT, at);
+  await setMeta(SYNC_WARNING, warning ?? '');
+  if (full) await setMeta(BACKFILL_AT, at);
 
-  const counted = [...buckets.values()].reduce((n, b) => n + b.executions, 0);
   const note =
-    `${counted} execution${counted === 1 ? '' : 's'} counted across ${buckets.size} workflow-day${buckets.size === 1 ? '' : 's'}` +
-    `${resolved ? `, ${resolved} of them finishing one that was still running earlier` : ''}` +
-    `${pending ? `, ${pending} still running and set aside by id for a later pass` : ''}` +
-    `${dropped ? `, ${dropped} never finished before n8n discarded ${dropped === 1 ? 'it' : 'them'} and ${dropped === 1 ? 'was' : 'were'} not counted` : ''}` +
-    `${read.truncated ? '. The read hit its page limit, so there may be more above the watermark; the next pass continues from where this one stopped' : ''}.`;
-  if (counted || pending) console.log(`executions snapshot: ${note} watermark ${from} -> ${watermark}`);
-  return { ran: true, at, ms: Date.now() - started, counted, pending, watermark, truncated: read.truncated, note };
+    `${read.executions.length} read from n8n over ${read.pages} page${read.pages === 1 ? '' : 's'}, ` +
+    `${inserted} new, ${updated} already held${resolved ? `, ${resolved} that had not finished before now resolved` : ''}${open ? `, ${open} still running` : ''}.`;
+  if (read.executions.length || resolved || full) console.log(`executions ${full ? 'backfill' : 'sync'}: ${note}${warning ? ` ${warning}` : ''}`);
+
+  return { ran: true, at, ms: Date.now() - started, read: read.executions.length, inserted, updated, resolved, open, highest, pages: read.pages, full, note, warning };
 }
 
-/* ------------------------------------------------------- the scheduled job */
-
-/**
- * How often the snapshot runs.
- *
- * Cheap after the first pass: the reader walks down from the newest execution
- * and stops the moment it crosses the watermark, so an hourly run reads one
- * page. Frequent enough that a period's counts are never more than an hour
- * behind even if the process restarts.
- */
-export const SNAPSHOT_EVERY_MS = 60 * 60 * 1000;
-
-/** How stale the snapshot may be before a page read refreshes it in line. */
-const STALE_MS = 5 * 60 * 1000;
+/* ------------------------------------------------------------------ poll */
 
 let timer: NodeJS.Timeout | null = null;
-let running: Promise<SnapshotResult> | null = null;
+let running: Promise<SyncResult> | null = null;
 
-/** One at a time, whoever asks. Two passes at once would double-count nothing, but would waste the read. */
-export function runSnapshot(): Promise<SnapshotResult> {
+/** One pass at a time, whoever asks. Two at once would waste the read, not corrupt it. */
+export function runSync(full = false): Promise<SyncResult> {
   if (!running) {
-    running = snapshot().finally(() => {
+    running = sync(full).finally(() => {
       running = null;
     });
   }
   return running;
 }
 
-export function startSnapshots(): void {
+/**
+ * Starts the poll.
+ *
+ * The first pass is a full read where nothing is held yet, so a fresh database
+ * fills itself with everything n8n has rather than starting from today.
+ */
+export function startPolling(): void {
   if (timer) return;
-  void runSnapshot().catch((e) => console.error('executions snapshot failed', e));
-  timer = setInterval(() => void runSnapshot().catch((e) => console.error('executions snapshot failed', e)), SNAPSHOT_EVERY_MS);
+  void (async () => {
+    try {
+      const held = await query<{ n: string }>(`SELECT count(*)::text AS n FROM engine_execution_runs`);
+      await runSync(Number(held.rows[0]?.n ?? 0) === 0);
+    } catch (e) {
+      console.error('executions first pass failed', e);
+    }
+  })();
+  timer = setInterval(() => void runSync().catch((e) => console.error('executions poll failed', e)), POLL_EVERY_MS);
   // Never hold the process open for this.
   timer.unref?.();
 }
 
-export function stopSnapshots(): void {
+export function stopPolling(): void {
   if (timer) clearInterval(timer);
   timer = null;
-}
-
-/**
- * Brings the current period up to date before a page reads it.
- *
- * The in-progress period is allowed to be read live. Rather than a second code
- * path that could disagree with the stored one, this runs the same accumulating
- * pass and then reads the table — so there is one source for every period, and
- * the newest one is never more than a few minutes old.
- */
-export async function refreshIfStale(): Promise<void> {
-  if (!n8n.n8nConfigured()) return;
-  const ranAt = await getMeta(RAN_AT);
-  if (ranAt && Date.now() - Date.parse(ranAt) < STALE_MS) return;
-  try {
-    await runSnapshot();
-  } catch (e) {
-    // A page still renders what the table holds; it says when that was.
-    console.error(`executions refresh failed: ${e instanceof Error ? e.message : String(e)}`);
-  }
 }
 
 /* --------------------------------------------------------------- calendar */
@@ -416,62 +418,54 @@ function spanOf(grain: ExecutionGrain, first: string, today: string): { key: str
 
 /* ------------------------------------------------------------------ reads */
 
-interface Row {
-  day: string;
-  workflow_id: string;
-  workflow_name: string | null;
-  system: string | null;
+/** n8n's own statuses, sorted into the four things a reader wants to know. */
+const SUCCEEDED = new Set(['success']);
+const CANCELED = new Set(['canceled']);
+
+interface Tally {
   executions: number;
-  failures: number;
+  succeeded: number;
+  failed: number;
+  canceled: number;
+  unfinished: number;
   duration_ms: number;
-  duration_counted: number;
-  failed_ids: string[];
+  timed: number;
 }
 
-async function rows(): Promise<Row[]> {
-  const r = await query<Row>(
-    `SELECT day, workflow_id, workflow_name, system, executions, failures, duration_ms, duration_counted, failed_ids
-       FROM engine_execution_days ORDER BY day DESC`,
-  );
-  return r.rows.map((x) => ({
-    ...x,
-    executions: Number(x.executions),
-    failures: Number(x.failures),
-    duration_ms: Number(x.duration_ms),
-    duration_counted: Number(x.duration_counted),
-    failed_ids: Array.isArray(x.failed_ids) ? x.failed_ids : [],
-  }));
+function blankTally(): Tally {
+  return { executions: 0, succeeded: 0, failed: 0, canceled: 0, unfinished: 0, duration_ms: 0, timed: 0 };
+}
+
+function add(t: Tally, status: string, n: number, ms: number, timed: number): void {
+  t.executions += n;
+  if (n8n.FAILED.has(status)) t.failed += n;
+  else if (SUCCEEDED.has(status)) t.succeeded += n;
+  else if (CANCELED.has(status)) t.canceled += n;
+  else t.unfinished += n;
+  t.duration_ms += ms;
+  t.timed += timed;
 }
 
 /**
- * The boundary every execution chart labels: the first period the snapshot
- * covers whole.
+ * The figures a tally produces.
  *
- * The period the job first ran in is partial by construction — n8n was already
- * ageing executions off before anything was counted — so the first *complete*
- * one is the next.
+ * The failure rate is failures over **finished** runs, not over every row: an
+ * execution still running has not failed and has not succeeded, and counting it
+ * in the denominator would report a lower failure rate the busier the moment.
  */
-async function boundary(grain: ExecutionGrain): Promise<MonthlyBoundary | null> {
-  const since = await getMeta(SINCE);
-  if (!since) return null;
-  const b = boundsOf(grain, since);
-  const nextStart = addDays(b.end, 1);
-  const word = grain === 'week' ? 'week' : grain === 'month' ? 'month' : 'year';
+function figures(t: Tally) {
+  const finished = t.succeeded + t.failed + t.canceled;
   return {
-    month: keyOf(grain, nextStart),
-    note:
-      `Execution counts begin on ${since}, which is when this dashboard started snapshotting them. ` +
-      `n8n keeps roughly three days of execution history and then discards it, so nothing before ${since} was ever there to count, ` +
-      `and the ${word} it falls in holds only the part of it the snapshot was running for. ${labelOf(grain, nextStart)} is the first complete ${word}.`,
+    executions: t.executions,
+    succeeded: t.succeeded,
+    failed: t.failed,
+    canceled: t.canceled,
+    unfinished: t.unfinished,
+    finished,
+    failure_rate: finished ? t.failed / finished : null,
+    avg_ms: t.timed ? Math.round(t.duration_ms / t.timed) : null,
+    timed: t.timed,
   };
-}
-
-function rateOf(failures: number, executions: number): number | null {
-  return executions ? failures / executions : null;
-}
-
-function meanOf(ms: number, counted: number): number | null {
-  return counted ? Math.round(ms / counted) : null;
 }
 
 /**
@@ -487,215 +481,459 @@ function delta(from: number | null, to: number | null, better: 'up' | 'down' | n
     from,
     to,
     // A ratio against nought has no meaning, so it is null rather than infinite
-    // or a hundred per cent. The two raw figures are both on the delta, so the
-    // page can still say "0 → 4" where it cannot say "+400%".
+    // or a hundred per cent. Both raw figures are on the delta, so the page can
+    // still say "0 → 4" where it cannot say "+400%".
     pct: from === 0 ? null : Math.round(((to - from) / from) * 1000) / 10,
     direction,
     better: better === null || direction === 'flat' ? null : better === 'up' ? direction === 'up' : direction === 'down',
   };
 }
 
-export async function read(grain: ExecutionGrain = 'week'): Promise<ExecutionsData> {
-  const all = await rows();
-  const b = await boundary(grain);
-  const since = await getMeta(SINCE);
-  const ranAt = await getMeta(RAN_AT);
-  const today = nowIso().slice(0, 10);
-  const first = since ?? (all.length ? all[all.length - 1].day : today);
-  const periods = spanOf(grain, first, today);
-  const currentKey = keyOf(grain, today);
-  const spansYears = new Set(periods.map((p) => p.start.slice(0, 4))).size > 1;
+/** "up 12%", "down 40%", "0 → 4" where there is no ratio to take. */
+function movement(d: ExecutionDelta, unit: 'pct' | 'points' | 'ms' = 'pct'): string {
+  if (d.direction === 'flat') return 'unchanged';
+  const word = d.direction === 'up' ? 'up' : 'down';
+  if (unit === 'points') return `${word} ${Math.abs(Math.round((d.to - d.from) * 10) / 10)} points`;
+  if (d.pct === null) return `${d.from} → ${d.to}`;
+  return `${word} ${Math.abs(d.pct)}%`;
+}
 
-  const registered = await registry.list('workflows');
-  const urlOf = new Map(registered.map((w) => [String(w.id), (w.n8n_url as string | null) ?? null]));
+function ms(n: number | null): string {
+  if (n === null) return 'unknown';
+  if (n < 1000) return `${Math.round(n)} ms`;
+  if (n < 60_000) return `${Math.round(n / 100) / 10} s`;
+  return `${Math.floor(n / 60_000)} m ${Math.round((n % 60_000) / 1000)} s`;
+}
 
-  /** Every row in one period, optionally cut short at a day — for the like-for-like comparison. */
-  const inPeriod = (mine: Row[], p: { start: string; end: string }, until?: string) =>
-    mine.filter((r) => r.day >= p.start && r.day <= (until && until < p.end ? until : p.end));
+interface DayRow {
+  day: string;
+  system: string | null;
+  status: string;
+  n: number;
+  duration_ms: number;
+  timed: number;
+}
 
-  const totals = (rs: Row[]) => {
-    const executions = rs.reduce((n, r) => n + r.executions, 0);
-    const failures = rs.reduce((n, r) => n + r.failures, 0);
-    const ms = rs.reduce((n, r) => n + r.duration_ms, 0);
-    const timed = rs.reduce((n, r) => n + r.duration_counted, 0);
-    return { executions, failures, successes: executions - failures, failure_rate: rateOf(failures, executions), avg_ms: meanOf(ms, timed), timed };
-  };
+/** Per day, per system, per status, from a day onwards. One query feeds every chart on the page. */
+async function dayRows(from: string): Promise<DayRow[]> {
+  const r = await query<{ day: string; system: string | null; status: string; n: string; duration_ms: string; timed: string }>(
+    `SELECT e.day,
+            w.system,
+            e.status,
+            count(*)::text                            AS n,
+            COALESCE(sum(e.duration_ms), 0)::text     AS duration_ms,
+            count(e.duration_ms)::text                AS timed
+       FROM engine_execution_runs e
+       LEFT JOIN registry_workflows w ON w.id = e.workflow_id AND w.deleted_at IS NULL
+      WHERE e.day >= $1
+      GROUP BY e.day, w.system, e.status`,
+    [from],
+  );
+  return r.rows.map((x) => ({ day: x.day, system: x.system, status: x.status, n: Number(x.n), duration_ms: Number(x.duration_ms), timed: Number(x.timed) }));
+}
 
-  const buildSystem = (system: string, label: string): ExecutionSystem => {
-    const mine = system === ALL ? all : all.filter((r) => r.system === system);
+interface WorkflowRow {
+  workflow_id: string;
+  workflow_name: string;
+  system: string | null;
+  registered: boolean;
+  n8n_url: string | null;
+  status: string;
+  n: number;
+  duration_ms: number;
+  timed: number;
+}
 
-    const built: ExecutionPeriod[] = periods.map((p) => {
-      const t = totals(inPeriod(mine, p));
-      const current = p.key === currentKey;
-      let coverage: MonthCoverage = 'full';
-      let note: string | null = null;
-      if (current) {
-        coverage = 'partial';
-        note = `This ${grain} is still running.`;
-      }
-      if (!since) {
-        coverage = 'none';
-        note = 'Nothing has been snapshotted yet, so there is no count for this period rather than a count of nought.';
-      } else if (p.end < since) {
-        coverage = 'none';
-        note = `n8n had already discarded these executions before anything was counted, so there is no figure for this ${grain} at all.`;
-      } else if (p.start < since) {
-        coverage = 'partial';
-        note = `Only the part of this ${grain} from ${since}, when counting started.`;
-      }
-      return { key: p.key, label: labelOf(grain, p.start, spansYears), start: p.start, end: p.end, ...t, coverage, note, current };
-    });
+/** Per workflow, per status, inside one period. Only the period on screen is asked for. */
+async function workflowRows(start: string, end: string): Promise<WorkflowRow[]> {
+  const r = await query<{
+    workflow_id: string;
+    workflow_name: string | null;
+    reg_name: string | null;
+    system: string | null;
+    n8n_url: string | null;
+    status: string;
+    n: string;
+    duration_ms: string;
+    timed: string;
+  }>(
+    `SELECT e.workflow_id,
+            max(e.workflow_name)                      AS workflow_name,
+            w.name                                    AS reg_name,
+            w.system,
+            w.n8n_url,
+            e.status,
+            count(*)::text                            AS n,
+            COALESCE(sum(e.duration_ms), 0)::text     AS duration_ms,
+            count(e.duration_ms)::text                AS timed
+       FROM engine_execution_runs e
+       LEFT JOIN registry_workflows w ON w.id = e.workflow_id AND w.deleted_at IS NULL
+      WHERE e.day >= $1 AND e.day <= $2
+      GROUP BY e.workflow_id, w.name, w.system, w.n8n_url, e.status`,
+    [start, end],
+  );
+  return r.rows.map((x) => ({
+    workflow_id: x.workflow_id,
+    workflow_name: x.reg_name ?? x.workflow_name ?? x.workflow_id,
+    system: x.system,
+    registered: x.reg_name !== null,
+    n8n_url: x.n8n_url,
+    status: x.status,
+    n: Number(x.n),
+    duration_ms: Number(x.duration_ms),
+    timed: Number(x.timed),
+  }));
+}
 
-    // The period the workflow table and the comparison describe: the newest
-    // with anything in it, else the one running now.
-    const newest = [...built].reverse().find((p) => p.executions > 0) ?? built[built.length - 1];
-    const bounds = periods.find((p) => p.key === newest?.key);
-    const inNewest = bounds ? inPeriod(mine, bounds) : [];
+/** The failing execution ids inside one period, newest first, so each opens in n8n. */
+async function failedIds(start: string, end: string, limit = 500): Promise<Map<string, string[]>> {
+  const r = await query<{ workflow_id: string; execution_id: string }>(
+    `SELECT workflow_id, execution_id::text AS execution_id
+       FROM engine_execution_runs
+      WHERE day >= $1 AND day <= $2 AND status IN ('error','crashed')
+      ORDER BY execution_id DESC
+      LIMIT $3`,
+    [start, end, limit],
+  );
+  const out = new Map<string, string[]>();
+  for (const row of r.rows) out.set(row.workflow_id, [...(out.get(row.workflow_id) ?? []), row.execution_id]);
+  return out;
+}
 
-    // One row per workflow inside that period, summed across its days.
-    const byWorkflow = new Map<string, Row[]>();
-    for (const r of inNewest) byWorkflow.set(r.workflow_id, [...(byWorkflow.get(r.workflow_id) ?? []), r]);
-    const workflows: ExecutionWorkflow[] = [...byWorkflow.entries()]
-      .map(([id, rs]) => {
-        const t = totals(rs);
-        return {
-          workflow_id: id,
-          workflow_name: rs[0].workflow_name ?? id,
-          system: rs[0].system,
-          executions: t.executions,
-          failures: t.failures,
-          avg_ms: t.avg_ms,
-          timed: t.timed,
-          // Newest first, and bounded the same way the table bounds them.
-          failed_ids: rs.flatMap((r) => r.failed_ids).sort((x, y) => Number(y) - Number(x)).slice(0, 200),
-          n8n_url: urlOf.get(id) ?? null,
-        };
-      })
-      .sort((x, y) => y.failures - x.failures || y.executions - x.executions);
+interface Held {
+  rows: number;
+  oldest: string | null;
+  newest: string | null;
+  highest: string | null;
+}
 
-    const t = totals(inNewest);
+async function held(): Promise<Held> {
+  const r = await query<{ rows: string; oldest: string | null; newest: string | null; highest: string | null }>(
+    `SELECT count(*)::text AS rows, min(day) AS oldest, max(day) AS newest, max(execution_id)::text AS highest FROM engine_execution_runs`,
+  );
+  const x = r.rows[0];
+  return { rows: Number(x?.rows ?? 0), oldest: x?.oldest ?? null, newest: x?.newest ?? null, highest: x?.highest ?? null };
+}
 
-    /**
-     * The comparison, and the one thing that makes it honest.
-     *
-     * A period still running always has fewer executions than a finished one,
-     * so comparing this week's total against the whole of last week would
-     * report a collapse every Monday morning. When the period in view is the
-     * current one, the previous period is cut to the same elapsed point — "so
-     * far this week against the same point last week" — and the page says so.
-     * Rates and averages need no such cut, but taking them from the same window
-     * keeps every figure in the comparison describing the same span.
-     */
-    let comparison: ExecutionComparison | null = null;
-    if (bounds && newest) {
-      const prevStart = previousOf(grain, bounds.start);
-      const prevBounds = boundsOf(grain, prevStart);
-      const like = newest.current;
-      // Days elapsed, counting today: a period that started today is one day in,
-      // not nought, and the sentence under the figures says the same number the
-      // window actually spans.
-      const elapsed = like ? Math.round((utc(today).getTime() - utc(bounds.start).getTime()) / 86_400_000) + 1 : null;
-      const cut = like && elapsed !== null ? addDays(prevBounds.start, elapsed - 1) : undefined;
-      const prevRows = inPeriod(mine, prevBounds, cut);
-      /**
-       * Whether the window being compared against was being counted at all.
-       *
-       * The whole previous period is the wrong thing to check. Counting began on
-       * 24 Aug; comparing the first fortnight of September against the first
-       * fortnight of August would read "0 → 890" and look like the engine
-       * started from nothing, when in truth nobody was counting in that window.
-       * So the test is the window's own start, and a window that begins before
-       * counting did gets no comparison and says why.
-       */
-      const windowStart = prevBounds.start;
-      const windowEnd = cut && cut < prevBounds.end ? cut : prevBounds.end;
-      const prevCovered = Boolean(since) && windowStart >= (since as string);
-      const p = totals(prevRows);
-      comparison = {
-        against: keyOf(grain, prevStart),
-        against_label: labelOf(grain, prevBounds.start, spansYears),
-        executions: prevCovered ? delta(p.executions, t.executions, null) : null,
-        successes: prevCovered ? delta(p.successes, t.successes, 'up') : null,
-        failures: prevCovered ? delta(p.failures, t.failures, 'down') : null,
-        failure_rate:
-          prevCovered && p.failure_rate !== null && t.failure_rate !== null
-            ? delta(Math.round(p.failure_rate * 1000) / 10, Math.round(t.failure_rate * 1000) / 10, 'down')
-            : null,
-        avg_ms: prevCovered ? delta(p.avg_ms, t.avg_ms, 'down') : null,
-        like_for_like: like,
-        note: !prevCovered
-          ? since
-            ? `There is nothing honest to compare against: counting only started on ${since}, and ${windowStart} to ${windowEnd} is before that. Those days were not quiet, they were not recorded.`
-            : 'There is nothing to compare against: nothing has been counted yet.'
-          : like
-            ? `Against the same point of ${labelOf(grain, prevBounds.start, spansYears)} — its first ${elapsed} day${elapsed === 1 ? '' : 's'}, ${windowStart} to ${windowEnd} — because this ${grain} is still running and a whole one would always look bigger.`
-            : `Against the whole of ${labelOf(grain, prevBounds.start, spansYears)}, ${windowStart} to ${windowEnd}.`,
-      };
-    }
-
-    return {
-      system,
-      label,
-      periods: built,
-      period: newest?.key ?? currentKey,
-      workflows,
-      executions: t.executions,
-      successes: t.successes,
-      failures: t.failures,
-      failure_rate: t.failure_rate,
-      avg_ms: t.avg_ms,
-      timed: t.timed,
-      comparison,
-    };
-  };
-
-  /**
-   * Workflows n8n is running that the registry names no system for. They are
-   * counted and listed rather than filed under a guess — a workflow in nobody's
-   * system is a registry row somebody needs to add, which is actionable, and
-   * putting it under the wrong heading would not be.
-   */
-  const known = new Set(SYSTEMS.map((s) => s.system));
-  const orphanRows = all.filter((r) => !r.system || !known.has(r.system));
-  const orphanBy = new Map<string, Row[]>();
-  for (const r of orphanRows) orphanBy.set(r.workflow_id, [...(orphanBy.get(r.workflow_id) ?? []), r]);
-  const unregistered: ExecutionWorkflow[] = [...orphanBy.entries()]
-    .map(([id, rs]) => {
-      const t = totals(rs);
-      return {
-        workflow_id: id,
-        workflow_name: rs[0].workflow_name ?? id,
-        system: rs[0].system,
-        executions: t.executions,
-        failures: t.failures,
-        avg_ms: t.avg_ms,
-        timed: t.timed,
-        failed_ids: rs.flatMap((r) => r.failed_ids).slice(0, 50),
-        n8n_url: urlOf.get(id) ?? null,
-      };
-    })
-    .sort((x, y) => y.executions - x.executions);
-
+/**
+ * The boundary every execution chart labels: the first period held whole.
+ *
+ * Not a claim about retention. It says what this database holds and from when —
+ * the instance's own history begins on the oldest day here — and leaves the
+ * reason to the page, which does not assert one.
+ */
+function boundary(grain: ExecutionGrain, oldest: string | null): MonthlyBoundary | null {
+  if (!oldest) return null;
+  const b = boundsOf(grain, oldest);
+  const nextStart = addDays(b.end, 1);
+  const word = grain === 'week' ? 'week' : grain === 'month' ? 'month' : 'year';
   return {
-    grain,
-    systems: [{ system: ALL, label: 'All systems' }, ...SYSTEMS].map((s) => buildSystem(s.system, s.label)),
-    boundary: b,
-    snapshot: {
-      at: ranAt,
-      configured: n8n.n8nConfigured(),
-      // The instance a failing execution id opens on. Sent from here rather
-      // than compiled into the bundle, which carries no configuration at all.
-      n8n_base: n8n.n8nConfigured() ? n8n.n8nHost() : null,
-      note: n8n.n8nConfigured()
-        ? ranAt
-          ? 'Counts are snapshotted from n8n into this database and read from there, never queried live for a past period: n8n keeps about three days of execution history and then discards it.'
-          : 'The snapshot has not completed a run yet, so these figures are empty rather than nought.'
-        : `${n8n.N8N_API_VAR} is not set on this server, so no execution has ever been counted and these figures are empty rather than nought.`,
-    },
-    unregistered,
+    month: keyOf(grain, nextStart),
+    note:
+      `This database holds every execution from ${oldest} onwards, which is as far back as the n8n instance's own history goes. ` +
+      `The ${word} it falls in is therefore part of one, and ${labelOf(grain, nextStart)} is the first complete ${word}.`,
   };
 }
 
 export function isGrain(v: string): v is ExecutionGrain {
   return v === 'week' || v === 'month' || v === 'year';
+}
+
+/** How many periods the chart draws. Enough to see a trend, few enough to read. */
+const SHOWN = 18;
+
+export async function read(grain: ExecutionGrain = 'week', wanted?: string): Promise<ExecutionsData> {
+  const h = await held();
+  const syncedAt = await getMeta(SYNC_AT);
+  const warning = (await getMeta(SYNC_WARNING)) || null;
+  const today = nowIso().slice(0, 10);
+  const first = h.oldest ?? today;
+  const periods = spanOf(grain, first, today);
+  const spansYears = new Set(periods.map((p) => p.start.slice(0, 4))).size > 1;
+  const currentKey = keyOf(grain, today);
+
+  // The period in view: whatever was asked for if it exists, else the one
+  // running now. Every figure, the workflow table, the comparison and the
+  // export all follow this one selection.
+  const selected = periods.find((p) => p.key === wanted) ?? periods.find((p) => p.key === currentKey) ?? periods[periods.length - 1];
+  const previousStart = boundsOf(grain, previousOf(grain, selected.start)).start;
+
+  // Only as far back as the chart and the comparison actually need.
+  const windowStart = [periods[Math.max(0, periods.length - SHOWN)].start, previousStart].sort()[0];
+  const days = await dayRows(windowStart);
+  const wfRows = await workflowRows(selected.start, selected.end);
+  const failing = await failedIds(selected.start, selected.end);
+
+  // Which tabs exist: the three known systems, then anything else the registry
+  // has filed a running workflow under, then Unregistered where anything is
+  // unclaimed. A system with a tab and no rows still draws, because its absence
+  // is itself worth seeing; one with rows and no tab would be invisible, which
+  // is the thing that must never happen.
+  const seen = new Set<string>();
+  for (const d of days) seen.add(d.system ?? UNREGISTERED);
+  for (const w of wfRows) seen.add(w.system ?? UNREGISTERED);
+  const known = new Set(SYSTEMS.map((s) => s.system));
+  const extra = [...seen].filter((s) => s !== UNREGISTERED && !known.has(s)).sort();
+  const tabs = [
+    { system: ALL, label: 'All systems' },
+    ...SYSTEMS,
+    ...extra.map((s) => ({ system: s, label: s })),
+    ...(seen.has(UNREGISTERED) ? [{ system: UNREGISTERED, label: 'Unregistered' }] : []),
+  ];
+
+  const mine = (system: string) => (row: { system: string | null }) =>
+    system === ALL ? true : system === UNREGISTERED ? row.system === null : row.system === system;
+
+  const tallyDays = (system: string, from: string, to: string): Tally => {
+    const t = blankTally();
+    for (const d of days) {
+      if (d.day < from || d.day > to) continue;
+      if (!mine(system)(d)) continue;
+      add(t, d.status, d.n, d.duration_ms, d.timed);
+    }
+    return t;
+  };
+
+  const buildSystem = (system: string, label: string): ExecutionSystem => {
+    const built: ExecutionPeriod[] = periods.map((p) => {
+      const inWindow = p.start >= windowStart;
+      const f = figures(inWindow ? tallyDays(system, p.start, p.end) : blankTally());
+      const current = p.key === currentKey;
+      let coverage: MonthCoverage = 'full';
+      let note: string | null = null;
+      if (!h.oldest || p.end < h.oldest) {
+        coverage = 'none';
+        note = h.oldest
+          ? `This database holds no execution before ${h.oldest}, so there is no figure for this ${grain} rather than a figure of nought.`
+          : 'Nothing has been read from n8n yet, so there is no figure for this period rather than a figure of nought.';
+      } else if (p.start < h.oldest) {
+        coverage = 'partial';
+        note = `Only the part of this ${grain} from ${h.oldest}, which is as far back as n8n's own history goes.`;
+      } else if (!inWindow) {
+        // Outside the window this read asked for. Not drawn as nought — it is
+        // simply not in this answer, and the chart shows the last 18 anyway.
+        coverage = 'none';
+        note = `Outside the ${SHOWN} ${grain}s this page reads.`;
+      } else if (current) {
+        coverage = 'partial';
+        note = `This ${grain} is still running.`;
+      }
+      return { key: p.key, label: labelOf(grain, p.start, spansYears), start: p.start, end: p.end, ...f, coverage, note, current };
+    });
+
+    const period = built.find((p) => p.key === selected.key) ?? built[built.length - 1];
+    const t = figures(tallyDays(system, selected.start, selected.end));
+
+    // One row per workflow inside the selected period.
+    const byWorkflow = new Map<string, { row: WorkflowRow; tally: Tally }>();
+    for (const w of wfRows) {
+      if (!mine(system)(w)) continue;
+      const entry = byWorkflow.get(w.workflow_id) ?? { row: w, tally: blankTally() };
+      add(entry.tally, w.status, w.n, w.duration_ms, w.timed);
+      byWorkflow.set(w.workflow_id, entry);
+    }
+    const workflows: ExecutionWorkflow[] = [...byWorkflow.entries()]
+      .map(([id, e]) => ({
+        workflow_id: id,
+        workflow_name: e.row.workflow_name,
+        system: e.row.system,
+        registered: e.row.registered,
+        n8n_url: e.row.n8n_url,
+        failed_ids: failing.get(id) ?? [],
+        ...figures(e.tally),
+      }))
+      .sort((x, y) => y.failed - x.failed || y.executions - x.executions);
+
+    /**
+     * The comparison, and the two things that make it honest.
+     *
+     * A period still running always has fewer executions than a finished one,
+     * so comparing this week's total against the whole of last week would
+     * report a collapse every Monday morning. When the period in view is the
+     * current one the previous period is cut to the same elapsed point, and the
+     * page says which days it used.
+     *
+     * And the window being compared against has to have been recorded. The test
+     * is the **window's** own start, not the whole previous period: comparing
+     * the first fortnight of a month against a fortnight nobody was recording
+     * would read "0 → 890" and look like the engine started from nothing.
+     */
+    const prevBounds = boundsOf(grain, previousOf(grain, selected.start));
+    const like = period.current;
+    const elapsed = like ? Math.round((utc(today).getTime() - utc(selected.start).getTime()) / 86_400_000) + 1 : null;
+    const cut = like && elapsed !== null ? addDays(prevBounds.start, elapsed - 1) : null;
+    const winStart = prevBounds.start;
+    const winEnd = cut && cut < prevBounds.end ? cut : prevBounds.end;
+    const covered = Boolean(h.oldest) && winStart >= (h.oldest as string);
+    const p = figures(tallyDays(system, winStart, winEnd));
+    const rate = (n: number | null) => (n === null ? null : Math.round(n * 1000) / 10);
+
+    const executions = covered ? delta(p.executions, t.executions, null) : null;
+    const successes = covered ? delta(p.succeeded, t.succeeded, 'up') : null;
+    const failures = covered ? delta(p.failed, t.failed, 'down') : null;
+    const failureRate = covered ? delta(rate(p.failure_rate), rate(t.failure_rate), 'down') : null;
+    const avg = covered ? delta(p.avg_ms, t.avg_ms, 'down') : null;
+
+    const againstLabel = labelOf(grain, prevBounds.start, spansYears);
+    const window = like
+      ? `its first ${elapsed} day${elapsed === 1 ? '' : 's'}, ${winStart} to ${winEnd}`
+      : `${winStart} to ${winEnd}`;
+
+    /**
+     * The write-up, in words, because that is how somebody reads a change.
+     *
+     * It is generated here rather than on the page so that the downloaded
+     * report and the screen cannot word the same comparison differently.
+     */
+    const prose = !covered
+      ? h.oldest
+        ? `No comparison with ${againstLabel}: this database holds nothing before ${h.oldest}, and ${winStart} to ${winEnd} is before that. Those days were not quiet, they were not recorded.`
+        : `No comparison with ${againstLabel}: nothing has been read from n8n yet.`
+      : t.executions === 0 && p.executions === 0
+        ? `Nothing ran in ${period.label} or in ${againstLabel}.`
+        : `Against ${like ? `the same point of ${againstLabel}` : againstLabel} (${window}): ` +
+          [
+            executions && `executions ${movement(executions)}`,
+            successes && `successes ${movement(successes)}`,
+            failures && `failures ${movement(failures)}`,
+            failureRate && `the failure rate ${movement(failureRate, 'points')}`,
+            avg && (avg.direction === 'flat' ? 'average run time unchanged' : `average run time ${avg.pct === null ? `${ms(avg.from)} → ${ms(avg.to)}` : `${Math.abs(avg.pct)}% ${avg.direction === 'down' ? 'faster' : 'slower'}`}`),
+          ]
+            .filter(Boolean)
+            .join(', ') +
+          '.';
+
+    const comparison: ExecutionComparison = {
+      against: keyOf(grain, prevBounds.start),
+      against_label: againstLabel,
+      executions,
+      successes,
+      failures,
+      failure_rate: failureRate,
+      avg_ms: avg,
+      like_for_like: like,
+      covered,
+      prose,
+      note: !covered
+        ? h.oldest
+          ? `There is nothing honest to compare against: this database holds nothing before ${h.oldest}, and ${winStart} to ${winEnd} is before that.`
+          : 'There is nothing to compare against: nothing has been read from n8n yet.'
+        : like
+          ? `Against the same point of ${againstLabel} — ${window} — because this ${grain} is still running and a whole one would always look bigger.`
+          : `Against the whole of ${againstLabel}, ${window}.`,
+    };
+
+    return { system, label, periods: built, period, workflows, comparison, ...t };
+  };
+
+  return {
+    grain,
+    period: selected.key,
+    systems: tabs.map((s) => buildSystem(s.system, s.label)),
+    boundary: boundary(grain, h.oldest),
+    source: {
+      at: syncedAt,
+      configured: n8n.n8nConfigured(),
+      poll_seconds: Math.round(POLL_EVERY_MS / 1000),
+      n8n_base: n8n.n8nConfigured() ? n8n.n8nHost() : null,
+      held: h.rows,
+      oldest: h.oldest,
+      newest: h.newest,
+      highest_id: h.highest,
+      warning,
+      note: n8n.n8nConfigured()
+        ? h.rows
+          ? `Every execution n8n reports is copied into this database, one row per execution, and the page reads those rows. New ones are picked up by a poll every ${Math.round(POLL_EVERY_MS / 1000)} seconds — n8n has nothing to push, so this is not live.`
+          : 'Nothing has been read from n8n yet, so these figures are empty rather than nought.'
+        : `${n8n.N8N_API_VAR} is not set on this server, so no execution has ever been read and these figures are empty rather than nought.`,
+    },
+  };
+}
+
+/* ------------------------------------------------------- one workflow */
+
+/**
+ * One workflow's own executions inside one period: a day-by-day breakdown and
+ * the individual runs, each with its id, start, duration and status.
+ *
+ * This is the thing a counter could not answer at all, and the reason the rows
+ * are stored. A failure is not a number here, it is an id that opens in n8n.
+ */
+export async function workflow(workflowId: string, grain: ExecutionGrain, wanted?: string, limit = 500): Promise<ExecutionWorkflowDetail | null> {
+  const h = await held();
+  const today = nowIso().slice(0, 10);
+  const first = h.oldest ?? today;
+  const periods = spanOf(grain, first, today);
+  const currentKey = keyOf(grain, today);
+  const selected = periods.find((p) => p.key === wanted) ?? periods.find((p) => p.key === currentKey) ?? periods[periods.length - 1];
+  const spansYears = new Set(periods.map((p) => p.start.slice(0, 4))).size > 1;
+
+  const rows = await workflowRows(selected.start, selected.end);
+  const mine = rows.filter((r) => r.workflow_id === workflowId);
+
+  // A workflow with nothing in this period is still a workflow: its name and
+  // its system come back so the panel can say "nothing ran" rather than 404.
+  const idRow = await query<{ workflow_name: string | null; reg_name: string | null; system: string | null; n8n_url: string | null }>(
+    `SELECT max(e.workflow_name) AS workflow_name, max(w.name) AS reg_name, max(w.system) AS system, max(w.n8n_url) AS n8n_url
+       FROM engine_execution_runs e
+       LEFT JOIN registry_workflows w ON w.id = e.workflow_id AND w.deleted_at IS NULL
+      WHERE e.workflow_id = $1`,
+    [workflowId],
+  );
+  if (!idRow.rows[0]?.workflow_name && !mine.length) return null;
+
+  const tally = blankTally();
+  for (const r of mine) add(tally, r.status, r.n, r.duration_ms, r.timed);
+  const failing = (await failedIds(selected.start, selected.end, 2000)).get(workflowId) ?? [];
+
+  const perDay = await query<{ day: string; status: string; n: string; duration_ms: string; timed: string }>(
+    `SELECT day, status, count(*)::text AS n, COALESCE(sum(duration_ms),0)::text AS duration_ms, count(duration_ms)::text AS timed
+       FROM engine_execution_runs
+      WHERE workflow_id = $1 AND day >= $2 AND day <= $3
+      GROUP BY day, status ORDER BY day ASC`,
+    [workflowId, selected.start, selected.end],
+  );
+  const byDay = new Map<string, Tally>();
+  for (const r of perDay.rows) {
+    const t = byDay.get(r.day) ?? blankTally();
+    add(t, r.status, Number(r.n), Number(r.duration_ms), Number(r.timed));
+    byDay.set(r.day, t);
+  }
+
+  const runRows = await query<{ execution_id: string; status: string; mode: string | null; started_at: string; stopped_at: string | null; duration_ms: string | null }>(
+    `SELECT execution_id::text AS execution_id, status, mode, started_at, stopped_at, duration_ms::text AS duration_ms
+       FROM engine_execution_runs
+      WHERE workflow_id = $1 AND day >= $2 AND day <= $3
+      ORDER BY execution_id DESC LIMIT $4`,
+    [workflowId, selected.start, selected.end, limit],
+  );
+  const runs: ExecutionRun[] = runRows.rows.map((r) => ({
+    execution_id: r.execution_id,
+    status: r.status,
+    mode: r.mode,
+    started_at: r.started_at,
+    stopped_at: r.stopped_at,
+    duration_ms: r.duration_ms === null ? null : Number(r.duration_ms),
+  }));
+
+  const meta = idRow.rows[0];
+  return {
+    workflow: {
+      workflow_id: workflowId,
+      workflow_name: meta?.reg_name ?? meta?.workflow_name ?? workflowId,
+      system: meta?.system ?? null,
+      registered: Boolean(meta?.reg_name),
+      n8n_url: meta?.n8n_url ?? null,
+      failed_ids: failing,
+      ...figures(tally),
+    },
+    grain,
+    period: { key: selected.key, label: labelOf(grain, selected.start, spansYears), start: selected.start, end: selected.end },
+    days: [...byDay.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([day, t]) => ({ day, ...figures(t) })),
+    runs,
+    runs_total: tally.executions,
+    n8n_base: n8n.n8nConfigured() ? n8n.n8nHost() : null,
+  };
 }
