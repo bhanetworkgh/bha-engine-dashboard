@@ -1803,6 +1803,9 @@ export interface ExecutionBackfill {
   highest: number | null;
   pages: number;
   full: boolean;
+  /** How many executions this database holds after the pass, and how many n8n says it holds. */
+  held: number;
+  reported: number | null;
   note: string;
   warning: string | null;
 }
