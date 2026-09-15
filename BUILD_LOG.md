@@ -3999,3 +3999,150 @@ Problem:    So Airtable says Approved 165 / Awaiting 0 / Needs input 0. The page
 Not done:   The resync. It is manual by instruction and nothing in this sandbox
             can press it, so the first production run's per-table numbers still
             come from the Render log afterwards.
+
+## 2026-09-15 11:10 — Build patterns, Commercial and Clients: what the data actually supports
+Intent:     Finish the three sibling record pages. Remove every grouping whose
+            buckets are constant or one-per-row, give all three the resync the
+            Codex page has had since yesterday, and find out what "1.3 open"
+            was rather than guessing at it.
+
+Files:      server/src/sources.ts, store.ts, engine.ts, index.ts
+            src/data/types.ts, src/data/index.ts
+            src/screens/BuildPatterns.tsx, Commercial.tsx, Clients.tsx, Codex.tsx
+            src/components/ui/Resync.tsx (new), index.ts, src/index.css
+            CLAUDE.md, README.md, render.yaml, .env.example
+
+Problem:    The Commercial page's lane strip rendered "1.3 open", "1.5 open",
+            "1.8 open". Those cannot be a per-lane average of
+            missing_research_count: every lane holds exactly one card and the
+            corpus total is 53 across 18 populated records, averaging 2.9.
+Fix:        Found in the code, not reasoned about. `src/screens/Commercial.tsx`
+            drew the lane bar's value as:
+
+                {l.n} <span className="text-faint">· {l.unresolved} open</span>
+
+            — the card count, a middot, and the open-question count. Every lane
+            holds one card, so the first number was always 1 and the middot at
+            11px on a faint span read as a decimal point. "1.5 open" was one
+            card with five open research questions. Nothing computed a decimal.
+            It went with the grouping it belonged to; the note is in the
+            Commercial screen's header comment so nobody re-derives it.
+
+Decision:   **Nothing on Commercial groups the corpus.** Checked against all 21
+            records: lane_id is 1:1 with the card, readiness_state is 19/1/1
+            with INCUBATE never used, and pilot_state, routing_state, media_gate
+            and lane_state are one hardcoded value each. One sortable table
+            instead, defaulting to missing_research_count ascending then
+            media_readiness descending. Four figures above it.
+Decision:   **The eight dead-scaffold columns are not mapped at all**, not
+            merely hidden. A field with no way out of `sources.ts` cannot be
+            rendered by accident later. They stay in Airtable and inside the
+            stored `fields` blob — nothing here removes a column the engine
+            owns.
+Decision:   **Build patterns loses `pattern_status` entirely.** The field is
+            gone from the base — confirmed against live Airtable, the table has
+            20 columns and none of them is a state — so the split, the pill, the
+            filter, the two row actions, the by-system bar and the promotion
+            rate all go, and `STATUSES.patterns` is now empty, which makes a
+            write to it a 422 rather than a write to a column that does not
+            exist. `statusOf` returns a constant for patterns: there is no state
+            to move between, and the ledger records only that this database has
+            seen the row.
+Decision:   **Clients is one table with a heading row per client**, not a table
+            per client. Four tables gave each block its own column widths, so
+            nothing lined up down the page and the header row was drawn four
+            times for four lanes.
+Decision:   **Lane Status and Run State get two columns.** They answer different
+            questions — onboarding maturity against the outcome of the last run
+            — and the single pill that mixed them could only ever say one.
+            Staleness moves to `Next Run Due` against today, which is the field
+            the weekly clock actually reads.
+
+Problem:    The resync read five rows from Build Patterns and stored none. The
+            result said "5 rows, 0 inserted, 0 updated, 0 unchanged", which a
+            reader could take for a table that already matched.
+Fix:        Two things. The rig's fault was real — its fixture record ids were
+            `rec` + 13, and `mirror.upsert` refused every one of them, correctly.
+            But the reporting gap was ours: a row read from Airtable and refused
+            by this database was logged and then invisible. Every resync now
+            counts refusals per table, says so in the note and in the toast, and
+            the run reads as a failure. The same count went onto the Codex
+            resync, so the four pages report identically.
+
+Decision:   **One shared resync**, `store.resync` behind
+            `POST /api/{patterns|commercial|clients}/resync`, and one shared
+            control in `src/components/ui/Resync.tsx` that the Codex page now
+            uses too. Codex keeps its own server-side pass: it has a deletion
+            log, a Layer 0 table and an unlanded-write check that the other
+            three do not, and folding those together would have been a rewrite
+            of a path that works.
+Decision:   **Clients follows the index and only the index.** A questions table
+            no index row names is never read, and a question row held against
+            one is removed — but only once the index has actually been read,
+            because without that guard the first refusal from Airtable would
+            empty the whole kind.
+Decision:   **A change made here that Airtable never had is named when it is
+            reverted.** These three kinds write no line to `record_writes` —
+            only loops and Codex go to Airtable from here — so the signal is the
+            mirror row's own `source = 'ui'`, which is exactly what it records.
+Decision:   **The token now reads five bases and writes two.** Read-only on
+            Build Patterns, Commercial Opportunities and BHA Client Research
+            Loop. Those three get no base variable of their own: this server
+            never writes to them, so it can never write to a guess about them.
+            render.yaml, .env.example and README all say so — the same mistake
+            as 14 Sep, where the comment said "the Open Loops base and nothing
+            else" and a token scoped from it failed every Codex read.
+
+Problem:    `patternMetrics` reported `distinct_ids: 4` beside a note reading
+            "5 rows carry 3 distinct pattern ids". The figure counted rows with
+            no pattern_id as one id each; the sentence did not.
+Fix:        `distinct_ids` is the count of distinct ids and nothing else, and
+            the note prints the arithmetic — "5 rows: 3 distinct pattern ids +
+            1 duplicate row (BP-BHARAG-002-CHUNK_OVERLAP) + 1 row carrying no
+            pattern_id" — so a reader can check it on the page.
+
+Verified:   Against a real Postgres 16 and a replay of the Airtable REST API
+            that refuses exactly what Airtable refuses (`fields[]=` with no
+            field named answers 422 `Unknown field name: ""`), pages two records
+            at a time so `offset` is genuinely followed, and can be told to 403
+            a named table.
+            - empty database: patterns +5, commercial +4, clients +8 across the
+              index and four question tables followed from `Table ID`.
+            - re-run with nothing changed: 0/0/0, everything "already matching".
+            - one field edited, two rows deleted, one lane added to the index:
+              patterns ~1, commercial -1, clients +1/-1 — and the new lane's own
+              questions table was read in the same pass, without a code change.
+            - two tables forced to 403: named with Airtable's own reason, the
+              run reads as a failure, and `select count(*)` confirms nothing
+              under either was deleted. The patterns run came back ran=false.
+            - orphan question row with the index unreadable: kept. With the index
+              readable: removed, counted, named in the note, and the whole row
+              written to `record_deletions` first.
+            - readiness_state set here, then a resync: "1 of those updates
+              overwrote a change made here that Airtable never had — CARD-2".
+            - `PATCH /api/records/patterns/:id` now answers 422, "patterns is
+              read-only in this dashboard".
+            In Chromium at 1440 and 400, all five pages: no console errors, no
+            page errors, zero horizontal overflow. Each sortable column checked
+            by clicking it — open questions ascending and descending, created
+            newest-first with the undated card last, confidence and media
+            readiness strongest-first. The resync button pressed on all four
+            pages: identical wording, and the failure path reads "Resync
+            finished in 0.2s · 0 inserted, 0 updated, 0 deleted · Client 9 —
+            Veganism/Plant-Based Trend could not be read, so nothing under it
+            changed" in the failing tone.
+            `npm run typecheck && npm run build` clean.
+
+Not done:   The Overview's build-patterns and commercial tiles lost the figures
+            they were reading (canonical/draft counts, and cards "blocked on
+            research" from the dead `lane_state_blocked_reason`). They now read
+            broadly-reusable and open research questions, which are real, but
+            nobody asked for a tile redesign and that is all they got.
+            The Commercial card still offers Set media-ready / research-first /
+            incubate. Those writes land in Postgres only and a resync takes
+            Airtable's value back — the same property the Codex page has — so
+            the toast now says so on the write as well as on the resync. Removing
+            them would be a scope change and was not in the brief.
+            Nobody in this sandbox can press these buttons against live
+            Airtable, so the first production run's per-table numbers come from
+            the Render log.

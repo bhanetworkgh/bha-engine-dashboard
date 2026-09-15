@@ -526,24 +526,28 @@ function excerpt(text: string | null, max = 180): string | null {
   return `${cut.slice(0, end > 60 ? end : max).trim()}…`;
 }
 
+/**
+ * One build pattern.
+ *
+ * **There is no `pattern_status`** (2026-09-15, Destiny). The field was deleted
+ * from the base and removed from every workflow that wrote it, so the table has
+ * twenty columns and none of them is a state. Reading it would now read nothing
+ * on every row, and every row would come back "no status" — which is how a
+ * deleted field turns into a page-wide bucket that means nothing. The dashboard
+ * neither reads it nor writes it.
+ *
+ * `reusability` — Narrow / Moderate / Broad — is what varies here and is the
+ * only thing the page groups by.
+ */
 export function mapPattern(rec: AtRecord): BuildPatternDetail {
   const f = rec.fields;
   const pattern_id = str(f.pattern_id);
   const bha_system = str(f.bha_system);
-  const statusName = str(f.pattern_status);
   const { system, keywords } = classify(pattern_id, bha_system);
   return {
     id: rec.id,
     pattern_id,
     title: str(f.pattern_name) ?? pattern_id ?? '(unnamed pattern)',
-    /**
-     * pattern_status is a single-select with exactly two choices, and a
-     * sizeable minority of rows leave it empty. Folding empty into draft was
-     * why the draft count and the total never reconciled: a pattern nobody
-     * has triaged is not a draft, it is a pattern in no state at all. Three
-     * states here, two of them writable.
-     */
-    status: statusName === 'canonical' ? 'canonical' : statusName === 'draft' ? 'draft' : 'unset',
     bha_system,
     reusability: str(f.reusability),
     created_at: iso(f.created_at),
@@ -580,6 +584,21 @@ export function patternSummary(p: BuildPatternDetail): BuildPattern {
 
 /* ------------------------------------------------------------ commercial */
 
+/**
+ * Eight single-selects on this table are dead scaffold: their only options are
+ * whole English sentences, written once as placeholders, and the extractor has
+ * never populated any of them. They exist on roughly half the records and say
+ * nothing about any of them; `lane_state_blocked_reason` even has an option
+ * whose name is the empty string. None is mapped, so none can be rendered.
+ *
+ *   demand_signal_sources · demand_evidence · cta_surface_plan ·
+ *   media_twin_integration_plan · subscription_flow_state ·
+ *   infra_readiness_state · engine_movement_state · lane_state_blocked_reason
+ *
+ * They are left in Airtable and left inside the stored `fields` blob — nothing
+ * here renames or removes a column the engine owns — they simply have no way
+ * onto the page.
+ */
 export function mapOpportunity(rec: AtRecord): Opportunity {
   const f = rec.fields;
   const readinessRaw = str(f.readiness_state);
@@ -599,16 +618,9 @@ export function mapOpportunity(rec: AtRecord): Opportunity {
     lane_id: lane,
     readiness_state,
     confidence: str(f.confidence),
-    pilot_state: str(f.pilot_state),
-    routing_state: str(f.routing_state),
-    lane_state: str(f.lane_state),
-    lane_state_blocked_reason: str(f.lane_state_blocked_reason),
-    engine_movement_state: str(f.engine_movement_state),
-    demand_evidence: str(f.demand_evidence),
     infra_readiness: str(f.infra_readiness),
     data_readiness: str(f.data_readiness),
     media_readiness: str(f.media_readiness),
-    media_gate: str(f.media_gate),
     missing_research_count: num(f.missing_research_count),
     missing_research_questions: questions,
     next_action: str(f.next_action),
@@ -617,12 +629,51 @@ export function mapOpportunity(rec: AtRecord): Opportunity {
     target: str(f.target),
     who_pays: str(f.who_pays),
     bha_system: str(f.bha_system),
+    metrics_hypothesis: str(f.metrics_hypothesis),
+    missing_proof: str(f.missing_proof),
+    implementation_constraints: str(f.implementation_constraints),
+    commercial_impact: str(f.commercial_impact),
+    offer_shapes_gates: str(f.offer_shapes_gates),
+    next_experiments: str(f.next_experiments),
+    experiment_results: str(f.experiment_results),
+    research_gleanings: str(f.research_gleanings),
+    demand_strength_hypothesis: str(f.demand_strength_hypothesis),
+    competing_offers_snapshot: str(f.competing_offers_snapshot),
+    hypothesis_rejection_note: str(f.hypothesis_rejection_note),
+    commercial_ready_v1_checklist: str(f.commercial_ready_v1_checklist),
+    infra_gaps: str(f.infra_gaps),
+    reuse_patterns: str(f.reuse_patterns),
+    source_logs: str(f.source_logs),
+    // Constant across all 21 cards: the extractor writes them and nothing
+    // advances them. Shown on the card, never grouped on.
+    pilot_state: str(f.pilot_state),
+    routing_state: str(f.routing_state),
+    lane_state: str(f.lane_state),
+    media_gate: str(f.media_gate),
     created_at: iso(f.created_at),
     note: null,
     spine: { session_id: null, builder_id: null, subsystem: 'COMMERCIALOPPS', lane },
     source: airtableSource(COMMERCIAL.base, COMMERCIAL.table, rec.id),
     airtable: { base: COMMERCIAL.base, table: COMMERCIAL.table, record_id: rec.id, url: recordUrl(COMMERCIAL.base, COMMERCIAL.table, rec.id) },
   };
+}
+
+/**
+ * The fields a complete extractor run writes on every card. The one record that
+ * is missing them — CARD-1783965721620-1RJX, TRAY_DESIGN_AND_DOSING — is a
+ * malformed row, not a category: it has no created_at, no media_readiness, no
+ * pilot_state and no readiness_state. The page says so in those words rather
+ * than drawing it as a fourth bucket beside Research-First and Media-Ready.
+ */
+export const COMMERCIAL_REQUIRED: { key: keyof Opportunity; label: string }[] = [
+  { key: 'created_at', label: 'created_at' },
+  { key: 'readiness_state', label: 'readiness_state' },
+  { key: 'media_readiness', label: 'media_readiness' },
+  { key: 'pilot_state', label: 'pilot_state' },
+];
+
+export function incompleteFields(o: Opportunity): string[] {
+  return COMMERCIAL_REQUIRED.filter((r) => o[r.key] === null || o[r.key] === undefined).map((r) => r.label);
 }
 
 /* ------------------------------------------------------- north star (NS) */

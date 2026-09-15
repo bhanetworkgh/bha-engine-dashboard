@@ -517,6 +517,21 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
       return send(res, 200, await store.resyncCodex(sessionInfo(req).email));
     }
 
+    /**
+     * The same pass for the other three record pages (2026-09-15, Destiny).
+     * Build patterns and Commercial are a single shared table each, so theirs
+     * is one sweep; Clients reads the watched-clients index and then follows
+     * the `Table ID` on each of its rows to that lane's own questions table.
+     *
+     * Same semantics in all four cases: insert what Airtable has and we do not,
+     * update what changed there, delete what is gone, and never treat a table
+     * that could not be read as a table that was emptied. Manual only.
+     */
+    const sweep = p.match(/^\/api\/(patterns|commercial|clients)\/resync$/);
+    if (sweep) {
+      return send(res, 200, await store.resync(sweep[1] as store.ResyncKind, sessionInfo(req).email));
+    }
+
     const dup = p.match(/^\/api\/loops\/([^/]+)\/duplicate$/);
     if (dup) {
       try {

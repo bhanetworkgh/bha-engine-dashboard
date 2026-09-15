@@ -22,7 +22,7 @@ import type {
   CodexData,
   CodexEntry,
   CodexEntryDetail,
-  CodexResync,
+  Resync,
   ClientsData,
   CommercialData,
   Loop,
@@ -178,8 +178,20 @@ export function removeLoopDuplicate(id: string): Promise<Loop> {
  * Slow on purpose — it reads every field of every row — so it gets its own
  * timeout rather than the default.
  */
-export function resyncCodex(): Promise<CodexResync> {
-  return api<CodexResync>('/api/codex/resync', { method: 'POST', timeoutMs: 180_000 });
+export function resyncCodex(): Promise<Resync> {
+  return api<Resync>('/api/codex/resync', { method: 'POST', timeoutMs: 180_000 });
+}
+
+/**
+ * The same pass for Build patterns, Commercial and Clients. One shared table
+ * each for the first two; Clients reads the watched-clients index and then the
+ * questions table each index row names in `Table ID`.
+ *
+ * Airtable wins every disagreement, and a table that could not be read is never
+ * read as an emptied one.
+ */
+export function resyncRecords(kind: 'patterns' | 'commercial' | 'clients'): Promise<Resync> {
+  return api<Resync>(`/api/${kind}/resync`, { method: 'POST', timeoutMs: 180_000 });
 }
 
 /** Sets Jason Status on one submission: Approved or Pending. */
