@@ -662,6 +662,45 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE record_writes ADD COLUMN IF NOT EXISTS from_record_id text`,
     ],
   },
+  {
+    id: 9,
+    name: 'n8n execution counts, snapshotted forward',
+    statements: [
+      /**
+       * Execution counts per workflow per month, accumulated.
+       *
+       * **n8n's execution history does not persist.** The instance holds a few
+       * days: on 15 Sep 2026 it held 3,673 executions and none older than
+       * 12 Sep. A monthly view that queried the API live would therefore show
+       * August, July and everything before as empty — a clean past that is only
+       * missing data, which is the exact failure this dashboard exists to stop.
+       *
+       * So this table is the record and the API is only ever the feed into it.
+       * Nothing prunes it. The counts are **accumulated forward** rather than
+       * recomputed: the snapshot job reads only executions above a watermark
+       * and adds them, so a month whose executions have since aged out of n8n
+       * keeps the count it had when they existed.
+       *
+       * `failed_ids` is the list of failing execution ids, kept so each failure
+       * still opens in n8n while the execution is there — and so the count is
+       * still explicable after it is not.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_executions (
+         period        text NOT NULL,
+         workflow_id   text NOT NULL,
+         workflow_name text,
+         system        text,
+         executions    integer NOT NULL DEFAULT 0,
+         failures      integer NOT NULL DEFAULT 0,
+         failed_ids    jsonb NOT NULL DEFAULT '[]'::jsonb,
+         first_seen_at text NOT NULL,
+         updated_at    text NOT NULL,
+         PRIMARY KEY (period, workflow_id)
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_executions_period ON engine_executions (period DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_executions_system ON engine_executions (system, period DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

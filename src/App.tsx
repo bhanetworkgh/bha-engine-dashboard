@@ -4,6 +4,7 @@ import { useSession } from './app/session';
 import Login from './screens/Login';
 import Overview from './screens/Overview';
 import AskBays from './screens/AskBays';
+import Bays from './screens/Bays';
 import NorthStar from './screens/NorthStar';
 import ResearchTwin from './screens/ResearchTwin';
 import Clients from './screens/Clients';
@@ -31,6 +32,7 @@ export default function App() {
       <Route element={<Layout />}>
         <Route path="/" element={<Overview />} />
         <Route path="/ask-bays" element={<AskBays />} />
+        <Route path="/bays" element={<Bays />} />
         <Route path="/north-star" element={<NorthStar />} />
         <Route path="/research-twin" element={<ResearchTwin />} />
         <Route path="/vfarm" element={<VFarm />} />

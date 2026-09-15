@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { getCommercial, getRecordMetrics, resyncRecords, setRecordStatus, type CommercialMetrics, type MetricSeries, type Opportunity, type ReadinessState } from '../data';
+import { getCommercial, getMonthly, getRecordMetrics, resyncRecords, setRecordStatus, type CommercialMetrics, type MetricSeries, type Opportunity, type ReadinessState } from '../data';
 import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
@@ -12,6 +12,7 @@ import {
   Loading,
   MetricCard,
   MetricCell,
+  MonthlyPanel,
   PageHeader,
   Pagination,
   Pill,
@@ -483,6 +484,7 @@ export default function Commercial() {
   const [confidence, setConfidence] = useState('all');
   const [media, setMedia] = useState('all');
   const [q, setQ] = useState('');
+  const [month, setMonth] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -491,6 +493,7 @@ export default function Commercial() {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'open', dir: 1 });
   const { toast, setToast } = useToast();
   const metrics = useData((query) => getRecordMetrics('commercial', query), [tick]);
+  const monthly = useData(() => getMonthly('commercial'), [tick]);
 
   useEffect(() => {
     if (loaded) setCards(loaded.opportunities);
@@ -526,11 +529,14 @@ export default function Commercial() {
         .filter((o) => confidence === 'all' || (o.confidence ?? '(not set)') === confidence)
         .filter((o) => media === 'all' || (o.media_readiness ?? '(not set)') === media)
         .filter((o) => matches(o, q.trim()))
+        // The month selection is a filter like any other, so the list, the count
+        // and the CSV all see the same rows.
+        .filter((o) => !month || o.created_at?.slice(0, 7) === month)
         .slice()
         .sort((a, b) => compare(sort.key, sort.dir, a, b) || tiebreak(a, b)),
-    [cards, confidence, media, q, sort],
+    [cards, confidence, media, q, sort, month],
   );
-  const paged = usePaged(rows, `${confidence}|${media}|${q.trim()}|${sort.key}|${sort.dir}`);
+  const paged = usePaged(rows, `${confidence}|${media}|${q.trim()}|${sort.key}|${sort.dir}|${month ?? ''}`);
 
   async function change(o: Opportunity, next: ReadinessState) {
     setBusyId(o.id);
@@ -564,6 +570,29 @@ export default function Commercial() {
         </div>
 
         <CommercialMetricsPanel metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
+
+        {monthly.data && (
+          <MonthlyPanel
+            series={monthly.data}
+            selected={month}
+            onSelect={setMonth}
+            rows={rows}
+            csvLabel="commercial"
+            columns={[
+              { header: 'card_id', value: (o) => o.card_id },
+              { header: 'airtable_record_id', value: (o) => o.id },
+              { header: 'opportunity_title', value: (o) => o.title },
+              { header: 'lane_id', value: (o) => o.lane_id },
+              { header: 'confidence', value: (o) => o.confidence },
+              { header: 'media_readiness', value: (o) => o.media_readiness },
+              { header: 'readiness_state', value: (o) => o.readiness_state },
+              { header: 'missing_research_count', value: (o) => o.missing_research_count },
+              { header: 'missing_research_questions', value: (o) => o.missing_research_questions.join(' | ') },
+              { header: 'created_at', value: (o) => o.created_at },
+              { header: 'airtable_url', value: (o) => o.airtable.url },
+            ]}
+          />
+        )}
 
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
           {/* Two filters, both on fields that genuinely vary. No tabs. */}

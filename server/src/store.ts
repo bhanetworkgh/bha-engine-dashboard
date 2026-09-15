@@ -2628,6 +2628,30 @@ export async function metrics(kind: RecordKind, filter: { builder?: string | nul
   }
 }
 
+/** Which mirror table a kind's rows live in, for a reader that needs the raw row. */
+export function mirrorTable(kind: RecordKind): string | null {
+  return MIRROR[kind]?.table ?? null;
+}
+
+/**
+ * Every loop close this database can date, as a transition rather than a first
+ * sighting.
+ *
+ * The same rule the close-rate figures already use: an event with no
+ * `from_status` is the first time this database saw the loop at all, and a loop
+ * that was already closed when it arrived has no close date anywhere, because
+ * the loop tables carry none. Counting those would date the whole backfill to
+ * the day of the backfill.
+ */
+export async function loopCloses(): Promise<{ record_id: string; at: string }[]> {
+  const r = await db().query<{ record_id: string; at: string }>(
+    `SELECT DISTINCT ON (record_id) record_id, at FROM events
+      WHERE kind = 'loops' AND to_status = 'closed' AND from_status IS NOT NULL
+      ORDER BY record_id, at DESC, seq DESC`,
+  );
+  return r.rows;
+}
+
 export async function historySince(): Promise<string | null> {
   return getMeta('history_since');
 }

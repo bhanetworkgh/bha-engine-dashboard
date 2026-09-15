@@ -4146,3 +4146,145 @@ Not done:   The Overview's build-patterns and commercial tiles lost the figures
             Nobody in this sandbox can press these buttons against live
             Airtable, so the first production run's per-table numbers come from
             the Render log.
+
+## 2026-09-15 11:55 — Monthly tracking, execution tracking, and a registry pass
+Intent:     Add the monthly rollup to all five record pages, give each system
+            per-workflow execution visibility, and bring the Engine Registry's
+            spacing into line with the three pages finished this morning.
+
+Files:      server/src/n8n.ts (new), executions.ts (new), monthly.ts (new)
+            server/src/migrations.ts, store.ts, sources.ts, index.ts
+            src/data/types.ts, src/data/index.ts, src/lib/csv.ts (new)
+            src/components/ui/Monthly.tsx (new), Executions.tsx (new), index.ts
+            src/screens/Bays/index.tsx (new), EngineHealth/index.tsx
+            src/screens/OpenLoops/index.tsx, Codex.tsx, BuildPatterns.tsx,
+            Commercial.tsx, Clients.tsx, NorthStar.tsx, ResearchTwin.tsx
+            src/screens/Registry/index.tsx, src/App.tsx, components/Layout.tsx
+            CLAUDE.md, README.md, render.yaml, .env.example
+
+Problem:    Read against the live instance before writing anything: n8n holds
+            **3,673 executions and none older than 12 Sep 2026** — three days.
+            `startedBefore=2026-09-12T12:00:00Z` returns zero. So a monthly view
+            that queried the API live would be told, honestly, that August held
+            nothing, and would draw a clean past that is only missing data.
+Fix:        `engine_executions`, migration 9. One row per workflow per month,
+            nothing prunes it, and the counts are **accumulated forward rather
+            than recomputed** — each pass reads only executions above a
+            watermark and adds them, so a month keeps the count it had when its
+            executions still existed. Proved against a replay that ages
+            executions off on command: July and August survived n8n forgetting
+            every execution they were built from.
+
+Problem:    The first design held the watermark below the oldest unfinished
+            execution so a run still in flight would be re-read. Everything
+            *above* it was then counted again on every pass: a September total
+            of 2 read 4 after two passes with nothing new. Caught in the rig,
+            not in production.
+Fix:        The watermark moves past everything read; an unfinished execution
+            goes on a deferred list by id and is looked up individually until it
+            finishes, then counted exactly once. It also removes a starvation
+            bug the first design had: one execution parked on a Wait node would
+            have frozen all counting behind it indefinitely. An execution that
+            ages out of n8n before finishing is dropped and never counted,
+            because nothing knows how it ended.
+
+Decision:   **A chart bar is never drawn for a month with no instrumentation.**
+            Every month carries its own coverage, and `created` and `advanced`
+            carry it separately, because they are almost never instrumented from
+            the same date. `none` draws no bar at all, behind a dashed boundary
+            rule, with a sentence saying what began when.
+Decision:   **Loops are the clearest case for splitting the two.** `Date Raised`
+            has always existed; a close is dated only by this dashboard's own
+            status ledger. So July and August draw a raised bar and **no closed
+            bar at all** — nine of those loops are closed in Airtable and not one
+            of those closes can be dated. Drawing "closed: 0" would have been the
+            lie the whole shape exists to prevent.
+Decision:   **Codex approval rate is honest for the whole history; days to
+            approval is not.** The rate counts a cohort's state today rather than
+            a dated event. `Jason Reviewed At` was created on 14 Sep 2026 —
+            confirmed against the live base, whose own field description reads
+            "Nothing before 14 Sept 2026 carries a value; it is not history
+            before then" — so it is a separate panel, July and August draw
+            nothing, September is partial and **October is the first honest
+            month**. The field was not mapped at all before today.
+Decision:   **A month whose rows mostly arrived later is marked partial.** Not in
+            the brief, and found in the data: Build Patterns holds 152 rows and
+            most of them were written to Airtable in one go on 12 Aug 2026,
+            carrying `created_at` values spread back through July. Those dates
+            are real and belong on the chart, but a bar of a hundred backdated
+            rows is not a hundred patterns' worth of output that month. The
+            mirror row's `created_time` against the record's own date is what
+            detects it.
+Decision:   **Build Patterns also needs an undated count.** The brief flagged
+            only Commercial. Twenty of the 152 pattern rows carry no `created_at`
+            — checked against the live base — so it gets the same explicit
+            undated count, per the rule that a record with no date is never
+            dropped or re-bucketed.
+Decision:   **CSV is built from the rows the page is showing**, not re-queried,
+            so the file and the screen cannot disagree. Cells beginning `=`, `+`,
+            `-` or `@` are prefixed with an apostrophe: these exports carry free
+            text written by builders and by agents, and a spreadsheet reads those
+            as formulas.
+Decision:   **A workflow's system comes from the workflow registry**, which
+            already holds one row per workflow with its `system`. Pointing a new
+            workflow at a system is a registry edit, not a deploy — the same rule
+            as the watched-clients index. One n8n reports that no row names is
+            counted and listed on Engine health as unregistered rather than filed
+            under a guess.
+Decision:   **Engine health keeps the roll-up and nothing more.** One figure per
+            system, a link through, and no per-workflow detail: two drawings of
+            the same counts drift, and whichever a person opens first becomes the
+            one they trust. Its incident half is still the placeholder it became
+            on 14 Sep, and the page now says plainly that a failed execution and
+            a self-healed incident are different things.
+Decision:   **Bays gets a page and execution health is the whole of it.** The
+            output stays on the four record pages and is linked rather than
+            copied.
+Decision:   **`N8N_API_KEY` is a new variable and a different credential from
+            `ASK_BAYS_API_KEY`** — an instance API key rather than a webhook
+            header. Read only: the one endpoint used is GET /api/v1/executions
+            and nothing in this server can write to n8n. No new dependency.
+
+Verified:   Against real Postgres 16, the Airtable replay (now carrying the six
+            builder tables) and a new n8n replay that ages executions off and can
+            leave one running.
+            - executions bucket by month and map to systems from the registry.
+            - n8n discards everything it holds: July and August keep their exact
+              counts, September accumulates. A pass with nothing new changes
+              nothing.
+            - a running execution is not counted, the watermark moves past it,
+              nothing above is double counted; when it finishes it is counted
+              once and stays once; one that ages off while deferred is dropped.
+            - loops: Jul raised 6 / closed none, Aug raised 6 / closed none, and
+              the boundary note names 2026-09-15 as the day the ledger started.
+            - codex: approval rate 100/92/83 across Jul/Aug/Sep with full
+              history; median days to approval draws nothing for Jul and Aug,
+              3.2 days over 5 logs for Sep, boundary 2026-10.
+            - month selection filters the list (5 rows → 1 for Aug) and the
+              export follows: `build-patterns-2026-08.csv`, one row, carrying
+              pattern_id and the Airtable URL.
+            - CSV escaping: a formula-leading cell is guarded, commas and quotes
+              quoted and doubled, a newline quoted, a null empty.
+            In Chromium at 1440 and 400, all ten pages plus every registry tab:
+            no console errors, no page errors, zero horizontal overflow.
+            `npm run typecheck && npm run build` clean.
+
+Not done:   **The Engine Registry's Workflow tab clips its last column.** The
+            table is wider than its card and scrolls inside it, which is allowed,
+            but there is no affordance saying so and the header reads "up" cut
+            mid-word. That is a real problem rather than a spacing
+            inconsistency, so per the brief it is reported and not fixed.
+            The registry pass was otherwise narrow: the intro paragraph is capped
+            to a readable measure, and every stat cell now declares a hint floor
+            so a row of four reads as one block, which is what Build patterns,
+            Commercial and Clients do.
+            **The brief said Build Patterns has "effectively no history before
+            15 Sep 2026".** The live base disagrees: 152 rows dating back to
+            16 July. Blanking July and August would have erased 130 real
+            patterns, so September is marked partial instead and the backfill
+            detection above says which months are imported history. Worth
+            confirming that reading.
+            The first production snapshot stamps the coverage boundary, so
+            whichever month it first runs in is partial by construction —
+            October 2026 if it deploys today. Nothing in this sandbox can run it
+            against the real instance.

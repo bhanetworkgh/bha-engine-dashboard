@@ -31,6 +31,9 @@ import { LOOPS_BASE_ID, OPEN_LOOPS_BASE_VAR, SUBMISSIONS_BASE_FROM_ENV, SUBMISSI
 import * as codex from './codex';
 import * as loops from './loops';
 import * as mirror from './mirror';
+import * as executions from './executions';
+import { monthly } from './monthly';
+import { N8N_API_VAR, n8nBase, n8nConfigured } from './n8n';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
 
 /**
@@ -459,6 +462,41 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
    * apart, which is what a yes/no dialog would not ask about. The whole row is
    * written to the deletion log before either side lets go.
    */
+  /**
+   * The monthly rollup behind each record page's tracking panel.
+   *
+   * Every month in it carries its own coverage, because several of the date
+   * fields only started being written recently and a low bar drawn for a month
+   * that had no instrumentation reads as a quiet month. See monthly.ts.
+   */
+  const month = p.match(/^\/api\/records\/([^/]+)\/monthly$/);
+  if (month && method === 'GET') {
+    const kind = month[1] as RecordKind;
+    if (!store.KINDS.includes(kind)) throw new HttpError(404, 'No such record kind.');
+    try {
+      return send(res, 200, await monthly(kind));
+    } catch (e) {
+      if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
+      throw e;
+    }
+  }
+
+  /**
+   * Execution health, read from the snapshot table and never from n8n's own
+   * history for a past month — n8n keeps about three days of it and then
+   * discards it, so a live query would report a clean past that is only
+   * missing data.
+   *
+   * The current, in-progress month is allowed to be fresher than the last
+   * scheduled pass, so a read refreshes the snapshot when it has gone stale.
+   * That keeps one read path rather than a live one and a stored one that can
+   * disagree.
+   */
+  if (p === '/api/executions' && method === 'GET') {
+    await executions.refreshIfStale();
+    return send(res, 200, await executions.read());
+  }
+
   const codexDelete = p.match(/^\/api\/codex\/([^/]+)$/);
   if (codexDelete && method === 'DELETE') {
     const body = await readJson(req);
@@ -672,7 +710,17 @@ async function boot(): Promise<void> {
     // load at boot. What does run is the ledger catch-up: any status that
     // changed in the database while this process was not running has to be
     // written down, because nothing upstream keeps that history.
+    console.log(
+      n8nConfigured()
+        ? `  n8n:      ${n8nBase()} (${N8N_API_VAR} set) \u2014 execution counts snapshot every ${Math.round(executions.SNAPSHOT_EVERY_MS / 60_000)} min`
+        : `  n8n:      NOT configured \u2014 ${N8N_API_VAR} is not set, so no execution is counted and the system pages say so rather than reading zero.`,
+    );
+    // Rows are read straight out of the engine tables, so there is nothing to
+    // load at boot. What does run is the ledger catch-up: any status that
+    // changed in the database while this process was not running has to be
+    // written down, because nothing upstream keeps that history.
     void catchUp();
+    executions.startSnapshots();
   });
 }
 

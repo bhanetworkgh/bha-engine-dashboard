@@ -69,6 +69,22 @@ services:
       # deleted.
       - key: DASHBOARD_INBOUND_KEY
         generateValue: true
+      # The n8n instance API key, for the execution snapshot (15 Sep 2026).
+      # READ ONLY: the one endpoint used is GET /api/v1/executions and nothing
+      # here can write to n8n.
+      #
+      # A different credential from ASK_BAYS_API_KEY — that is a webhook header,
+      # this is an instance API key from Settings → n8n API. Without it no
+      # execution is counted, and the Bays, North Star, Research Twin and Engine
+      # health pages say so rather than reading zero.
+      #
+      # It exists because n8n's execution history does not persist: on 15 Sep
+      # 2026 the instance held 3,673 executions and none older than the 12th, so
+      # a page that queried it live for August would draw an empty month for a
+      # month that was busy. The counts are snapshotted into engine_executions
+      # hourly and the pages read that.
+      - key: N8N_API_KEY
+        sync: false
       # The Airtable token, for loop and Codex edits (2026-09-14). The n8n
       # write-back that stood here for a day is retired: the loop panel edits
       # four fields and can move a row between builder tables, and routing that

@@ -444,6 +444,14 @@ export function mapCodex(rec: AtRecord, owner: string, table: string, pending?: 
     has_entry: Boolean(layer2),
     entry_excerpt: firstLines(layer2),
     breakthroughs: breakthroughs(layer2),
+    /**
+     * When Jason acted on the log. The field was created on 14 Sep 2026 and
+     * there is no backfill and never will be — its own description in Airtable
+     * says so — so every submission before that carries a decision and no date
+     * for it. Read as null rather than substituted with Processed At, which is
+     * when the pipeline ran and not when a person decided.
+     */
+    reviewed_at: iso(f['Jason Reviewed At']),
     processed_at: iso(f['Processed At']),
     processed_date: day(f['Processed Date']),
     note: null,

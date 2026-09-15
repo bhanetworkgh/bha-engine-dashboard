@@ -444,6 +444,96 @@ matching — and a change made here that Airtable never had is named when it is
 reverted, found through the mirror row's own `source = 'ui'` rather than through
 `record_writes`, which only loops and Codex write to.
 
+### Monthly tracking
+
+Every record page carries the same three components in the same order: the
+month currently in view as figures, a month-over-month chart, and a CSV export
+of exactly the rows on screen. Clicking a month filters the page's list to it;
+the export follows that selection and every other filter, and carries the
+record's natural key so a row can be traced back to Airtable.
+
+**The chart is the part that can lie by omission, and its whole shape is that
+risk.** Several of the date fields only started being written recently, and a
+month drawn as a low bar because the data did not exist yet reads as a quiet
+month rather than a gap in instrumentation. So every month carries its own
+coverage — separately for what was created and for what advanced, because they
+are usually instrumented from different dates:
+
+| coverage | drawn as |
+|---|---|
+| full | a solid bar |
+| partial | a hatched bar, and "part" under the label |
+| none | **no bar at all** — a dashed boundary rule, "none" under the label, and a sentence saying what began when |
+
+The boundaries, each a fact about the engine rather than a rendering choice:
+
+| Page | Created | Advanced | Boundary |
+|---|---|---|---|
+| Open loops | `Date Raised`, full history | `Status` → Closed | **Closes are dated only by this dashboard's status ledger** (`meta.history_since`). The loop tables carry no close date and nothing upstream keeps a status-change history, so before that month there is no closed figure — not a zero |
+| Codex | `Timestamp` | `Jason Status` → Approved or Input Added | The approval **rate** is honest for the whole history: it counts a cohort's state today, not a dated event. **Median days to approval is not** — `Jason Reviewed At` was created on 14 Sep 2026 with no backfill, so Sep 2026 is partial and **Oct 2026 is the first honest month**. It is drawn as its own panel with its own boundary |
+| Build patterns | `created_at` | none — patterns do not close, so there is no rate | Sep 2026 is partial: the extractor received empty payloads until the upstream fix on 15 Sep |
+| Commercial | `created_at` | `missing_research_count` = 0, as a cohort | Sep 2026 is partial: card creation stopped on 9 Sep and was not fixed until the 15th |
+| Clients | per-question `Last Updated` | `Movement Tag` is new, refined or contradicted | None. `Last Updated` has always been written correctly; the index's own `Last Run At` was frozen at 24 Aug because nothing wrote it back, so it is deliberately not the source |
+
+Two further rules the builder applies everywhere. **A record with no usable date
+is counted as undated, by name** — never dropped, never re-bucketed into the
+earliest month. And **a month whose rows mostly arrived later is marked
+partial**: Build Patterns holds 152 rows, most of them written to Airtable in
+one go on 12 Aug 2026 carrying `created_at` values spread back through July.
+Those dates are real and belong on the chart, but a bar of a hundred backdated
+rows is not a hundred patterns' worth of output that month.
+
+### Execution tracking
+
+Per-system visibility into n8n workflow executions, on **Bays, North Star and
+Research Twin** — each inside its own page, because a workflow belongs to
+exactly one system and the system page is where somebody goes to debug it. Each
+shows total executions, failures, failure rate, a per-workflow breakdown and
+**the failing execution ids**, so a failure opens directly in n8n.
+
+**Engine health keeps a roll-up only**: one figure per system and a link
+through. It answers "is something failing somewhere"; the system page answers
+"what, and which". The per-workflow detail is deliberately not repeated there.
+
+Bays has a page for the first time. Its *output* is still split across Codex
+entries, Open loops, Build patterns and Commercial and is linked rather than
+copied; what it had nowhere to show was its own health, and it owns seventeen
+workflows — the largest set in the engine.
+
+#### Why it is snapshotted rather than queried
+
+**n8n's execution history does not persist.** Read on 15 Sep 2026 the instance
+held 3,673 executions and none older than 12 Sep — three days. A monthly view
+that queried the API live would be told, honestly, that August held nothing, and
+would draw a clean past that is only missing data. That is the exact failure
+this dashboard exists to prevent.
+
+So a job snapshots counts into `engine_executions` hourly and the pages read
+that table. Nothing prunes it. The counts are **accumulated forward, never
+recomputed**: each pass reads only executions above a watermark and adds them,
+so a month whose executions have since aged out of n8n keeps the count it had
+when they existed. The current month is allowed to be fresher — a page read
+refreshes the snapshot when it is more than five minutes old, which runs the
+same accumulating pass rather than a second, divergent live path.
+
+An execution still running when a pass goes by is **not** counted, and its id
+goes on a deferred list to be resolved individually later. The obvious
+alternative — holding the watermark below it — is wrong twice over: everything
+above it is counted again on every pass (a September total of 2 read 4 after two
+passes with nothing new), and one execution parked on a Wait node would freeze
+all counting behind it. One that ages out of n8n before finishing is dropped and
+never counted, because nothing knows how it ended.
+
+Which system a workflow belongs to comes from the **workflow registry**, which
+already holds one row per workflow with its `system`. Pointing a new workflow at
+a system is a registry edit, not a deploy. A workflow n8n reports that no
+registry row names is counted and listed on Engine health as unregistered,
+rather than filed under a guess.
+
+Whichever month the job first runs in is partial by construction, and that
+boundary is labelled on every execution chart exactly as the record pages label
+theirs.
+
 ### The migration backfill
 
 Gone, with the Airtable client it read through (13 September 2026).
@@ -462,6 +552,8 @@ Airtable; those rows are in `git log` if it is ever needed again.
 | `AIRTABLE_TOKEN` | Read **and** write on Open Loops and BHA Submissions, for loop and Codex edits; read on Build Patterns (`app5ni3E8r7Lvxk22`), Commercial Opportunities (`appvLglfdCqOKqLpT`) and BHA Client Research Loop (`appkSUSh9ijNjP2f8`), for the resync those three pages gained on 15 Sep. Five bases, one token; nothing is ever written to the last three. Without it nothing edited here reaches Airtable and no page can resync; the server says so at boot and on every write. **Note the name** — the client deleted on 13 Sep read `AIRTABLE_API_KEY` |
 | `AIRTABLE_OPEN_LOOPS_BASE_ID` | The Open Loops base (`appUVlBSGGPHw6DGh`). **No default** — unset, the boot line says so by name and every loop edit is refused and marked. Called `AIRTABLE_BASE_ID` until 14 Sep 2026; that name is read by nothing |
 | `AIRTABLE_SUBMISSIONS_BASE_ID` | BHA Submissions, for Codex entries. Defaults to `appEmdKshNVTl64Zf` |
+| `N8N_API_KEY` | The n8n **instance API key**, for the execution snapshot. Read only — one endpoint, `GET /api/v1/executions`. Not the same credential as `ASK_BAYS_API_KEY`, which is a webhook header. Without it no execution is counted and the system pages say so rather than reading zero |
+| `N8N_API_URL` | Defaults to `N8N_BASE_URL` + `/api/v1`. Points the same client at a replay in a sandbox |
 | `AIRTABLE_API_URL` | Points the same client at a local replay of the API in a sandbox |
 | `DATABASE_URL` | Postgres. **Required** — the server exits if it is missing or unreachable |
 
@@ -484,8 +576,9 @@ is missing, and the note is what the page shows.
 | Ask Bays | Chat interface onto the Bays agent |
 | North Star | Asks routed through NS — records, runs, gaps |
 | Research Twin | Research jobs — records, runs, gaps |
+| Bays | The Slack-facing agent's own execution health. Its output lives on the record pages and is linked, not copied |
 | vFarm | Placeholder — nothing on the rack writes here yet |
-| Engine health | Placeholder — no incident reaches this dashboard yet |
+| Engine health | The execution roll-up, one figure per system with a link through. Incidents are still a placeholder — nothing upstream records one |
 | Open loops | Loops by age and owner, close from the interface |
 | Codex entries | Session logs by builder and week |
 | Build patterns | Every pattern, by reusability. No `pattern_status` — the field was deleted from the base on 15 Sep |

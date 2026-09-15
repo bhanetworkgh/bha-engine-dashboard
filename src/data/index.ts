@@ -22,6 +22,8 @@ import type {
   CodexData,
   CodexEntry,
   CodexEntryDetail,
+  ExecutionsData,
+  MonthlySeries,
   Resync,
   ClientsData,
   CommercialData,
@@ -122,6 +124,17 @@ export const getCommercial = (q: Query) => api<CommercialData>(withLane('/api/co
 export const getNsTelemetry = () => api<NsData>('/api/ns-telemetry');
 export const getRtTelemetry = () => api<RtData>('/api/rt-telemetry');
 export const getClients = () => api<ClientsData>('/api/clients');
+
+/**
+ * n8n execution health, read from the snapshot this dashboard keeps rather than
+ * from n8n's own history: n8n holds about three days of executions and then
+ * discards them, so a live query for a past month would report a clean past
+ * that is only missing data.
+ */
+export const getExecutions = () => api<ExecutionsData>('/api/executions');
+
+/** The monthly rollup behind a record page's tracking panel. */
+export const getMonthly = (kind: RecordKind) => api<MonthlySeries>(`/api/records/${kind}/monthly`);
 
 /* --------------------------------------------------------------- records */
 
