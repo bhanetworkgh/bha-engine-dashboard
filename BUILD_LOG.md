@@ -4681,3 +4681,37 @@ Decision:   This is the same lesson as the replay: a check that quietly does
 Verified:   In the rig, whose replay has 36 ids deliberately missing: "holds
             3895, ids 1 to 3931 with 36 of that range not here". The production
             figure is in the next sync line after this deploy.
+
+## 2026-09-15 15:05 — Production figures, and the 36-row difference explained
+
+Intent:     Answer the brief's four verification targets from production rather
+            than from the rig, and close the discrepancy left open at 14:45.
+
+Problem:    Two of the four targets — workflows and failures — were nowhere in
+            the server's own output, so checking them meant logging into the
+            page and reading two screens.
+Fix:        Each pass's line now carries all four: held, workflows, failures and
+            the id span. "holds 4044 across 32 workflows, 51 of them failed, ids
+            1 to 4045 with 1 of that range not here" answers the whole of
+            section 2 of the brief in one line, on every pass, for good.
+
+Problem:    **The 36-row difference was two different views of n8n, not a fault.**
+            Production reported "holds 4044, ids 1 to 4045 with 1 of that range
+            not here": the dashboard's walk of the public API sees an id space
+            that is dense — one absent id in four thousand. The n8n MCP
+            connector, read at the same moment, reported `count: 3989` with the
+            newest id at 4025: exactly 36 short of its own id range, and the same
+            36 as at 14:27. So the MCP sees a subset — most likely one project's
+            worth — and the instance API key the dashboard uses sees everything.
+            This database is **more** complete than the view I was checking it
+            against, which is the opposite of the fear.
+Decision:   The targets in the brief were derived from that same MCP view, so
+            they read ~36 low. Reported as measured rather than reconciled to
+            the brief's numbers: the page holds what n8n's own API gave it, and
+            says how much of the id sequence that is.
+
+Verified:   Rig, with 36 ids deliberately absent: "holds 3895 across 31
+            workflows, 51 of them failed, ids 1 to 3931 with 36 of that range
+            not here". Production, 14:54:41: "holds 4044, ids 1 to 4045 with 1
+            of that range not here", growing by 8 and then 11 executions across
+            two consecutive 45-second polls, each over one page.

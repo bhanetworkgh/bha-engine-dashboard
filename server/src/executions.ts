@@ -257,17 +257,21 @@ export async function sync(full = false): Promise<SyncResult> {
     }
   }
 
-  const after = await query<{ open: string; highest: string | null; lowest: string | null; held: string }>(
+  const after = await query<{ open: string; highest: string | null; lowest: string | null; held: string; workflows: string; failed: string }>(
     `SELECT count(*) FILTER (WHERE status NOT IN ('success','error','crashed','canceled','unknown'))::text AS open,
             max(execution_id)::text AS highest,
             min(execution_id)::text AS lowest,
-            count(*)::text AS held
+            count(*)::text AS held,
+            count(DISTINCT workflow_id)::text AS workflows,
+            count(*) FILTER (WHERE status IN ('error','crashed'))::text AS failed
        FROM engine_execution_runs`,
   );
   const open = Number(after.rows[0]?.open ?? 0);
   const highest = after.rows[0]?.highest ? Number(after.rows[0].highest) : null;
   const lowest = after.rows[0]?.lowest ? Number(after.rows[0].lowest) : null;
   const heldNow = Number(after.rows[0]?.held ?? 0);
+  const workflowsHeld = Number(after.rows[0]?.workflows ?? 0);
+  const failedHeld = Number(after.rows[0]?.failed ?? 0);
 
   /**
    * How much of n8n's id sequence is here.
@@ -316,7 +320,8 @@ export async function sync(full = false): Promise<SyncResult> {
   const note =
     `${read.executions.length} read from n8n over ${read.pages} page${read.pages === 1 ? '' : 's'}, ` +
     `${inserted} new, ${updated} already held${resolved ? `, ${resolved} that had not finished before now resolved` : ''}${open ? `, ${open} still running` : ''}. ` +
-    `This database now holds ${heldNow}${lowest !== null && highest !== null ? `, ids ${lowest} to ${highest}${gaps ? ` with ${gaps} of that range not here` : ' with no gaps'}` : ''}` +
+    `This database now holds ${heldNow} across ${workflowsHeld} workflow${workflowsHeld === 1 ? '' : 's'}, ${failedHeld} of them failed` +
+    `${lowest !== null && highest !== null ? `, ids ${lowest} to ${highest}${gaps ? ` with ${gaps} of that range not here` : ' with no gaps'}` : ''}` +
     `${read.reported === null ? '' : `; n8n reports holding ${read.reported}`}.`;
   // Logged when something happened, when a pass is short of n8n, and on every
   // full read — a quiet poll that found nothing new and agrees with n8n has
