@@ -273,14 +273,19 @@ export async function sync(full = false): Promise<SyncResult> {
    * Holding **more** than n8n reports is expected and is the point: rows stay
    * here after n8n stops returning them. Holding **fewer** means something was
    * not read, and that is worth saying rather than leaving a plausible-looking
-   * total on the page. Only a full read can make the comparison — an
-   * incremental one has read only the top of the list.
+   * total on the page.
+   *
+   * Every pass can make this comparison, not only a full one: the total comes
+   * from the `count` n8n returns on the first page, which every pass fetches
+   * whether or not there is anything new above the watermark. So a database
+   * that has fallen behind says so within 45 seconds rather than at the next
+   * backfill somebody remembers to run.
    */
-  const shortBy = full && read.reported !== null && heldNow < read.reported ? read.reported - heldNow : 0;
+  const shortBy = read.reported !== null && heldNow < read.reported ? read.reported - heldNow : 0;
 
   const warning =
     shortBy
-      ? `n8n reports holding ${read.reported} executions and this database holds ${heldNow} after reading everything — ${shortBy} short. Something was not read; the figures below are of what is here, not of what ran.`
+      ? `n8n reports holding ${read.reported} executions and this database holds ${heldNow} — ${shortBy} short. Something has not been read; the figures below are of what is here, not of what ran. Reading n8n again fills the gap.`
       : read.stalled
       ? `n8n's paging did not advance: page ${read.pages} of this read came back no older than the one before it, so this pass saw only what it could reach. Nothing was double counted — rows are keyed on the execution id — but there may be executions this database has not seen.`
       : read.truncated
@@ -297,7 +302,10 @@ export async function sync(full = false): Promise<SyncResult> {
     `${read.executions.length} read from n8n over ${read.pages} page${read.pages === 1 ? '' : 's'}, ` +
     `${inserted} new, ${updated} already held${resolved ? `, ${resolved} that had not finished before now resolved` : ''}${open ? `, ${open} still running` : ''}. ` +
     `This database now holds ${heldNow}${read.reported === null ? '' : `; n8n reports holding ${read.reported}`}.`;
-  if (read.executions.length || resolved || full) console.log(`executions ${full ? 'backfill' : 'sync'}: ${note}${warning ? ` ${warning}` : ''}`);
+  // Logged when something happened, when a pass is short of n8n, and on every
+  // full read — a quiet poll that found nothing new and agrees with n8n has
+  // nothing to say and says nothing.
+  if (read.executions.length || resolved || full || shortBy) console.log(`executions ${full ? 'backfill' : 'sync'}: ${note}${warning ? ` ${warning}` : ''}`);
 
   return { ran: true, at, ms: Date.now() - started, read: read.executions.length, inserted, updated, resolved, open, highest, pages: read.pages, full, held: heldNow, reported: read.reported, note, warning };
 }
