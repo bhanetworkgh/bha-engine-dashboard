@@ -22,6 +22,7 @@ import type {
   CodexData,
   CodexEntry,
   CodexEntryDetail,
+  ExecutionGrain,
   ExecutionsData,
   MonthlySeries,
   Resync,
@@ -131,7 +132,7 @@ export const getClients = () => api<ClientsData>('/api/clients');
  * discards them, so a live query for a past month would report a clean past
  * that is only missing data.
  */
-export const getExecutions = () => api<ExecutionsData>('/api/executions');
+export const getExecutions = (grain: ExecutionGrain = 'week') => api<ExecutionsData>(`/api/executions?grain=${grain}`);
 
 /** The monthly rollup behind a record page's tracking panel. */
 export const getMonthly = (kind: RecordKind) => api<MonthlySeries>(`/api/records/${kind}/monthly`);

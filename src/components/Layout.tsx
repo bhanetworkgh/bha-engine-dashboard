@@ -16,11 +16,6 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
   {
     group: 'Systems',
     items: [
-      // Bays gets a page of its own (2026-09-15, Destiny). Its *output* is still
-      // split across four record pages and is linked from there rather than
-      // copied; what it had nowhere to show was its own execution health, and
-      // it owns seventeen workflows — the largest set in the engine.
-      { to: '/bays', label: 'Bays', icon: 'chat' },
       { to: '/north-star', label: 'North Star', icon: 'star' },
       { to: '/research-twin', label: 'Research Twin', icon: 'twin' },
       { to: '/vfarm', label: 'vFarm', icon: 'leaf' },
@@ -38,6 +33,11 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
       { to: '/build-patterns', label: 'Build patterns', icon: 'pattern' },
       { to: '/commercial', label: 'Commercial', icon: 'tag' },
       { to: '/clients', label: 'Clients', icon: 'people' },
+      // Every execution in the engine, one record kind like any other
+      // (2026-09-15, Destiny). It replaced a Bays page that held only Bays'
+      // executions: a run is a record, it is the same record whichever system
+      // produced it, and one page with a tab per system beats three pages.
+      { to: '/executions', label: 'Executions', icon: 'pulse' },
     ],
   },
   // People is gone (2026-09-14, Destiny). Builders was its only item, and

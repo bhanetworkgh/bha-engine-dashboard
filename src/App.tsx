@@ -4,7 +4,6 @@ import { useSession } from './app/session';
 import Login from './screens/Login';
 import Overview from './screens/Overview';
 import AskBays from './screens/AskBays';
-import Bays from './screens/Bays';
 import NorthStar from './screens/NorthStar';
 import ResearchTwin from './screens/ResearchTwin';
 import Clients from './screens/Clients';
@@ -14,6 +13,7 @@ import OpenLoops from './screens/OpenLoops';
 import Codex from './screens/Codex';
 import BuildPatterns from './screens/BuildPatterns';
 import Commercial from './screens/Commercial';
+import Executions from './screens/Executions';
 import Registry from './screens/Registry';
 import Settings from './screens/Settings';
 
@@ -32,7 +32,6 @@ export default function App() {
       <Route element={<Layout />}>
         <Route path="/" element={<Overview />} />
         <Route path="/ask-bays" element={<AskBays />} />
-        <Route path="/bays" element={<Bays />} />
         <Route path="/north-star" element={<NorthStar />} />
         <Route path="/research-twin" element={<ResearchTwin />} />
         <Route path="/vfarm" element={<VFarm />} />
@@ -42,6 +41,7 @@ export default function App() {
         <Route path="/build-patterns" element={<BuildPatterns />} />
         <Route path="/commercial" element={<Commercial />} />
         <Route path="/clients" element={<Clients />} />
+        <Route path="/executions" element={<Executions />} />
         <Route path="/registry" element={<Registry />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
