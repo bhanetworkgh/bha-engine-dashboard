@@ -4647,3 +4647,37 @@ Verified:   In the rig: every seventh row deleted from the table by hand, and th
             next quiet poll — "0 read from n8n over 1 page, 0 new" — reported
             "this database holds 3342 — 553 short. Something has not been read."
             No full read, no restart, 45 seconds.
+
+## 2026-09-15 15:00 — Correction: n8n's public API returns no count, so the pass states its own id coverage
+
+Problem:    The check added at 14:45 compares what this database holds with the
+            `count` n8n returns. **The public API does not return one.** The
+            production log at 14:42 reads "This database now holds 4019." with
+            no total beside it, because `reported` came back null. The
+            `count: 3973` I had been comparing against comes from the n8n MCP
+            connector, not from `GET /api/v1/executions` — a different layer,
+            and on the evidence a different scope: its execution list has gaps
+            in the id sequence (3421 then 3427) where the dashboard's walk of
+            the public API found none. The likeliest reading is that the MCP
+            sees a project-scoped subset and the instance API key sees
+            everything, which would make this database **more** complete than
+            the view I was checking it against, not less. Either way, comparing
+            two systems' totals cannot settle it when they may not be looking at
+            the same set.
+
+Fix:        The pass now states a fact it can establish on its own: n8n's
+            execution ids are one increasing sequence, so the span from the
+            oldest id held to the newest says how many executions could exist in
+            that range, and the difference from what is held is how many are
+            missing from it. "holds 4019, ids 1 to 4019 with no gaps" settles the
+            question with one number and no second opinion.
+            The reported-total comparison stays, because it is free and correct
+            where a total is given, but nothing depends on it.
+
+Decision:   This is the same lesson as the replay: a check that quietly does
+            nothing is worse than no check, because it reads as one. The id-span
+            line cannot quietly do nothing — it prints on every pass that logs.
+
+Verified:   In the rig, whose replay has 36 ids deliberately missing: "holds
+            3895, ids 1 to 3931 with 36 of that range not here". The production
+            figure is in the next sync line after this deploy.

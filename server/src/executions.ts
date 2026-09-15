@@ -257,15 +257,30 @@ export async function sync(full = false): Promise<SyncResult> {
     }
   }
 
-  const after = await query<{ open: string; highest: string | null; held: string }>(
+  const after = await query<{ open: string; highest: string | null; lowest: string | null; held: string }>(
     `SELECT count(*) FILTER (WHERE status NOT IN ('success','error','crashed','canceled','unknown'))::text AS open,
             max(execution_id)::text AS highest,
+            min(execution_id)::text AS lowest,
             count(*)::text AS held
        FROM engine_execution_runs`,
   );
   const open = Number(after.rows[0]?.open ?? 0);
   const highest = after.rows[0]?.highest ? Number(after.rows[0].highest) : null;
+  const lowest = after.rows[0]?.lowest ? Number(after.rows[0].lowest) : null;
   const heldNow = Number(after.rows[0]?.held ?? 0);
+
+  /**
+   * How much of n8n's id sequence is here.
+   *
+   * n8n's execution ids are a single increasing sequence, so the span between
+   * the oldest and newest id held says how many executions could exist in that
+   * range, and the difference from what is held is how many are missing from
+   * it — deleted in n8n, or never read. It is a statement this database can
+   * make on its own, without asking a second system for a total and trusting
+   * that both are looking at the same set.
+   */
+  const span = lowest !== null && highest !== null ? highest - lowest + 1 : 0;
+  const gaps = span ? span - heldNow : 0;
 
   /**
    * The pass checking itself against n8n's own total.
@@ -301,7 +316,8 @@ export async function sync(full = false): Promise<SyncResult> {
   const note =
     `${read.executions.length} read from n8n over ${read.pages} page${read.pages === 1 ? '' : 's'}, ` +
     `${inserted} new, ${updated} already held${resolved ? `, ${resolved} that had not finished before now resolved` : ''}${open ? `, ${open} still running` : ''}. ` +
-    `This database now holds ${heldNow}${read.reported === null ? '' : `; n8n reports holding ${read.reported}`}.`;
+    `This database now holds ${heldNow}${lowest !== null && highest !== null ? `, ids ${lowest} to ${highest}${gaps ? ` with ${gaps} of that range not here` : ' with no gaps'}` : ''}` +
+    `${read.reported === null ? '' : `; n8n reports holding ${read.reported}`}.`;
   // Logged when something happened, when a pass is short of n8n, and on every
   // full read — a quiet poll that found nothing new and agrees with n8n has
   // nothing to say and says nothing.
