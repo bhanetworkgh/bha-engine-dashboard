@@ -1,21 +1,26 @@
 /**
  * The n8n public API, read only.
  *
- * One endpoint is used — `GET /api/v1/executions` — and nothing here ever
- * writes. CLAUDE.md section 3 is explicit that workflows are read and never
- * modified, and this client has no method that could.
+ * Two endpoints are read — `GET /api/v1/executions` and `GET /api/v1/workflows`
+ * — and nothing here ever writes. CLAUDE.md section 3 is explicit that
+ * workflows are read and never modified, and this client has no method that
+ * could. The workflows read exists so a workflow with no registry row still
+ * appears under its own name rather than as an opaque id: a workflow must never
+ * be invisible because a registry row is missing.
  *
- * **Why this exists rather than the n8n API being queried from the page.**
- * n8n's execution history does not persist. Read on 15 Sep 2026 the instance
- * held 3,673 executions, the oldest of them from 12 Sep — three days. A
- * monthly chart that asked this API about August would be told, truthfully,
- * that August held nothing, and would draw an empty bar for a month that was
- * in fact busy. So this feeds a snapshot table (see executions.ts) and the
- * pages read that.
+ * **Why the executions are copied into Postgres rather than queried live.**
+ * Not because n8n discards them — that has never been observed here, and this
+ * file used to assert it. The instance's history runs back to 12 Sep 2026
+ * because that is when it was migrated, not because anything expired. The
+ * reason is simpler and does not depend on a retention policy nobody has
+ * confirmed: a chart of the engine's history should not be at the mercy of what
+ * another system decides to keep. Every execution is copied here, keyed on its
+ * own id, so the record survives whatever n8n retains — and if n8n does start
+ * pruning, the rows already here are unaffected.
  *
  * `N8N_API_KEY` is a different credential from `ASK_BAYS_API_KEY`: that one is
- * the header a webhook expects, this one is an instance API key. Without it the
- * snapshot does not run, the pages say so, and nothing is drawn from nothing.
+ * the header a webhook expects, this one is an instance API key. Without it
+ * nothing is ever read, the pages say so, and nothing is drawn from nothing.
  */
 
 /** The instance's REST base. Derived from N8N_BASE_URL so one host is configured once. */
@@ -59,14 +64,23 @@ export interface N8nExecution {
   id: string;
   workflowId: string;
   status: string;
+  /** How it was started — webhook, trigger, integrated, manual, error. Stored, because it says what kind of run it was. */
+  mode?: string | null;
   startedAt: string | null;
   stoppedAt: string | null;
 }
 
+/** One workflow, for the name and nothing else. The registry owns everything else about it. */
+export interface N8nWorkflow {
+  id: string;
+  name: string;
+  active?: boolean;
+}
+
 /**
  * Statuses that mean the execution is over and its outcome will not change.
- * An execution still running is deliberately not counted yet — see the
- * watermark rule in executions.ts.
+ * One that is not terminal is stored with the status it has and read again on a
+ * later pass — the row itself is the list of what still needs resolving.
  */
 export const TERMINAL = new Set(['success', 'error', 'crashed', 'canceled']);
 
@@ -76,8 +90,15 @@ export const FAILED = new Set(['error', 'crashed']);
 const TIMEOUT_MS = 20_000;
 /** n8n allows 250; 200 is its documented maximum for this endpoint. */
 const PAGE = 200;
-/** Enough pages to catch up after a long outage without running forever. */
-const MAX_PAGES = 60;
+/**
+ * Enough pages for a full backfill without running forever.
+ *
+ * The instance held 3,895 executions on 15 Sep 2026, which is 20 pages, and
+ * runs roughly 1,300 a day. 400 pages is 80,000 executions — two months of
+ * history read in one pass — and a walk that hits this ceiling says so rather
+ * than reporting what it managed as though it were everything.
+ */
+const MAX_PAGES = 400;
 
 async function call<T>(path: string, timeoutMs = TIMEOUT_MS): Promise<T> {
   if (!KEY) throw new N8nError(`${N8N_API_VAR} is not set on this server, so n8n could not be asked anything.`, 503);
@@ -123,38 +144,99 @@ export async function execution(id: string): Promise<N8nExecution | null> {
 }
 
 /**
- * Every execution newer than `afterId`, newest first.
+ * Every execution newer than `afterId`, newest first. `afterId` of 0 reads the
+ * whole history the instance holds.
  *
- * The API pages backwards from the newest with a `lastId` cursor, so this walks
- * down until it crosses the watermark and stops. That is what makes the
- * snapshot cheap on every run after the first: a job that ran an hour ago reads
- * one page and stops.
+ * **The page cursor is `cursor`, and carries `nextCursor` verbatim.** The
+ * version of this that shipped on 15 Sep sent it as `lastId`, which the public
+ * API does not accept and silently ignores, so every page of the walk was the
+ * same newest 200 executions. Sixty pages of the same 200 rows is how the live
+ * page came to read 11,760 executions where n8n held 196 for the week, why
+ * failures read nought (the pages holding them were never reached) and why
+ * seven workflows of thirty-one appeared. The bug was invisible because a
+ * counter cheerfully adds the same row twice.
  *
- * Ids are n8n's own sequence and increase, which is what the watermark relies
- * on. Nothing here parses a date to decide what is new.
+ * So this walk now proves it is moving. Every page must contain an id lower
+ * than the lowest seen so far; one that does not is reported as stalled rather
+ * than followed, and the caller says so loudly. Storage is keyed on the
+ * execution id as well, so even a stalled walk cannot inflate a figure — but a
+ * reader that cannot page is a broken reader whether or not it corrupts
+ * anything, and it says so.
  */
-export async function executionsAfter(afterId: number): Promise<{ executions: N8nExecution[]; truncated: boolean }> {
+export interface ExecutionRead {
+  executions: N8nExecution[];
+  /** True where the walk ran out of pages before reaching `afterId` — there is more above it. */
+  truncated: boolean;
+  /** True where a page failed to move below the previous one, which means the cursor is not working. */
+  stalled: boolean;
+  pages: number;
+}
+
+export async function executionsAfter(afterId: number, maxPages = MAX_PAGES): Promise<ExecutionRead> {
   const out: N8nExecution[] = [];
+  const seen = new Set<string>();
   let cursor: string | undefined;
-  for (let page = 0; page < MAX_PAGES; page++) {
+  let lowest = Number.POSITIVE_INFINITY;
+  let pages = 0;
+
+  for (; pages < maxPages; pages++) {
     const q = new URLSearchParams({ limit: String(PAGE) });
-    if (cursor) q.set('lastId', cursor);
+    if (cursor) q.set('cursor', cursor);
     const r = await call<{ data: N8nExecution[]; nextCursor?: string | null }>(`/executions?${q.toString()}`);
     const rows = r.data ?? [];
-    if (rows.length === 0) return { executions: out, truncated: false };
+    if (rows.length === 0) return { executions: out, truncated: false, stalled: false, pages: pages + 1 };
+
     let crossed = false;
+    let advanced = false;
     for (const e of rows) {
-      if (Number(e.id) <= afterId) {
+      const id = Number(e.id);
+      if (id < lowest) {
+        lowest = id;
+        advanced = true;
+      }
+      if (id <= afterId) {
         crossed = true;
         break;
       }
-      out.push(e);
+      // Belt and braces: the same execution twice in one walk is dropped here as
+      // well as being a no-op on the way into the table.
+      if (!seen.has(e.id)) {
+        seen.add(e.id);
+        out.push(e);
+      }
     }
-    if (crossed) return { executions: out, truncated: false };
-    cursor = r.nextCursor ?? rows[rows.length - 1]?.id;
-    if (!cursor) return { executions: out, truncated: false };
+    if (crossed) return { executions: out, truncated: false, stalled: false, pages: pages + 1 };
+    if (!advanced) return { executions: out, truncated: true, stalled: true, pages: pages + 1 };
+
+    cursor = r.nextCursor ?? undefined;
+    if (!cursor) return { executions: out, truncated: false, stalled: false, pages: pages + 1 };
   }
+
   // Ran out of pages before reaching the watermark. The caller still commits
   // what it read — and says so, rather than pretending it saw everything.
-  return { executions: out, truncated: true };
+  return { executions: out, truncated: true, stalled: false, pages };
+}
+
+/**
+ * Every workflow the instance has, for names only.
+ *
+ * Paged the same way and with the same proof of movement, keyed on the id so a
+ * repeated page cannot double anything.
+ */
+export async function workflows(maxPages = 20): Promise<{ workflows: N8nWorkflow[]; truncated: boolean }> {
+  const byId = new Map<string, N8nWorkflow>();
+  let cursor: string | undefined;
+  for (let page = 0; page < maxPages; page++) {
+    const q = new URLSearchParams({ limit: String(PAGE) });
+    if (cursor) q.set('cursor', cursor);
+    const r = await call<{ data: N8nWorkflow[]; nextCursor?: string | null }>(`/workflows?${q.toString()}`);
+    const rows = r.data ?? [];
+    const before = byId.size;
+    for (const w of rows) byId.set(String(w.id), { id: String(w.id), name: String(w.name ?? w.id), active: w.active });
+    cursor = r.nextCursor ?? undefined;
+    // No cursor, an empty page, or a page that added nothing new: done either
+    // way, and never a loop that reads the same page until it runs out of turns.
+    if (!cursor || rows.length === 0 || byId.size === before) return { workflows: [...byId.values()], truncated: false };
+  }
+  return { workflows: [...byId.values()], truncated: true };
 }

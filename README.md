@@ -486,98 +486,123 @@ rows is not a hundred patterns' worth of output that month.
 ### Execution tracking
 
 **One Executions page**, under RECORDS, tabbed by system exactly as the System
-registry is tabbed: **all systems, Bays, North Star, Research Twin** — the three
-that are active. Each tab shows, for the period in view, total executions,
+registry is tabbed: **All systems · Bays · North Star · Research Twin ·
+Unregistered**, plus a tab for any other system the registry has filed a running
+workflow under. Each tab shows, for the period in view, total executions,
 successes, failures, failure rate, average execution time, a per-workflow
-breakdown and **the failing execution ids**, so a failure opens directly in n8n.
+breakdown, and every individual execution behind it.
 
-It replaces the per-system execution sections and the Bays page that carried
-them for a day. Executions are one question asked of every workflow in the
-engine, and answering it meant opening three pages and holding three numbers in
-your head; a workflow still belongs to exactly one system, which is what the
-tabs are for. Bays's *output* keeps its own pages — Codex entries, Open loops,
-Build patterns, Commercial — and is linked, never copied.
+**Weekly, monthly and yearly**, from the same rows. Selecting a period on the
+chart moves every figure, the workflow table, the comparison and the export with
+it.
 
-**Weekly, monthly and yearly.** One segmented control, and every figure on the
-page follows it. Weeks are ISO weeks, Monday to Sunday; months and years are
-calendar. Yearly holds one bar and no comparison until this database has two
-years in it, which it says rather than drawing an empty one.
+#### One row per execution, not a counter
 
-#### Comparing to the period before
+`engine_execution_runs` holds one row per n8n execution, keyed on **n8n's own
+execution id**: workflow, status, mode, start, end and duration. Every figure on
+the page is a `GROUP BY` over those rows.
 
-The point of the three grains: *failures are down 20% on last week*. Each
-period prints its deltas against the one before it — executions, successes,
-failures, failure rate and average execution time — with the direction that is
-*better* marked, so a fall in failures and a rise in successes both read as
-good.
+This replaced two counter tables on 15 Sep 2026, and it replaced them because
+the counters were the fault rather than the arithmetic. The live page shipped
+that morning was wrong three ways at once:
 
-Two rules keep the comparison honest, and both were bugs first:
+- every per-workflow figure was an exact multiple of 60 — 5820, 1620, 1500 —
+  and the headline read 11,760 where n8n held 196 for the week;
+- failures read **0** when n8n held 51;
+- **7 workflows of 31** appeared, and the North Star tab was empty.
+
+One bug caused all three. The reader paged with `lastId`, which the n8n public
+API does not accept and silently ignores — it pages on an opaque `cursor` — so
+each of its sixty pages was the same newest 200 executions, counted again every
+time. 196 × 60 = 11,760; the failures were all older than those 200; so were 24
+of the workflows. A counter cannot notice it is being told the same execution
+twice.
+
+Keyed on the execution id, none of that is expressible. Re-reading a page is an
+upsert that changes nothing, so **the backfill is safe to run at any time**, and
+a failure is a row whose status says `error` or `crashed` or it is not there.
+The reader also now proves it is moving: a page that does not come back older
+than the one before it stops the walk and is reported, loudly, rather than
+followed.
+
+Volume is not a concern — roughly 1,300 executions a day, about 40k rows a
+month. `engine_execution_days` and `engine_executions` are left in place and
+unread, like the `records` read model; nothing here drops a table.
+
+#### Why the rows are copied here at all
+
+Not because n8n discards them. This repo asserted that on 15 Sep — "about three
+days and then discards it" — and it was never verified. The instance's history
+begins on 12 Sep 2026 because that is when it was migrated, and no execution has
+been observed ageing off.
+
+The reason is simpler and does not depend on a retention policy nobody has
+confirmed: a record of the engine's history should not be at the mercy of what
+another system decides to keep, and a period cannot be grouped, drilled into or
+exported from an API that only answers about recent runs. What is copied here
+stays here. The page says what this database holds and from when, and claims
+nothing about n8n's retention.
+
+#### A poll, and it says so
+
+n8n has no webhook for a finished execution, so the server asks every **45
+seconds** for what is above the highest id it holds, and the page re-reads on
+the same interval. It is never described as live, in the subtitle or anywhere
+else.
+
+The alternative — a reporting node added to each workflow — was rejected: a
+workflow somebody forgets to instrument becomes a silent gap, which is the
+failure this dashboard exists to remove. Nothing in this server can write to
+n8n in any case.
+
+An execution read while it is still running is stored with that status and read
+again by id until it finishes. The row is its own to-do list, so there is no
+second list of ids to keep in step with it, and an execution n8n no longer holds
+is marked `unknown` rather than guessed at.
+
+#### Per workflow, and per execution
+
+Clicking a workflow opens its own view for the period: its executions day by
+day, and then the runs themselves — id, start time, duration, how it ran, how it
+ended — with failures called out and each id opening in n8n. This is the
+capability the counter tables could not support at all.
+
+#### The period in words, and the report
+
+Above the figures, the comparison in prose: "executions up 12%, failures down
+40%, average run time 3% faster". Written on the server so the page and the
+downloaded report cannot word the same comparison differently.
+
+The report downloads per week, per month or per year and carries the figures on
+screen, the per-workflow breakdown and every period held. Because a report is
+kept after the page is closed, every caveat is inside the file: the coverage of
+the period, the comparison in full, and the refusal where there is nothing
+honest to compare against. A period with no coverage carries blank cells, never
+zeros.
+
+The honesty rules are unchanged and matter more in prose, which reads as
+authoritative:
 
 - **A running period is cut to the same elapsed point.** Three days into a
-  month, the comparison is against the previous month's first three days, not
-  its whole. Otherwise every period reads catastrophic until the last day of
-  it.
-- **A comparison whose window predates counting is refused, by name.** Counting
-  began on a date this database knows (`meta.executions.since_day`). If the
-  period being compared against falls before it, the page does not print a
-  delta against a number it does not have — it says that those days were not
-  quiet, they were not recorded. A change measured against nought prints both
-  figures rather than an infinity.
+  month, against the previous month's first three days.
+- **A comparison whose window predates everything held is refused, by name.**
+  Not "0 → 890" — instead, that those days were not quiet, they were not
+  recorded.
+- **A change from nought prints both figures**, because a ratio against nought
+  has no meaning.
 
-#### Average execution time
+#### Systems, and nothing invisible
 
-Stored as **a sum and a count, never an average**: an execution that finished
-adds its duration and one to the count, and the mean over any span is that sum
-over that count. Averaging a week's averages would weight a quiet Sunday the
-same as a busy Tuesday. An execution still running contributes neither, so the
-average is of executions that actually finished.
-
-#### Why it is snapshotted rather than queried
-
-**n8n's execution history does not persist.** Read on 15 Sep 2026 the instance
-held 3,673 executions and none older than 12 Sep — three days. A monthly view
-that queried the API live would be told, honestly, that August held nothing, and
-would draw a clean past that is only missing data. That is the exact failure
-this dashboard exists to prevent.
-
-So a job snapshots counts into `engine_execution_days` hourly and the page reads
-that table. Nothing prunes it. **The grain is a day**, one row per workflow per
-day: a month can be divided into weeks after the fact and a week cannot be
-divided out of a month, so the finest grain n8n's own timestamps support is the
-one stored. (The old monthly table, `engine_executions`, is left in place and
-unread, like the `records` read model — nothing here drops a table. The reset
-cost nothing: n8n holds three days, so everything the monthly table knew was
-re-read within a day of the change.)
-
-The counts are **accumulated forward, never recomputed**: each pass reads only
-executions above a watermark and adds them, so a day whose executions have since
-aged out of n8n keeps the count it had when they existed. The current period is
-allowed to be fresher — a page read refreshes the snapshot when it is more than
-five minutes old, which runs the same accumulating pass rather than a second,
-divergent live path.
-
-An execution still running when a pass goes by is **not** counted, and its id
-goes on a deferred list to be resolved individually later. The obvious
-alternative — holding the watermark below it — is wrong twice over: everything
-above it is counted again on every pass (a September total of 2 read 4 after two
-passes with nothing new), and one execution parked on a Wait node would freeze
-all counting behind it. One that ages out of n8n before finishing is dropped and
-never counted, because nothing knows how it ended.
-
-Which system a workflow belongs to comes from the **workflow registry**, which
-already holds one row per workflow with its `system`. Pointing a new workflow at
-a system is a registry edit, not a deploy. A workflow n8n reports that no
-registry row names is counted and listed on Engine health as unregistered,
-rather than filed under a guess.
+A workflow's system comes from the **workflow registry, by join at read time**,
+so pointing a workflow at a system is a registry edit that re-files its whole
+history rather than only its future — a row, not a deploy. A workflow no
+registry row claims is counted in All systems and listed under **Unregistered**;
+one filed under a system with no tab of its own gets a tab. The tabs sum to All
+systems exactly, which is how you can see that nothing has been dropped.
 
 **Engine health keeps a roll-up only**: one figure per system for the current
 week and a link through. It answers "is something failing somewhere"; the
-Executions page answers "what, and which". The per-workflow detail is
-deliberately not repeated there.
-
-Whichever period the job first ran in is partial by construction, and that
-boundary is labelled on every execution chart exactly as the record pages label
-theirs.
+Executions page answers "what, and which".
 
 ### The migration backfill
 
@@ -597,7 +622,7 @@ Airtable; those rows are in `git log` if it is ever needed again.
 | `AIRTABLE_TOKEN` | Read **and** write on Open Loops and BHA Submissions, for loop and Codex edits; read on Build Patterns (`app5ni3E8r7Lvxk22`), Commercial Opportunities (`appvLglfdCqOKqLpT`) and BHA Client Research Loop (`appkSUSh9ijNjP2f8`), for the resync those three pages gained on 15 Sep. Five bases, one token; nothing is ever written to the last three. Without it nothing edited here reaches Airtable and no page can resync; the server says so at boot and on every write. **Note the name** — the client deleted on 13 Sep read `AIRTABLE_API_KEY` |
 | `AIRTABLE_OPEN_LOOPS_BASE_ID` | The Open Loops base (`appUVlBSGGPHw6DGh`). **No default** — unset, the boot line says so by name and every loop edit is refused and marked. Called `AIRTABLE_BASE_ID` until 14 Sep 2026; that name is read by nothing |
 | `AIRTABLE_SUBMISSIONS_BASE_ID` | BHA Submissions, for Codex entries. Defaults to `appEmdKshNVTl64Zf` |
-| `N8N_API_KEY` | The n8n **instance API key**, for the execution snapshot. Read only — one endpoint, `GET /api/v1/executions`. Not the same credential as `ASK_BAYS_API_KEY`, which is a webhook header. Without it no execution is counted and the system pages say so rather than reading zero |
+| `N8N_API_KEY` | The n8n **instance API key**, for the Executions page. Read only — two endpoints, `GET /api/v1/executions` and `GET /api/v1/workflows` (names only, so a workflow with no registry row still appears under its own name). Not the same credential as `ASK_BAYS_API_KEY`, which is a webhook header. Without it no execution is ever read and the page says so rather than reading zero |
 | `N8N_API_URL` | Defaults to `N8N_BASE_URL` + `/api/v1`. Points the same client at a replay in a sandbox |
 | `AIRTABLE_API_URL` | Points the same client at a local replay of the API in a sandbox |
 | `DATABASE_URL` | Postgres. **Required** — the server exits if it is missing or unreachable |
@@ -628,7 +653,7 @@ is missing, and the note is what the page shows.
 | Build patterns | Every pattern, by reusability. No `pattern_status` — the field was deleted from the base on 15 Sep |
 | Commercial | One sortable table of opportunity cards, closest to ready first. Nothing on it groups the corpus: every candidate axis is constant or 1:1 with the card |
 | Clients | Watched client lanes grouped under the client that owns them, ordered by `Client ID` |
-| Executions | Every execution of every workflow, tabbed by system, weekly / monthly / yearly, against the period before |
+| Executions | Every execution of every workflow, one row each, tabbed by system, weekly / monthly / yearly, against the period before, with a per-workflow drill-down and a downloadable report |
 | System registry | Builders, Tools, Endpoint, Workflow, and the engine-writes surface |
 
 ## Repo layout
@@ -677,8 +702,8 @@ server/
     ask.ts            Proxy to the Bays workflow; attaches the API key server-side.
     engine.ts         Every read, derived from fixtures and the store.
     store.ts          Records with status, the events/observation history, and metrics.
-    executions.ts     The hourly n8n snapshot into engine_execution_days, and the page's periods and comparisons.
-    n8n.ts            Read-only n8n client — one endpoint, GET /api/v1/executions.
+    executions.ts     The 45s poll into engine_execution_runs, and the page's periods, comparisons and drill-down.
+    n8n.ts            Read-only n8n client — GET /api/v1/executions and /workflows, paged on cursor.
     pg.ts             The connection pool, TLS, and the startup check that refuses to serve without it.
     migrations.ts     Forward-only numbered migrations, run on boot under an advisory lock.
     db.ts             The meta key/value state and the date helpers.
@@ -783,9 +808,11 @@ evidence thin · ready to pitch · blocked · closed`.
 **Reads.** `GET /api/{overview, engine-status, north-star, research-twin,
 vfarm, engine-health, open-loops, codex, build-patterns, commercial, builders,
 builders/:id, ask-bays}?lane=` return the shapes in `src/data/types.ts`.
-`GET /api/executions?grain={week|month|year}` returns the Executions page —
-every system, every period held, and each period's comparison with the one
-before it.
+`GET /api/executions?grain={week|month|year}&period=` returns the Executions
+page — every system, every period held, and the selected period's workflows and
+comparison. `GET /api/executions/workflow/:id` returns one workflow's days and
+its individual runs. `POST /api/executions/backfill` reads n8n's whole history
+again; it is idempotent, because every row is keyed on the execution id.
 `GET /api/status` reports what is configured, without values.
 
 ## Deployment

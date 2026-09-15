@@ -69,14 +69,14 @@ services:
       # deleted.
       - key: DASHBOARD_INBOUND_KEY
         generateValue: true
-      # The n8n instance API key, for the execution snapshot (15 Sep 2026).
-      # READ ONLY: the one endpoint used is GET /api/v1/executions and nothing
-      # here can write to n8n.
+      # The n8n instance API key, for the Executions page (15 Sep 2026).
+      # READ ONLY: the two endpoints used are GET /api/v1/executions and
+      # GET /api/v1/workflows (names only) and nothing here can write to n8n.
       #
       # A different credential from ASK_BAYS_API_KEY — that is a webhook header,
       # this is an instance API key from Settings → n8n API. Without it no
-      # execution is counted, and the Bays, North Star, Research Twin and Engine
-      # health pages say so rather than reading zero.
+      # execution is ever read, and the Executions and Engine health pages say
+      # so rather than reading zero.
       #
       # It exists because n8n's execution history does not persist: on 15 Sep
       # 2026 the instance held 3,673 executions and none older than the 12th, so

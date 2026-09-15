@@ -4421,3 +4421,157 @@ Not done:   The first production snapshot after this deploy stamps the coverage
             the real instance.
             The Engine Registry's clipped Workflow column, reported at 11:55, is
             still reported and still not fixed.
+
+## 2026-09-15 14:30 — Executions: store the executions, delete the counters
+
+Intent:     Destiny, after seeing the live page: every number on it is wrong,
+            and the fix is the storage model rather than the arithmetic —
+            "Do not start by fixing the counters. They are being deleted."
+            One row per n8n execution id, a backfill of everything n8n holds, a
+            30–60 second poll, an unregistered bucket beside the three systems,
+            a per-workflow drill-down, the period comparison in prose, and
+            downloadable reports. And one factual correction: stop asserting a
+            retention window nobody has confirmed.
+
+Files:      server/src/migrations.ts       migration 11, engine_execution_runs
+            server/src/n8n.ts              the paging fix, /workflows, the stall guard
+            server/src/executions.ts       rewritten against rows
+            server/src/index.ts            ?period=, /workflow/:id, /backfill, the poll
+            src/data/types.ts, src/data/index.ts, src/app/useData.ts
+            src/lib/executionReport.ts (new), src/lib/csv.ts
+            src/screens/Executions/index.tsx, src/screens/EngineHealth/index.tsx
+            CLAUDE.md, README.md, render.yaml, .env.example
+            /var/tmp/bharig/n8nreplay.mjs  (the rig, and the reason all this shipped)
+
+Problem:    **One bug produced all three faults, and the evidence in the brief
+            pinned it exactly.** `server/src/n8n.ts` walked the executions list
+            with `?limit=200&lastId=<cursor>`. The n8n public API does not accept
+            `lastId` — it pages on an opaque `cursor` — so it ignored the
+            parameter and returned the newest 200 executions every time. The
+            walk ran its full 60-page ceiling, pushing the same 200 rows 60
+            times, and the counter table faithfully **added** them:
+
+              196 executions in the week × 60 = 11,760, the headline on screen.
+              Per workflow: 97, 27, 25, 24, 17, 4, 2 × 60 = 5820, 1620, 1500,
+              1440, 1020, 240, 120 — the exact multiples of 60 Destiny spotted.
+              12,000 − 240 (4 still running × 60, correctly set aside) = 11,760.
+
+            Failures read 0 because the newest 200 ids were 3702–3902 and both
+            errors (3396, 3413) are below that — the pages holding them were
+            never reached. 7 workflows of 31 for the same reason. And the
+            "11760 of 11760 runs recorded an end" caption beside "4 still
+            running" was the same multiplication applied to the duration count.
+
+Fix:        `cursor`, carrying `nextCursor` verbatim. And because a reader that
+            cannot page is broken whether or not it corrupts anything, the walk
+            now proves it is moving: every page must contain an id lower than
+            the lowest seen so far, and one that does not stops the walk and is
+            reported as stalled rather than followed.
+
+Problem:    **The rig shared the bug it existed to catch.** `n8nreplay.mjs`
+            paged on `lastId`, because the client did. Every test passed against
+            a stand-in that implemented the client's assumption. This is the
+            same failure CLAUDE.md already records for the Airtable replay on
+            14 Sep — "the replay used for testing must refuse exactly what
+            Airtable refuses" — repeated verbatim with n8n eight hours later.
+Fix:        The replay now ignores `lastId` exactly as n8n ignores it, and pages
+            on an opaque base64 `cursor` that cannot be mistaken for an id. A
+            `ignoreCursor` flag reproduces a cursor the server does not honour,
+            which is what the stall guard is tested against.
+
+Decision:   **Counters are gone; the rows are the record.** Migration 11 creates
+            `engine_execution_runs`, primary key `execution_id`, carrying
+            workflow, status, mode, start, end and duration. Every figure is a
+            GROUP BY. Nothing accumulates, there is no watermark arithmetic, and
+            a re-read is an upsert — so the backfill is safe to run at any time,
+            which is now a button on the page. `engine_execution_days` and
+            `engine_executions` are left in place unread; nothing here drops a
+            table.
+Decision:   **No `system` column.** The system comes from `registry_workflows`
+            by join at read time, so pointing a workflow at a system re-files its
+            whole history rather than only its future. The old table copied the
+            system onto each row, which froze yesterday's answer into yesterday's
+            rows.
+Decision:   **Duration is null where a run recorded no end, never nought.** A run
+            of unknown length and a run of no length are different facts, and an
+            average must not be dragged down by the first.
+Decision:   **The failure rate is over finished runs**, not over every row. An
+            execution still running has neither failed nor succeeded, and putting
+            it in the denominator would report a lower failure rate the busier
+            the moment.
+Decision:   **Unregistered is a tab, and so is any other system the registry
+            names.** The rig turned up a case the brief did not: one workflow is
+            filed under `vFarm`, which had no tab, so its executions were in the
+            All systems total and under no tab at all — invisible for the same
+            reason an unregistered one was. Tabs are now the three known systems,
+            every other system present in the data, and Unregistered. They sum to
+            All systems exactly, which is how you can see nothing was dropped.
+Decision:   **The poll is 45 seconds and the page says so** — in the subtitle, in
+            the card note and in a line at the foot. Nothing is described as
+            live. No reporting node was added to any workflow: a workflow
+            somebody forgets to instrument is a silent gap, which is the failure
+            this dashboard exists to remove.
+Decision:   **An execution still running is a row, not a list entry.** It is
+            stored with its real status and re-read by id until it finishes, so
+            the row is its own to-do list and there is no deferred-id list to
+            keep in step with the table. One n8n no longer holds becomes
+            `unknown`, which is what it is.
+Decision:   **The retention claim comes off, everywhere.** The page, the client,
+            CLAUDE.md and the README all said n8n keeps about three days and
+            discards the rest. Never verified, and not true as stated: the
+            history begins on 12 Sep because that is when the instance was
+            migrated. What they say now is that the rows are copied here so the
+            record does not depend on another system's retention policy, and
+            what this database holds and from when.
+Decision:   **The prose comparison is generated on the server**, not on the page,
+            so the screen and the downloaded report cannot word the same
+            comparison differently. The report carries every caveat inside the
+            file — coverage, the comparison in full, the refusal where there is
+            nothing honest to compare against — because a report is read after
+            the page is closed.
+
+Verified:   Against real Postgres 16 and a replay seeded to the live instance's
+            exact shape: 31 workflows, 3,895 executions, ids to 3931 with gaps,
+            oldest 12 Sep, 51 failures at the live ids, 3 canceled, 4 running.
+            Verification targets from the brief, first pass, from an empty
+            database:
+            - 3,895 rows stored, read over **20 pages** (not 60 of the same one).
+            - highest execution id 3931; oldest day 2026-09-12; newest today.
+            - 31 distinct workflows.
+            - 51 failures — 49 error, 2 crashed — matching n8n exactly.
+            - 3,837 success + 51 failed + 3 canceled + 4 running = 3,895.
+            - **Three further full backfills left the table at 3,895 rows.**
+              That is the ×60 regression test: under the old design each pass
+              added another copy.
+            - the stall guard: with a cursor the server ignores — the old
+              `lastId` condition exactly — the walk stops after 2 pages, stores
+              200 unique rows rather than 12,000, and says "n8n's paging did not
+              advance".
+            - the poll picked up two new executions within 25s over one page,
+              and resolved a running one by id 35s later: status running with a
+              null duration became success with its real duration, and the total
+              stayed put.
+            - tabs sum: All 2113 = Bays 1143 + North Star 351 + Research Twin 483
+              + vFarm 71 + Unregistered 65. Weeks sum to the whole: 1054 + 1278 +
+              1274 + 289 = 3,895. Aug 1236 + Sep 2659 = 3,895.
+            - comparisons: a past whole period reads "Against 31 Aug (2026-08-31
+              to 2026-09-06): executions down 0.3%, successes down 0.8%, failures
+              up 400%, the failure rate up 0.6 points, average run time 0.2%
+              faster"; the running week reads "Against the same point of 7 Sep
+              (its first 2 days …)"; a window before the oldest row held is
+              refused by name in all three grains.
+            - the drill-down lists a workflow's days and its individual runs with
+              id, start, duration, mode and outcome, each id linking into n8n.
+            - the report downloaded as `executions-all-systems-2026-W37.csv`,
+              4,444 bytes, carrying the period, the coverage, the prose, the
+              per-workflow rows and every period held.
+            In Chromium at 1440 and 400, every tab, all three grains, a past
+            period selected, the drill-down opened: no page errors, no
+            horizontal overflow. `npm run typecheck && npm run build` clean.
+
+Not done:   The figures above are the rig's, against a replay shaped like the
+            live instance. The production backfill runs on this deploy and its
+            own figures are in the Render log and on the page's own line
+            ("3,895 executions held, from 2026-09-12 · newest id 3931").
+            The Engine Registry's clipped Workflow column, reported at 11:55 and
+            again at 13:40, is still reported and still not fixed.

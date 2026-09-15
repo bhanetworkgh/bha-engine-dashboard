@@ -29,6 +29,11 @@ function cell(v: string | number | boolean | null | undefined): string {
   return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
+/** One row of arbitrary cells, escaped the same way. For a report that is not one flat table. */
+export function csvRow(values: (string | number | boolean | null | undefined)[]): string {
+  return values.map(cell).join(',');
+}
+
 export function toCsv<T>(rows: T[], columns: CsvColumn<T>[]): string {
   const head = columns.map((c) => cell(c.header)).join(',');
   const body = rows.map((r) => columns.map((c) => cell(c.value(r))).join(','));

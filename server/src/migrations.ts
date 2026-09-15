@@ -747,6 +747,68 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_execution_days_system ON engine_execution_days (system, day DESC)`,
     ],
   },
+  {
+    id: 11,
+    name: 'executions are stored one row per execution, not as counters',
+    statements: [
+      /**
+       * **One row per n8n execution, keyed on n8n's own id.**
+       *
+       * The two tables before this one stored counters — a month's total, then
+       * a day's total — and every fault the live page shipped with was a fault
+       * of counter arithmetic rather than of the figures themselves. Counts
+       * read exactly sixty times what n8n held, because a paging bug re-read
+       * the same page sixty times and each pass *added* to the running total.
+       * Failures read nought, because the pages that held them were never
+       * reached. Seven workflows of thirty-one appeared, for the same reason.
+       * None of those can exist here: re-reading an execution is an upsert on
+       * its primary key, so a second read changes nothing, a tenth changes
+       * nothing, and a figure is a `count(*)` over rows that either exist or
+       * do not.
+       *
+       * It also makes a per-workflow drill-down possible at all — individual
+       * ids, start times and durations — which a counter cannot answer however
+       * carefully it is kept.
+       *
+       * **No `system` column.** A workflow's system comes from the workflow
+       * registry at read time, so re-pointing a workflow at a system is a
+       * registry edit that re-files its whole history. Copying the system onto
+       * each row would have frozen yesterday's answer into yesterday's rows.
+       *
+       * `status` is n8n's own word, kept verbatim: success, error, crashed,
+       * canceled, running, waiting, new. An execution read while it is still
+       * running is stored with that status and re-read later — the row is the
+       * to-do list, so nothing needs a separate list of ids to come back to.
+       *
+       * `duration_ms` is null where the execution recorded no end, never nought:
+       * a run of unknown length and a run of no length are different facts.
+       *
+       * Volume is not a concern. The instance runs roughly 1,300 executions a
+       * day — about 40k rows a month, under half a million a year.
+       *
+       * `engine_execution_days` and `engine_executions` are left in place and
+       * unread, like the `records` read model. Nothing here drops a table.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_execution_runs (
+         execution_id  bigint PRIMARY KEY,
+         workflow_id   text NOT NULL,
+         workflow_name text,
+         status        text NOT NULL,
+         mode          text,
+         day           text NOT NULL,
+         started_at    text NOT NULL,
+         stopped_at    text,
+         duration_ms   bigint,
+         first_seen_at text NOT NULL,
+         updated_at    text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_execution_runs_day ON engine_execution_runs (day DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_execution_runs_workflow ON engine_execution_runs (workflow_id, day DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_execution_runs_status ON engine_execution_runs (status)`,
+      /** The poll asks for these every pass: the runs that have not finished yet. */
+      `CREATE INDEX IF NOT EXISTS engine_execution_runs_open ON engine_execution_runs (execution_id) WHERE status NOT IN ('success','error','crashed','canceled')`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

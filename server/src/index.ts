@@ -482,21 +482,42 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   }
 
   /**
-   * Execution health, read from the snapshot table and never from n8n's own
-   * history for a past month — n8n keeps about three days of it and then
-   * discards it, so a live query would report a clean past that is only
-   * missing data.
+   * Executions, read from the rows this database holds rather than from n8n.
    *
-   * The current, in-progress month is allowed to be fresher than the last
-   * scheduled pass, so a read refreshes the snapshot when it has gone stale.
-   * That keeps one read path rather than a live one and a stored one that can
-   * disagree.
+   * Not because n8n discards them — that has never been observed, and the page
+   * no longer says it does. The rows are here so the record does not depend on
+   * another system's retention policy, and so a period can be grouped, drilled
+   * into and exported without asking n8n anything.
+   *
+   * Nothing is refreshed on the way through: the poll runs every 45 seconds of
+   * its own accord, and the page says when it last ran. A read that triggered a
+   * write would make every page load a load test on n8n.
    */
   if (p === '/api/executions' && method === 'GET') {
-    await executions.refreshIfStale();
     const grain = url.searchParams.get('grain') ?? 'week';
     if (!executions.isGrain(grain)) throw new HttpError(400, 'grain must be week, month or year.');
-    return send(res, 200, await executions.read(grain));
+    return send(res, 200, await executions.read(grain, url.searchParams.get('period') ?? undefined));
+  }
+
+  /** One workflow opened up: its days inside the period, and its individual runs. */
+  const execWorkflow = p.match(/^\/api\/executions\/workflow\/([^/]+)$/);
+  if (execWorkflow && method === 'GET') {
+    const grain = url.searchParams.get('grain') ?? 'week';
+    if (!executions.isGrain(grain)) throw new HttpError(400, 'grain must be week, month or year.');
+    const detail = await executions.workflow(decodeURIComponent(execWorkflow[1]), grain, url.searchParams.get('period') ?? undefined);
+    if (!detail) throw new HttpError(404, 'No execution of that workflow has ever been read.');
+    return send(res, 200, detail);
+  }
+
+  /**
+   * Read the whole history again, by hand.
+   *
+   * Idempotent, because every row is keyed on n8n's own execution id: it inserts
+   * what is missing, updates what changed and touches nothing else. Manual, like
+   * the four record resyncs — the poll keeps the page current on its own.
+   */
+  if (p === '/api/executions/backfill' && method === 'POST') {
+    return send(res, 200, await executions.runSync(true));
   }
 
   const codexDelete = p.match(/^\/api\/codex\/([^/]+)$/);
@@ -714,15 +735,15 @@ async function boot(): Promise<void> {
     // written down, because nothing upstream keeps that history.
     console.log(
       n8nConfigured()
-        ? `  n8n:      ${n8nBase()} (${N8N_API_VAR} set) \u2014 execution counts snapshot every ${Math.round(executions.SNAPSHOT_EVERY_MS / 60_000)} min`
-        : `  n8n:      NOT configured \u2014 ${N8N_API_VAR} is not set, so no execution is counted and the system pages say so rather than reading zero.`,
+        ? `  n8n:      ${n8nBase()} (${N8N_API_VAR} set) \u2014 executions polled every ${Math.round(executions.POLL_EVERY_MS / 1000)}s, one row per execution`
+        : `  n8n:      NOT configured \u2014 ${N8N_API_VAR} is not set, so no execution is ever read and the Executions page says so rather than reading zero.`,
     );
     // Rows are read straight out of the engine tables, so there is nothing to
     // load at boot. What does run is the ledger catch-up: any status that
     // changed in the database while this process was not running has to be
     // written down, because nothing upstream keeps that history.
     void catchUp();
-    executions.startSnapshots();
+    executions.startPolling();
   });
 }
 

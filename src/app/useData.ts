@@ -11,8 +11,15 @@ type State<T> =
  * Calls a data-module function with the current global lane filter and tracks
  * loading and failure. Components use this rather than calling the data module
  * directly, so when the module starts making real requests nothing else moves.
+ *
+ * `refreshMs` re-reads on an interval **without** dropping back to the loading
+ * state: the page keeps what it has until the new answer arrives, so a screen
+ * left open does not flash every time it refreshes. A refresh that fails leaves
+ * the last good answer on screen rather than replacing a working page with an
+ * error — the reader can see it has gone stale, because every page that
+ * refreshes prints when its data was last read.
  */
-export function useData<T>(fn: (q: Query) => Promise<T>, deps: unknown[] = []): State<T> {
+export function useData<T>(fn: (q: Query) => Promise<T>, deps: unknown[] = [], refreshMs?: number): State<T> {
   const { lane } = useSession();
   const [state, setState] = useState<State<T>>({ status: 'loading', data: null, error: null });
 
@@ -31,11 +38,22 @@ export function useData<T>(fn: (q: Query) => Promise<T>, deps: unknown[] = []): 
             error: e instanceof Error ? e.message : 'Request failed',
           });
       });
+    const timer = refreshMs
+      ? setInterval(() => {
+          fn({ lane })
+            .then((data) => {
+              if (live) setState({ status: 'ready', data, error: null });
+            })
+            .catch(() => undefined);
+        }, refreshMs)
+      : null;
+
     return () => {
       live = false;
+      if (timer) clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lane, ...deps]);
+  }, [lane, refreshMs, ...deps]);
 
   return state;
 }

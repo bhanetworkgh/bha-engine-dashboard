@@ -1624,25 +1624,50 @@ export interface MonthlySeries {
 /* ------------------------------------------------------ execution tracking */
 
 /**
- * One workflow's executions inside one period, as the snapshot holds them.
+ * Executions are stored **one row per execution**, keyed on n8n's own id, and
+ * every figure below is a query over those rows rather than a counter kept
+ * alongside them (decision 2026-09-15, Destiny — the second one that day).
  *
- * Never read live for a past period: n8n's execution history ages off, so a
- * live query would show a clean past that is only missing data. The snapshot
- * job accumulates these forward, one row per day per workflow, and nothing
- * prunes them.
+ * The counters that came first were wrong on the live page in three ways at
+ * once — every total sixty times what n8n held, failures at nought, seven
+ * workflows of thirty-one — and all three were one paging bug being added up
+ * repeatedly. None of them is expressible against rows: re-reading an execution
+ * is an upsert on its primary key, and a failure is a row whose status says so.
+ *
+ * The rows are copied out of n8n so the record does not depend on another
+ * system's retention policy. Nothing here asserts what that policy is: the
+ * instance's history begins on 12 Sep 2026 because that is when it was
+ * migrated, and no execution has been observed ageing off.
  */
-export interface ExecutionWorkflow {
+
+/** Everything every execution figure carries, whether it is a period, a system or one workflow. */
+export interface ExecutionTotals {
+  executions: number;
+  succeeded: number;
+  failed: number;
+  /** A person stopping a run is not a fault, so it is counted apart from failures. */
+  canceled: number;
+  /** Still running, or waiting. Not yet a success and not yet a failure. */
+  unfinished: number;
+  /** succeeded + failed + canceled — the denominator the failure rate uses. */
+  finished: number;
+  /** Failures over finished runs. Null where nothing has finished. */
+  failure_rate: number | null;
+  /** Mean wall-clock time in milliseconds, over `timed` runs. Null where none recorded an end. */
+  avg_ms: number | null;
+  /** How many runs carried both a start and an end, so the mean can be checked. */
+  timed: number;
+}
+
+/** One workflow's executions inside the period in view. */
+export interface ExecutionWorkflow extends ExecutionTotals {
   workflow_id: string;
   workflow_name: string;
-  /** From the workflow registry. Null where n8n reports a workflow no row names. */
+  /** From the workflow registry, by join at read time. Null where no row claims it. */
   system: string | null;
-  executions: number;
-  failures: number;
-  /** Mean wall-clock time, in milliseconds. Null where no execution recorded an end. */
-  avg_ms: number | null;
-  /** How many executions carried both a start and an end, so the mean can be checked. */
-  timed: number;
-  /** The failing execution ids, so each one opens in n8n. */
+  /** Whether a registry row names this workflow at all. */
+  registered: boolean;
+  /** The failing execution ids, newest first, so each one opens in n8n. */
   failed_ids: string[];
   n8n_url: string | null;
 }
@@ -1651,18 +1676,12 @@ export interface ExecutionWorkflow {
 export type ExecutionGrain = 'week' | 'month' | 'year';
 
 /** One period's totals. `key` is 2026-W38, 2026-09 or 2026, by grain. */
-export interface ExecutionPeriod {
+export interface ExecutionPeriod extends ExecutionTotals {
   key: string;
   label: string;
   /** Inclusive, YYYY-MM-DD. */
   start: string;
   end: string;
-  executions: number;
-  successes: number;
-  failures: number;
-  failure_rate: number | null;
-  avg_ms: number | null;
-  timed: number;
   coverage: MonthCoverage;
   note: string | null;
   /** True for the period that has not finished yet. */
@@ -1696,44 +1715,110 @@ export interface ExecutionComparison {
   failure_rate: ExecutionDelta | null;
   avg_ms: ExecutionDelta | null;
   /**
-   * True when the current period is still running and the previous one was cut
-   * to the same elapsed point, so the totals are comparable. False when the
-   * comparison is whole period against whole period.
+   * True when the period in view is still running and the previous one was cut
+   * to the same elapsed point, so the totals are comparable.
    */
   like_for_like: boolean;
+  /** False where the window being compared against predates everything held, and no delta is given. */
+  covered: boolean;
+  /**
+   * The comparison in words — "executions up 12%, failures down 40%, average
+   * run time 3% faster". Written on the server so the page and the downloaded
+   * report cannot word the same comparison differently.
+   */
+  prose: string;
+  /** What the comparison is against, and why it is cut or refused. */
   note: string;
 }
 
-/** One system's execution health at one grain. */
-export interface ExecutionSystem {
-  /** The registry's own `system` value, which is the join key. `all` is every system together. */
+/** One system's executions at one grain. `all` is every system together. */
+export interface ExecutionSystem extends ExecutionTotals {
+  /** The registry's own `system` value, which is the join key. `unregistered` is everything no row claims. */
   system: string;
   /** What the page calls it — "North Star", not "North Star Twin". */
   label: string;
   periods: ExecutionPeriod[];
-  /** The period `workflows` and `comparison` describe: the newest with anything in it. */
-  period: string;
+  /** The period in view, which every figure on the page follows. */
+  period: ExecutionPeriod;
   workflows: ExecutionWorkflow[];
-  executions: number;
-  successes: number;
-  failures: number;
-  failure_rate: number | null;
-  avg_ms: number | null;
-  timed: number;
-  comparison: ExecutionComparison | null;
+  comparison: ExecutionComparison;
 }
 
 export interface ExecutionsData {
   grain: ExecutionGrain;
+  /** The period in view. Selecting one on the chart re-reads at that key. */
+  period: string;
   systems: ExecutionSystem[];
-  /**
-   * The first period the snapshot covers whole. Everything before it is partial
-   * by construction: n8n had already aged executions off, or the job was not
-   * running yet.
-   */
+  /** The first period held whole. What came before it is not here, and is drawn as absent rather than nought. */
   boundary: MonthlyBoundary | null;
-  /** When the snapshot last ran, whether it can run at all, and the n8n host a failing execution opens on. */
-  snapshot: { at: string | null; configured: boolean; note: string; n8n_base: string | null };
-  /** Workflows n8n reports that the registry names no system for. */
-  unregistered: ExecutionWorkflow[];
+  /** Where the rows came from, when they were last read, and how far back they go. */
+  source: {
+    /** When the poll last completed. */
+    at: string | null;
+    configured: boolean;
+    /** How often new executions are read. A poll: n8n has nothing to push. */
+    poll_seconds: number;
+    n8n_base: string | null;
+    /** How many executions this database holds, and the span they cover. */
+    held: number;
+    oldest: string | null;
+    newest: string | null;
+    highest_id: string | null;
+    note: string;
+    /** Anything that made the last pass less than complete. Null when it was clean. */
+    warning: string | null;
+  };
+}
+
+/** One execution, as the drill-down lists it. */
+export interface ExecutionRun {
+  execution_id: string;
+  /** n8n's own word: success, error, crashed, canceled, running, waiting, new, unknown. */
+  status: string;
+  /** How it was started — webhook, trigger, integrated, manual. */
+  mode: string | null;
+  started_at: string;
+  stopped_at: string | null;
+  /** Null, never nought, where the run recorded no end. */
+  duration_ms: number | null;
+}
+
+/**
+ * What a read of n8n did, whether it was the poll or a backfill by hand.
+ *
+ * `warning` is the one field worth reading first: a stalled cursor or a page
+ * ceiling means the pass saw less than everything, and a pass that saw less
+ * than everything must say so rather than reporting what it managed as though
+ * it were the whole.
+ */
+export interface ExecutionBackfill {
+  ran: boolean;
+  at: string;
+  ms: number;
+  read: number;
+  inserted: number;
+  updated: number;
+  resolved: number;
+  open: number;
+  highest: number | null;
+  pages: number;
+  full: boolean;
+  note: string;
+  warning: string | null;
+}
+
+/**
+ * One workflow opened up: its own days inside the period, and its individual
+ * executions. This is what a counter could never answer, and the reason the
+ * rows are stored.
+ */
+export interface ExecutionWorkflowDetail {
+  workflow: ExecutionWorkflow;
+  grain: ExecutionGrain;
+  period: { key: string; label: string; start: string; end: string };
+  days: (ExecutionTotals & { day: string })[];
+  /** Newest first, capped. `runs_total` says how many there were. */
+  runs: ExecutionRun[];
+  runs_total: number;
+  n8n_base: string | null;
 }
