@@ -14,9 +14,16 @@ import { CountCell, CountUp, EmptyPanel, HBar, MetricCard, SeriesBlock, StatCell
  * a line of text in the middle of a tall empty box: MetricCard grows its body
  * and pins its footnote to the floor, so a row of cards lines up.
  */
-export function LoopMetricsPanel({ metrics, loading, switching, error, view }: { metrics: LoopMetrics | null; loading: boolean; switching: boolean; error: string | null; view: string }) {
-  if (error) return <div className="card mx-6 mb-4 px-5 py-4 text-[12.5px] text-failing md:mx-8">Figures unavailable: {error}</div>;
-  if (!metrics) {
+/**
+ * Where the backlog stands, over every loop held — **never scoped to the month
+ * in view** (2026-09-16, Destiny). It sits above the builder tabs, and
+ * everything below it follows the month. "How many loops are open" is a
+ * question about today; narrowing it to September would answer a different one
+ * in the same row.
+ */
+export function LoopStatusStrip({ metrics, view, loading }: { metrics: LoopMetrics | null; view: string; loading?: boolean }) {
+  const t = metrics?.all_time;
+  if (!metrics || !t) {
     return (
       <StatStrip cols={3} className="opacity-60">
         {['Open', 'In progress', 'Closed'].map((l) => (
@@ -28,85 +35,32 @@ export function LoopMetricsPanel({ metrics, loading, switching, error, view }: {
       </StatStrip>
     );
   }
-  const m = metrics;
-  const dim = loading || switching;
-  const maxRate = Math.max(1, ...m.close_rate_by_builder.map((o) => o.rate ?? 0));
-  // The age card is a share of the open loops, so it reads in the same language
-  // as close rate beside it: count over total, then the percentage.
-  const openTotal = m.age_distribution.reduce((n, d) => n + d.n, 0);
-
   return (
-    <div className={dim ? 'opacity-50 transition-opacity duration-200' : 'transition-opacity duration-200'} aria-busy={dim}>
-      <StatStrip cols={3}>
-        <CountCell label="Open" value={m.open} tone="accent" replayKey={view} hint={m.scope.builder ? `In ${BUILDER_NAMES[m.scope.builder] ?? m.scope.builder}’s table` : `Across ${m.scope.rows} loops in seven tables`} />
-        <CountCell label="In progress" value={m.in_progress} replayKey={view} />
-        <CountCell label="Closed" value={m.closed} tone="dim" replayKey={view} />
-      </StatStrip>
+    <StatStrip cols={3}>
+      <CountCell
+        label="Open"
+        value={t.open}
+        tone="accent"
+        replayKey={view}
+        hint={metrics.scope.builder ? `In ${BUILDER_NAMES[metrics.scope.builder] ?? metrics.scope.builder}’s table, all time` : `Across all ${t.rows} loops in seven tables, all time`}
+      />
+      <CountCell label="In progress" value={t.in_progress} replayKey={view} />
+      <CountCell label="Closed" value={t.closed} tone="dim" replayKey={view} />
+    </StatStrip>
+  );
+}
 
-      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-2">
-        {/* The reference design for this page. */}
-        <MetricCard title="Close rate by builder" align="top" note={m.close_rate_note}>
-          {m.close_rate_by_builder.length === 0 ? (
-            <EmptyPanel>No loops in this table.</EmptyPanel>
-          ) : (
-            <div className="space-y-2">
-              {m.close_rate_by_builder.map((o) => (
-                <HBar
-                  key={o.owner}
-                  label={BUILDER_NAMES[o.owner] ?? o.owner}
-                  value={o.rate ?? 0}
-                  max={maxRate}
-                  suffix="%"
-                  replayKey={view}
-                  valueNode={<CountUp value={o.rate ?? 0} replayKey={view} />}
-                  right={
-                    <span className="text-faint">
-                      {o.closed}/{o.total}
-                    </span>
-                  }
-                />
-              ))}
-            </div>
-          )}
-        </MetricCard>
-        {/*
-          The same visual language as Close rate by builder beside it: a
-          labelled horizontal bar per bucket, its count over the total, then the
-          percentage. It was a row of unlabelled vertical bars, which said
-          nothing a reader could act on.
-        */}
-        <MetricCard
-          title="How long these have been sitting"
-          align="top"
-          right="newest → oldest"
-          note={`Open and in-progress loops by days since Date Raised, as a share of the ${openTotal} currently open. “No date raised” is the count with no Date Raised on the row.`}
-        >
-          {openTotal === 0 ? (
-            <EmptyPanel>Nothing is open in this table, so there is no age to distribute.</EmptyPanel>
-          ) : (
-            <div className="space-y-2">
-              {m.age_distribution.map((d) => (
-                <HBar
-                  key={d.bucket}
-                  label={d.bucket}
-                  value={openTotal ? Math.round((d.n / openTotal) * 100) : 0}
-                  max={100}
-                  suffix="%"
-                  replayKey={view}
-                  valueNode={<CountUp value={openTotal ? Math.round((d.n / openTotal) * 100) : 0} replayKey={view} />}
-                  right={
-                    <span className="text-faint">
-                      {d.n}/{openTotal}
-                    </span>
-                  }
-                />
-              ))}
-            </div>
-          )}
-        </MetricCard>
-
-      </div>
-
+/**
+ * The four weekly series, which moved to the statistics tab (2026-09-16,
+ * Destiny) along with everything else month-shaped. They are an eight-week
+ * strip by design and were never scoped to a month, which is exactly why they
+ * did not belong above a list that now is.
+ */
+export function LoopSeriesPanel({ metrics, view }: { metrics: LoopMetrics | null; view: string }) {
+  if (!metrics) return null;
+  const m = metrics;
+  return (
+    <div>
       {/*
         One set, not four charts that happen to sit together — and read as one
         set, which needs two things beyond the same card and the same grid.
@@ -146,6 +100,86 @@ export function LoopMetricsPanel({ metrics, loading, switching, error, view }: {
           </MetricCard>
         ))}
       </div>
+    </div>
+  );
+}
+
+export function LoopMetricsPanel({ metrics, loading, switching, error, view }: { metrics: LoopMetrics | null; loading: boolean; switching: boolean; error: string | null; view: string }) {
+  if (error) return <div className="card mx-6 mb-4 px-5 py-4 text-[12.5px] text-failing md:mx-8">Figures unavailable: {error}</div>;
+  if (!metrics) return null;
+  const m = metrics;
+  const dim = loading || switching;
+  const maxRate = Math.max(1, ...m.close_rate_by_builder.map((o) => o.rate ?? 0));
+  // The age card is a share of the open loops, so it reads in the same language
+  // as close rate beside it: count over total, then the percentage.
+  const openTotal = m.age_distribution.reduce((n, d) => n + d.n, 0);
+
+  return (
+    <div className={dim ? 'opacity-50 transition-opacity duration-200' : 'transition-opacity duration-200'} aria-busy={dim}>
+      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-2">
+        {/* The reference design for this page. */}
+        <MetricCard title="Close rate by builder" align="top" note={m.close_rate_note}>
+          {m.close_rate_by_builder.length === 0 ? (
+            <EmptyPanel>No loops in this table.</EmptyPanel>
+          ) : (
+            <div className="space-y-2">
+              {m.close_rate_by_builder.map((o) => (
+                <HBar
+                  key={o.owner}
+                  label={BUILDER_NAMES[o.owner] ?? o.owner}
+                  value={o.rate ?? 0}
+                  max={maxRate}
+                  suffix="%"
+                  replayKey={view}
+                  valueNode={<CountUp value={o.rate ?? 0} replayKey={view} />}
+                  right={
+                    <span className="text-faint">
+                      {o.closed}/{o.total}
+                    </span>
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </MetricCard>
+        {/*
+          The same visual language as Close rate by builder beside it: a
+          labelled horizontal bar per bucket, its count over the total, then the
+          percentage. It was a row of unlabelled vertical bars, which said
+          nothing a reader could act on.
+        */}
+        <MetricCard
+          title="How long these have been sitting"
+          align="top"
+          right="newest → oldest"
+          note={`Open and in-progress loops by days since Date Raised, as a share of the ${openTotal} open in view. “No date raised” is the count with no Date Raised on the row.`}
+        >
+          {openTotal === 0 ? (
+            <EmptyPanel>Nothing is open in this table, so there is no age to distribute.</EmptyPanel>
+          ) : (
+            <div className="space-y-2">
+              {m.age_distribution.map((d) => (
+                <HBar
+                  key={d.bucket}
+                  label={d.bucket}
+                  value={openTotal ? Math.round((d.n / openTotal) * 100) : 0}
+                  max={100}
+                  suffix="%"
+                  replayKey={view}
+                  valueNode={<CountUp value={openTotal ? Math.round((d.n / openTotal) * 100) : 0} replayKey={view} />}
+                  right={
+                    <span className="text-faint">
+                      {d.n}/{openTotal}
+                    </span>
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </MetricCard>
+
+      </div>
+
     </div>
   );
 }

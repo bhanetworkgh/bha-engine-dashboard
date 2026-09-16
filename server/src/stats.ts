@@ -138,9 +138,8 @@ const REVIEWED_AT_FROM = '2026-09-14';
  * became computable on 14 Sep — and not before.
  */
 const NO_PAY_CLOCK =
-  'Nothing dates a payment. Paid is a Yes/No select with no Paid At beside it, and this dashboard does not write the field, ' +
-  'so neither Airtable nor the status ledger knows when a log went from No to Yes — only that it is Yes now. ' +
-  'This becomes a real figure the day the workflow that flips Paid also stamps when it did, the way Jason Reviewed At does for a review.';
+  'There is no Paid At, so nothing dates the flip from No to Yes — only that it is Yes now. ' +
+  'It becomes a real figure the day the workflow that flips Paid also stamps when it did.';
 
 
 /* ------------------------------------------------------------- the engine */
@@ -301,6 +300,17 @@ function written<T>(spec: KindSpec<T>, metrics: RecordStatMetric[], against: str
 
 /* --------------------------------------------------------------- the kinds */
 
+/**
+ * **Every tile's note is one or two short sentences, and they are all about the
+ * same length** (2026-09-16, Destiny). They were not: approval time ran to
+ * seventy words where pay rate ran to twelve, so a row of cards read as six
+ * different objects and the longest note pushed its own figure out of line.
+ *
+ * What a note is for: the base the figure is over, and the boundary if it has
+ * one. Nothing else. The reasoning behind a rule lives in CLAUDE.md and in the
+ * comments here, where it is the spec rather than a caption — the same
+ * decision that took the three stage rules off the Codex page on 14 Sep.
+ */
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /**
@@ -331,7 +341,7 @@ function codexSpec(): KindSpec<CodexEntry> {
         // how much work was done, not how well. Uncoloured, like executions.
         better: null,
         word: 'logs',
-        figure: (c) => count(c.length, 'Every submission carries a Timestamp, so this counts the whole month with no boundary.'),
+        figure: (c) => count(c.length, 'By Timestamp, which every submission carries. No month is missing one.'),
       },
       {
         key: 'approval_rate',
@@ -346,7 +356,7 @@ function codexSpec(): KindSpec<CodexEntry> {
             approved,
             c.length,
             c.length
-              ? `${approved} of ${plural(c.length, 'log')} logged this month stand approved today. A cohort's state, not a dated event, so it is honest for the whole history.`
+              ? `${approved} of ${plural(c.length, 'log')} approved so far. A cohort's state rather than a dated event, so it is honest for the whole history.`
               : 'No log was written this month, so there is no rate — not a rate of nought.',
           );
         },
@@ -372,19 +382,14 @@ function codexSpec(): KindSpec<CodexEntry> {
            * mean is the headline; the median is how it is checked.
            */
           const note = [
-            ctx.month < reviewBoundary
-              ? `Jason Reviewed At was created on ${REVIEWED_AT_FROM} and there is no backfill, so nothing before ${reviewBoundary} records when a decision was made. Those months were not instant, they were not timed.`
-              : ctx.month === reviewBoundary
-                ? `Partial: this month holds only the decisions made on or after ${REVIEWED_AT_FROM}, the day Jason Reviewed At was created, so it undercounts. ${labelOf(nextMonth(reviewBoundary))} is the first month it covers whole.`
-                : null,
             ms.length
-              ? `The mean over ${plural(ms.length, 'decision')} made this month, timed from when each log was written.${
-                  ms.length > 1 ? ` The middle one took ${humanDuration(median(ms))} — the better guide where one slow review drags the mean up.` : ''
-                }`
+              ? `The mean over ${plural(ms.length, 'decision')} made this month${ms.length > 1 ? `; the middle one took ${humanDuration(median(ms))}` : ''}.`
               : null,
-            ctx.month >= reviewBoundary
-              ? 'Counted in the month the decision was made, not the month the log was written, so a month is not dragged down by logs nobody has reached yet.'
-              : null,
+            ctx.month < reviewBoundary
+              ? `Jason Reviewed At began ${REVIEWED_AT_FROM} and nothing is backfilled, so these months were not instant — they were not timed.`
+              : ctx.month === reviewBoundary
+                ? `Partial: only decisions from ${REVIEWED_AT_FROM} on. ${labelOf(nextMonth(reviewBoundary))} is the first whole month.`
+                : null,
           ]
             .filter(Boolean)
             .join(' ');
@@ -404,7 +409,7 @@ function codexSpec(): KindSpec<CodexEntry> {
             flagged,
             c.length,
             c.length
-              ? `${flagged} of ${plural(c.length, 'log')} ${flagged === 1 ? 'was' : 'were'} flagged. Layer0 Flagged means was flagged once, ever — nothing clears it when the builder answers — so this is how often the check stopped a log, not how many are still owed.`
+              ? `${flagged} of ${plural(c.length, 'log')} flagged. Layer0 Flagged means flagged once ever, so this is how often the check stopped one.`
               : 'No log was written this month, so there is nothing for the check to have stopped.',
           );
         },
@@ -424,13 +429,11 @@ function codexSpec(): KindSpec<CodexEntry> {
             paid,
             base.length,
             base.length
-              ? `${paid} of ${plural(base.length, 'approved log')} from this month ${paid === 1 ? 'is' : 'are'} marked paid.${
-                  unpriced
-                    ? ` ${plural(unpriced, 'further approved log')} ${unpriced === 1 ? 'carries' : 'carry'} no Paid value at all and ${unpriced === 1 ? 'is' : 'are'} left out rather than counted as unpaid — resync the page to pull the column through.`
-                    : ''
+              ? `${paid} of ${plural(base.length, 'approved log')} marked paid.${
+                  unpriced ? ` ${plural(unpriced, 'more')} ${unpriced === 1 ? 'carries' : 'carry'} no Paid value and ${unpriced === 1 ? 'is' : 'are'} left out, never counted as unpaid.` : ''
                 }`
               : c.some((e) => e.stage === 'approved')
-                ? 'No approved log from this month carries a Paid value yet, so there is no rate — not a rate of nought. Resync the page to pull the column through from Airtable.'
+                ? 'No approved log here carries a Paid value yet, so there is no rate. Resync to pull the column through.'
                 : 'No log from this month is approved, so there is nothing to have paid.',
           );
         },
@@ -459,10 +462,9 @@ function codexSpec(): KindSpec<CodexEntry> {
  */
 function loopsSpec(closes: Map<string, string>, since: string | null): KindSpec<Loop> {
   const ledgerMonth = since ? since.slice(0, 7) : nowIso().slice(0, 7);
-  const ledgerNote =
-    `Closes are dated by this dashboard's own status ledger, which began recording on ${since?.slice(0, 10) ?? 'its first boot'}. ` +
-    'The loop tables carry no close date and nothing upstream keeps a status-change history, so before then there is no closed figure at all — ' +
-    'which is not the same as a month in which nothing closed.';
+  // Short on purpose: it is one of five footnotes that have to sit at the same
+  // height. Why the ledger is the only source is in CLAUDE.md, not on the card.
+  const ledgerNote = `Dated by this dashboard's ledger, which began ${since?.slice(0, 10) ?? 'at first boot'}. Before then there is no closed figure at all.`;
   const closedIn = (ctx: Ctx<Loop>) => ctx.all.filter((l) => within(closes.get(l.id) ?? null, ctx.month, ctx.cut));
 
   return {
@@ -476,7 +478,7 @@ function loopsSpec(closes: Map<string, string>, since: string | null): KindSpec<
         unit: 'count',
         better: null,
         word: 'loops raised',
-        figure: (c) => count(c.length, 'Every loop carries a Date Raised, so this counts the whole month with no boundary.'),
+        figure: (c) => count(c.length, 'By Date Raised, which every loop carries. No month is missing one.'),
       },
       {
         key: 'closed',
@@ -490,7 +492,7 @@ function loopsSpec(closes: Map<string, string>, since: string | null): KindSpec<
           return {
             value: ctx.month < ledgerMonth ? null : n,
             n,
-            note: ctx.month < ledgerMonth ? ledgerNote : `${plural(n, 'loop')} closed in this month, dated by the status ledger. ${ledgerNote}`,
+            note: ctx.month < ledgerMonth ? ledgerNote : `${plural(n, 'loop')} closed in this month. ${ledgerNote}`,
           };
         },
       },
@@ -507,7 +509,7 @@ function loopsSpec(closes: Map<string, string>, since: string | null): KindSpec<
             closed,
             c.length,
             c.length
-              ? `${closed} of ${plural(c.length, 'loop')} raised this month are closed today. A cohort's state rather than a dated event, so it is honest for the whole history even where the ledger is not.`
+              ? `${closed} of ${plural(c.length, 'loop')} raised here are closed today. A cohort's state, so it is honest even where the ledger is not.`
               : 'No loop was raised this month, so there is no rate — not a rate of nought.',
           );
         },
@@ -526,7 +528,7 @@ function loopsSpec(closes: Map<string, string>, since: string | null): KindSpec<
           const note = [
             ctx.month < ledgerMonth ? ledgerNote : null,
             ms.length
-              ? `The mean over ${plural(ms.length, 'close')} dated in this month.${ms.length > 1 ? ` The middle one took ${humanDuration(median(ms))}.` : ''}`
+              ? `The mean over ${plural(ms.length, 'close')} dated here${ms.length > 1 ? `; the middle one took ${humanDuration(median(ms))}` : ''}.`
               : null,
           ]
             .filter(Boolean)
@@ -549,7 +551,7 @@ function loopsSpec(closes: Map<string, string>, since: string | null): KindSpec<
           return average(
             ms,
             ms.length
-              ? `${plural(ms.length, 'loop')} raised this month ${ms.length === 1 ? 'is' : 'are'} still open, aged from Date Raised to now. No field is needed for this, so it is honest for the whole history.`
+              ? `${plural(ms.length, 'loop')} raised here ${ms.length === 1 ? 'is' : 'are'} still open, aged from Date Raised to now.`
               : c.length
                 ? 'Every loop raised this month is closed, so there is no open age to report.'
                 : 'No loop was raised this month.',

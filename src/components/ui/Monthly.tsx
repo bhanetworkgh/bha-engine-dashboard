@@ -43,10 +43,17 @@ export function MonthChart({
   selected,
   onSelect,
   fill = false,
+  readOnly = false,
 }: {
   series: MonthlySeries;
   selected: string | null;
   onSelect: (month: string | null) => void;
+  /**
+   * Draw it, do not let anyone click it. The statistics tab chooses its month
+   * in a picker; a chart that also set it would be a second control for one
+   * selection with nothing saying which had been used.
+   */
+  readOnly?: boolean;
   /**
    * Widen the bars to fill the card, and print each month's figure above it.
    *
@@ -115,9 +122,9 @@ export function MonthChart({
           const createdH = barH(m.created, m.coverage);
           const advancedH = barH(m.advanced, m.advanced_coverage);
           return (
-            <g key={m.month} className="cursor-pointer" onClick={() => onSelect(on ? null : m.month)}>
+            <g key={m.month} className={readOnly ? undefined : 'cursor-pointer'} onClick={readOnly ? undefined : () => onSelect(on ? null : m.month)}>
               {/* The whole column is the hit area, so an empty month is still selectable. */}
-              <rect x={x - GAP / 2} y="0" width={bar + GAP} height={H + 30} fill={on ? 'var(--hover)' : 'transparent'} />
+              <rect x={x - GAP / 2} y="0" width={bar + GAP} height={H + 30} fill={!readOnly && on ? 'var(--hover)' : 'transparent'} />
               {m.coverage === 'none' ? (
                 <line x1={x} y1={H - 1} x2={x + bar} y2={H - 1} stroke="var(--faint)" strokeWidth="2" strokeDasharray="2 2" />
               ) : (

@@ -366,7 +366,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
       const kind = metrics[1] as RecordKind;
       if (!store.KINDS.includes(kind)) throw new HttpError(404, 'No such record kind.');
       const b = url.searchParams.get('builder');
-      return send(res, 200, await store.metrics(kind, { builder: b && b !== 'all' ? b : null }));
+      // The month the page is showing. Omitted is every month, which is what
+      // the kinds without a month picker still ask for.
+      const mon = url.searchParams.get('month');
+      return send(res, 200, await store.metrics(kind, { builder: b && b !== 'all' ? b : null, month: mon || null }));
     }
     if (p === '/api/build-patterns/search') {
       return send(res, 200, { patterns: await store.searchPatterns(url.searchParams.get('q') ?? '') });

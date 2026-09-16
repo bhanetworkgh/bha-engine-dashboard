@@ -17,8 +17,34 @@ export type StatusFilter = 'all' | LoopStatus;
  * problem. Age is still on every row, and the age distribution card is still
  * the page's answer to "where is it piling up".
  */
-export function OwnerPicker({ data, owner, setOwner }: { data: OpenLoopsData; owner: string; setOwner: (o: string) => void }) {
-  const total = data.by_owner.reduce((n, o) => n + o.open + o.in_progress, 0);
+/**
+ * The builder tables, each with how many loops it holds.
+ *
+ * `counts` narrows those numbers to the month in view (2026-09-16, Destiny).
+ * Without it the tabs count every loop still open in that table, which is a
+ * different question from the one the rest of the page is answering once a
+ * month is selected — and two questions in one row is how a reader stops
+ * trusting either number.
+ */
+export function OwnerPicker({
+  data,
+  owner,
+  setOwner,
+  counts,
+}: {
+  data: OpenLoopsData;
+  owner: string;
+  setOwner: (o: string) => void;
+  counts?: Record<string, number>;
+}) {
+  const countOf = (o: string) => {
+    if (counts) return counts[o] ?? 0;
+    const row = data.by_owner.find((x) => x.owner === o);
+    return row ? row.open + row.in_progress : 0;
+  };
+  const total = counts
+    ? data.by_owner.reduce((n, o) => n + countOf(o.owner), 0)
+    : data.by_owner.reduce((n, o) => n + o.open + o.in_progress, 0);
   const cell = (active: boolean) =>
     `flex min-w-[112px] shrink-0 flex-col rounded-[12px] px-3.5 py-2.5 text-left transition-colors md:min-w-0 md:flex-1 ${active ? 'bg-panel shadow-[var(--shadow-card)]' : 'hover:bg-hover'}`;
   return (
@@ -30,7 +56,7 @@ export function OwnerPicker({ data, owner, setOwner }: { data: OpenLoopsData; ow
       {data.by_owner.map((o) => (
         <button key={o.owner} type="button" onClick={() => setOwner(o.owner)} className={cell(owner === o.owner)} aria-pressed={owner === o.owner} title={`${o.open} open, ${o.in_progress} in progress, ${o.closed} closed`}>
           <span className="truncate text-[11.5px] text-faint">{BUILDER_NAMES[o.owner] ?? o.owner}</span>
-          <span className="font-display tabular mt-0.5 block text-[20px] leading-none">{o.open + o.in_progress}</span>
+          <span className="font-display tabular mt-0.5 block text-[20px] leading-none">{countOf(o.owner)}</span>
         </button>
       ))}
     </div>
