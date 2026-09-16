@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { useData } from '../app/useData';
 import {
   getMonthly,
@@ -221,6 +222,7 @@ export default function RecordStatistics<T>({
   rowsNoun,
   dateOf,
   monthlyKind,
+  extraTiles,
 }: {
   kind: StatKind;
   month: string | null;
@@ -240,6 +242,15 @@ export default function RecordStatistics<T>({
   dateOf: (r: T) => string | null;
   /** The monthly rollup to draw, where the kind has one. Omitted builds the chart from the counts. */
   monthlyKind?: RecordKind;
+  /**
+   * Tiles the page adds to the same grid, before the computed ones.
+   *
+   * They have to be `MetricCard`s so the grid reads as one set rather than as
+   * a row of figures with a different-looking row bolted under it — which is
+   * exactly what moving Open loops' four weekly series here produced the first
+   * time (2026-09-16, Destiny).
+   */
+  extraTiles?: ReactNode;
 }) {
   const { status, data, error } = useData(() => getRecordStats(kind, month), [kind, month]);
   const monthly = useData(() => (monthlyKind ? getMonthly(monthlyKind) : Promise.resolve(null)), [monthlyKind]);
@@ -330,6 +341,7 @@ export default function RecordStatistics<T>({
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {extraTiles}
         {data.metrics.map((m) => (
           <StatTile key={m.key} m={m} previousLabel={data.previous_label} covered={data.covered} />
         ))}

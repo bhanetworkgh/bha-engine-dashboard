@@ -126,13 +126,12 @@ export function LoopPanel({
               {loop.closed_at && <span className="tabular">closed {loop.closed_at}</span>}
             </div>
           </div>
+          {/* Only the link up here (2026-09-16, Destiny). Closing the panel is
+              one of the actions on the footer row, beside the others. */}
           <div className="flex items-center gap-2">
             <a href={loop.airtable.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
               Open in Airtable
             </a>
-            <button type="button" onClick={onClose} className="btn btn-ghost btn-sm" aria-label="Close">
-              Close panel
-            </button>
           </div>
         </div>
 
@@ -229,9 +228,22 @@ export function LoopPanel({
             {loop.note ? `Note: ${loop.note}` : 'Saved here first, then written to Airtable.'}
           </div>
           <div className="flex items-center gap-2">
+            {/*
+              **"Close panel" and "Mark as closed" are two different things and
+              the labels now say so** (2026-09-16, Destiny).
+
+              This button used to read "Close loop", which could be read either
+              way — and it is not the harmless one: it writes Status → Closed to
+              this database and then to Airtable. It is renamed rather than
+              repurposed, because the panel is where a loop gets closed and
+              CLAUDE.md §7 asks for exactly that.
+            */}
+            <button type="button" className="btn btn-ghost" onClick={onClose}>
+              Close panel
+            </button>
             {status !== 'closed' && (
               <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => save({ status: 'closed' })}>
-                Close loop
+                Mark as closed
               </button>
             )}
             <button type="button" className="btn btn-primary" disabled={busy || !dirty} onClick={() => save()}>

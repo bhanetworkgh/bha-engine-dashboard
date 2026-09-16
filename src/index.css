@@ -943,6 +943,14 @@
   .mark {
     border-radius: 999px;
   }
+  /*
+   * The mark with no tile behind it, for the page loading state. `.mark` gives
+   * the logo a white circular badge, which is the look in the sidebar and on
+   * Ask Bays; a full-page wait wants the mark alone on the page wash.
+   */
+  :root[data-theme="dark"] .mark-plain {
+    filter: invert(1) hue-rotate(180deg) brightness(1.05);
+  }
   :root[data-theme="dark"] .mark {
     filter: invert(1) hue-rotate(180deg) brightness(1.05);
   }
