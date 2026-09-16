@@ -472,8 +472,10 @@ Ask Bays
 SYSTEMS
   North Star
   Research Twin
+  Media Twin             ← placeholder
+  Genie                  ← placeholder
   vFarm                  ← placeholder
-  Engine health          ← the execution roll-up; incidents still a placeholder
+  Engine health          ← placeholder
 
 RECORDS
   Open loops
@@ -679,6 +681,17 @@ answer it however carefully it is kept.
 written on the server so the page and the downloaded report cannot word the same
 comparison differently.
 
+**Two downloads, and both follow the tab** (decision 2026-09-16, Destiny). The
+button at the top of the page takes **the whole year** — the control up there is
+the year, so a report asked for from beside it is that year. The button on the
+**Every month held** card, after the bars-or-line switch, opens a list of that
+year's months and takes **one month**, which is where a reader is already looking
+at months. All systems downloads every system; Bays downloads Bays. Each
+re-reads its period from the server rather than building from what is on screen,
+because the page holds one month and the report may be asked for another — the
+grains are `GROUP BY`s over the same one-row-per-execution table, so a year
+cannot disagree with the months inside it.
+
 **A report downloads per week, per month or per year**: the figures on screen,
 the per-workflow breakdown, and every period held. A report is kept after the
 page is closed, so every caveat the page makes is inside the file — the
@@ -694,15 +707,25 @@ green on a page where almost everything succeeds is decoration.
 See section 4 for how the rows are stored and polled, for why nothing here
 claims what n8n retains, and for the two rules that keep a comparison honest.
 
-### vFarm and Engine health
-**vFarm is a single centred "coming soon" and nothing else** (decision
-2026-09-14, Destiny). **Engine health now carries the execution roll-up** —
-one figure per system for the current week, each linking through to the
-Executions page (decision 2026-09-15, Destiny) — and
-its incident half is still the placeholder that decision made it. It answers
-"is something failing somewhere"; the Executions page answers "what, and which",
-and the per-workflow detail is deliberately not repeated on it. The rest of
-this entry is the 14 Sep decision, unchanged: Every card, table and figure they held was computed from
+### Media Twin, Genie, vFarm and Engine health
+**Four single centred "coming soon" pages, and nothing else** (decisions
+2026-09-14 and 2026-09-16, Destiny). **Media Twin and Genie are systems in the
+engine and belong in the Systems group**, so they are there, as placeholders,
+rather than absent — nothing either of them does writes a row here yet, and a
+page of fixtures would be the thing section 2 forbids. Genie's executions are
+counted on the Executions page, under whichever system the workflow registry
+files them.
+
+**Engine health is a placeholder in full now** (decision 2026-09-16, Destiny).
+The execution roll-up it carried for a day — one figure per system for the
+current week, linking through to Executions — has come off with it. It was
+real, but it was a second drawing of counts the Executions page already draws
+with the month, the year, the per-workflow breakdown and the failing ids behind
+them; two drawings of the same counts drift, and the one a person happens to
+open first becomes the one they trust. The workflows-in-no-system card went the
+same way: those workflows are the **Archived** tab on Executions, where they are
+counted rather than only listed. The rest of this entry is the 14 Sep decision,
+unchanged: Every card, table and figure they held was computed from
 phase 1 fixtures: vFarm's live readings, rack state and readiness panel, and
 Engine health's incident list, state track, self-heal rate and retry counts.
 Nothing on the rack and no incident has ever written a row to this dashboard, so

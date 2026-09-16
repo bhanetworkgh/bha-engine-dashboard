@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useData } from '../../app/useData';
 import {
@@ -15,7 +15,7 @@ import {
 } from '../../data';
 import { buildReport, reportName } from '../../lib/executionReport';
 import { downloadCsv } from '../../lib/csv';
-import { CountUpText, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, MonthPicker, PageHeader, Tabs, Toast, useToast, yearOf } from '../../components/ui';
+import { CountUpText, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, monthLabel, MonthPicker, PageHeader, Tabs, Toast, useToast, yearOf } from '../../components/ui';
 
 /**
  * Executions — every run of every workflow in the engine, one row per run.
@@ -328,6 +328,105 @@ function WorkflowRow({ w, onOpen }: { w: ExecutionWorkflow; onOpen: () => void }
   );
 }
 
+/* -------------------------------------------------------------- downloads */
+
+/**
+ * A report for one period, for the tab you are looking at.
+ *
+ * It re-reads that period rather than building from what is on screen, because
+ * the page holds one month and a report may be asked for a different month or
+ * for the whole year. The server answers at all three grains over the same
+ * one-row-per-execution table, so a year is a `GROUP BY` and not a second
+ * arithmetic — a year's figures cannot disagree with the months inside it.
+ *
+ * The system is carried across by key, never by index: tabs differ between
+ * periods, because a system with no execution in a month has no tab in it, and
+ * an index would quietly hand you somebody else's report.
+ */
+async function downloadPeriod(grain: ExecutionGrain, period: string, systemKey: string): Promise<string | null> {
+  const d = await getExecutions(grain, period);
+  const s = d.systems.find((x) => x.system === systemKey);
+  if (!s) return `${systemKey} ran nothing in ${period}, so there is no report for it.`;
+  downloadCsv(reportName(s, d.period), buildReport(d, s));
+  return null;
+}
+
+/**
+ * Download, and which month (2026-09-16, Destiny).
+ *
+ * The button at the top of the page takes the whole year; this one sits on the
+ * chart of every month held, which is where a reader is already looking at the
+ * months, and offers them one at a time. Both follow the tab, so All systems
+ * downloads every system and Bays downloads Bays.
+ */
+function MonthDownload({ months, systemKey, systemLabel, onFail }: { months: string[]; systemKey: string; systemLabel: string; onFail: (m: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [open]);
+
+  async function take(month: string) {
+    setBusy(month);
+    try {
+      const err = await downloadPeriod('month', month, systemKey);
+      if (err) onFail(err);
+      else setOpen(false);
+    } catch (e) {
+      onFail(e instanceof Error ? e.message : 'The report could not be built.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <span className="relative" ref={box as React.RefObject<HTMLDivElement>}>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        title={`A month of ${systemLabel.toLowerCase()} as a CSV — the figures, the per-workflow breakdown and every caveat`}
+      >
+        Download month
+      </button>
+      {open && (
+        <div className="card absolute right-0 z-30 mt-1 max-h-[280px] w-[168px] overflow-y-auto p-1 shadow-lg" role="menu">
+          {months.length === 0 ? (
+            <div className="px-3 py-2 text-[12px] text-faint">No month of this year is held.</div>
+          ) : (
+            months.map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="menuitem"
+                disabled={busy !== null}
+                className="block w-full rounded-[10px] px-3 py-1.5 text-left text-[12.5px] text-ink hover:bg-raised disabled:opacity-50"
+                onClick={() => void take(m)}
+              >
+                {busy === m ? 'Building…' : monthLabel(m)}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </span>
+  );
+}
+
 /* ------------------------------------------------------------------ page */
 
 function SystemView({
@@ -338,6 +437,7 @@ function SystemView({
   period: periodKey,
   onMonth,
   onOpenWorkflow,
+  onFail,
 }: {
   system: ExecutionSystem;
   data: ExecutionsData;
@@ -346,6 +446,7 @@ function SystemView({
   period: string;
   onMonth: (m: string | null) => void;
   onOpenWorkflow: (id: string) => void;
+  onFail: (message: string) => void;
 }) {
   const [shape, setShape] = useState<'bars' | 'line'>('bars');
   const period = system.period;
@@ -463,6 +564,18 @@ function SystemView({
                   Line
                 </button>
               </span>
+              {/*
+                After the shape switch, on the card that already holds the
+                months (2026-09-16, Destiny): a month at a time, for whichever
+                tab you are on. The button at the top of the page takes the
+                whole year.
+              */}
+              <MonthDownload
+                months={monthKeys.filter((k) => k.startsWith(`${year}-`))}
+                systemKey={system.system}
+                systemLabel={system.label}
+                onFail={onFail}
+              />
             </span>
           }
           note={<Legend series={yearSeries} />}
@@ -520,6 +633,8 @@ export default function Executions() {
   // inside it are still the same arithmetic over the same executions.
   const [period, setPeriod] = useState<string | null>(null);
   const [year, setYear] = useState<number>(() => new Date().getFullYear());
+  /** The year whose report is being built, so the button can say so. */
+  const [report, setReport] = useState<string | null>(null);
   const [tab, setTab] = useState('All systems');
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -599,8 +714,26 @@ export default function Executions() {
                 ))}
               </select>
             </label>
-            <button type="button" className="btn" onClick={() => downloadCsv(reportName(system, data.period), buildReport(data, system))}>
-              Download report
+            {/*
+              The whole year (2026-09-16, Destiny), not the month on screen: a
+              report asked for from the top of a page whose control up there is
+              the year should be that year. The month is downloaded from the
+              chart of months, where the months are.
+            */}
+            <button
+              type="button"
+              className="btn"
+              disabled={report !== null}
+              title={`${year} for ${system.label.toLowerCase()} — the figures, the per-workflow breakdown and every month held, with every caveat inside the file`}
+              onClick={() => {
+                setReport(String(year));
+                void downloadPeriod('year', String(year), system.system)
+                  .then((err) => err && setToast({ text: err, tone: 'failing' }))
+                  .catch((e: unknown) => setToast({ text: e instanceof Error ? e.message : 'The report could not be built.', tone: 'failing' }))
+                  .finally(() => setReport(null));
+              }}
+            >
+              {report ? 'Building…' : `Download ${year} report`}
             </button>
             <button type="button" className="btn" disabled={busy} onClick={reread} title="Reads every execution n8n holds again. Safe to run at any time: each row is keyed on its n8n execution id.">
               {busy ? 'Reading n8n…' : 'Read n8n again'}
@@ -611,7 +744,17 @@ export default function Executions() {
       />
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <SystemView key={`${system.system}-${data.period}`} system={system} data={data} year={year} monthKeys={monthKeys} period={data.period} onMonth={setPeriod} onOpenWorkflow={setOpen} />
+        <SystemView
+          key={`${system.system}-${data.period}`}
+          system={system}
+          data={data}
+          year={year}
+          monthKeys={monthKeys}
+          period={data.period}
+          onMonth={setPeriod}
+          onOpenWorkflow={setOpen}
+          onFail={(m) => setToast({ text: m, tone: 'failing' })}
+        />
 
         {/*
           Said once, at the foot of the page: these numbers are as fresh as the

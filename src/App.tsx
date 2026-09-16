@@ -24,6 +24,8 @@ const NorthStar = lazy(() => import('./screens/NorthStar'));
 const ResearchTwin = lazy(() => import('./screens/ResearchTwin'));
 const Clients = lazy(() => import('./screens/Clients'));
 const VFarm = lazy(() => import('./screens/VFarm'));
+const MediaTwin = lazy(() => import('./screens/MediaTwin'));
+const Genie = lazy(() => import('./screens/Genie'));
 const EngineHealth = lazy(() => import('./screens/EngineHealth'));
 const OpenLoops = lazy(() => import('./screens/OpenLoops'));
 const Codex = lazy(() => import('./screens/Codex'));
@@ -56,6 +58,8 @@ export default function App() {
         <Route path="/ask-bays" element={<Suspense fallback={<Loading />}><AskBays /></Suspense>} />
         <Route path="/north-star" element={<Suspense fallback={<Loading />}><NorthStar /></Suspense>} />
         <Route path="/research-twin" element={<Suspense fallback={<Loading />}><ResearchTwin /></Suspense>} />
+        <Route path="/media-twin" element={<Suspense fallback={<Loading />}><MediaTwin /></Suspense>} />
+        <Route path="/genie" element={<Suspense fallback={<Loading />}><Genie /></Suspense>} />
         <Route path="/vfarm" element={<Suspense fallback={<Loading />}><VFarm /></Suspense>} />
         <Route path="/engine-health" element={<Suspense fallback={<Loading />}><EngineHealth /></Suspense>} />
         <Route path="/open-loops" element={<Suspense fallback={<Loading />}><OpenLoops /></Suspense>} />

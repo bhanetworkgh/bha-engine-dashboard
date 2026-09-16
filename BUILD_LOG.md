@@ -5632,3 +5632,56 @@ Verified:   Sampled the codex statistics grid at 250/500/900/1400/2600ms and it
             migration 12: seven people, every one with a bhanetwork.org address,
             Jason CEO, Ahad CS Twin. Spend card names Render as priced and not
             counted. No page errors.
+
+## 2026-09-16 14:30 — Two downloads on Executions; Media Twin, Genie and Engine health
+Intent:     Destiny: the top download "should be formatted in a way that it
+            downloads the entire yearly report", and on Every month held, "after
+            bars and line, you should add a download button... a dropdown where
+            you get to select the particular month... if you are on the all
+            systems page it downloads for all systems, if you are on the Bays tab
+            it downloads only Bays." Plus: "for the systems side, please add
+            Media Twin and Genie... give them the same coming soon screen that
+            vFarm has. Engine health should also have that coming soon."
+Files:      src/screens/Executions/index.tsx, src/components/Layout.tsx,
+            src/App.tsx, src/screens/MediaTwin/index.tsx (new),
+            src/screens/Genie/index.tsx (new), src/screens/EngineHealth/index.tsx,
+            src/screens/Overview.tsx, server/src/engine.ts, CLAUDE.md
+Problem:    The top button built its report from `data` and `system` — the props
+            already on screen — which is one month. A year needs the year's rows.
+            Building it client-side from the twelve months on the chart would have
+            been a second arithmetic that could disagree with the server's.
+Fix:        `downloadPeriod(grain, period, systemKey)` re-reads the period from
+            the server and builds the report from that. The server already
+            answers all three grains over the same one-row-per-execution table —
+            a grain is a GROUP BY — so a year cannot disagree with its months.
+            The system is carried by key, never by index: tabs differ between
+            periods, because a system that ran nothing in a month has no tab in
+            it, and an index would have handed back somebody else's report. A
+            system with no tab in the requested period says so rather than
+            downloading the wrong file.
+            `MonthDownload` is the menu: a button on the chart card, closing on
+            outside click and on Escape, one row per month of the year on screen.
+            Media Twin and Genie are two new placeholder screens, the same shape
+            as vFarm, with sidebar entries, routes and an Overview tile each
+            (one tile per sidebar section is the rule). Engine health becomes the
+            same thing.
+Decision:   Engine health loses the execution roll-up it gained on 15 Sep. It was
+            real, but it drew counts the Executions page already draws with the
+            month, the year, the per-workflow breakdown and the failing ids
+            behind them. Two drawings of the same counts drift and the one
+            somebody opens first becomes the one they trust — which is the
+            reasoning that kept the per-workflow detail off it in the first
+            place, followed the rest of the way. The workflows-in-no-system card
+            went with it; those workflows are the Archived tab on Executions,
+            where they are counted rather than only listed. CLAUDE.md §7 is
+            updated; the code is in git history rather than commented out.
+Verified:   Playwright, with downloads captured. Top button reads
+            "Download 2026 report" and yields executions-all-systems-2026.csv
+            opening "All systems, by year / period,2026,2026-01-01,2026-12-31".
+            The month menu lists Sep 2026 / Aug 2026 and yields
+            executions-all-systems-2026-08.csv opening "All systems, by month /
+            period,Aug,2026-08-01,2026-08-31". Switching to the Archived tab and
+            downloading gives executions-archived-2026.csv. Sidebar reads Home /
+            Ask Bays / North Star / Research Twin / Media Twin / Genie / vFarm /
+            Engine health / ... and all three placeholder pages render their
+            sentence. No page errors.

@@ -154,6 +154,8 @@ export async function getOverview(q: Query): Promise<OverviewData> {
       // their tiles carry no number. A headline figure for a page that says
       // "coming soon" would be a figure about nothing, which is the rule in
       // section 2 rather than a matter of taste.
+      { key: 'media-twin', label: 'Media Twin', to: '/media-twin', headline: '—', sublabel: 'not wired up', signal: 'nothing Media Twin does writes here yet', health: 'ok' },
+      { key: 'genie', label: 'Genie', to: '/genie', headline: '—', sublabel: 'not wired up', signal: 'nothing Genie does writes here yet', health: 'ok' },
       { key: 'vfarm', label: 'vFarm', to: '/vfarm', headline: '—', sublabel: 'not wired up', signal: 'nothing on the rack writes here yet', health: 'ok' },
       { key: 'engine-health', label: 'Engine health', to: '/engine-health', headline: '—', sublabel: 'not wired up', signal: 'no incident reaches this dashboard yet', health: 'ok' },
       {
