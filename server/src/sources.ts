@@ -527,6 +527,22 @@ function classify(patternId: string | null, bhaSystem: string | null): { system:
   return { system, keywords: [...words] };
 }
 
+/**
+ * LANE-VFARM-ZONE_MONITORING_SAAS → zone, monitoring, saas.
+ *
+ * A commercial card's `lane_id` carries the same shape as a pattern id, minus
+ * the sequence number, so the keywords on that page are read the same way. The
+ * system segment is dropped: it is VFARM on every card, and a keyword every row
+ * carries groups nothing.
+ */
+function laneKeywords(laneId: string | null): string[] {
+  const m = laneId?.match(/^LANE-[A-Z0-9]+-(.+)$/i);
+  if (!m) return [];
+  const words = new Set<string>();
+  for (const w of m[1].toLowerCase().split(/[^a-z0-9]+/)) if (w && !STOP.has(w)) words.add(w);
+  return [...words];
+}
+
 function excerpt(text: string | null, max = 180): string | null {
   if (!text) return null;
   const t = text.replace(/\s+/g, ' ').trim();
@@ -639,6 +655,7 @@ export function mapOpportunity(rec: AtRecord): Opportunity {
     target: str(f.target),
     who_pays: str(f.who_pays),
     bha_system: str(f.bha_system),
+    keywords: laneKeywords(lane),
     metrics_hypothesis: str(f.metrics_hypothesis),
     missing_proof: str(f.missing_proof),
     implementation_constraints: str(f.implementation_constraints),

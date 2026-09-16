@@ -5493,3 +5493,72 @@ Verified:   The rig. Executions: tabs read "All systems / Bays / North Star /
             twelve months in bars and in line. Registry: the Builders table is
             down to name, role, lanes owned, slack id, email. Open loops and
             Codex dropdowns carry no counts. No page errors on any of them.
+
+## 2026-09-16 13:10 — Build patterns and Commercial become one page shape
+Intent:     Destiny: "for the build patterns and the commercial opportunities
+            both of them are basically the same page right they are going to
+            have the exact same look." Header strip, two cards each (reusability
+            + created per week; confidence + created per week), media readiness
+            and the open-question trend moved to Statistics, the media-readiness
+            segmented bar removed, a month dropdown beside each search box, the
+            keyword bar added to Commercial, and Commercial's table stopped
+            scrolling sideways.
+Files:      src/data/types.ts, server/src/sources.ts, server/src/store.ts,
+            src/screens/BuildPatterns.tsx, src/screens/Commercial.tsx, CLAUDE.md
+Problem:    Three things the page could not do yet.
+            1. `patternMetrics()` and `commercialMetrics()` took no month, so a
+               month picker beside the search box would have left the strip and
+               the cards answering all time while the list answered one month —
+               the same reconciliation bug the loops page had on 15 Sep, where
+               "602 open" sat above "627 raised in August".
+            2. Commercial had no `created_per_week` series at all and no
+               keywords: `Opportunity` carries no keyword field, and `bha_system`
+               on that table is prose — "vFarm (digital twin), RAG archive
+               (intelligence layer), Swagger-documented API" — so splitting it on
+               spaces yields "documented" and "layer".
+            3. The Commercial table measured 1158px inside a 1136px card at
+               1440px wide, so it scrolled sideways where no other record table
+               did. The `width` props are `maxWidth`, not minimums, so narrowing
+               card id 28ch→24ch and card 58ch→48ch changed nothing at all:
+               re-measured at exactly 1158/1136 again. The floor was the header
+               row's own min-content, and the two widest headers were the
+               offenders at 120px and 114px.
+Fix:        1. Both metrics take `month`, cache per month (`patterns:2026-09`),
+               and scope every figure over the same set the list shows.
+               `created_per_week` follows: `weeksIn(month)` where a month is
+               chosen, `lastWeeks(8)` for all time, with the note saying which.
+               Added `scope.month` so the strip's hint can read "created in this
+               month" rather than "rows in the table".
+            2. Read Commercial's real `lane_id` values off the live base rather
+               than assuming: `LANE-VFARM-ZONE_MONITORING_SAAS` — the same shape
+               as a pattern id minus the sequence number. `laneKeywords()` gives
+               zone, monitoring, saas. The VFARM segment is dropped because it is
+               on every card and would group nothing, the same rule `classify()`
+               already applied to BP-.
+            3. Headed the two columns `media` and `questions`. Re-measured:
+               1136/1136 at 1440, 1416/1416 at 1720. At 1280 it still scrolls,
+               and so does Open loops (1115/976) — that is the existing floor for
+               a dense table, not a Commercial fault.
+Decision:   Both pages open on the current month, not all time, matching Codex
+            and Open loops; "All time" stays as the last option in the picker.
+            The media-readiness bar came off because it read All / high / medium
+            / low / not set beside a confidence bar reading the same five words.
+            Media readiness stays a sortable column — it is still the second half
+            of the list's default order — and becomes a statistics tile.
+            `unresolved_trend` is deliberately the one figure on that tab not
+            scoped to the month: it is this dashboard's own observation of the
+            whole corpus at each resync, and cutting a record of when something
+            was written down to the month the cards were created in would be two
+            questions in one chart.
+            Commercial's keyword bar starts at two occurrences where Build
+            patterns starts at three, because it holds 21 rows to the other's 152.
+Verified:   Postgres + real server + Playwright at 1280/1440/1720.
+            patterns months: Sep 2026 / Aug 2026 / All time; 5 rows in Sep,
+            15 all time. commercial: same picker, 4 rows in Sep, 12 all time,
+            segmented "All confidence 4 / high 1 / medium 3", keywords "ledger 2",
+            statistics grid reads Every month held · Month in view · Media
+            readiness · Open research questions over time · Cards written ·
+            Nothing outstanding · Open research questions · Reached Media-Ready.
+            No page errors. Caught on screenshot and fixed: the Created per week
+            card printed its note twice, once from `MetricCard note` and once
+            from `SeriesBlock`.

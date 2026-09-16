@@ -178,6 +178,26 @@ function addDays(day: string, n: number): string {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
+/**
+ * Every week that touches a month, oldest first. A week straddling the boundary
+ * belongs to both months it touches, which is a fact about weeks rather than a
+ * rounding decision: a bar labelled "31 Aug–6 Sep" is exactly that.
+ */
+function weeksIn(month: string): string[] {
+  const [y, m] = month.split('-').map(Number);
+  const first = `${month}-01`;
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const last = `${month}-${String(lastDay).padStart(2, '0')}`;
+  const out: string[] = [];
+  let w = weekStart(first);
+  const end = weekStart(last);
+  while (w <= end) {
+    out.push(w);
+    w = addDays(w, 7);
+  }
+  return out;
+}
+
 function lastWeeks(n: number): string[] {
   const out: string[] = [];
   let w = weekStart(today());
@@ -2145,6 +2165,13 @@ function series(points: SeriesPoint[] | null, note: string | null): MetricSeries
   return { points, note };
 }
 
+/** "Sep 2026" from `2026-09`. Spelled the same way stats.ts and the pages spell one. */
+function monthName(month: string): string {
+  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const [y, m] = month.split('-');
+  return `${names[Number(m) - 1] ?? month} ${y}`;
+}
+
 /** "7–13 Sep" from a week-start day. */
 function weekLabel(start: string): string {
   const a = new Date(`${start}T00:00:00Z`);
@@ -2529,14 +2556,23 @@ export async function codexMetrics(builder: string | null, month?: string | null
   return value;
 }
 
-export async function patternMetrics(): Promise<PatternMetrics> {
-  const hit = metricsCache.get('patterns');
+export async function patternMetrics(month?: string | null): Promise<PatternMetrics> {
+  const key = `patterns:${month ?? '*'}`;
+  const hit = metricsCache.get(key);
   if (hit && hit.version === storeVersion) return hit.value as PatternMetrics;
-  const all = await patterns();
-  const weeks = lastWeeks(8);
+  const everything = await patterns();
+  /**
+   * The month in view, chosen beside the search box (2026-09-16, Destiny). The
+   * figures, the reusability mix and the duplicate arithmetic are all about the
+   * rows on screen, so they are all computed over the same scoped set — a
+   * strip that answered all time while the list answered one month is the
+   * reconciliation bug the loops page had.
+   */
+  const all = month ? everything.filter((p) => p.created_at?.slice(0, 7) === month) : everything;
+  const weeks = month ? weeksIn(month) : lastWeeks(8);
   const created = series(
-    weeks.map((w) => ({ label: weekLabel(w), value: all.filter((p) => p.created_at && weekStart(p.created_at.slice(0, 10)) === w).length })),
-    'Patterns by the week of created_at, last eight weeks.',
+    weeks.map((w) => ({ label: weekLabel(w), value: everything.filter((p) => p.created_at && weekStart(p.created_at.slice(0, 10)) === w).length })),
+    month ? `Patterns by the week of created_at, the weeks covering ${monthName(month)}. A week that straddles the boundary counts every pattern in it.` : 'Patterns by the week of created_at, last eight weeks.',
   );
 
   /**
@@ -2569,7 +2605,7 @@ export async function patternMetrics(): Promise<PatternMetrics> {
   const value: PatternMetrics = {
     kind: 'patterns',
     computed_at: nowIso(),
-    scope: { rows: all.length },
+    scope: { rows: all.length, month: month ?? null },
     /**
      * The figure and the sentence have to agree, so `distinct_ids` is the count
      * of distinct pattern ids and nothing else: rows carrying no pattern_id at
@@ -2596,7 +2632,7 @@ export async function patternMetrics(): Promise<PatternMetrics> {
     reusability_note: `reusability is free text rather than a select. ${all.length - prose} of ${all.length} rows answer in one word; ${prose} explain the reach in a sentence and are grouped as \u201cwritten out in prose\u201d \u2014 open the pattern to read it.`,
     created_per_week: created,
   };
-  metricsCache.set('patterns', { version: storeVersion, value });
+  metricsCache.set(key, { version: storeVersion, value });
   return value;
 }
 
@@ -2611,10 +2647,19 @@ function levelRank(v: string): number {
   return i === -1 ? LEVEL_ORDER.length : i;
 }
 
-export async function commercialMetrics(): Promise<CommercialMetrics> {
-  const hit = metricsCache.get('commercial');
+export async function commercialMetrics(month?: string | null): Promise<CommercialMetrics> {
+  const key = `commercial:${month ?? '*'}`;
+  const hit = metricsCache.get(key);
   if (hit && hit.version === storeVersion) return hit.value as CommercialMetrics;
-  const all = await opportunities();
+  const everything = await opportunities();
+  /**
+   * The month in view, chosen beside the search box (2026-09-16, Destiny), the
+   * same way Build patterns scopes itself. `unresolved_trend` is the one figure
+   * here that is deliberately not scoped: it is this dashboard's own
+   * observations of the whole corpus at each resync, and cutting that to a
+   * month would be cutting a history by when it was written down.
+   */
+  const all = month ? everything.filter((o) => o.created_at?.slice(0, 7) === month) : everything;
   const withCount = all.filter((o) => o.missing_research_count !== null);
   const total = withCount.reduce((n, o) => n + (o.missing_research_count ?? 0), 0);
   const obs = await observations('commercial', 'unresolved_questions');
@@ -2623,6 +2668,13 @@ export async function commercialMetrics(): Promise<CommercialMetrics> {
   const mediaMix = [...new Set(all.map((o) => o.media_readiness ?? '(unset)'))];
   const open = (o: Opportunity) => o.missing_research_count ?? o.missing_research_questions.length;
   const incomplete = all.map((o) => ({ id: o.id, card_id: o.card_id, missing: incompleteFields(o) })).filter((c) => c.missing.length > 0);
+  const weeks = month ? weeksIn(month) : lastWeeks(8);
+  const created = series(
+    weeks.map((w) => ({ label: weekLabel(w), value: everything.filter((o) => o.created_at && weekStart(o.created_at.slice(0, 10)) === w).length })),
+    month
+      ? `Cards by the week of created_at, the weeks covering ${monthName(month)}. A week that straddles the boundary counts every card in it.`
+      : 'Cards by the week of created_at, last eight weeks. Card creation stopped on 9 Sep 2026, so a run of empty weeks after that is the outage, not a fall in output.',
+  );
 
   /**
    * There is deliberately nothing here grouped by lane, readiness, pilot state,
@@ -2635,7 +2687,7 @@ export async function commercialMetrics(): Promise<CommercialMetrics> {
   const value: CommercialMetrics = {
     kind: 'commercial',
     computed_at: nowIso(),
-    scope: { rows: all.length },
+    scope: { rows: all.length, month: month ?? null },
     cards: all.length,
     clear: all.filter((o) => open(o) === 0).length,
     media_ready: all.filter((o) => o.readiness_state === 'Media-Ready').length,
@@ -2646,6 +2698,7 @@ export async function commercialMetrics(): Promise<CommercialMetrics> {
     media_readiness_mix: mediaMix
       .map((m) => ({ media_readiness: m, n: all.filter((o) => (o.media_readiness ?? '(unset)') === m).length }))
       .sort((a, b) => levelRank(a.media_readiness) - levelRank(b.media_readiness) || a.media_readiness.localeCompare(b.media_readiness)),
+    created_per_week: created,
     unresolved_questions: {
       value: withCount.length ? total : null,
       note: withCount.length
@@ -2664,7 +2717,7 @@ export async function commercialMetrics(): Promise<CommercialMetrics> {
         : 'Every card carries the fields a complete extractor run writes.',
     },
   };
-  metricsCache.set('commercial', { version: storeVersion, value });
+  metricsCache.set(key, { version: storeVersion, value });
   return value;
 }
 
@@ -2675,9 +2728,9 @@ export async function metrics(kind: RecordKind, filter: { builder?: string | nul
     case 'codex':
       return codexMetrics(filter.builder ?? null, filter.month ?? null);
     case 'patterns':
-      return patternMetrics();
+      return patternMetrics(filter.month ?? null);
     case 'commercial':
-      return commercialMetrics();
+      return commercialMetrics(filter.month ?? null);
     case 'ns':
       return nsMetrics();
     case 'rt':
