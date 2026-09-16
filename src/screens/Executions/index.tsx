@@ -7,7 +7,6 @@ import {
   getExecutions,
   type ExecutionDelta,
   type ExecutionGrain,
-  type ExecutionPeriod,
   type ExecutionRun,
   type ExecutionSystem,
   type ExecutionWorkflow,
@@ -16,7 +15,7 @@ import {
 } from '../../data';
 import { buildReport, reportName } from '../../lib/executionReport';
 import { downloadCsv } from '../../lib/csv';
-import { EmptyPanel, LoadFailed, Loading, MetricCard, MonthPicker, PageHeader, Tabs, Toast, relativeTime, useToast } from '../../components/ui';
+import { CountUp, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, MonthPicker, PageHeader, Tabs, Toast, useToast, yearOf } from '../../components/ui';
 
 /**
  * Executions — every run of every workflow in the engine, one row per run.
@@ -34,7 +33,7 @@ import { EmptyPanel, LoadFailed, Loading, MetricCard, MonthPicker, PageHeader, T
  * above the highest id it holds every 45 seconds, this page re-reads on the
  * same interval, and both say so rather than implying the numbers are live.
  *
- * **Tabs are systems, and Unregistered is one of them.** A workflow the
+ * **Tabs are systems, and Archived is one of them.** A workflow the
  * registry names no system for is counted in All systems and listed under its
  * own tab — never dropped, never filed under a guess. A workflow must not be
  * invisible because a registry row is missing.
@@ -51,7 +50,6 @@ const REFRESH_MS = 45_000;
  * query string.
  */
 
-const NOUN: Record<ExecutionGrain, string> = { week: 'week', month: 'month', year: 'year' };
 
 function pct(n: number | null): string {
   return n === null ? '—' : `${Math.round(n * 1000) / 10}%`;
@@ -114,10 +112,17 @@ function Delta({ d, format = (n: number) => String(n), suffix = '' }: { d: Execu
 }
 
 /** One tile's body: the figure, and its change against last month under it. */
-function Figure({ value, delta, tone }: { value: string; delta?: ReactNode; tone?: 'failing' }) {
+function Figure({ value, delta, tone, count, replayKey }: { value: string; delta?: ReactNode; tone?: 'failing'; count?: number | null; replayKey?: string }) {
   return (
     <div className="space-y-1.5">
-      <div className={`font-display tabular text-[30px] leading-none ${tone === 'failing' ? 'text-failing' : 'text-ink'}`}>{value}</div>
+      {/*
+        Numbers count up here too (2026-09-16, Destiny). It is the one place in
+        the dashboard they did not, and a figure that animates on one page and
+        snaps on another reads as two different products.
+      */}
+      <div className={`font-display tabular text-[30px] leading-none ${tone === 'failing' ? 'text-failing' : 'text-ink'}`}>
+        {count === null || count === undefined ? value : <CountUp value={count} replayKey={replayKey} />}
+      </div>
       {delta && <div className="flex flex-wrap items-baseline gap-x-2">{delta}</div>}
     </div>
   );
@@ -125,86 +130,11 @@ function Figure({ value, delta, tone }: { value: string; delta?: ReactNode; tone
 
 /* ------------------------------------------------------------------ chart */
 
-const BAR = 26;
-const GAP = 12;
-const H = 96;
-/** A gutter so the first period's label is not clipped by the edge of the svg. */
-const PAD = 16;
-
-/** Executions and failures per period. A period nothing is held for draws no bar at all. */
-function PeriodChart({
-  periods,
-  grain,
-  selected,
-  onSelect,
-  readOnly = false,
-}: {
-  periods: ExecutionPeriod[];
-  grain: ExecutionGrain;
-  selected: string;
-  onSelect: (key: string) => void;
-  /** Draw it, do not let anyone click it. The month is chosen in the picker. */
-  readOnly?: boolean;
-}) {
-  const shown = periods.slice(-18);
-  const max = Math.max(1, ...shown.map((p) => p.executions));
-  const width = shown.length * (BAR + GAP);
-  const firstCovered = shown.findIndex((p) => p.coverage !== 'none');
-  return (
-    <div className="scroll-thin -mx-1 overflow-x-auto px-1">
-      <svg width={Math.max(width, 120) + PAD * 2} height={H + 30} role="img" aria-label={`Executions by ${NOUN[grain]}`} className="block">
-        <defs>
-          <pattern id="exec-hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-            <rect width="5" height="5" fill="var(--ink)" opacity="0.18" />
-            <line x1="0" y1="0" x2="0" y2="5" stroke="var(--ink)" strokeWidth="2.4" />
-          </pattern>
-        </defs>
-        <line x1={PAD} y1={H} x2={PAD + Math.max(width - GAP, 1)} y2={H} stroke="var(--line)" strokeWidth="1" />
-        {firstCovered > 0 && (
-          <g>
-            <line x1={PAD + firstCovered * (BAR + GAP) - GAP / 2} y1="2" x2={PAD + firstCovered * (BAR + GAP) - GAP / 2} y2={H} stroke="var(--degraded)" strokeWidth="1" strokeDasharray="3 3" />
-            <text x={PAD + firstCovered * (BAR + GAP) - GAP / 2 + 4} y="11" fontSize="9.5" fill="var(--degraded)">
-              history begins
-            </text>
-          </g>
-        )}
-        {shown.map((p, i) => {
-          const x = PAD + i * (BAR + GAP);
-          const on = selected === p.key;
-          const h = p.coverage === 'none' ? 0 : Math.round((p.executions / max) * (H - 16));
-          const fh = p.coverage === 'none' || !p.executions ? 0 : Math.round((p.failed / max) * (H - 16));
-          return (
-            <g key={p.key} className={readOnly ? undefined : 'cursor-pointer'} onClick={readOnly ? undefined : () => onSelect(p.key)}>
-              <rect x={x - GAP / 2} y="0" width={BAR + GAP} height={H + 30} fill={on ? 'var(--hover)' : 'transparent'} />
-              {p.coverage === 'none' ? (
-                <line x1={x} y1={H - 1} x2={x + BAR} y2={H - 1} stroke="var(--faint)" strokeWidth="2" strokeDasharray="2 2" />
-              ) : (
-                <>
-                  <rect x={x} y={H - h} width={BAR} height={h} rx="2" fill={p.coverage === 'partial' ? 'url(#exec-hatch)' : 'var(--ink)'} opacity={p.coverage === 'partial' ? 0.85 : 1} />
-                  {/* Failures sit inside the same bar, so the eye reads a share rather than two totals. */}
-                  {fh > 0 && <rect x={x} y={H - fh} width={BAR} height={fh} rx="2" fill="var(--failing)" />}
-                </>
-              )}
-              <text x={x + BAR / 2} y={H + 14} textAnchor="middle" fontSize="10" fill={on ? 'var(--ink)' : 'var(--faint)'}>
-                {p.label}
-              </text>
-              {p.coverage !== 'full' && (
-                <text x={x + BAR / 2} y={H + 25} textAnchor="middle" fontSize="9" fill="var(--degraded)">
-                  {p.coverage === 'none' ? 'none' : 'part'}
-                </text>
-              )}
-              <title>
-                {p.coverage === 'none'
-                  ? `${p.label}: nothing is held. ${p.note ?? ''}`
-                  : `${p.label} (${p.start} to ${p.end}): ${p.executions} executions, ${p.failed} failed, average ${duration(p.avg_ms)}${p.note ? ` — ${p.note}` : ''}`}
-              </title>
-            </g>
-          );
-        })}
-      </svg>
-    </div>
-  );
-}
+/*
+ * `PeriodChart` stood here until 16 Sep 2026, when this page went to a calendar
+ * year drawn by the same chart the record pages use (Destiny). One chart for
+ * every page beats two that drift; it is in git history.
+ */
 
 /* ------------------------------------------------------- one workflow */
 
@@ -361,7 +291,7 @@ function WorkflowRow({ w, onOpen }: { w: ExecutionWorkflow; onOpen: () => void }
     <tr className="cursor-pointer" onClick={onOpen}>
       <td className="td card-title td-clip" style={{ maxWidth: '36ch' }} title={w.registered ? w.workflow_name : `${w.workflow_name} — no workflow registry row names a system for this one`}>
         {w.workflow_name}
-        {!w.registered && <span className="ml-1.5 text-[10.5px] text-degraded">unregistered</span>}
+        {!w.registered && <span className="ml-1.5 text-[10.5px] text-degraded">archived</span>}
       </td>
       <td className="td card-meta tabular text-right text-ink">
         {w.executions}
@@ -389,15 +319,58 @@ function WorkflowRow({ w, onOpen }: { w: ExecutionWorkflow; onOpen: () => void }
 function SystemView({
   system,
   data,
+  year,
+  monthKeys,
+  period: periodKey,
+  onMonth,
   onOpenWorkflow,
 }: {
   system: ExecutionSystem;
   data: ExecutionsData;
+  year: number;
+  monthKeys: string[];
+  period: string;
+  onMonth: (m: string | null) => void;
   onOpenWorkflow: (id: string) => void;
 }) {
+  const [shape, setShape] = useState<'bars' | 'line'>('bars');
   const period = system.period;
   const c = system.comparison;
   const nothing = system.periods.every((p) => p.executions === 0);
+  /**
+   * The year as a `MonthlySeries`, so the same chart the record pages use can
+   * draw it. Executions have no "advanced" second series — a run is one thing —
+   * so failures ride inside the bar as they always did and the line is one
+   * line.
+   */
+  const yearSeries = yearOf(
+    {
+      kind: 'loops',
+      created_label: 'Executions',
+      created_field: 'n8n execution id',
+      advanced_label: null,
+      advanced_field: null,
+      rate_label: null,
+      months: system.periods.map((p) => ({
+        month: p.key,
+        label: p.label,
+        created: p.executions,
+        advanced: 0,
+        rate: null,
+        coverage: p.coverage,
+        advanced_coverage: 'none' as const,
+        note: p.note,
+        backfilled: 0,
+        segments: null,
+      })),
+      boundary: null,
+      undated: { n: 0, ids: [], note: '' },
+      secondary: null,
+      segment_keys: null,
+      current: system.period.key,
+    },
+    year,
+  );
 
   return (
     <>
@@ -410,18 +383,25 @@ function SystemView({
         comparison note, is gone at Destiny's request. The change against last
         month is still on every tile that has one.
       */}
+      <div className="mx-6 mb-3 flex flex-wrap items-center justify-between gap-2 md:mx-8">
+        <div className="text-[13px] font-medium text-ink">
+          {period.label} {year} · {system.label}
+        </div>
+        <MonthPicker months={monthKeys.filter((k) => k.startsWith(`${year}-`))} value={periodKey} onChange={onMonth} allowAll={false} />
+      </div>
+
       <div className="mx-6 mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 md:mx-8">
         <MetricCard title="Executions" right="every run read from n8n" align="top" noteMinLines={3}
           note={period.unfinished ? `${period.unfinished} of them are still running and are counted with the status they were read at.` : 'Every run n8n recorded in this month, whatever its outcome.'}>
-          <Figure value={nothing ? '—' : String(period.executions)} delta={<Delta d={c.executions} />} />
+          <Figure value="—" count={nothing ? null : period.executions} replayKey={`${system.system}|${period.key}`} delta={<Delta d={c.executions} />} />
         </MetricCard>
         <MetricCard title="Succeeded" right="status = success" align="top" noteMinLines={3}
           note={period.canceled ? `${period.canceled} further ${period.canceled === 1 ? 'run was' : 'runs were'} canceled by hand, which is neither a success nor a failure.` : 'Runs that finished without an error.'}>
-          <Figure value={nothing ? '—' : String(period.succeeded)} delta={<Delta d={c.successes} />} />
+          <Figure value="—" count={nothing ? null : period.succeeded} replayKey={`${system.system}|${period.key}`} delta={<Delta d={c.successes} />} />
         </MetricCard>
         <MetricCard title="Failed" right="status = error" align="top" noteMinLines={3}
           note={`${pct(period.failure_rate)} of the ${period.finished} runs that finished. A run still going is not counted either way.`}>
-          <Figure value={nothing ? '—' : String(period.failed)} tone={period.failed ? 'failing' : undefined} delta={<Delta d={c.failures} />} />
+          <Figure value="—" count={nothing ? null : period.failed} replayKey={`${system.system}|${period.key}`} tone={period.failed ? 'failing' : undefined} delta={<Delta d={c.failures} />} />
         </MetricCard>
         <MetricCard title="Failure rate" right="failed ÷ finished" align="top" noteMinLines={3}
           note={period.finished ? `Over the ${period.finished} runs that finished this month.` : 'No run finished this month, so there is no rate — not a rate of nought.'}>
@@ -432,38 +412,41 @@ function SystemView({
           <Figure value={duration(period.avg_ms)} delta={<Delta d={c.avg_ms} format={(n) => duration(n)} />} />
         </MetricCard>
         <MetricCard title="Workflows run" right="distinct workflows" align="top" noteMinLines={3}
-          note={`Workflows with at least one execution this month. A workflow the registry names no system for is still counted, under Unregistered.`}>
-          <Figure value={nothing ? '—' : String(system.workflows.length)} />
+          note={`Workflows with at least one execution this month. A workflow the registry names no system for is still counted, under Archived.`}>
+          <Figure value="—" count={nothing ? null : system.workflows.length} replayKey={`${system.system}|${period.key}`} />
         </MetricCard>
       </div>
 
+      {/*
+        The year, the same way the record pages draw one (2026-09-16, Destiny):
+        twelve columns, bars or line, no bar and a broken line where nothing was
+        recorded. The paragraph of caveats that sat under it is gone; what is
+        left of it — when this database last read n8n, and how far back it goes
+        — is one quiet line at the foot of the page, said once.
+      */}
       <div className="mx-6 mb-4 md:mx-8">
         <MetricCard
-          title={`Executions by week in ${period.label}`}
-          right={<span className="text-[11px] text-faint">bar = executions · red = failures</span>}
-          note={
-            <span className="block space-y-1">
-              {period.note && <span className="block text-[11px] leading-snug text-degraded">{period.note}</span>}
-              <span className="block text-[11px] leading-snug text-faint">{data.source.note}</span>
-              {data.boundary && <span className="block text-[11px] leading-snug text-degraded">{data.boundary.note}</span>}
-              {data.source.warning && <span className="block text-[11px] leading-snug text-failing">{data.source.warning}</span>}
-              {data.source.at && (
-                <span className="block text-[11px] leading-snug text-faint">
-                  Last read {relativeTime(data.source.at) ?? data.source.at} · {data.source.held} executions held
-                  {data.source.oldest ? `, from ${data.source.oldest}` : ''}
-                  {data.source.highest_id ? ` · newest id ${data.source.highest_id}` : ''}.
-                </span>
-              )}
+          title="Every month held"
+          right={
+            <span className="flex items-center gap-2">
+              <span className="seg" role="group" aria-label="Chart shape">
+                <button type="button" aria-pressed={shape === 'bars'} onClick={() => setShape('bars')}>
+                  Bars
+                </button>
+                <button type="button" aria-pressed={shape === 'line'} onClick={() => setShape('line')}>
+                  Line
+                </button>
+              </span>
             </span>
           }
+          note={<Legend series={yearSeries} />}
+          align="top"
         >
-          {/*
-            The weeks inside the month in view, from the same day rows as the
-            figures above them. Read-only: the month is chosen in the picker at
-            the top, and a chart that also set it would be a second control for
-            one selection.
-          */}
-          {nothing ? <EmptyPanel>{data.source.note}</EmptyPanel> : <PeriodChart periods={system.weeks} grain="week" selected={period.key} onSelect={() => {}} readOnly />}
+          {shape === 'bars' ? (
+            <MonthChart series={yearSeries} selected={period.key} onSelect={() => {}} fill readOnly />
+          ) : (
+            <LineChart series={yearSeries} />
+          )}
         </MetricCard>
       </div>
 
@@ -510,6 +493,7 @@ export default function Executions() {
   // fixed; the rows behind it are unchanged, so the month and the weeks drawn
   // inside it are still the same arithmetic over the same executions.
   const [period, setPeriod] = useState<string | null>(null);
+  const [year, setYear] = useState<number>(() => new Date().getFullYear());
   const [tab, setTab] = useState('All systems');
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -524,6 +508,7 @@ export default function Executions() {
   // Every month this database holds an execution for, newest first, from the
   // All-systems series so the list does not change as you move between tabs.
   const monthKeys = [...data.systems[0].periods].map((p) => p.key).reverse();
+  const years = [...new Set(monthKeys.map((k) => Number(k.slice(0, 4))))].sort((a, b) => b - a);
   const counts = Object.fromEntries(
     data.systems.map((s) => [
       s.label,
@@ -560,14 +545,34 @@ export default function Executions() {
         right={
           <div className="flex flex-wrap items-center gap-2">
             {/*
-              One month at a time (2026-09-16, Destiny). The week / month / year
-              control that stood here asked a question the tabs below already
-              answer differently: the systems are what you switch between, and
-              the period is what you set. The rows behind every figure are
-              unchanged — they are still one row per execution, so a month and
-              the weeks drawn inside it are the same arithmetic.
+              The year sits at the top and the month is chosen inside the page
+              (2026-09-16, Destiny). The chart under the figures is the whole
+              year; the figures themselves are one month of it, and picking
+              the month next to them is where that choice belongs.
             */}
-            <MonthPicker months={monthKeys} value={data.period} onChange={(m) => setPeriod(m)} allowAll={false} />
+            <label className="flex items-center gap-2 text-[11.5px] text-faint">
+              <span>Year</span>
+              <select
+                className="input h-[30px] w-auto py-0 text-[12px]"
+                value={year}
+                onChange={(e) => {
+                  const y = Number(e.target.value);
+                  setYear(y);
+                  // A period key belongs to its year, so changing the year lands
+                  // on that year's newest month rather than keeping one that is
+                  // no longer on the chart.
+                  const first = [...monthKeys].find((k) => k.startsWith(`${y}-`));
+                  setPeriod(first ?? null);
+                }}
+                aria-label="Year"
+              >
+                {years.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button type="button" className="btn" onClick={() => downloadCsv(reportName(system, data.period), buildReport(data, system))}>
               Download report
             </button>
@@ -580,7 +585,7 @@ export default function Executions() {
       />
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <SystemView key={`${system.system}-${data.period}`} system={system} data={data} onOpenWorkflow={setOpen} />
+        <SystemView key={`${system.system}-${data.period}`} system={system} data={data} year={year} monthKeys={monthKeys} period={data.period} onMonth={setPeriod} onOpenWorkflow={setOpen} />
 
         {/*
           Said once, at the foot of the page: these numbers are as fresh as the

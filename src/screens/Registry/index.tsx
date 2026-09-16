@@ -34,7 +34,6 @@ import {
   usePaged,
   useToast,
 } from '../../components/ui';
-import { ageTone } from '../../lib';
 import { DASH, EditableCell, NewRow, type CellType } from './Editable';
 
 /**
@@ -268,11 +267,10 @@ export default function Registry() {
         <div className="shrink-0 max-w-[104ch] px-6 pb-3 text-[11.5px] leading-snug text-faint md:px-8">
           Every typed cell here is editable — click one, type, press Enter. This dashboard is the system of record for
           these tables: nothing upstream writes them, so a change is saved to Postgres and stays there. A field nobody
-          has filled in shows a dash rather than a guess. The open-loop, oldest-loop and entries-this-week figures on
-          Builders are the exception: they are read from the record tables, so they are shown rather than typed.
+          has filled in shows a dash rather than a guess.
         </div>
 
-        {tab === 'Builders' && <BuildersTab rows={d.people} figures={d.builders} {...shared} />}
+        {tab === 'Builders' && <BuildersTab rows={d.people} {...shared} />}
         {tab === 'Tools' && <ServicesTab rows={d.services} spend={d.spend} {...shared} />}
         {tab === 'Endpoint' && <EndpointsTab rows={d.endpoints} bases={d.bases} digests={d.digest_health} {...shared} />}
         {tab === 'Workflow' && <WorkflowsTab rows={d.workflows} {...shared} />}
@@ -641,10 +639,16 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
         />
       </div>
 
+      {/*
+        Twelve columns at 1040 rather than thirteen at 1400 (2026-09-16,
+        Destiny): the table scrolled sideways inside itself on a normal screen,
+        and "updated" was the column paying for it — a timestamp nobody reads on
+        a table whose whole point is what it costs and who pays.
+      */}
       <Grid
         label="Tools"
-        min={1400}
-        cols={13}
+        min={1040}
+        cols={12}
         empty="No tool is registered yet."
 
         head={
@@ -660,7 +664,6 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
             <Th>renews</Th>
             <Th>who pays</Th>
             <Th>status</Th>
-            <Th>updated</Th>
             <Th />
           </>
         }
@@ -700,9 +703,6 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
               </td>
               <td className="td text-dim">{cell(p, 'services', s, 'billing_owner')}</td>
               <td className="td card-meta">{cell(p, 'services', s, 'status', { type: 'select', options: SERVICE_STATUS })}</td>
-              <td className="td tabular whitespace-nowrap text-faint" title={s.updated_at}>
-                {when(s.updated_at)}
-              </td>
               <td className="td card-actions td-actions">
                 <RowTools {...p} kind="services" row={s} />
               </td>
@@ -903,30 +903,34 @@ function EndpointsTab({ rows, bases, digests, ...p }: TabProps & { rows: Registr
 /* -------------------------------------------------------------- builders */
 
 /**
- * The roster, with the live figures beside it.
+ * The roster.
  *
- * This is where the Builders page went (decision 2026-09-14, Destiny). Of
- * everything that page showed only the open-loop count and the oldest-loop age
- * were real; the rest — lane, last activity, contract status, entries this week
- * — was a fixture. So the three figures here are read from the record tables
- * and nothing else is invented: a person with no submissions table shows a dash
- * for entries this week rather than a zero, because he writes none rather than
- * having written none.
+ * This is where the Builders page went (decision 2026-09-14, Destiny). The
+ * open-loop count, the oldest-loop age and entries-this-week came with it and
+ * went again on 2026-09-16: they are what Open loops and Codex entries are
+ * *for*, and repeating them on a roster meant three figures nobody would think
+ * to keep looking at here. What is left is who the team are, which is the one
+ * thing this table is the only source of.
  */
-function BuildersTab({ rows, figures, ...p }: TabProps & { rows: RegistryData['people']; figures: RegistryData['builders'] }) {
-  const fig = new Map(figures.map((f) => [f.id, f]));
-  const num = (v: number | null) => (v === null ? <span className="text-faint">{DASH}</span> : <span className="tabular">{v}</span>);
+function BuildersTab({ rows, ...p }: TabProps & { rows: RegistryData['people'] }) {
   const live = rows.filter((r) => !r.deleted_at);
-  const openLoops = figures.reduce((n, f) => n + (f.open_loops ?? 0), 0);
-  const thisWeek = figures.reduce((n, f) => n + (f.entries_this_week ?? 0), 0);
-  const oldest = Math.max(0, ...figures.map((f) => f.oldest_loop_days ?? 0));
+  const withRole = live.filter((r) => (r.role ?? '').trim()).length;
+  const withLanes = live.filter((r) => r.lanes_owned.length > 0).length;
+  const withSlack = live.filter((r) => (r.slack_user_id ?? '').trim()).length;
   return (
     <>
+      {/*
+        Four figures about the roster itself, not about the work (2026-09-16,
+        Destiny). Open loops, oldest loop and entries this week were figures
+        about other pages, shown on the one page nobody goes to for them. These
+        three say how complete the roster is — the only question this table is
+        the source of an answer to.
+      */}
       <StatStrip cols={4}>
         <CountCell label="People" value={live.length} hint="the roster, typed here and nowhere else" hintMinLines={2} />
-        <CountCell label="Open loops" value={openLoops} hint="across every builder table, read from Postgres" hintMinLines={2} />
-        <CountCell label="Oldest open loop, days" value={oldest} tone={oldest >= 30 ? 'failing' : oldest >= 14 ? 'degraded' : 'dim'} hint="the age of the oldest loop still open in any builder table" hintMinLines={2} />
-        <CountCell label="Entries this week" value={thisWeek} hint="Codex submissions logged in the current ISO week" hintMinLines={2} />
+        <CountCell label="With a role" value={withRole} tone={withRole < live.length ? 'degraded' : 'dim'} hint="a row with no role says nothing about what the person owns" hintMinLines={2} />
+        <CountCell label="Lanes assigned" value={withLanes} tone={withLanes < live.length ? 'degraded' : 'dim'} hint="people carrying at least one lane" hintMinLines={2} />
+        <CountCell label="Slack ids" value={withSlack} tone={withSlack < live.length ? 'degraded' : 'dim'} hint="needed to route a digest to the person" hintMinLines={2} />
       </StatStrip>
 
       <div className="shrink-0 px-6 pb-3 md:px-8">
@@ -946,27 +950,22 @@ function BuildersTab({ rows, figures, ...p }: TabProps & { rows: RegistryData['p
 
       <Grid
         label="Builders"
-        min={1380}
-        cols={10}
+        min={880}
+        cols={6}
         empty="Nobody is on the roster yet."
 
         head={
           <>
-            <Th width="16%">name</Th>
-            <Th width="18%">role</Th>
-            <Th width="16%">lanes owned</Th>
-            <Th right>open loops</Th>
-            <Th right>oldest</Th>
-            <Th right>entries this week</Th>
+            <Th width="20%">name</Th>
+            <Th width="22%">role</Th>
+            <Th width="20%">lanes owned</Th>
             <Th>slack id</Th>
             <Th>email</Th>
-            <Th>updated</Th>
             <Th />
           </>
         }
       >
         {rows.map((person) => {
-          const f = fig.get(person.id);
           return (
           <tr key={person.id} className={person.deleted_at ? 'opacity-50' : ''}>
             <td className="td card-title td-clip" style={{ maxWidth: '26ch' }}>
@@ -999,32 +998,9 @@ function BuildersTab({ rows, figures, ...p }: TabProps & { rows: RegistryData['p
                 </span>
               )}
             </td>
-            {/* Read from the record tables on every load, never typed in and
-                never a fixture — so these three are the only cells on this page
-                that are not editable. A dash is "there is no table of that kind
-                for this person", which is not a zero.
-
-                Each carries its own label under 768px, where the table becomes
-                cards and the column headers are gone: three bare numbers in a
-                row say nothing without them. */}
-            <td className="td card-meta text-right">
-              {num(f?.open_loops ?? null)}
-              <span className="text-faint md:hidden"> open</span>
-            </td>
-            <td className={`td card-meta text-right ${f?.oldest_loop_days ? ageTone(f.oldest_loop_days) : ''}`}>
-              {f?.oldest_loop_days ? <span className="tabular">{f.oldest_loop_days}d</span> : <span className="text-faint">{DASH}</span>}
-              <span className="text-faint md:hidden"> oldest</span>
-            </td>
-            <td className="td card-meta text-right">
-              {num(f?.entries_this_week ?? null)}
-              <span className="text-faint md:hidden"> this week</span>
-            </td>
             <td className="td tabular text-faint">{cell(p, 'people', person, 'slack_user_id')}</td>
             <td className="td td-clip text-dim" style={{ maxWidth: '26ch' }}>
               {cell(p, 'people', person, 'email', { width: '26ch' })}
-            </td>
-            <td className="td tabular whitespace-nowrap text-faint" title={person.updated_at}>
-              {when(person.updated_at)}
             </td>
             <td className="td card-actions td-actions">
               <RowTools {...p} kind="people" row={person} />
@@ -1034,21 +1010,6 @@ function BuildersTab({ rows, figures, ...p }: TabProps & { rows: RegistryData['p
         })}
       </Grid>
 
-      {rows.some((x) => x.notes) && (
-        <div className="shrink-0 px-6 pb-6 md:px-8">
-          <MetricCard title="Notes">
-            <div className="space-y-2.5 text-[12.5px] leading-relaxed">
-              {rows
-                .filter((x) => x.notes)
-                .map((x) => (
-                  <div key={x.id} className="text-dim">
-                    <span className="text-ink">{x.name}</span> — {x.notes}
-                  </div>
-                ))}
-            </div>
-          </MetricCard>
-        </div>
-      )}
     </>
   );
 }

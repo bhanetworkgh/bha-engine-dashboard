@@ -50,14 +50,11 @@ export function MonthPicker({
   months,
   value,
   onChange,
-  counts,
   allowAll = true,
 }: {
   months: string[];
   value: string | null;
   onChange: (m: string | null) => void;
-  /** How many rows each month holds, printed beside it. */
-  counts?: Record<string, number>;
   /**
    * Whether "All time" is offered. It is not everywhere: the Executions page
    * always shows exactly one month, so an option that quietly means "the
@@ -77,7 +74,6 @@ export function MonthPicker({
         {months.map((m) => (
           <option key={m} value={m}>
             {monthLabel(m)}
-            {counts && counts[m] !== undefined ? ` · ${counts[m]}` : ''}
           </option>
         ))}
         {allowAll && <option value="">All time</option>}

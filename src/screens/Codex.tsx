@@ -817,14 +817,6 @@ export default function Codex() {
   // holds — read off the rows the page already has rather than asked for.
   const months = useMemo(() => monthsFrom(entries.map((e) => e.logged_at)), [entries]);
   const inMonth = useMemo(() => entries.filter((e) => !month || e.logged_at?.slice(0, 7) === month), [entries, month]);
-  const monthCounts = useMemo(() => {
-    const out: Record<string, number> = {};
-    for (const e of entries) {
-      const m = e.logged_at?.slice(0, 7);
-      if (m) out[m] = (out[m] ?? 0) + 1;
-    }
-    return out;
-  }, [entries]);
   const scoped = useMemo(
     () => entries.filter((e) => (builder === 'all' || e.builder_id === builder) && (!month || e.logged_at?.slice(0, 7) === month)),
     [entries, builder, month],
@@ -920,7 +912,7 @@ export default function Codex() {
                 ...loaded.builders.map((b) => ({ value: b.id, label: b.label, count: inMonth.filter((e) => e.builder_id === b.id).length })),
               ]}
             />
-            <MonthPicker months={months} value={month} onChange={setMonth} counts={monthCounts} />
+            <MonthPicker months={months} value={month} onChange={setMonth} />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Segmented<Tab> ariaLabel="Stage" value={tab} onChange={setTab} options={TABS.map((t) => ({ value: t.value, label: t.label, count: scoped.filter((e) => inTab(e, t.value)).length }))} />

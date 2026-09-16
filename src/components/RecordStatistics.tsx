@@ -346,7 +346,7 @@ export default function RecordStatistics<T>({
                 {/* Newest first, like every other list on every page. */}
                 {[...data.months].reverse().map((m) => (
                   <option key={m.month} value={m.month}>
-                    {m.label} · {m.logs}
+                    {m.label}
                   </option>
                 ))}
               </select>

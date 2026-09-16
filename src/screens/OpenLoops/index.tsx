@@ -115,14 +115,6 @@ export default function OpenLoops() {
   // Every month a loop was raised in, newest first, and how many each holds —
   // read off the rows the page already has rather than asked for.
   const months = useMemo(() => monthsFrom((data?.loops ?? []).map((l) => l.raised_at)), [data]);
-  const monthCounts = useMemo(() => {
-    const out: Record<string, number> = {};
-    for (const l of data?.loops ?? []) {
-      const m = l.raised_at?.slice(0, 7);
-      if (m) out[m] = (out[m] ?? 0) + 1;
-    }
-    return out;
-  }, [data]);
   const inMonth = useMemo(() => (data?.loops ?? []).filter((l) => !month || l.raised_at?.slice(0, 7) === month), [data, month]);
   // One count per builder table, for the month in view.
   const ownerCounts = useMemo(() => {
@@ -330,7 +322,7 @@ export default function OpenLoops() {
                 ...data.by_owner.map((o) => ({ value: o.owner, label: BUILDER_NAMES[o.owner] ?? o.owner, count: ownerCounts[o.owner] ?? 0 })),
               ]}
             />
-            <MonthPicker months={months} value={month} onChange={setMonth} counts={monthCounts} />
+            <MonthPicker months={months} value={month} onChange={setMonth} />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Segmented

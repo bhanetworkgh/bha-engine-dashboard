@@ -34,7 +34,7 @@
  * join, so pointing a workflow at a system is a registry edit that re-files its
  * whole history rather than only its future. A workflow no registry row claims
  * is not dropped and not guessed at: it is counted in All systems and listed
- * under Unregistered, which is a tab rather than a footnote, because a workflow
+ * under Archived, which is a tab rather than a footnote, because a workflow
  * must never be invisible because a registry row is missing.
  */
 import { getMeta, nowIso, setMeta } from './db';
@@ -684,7 +684,7 @@ export async function read(grain: ExecutionGrain = 'week', wanted?: string): Pro
   const failing = await failedIds(selected.start, selected.end);
 
   // Which tabs exist: the three known systems, then anything else the registry
-  // has filed a running workflow under, then Unregistered where anything is
+  // has filed a running workflow under, then Archived where anything is
   // unclaimed. A system with a tab and no rows still draws, because its absence
   // is itself worth seeing; one with rows and no tab would be invisible, which
   // is the thing that must never happen.
@@ -697,7 +697,21 @@ export async function read(grain: ExecutionGrain = 'week', wanted?: string): Pro
     { system: ALL, label: 'All systems' },
     ...SYSTEMS,
     ...extra.map((s) => ({ system: s, label: s })),
-    ...(seen.has(UNREGISTERED) ? [{ system: UNREGISTERED, label: 'Unregistered' }] : []),
+    /**
+     * **"Archived", not "Unregistered"** (2026-09-16, Destiny, who checked the
+     * workflows this tab was holding and found every one of them archived in
+     * n8n).
+     *
+     * The test behind it is unchanged and is still *the workflow registry has
+     * no row for this workflow*, because this server does not read n8n's own
+     * archived flag — `GET /api/v1/workflows` is read for names only. So the
+     * label is Destiny's verified reading of what currently lands here rather
+     * than something the data itself knows, and a live workflow nobody has
+     * registered would land here too and be mislabelled. Reading `isArchived`
+     * and filing on that is the honest version and is the next change to make
+     * here.
+     */
+    ...(seen.has(UNREGISTERED) ? [{ system: UNREGISTERED, label: 'Archived' }] : []),
   ];
 
   const mine = (system: string) => (row: { system: string | null }) =>

@@ -5405,3 +5405,91 @@ Verified:   The rig. Open loops: the strip reconciles (3 + 0 + 5 = 8), the
             nothing is recorded, and the line view breaks across the empty
             months rather than running through them. Executions: months listed
             without counts. No page errors on either.
+
+## 2026-09-16 11:35 — Executions draws a year, the registry sheds borrowed figures, and everything slows down again
+
+Intent:     Destiny's round. Animations still too rushed. Counts off every month
+            dropdown. Executions: year at the top, a month picker inside the
+            page, the calendar-year chart the record pages use, the paragraph of
+            caveats gone, count-ups on the figures, and Unregistered renamed.
+            Registry: strip the Builders tab of figures that belong to other
+            pages, and stop the Tools table scrolling sideways.
+Files:      src/index.css, src/components/ui/{Charts,Records,MonthPicker}.tsx,
+            src/components/RecordStatistics.tsx, src/screens/Executions/index.tsx,
+            src/screens/Registry/index.tsx, src/screens/{Codex,OpenLoops/index}.tsx,
+            server/src/executions.ts
+
+Problem:    The entry animations read as "all at once" for the third time, after
+            two passes that only lengthened them.
+Fix:        The curve was the fault, not the duration. **Every ease-out —
+            cubic, quint — front-loads**: it covers most of its distance
+            immediately and then crawls, so a longer duration made the crawl
+            longer without making the motion legible. `CountUp` now uses a
+            smoothstep (`p²(3−2p)`), which starts slow, moves through the middle
+            and settles, and the number is readable the whole way up. Durations
+            go to 1900ms for the count-up and the bar widen, 700ms for the page
+            fade, 620ms for the card fade, 2.8s for the loading pulse.
+
+Fix:        The count beside each month is gone from every dropdown — Open
+            loops, Codex, both statistics tabs, Executions — and the `counts`
+            prop is deleted rather than left unused. The figure it repeated is
+            the headline on the page under it.
+
+Decision:   **Executions is a year, month by month** (Destiny). The year sits in
+            the header beside the report buttons; the month is picked inside the
+            page, next to the figures it scopes, because that is where the
+            choice belongs. The chart is the same calendar-year chart the record
+            pages draw — twelve columns, bars or line, no bar and a broken line
+            where nothing was recorded — so the dashboard has one chart rather
+            than two that drift. `PeriodChart` is deleted; it is in git history.
+Fix:        The paragraph of caveats under the chart is gone, as asked. What is
+            left of it — when n8n was last read, and how far back this database
+            goes — is the line already at the foot of the page.
+Fix:        The six figures count up like every other number in the dashboard.
+            They were the one place that snapped, and a figure that animates on
+            one page and snaps on another reads as two different products.
+
+Decision:   **"Unregistered" is now "Archived"** (Destiny, who checked the
+            workflows the tab was holding and found every one archived in n8n).
+            **The test behind it is unchanged** and is still "the workflow
+            registry has no row for this workflow" — this server reads
+            `GET /api/v1/workflows` for names only and never looks at n8n's own
+            archived flag. So the label is Destiny's verified reading of what
+            lands there today, not something the data knows, and a live
+            workflow nobody had registered would land there and be mislabelled.
+            Reading `isArchived` and filing on that is the honest version and is
+            written down in the code as the next change to make.
+
+Decision:   **Builders loses the open-loop, oldest-loop and entries-this-week
+            columns, the notes card and the updated column** (Destiny). Those
+            three were figures about Open loops and Codex shown on the one page
+            nobody goes to for them. The four figures above the table are now
+            about the roster itself — people, with a role, lanes assigned, Slack
+            ids — which is the only question this table is the source of an
+            answer to, and each goes amber when it is short of the headcount.
+Fix:        Tools drops its `updated` column and its minimum width with it, from
+            thirteen columns at 1400 to twelve at 1040, so the table stops
+            scrolling sideways inside itself on a normal screen.
+
+Not done, and why:
+  - **The Tools data** — plans, costs, cycles, renewal dates, who pays, the
+    Genie URL, adding AWS and Kaiqi's tools. Two reasons. The Slack connector
+    was down for this session, so the Genie URL and Kaiqi's list could not be
+    read, and guessing either would put a wrong URL in the one place that is
+    the system of record for it. And **every cell on that page is editable** —
+    Destiny found this mid-message — so these are one-line edits he can make
+    faster than I can verify them. Offered rather than guessed.
+  - **The builder emails and Jason's lane.** Same reason: the local part of each
+    address is not something this repo knows, and a guessed address in the
+    roster is worse than an empty cell that says so.
+  - **"The button next to the export CSV."** The statistics card carries the
+    Compare picker and Export CSV and nothing else, and removing the picker
+    would leave the tab with no way to choose its month. Asked rather than
+    deleted.
+
+Verified:   The rig. Executions: tabs read "All systems / Bays / North Star /
+            Research Twin / Archived", the year picker offers 2026, the in-page
+            month picker offers Sep and Aug with no counts, the chart draws all
+            twelve months in bars and in line. Registry: the Builders table is
+            down to name, role, lanes owned, slack id, email. Open loops and
+            Codex dropdowns carry no counts. No page errors on any of them.
