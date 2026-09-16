@@ -21,7 +21,6 @@ import {
   Pill,
   RecordId,
   RecordTable,
-  Ring,
   RowAction,
   RowActions,
   SearchBox,
@@ -30,6 +29,7 @@ import {
   SourceLink,
   StatCell,
   StatStrip,
+  TileFigure,
   ResyncButton,
   RowsLine,
   relativeTime,
@@ -110,20 +110,38 @@ function NsMetricsPanel({ metrics, loading, error }: { metrics: NsMetrics | null
           North Star's answers can be trusted. Null renders as "not recorded"
           with the reason, never as zero.
         */}
-        <MetricCell label="Thin rate" metric={m.thin_rate} suffix="%" />
-        <CountCell label="Asks" value={m.scope.rows} hint="rows in the ask log" />
+        {/*
+          Five hints of roughly one length (2026-09-16, Destiny). One line, five
+          lines, one line and four read as a ragged block under a row of figures
+          that are all the same size; `noteMinLines` at 3 holds the boxes level
+          and the sentences are written to fill them.
+        */}
+        <MetricCell label="Thin rate" metric={m.thin_rate} suffix="%" noteMinLines={3} />
+        <CountCell
+          label="Asks"
+          value={m.scope.rows}
+          hint={`Every row in the ask log for this month, whatever outcome it carries or does not.`}
+          hintMinLines={3}
+        />
         <CountCell
           label="Classified"
           value={m.classified}
           tone={m.classified === 0 ? 'degraded' : 'default'}
-          hint={m.unclassified ? `${m.unclassified} carry no outcome` : 'every ask carries an outcome'}
+          hint={
+            m.unclassified
+              ? `${m.unclassified} of ${m.scope.rows} asks ${m.unclassified === 1 ? 'carries' : 'carry'} no outcome, so every rate on this page is computed over the rest.`
+              : `Every ask carries an outcome, so the rates on this page are computed over all ${m.scope.rows} of them.`
+          }
+          hintMinLines={3}
         />
-        <MetricCell label="Research required" metric={m.research_required_rate} suffix="%" />
+        <MetricCell label="Research required" metric={m.research_required_rate} suffix="%" noteMinLines={3} />
         <StatCell>
           <div className="min-w-0">
             <div className="kicker truncate">Last ask</div>
             <div className={`mt-1 text-[15px] leading-tight ${silent ? 'text-degraded' : 'text-ink'}`}>{lastAge ?? 'never'}</div>
-            <div className="mt-1.5 text-[11.5px] leading-snug text-faint">{m.last_ask.note}</div>
+            <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={{ minHeight: '45px' }}>
+              {m.last_ask.note}
+            </div>
           </div>
         </StatCell>
       </StatStrip>
@@ -133,36 +151,117 @@ function NsMetricsPanel({ metrics, loading, error }: { metrics: NsMetrics | null
 }
 
 /**
+ * The two week charts, on the Asks tab, under the strip (2026-09-16, Destiny).
+ *
+ * They came back off the statistics tab because they are not a
+ * month-against-month question: they are what the last eight weeks looked like,
+ * which is something a reader wants beside the asks themselves. Everything else
+ * that was a card here is on the statistics tab.
+ */
+function NsWeeklyPanel({ metrics, loading }: { metrics: NsMetrics | null; loading: boolean }) {
+  if (!metrics) return null;
+  const m = metrics;
+  const stacked = m.outcome_per_week;
+  return (
+    <div className={`mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-2 ${loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}`}>
+      <MetricCard title="Asks per week" right="asked_at">
+        <SeriesBlock title="" series={m.asks_per_week} tone="accent" total bare />
+      </MetricCard>
+      <MetricCard
+        title="Outcome over time"
+        right="answered · thin · failed · unclassified"
+        note="The same eight weeks, split by outcome. A column that is all unclassified is a week North Star answered without recording what kind of answer it gave."
+      >
+        {stacked.every((w) => w.answered + w.thin + w.failed + w.unclassified === 0) ? (
+          <EmptyPanel>No ask in the last eight weeks.</EmptyPanel>
+        ) : (
+          <div>
+            <div className="flex w-full items-end gap-[3px]" style={{ height: 72 }} role="img" aria-label="Outcome by week">
+              {stacked.map((w) => {
+                const total = w.answered + w.thin + w.failed + w.unclassified;
+                const max = Math.max(1, ...stacked.map((x) => x.answered + x.thin + x.failed + x.unclassified));
+                const h = (total / max) * 100;
+                const seg = (n: number) => (total ? (n / total) * 100 : 0);
+                return (
+                  <div key={w.week} className="flex min-w-0 flex-1 flex-col justify-end self-stretch" title={`${w.label}: ${w.answered} answered, ${w.thin} thin, ${w.failed} failed, ${w.unclassified} unclassified`}>
+                    <div className="flex w-full flex-col-reverse overflow-hidden rounded-[3px]" style={{ height: `${Math.max(h, total ? 6 : 2)}%` }}>
+                      <div style={{ height: `${seg(w.answered)}%`, background: 'var(--accent)', opacity: 0.85 }} />
+                      <div style={{ height: `${seg(w.thin)}%`, background: 'var(--degraded)', opacity: 0.9 }} />
+                      <div style={{ height: `${seg(w.failed)}%`, background: 'var(--failing)', opacity: 0.9 }} />
+                      <div style={{ height: `${seg(w.unclassified)}%`, background: 'var(--dim)', opacity: 0.28 }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-1 flex justify-between text-[10.5px] text-faint">
+              <span>{stacked[0]?.label}</span>
+              <span>{stacked[stacked.length - 1]?.label}</span>
+            </div>
+          </div>
+        )}
+      </MetricCard>
+    </div>
+  );
+}
+
+/**
  * North Star's telemetry, as statistics tiles (2026-09-16, Destiny).
  *
- * Same cards, same figures, moved into the grid the statistics tab already
- * draws — `MetricCard`s, so the page reads as one set of tiles rather than as
- * the computed figures with a differently-shaped row bolted underneath. The
- * classified card was a bespoke `.card` with a ring in it; it is a MetricCard
- * now for the same reason.
+ * **Every tile leads with a figure**, in the same 30px display face and with
+ * the same quiet line under it that the computed tiles use, and the bars it
+ * summarises sit beneath. Half a grid reading as numbers and half as charts is
+ * two kinds of card in one place; `TileFigure` is the shape `StatTile` draws,
+ * so there is one.
+ *
+ * The headline on each is derived from what that card already shows, never from
+ * anything else, so a reader can check it against the bars underneath it.
  */
 export function NsStatTiles({ m }: { m: NsMetrics | null }) {
   if (!m) return null;
+  const rows = m.scope.rows;
   const maxTool = Math.max(1, ...m.tool_usage.map((t) => t.hits));
   const maxLane = Math.max(1, ...m.by_lane.map((l) => l.asks));
   const maxOutcome = Math.max(1, ...m.outcome_mix.map((o) => o.n));
-  const stacked = m.outcome_per_week;
+  const pct = (n: number) => `${Math.round(n)}%`;
+
+  const answered = m.outcome_mix.find((o) => o.outcome === 'answered')?.n ?? 0;
+  const hits = m.tool_usage.reduce((n, t) => n + t.hits, 0);
+  const cited = m.tool_usage.reduce((n, t) => n + t.used, 0);
+  const coverage = m.confidence_mix.reduce((n, c) => n + c.n, 0);
+  const nothingCited = m.confidence_mix.find((c) => c.bucket.startsWith('nothing'))?.n ?? 0;
+  const busiest = m.by_lane[0];
+
   return (
     <>
-      <MetricCard title="Classified" note={m.unclassified_note}>
-        <div className="flex items-center gap-5">
-          <Ring value={m.classified} total={m.scope.rows} size={88} tone={m.classified ? 'accent' : 'degraded'} label="classified" />
-          <div className="min-w-0">
-            <div className="flex items-baseline gap-2">
-              <span className="font-display tabular text-[32px] leading-none text-ink">
-                <CountUp value={m.classified} />
-              </span>
-              <span className="text-[14px] text-faint">of {m.scope.rows}</span>
-            </div>
-          </div>
-        </div>
+      <MetricCard title="Classified" right="outcome" note={m.unclassified_note} noteMinLines={4} align="top">
+        <TileFigure
+          value={rows ? (m.classified / rows) * 100 : null}
+          format={pct}
+          tone={m.classified ? undefined : 'degraded'}
+          missing="No ask is held, so there is nothing to classify."
+          sub={`${m.classified} of ${rows} asks carry an outcome`}
+          replayKey={`ns-classified|${rows}`}
+        >
+          <HBar label="classified" value={m.classified} max={Math.max(1, rows)} tone="accent" valueNode={<CountUp value={m.classified} />} right={<span className="text-faint">of {rows}</span>} />
+        </TileFigure>
       </MetricCard>
-        <MetricCard title="Outcome mix" note="answered = an answer carrying at least one [S#] citation · thin = an answer with nothing cited behind it · failed = no answer text at all. These are North Star’s own definitions, read from its outcome field.">
+
+      <MetricCard
+        title="Outcome mix"
+        right="outcome"
+        note="answered = an answer carrying at least one [S#] citation · thin = an answer with nothing cited behind it · failed = no answer text at all. North Star's own definitions."
+        noteMinLines={4}
+        align="top"
+      >
+        <TileFigure
+          value={rows ? (answered / rows) * 100 : null}
+          format={pct}
+          tone="accent"
+          missing="No ask carries an outcome yet."
+          sub={`${answered} of ${rows} answered`}
+          replayKey={`ns-outcome|${rows}`}
+        >
           {m.outcome_mix.length === 0 ? (
             <EmptyPanel>No ask carries an outcome yet.</EmptyPanel>
           ) : (
@@ -175,53 +274,24 @@ export function NsStatTiles({ m }: { m: NsMetrics | null }) {
                   max={maxOutcome}
                   tone={o.outcome === 'thin' ? 'degraded' : o.outcome === 'failed' ? 'failing' : o.outcome === 'answered' ? 'accent' : 'ink'}
                   valueNode={<CountUp value={o.n} />}
-                  right={<span className="text-faint">{m.scope.rows ? Math.round((o.n / m.scope.rows) * 100) : 0}%</span>}
+                  right={<span className="text-faint">{rows ? Math.round((o.n / rows) * 100) : 0}%</span>}
                 />
               ))}
             </div>
           )}
-        </MetricCard>
-        <MetricCard title="Asks per week">
-          <SeriesBlock title="" series={m.asks_per_week} tone="accent" total bare />
-        </MetricCard>
-        <MetricCard
-          title="Outcome over time"
-          right="answered · thin · failed · unclassified"
-          note="The same eight weeks, split by outcome. A column that is all unclassified is a week North Star answered without recording what kind of answer it gave."
+        </TileFigure>
+      </MetricCard>
+
+      <MetricCard title="Tool usage" right="searches" note={m.tool_note} noteMinLines={4} align="top">
+        <TileFigure
+          value={hits ? (cited / hits) * 100 : null}
+          format={pct}
+          tone={hits && cited === 0 ? 'degraded' : undefined}
+          missing="No ask records a tool call in its evidence blob."
+          sub={`${cited} of ${hits} hits ended up cited`}
+          replayKey={`ns-tools|${hits}`}
         >
-          {stacked.every((w) => w.answered + w.thin + w.failed + w.unclassified === 0) ? (
-            <EmptyPanel>No ask in the last eight weeks.</EmptyPanel>
-          ) : (
-            <div>
-              <div className="flex w-full items-end gap-[3px]" style={{ height: 72 }} role="img" aria-label="Outcome by week">
-                {stacked.map((w) => {
-                  const total = w.answered + w.thin + w.failed + w.unclassified;
-                  const max = Math.max(1, ...stacked.map((x) => x.answered + x.thin + x.failed + x.unclassified));
-                  const h = (total / max) * 100;
-                  const seg = (n: number) => (total ? (n / total) * 100 : 0);
-                  return (
-                    <div key={w.week} className="flex min-w-0 flex-1 flex-col justify-end self-stretch" title={`${w.label}: ${w.answered} answered, ${w.thin} thin, ${w.failed} failed, ${w.unclassified} unclassified`}>
-                      <div className="flex w-full flex-col-reverse overflow-hidden rounded-[3px]" style={{ height: `${Math.max(h, total ? 6 : 2)}%` }}>
-                        <div style={{ height: `${seg(w.answered)}%`, background: 'var(--accent)', opacity: 0.85 }} />
-                        <div style={{ height: `${seg(w.thin)}%`, background: 'var(--degraded)', opacity: 0.9 }} />
-                        <div style={{ height: `${seg(w.failed)}%`, background: 'var(--failing)', opacity: 0.9 }} />
-                        <div style={{ height: `${seg(w.unclassified)}%`, background: 'var(--dim)', opacity: 0.28 }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="mt-1 flex justify-between text-[10.5px] text-faint">
-                <span>{stacked[0]?.label}</span>
-                <span>{stacked[stacked.length - 1]?.label}</span>
-              </div>
-            </div>
-          )}
-        </MetricCard>
-        <MetricCard title="Tool usage" right="hits · cited" note={m.tool_note}>
-          {m.tool_usage.length === 0 ? (
-            <EmptyPanel>No ask records a tool call.</EmptyPanel>
-          ) : (
+          {m.tool_usage.length === 0 ? null : (
             <div className="space-y-2">
               {m.tool_usage.map((t) => (
                 <HBar
@@ -240,12 +310,25 @@ export function NsStatTiles({ m }: { m: NsMetrics | null }) {
               ))}
             </div>
           )}
-        </MetricCard>
+        </TileFigure>
+      </MetricCard>
 
-        <MetricCard title="Citation coverage" note={m.confidence_note}>
-          {m.confidence_mix.length === 0 ? (
-            <EmptyPanel>No ask records a coverage figure.</EmptyPanel>
-          ) : (
+      {/*
+        "Coverage mix", not "Citation coverage" — the statistics tab already
+        computes a tile by that name from the same blob, and two cards with one
+        title and two different figures is worse than either. This one is the
+        distribution, the way "Outcome mix" is; that one is the month's figure.
+      */}
+      <MetricCard title="Coverage mix" right="searches" note={m.confidence_note} noteMinLines={4} align="top">
+        <TileFigure
+          value={coverage ? ((coverage - nothingCited) / coverage) * 100 : null}
+          format={pct}
+          tone={coverage && nothingCited === coverage ? 'degraded' : undefined}
+          missing="No ask records a coverage figure."
+          sub={`${coverage - nothingCited} of ${coverage} cite something`}
+          replayKey={`ns-coverage|${coverage}`}
+        >
+          {m.confidence_mix.length === 0 ? null : (
             <div className="space-y-2">
               {m.confidence_mix.map((c) => (
                 <HBar
@@ -259,12 +342,24 @@ export function NsStatTiles({ m }: { m: NsMetrics | null }) {
               ))}
             </div>
           )}
-        </MetricCard>
+        </TileFigure>
+      </MetricCard>
 
-        <MetricCard title="By lane" note="Asks by the lane_id on each row; “(no lane_id)” is the count with none.">
-          {m.by_lane.length === 0 ? (
-            <EmptyPanel>No asks.</EmptyPanel>
-          ) : (
+      <MetricCard
+        title="By lane"
+        right="lane_id"
+        note="Asks by the lane_id on each row. A row with none is counted under “(no lane_id)” rather than dropped, because a lane nobody set is a fact about the routing."
+        noteMinLines={4}
+        align="top"
+      >
+        <TileFigure
+          value={m.by_lane.length || null}
+          format={(n) => String(Math.round(n))}
+          missing="No ask is held, so no lane has one."
+          sub={busiest ? `busiest is ${busiest.lane_id} with ${busiest.asks}` : undefined}
+          replayKey={`ns-lanes|${rows}`}
+        >
+          {m.by_lane.length === 0 ? null : (
             <div className="space-y-2">
               {m.by_lane.slice(0, 8).map((l) => (
                 <HBar
@@ -278,7 +373,8 @@ export function NsStatTiles({ m }: { m: NsMetrics | null }) {
               ))}
             </div>
           )}
-        </MetricCard>
+        </TileFigure>
+      </MetricCard>
     </>
   );
 }
@@ -523,6 +619,13 @@ export default function NorthStar() {
         </div>
 
         <NsMetricsPanel metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
+
+        {/*
+          Asks per week and outcome over time sit here, under the strip
+          (2026-09-16, Destiny). They are what the last eight weeks looked like,
+          not a month against a month, so they belong beside the asks.
+        */}
+        <NsWeeklyPanel metrics={metrics.data} loading={metrics.status === 'loading'} />
 
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
           <div className="flex flex-wrap items-center justify-between gap-2">

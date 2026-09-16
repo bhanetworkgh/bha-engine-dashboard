@@ -18,7 +18,6 @@ import {
   Pill,
   RecordId,
   RecordTable,
-  Ring,
   RowAction,
   RowActions,
   MonthPicker,
@@ -32,6 +31,7 @@ import {
   StatStrip,
   RowsLine,
   thisMonth,
+  TileFigure,
   Toast,
   usePaged,
   useResync,
@@ -142,43 +142,70 @@ function RtMetricsPanel({ metrics, loading, error }: { metrics: RtMetrics | null
 /**
  * Research Twin's telemetry, as statistics tiles (2026-09-16, Destiny).
  *
- * The same cards, in the grid the statistics tab already draws. They are
- * `MetricCard`s so the grid reads as one set of tiles; the hard-stop card was a
- * bespoke `.card` with a ring in it and is one now too.
+ * **Every tile leads with a figure**, in the same 30px display face and with
+ * the same quiet line under it that the computed tiles use, and the bars it
+ * summarises sit beneath — `TileFigure` is the shape `StatTile` draws, so the
+ * grid is one kind of card rather than two. Each headline is derived from what
+ * that card already shows, so a reader can check it against its own bars.
  */
 export function RtStatTiles({ m }: { m: RtMetrics | null }) {
   if (!m) return null;
+  const cards = m.scope.cards;
   const maxStatus = Math.max(1, ...m.by_status.map((s) => s.n));
   const maxStuck = Math.max(1, ...m.days_stuck.map((s) => s.n));
   const maxRun = Math.max(1, ...m.run_count_mix.map((r) => r.n));
   const maxGap = Math.max(1, ...m.gap_mix.map((g) => g.n));
+  const pct = (n: number) => `${Math.round(n)}%`;
+
+  /**
+   * The largest status, not "resolved" (2026-09-16, Destiny). Naming a status
+   * in this code is asserting which one is terminal, and the queue's own
+   * vocabulary is Airtable's to change — a seed whose cards are all `answered`
+   * made a resolved-share headline read 0% above a bar saying 100%. The
+   * largest share is derived from the bars underneath it and cannot disagree
+   * with them.
+   */
+  const biggest = [...m.by_status].sort((a, b) => b.n - a.n)[0];
+  const everStuck = m.days_stuck.reduce((n, b) => n + b.n, 0);
+  const capped = m.run_count_mix.filter((r) => r.runs.startsWith('3') || r.runs.startsWith('over')).reduce((n, r) => n + r.n, 0);
+  const classified = m.gap_mix.reduce((n, g) => n + g.n, 0);
+
   return (
     <>
-      <MetricCard title="At the hard stop" note={m.requires_human.note}>
-        <div className="flex items-center gap-5">
-          <Ring value={m.requires_human.n} total={m.scope.cards} size={88} tone={m.requires_human.n ? 'degraded' : 'accent'} label="need a human" />
-          <div className="min-w-0">
-            <div className="flex items-baseline gap-2">
-              <span className="font-display tabular text-[32px] leading-none text-ink">
-                <CountUp value={m.requires_human.n} />
-              </span>
-              <span className="text-[14px] text-faint">of {m.scope.cards}</span>
-            </div>
-            {/*
-              How much of the queue is still moving on its own. The hard stop
-              and the untriaged pile are the two ways a card stops moving, and
-              neither is stated anywhere else as a share of the whole.
-            */}
-            <div className="mt-2 text-[11.5px] leading-snug text-faint">
-              {m.scope.cards - m.requires_human.n - m.untriaged.n} of {m.scope.cards} still moving on their own. {m.untriaged.note}
-            </div>
-          </div>
-        </div>
+      <MetricCard title="At the hard stop" right="requires_human" note={m.requires_human.note} noteMinLines={4} align="top">
+        <TileFigure
+          value={cards ? (m.requires_human.n / cards) * 100 : null}
+          format={pct}
+          tone={m.requires_human.n ? 'degraded' : 'accent'}
+          missing="No card is held, so nothing can be waiting on a person."
+          sub={`${m.requires_human.n} of ${cards} cards are waiting on a person`}
+          replayKey={`rt-stop|${cards}`}
+        >
+          {/*
+            How much of the queue is still moving on its own. The hard stop and
+            the untriaged pile are the two ways a card stops moving, and neither
+            is stated anywhere else as a share of the whole.
+          */}
+          <HBar
+            label="still moving on its own"
+            value={cards - m.requires_human.n - m.untriaged.n}
+            max={Math.max(1, cards)}
+            tone="accent"
+            valueNode={<CountUp value={cards - m.requires_human.n - m.untriaged.n} />}
+            right={<span className="text-faint">of {cards}</span>}
+          />
+        </TileFigure>
       </MetricCard>
-        <MetricCard title="Queue depth by status" note={m.status_note}>
-          {m.by_status.length === 0 ? (
-            <EmptyPanel>The queue is empty.</EmptyPanel>
-          ) : (
+
+      <MetricCard title="Queue depth by status" right="status" note={m.status_note} noteMinLines={4} align="top">
+        <TileFigure
+          value={cards && biggest ? (biggest.n / cards) * 100 : null}
+          format={pct}
+          missing="The queue is empty."
+          sub={biggest ? `${biggest.n} of ${cards} cards are ${biggest.label.toLowerCase()}, the largest group` : undefined}
+          replayKey={`rt-status|${cards}`}
+        >
+          {m.by_status.length === 0 ? null : (
             <div className="space-y-2">
               {m.by_status.map((s) => (
                 <HBar
@@ -188,47 +215,75 @@ export function RtStatTiles({ m }: { m: RtMetrics | null }) {
                   max={maxStatus}
                   tone={s.status === 'resolved' ? 'accent' : 'ink'}
                   valueNode={<CountUp value={s.n} />}
-                  right={<span className="text-faint">{m.scope.cards ? Math.round((s.n / m.scope.cards) * 100) : 0}%</span>}
+                  right={<span className="text-faint">{cards ? Math.round((s.n / cards) * 100) : 0}%</span>}
                 />
               ))}
             </div>
           )}
-        </MetricCard>
-        <MetricCard title="Days stuck" note={m.days_stuck_note}>
-          {m.days_stuck.every((b) => b.n === 0) ? (
-            <EmptyPanel>No card carries a first_stuck_at, so nothing has been recorded as stuck.</EmptyPanel>
-          ) : (
+        </TileFigure>
+      </MetricCard>
+
+      <MetricCard title="Days stuck" right="first_stuck_at" note={m.days_stuck_note} noteMinLines={4} align="top">
+        <TileFigure
+          value={cards ? (everStuck / cards) * 100 : null}
+          format={pct}
+          tone={everStuck ? 'degraded' : undefined}
+          missing="No card carries a first_stuck_at, so nothing has been recorded as stuck."
+          sub={`${everStuck} of ${cards} cards have been stuck at some point`}
+          replayKey={`rt-stuck|${cards}`}
+        >
+          {everStuck === 0 ? null : (
             <div className="space-y-2">
               {m.days_stuck.map((b) => (
                 <HBar key={b.bucket} label={b.bucket} value={b.n} max={maxStuck} tone={b.bucket.startsWith('over') ? 'degraded' : 'ink'} valueNode={<CountUp value={b.n} />} />
               ))}
             </div>
           )}
-        </MetricCard>
+        </TileFigure>
+      </MetricCard>
 
-        <MetricCard title="Attempts per card" note={m.run_count_note}>
-          {m.run_count_mix.length === 0 ? (
-            <EmptyPanel>No card records a run count.</EmptyPanel>
-          ) : (
+      <MetricCard title="Attempts per card" right="run_count" note={m.run_count_note} noteMinLines={4} align="top">
+        <TileFigure
+          value={cards ? (capped / cards) * 100 : null}
+          format={pct}
+          tone={capped ? 'degraded' : undefined}
+          missing="No card records a run count."
+          sub={`${capped} of ${cards} cards are at the cap of three or above it`}
+          replayKey={`rt-runs|${cards}`}
+        >
+          {m.run_count_mix.length === 0 ? null : (
             <div className="space-y-2">
               {m.run_count_mix.map((r) => (
                 <HBar key={r.runs} label={r.runs} value={r.n} max={maxRun} tone={r.runs.startsWith('3') || r.runs.startsWith('over') ? 'degraded' : 'ink'} valueNode={<CountUp value={r.n} />} />
               ))}
             </div>
           )}
-        </MetricCard>
+        </TileFigure>
+      </MetricCard>
 
-        <MetricCard title="What kind of stuck" note="From gap_classification, set on any attempt that came back low-confidence.">
-          {m.gap_mix.length === 0 ? (
-            <EmptyPanel>No card records a gap classification.</EmptyPanel>
-          ) : (
+      <MetricCard
+        title="What kind of stuck"
+        right="gap_classification"
+        note="From gap_classification, set on any attempt that came back low-confidence. A card that has never come back low-confidence carries none, which is not a gap of its own."
+        noteMinLines={4}
+        align="top"
+      >
+        <TileFigure
+          value={cards ? (classified / cards) * 100 : null}
+          format={pct}
+          missing="No card records a gap classification."
+          sub={`${classified} of ${cards} cards name what kind of gap`}
+          replayKey={`rt-gap|${cards}`}
+        >
+          {m.gap_mix.length === 0 ? null : (
             <div className="space-y-2">
               {m.gap_mix.map((g) => (
                 <HBar key={g.gap} label={g.gap} value={g.n} max={maxGap} valueNode={<CountUp value={g.n} />} />
               ))}
             </div>
           )}
-        </MetricCard>
+        </TileFigure>
+      </MetricCard>
     </>
   );
 }

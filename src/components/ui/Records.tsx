@@ -56,7 +56,7 @@ export function CountCell({
 }
 
 /** A figure that may be unknown. Null renders as "Not recorded" and the reason; never as 0. */
-export function MetricCell({ label, metric, suffix, compareLabel = 'last week', replayKey }: { label: string; metric: Metric; suffix?: string; compareLabel?: string; replayKey?: string | number }) {
+export function MetricCell({ label, metric, suffix, compareLabel = 'last week', noteMinLines, replayKey }: { label: string; metric: Metric; suffix?: string; compareLabel?: string; /** A floor under the footnote, so a row of cells is one block of text rather than four of different depths. The counterpart of CountCell's `hintMinLines`. */ noteMinLines?: number; replayKey?: string | number }) {
   const { value, compare, note } = metric;
   const delta = value !== null && compare !== null && compare !== undefined ? value - compare : null;
   return (
@@ -79,7 +79,7 @@ export function MetricCell({ label, metric, suffix, compareLabel = 'last week', 
           </div>
         )}
         {note && (
-          <div className="mt-1.5 text-[11.5px] leading-snug text-faint" title={note}>
+          <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={noteMinLines ? { minHeight: `${noteMinLines * 15}px` } : undefined} title={note}>
             {note}
           </div>
         )}

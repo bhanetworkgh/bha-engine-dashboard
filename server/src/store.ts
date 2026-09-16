@@ -2882,9 +2882,16 @@ export async function nsMetrics(month?: string | null): Promise<NsMetrics> {
         : `${all.length - classified.length} of ${all.length} rows carry no outcome. The field was added to the table on 10 Sept 2026; rows written before it, and any the agent has not classified since, are counted here and excluded from every rate below. Nothing is inferred from the answer text.`,
     thin_rate: {
       value: classified.length ? Math.round((thin / classified.length) * 100) : null,
+      /**
+       * Every hint on this strip runs to roughly the same length (2026-09-16,
+       * Destiny). Five cells whose footnotes were one line, five lines, one
+       * line and four read as a ragged block; the rule is the same one the
+       * record pages' `hintMinLines` already enforces, applied to the words
+       * rather than to the box.
+       */
       note: classified.length
-        ? `${thin} of ${classified.length} classified asks produced an answer with no [S#] citation behind it. Computed over classified rows only; ${all.length - classified.length} rows carry no outcome and are not in this figure.`
-        : `No row carries an outcome yet, so this cannot be computed. It is the share of classified asks whose answer cites nothing — the measure of answers that look real and are not. It fills the moment North Star starts writing the outcome field.`,
+        ? `${thin} of ${classified.length} classified asks answered with no [S#] citation behind them. ${all.length - classified.length} ${all.length - classified.length === 1 ? 'row carries' : 'rows carry'} no outcome and ${all.length - classified.length === 1 ? 'is' : 'are'} left out.`
+        : `Nothing carries an outcome yet, so this cannot be computed. It is the share of classified asks whose answer cites nothing at all.`,
     },
     outcome_mix: outcomes
       .map((o) => ({ outcome: o, label: NS_OUTCOME_LABELS[o], n: o === 'unclassified' ? all.length - classified.length : all.filter((r) => r.outcome === o).length }))
@@ -2910,7 +2917,7 @@ export async function nsMetrics(month?: string | null): Promise<NsMetrics> {
       return {
         value: known.length ? Math.round((yes / known.length) * 100) : null,
         note: known.length
-          ? `${yes} of ${known.length} asks were flagged as needing research. ${all.length - known.length ? `${all.length - known.length} rows record neither Yes nor No.` : ''}`.trim()
+          ? `${yes} of ${known.length} asks were flagged as needing research before answering. ${all.length - known.length ? `${all.length - known.length} rows record neither Yes nor No.` : 'Every row records one or the other.'}`.trim()
           : 'No row records research_required.',
       };
     })(),
@@ -2936,8 +2943,8 @@ export async function nsMetrics(month?: string | null): Promise<NsMetrics> {
       trace_id: newest?.trace_id ?? null,
       note: newest?.asked_at
         ? sinceLast === 0
-          ? 'North Star was asked something today.'
-          : `North Star has not been asked anything for ${sinceLast} ${sinceLast === 1 ? 'day' : 'days'}. Silence here is itself a signal: it means nothing is routing questions to it.`
+          ? 'North Star was asked something today, so the routing into it is working.'
+          : `Nothing has been routed to North Star for ${sinceLast} ${sinceLast === 1 ? 'day' : 'days'}. Silence here is itself the signal.`
         : 'No ask carries a timestamp.',
     },
   };

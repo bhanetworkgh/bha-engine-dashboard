@@ -562,15 +562,23 @@ Right-hand panel: new chat, chat history list, search past chats.
 against fixtures. It gets wired in a later phase.
 
 ### North Star
-**Two tabs, and every telemetry card is on the second one** (decision
-2026-09-16, Destiny). Asks is the working surface: the five figures, the outcome
-filter, the month, the search and the asks. **Statistics** carries the
-classified ring, the outcome mix, asks per week, outcome over time, tool usage,
-citation coverage and by lane — all of them month-against-month questions, drawn
-as the same tiles every record page's statistics tab uses. The month is chosen
-beside the search box and the strip follows it, so the figures and the list
-always answer the same question. **Resync from Airtable** is at the top, the
-same control the other pages carry.
+**Two tabs** (decision 2026-09-16, Destiny). Asks is the working surface: the
+five figures, **asks per week and outcome over time**, the outcome filter, the
+month, the search and the asks. Those two charts are the last eight weeks
+rather than a month against a month, which is why they are beside the asks and
+not on the other tab.
+
+**Statistics is a 3×3 grid**: classified, outcome mix, tool usage, coverage mix
+and by lane, alongside the four the server computes. The month is chosen beside
+the search box and the strip follows it, so the figures and the list always
+answer the same question. **Resync from Airtable** is at the top, the same
+control the other pages carry.
+
+**Every hint on the strip runs to roughly one length** (decision 2026-09-16,
+Destiny). Five cells whose footnotes were one line, five lines, one line and
+four read as a ragged block under five figures of the same size. `noteMinLines`
+holds the boxes level and the sentences are written to fill them — the same rule
+`hintMinLines` already applies to the record pages.
 
 The ask log. **Thin rate is the headline** — answers that look real and cite
 nothing — computed over the rows carrying an `outcome` and no others, with the
@@ -635,6 +643,25 @@ what they mean. `Quarantined` is the real one: it flips true only when
 so a question at 3 is skipped by the weekly clock and is counted in its own
 column. `Plain Summary` is deliberately jargon-free and is shown first. A lane
 with no run yet is **warming up, not failing**.
+
+### A statistics tile
+**Every card in a statistics grid is one shape** (decision 2026-09-16, Destiny):
+a title, the source field top right, **one figure in the display face at 30px**,
+a quiet line under it saying what the figure is a share of, the detail it
+summarises beneath that, and the note at the foot. `TileFigure` is that shape,
+pulled out of `StatTile` so a tile a page brings with it cannot draw itself
+differently — before it, half of North Star's and Research Twin's grids read as
+figures and half as charts.
+
+**A tile's headline is derived from what that tile already shows**, never from
+anything else, so a reader can check it against the bars underneath it. Where a
+card has no single obvious figure the headline is the largest share and the line
+under it names which — never a status this code picks out by name, because the
+vocabulary is Airtable's to change: a queue whose cards are all `answered` made
+a hardcoded resolved-share read 0% above a bar saying 100%.
+
+A figure the rows cannot support prints the reason where the number would be. A
+dash set at 30px reads like a redaction, and worse, like a value.
 
 ### Monthly tracking, on every record page
 Three components, same order, same styling on all five (decision 2026-09-15,
