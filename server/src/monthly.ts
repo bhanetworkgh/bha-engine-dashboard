@@ -170,10 +170,13 @@ function build(spec: Spec, items: Item[], arrived: Map<string, string | null>): 
 
     let coverage: MonthCoverage = 'full';
     let note: string | null = null;
-    if (month === current) {
-      coverage = 'partial';
-      note = 'This month is still running.';
-    }
+    // The month in progress is genuinely incomplete, so it stays hatched and
+    // marked "part" — but it carries no sentence (2026-09-16, Destiny).
+    // "This month is still running" told a reader what the calendar already
+    // told them, and it sat where a real caveat about instrumentation goes,
+    // which is the one place a redundant line does damage. A real caveat below
+    // still overwrites the coverage and prints its own note.
+    if (month === current) coverage = 'partial';
     if (spec.boundary && month < spec.boundary.month) {
       coverage = 'none';
       note = spec.boundary.note;

@@ -644,6 +644,54 @@ export interface CodexEntryDetail extends CodexEntry {
   jason_notes: string | null;
 }
 
+/**
+ * One figure on the Codex statistics tab, with the same figure a month ago.
+ *
+ * `unavailable` is the case that must not be drawn as a zero: a metric nothing
+ * in the engine records. Its tile prints the reason rather than a number, which
+ * is the same rule as "a zero and an unknown must never look the same".
+ */
+export interface CodexStatMetric {
+  key: string;
+  label: string;
+  /** The source field the figure comes from, named as Airtable spells it. */
+  field: string;
+  unit: 'count' | 'percent' | 'days';
+  value: number | null;
+  previous: number | null;
+  /** How many rows the figure is over, so a rate says what it is a rate of. */
+  n: number;
+  previous_n: number;
+  change: Delta | null;
+  /** Which direction is good news, where there is one. Null means the page colours nothing. */
+  better: 'up' | 'down' | null;
+  /** The base of the figure, or why it is missing. Always shown. */
+  note: string | null;
+  /** True where nothing in the engine records this, so the tile says so plainly. */
+  unavailable: boolean;
+}
+
+/** A month of Codex output set against the month before it. */
+export interface CodexStats {
+  /** Every month from the first log held to this one, for the picker. */
+  months: { month: string; label: string; logs: number }[];
+  selected: string;
+  selected_label: string;
+  previous: string;
+  previous_label: string;
+  /** True when the selected month is still running and the previous was cut to the same elapsed point. */
+  like_for_like: boolean;
+  /** Which days of the previous month were counted, where it was cut. Null where there is no comparison. */
+  window: string | null;
+  /** False where the previous month predates everything held; no change is given anywhere. */
+  covered: boolean;
+  metrics: CodexStatMetric[];
+  /** The comparison in words, written on the server. */
+  prose: string;
+  /** What it is compared against, and why it was cut or refused. */
+  note: string;
+}
+
 /** Jason Status, lower-cased. 'unset' is a row he has not touched. */
 export type CodexApproval = 'approved' | 'pending' | 'input added' | 'unset';
 
@@ -1702,7 +1750,14 @@ export interface ExecutionPeriod extends ExecutionTotals {
  * more executions is up and neutral, more failures is up and bad, a faster
  * average is down and good. Null where the direction carries no judgement.
  */
-export interface ExecutionDelta {
+/**
+ * One figure against the same figure a period ago.
+ *
+ * `better` is whether the movement is good news, which is not the same as up:
+ * more executions is neither, more failures is bad, a faster average is good.
+ * Null where the direction is not news, and the page colours nothing there.
+ */
+export interface Delta {
   from: number;
   to: number;
   /** Percentage change, or null where the previous figure was nought and a ratio has no meaning. */
@@ -1710,6 +1765,9 @@ export interface ExecutionDelta {
   direction: 'up' | 'down' | 'flat';
   better: boolean | null;
 }
+
+/** The Executions page's own name for it, kept so that page reads as it did. */
+export type ExecutionDelta = Delta;
 
 export interface ExecutionComparison {
   /** The period compared against, and what it is called. */

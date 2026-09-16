@@ -39,10 +39,10 @@
  */
 import { getMeta, nowIso, setMeta } from './db';
 import { query } from './pg';
+import { delta, movement } from './delta';
 import * as n8n from './n8n';
 import type {
   ExecutionComparison,
-  ExecutionDelta,
   ExecutionGrain,
   ExecutionPeriod,
   ExecutionRun,
@@ -515,36 +515,6 @@ function figures(t: Tally) {
     avg_ms: t.timed ? Math.round(t.duration_ms / t.timed) : null,
     timed: t.timed,
   };
-}
-
-/**
- * One figure against the same figure last period.
- *
- * `better` says whether the movement is good news, which is not the same as up.
- * More executions is neither; more failures is bad; a faster average is good.
- */
-function delta(from: number | null, to: number | null, better: 'up' | 'down' | null): ExecutionDelta | null {
-  if (from === null || to === null) return null;
-  const direction = to > from ? 'up' : to < from ? 'down' : 'flat';
-  return {
-    from,
-    to,
-    // A ratio against nought has no meaning, so it is null rather than infinite
-    // or a hundred per cent. Both raw figures are on the delta, so the page can
-    // still say "0 → 4" where it cannot say "+400%".
-    pct: from === 0 ? null : Math.round(((to - from) / from) * 1000) / 10,
-    direction,
-    better: better === null || direction === 'flat' ? null : better === 'up' ? direction === 'up' : direction === 'down',
-  };
-}
-
-/** "up 12%", "down 40%", "0 → 4" where there is no ratio to take. */
-function movement(d: ExecutionDelta, unit: 'pct' | 'points' | 'ms' = 'pct'): string {
-  if (d.direction === 'flat') return 'unchanged';
-  const word = d.direction === 'up' ? 'up' : 'down';
-  if (unit === 'points') return `${word} ${Math.abs(Math.round((d.to - d.from) * 10) / 10)} points`;
-  if (d.pct === null) return `${d.from} → ${d.to}`;
-  return `${word} ${Math.abs(d.pct)}%`;
 }
 
 function ms(n: number | null): string {

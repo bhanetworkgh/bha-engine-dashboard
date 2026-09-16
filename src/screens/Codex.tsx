@@ -16,6 +16,7 @@ import {
   type CodexTab,
 } from '../data';
 import type { RecordColumn } from '../components/ui';
+import CodexStatistics from './CodexStatistics';
 import {
   Bars,
   CountCell,
@@ -39,6 +40,7 @@ import {
   Segmented,
   SourceLink,
   StatCell,
+  Tabs,
   StatStrip,
   ResyncButton,
   RowsLine,
@@ -112,6 +114,18 @@ function emptyLine({
  * every log ends up approved, so that is where a reader starts, and a fourth
  * tab that is the sum of the other three earns nothing.
  */
+
+/**
+ * Two views of the same rows (2026-09-16, Destiny), tabbed at the top the way
+ * the System Registry tabs its four registries.
+ *
+ * **Entries** is the working surface: the list, its filters, the month in view
+ * and the export. **Statistics** answers the other question — is this getting
+ * better or worse — which needs month-against-month figures rather than rows,
+ * and would have crowded the list off the screen if it sat above it.
+ */
+const VIEWS = ['Entries', 'Statistics'] as const;
+type View = (typeof VIEWS)[number];
 
 const TABS: { value: CodexTab; label: string }[] = [
   { value: 'approved', label: 'Approved' },
@@ -760,6 +774,7 @@ export default function Codex() {
   const [tab, setTab] = useState<Tab>('approved');
   const [q, setQ] = useState('');
   const [month, setMonth] = useState<string | null>(null);
+  const [view, setView] = useState<View>('Entries');
   const [open, setOpen] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const { toast, setToast } = useToast();
@@ -813,8 +828,19 @@ export default function Codex() {
         right={
           <ResyncButton busy={resync.busy} onClick={resync.start} />
         }
+        below={<Tabs tabs={VIEWS} value={view} onChange={setView} />}
       />
 
+      {/*
+        The statistics view reads its own months from the server and shares the
+        page's month selection, so picking September there and coming back to
+        the entries list shows September's rows.
+      */}
+      {view === 'Statistics' ? (
+        <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-4">
+          <CodexStatistics month={month} onMonth={setMonth} />
+        </div>
+      ) : (
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 px-6 pb-3 md:px-8">
           <RowsLine freshness={loaded.freshness} writes={false} />
@@ -906,6 +932,7 @@ export default function Codex() {
         {rows.length > 0 && <Pagination paged={paged} unit="submissions" />}
 
       </div>
+      )}
 
       {open && (
         <EntryView

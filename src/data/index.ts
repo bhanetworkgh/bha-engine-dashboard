@@ -22,6 +22,7 @@ import type {
   CodexData,
   CodexEntry,
   CodexEntryDetail,
+  CodexStats,
   ExecutionBackfill,
   ExecutionGrain,
   ExecutionWorkflowDetail,
@@ -148,6 +149,14 @@ export const backfillExecutions = () => api<ExecutionBackfill>('/api/executions/
 
 /** The monthly rollup behind a record page's tracking panel. */
 export const getMonthly = (kind: RecordKind) => api<MonthlySeries>(`/api/records/${kind}/monthly`);
+
+/**
+ * The Codex statistics tab: one month against the month before it. The month
+ * is a parameter so the tab can look at any month held, not only the current
+ * one, and the server decides what is honest to compare it against.
+ */
+export const getCodexStats = (month?: string | null) =>
+  api<CodexStats>(`/api/codex/stats${month ? `?month=${encodeURIComponent(month)}` : ''}`);
 
 /* --------------------------------------------------------------- records */
 
