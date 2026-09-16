@@ -4745,3 +4745,79 @@ worth and the instance API key the dashboard uses sees the instance. **Worth
 one look on the page**: the 32nd workflow and those extra failures are real runs
 that this view could not see at all, and they will be sitting under Unregistered
 or under their own system tab.
+
+## 2026-09-16 07:33 — Codex: the Paid column, and the list reads the session description
+
+Intent:     Two changes to the Codex page, both from Destiny. The pipeline now
+            tracks pay and the dashboard had no field for it at all. And the
+            wide list column headed "breakthroughs" should be "description",
+            previewing the session description rather than the opening of the
+            generated codex — the full codex still opens on click.
+Files:      server/src/sources.ts, src/data/types.ts, src/screens/Codex.tsx
+
+Problem:    There was no pay field anywhere in this repo, so the first job was
+            finding what the engine actually writes rather than guessing a
+            name. Read from the live base (Airtable connector), not assumed:
+            `Paid`, a **singleSelect with exactly Yes and No**, present in all
+            six builder tables — Destiny fldG1JJS6IJewGS05, Ahad
+            fldp3kvzIev8wwbzh, Kavin fldg7hnlH3EiBb6I0, Kaiqi flddGiqw6dV247A82,
+            Hardik fldjLoGkTKD6ZwpkT, Jegan fld31lpSGDmLKYAxG. Its own
+            description in Airtable: "Written as No by Bays — Submit Actions at
+            Layer 1 and kept No through Layer 2. Changes to Yes only when Jason
+            clicks Yes on the card in #bha-pay-reviews." It is **not** on the
+            Layer 0 parking table, which has a different schema, as ever.
+Fix:        `paidState()` in sources.ts reads it to `paid: boolean | null` and
+            `mapCodex` carries it. The name `Paid` is quoted verbatim and never
+            renamed, per rule 6.
+
+Decision:   **Null is a third state and is not No.** The column was added after
+            most of the history and nothing backfills it, so a row can carry no
+            value. The column prints "not recorded" there, with the reason on
+            hover — reading an empty field as "unpaid" would be the dashboard
+            asserting a fact the base does not hold, which is exactly what
+            section 2 forbids and the same rule as "a zero and an unknown must
+            never look the same".
+Decision:   **Paid is not coloured, either way.** Paid is not a healthy state
+            and unpaid is not a failing one; they are two ordinary facts about
+            a log. A green pill on every paid row would be decoration and would
+            dilute what green means on the rest of the page. Plain pill for
+            both, faint text for not recorded.
+Decision:   Paid appears in three places, all reading the same value: the list
+            column, the entry panel's field grid, and the CSV export (as `Yes`
+            / `No` / blank, never a fabricated `No`). It is searchable by the
+            word the column prints, so "unpaid" finds the unpaid rows.
+
+Problem:    The wide column showed the Breakthroughs section of the generated
+            codex. Every Layer 2 entry is written to the same template, so 220
+            characters of one reads much like 220 of the next; scanning down
+            the page past builder names told a reader nothing about which
+            session was which.
+Fix:        The column is now `description` and previews `Session Description`
+            — the builder's own one-line title for the session, which is what
+            somebody scrolling the list is looking for. New
+            `description_excerpt` on the list shape, built by the same
+            `firstLines` helper `entry_excerpt` uses. The full
+            `Orchestrator Layer2 Review` is untouched: it is still carried whole
+            on the detail shape and still what opens on click, still open by
+            default in the entry panel.
+Decision:   The `breakthroughs()` parser is **deleted rather than left unread**
+            — it had one caller and now has none, and the removed code lives in
+            git history rather than commented out, same as the 14 Sep removals.
+            `entry_excerpt` stays: it is still searched, so a search for a
+            phrase inside a codex still finds its row.
+
+Verified:   `npm run typecheck` and `npm run build` clean. The mapper exercised
+            against a real record shape over all four cases: Paid "Yes" → true,
+            "No" → false, field absent → null, an unexpected spelling → null;
+            and a row with no Session Description → `description_excerpt` null,
+            which renders as "No session description was submitted with this
+            log." rather than an empty cell. Confirmed the list shape carries
+            `paid` and `description_excerpt` and no longer carries
+            `breakthroughs`.
+
+Note:       **Rows already in Postgres carry no `Paid` until a resync.** The
+            stored `fields` blob is whatever was written when the row landed,
+            and `Paid` postdates most of them, so those rows read "not
+            recorded" — correctly — until the Codex page's resync button pulls
+            the column through, or n8n writes the record again. Nothing here
+            invents the value in the meantime.

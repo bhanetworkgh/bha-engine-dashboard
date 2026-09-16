@@ -612,12 +612,19 @@ export interface CodexEntry {
   /** The opening of the Layer 2 review, for the list. */
   entry_excerpt: string | null;
   /**
-   * The Breakthroughs section of the Layer 2 review — what the session
-   * actually moved. Every entry Layer 2 writes opens with that heading; one
-   * that does not falls back to the opening of the entry, so a written entry
-   * never shows an empty column.
+   * The opening of Session Description — the builder's own one-line title for
+   * the session — which is what the list shows in the description column. The
+   * generated codex is still what opens on click; a scan down the page reads
+   * better against the session's title than against the first 220 characters
+   * of every entry, which all begin the same way.
    */
-  breakthroughs: string | null;
+  description_excerpt: string | null;
+  /**
+   * `Paid`: true for Yes, false for No, and **null where the row carries no
+   * value at all** — the column was added after most of the history and
+   * nothing backfills it. Null is rendered as "not recorded", never as unpaid.
+   */
+  paid: boolean | null;
   processed_at: string | null;
   processed_date: string | null;
   note?: string | null;
