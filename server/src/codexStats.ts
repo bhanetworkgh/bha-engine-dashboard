@@ -75,18 +75,41 @@ function span(from: string, to: string): string[] {
   return out;
 }
 
+function mean(values: number[]): number | null {
+  return values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length) : null;
+}
+
 function median(values: number[]): number | null {
   if (!values.length) return null;
   const s = [...values].sort((a, b) => a - b);
   const mid = Math.floor(s.length / 2);
-  return Math.round((s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2) * 10) / 10;
+  return Math.round(s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2);
 }
 
-function daysBetween(from: string, to: string): number | null {
+/**
+ * Milliseconds between two stamps, or null where either is unreadable or the
+ * second is before the first.
+ *
+ * **Kept in milliseconds, never rounded to days** (2026-09-16, Destiny). A
+ * review that took twenty minutes and one that took four hours both rounded to
+ * "0 days", which is how a figure meant to say how quickly Jason answers came
+ * to say nothing at all. The page turns this into minutes, hours or days at
+ * the point it is read.
+ */
+function msBetween(from: string, to: string): number | null {
   const a = Date.parse(from);
   const b = Date.parse(to);
   if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return null;
-  return Math.round(((b - a) / 86_400_000) * 10) / 10;
+  return b - a;
+}
+
+/** "18 min", "4.2 hours", "2.1 days" — the unit a person would use out loud. */
+export function humanDuration(ms: number | null): string {
+  if (ms === null) return '—';
+  if (ms < 60_000) return `${Math.max(1, Math.round(ms / 1000))} sec`;
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)} min`;
+  if (ms < 172_800_000) return `${Math.round((ms / 3_600_000) * 10) / 10} hours`;
+  return `${Math.round((ms / 86_400_000) * 10) / 10} days`;
 }
 
 function share(part: number, whole: number): number | null {
@@ -182,8 +205,8 @@ export async function codexStats(month?: string | null): Promise<CodexStats> {
   const approved = (c: Cohort) => c.logs.filter((e) => e.stage === 'approved').length;
   const flagged = (c: Cohort) => c.logs.filter((e) => e.layer0_flagged).length;
   const paid = (c: Cohort) => payable(c).filter((e) => e.paid === true).length;
-  const speed = (c: Cohort) =>
-    median(c.reviews.map((e) => daysBetween(e.logged_at!, e.reviewed_at!)).filter((d): d is number => d !== null));
+  const times = (c: Cohort) => c.reviews.map((e) => msBetween(e.logged_at!, e.reviewed_at!)).filter((d): d is number => d !== null);
+  const speed = (c: Cohort) => mean(times(c));
 
   const unpriced = now.logs.filter((e) => e.stage === 'approved' && e.paid === null).length;
   const reviewBoundary = REVIEWED_AT_FROM.slice(0, 7);
@@ -225,21 +248,42 @@ export async function codexStats(month?: string | null): Promise<CodexStats> {
       unavailable: false,
     }),
     metric({
-      key: 'approval_days',
-      label: 'Median days to approval',
+      key: 'approval_time',
+      label: 'Average approval time',
       field: 'Jason Reviewed At − Timestamp',
-      unit: 'days',
+      unit: 'duration',
       value: selected < reviewBoundary ? null : speed(now),
       previous: previous < reviewBoundary ? null : speed(before),
       n: now.reviews.length,
       previous_n: before.reviews.length,
       better: 'down',
-      note:
+      /**
+       * Three things, and the month decides which of them apply: the boundary
+       * where the field was not recording, the base the mean is over, and the
+       * median beside it.
+       *
+       * **The base is never dropped for the boundary** (2026-09-16): a mean of
+       * seven reviews where one took two days and the rest took under an hour
+       * is 7.8 hours, and a reader who cannot see that the middle one took 55
+       * minutes will read 7.8 hours as how long Jason usually takes. The mean
+       * is what Destiny asked for and it is the headline; the median is how it
+       * is checked.
+       */
+      note: [
         selected < reviewBoundary
           ? `Jason Reviewed At was created on ${REVIEWED_AT_FROM} and there is no backfill, so nothing before ${reviewBoundary} records when a decision was made. Those months were not instant, they were not timed.`
           : selected === reviewBoundary
             ? `Partial: this month holds only the decisions made on or after ${REVIEWED_AT_FROM}, the day Jason Reviewed At was created, so it undercounts. ${labelOf(nextMonth(reviewBoundary))} is the first month it covers whole.`
-            : `Over the ${now.reviews.length} ${now.reviews.length === 1 ? 'decision' : 'decisions'} made this month, counted from when each log was written. Bucketed by when the decision was made rather than when the log was, so a month is not dragged down by logs nobody has reached yet.`,
+            : null,
+        now.reviews.length
+          ? `The mean over the ${now.reviews.length} ${now.reviews.length === 1 ? 'decision' : 'decisions'} made this month, timed from when each log was written.${
+              times(now).length > 1 ? ` The middle one took ${humanDuration(median(times(now)))} — the better guide where one slow review drags the mean up.` : ''
+            }`
+          : null,
+        selected >= reviewBoundary ? 'Counted in the month the decision was made, not the month the log was written, so a month is not dragged down by logs nobody has reached yet.' : null,
+      ]
+        .filter(Boolean)
+        .join(' '),
       unavailable: false,
     }),
     metric({
@@ -275,10 +319,10 @@ export async function codexStats(month?: string | null): Promise<CodexStats> {
       unavailable: false,
     }),
     metric({
-      key: 'pay_days',
-      label: 'Median days to payment',
+      key: 'pay_time',
+      label: 'Average time to payment',
       field: 'no field records this',
-      unit: 'days',
+      unit: 'duration',
       value: null,
       previous: null,
       n: 0,
@@ -290,6 +334,7 @@ export async function codexStats(month?: string | null): Promise<CodexStats> {
   ];
 
   const windowLabel = cut !== null ? `1–${cut} ${labelOf(previous)}` : labelOf(previous);
+  const hereLabel = cut !== null ? `1–${cut} ${labelOf(selected)}` : labelOf(selected);
   const prose = written(metrics, labelOf(previous), covered, cut !== null);
 
   return {
@@ -306,7 +351,7 @@ export async function codexStats(month?: string | null): Promise<CodexStats> {
     note: !covered
       ? `There is nothing honest to compare ${labelOf(selected)} against: the first log this database holds is from ${labelOf(earliest)}. ${labelOf(previous)} was not quiet, it was not recorded.`
       : cut !== null
-        ? `${labelOf(selected)} is still running, so it is compared against the same stretch of the month before it — ${windowLabel}, its first ${cut} ${cut === 1 ? 'day' : 'days'} — and not against the whole of it. Setting 16 days against 31 would report a collapse every month.`
+        ? `${hereLabel} against ${windowLabel} — the same ${cut} ${cut === 1 ? 'day' : 'days'} of each month. ${labelOf(selected)} is still running, so it is never set against the whole of ${labelOf(previous)}: that would report a collapse every month, on the 1st worst of all.`
         : `${labelOf(selected)} is complete and is compared against the whole of ${labelOf(previous)}.`,
   };
 }
@@ -322,16 +367,16 @@ export async function codexStats(month?: string | null): Promise<CodexStats> {
  */
 function written(metrics: CodexStatMetric[], against: string, covered: boolean, cutShort: boolean): string {
   if (!covered) return `Nothing recorded before this month, so there is no comparison to make.`;
-  const say = (key: string, word: string, unit: 'pct' | 'points'): string | null => {
+  const say = (key: string, word: string, unit: 'pct' | 'rate'): string | null => {
     const m = metrics.find((x) => x.key === key);
     return m?.change ? `${word} ${movement(m.change, unit)}` : null;
   };
   const parts = [
     say('logs', 'logs', 'pct'),
-    say('approval_rate', 'approval rate', 'points'),
-    say('approval_days', 'time to approval', 'pct'),
-    say('flag_rate', 'completeness flags', 'points'),
-    say('pay_rate', 'pay rate', 'points'),
+    say('approval_rate', 'approval rate', 'rate'),
+    say('approval_time', 'approval time', 'pct'),
+    say('flag_rate', 'completeness flags', 'rate'),
+    say('pay_rate', 'pay rate', 'rate'),
   ].filter((p): p is string => p !== null);
   if (!parts.length) return `Nothing in ${against} can be compared against, so there is no change to report.`;
   const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
