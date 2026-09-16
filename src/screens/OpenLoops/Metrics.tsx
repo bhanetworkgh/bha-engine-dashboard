@@ -51,56 +51,45 @@ export function LoopStatusStrip({ metrics, view, loading }: { metrics: LoopMetri
 }
 
 /**
- * The four weekly series, which moved to the statistics tab (2026-09-16,
- * Destiny) along with everything else month-shaped. They are an eight-week
- * strip by design and were never scoped to a month, which is exactly why they
- * did not belong above a list that now is.
+ * The four weekly series, as tiles for the statistics grid (2026-09-16,
+ * Destiny).
+ *
+ * They moved here with everything else month-shaped, and then moved *into* the
+ * grid rather than sitting in a row of their own: four wide charts under five
+ * narrow figures read as two different pages stacked. They are `MetricCard`s
+ * like every other tile, they go in the same three-column grid, and with the
+ * five computed figures they make it exactly nine.
+ *
+ * This is the one set of figures on the tab that is **not** scoped to the month
+ * in view. They are an eight-week strip by design, which is what makes them
+ * worth having beside a month's totals rather than a repeat of them, and each
+ * card's own footnote says what it counts.
  */
-export function LoopSeriesPanel({ metrics, view }: { metrics: LoopMetrics | null; view: string }) {
+export function LoopSeriesTiles({ metrics, view }: { metrics: LoopMetrics | null; view: string }) {
   if (!metrics) return null;
   const m = metrics;
   return (
-    <div>
-      {/*
-        One set, not four charts that happen to sit together — and read as one
-        set, which needs two things beyond the same card and the same grid.
-
-        The footnotes are the same length. They were one short line, two dense
-        paragraphs and a middling one, so the eye read four different objects;
-        they are now the same two lines each where the row is one or two
-        across, and the same three where it is four across, saying what they
-        said in fewer words. The sentences live in the series' own `note`,
-        server-side, because a caveat and the figure it qualifies belong
-        together.
-
-        And the parts line up. The note is the card's footnote rather than the
-        chart's, so it sits on the floor of the card; `noteMinLines` holds a
-        two-line floor under it so all four bodies are the same height; and
-        `spread` puts each total at the top of its body and each chart on the
-        bottom. Totals on one line, charts on one baseline, footnotes on one
-        floor.
-      */}
-      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-2 xl:grid-cols-4">
-        {[
-          { title: 'Raised per week', series: m.raised_per_week },
-          { title: 'Closed per week', series: m.closed_per_week },
-          { title: 'Net raised vs closed per week', series: m.net_per_week },
-          { title: 'Closed per day', series: m.closed_per_day },
-        ].map((c) => (
-          <MetricCard
-            key={c.title}
-            title={c.title}
-            align="top"
-            // With no points the reason *is* the body — SeriesBlock prints it
-            // in place of the chart — so it is not also the footnote.
-            note={c.series.points ? c.series.note : undefined}
-            noteMinLines={2}
-          >
-            <SeriesBlock title="" series={c.series} tone="accent" total replayKey={view} bare layout="spread" footnote={false} />
-          </MetricCard>
-        ))}
-      </div>
-    </div>
+    <>
+      {[
+        { title: 'Raised per week', series: m.raised_per_week },
+        { title: 'Closed per week', series: m.closed_per_week },
+        { title: 'Net raised vs closed', series: m.net_per_week },
+        { title: 'Closed per day', series: m.closed_per_day },
+      ].map((c) => (
+        <MetricCard
+          key={c.title}
+          title={c.title}
+          right="last eight weeks"
+          align="top"
+          // With no points the reason *is* the body — SeriesBlock prints it in
+          // place of the chart — so it is not also the footnote.
+          note={c.series.points ? c.series.note : undefined}
+          noteMinLines={4}
+        >
+          <SeriesBlock title="" series={c.series} tone="accent" total replayKey={view} bare layout="spread" footnote={false} />
+        </MetricCard>
+      ))}
+    </>
   );
 }
 

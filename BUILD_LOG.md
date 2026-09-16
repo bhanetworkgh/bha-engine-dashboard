@@ -5154,3 +5154,89 @@ Verified:   The rig again — Postgres, the real server, seeded rows, both pages
             - Both statistics tabs still follow the same month, the chart no
               longer responds to a click, and the notes now sit at the same
               depth across all six cards.
+
+## 2026-09-16 10:15 — Loop page furniture, panel labels, one statistics grid, and a real loading state
+
+Intent:     Destiny's review round. Replace Open loops' tall builder tiles with
+            the Codex page's quiet segmented control, drop "All" from the status
+            filter, move the month picker next to the search box, rename "All
+            months" to "All time", stop the two comparison cards from following
+            the builder tab, fix the panel's button labels, restyle the four
+            moved series as statistics tiles, and replace the corner "Loading"
+            dot with the BHA mark. Plus: make it faster.
+Files:      src/App.tsx, src/components/ui/{Loading,MonthPicker,index}.tsx,
+            src/components/RecordStatistics.tsx, src/index.css,
+            public/logo-mark.svg (new),
+            src/screens/OpenLoops/{index,Loops,Metrics,LoopPanel}.tsx
+
+Problem:    **"Close loop" was ambiguous and Destiny asked for it to be renamed
+            "Close panel". It is not a panel control.** It calls
+            `save({ status: 'closed' })`, which writes Status → Closed to this
+            database and then to Airtable.
+Fix:        Renaming it as asked would have put a destructive write behind a
+            label that says it closes a dialog. The ambiguity is real and is
+            fixed the other way: the footer now carries **"Close panel"**, which
+            closes the dialog, beside **"Mark as closed"**, which is the write.
+            The top row keeps only "Open in Airtable", as asked. Raised with
+            Destiny rather than done silently — closing a loop from the panel is
+            CLAUDE.md §7 and is not mine to remove.
+
+Problem:    Close rate by builder and How long these have been sitting followed
+            the builder tab, so picking Destiny left a comparison chart with one
+            bar in it — the one question those two cards cannot answer.
+Fix:        They read the all-builders figures and never the per-builder ones.
+            They still follow the **month**, because that is a page-level scope
+            rather than a comparison axis. The status strip above them follows
+            both, as it did.
+Decision:   The builder filter becomes the same `Segmented` control the Codex
+            page uses, and `OwnerPicker` — the row of tall tiles with a headline
+            number each — is deleted rather than left unread. A number per
+            builder was a lot of furniture for a filter, and the two cards below
+            already say who is where.
+Decision:   The status filter loses "All". Open, in progress and closed are the
+            three states a loop can be in; a fourth tab that is the sum of them
+            earns nothing, which is the same call as the Codex tabs on 14 Sep.
+
+Problem:    The four weekly series arrived on the statistics tab still in their
+            own four-across row, so the tab read as two pages stacked: five
+            narrow figures, then four wide charts.
+Fix:        They are `MetricCard`s in the same three-column grid now, which with
+            the five computed figures makes exactly nine. `RecordStatistics`
+            takes an `extraTiles` slot for the purpose. They are the one set on
+            the tab that is not month-scoped — an eight-week strip by design —
+            and each card's own footnote says so.
+
+Problem:    A page that takes a moment showed a grey dot and the word "Loading"
+            in the top-left corner, which reads as an empty page with a speck on
+            it.
+Fix:        The BHA mark, centred and breathing, on the same `idle-breath`
+            animation Ask Bays uses — so the two places this dashboard waits
+            look like the same product. `public/logo-mark.svg` is `logo.svg`
+            with its full-canvas white background path removed, so the mark sits
+            on the page wash rather than in a white tile; the sidebar and Ask
+            Bays keep the original, where the white circle is the look.
+
+Problem:    "It takes quite a while for a page to load." The server was not the
+            cause: every endpoint the two pages call answers in 1–2 ms warm
+            (measured on the rig — open-loops 1.4 ms, loops/metrics 1.0 ms,
+            loops/stats 2.0 ms, codex 2.0 ms, codex/metrics 0.5 ms). **Every
+            screen was imported eagerly**, so opening the dashboard downloaded
+            and parsed the Executions drill-down, the registry editors and the
+            Ask Bays thread before the Overview could paint.
+Fix:        Route-level `React.lazy`, with the new loading mark as the Suspense
+            fallback, so a page still arriving and a page still fetching look
+            like one wait. **The initial bundle goes from 431 kB to 215 kB —
+            121 kB gzipped to 69 kB** — and the rest arrives per page. Overview
+            is deliberately not split: it is what the dashboard opens on, and
+            splitting it would add a round trip before every first paint.
+
+Verified:   The rig. All fourteen routes opened after the split and every one
+            rendered its own heading, with no page errors — the check that
+            matters for lazy routes, since a broken chunk fails at navigation
+            rather than at build. Open loops: month picker reads
+            "Sep 2026 · 8 / Aug 2026 · 14 / All time"; picking Destiny leaves
+            the close-rate card **byte-identical** (asserted, not eyeballed);
+            the panel's buttons read "Open in Airtable | Close panel | Mark as
+            closed | Save"; the statistics grid is nine tiles. Codex's picker
+            reads "All time" too. The loading mark was captured by holding the
+            data request open, and renders with no white tile behind it.

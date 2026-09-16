@@ -3,8 +3,8 @@ import { useData } from '../../app/useData';
 import { BUILDER_NAMES, createLoop, getOpenLoops, getRecordMetrics, removeLoopDuplicate, saveLoop, type Loop, type LoopEdit, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
 import { Icon, LoadFailed, Loading, MonthPicker, monthsFrom, thisMonth, PageHeader, Tabs, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useToast } from '../../components/ui';
 import { LoopPanel } from './LoopPanel';
-import { Loops, OwnerPicker, type StatusFilter } from './Loops';
-import { LoopMetricsPanel, LoopSeriesPanel, LoopStatusStrip } from './Metrics';
+import { Loops, type StatusFilter } from './Loops';
+import { LoopMetricsPanel, LoopSeriesTiles, LoopStatusStrip } from './Metrics';
 import { NewLoopForm } from './NewLoop';
 import RecordStatistics from '../../components/RecordStatistics';
 
@@ -60,11 +60,25 @@ export default function OpenLoops() {
    */
   const [metricsTick, setMetricsTick] = useState(0);
   const metrics = useData((query) => getRecordMetrics('loops', query, null, month), [metricsTick, month]);
+  /**
+   * The figures for the builder tab in view — the status strip at the top, which
+   * follows both the builder and the month.
+   */
   const current: LoopMetrics | null = useMemo(() => {
     const m = metrics.data;
     if (!m) return null;
     return owner === 'all' ? m : (m.by_builder?.[owner] ?? null);
   }, [metrics.data, owner]);
+  /**
+   * The figures across **every** builder, for the two comparison cards
+   * (2026-09-16, Destiny).
+   *
+   * Close rate by builder and How long these have been sitting exist to set the
+   * builders against each other. Narrowing them to one builder left a chart
+   * with a single bar, which is the one thing they cannot answer. They follow
+   * the month like everything else; they just never follow the builder tab.
+   */
+  const allBuilders: LoopMetrics | null = metrics.data ?? null;
   const [switching, setSwitching] = useState(false);
   const firstOwner = useRef(true);
   useEffect(() => {
@@ -255,14 +269,8 @@ export default function OpenLoops() {
               { header: 'age_days', value: (l) => l.age_days },
               { header: 'airtable_url', value: (l) => l.airtable.url },
             ]}
+            extraTiles={<LoopSeriesTiles metrics={allBuilders} view={month ?? 'all'} />}
           />
-          {/*
-            The four weekly series moved here from the loops tab (2026-09-16,
-            Destiny). They are an eight-week strip by design and were never
-            scoped to a month, which is why they did not belong above a list
-            that now is.
-          */}
-          <LoopSeriesPanel metrics={current} view={owner} />
         </div>
       ) : (
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
@@ -276,17 +284,24 @@ export default function OpenLoops() {
         */}
         <LoopStatusStrip metrics={current} view={owner} loading={metrics.status === 'loading'} />
 
-        <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <OwnerPicker data={data} owner={owner} setOwner={setOwner} counts={ownerCounts} />
-            </div>
-            <MonthPicker months={months} value={month} onChange={setMonth} counts={monthCounts} />
-          </div>
+        {/*
+          One tab per builder table, in the same quiet segmented control the
+          Codex page uses (2026-09-16, Destiny). It was a row of tall tiles with
+          a headline number in each, which is a lot of furniture for a filter.
+        */}
+        <div className="shrink-0 px-6 pb-3 md:px-8">
+          <Segmented
+            ariaLabel="Filter by builder table"
+            value={owner}
+            onChange={setOwner}
+            options={[
+              { value: 'all', label: 'All tables', count: inMonth.length },
+              ...data.by_owner.map((o) => ({ value: o.owner, label: BUILDER_NAMES[o.owner] ?? o.owner, count: ownerCounts[o.owner] ?? 0 })),
+            ]}
+          />
         </div>
 
-        <LoopMetricsPanel metrics={current} loading={metrics.status === 'loading'} switching={switching} error={metrics.error} view={owner} />
-
+        <LoopMetricsPanel metrics={allBuilders} loading={metrics.status === 'loading'} switching={switching} error={metrics.error} view={month ?? 'all'} />
 
 
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
@@ -299,10 +314,10 @@ export default function OpenLoops() {
                 { value: 'open', label: 'Open', count: counts.open },
                 { value: 'in progress', label: 'In progress', count: counts['in progress'] },
                 { value: 'closed', label: 'Closed', count: counts.closed },
-                { value: 'all', label: 'All', count: counts.all },
               ]}
             />
             <div className="flex flex-1 items-center justify-end gap-3">
+              <MonthPicker months={months} value={month} onChange={setMonth} counts={monthCounts} />
               <SearchBox value={q} onChange={setQ} placeholder="Search by loop id or text" />
             </div>
           </div>

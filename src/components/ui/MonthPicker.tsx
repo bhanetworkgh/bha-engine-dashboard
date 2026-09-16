@@ -38,9 +38,9 @@ export function monthsFrom(dates: (string | null | undefined)[]): string[] {
  *
  * The record pages opened on an all-time view, so "submissions" was every
  * submission BHA has ever logged and the figure never moved. They open on the
- * current month now and this is how you leave it. `null` is every month, kept
- * as the last option because the all-time view is still worth having — it is
- * just no longer what the page assumes you wanted.
+ * current month now and this is how you leave it. `null` is "All time", kept
+ * as the last option because that view is still worth having — it is just no
+ * longer what the page assumes you wanted.
  *
  * The statistics tab has its own picker and its own selection: that one chooses
  * which month to *compare*, this one chooses which month to *show*, and tying
@@ -73,7 +73,7 @@ export function MonthPicker({
             {counts && counts[m] !== undefined ? ` · ${counts[m]}` : ''}
           </option>
         ))}
-        <option value="">All months</option>
+        <option value="">All time</option>
       </select>
     </label>
   );
