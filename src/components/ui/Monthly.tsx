@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { MonthCoverage, MonthPoint, MonthlySeries } from '../../data';
 import { MetricCard } from './Card';
 import { EmptyPanel } from './EmptyState';
@@ -47,27 +47,53 @@ function Hatch({ id, color }: { id: string; color: string }) {
   );
 }
 
-function MonthChart({
+export function MonthChart({
   series,
   selected,
   onSelect,
+  fill = false,
 }: {
   series: MonthlySeries;
   selected: string | null;
   onSelect: (month: string | null) => void;
+  /**
+   * Widen the bars to fill the card, and print each month's figure above it.
+   *
+   * The statistics tab gives this chart a whole row to itself, and three months
+   * of 26px bars in a 1500px card is ten pixels of content in a hundred-pixel
+   * card — the thing section 5 calls a bug. Bars grow to fill the width and
+   * stop at 90px, so a year of months still reads and still scrolls.
+   */
+  fill?: boolean;
 }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [avail, setAvail] = useState(0);
+  useEffect(() => {
+    if (!fill || !box.current) return;
+    const el = box.current;
+    const measure = () => setAvail(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fill]);
+
   const months = series.months;
   const max = Math.max(1, ...months.map((m) => Math.max(m.created, m.advanced)));
   const showAdvanced = series.advanced_label !== null;
-  const width = months.length * (BAR + GAP);
+  // Fill the card where asked, but never below the fixed size and never past
+  // 90px — a bar wider than that stops reading as a bar.
+  const bar = fill && avail > 0 ? Math.max(BAR, Math.min(90, Math.floor(avail / Math.max(1, months.length)) - GAP)) : BAR;
+  const width = months.length * (bar + GAP);
   // The first month with anything recorded, so the boundary rule sits on its edge.
   const firstCovered = months.findIndex((m) => m.coverage !== 'none');
   const uid = `m-${series.kind}`;
+  const TOP = fill ? 16 : 0;
 
-  const barH = (v: number, coverage: MonthCoverage) => (coverage === 'none' ? 0 : Math.round((v / max) * (H - 18)));
+  const barH = (v: number, coverage: MonthCoverage) => (coverage === 'none' ? 0 : Math.round((v / max) * (H - 18 - TOP)));
 
   return (
-    <div className="scroll-thin -mx-1 overflow-x-auto px-1">
+    <div ref={box} className="scroll-thin -mx-1 overflow-x-auto px-1">
       <svg width={Math.max(width, Number(120))} height={H + 30} role="img" aria-label={`${series.created_label} by month`} className="block">
         <defs>
           <Hatch id={`${uid}-ink`} color="var(--ink)" />
@@ -92,17 +118,17 @@ function MonthChart({
           </g>
         )}
         {months.map((m, i) => {
-          const x = i * (BAR + GAP);
+          const x = i * (bar + GAP);
           const on = selected === m.month;
-          const half = showAdvanced ? Math.round(BAR / 2) - 1 : BAR;
+          const half = showAdvanced ? Math.round(bar / 2) - 1 : bar;
           const createdH = barH(m.created, m.coverage);
           const advancedH = barH(m.advanced, m.advanced_coverage);
           return (
             <g key={m.month} className="cursor-pointer" onClick={() => onSelect(on ? null : m.month)}>
               {/* The whole column is the hit area, so an empty month is still selectable. */}
-              <rect x={x - GAP / 2} y="0" width={BAR + GAP} height={H + 30} fill={on ? 'var(--hover)' : 'transparent'} />
+              <rect x={x - GAP / 2} y="0" width={bar + GAP} height={H + 30} fill={on ? 'var(--hover)' : 'transparent'} />
               {m.coverage === 'none' ? (
-                <line x1={x} y1={H - 1} x2={x + BAR} y2={H - 1} stroke="var(--faint)" strokeWidth="2" strokeDasharray="2 2" />
+                <line x1={x} y1={H - 1} x2={x + bar} y2={H - 1} stroke="var(--faint)" strokeWidth="2" strokeDasharray="2 2" />
               ) : (
                 <rect
                   x={x}
@@ -125,12 +151,19 @@ function MonthChart({
                   opacity={m.advanced_coverage === 'partial' ? 0.85 : 1}
                 />
               )}
-              <text x={x + BAR / 2} y={H + 14} textAnchor="middle" fontSize="10" fill={on ? 'var(--ink)' : 'var(--faint)'}>
+              {/* The figure above its own bar, so the chart can be read without hovering. */}
+              {fill && m.coverage !== 'none' && (
+                <text x={x + bar / 2} y={H - Math.max(createdH, advancedH) - 5} textAnchor="middle" fontSize="10.5" fill="var(--dim)" className="tabular">
+                  {m.created}
+                  {showAdvanced && m.advanced_coverage !== 'none' ? ` · ${m.advanced}` : ''}
+                </text>
+              )}
+              <text x={x + bar / 2} y={H + 14} textAnchor="middle" fontSize="10" fill={on ? 'var(--ink)' : 'var(--faint)'}>
                 {m.label}
               </text>
               {/* A caret marks a month the figures are known not to cover fully. */}
               {m.coverage !== 'full' && (
-                <text x={x + BAR / 2} y={H + 25} textAnchor="middle" fontSize="9" fill="var(--degraded)">
+                <text x={x + bar / 2} y={H + 25} textAnchor="middle" fontSize="9" fill="var(--degraded)">
                   {m.coverage === 'none' ? 'none' : 'part'}
                 </text>
               )}
@@ -147,7 +180,7 @@ function MonthChart({
   );
 }
 
-function Legend({ series }: { series: MonthlySeries }) {
+export function Legend({ series }: { series: MonthlySeries }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-faint">
       <span className="flex items-center gap-1.5">

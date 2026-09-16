@@ -5,7 +5,6 @@ import {
   deleteCodexEntry,
   getCodexDetail,
   getCodexEntries,
-  getMonthly,
   getRecordMetrics,
   resyncCodex as resyncCodexFromAirtable,
   setCodexStatus,
@@ -27,9 +26,7 @@ import {
   LoadFailed,
   Loading,
   MetricCard,
-  MonthlyPanel,
   Pagination,
-  SecondaryMonthly,
   PageHeader,
   Pill,
   RecordId,
@@ -773,13 +770,16 @@ export default function Codex() {
   const [builder, setBuilder] = useState('all');
   const [tab, setTab] = useState<Tab>('approved');
   const [q, setQ] = useState('');
+  // The month the statistics tab is looking at. The entries list is no longer
+  // filtered by it (2026-09-16, Destiny): the month card came off that tab, and
+  // a list silently narrowed to a month with nothing on screen saying so is
+  // worse than no filter at all.
   const [month, setMonth] = useState<string | null>(null);
   const [view, setView] = useState<View>('Entries');
   const [open, setOpen] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const { toast, setToast } = useToast();
   const metrics = useData((query) => getRecordMetrics('codex', query, builder), [builder, tick]);
-  const monthly = useData(() => getMonthly('codex'), [tick]);
 
   useEffect(() => {
     if (loaded) setEntries(loaded.entries);
@@ -808,13 +808,10 @@ export default function Codex() {
     () =>
       scoped
         .filter((e) => inTab(e, tab))
-        .filter((e) => matches(e, q.trim()))
-        // The month selection is a filter like any other, so the list, the
-        // count and the CSV all see the same rows.
-        .filter((e) => !month || e.logged_at?.slice(0, 7) === month),
-    [scoped, tab, q, month],
+        .filter((e) => matches(e, q.trim())),
+    [scoped, tab, q],
   );
-  const paged = usePaged(rows, `${builder}|${tab}|${q.trim()}|${month ?? ''}`);
+  const paged = usePaged(rows, `${builder}|${tab}|${q.trim()}`);
 
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
   const m = metrics.data;
@@ -832,13 +829,13 @@ export default function Codex() {
       />
 
       {/*
-        The statistics view reads its own months from the server and shares the
-        page's month selection, so picking September there and coming back to
-        the entries list shows September's rows.
+        Everything month-shaped lives on the statistics tab now: the chart, the
+        month in view, the approval-time figure and the export. The entries tab
+        is the list and its filters, and nothing else.
       */}
       {view === 'Statistics' ? (
         <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-4">
-          <CodexStatistics month={month} onMonth={setMonth} />
+          <CodexStatistics month={month} onMonth={setMonth} entries={entries} />
         </div>
       ) : (
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
@@ -854,40 +851,6 @@ export default function Codex() {
         </div>
 
         <CodexMetricsPanel metrics={m} loading={metrics.status === 'loading'} error={metrics.error} view={builder} />
-
-        {monthly.data && (
-          <>
-            <MonthlyPanel
-              series={monthly.data}
-              selected={month}
-              onSelect={setMonth}
-              rows={rows}
-              csvLabel="codex"
-              columns={[
-                { header: 'codex_entry_id', value: (e) => e.codex_entry_id },
-                { header: 'submission_id', value: (e) => e.submission_id },
-                { header: 'airtable_record_id', value: (e) => e.id },
-                { header: 'builder', value: (e) => e.builder_id },
-                { header: 'logged_at', value: (e) => e.logged_at },
-                { header: 'jason_status', value: (e) => e.jason_status },
-                { header: 'jason_reviewed_at', value: (e) => e.reviewed_at },
-                { header: 'stage', value: (e) => e.stage },
-                { header: 'paid', value: (e) => (e.paid === null ? null : e.paid ? 'Yes' : 'No') },
-                { header: 'session_description', value: (e) => e.description_excerpt },
-                { header: 'session_type', value: (e) => e.session_type },
-                { header: 'layer0_flagged', value: (e) => e.layer0_flagged },
-                { header: 'airtable_url', value: (e) => e.airtable.url },
-              ]}
-            />
-            {/*
-              Days to approval has its own, later boundary than everything else
-              on this page: Jason Reviewed At was created on 14 Sep 2026 with no
-              backfill, so it is drawn separately and the months before it carry
-              nothing at all.
-            */}
-            <SecondaryMonthly series={monthly.data} />
-          </>
-        )}
 
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
           {/* One tab per submissions table. There is no Jason tab — he reviews

@@ -36,10 +36,17 @@ export function delta(from: number | null, to: number | null, better: 'up' | 'do
  * figure anybody can act on, so an approval rate that moves from 80% to 90%
  * reads "up 10 points" rather than "up 12.5%".
  */
-export function movement(d: Delta, unit: 'pct' | 'points' | 'ms' = 'pct'): string {
+export function movement(d: Delta, unit: 'pct' | 'points' | 'rate' | 'ms' = 'pct'): string {
   if (d.direction === 'flat') return 'unchanged';
   const word = d.direction === 'up' ? 'up' : 'down';
   if (unit === 'points') return `${word} ${Math.abs(Math.round((d.to - d.from) * 10) / 10)} points`;
+  // `rate` is the same arithmetic as `points` said the way Destiny reads it
+  // (2026-09-16): a rate that moves 79.3% → 76.4% is "down 2.9%", not "down 2.9
+  // points". It is safe here only because both underlying figures are printed
+  // beside it — "76.4%, vs 79.3% in Aug 2026" — so the number can always be
+  // checked against what it came from. The Executions page keeps `points`,
+  // which is a decision already recorded in CLAUDE.md.
+  if (unit === 'rate') return `${word} ${Math.abs(Math.round((d.to - d.from) * 10) / 10)}%`;
   if (d.pct === null) return `${d.from} → ${d.to}`;
   return `${word} ${Math.abs(d.pct)}%`;
 }

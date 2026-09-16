@@ -656,7 +656,8 @@ export interface CodexStatMetric {
   label: string;
   /** The source field the figure comes from, named as Airtable spells it. */
   field: string;
-  unit: 'count' | 'percent' | 'days';
+  unit: 'count' | 'percent' | 'duration';
+  /** A duration figure is milliseconds; the page turns it into minutes, hours or days. */
   value: number | null;
   previous: number | null;
   /** How many rows the figure is over, so a rate says what it is a rate of. */
