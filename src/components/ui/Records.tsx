@@ -28,7 +28,7 @@ function reducedMotion(): boolean {
  * change reads as movement), and from zero whenever `replayKey` changes —
  * the page passes the selected builder, so switching tabs re-runs it.
  */
-export function CountUp({ value, duration = 1100, replayKey }: { value: number; duration?: number; replayKey?: string | number }) {
+export function CountUp({ value, duration = 1900, replayKey }: { value: number; duration?: number; replayKey?: string | number }) {
   const [shown, setShown] = useState(reducedMotion() ? value : 0);
   const shownRef = useRef(reducedMotion() ? value : 0);
   const lastKey = useRef(replayKey);
@@ -44,10 +44,16 @@ export function CountUp({ value, duration = 1100, replayKey }: { value: number; 
     let raf = 0;
     const tick = (t: number) => {
       const p = Math.min(1, (t - start) / duration);
-      // Quint ease-out rather than cubic: cubic spends most of its distance in
-      // the first third, which is why a count-up read as arriving all at once
-      // rather than counting (2026-09-16, Destiny).
-      const eased = 1 - Math.pow(1 - p, 5);
+      /**
+       * A smoothstep, not an ease-out (2026-09-16, Destiny, third pass).
+       *
+       * Every ease-out — cubic, quint — front-loads: it covers most of its
+       * distance immediately and then crawls, which is exactly the "it just
+       * happens all at once" this kept reading as. A smoothstep starts slow,
+       * moves through the middle and settles, so the number is legible the
+       * whole way up rather than only at the end.
+       */
+      const eased = p * p * (3 - 2 * p);
       const v = Math.round(from + (value - from) * eased);
       shownRef.current = v;
       setShown(v);
