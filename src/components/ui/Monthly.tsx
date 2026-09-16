@@ -239,14 +239,36 @@ export function MonthlyPanel<T>({
           </span>
         }
         right={
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => downloadCsv(csvName(csvLabel ?? series.kind, selected), toCsv(rows, columns))}
-            title="Exports the rows this page is showing, with every filter and the month selection applied"
-          >
-            Export CSV
-          </button>
+          // The month is pickable here as well as on the chart (2026-09-16,
+          // Destiny). Clicking a bar has always selected a month and the export
+          // has always followed that selection, but nothing on the card said
+          // so, so a previous month read as something the page could not
+          // export. A named control that says "All months" or "Aug 2026" is the
+          // difference between a capability and a discoverable one.
+          <span className="flex items-center gap-2">
+            <select
+              className="input h-[28px] w-auto py-0 text-[11.5px]"
+              value={selected ?? ''}
+              onChange={(e) => onSelect(e.target.value || null)}
+              aria-label="Month to show and export"
+            >
+              <option value="">All months</option>
+              {/* Newest first, like every other list on every page. */}
+              {[...series.months].reverse().map((m) => (
+                <option key={m.month} value={m.month}>
+                  {m.label} {m.month.slice(0, 4)}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => downloadCsv(csvName(csvLabel ?? series.kind, selected), toCsv(rows, columns))}
+              title="Exports the rows this page is showing, with every filter and the month selection applied"
+            >
+              Export CSV
+            </button>
+          </span>
         }
         note={
           selected

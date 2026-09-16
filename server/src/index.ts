@@ -33,6 +33,7 @@ import * as loops from './loops';
 import * as mirror from './mirror';
 import * as executions from './executions';
 import { monthly } from './monthly';
+import { codexStats } from './codexStats';
 import { N8N_API_VAR, n8nBase, n8nConfigured } from './n8n';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
 
@@ -376,6 +377,21 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
       if (!d) throw new HttpError(404, 'That pattern is not held by this dashboard.');
       return send(res, 200, d);
     }
+    /**
+     * The Codex statistics tab: one month against the month before it.
+     *
+     * **Before `/api/codex/:id`**, which would otherwise read "stats" as a
+     * record id and answer "that Codex entry is not held by this dashboard".
+     *
+     * A month still running is compared against the same elapsed stretch of
+     * the previous one and says which days it used, and a comparison whose
+     * window predates everything held is refused rather than reported as a
+     * collapse. See codexStats.ts.
+     */
+    if (p === '/api/codex/stats') {
+      return send(res, 200, await codexStats(url.searchParams.get('month')));
+    }
+
     // The full Codex entry (Orchestrator Layer2 Review) is thousands of words,
     // so it is fetched one entry at a time rather than carried on the list.
     const codexDetail = p.match(/^\/api\/codex\/([^/]+)$/);

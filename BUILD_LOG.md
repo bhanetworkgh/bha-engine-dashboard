@@ -4821,3 +4821,128 @@ Note:       **Rows already in Postgres carry no `Paid` until a resync.** The
             recorded" — correctly — until the Codex page's resync button pulls
             the column through, or n8n writes the record again. Nothing here
             invents the value in the meantime.
+
+## 2026-09-16 08:30 — Codex: a statistics tab, a month picker on the export, and the caption comes off
+
+Intent:     Three things from Destiny. Be able to export a month that is not
+            the current one. Add a statistics surface — month against month for
+            logs, approval rate, approval speed, pay and the completeness check
+            — tabbed at the top the way the System Registry tabs its registries.
+            And take off "This month is still running."
+Files:      server/src/codexStats.ts (new), server/src/delta.ts (new),
+            server/src/executions.ts, server/src/index.ts,
+            server/src/monthly.ts, src/data/types.ts, src/data/index.ts,
+            src/components/ui/Monthly.tsx, src/screens/CodexStatistics.tsx
+            (new), src/screens/Codex.tsx
+
+Problem:    "There is nowhere we can download the previous month" was a
+            **discoverability** fault, not a missing capability. Clicking a bar
+            on the month-over-month chart has always selected that month,
+            filtered the list to it and pointed the export at it — but nothing
+            on the card said the bars were clickable, so a previous month read
+            as something the page could not export.
+Fix:        A named month control sits beside Export CSV: "All months", then
+            every month held, newest first. Same selection, same state, same
+            export — just visible. Verified end to end in a browser: picking
+            Jul 2026 downloads `codex-2026-07.csv` with 6 rows, all of them
+            July and all of them the selected stage; Aug 2026 downloads 18.
+Decision:   The chart bars stay clickable. Two ways into the same state is
+            fine; a capability with no affordance is not.
+
+Problem:    Every figure on the page answered "what is it" and none answered
+            "is it getting better". An approval rate of 86% says nothing on its
+            own.
+Fix:        A **Statistics** tab beside Entries, `GET /api/codex/stats?month=`,
+            computed in `codexStats.ts`. Six figures, each with the same figure
+            a month ago: logs submitted, approval rate, median days to approval,
+            share stopped by the completeness check, pay rate, and median days
+            to payment.
+Decision:   **The two rules that keep the Executions comparison honest are
+            reused verbatim, because they are the same risk.** A month still
+            running is never set against a whole one — on the 16th, September is
+            compared against 1–16 August and the page says so — and a
+            comparison whose window predates everything held is refused
+            outright rather than reported as a collapse. Without the first,
+            this tab would report a catastrophe on the 1st of every month.
+Decision:   `delta()` and `movement()` moved out of `executions.ts` into
+            `delta.ts` and are now shared. Two surfaces computing a change
+            separately will eventually word the same change differently.
+Decision:   **A rate moves in points, never in a percentage of a percentage.**
+            80% → 90% is up 10 points; calling it "up 12.5%" is a number nobody
+            can act on.
+Decision:   Colour only where the direction is news, same rule as Executions.
+            More logs is neither good nor bad and is uncoloured; a falling
+            approval rate is red, a rising completeness-flag rate is red, a
+            rising pay rate is green.
+Decision:   Cohort state versus dated event is kept explicit, because the two
+            have different honesty boundaries. Logs, approval rate, flag rate
+            and pay rate are properties of the cohort logged that month read as
+            they stand today, so they are honest for the whole history. Median
+            days to approval is a dated event from `Jason Reviewed At` (created
+            14 Sep 2026, no backfill), so it carries its boundary onto the tile
+            and Oct 2026 is the first month it covers whole. It is bucketed by
+            the month the **decision** was made, not the month the log was
+            written, so a month is not dragged down by logs nobody has reached.
+
+Problem:    **Destiny asked for time-to-pay and it cannot be computed.** There
+            is no `Paid At` on any of the six builder tables — `Paid` is a
+            Yes/No select and nothing anywhere dates the moment it changed. This
+            dashboard does not write the field either, so its own status ledger
+            has never seen it move; a resync would only record when this
+            database looked, which is not when the payment happened.
+Fix:        The tile is shown and says so: "Not recorded anywhere", with the
+            reason and what would fix it. Per section 5 — where the capability
+            does not exist, say so plainly rather than drawing something that
+            implies it works — and per section 4, a metric the data cannot
+            support is null with a note, and the note is shown.
+Decision:   Not silently dropped from the six. Destiny asked for it, it is a
+            real gap, and a tile naming the missing field is how it gets fixed.
+            **It becomes a real figure the day the workflow that flips `Paid`
+            also stamps when it did**, exactly as days-to-approval became real
+            on 14 Sep. Raised with Destiny rather than added to Airtable here:
+            this dashboard does not add columns the engine owns.
+Decision:   Pay rate's denominator is approved logs **that carry a Paid value**.
+            An empty Paid is unknown, never No, and the note says how many
+            approved logs were left out for that reason.
+
+Problem:    "This month is still running." sat under the month summary telling
+            a reader what the calendar already told them, in the one place a
+            real instrumentation caveat goes.
+Fix:        The sentence is gone. The current month **stays** hatched and marked
+            "part" on the chart, because it is genuinely incomplete and the
+            comparison logic depends on knowing that; it simply no longer
+            prints a caption. A real caveat still overwrites the coverage and
+            prints its own note.
+
+Problem:    `/api/codex/stats` returned 404: "That Codex entry is not held by
+            this dashboard." The route was declared after
+            `/api/codex/:id`, which matched "stats" as a record id.
+Fix:        Moved above it, with a comment saying why it has to stay there.
+            **A typecheck cannot catch this and did not** — it was found by
+            standing the whole thing up and calling it.
+
+Verified:   Not on a typecheck. A throwaway Postgres 16 cluster, the real
+            server booted against it, 41 seeded submissions across three builder
+            tables carrying real Airtable field names (12 July, 20 August, 9
+            September; 31 of them with a `Paid` value), and the page driven in
+            Chromium.
+            - Sep vs Aug, like-for-like: "Against the same days of Aug 2026:
+              logs down 43.7%, approval rate down 22.2 points, completeness
+              flags up 11.1 points and pay rate up 6.2 points." Checked by hand
+              against the seed: Sep 1–16 holds 9 logs to August's 16; 7 of 9
+              approved (77.8%) against 16 of 16 (100%); 1 of 9 flagged (11.1%)
+              against 0; 7 of 7 paid against 15 of 16 (93.8%). Every figure
+              matches.
+            - Aug vs Jul, both complete: no cut, compared whole.
+            - Jul, the earliest month held: comparison refused, in amber —
+              "Jun 2026 was not quiet, it was not recorded" — with July's own
+              figures still shown, because they are real.
+            - Colour: approval down red, flags up red, pay up green, logs grey.
+            - Both month pickers, the CSV contents, and the absence of "This
+              month is still running" on the entries tab.
+Problem:    Two figures read as inventions in the refused case. A null median
+            drew a dash at 30px in the display face, which reads like a
+            redaction and worse, like a value; and the logs note said "12 here,
+            0 then" about a month nobody had recorded.
+Fix:        A null figure now says "Not recorded this month" in words, and the
+            "N here, M then" clause is only written where there is an M.
