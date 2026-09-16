@@ -5822,3 +5822,58 @@ Verified:   Every page at 1440×900: no sidebar scroll, no body sideways scroll,
             ("AIRTABLE_TOKEN is not set on this server, so nothing was read and
             nothing was changed"). Build patterns headers read pattern id /
             pattern / reusability / system / created / source. No page errors.
+
+## 2026-09-16 16:55 — The week charts go back to Asks, and every statistics tile is one shape
+Intent:     Destiny: "move asks per week and outcome over time back to the asks
+            page on the North Star, they are supposed to be underneath the bar
+            that has thin rate, asks, classified, research required and last
+            ask"; "the text for that bar — the number of words, the characters —
+            should be uniform across every section in there"; and "I want every
+            grid, all the different cards, to have the same format and style as
+            the asks 59, thin rate 100%, research required and citation
+            coverage — styling that shows the number, the percentage. Do it like
+            that for the North Star statistics and the research twin statistics."
+Files:      src/components/ui/CountUp.tsx, src/components/ui/Records.tsx,
+            src/screens/NorthStar.tsx, src/screens/ResearchTwin.tsx,
+            server/src/store.ts, CLAUDE.md
+Fix:        `TileFigure` — the exact shape `StatTile` draws, pulled out into the
+            shared module: a 30px figure, a quiet line under it, and the detail
+            it summarises beneath. Every tile on both twins' statistics grids
+            now leads with one, so a grid is one kind of card rather than a
+            computed figure beside a stack of bars.
+            The headline on each is derived from what that card already shows:
+            classified share, answered share, the share of tool hits that ended
+            up cited, the share of asks citing something, the lane count; and on
+            Research Twin the hard-stop share, the largest status, the share
+            ever stuck, the share at the attempt cap and the share naming a gap.
+            Asks per week and outcome over time moved into `NsWeeklyPanel` on
+            the Asks tab, under the strip, which leaves the statistics grid at
+            exactly nine cards — a 3×3, measured on the rendered page.
+            The five strip hints were rewritten to 81–108 characters each and
+            `MetricCell` gained `noteMinLines`, the counterpart of `CountCell`'s
+            `hintMinLines`, so the boxes are level as well as the sentences.
+Problem:    Two things the rig caught that a typecheck could not.
+            1. "Queue depth by status" headlined the resolved share, hardcoding
+               `status === 'resolved'`. The seeded queue's cards are all
+               `answered`, so the tile read **0%** above its own bar saying
+               **100%**. Naming a status in this code is asserting which one is
+               terminal, and that vocabulary is Airtable's to change.
+            2. Two cards on the North Star grid were both titled "Citation
+               coverage" — the moved bucket distribution and the computed
+               monthly figure — showing different numbers under one name.
+            Plus two agreement bugs in the new hints: "1 rows carry no outcome",
+            and then "1 of 6 ask carries", where I had made the noun agree with
+            the numerator instead of the total.
+Decision:   The status headline is the **largest** group, with the line under it
+            naming which. It is derived from the bars underneath and cannot
+            disagree with them, whatever the queue calls its states.
+            The moved distribution is **Coverage mix**, beside Outcome mix; the
+            computed one keeps Citation coverage. Two figures under one title is
+            worse than either.
+Verified:   Rendered grids read 9 cards in 3 columns on North Star and 8 in 3 on
+            Research Twin, every one carrying a figure except Citation coverage,
+            which correctly prints "No ask records a coverage figure" because the
+            rig's rows have none. Strip hints measure 108 / 81 / 85 / 98
+            characters plus the last-ask note. Full sweep of all sixteen pages:
+            no sidebar scroll, no body sideways scroll, no table sideways
+            scroll, no page errors.
