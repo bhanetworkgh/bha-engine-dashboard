@@ -12,6 +12,8 @@ import {
   Loading,
   MetricCard,
   MetricCell,
+  MonthPicker,
+  monthsFrom,
   PageHeader,
   Tabs,
   Pagination,
@@ -29,6 +31,7 @@ import {
   StatCell,
   StatStrip,
   RowsLine,
+  thisMonth,
   Toast,
   TwoLine,
   usePaged,
@@ -176,12 +179,12 @@ function CommercialMetricsPanel({ metrics, loading, error }: { metrics: Commerci
   }
   const m = metrics;
   const maxConfidence = Math.max(1, ...m.confidence_mix.map((c) => c.n));
-  const maxMedia = Math.max(1, ...m.media_readiness_mix.map((c) => c.n));
 
   return (
     <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
       <StatStrip cols={4}>
-        <CountCell label="Cards" value={m.cards} hint="rows in the table" hintMinLines={2} />
+        {/* The hint says which rows, because the strip follows the month picker. */}
+        <CountCell label="Cards" value={m.cards} hint={m.scope.month ? 'created in this month' : 'rows in the table'} hintMinLines={2} />
         <CountCell label="Nothing left to answer" value={m.clear} tone={m.clear ? 'accent' : 'dim'} hint="no open research question on the card" hintMinLines={2} />
         <CountCell label="Media-ready" value={m.media_ready} tone={m.media_ready ? 'accent' : 'dim'} hint="readiness_state = Media-Ready" hintMinLines={2} />
         <MetricCell label="Open research questions" metric={m.unresolved_questions} />
@@ -202,7 +205,15 @@ function CommercialMetricsPanel({ metrics, loading, error }: { metrics: Commerci
         </div>
       )}
 
-      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-3">
+      {/*
+        Two cards, the same two Build patterns carries (2026-09-16, Destiny):
+        the one field that genuinely groups the corpus, and what was created
+        per week. Media readiness and the open-question trend moved to the
+        statistics tab — both are month-against-month questions, and three
+        cards across a page whose sibling has two is the shape the two pages
+        were meant to share.
+      */}
+      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-2">
         <MetricCard title="Confidence" note="The confidence field as set on each card, strongest first.">
           {m.confidence_mix.length === 0 ? (
             <EmptyPanel>No card records a confidence.</EmptyPanel>
@@ -221,29 +232,55 @@ function CommercialMetricsPanel({ metrics, loading, error }: { metrics: Commerci
             </div>
           )}
         </MetricCard>
-        <MetricCard title="Media readiness" note="media_readiness per card. The second half of the page's default order, after the open research count.">
-          {m.media_readiness_mix.length === 0 ? (
-            <EmptyPanel>No card records a media readiness.</EmptyPanel>
-          ) : (
-            <div className="space-y-2">
-              {m.media_readiness_mix.map((c) => (
-                <HBar
-                  key={c.media_readiness}
-                  label={c.media_readiness === '(unset)' ? 'no media readiness set' : c.media_readiness.toLowerCase()}
-                  value={c.n}
-                  max={maxMedia}
-                  tone={c.media_readiness === 'High' ? 'accent' : 'ink'}
-                  valueNode={<span>{c.n}</span>}
-                />
-              ))}
-            </div>
-          )}
-        </MetricCard>
-        <MetricCard title="Open research questions over time">
-          <SeriesBlock title="" series={m.unresolved_trend} tone="accent" bare />
+        <MetricCard title="Created per week">
+          <SeriesBlock title="" series={m.created_per_week} tone="accent" total bare />
         </MetricCard>
       </div>
     </div>
+  );
+}
+
+/**
+ * The two cards that moved off the working tab (2026-09-16, Destiny) — media
+ * readiness and the open-question trend. Both are month-against-month
+ * questions, so they belong beside the month-against-month figures, and they
+ * are `MetricCard`s for the same reason the loops series are: the grid has to
+ * read as one set of tiles rather than as a row of figures with a
+ * different-looking row bolted underneath.
+ *
+ * The trend is deliberately not scoped to the month. It is this dashboard's own
+ * observation of the whole corpus at each resync — Airtable keeps no history
+ * of the field — and cutting a record of when something was written down to
+ * the month the cards were created in would be two different questions in one
+ * chart.
+ */
+function CommercialStatTiles({ m }: { m: CommercialMetrics | null }) {
+  if (!m) return null;
+  const maxMedia = Math.max(1, ...m.media_readiness_mix.map((c) => c.n));
+  return (
+    <>
+      <MetricCard title="Media readiness" note="media_readiness per card, strongest first. The second half of the list's default order, after the open research count.">
+        {m.media_readiness_mix.length === 0 ? (
+          <EmptyPanel>No card in this month records a media readiness.</EmptyPanel>
+        ) : (
+          <div className="space-y-2">
+            {m.media_readiness_mix.map((c) => (
+              <HBar
+                key={c.media_readiness}
+                label={c.media_readiness === '(unset)' ? 'no media readiness set' : c.media_readiness.toLowerCase()}
+                value={c.n}
+                max={maxMedia}
+                tone={c.media_readiness === 'High' ? 'accent' : 'ink'}
+                valueNode={<span>{c.n}</span>}
+              />
+            ))}
+          </div>
+        )}
+      </MetricCard>
+      <MetricCard title="Open research questions over time" note={m.unresolved_trend.points ? 'Every card held, at each resync — not only this month\u2019s.' : null}>
+        <SeriesBlock title="" series={m.unresolved_trend} tone="accent" bare />
+      </MetricCard>
+    </>
   );
 }
 
@@ -407,7 +444,7 @@ function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportuni
     {
       key: 'card_id',
       header: 'card id',
-      width: '28ch',
+      width: '24ch',
       clip: true,
       title: (o) => o.card_id ?? o.id,
       cell: (o) => <RecordId missing="no card id">{o.card_id}</RecordId>,
@@ -416,7 +453,7 @@ function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportuni
       key: 'title',
       header: <SortHeader label="card" k="title" sort={sort} onSort={onSort} />,
       card: 'title',
-      width: '58ch',
+      width: '48ch',
       title: (o) => o.title,
       cell: (o) => <TwoLine title={o.title} description={o.pain_point ?? o.offer} empty="No pain point or offer written on this card." />,
     },
@@ -431,16 +468,16 @@ function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportuni
     },
     {
       key: 'media',
-      header: <SortHeader label="media readiness" k="media" sort={sort} onSort={onSort} />,
+      header: <SortHeader label="media" k="media" sort={sort} onSort={onSort} />,
       card: 'meta',
-      width: '18ch',
+      width: '16ch',
       className: 'card-meta',
       cellClass: (o) => (o.media_readiness === 'High' ? 'text-accent-ink' : 'text-dim'),
       cell: (o) => o.media_readiness?.toLowerCase() ?? <span className="text-faint">not set</span>,
     },
     {
       key: 'questions',
-      header: <SortHeader label="open questions" k="open" sort={sort} onSort={onSort} />,
+      header: <SortHeader label="questions" k="open" sort={sort} onSort={onSort} />,
       align: 'right',
       card: 'meta',
       className: 'card-meta tabular',
@@ -495,12 +532,13 @@ export default function Commercial() {
   const { status, data: loaded, error } = useData(getCommercial, []);
   const [cards, setCards] = useState<Opportunity[]>([]);
   const [confidence, setConfidence] = useState('all');
-  const [media, setMedia] = useState('all');
   const [q, setQ] = useState('');
-  // The month the statistics tab is looking at. The list is not filtered by
-  // it: the month card came off this tab, and a list silently narrowed with
-  // nothing on screen saying so is worse than no filter at all.
-  const [month, setMonth] = useState<string | null>(null);
+  /**
+   * The month the page is showing, and the month the statistics tab compares
+   * (2026-09-16, Destiny). One selection, chosen beside the search box, the
+   * same as Build patterns — the two pages are one shape.
+   */
+  const [month, setMonth] = useState<string | null>(thisMonth());
   const [view, setView] = useState<View>('Cards');
   const [open, setOpen] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -509,7 +547,7 @@ export default function Commercial() {
   // closest to ready at the top, which is the question this page answers.
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'open', dir: 1 });
   const { toast, setToast } = useToast();
-  const metrics = useData((query) => getRecordMetrics('commercial', query), [tick]);
+  const metrics = useData((query) => getRecordMetrics('commercial', query, null, month), [month, tick]);
 
   useEffect(() => {
     if (loaded) setCards(loaded.opportunities);
@@ -528,28 +566,45 @@ export default function Commercial() {
     setSort((s) => (s.key === k ? { key: k, dir: s.dir === 1 ? -1 : 1 } : { key: k, dir: k === 'created' ? -1 : 1 }));
   }
 
-  const values = (pick: (o: Opportunity) => string | null) => {
+  // Every month a card was created in, newest first, with no gaps.
+  const months = useMemo(() => monthsFrom(cards.map((o) => o.created_at)), [cards]);
+  // The month in view, before the confidence filter and the search: what the
+  // keyword bar and the confidence filter are counting.
+  const inMonth = useMemo(() => cards.filter((o) => !month || o.created_at?.slice(0, 7) === month), [cards, month]);
+  const confidenceOptions = useMemo(() => {
     const c = new Map<string, number>();
-    for (const o of cards) {
-      const v = pick(o) ?? '(not set)';
+    for (const o of inMonth) {
+      const v = o.confidence ?? '(not set)';
       c.set(v, (c.get(v) ?? 0) + 1);
     }
     return [...c.entries()].sort((a, b) => level(a[0]) - level(b[0]) || a[0].localeCompare(b[0]));
-  };
-  const confidenceOptions = useMemo(() => values((o) => o.confidence), [cards]);
-  const mediaOptions = useMemo(() => values((o) => o.media_readiness), [cards]);
+  }, [inMonth]);
+
+  /**
+   * The same keyword bar Build patterns carries, read off each card's own
+   * `lane_id` (2026-09-16, Destiny). A word one card uses is the card's name,
+   * not a keyword, so the bar starts at two — Build patterns uses three
+   * because it holds 152 rows to this page's 21.
+   */
+  const keywordCounts = useMemo(() => {
+    const c = new Map<string, number>();
+    for (const o of inMonth) for (const k of o.keywords) c.set(k, (c.get(k) ?? 0) + 1);
+    return [...c.entries()]
+      .filter(([, n]) => n >= 2)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 24);
+  }, [inMonth]);
 
   const rows = useMemo(
     () =>
-      cards
+      inMonth
         .filter((o) => confidence === 'all' || (o.confidence ?? '(not set)') === confidence)
-        .filter((o) => media === 'all' || (o.media_readiness ?? '(not set)') === media)
         .filter((o) => matches(o, q.trim()))
         .slice()
         .sort((a, b) => compare(sort.key, sort.dir, a, b) || tiebreak(a, b)),
-    [cards, confidence, media, q, sort, month],
+    [inMonth, confidence, q, sort],
   );
-  const paged = usePaged(rows, `${confidence}|${media}|${q.trim()}|${sort.key}|${sort.dir}`);
+  const paged = usePaged(rows, `${confidence}|${q.trim()}|${sort.key}|${sort.dir}|${month ?? 'all'}`);
 
   async function change(o: Opportunity, next: ReadinessState) {
     setBusyId(o.id);
@@ -592,6 +647,7 @@ export default function Commercial() {
             onMonth={setMonth}
             rows={cards}
             dateOf={(o) => o.created_at}
+            extraTiles={<CommercialStatTiles m={metrics.data} />}
             columns={[
               { header: 'card_id', value: (o) => o.card_id },
               { header: 'airtable_record_id', value: (o) => o.id },
@@ -618,26 +674,36 @@ export default function Commercial() {
 
 
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
-          {/* Two filters, both on fields that genuinely vary. No tabs. */}
+          {/*
+            One filter (2026-09-16, Destiny). The media-readiness bar came off:
+            it read All / high / medium / low / not set beside a confidence bar
+            that reads the same words, and two segmented controls saying the
+            same five things is two ways to ask one question. Media readiness is
+            still a sortable column and still a card on the statistics tab.
+          */}
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Segmented
-                ariaLabel="Filter by confidence"
-                value={confidence}
-                onChange={setConfidence}
-                options={[{ value: 'all', label: 'All confidence', count: cards.length }, ...confidenceOptions.map(([v, n]) => ({ value: v, label: v === '(not set)' ? 'not set' : v.toLowerCase(), count: n }))]}
-              />
-              <Segmented
-                ariaLabel="Filter by media readiness"
-                value={media}
-                onChange={setMedia}
-                options={[{ value: 'all', label: 'All media readiness', count: cards.length }, ...mediaOptions.map(([v, n]) => ({ value: v, label: v === '(not set)' ? 'not set' : v.toLowerCase(), count: n }))]}
-              />
-            </div>
+            <Segmented
+              ariaLabel="Filter by confidence"
+              value={confidence}
+              onChange={setConfidence}
+              options={[{ value: 'all', label: 'All confidence', count: inMonth.length }, ...confidenceOptions.map(([v, n]) => ({ value: v, label: v === '(not set)' ? 'not set' : v.toLowerCase(), count: n }))]}
+            />
             <div className="flex flex-1 items-center justify-end gap-3">
               <SearchBox value={q} onChange={setQ} placeholder="Search cards and research questions" />
+              {/* The month in view, beside the search box, the same place Build patterns puts it. */}
+              <MonthPicker months={months} value={month} onChange={setMonth} />
             </div>
           </div>
+          {keywordCounts.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="mr-1 text-[11px] text-faint">Keywords</span>
+              {keywordCounts.map(([k, n]) => (
+                <button key={k} type="button" onClick={() => setQ(k)} className={`tag hover:text-accent-ink ${q.trim() === k ? 'tag-accent' : ''}`} title={`${n} cards`}>
+                  {k} <span className="text-faint">{n}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {cards.length === 0 ? (
@@ -652,7 +718,7 @@ export default function Commercial() {
               busyKey={busyId}
               lines={2}
               label="Commercial cards"
-              empty={q.trim() ? 'No card matches that search at the selected confidence and media readiness.' : 'No card carries that combination of confidence and media readiness.'}
+              empty={q.trim() ? 'No card matches that search in this month at the selected confidence.' : month ? 'No card was created in this month at the selected confidence.' : 'No card records that confidence.'}
             />
             <Pagination paged={paged} unit="cards" />
           </>

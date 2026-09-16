@@ -742,6 +742,35 @@ Build patterns and Commercial share the Codex page's shape — the same filter
 bar, the same truncated list rows with the full record on click, the same chart
 treatment, the same resync control in the same place.
 
+**Build patterns and Commercial are one shape, not two** (decision 2026-09-16,
+Destiny). Both open on the current month, chosen in a picker beside the search
+box, and the strip, the cards and the list all follow that one selection — a
+strip answering all time beside a list answering one month is two right numbers
+to two different questions, which is the reconciliation bug Open loops had. Each
+carries a stat strip and then **exactly two cards**: Build patterns shows
+reusability and created per week, Commercial shows confidence and created per
+week. Each carries a **keyword bar** under the filter row, read off the record's
+own id — a pattern's `pattern_id`, a card's `lane_id`
+(`LANE-VFARM-ZONE_MONITORING_SAAS` gives zone, monitoring, saas). The system
+segment is dropped from both because every row carries it. Commercial's
+`bha_system` is deliberately not a keyword source: on that table it is prose,
+and splitting it on spaces yields "documented" and "layer".
+
+**Commercial's media-readiness filter bar is gone, and two of its cards moved**
+(decision 2026-09-16, Destiny). The bar read All / high / medium / low / not set
+beside a confidence bar reading the same five words, which is two controls for
+one question; confidence is the one left. Media readiness and the open-question
+trend are **statistics tiles** now — both are month-against-month questions, so
+they belong beside the month-against-month figures, in the same cards. The
+trend is the one figure there that is never scoped to the month: it is this
+dashboard's own observation of the whole corpus at each resync, and cutting a
+record of when something was written down to the month the cards were created
+in would be two questions in one chart. Media readiness is still a sortable
+column on the list, because it is still the second half of the default order.
+The list's own table no longer scrolls sideways at the widths the other record
+tables fit at; `media readiness` and `open questions` are headed `media` and
+`questions`, which is what bought the room.
+
 **Build patterns has no status** (decision 2026-09-15, Destiny). `pattern_status`
 was deleted from the base and removed from every workflow that wrote it, so the
 canonical / draft / no-status split, its tabs, its pill, its filter and the two

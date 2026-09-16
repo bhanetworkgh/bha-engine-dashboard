@@ -921,6 +921,18 @@ export interface Opportunity {
   who_pays: string | null;
   bha_system: string | null;
   /**
+   * Read off the card's own `lane_id`, the same way a build pattern's keywords
+   * are read off its `pattern_id` — `LANE-VFARM-ZONE_MONITORING_SAAS` gives
+   * zone, monitoring, saas. The `VFARM` segment is left out because it is the
+   * same on every card, so it would group nothing.
+   *
+   * `bha_system` is deliberately not a source here. On this table it is prose
+   * — "vFarm (digital twin), RAG archive (intelligence layer), Swagger-
+   * documented API" — and splitting it on spaces produces words like
+   * "documented" and "layer", which are not keywords.
+   */
+  keywords: string[];
+  /**
    * The rest of the prose the table carries. Every one of these is absent on
    * roughly half the corpus — the schema grew over months and the July and
    * early-August cards predate the deeper half of it — so each is rendered
@@ -1331,7 +1343,8 @@ export interface CodexMetrics {
 export interface PatternMetrics {
   kind: 'patterns';
   computed_at: string;
-  scope: { rows: number };
+  /** `month` is the month the page is showing, or null for all time. */
+  scope: { rows: number; month: string | null };
   /** Distinct pattern_id values against the row count: a count of rows is not a count of patterns. */
   duplicates: { distinct_ids: number; duplicate_rows: number; ids: { pattern_id: string; n: number }[]; note: string };
   /**
@@ -1347,7 +1360,8 @@ export interface PatternMetrics {
 export interface CommercialMetrics {
   kind: 'commercial';
   computed_at: string;
-  scope: { rows: number };
+  /** `month` is the month the page is showing, or null for all time. */
+  scope: { rows: number; month: string | null };
   cards: number;
   /** Cards carrying no open research question — the closest-to-ready end of the table. */
   clear: number;
@@ -1355,6 +1369,12 @@ export interface CommercialMetrics {
   media_ready: number;
   confidence_mix: { confidence: string; n: number }[];
   media_readiness_mix: { media_readiness: string; n: number }[];
+  /**
+   * Cards by the week of `created_at` — the weeks covering the month in view,
+   * or the last eight weeks when the page is showing all time. The same card
+   * Build patterns carries, so the two pages read as one shape.
+   */
+  created_per_week: MetricSeries;
   unresolved_questions: Metric;
   unresolved_trend: MetricSeries;
   /**

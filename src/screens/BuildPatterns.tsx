@@ -11,6 +11,8 @@ import {
   LoadFailed,
   Loading,
   MetricCard,
+  MonthPicker,
+  monthsFrom,
   PageHeader,
   Tabs,
   Pagination,
@@ -28,6 +30,7 @@ import {
   RowsLine,
   Toast,
   TwoLine,
+  thisMonth,
   usePaged,
   useResync,
   useToast,
@@ -96,7 +99,8 @@ function PatternMetricsPanel({ metrics, loading, error }: { metrics: PatternMetr
   return (
     <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
       <StatStrip cols={3}>
-        <CountCell label="Patterns" value={m.scope.rows} hint="rows in the table" hintMinLines={2} />
+        {/* The hint says which rows, because the strip follows the month picker. */}
+        <CountCell label="Patterns" value={m.scope.rows} hint={m.scope.month ? 'created in this month' : 'rows in the table'} hintMinLines={2} />
         <CountCell
           label="Distinct pattern ids"
           value={m.duplicates.distinct_ids}
@@ -308,17 +312,23 @@ export default function BuildPatterns() {
   const { status, data: loaded, error } = useData(getBuildPatterns, []);
   const [patterns, setPatterns] = useState<BuildPattern[]>([]);
   const [reuse, setReuse] = useState('all');
-  // The month the statistics tab is looking at. The list is not filtered by
-  // it: the month card came off this tab, and a list silently narrowed with
-  // nothing on screen saying so is worse than no filter at all.
-  const [month, setMonth] = useState<string | null>(null);
+  /**
+   * The month the page is showing, and the month the statistics tab compares
+   * (2026-09-16, Destiny). One selection, chosen beside the search box, the
+   * same as Codex and Open loops: a strip answering all time while the list
+   * answers one month is two right numbers to two different questions.
+   *
+   * It opens on the current month. `null` is "All time", still the last option
+   * in the picker — just no longer what the page assumes you wanted.
+   */
+  const [month, setMonth] = useState<string | null>(thisMonth());
   const [view, setView] = useState<View>('Patterns');
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<Set<string> | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const { toast, setToast } = useToast();
-  const metrics = useData((query) => getRecordMetrics('patterns', query), [tick]);
+  const metrics = useData((query) => getRecordMetrics('patterns', query, null, month), [month, tick]);
   // Re-read after a resync: the months change when the rows do.
   const searchSeq = useRef(0);
 
@@ -355,29 +365,35 @@ export default function BuildPatterns() {
     return () => clearTimeout(t);
   }, [q]);
 
+  // Every month a pattern was created in, newest first, with no gaps.
+  const months = useMemo(() => monthsFrom(patterns.map((p) => p.created_at)), [patterns]);
+  // The month in view, before the reusability filter and the search: what the
+  // keyword bar and the reusability filter are counting.
+  const inMonth = useMemo(() => patterns.filter((p) => !month || p.created_at?.slice(0, 7) === month), [patterns, month]);
+
   const keywordCounts = useMemo(() => {
     const c = new Map<string, number>();
-    for (const p of patterns) for (const k of p.keywords) c.set(k, (c.get(k) ?? 0) + 1);
+    for (const p of inMonth) for (const k of p.keywords) c.set(k, (c.get(k) ?? 0) + 1);
     return [...c.entries()]
       .filter(([, n]) => n >= 3)
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .slice(0, 24);
-  }, [patterns]);
+  }, [inMonth]);
 
   const reuseOptions = useMemo(() => {
     const c = new Map<string, number>();
-    for (const p of patterns) c.set(reuseKey(p), (c.get(reuseKey(p)) ?? 0) + 1);
+    for (const p of inMonth) c.set(reuseKey(p), (c.get(reuseKey(p)) ?? 0) + 1);
     return [...c.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  }, [patterns]);
+  }, [inMonth]);
 
   const rows = useMemo(
     () =>
-      patterns
+      inMonth
         .filter((p) => reuse === 'all' || reuseKey(p) === reuse)
         .filter((p) => (hits ? hits.has(p.id) : true)),
-    [patterns, reuse, hits, month],
+    [inMonth, reuse, hits],
   );
-  const paged = usePaged(rows, `${reuse}|${q.trim()}`);
+  const paged = usePaged(rows, `${reuse}|${q.trim()}|${month ?? 'all'}`);
 
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
 
@@ -439,10 +455,12 @@ export default function BuildPatterns() {
               ariaLabel="Filter by reusability"
               value={reuse}
               onChange={setReuse}
-              options={[{ value: 'all', label: 'All', count: patterns.length }, ...reuseOptions.map(([r, n]) => ({ value: r, label: r.startsWith('(') ? r.slice(1, -1) : r.toLowerCase(), count: n }))]}
+              options={[{ value: 'all', label: 'All', count: inMonth.length }, ...reuseOptions.map(([r, n]) => ({ value: r, label: r.startsWith('(') ? r.slice(1, -1) : r.toLowerCase(), count: n }))]}
             />
             <div className="flex flex-1 items-center justify-end gap-3">
               <SearchBox value={q} onChange={setQ} placeholder="Search problem, solution, context, name" />
+              {/* The month in view, beside the search box, the same place Codex and Open loops put it. */}
+              <MonthPicker months={months} value={month} onChange={setMonth} />
               {q.trim() && hits === null && <span className="tabular whitespace-nowrap text-[11.5px] text-faint">Searching…</span>}
             </div>
           </div>
@@ -479,7 +497,7 @@ export default function BuildPatterns() {
               onOpen={(p) => setOpen(p.id)}
               lines={2}
               label="Build patterns"
-              empty={q.trim() ? 'No pattern matches that search at the selected reusability.' : 'No pattern records that reusability.'}
+              empty={q.trim() ? 'No pattern matches that search in this month at the selected reusability.' : month ? 'No pattern was created in this month at the selected reusability.' : 'No pattern records that reusability.'}
             />
             <Pagination paged={paged} unit="patterns" />
           </>
