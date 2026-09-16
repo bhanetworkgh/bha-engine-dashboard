@@ -5562,3 +5562,73 @@ Verified:   Postgres + real server + Playwright at 1280/1440/1720.
             No page errors. Caught on screenshot and fixed: the Created per week
             card printed its note twice, once from `MetricCard note` and once
             from `SeriesBlock`.
+
+## 2026-09-16 13:55 — Percentages and durations count up; the roster and the spend card
+Intent:     Destiny: "it's only the numbers that are doing the counting
+            animation for percentages and for seconds time, right? It should
+            also do the same animation across all the tables, all the workflows,
+            all the pages." Plus the roster emails he had asked for and I had not
+            written, and "for the total monthly spend it seems you did not put in
+            the figures I told you to put... I added the $60 for the Anything
+            Cloud, however it did not update."
+Files:      src/components/ui/CountUp.tsx (new), src/components/ui/Records.tsx,
+            src/components/ui/Charts.tsx, src/components/ui/index.ts,
+            src/components/RecordStatistics.tsx, src/screens/Executions/index.tsx,
+            server/src/migrations.ts, server/src/registrySeed.ts,
+            server/src/registry.ts, src/data/types.ts,
+            src/screens/Registry/index.tsx
+Problem:    `CountUp` did `Math.round` inside the animation loop, so it could only
+            ever emit whole numbers. Every rate and every duration on the page
+            snapped into place beside counts that ran, on the same row of tiles.
+            The count-up also lived in `Records.tsx`, which imports `Charts.tsx`,
+            so a bar's own figure could not use it without a cycle — which is why
+            an HBar grew from nought over 1900ms with a number that was already
+            at its final value.
+            The roster emails were never written anywhere: `seedRegistry` inserts
+            `ON CONFLICT (id) DO NOTHING`, so editing `registrySeed.ts` reaches a
+            fresh database and no other, and every live one already holds the
+            seven rows.
+            The spend total was not broken. Reproduced against the rig: PATCH
+            cost_amount 60 onto Render, re-read /api/registry, and the answer came
+            back `priced: 1, not_monthly: 1, totals: []` — correct, because a cost
+            with no billing cycle cannot be part of a monthly figure. What was
+            broken was the page, which said "No active service has a cost against
+            it yet" while one did, and "3 are one-off or have no billing cycle"
+            without saying which three.
+Fix:        Split the animation into `useCountUp`, returning the raw number, in
+            its own module both Records and Charts can import. `CountUp` rounds
+            it; the new `CountUpText` runs it through a formatter, so a rate
+            counts up through 3.4%, 12.8%, 36.2%, 59.7% and a duration through
+            20 min, 1.3 hours, 3.6 hours, 6 hours. Wired into the statistics
+            tiles (replayKey is the month, so the whole grid re-runs on a month
+            change), the Executions failure rate and average time, the five
+            figures inside a workflow panel, every HBar's own number, and the
+            percentage in the middle of a Ring.
+            Made `fmt` round on every branch, because it now also draws frames:
+            without it a rate read 12.38741952% for a second and a half. A value
+            that arrives already rounded comes back unchanged, so the figure that
+            lands is the figure it would have printed anyway.
+            Migration 12 writes the seven work addresses, `WHERE email IS NULL`
+            on six so an edit made in the interface is never overwritten, and
+            from the exact seeded gmail on Destiny's. It also sets Jason's lanes
+            to CEO and Ahad's role to CS Twin, each guarded on the exact seeded
+            value. The seed carries the same values for a fresh database.
+            `spendOf` now returns `not_monthly_ids`, the card names those
+            services and says what to do, the cycle cell on such a row goes amber,
+            and the empty state has two sentences rather than one — "no service
+            carries a cost" and "costs exist, none has a cycle" are different
+            facts.
+Decision:   Destiny named four addresses — ahad@, destiny@, jason@, jegan@ — and
+            asked for "everybody's bhanetwork.org emails". The other three follow
+            the same convention and are the ones to check first if one bounces;
+            they are in the migration, in one place, rather than guessed at
+            row by row.
+            A cost with no cycle stays out of the monthly total. It is the
+            honest answer and the page now says so by name instead of leaving a
+            reader to conclude the total is broken.
+Verified:   Sampled the codex statistics grid at 250/500/900/1400/2600ms and it
+            reads 0 → 1 → 4 → 7 → 9, 3.4% → 12.8% → 36.2% → 59.7% → 75.9%,
+            20 min → 1.3 hours → 3.6 hours → 6 hours → 7.6 hours. Registry after
+            migration 12: seven people, every one with a bhanetwork.org address,
+            Jason CEO, Ahad CS Twin. Spend card names Render as priced and not
+            counted. No page errors.

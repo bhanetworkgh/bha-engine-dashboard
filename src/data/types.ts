@@ -1508,6 +1508,8 @@ export interface Spend {
   unpriced: number;
   /** Priced, but one-off or with no cycle, so not part of a monthly figure. */
   not_monthly: number;
+  /** Which services those are, so the card can name what is left to fill in. */
+  not_monthly_ids: string[];
   renewing_soon: string[];
   overdue: string[];
   with_renewal_date: number;

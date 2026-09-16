@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { Metric, MetricSeries, Freshness, RecordWrite } from '../../data';
 import { BUILDER_NAMES } from '../../data';
 import { Bars } from './Charts';
 import { StatCell } from './Card';
 import { EmptyPanel } from './EmptyState';
+import { CountUp } from './CountUp';
 import { Segmented } from './Tabs';
 
 /**
@@ -12,59 +13,6 @@ import { Segmented } from './Tabs';
  * a note, and the note is what is shown. A zero and an unknown never look the
  * same: a zero is a number, an unknown is a sentence.
  */
-
-/** Whether the viewer asked for less motion. */
-function reducedMotion(): boolean {
-  try {
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * A count that runs up to its value. It animates on first paint, again
- * whenever the value changes (from the number it was showing, so a status
- * change reads as movement), and from zero whenever `replayKey` changes —
- * the page passes the selected builder, so switching tabs re-runs it.
- */
-export function CountUp({ value, duration = 1900, replayKey }: { value: number; duration?: number; replayKey?: string | number }) {
-  const [shown, setShown] = useState(reducedMotion() ? value : 0);
-  const shownRef = useRef(reducedMotion() ? value : 0);
-  const lastKey = useRef(replayKey);
-  useEffect(() => {
-    if (reducedMotion()) {
-      shownRef.current = value;
-      setShown(value);
-      return;
-    }
-    const from = lastKey.current === replayKey ? shownRef.current : 0;
-    lastKey.current = replayKey;
-    const start = performance.now();
-    let raf = 0;
-    const tick = (t: number) => {
-      const p = Math.min(1, (t - start) / duration);
-      /**
-       * A smoothstep, not an ease-out (2026-09-16, Destiny, third pass).
-       *
-       * Every ease-out — cubic, quint — front-loads: it covers most of its
-       * distance immediately and then crawls, which is exactly the "it just
-       * happens all at once" this kept reading as. A smoothstep starts slow,
-       * moves through the middle and settles, so the number is legible the
-       * whole way up rather than only at the end.
-       */
-      const eased = p * p * (3 - 2 * p);
-      const v = Math.round(from + (value - from) * eased);
-      shownRef.current = v;
-      setShown(v);
-      if (p < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, replayKey]);
-  return <>{shown}</>;
-}
 
 /**
  * A headline count with its label; animates on load.

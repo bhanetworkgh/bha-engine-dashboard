@@ -4,6 +4,7 @@
  * value it was not given. Every chart takes real numbers from the data module.
  */
 import { useEffect, useState } from 'react';
+import { CountUp, CountUpText } from './CountUp';
 
 type Tone = 'ink' | 'accent' | 'degraded' | 'failing' | 'dim';
 
@@ -169,8 +170,15 @@ export function HBar({
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
       <div className="truncate text-[12.5px] text-ink">{label}</div>
       <div className="tabular flex items-center gap-2 text-[12px] text-dim">
+        {/*
+          The figure runs up as the bar widens (2026-09-16, Destiny). It used to
+          snap into place beside a bar growing from nought over nearly two
+          seconds, which is the same seam the count-up exists to remove. A
+          caller wanting something other than a plain number still passes
+          `valueNode`.
+        */}
         <span>
-          {valueNode ?? value}
+          {valueNode ?? <CountUp value={value} replayKey={`${replayKey ?? ''}|${max}`} />}
           {suffix}
         </span>
         {right}
@@ -218,7 +226,8 @@ export function Ring({
         className="font-display tabular absolute inset-0 flex items-center justify-center text-ink"
         style={{ fontSize: size < 44 ? 10 : size < 60 ? 12 : 15 }}
       >
-        {total > 0 ? `${Math.round(pct * 100)}%` : '—'}
+        {/* The share in the middle runs up with the arc around it. */}
+        {total > 0 ? <CountUpText value={pct * 100} format={(n) => `${Math.round(n)}%`} replayKey={`${value}|${total}`} /> : '—'}
       </div>
     </div>
   );

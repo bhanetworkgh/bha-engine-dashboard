@@ -809,6 +809,53 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_execution_runs_open ON engine_execution_runs (execution_id) WHERE status NOT IN ('success','error','crashed','canceled')`,
     ],
   },
+  {
+    id: 12,
+    name: 'the roster carries its work email',
+    statements: [
+      /**
+       * Everybody's `@bhanetwork.org` address on the Builders registry
+       * (2026-09-16, Destiny).
+       *
+       * The seed cannot do this. `seedRegistry` inserts `ON CONFLICT (id) DO
+       * NOTHING`, so a row that already exists is never touched again and an
+       * email added to `registrySeed.ts` would reach a fresh database and no
+       * other. Every live database already has these seven rows.
+       *
+       * `WHERE email IS NULL` on six of them: a value somebody typed into the
+       * interface is theirs, and a migration that overwrote it would be this
+       * dashboard deciding it knows better than the person who typed it.
+       * Destiny's is the one replacement, and only from the exact personal
+       * address the seed put there — it is the work address for a work
+       * roster, and he asked for it by name.
+       *
+       * The four Destiny spelled out are Ahad, Destiny, Jason and Jegan. The
+       * other three follow the same convention he gave for "everybody's", and
+       * are the ones to check first if an address bounces.
+       */
+      `UPDATE registry_people SET email = 'jason@bhanetwork.org',   updated_at = now() WHERE id = 'jason'   AND email IS NULL`,
+      `UPDATE registry_people SET email = 'jegan@bhanetwork.org',   updated_at = now() WHERE id = 'jegan'   AND email IS NULL`,
+      `UPDATE registry_people SET email = 'ahad@bhanetwork.org',    updated_at = now() WHERE id = 'ahad'    AND email IS NULL`,
+      `UPDATE registry_people SET email = 'kaiqi@bhanetwork.org',   updated_at = now() WHERE id = 'kaiqi'   AND email IS NULL`,
+      `UPDATE registry_people SET email = 'hardik@bhanetwork.org',  updated_at = now() WHERE id = 'hardik'  AND email IS NULL`,
+      `UPDATE registry_people SET email = 'kavin@bhanetwork.org',   updated_at = now() WHERE id = 'kavin'   AND email IS NULL`,
+      `UPDATE registry_people SET email = 'destiny@bhanetwork.org', updated_at = now() WHERE id = 'destiny' AND (email IS NULL OR email = 'destinyarupi@gmail.com')`,
+
+      /**
+       * Two roster corrections from the same conversation (2026-09-16,
+       * Destiny): Jason owns no loop lane and the column read empty, where what
+       * it should say is what he actually does — CEO. And Ahad's role named
+       * North Star, which is not his; CS Twin is.
+       *
+       * Both are guarded on the exact value the seed wrote, so an edit somebody
+       * has since made in the interface is never overwritten. Nothing happens
+       * twice: `schema_migrations` sees to that, and the guard sees to it again
+       * if a database is ever rebuilt from an older dump.
+       */
+      `UPDATE registry_people SET lanes_owned = ARRAY['CEO'], updated_at = now() WHERE id = 'jason' AND (lanes_owned IS NULL OR cardinality(lanes_owned) = 0)`,
+      `UPDATE registry_people SET role = 'CS Twin', updated_at = now() WHERE id = 'ahad' AND role = 'North Star / CS Twin'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

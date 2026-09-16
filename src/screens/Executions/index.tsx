@@ -15,7 +15,7 @@ import {
 } from '../../data';
 import { buildReport, reportName } from '../../lib/executionReport';
 import { downloadCsv } from '../../lib/csv';
-import { CountUp, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, MonthPicker, PageHeader, Tabs, Toast, useToast, yearOf } from '../../components/ui';
+import { CountUpText, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, MonthPicker, PageHeader, Tabs, Toast, useToast, yearOf } from '../../components/ui';
 
 /**
  * Executions — every run of every workflow in the engine, one row per run.
@@ -112,16 +112,22 @@ function Delta({ d, format = (n: number) => String(n), suffix = '' }: { d: Execu
 }
 
 /** One tile's body: the figure, and its change against last month under it. */
-function Figure({ value, delta, tone, count, replayKey }: { value: string; delta?: ReactNode; tone?: 'failing'; count?: number | null; replayKey?: string }) {
+function Figure({ value, delta, tone, count, format, replayKey }: { value: string; delta?: ReactNode; tone?: 'failing'; count?: number | null; format?: (n: number) => string; replayKey?: string }) {
   return (
     <div className="space-y-1.5">
       {/*
         Numbers count up here too (2026-09-16, Destiny). It is the one place in
         the dashboard they did not, and a figure that animates on one page and
         snaps on another reads as two different products.
+
+        `format` carries the unit, so the failure rate and the average run time
+        run up the same way the three counts beside them do rather than snapping
+        into place on a row where everything else moves. Without a `count` there
+        is no number to run — `value` is then a dash, and a dash does not
+        animate.
       */}
       <div className={`font-display tabular text-[30px] leading-none ${tone === 'failing' ? 'text-failing' : 'text-ink'}`}>
-        {count === null || count === undefined ? value : <CountUp value={count} replayKey={replayKey} />}
+        {count === null || count === undefined ? value : <CountUpText value={count} format={format ?? ((n) => String(Math.round(n)))} replayKey={replayKey} />}
       </div>
       {delta && <div className="flex flex-wrap items-baseline gap-x-2">{delta}</div>}
     </div>
@@ -186,17 +192,25 @@ function WorkflowPanel({ workflowId, grain, period, onClose }: { workflowId: str
               </button>
             </div>
 
+            {/*
+              The workflow's own five, counting up like every other figure on
+              the page (2026-09-16, Destiny) — a number that snaps inside a
+              panel opened from a page of numbers that run is the seam the
+              count-up was meant to remove.
+            */}
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
               {[
-                { k: 'executions', v: String(detail.workflow.executions), tone: 'text-ink' },
-                { k: 'succeeded', v: String(detail.workflow.succeeded), tone: 'text-ink' },
-                { k: 'failed', v: String(detail.workflow.failed), tone: detail.workflow.failed ? 'text-failing' : 'text-dim' },
-                { k: 'failure rate', v: pct(detail.workflow.failure_rate), tone: rateTone(detail.workflow.failure_rate) },
-                { k: 'average time', v: duration(detail.workflow.avg_ms), tone: 'text-ink' },
+                { k: 'executions', n: detail.workflow.executions, f: (n: number) => String(Math.round(n)), tone: 'text-ink' },
+                { k: 'succeeded', n: detail.workflow.succeeded, f: (n: number) => String(Math.round(n)), tone: 'text-ink' },
+                { k: 'failed', n: detail.workflow.failed, f: (n: number) => String(Math.round(n)), tone: detail.workflow.failed ? 'text-failing' : 'text-dim' },
+                { k: 'failure rate', n: detail.workflow.failure_rate, f: pct, tone: rateTone(detail.workflow.failure_rate) },
+                { k: 'average time', n: detail.workflow.avg_ms, f: duration, tone: 'text-ink' },
               ].map((f) => (
                 <div key={f.k} className="rounded-[12px] bg-raised px-3 py-2.5">
                   <div className="kicker truncate">{f.k}</div>
-                  <div className={`font-display tabular mt-1 text-[19px] leading-none ${f.tone}`}>{f.v}</div>
+                  <div className={`font-display tabular mt-1 text-[19px] leading-none ${f.tone}`}>
+                    {f.n === null ? '—' : <CountUpText value={f.n} format={f.f} replayKey={`${detail.workflow.workflow_id}|${detail.period.key}`} />}
+                  </div>
                 </div>
               ))}
             </div>
@@ -405,11 +419,23 @@ function SystemView({
         </MetricCard>
         <MetricCard title="Failure rate" right="failed ÷ finished" align="top" noteMinLines={3}
           note={period.finished ? `Over the ${period.finished} runs that finished this month.` : 'No run finished this month, so there is no rate — not a rate of nought.'}>
-          <Figure value={period.finished ? pct(period.failure_rate) : '—'} delta={<Delta d={c.failure_rate} />} />
+          <Figure
+            value="—"
+            count={period.finished ? period.failure_rate : null}
+            format={(n) => pct(n)}
+            replayKey={`${system.system}|${period.key}`}
+            delta={<Delta d={c.failure_rate} />}
+          />
         </MetricCard>
         <MetricCard title="Average time" right="duration, per run" align="top" noteMinLines={3}
           note={period.timed ? `Over the ${period.timed} of ${period.executions} runs that recorded an end. A run with no end is left out rather than counted as nought.` : 'No run recorded an end, so there is no average.'}>
-          <Figure value={duration(period.avg_ms)} delta={<Delta d={c.avg_ms} format={(n) => duration(n)} />} />
+          <Figure
+            value="—"
+            count={period.avg_ms}
+            format={(n) => duration(n)}
+            replayKey={`${system.system}|${period.key}`}
+            delta={<Delta d={c.avg_ms} format={(n) => duration(n)} />}
+          />
         </MetricCard>
         <MetricCard title="Workflows run" right="distinct workflows" align="top" noteMinLines={3}
           note={`Workflows with at least one execution this month. A workflow the registry names no system for is still counted, under Archived.`}>
