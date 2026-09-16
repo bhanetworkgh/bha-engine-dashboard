@@ -354,28 +354,23 @@ function firstLines(text: string | null, max = 220): string | null {
 }
 
 /**
- * The Breakthroughs section of a Layer 2 Codex entry — what the session
- * actually moved — for the Codex list column of the same name.
+ * `Paid` — whether an approved log has been paid.
  *
- * Layer 2 writes every entry with the same section headings and opens with
- * "Breakthroughs", so the section is read by that heading rather than guessed
- * at. A heading is a short line carrying no bullet marker, which is what ends
- * the section; an entry written in some other shape falls back to its opening
- * lines so a written entry never shows an empty column.
+ * A single select with exactly Yes and No in all six builder tables, written
+ * No by Bays — Submit Actions at Layer 1 and flipped to Yes only when Jason
+ * answers the card in #bha-pay-reviews. The field's own description in
+ * Airtable says so.
+ *
+ * **Null is a third state and is not No.** The column was added after most of
+ * the history, nothing backfills it, and the Layer 0 parking table has no such
+ * field at all — so a row can carry no value. Reading that as "not paid" would
+ * be this dashboard asserting a fact the base does not hold, which is the one
+ * thing section 2 of CLAUDE.md forbids. Any spelling but those two reads null
+ * for the same reason.
  */
-function breakthroughs(text: string | null, max = 220): string | null {
-  if (!text) return null;
-  const heading = /^[ \t]*breakthroughs[ \t]*:?[ \t]*$/im.exec(text);
-  if (!heading) return firstLines(text, max);
-  const items: string[] = [];
-  for (const line of text.slice(heading.index + heading[0].length).split('\n')) {
-    const t = line.trim();
-    if (!t) continue;
-    const nextHeading = items.length > 0 && t.length < 40 && !/^[\u2022\-*\d]/.test(t);
-    if (nextHeading) break;
-    items.push(t.replace(/^[\u2022\-*]\s*/, ''));
-  }
-  return firstLines(items.join(' \u00b7 '), max);
+function paidState(raw: unknown): boolean | null {
+  const v = str(raw)?.toLowerCase();
+  return v === 'yes' ? true : v === 'no' ? false : null;
 }
 
 /**
@@ -443,7 +438,14 @@ export function mapCodex(rec: AtRecord, owner: string, table: string, pending?: 
     stage: needsInput ? 'needs_input' : approval === 'approved' || approval === 'input added' ? 'approved' : 'awaiting',
     has_entry: Boolean(layer2),
     entry_excerpt: firstLines(layer2),
-    breakthroughs: breakthroughs(layer2),
+    /**
+     * Session Description is the builder's own one-line title for the
+     * session, so it is what the list shows. The generated codex is still
+     * carried whole on the detail shape and is what opens on click; its
+     * opening lines stay in `entry_excerpt` for search.
+     */
+    description_excerpt: firstLines(str(f['Session Description'])),
+    paid: paidState(f.Paid),
     /**
      * When Jason acted on the log. The field was created on 14 Sep 2026 and
      * there is no backfill and never will be — its own description in Airtable

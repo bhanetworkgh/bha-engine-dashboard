@@ -132,9 +132,22 @@ function when(iso: string | null): string {
 function matches(e: CodexEntry, q: string): boolean {
   if (!q) return true;
   const n = q.toLowerCase();
-  return [e.codex_entry_id, e.submission_id, e.session_type, e.jason_status, e.narration_quality, e.entry_excerpt, e.week, e.session_url, ...e.layer0_missing].some(
-    (v) => v && v.toLowerCase().includes(n),
-  );
+  // `paid` is searchable by the word the column prints, so "unpaid" finds the
+  // rows the column calls unpaid rather than nothing.
+  const paid = e.paid === null ? null : e.paid ? 'paid' : 'unpaid';
+  return [
+    e.codex_entry_id,
+    e.submission_id,
+    e.session_type,
+    e.jason_status,
+    e.narration_quality,
+    e.description_excerpt,
+    e.entry_excerpt,
+    e.week,
+    e.session_url,
+    paid,
+    ...e.layer0_missing,
+  ].some((v) => v && v.toLowerCase().includes(n));
 }
 
 /**
@@ -525,6 +538,16 @@ function EntryView({
                 <div className="text-[11px] text-faint">submission id</div>
                 <div className="tabular truncate text-ink">{detail.submission_id ?? <span className="text-faint">—</span>}</div>
               </div>
+              <div className="min-w-0">
+                <div className="text-[11px] text-faint">paid</div>
+                {detail.paid === null ? (
+                  <div className="text-faint" title="The field was added to the builder tables after this log was written and nothing backfills it.">
+                    not recorded
+                  </div>
+                ) : (
+                  <div className="text-ink">{detail.paid ? 'yes' : 'no'}</div>
+                )}
+              </div>
               {detail.jason_notes && (
                 <div className="min-w-0 md:col-span-3">
                   <div className="text-[11px] text-faint">Jason’s notes</div>
@@ -639,10 +662,17 @@ function EntryView({
 }
 
 /**
- * The list, as columns. Date, builder and the Codex id read first; the
- * breakthroughs are the substance of the entry and take the wide column;
- * flags carry the review decision and the completeness verdict, two axes
- * and both shown.
+ * The list, as columns. Date, builder and the Codex id read first; the session
+ * description takes the wide column; flags carry the review decision, the pay
+ * state and the completeness verdict, three axes and all shown.
+ *
+ * The wide column used to hold the Breakthroughs section of the generated
+ * codex (changed 2026-09-16, Destiny). Every Layer 2 entry is written to the
+ * same template, so 220 characters of one read much like 220 characters of the
+ * next and scanning down the page told you nothing. Session Description is the
+ * builder's own title for the session, which is what a reader scanning
+ * builders and dates is actually looking for. The full codex is unchanged and
+ * still opens on click.
  */
 function codexColumns(open: (e: CodexEntry) => void): RecordColumn<CodexEntry>[] {
   return [
@@ -666,13 +696,13 @@ function codexColumns(open: (e: CodexEntry) => void): RecordColumn<CodexEntry>[]
       cell: (e) => e.session_type ?? <span className="text-faint">not stated</span>,
     },
     {
-      key: 'breakthroughs',
-      header: 'breakthroughs',
+      key: 'description',
+      header: 'description',
       card: 'title',
-      width: '54ch',
+      width: '50ch',
       clip: true,
-      title: (e) => e.breakthroughs ?? undefined,
-      cell: (e) => e.breakthroughs ?? <span className="text-faint">No Codex entry written — Orchestrator Layer2 Review is empty.</span>,
+      title: (e) => e.description_excerpt ?? undefined,
+      cell: (e) => e.description_excerpt ?? <span className="text-faint">No session description was submitted with this log.</span>,
     },
     {
       key: 'stage',
@@ -692,6 +722,17 @@ function codexColumns(open: (e: CodexEntry) => void): RecordColumn<CodexEntry>[]
           {unlanded(e.writeback) && <NotLanded write={e.writeback!} />}
         </span>
       ),
+    },
+    {
+      key: 'paid',
+      header: 'paid',
+      card: 'meta',
+      className: 'card-meta',
+      title: (e) => (e.paid === null ? 'Paid carries no value on this row. The field was added to the builder tables after this log was written and nothing backfills it.' : undefined),
+      // Not coloured either way. Paid is not a healthy state and unpaid is not
+      // a failing one — they are two ordinary facts about a log — so the pill
+      // is the quiet default and amber and red stay meaning what they mean.
+      cell: (e) => (e.paid === null ? <span className="text-faint">not recorded</span> : <Pill>{e.paid ? 'paid' : 'unpaid'}</Pill>),
     },
     { key: 'quality', header: 'quality', className: 'text-faint', cell: (e) => e.narration_quality?.toLowerCase() ?? '—' },
     { key: 'source', header: 'source', cell: (e) => <SourceLink source={e.source} /> },
@@ -805,6 +846,8 @@ export default function Codex() {
                 { header: 'jason_status', value: (e) => e.jason_status },
                 { header: 'jason_reviewed_at', value: (e) => e.reviewed_at },
                 { header: 'stage', value: (e) => e.stage },
+                { header: 'paid', value: (e) => (e.paid === null ? null : e.paid ? 'Yes' : 'No') },
+                { header: 'session_description', value: (e) => e.description_excerpt },
                 { header: 'session_type', value: (e) => e.session_type },
                 { header: 'layer0_flagged', value: (e) => e.layer0_flagged },
                 { header: 'airtable_url', value: (e) => e.airtable.url },
