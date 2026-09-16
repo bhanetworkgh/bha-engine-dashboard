@@ -566,8 +566,8 @@ function SpendPanel({ spend, services }: { spend: Spend; services: RegistryData[
             ) : (
               <>
                 No monthly total yet. {spend.priced} {spend.priced === 1 ? 'service carries' : 'services carry'} a cost, but{' '}
-                {spend.priced === 1 ? 'it has' : 'none has'} a <span className="text-ink">billing cycle</span>, and a cost with no
-                cycle is not a monthly cost — sixty dollars is not sixty dollars a month until somebody says which.
+                {spend.priced === 1 ? 'it has no' : 'not one of them has a'} <span className="text-ink">billing cycle</span>, and a cost with
+                no cycle is not a monthly cost — sixty dollars is not sixty dollars a month until somebody says which.
               </>
             )}
           </div>
@@ -786,12 +786,12 @@ function EndpointsTab({ rows, bases, digests, ...p }: TabProps & { rows: Registr
     <>
       <div className="mx-6 mb-4 md:mx-8">
         <MetricCard
-          title="Digests that never arrived"
+          title="Open Loops digests that never reached Slack"
           right={`last ${digests.window_days} days`}
           note={
             digests.rows === 0
               ? 'Nothing has been read into digest_deliveries yet, so this is not a count of zero — it is nothing to count. Run the backfill, or let Bays — Digest Delivery Check write its first row.'
-              : `${digests.sent} digest${digests.sent === 1 ? '' : 's'} sent in the window, ${digests.delivered} confirmed in Slack. Every other signal in the stack stops at North Star accepting the hand-off, which is four hops short of a builder reading it — this is the only measure that goes the rest of the way.`
+              : `The 08:00 open-loops digest is handed to North Star, which posts it to each builder in Slack; a row is written when it is sent and updated when the Callback Receiver confirms it posted. ${digests.sent} sent in the window, ${digests.delivered} confirmed. Every other signal in the stack stops at North Star accepting the hand-off, which is four hops short of a builder reading it — this is the only measure that goes the rest of the way.`
           }
         >
           {digests.rows === 0 ? (
@@ -1110,7 +1110,21 @@ function EngineWritesTab() {
       <StatStrip cols={4}>
         <CountCell label="Writes accepted" value={accepted} hint={`in the last ${d.window_hours} hours`} hintMinLines={2} />
         <CountCell label="Refused" value={refused} tone={refused ? 'failing' : 'dim'} hint="rejected, unauthorised or errored" hintMinLines={2} />
-        <CountCell label="Kinds receiving writes" value={wired} tone={wired < d.held.length ? 'failing' : 'dim'} hint={`of ${d.held.length} record tables`} hintMinLines={2} />
+        {/*
+          "Kinds receiving writes" told a reader nothing (2026-09-16, Destiny).
+          What it counts is record tables n8n has written to at least once —
+          rows whose `source` is not the migration backfill — so that is what it
+          says. Red when any table has none, because a table at nought is a
+          kind n8n has never been pointed at: its rows are exactly as the
+          backfill left them and nothing is adding to them.
+        */}
+        <CountCell
+          label="Record tables n8n writes to"
+          value={wired}
+          tone={wired < d.held.length ? 'failing' : 'dim'}
+          hint={wired < d.held.length ? `of ${d.held.length}. The rest have only backfilled rows — n8n has never written to them.` : `all ${d.held.length} of them`}
+          hintMinLines={2}
+        />
         <CountCell label="Writes recorded, all time" value={d.total} hint={d.last_at ? `newest ${when(d.last_at)}` : 'none yet'} hintMinLines={2} />
       </StatStrip>
 
