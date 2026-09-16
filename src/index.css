@@ -518,9 +518,16 @@
     inset: 0;
     z-index: -1;
     pointer-events: none;
+    /*
+     * The first two centres sit on the top edge (2026-09-16, Destiny). They
+     * were at 12% and 30%, which put the colour a little below the frosted top
+     * bar — so the wash read as starting partway down the page rather than
+     * behind the header. The bar now has real colour to blur rather than bare
+     * page grey.
+     */
     background:
-      radial-gradient(60% 50% at 18% 12%, var(--aurora-a), transparent 70%),
-      radial-gradient(50% 45% at 85% 30%, var(--aurora-b), transparent 70%),
+      radial-gradient(65% 55% at 18% 0%, var(--aurora-a), transparent 70%),
+      radial-gradient(55% 50% at 85% 8%, var(--aurora-b), transparent 70%),
       radial-gradient(55% 50% at 55% 95%, var(--aurora-c), transparent 70%);
   }
 

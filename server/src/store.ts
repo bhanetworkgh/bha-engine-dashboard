@@ -2214,12 +2214,23 @@ function loopMetricsFor(all: Loop[], builder: string | null, historySince: strin
 
   const dated = openRows.filter((l) => l.raised_at);
   // Newest first, oldest last.
+  /**
+   * Seven buckets (2026-09-16, Destiny), so this card and Close rate by builder
+   * beside it — which has one row per builder, and there are seven — read as
+   * one set rather than two lists of different lengths.
+   *
+   * An empty bucket is still drawn: "nothing has been open longer than ninety
+   * days" is a fact worth seeing, and a bucket that vanishes when it empties
+   * makes the card change shape every time the backlog does.
+   */
   const buckets: [string, (d: number) => boolean][] = [
     ['0–7 days', (d) => d <= 7],
     ['8–14 days', (d) => d > 7 && d <= 14],
     ['15–30 days', (d) => d > 14 && d <= 30],
     ['31–60 days', (d) => d > 30 && d <= 60],
-    ['over 60 days', (d) => d > 60],
+    ['61–90 days', (d) => d > 60 && d <= 90],
+    ['91–180 days', (d) => d > 90 && d <= 180],
+    ['over 180 days', (d) => d > 180],
   ];
   const undated = openRows.length - dated.length;
   const ageDistribution = buckets.map(([bucket, test]) => ({ bucket, n: dated.filter((l) => test(l.age_days)).length }));
@@ -2298,7 +2309,11 @@ function loopMetricsFor(all: Loop[], builder: string | null, historySince: strin
     in_progress: all.filter((l) => l.status === 'in progress').length,
     closed: all.filter((l) => l.status === 'closed').length,
     close_rate_by_builder: byOwner,
-    close_rate_note: 'Closed as a share of every loop in the builder’s table today. It is a state, not a rate over time: nothing records when a loop closed.',
+    // "In view" rather than "in the builder's table": these rows are narrowed
+    // to the month the page is showing (2026-09-16), and a note that claims
+    // all time over a month's figures is the kind of quiet lie this dashboard
+    // exists to stop.
+    close_rate_note: 'Closed as a share of the loops in view. A state, not a rate over time: nothing records when a loop closed.',
     closed_per_day: closedPerDay,
     age_distribution: ageDistribution,
     raised_per_week: raisedPerWeek,
@@ -2314,22 +2329,45 @@ function loopMetricsFor(all: Loop[], builder: string | null, historySince: strin
   };
 }
 
-export async function loopMetrics(builder: string | null): Promise<LoopMetrics> {
-  const key = `loops:${builder ?? '*'}`;
+/**
+ * The figures across Open loops, scoped to a month (2026-09-16, Destiny) by
+ * `Date Raised` — the same field the statistics tab groups by, so the two
+ * cannot disagree about which loops belong to September.
+ *
+ * **The all-time status counts are computed separately and are never scoped.**
+ * Open, in progress and closed describe where the whole backlog stands right
+ * now; narrowing them to a month would answer a different question and lose the
+ * one the top of the page exists to answer.
+ */
+export async function loopMetrics(builder: string | null, month?: string | null): Promise<LoopMetrics> {
+  const key = `loops:${builder ?? '*'}:${month ?? '*'}`;
   const hit = metricsCache.get(key);
   if (hit && hit.version === storeVersion) return hit.value as LoopMetrics;
-  const all = await loops();
+  const everything = await loops();
+  const inMonth = (l: Loop) => !month || l.raised_at?.slice(0, 7) === month;
+  const all = everything.filter(inMonth);
   const historySince = await getMeta('history_since');
   const closes = await loopCloseEvents();
+  // Where the backlog stands, over every loop held, whatever month is in view.
+  const lifetime = (rows: Loop[]) => ({
+    open: rows.filter((l) => l.status === 'open').length,
+    in_progress: rows.filter((l) => l.status === 'in progress').length,
+    closed: rows.filter((l) => l.status === 'closed').length,
+    rows: rows.length,
+  });
   const value: LoopMetrics = builder
-    ? loopMetricsFor(all.filter((l) => l.owner === builder), builder, historySince, closes)
+    ? {
+        ...loopMetricsFor(all.filter((l) => l.owner === builder), builder, historySince, closes),
+        all_time: lifetime(everything.filter((l) => l.owner === builder)),
+      }
     : {
         ...loopMetricsFor(all, null, historySince, closes),
+        all_time: lifetime(everything),
         // One pass per builder, computed here once and cached, so a tab change on the page needs no request.
         by_builder: Object.fromEntries(
-          LOOP_TABLES.filter((t) => all.some((l) => l.owner === t.owner)).map((t) => [
+          LOOP_TABLES.filter((t) => everything.some((l) => l.owner === t.owner)).map((t) => [
             t.owner,
-            loopMetricsFor(all.filter((l) => l.owner === t.owner), t.owner, historySince, closes),
+            { ...loopMetricsFor(all.filter((l) => l.owner === t.owner), t.owner, historySince, closes), all_time: lifetime(everything.filter((l) => l.owner === t.owner)) },
           ]),
         ),
       };
@@ -2382,12 +2420,28 @@ export function codexTabRule(tab: CodexTab): (e: CodexEntry) => boolean {
   return TAB_RULES.find((r) => r.tab === tab)!.test;
 }
 
-export async function codexMetrics(builder: string | null): Promise<CodexMetrics> {
-  const key = `codex:${builder ?? '*'}`;
+/**
+ * The figures on a record page, scoped to a month (2026-09-16, Destiny).
+ *
+ * The pages opened on an all-time view, so "submissions" was every submission
+ * BHA has ever logged and the figure never moved. Scoped to the month in view
+ * it answers the question somebody actually has — what happened this month —
+ * and the month picker changes it.
+ *
+ * **The per-builder weekly grid is deliberately not scoped.** It is an
+ * eight-week strip by design; narrowing it to one month would blank most of its
+ * columns, and Destiny asked for it to stay as it is. So it is computed over
+ * the whole history while everything else follows the month.
+ */
+export async function codexMetrics(builder: string | null, month?: string | null): Promise<CodexMetrics> {
+  const key = `codex:${builder ?? '*'}:${month ?? '*'}`;
   const hit = metricsCache.get(key);
   if (hit && hit.version === storeVersion) return hit.value as CodexMetrics;
-  const all = (await codexEntries()).filter((e) => !builder || e.builder_id === builder);
-  const holds = (await layer0Holds()).filter((h) => !builder || h.builder_id === builder);
+  const everything = (await codexEntries()).filter((e) => !builder || e.builder_id === builder);
+  const all = month ? everything.filter((e) => e.logged_at?.slice(0, 7) === month) : everything;
+  const holds = (await layer0Holds()).filter(
+    (h) => (!builder || h.builder_id === builder) && (!month || h.created_at?.slice(0, 7) === month),
+  );
 
   const flagged = all.filter((e) => e.layer0_flagged);
   const withEntry = all.filter((e) => e.has_entry).length;
@@ -2395,11 +2449,13 @@ export async function codexMetrics(builder: string | null): Promise<CodexMetrics
   const missing = new Map<string, number>();
   for (const e of flagged) for (const m of e.layer0_missing) missing.set(m, (missing.get(m) ?? 0) + 1);
 
-  const owners = CODEX_TABLES.filter((t) => (!builder || t.owner === builder) && all.some((e) => e.builder_id === t.owner)).map((t) => t.owner);
+  const owners = CODEX_TABLES.filter((t) => (!builder || t.owner === builder) && everything.some((e) => e.builder_id === t.owner)).map((t) => t.owner);
   const weekStarts = lastWeeks(8);
   const perBuilder = owners.map((o) => ({
     owner: o,
-    weeks: weekStarts.map((w) => ({ week: isoWeek(w), start: w, label: weekLabel(w), short: shortWeekLabel(w), n: all.filter((e) => e.builder_id === o && e.week === isoWeek(w)).length })),
+    // `everything`, not `all`: the eight-week strip keeps the whole history
+    // even when the rest of the page is scoped to one month.
+    weeks: weekStarts.map((w) => ({ week: isoWeek(w), start: w, label: weekLabel(w), short: shortWeekLabel(w), n: everything.filter((e) => e.builder_id === o && e.week === isoWeek(w)).length })),
   }));
 
   const approvals: CodexApproval[] = ['approved', 'pending', 'input added', 'unset'];
@@ -2609,12 +2665,12 @@ export async function commercialMetrics(): Promise<CommercialMetrics> {
   return value;
 }
 
-export async function metrics(kind: RecordKind, filter: { builder?: string | null } = {}): Promise<RecordMetrics> {
+export async function metrics(kind: RecordKind, filter: { builder?: string | null; month?: string | null } = {}): Promise<RecordMetrics> {
   switch (kind) {
     case 'loops':
-      return loopMetrics(filter.builder ?? null);
+      return loopMetrics(filter.builder ?? null, filter.month ?? null);
     case 'codex':
-      return codexMetrics(filter.builder ?? null);
+      return codexMetrics(filter.builder ?? null, filter.month ?? null);
     case 'patterns':
       return patternMetrics();
     case 'commercial':

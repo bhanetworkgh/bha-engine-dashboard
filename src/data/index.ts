@@ -164,8 +164,10 @@ export const getRecordStats = (kind: StatKind, month?: string | null) =>
 type MetricsOf<K extends RecordKind> = Extract<RecordMetrics, { kind: K }>;
 
 /** The figures on a records page, computed by the server from the rows it holds. Filtered by builder where the kind has one. */
-export function getRecordMetrics<K extends RecordKind>(kind: K, q: Query, builder?: string | null): Promise<MetricsOf<K>> {
-  return api<MetricsOf<K>>(withLane(`/api/records/${kind}/metrics`, q, { builder: builder && builder !== 'all' ? builder : null }));
+export function getRecordMetrics<K extends RecordKind>(kind: K, q: Query, builder?: string | null, month?: string | null): Promise<MetricsOf<K>> {
+  return api<MetricsOf<K>>(
+    withLane(`/api/records/${kind}/metrics`, q, { builder: builder && builder !== 'all' ? builder : null, month: month ?? null }),
+  );
 }
 
 type RecordOf<K extends RecordKind> = K extends 'loops' ? Loop : K extends 'codex' ? CodexEntry : K extends 'patterns' ? BuildPattern : Opportunity;

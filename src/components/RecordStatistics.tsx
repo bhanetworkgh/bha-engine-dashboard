@@ -270,17 +270,15 @@ export default function RecordStatistics<T>({
         selection and two ways to make it.
       */}
       {series.months.length > 0 && (
-        <MetricCard
-          title="Every month held"
-          note={
-            <span className="block space-y-1">
-              <Legend series={series} />
-              <span className="block text-[11px] leading-snug text-faint">Click a month to put it in view below.</span>
-            </span>
-          }
-          align="top"
-        >
-          <MonthChart series={series} selected={data.selected} onSelect={(m) => onMonth(m ?? data.selected)} fill />
+        <MetricCard title="Every month held" note={<Legend series={series} />} align="top">
+          {/*
+            Read-only (2026-09-16, Destiny). It was clickable and it is not any
+            more: the month is chosen in the picker below, and a chart that
+            also changed it gave the page two controls for one selection with
+            nothing saying which you had used. It is here to show the shape of
+            the year.
+          */}
+          <MonthChart series={series} selected={data.selected} onSelect={() => {}} fill readOnly />
         </MetricCard>
       )}
 

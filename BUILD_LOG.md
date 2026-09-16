@@ -5058,3 +5058,99 @@ Fix:        All three were **the seed, not the code**: `research_required` is a
             all three computed. Worth recording because each looked like a bug in
             the accessor and none was — the accessors match `sources.ts`, which
             was read off the live bases.
+
+## 2026-09-16 09:55 — Codex and Open loops open on the month, not on all time
+
+Intent:     Destiny's review notes. Both record pages opened on an all-time
+            view, so the headline figures never moved. Give the working tab a
+            month picker and scope everything under it. Plus: the statistics
+            chart should not be clickable, the tile notes should be the same
+            length, the loop age buckets should be seven, the four weekly
+            series should move to statistics, and the page wash should reach
+            the top of the page.
+Files:      server/src/store.ts, server/src/stats.ts, server/src/engine.ts,
+            server/src/index.ts, src/data/types.ts, src/data/index.ts,
+            src/index.css, src/components/ui/MonthPicker.tsx (new),
+            src/components/ui/Monthly.tsx, src/components/RecordStatistics.tsx,
+            src/screens/Codex.tsx, src/screens/OpenLoops/{index,Loops,Metrics}.tsx
+
+Problem:    "Submissions 41" was every submission BHA has ever logged. It is a
+            true number and a useless one: it never moves, so it says nothing
+            about how the month is going.
+Fix:        `/api/records/:kind/metrics` takes a `month`, and both pages open on
+            the current one. The stat strip, the three cards, the stage counts,
+            the builder tabs and the list all follow it. `null` is still
+            reachable as the last option in the picker — the all-time view is
+            worth having, it is just no longer what the page assumes.
+Decision:   **The entries tab and the statistics tab share one month
+            selection.** Choosing September on one and coming back to the other
+            must not show August. Two pickers, one piece of state.
+Decision:   **"Entries per builder per week" is deliberately not scoped**, as
+            asked. It is an eight-week strip by design and narrowing it to one
+            month would blank most of its columns, so it is computed over the
+            whole history while everything else follows the month.
+Decision:   The builder tabs count the month too. A tab whose number never
+            moved would be answering a different question in the same row as
+            one that does.
+
+Problem:    Scoping the rows silently made two notes lie. "Closed as a share of
+            every loop in the builder's table today" and the page's own "22
+            loops across 3 builder tables" both claimed all time while sitting
+            over a month's figures.
+Fix:        Both reworded — "the loops in view", and the leading total dropped
+            from the list caption. The all-time total is in the status strip
+            and the month's is in the tabs, so neither number is missing;
+            neither is now attached to the wrong sentence.
+
+Decision:   **Open loops' status strip stays all-time and moves above the
+            builder tabs** (Destiny). Open, in progress and closed describe
+            where the backlog stands today; narrowing them to September would
+            answer a different question. It is computed separately, as
+            `all_time`, and never takes the month filter. Everything below it
+            does.
+Decision:   **Seven age buckets** — 0–7, 8–14, 15–30, 31–60, 61–90, 91–180 and
+            over 180 — so that card and Close rate by builder beside it, which
+            has one row per builder and there are seven, read as one set rather
+            than two lists of different lengths. An empty bucket is still drawn:
+            "nothing has been open longer than ninety days" is worth seeing, and
+            a bucket that vanishes when it empties makes the card change shape
+            every time the backlog does.
+Decision:   The four weekly series (raised, closed, net, closed per day) move to
+            the statistics tab. They were never scoped to a month, which is
+            exactly why they no longer belonged above a list that is.
+
+Problem:    The statistics chart was clickable and the month picker below it
+            also set the month: two controls for one selection, with nothing
+            saying which you had used.
+Fix:        `readOnly` on `MonthChart`. It is there to show the shape of the
+            year; the picker chooses the month.
+
+Problem:    Approval time's note ran to about seventy words where pay rate's ran
+            to twelve, so a row of cards read as six different objects and the
+            longest note pushed its own figure out of line with its neighbours.
+Fix:        Every note on both pages rewritten to one or two short sentences of
+            roughly the same length. **What a note is for: the base the figure
+            is over, and the boundary if it has one.** The reasoning lives in
+            CLAUDE.md and in the comments, where it is the spec rather than a
+            caption — the same call that took the three stage rules off the
+            Codex page on 14 Sep.
+
+Problem:    The page's colour wash did not reach the top. Its first two radial
+            gradients were centred at 12% and 30% of the page height, which put
+            the colour below the frosted top bar, so the bar was blurring bare
+            page grey.
+Fix:        Those two centres moved to the top edge (0% and 8%). The bar now has
+            real colour behind it and the wash reads as starting at the top.
+
+Verified:   The rig again — Postgres, the real server, seeded rows, both pages
+            driven in Chromium, no page errors.
+            - Codex: opens on Sep 2026 (9 logs); picking Aug 2026 moves every
+              figure to 20 submissions, 20 generated, 18 approved, 2 flagged,
+              and the builder tabs to Destiny 7, Ahad 7, Kavin 6 — which sums to
+              20. Entries per builder per week stayed the eight-week strip.
+            - Open loops: status strip 7 open / 0 in progress / 15 closed, all
+              time, above the tabs; tabs count September (3 + 3 + 2 = 8); seven
+              age buckets drawn; list scoped to September.
+            - Both statistics tabs still follow the same month, the chart no
+              longer responds to a click, and the notes now sit at the same
+              depth across all six cards.

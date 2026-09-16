@@ -33,6 +33,9 @@ import {
   RecordTable,
   RowAction,
   RowActions,
+  MonthPicker,
+  monthsFrom,
+  thisMonth,
   SearchBox,
   Segmented,
   SourceLink,
@@ -770,16 +773,23 @@ export default function Codex() {
   const [builder, setBuilder] = useState('all');
   const [tab, setTab] = useState<Tab>('approved');
   const [q, setQ] = useState('');
-  // The month the statistics tab is looking at. The entries list is no longer
-  // filtered by it (2026-09-16, Destiny): the month card came off that tab, and
-  // a list silently narrowed to a month with nothing on screen saying so is
-  // worse than no filter at all.
-  const [month, setMonth] = useState<string | null>(null);
+  /**
+   * The month the entries tab is showing, and the month the statistics tab is
+   * comparing. They are deliberately the same selection: choosing September on
+   * one and coming back to the other should not show you August.
+   *
+   * It opens on the current month (2026-09-16, Destiny). The page used to open
+   * on every submission BHA had ever logged, so the headline figure never
+   * moved and said nothing about how the month was going. `null` is still
+   * reachable — it is the last option in the picker — it is just no longer
+   * what the page assumes.
+   */
+  const [month, setMonth] = useState<string | null>(thisMonth());
   const [view, setView] = useState<View>('Entries');
   const [open, setOpen] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const { toast, setToast } = useToast();
-  const metrics = useData((query) => getRecordMetrics('codex', query, builder), [builder, tick]);
+  const metrics = useData((query) => getRecordMetrics('codex', query, builder, month), [builder, month, tick]);
 
   useEffect(() => {
     if (loaded) setEntries(loaded.entries);
@@ -803,7 +813,22 @@ export default function Codex() {
     setToast,
   });
 
-  const scoped = useMemo(() => entries.filter((e) => builder === 'all' || e.builder_id === builder), [entries, builder]);
+  // Every month there is a submission for, newest first, and how many each
+  // holds — read off the rows the page already has rather than asked for.
+  const months = useMemo(() => monthsFrom(entries.map((e) => e.logged_at)), [entries]);
+  const inMonth = useMemo(() => entries.filter((e) => !month || e.logged_at?.slice(0, 7) === month), [entries, month]);
+  const monthCounts = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const e of entries) {
+      const m = e.logged_at?.slice(0, 7);
+      if (m) out[m] = (out[m] ?? 0) + 1;
+    }
+    return out;
+  }, [entries]);
+  const scoped = useMemo(
+    () => entries.filter((e) => (builder === 'all' || e.builder_id === builder) && (!month || e.logged_at?.slice(0, 7) === month)),
+    [entries, builder, month],
+  );
   const rows = useMemo(
     () =>
       scoped
@@ -811,7 +836,7 @@ export default function Codex() {
         .filter((e) => matches(e, q.trim())),
     [scoped, tab, q],
   );
-  const paged = usePaged(rows, `${builder}|${tab}|${q.trim()}`);
+  const paged = usePaged(rows, `${builder}|${tab}|${q.trim()}|${month ?? 'all'}`);
 
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
   const m = metrics.data;
@@ -879,12 +904,24 @@ export default function Codex() {
           {/* One tab per submissions table. There is no Jason tab — he reviews
               logs rather than submitting them — and no "no builder" tab, since
               the table a row lives in is its builder. */}
-          <Segmented
-            ariaLabel="Filter by builder"
-            value={builder}
-            onChange={setBuilder}
-            options={[{ value: 'all', label: 'All builders', count: entries.length }, ...loaded.builders.map((b) => ({ value: b.id, label: b.label, count: b.n }))]}
-          />
+          {/*
+            The builder tabs count what each builder logged in the month in
+            view, not for all time (2026-09-16, Destiny) — the whole page is
+            answering "how did this month go", and a tab whose number never
+            moved would be answering a different question in the same row.
+          */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Segmented
+              ariaLabel="Filter by builder"
+              value={builder}
+              onChange={setBuilder}
+              options={[
+                { value: 'all', label: 'All builders', count: inMonth.length },
+                ...loaded.builders.map((b) => ({ value: b.id, label: b.label, count: inMonth.filter((e) => e.builder_id === b.id).length })),
+              ]}
+            />
+            <MonthPicker months={months} value={month} onChange={setMonth} counts={monthCounts} />
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Segmented<Tab> ariaLabel="Stage" value={tab} onChange={setTab} options={TABS.map((t) => ({ value: t.value, label: t.label, count: scoped.filter((e) => inTab(e, t.value)).length }))} />
             <div className="flex flex-1 items-center justify-end gap-3">

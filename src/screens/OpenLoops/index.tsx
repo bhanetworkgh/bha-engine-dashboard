@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../../app/useData';
 import { BUILDER_NAMES, createLoop, getOpenLoops, getRecordMetrics, removeLoopDuplicate, saveLoop, type Loop, type LoopEdit, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
-import { Icon, LoadFailed, Loading, PageHeader, Tabs, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useToast } from '../../components/ui';
+import { Icon, LoadFailed, Loading, MonthPicker, monthsFrom, thisMonth, PageHeader, Tabs, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useToast } from '../../components/ui';
 import { LoopPanel } from './LoopPanel';
 import { Loops, OwnerPicker, type StatusFilter } from './Loops';
-import { LoopMetricsPanel } from './Metrics';
+import { LoopMetricsPanel, LoopSeriesPanel, LoopStatusStrip } from './Metrics';
 import { NewLoopForm } from './NewLoop';
 import RecordStatistics from '../../components/RecordStatistics';
 
@@ -34,10 +34,17 @@ export default function OpenLoops() {
   const [owner, setOwner] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
   const [q, setQ] = useState('');
-  // The month the statistics tab is looking at. The list is not filtered by
-  // it: the month card came off this tab, and a list silently narrowed with
-  // nothing on screen saying so is worse than no filter at all.
-  const [month, setMonth] = useState<string | null>(null);
+  /**
+   * The month the loops tab is showing, and the month the statistics tab is
+   * comparing — deliberately one selection, so choosing September on one and
+   * coming back to the other does not show you August.
+   *
+   * It opens on the current month (2026-09-16, Destiny). The page used to open
+   * on every loop ever raised, so the figures never moved. The status strip
+   * above the tabs is the exception and stays all-time, because "how many
+   * loops are open" is a question about today.
+   */
+  const [month, setMonth] = useState<string | null>(thisMonth());
   const [view, setView] = useState<View>('Loops');
   const [showNew, setShowNew] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -52,7 +59,7 @@ export default function OpenLoops() {
    * run up again.
    */
   const [metricsTick, setMetricsTick] = useState(0);
-  const metrics = useData((query) => getRecordMetrics('loops', query), [metricsTick]);
+  const metrics = useData((query) => getRecordMetrics('loops', query, null, month), [metricsTick, month]);
   const current: LoopMetrics | null = useMemo(() => {
     const m = metrics.data;
     if (!m) return null;
@@ -76,7 +83,25 @@ export default function OpenLoops() {
     setData(loaded);
   }, [loaded]);
 
-  const scoped = useMemo(() => (data ? data.loops.filter((l) => owner === 'all' || l.owner === owner) : []), [data, owner]);
+  // Every month a loop was raised in, newest first, and how many each holds —
+  // read off the rows the page already has rather than asked for.
+  const months = useMemo(() => monthsFrom((data?.loops ?? []).map((l) => l.raised_at)), [data]);
+  const monthCounts = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const l of data?.loops ?? []) {
+      const m = l.raised_at?.slice(0, 7);
+      if (m) out[m] = (out[m] ?? 0) + 1;
+    }
+    return out;
+  }, [data]);
+  const inMonth = useMemo(() => (data?.loops ?? []).filter((l) => !month || l.raised_at?.slice(0, 7) === month), [data, month]);
+  // One count per builder table, for the month in view.
+  const ownerCounts = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const l of inMonth) out[l.owner] = (out[l.owner] ?? 0) + 1;
+    return out;
+  }, [inMonth]);
+  const scoped = useMemo(() => inMonth.filter((l) => owner === 'all' || l.owner === owner), [inMonth, owner]);
   const counts = useMemo(
     () => ({
       all: scoped.length,
@@ -97,7 +122,7 @@ export default function OpenLoops() {
     [scoped, statusFilter, q, month],
   );
 
-  const paged = usePaged(loops, `${owner}|${statusFilter}|${q.trim()}`);
+  const paged = usePaged(loops, `${owner}|${statusFilter}|${q.trim()}|${month ?? 'all'}`);
 
   /**
    * One save, whether it came from a row action or the panel.
@@ -231,12 +256,33 @@ export default function OpenLoops() {
               { header: 'airtable_url', value: (l) => l.airtable.url },
             ]}
           />
+          {/*
+            The four weekly series moved here from the loops tab (2026-09-16,
+            Destiny). They are an eight-week strip by design and were never
+            scoped to a month, which is why they did not belong above a list
+            that now is.
+          */}
+          <LoopSeriesPanel metrics={current} view={owner} />
         </div>
       ) : (
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
+        <div className="shrink-0 px-6 pb-3 md:px-8">
           <RowsLine freshness={data.freshness} writes={false} />
-          <OwnerPicker data={data} owner={owner} setOwner={setOwner} />
+        </div>
+
+        {/*
+          Where the backlog stands, all time, above the builder tabs
+          (2026-09-16, Destiny). Everything below it follows the month.
+        */}
+        <LoopStatusStrip metrics={current} view={owner} loading={metrics.status === 'loading'} />
+
+        <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <OwnerPicker data={data} owner={owner} setOwner={setOwner} counts={ownerCounts} />
+            </div>
+            <MonthPicker months={months} value={month} onChange={setMonth} counts={monthCounts} />
+          </div>
         </div>
 
         <LoopMetricsPanel metrics={current} loading={metrics.status === 'loading'} switching={switching} error={metrics.error} view={owner} />
