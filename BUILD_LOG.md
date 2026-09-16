@@ -5685,3 +5685,51 @@ Verified:   Playwright, with downloads captured. Top button reads
             Ask Bays / North Star / Research Twin / Media Twin / Genie / vFarm /
             Engine health / ... and all three placeholder pages render their
             sentence. No page errors.
+
+## 2026-09-16 15:05 — The Tools registry data, and two labels that said nothing
+Intent:     Destiny, carried over from 15 Sep: "remove cluster from the BHARAG",
+            "Genie, this URL needs to be updated if you check Slack", "you need
+            to add AWS", "Airtable, the plan is free... Google Workspace, free
+            plan, OpenRouter is pay as you go", "currency for all of them is in
+            dollars", "who pays, just put BHA". And from today: "for the
+            endpoints you have something called digest that never arrived, I
+            don't know what that tab is supposed to mean" and "Engine writes —
+            what is kinds receiving writes?"
+Files:      server/src/migrations.ts, server/src/registrySeed.ts,
+            src/screens/Registry/index.tsx
+Problem:    Genie's URL. The seed carried https://genie-v3-migration.onrender.com
+            with a note already saying no live Render service reports that host.
+            Slack settles it: "genie-v3-migration.onrender.com never resolved;
+            the DNS failure surfaced as network_timeout and read as a transient
+            outage", "ruled out ... as either live Genie service after checking
+            the Render API directly", and "Kaiqi confirmed the canonical Genie
+            deployment (genie-v3-migration-u82u) before the builder repointed
+            ask_genie". Two independent sources agree, so it is a correction
+            rather than a guess.
+Fix:        Migration 13, guarded on the exact seeded value on every statement so
+            an edit made in the interface survives: BHARAG loses "cluster", the
+            Genie service row and the ep-genie-messages endpoint both move to
+            genie-v3-migration-u82u.onrender.com, Airtable and Google Workspace
+            get Free, OpenRouter Pay as you go, AWS is inserted, and every row
+            with no currency or no billing owner gets USD and BHA. The seed
+            carries the same values for a fresh database, with USD and BHA now
+            the default in `S()`.
+            "Kinds receiving writes" became "Record tables n8n writes to", which
+            is what it counts — mirror rows whose source is not the migration
+            backfill — and its hint now says what a shortfall means rather than
+            only "of 6". "Digests that never arrived" became "Open Loops digests
+            that never reached Slack", and the note explains the hop it measures:
+            the 08:00 digest is handed to North Star, which posts it to each
+            builder, and the Callback Receiver confirms it landed.
+Decision:   AWS goes in with no cost and no billing cycle. Destiny said it is in
+            use, not what it costs, and a figure nobody supplied is exactly what
+            section 2 forbids — it counts as unpriced on the spend card, which
+            says so. The $60 is not written here either: he entered it himself,
+            and what it was missing was a billing cycle, which the card now names.
+Verified:   Migration 13 applied on boot; /api/registry reads AWS / Airtable Free
+            / BHARAG / Genie v3 at genie-v3-migration-u82u.onrender.com / Google
+            Workspace Free / Onshape / OpenRouter Pay as you go / Otter.ai /
+            Render / Slack / n8n Cloud Pro, every one USD and paid by BHA, and
+            the Genie endpoint row moved with it. Caught on the rendered page and
+            fixed: the new spend sentence had lost its negation and read "1
+            service carries a cost, but it has a billing cycle".

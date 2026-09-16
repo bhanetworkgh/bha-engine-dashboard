@@ -856,6 +856,63 @@ const MIGRATIONS: Migration[] = [
       `UPDATE registry_people SET role = 'CS Twin', updated_at = now() WHERE id = 'ahad' AND role = 'North Star / CS Twin'`,
     ],
   },
+  {
+    id: 13,
+    name: 'the tools registry gets its plans, its currency, and Genie its real host',
+    statements: [
+      /**
+       * Corrections Destiny gave on 15 Sep and I had not written (2026-09-16).
+       * Same shape as migration 12 and for the same reason: `seedRegistry`
+       * inserts `ON CONFLICT (id) DO NOTHING`, so the seed alone reaches a
+       * fresh database and no other. Every statement is guarded on the exact
+       * seeded value, so an edit made in the interface survives.
+       *
+       * **Genie's host.** The seed carried
+       * `genie-v3-migration.onrender.com`, with a note saying no live Render
+       * service reports it. Slack settles it: that hostname never resolved and
+       * was ruled out as either live service after reading the Render API
+       * directly, and Kaiqi confirmed `genie-v3-migration-u82u` as the
+       * canonical deployment before ask_genie was repointed to it. The service
+       * row and the endpoint row both move, because a stale host in two places
+       * is two chances to call the wrong one.
+       */
+      `UPDATE registry_services SET name = 'BHARAG', updated_at = now() WHERE id = 'bharag' AND name = 'BHARAG cluster'`,
+      `UPDATE registry_services
+          SET url = 'https://genie-v3-migration-u82u.onrender.com',
+              notes = 'Host corrected on 16 Sep 2026. genie-v3-migration.onrender.com never resolved and was ruled out as either live service against the Render API; Kaiqi confirmed genie-v3-migration-u82u as the canonical deployment before ask_genie was repointed to it.',
+              updated_at = now()
+        WHERE id = 'genie-v3' AND url = 'https://genie-v3-migration.onrender.com'`,
+      `UPDATE registry_endpoints
+          SET url = 'https://genie-v3-migration-u82u.onrender.com/api/genie/messages',
+              notes = 'Repointed 16 Sep 2026 to the canonical Genie deployment. The host recorded before this never resolved.',
+              updated_at = now()
+        WHERE id = 'ep-genie-messages' AND url = 'https://genie-v3-migration.onrender.com/api/genie/messages'`,
+
+      /** The plans Destiny opened these accounts on. */
+      `UPDATE registry_services SET plan = 'Free', updated_at = now() WHERE id = 'airtable' AND plan IS NULL`,
+      `UPDATE registry_services SET plan = 'Free', updated_at = now() WHERE id = 'google-workspace' AND plan IS NULL`,
+      `UPDATE registry_services SET plan = 'Pay as you go', updated_at = now() WHERE id = 'openrouter' AND plan IS NULL`,
+
+      /**
+       * AWS. Added with no cost and no cycle on purpose: Destiny said it is in
+       * use, not what it costs, and a figure nobody supplied is exactly what
+       * section 2 forbids. It shows as unpriced on the spend card until
+       * somebody fills it in, which is the honest state.
+       */
+      `INSERT INTO registry_services (id, name, category, what_it_is_for, url, billing_owner, cost_currency, status, notes, created_at, updated_at)
+       VALUES ('aws', 'AWS', 'hosting', 'Cloud infrastructure alongside Render.', 'https://console.aws.amazon.com', 'BHA', 'USD', 'active',
+               'Added on Destiny''s instruction, 16 Sep 2026. No cost or billing cycle is recorded because none was given; it counts as unpriced on the spend card until one is.', now(), now())
+       ON CONFLICT (id) DO NOTHING`,
+
+      /**
+       * "Currency for all of them is in dollars" and "who pays, just put BHA".
+       * Both only where the cell is empty — a currency or an owner somebody
+       * typed is theirs.
+       */
+      `UPDATE registry_services SET cost_currency = 'USD', updated_at = now() WHERE cost_currency IS NULL AND deleted_at IS NULL`,
+      `UPDATE registry_services SET billing_owner = 'BHA', updated_at = now() WHERE billing_owner IS NULL AND deleted_at IS NULL`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

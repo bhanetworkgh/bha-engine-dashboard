@@ -146,7 +146,14 @@ const S = (
   notes: string | null = null,
 ): SeedRow => ({
   id, name, category, what_it_is_for, url, managed_by, plan,
-  billing_owner: null, cost_amount: null, cost_currency: null, billing_cycle: null, renewal_date: null,
+  /**
+   * Dollars and BHA on every row (2026-09-16, Destiny): "currency for all of
+   * them is in dollars", "who pays, just put BHA". `cost_amount` and
+   * `billing_cycle` stay null, because nobody has supplied them and a figure
+   * nobody supplied is what section 2 forbids — the spend card counts these
+   * as unpriced and says so.
+   */
+  billing_owner: 'BHA', cost_amount: null, cost_currency: 'USD', billing_cycle: null, renewal_date: null,
   status: 'active', notes,
 });
 
@@ -161,9 +168,9 @@ export const SERVICES: SeedRow[] = [
     "Workspace “Bays' workspace” (tea-dafco81t0dsc73djsv4g). Live inventory read from the Render API on 13 Sep 2026 — eight paid resources, none of them priced here: bha-engine-dashboard (web, 0.5c-512mb), bha-engine-db (postgres 18, 0.1c-256mb, 1 GB), genie-v3-migration (web, starter), genie-v3-migration-ldye (web, starter), ragingester (web, starter), smartcursorbrowser (web, starter), Genie-RSS (web, free), vfarm-device-sdk-docs (static site, starter build). All in Oregon."),
   S('airtable', 'Airtable', 'data',
     'System of record for open loops, submissions, the research queue, build patterns, commercial cards and lane state.',
-    'https://airtable.com', 'Destiny Arupi', null,
+    'https://airtable.com', 'Destiny Arupi', 'Free',
     'Ten bases are in use; they are listed on the Endpoints tab.'),
-  S('bharag', 'BHARAG cluster', 'data',
+  S('bharag', 'BHARAG', 'data',
     'The RAG and incident store every subsystem reads from and writes to.',
     'https://bharag2.duckdns.org', 'Jeganathan', null, null),
   S('slack', 'Slack', 'comms',
@@ -171,16 +178,16 @@ export const SERVICES: SeedRow[] = [
     'https://bayshorizonnetwork.slack.com', null, null, null),
   S('google-workspace', 'Google Workspace', 'storage',
     'Drive and Docs for session narrations, channel archives and client reports.',
-    'https://admin.google.com', null, null,
+    'https://admin.google.com', null, 'Free',
     'admin@bhanetwork.org. Every BHA Google credential moved from destiny@ to admin@ on 9 Sep 2026; a document owned by a personal account is not reachable by the admin account, which presents as an intermittent 403.'),
   S('openrouter', 'OpenRouter', 'ai',
     'The model gateway every agent and every error classifier calls.',
-    'https://openrouter.ai', null, null,
+    'https://openrouter.ai', null, 'Pay as you go',
     'Briefed models in use: anthropic/claude-sonnet-5 and google/gemini-3.1-pro-preview. Reading the live workflows on 13 Sep also found anthropic/claude-sonnet-4-5 and 4.5 in the three error classifiers and the weekly ranking, and claude-sonnet-4.5:online for web search. No gemini call was found.'),
   S('genie-v3', 'Genie v3', 'other',
     'The Genie service Bays exchanges signed callbacks with.',
-    'https://genie-v3-migration.onrender.com', 'Kaiqi Yang', null,
-    'Render lists two services built from the genie-v3-migration repo on 13 Sep 2026 — genie-v3-migration (genie-v3-migration-u82u.onrender.com) and genie-v3-migration-ldye — and neither carries genie-v3-migration.onrender.com as its Render URL. Either a custom domain the API does not report, or the endpoint recorded for it is stale. Worth confirming before relying on that host.'),
+    'https://genie-v3-migration-u82u.onrender.com', 'Kaiqi Yang', null,
+    'Host corrected on 16 Sep 2026. genie-v3-migration.onrender.com never resolved and was ruled out as either live service against the Render API; Kaiqi confirmed genie-v3-migration-u82u as the canonical deployment before ask_genie was repointed to it.'),
   S('otter', 'Otter.ai', 'comms',
     'Session recording and transcription behind every builder narration.',
     'https://otter.ai', null, null,
@@ -188,6 +195,14 @@ export const SERVICES: SeedRow[] = [
   S('onshape', 'Onshape', 'other',
     'CAD for the vFarm build.',
     'https://onshape.com', 'Hardik Bhatt', null, null),
+  /**
+   * Added on Destiny's instruction, 16 Sep 2026. No cost and no billing cycle,
+   * because none was given: it shows as unpriced on the spend card until
+   * somebody fills it in, which is the honest state rather than a guess.
+   */
+  S('aws', 'AWS', 'hosting',
+    'Cloud infrastructure alongside Render.',
+    'https://console.aws.amazon.com', null, null, null),
 ];
 
 /**
@@ -273,9 +288,9 @@ export const ENDPOINTS: SeedRow[] = [
     'All three error handlers — Bays, North Star and Research Twin', null),
   E('ep-bharag-ask', 'BHARAG cluster ask', 'https://bharag2.duckdns.org/api/v1/cluster/ask', 'POST', 'header auth', 'BHARAG cluster',
     'North Star and Research Twin tools routers', null),
-  E('ep-genie-messages', 'Genie messages', 'https://genie-v3-migration.onrender.com/api/genie/messages', 'POST', null, 'Genie v3',
+  E('ep-genie-messages', 'Genie messages', 'https://genie-v3-migration-u82u.onrender.com/api/genie/messages', 'POST', null, 'Genie v3',
     'Bays — Tools Router (ask_genie)',
-    'This host is not the Render URL of either live genie-v3-migration service — see that service row.'),
+    'Repointed 16 Sep 2026 to the canonical Genie deployment. The host recorded before this never resolved.'),
 ];
 
 /**
