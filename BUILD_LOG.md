@@ -5320,3 +5320,88 @@ Verified:   The rig, with 330 seeded executions across two months on five
             Aug 2026 · 186" and no All time, six tiles, the weekly chart inside
             September with no future columns, and the per-workflow table under
             it. No page errors on either page.
+
+## 2026-09-16 11:10 — The loop figures reconcile, a calendar year on the chart, and loops gets a resync
+
+Intent:     Destiny's round. The loop page's numbers did not reconcile with its
+            own statistics tab. Bars should re-animate on a builder switch. The
+            month chart should show a whole calendar year with a year picker and
+            a line view. Open loops needs a resync button. Executions: no count
+            in the picker. And every entry animation was too abrupt.
+Files:      server/src/store.ts, server/src/index.ts, src/data/{types,index}.ts,
+            src/index.css, src/components/ui/{Monthly,Charts,Records}.tsx,
+            src/components/RecordStatistics.tsx,
+            src/screens/OpenLoops/{index,Metrics}.tsx,
+            src/screens/Executions/index.tsx
+
+Problem:    **Destiny read 602 open at the top of Open loops and 627 raised in
+            August on its statistics tab and could not tell which was wrong.**
+            Neither was: the strip was all-time and everything under it was the
+            month, so the page carried two answers to one question with nothing
+            saying they were different questions.
+Fix:        The strip follows the month and the builder, like the rest of the
+            page. Its hint now states the identity out loud — "Of the 8 in view.
+            Open + in progress + closed = 8" — so it can be checked against the
+            builder tabs beside it. Verified on the rig: 3 + 0 + 5 = 8, matching
+            the All-tables tab and September's 8 raised.
+Decision:   This reverses the all-time strip of earlier today, which was also
+            Destiny's call. All-time is not lost: it is "All time" in the month
+            picker, which scopes the **whole page** at once rather than one row
+            of it. `all_time` on `LoopMetrics` is deleted rather than left
+            unread.
+
+Fix:        The two comparison cards and the strip take `owner|month` as their
+            replay key, so switching builder re-runs the count-ups and re-grows
+            the bars from zero even though the cards' figures do not change —
+            which is the point: the page should visibly answer a click.
+
+Problem:    Every entry animation "happened all at once". A cubic ease-out
+            spends most of its distance in the first third, so a 720ms count-up
+            reads as a snap.
+Fix:        Quint ease-out and 1100ms for `CountUp`, 1100ms for the bar widen,
+            420ms for `page-in`, and the loading pulse slowed from 1.5s to 2.2s.
+
+Decision:   **The month chart draws a calendar year, twelve columns** (Destiny),
+            with a year picker and a bars/line switch on the card's own header.
+            A year that starts in August was two columns wide and said nothing
+            about the ten months before it. A month the series does not hold
+            gets `coverage: 'none'` — no bar, and the line **breaks** rather
+            than joining through as though the value were nought.
+Problem:    The "recording starts" boundary rule was drawn against the fixed bar
+            width while the bars themselves widen to fill the card, so on a
+            filled chart it pointed at the wrong month — March, where the data
+            starts in August.
+Fix:        It uses the computed width, so it lands on the same grid the bars do.
+Decision:   The word under each month — "part" and "none" — is gone, as asked.
+            With twelve columns drawn that was ten "none" labels of noise. **The
+            hatching stays**: it is the only thing keeping a partly-covered
+            month from looking like a fully-covered one, which is section 4's
+            rule. The legend now carries both meanings instead.
+
+Decision:   **Open loops is the fifth page with a resync**, through the same
+            shared pass and the same control. Loops are seven Airtable tables,
+            one per builder, and every one is swept; `sweepScope` treats them
+            per-table like client questions, so a sweep of one builder's table
+            only ever compares against and deletes from rows that came out of
+            it. The base is `AIRTABLE_OPEN_LOOPS_BASE_ID` and never a default.
+
+Fix:        The Executions month picker drops the count beside each month: the
+            figure it repeated is the first tile on the page.
+
+Not done, and why:
+  - **"Unregistered" → "Archived" on Executions.** The tab means "the workflow
+    registry has no row for this workflow", which is not the same as "archived
+    in n8n" — this server never reads n8n's archived flag, so relabelling it
+    would assert something the data does not know. The honest version is to read
+    `isArchived` from `GET /api/v1/workflows`, which is a real change to
+    `n8n.ts` and wants testing against the live instance. Raised rather than
+    renamed.
+  - **Removing the hatch entirely.** See the decision above: the word labels
+    went, the hatch stays.
+
+Verified:   The rig. Open loops: the strip reconciles (3 + 0 + 5 = 8), the
+            resync button sits beside New loop, the year picker offers 2026 and
+            2027, the chart draws all twelve months with dotted baselines where
+            nothing is recorded, and the line view breaks across the empty
+            months rather than running through them. Executions: months listed
+            without counts. No page errors on either.

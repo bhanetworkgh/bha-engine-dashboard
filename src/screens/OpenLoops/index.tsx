@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../../app/useData';
-import { BUILDER_NAMES, createLoop, getOpenLoops, getRecordMetrics, removeLoopDuplicate, saveLoop, type Loop, type LoopEdit, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
-import { Icon, LoadFailed, Loading, MonthPicker, monthsFrom, thisMonth, PageHeader, Tabs, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useToast } from '../../components/ui';
+import { BUILDER_NAMES, createLoop, getOpenLoops, getRecordMetrics, removeLoopDuplicate, resyncRecords, saveLoop, type Loop, type LoopEdit, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
+import { Icon, LoadFailed, Loading, MonthPicker, monthsFrom, thisMonth, PageHeader, ResyncButton, Tabs, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useResync, useToast } from '../../components/ui';
 import { LoopPanel } from './LoopPanel';
 import { Loops, type StatusFilter } from './Loops';
 import { LoopMetricsPanel, LoopStatusStrip } from './Metrics';
@@ -50,7 +50,22 @@ export default function OpenLoops() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const { toast, setToast } = useToast();
-  const { status, data: loaded, error } = useData(getOpenLoops, []);
+  /**
+   * Pull every builder table from Airtable and make this database match it.
+   * Airtable wins every disagreement; a change made here it never had is
+   * reverted, counted and named. The button, the toast and the refetch are the
+   * shared ones, so five pages cannot word the same outcome differently.
+   */
+  const resync = useResync({
+    run: () => resyncRecords('loops'),
+    reload: async () => {
+      setMetricsTick((n) => n + 1);
+      setReloadTick((n) => n + 1);
+    },
+    setToast,
+  });
+  const [reloadTick, setReloadTick] = useState(0);
+  const { status, data: loaded, error } = useData(getOpenLoops, [reloadTick]);
 
   /**
    * The figures arrive once, unscoped, carrying every builder's figures with
@@ -228,10 +243,20 @@ export default function OpenLoops() {
         title="Open loops"
         subtitle="Every commitment BHA has made, across every system"
         right={
-          <button type="button" onClick={() => setShowNew((v) => !v)} className="btn btn-primary gap-1.5">
-            <Icon.plus />
-            New loop
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => setShowNew((v) => !v)} className="btn btn-primary gap-1.5">
+              <Icon.plus />
+              New loop
+            </button>
+            {/*
+              The fifth page to get one (2026-09-16, Destiny). Without it a loop
+              closed or raised in Airtable by hand never reached this database,
+              so the two drifted quietly — exactly the fault the other four
+              pages got a button for. Same control, same shared pass, same
+              wording of the outcome.
+            */}
+            <ResyncButton busy={resync.busy} onClick={resync.start} />
+          </div>
         }
         below={<Tabs tabs={VIEWS} value={view} onChange={setView} />}
       />
@@ -278,12 +303,13 @@ export default function OpenLoops() {
         </div>
 
         {/*
-          Where the backlog stands, all time, above the builder tabs
-          (2026-09-16, Destiny). Everything below it follows the month.
+          Open, in progress and closed for the loops in view — the month and the
+          builder, like everything else on the page. All time is the "All time"
+          option in the month picker, which scopes the whole page at once.
         */}
-        <LoopStatusStrip metrics={current} view={owner} loading={metrics.status === 'loading'} />
+        <LoopStatusStrip metrics={current} view={`${owner}|${month ?? 'all'}`} loading={metrics.status === 'loading'} />
 
-        <LoopMetricsPanel metrics={allBuilders} loading={metrics.status === 'loading'} switching={switching} error={metrics.error} view={month ?? 'all'} />
+        <LoopMetricsPanel metrics={allBuilders} loading={metrics.status === 'loading'} switching={switching} error={metrics.error} view={`${owner}|${month ?? 'all'}`} />
 
 
         {/*

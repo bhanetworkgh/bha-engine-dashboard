@@ -1272,13 +1272,7 @@ export interface LoopMetrics {
   kind: 'loops';
   computed_at: string;
   scope: { builder: string | null; rows: number };
-  /**
-   * Where the whole backlog stands right now, over every loop held — never
-   * narrowed to the month in view (2026-09-16, Destiny). The rest of this
-   * object follows the month; these three do not, because "how many loops are
-   * open" is a question about today and not about September.
-   */
-  all_time?: { open: number; in_progress: number; closed: number; rows: number };
+
   open: number;
   in_progress: number;
   closed: number;

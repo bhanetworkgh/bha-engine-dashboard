@@ -614,7 +614,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
      * update what changed there, delete what is gone, and never treat a table
      * that could not be read as a table that was emptied. Manual only.
      */
-    const sweep = p.match(/^\/api\/(patterns|commercial|clients)\/resync$/);
+    const sweep = p.match(/^\/api\/(patterns|commercial|clients|loops)\/resync$/);
     if (sweep) {
       return send(res, 200, await store.resync(sweep[1] as store.ResyncKind, sessionInfo(req).email));
     }

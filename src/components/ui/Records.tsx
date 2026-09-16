@@ -28,7 +28,7 @@ function reducedMotion(): boolean {
  * change reads as movement), and from zero whenever `replayKey` changes —
  * the page passes the selected builder, so switching tabs re-runs it.
  */
-export function CountUp({ value, duration = 720, replayKey }: { value: number; duration?: number; replayKey?: string | number }) {
+export function CountUp({ value, duration = 1100, replayKey }: { value: number; duration?: number; replayKey?: string | number }) {
   const [shown, setShown] = useState(reducedMotion() ? value : 0);
   const shownRef = useRef(reducedMotion() ? value : 0);
   const lastKey = useRef(replayKey);
@@ -44,7 +44,10 @@ export function CountUp({ value, duration = 720, replayKey }: { value: number; d
     let raf = 0;
     const tick = (t: number) => {
       const p = Math.min(1, (t - start) / duration);
-      const eased = 1 - Math.pow(1 - p, 3);
+      // Quint ease-out rather than cubic: cubic spends most of its distance in
+      // the first third, which is why a count-up read as arriving all at once
+      // rather than counting (2026-09-16, Destiny).
+      const eased = 1 - Math.pow(1 - p, 5);
       const v = Math.round(from + (value - from) * eased);
       shownRef.current = v;
       setShown(v);

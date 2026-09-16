@@ -524,7 +524,6 @@ export default function Executions() {
   // Every month this database holds an execution for, newest first, from the
   // All-systems series so the list does not change as you move between tabs.
   const monthKeys = [...data.systems[0].periods].map((p) => p.key).reverse();
-  const monthCounts = Object.fromEntries(data.systems[0].periods.map((p) => [p.key, p.executions]));
   const counts = Object.fromEntries(
     data.systems.map((s) => [
       s.label,
@@ -568,7 +567,7 @@ export default function Executions() {
               unchanged — they are still one row per execution, so a month and
               the weeks drawn inside it are the same arithmetic.
             */}
-            <MonthPicker months={monthKeys} value={data.period} onChange={(m) => setPeriod(m)} counts={monthCounts} allowAll={false} />
+            <MonthPicker months={monthKeys} value={data.period} onChange={(m) => setPeriod(m)} allowAll={false} />
             <button type="button" className="btn" onClick={() => downloadCsv(reportName(system, data.period), buildReport(data, system))}>
               Download report
             </button>

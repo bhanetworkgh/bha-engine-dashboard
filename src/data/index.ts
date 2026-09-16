@@ -228,7 +228,7 @@ export function resyncCodex(): Promise<Resync> {
  * Airtable wins every disagreement, and a table that could not be read is never
  * read as an emptied one.
  */
-export function resyncRecords(kind: 'patterns' | 'commercial' | 'clients'): Promise<Resync> {
+export function resyncRecords(kind: 'patterns' | 'commercial' | 'clients' | 'loops'): Promise<Resync> {
   return api<Resync>(`/api/${kind}/resync`, { method: 'POST', timeoutMs: 180_000 });
 }
 
