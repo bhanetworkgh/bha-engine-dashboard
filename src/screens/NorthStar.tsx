@@ -14,6 +14,7 @@ import {
   MetricCard,
   MetricCell,
   PageHeader,
+  Tabs,
   Pagination,
   Pill,
   RecordId,
@@ -31,6 +32,7 @@ import {
   relativeTime,
   usePaged,
 } from '../components/ui';
+import RecordStatistics from '../components/RecordStatistics';
 
 /**
  * North Star telemetry, read from its own ask log (NS Records).
@@ -395,11 +397,25 @@ function nsColumns(open: (r: NsRecord) => void): RecordColumn<NsRecord>[] {
   ];
 }
 
+/**
+ * Two views of the same rows (2026-09-16, Destiny), tabbed the way the System
+ * Registry tabs its registries.
+ *
+ * **Asks** is the working surface. **Statistics** answers the other
+ * question — is this getting better or worse — month against month. This kind
+ * has no monthly rollup of its own, so its chart is drawn from the counts the
+ * statistics return, by the same component, rather than by a second one.
+ */
+const VIEWS = ['Asks', 'Statistics'] as const;
+type View = (typeof VIEWS)[number];
+
 export default function NorthStar() {
   const { status, data: loaded, error } = useData(getNsTelemetry, []);
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
+  const [view, setView] = useState<View>('Asks');
+  const [month, setMonth] = useState<string | null>(null);
   const metrics = useData(() => getRecordMetrics('ns', { lane: 'all' }), []);
 
   const records = loaded?.records ?? [];
@@ -421,8 +437,33 @@ export default function NorthStar() {
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      <PageHeader title="North Star" subtitle="Every question routed through the agent, and what came back" />
+      <PageHeader title="North Star" subtitle="Every question routed through the agent, and what came back" below={<Tabs tabs={VIEWS} value={view} onChange={setView} />} />
 
+      {view === 'Statistics' ? (
+        <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-4">
+          <RecordStatistics<NsRecord>
+            kind="northstar"
+            noun="Asks"
+            month={month}
+            onMonth={setMonth}
+            rows={records}
+            dateOf={(r) => r.asked_at}
+            columns={[
+              { header: 'trace_id', value: (r) => r.trace_id },
+              { header: 'airtable_record_id', value: (r) => r.id },
+              { header: 'asked_at', value: (r) => r.asked_at },
+              { header: 'lane_id', value: (r) => r.lane_id },
+              { header: 'workflow', value: (r) => r.workflow },
+              { header: 'outcome', value: (r) => r.outcome ?? 'unclassified' },
+              { header: 'research_required', value: (r) => r.research_required },
+              { header: 'has_answer', value: (r) => r.has_answer },
+              { header: 'sources_used', value: (r) => r.searches.reduce((a, x) => a + x.used, 0) },
+              { header: 'request', value: (r) => r.request },
+              { header: 'airtable_url', value: (r) => r.airtable.url },
+            ]}
+          />
+        </div>
+      ) : (
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 px-6 pb-3 md:px-8">
           <RowsLine freshness={loaded.freshness} />
@@ -467,6 +508,7 @@ export default function NorthStar() {
           </>
         )}
       </div>
+      )}
 
       {current && <AskView r={current} onClose={() => setOpen(null)} />}
     </div>

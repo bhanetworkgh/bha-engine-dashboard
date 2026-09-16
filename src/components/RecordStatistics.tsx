@@ -1,25 +1,34 @@
 import { useData } from '../app/useData';
-import { getCodexStats, getMonthly, type CodexEntry, type CodexStatMetric, type CodexStats, type Delta } from '../data';
-import { EmptyPanel, Legend, LoadFailed, Loading, MetricCard, MonthChart } from '../components/ui';
-import { csvRow, downloadCsv, toCsv } from '../lib/csv';
+import {
+  getMonthly,
+  getRecordStats,
+  type Delta,
+  type MonthlySeries,
+  type RecordKind,
+  type RecordStatMetric,
+  type RecordStats,
+  type StatKind,
+} from '../data';
+import { EmptyPanel, Legend, LoadFailed, Loading, MetricCard, MonthChart } from './ui';
+import { csvRow, downloadCsv, toCsv, type CsvColumn } from '../lib/csv';
 
 /**
- * The Codex statistics tab: one month set against the month before it.
+ * The statistics tab behind six record pages: one month set against the month
+ * before it.
  *
- * The entries tab answers "what was logged"; this one answers "is it getting
- * better or worse", which is a different question and needs a different screen.
- * Since 16 Sep 2026 (Destiny) it owns **everything month-shaped on this page**
- * — the month-over-month chart, the month in view, the approval-time figure and
- * the export all moved here, and the entries tab went back to being a list with
- * its filters. A small month card above a list, duplicating a screen one tab
- * away, was two answers to one question.
+ * A record page's own tab answers "what is there"; this one answers "is it
+ * getting better or worse", which is a different question and needs a different
+ * screen. Built for Codex on 16 Sep 2026 and generalised the same day
+ * (Destiny) to Open loops, Build patterns, Commercial, Clients, North Star and
+ * Research Twin — one component, so six pages cannot draw the same comparison
+ * six ways.
  *
  * **Everything that makes a comparison honest is computed on the server** (see
- * `codexStats.ts`): which month is compared against which, whether a running
- * month was cut to a like-for-like window, and the sentence at the top. This
- * file draws it. The one rule it owns is colour: a change is coloured only
- * where the direction is news, so more logs is uncoloured and a rising
- * completeness-flag rate is red.
+ * `server/src/stats.ts`): which month is compared against which, whether a
+ * running month was cut to a like-for-like window, what each figure is over,
+ * and the sentence at the top. This file draws it. The one rule it owns is
+ * colour: a change is coloured only where the direction is news, so more
+ * records is uncoloured and a rising completeness-flag rate is red.
  */
 
 /** "18 min", "4.2 hours", "2.1 days" — the unit a person would use out loud. */
@@ -31,7 +40,7 @@ function duration(ms: number | null): string {
   return `${Math.round((ms / 86_400_000) * 10) / 10} days`;
 }
 
-function fmt(value: number | null, unit: CodexStatMetric['unit']): string {
+function fmt(value: number | null, unit: RecordStatMetric['unit']): string {
   if (value === null) return '—';
   if (unit === 'percent') return `${value}%`;
   if (unit === 'duration') return duration(value);
@@ -50,7 +59,7 @@ function fmt(value: number | null, unit: CodexStatMetric['unit']): string {
  * A change from nought prints both figures rather than an infinity dressed up
  * as a percentage.
  */
-function Change({ d, unit }: { d: Delta | null; unit: CodexStatMetric['unit'] }) {
+function Change({ d, unit }: { d: Delta | null; unit: RecordStatMetric['unit'] }) {
   if (!d) return null;
   if (d.direction === 'flat') return <span className="text-[11.5px] text-faint">no change</span>;
   const arrow = d.direction === 'up' ? '↑' : '↓';
@@ -74,7 +83,7 @@ function Change({ d, unit }: { d: Delta | null; unit: CodexStatMetric['unit'] })
  * A metric nothing records prints the reason where the number would be, rather
  * than a dash that reads like a quiet month or a nought that reads like a fact.
  */
-function StatTile({ m, previousLabel, covered }: { m: CodexStatMetric; previousLabel: string; covered: boolean }) {
+function StatTile({ m, previousLabel, covered }: { m: RecordStatMetric; previousLabel: string; covered: boolean }) {
   return (
     <MetricCard title={m.label} right={m.field} note={m.note} noteMinLines={4} align="top">
       {m.unavailable ? (
@@ -119,9 +128,11 @@ function StatTile({ m, previousLabel, covered }: { m: CodexStatMetric; previousL
  * the screen and a number without its boundary is how a partial month gets
  * quoted as a whole one.
  */
-function report(stats: CodexStats, rows: CodexEntry[]): string {
-  const lines = [
-    csvRow(['BHA Codex statistics']),
+function report<T>(stats: RecordStats, rows: T[], columns: CsvColumn<T>[], noun: string, rowsNoun: string): string {
+  const shown = (m: RecordStatMetric, v: number | null) =>
+    m.unavailable || v === null ? '' : m.unit === 'duration' ? duration(v) : m.unit === 'percent' ? `${v}%` : v;
+  return [
+    csvRow([`BHA ${noun} statistics`]),
     csvRow(['Month in view', stats.selected_label]),
     csvRow(['Compared against', stats.previous_label]),
     csvRow(['Window', stats.window ?? 'no comparison']),
@@ -142,54 +153,113 @@ function report(stats: CodexStats, rows: CodexEntry[]): string {
         m.label,
         m.field,
         // Blank, never a zero, where the month cannot support the figure.
-        m.unavailable || m.value === null ? '' : m.unit === 'duration' ? duration(m.value) : m.unit === 'percent' ? `${m.value}%` : m.value,
-        m.previous === null ? '' : m.unit === 'duration' ? duration(m.previous) : m.unit === 'percent' ? `${m.previous}%` : m.previous,
+        shown(m, m.value),
+        shown(m, m.previous),
         !m.change || m.change.direction === 'flat'
           ? ''
-          : `${m.change.direction} ${m.unit === 'percent' ? `${Math.abs(Math.round((m.change.to - m.change.from) * 10) / 10)}%` : m.change.pct === null ? `${m.change.from} to ${m.change.to}` : `${Math.abs(m.change.pct)}%`}`,
+          : `${m.change.direction} ${
+              m.unit === 'percent'
+                ? `${Math.abs(Math.round((m.change.to - m.change.from) * 10) / 10)}%`
+                : m.change.pct === null
+                  ? `${m.change.from} to ${m.change.to}`
+                  : `${Math.abs(m.change.pct)}%`
+            }`,
         m.note ?? '',
       ]),
     ),
     '',
-    csvRow([`Logs written in ${stats.selected_label}`, `${rows.length}`]),
-    toCsv(rows, [
-      { header: 'codex_entry_id', value: (e) => e.codex_entry_id },
-      { header: 'submission_id', value: (e) => e.submission_id },
-      { header: 'airtable_record_id', value: (e) => e.id },
-      { header: 'builder', value: (e) => e.builder_id },
-      { header: 'logged_at', value: (e) => e.logged_at },
-      { header: 'jason_status', value: (e) => e.jason_status },
-      { header: 'jason_reviewed_at', value: (e) => e.reviewed_at },
-      { header: 'stage', value: (e) => e.stage },
-      { header: 'paid', value: (e) => (e.paid === null ? null : e.paid ? 'Yes' : 'No') },
-      { header: 'session_description', value: (e) => e.description_excerpt },
-      { header: 'session_type', value: (e) => e.session_type },
-      { header: 'layer0_flagged', value: (e) => e.layer0_flagged },
-      { header: 'airtable_url', value: (e) => e.airtable.url },
-    ]),
-  ];
-  return lines.join('\r\n');
+    csvRow([`${rowsNoun} in ${stats.selected_label}`, `${rows.length}`]),
+    toCsv(rows, columns),
+  ].join('\r\n');
 }
 
-export default function CodexStatistics({ month, onMonth, entries }: { month: string | null; onMonth: (m: string) => void; entries: CodexEntry[] }) {
-  const { status, data, error } = useData(() => getCodexStats(month), [month]);
-  const monthly = useData(() => getMonthly('codex'), []);
+/**
+ * A chart for a kind with no monthly rollup of its own.
+ *
+ * North Star and Research Twin have no `MonthlySeries` — that file encodes
+ * per-kind instrumentation boundaries and neither kind has one recorded — so
+ * their chart is built from the counts the statistics already returned, drawn
+ * by the **same** component rather than a second one. The month in progress is
+ * marked partial because it is; nothing else claims a coverage it cannot back.
+ */
+function seriesFrom(stats: RecordStats, label: string): MonthlySeries {
+  const current = stats.months[stats.months.length - 1]?.month;
+  return {
+    kind: 'codex',
+    created_label: label,
+    created_field: '',
+    advanced_label: null,
+    advanced_field: null,
+    rate_label: null,
+    months: stats.months.map((m) => ({
+      month: m.month,
+      label: m.label.split(' ')[0],
+      created: m.logs,
+      advanced: 0,
+      rate: null,
+      coverage: m.month === current ? 'partial' : 'full',
+      advanced_coverage: 'none',
+      note: null,
+      backfilled: 0,
+      segments: null,
+    })),
+    boundary: null,
+    undated: { n: 0, ids: [], note: '' },
+    secondary: null,
+    segment_keys: null,
+    current: stats.selected,
+  };
+}
+
+export default function RecordStatistics<T>({
+  kind,
+  month,
+  onMonth,
+  rows,
+  columns,
+  noun,
+  rowsNoun,
+  dateOf,
+  monthlyKind,
+}: {
+  kind: StatKind;
+  month: string | null;
+  onMonth: (m: string) => void;
+  /** Every record of the kind. The export narrows these to the month in view. */
+  rows: T[];
+  columns: CsvColumn<T>[];
+  /** What a record of this kind is called, for the chart and the file. */
+  noun: string;
+  /**
+   * What the exported rows are, where that is not the same thing. Research Twin
+   * counts attempts and exports cards — one card can be four attempts — so the
+   * file names what it actually carries rather than what the figures count.
+   */
+  rowsNoun?: string;
+  /** The date that puts a record in a month — the same one the server groups by. */
+  dateOf: (r: T) => string | null;
+  /** The monthly rollup to draw, where the kind has one. Omitted builds the chart from the counts. */
+  monthlyKind?: RecordKind;
+}) {
+  const { status, data, error } = useData(() => getRecordStats(kind, month), [kind, month]);
+  const monthly = useData(() => (monthlyKind ? getMonthly(monthlyKind) : Promise.resolve(null)), [monthlyKind]);
 
   if (status === 'error') return <LoadFailed error={error} />;
   if (!data) return <Loading />;
   if (data.months.length === 0) {
     return (
       <div className="px-6 pb-6 md:px-8">
-        <EmptyPanel>No Codex submission carries a Timestamp, so there is no month to compare.</EmptyPanel>
+        <EmptyPanel>No {noun.toLowerCase()} carries a date, so there is no month to compare.</EmptyPanel>
       </div>
     );
   }
 
-  // The logs the figures are about — the whole month, every builder and every
-  // stage, which is what the figures above are computed over. Filtering this by
-  // anything the entries tab is doing would make the file disagree with the
-  // numbers printed beside the button.
-  const rows = entries.filter((e) => e.logged_at?.slice(0, 7) === data.selected);
+  // The records the figures are about — the whole month, unfiltered, which is
+  // what the figures above are computed over. Narrowing this by anything the
+  // other tab is doing would make the file disagree with the numbers printed
+  // beside the button.
+  const inMonth = rows.filter((r) => dateOf(r)?.slice(0, 7) === data.selected);
+  const series = monthly.data ?? seriesFrom(data, noun);
 
   return (
     <div className="space-y-4 px-6 pb-6 md:px-8">
@@ -199,18 +269,18 @@ export default function CodexStatistics({ month, onMonth, entries }: { month: st
         month is the same act as choosing it in the picker, so there is one
         selection and two ways to make it.
       */}
-      {monthly.data && monthly.data.months.length > 0 && (
+      {series.months.length > 0 && (
         <MetricCard
           title="Every month held"
           note={
             <span className="block space-y-1">
-              <Legend series={monthly.data} />
+              <Legend series={series} />
               <span className="block text-[11px] leading-snug text-faint">Click a month to put it in view below.</span>
             </span>
           }
           align="top"
         >
-          <MonthChart series={monthly.data} selected={data.selected} onSelect={(m) => onMonth(m ?? data.selected)} fill />
+          <MonthChart series={series} selected={data.selected} onSelect={(m) => onMonth(m ?? data.selected)} fill />
         </MetricCard>
       )}
 
@@ -237,7 +307,7 @@ export default function CodexStatistics({ month, onMonth, entries }: { month: st
                 {/* Newest first, like every other list on every page. */}
                 {[...data.months].reverse().map((m) => (
                   <option key={m.month} value={m.month}>
-                    {m.label} · {m.logs} {m.logs === 1 ? 'log' : 'logs'}
+                    {m.label} · {m.logs}
                   </option>
                 ))}
               </select>
@@ -245,8 +315,8 @@ export default function CodexStatistics({ month, onMonth, entries }: { month: st
             <button
               type="button"
               className="btn btn-ghost btn-sm"
-              onClick={() => downloadCsv(`codex-${data.selected}.csv`, report(data, rows))}
-              title="The figures above with every caveat, then the logs written in this month"
+              onClick={() => downloadCsv(`${kind}-${data.selected}.csv`, report(data, inMonth, columns, noun, rowsNoun ?? noun))}
+              title={`The figures above with every caveat, then the ${(rowsNoun ?? noun).toLowerCase()} in this month`}
             >
               Export CSV
             </button>

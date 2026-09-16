@@ -645,13 +645,19 @@ export interface CodexEntryDetail extends CodexEntry {
 }
 
 /**
- * One figure on the Codex statistics tab, with the same figure a month ago.
+ * The record kinds that have a statistics tab. Six pages, one engine — see
+ * `server/src/stats.ts`.
+ */
+export type StatKind = 'codex' | 'loops' | 'patterns' | 'commercial' | 'clients' | 'northstar' | 'researchtwin';
+
+/**
+ * One figure on a statistics tab, with the same figure a month ago.
  *
  * `unavailable` is the case that must not be drawn as a zero: a metric nothing
  * in the engine records. Its tile prints the reason rather than a number, which
  * is the same rule as "a zero and an unknown must never look the same".
  */
-export interface CodexStatMetric {
+export interface RecordStatMetric {
   key: string;
   label: string;
   /** The source field the figure comes from, named as Airtable spells it. */
@@ -672,9 +678,10 @@ export interface CodexStatMetric {
   unavailable: boolean;
 }
 
-/** A month of Codex output set against the month before it. */
-export interface CodexStats {
-  /** Every month from the first log held to this one, for the picker. */
+/** A month of one record kind set against the month before it. */
+export interface RecordStats {
+  kind: StatKind;
+  /** Every month from the first record held to this one, for the picker. */
   months: { month: string; label: string; logs: number }[];
   selected: string;
   selected_label: string;
@@ -686,7 +693,7 @@ export interface CodexStats {
   window: string | null;
   /** False where the previous month predates everything held; no change is given anywhere. */
   covered: boolean;
-  metrics: CodexStatMetric[];
+  metrics: RecordStatMetric[];
   /** The comparison in words, written on the server. */
   prose: string;
   /** What it is compared against, and why it was cut or refused. */

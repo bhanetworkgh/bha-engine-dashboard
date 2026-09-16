@@ -15,7 +15,7 @@ import {
   type CodexTab,
 } from '../data';
 import type { RecordColumn } from '../components/ui';
-import CodexStatistics from './CodexStatistics';
+import RecordStatistics from '../components/RecordStatistics';
 import {
   Bars,
   CountCell,
@@ -835,7 +835,30 @@ export default function Codex() {
       */}
       {view === 'Statistics' ? (
         <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-4">
-          <CodexStatistics month={month} onMonth={setMonth} entries={entries} />
+          <RecordStatistics<CodexEntry>
+            kind="codex"
+            noun="Logs"
+            monthlyKind="codex"
+            month={month}
+            onMonth={setMonth}
+            rows={entries}
+            dateOf={(e) => e.logged_at}
+            columns={[
+              { header: 'codex_entry_id', value: (e) => e.codex_entry_id },
+              { header: 'submission_id', value: (e) => e.submission_id },
+              { header: 'airtable_record_id', value: (e) => e.id },
+              { header: 'builder', value: (e) => e.builder_id },
+              { header: 'logged_at', value: (e) => e.logged_at },
+              { header: 'jason_status', value: (e) => e.jason_status },
+              { header: 'jason_reviewed_at', value: (e) => e.reviewed_at },
+              { header: 'stage', value: (e) => e.stage },
+              { header: 'paid', value: (e) => (e.paid === null ? null : e.paid ? 'Yes' : 'No') },
+              { header: 'session_description', value: (e) => e.description_excerpt },
+              { header: 'session_type', value: (e) => e.session_type },
+              { header: 'layer0_flagged', value: (e) => e.layer0_flagged },
+              { header: 'airtable_url', value: (e) => e.airtable.url },
+            ]}
+          />
         </div>
       ) : (
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
