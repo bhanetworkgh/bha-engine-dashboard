@@ -1,13 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { MonthCoverage, MonthPoint, MonthlySeries } from '../../data';
-import { MetricCard } from './Card';
-import { EmptyPanel } from './EmptyState';
-import { downloadCsv, csvName, toCsv, type CsvColumn } from '../../lib/csv';
+import { useEffect, useRef, useState } from 'react';
+import type { MonthCoverage, MonthlySeries } from '../../data';
 
 /**
- * The monthly tracking panel: this month's summary, the month-over-month
- * chart, and the CSV export. The same three components in the same order on
- * every record page.
+ * The month-over-month chart every statistics tab draws with.
  *
  * **The chart is the component at risk of lying by omission, and everything
  * about its shape is that risk.** Several of the date fields behind these
@@ -24,18 +19,14 @@ import { downloadCsv, csvName, toCsv, type CsvColumn } from '../../lib/csv';
  *            when. A bar of nought and a month nothing was recording must never
  *            look the same.
  *
- * Clicking a month selects it and the page's own list filters to it; clicking
- * it again clears the selection. The CSV export then exports exactly what is on
- * screen, that selection and every other filter included.
+ * Clicking a month puts it in view on the statistics tab it is drawn on, which
+ * moves every figure and the export with it.
  */
 
 const BAR = 26;
 const GAP = 12;
 const H = 116;
 
-function pct(n: number | null): string {
-  return n === null ? '—' : `${n}%`;
-}
 
 /** The hatch a partial month is drawn with, defined once per chart instance. */
 function Hatch({ id, color }: { id: string; color: string }) {
@@ -198,185 +189,11 @@ export function Legend({ series }: { series: MonthlySeries }) {
   );
 }
 
-/** The month currently in view, as three figures. */
-function Summary({ series, point }: { series: MonthlySeries; point: MonthPoint | undefined }) {
-  if (!point) return null;
-  const cells: { label: string; value: ReactNode; note: string | null }[] = [
-    {
-      label: series.created_label,
-      value: point.coverage === 'none' ? '—' : point.created,
-      note: point.coverage === 'none' ? 'nothing was recording this month' : `from ${series.created_field}`,
-    },
-  ];
-  if (series.advanced_label) {
-    cells.push({
-      label: series.advanced_label,
-      value: point.advanced_coverage === 'none' ? '—' : point.advanced,
-      note: point.advanced_coverage === 'none' ? 'not dated this far back' : series.advanced_field,
-    });
-  }
-  if (series.rate_label) {
-    cells.push({
-      label: series.rate_label,
-      value: pct(point.rate),
-      note: point.rate === null ? 'the rows cannot support a rate for this month' : null,
-    });
-  }
-  return (
-    <div className="grid gap-x-6 gap-y-3 sm:grid-cols-3">
-      {cells.map((c) => (
-        <div key={c.label} className="min-w-0">
-          <div className="kicker truncate">{c.label}</div>
-          <div className="font-display tabular mt-1 text-[24px] leading-none text-ink">{c.value}</div>
-          {c.note && <div className="mt-1 text-[11px] leading-snug text-faint">{c.note}</div>}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/**
- * The tracking panel.
- *
- * `rows` and `columns` are what the CSV writes: the page hands over the rows it
- * is actually showing, so the export and the screen cannot disagree.
+/*
+ * `MonthlyPanel` and `SecondaryMonthly` stood here until 16 Sep 2026, when the
+ * month in view, the month-over-month chart and the export moved onto each
+ * page's statistics tab (Destiny). Nothing referenced them afterwards and dead
+ * components drift, so they are deleted rather than left unread — they are in
+ * git history. `MonthChart` and `Legend` above are what the statistics tab
+ * draws with, which is why they are exported.
  */
-export function MonthlyPanel<T>({
-  series,
-  selected,
-  onSelect,
-  rows,
-  columns,
-  csvLabel,
-}: {
-  series: MonthlySeries;
-  selected: string | null;
-  onSelect: (month: string | null) => void;
-  rows: T[];
-  columns: CsvColumn<T>[];
-  csvLabel?: string;
-}) {
-  const shown = selected ?? series.current;
-  const point = series.months.find((m) => m.month === shown);
-  const boundary = series.boundary;
-  const gaps = series.months.filter((m) => m.coverage === 'none' || m.advanced_coverage === 'none');
-  const partials = series.months.filter((m) => m.coverage === 'partial' && m.note);
-
-  return (
-    <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
-      <MetricCard
-        title={
-          <span className="flex flex-wrap items-baseline gap-x-2">
-            <span>{shown === series.current && !selected ? 'This month' : 'Selected month'}</span>
-            <span className="tabular text-[11.5px] font-normal text-faint">{shown}</span>
-          </span>
-        }
-        right={
-          // The month is pickable here as well as on the chart (2026-09-16,
-          // Destiny). Clicking a bar has always selected a month and the export
-          // has always followed that selection, but nothing on the card said
-          // so, so a previous month read as something the page could not
-          // export. A named control that says "All months" or "Aug 2026" is the
-          // difference between a capability and a discoverable one.
-          <span className="flex items-center gap-2">
-            <select
-              className="input h-[28px] w-auto py-0 text-[11.5px]"
-              value={selected ?? ''}
-              onChange={(e) => onSelect(e.target.value || null)}
-              aria-label="Month to show and export"
-            >
-              <option value="">All months</option>
-              {/* Newest first, like every other list on every page. */}
-              {[...series.months].reverse().map((m) => (
-                <option key={m.month} value={m.month}>
-                  {m.label} {m.month.slice(0, 4)}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => downloadCsv(csvName(csvLabel ?? series.kind, selected), toCsv(rows, columns))}
-              title="Exports the rows this page is showing, with every filter and the month selection applied"
-            >
-              Export CSV
-            </button>
-          </span>
-        }
-        note={
-          selected
-            ? `The list below is filtered to ${shown}. ${rows.length} ${rows.length === 1 ? 'row' : 'rows'} in view, and the export carries exactly those.`
-            : `The list below is not filtered by month. ${rows.length} ${rows.length === 1 ? 'row' : 'rows'} in view, and the export carries exactly those.`
-        }
-      >
-        {point ? <Summary series={series} point={point} /> : <EmptyPanel>No month holds anything yet.</EmptyPanel>}
-        {point?.note && <p className="mt-3 text-[11.5px] leading-snug text-degraded">{point.note}</p>}
-      </MetricCard>
-
-      <MetricCard
-        title="Month over month"
-        right={selected ? <button type="button" className="btn btn-ghost btn-sm" onClick={() => onSelect(null)}>Clear month</button> : undefined}
-        note={
-          <span className="space-y-1 block">
-            <Legend series={series} />
-            {boundary && <span className="block text-[11px] leading-snug text-degraded">{boundary.note}</span>}
-            {!boundary && partials.length > 0 && <span className="block text-[11px] leading-snug text-degraded">{partials[partials.length - 1].note}</span>}
-            {series.undated.n > 0 && <span className="block text-[11px] leading-snug text-faint">{series.undated.note}</span>}
-          </span>
-        }
-      >
-        {series.months.length === 0 ? (
-          <EmptyPanel>Nothing is dated yet, so there is no month to draw.</EmptyPanel>
-        ) : (
-          <MonthChart series={series} selected={selected} onSelect={onSelect} />
-        )}
-        {gaps.length > 0 && (
-          <p className="mt-2 text-[11px] leading-snug text-faint">
-            {gaps.length} {gaps.length === 1 ? 'month is' : 'months are'} drawn without a bar because nothing was recording then. That is a gap in instrumentation, not a month in which nothing
-            happened.
-          </p>
-        )}
-      </MetricCard>
-    </div>
-  );
-}
-
-/**
- * The second metric where a page has one with its own, later boundary — Codex's
- * median days to approval. Months before its boundary draw nothing at all.
- */
-export function SecondaryMonthly({ series }: { series: MonthlySeries }) {
-  const s = series.secondary;
-  if (!s) return null;
-  const drawn = s.points.filter((p) => p.coverage !== 'none');
-  const max = Math.max(1, ...drawn.map((p) => p.value ?? 0));
-  const any = drawn.some((p) => p.value !== null);
-  return (
-    <div className="mx-6 mb-4 md:mx-8">
-      <MetricCard title={s.label} note={<span className="block text-[11px] leading-snug text-degraded">{s.boundary.note}</span>}>
-        {!any ? (
-          <EmptyPanel>{s.note}</EmptyPanel>
-        ) : (
-          <div className="space-y-2">
-            {drawn.map((p) => (
-              <div key={p.month} className="flex items-center gap-3 text-[12px]">
-                <span className="w-12 shrink-0 text-faint">{p.label}</span>
-                <span className="h-2 flex-1 overflow-hidden rounded-full bg-raised">
-                  <span
-                    className={`block h-full rounded-full ${p.coverage === 'partial' ? 'bg-degraded' : 'bg-accent'}`}
-                    style={{ width: `${Math.round(((p.value ?? 0) / max) * 100)}%` }}
-                  />
-                </span>
-                <span className="tabular w-20 shrink-0 text-right text-dim">
-                  {p.value === null ? 'not recorded' : `${p.value} ${s.unit}`}
-                </span>
-                <span className="tabular w-16 shrink-0 text-right text-faint">{p.n ? `${p.n} logs` : ''}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {any && <p className="mt-2 text-[11px] leading-snug text-faint">{s.note}</p>}
-      </MetricCard>
-    </div>
-  );
-}

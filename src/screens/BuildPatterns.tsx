@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../app/useData';
-import { getBuildPatterns, getMonthly, getPatternDetail, getRecordMetrics, resyncRecords, searchPatterns, type BuildPattern, type BuildPatternDetail, type PatternMetrics } from '../data';
+import { getBuildPatterns, getPatternDetail, getRecordMetrics, resyncRecords, searchPatterns, type BuildPattern, type BuildPatternDetail, type PatternMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
@@ -11,8 +11,8 @@ import {
   LoadFailed,
   Loading,
   MetricCard,
-  MonthlyPanel,
   PageHeader,
+  Tabs,
   Pagination,
   RecordId,
   RecordTable,
@@ -32,6 +32,7 @@ import {
   useResync,
   useToast,
 } from '../components/ui';
+import RecordStatistics from '../components/RecordStatistics';
 
 /**
  * Build patterns.
@@ -291,11 +292,27 @@ function patternColumns(open: (p: BuildPattern) => void): RecordColumn<BuildPatt
   ];
 }
 
+/**
+ * Two views of the same records (2026-09-16, Destiny), tabbed at the top the
+ * way the System Registry tabs its four registries.
+ *
+ * **Patterns** is the working surface: the list and its filters. **Statistics**
+ * answers the other question — is this getting better or worse — which needs
+ * month-against-month figures rather than rows. Everything month-shaped lives
+ * there: the chart, the month in view and the export.
+ */
+const VIEWS = ['Patterns', 'Statistics'] as const;
+type View = (typeof VIEWS)[number];
+
 export default function BuildPatterns() {
   const { status, data: loaded, error } = useData(getBuildPatterns, []);
   const [patterns, setPatterns] = useState<BuildPattern[]>([]);
   const [reuse, setReuse] = useState('all');
+  // The month the statistics tab is looking at. The list is not filtered by
+  // it: the month card came off this tab, and a list silently narrowed with
+  // nothing on screen saying so is worse than no filter at all.
   const [month, setMonth] = useState<string | null>(null);
+  const [view, setView] = useState<View>('Patterns');
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<Set<string> | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -303,7 +320,6 @@ export default function BuildPatterns() {
   const { toast, setToast } = useToast();
   const metrics = useData((query) => getRecordMetrics('patterns', query), [tick]);
   // Re-read after a resync: the months change when the rows do.
-  const monthly = useData(() => getMonthly('patterns'), [tick]);
   const searchSeq = useRef(0);
 
   useEffect(() => {
@@ -358,13 +374,10 @@ export default function BuildPatterns() {
     () =>
       patterns
         .filter((p) => reuse === 'all' || reuseKey(p) === reuse)
-        .filter((p) => (hits ? hits.has(p.id) : true))
-        // The month selection is a filter like any other, so the list, the
-        // count and the CSV all see the same rows.
-        .filter((p) => !month || p.created_at?.slice(0, 7) === month),
+        .filter((p) => (hits ? hits.has(p.id) : true)),
     [patterns, reuse, hits, month],
   );
-  const paged = usePaged(rows, `${reuse}|${q.trim()}|${month ?? ''}`);
+  const paged = usePaged(rows, `${reuse}|${q.trim()}`);
 
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
 
@@ -374,9 +387,37 @@ export default function BuildPatterns() {
         title="Build patterns"
         subtitle="Every reusable pattern the engine has written up, searchable across every field"
         right={<ResyncButton busy={resync.busy} onClick={resync.start} />}
+        below={<Tabs tabs={VIEWS} value={view} onChange={setView} />}
       />
 
       {/* overflow-x-hidden: nothing on this page may scroll the body sideways. */}
+      {/*
+        Everything month-shaped lives on the statistics tab: the chart, the
+        month in view and the export. This tab is the list and its filters.
+      */}
+      {view === 'Statistics' ? (
+        <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-4">
+          <RecordStatistics<BuildPattern>
+            kind="patterns"
+            noun="Patterns"
+            monthlyKind="patterns"
+            month={month}
+            onMonth={setMonth}
+            rows={patterns}
+            dateOf={(p) => p.created_at}
+            columns={[
+              { header: 'pattern_id', value: (p) => p.pattern_id },
+              { header: 'airtable_record_id', value: (p) => p.id },
+              { header: 'pattern_name', value: (p) => p.title },
+              { header: 'bha_system', value: (p) => p.bha_system },
+              { header: 'reusability', value: (p) => p.reusability },
+              { header: 'created_at', value: (p) => p.created_at },
+              { header: 'problem', value: (p) => p.excerpt },
+              { header: 'airtable_url', value: (p) => p.airtable.url },
+            ]}
+          />
+        </div>
+      ) : (
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 px-6 pb-3 md:px-8">
           {/*
@@ -390,25 +431,7 @@ export default function BuildPatterns() {
 
         <PatternMetricsPanel metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
 
-        {monthly.data && (
-          <MonthlyPanel
-            series={monthly.data}
-            selected={month}
-            onSelect={setMonth}
-            rows={rows}
-            csvLabel="build-patterns"
-            columns={[
-              { header: 'pattern_id', value: (p) => p.pattern_id },
-              { header: 'airtable_record_id', value: (p) => p.id },
-              { header: 'pattern_name', value: (p) => p.title },
-              { header: 'bha_system', value: (p) => p.bha_system },
-              { header: 'reusability', value: (p) => p.reusability },
-              { header: 'created_at', value: (p) => p.created_at },
-              { header: 'problem', value: (p) => p.excerpt },
-              { header: 'airtable_url', value: (p) => p.airtable.url },
-            ]}
-          />
-        )}
+
 
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -462,6 +485,7 @@ export default function BuildPatterns() {
           </>
         )}
       </div>
+      )}
 
       {open && <PatternView id={open} onClose={() => setOpen(null)} />}
       <Toast toast={toast} />

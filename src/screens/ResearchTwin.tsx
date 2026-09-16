@@ -13,6 +13,7 @@ import {
   Loading,
   MetricCard,
   PageHeader,
+  Tabs,
   Pagination,
   Pill,
   RecordId,
@@ -29,6 +30,7 @@ import {
   RowsLine,
   usePaged,
 } from '../components/ui';
+import RecordStatistics from '../components/RecordStatistics';
 
 /**
  * Research Twin's queue.
@@ -355,11 +357,30 @@ function rtColumns(open: (c: RtCard) => void): RecordColumn<RtCard>[] {
   ];
 }
 
+/**
+ * Two views of the same queue (2026-09-16, Destiny), tabbed the way the System
+ * Registry tabs its registries.
+ *
+ * **Queue** is the working surface. **Statistics** answers the other question —
+ * is this getting better or worse — month against month. Research Twin has no
+ * monthly rollup of its own, so its chart is drawn from the counts the
+ * statistics return, by the same component rather than a second one.
+ *
+ * **The figures count attempts and the export carries cards**, which is the
+ * page's own shape caveat: one row per attempt, `card_id` repeats, so a card
+ * retried four times is four attempts and one card. The file says which it
+ * holds rather than borrowing the word above it.
+ */
+const VIEWS = ['Queue', 'Statistics'] as const;
+type View = (typeof VIEWS)[number];
+
 export default function ResearchTwin() {
   const { status, data: loaded, error } = useData(getRtTelemetry, []);
   const [filter, setFilter] = useState<Filter>('needs-human');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
+  const [view, setView] = useState<View>('Queue');
+  const [month, setMonth] = useState<string | null>(null);
   const metrics = useData(() => getRecordMetrics('rt', { lane: 'all' }), []);
 
   const cards = loaded?.cards ?? [];
@@ -396,8 +417,36 @@ export default function ResearchTwin() {
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      <PageHeader title="Research Twin" subtitle="The research queue, and what is waiting on a person" />
+      <PageHeader title="Research Twin" subtitle="The research queue, and what is waiting on a person" below={<Tabs tabs={VIEWS} value={view} onChange={setView} />} />
 
+      {view === 'Statistics' ? (
+        <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-4">
+          <RecordStatistics<RtCard>
+            kind="researchtwin"
+            noun="Attempts"
+            rowsNoun="Cards"
+            month={month}
+            onMonth={setMonth}
+            rows={cards}
+            dateOf={(c) => c.created_at}
+            columns={[
+              { header: 'card_id', value: (c) => c.card_id },
+              { header: 'airtable_record_id', value: (c) => c.airtable.record_id },
+              { header: 'lane_id', value: (c) => c.lane_id },
+              { header: 'created_at', value: (c) => c.created_at },
+              { header: 'last_attempt_at', value: (c) => c.last_attempt_at },
+              { header: 'status', value: (c) => c.status },
+              { header: 'attempts', value: (c) => c.attempts },
+              { header: 'run_count', value: (c) => c.run_count },
+              { header: 'requires_human', value: (c) => c.requires_human },
+              { header: 'first_stuck_at', value: (c) => c.first_stuck_at },
+              { header: 'days_stuck', value: (c) => c.days_stuck },
+              { header: 'gap_classification', value: (c) => c.gap_classification },
+              { header: 'airtable_url', value: (c) => c.airtable.url },
+            ]}
+          />
+        </div>
+      ) : (
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 px-6 pb-3 md:px-8">
           <RowsLine freshness={loaded.freshness} />
@@ -447,6 +496,7 @@ export default function ResearchTwin() {
           </>
         )}
       </div>
+      )}
 
       {current && <CardView c={current} onClose={() => setOpen(null)} />}
     </div>

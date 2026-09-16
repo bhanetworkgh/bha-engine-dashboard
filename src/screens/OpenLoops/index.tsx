@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../../app/useData';
-import { BUILDER_NAMES, createLoop, getMonthly, getOpenLoops, getRecordMetrics, removeLoopDuplicate, saveLoop, type Loop, type LoopEdit, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
-import { Icon, LoadFailed, Loading, MonthlyPanel, PageHeader, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useToast } from '../../components/ui';
+import { BUILDER_NAMES, createLoop, getOpenLoops, getRecordMetrics, removeLoopDuplicate, saveLoop, type Loop, type LoopEdit, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
+import { Icon, LoadFailed, Loading, PageHeader, Tabs, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useToast } from '../../components/ui';
 import { LoopPanel } from './LoopPanel';
 import { Loops, OwnerPicker, type StatusFilter } from './Loops';
 import { LoopMetricsPanel } from './Metrics';
 import { NewLoopForm } from './NewLoop';
+import RecordStatistics from '../../components/RecordStatistics';
 
 /** Case-insensitive match on loop_id, title, who raised it and where. */
 function matches(l: Loop, q: string): boolean {
@@ -17,11 +18,27 @@ function matches(l: Loop, q: string): boolean {
 /** How long the panel shows its transition state when the builder changes. */
 const SWITCH_MS = 220;
 
+/**
+ * Two views of the same records (2026-09-16, Destiny), tabbed at the top the
+ * way the System Registry tabs its four registries.
+ *
+ * **Loops** is the working surface: the list and its filters. **Statistics**
+ * answers the other question — is this getting better or worse — which needs
+ * month-against-month figures rather than rows. Everything month-shaped lives
+ * there: the chart, the month in view and the export.
+ */
+const VIEWS = ['Loops', 'Statistics'] as const;
+type View = (typeof VIEWS)[number];
+
 export default function OpenLoops() {
   const [owner, setOwner] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
   const [q, setQ] = useState('');
+  // The month the statistics tab is looking at. The list is not filtered by
+  // it: the month card came off this tab, and a list silently narrowed with
+  // nothing on screen saying so is worse than no filter at all.
   const [month, setMonth] = useState<string | null>(null);
+  const [view, setView] = useState<View>('Loops');
   const [showNew, setShowNew] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -36,7 +53,6 @@ export default function OpenLoops() {
    */
   const [metricsTick, setMetricsTick] = useState(0);
   const metrics = useData((query) => getRecordMetrics('loops', query), [metricsTick]);
-  const monthly = useData(() => getMonthly('loops'), [metricsTick]);
   const current: LoopMetrics | null = useMemo(() => {
     const m = metrics.data;
     if (!m) return null;
@@ -77,15 +93,11 @@ export default function OpenLoops() {
         // Newest first, oldest last. Age stays on every row as the signal;
         // it is no longer what decides the order.
         .filter((l) => matches(l, q.trim()))
-        // The month selection is a filter like any other, so the list, the
-        // count and the CSV all see the same rows. It reads Date Raised, which
-        // is the field the chart's raised bars count.
-        .filter((l) => !month || l.raised_at?.slice(0, 7) === month)
         .sort((a, b) => (b.raised_at ?? '').localeCompare(a.raised_at ?? '') || a.age_days - b.age_days),
     [scoped, statusFilter, q, month],
   );
 
-  const paged = usePaged(loops, `${owner}|${statusFilter}|${q.trim()}|${month ?? ''}`);
+  const paged = usePaged(loops, `${owner}|${statusFilter}|${q.trim()}`);
 
   /**
    * One save, whether it came from a row action or the panel.
@@ -182,6 +194,7 @@ export default function OpenLoops() {
             New loop
           </button>
         }
+        below={<Tabs tabs={VIEWS} value={view} onChange={setView} />}
       />
 
       {showNew && (
@@ -190,21 +203,20 @@ export default function OpenLoops() {
         </div>
       )}
 
-      <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
-          <RowsLine freshness={data.freshness} writes={false} />
-          <OwnerPicker data={data} owner={owner} setOwner={setOwner} />
-        </div>
-
-        <LoopMetricsPanel metrics={current} loading={metrics.status === 'loading'} switching={switching} error={metrics.error} view={owner} />
-
-        {monthly.data && (
-          <MonthlyPanel
-            series={monthly.data}
-            selected={month}
-            onSelect={setMonth}
-            rows={loops}
-            csvLabel="open-loops"
+      {/*
+        Everything month-shaped lives on the statistics tab: the chart, the
+        month in view and the export. This tab is the list and its filters.
+      */}
+      {view === 'Statistics' ? (
+        <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-4">
+          <RecordStatistics<Loop>
+            kind="loops"
+            noun="Loops"
+            monthlyKind="loops"
+            month={month}
+            onMonth={setMonth}
+            rows={data.loops}
+            dateOf={(l) => l.raised_at}
             columns={[
               { header: 'loop_id', value: (l) => l.loop_id },
               { header: 'airtable_record_id', value: (l) => l.id },
@@ -219,7 +231,17 @@ export default function OpenLoops() {
               { header: 'airtable_url', value: (l) => l.airtable.url },
             ]}
           />
-        )}
+        </div>
+      ) : (
+      <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+        <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
+          <RowsLine freshness={data.freshness} writes={false} />
+          <OwnerPicker data={data} owner={owner} setOwner={setOwner} />
+        </div>
+
+        <LoopMetricsPanel metrics={current} loading={metrics.status === 'loading'} switching={switching} error={metrics.error} view={owner} />
+
+
 
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -251,6 +273,7 @@ export default function OpenLoops() {
         />
         <Pagination paged={paged} unit="loops" />
       </div>
+      )}
 
       {panelLoop && (
         <LoopPanel

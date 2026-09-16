@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { Fragment, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { getClients, getMonthly, resyncRecords, type ClientGroup, type ClientLaneRow, type ClientQuestion, type ClientsData } from '../data';
+import { getClients, resyncRecords, type ClientGroup, type ClientLaneRow, type ClientQuestion, type ClientsData } from '../data';
 import {
   CountCell,
   EmptyPanel,
@@ -9,8 +9,8 @@ import {
   LoadFailed,
   Loading,
   MetricCard,
-  MonthlyPanel,
   PageHeader,
+  Tabs,
   Pill,
   ResyncButton,
   RowAction,
@@ -25,6 +25,7 @@ import {
   useResync,
   useToast,
 } from '../components/ui';
+import RecordStatistics from '../components/RecordStatistics';
 
 /**
  * Watched clients: one row per lane, grouped under the client that owns it.
@@ -327,12 +328,27 @@ function LaneTable({ clients, lanes, onOpen }: { clients: ClientGroup[]; lanes: 
 
 type Filter = 'all' | 'needs-human' | 'overdue';
 
+/**
+ * Two views of the same records (2026-09-16, Destiny), tabbed at the top the
+ * way the System Registry tabs its four registries.
+ *
+ * **Clients** is the working surface: the list and its filters. **Statistics**
+ * answers the other question — is this getting better or worse — which needs
+ * month-against-month figures rather than rows. Everything month-shaped lives
+ * there: the chart, the month in view and the export.
+ */
+const VIEWS = ['Clients', 'Statistics'] as const;
+type View = (typeof VIEWS)[number];
+
 export default function Clients() {
   const { status, data: loaded, error } = useData(getClients, []);
   const [live, setLive] = useState<ClientsData | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
+  // The month the statistics tab is looking at. The list is not filtered by
+  // it: the month card came off this tab, and a list silently narrowed with
+  // nothing on screen saying so is worse than no filter at all.
   const [month, setMonth] = useState<string | null>(null);
-  const monthly = useData(() => getMonthly('clients'), []);
+  const [view, setView] = useState<View>('Clients');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const { toast, setToast } = useToast();
@@ -354,15 +370,12 @@ export default function Clients() {
     [lanes, filter, q],
   );
   const shown = useMemo(() => new Set(rows.map((l) => l.id)), [rows]);
-  /**
-   * The questions the export carries: those belonging to a lane still in view,
-   * narrowed to the selected month by the same `Last Updated` the chart counts.
+  /*
+   * The export moved to the statistics tab and carries every question in the
+   * month in view, not the lanes this tab happens to be filtered to: the
+   * figures beside the button are computed over all of them, and a file that
+   * disagreed with the numbers printed next to it would be worse than no file.
    */
-  const laneIds = useMemo(() => new Set(rows.map((l) => l.lane_id ?? l.id)), [rows]);
-  const questionRows = useMemo(
-    () => (d?.questions ?? []).filter((q) => laneIds.has(q.lane_id)).filter((q) => !month || q.last_updated?.slice(0, 7) === month),
-    [d, laneIds, month],
-  );
 
   if (status === 'loading' || !d) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
   const current = open ? lanes.find((l) => l.id === open) : null;
@@ -381,8 +394,40 @@ export default function Clients() {
         title="Clients"
         subtitle="Every watched lane, grouped under the client it belongs to"
         right={<ResyncButton busy={resync.busy} onClick={resync.start} />}
+        below={<Tabs tabs={VIEWS} value={view} onChange={setView} />}
       />
 
+      {/*
+        Everything month-shaped lives on the statistics tab: the chart, the
+        month in view and the export. This tab is the list and its filters.
+      */}
+      {view === 'Statistics' ? (
+        <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-4">
+          <RecordStatistics<ClientQuestion>
+            kind="clients"
+            noun="Questions"
+            monthlyKind="clients"
+            month={month}
+            onMonth={setMonth}
+            rows={d?.questions ?? []}
+            dateOf={(q) => q.last_updated}
+            columns={[
+              { header: 'record_id', value: (q) => q.id },
+              { header: 'table_id', value: (q) => q.table },
+              { header: 'lane_id', value: (q) => q.lane_id },
+              { header: 'question', value: (q) => q.question },
+              { header: 'plain_summary', value: (q) => q.plain_summary },
+              { header: 'confidence', value: (q) => q.confidence },
+              { header: 'movement_tag', value: (q) => q.movement_tag },
+              { header: 'run_count', value: (q) => q.run_count },
+              { header: 'missing_research', value: (q) => q.missing_research },
+              { header: 'research_stuck', value: (q) => q.research_stuck },
+              { header: 'last_updated', value: (q) => q.last_updated },
+              { header: 'airtable_url', value: (q) => q.airtable.url },
+            ]}
+          />
+        </div>
+      ) : (
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 px-6 pb-3 md:px-8">
           <RowsLine freshness={d.freshness} writes={false} />
@@ -402,29 +447,7 @@ export default function Clients() {
           own `Last Run At` was frozen at 24 Aug because nothing wrote it back.
           The CSV therefore exports the questions in view, not the lanes.
         */}
-        {monthly.data && (
-          <MonthlyPanel
-            series={monthly.data}
-            selected={month}
-            onSelect={setMonth}
-            rows={questionRows}
-            csvLabel="client-questions"
-            columns={[
-              { header: 'record_id', value: (q) => q.id },
-              { header: 'table_id', value: (q) => q.table },
-              { header: 'lane_id', value: (q) => q.lane_id },
-              { header: 'question', value: (q) => q.question },
-              { header: 'plain_summary', value: (q) => q.plain_summary },
-              { header: 'confidence', value: (q) => q.confidence },
-              { header: 'movement_tag', value: (q) => q.movement_tag },
-              { header: 'run_count', value: (q) => q.run_count },
-              { header: 'missing_research', value: (q) => q.missing_research },
-              { header: 'research_stuck', value: (q) => q.research_stuck },
-              { header: 'last_updated', value: (q) => q.last_updated },
-              { header: 'airtable_url', value: (q) => q.airtable.url },
-            ]}
-          />
-        )}
+
 
         {d.unreadable.length > 0 && (
           <div className="mx-6 mb-4 md:mx-8">
@@ -490,6 +513,7 @@ export default function Clients() {
           </div>
         )}
       </div>
+      )}
 
       {current && <LaneView lane={current} questions={d.questions.filter((qq) => qq.lane_id === (current.lane_id ?? current.id))} onClose={() => setOpen(null)} />}
       <Toast toast={toast} />

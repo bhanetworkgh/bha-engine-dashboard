@@ -4946,3 +4946,115 @@ Problem:    Two figures read as inventions in the refused case. A null median
             0 then" about a month nobody had recorded.
 Fix:        A null figure now says "Not recorded this month" in words, and the
             "N here, M then" clause is only written where there is an M.
+
+## 2026-09-16 09:25 — The statistics tab, generalised to six pages
+
+Intent:     Destiny's list. On Codex: drop median days to approval from the
+            entries tab, drop the month card and the month-over-month chart
+            with it, move the export to the statistics tab, put the chart at
+            the top of that tab, say "average approval time" in hours rather
+            than "median days", and print a rate change as a percentage rather
+            than points. Then the same treatment on Open loops, Build patterns,
+            Commercial, Clients, and — proactively — North Star and Research
+            Twin.
+Files:      server/src/stats.ts (was codexStats.ts), server/src/delta.ts,
+            server/src/index.ts, src/data/types.ts, src/data/index.ts,
+            src/components/RecordStatistics.tsx (was screens/CodexStatistics),
+            src/components/ui/Monthly.tsx, and the six record screens.
+
+Decision:   **One engine, not six.** `codexStats.ts` became `stats.ts`: each
+            page contributes a *spec* — what dates a record into a month, and a
+            list of figures — and the month span, the like-for-like cut, the
+            refusal, the deltas and the sentence are computed once. Six pages
+            each working out a month-over-month change would eventually
+            disagree about what "down 12%" means. One route,
+            `GET /api/records/:kind/stats`, and one React component.
+Decision:   Every spec has to say whether a figure is a **cohort state** or a
+            **dated event**, because they have different honesty boundaries. A
+            rate read off the cohort created in a month — approval rate, close
+            rate, movement rate — is a property of those records as they stand
+            today, so it is honest for the whole history and needs no field to
+            have been recording. A figure timed from an event exists only as
+            far back as the field that dates it and carries that boundary onto
+            its own tile. Loops is the clearest case: `Date Raised` has always
+            been written so raised and close *rate* are honest throughout, but a
+            close is dated by this dashboard's ledger and by nothing else.
+
+Problem:    "Median days to approval" could not answer the question it was
+            asked. Every review Jason does in under a day rounded to "0 days".
+Fix:        Durations are kept in **milliseconds** and rendered as seconds,
+            minutes, hours or days at the point they are read. The tile now says
+            "7.8 hours". `days()`, which rounded to a tenth of a day, is gone.
+Decision:   The **mean** is the headline, as asked, and the **median sits in the
+            note beside it**. Verified on the rig: seven reviews, six under an
+            hour and one at two days, is a mean of 7.8 hours and a median of 55
+            minutes. A reader who cannot see the second will read the first as
+            how long Jason usually takes.
+
+Decision:   A rate change prints as a **percentage, not points**: 79.3% → 76.4%
+            reads "down 2.9%". That is the difference between the two rates
+            wearing a per-cent sign rather than a ratio of a ratio, and it is
+            only safe because the tile always prints "vs 79.3% in Aug 2026"
+            underneath, so the number can be checked against what it came from.
+            The Executions page keeps points — that choice is recorded in
+            CLAUDE.md and was not part of this ask.
+
+Problem:    **Time to payment still cannot be computed** and now neither can it
+            be quietly dropped. There is no `Paid At` on any builder table.
+Fix:        Unchanged from this morning: the tile says "Not recorded anywhere"
+            with the reason and the fix. It is the one `unavailable` metric in
+            the whole engine and the shape exists precisely so a real gap can be
+            shown rather than drawn as a zero.
+
+Problem:    The four pages carrying a month card each had a second, smaller
+            answer to a question their statistics tab answers properly.
+Fix:        `MonthlyPanel` and `SecondaryMonthly` are **deleted**, not left
+            unread — nothing referenced them and dead components drift. The
+            chart itself (`MonthChart`, `Legend`) is exported and is what every
+            statistics tab draws with. The chart now fills the card it is given
+            (bars grow to fill the width, capped at 90px) and prints each
+            month's figures above its own bar, so it reads without hovering.
+Decision:   The lists no longer filter by month. With the month card off that
+            tab, a list silently narrowed to a month with nothing on screen
+            saying so is worse than no filter.
+Decision:   North Star and Research Twin have **no `MonthlySeries`** — that file
+            encodes per-kind instrumentation boundaries and neither kind has one
+            recorded — so their chart is synthesised from the counts the
+            statistics already return and drawn by the *same* component. A
+            second chart renderer would drift from the first.
+Decision:   Research Twin counts **attempts** and exports **cards**, so the
+            report names what it carries rather than borrowing the word above
+            it. That is the page's own shape caveat: one row per attempt,
+            `card_id` repeats.
+
+Problem:    `/api/codex/stats` returned 404 — "That Codex entry is not held by
+            this dashboard" — because it was declared after `/api/codex/:id`,
+            which matched "stats" as a record id. (Fixed earlier today; the
+            generalised route lives under `/api/records/:kind/stats` and cannot
+            collide.)
+
+Verified:   Not on a typecheck. A throwaway Postgres 16, the real server, and
+            seeded rows for every kind, each carrying Airtable's own field
+            names: 41 Codex submissions, 22 loops with 15 dated close events,
+            15 patterns, 12 commercial cards, 18 North Star asks, 15 Research
+            Twin attempts.
+            - All seven routes answered; arithmetic checked by hand against the
+              seed. Loops: Sep 1–16 raised 8 against Aug 1–16's 8; closed 5
+              against 7; close rate 62.5% against 100%; mean time to close 3
+              days, median 3.4; average age still open 9.4 days.
+            - Every one of the six pages driven in Chromium: both tabs render,
+              the picker lists every month, the export downloads
+              `<kind>-2026-09.csv`, and there were **no page errors**.
+            - Every main tab re-checked afterwards for leftovers of the removed
+              panels: none, on any page.
+Problem:    Three figures read as nulls or zeros on the first pass — North Star's
+            research-required and citation coverage, and Research Twin's
+            requires-human.
+Fix:        All three were **the seed, not the code**: `research_required` is a
+            Yes/No select upstream and I had written "true"/"false";
+            `requires_human` is a checkbox and wants a real boolean; and the
+            searches blob is a JSON *string* in `expected_result`, not a field of
+            its own. Corrected the seed to match what Airtable actually sends and
+            all three computed. Worth recording because each looked like a bug in
+            the accessor and none was — the accessors match `sources.ts`, which
+            was read off the live bases.

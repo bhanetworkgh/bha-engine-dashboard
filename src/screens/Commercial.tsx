@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { getCommercial, getMonthly, getRecordMetrics, resyncRecords, setRecordStatus, type CommercialMetrics, type MetricSeries, type Opportunity, type ReadinessState } from '../data';
+import { getCommercial, getRecordMetrics, resyncRecords, setRecordStatus, type CommercialMetrics, type MetricSeries, type Opportunity, type ReadinessState } from '../data';
 import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
@@ -12,8 +12,8 @@ import {
   Loading,
   MetricCard,
   MetricCell,
-  MonthlyPanel,
   PageHeader,
+  Tabs,
   Pagination,
   Pill,
   RecordId,
@@ -35,6 +35,7 @@ import {
   useResync,
   useToast,
 } from '../components/ui';
+import RecordStatistics from '../components/RecordStatistics';
 
 /**
  * Commercial opportunity cards. 21 of them.
@@ -478,13 +479,29 @@ function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportuni
   ];
 }
 
+/**
+ * Two views of the same records (2026-09-16, Destiny), tabbed at the top the
+ * way the System Registry tabs its four registries.
+ *
+ * **Cards** is the working surface: the list and its filters. **Statistics**
+ * answers the other question — is this getting better or worse — which needs
+ * month-against-month figures rather than rows. Everything month-shaped lives
+ * there: the chart, the month in view and the export.
+ */
+const VIEWS = ['Cards', 'Statistics'] as const;
+type View = (typeof VIEWS)[number];
+
 export default function Commercial() {
   const { status, data: loaded, error } = useData(getCommercial, []);
   const [cards, setCards] = useState<Opportunity[]>([]);
   const [confidence, setConfidence] = useState('all');
   const [media, setMedia] = useState('all');
   const [q, setQ] = useState('');
+  // The month the statistics tab is looking at. The list is not filtered by
+  // it: the month card came off this tab, and a list silently narrowed with
+  // nothing on screen saying so is worse than no filter at all.
   const [month, setMonth] = useState<string | null>(null);
+  const [view, setView] = useState<View>('Cards');
   const [open, setOpen] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -493,7 +510,6 @@ export default function Commercial() {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'open', dir: 1 });
   const { toast, setToast } = useToast();
   const metrics = useData((query) => getRecordMetrics('commercial', query), [tick]);
-  const monthly = useData(() => getMonthly('commercial'), [tick]);
 
   useEffect(() => {
     if (loaded) setCards(loaded.opportunities);
@@ -529,14 +545,11 @@ export default function Commercial() {
         .filter((o) => confidence === 'all' || (o.confidence ?? '(not set)') === confidence)
         .filter((o) => media === 'all' || (o.media_readiness ?? '(not set)') === media)
         .filter((o) => matches(o, q.trim()))
-        // The month selection is a filter like any other, so the list, the count
-        // and the CSV all see the same rows.
-        .filter((o) => !month || o.created_at?.slice(0, 7) === month)
         .slice()
         .sort((a, b) => compare(sort.key, sort.dir, a, b) || tiebreak(a, b)),
     [cards, confidence, media, q, sort, month],
   );
-  const paged = usePaged(rows, `${confidence}|${media}|${q.trim()}|${sort.key}|${sort.dir}|${month ?? ''}`);
+  const paged = usePaged(rows, `${confidence}|${media}|${q.trim()}|${sort.key}|${sort.dir}`);
 
   async function change(o: Opportunity, next: ReadinessState) {
     setBusyId(o.id);
@@ -561,23 +574,24 @@ export default function Commercial() {
         title="Commercial"
         subtitle="Every opportunity card, closest to ready first"
         right={<ResyncButton busy={resync.busy} onClick={resync.start} />}
+        below={<Tabs tabs={VIEWS} value={view} onChange={setView} />}
       />
 
       {/* overflow-x-hidden: nothing on this page may scroll the body sideways. */}
-      <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <div className="shrink-0 px-6 pb-3 md:px-8">
-          <RowsLine freshness={loaded.freshness} writes={false} />
-        </div>
-
-        <CommercialMetricsPanel metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
-
-        {monthly.data && (
-          <MonthlyPanel
-            series={monthly.data}
-            selected={month}
-            onSelect={setMonth}
-            rows={rows}
-            csvLabel="commercial"
+      {/*
+        Everything month-shaped lives on the statistics tab: the chart, the
+        month in view and the export. This tab is the list and its filters.
+      */}
+      {view === 'Statistics' ? (
+        <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-4">
+          <RecordStatistics<Opportunity>
+            kind="commercial"
+            noun="Cards"
+            monthlyKind="commercial"
+            month={month}
+            onMonth={setMonth}
+            rows={cards}
+            dateOf={(o) => o.created_at}
             columns={[
               { header: 'card_id', value: (o) => o.card_id },
               { header: 'airtable_record_id', value: (o) => o.id },
@@ -592,7 +606,16 @@ export default function Commercial() {
               { header: 'airtable_url', value: (o) => o.airtable.url },
             ]}
           />
-        )}
+        </div>
+      ) : (
+      <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+        <div className="shrink-0 px-6 pb-3 md:px-8">
+          <RowsLine freshness={loaded.freshness} writes={false} />
+        </div>
+
+        <CommercialMetricsPanel metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
+
+
 
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
           {/* Two filters, both on fields that genuinely vary. No tabs. */}
@@ -635,6 +658,7 @@ export default function Commercial() {
           </>
         )}
       </div>
+      )}
 
       {current && <CardView o={current} trend={loaded.trends[current.id]} busy={busyId === current.id} onReadiness={change} onClose={() => setOpen(null)} />}
       <Toast toast={toast} />
