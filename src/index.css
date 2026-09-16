@@ -929,14 +929,20 @@
 
   /* Sidebar navigation ----------------------------------------------------- */
 
+  /*
+    32px, not 38 (2026-09-16, Destiny). The sidebar must show every item at
+    once — a dashboard whose navigation is half below the fold is one where
+    people miss pages — and fifteen items at 38px did not fit a laptop. The
+    row is still comfortably above the 24px that would read as a dense menu.
+  */
   .nav-item {
     display: flex;
     align-items: center;
     gap: 11px;
-    height: 38px;
+    height: 32px;
     padding: 0 12px;
-    border-radius: 12px;
-    font-size: 13.5px;
+    border-radius: 10px;
+    font-size: 13px;
     font-weight: 500;
     color: var(--ink);
     transition:

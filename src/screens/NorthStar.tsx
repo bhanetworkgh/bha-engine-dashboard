@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { getNsTelemetry, getRecordMetrics, type NsMetrics, type NsOutcome, type NsRecord } from '../data';
+import { getNsTelemetry, getRecordMetrics, resyncRecords, type NsMetrics, type NsOutcome, type NsRecord } from '../data';
 import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
@@ -13,6 +13,8 @@ import {
   Loading,
   MetricCard,
   MetricCell,
+  MonthPicker,
+  monthsFrom,
   PageHeader,
   Tabs,
   Pagination,
@@ -28,9 +30,14 @@ import {
   SourceLink,
   StatCell,
   StatStrip,
+  ResyncButton,
   RowsLine,
   relativeTime,
+  thisMonth,
+  Toast,
   usePaged,
+  useResync,
+  useToast,
 } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 
@@ -67,6 +74,16 @@ function matches(r: NsRecord, q: string): boolean {
 
 /* ---------------------------------------------------------------- metrics */
 
+/**
+ * The strip, and only the strip (2026-09-16, Destiny).
+ *
+ * Everything that was a card under it — the classified ring, the outcome mix,
+ * asks per week, outcome over time, tool usage, citation coverage and by lane
+ * — is telemetry, which is a month-against-month question rather than a
+ * "what is in the log right now" one. All of it is on the statistics tab, in
+ * the same tiles every other record page uses, so the working surface here is
+ * the five figures, the filters and the asks.
+ */
 function NsMetricsPanel({ metrics, loading, error }: { metrics: NsMetrics | null; loading: boolean; error: string | null }) {
   if (error) return <div className="card mx-6 mb-4 px-5 py-4 text-[12.5px] text-failing md:mx-8">Figures unavailable: {error}</div>;
   if (!metrics) {
@@ -82,10 +99,6 @@ function NsMetricsPanel({ metrics, loading, error }: { metrics: NsMetrics | null
     );
   }
   const m = metrics;
-  const maxTool = Math.max(1, ...m.tool_usage.map((t) => t.hits));
-  const maxLane = Math.max(1, ...m.by_lane.map((l) => l.asks));
-  const maxOutcome = Math.max(1, ...m.outcome_mix.map((o) => o.n));
-  const stacked = m.outcome_per_week;
   const lastAge = relativeTime(m.last_ask.at);
   const silent = m.last_ask.at ? Date.now() - Date.parse(m.last_ask.at) > 2 * 86_400_000 : true;
 
@@ -115,23 +128,40 @@ function NsMetricsPanel({ metrics, loading, error }: { metrics: NsMetrics | null
         </StatCell>
       </StatStrip>
 
-      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-        <div className="card flex h-full flex-col justify-between px-5 py-4">
-          <div className="flex items-center gap-5">
-            <Ring value={m.classified} total={m.scope.rows} size={88} tone={m.classified ? 'accent' : 'degraded'} label="classified" />
-            <div className="min-w-0">
-              <div className="kicker">Classified</div>
-              <div className="mt-1 flex items-baseline gap-2">
-                <span className="font-display tabular text-[32px] leading-none text-ink">
-                  <CountUp value={m.classified} />
-                </span>
-                <span className="text-[14px] text-faint">of {m.scope.rows}</span>
-              </div>
-              <div className="mt-1.5 text-[11.5px] leading-snug text-faint">{m.unclassified_note}</div>
+    </div>
+  );
+}
+
+/**
+ * North Star's telemetry, as statistics tiles (2026-09-16, Destiny).
+ *
+ * Same cards, same figures, moved into the grid the statistics tab already
+ * draws — `MetricCard`s, so the page reads as one set of tiles rather than as
+ * the computed figures with a differently-shaped row bolted underneath. The
+ * classified card was a bespoke `.card` with a ring in it; it is a MetricCard
+ * now for the same reason.
+ */
+export function NsStatTiles({ m }: { m: NsMetrics | null }) {
+  if (!m) return null;
+  const maxTool = Math.max(1, ...m.tool_usage.map((t) => t.hits));
+  const maxLane = Math.max(1, ...m.by_lane.map((l) => l.asks));
+  const maxOutcome = Math.max(1, ...m.outcome_mix.map((o) => o.n));
+  const stacked = m.outcome_per_week;
+  return (
+    <>
+      <MetricCard title="Classified" note={m.unclassified_note}>
+        <div className="flex items-center gap-5">
+          <Ring value={m.classified} total={m.scope.rows} size={88} tone={m.classified ? 'accent' : 'degraded'} label="classified" />
+          <div className="min-w-0">
+            <div className="flex items-baseline gap-2">
+              <span className="font-display tabular text-[32px] leading-none text-ink">
+                <CountUp value={m.classified} />
+              </span>
+              <span className="text-[14px] text-faint">of {m.scope.rows}</span>
             </div>
           </div>
         </div>
-
+      </MetricCard>
         <MetricCard title="Outcome mix" note="answered = an answer carrying at least one [S#] citation · thin = an answer with nothing cited behind it · failed = no answer text at all. These are North Star’s own definitions, read from its outcome field.">
           {m.outcome_mix.length === 0 ? (
             <EmptyPanel>No ask carries an outcome yet.</EmptyPanel>
@@ -151,9 +181,6 @@ function NsMetricsPanel({ metrics, loading, error }: { metrics: NsMetrics | null
             </div>
           )}
         </MetricCard>
-      </div>
-
-      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-2">
         <MetricCard title="Asks per week">
           <SeriesBlock title="" series={m.asks_per_week} tone="accent" total bare />
         </MetricCard>
@@ -191,9 +218,6 @@ function NsMetricsPanel({ metrics, loading, error }: { metrics: NsMetrics | null
             </div>
           )}
         </MetricCard>
-      </div>
-
-      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-3">
         <MetricCard title="Tool usage" right="hits · cited" note={m.tool_note}>
           {m.tool_usage.length === 0 ? (
             <EmptyPanel>No ask records a tool call.</EmptyPanel>
@@ -255,8 +279,7 @@ function NsMetricsPanel({ metrics, loading, error }: { metrics: NsMetrics | null
             </div>
           )}
         </MetricCard>
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -415,29 +438,58 @@ export default function NorthStar() {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [view, setView] = useState<View>('Asks');
-  const [month, setMonth] = useState<string | null>(null);
-  const metrics = useData(() => getRecordMetrics('ns', { lane: 'all' }), []);
+  /**
+   * The month the page is showing, and the month the statistics tab compares
+   * (2026-09-16, Destiny) — one selection, beside the search box, the same as
+   * every other record page.
+   */
+  const [month, setMonth] = useState<string | null>(thisMonth());
+  const [tick, setTick] = useState(0);
+  const [held, setHeld] = useState<NsRecord[]>([]);
+  const { toast, setToast } = useToast();
+  const metrics = useData(() => getRecordMetrics('ns', { lane: 'all' }, null, month), [month, tick]);
 
-  const records = loaded?.records ?? [];
+  useEffect(() => {
+    if (loaded) setHeld(loaded.records);
+  }, [loaded]);
+
+  const resync = useResync({
+    run: () => resyncRecords('ns'),
+    reload: async () => {
+      setTick((n) => n + 1);
+      setHeld((await getNsTelemetry()).records);
+    },
+    setToast,
+  });
+
+  const records = held;
+  const months = useMemo(() => monthsFrom(records.map((r) => r.asked_at)), [records]);
+  const inMonth = useMemo(() => records.filter((r) => !month || r.asked_at?.slice(0, 7) === month), [records, month]);
   const rows = useMemo(
-    () => records.filter((r) => (filter === 'all' ? true : filter === 'unclassified' ? !r.outcome : r.outcome === filter)).filter((r) => matches(r, q.trim())),
-    [records, filter, q],
+    () => inMonth.filter((r) => (filter === 'all' ? true : filter === 'unclassified' ? !r.outcome : r.outcome === filter)).filter((r) => matches(r, q.trim())),
+    [inMonth, filter, q],
   );
-  const paged = usePaged(rows, `${filter}|${q.trim()}`);
+  const paged = usePaged(rows, `${filter}|${q.trim()}|${month ?? 'all'}`);
 
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
   const current = open ? records.find((r) => r.id === open) : null;
+  // The filter counts follow the month, the same way every other page's do.
   const counts = {
-    all: records.length,
-    answered: records.filter((r) => r.outcome === 'answered').length,
-    thin: records.filter((r) => r.outcome === 'thin').length,
-    failed: records.filter((r) => r.outcome === 'failed').length,
-    unclassified: records.filter((r) => !r.outcome).length,
+    all: inMonth.length,
+    answered: inMonth.filter((r) => r.outcome === 'answered').length,
+    thin: inMonth.filter((r) => r.outcome === 'thin').length,
+    failed: inMonth.filter((r) => r.outcome === 'failed').length,
+    unclassified: inMonth.filter((r) => !r.outcome).length,
   };
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      <PageHeader title="North Star" subtitle="Every question routed through the agent, and what came back" below={<Tabs tabs={VIEWS} value={view} onChange={setView} />} />
+      <PageHeader
+        title="North Star"
+        subtitle="Every question routed through the agent, and what came back"
+        right={<ResyncButton busy={resync.busy} onClick={resync.start} />}
+        below={<Tabs tabs={VIEWS} value={view} onChange={setView} />}
+      />
 
       {view === 'Statistics' ? (
         <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-4">
@@ -448,6 +500,7 @@ export default function NorthStar() {
             onMonth={setMonth}
             rows={records}
             dateOf={(r) => r.asked_at}
+            extraTiles={<NsStatTiles m={metrics.data} />}
             columns={[
               { header: 'trace_id', value: (r) => r.trace_id },
               { header: 'airtable_record_id', value: (r) => r.id },
@@ -486,6 +539,8 @@ export default function NorthStar() {
               ]}
             />
             <div className="flex flex-1 items-center justify-end gap-3">
+              {/* The month sits to the left of the search box, on every record page. */}
+              <MonthPicker months={months} value={month} onChange={setMonth} />
               <SearchBox value={q} onChange={setQ} placeholder="Search asks, answers and tools" />
             </div>
           </div>
@@ -511,6 +566,7 @@ export default function NorthStar() {
       )}
 
       {current && <AskView r={current} onClose={() => setOpen(null)} />}
+      <Toast toast={toast} />
     </div>
   );
 }

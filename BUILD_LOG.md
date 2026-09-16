@@ -5733,3 +5733,92 @@ Verified:   Migration 13 applied on boot; /api/registry reads AWS / Airtable Fre
             the Genie endpoint row moved with it. Caught on the rendered page and
             fixed: the new spend sentence had lost its negation and read "1
             service carries a cost, but it has a billing cycle".
+
+## 2026-09-16 16:10 — 80% by default, a sidebar that shows everything, and the twins get statistics tabs
+Intent:     Destiny: "I've been using my laptop on 80% zoom and the screen looks
+            phenomenal — is there a way we can set it as a default"; "for the
+            sidebar I would really love it if this sidebar is not scrollable,
+            everything just shows as it's loaded"; the month dropdown belongs
+            "on the left hand side of the search bar" on Build patterns and
+            Commercial; "for the patterns page, can you give it a similar
+            looking UI" to the other record pages; on North Star "all those
+            things should move into the statistics, let's also have that monthly
+            select next to the search bar"; on Research Twin the same, keeping
+            only confidence (on the left) and cards created per week, and "the
+            research queue holds 212 rows across 36 distinct — let's remove that
+            write-up"; and "add a resync from Airtable at the top of research
+            twin page, North Star page."
+Files:      src/app/zoom.tsx (new), src/main.tsx, src/screens/Settings.tsx,
+            src/index.css, src/components/Layout.tsx, src/screens/NorthStar.tsx,
+            src/screens/ResearchTwin.tsx, src/screens/BuildPatterns.tsx,
+            src/screens/Commercial.tsx, src/data/types.ts, src/data/index.ts,
+            server/src/store.ts, server/src/sources.ts, server/src/index.ts,
+            .env.example, render.yaml, CLAUDE.md
+Problem:    Three real ones, none of them where I expected.
+            1. The North Star strip read "Asks 18" above a list of 6 as soon as
+               the month picker went on, and Research Twin the same. The page
+               was passing `month` and the server was ignoring it: `metrics()`
+               dispatched `case 'ns': return nsMetrics()` with no argument, so
+               the filter never arrived. That is the exact reconciliation fault
+               the loops page had on 15 Sep ("602 open" over "627 raised in
+               August"), reintroduced by adding a picker to a kind whose metrics
+               took no month.
+            2. `Systems covered` read 0 with every one of fifteen rows filed
+               under none. `classify()` matched `^BP-([A-Z0-9]+)-\d+-(.+)$`,
+               which requires a slug after the sequence number, so an ordinary
+               id like `BP-BHARAG-114` matched nothing at all — not even its
+               system, which is the second segment and needs nothing else to be
+               read.
+            3. `Segmented` is `<T extends string>`, so a zoom choice typed as
+               `0.75 | 0.8 | 0.9 | 1` would not compile against it:
+               "Type 'number' does not satisfy the constraint 'string'."
+Fix:        1. `nsMetrics(month)` and `rtMetrics(month)` scope and cache per
+               month, and the dispatcher passes `filter.month` through. Research
+               Twin scopes cards by `created_at` and then keeps the attempts
+               belonging to those cards, because the strip prints "cards" and
+               "attempt rows" side by side and they have to count the same set;
+               an attempt with no `card_id` belongs to no card and is left out
+               rather than matched against a null. Verified against the rig:
+               ns 18→6 rows, 15→5 classified; rt 10→4 cards, 15→6 rows.
+            2. `^BP-([A-Z0-9]+)-\d+(?:-(.+))?$`. The system comes off the second
+               segment either way; the slug is only what the keywords come from.
+            3. `ZoomChoice` is `'75' | '80' | '90' | '100'` — the percentage as
+               the control shows it, converted where it is applied, so there is
+               one representation rather than two to keep in step.
+            The zoom itself is `document.documentElement.style.zoom`, not a
+            transform: `zoom` reflows, so the page genuinely gets more CSS
+            pixels and the breakpoints, the sticky header and the tables behave
+            as they would on a bigger screen. 100% is written as the empty
+            string so the property comes off entirely.
+            Sidebar: nav rows 38px→32px, radius 12→10, font 13.5→13, group gap
+            mt-5→mt-3, item gap 2px→1px, header a little tighter. Measured at
+            1440×1000, ×860 and ×760: does not scroll at any of them, fifteen
+            items each time.
+            North Star and Research Twin: the cards split out into `NsStatTiles`
+            and `RtStatTiles`, passed to `RecordStatistics` as `extraTiles`, with
+            the two bespoke ring cards rebuilt as `MetricCard`s so the grid reads
+            as one set. Both pages gained a month picker left of the search box,
+            month-scoped filter counts, and a resync button.
+            Build patterns: a fourth strip figure (systems covered) and a system
+            column, and the two widest columns brought in, so the table is tight
+            like Commercial's rather than stretched across five.
+Decision:   **The resync widens what the Airtable token must read**, from five
+            bases to seven. Nothing is written to the two new ones, so they get
+            no base variable — this server cannot write to a guess about them —
+            and .env.example, render.yaml and CLAUDE.md all name them. Without
+            read access the resync refuses and names the table; it never reads a
+            refusal as an emptied table.
+            80% is the default rather than an opt-in, because Destiny asked for
+            it to be what loads. The Settings note says it multiplies with the
+            browser's zoom, which is the one thing that surprises people.
+            The sidebar keeps `overflow-y-auto` underneath the new sizing. It
+            will not scroll on any realistic screen, and if the list ever
+            outgrows the shortest one, degrading to a scroll beats clipping an
+            item out of sight.
+Verified:   Every page at 1440×900: no sidebar scroll, no body sideways scroll,
+            and no table sideways scroll anywhere — at 80% the layout has 1800
+            CSS pixels, so even Commercial and Open loops fit. `POST /api/ns/resync`
+            and `/api/rt/resync` both answer and refuse cleanly with no token
+            ("AIRTABLE_TOKEN is not set on this server, so nothing was read and
+            nothing was changed"). Build patterns headers read pattern id /
+            pattern / reusability / system / created / source. No page errors.

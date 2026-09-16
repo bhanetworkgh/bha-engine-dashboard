@@ -1,6 +1,7 @@
 import { useSession } from '../app/session';
 import { useData } from '../app/useData';
 import { useTheme, type ThemeChoice } from '../app/theme';
+import { useZoom, ZOOMS, type ZoomChoice } from '../app/zoom';
 import { getServerStatus, TEAM_EMAIL } from '../data';
 import { Card, Icon, PageHeader, Segmented } from '../components/ui';
 
@@ -17,6 +18,7 @@ function Row({ label, value, tone = 'default' }: { label: string; value: React.R
 export default function Settings() {
   const { session, signOut } = useSession();
   const { choice, setChoice } = useTheme();
+  const { zoom, setZoom } = useZoom();
   const server = useData(() => getServerStatus());
   const expires = session?.expires_at ? new Date(session.expires_at).toLocaleString() : 'unknown';
   const s = server.data;
@@ -40,6 +42,25 @@ export default function Settings() {
               ariaLabel="Theme"
             />
           </div>
+          {/*
+            Interface size (2026-09-16, Destiny). It opens at 80% because that
+            is where this dashboard reads best — more of a table on screen, the
+            sidebar whole, cards in three columns. The note says the one thing
+            that surprises people: this multiplies with the browser's own zoom.
+          */}
+          <div className="mt-4 flex items-center justify-between gap-4">
+            <span className="text-[13.5px]">Interface size</span>
+            <Segmented<ZoomChoice>
+              value={zoom}
+              onChange={setZoom}
+              options={ZOOMS.map((z) => ({ value: z, label: `${z}%` }))}
+              ariaLabel="Interface size"
+            />
+          </div>
+          <p className="mt-2 text-[11.5px] leading-snug text-faint">
+            This is the dashboard's own scale and it multiplies with the browser's zoom, so a browser already at 80% lands at 64%.
+            Set the browser back to 100% and leave this at 80%.
+          </p>
         </Card>
 
         <Card className="p-5">

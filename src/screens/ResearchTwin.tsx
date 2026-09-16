@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { getRecordMetrics, getRtTelemetry, type RtCard, type RtMetrics } from '../data';
+import { getRecordMetrics, getRtTelemetry, resyncRecords, type RtCard, type RtMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
@@ -21,6 +21,9 @@ import {
   Ring,
   RowAction,
   RowActions,
+  MonthPicker,
+  monthsFrom,
+  ResyncButton,
   SearchBox,
   Segmented,
   SeriesBlock,
@@ -28,7 +31,11 @@ import {
   StatCell,
   StatStrip,
   RowsLine,
+  thisMonth,
+  Toast,
   usePaged,
+  useResync,
+  useToast,
 } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 
@@ -76,11 +83,6 @@ function RtMetricsPanel({ metrics, loading, error }: { metrics: RtMetrics | null
     );
   }
   const m = metrics;
-  const maxStatus = Math.max(1, ...m.by_status.map((s) => s.n));
-  const maxStuck = Math.max(1, ...m.days_stuck.map((s) => s.n));
-  const maxRun = Math.max(1, ...m.run_count_mix.map((r) => r.n));
-  const maxGap = Math.max(1, ...m.gap_mix.map((g) => g.n));
-
   return (
     <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
       <StatStrip cols={4}>
@@ -102,39 +104,77 @@ function RtMetricsPanel({ metrics, loading, error }: { metrics: RtMetrics | null
         </StatCell>
       </StatStrip>
 
-      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-        <div className="card flex h-full flex-col justify-between px-5 py-4">
-          <div className="flex items-center gap-5">
-            <Ring value={m.requires_human.n} total={m.scope.cards} size={88} tone={m.requires_human.n ? 'degraded' : 'accent'} label="need a human" />
-            <div className="min-w-0">
-              <div className="kicker">At the hard stop</div>
-              <div className="mt-1 flex items-baseline gap-2">
-                <span className="font-display tabular text-[32px] leading-none text-ink">
-                  <CountUp value={m.requires_human.n} />
-                </span>
-                <span className="text-[14px] text-faint">of {m.scope.cards}</span>
-              </div>
-              <div className="mt-1.5 text-[11.5px] leading-snug text-faint">{m.requires_human.note}</div>
+      {/*
+        Two cards, and confidence leads (2026-09-16, Destiny). Everything else
+        that stood here — the hard-stop ring, queue depth by status, days
+        stuck, attempts per card and what kind of stuck — is telemetry, which
+        is a month-against-month question, so it is on the statistics tab in the
+        tiles every record page uses. This is the working surface: what the
+        queue holds and how fast it is filling.
+      */}
+      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-2">
+        <MetricCard title="Confidence" note="confidence_level as set on each card's newest attempt.">
+          {m.confidence_mix.length === 0 ? (
+            <EmptyPanel>No card records a confidence level.</EmptyPanel>
+          ) : (
+            <div className="space-y-2">
+              {m.confidence_mix.map((c) => (
+                <HBar
+                  key={c.level}
+                  label={c.level}
+                  value={c.n}
+                  max={Math.max(1, ...m.confidence_mix.map((x) => x.n))}
+                  tone={c.level === 'low' ? 'degraded' : 'ink'}
+                  valueNode={<CountUp value={c.n} />}
+                />
+              ))}
+            </div>
+          )}
+        </MetricCard>
+        <MetricCard title="Cards created per week">
+          <SeriesBlock title="" series={m.created_per_week} tone="accent" total bare />
+        </MetricCard>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Research Twin's telemetry, as statistics tiles (2026-09-16, Destiny).
+ *
+ * The same cards, in the grid the statistics tab already draws. They are
+ * `MetricCard`s so the grid reads as one set of tiles; the hard-stop card was a
+ * bespoke `.card` with a ring in it and is one now too.
+ */
+export function RtStatTiles({ m }: { m: RtMetrics | null }) {
+  if (!m) return null;
+  const maxStatus = Math.max(1, ...m.by_status.map((s) => s.n));
+  const maxStuck = Math.max(1, ...m.days_stuck.map((s) => s.n));
+  const maxRun = Math.max(1, ...m.run_count_mix.map((r) => r.n));
+  const maxGap = Math.max(1, ...m.gap_mix.map((g) => g.n));
+  return (
+    <>
+      <MetricCard title="At the hard stop" note={m.requires_human.note}>
+        <div className="flex items-center gap-5">
+          <Ring value={m.requires_human.n} total={m.scope.cards} size={88} tone={m.requires_human.n ? 'degraded' : 'accent'} label="need a human" />
+          <div className="min-w-0">
+            <div className="flex items-baseline gap-2">
+              <span className="font-display tabular text-[32px] leading-none text-ink">
+                <CountUp value={m.requires_human.n} />
+              </span>
+              <span className="text-[14px] text-faint">of {m.scope.cards}</span>
+            </div>
+            {/*
+              How much of the queue is still moving on its own. The hard stop
+              and the untriaged pile are the two ways a card stops moving, and
+              neither is stated anywhere else as a share of the whole.
+            */}
+            <div className="mt-2 text-[11.5px] leading-snug text-faint">
+              {m.scope.cards - m.requires_human.n - m.untriaged.n} of {m.scope.cards} still moving on their own. {m.untriaged.note}
             </div>
           </div>
-          {/*
-            How much of the queue is still moving on its own. The hard stop and
-            the untriaged pile are the two ways a card stops moving, and neither
-            is stated anywhere else on the page as a share of the whole.
-          */}
-          <div className="mt-4 space-y-2 border-t border-line pt-3">
-            <HBar
-              label="Still moving on its own"
-              value={m.scope.cards - m.requires_human.n - m.untriaged.n}
-              max={Math.max(1, m.scope.cards)}
-              tone="accent"
-              valueNode={<CountUp value={m.scope.cards - m.requires_human.n - m.untriaged.n} />}
-              right={<span className="text-faint">of {m.scope.cards}</span>}
-            />
-            <div className="text-[11.5px] leading-snug text-faint">{m.untriaged.note}</div>
-          </div>
         </div>
-
+      </MetricCard>
         <MetricCard title="Queue depth by status" note={m.status_note}>
           {m.by_status.length === 0 ? (
             <EmptyPanel>The queue is empty.</EmptyPanel>
@@ -154,9 +194,6 @@ function RtMetricsPanel({ metrics, loading, error }: { metrics: RtMetrics | null
             </div>
           )}
         </MetricCard>
-      </div>
-
-      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-3">
         <MetricCard title="Days stuck" note={m.days_stuck_note}>
           {m.days_stuck.every((b) => b.n === 0) ? (
             <EmptyPanel>No card carries a first_stuck_at, so nothing has been recorded as stuck.</EmptyPanel>
@@ -192,32 +229,7 @@ function RtMetricsPanel({ metrics, loading, error }: { metrics: RtMetrics | null
             </div>
           )}
         </MetricCard>
-      </div>
-
-      <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-2">
-        <MetricCard title="Cards created per week">
-          <SeriesBlock title="" series={m.created_per_week} tone="accent" total bare />
-        </MetricCard>
-        <MetricCard title="Confidence" note="confidence_level as set on each card's newest attempt.">
-          {m.confidence_mix.length === 0 ? (
-            <EmptyPanel>No card records a confidence level.</EmptyPanel>
-          ) : (
-            <div className="space-y-2">
-              {m.confidence_mix.map((c) => (
-                <HBar
-                  key={c.level}
-                  label={c.level}
-                  value={c.n}
-                  max={Math.max(1, ...m.confidence_mix.map((x) => x.n))}
-                  tone={c.level === 'low' ? 'degraded' : 'ink'}
-                  valueNode={<CountUp value={c.n} />}
-                />
-              ))}
-            </div>
-          )}
-        </MetricCard>
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -380,14 +392,33 @@ export default function ResearchTwin() {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [view, setView] = useState<View>('Queue');
-  const [month, setMonth] = useState<string | null>(null);
-  const metrics = useData(() => getRecordMetrics('rt', { lane: 'all' }), []);
+  /** One month, chosen beside the search box, shared with the statistics tab. */
+  const [month, setMonth] = useState<string | null>(thisMonth());
+  const [tick, setTick] = useState(0);
+  const [held, setHeld] = useState<RtCard[]>([]);
+  const { toast, setToast } = useToast();
+  const metrics = useData(() => getRecordMetrics('rt', { lane: 'all' }, null, month), [month, tick]);
 
-  const cards = loaded?.cards ?? [];
-  const statuses = useMemo(() => [...new Set(cards.map((c) => c.status).filter((v): v is string => Boolean(v)))].sort(), [cards]);
+  useEffect(() => {
+    if (loaded) setHeld(loaded.cards);
+  }, [loaded]);
+
+  const resync = useResync({
+    run: () => resyncRecords('rt'),
+    reload: async () => {
+      setTick((n) => n + 1);
+      setHeld((await getRtTelemetry()).cards);
+    },
+    setToast,
+  });
+
+  const cards = held;
+  const months = useMemo(() => monthsFrom(cards.map((c) => c.created_at)), [cards]);
+  const inMonth = useMemo(() => cards.filter((c) => !month || c.created_at?.slice(0, 7) === month), [cards, month]);
+  const statuses = useMemo(() => [...new Set(inMonth.map((c) => c.status).filter((v): v is string => Boolean(v)))].sort(), [inMonth]);
   const rows = useMemo(
     () =>
-      cards
+      inMonth
         .filter((c) =>
           filter === 'all'
             ? true
@@ -402,22 +433,28 @@ export default function ResearchTwin() {
         .filter((c) => matches(c, q.trim()))
         // Newest first by last attempt; a card needing a human sorts above the rest.
         .sort((a, b) => Number(b.requires_human) - Number(a.requires_human) || (b.last_attempt_at ?? '').localeCompare(a.last_attempt_at ?? '')),
-    [cards, filter, q],
+    [inMonth, filter, q],
   );
-  const paged = usePaged(rows, `${filter}|${q.trim()}`);
+  const paged = usePaged(rows, `${filter}|${q.trim()}|${month ?? 'all'}`);
 
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
   const current = open ? cards.find((c) => c.card_id === open) : null;
+  // The filter counts follow the month, the same way every other page's do.
   const counts = {
-    all: cards.length,
-    'needs-human': cards.filter((c) => c.requires_human).length,
-    stuck: cards.filter((c) => c.days_stuck !== null).length,
-    untriaged: cards.filter((c) => !c.status).length,
+    all: inMonth.length,
+    'needs-human': inMonth.filter((c) => c.requires_human).length,
+    stuck: inMonth.filter((c) => c.days_stuck !== null).length,
+    untriaged: inMonth.filter((c) => !c.status).length,
   };
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      <PageHeader title="Research Twin" subtitle="The research queue, and what is waiting on a person" below={<Tabs tabs={VIEWS} value={view} onChange={setView} />} />
+      <PageHeader
+        title="Research Twin"
+        subtitle="The research queue, and what is waiting on a person"
+        right={<ResyncButton busy={resync.busy} onClick={resync.start} />}
+        below={<Tabs tabs={VIEWS} value={view} onChange={setView} />}
+      />
 
       {view === 'Statistics' ? (
         <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-4">
@@ -429,6 +466,7 @@ export default function ResearchTwin() {
             onMonth={setMonth}
             rows={cards}
             dateOf={(c) => c.created_at}
+            extraTiles={<RtStatTiles m={metrics.data} />}
             columns={[
               { header: 'card_id', value: (c) => c.card_id },
               { header: 'airtable_record_id', value: (c) => c.airtable.record_id },
@@ -454,7 +492,13 @@ export default function ResearchTwin() {
 
         <RtMetricsPanel metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
 
+        {/*
+          One row, like every other record page: the filter on the left, the
+          month and the search on the right. Two rows with an empty left half
+          is what was left when the shape note came off.
+        */}
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-2">
           <Segmented<Filter>
             ariaLabel="Filter cards"
             value={filter}
@@ -467,11 +511,17 @@ export default function ResearchTwin() {
               { value: 'all', label: 'All', count: counts.all },
             ]}
           />
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[11.5px] leading-snug text-faint">{loaded.shape.note}</span>
-            <div className="flex flex-1 items-center justify-end gap-3">
-              <SearchBox value={q} onChange={setQ} placeholder="Search cards, hypotheses and gaps" />
-            </div>
+          {/*
+            The shape note came off (2026-09-16, Destiny) — "the research queue
+            holds 212 rows across 36 distinct card_ids". It is true and it is a
+            caveat about the corpus, not about anything a reader is doing here;
+            the strip above already prints both figures side by side, and the
+            export still carries the sentence, which is where it matters.
+          */}
+          <div className="flex flex-1 items-center justify-end gap-3">
+            <MonthPicker months={months} value={month} onChange={setMonth} />
+            <SearchBox value={q} onChange={setQ} placeholder="Search cards, hypotheses and gaps" />
+          </div>
           </div>
         </div>
 
@@ -499,6 +549,7 @@ export default function ResearchTwin() {
       )}
 
       {current && <CardView c={current} onClose={() => setOpen(null)} />}
+      <Toast toast={toast} />
     </div>
   );
 }
