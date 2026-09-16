@@ -9,6 +9,8 @@ import { ageTone, healthText, laneLabel } from '../lib';
 const TILE_META: Record<string, { icon: IconName; tint: string }> = {
   'north-star': { icon: 'star', tint: 'tile-indigo' },
   'research-twin': { icon: 'twin', tint: 'tile-purple' },
+  'media-twin': { icon: 'tag', tint: 'tile-pink' },
+  genie: { icon: 'sparkle', tint: 'tile-purple' },
   vfarm: { icon: 'leaf', tint: 'tile-green' },
   'engine-health': { icon: 'pulse', tint: 'tile-red' },
   'open-loops': { icon: 'loop', tint: 'tile-teal' },

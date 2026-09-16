@@ -18,10 +18,17 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
     items: [
       { to: '/north-star', label: 'North Star', icon: 'star' },
       { to: '/research-twin', label: 'Research Twin', icon: 'twin' },
+      // Media Twin and Genie are systems in the engine and belong in this group
+      // (2026-09-16, Destiny). Neither writes a row here yet, so both are the
+      // same plain "coming soon" vFarm is, rather than a page of fixtures.
+      { to: '/media-twin', label: 'Media Twin', icon: 'tag' },
+      { to: '/genie', label: 'Genie', icon: 'sparkle' },
       { to: '/vfarm', label: 'vFarm', icon: 'leaf' },
       // No red count beside this one any more (2026-09-14, Destiny). The page
       // is a placeholder and the badge was counting phase 1 fixtures, so it was
-      // a red number about nothing.
+      // a red number about nothing. The execution roll-up it carried came off
+      // on 16 Sep: the Executions page already answers that question, and two
+      // drawings of the same counts drift.
       { to: '/engine-health', label: 'Engine health', icon: 'pulse' },
     ],
   },
