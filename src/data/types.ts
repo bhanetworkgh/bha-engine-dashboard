@@ -1818,6 +1818,12 @@ export interface ExecutionSystem extends ExecutionTotals {
   /** What the page calls it — "North Star", not "North Star Twin". */
   label: string;
   periods: ExecutionPeriod[];
+  /**
+   * The weeks inside the period in view, tallied from the same day rows as the
+   * period's own totals — so a month and the weeks drawn under it cannot
+   * disagree. The first and last are cut to the period.
+   */
+  weeks: ExecutionPeriod[];
   /** The period in view, which every figure on the page follows. */
   period: ExecutionPeriod;
   workflows: ExecutionWorkflow[];

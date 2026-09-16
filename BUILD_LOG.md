@@ -5240,3 +5240,83 @@ Verified:   The rig. All fourteen routes opened after the split and every one
             closed | Save"; the statistics grid is nine tiles. Codex's picker
             reads "All time" too. The loading mark was captured by holding the
             data request open, and renders with no white tile behind it.
+
+## 2026-09-16 10:35 — The wash reaches the top, the loop page reorders, Executions goes monthly
+
+Intent:     Destiny's round. The colour wash still was not reaching the top.
+            Bigger, more obvious loading pulse, centred properly on a tab
+            switch. Open loops: builder tabs above the status filter with the
+            month beside them, and the statistics tab cut to five figures.
+            Remove the panel's "Mark as closed". And the same monthly treatment
+            for Executions.
+Files:      src/index.css, src/components/ui/{Loading,MonthPicker}.tsx,
+            src/screens/OpenLoops/{index,Metrics,LoopPanel}.tsx,
+            src/screens/Executions/index.tsx, server/src/executions.ts,
+            server/src/stats.ts, src/data/types.ts, CLAUDE.md
+
+Problem:    **The wash was never going to reach the top, and moving the
+            gradients could not fix it.** `.frost-bar` — the 84px header band —
+            fills with `--frost-bar`, which was `rgba(245,245,247,0.72)`: 72%
+            opaque page grey laid over the wash. Whatever the gradients behind
+            it did, the top 84px was three-quarters flat grey.
+Fix:        The fill drops to 0.22 (0.24 in dark). The blur and the mask are
+            what stop scrolled content reading through the bar; the fill only
+            has to take the edge off. Diagnosed this time rather than nudged —
+            the last two attempts moved the gradients, which was the wrong
+            layer.
+
+Problem:    The loading mark reused Ask Bays' `idle-breath`, a six-second calm
+            that says "waiting for you" rather than "working".
+Fix:        Its own `loading-pulse`: 1.5s, opacity 0.32 → 1, scale 0.94 → 1.06.
+            The mark goes from 28 to 36.
+Problem:    On a tab switch it sat under the tab row rather than centred below
+            it. `flex-1` does nothing when the parent is not a flex column, and
+            a tab body is not always one.
+Fix:        `min-h-[55vh]` gives it real height to centre inside whatever it is
+            dropped into.
+
+Decision:   Open loops' rows reorder to the Codex page's shape: the all-time
+            status strip, the two comparison cards, then **builder tables and
+            the month on one row**, then **status and search on the next**.
+Decision:   **"Mark as closed" comes off the loop panel entirely.** The Status
+            control in the panel already closes a loop, so the button was a
+            second way to make the same write — and the ambiguous one. Removing
+            it loses nothing: CLAUDE.md §7's "close a loop directly from the
+            interface" is the dropdown.
+Decision:   The four weekly series come off the statistics tab, as asked, and
+            `LoopSeriesTiles` is deleted rather than left unread. Five figures
+            would leave a gap in a three-column grid, so a sixth was added:
+            **Longest still open**. It is not filler — an average age hides its
+            own tail, and the oldest loop still open from a month is the one
+            somebody has to go and deal with. Cohort state, aged from Date
+            Raised, no new field.
+
+Decision:   **Executions goes to one month at a time** (CLAUDE.md §7 updated).
+            The week / month / year control asked a question the tabs already
+            answer differently. **The rows are untouched** — one per execution,
+            a grain is only a `GROUP BY` — so the arithmetic is the same and the
+            other two grains stay reachable by query string. Recorded in
+            CLAUDE.md rather than left to drift from it.
+Fix:        Six tiles in the same cards the statistics tabs use: executions,
+            succeeded, failed, failure rate, average time, **workflows run**.
+            The card carrying the period in words is gone, as asked; the change
+            against last month is still on every tile that has one.
+Fix:        New `weeks` on `ExecutionSystem`: the weeks inside the period in
+            view, **tallied from the same day rows as the month's own totals**,
+            so a month and the weeks drawn under it cannot disagree. The first
+            and last are cut to the month.
+Problem:    Weeks that had not started yet were drawn hatched and marked "part",
+            which says the days were only partly recorded. They have not
+            happened.
+Fix:        A week starting after today is not emitted at all.
+Problem:    The month picker offered "All time" on Executions, where selecting
+            it quietly means "the current month" — a lie in a dropdown.
+Fix:        `allowAll` on `MonthPicker`, false there.
+
+Verified:   The rig, with 330 seeded executions across two months on five
+            workflows. Open loops reads in the new order; the panel's buttons
+            are "Open in Airtable | Close panel | Save"; the statistics grid is
+            six tiles. Executions shows the month picker with "Sep 2026 · 144 /
+            Aug 2026 · 186" and no All time, six tiles, the weekly chart inside
+            September with no future columns, and the per-workflow table under
+            it. No page errors on either page.

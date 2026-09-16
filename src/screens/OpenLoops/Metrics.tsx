@@ -1,6 +1,6 @@
 import type { LoopMetrics } from '../../data';
 import { BUILDER_NAMES } from '../../data';
-import { CountCell, CountUp, EmptyPanel, HBar, MetricCard, SeriesBlock, StatCell, StatStrip } from '../../components/ui';
+import { CountCell, CountUp, EmptyPanel, HBar, MetricCard, StatCell, StatStrip } from '../../components/ui';
 
 /**
  * The figures across the top of Open loops. Three counts, then close rate and
@@ -50,48 +50,15 @@ export function LoopStatusStrip({ metrics, view, loading }: { metrics: LoopMetri
   );
 }
 
-/**
- * The four weekly series, as tiles for the statistics grid (2026-09-16,
- * Destiny).
- *
- * They moved here with everything else month-shaped, and then moved *into* the
- * grid rather than sitting in a row of their own: four wide charts under five
- * narrow figures read as two different pages stacked. They are `MetricCard`s
- * like every other tile, they go in the same three-column grid, and with the
- * five computed figures they make it exactly nine.
- *
- * This is the one set of figures on the tab that is **not** scoped to the month
- * in view. They are an eight-week strip by design, which is what makes them
- * worth having beside a month's totals rather than a repeat of them, and each
- * card's own footnote says what it counts.
+/*
+ * `LoopSeriesTiles` — raised per week, closed per week, net raised vs closed
+ * and closed per day — stood here until 16 Sep 2026, when Destiny cut the
+ * statistics tab to the five figures that answer the month: raised, closed,
+ * close rate, average time to close and average age still open. Four weekly
+ * charts among them were a second question in the same grid. Deleted rather
+ * than left unread; they are in git history, and the series they drew are
+ * still computed in `loopMetricsFor`.
  */
-export function LoopSeriesTiles({ metrics, view }: { metrics: LoopMetrics | null; view: string }) {
-  if (!metrics) return null;
-  const m = metrics;
-  return (
-    <>
-      {[
-        { title: 'Raised per week', series: m.raised_per_week },
-        { title: 'Closed per week', series: m.closed_per_week },
-        { title: 'Net raised vs closed', series: m.net_per_week },
-        { title: 'Closed per day', series: m.closed_per_day },
-      ].map((c) => (
-        <MetricCard
-          key={c.title}
-          title={c.title}
-          right="last eight weeks"
-          align="top"
-          // With no points the reason *is* the body — SeriesBlock prints it in
-          // place of the chart — so it is not also the footnote.
-          note={c.series.points ? c.series.note : undefined}
-          noteMinLines={4}
-        >
-          <SeriesBlock title="" series={c.series} tone="accent" total replayKey={view} bare layout="spread" footnote={false} />
-        </MetricCard>
-      ))}
-    </>
-  );
-}
 
 export function LoopMetricsPanel({ metrics, loading, switching, error, view }: { metrics: LoopMetrics | null; loading: boolean; switching: boolean; error: string | null; view: string }) {
   if (error) return <div className="card mx-6 mb-4 px-5 py-4 text-[12.5px] text-failing md:mx-8">Figures unavailable: {error}</div>;

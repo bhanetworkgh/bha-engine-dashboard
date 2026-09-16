@@ -3,9 +3,13 @@
  *
  * It was a grey dot and the word "Loading" in the top-left corner, which on a
  * page that takes a second to answer reads as an empty page with a speck on it
- * (2026-09-16, Destiny). It is now the BHA mark, centred and breathing, the
- * same idle animation Ask Bays uses on its empty state — so the two places the
- * dashboard waits for something look like the same product.
+ * (2026-09-16, Destiny). It is the BHA mark now, pulsing.
+ *
+ * **It fills its own container rather than sitting at the top of it.** A tab
+ * switch renders this inside the tab body, which is not always a flex column,
+ * so `flex-1` alone left the mark stuck under the tab row instead of centred in
+ * the space below it. `min-h` gives it real height to centre inside whatever it
+ * is dropped into.
  *
  * `logo-mark.svg` is `logo.svg` with its white background square removed, so
  * the mark sits on the page wash rather than in a white tile. The sidebar and
@@ -13,8 +17,8 @@
  */
 export function Loading({ label = 'Loading' }: { label?: string }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-16" role="status" aria-live="polite">
-      <img src="/logo-mark.svg" alt="" className="mark-plain idle-mark h-28 w-28" />
+    <div className="flex min-h-[55vh] w-full flex-1 flex-col items-center justify-center gap-4 px-6" role="status" aria-live="polite">
+      <img src="/logo-mark.svg" alt="" className="mark-plain loading-mark h-36 w-36" />
       <span className="sr-only">{label}</span>
     </div>
   );

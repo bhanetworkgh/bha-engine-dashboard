@@ -4,7 +4,7 @@ import { BUILDER_NAMES, createLoop, getOpenLoops, getRecordMetrics, removeLoopDu
 import { Icon, LoadFailed, Loading, MonthPicker, monthsFrom, thisMonth, PageHeader, Tabs, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useToast } from '../../components/ui';
 import { LoopPanel } from './LoopPanel';
 import { Loops, type StatusFilter } from './Loops';
-import { LoopMetricsPanel, LoopSeriesTiles, LoopStatusStrip } from './Metrics';
+import { LoopMetricsPanel, LoopStatusStrip } from './Metrics';
 import { NewLoopForm } from './NewLoop';
 import RecordStatistics from '../../components/RecordStatistics';
 
@@ -269,7 +269,6 @@ export default function OpenLoops() {
               { header: 'age_days', value: (l) => l.age_days },
               { header: 'airtable_url', value: (l) => l.airtable.url },
             ]}
-            extraTiles={<LoopSeriesTiles metrics={allBuilders} view={month ?? 'all'} />}
           />
         </div>
       ) : (
@@ -284,27 +283,29 @@ export default function OpenLoops() {
         */}
         <LoopStatusStrip metrics={current} view={owner} loading={metrics.status === 'loading'} />
 
-        {/*
-          One tab per builder table, in the same quiet segmented control the
-          Codex page uses (2026-09-16, Destiny). It was a row of tall tiles with
-          a headline number in each, which is a lot of furniture for a filter.
-        */}
-        <div className="shrink-0 px-6 pb-3 md:px-8">
-          <Segmented
-            ariaLabel="Filter by builder table"
-            value={owner}
-            onChange={setOwner}
-            options={[
-              { value: 'all', label: 'All tables', count: inMonth.length },
-              ...data.by_owner.map((o) => ({ value: o.owner, label: BUILDER_NAMES[o.owner] ?? o.owner, count: ownerCounts[o.owner] ?? 0 })),
-            ]}
-          />
-        </div>
-
         <LoopMetricsPanel metrics={allBuilders} loading={metrics.status === 'loading'} switching={switching} error={metrics.error} view={month ?? 'all'} />
 
 
+        {/*
+          The two filter rows, in the order the Codex page puts them
+          (2026-09-16, Destiny): the builder tables and the month above, the
+          status and the search below. The tall tile strip that used to carry
+          the builders is gone; a headline number per builder was a lot of
+          furniture for a filter.
+        */}
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Segmented
+              ariaLabel="Filter by builder table"
+              value={owner}
+              onChange={setOwner}
+              options={[
+                { value: 'all', label: 'All tables', count: inMonth.length },
+                ...data.by_owner.map((o) => ({ value: o.owner, label: BUILDER_NAMES[o.owner] ?? o.owner, count: ownerCounts[o.owner] ?? 0 })),
+              ]}
+            />
+            <MonthPicker months={months} value={month} onChange={setMonth} counts={monthCounts} />
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Segmented
               ariaLabel="Filter by status"
@@ -317,7 +318,6 @@ export default function OpenLoops() {
               ]}
             />
             <div className="flex flex-1 items-center justify-end gap-3">
-              <MonthPicker months={months} value={month} onChange={setMonth} counts={monthCounts} />
               <SearchBox value={q} onChange={setQ} placeholder="Search by loop id or text" />
             </div>
           </div>

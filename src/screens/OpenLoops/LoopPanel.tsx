@@ -229,23 +229,16 @@ export function LoopPanel({
           </div>
           <div className="flex items-center gap-2">
             {/*
-              **"Close panel" and "Mark as closed" are two different things and
-              the labels now say so** (2026-09-16, Destiny).
-
-              This button used to read "Close loop", which could be read either
-              way — and it is not the harmless one: it writes Status → Closed to
-              this database and then to Airtable. It is renamed rather than
-              repurposed, because the panel is where a loop gets closed and
-              CLAUDE.md §7 asks for exactly that.
+              Closing a loop is the Status control above, and only that
+              (2026-09-16, Destiny). The shortcut button that stood here read
+              "Close loop", which could be read as closing the panel — and it
+              was not the harmless one, it wrote Status → Closed straight
+              through. Two ways to make the same write, one of them ambiguously
+              labelled, is worse than one way that is plain.
             */}
             <button type="button" className="btn btn-ghost" onClick={onClose}>
               Close panel
             </button>
-            {status !== 'closed' && (
-              <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => save({ status: 'closed' })}>
-                Mark as closed
-              </button>
-            )}
             <button type="button" className="btn btn-primary" disabled={busy || !dirty} onClick={() => save()}>
               {busy ? 'Saving…' : moving ? `Move to ${BUILDER_NAMES[builder] ?? builder}` : 'Save'}
             </button>
