@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useData } from '../app/useData';
 import {
   getMonthly,
@@ -10,7 +10,7 @@ import {
   type RecordStats,
   type StatKind,
 } from '../data';
-import { EmptyPanel, Legend, LoadFailed, Loading, MetricCard, MonthChart } from './ui';
+import { EmptyPanel, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, yearOf, yearsOf } from './ui';
 import { csvRow, downloadCsv, toCsv, type CsvColumn } from '../lib/csv';
 
 /**
@@ -253,6 +253,8 @@ export default function RecordStatistics<T>({
   extraTiles?: ReactNode;
 }) {
   const { status, data, error } = useData(() => getRecordStats(kind, month), [kind, month]);
+  const [shape, setShape] = useState<'bars' | 'line'>('bars');
+  const [year, setYear] = useState<number>(() => new Date().getFullYear());
   const monthly = useData(() => (monthlyKind ? getMonthly(monthlyKind) : Promise.resolve(null)), [monthlyKind]);
 
   if (status === 'error') return <LoadFailed error={error} />;
@@ -270,7 +272,9 @@ export default function RecordStatistics<T>({
   // other tab is doing would make the file disagree with the numbers printed
   // beside the button.
   const inMonth = rows.filter((r) => dateOf(r)?.slice(0, 7) === data.selected);
+  const years = yearsOf(monthly.data ?? seriesFrom(data, noun));
   const series = monthly.data ?? seriesFrom(data, noun);
+  const shown = yearOf(series, year);
 
   return (
     <div className="space-y-4 px-6 pb-6 md:px-8">
@@ -281,15 +285,41 @@ export default function RecordStatistics<T>({
         selection and two ways to make it.
       */}
       {series.months.length > 0 && (
-        <MetricCard title="Every month held" note={<Legend series={series} />} align="top">
+        <MetricCard
+          title="Every month held"
+          right={
+            // The year, and how to draw it. Both sit on the card's own header
+            // rather than above it, because they change this chart and nothing
+            // else on the page.
+            <span className="flex items-center gap-2">
+              <span className="seg" role="group" aria-label="Chart shape">
+                <button type="button" aria-pressed={shape === 'bars'} onClick={() => setShape('bars')}>
+                  Bars
+                </button>
+                <button type="button" aria-pressed={shape === 'line'} onClick={() => setShape('line')}>
+                  Line
+                </button>
+              </span>
+              <select className="input h-[26px] w-auto py-0 text-[11.5px]" value={year} onChange={(e) => setYear(Number(e.target.value))} aria-label="Year">
+                {years.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </span>
+          }
+          note={<Legend series={shown} />}
+          align="top"
+        >
           {/*
-            Read-only (2026-09-16, Destiny). It was clickable and it is not any
-            more: the month is chosen in the picker below, and a chart that
-            also changed it gave the page two controls for one selection with
-            nothing saying which you had used. It is here to show the shape of
-            the year.
+            Read-only (2026-09-16, Destiny). The month is chosen in the picker
+            below; a chart that also set it would be two controls for one
+            selection. It is here to show the shape of the year — all twelve
+            months of it, with no bar and a broken line where nothing was
+            recorded.
           */}
-          <MonthChart series={series} selected={data.selected} onSelect={() => {}} fill readOnly />
+          {shape === 'bars' ? <MonthChart series={shown} selected={data.selected} onSelect={() => {}} fill readOnly /> : <LineChart series={shown} />}
         </MetricCard>
       )}
 

@@ -15,15 +15,21 @@ import { CountCell, CountUp, EmptyPanel, HBar, MetricCard, StatCell, StatStrip }
  * and pins its footnote to the floor, so a row of cards lines up.
  */
 /**
- * Where the backlog stands, over every loop held — **never scoped to the month
- * in view** (2026-09-16, Destiny). It sits above the builder tabs, and
- * everything below it follows the month. "How many loops are open" is a
- * question about today; narrowing it to September would answer a different one
- * in the same row.
+ * Where the loops in view stand: open, in progress, closed.
+ *
+ * **It follows the month and the builder, like everything else on the page**
+ * (2026-09-16, Destiny — replacing the all-time strip of earlier the same day).
+ * All-time was defensible on its own but it did not reconcile with anything
+ * around it: 602 open above a statistics tab reporting 627 raised in August
+ * reads as two answers to one question, and a reader cannot tell which is
+ * wrong. Three figures that sum to the month's own total can be checked against
+ * the tabs beside them.
+ *
+ * **The all-time view did not go away** — it is "All time" in the month picker,
+ * which scopes the whole page at once rather than one strip.
  */
 export function LoopStatusStrip({ metrics, view, loading }: { metrics: LoopMetrics | null; view: string; loading?: boolean }) {
-  const t = metrics?.all_time;
-  if (!metrics || !t) {
+  if (!metrics) {
     return (
       <StatStrip cols={3} className="opacity-60">
         {['Open', 'In progress', 'Closed'].map((l) => (
@@ -35,17 +41,22 @@ export function LoopStatusStrip({ metrics, view, loading }: { metrics: LoopMetri
       </StatStrip>
     );
   }
+  const total = metrics.open + metrics.in_progress + metrics.closed;
   return (
     <StatStrip cols={3}>
       <CountCell
         label="Open"
-        value={t.open}
+        value={metrics.open}
         tone="accent"
         replayKey={view}
-        hint={metrics.scope.builder ? `In ${BUILDER_NAMES[metrics.scope.builder] ?? metrics.scope.builder}’s table, all time` : `Across all ${t.rows} loops in seven tables, all time`}
+        hint={
+          metrics.scope.builder
+            ? `Of the ${total} in ${BUILDER_NAMES[metrics.scope.builder] ?? metrics.scope.builder}’s table`
+            : `Of the ${total} in view. Open + in progress + closed = ${total}.`
+        }
       />
-      <CountCell label="In progress" value={t.in_progress} replayKey={view} />
-      <CountCell label="Closed" value={t.closed} tone="dim" replayKey={view} />
+      <CountCell label="In progress" value={metrics.in_progress} replayKey={view} />
+      <CountCell label="Closed" value={metrics.closed} tone="dim" replayKey={view} />
     </StatStrip>
   );
 }

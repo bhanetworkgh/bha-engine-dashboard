@@ -1672,7 +1672,7 @@ function reasonsOf(blocked: { label: string; reason: string }[], total = blocked
  * Manual only — not on load, not on a schedule — because it reads every field
  * of every row and it deletes.
  */
-export type ResyncKind = 'patterns' | 'commercial' | 'clients';
+export type ResyncKind = 'patterns' | 'commercial' | 'clients' | 'loops';
 
 interface ResyncSource {
   base: string;
@@ -1694,7 +1694,10 @@ const SWEEP_BUDGET_MS = 120_000;
 
 /** Which mirror table a kind's rows live in, and whether the sweep is scoped to one Airtable table. */
 function sweepScope(source: ResyncSource): { table: string; perTable: boolean } {
-  return { table: mirror.KINDS[source.kind].table, perTable: source.kind === 'client_questions' };
+  // Loops and client questions both live one Airtable table per row-group — a
+  // builder's table, a lane's questions — so a sweep of one must only compare
+  // against, and only delete from, the rows that came out of that table.
+  return { table: mirror.KINDS[source.kind].table, perTable: source.kind === 'client_questions' || source.kind === 'loops' };
 }
 
 /**
@@ -1748,6 +1751,16 @@ async function uiWritten(source: ResyncSource): Promise<Map<string, string | nul
 
 /** Where each kind reads from. Clients is the only one that learns its tables while it runs. */
 function firstSources(kind: ResyncKind): ResyncSource[] {
+  /**
+   * Loops are seven tables, one per builder, and every one is swept
+   * (2026-09-16, Destiny). The page had no resync at all, so a loop closed or
+   * raised in Airtable by hand never reached this database and the two drifted
+   * quietly — the same fault the other four pages got a button for on 14 and
+   * 15 Sep. The base comes from `AIRTABLE_OPEN_LOOPS_BASE_ID`, never from a
+   * default: a guess about which base holds real loops is the one thing that
+   * must not be guessed.
+   */
+  if (kind === 'loops') return LOOP_TABLES.map((t) => ({ base: airtable.loopsBase(), table: t.table, label: `${t.label} loops`, kind: 'loops' as const }));
   if (kind === 'patterns') return [{ base: PATTERNS.base, table: PATTERNS.table, label: PATTERNS.label, kind: 'patterns' }];
   if (kind === 'commercial') return [{ base: COMMERCIAL.base, table: COMMERCIAL.table, label: COMMERCIAL.label, kind: 'commercial' }];
   return [{ base: CLIENTS_INDEX.base, table: CLIENTS_INDEX.table, label: CLIENTS_INDEX.label, kind: 'client_lanes' }];
@@ -2334,10 +2347,11 @@ function loopMetricsFor(all: Loop[], builder: string | null, historySince: strin
  * `Date Raised` — the same field the statistics tab groups by, so the two
  * cannot disagree about which loops belong to September.
  *
- * **The all-time status counts are computed separately and are never scoped.**
- * Open, in progress and closed describe where the whole backlog stands right
- * now; narrowing them to a month would answer a different question and lose the
- * one the top of the page exists to answer.
+ * Everything follows the month, the status counts included (2026-09-16,
+ * Destiny — replacing the all-time strip of earlier the same day). All-time was
+ * defensible alone but did not reconcile with the statistics tab beside it, and
+ * two answers to one question is worse than one narrower answer. All time is
+ * reached by choosing it in the month picker, which scopes the whole page.
  */
 export async function loopMetrics(builder: string | null, month?: string | null): Promise<LoopMetrics> {
   const key = `loops:${builder ?? '*'}:${month ?? '*'}`;
@@ -2348,26 +2362,15 @@ export async function loopMetrics(builder: string | null, month?: string | null)
   const all = everything.filter(inMonth);
   const historySince = await getMeta('history_since');
   const closes = await loopCloseEvents();
-  // Where the backlog stands, over every loop held, whatever month is in view.
-  const lifetime = (rows: Loop[]) => ({
-    open: rows.filter((l) => l.status === 'open').length,
-    in_progress: rows.filter((l) => l.status === 'in progress').length,
-    closed: rows.filter((l) => l.status === 'closed').length,
-    rows: rows.length,
-  });
   const value: LoopMetrics = builder
-    ? {
-        ...loopMetricsFor(all.filter((l) => l.owner === builder), builder, historySince, closes),
-        all_time: lifetime(everything.filter((l) => l.owner === builder)),
-      }
+    ? loopMetricsFor(all.filter((l) => l.owner === builder), builder, historySince, closes)
     : {
         ...loopMetricsFor(all, null, historySince, closes),
-        all_time: lifetime(everything),
         // One pass per builder, computed here once and cached, so a tab change on the page needs no request.
         by_builder: Object.fromEntries(
           LOOP_TABLES.filter((t) => everything.some((l) => l.owner === t.owner)).map((t) => [
             t.owner,
-            { ...loopMetricsFor(all.filter((l) => l.owner === t.owner), t.owner, historySince, closes), all_time: lifetime(everything.filter((l) => l.owner === t.owner)) },
+            loopMetricsFor(all.filter((l) => l.owner === t.owner), t.owner, historySince, closes),
           ]),
         ),
       };
