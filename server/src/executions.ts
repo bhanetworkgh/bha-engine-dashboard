@@ -743,6 +743,55 @@ export async function read(grain: ExecutionGrain = 'week', wanted?: string): Pro
     const period = built.find((p) => p.key === selected.key) ?? built[built.length - 1];
     const t = figures(tallyDays(system, selected.start, selected.end));
 
+    /**
+     * The weeks inside the period in view (2026-09-16, Destiny).
+     *
+     * The page shows one month at a time now, and the chart under its figures
+     * shows that month's weeks. They are tallied from the **same day rows** as
+     * the month's own totals, so a month and the weeks drawn under it cannot
+     * disagree — the rule the whole file is built on.
+     *
+     * A week is cut to the period at both ends, so the first and last are
+     * however many days of them fall inside the month rather than a full seven
+     * counted from outside it.
+     */
+    const weeks: ExecutionPeriod[] = [];
+    for (let cursor = selected.start; cursor <= selected.end; ) {
+      const wb = boundsOf('week', cursor);
+      // A week that has not started is not drawn at all. Hatching it as
+      // "partly covered" said the days were only partly recorded; they have
+      // not happened, which is a different thing and not worth a column.
+      if (wb.start > today) break;
+      const from = wb.start < selected.start ? selected.start : wb.start;
+      const to = wb.end > selected.end ? selected.end : wb.end;
+      const wf = figures(tallyDays(system, from, to));
+      let coverage: MonthCoverage = 'full';
+      let note: string | null = null;
+      if (!h.oldest || to < h.oldest) {
+        coverage = 'none';
+        note = h.oldest
+          ? `This database holds no execution before ${h.oldest}, so there is no figure for these days rather than a figure of nought.`
+          : 'Nothing has been read from n8n yet.';
+      } else if (from < h.oldest) {
+        coverage = 'partial';
+        note = `Only the part of this week from ${h.oldest}, which is as far back as this database goes.`;
+      } else if (to >= today) {
+        coverage = 'partial';
+        note = 'These days are still running.';
+      }
+      weeks.push({
+        key: from,
+        label: `${Number(from.slice(8))}–${Number(to.slice(8))}`,
+        start: from,
+        end: to,
+        ...wf,
+        coverage,
+        note,
+        current: to >= today,
+      });
+      cursor = addDays(wb.end, 1);
+    }
+
     // One row per workflow inside the selected period.
     const byWorkflow = new Map<string, { row: WorkflowRow; tally: Tally }>();
     for (const w of wfRows) {
@@ -842,7 +891,7 @@ export async function read(grain: ExecutionGrain = 'week', wanted?: string): Pro
           : `Against the whole of ${againstLabel}, ${window}.`,
     };
 
-    return { system, label, periods: built, period, workflows, comparison, ...t };
+    return { system, label, periods: built, weeks, period, workflows, comparison, ...t };
   };
 
   return {

@@ -537,6 +537,36 @@ function loopsSpec(closes: Map<string, string>, since: string | null): KindSpec<
         },
       },
       {
+        /**
+         * The sixth tile, so the grid is two full rows rather than five and a
+         * gap (2026-09-16, Destiny). It is not filler: an average age hides its
+         * own tail, and the oldest loop still open from a month is the one
+         * somebody actually has to go and deal with. Cohort state, aged from
+         * Date Raised to now, so it needs no field that was not already there.
+         */
+        key: 'oldest_open',
+        label: 'Longest still open',
+        field: 'now − Date Raised, the oldest still open',
+        unit: 'duration',
+        better: 'down',
+        figure: (c) => {
+          const now = nowIso();
+          const ms = c
+            .filter((l) => l.status !== 'closed' && l.raised_at)
+            .map((l) => msBetween(l.raised_at!, now))
+            .filter((d): d is number => d !== null);
+          return {
+            value: ms.length ? Math.max(...ms) : null,
+            n: ms.length,
+            note: ms.length
+              ? `The oldest of the ${plural(ms.length, 'loop')} raised here that ${ms.length === 1 ? 'is' : 'are'} still open.`
+              : c.length
+                ? 'Every loop raised this month is closed, so none is still ageing.'
+                : 'No loop was raised this month.',
+          };
+        },
+      },
+      {
         key: 'open_age',
         label: 'Average age still open',
         field: 'now − Date Raised, those still open',

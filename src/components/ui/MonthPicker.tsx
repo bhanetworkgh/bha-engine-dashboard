@@ -51,12 +51,19 @@ export function MonthPicker({
   value,
   onChange,
   counts,
+  allowAll = true,
 }: {
   months: string[];
   value: string | null;
   onChange: (m: string | null) => void;
   /** How many rows each month holds, printed beside it. */
   counts?: Record<string, number>;
+  /**
+   * Whether "All time" is offered. It is not everywhere: the Executions page
+   * always shows exactly one month, so an option that quietly means "the
+   * current one" would be a lie in a dropdown.
+   */
+  allowAll?: boolean;
 }) {
   return (
     <label className="flex items-center gap-2 text-[11.5px] text-faint">
@@ -73,7 +80,7 @@ export function MonthPicker({
             {counts && counts[m] !== undefined ? ` · ${counts[m]}` : ''}
           </option>
         ))}
-        <option value="">All time</option>
+        {allowAll && <option value="">All time</option>}
       </select>
     </label>
   );

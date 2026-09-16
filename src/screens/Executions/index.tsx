@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useData } from '../../app/useData';
 import {
@@ -16,7 +16,7 @@ import {
 } from '../../data';
 import { buildReport, reportName } from '../../lib/executionReport';
 import { downloadCsv } from '../../lib/csv';
-import { EmptyPanel, LoadFailed, Loading, MetricCard, PageHeader, Segmented, StatCell, StatStrip, Tabs, Toast, relativeTime, useToast } from '../../components/ui';
+import { EmptyPanel, LoadFailed, Loading, MetricCard, MonthPicker, PageHeader, Tabs, Toast, relativeTime, useToast } from '../../components/ui';
 
 /**
  * Executions — every run of every workflow in the engine, one row per run.
@@ -43,11 +43,13 @@ import { EmptyPanel, LoadFailed, Loading, MetricCard, PageHeader, Segmented, Sta
 /** The page re-reads on the same interval the server polls on. */
 const REFRESH_MS = 45_000;
 
-const GRAINS: { value: ExecutionGrain; label: string }[] = [
-  { value: 'week', label: 'Weekly' },
-  { value: 'month', label: 'Monthly' },
-  { value: 'year', label: 'Yearly' },
-];
+/*
+ * The week / month / year control stood here until 16 Sep 2026, when the page
+ * went to one month at a time (Destiny). The server still answers at all three
+ * grains — the rows are one per execution and the grain is only a GROUP BY — so
+ * nothing about the arithmetic changed and the other two remain reachable by
+ * query string.
+ */
 
 const NOUN: Record<ExecutionGrain, string> = { week: 'week', month: 'month', year: 'year' };
 
@@ -111,6 +113,16 @@ function Delta({ d, format = (n: number) => String(n), suffix = '' }: { d: Execu
   );
 }
 
+/** One tile's body: the figure, and its change against last month under it. */
+function Figure({ value, delta, tone }: { value: string; delta?: ReactNode; tone?: 'failing' }) {
+  return (
+    <div className="space-y-1.5">
+      <div className={`font-display tabular text-[30px] leading-none ${tone === 'failing' ? 'text-failing' : 'text-ink'}`}>{value}</div>
+      {delta && <div className="flex flex-wrap items-baseline gap-x-2">{delta}</div>}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ chart */
 
 const BAR = 26;
@@ -120,7 +132,20 @@ const H = 96;
 const PAD = 16;
 
 /** Executions and failures per period. A period nothing is held for draws no bar at all. */
-function PeriodChart({ periods, grain, selected, onSelect }: { periods: ExecutionPeriod[]; grain: ExecutionGrain; selected: string; onSelect: (key: string) => void }) {
+function PeriodChart({
+  periods,
+  grain,
+  selected,
+  onSelect,
+  readOnly = false,
+}: {
+  periods: ExecutionPeriod[];
+  grain: ExecutionGrain;
+  selected: string;
+  onSelect: (key: string) => void;
+  /** Draw it, do not let anyone click it. The month is chosen in the picker. */
+  readOnly?: boolean;
+}) {
   const shown = periods.slice(-18);
   const max = Math.max(1, ...shown.map((p) => p.executions));
   const width = shown.length * (BAR + GAP);
@@ -149,7 +174,7 @@ function PeriodChart({ periods, grain, selected, onSelect }: { periods: Executio
           const h = p.coverage === 'none' ? 0 : Math.round((p.executions / max) * (H - 16));
           const fh = p.coverage === 'none' || !p.executions ? 0 : Math.round((p.failed / max) * (H - 16));
           return (
-            <g key={p.key} className="cursor-pointer" onClick={() => onSelect(p.key)}>
+            <g key={p.key} className={readOnly ? undefined : 'cursor-pointer'} onClick={readOnly ? undefined : () => onSelect(p.key)}>
               <rect x={x - GAP / 2} y="0" width={BAR + GAP} height={H + 30} fill={on ? 'var(--hover)' : 'transparent'} />
               {p.coverage === 'none' ? (
                 <line x1={x} y1={H - 1} x2={x + BAR} y2={H - 1} stroke="var(--faint)" strokeWidth="2" strokeDasharray="2 2" />
@@ -364,83 +389,58 @@ function WorkflowRow({ w, onOpen }: { w: ExecutionWorkflow; onOpen: () => void }
 function SystemView({
   system,
   data,
-  grain,
-  onSelectPeriod,
   onOpenWorkflow,
 }: {
   system: ExecutionSystem;
   data: ExecutionsData;
-  grain: ExecutionGrain;
-  onSelectPeriod: (key: string) => void;
   onOpenWorkflow: (id: string) => void;
 }) {
   const period = system.period;
   const c = system.comparison;
   const nothing = system.periods.every((p) => p.executions === 0);
-  const noun = NOUN[grain];
 
   return (
     <>
       {/*
-        The period in words, above the figures, because "failures down 40%" is
-        how somebody reads a change and "12 against 20" is not. Written by the
-        server so this and the downloaded report cannot word it differently.
-      */}
-      <div className="mx-6 mb-4 md:mx-8">
-        <div className="card px-5 py-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <div className="text-[13px] font-medium text-ink">
-              {period.label} · {system.label}
-            </div>
-            <div className="tabular text-[11.5px] text-faint">
-              {period.start} to {period.end}
-              {period.current ? ` · still running` : ''}
-            </div>
-          </div>
-          <p className={`mt-1.5 text-[13px] leading-relaxed ${c.covered ? 'text-ink' : 'text-degraded'}`}>{c.prose}</p>
-          <p className="mt-1 text-[11.5px] leading-snug text-faint">{c.note}</p>
-        </div>
-      </div>
+        Six figures, as the same tiles the record pages' statistics tabs use
+        (2026-09-16, Destiny) — so a month of executions reads like a month of
+        anything else in this dashboard.
 
-      <StatStrip cols={4}>
-        <StatCell>
-          <div className="kicker truncate">Executions</div>
-          <div className="font-display tabular mt-1 text-[28px] leading-none text-ink">{nothing ? '—' : period.executions}</div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[11.5px] leading-snug text-faint">
-            <Delta d={c.executions} />
-            <span>{period.unfinished ? `${period.unfinished} still running` : `across ${system.workflows.length} workflow${system.workflows.length === 1 ? '' : 's'}`}</span>
-          </div>
-        </StatCell>
-        <StatCell>
-          <div className="kicker truncate">Succeeded</div>
-          <div className="font-display tabular mt-1 text-[28px] leading-none text-ink">{nothing ? '—' : period.succeeded}</div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[11.5px] leading-snug text-faint">
-            <Delta d={c.successes} />
-            <span>{period.canceled ? `${period.canceled} canceled by hand` : 'finished without an error'}</span>
-          </div>
-        </StatCell>
-        <StatCell>
-          <div className="kicker truncate">Failed</div>
-          <div className={`font-display tabular mt-1 text-[28px] leading-none ${period.failed ? 'text-failing' : 'text-dim'}`}>{nothing ? '—' : period.failed}</div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[11.5px] leading-snug text-faint">
-            <Delta d={c.failures} />
-            <span>{pct(period.failure_rate)} of {period.finished} finished runs</span>
-          </div>
-        </StatCell>
-        <StatCell>
-          <div className="kicker truncate">Average time</div>
-          <div className="font-display tabular mt-1 text-[28px] leading-none text-ink">{duration(period.avg_ms)}</div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[11.5px] leading-snug text-faint">
-            <Delta d={c.avg_ms} format={(n) => duration(n)} />
-            <span>{period.timed ? `over the ${period.timed} of ${period.executions} runs that recorded an end` : 'no run recorded an end'}</span>
-          </div>
-        </StatCell>
-      </StatStrip>
+        The card that stood above them, carrying the period in words and the
+        comparison note, is gone at Destiny's request. The change against last
+        month is still on every tile that has one.
+      */}
+      <div className="mx-6 mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 md:mx-8">
+        <MetricCard title="Executions" right="every run read from n8n" align="top" noteMinLines={3}
+          note={period.unfinished ? `${period.unfinished} of them are still running and are counted with the status they were read at.` : 'Every run n8n recorded in this month, whatever its outcome.'}>
+          <Figure value={nothing ? '—' : String(period.executions)} delta={<Delta d={c.executions} />} />
+        </MetricCard>
+        <MetricCard title="Succeeded" right="status = success" align="top" noteMinLines={3}
+          note={period.canceled ? `${period.canceled} further ${period.canceled === 1 ? 'run was' : 'runs were'} canceled by hand, which is neither a success nor a failure.` : 'Runs that finished without an error.'}>
+          <Figure value={nothing ? '—' : String(period.succeeded)} delta={<Delta d={c.successes} />} />
+        </MetricCard>
+        <MetricCard title="Failed" right="status = error" align="top" noteMinLines={3}
+          note={`${pct(period.failure_rate)} of the ${period.finished} runs that finished. A run still going is not counted either way.`}>
+          <Figure value={nothing ? '—' : String(period.failed)} tone={period.failed ? 'failing' : undefined} delta={<Delta d={c.failures} />} />
+        </MetricCard>
+        <MetricCard title="Failure rate" right="failed ÷ finished" align="top" noteMinLines={3}
+          note={period.finished ? `Over the ${period.finished} runs that finished this month.` : 'No run finished this month, so there is no rate — not a rate of nought.'}>
+          <Figure value={period.finished ? pct(period.failure_rate) : '—'} delta={<Delta d={c.failure_rate} />} />
+        </MetricCard>
+        <MetricCard title="Average time" right="duration, per run" align="top" noteMinLines={3}
+          note={period.timed ? `Over the ${period.timed} of ${period.executions} runs that recorded an end. A run with no end is left out rather than counted as nought.` : 'No run recorded an end, so there is no average.'}>
+          <Figure value={duration(period.avg_ms)} delta={<Delta d={c.avg_ms} format={(n) => duration(n)} />} />
+        </MetricCard>
+        <MetricCard title="Workflows run" right="distinct workflows" align="top" noteMinLines={3}
+          note={`Workflows with at least one execution this month. A workflow the registry names no system for is still counted, under Unregistered.`}>
+          <Figure value={nothing ? '—' : String(system.workflows.length)} />
+        </MetricCard>
+      </div>
 
       <div className="mx-6 mb-4 md:mx-8">
         <MetricCard
-          title={`Executions by ${noun}`}
-          right={<span className="text-[11px] text-faint">bar = executions · red = failures · click one to read it</span>}
+          title={`Executions by week in ${period.label}`}
+          right={<span className="text-[11px] text-faint">bar = executions · red = failures</span>}
           note={
             <span className="block space-y-1">
               {period.note && <span className="block text-[11px] leading-snug text-degraded">{period.note}</span>}
@@ -457,7 +457,13 @@ function SystemView({
             </span>
           }
         >
-          {nothing ? <EmptyPanel>{data.source.note}</EmptyPanel> : <PeriodChart periods={system.periods} grain={grain} selected={period.key} onSelect={onSelectPeriod} />}
+          {/*
+            The weeks inside the month in view, from the same day rows as the
+            figures above them. Read-only: the month is chosen in the picker at
+            the top, and a chart that also set it would be a second control for
+            one selection.
+          */}
+          {nothing ? <EmptyPanel>{data.source.note}</EmptyPanel> : <PeriodChart periods={system.weeks} grain="week" selected={period.key} onSelect={() => {}} readOnly />}
         </MetricCard>
       </div>
 
@@ -471,7 +477,7 @@ function SystemView({
           </div>
           {system.workflows.length === 0 ? (
             <div className="px-5 py-8 text-center text-[13px] text-dim">
-              {nothing ? data.source.note : `No ${system.label === 'All systems' ? '' : `${system.label} `}workflow ran in this ${noun}.`}
+              {nothing ? data.source.note : `No ${system.label === 'All systems' ? '' : `${system.label} `}workflow ran in ${period.label}.`}
             </div>
           ) : (
             <div className="scroll-thin overflow-x-auto">
@@ -500,7 +506,9 @@ function SystemView({
 }
 
 export default function Executions() {
-  const [grain, setGrain] = useState<ExecutionGrain>('week');
+  // The page shows one month at a time (2026-09-16, Destiny). The grain is
+  // fixed; the rows behind it are unchanged, so the month and the weeks drawn
+  // inside it are still the same arithmetic over the same executions.
   const [period, setPeriod] = useState<string | null>(null);
   const [tab, setTab] = useState('All systems');
   const [open, setOpen] = useState<string | null>(null);
@@ -508,11 +516,15 @@ export default function Executions() {
   const [tick, setTick] = useState(0);
   const { toast, setToast } = useToast();
 
-  const { status, data, error } = useData(() => getExecutions(grain, period ?? undefined), [grain, period, tick], REFRESH_MS);
+  const { status, data, error } = useData(() => getExecutions('month', period ?? undefined), [period, tick], REFRESH_MS);
 
   if (status === 'loading' || !data) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
 
   const system = data.systems.find((s) => s.label === tab) ?? data.systems[0];
+  // Every month this database holds an execution for, newest first, from the
+  // All-systems series so the list does not change as you move between tabs.
+  const monthKeys = [...data.systems[0].periods].map((p) => p.key).reverse();
+  const monthCounts = Object.fromEntries(data.systems[0].periods.map((p) => [p.key, p.executions]));
   const counts = Object.fromEntries(
     data.systems.map((s) => [
       s.label,
@@ -548,17 +560,15 @@ export default function Executions() {
         subtitle={`Every run of every workflow in the engine — read from n8n every ${data.source.poll_seconds} seconds, not live`}
         right={
           <div className="flex flex-wrap items-center gap-2">
-            <Segmented<ExecutionGrain>
-              ariaLabel="Period"
-              value={grain}
-              onChange={(g) => {
-                // A period key belongs to its grain: 2026-W38 means nothing to a
-                // monthly view, so changing the grain returns to the current one.
-                setPeriod(null);
-                setGrain(g);
-              }}
-              options={GRAINS}
-            />
+            {/*
+              One month at a time (2026-09-16, Destiny). The week / month / year
+              control that stood here asked a question the tabs below already
+              answer differently: the systems are what you switch between, and
+              the period is what you set. The rows behind every figure are
+              unchanged — they are still one row per execution, so a month and
+              the weeks drawn inside it are the same arithmetic.
+            */}
+            <MonthPicker months={monthKeys} value={data.period} onChange={(m) => setPeriod(m)} counts={monthCounts} allowAll={false} />
             <button type="button" className="btn" onClick={() => downloadCsv(reportName(system, data.period), buildReport(data, system))}>
               Download report
             </button>
@@ -571,7 +581,7 @@ export default function Executions() {
       />
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <SystemView key={`${system.system}-${grain}-${data.period}`} system={system} data={data} grain={grain} onSelectPeriod={setPeriod} onOpenWorkflow={setOpen} />
+        <SystemView key={`${system.system}-${data.period}`} system={system} data={data} onOpenWorkflow={setOpen} />
 
         {/*
           Said once, at the foot of the page: these numbers are as fresh as the
@@ -584,7 +594,7 @@ export default function Executions() {
         </div>
       </div>
 
-      {open && <WorkflowPanel workflowId={open} grain={grain} period={data.period} onClose={() => setOpen(null)} />}
+      {open && <WorkflowPanel workflowId={open} grain="month" period={data.period} onClose={() => setOpen(null)} />}
       <Toast toast={toast} />
     </div>
   );

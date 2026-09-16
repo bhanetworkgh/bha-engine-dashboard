@@ -650,9 +650,20 @@ counted in the total and shown under no tab, and one filed under a system
 without a tab was invisible altogether. **A workflow must never be invisible
 because a registry row is missing.**
 
-**Weekly, monthly and yearly**, from the same rows, so the three can never
-disagree. Selecting a period on the chart moves every figure on the page, the
-per-workflow table, the comparison and the export with it.
+**One month at a time** (decision 2026-09-16, Destiny). The week / month / year
+control is gone: the tabs are what you switch between and the period is what you
+set, and asking both questions in one row read as two controls for one view. The
+server still answers at all three grains — the rows are one per execution and a
+grain is only a `GROUP BY`, so nothing about the arithmetic changed and the other
+two stay reachable by query string. The month is chosen in a picker, the same one
+the record pages use, and the chart under the figures shows **that month's weeks**,
+tallied from the same day rows so a month and its weeks can never disagree.
+
+**Six figures, as tiles** — executions, succeeded, failed, failure rate, average
+time, workflows run — in the same cards the record pages' statistics tabs use, so
+a month of executions reads like a month of anything else here. The card that
+carried the period in words above them is gone (decision 2026-09-16, Destiny);
+the change against last month is still on every tile that has one.
 
 Per period, per tab: **executions, succeeded, failed, failure rate and average
 time**, each with its change against the same period before it; a chart over
