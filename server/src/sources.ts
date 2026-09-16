@@ -517,10 +517,17 @@ function classify(patternId: string | null, bhaSystem: string | null): { system:
   const words = new Set<string>();
   let system: string | null = null;
   if (patternId) {
-    const m = patternId.match(/^BP-([A-Z0-9]+)-\d+-(.+)$/i);
+    /**
+     * The system is the second segment and nothing more is needed to read it
+     * (2026-09-16, Destiny). This used to require a slug after the sequence
+     * number — `^BP-([A-Z0-9]+)-\d+-(.+)$` — so `BP-BHARAG-114`, which is a
+     * perfectly ordinary id, was filed under no system at all. The slug is what
+     * the keywords come from, and only that.
+     */
+    const m = patternId.match(/^BP-([A-Z0-9]+)-\d+(?:-(.+))?$/i);
     if (m) {
       system = m[1].toUpperCase();
-      for (const w of m[2].toLowerCase().split(/[^a-z0-9]+/)) if (w && !STOP.has(w)) words.add(w);
+      if (m[2]) for (const w of m[2].toLowerCase().split(/[^a-z0-9]+/)) if (w && !STOP.has(w)) words.add(w);
     }
   }
   if (bhaSystem) for (const w of bhaSystem.toLowerCase().split(/[^a-z0-9]+/)) if (w && !STOP.has(w)) words.add(w);

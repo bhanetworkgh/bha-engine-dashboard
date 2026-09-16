@@ -1354,6 +1354,12 @@ export interface PatternMetrics {
    */
   reusability_mix: { reusability: string; n: number }[];
   reusability_note: string;
+  /**
+   * How much of the engine has patterns written up, from the system segment of
+   * each pattern's own id — BHARAG in BP-BHARAG-114. A count of rows says how
+   * much was written; this says how widely.
+   */
+  systems: { n: number; names: string[]; unfiled: number; note: string };
   created_per_week: MetricSeries;
 }
 

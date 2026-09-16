@@ -689,9 +689,9 @@ export default function Commercial() {
               options={[{ value: 'all', label: 'All confidence', count: inMonth.length }, ...confidenceOptions.map(([v, n]) => ({ value: v, label: v === '(not set)' ? 'not set' : v.toLowerCase(), count: n }))]}
             />
             <div className="flex flex-1 items-center justify-end gap-3">
-              <SearchBox value={q} onChange={setQ} placeholder="Search cards and research questions" />
-              {/* The month in view, beside the search box, the same place Build patterns puts it. */}
+              {/* The month in view, to the left of the search box, on every record page. */}
               <MonthPicker months={months} value={month} onChange={setMonth} />
+              <SearchBox value={q} onChange={setQ} placeholder="Search cards and research questions" />
             </div>
           </div>
           {keywordCounts.length > 0 && (

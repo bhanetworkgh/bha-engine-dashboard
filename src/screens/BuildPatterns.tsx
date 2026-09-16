@@ -83,8 +83,8 @@ function PatternMetricsPanel({ metrics, loading, error }: { metrics: PatternMetr
   if (error) return <div className="card mx-6 mb-4 px-5 py-4 text-[12.5px] text-failing md:mx-8">Figures unavailable: {error}</div>;
   if (!metrics) {
     return (
-      <StatStrip cols={3} className="opacity-60">
-        {['Patterns', 'Distinct pattern ids', 'Broadly reusable'].map((l) => (
+      <StatStrip cols={4} className="opacity-60">
+        {['Patterns', 'Distinct pattern ids', 'Systems covered', 'Broadly reusable'].map((l) => (
           <StatCell key={l}>
             <div className="kicker truncate">{l}</div>
             <div className="mt-1 text-[15px] text-faint">Counting</div>
@@ -98,7 +98,7 @@ function PatternMetricsPanel({ metrics, loading, error }: { metrics: PatternMetr
   const broad = m.reusability_mix.find((r) => r.reusability.toLowerCase() === 'broad')?.n ?? 0;
   return (
     <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
-      <StatStrip cols={3}>
+      <StatStrip cols={4}>
         {/* The hint says which rows, because the strip follows the month picker. */}
         <CountCell label="Patterns" value={m.scope.rows} hint={m.scope.month ? 'created in this month' : 'rows in the table'} hintMinLines={2} />
         <CountCell
@@ -106,6 +106,18 @@ function PatternMetricsPanel({ metrics, loading, error }: { metrics: PatternMetr
           value={m.duplicates.distinct_ids}
           tone={m.duplicates.duplicate_rows ? 'degraded' : 'dim'}
           hint={m.duplicates.duplicate_rows ? `${m.duplicates.duplicate_rows} more ${m.duplicates.duplicate_rows === 1 ? 'row' : 'rows'} than patterns` : 'one row per pattern'}
+          hintMinLines={2}
+        />
+        {/*
+          A fourth figure (2026-09-16, Destiny): three wide cells read sparse
+          beside the four and five the other record pages carry. It is the
+          system segment of each pattern's own id, which the rows already print.
+        */}
+        <CountCell
+          label="Systems covered"
+          value={m.systems.n}
+          tone={m.systems.n ? 'default' : 'dim'}
+          hint={m.systems.names.length ? m.systems.names.join(', ') : 'no pattern_id names a system'}
           hintMinLines={2}
         />
         <CountCell label="Broadly reusable" value={broad} tone={broad ? 'accent' : 'dim'} hint="reusability = Broad" hintMinLines={2} />
@@ -130,7 +142,7 @@ function PatternMetricsPanel({ metrics, loading, error }: { metrics: PatternMetr
             </div>
           )}
         </MetricCard>
-        <MetricCard title="Created per week" note={m.duplicates.note}>
+        <MetricCard title="Created per week">
           <SeriesBlock title="" series={m.created_per_week} tone="accent" total bare />
         </MetricCard>
       </div>
@@ -249,7 +261,7 @@ function patternColumns(open: (p: BuildPattern) => void): RecordColumn<BuildPatt
     {
       key: 'pattern_id',
       header: 'pattern id',
-      width: '34ch',
+      width: '26ch',
       clip: true,
       title: (p) => p.pattern_id ?? p.id,
       cell: (p) => <RecordId missing="no pattern_id">{p.pattern_id}</RecordId>,
@@ -258,7 +270,7 @@ function patternColumns(open: (p: BuildPattern) => void): RecordColumn<BuildPatt
       key: 'title',
       header: 'pattern',
       card: 'title',
-      width: '62ch',
+      width: '48ch',
       title: (p) => p.title,
       cell: (p) => <TwoLine title={p.title} description={p.excerpt} empty="No problem statement written on this pattern." />,
     },
@@ -266,12 +278,28 @@ function patternColumns(open: (p: BuildPattern) => void): RecordColumn<BuildPatt
       key: 'reusability',
       header: 'reusability',
       card: 'meta',
-      width: '26ch',
+      width: '18ch',
       clip: true,
       className: 'card-meta',
       cellClass: (p) => (p.reusability?.trim().toLowerCase() === 'broad' ? 'text-accent-ink' : 'text-faint'),
       title: (p) => p.reusability ?? undefined,
       cell: (p) => (p.reusability ? (reuseKey(p) === '(written out in prose)' ? 'in prose' : p.reusability.toLowerCase()) : <span className="text-faint">—</span>),
+    },
+    {
+      /*
+        The system, from the pattern id's own second segment (2026-09-16,
+        Destiny). Five columns left this table stretched where the other record
+        tables are tight; this is a real field every row already carries, and
+        it is the one the strip's new figure counts.
+      */
+      key: 'system',
+      header: 'system',
+      card: 'meta',
+      width: '16ch',
+      clip: true,
+      className: 'card-meta text-dim',
+      title: (p) => p.system ?? undefined,
+      cell: (p) => p.system ?? <span className="text-faint">—</span>,
     },
     {
       key: 'created',
@@ -458,9 +486,9 @@ export default function BuildPatterns() {
               options={[{ value: 'all', label: 'All', count: inMonth.length }, ...reuseOptions.map(([r, n]) => ({ value: r, label: r.startsWith('(') ? r.slice(1, -1) : r.toLowerCase(), count: n }))]}
             />
             <div className="flex flex-1 items-center justify-end gap-3">
-              <SearchBox value={q} onChange={setQ} placeholder="Search problem, solution, context, name" />
-              {/* The month in view, beside the search box, the same place Codex and Open loops put it. */}
+              {/* The month in view, to the left of the search box, on every record page. */}
               <MonthPicker months={months} value={month} onChange={setMonth} />
+              <SearchBox value={q} onChange={setQ} placeholder="Search problem, solution, context, name" />
               {q.trim() && hits === null && <span className="tabular whitespace-nowrap text-[11.5px] text-faint">Searching…</span>}
             </div>
           </div>

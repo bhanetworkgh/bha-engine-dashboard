@@ -97,12 +97,15 @@ services:
       # from these instructions would have been scoped to; the Codex page's
       # reconciliation then failed on every one of its seven table reads.
       #
-      # And data.records:READ — read only — on three more, for the resync
-      # button Build patterns, Commercial and Clients gained on 15 Sep:
+      # And data.records:READ — read only — on five more, for the resync
+      # button Build patterns, Commercial and Clients gained on 15 Sep and
+      # North Star and Research Twin gained on 16 Sep:
       #   app5ni3E8r7Lvxk22  Build Patterns
       #   appvLglfdCqOKqLpT  Commercial Opportunities
       #   appkSUSh9ijNjP2f8  BHA Client Research Loop
-      # Nothing is written to those three, so they get no base variable of
+      #   appkCTjhH8PtYRFI7  North Star ask log
+      #   appud969Dw7H4tMwv  Research Queue
+      # Nothing is written to those five, so they get no base variable of
       # their own: this server can never write to a guess about them. A token
       # without read on one makes that page's resync refuse and name the
       # table; it never reads a refusal as an emptied table.

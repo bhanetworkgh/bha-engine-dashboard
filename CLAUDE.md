@@ -288,12 +288,20 @@ explicitly for this. Therefore:
   not the same as five already matching; and a change made here that Airtable
   never had is named when it is reverted, found through the mirror row's own
   `source = 'ui'`, because only loops and Codex write to `record_writes`.
-- **The token reads five bases and writes two.** `AIRTABLE_TOKEN` needs read and
-  write on Open Loops and BHA Submissions as before, and **read only** on Build
-  Patterns, Commercial Opportunities and BHA Client Research Loop for the three
-  resyncs. Those three get **no base variable of their own**: this server never
-  writes to them, so it can never write to a guess, and their ids stay in
-  `sources.ts` where the record links already read them.
+- **The token reads seven bases and writes two.** `AIRTABLE_TOKEN` needs read
+  and write on Open Loops and BHA Submissions as before, and **read only** on
+  Build Patterns, Commercial Opportunities, BHA Client Research Loop and — from
+  2026-09-16 — **North Star's ask log (`appkCTjhH8PtYRFI7`) and Research Twin's
+  queue (`appud969Dw7H4tMwv`)**, for the five resyncs. Those five get **no base
+  variable of their own**: this server never writes to them, so it can never
+  write to a guess, and their ids stay in `sources.ts` where the record links
+  already read them. A token without read on one of them authenticates and then
+  refuses, which the resync names by table rather than reading as an emptied one.
+- **North Star and Research Twin resync too** (decision 2026-09-16, Destiny),
+  through the same shared pass and the same control as the other four. Research
+  Twin is an **attempt log**, so its sweep compares Airtable record ids and never
+  `card_id`: `card_id` repeats, and comparing on it would read four attempts on
+  one card as three rows Airtable no longer has, and delete them.
 - **Executions are stored one row per execution, never as counters** (decision
   2026-09-15, Destiny — the second of that day, replacing the first). n8n's own
   execution id is the primary key of `engine_execution_runs`, and every figure
@@ -422,6 +430,16 @@ them. The reference is the "My Apple" mockup Destiny supplied on 2026-09-08.
 - **Two themes.** Light and dark, switchable from the user menu in the sidebar,
   following the OS by default. Every colour is a token in `src/index.css`;
   components never name a hex value.
+- **The interface opens at 80%** (decision 2026-09-16, Destiny). It reads better
+  there — more of a table on screen, the sidebar whole, cards in three columns —
+  so it does that without anybody setting it. Applied as `zoom` on `<html>`, not
+  `transform: scale`, so the page genuinely has more CSS pixels and every
+  breakpoint, sticky header and table behaves as it would on a larger screen; a
+  transform would shrink a picture of the smaller layout. Settings carries
+  75 / 80 / 90 / 100 and says the thing that surprises people: **it multiplies
+  with the browser's own zoom**, so a browser already at 80% lands at 64%. A
+  browser without `zoom` (Firefox before 126) renders at 100%, which is the size
+  this dashboard has always been.
 - **Palette:** cool light grey page (`#f5f5f7`) with white cards in light mode,
   near-black page with charcoal cards in dark. **One accent: system blue**, for
   links, the active tab, primary buttons, progress and focus. No gold, no
@@ -489,6 +507,13 @@ REFERENCE
   System registry
 ```
 
+**The sidebar shows every item at once and never scrolls** (decision
+2026-09-16, Destiny). A dashboard whose navigation is half below the fold is one
+where people miss pages. The rows are 32px and the group spacing is sized so all
+fifteen fit the shortest laptop; `overflow-y-auto` is kept only as the failure
+mode if the list ever outgrows that, because navigation that clips an item
+silently is worse than navigation that scrolls.
+
 **There is no People section** (decision 2026-09-14, Destiny). Builders was its
 only item and almost everything on that page was a fixture; the roster and the
 two figures that were real are the **Builders** registry now. The Overview's
@@ -537,6 +562,16 @@ Right-hand panel: new chat, chat history list, search past chats.
 against fixtures. It gets wired in a later phase.
 
 ### North Star
+**Two tabs, and every telemetry card is on the second one** (decision
+2026-09-16, Destiny). Asks is the working surface: the five figures, the outcome
+filter, the month, the search and the asks. **Statistics** carries the
+classified ring, the outcome mix, asks per week, outcome over time, tool usage,
+citation coverage and by lane — all of them month-against-month questions, drawn
+as the same tiles every record page's statistics tab uses. The month is chosen
+beside the search box and the strip follows it, so the figures and the list
+always answer the same question. **Resync from Airtable** is at the top, the
+same control the other pages carry.
+
 The ask log. **Thin rate is the headline** — answers that look real and cite
 nothing — computed over the rows carrying an `outcome` and no others, with the
 unclassified count stated beside it. `outcome` is North Star's own
@@ -547,6 +582,15 @@ uses from the searches blob, citation coverage, by lane, and when it was last
 asked anything — silence there is itself the signal.
 
 ### Research Twin
+**The same shape** (decision 2026-09-16, Destiny): the strip, **exactly two
+cards — confidence, then cards created per week** — the filter, the month and
+the search. The hard-stop ring, queue depth by status, days stuck, attempts per
+card and what kind of stuck are all statistics tiles. **Resync from Airtable**
+is at the top. The shape note under the filter bar — "the research queue holds
+212 rows across 36 distinct card_ids" — is gone: the strip already prints both
+figures side by side, and the export still carries the sentence, which is where
+a reader can act on it.
+
 The research queue. It is an **attempt log** — one row per attempt, `card_id`
 repeats — so every figure is per card, collapsed on `card_id` with the newest
 attempt deciding the state, and the row count is printed beside the card count.
@@ -766,8 +810,9 @@ bar, the same truncated list rows with the full record on click, the same chart
 treatment, the same resync control in the same place.
 
 **Build patterns and Commercial are one shape, not two** (decision 2026-09-16,
-Destiny). Both open on the current month, chosen in a picker beside the search
-box, and the strip, the cards and the list all follow that one selection — a
+Destiny). Both open on the current month, chosen in a picker **to the left of the
+search box** — where it is on every record page — and the strip, the cards and
+the list all follow that one selection — a
 strip answering all time beside a list answering one month is two right numbers
 to two different questions, which is the reconciliation bug Open loops had. Each
 carries a stat strip and then **exactly two cards**: Build patterns shows
@@ -793,6 +838,15 @@ column on the list, because it is still the second half of the default order.
 The list's own table no longer scrolls sideways at the widths the other record
 tables fit at; `media readiness` and `open questions` are headed `media` and
 `questions`, which is what bought the room.
+
+**Build patterns reads at the density the other record pages do** (decision
+2026-09-16, Destiny): **four figures on the strip**, not three — patterns,
+distinct pattern ids, **systems covered**, broadly reusable — and a **system**
+column on the list, both read off the second segment of each pattern's own id.
+That derivation used to require a slug after the sequence number, so
+`BP-BHARAG-114` was filed under no system at all; the system is the second
+segment and nothing more is needed to read it. The slug is what the keywords
+come from, and only that.
 
 **Build patterns has no status** (decision 2026-09-15, Destiny). `pattern_status`
 was deleted from the base and removed from every workflow that wrote it, so the

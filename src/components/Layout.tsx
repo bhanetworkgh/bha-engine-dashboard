@@ -128,19 +128,26 @@ function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }
       )}
       aria-label="Primary"
     >
-      <div className="flex items-center gap-3 px-6 pt-6 pb-5">
-        <img src="/logo.svg" alt="" className="mark h-8 w-8" />
+      <div className="flex items-center gap-3 px-6 pt-5 pb-3.5">
+        <img src="/logo.svg" alt="" className="mark h-7 w-7" />
         <span className="text-[15px] font-semibold">BHA Engine</span>
         <button type="button" onClick={onNavigate} className="btn btn-ghost btn-sm ml-auto md:hidden" aria-label="Close navigation">
           <Icon.close />
         </button>
       </div>
 
+      {/*
+        Every item at once, no scroll (2026-09-16, Destiny). The rows and the
+        group spacing are sized so fifteen of them fit a laptop without one —
+        `overflow-y-auto` is kept only as the failure mode if the list ever
+        outgrows the shortest screen, because a navigation that clips an item
+        silently is worse than one that scrolls.
+      */}
       <div className="scroll-thin flex-1 overflow-y-auto px-3">
         {GROUPS.map((g, i) => (
-          <div key={g.group ?? `top-${i}`} className={g.group ? 'mt-5' : ''}>
-            {g.group && <div className="kicker px-3 pb-1.5">{g.group}</div>}
-            <div className="space-y-[2px]">
+          <div key={g.group ?? `top-${i}`} className={g.group ? 'mt-3' : ''}>
+            {g.group && <div className="kicker px-3 pb-1">{g.group}</div>}
+            <div className="space-y-[1px]">
               {g.items.map((item) => {
                 const I = Icon[item.icon];
                 return (

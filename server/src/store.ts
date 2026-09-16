@@ -1692,7 +1692,7 @@ function reasonsOf(blocked: { label: string; reason: string }[], total = blocked
  * Manual only — not on load, not on a schedule — because it reads every field
  * of every row and it deletes.
  */
-export type ResyncKind = 'patterns' | 'commercial' | 'clients' | 'loops';
+export type ResyncKind = 'patterns' | 'commercial' | 'clients' | 'loops' | 'ns' | 'rt';
 
 interface ResyncSource {
   base: string;
@@ -1783,6 +1783,24 @@ function firstSources(kind: ResyncKind): ResyncSource[] {
   if (kind === 'loops') return LOOP_TABLES.map((t) => ({ base: airtable.loopsBase(), table: t.table, label: `${t.label} loops`, kind: 'loops' as const }));
   if (kind === 'patterns') return [{ base: PATTERNS.base, table: PATTERNS.table, label: PATTERNS.label, kind: 'patterns' }];
   if (kind === 'commercial') return [{ base: COMMERCIAL.base, table: COMMERCIAL.table, label: COMMERCIAL.label, kind: 'commercial' }];
+  /**
+   * The two twins, one table each (2026-09-16, Destiny), so that a row changed
+   * or deleted in Airtable reaches this database the same way it does on the
+   * other five pages.
+   *
+   * **This widens what the token has to read.** It was five bases; it is seven
+   * now — North Star's ask log and Research Twin's queue, read only, nothing
+   * written to either. A token that cannot read them authenticates and then
+   * refuses, which is exactly the failure the submissions base had on 14 Sep,
+   * so the refusal names the base rather than reading as an empty table.
+   *
+   * Research Twin is an **attempt log**: `card_id` repeats and `keyOnNatural`
+   * is false for that kind, so the sweep compares Airtable record ids, which
+   * are unique per attempt. Comparing on card_id would read four attempts on
+   * one card as three rows Airtable no longer has, and delete them.
+   */
+  if (kind === 'ns') return [{ base: NORTH_STAR.base, table: NORTH_STAR.table, label: NORTH_STAR.label, kind: 'ns' }];
+  if (kind === 'rt') return [{ base: RESEARCH_QUEUE.base, table: RESEARCH_QUEUE.table, label: RESEARCH_QUEUE.label, kind: 'rt' }];
   return [{ base: CLIENTS_INDEX.base, table: CLIENTS_INDEX.table, label: CLIENTS_INDEX.label, kind: 'client_lanes' }];
 }
 
@@ -2629,6 +2647,24 @@ export async function patternMetrics(month?: string | null): Promise<PatternMetr
       })(),
     },
     reusability_mix: reuse.map((r) => ({ reusability: r, n: all.filter((p) => reuseKey(p) === r).length })).sort((a, b) => b.n - a.n),
+    /**
+     * The fourth figure on the strip (2026-09-16, Destiny), so this page reads
+     * with the same density as the other record pages rather than three wide
+     * cells. It is real: the system segment of each pattern's own id, which is
+     * the same source the row's own `system` column already prints.
+     */
+    systems: (() => {
+      const names = [...new Set(all.map((p) => p.system).filter((v): v is string => Boolean(v)))].sort();
+      const unfiled = all.filter((p) => !p.system).length;
+      return {
+        n: names.length,
+        names,
+        unfiled,
+        note: names.length
+          ? `From the system segment of each pattern_id: ${names.join(', ')}.${unfiled ? ` ${unfiled} ${unfiled === 1 ? 'row does' : 'rows do'} not follow that shape and are filed under none.` : ''}`
+          : 'No pattern_id follows the BP-SYSTEM-nnn shape, so no system can be read off one.',
+      };
+    })(),
     reusability_note: `reusability is free text rather than a select. ${all.length - prose} of ${all.length} rows answer in one word; ${prose} explain the reach in a sentence and are grouped as \u201cwritten out in prose\u201d \u2014 open the pattern to read it.`,
     created_per_week: created,
   };
@@ -2732,9 +2768,9 @@ export async function metrics(kind: RecordKind, filter: { builder?: string | nul
     case 'commercial':
       return commercialMetrics(filter.month ?? null);
     case 'ns':
-      return nsMetrics();
+      return nsMetrics(filter.month ?? null);
     case 'rt':
-      return rtMetrics();
+      return rtMetrics(filter.month ?? null);
     default:
       throw new StoreError(`${kind} has no metrics of its own.`, 404);
   }
@@ -2791,12 +2827,22 @@ const NS_OUTCOME_LABELS: Record<string, string> = { answered: 'Answered', thin: 
  * point: a thin rate of "0%" computed over zero classified rows would be a
  * lie told in the most reassuring possible direction.
  */
-export async function nsMetrics(): Promise<NsMetrics> {
-  const hit = metricsCache.get('ns');
+export async function nsMetrics(month?: string | null): Promise<NsMetrics> {
+  const key = `ns:${month ?? '*'}`;
+  const hit = metricsCache.get(key);
   if (hit && hit.version === storeVersion) return hit.value as NsMetrics;
-  const all = await nsRecords();
+  const everything = await nsRecords();
+  /**
+   * The month in view, chosen beside the search box (2026-09-16, Destiny). The
+   * strip and the telemetry are about the rows the list is showing — a strip
+   * reading 18 asks above a list of 6 is two right numbers to two different
+   * questions, which is the reconciliation fault the loops page had.
+   */
+  const all = month ? everything.filter((r) => r.asked_at?.slice(0, 7) === month) : everything;
   const classified = all.filter((r) => r.outcome);
   const thin = classified.filter((r) => r.outcome === 'thin').length;
+  // The eight-week strips keep the whole history even when the page is scoped
+  // to one month: a trend cut to a month is not a trend.
   const weeks = lastWeeks(8);
 
   const outcomes: (NsOutcome | 'unclassified')[] = ['answered', 'thin', 'failed', 'unclassified'];
@@ -2895,7 +2941,7 @@ export async function nsMetrics(): Promise<NsMetrics> {
         : 'No ask carries a timestamp.',
     },
   };
-  metricsCache.set('ns', { version: storeVersion, value });
+  metricsCache.set(key, { version: storeVersion, value });
   return value;
 }
 
@@ -2955,11 +3001,23 @@ export async function rtCards(): Promise<RtCard[]> {
     .sort((a, b) => (b.last_attempt_at ?? '').localeCompare(a.last_attempt_at ?? ''));
 }
 
-export async function rtMetrics(): Promise<RtMetrics> {
-  const hit = metricsCache.get('rt');
+export async function rtMetrics(month?: string | null): Promise<RtMetrics> {
+  const key = `rt:${month ?? '*'}`;
+  const hit = metricsCache.get(key);
   if (hit && hit.version === storeVersion) return hit.value as RtMetrics;
-  const attempts = await rtAttempts();
-  const cards = await rtCards();
+  const allAttempts = await rtAttempts();
+  const allCards = await rtCards();
+  /**
+   * Scoped to the month the page is showing, the same as every other record
+   * page. A card is in the month its `created_at` falls in, and its attempts
+   * go with it — the two figures on the strip are "cards" and "attempt rows"
+   * and they have to be counting the same set.
+   */
+  const cards = month ? allCards.filter((c) => c.created_at?.slice(0, 7) === month) : allCards;
+  // An attempt with no card_id belongs to no card, so it cannot be in the
+  // month's set — it is left out rather than matched against a null.
+  const keep = new Set(cards.map((c) => c.card_id));
+  const attempts = month ? allAttempts.filter((a) => a.card_id !== null && keep.has(a.card_id)) : allAttempts;
   const needsHuman = cards.filter((c) => c.requires_human);
   const untriaged = cards.filter((c) => !c.status);
   const stuck = cards.filter((c) => c.days_stuck !== null);
@@ -3015,6 +3073,6 @@ export async function rtMetrics(): Promise<RtMetrics> {
         : 'Every card carries a status.',
     },
   };
-  metricsCache.set('rt', { version: storeVersion, value });
+  metricsCache.set(key, { version: storeVersion, value });
   return value;
 }
