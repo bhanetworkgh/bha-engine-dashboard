@@ -519,8 +519,20 @@ function WorkflowsTab({ rows, ...p }: TabProps & { rows: RegistryData['workflows
  * it, in the same card, at the same weight, and when nothing is priced at all
  * there is no number at all — just the sentence saying so.
  */
-function SpendPanel({ spend }: { spend: Spend }) {
+function SpendPanel({ spend, services }: { spend: Spend; services: RegistryData['services'] }) {
   const complete = spend.unpriced === 0 && spend.not_monthly === 0;
+  /**
+   * The services a cost was typed onto that no monthly figure can use, by name
+   * (2026-09-16, Destiny). "3 are one-off or have no billing cycle" is true and
+   * unactionable: it takes a reader down a table of ten rows looking for which
+   * three. A cost with no cycle is not a monthly cost — sixty dollars is not
+   * sixty dollars a month until somebody says which — so the total is right to
+   * leave it out, and the card has to say so by name or it reads as the total
+   * being broken.
+   */
+  const pending = spend.not_monthly_ids
+    .map((id) => services.find((x) => x.id === id)?.name)
+    .filter((n): n is string => Boolean(n));
   return (
     <div className="mx-6 mb-4 grid gap-4 md:mx-8 md:grid-cols-3">
       <MetricCard
@@ -538,10 +550,26 @@ function SpendPanel({ spend }: { spend: Spend }) {
       >
         {spend.totals.length === 0 ? (
           <div className="text-[14px] leading-relaxed text-dim">
-            Not recorded. No active service has a cost against it yet, so there is no total to show — a zero here would
-            claim BHA spends nothing, which is a different thing entirely. Fill in <span className="text-ink">cost</span>,{' '}
-            <span className="text-ink">currency</span> and <span className="text-ink">billing cycle</span> on any row below
-            and it starts counting.
+            {/*
+              Two reasons there is no total, and they are not the same sentence
+              (2026-09-16, Destiny). "No service has a cost against it" is a lie
+              on a page where one does and simply has no billing cycle, and it
+              is the lie that reads as the total being broken.
+            */}
+            {spend.priced === 0 ? (
+              <>
+                Not recorded. No active service has a cost against it yet, so there is no total to show — a zero here would
+                claim BHA spends nothing, which is a different thing entirely. Fill in <span className="text-ink">cost</span>,{' '}
+                <span className="text-ink">currency</span> and <span className="text-ink">billing cycle</span> on any row below
+                and it starts counting.
+              </>
+            ) : (
+              <>
+                No monthly total yet. {spend.priced} {spend.priced === 1 ? 'service carries' : 'services carry'} a cost, but{' '}
+                {spend.priced === 1 ? 'it has' : 'none has'} a <span className="text-ink">billing cycle</span>, and a cost with no
+                cycle is not a monthly cost — sixty dollars is not sixty dollars a month until somebody says which.
+              </>
+            )}
           </div>
         ) : (
           <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3">
@@ -557,6 +585,12 @@ function SpendPanel({ spend }: { spend: Spend }) {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+        {pending.length > 0 && (
+          <div className="mt-3 text-[11.5px] leading-snug text-degraded">
+            Priced but not counted, because {pending.length === 1 ? 'it carries' : 'they carry'} no billing cycle:{' '}
+            <span className="text-ink">{pending.join(', ')}</span>. Set a cycle on {pending.length === 1 ? 'that row' : 'those rows'} and the total picks {pending.length === 1 ? 'it' : 'them'} up.
           </div>
         )}
       </MetricCard>
@@ -598,10 +632,11 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
 
   const soon = new Set(spend.renewing_soon);
   const late = new Set(spend.overdue);
+  const uncounted = new Set(spend.not_monthly_ids);
 
   return (
     <>
-      <SpendPanel spend={spend} />
+      <SpendPanel spend={spend} services={rows} />
 
       <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -694,7 +729,15 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
               <td className="td text-dim">{cell(p, 'services', s, 'plan')}</td>
               <td className="td tabular text-right">{cell(p, 'services', s, 'cost_amount', { type: 'number', align: 'right' })}</td>
               <td className="td text-faint">{cell(p, 'services', s, 'cost_currency')}</td>
-              <td className="td text-faint">{cell(p, 'services', s, 'billing_cycle', { type: 'select', options: CYCLES })}</td>
+              {/*
+                Amber where a cost was typed and no cycle was, because that row
+                is the reason the monthly total is not the whole bill. Amber on
+                a genuinely bad state, never on a blank one: a row with no cost
+                either is simply not priced yet and stays quiet.
+              */}
+              <td className={`td ${uncounted.has(s.id) ? 'text-degraded' : 'text-faint'}`} title={uncounted.has(s.id) ? 'A cost with no billing cycle cannot be part of a monthly total.' : undefined}>
+                {cell(p, 'services', s, 'billing_cycle', { type: 'select', options: CYCLES })}
+              </td>
               <td className={`td tabular whitespace-nowrap ${late.has(s.id) ? 'text-failing' : soon.has(s.id) ? 'text-degraded' : 'text-faint'}`}>
                 {cell(p, 'services', s, 'renewal_date', { type: 'date' })}
                 {flagged && (

@@ -10,7 +10,7 @@ import {
   type RecordStats,
   type StatKind,
 } from '../data';
-import { EmptyPanel, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, yearOf, yearsOf } from './ui';
+import { CountUpText, EmptyPanel, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, yearOf, yearsOf } from './ui';
 import { csvRow, downloadCsv, toCsv, type CsvColumn } from '../lib/csv';
 
 /**
@@ -41,11 +41,18 @@ function duration(ms: number | null): string {
   return `${Math.round((ms / 86_400_000) * 10) / 10} days`;
 }
 
+/**
+ * A figure in its unit. Every branch rounds, because this is also what draws a
+ * count-up mid-flight: without it a rate reads 12.38741952% for a second and a
+ * half. A value that arrives already rounded — the server sends rates to one
+ * decimal — comes back unchanged, so the figure that lands is the figure it
+ * would have printed without the animation.
+ */
 function fmt(value: number | null, unit: RecordStatMetric['unit']): string {
   if (value === null) return '—';
-  if (unit === 'percent') return `${value}%`;
+  if (unit === 'percent') return `${Math.round(value * 10) / 10}%`;
   if (unit === 'duration') return duration(value);
-  return String(value);
+  return String(Math.round(value));
 }
 
 /**
@@ -84,7 +91,7 @@ function Change({ d, unit }: { d: Delta | null; unit: RecordStatMetric['unit'] }
  * A metric nothing records prints the reason where the number would be, rather
  * than a dash that reads like a quiet month or a nought that reads like a fact.
  */
-function StatTile({ m, previousLabel, covered }: { m: RecordStatMetric; previousLabel: string; covered: boolean }) {
+function StatTile({ m, previousLabel, covered, replayKey }: { m: RecordStatMetric; previousLabel: string; covered: boolean; replayKey: string }) {
   return (
     <MetricCard title={m.label} right={m.field} note={m.note} noteMinLines={4} align="top">
       {m.unavailable ? (
@@ -99,7 +106,16 @@ function StatTile({ m, previousLabel, covered }: { m: RecordStatMetric; previous
           {m.value === null ? (
             <div className="text-[13px] leading-snug text-degraded">Not recorded this month.</div>
           ) : (
-            <div className="font-display tabular text-[30px] leading-none text-ink">{fmt(m.value, m.unit)}</div>
+            <div className="font-display tabular text-[30px] leading-none text-ink">
+              {/*
+                Percentages and durations count up too (2026-09-16, Destiny).
+                They used to snap while the plain counts beside them ran, which
+                read as half the row working. `replayKey` is the month, so
+                changing it re-runs the whole grid rather than only the tiles
+                whose number happened to change.
+              */}
+              <CountUpText value={m.value} format={(n) => fmt(n, m.unit)} replayKey={replayKey} />
+            </div>
           )}
           <div className="flex flex-wrap items-baseline gap-x-2">
             <Change d={m.change} unit={m.unit} />
@@ -373,7 +389,7 @@ export default function RecordStatistics<T>({
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {extraTiles}
         {data.metrics.map((m) => (
-          <StatTile key={m.key} m={m} previousLabel={data.previous_label} covered={data.covered} />
+          <StatTile key={m.key} m={m} previousLabel={data.previous_label} covered={data.covered} replayKey={`${kind}|${data.selected}`} />
         ))}
       </div>
     </div>

@@ -304,13 +304,19 @@ export const AIRTABLE_BASES: SeedRow[] = [
 const P = (id: string, name: string, slack_user_id: string | null, email: string | null, role: string | null, lanes_owned: string[], notes: string | null = null): SeedRow =>
   ({ id, name, slack_user_id, email, role, lanes_owned, notes });
 
+/**
+ * Work addresses, not personal ones (2026-09-16, Destiny). A live database
+ * already holds these rows, and `seedRegistry` inserts `ON CONFLICT (id) DO
+ * NOTHING`, so this list only ever reaches a fresh one — migration 12 is what
+ * carries the same addresses to the databases that already exist.
+ */
 export const PEOPLE: SeedRow[] = [
-  P('jason', 'Jason Bays', 'U0A9V97949F', null, 'Founder / Principal', []),
-  P('destiny', 'Destiny Arupi', 'U0AEW3TBYH1', 'destinyarupi@gmail.com', 'Engine Steward', ['RT', 'NS', 'BAYS']),
-  P('jegan', 'Jeganathan', 'U0AF011R821', null, 'Infrastructure / BHARAG', ['VFARM_HARDWARE']),
-  P('kaiqi', 'Kaiqi Yang', 'U0AD1V1D65N', null, 'Genie / RSS / infra', ['GENIE']),
-  P('ahad', 'Ahad', 'U0AC6RFNP3P', null, 'North Star / CS Twin', ['CST']),
-  P('hardik', 'Hardik Bhatt', 'U0BKT6MAW2Y', null, 'Media Twin / vFarm funnel', ['MEDIA', 'CAD_API'],
+  P('jason', 'Jason Bays', 'U0A9V97949F', 'jason@bhanetwork.org', 'Founder / Principal', ['CEO']),
+  P('destiny', 'Destiny Arupi', 'U0AEW3TBYH1', 'destiny@bhanetwork.org', 'Engine Steward', ['RT', 'NS', 'BAYS']),
+  P('jegan', 'Jeganathan', 'U0AF011R821', 'jegan@bhanetwork.org', 'Infrastructure / BHARAG', ['VFARM_HARDWARE']),
+  P('kaiqi', 'Kaiqi Yang', 'U0AD1V1D65N', 'kaiqi@bhanetwork.org', 'Genie / RSS / infra', ['GENIE']),
+  P('ahad', 'Ahad', 'U0AC6RFNP3P', 'ahad@bhanetwork.org', 'CS Twin', ['CST']),
+  P('hardik', 'Hardik Bhatt', 'U0BKT6MAW2Y', 'hardik@bhanetwork.org', 'Media Twin / vFarm funnel', ['MEDIA', 'CAD_API'],
     'Bays — Message Capture carries a different Slack id for Hardik (U0AEYQ6QB1B). The Daily Open Loops Sweep and the North Star Tools Router both agree on U0BKT6MAW2Y, so Message Capture is probably the wrong one — confirm before re-enabling that branch.'),
-  P('kavin', 'Kavin G N', 'U0BNQGG020Y', null, 'vFarm / kiosk', ['KIOSK']),
+  P('kavin', 'Kavin G N', 'U0BNQGG020Y', 'kavin@bhanetwork.org', 'vFarm / kiosk', ['KIOSK']),
 ];

@@ -402,6 +402,14 @@ export interface Spend {
   unpriced: number;
   /** Priced, but with no billing cycle or a one-off one, so not part of a monthly figure. */
   not_monthly: number;
+  /**
+   * Which ones (2026-09-16, Destiny). A cost typed onto a row with no billing
+   * cycle is correctly left out of a monthly total — sixty dollars is not
+   * sixty dollars a month until somebody says so — but the card only said how
+   * many, which reads as "I entered a cost and nothing happened". Naming them
+   * turns a count into the one thing left to fill in.
+   */
+  not_monthly_ids: string[];
   /** Ids renewing within thirty days, and any already past. */
   renewing_soon: string[];
   overdue: string[];
@@ -435,7 +443,7 @@ export function spendOf(services: RegistryRow[]): Spend {
 
   const byCurrency = new Map<string, { monthly: number; services: number }>();
   let priced = 0;
-  let notMonthly = 0;
+  const notMonthlyIds: string[] = [];
 
   for (const s of active) {
     const amount = typeof s.cost_amount === 'number' ? s.cost_amount : s.cost_amount === null ? null : Number(s.cost_amount);
@@ -444,7 +452,7 @@ export function spendOf(services: RegistryRow[]): Spend {
     const cycle = typeof s.billing_cycle === 'string' ? s.billing_cycle : null;
     const factor = cycle ? PER_MONTH[cycle] : null;
     if (factor === null || factor === undefined) {
-      notMonthly++;
+      notMonthlyIds.push(s.id);
       continue;
     }
     // A cost with no currency is still a real cost; it is grouped under the
@@ -472,7 +480,8 @@ export function spendOf(services: RegistryRow[]): Spend {
     active: active.length,
     priced,
     unpriced: active.length - priced,
-    not_monthly: notMonthly,
+    not_monthly: notMonthlyIds.length,
+    not_monthly_ids: notMonthlyIds,
     renewing_soon: renewing,
     overdue,
     with_renewal_date: withRenewal.length,
