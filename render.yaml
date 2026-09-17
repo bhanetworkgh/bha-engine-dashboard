@@ -128,6 +128,12 @@ services:
       #   appINvgEoZjuYQI2O  engine_events              (error_counts AND
       #                                                  retry_attempts, for
       #                                                  Engine health, 17 Sep)
+      #   appwnt0mEtfwDtcN5  BHA Pay Ledger             (Builders, Sessions AND
+      #                                                  Monthly Statements, for
+      #                                                  Pay Tracker, 17 Sep)
+      # Nothing is ever written to the pay ledger: paid status is set by the
+      # Slack card or by a statement closing, and the dashboard is read-only on
+      # pay by design.
       # The last two changed on 17 Sep 2026, when both twins moved onto their
       # own ledgers. The five [LEGACY] bases they read until then —
       # appkCTjhH8PtYRFI7, appud969Dw7H4tMwv, app4QnMJ2woiKlLc0,

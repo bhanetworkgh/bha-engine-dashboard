@@ -445,7 +445,9 @@ never read and Engine health says so rather than showing it healthy; the boot
 line names every lane that is not keyed. `AIRTABLE_TOKEN` also needs read on
 `appINvgEoZjuYQI2O` (engine_events) for that page's two Airtable tables.
 `ENGINE_HEAL_URL` is the self-healing webhook behind Retry now, optional, with
-the live webhook as its default.
+the live webhook as its default. `AIRTABLE_TOKEN` also needs read on
+`appwnt0mEtfwDtcN5` (BHA Pay Ledger) for Pay Tracker — read only, and no base
+variable, because nothing here ever writes to it.
 `DATABASE_CA_CERT`, `DATABASE_POOL_MAX`, `N8N_API_URL`, `BHARAG_API_URL` and
 `AIRTABLE_API_URL` are optional.
 `DATA_DIR` is gone, and so are `AIRTABLE_RESYNC_MINUTES`, the
@@ -544,6 +546,7 @@ RECORDS
   Commercial
   Clients
   Executions             ← every run of every workflow, tabbed by system
+  Pay Tracker            ← who is owed, for what work, and what has been paid
 
 REFERENCE
   System registry
@@ -1176,6 +1179,77 @@ carries — which is why the page used to show so much less than the table holds
 The one record missing what a complete extractor run writes
 (`CARD-1783965721620-1RJX`, no `created_at`, `media_readiness`, `pilot_state` or
 `readiness_state`) is surfaced as **incomplete**, never as a bucket of its own.
+
+### Pay Tracker
+**Built 2026-09-17, Destiny**, against a ledger created the same day. One
+question: **who is owed money, for what work, and what has already been paid?**
+Before it, pay was a tick on a Slack card, so answering "what do I owe Hardik for
+September" meant scrolling back through weeks of messages.
+
+The BHA Pay Ledger, `appwnt0mEtfwDtcN5`, three tables — **Builders**
+(`tblS6WMJugqP8GJNa`, who is paid how), **Sessions** (`tblPVfIicEiJ2uOYC`, one
+row per approved session, owed or paid) and **Monthly Statements**
+(`tbl5iAdfhz91PZrUg`, one row per monthly builder per month). Mirrored through
+`POST /api/engine/pay` — **one route with a `kind` of "session" or "statement" in
+the body**, which is what n8n was given, rather than three kind-named routes;
+those exist too and the dispatch is the only thing that differs. **Resync from
+Airtable** is the button, and Airtable is the source of truth.
+
+Four rules run through every figure, and they are what the page is for:
+
+- **It counts work, not money.** There are no rates in this system and none
+  appear here. If a rate is ever added it belongs in the Builders table first;
+  until then any figure with a currency sign on it would be invented.
+- **It is read-only.** Paid status is set by the Slack card or by a monthly
+  statement closing. Two places to change the same fact is how records drift, so
+  there is no write path from this page and no button that would make one.
+- **Monthly and daily are never summed into one rate.** They are different
+  agreements — a monthly builder is *expected* to wait until the 1st — so a
+  blended figure describes nobody. Time to pay is two figures, never one, and
+  the Owed tab is two tables rather than one with a column.
+- **Working days and session count are different numbers.** Two sessions in one
+  day is one working day and two sessions. Neither is derived from the other and
+  neither is presented as the other; the statement panel prints both side by
+  side and says so when they differ.
+
+**A month is the session's own month**, which comes from the session date. A
+session worked on 30 September and approved on 1 October belongs to September,
+and nothing here groups by `Approved At`. **`Pay Mode` is frozen onto the
+session at approval**: if somebody moves from daily to monthly their old sessions
+keep the mode they had, so the page reads the row's own value and never joins to
+the Builders table to decide how a past session should be treated. **A session
+carrying neither mode is counted apart from both** and named wherever the split
+is printed, because a split that does not add up to the figure above it is the
+quietly-wrong number this dashboard exists to remove.
+
+**Four tabs, Owed first.** Owed is one row per builder, not per session — that is
+the view Jason wants on payday, and the sessions behind a figure are the evidence
+for it rather than the answer, so they are behind a click. Statements is every
+monthly statement with its **evidence block shown whole**: it is the proof Jason
+asked for and a one-line summary of it would defeat the point of writing it down.
+Sessions is the full ledger for when an answer needs checking. Statistics is the
+shape over time.
+
+**Status colour on a statement: only `Disputed`, and `Sent` once it is older than
+fourteen days.** `Payment Sent` is not a success to celebrate, it is the normal
+state, so it carries none. A statement closes itself to Payment Sent once every
+session behind it is ticked — so if a payment goes out and the sessions are never
+ticked, the statement stays open and reappears, which is a forgotten payment
+surfacing rather than vanishing.
+
+**The ledger's own age is on the page, and it is load-bearing.** The ledger is
+kept in step with the approved logs by a sync that runs every 30 minutes, and
+this dashboard reads the ledger when somebody presses Resync — two hops, both
+stated. **Nothing owed and the sync not having run look identical**, and on a pay
+page that is the difference between a quiet month and an unpaid builder, so every
+empty state here says which of the two it is rather than drawing a tidy nought.
+
+**Sessions whose `Builder Slack ID` matches nobody on the roster are surfaced,
+never dropped.** It should be nought; if it is not, somebody is building and the
+pay system has not been told who they are, so no statement will ever include them
+and no card will ever be sent. Colour is otherwise reserved for what is genuinely
+bad: unpaid past sixty days, a disputed statement, a statement sent and unanswered
+past fourteen days.
 
 ### System registry
 **Four registries on one page** (decision 2026-09-14, Destiny) — Builders,

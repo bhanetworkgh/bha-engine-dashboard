@@ -27,6 +27,7 @@ const VFarm = lazy(() => import('./screens/VFarm'));
 const MediaTwin = lazy(() => import('./screens/MediaTwin'));
 const Genie = lazy(() => import('./screens/Genie'));
 const EngineHealth = lazy(() => import('./screens/EngineHealth'));
+const PayTracker = lazy(() => import('./screens/PayTracker'));
 const OpenLoops = lazy(() => import('./screens/OpenLoops'));
 const Codex = lazy(() => import('./screens/Codex'));
 const BuildPatterns = lazy(() => import('./screens/BuildPatterns'));
@@ -62,6 +63,7 @@ export default function App() {
         <Route path="/genie" element={<Suspense fallback={<Loading />}><Genie /></Suspense>} />
         <Route path="/vfarm" element={<Suspense fallback={<Loading />}><VFarm /></Suspense>} />
         <Route path="/engine-health" element={<Suspense fallback={<Loading />}><EngineHealth /></Suspense>} />
+        <Route path="/pay" element={<Suspense fallback={<Loading />}><PayTracker /></Suspense>} />
         <Route path="/open-loops" element={<Suspense fallback={<Loading />}><OpenLoops /></Suspense>} />
         <Route path="/codex" element={<Suspense fallback={<Loading />}><Codex /></Suspense>} />
         <Route path="/build-patterns" element={<Suspense fallback={<Loading />}><BuildPatterns /></Suspense>} />

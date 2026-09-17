@@ -1091,6 +1091,64 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_retry_attempts_natural ON engine_retry_attempts (natural_id)`,
     ],
   },
+
+  {
+    id: 17,
+    name: 'the pay ledger: builders, approved sessions and monthly statements',
+    statements: [
+      /**
+       * The BHA Pay Ledger (2026-09-17). Three tables, all keyed on a real id
+       * of their own, so all three key on the natural id as well as the record
+       * id.
+       *
+       * Nothing here holds an amount, and nothing here should ever be asked to:
+       * the ledger counts work, not money. If a rate arrives it goes on the
+       * Builders row, and this schema would need a migration of its own to
+       * carry it — which is the point of saying so here rather than leaving a
+       * spare column somebody might fill.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_pay_builders (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_pay_builders_natural ON engine_pay_builders (natural_id)`,
+
+      /**
+       * `natural_id` is the Codex entry id, which is one session. The rows are
+       * only ever created by a session being approved — nothing writes here by
+       * hand — which is what keeps the ledger in line with the session logs.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_pay_sessions (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_pay_sessions_natural ON engine_pay_sessions (natural_id)`,
+
+      `CREATE TABLE IF NOT EXISTS engine_pay_statements (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_pay_statements_natural ON engine_pay_statements (natural_id)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

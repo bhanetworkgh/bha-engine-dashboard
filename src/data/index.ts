@@ -40,6 +40,8 @@ import type {
   HealthMetrics,
   NewLoop,
   NsData,
+  PayData,
+  PayMetrics,
   OpenLoopsData,
   Opportunity,
   OverviewData,
@@ -172,6 +174,19 @@ export const getRetryMetrics = () => api<RetryMetrics>('/api/engine-health/retri
  * to another host, so it gets the same long timeout they do.
  */
 export const resyncHealth = () => api<Resync>('/api/engine-health/resync', { method: 'POST', timeoutMs: 180_000 });
+
+/* ------------------------------------------------------------ pay tracker */
+
+/**
+ * The pay ledger: who is owed money, for what work, and what has been paid.
+ *
+ * Read-only from here. Paid status is set by the Slack card or by a monthly
+ * statement closing, and two places to change the same fact is how records
+ * drift — so there is no write in this module and no route to make one.
+ */
+export const getPay = () => api<PayData>('/api/pay');
+export const getPayMetrics = () => api<PayMetrics>('/api/pay/metrics');
+export const resyncPay = () => api<Resync>('/api/pay/resync', { method: 'POST', timeoutMs: 180_000 });
 
 /**
  * Asks the healer to retry one incident — **the same path the 5-minute

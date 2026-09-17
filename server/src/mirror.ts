@@ -53,6 +53,9 @@ export type MirrorKind =
   | 'incidents'
   | 'error_counts'
   | 'retry_attempts'
+  | 'pay_builders'
+  | 'pay_sessions'
+  | 'pay_statements'
   | 'digests';
 
 interface KindSpec {
@@ -121,6 +124,18 @@ export const KINDS: Record<MirrorKind, KindSpec> = {
   incidents: { table: 'engine_incidents', label: 'Incident ledger', naturalField: 'entity_id', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
   error_counts: { table: 'engine_error_counts', label: 'error_counts', naturalField: 'signature', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
   retry_attempts: { table: 'engine_retry_attempts', label: 'retry_attempts', naturalField: 'incident_id', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
+  /**
+   * The pay ledger's three (2026-09-17). All three carry a real id of their
+   * own, so all three key on it.
+   *
+   * n8n posts to `/api/engine/pay` with a `kind` of "session" or "statement"
+   * rather than to a kind-named route — see index.ts, which reads that and
+   * dispatches here. The kinds exist under their own names too, so the Engine
+   * writes tab counts them like everything else.
+   */
+  pay_builders: { table: 'engine_pay_builders', label: 'Pay builders', naturalField: 'Slack User ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
+  pay_sessions: { table: 'engine_pay_sessions', label: 'Pay sessions', naturalField: 'Codex Entry ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
+  pay_statements: { table: 'engine_pay_statements', label: 'Monthly statements', naturalField: 'Statement ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
   digests: { table: 'engine_digest_deliveries', label: 'digest_deliveries', naturalField: 'session_id', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['builder_id', 'status', 'sent_at'] },
 };
 
