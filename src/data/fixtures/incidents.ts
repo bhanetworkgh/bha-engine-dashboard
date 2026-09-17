@@ -8,10 +8,10 @@
  * Reference date for every relative figure: 2026-09-07.
  */
 
-import type { Incident } from '../types';
+import type { FixtureIncident } from '../types';
 import { n8n } from './common';
 
-export const INCIDENTS: Incident[] = [
+export const INCIDENTS: FixtureIncident[] = [
   {
     id: 'INC-8F2A41',
     opened_at: '2026-09-07 11:42',

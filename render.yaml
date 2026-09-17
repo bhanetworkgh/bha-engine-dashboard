@@ -85,6 +85,26 @@ services:
       # hourly and the pages read that.
       - key: N8N_API_KEY
         sync: false
+      # The BHARAG incident ledger, for Engine health (17 Sep 2026). Read only,
+      # and the second external read path this server has after Airtable.
+      #
+      # **One key per lane, and they are not interchangeable.** Each of the
+      # three error handlers holds its own BHARAG credential and a key for one
+      # lane is refused for another, so the server reads three times with three
+      # keys. No defaults: a guessed key is a 401, which reads on the page like
+      # the ledger refusing the lane rather than like this service being
+      # misconfigured.
+      #
+      # A lane with no key is never read, and the page says so rather than
+      # drawing it healthy — no incidents and no reporting look identical from
+      # the outside, and only one of them is good news. The boot line names
+      # every lane that is not keyed.
+      - key: BHARAG_BAYS_KEY
+        sync: false
+      - key: BHARAG_NORTH_STAR_KEY
+        sync: false
+      - key: BHARAG_RESEARCH_TWIN_KEY
+        sync: false
       # The Airtable token, for loop and Codex edits (2026-09-14). The n8n
       # write-back that stood here for a day is retired: the loop panel edits
       # four fields and can move a row between builder tables, and routing that
@@ -105,6 +125,9 @@ services:
       #   appkSUSh9ijNjP2f8  BHA Client Research Loop
       #   appRvx4u9V9BYp646  BHA North Star Ledger      (Asks)
       #   appv39nQzmfC9VVkG  BHA Research Twin Ledger   (Asks AND Research Jobs)
+      #   appINvgEoZjuYQI2O  engine_events              (error_counts AND
+      #                                                  retry_attempts, for
+      #                                                  Engine health, 17 Sep)
       # The last two changed on 17 Sep 2026, when both twins moved onto their
       # own ledgers. The five [LEGACY] bases they read until then —
       # appkCTjhH8PtYRFI7, appud969Dw7H4tMwv, app4QnMJ2woiKlLc0,

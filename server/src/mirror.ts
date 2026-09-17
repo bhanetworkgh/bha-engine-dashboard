@@ -50,6 +50,9 @@ export type MirrorKind =
   | 'client_lanes'
   | 'client_questions'
   | 'client_requests'
+  | 'incidents'
+  | 'error_counts'
+  | 'retry_attempts'
   | 'digests';
 
 interface KindSpec {
@@ -102,6 +105,22 @@ export const KINDS: Record<MirrorKind, KindSpec> = {
    * not something the engine writes, so the record id is the key.
    */
   client_requests: { table: 'engine_client_requests', label: 'Client Requests', naturalField: null, keyOnNatural: false, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
+  /**
+   * Engine Health's three (2026-09-17).
+   *
+   * **`incidents` comes from BHARAG rather than Airtable**, so it is the one
+   * kind with no `record_id` to send: the ledger's `entity_id` is the key, and
+   * `keyOnNatural` is what makes that work. Everything else about the write is
+   * identical — same envelope, same auth, same write log — because a second
+   * way in is a second thing to keep honest.
+   *
+   * `lane` is promoted on incidents and retries because every figure on that
+   * page groups by it, and it is spelled `source` on an incident and `lane` on
+   * a retry row, so `prepare()` reads both rather than assuming one.
+   */
+  incidents: { table: 'engine_incidents', label: 'Incident ledger', naturalField: 'entity_id', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
+  error_counts: { table: 'engine_error_counts', label: 'error_counts', naturalField: 'signature', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
+  retry_attempts: { table: 'engine_retry_attempts', label: 'retry_attempts', naturalField: 'incident_id', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
   digests: { table: 'engine_digest_deliveries', label: 'digest_deliveries', naturalField: 'session_id', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['builder_id', 'status', 'sent_at'] },
 };
 
@@ -241,7 +260,11 @@ function prepare(kind: MirrorKind, input: MirrorInput): {
     // `Lane` on the twins' ledgers, `lane_id` everywhere else. Both are read
     // rather than one being assumed: a promoted column that silently comes back
     // null files every row under "(no lane)".
-    if (col === 'lane_id') extra.lane_id = text(input.lane_id) ?? text(fields.lane_id) ?? text(fields.Lane);
+    // `lane_id` on the record kinds, `Lane` on the twins' ledgers, `source` on
+    // an incident and `lane` on a retry row. All four are read rather than one
+    // being assumed: a promoted column that silently comes back null files
+    // every row under "(no lane)".
+    if (col === 'lane_id') extra.lane_id = text(input.lane_id) ?? text(fields.lane_id) ?? text(fields.Lane) ?? text(fields.lane) ?? text(fields.source);
     else if (col === 'builder_id') extra.builder_id = text(input.builder_id) ?? text(fields.builder_id);
     else if (col === 'status') extra.status = text(fields.status);
     else if (col === 'sent_at') extra.sent_at = text(fields.sent_at);

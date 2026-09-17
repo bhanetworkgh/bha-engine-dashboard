@@ -37,7 +37,7 @@ export function recordUrl(base: string, table: string, id: string): string {
 
 /** Airtable's record id, as a shape. A row the engine wrote before Airtable had one carries none. */
 const REC_ID = /^rec[A-Za-z0-9]{14}$/;
-import type { AskTool, BuildPattern, BuildPatternDetail, ClientLane, ClientQuestion, ClientRequest, CodexEntry, CodexEntryDetail, Layer0Hold, Loop, LoopLaneTag, LoopStatus, NsAsk, Opportunity, ReadinessState, RecordKind, RtAsk, RtJob, Source } from '../../src/data/types';
+import type { AskTool, BuildPattern, BuildPatternDetail, ClientLane, ClientQuestion, ClientRequest, CodexEntry, CodexEntryDetail, ErrorCount, Incident, Layer0Hold, Loop, LoopLaneTag, LoopStatus, NsAsk, Opportunity, ReadinessState, RecordKind, RetryAttempt, RtAsk, RtJob, Source } from '../../src/data/types';
 
 /** Jason Status as the submission tables define it, lower-cased. 'unset' is a row he has not touched. */
 export type CodexApproval = 'approved' | 'pending' | 'input added' | 'unset';
@@ -959,6 +959,266 @@ export function mapRtJob(rec: AtRecord, now = new Date().toISOString()): RtJob {
     capped: status === JOB_CAPPED,
     source: airtableSource(RESEARCH_JOBS.base, RESEARCH_JOBS.table, rec.id),
     airtable: { base: RESEARCH_JOBS.base, table: RESEARCH_JOBS.table, record_id: rec.id, url: recordUrl(RESEARCH_JOBS.base, RESEARCH_JOBS.table, rec.id) },
+  };
+}
+
+
+/* ----------------------------------------------------------- engine health */
+
+/**
+ * Incidents, occurrence counts and retry attempts — the three things Engine
+ * Health is built from (2026-09-17).
+ *
+ * Three sources, and they do not agree with each other about spelling:
+ *
+ *   the incident ledger   BHARAG, `GET /api/v1/incidents`, one call per lane
+ *                         with that lane's own key. `error_class` uppercase.
+ *   error_counts          Airtable `appINvgEoZjuYQI2O / tblnvhKOnuOoiB1RX`,
+ *                         one row per fault signature. `error_class` **lower
+ *                         case with underscores** — `schema_validation`.
+ *   retry_attempts        Airtable `appINvgEoZjuYQI2O / tblu9fFmCkAaeJd8Y`,
+ *                         one row per incident the healer has touched.
+ *                         `error_class` uppercase.
+ *
+ * That disagreement is real and was read off the live tables, not assumed:
+ * `error_counts` holds `schema_validation` and `billing_quota` today while
+ * `retry_attempts` holds `NETWORK_TIMEOUT`. `errorClass()` below normalises
+ * both to the canonical label so the same fault is one bar rather than two.
+ */
+
+export const ERROR_COUNTS = { base: 'appINvgEoZjuYQI2O', table: 'tblnvhKOnuOoiB1RX', label: 'error_counts' };
+export const RETRY_ATTEMPTS = { base: 'appINvgEoZjuYQI2O', table: 'tblu9fFmCkAaeJd8Y', label: 'retry_attempts' };
+
+/** The three lanes, each with its own BHARAG credential. Not collapsible into one call. */
+export const HEALTH_LANES: { key: string; source: string; label: string }[] = [
+  { key: 'bays', source: 'bays', label: 'Bays' },
+  { key: 'north_star', source: 'north_star', label: 'North Star' },
+  { key: 'research_twin', source: 'research_twin', label: 'Research Twin' },
+];
+
+export function laneLabelOf(lane: string | null): string {
+  return HEALTH_LANES.find((l) => l.key === lane)?.label ?? (lane ?? '(no lane)');
+}
+
+/**
+ * The shared error-class vocabulary, as of 17 Sep 2026, and **which of them a
+ * retry can do anything about**.
+ *
+ * Retryability is a property of the class, not a judgement: a 429 is the caller
+ * going too fast and clears on its own; a 402 is credit exhausted and retrying
+ * it burns more calls. `MODEL_OUTPUT_INVALID` and `UPSTREAM_5XX` were split out
+ * of the older classes on 17 Sep — the first because a model answers
+ * differently every run so a retry usually works, the second because a server
+ * error is not a billing refusal and was being treated as one.
+ */
+export const ERROR_CLASSES: { key: string; retryable: boolean; severity: string; what: string }[] = [
+  { key: 'NETWORK_TIMEOUT', retryable: true, severity: 'warning', what: 'Connection refused, a timeout, a 502 or 503 — and rate limiting. A 429 is not a billing problem: the caller sent requests too fast.' },
+  { key: 'MODEL_OUTPUT_INVALID', retryable: true, severity: 'warning', what: 'A model produced output its own parser rejected. It answers differently every run, so a retry usually works. New on 17 Sep 2026.' },
+  { key: 'UPSTREAM_5XX', retryable: true, severity: 'warning', what: 'A service returned a server error rather than refusing on credit. New on 17 Sep 2026, split out of billing.' },
+  { key: 'BILLING_QUOTA', retryable: false, severity: 'critical', what: 'A 402: credit exhausted. Retrying burns calls without changing the answer.' },
+  { key: 'CONFIG_AUTH', retryable: false, severity: 'critical', what: 'A 401 or 403, including Google PERMISSION_DENIED — the token is valid but the account has no access to the file.' },
+  { key: 'SCHEMA_VALIDATION', retryable: false, severity: 'high', what: 'A malformed payload, a 404, a 400, or Airtable’s ambiguous 403. Fails identically on every retry.' },
+  { key: 'UNKNOWN', retryable: false, severity: 'info', what: 'The handler did not classify it. Not the same as a class this dashboard has not heard of, which is shown under its own name.' },
+];
+
+const CLASS_BY_KEY = new Map(ERROR_CLASSES.map((c) => [c.key, c]));
+
+/**
+ * One spelling for a class, whatever the source wrote.
+ *
+ * `error_counts` writes `schema_validation`, the ledger and `retry_attempts`
+ * write `SCHEMA_VALIDATION`. Upper-casing and swapping spaces and hyphens for
+ * underscores makes them one value.
+ *
+ * **A class this vocabulary does not know keeps its own name.** It is not
+ * folded into `UNKNOWN`: `UNKNOWN` is a real classification meaning the handler
+ * looked and could not decide, and a class added upstream that this code has
+ * not heard of is a different fact — one worth seeing rather than hiding.
+ */
+export function errorClass(raw: unknown): string {
+  const s = str(raw);
+  if (!s) return 'UNKNOWN';
+  return s.trim().toUpperCase().replace(/[\s-]+/g, '_');
+}
+
+export function classIsKnown(key: string): boolean {
+  return CLASS_BY_KEY.has(key);
+}
+
+/** Whether a retry can do anything about this class. Unknown classes are not retried. */
+export function classIsRetryable(key: string): boolean {
+  return CLASS_BY_KEY.get(key)?.retryable ?? false;
+}
+
+export function classSeverity(key: string): string {
+  return CLASS_BY_KEY.get(key)?.severity ?? 'info';
+}
+
+export function classMeaning(key: string): string | null {
+  return CLASS_BY_KEY.get(key)?.what ?? null;
+}
+
+export const SEVERITIES = ['critical', 'high', 'warning', 'info'];
+export const RETRY_STATUSES = ['Retrying', 'Recovered', 'Exhausted'];
+export const RETRY_TRIGGERS = ['Schedule', 'Dashboard'];
+/** Three attempts and the circuit is broken deliberately. */
+export const RETRY_CAP = 3;
+
+/** A single-select as Airtable's REST API gives it (a string) or as a client object. */
+function selectName(v: unknown): string | null {
+  if (typeof v === 'string') return str(v);
+  if (v && typeof v === 'object' && 'name' in v) return str((v as { name: unknown }).name);
+  return null;
+}
+
+function strings(v: unknown): string[] {
+  return Array.isArray(v) ? v.map((x) => String(x)).filter(Boolean) : [];
+}
+
+/** Whole hours between two stamps, to one decimal. Null where either is missing. */
+function hoursBetween(from: string | null, to: string | null): number | null {
+  if (!from || !to) return null;
+  const a = Date.parse(from);
+  const b = Date.parse(to);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return null;
+  return Math.round(((b - a) / 3_600_000) * 10) / 10;
+}
+
+/**
+ * One incident from the ledger.
+ *
+ * **`payload.retry_policy.retries_attempted` is deliberately not mapped.** The
+ * healer does not maintain it — it records attempts in the `retry_attempts`
+ * table instead — so the number on the incident is stale the moment a retry
+ * happens. It stays inside the stored blob, because nothing here drops a field
+ * the engine owns, and it has no way onto the page.
+ *
+ * `retryable` prefers the incident's own `retry_policy.retryable` where it is a
+ * boolean and falls back to the class table, so this code never contradicts the
+ * handler about an incident the handler classified. Which of the two answered is
+ * carried on the record, so a card can say.
+ */
+export function mapIncident(rec: AtRecord, ctx?: { open_now?: boolean; last_seen_open?: string | null; first_seen_at?: string | null }): Incident {
+  const f = rec.fields;
+  const payload = (f.payload && typeof f.payload === 'object' && !Array.isArray(f.payload) ? f.payload : {}) as Record<string, unknown>;
+  const policy = (payload.retry_policy && typeof payload.retry_policy === 'object' ? payload.retry_policy : {}) as Record<string, unknown>;
+  const cls = errorClass(payload.error_class);
+  const ownRetryable = typeof policy.retryable === 'boolean' ? policy.retryable : null;
+  const lane = str(f.source) ?? str(payload.lane) ?? null;
+  const resolved = iso(payload.resolved_at);
+  /**
+   * **The incident's own date wins.** `ctx.first_seen_at` is when *this
+   * database* inserted the row, which is a fact about the resync rather than
+   * about the failure — and if it were preferred, every incident read in one
+   * pass would land in the week it was imported and the weekly chart would
+   * draw one tall bar the day somebody pressed the button. The ledger's
+   * `created_at` is when the thing actually broke; the insert time is only the
+   * fallback for a row that carries no date of its own.
+   */
+  const firstSeen = iso(f.created_at) ?? iso(rec.createdTime) ?? ctx?.first_seen_at ?? null;
+
+  return {
+    id: str(f.entity_id) ?? rec.id,
+    entity_id: str(f.entity_id) ?? rec.id,
+    type: str(f.type),
+    subsystem: str(f.subsystem),
+    lane,
+    lane_label: laneLabelOf(lane),
+    // The ledger's own severity where it gave one. The class map is a fallback
+    // for a row that did not, never an override of what the handler said.
+    severity: str(f.severity) ?? classSeverity(cls),
+    severity_from: str(f.severity) ? 'the incident' : 'the error class',
+    summary: str(f.summary),
+    resolution_status: str(f.resolution_status),
+    workflow: str(payload.workflow_or_scenario),
+    failed_node: str(payload.failed_node_or_component),
+    error_class: cls,
+    error_class_known: classIsKnown(cls),
+    retryable: ownRetryable ?? classIsRetryable(cls),
+    retryable_from: ownRetryable === null ? 'the error class' : 'the incident',
+    error_message: str(payload.error_message),
+    execution_id: str(payload.execution_id),
+    impact_tags: strings(payload.impact_tags),
+    max_retries: num(policy.max_retries),
+    retry_interval: str(policy.retry_interval),
+    self_healing_strategy: str(payload.self_healing_strategy),
+    resolved_at: resolved,
+    resolved_by: str(payload.resolved_by),
+    // Set where a handler overrode its own first answer. The page counts these
+    // to show whether the classes added on 17 Sep are catching real cases.
+    reclassified_from: str(payload.reclassified_from) ? errorClass(payload.reclassified_from) : null,
+    first_seen_at: firstSeen,
+    open_now: ctx?.open_now ?? true,
+    last_seen_open: ctx?.last_seen_open ?? null,
+    hours_to_resolve: hoursBetween(firstSeen, resolved),
+    /**
+     * **No `source` link, deliberately.** The incident ledger has no per-record
+     * page to open, and inventing a URL that 404s is worse than not offering
+     * one. The link that is useful is the n8n execution, and `execution_url` is
+     * filled in from the executions this database already holds — see
+     * `health.ts`. Where we do not hold that execution it stays null and the row
+     * says so rather than linking somewhere that cannot show it.
+     */
+    execution_url: null,
+  };
+}
+
+export function mapErrorCount(rec: AtRecord): ErrorCount {
+  const f = rec.fields;
+  return {
+    id: rec.id,
+    signature: str(f.signature) ?? '(no signature)',
+    workflow: str(f.workflow),
+    failed_node: str(f.failed_node),
+    error_class: errorClass(f.error_class),
+    // Deliberately nullable. Nought is a real value here — it is what the
+    // counter is reset to after an alert fires — and "not recorded" is not.
+    error_count: num(f.error_count),
+    last_seen: iso(f.last_seen),
+    last_alerted_at: iso(f.last_alerted_at),
+    incident_id: str(f.incident_id),
+    source: airtableSource(ERROR_COUNTS.base, ERROR_COUNTS.table, rec.id),
+    airtable: { base: ERROR_COUNTS.base, table: ERROR_COUNTS.table, record_id: rec.id, url: recordUrl(ERROR_COUNTS.base, ERROR_COUNTS.table, rec.id) },
+  };
+}
+
+export function mapRetryAttempt(rec: AtRecord): RetryAttempt {
+  const f = rec.fields;
+  const attempts = num(f.attempts);
+  const executionId = str(f.execution_id);
+  const status = selectName(f.status);
+  /**
+   * The button is disabled for exactly two reasons, and each says which.
+   * Three attempts is the circuit breaker, broken on purpose; no execution id
+   * means the healer has nothing to resume, and it refuses without one rather
+   * than starting a fresh run.
+   */
+  const atCap = (attempts ?? 0) >= RETRY_CAP;
+  const lane = selectName(f.lane);
+  return {
+    id: rec.id,
+    incident_id: str(f.incident_id) ?? '(no incident id)',
+    lane,
+    lane_label: laneLabelOf(lane),
+    workflow: str(f.workflow),
+    failed_node: str(f.failed_node),
+    error_class: errorClass(f.error_class),
+    execution_id: executionId,
+    attempts,
+    first_attempt_at: iso(f.first_attempt_at),
+    last_attempt_at: iso(f.last_attempt_at),
+    status: status ?? '(no status)',
+    retry_execution_id: str(f.retry_execution_id),
+    triggered_by: selectName(f.triggered_by),
+    last_result: str(f.last_result),
+    can_retry: !atCap && Boolean(executionId),
+    blocked_reason: atCap
+      ? `This incident has used all ${RETRY_CAP} attempts. The circuit is broken deliberately: a person should look at why it is failing before it is retried again.`
+      : executionId
+        ? null
+        : 'This row carries no execution id, and the healer refuses without one — there is nothing for it to resume from.',
+    source: airtableSource(RETRY_ATTEMPTS.base, RETRY_ATTEMPTS.table, rec.id),
+    airtable: { base: RETRY_ATTEMPTS.base, table: RETRY_ATTEMPTS.table, record_id: rec.id, url: recordUrl(RETRY_ATTEMPTS.base, RETRY_ATTEMPTS.table, rec.id) },
   };
 }
 

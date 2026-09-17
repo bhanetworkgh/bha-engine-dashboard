@@ -1,37 +1,94 @@
-import { ComingSoon, PageHeader } from '../../components/ui';
+import { useCallback, useState } from 'react';
+import { useData } from '../../app/useData';
+import { getEngineHealth, resyncHealth, type HealthData } from '../../data';
+import { LoadFailed, Loading, PageHeader, ResyncButton, Tabs, Toast, useResync, useToast } from '../../components/ui';
+import LaneView from './LaneView';
+import Retries from './Retries';
 
 /**
- * Engine health, as a placeholder (decision 2026-09-16, Destiny).
+ * Engine Health — built 2026-09-17, where a "coming soon" page stood.
  *
- * **Incidents were already a placeholder** (2026-09-14): nothing upstream
- * records an incident into this dashboard, so there is no self-heal rate, no
- * retry count and no time to resolve.
+ * It answers one question: **is the engine actually working right now, and if
+ * not, what broke, was it fixed by itself, and does anyone need to do
+ * something?** Everything on it is read from three sources that were already
+ * being written and had never been read — the BHARAG incident ledger, and
+ * `error_counts` and `retry_attempts` in Airtable.
  *
- * **The execution roll-up that sat above it has come off too.** It was one
- * figure per system for the current week, each linking through to the
- * Executions page — real, but a second drawing of counts the Executions page
- * already draws, and that page answers the same question with the month, the
- * year, the per-workflow breakdown and the failing ids behind it. Two drawings
- * of the same counts drift, and the one a person happens to open first becomes
- * the one they trust. The workflows-in-no-system card went with it: those
- * workflows are the **Archived** tab on Executions, where they are counted
- * rather than only listed.
+ * **The three lane tabs are one component with a different `lane`.** The
+ * handlers are deliberately identical, and a per-lane copy would drift the
+ * first time one of them changed.
  *
- * What this page should show when incidents start arriving is the spec that
- * stood in CLAUDE.md before the 14 Sep entry — read it out of git. The removed
- * code is in git history rather than commented out here.
+ * The rule the whole page is built around: **no incidents and no reporting look
+ * identical from the outside**, and only one of them is good news. Every tab
+ * leads with which lanes answered — each lane needs its own BHARAG credential,
+ * so an unkeyed or refused lane is a real and common state — and no figure is
+ * allowed to imply an answer a lane never gave.
  */
+const TABS = ['All systems', 'Bays', 'North Star', 'Research Twin', 'Retries'] as const;
+type Tab = (typeof TABS)[number];
+
+/** Which lane each tab reads. All systems and Retries read every lane. */
+const LANE_OF: Partial<Record<Tab, string>> = {
+  Bays: 'bays',
+  'North Star': 'north_star',
+  'Research Twin': 'research_twin',
+};
+
 export default function EngineHealth() {
+  const [tab, setTab] = useState<Tab>('All systems');
+  const [tick, setTick] = useState(0);
+  const [held, setHeld] = useState<HealthData | null>(null);
+  const { toast, setToast } = useToast();
+  const { status, data: loaded, error } = useData(getEngineHealth, [tick === -1]);
+
+  const data = held ?? loaded;
+
+  /** Re-reads the rows and re-runs every figure, after a resync or a retry. */
+  const reload = useCallback(async () => {
+    setTick((n) => n + 1);
+    setHeld(await getEngineHealth());
+  }, []);
+
+  const resync = useResync({ run: resyncHealth, reload, setToast });
+
+  if (status === 'loading' && !data) return <Loading />;
+  if (status === 'error' && !data) return <LoadFailed error={error} />;
+  if (!data) return <Loading />;
+
+  const openNow = data.incidents.filter((i) => i.open_now).length;
+  const exhausted = data.retries.filter((r) => r.status === 'Exhausted').length;
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <PageHeader title="Engine health" subtitle="Incidents, retries and self-healing" />
-      <div className="flex min-h-0 flex-1 items-center justify-center px-6 pb-8 md:px-8">
-        <ComingSoon title="No incident reaches this dashboard yet" min={200}>
-          Nothing upstream records an incident here, so there is no self-heal rate, no retry count and no time to resolve to report.
-          What is real today is workflow executions, and those are on the Executions page — which is a different thing: an execution
-          that failed and was retried successfully is one failure there and would be one self-healed incident here.
-        </ComingSoon>
-      </div>
+    <div className="relative flex h-full min-h-0 flex-col">
+      <PageHeader
+        title="Engine health"
+        subtitle="What broke, whether it healed itself, and what is waiting on a person"
+        right={<ResyncButton busy={resync.busy} onClick={resync.start} />}
+        below={
+          <Tabs
+            tabs={TABS}
+            value={tab}
+            onChange={setTab}
+            /*
+              Counts on the two tabs where a number above nought is genuinely
+              bad. Nothing else carries one: a count on every tab is decoration,
+              and decoration that looks like a warning is worse than none.
+            */
+            counts={{
+              'All systems': openNow ? { n: openNow, tone: 'degraded' } : undefined,
+              Retries: exhausted ? { n: exhausted, tone: 'failing' } : undefined,
+            }}
+          />
+        }
+      />
+
+      {tab === 'Retries' ? (
+        <Retries data={data} tick={tick} onChanged={() => void reload()} />
+      ) : (
+        <LaneView data={data} lane={LANE_OF[tab] ?? null} tick={tick} />
+      )}
+
+      <Toast toast={toast} />
     </div>
   );
 }

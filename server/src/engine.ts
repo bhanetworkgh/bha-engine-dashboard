@@ -24,12 +24,14 @@ import type {
   NsData,
   OpenLoopsData,
   OverviewData,
+  OverviewTile,
   Query,
   RtData,
   SeriesPoint,
   TwinData,
 } from '../../src/data/types';
 import { MODEL_LABEL, askConfigured } from './ask';
+import * as health from './health';
 import { CODEX_CHOICES, CODEX_TABLES, loopTable, questionNeedsHuman, requestIsOpen } from './sources';
 import * as store from './store';
 
@@ -154,6 +156,12 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
   const nsUndelivered = ns.filter((a) => a.delivered === 'Not delivered').length;
   const cappedJobs = jobs.filter((j) => j.capped).length;
 
+  /** Engine Health, for its own tile. Read the same way its page reads it. */
+  const healthData = await health.data();
+  const healthIncidents = healthData.incidents;
+  const healthRetries = healthData.retries;
+  const healthLanes = healthData.lanes;
+
   const days7 = lastDays(REF_DATE, 7);
   const days14 = lastDays(REF_TODAY(), 14);
   const loops14d = countByDay(days14, loops.map((l) => l.raised_at).filter((d): d is string => Boolean(d)));
@@ -216,7 +224,38 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
       { key: 'media-twin', label: 'Media Twin', to: '/media-twin', headline: '—', sublabel: 'not wired up', signal: 'nothing Media Twin does writes here yet', health: 'ok' },
       { key: 'genie', label: 'Genie', to: '/genie', headline: '—', sublabel: 'not wired up', signal: 'nothing Genie does writes here yet', health: 'ok' },
       { key: 'vfarm', label: 'vFarm', to: '/vfarm', headline: '—', sublabel: 'not wired up', signal: 'nothing on the rack writes here yet', health: 'ok' },
-      { key: 'engine-health', label: 'Engine health', to: '/engine-health', headline: '—', sublabel: 'not wired up', signal: 'no incident reaches this dashboard yet', health: 'ok' },
+      /**
+       * Real from 2026-09-17: the incident ledger, its occurrence counts and
+       * its retries are read now, so the tile carries the figure its page
+       * leads with instead of a dash.
+       *
+       * **An unread lane is never drawn as health.** Where no lane answered,
+       * the headline is a dash and the signal says so — nought open incidents
+       * and nobody asked look identical, and only one of them is good news.
+       */
+      (() => {
+        const read = healthLanes.filter((l) => l.read);
+        const unread = healthLanes.filter((l) => !l.read);
+        const openIncidents = healthIncidents.filter((i) => i.open_now).length;
+        const capped = healthRetries.filter((r) => r.status === 'Exhausted').length;
+        return {
+          key: 'engine-health',
+          label: 'Engine health',
+          to: '/engine-health',
+          headline: read.length ? String(openIncidents) : '—',
+          sublabel: read.length ? (openIncidents === 1 ? 'incident open' : 'incidents open') : 'no lane was read',
+          signal: !read.length
+            ? `no lane answered — ${unread.map((l) => l.label).join(', ')} ${unread.length === 1 ? 'was' : 'were'} not read`
+            : unread.length
+              ? `${unread.map((l) => l.label).join(' and ')} could not be read, so this counts what is held`
+              : capped
+                ? `${capped} retr${capped === 1 ? 'y has' : 'ies have'} used all three attempts`
+                : openIncidents
+                  ? 'the healer is working what it can'
+                  : 'nothing is open in any lane',
+          health: (!read.length || openIncidents || capped ? 'degraded' : 'ok') as OverviewTile['health'],
+        };
+      })(),
       {
         key: 'open-loops',
         label: 'Open loops',

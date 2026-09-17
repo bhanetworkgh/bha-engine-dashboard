@@ -32,6 +32,8 @@ import * as codex from './codex';
 import * as loops from './loops';
 import * as mirror from './mirror';
 import * as executions from './executions';
+import * as health from './health';
+import * as bharag from './bharag';
 import { monthly } from './monthly';
 import { isStatKind, stats } from './stats';
 import { N8N_API_VAR, n8nBase, n8nConfigured } from './n8n';
@@ -320,6 +322,26 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
        */
       case '/api/twin-handoffs':
         return send(res, 200, await engine.getTwinHandoffs());
+      /**
+       * Engine Health. The rows it holds, and the figures over them — split the
+       * same way every other page splits them, so the page can re-read the
+       * figures for a different lane without re-reading every row.
+       */
+      /**
+       * `/api/engine-health`, not `/api/health`: that one is the
+       * unauthenticated liveness check the host polls, and a page's data route
+       * sharing its prefix is how one of them eventually shadows the other.
+       */
+      case '/api/engine-health':
+        return send(res, 200, await health.data());
+      case '/api/engine-health/retries':
+        return send(res, 200, await health.retryMetrics());
+      /** One lane, or all three when `lane` is absent. */
+      case '/api/engine-health/metrics': {
+        const lane = url.searchParams.get('lane');
+        if (lane && !health.LANE_KEYS.includes(lane)) throw new HttpError(404, `"${lane}" is not a lane this engine reports on. One of: ${health.LANE_KEYS.join(', ')}.`);
+        return send(res, 200, await health.metrics(lane || null));
+      }
       case '/api/clients':
         return send(res, 200, await engine.getClients());
       case '/api/ask-bays':
@@ -622,6 +644,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
      * update what changed there, delete what is gone, and never treat a table
      * that could not be read as a table that was emptied. Manual only.
      */
+    /**
+     * Engine Health reads five sources — three BHARAG lanes, each with its own
+     * credential, and two Airtable tables — so it has its own pass rather than
+     * the shared one, which is Airtable-shaped. It answers in the same `Resync`
+     * shape, so the shared button and its toast are unchanged.
+     */
+    if (p === '/api/engine-health/resync') {
+      return send(res, 200, await health.resync(sessionInfo(req).email));
+    }
+    /** One manual retry. The same path the 5-minute schedule takes. */
+    const retryNow = p.match(/^\/api\/engine-health\/retry\/(.+)$/);
+    if (retryNow) {
+      return send(res, 200, await health.retryNow(decodeURIComponent(retryNow[1]), sessionInfo(req).email));
+    }
     const sweep = p.match(/^\/api\/(patterns|commercial|clients|loops|ns|rt)\/resync$/);
     if (sweep) {
       return send(res, 200, await store.resync(sweep[1] as store.ResyncKind, sessionInfo(req).email));
@@ -771,6 +807,19 @@ async function boot(): Promise<void> {
       n8nConfigured()
         ? `  n8n:      ${n8nBase()} (${N8N_API_VAR} set) \u2014 executions polled every ${Math.round(executions.POLL_EVERY_MS / 1000)}s, one row per execution`
         : `  n8n:      NOT configured \u2014 ${N8N_API_VAR} is not set, so no execution is ever read and the Executions page says so rather than reading zero.`,
+    );
+    /**
+     * Named lane by lane, because a missing key is not a quiet default here:
+     * the lane simply never gets asked, and an unasked lane looks exactly like
+     * a healthy one on any page that does not say otherwise.
+     */
+    const laneKeys = bharag.configuredLanes();
+    console.log(
+      laneKeys.length === 3
+        ? `  incidents: ${bharag.BHARAG_URL} — all three lanes keyed`
+        : laneKeys.length
+          ? `  incidents: ${bharag.BHARAG_URL} — ${laneKeys.join(', ')} keyed; NOT keyed: ${Object.entries(bharag.LANE_KEY_VARS).filter(([k]) => !laneKeys.includes(k)).map(([, v]) => v).join(', ')}. An unkeyed lane is never read and Engine health says so rather than showing it healthy.`
+          : `  incidents: NOT configured — none of ${Object.values(bharag.LANE_KEY_VARS).join(', ')} is set, so no incident is ever read and Engine health says so rather than reading zero.`,
     );
     // Rows are read straight out of the engine tables, so there is nothing to
     // load at boot. What does run is the ledger catch-up: any status that

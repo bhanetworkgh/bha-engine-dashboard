@@ -413,6 +413,15 @@ workflow` with the key in `x-api-key` from the server's environment. The
 thread's `session_id` is stable for its life and is Bays's memory. The reply's
 `steps` are shown under the answer; empty means nothing is shown.
 
+**The incident ledger is the second external read path** (decision 2026-09-17,
+Destiny). Until it, Airtable was the only system this server called out to.
+BHARAG's `GET /api/v1/incidents` is read only, adds no dependency past Node
+itself, and needs **one credential per lane** — the three error handlers each
+hold their own and a key for one lane is refused for another, so it is three
+calls with three keys and cannot be collapsed. `server/src/bharag.ts` is the
+only code that holds them. Nothing here writes to the ledger: the handlers
+create incidents and the healer closes them.
+
 **Environment (all server-side, none in the bundle):** `AUTH_EMAIL`,
 `AUTH_PASSWORD_HASH`, `SESSION_SECRET`, `ASK_BAYS_API_KEY`, `ASK_BAYS_URL`,
 `DASHBOARD_INBOUND_KEY` (nothing reaches the record tables without it),
@@ -430,8 +439,15 @@ server refuses to start without.
 only), for the Executions page; not the same credential as `ASK_BAYS_API_KEY`,
 which is a webhook header. Without it no execution is ever read and the page
 says so rather than reading zero.
-`DATABASE_CA_CERT`, `DATABASE_POOL_MAX`, `N8N_API_URL` and `AIRTABLE_API_URL`
-are optional.
+`BHARAG_BAYS_KEY`, `BHARAG_NORTH_STAR_KEY` and `BHARAG_RESEARCH_TWIN_KEY` — the
+incident ledger, one per lane, read only, no defaults. A lane with no key is
+never read and Engine health says so rather than showing it healthy; the boot
+line names every lane that is not keyed. `AIRTABLE_TOKEN` also needs read on
+`appINvgEoZjuYQI2O` (engine_events) for that page's two Airtable tables.
+`ENGINE_HEAL_URL` is the self-healing webhook behind Retry now, optional, with
+the live webhook as its default.
+`DATABASE_CA_CERT`, `DATABASE_POOL_MAX`, `N8N_API_URL`, `BHARAG_API_URL` and
+`AIRTABLE_API_URL` are optional.
 `DATA_DIR` is gone, and so are `AIRTABLE_RESYNC_MINUTES`, the
 `N8N_WRITEBACK_*` pair and `AIRTABLE_BASE_ID` (renamed 2026-09-14; **a base
 variable is named for its base**, so the next one cannot be mistaken for it).
@@ -519,7 +535,7 @@ SYSTEMS
   Media Twin             ← placeholder
   Genie                  ← placeholder
   vFarm                  ← placeholder
-  Engine health          ← placeholder
+  Engine health
 
 RECORDS
   Open loops
@@ -562,14 +578,19 @@ current signal. Clicking a tile navigates into that section.
 Pinned across the top: days to Halloween (the vFarm deadline), open loops,
 entries logged this week.
 
-**Nothing on this page counts an incident or a rack** (decision 2026-09-14,
-Destiny). The vFarm-status and open-incidents pins, the incidents chip, the
-Engine health card with its self-heal rate and its incidents by class, and the
-seven-day incident count all read phase 1 fixtures, and the pages behind them
-are placeholders now; a headline figure for a page that says "coming soon" is a
-figure about nothing. The vFarm and Engine health tiles stay as navigation, with
-a dash where the number was. The two 24-hour columns are still the phase 1
-fixtures they have always been.
+**Nothing on this page counts a rack** (decision 2026-09-14, Destiny). The
+vFarm-status pin and everything behind it read phase 1 fixtures and the page
+behind them is a placeholder; a headline figure for a page that says "coming
+soon" is a figure about nothing. The vFarm tile stays as navigation, with a dash
+where the number was. The two 24-hour columns are still the phase 1 fixtures
+they have always been.
+
+**The Engine health tile counts incidents again** (2026-09-17), because that
+page is real now. It carries the figure its page leads with — open incidents —
+and its signal is that page's own failure metric: an exhausted retry, or a lane
+that could not be read. **Where no lane answered the headline is a dash**, not a
+nought: nought open incidents and nobody asked look identical, and only one of
+them is good news.
 
 Below: two columns — **what broke in the last 24 hours**, **what moved in the
 last 24 hours**.
@@ -903,8 +924,122 @@ green on a page where almost everything succeeds is decoration.
 See section 4 for how the rows are stored and polled, for why nothing here
 claims what n8n retains, and for the two rules that keep a comparison honest.
 
-### Media Twin, Genie, vFarm and Engine health
-**Four single centred "coming soon" pages, and nothing else** (decisions
+### Engine health
+**Built 2026-09-17, Destiny**, where a "coming soon" page stood. It answers one
+question: **is the engine actually working right now, and if not, what broke,
+was it fixed by itself, and does anyone need to do something?**
+
+Three sources, all of which were already being written and none of which had
+ever been read:
+
+- **The incident ledger**, BHARAG `GET /api/v1/incidents?status=open&source=<lane>`.
+  **One call per lane, each with its own credential** — the three error handlers
+  each hold their own BHARAG key and a key for one lane is refused for another,
+  so this is three calls with three keys and cannot be collapsed into one.
+  `BHARAG_BAYS_KEY`, `BHARAG_NORTH_STAR_KEY`, `BHARAG_RESEARCH_TWIN_KEY`, no
+  defaults, on the same rule the Airtable base ids follow.
+- **`error_counts`** (`appINvgEoZjuYQI2O / tblnvhKOnuOoiB1RX`), one row per
+  recurring fault signature, shared by all three lanes.
+- **`retry_attempts`** (`appINvgEoZjuYQI2O / tblu9fFmCkAaeJd8Y`), one row per
+  incident the healer has touched.
+
+All three are mirrored into Postgres through `/api/engine/{incidents,error_counts,retry_attempts}`
+and the page reads the mirror, so a page load costs nothing external and a
+refused read never blanks a screen. **Resync from Airtable** is the button, and
+it reads all five sources.
+
+**The rule the whole page is built around: no incidents and no reporting look
+identical from the outside, and only one of them is good news.** A lane with no
+credential was never asked; a lane that refused was asked and said no; a lane
+that answered with nothing is the only one of the three that is health. Every
+tab leads with which lanes answered, every figure computed over an unread lane
+says so in its own note, and **a lane that was not read is never drawn as a
+bar** — a bar is a measured value, and whatever count is held for an unread lane
+is what happened to be stored.
+
+**Five tabs**: All systems · Bays · North Star · Research Twin · Retries. **The
+three lane tabs are one component with a different lane**, because the handlers
+are deliberately identical and a per-lane copy would drift the first time one of
+them changed. All systems is the same component with no lane.
+
+**Five figures**: open incidents (the failure metric, coloured above nought,
+with the per-lane split), healed without a person (`Recovered ÷ (Recovered +
+Exhausted)`, with retries still in flight excluded because they have not
+finished), needing a person (exhausted retries **union** open incidents in a
+non-retryable class — a union, not a sum, because an incident can be both), the
+most recent incident, and retries in the last 24 hours. Then two charts —
+incidents per week stacked by lane, and by class over the same weeks, so a shift
+in *what kind* of thing is breaking is visible and not only how much.
+
+**The error classes are a shared vocabulary as of 17 Sep 2026**, and three of
+them are retryable: `NETWORK_TIMEOUT` (which includes a 429 — rate limiting is
+the caller going too fast, not a billing problem), `MODEL_OUTPUT_INVALID` (new;
+a model answers differently every run so a retry usually works) and
+`UPSTREAM_5XX` (new, split out of billing: a server error is not a refusal on
+credit). `BILLING_QUOTA`, `CONFIG_AUTH`, `SCHEMA_VALIDATION` and `UNKNOWN` are
+not. **The sources disagree about spelling** — `error_counts` writes
+`schema_validation`, the ledger and `retry_attempts` write `SCHEMA_VALIDATION` —
+and both are normalised to one spelling, read off the live tables rather than
+assumed. **A class this dashboard has not heard of keeps its own name** rather
+than being folded into `UNKNOWN`: `UNKNOWN` means the handler looked and could
+not decide, which is a different fact.
+
+**`retries_attempted` on the incident payload is never displayed.** The healer
+does not maintain it — attempts live in `retry_attempts` — so it is stale the
+moment a retry happens. It stays inside the stored blob, because nothing drops a
+field the engine owns, and it has no way onto the page.
+
+**Severity and retryability prefer the incident's own answer**, falling back to
+the class map only where the row carries none, and each says which of the two
+answered for it. This code never contradicts a handler about an incident the
+handler classified.
+
+**Incidents are never deleted.** The ledger is read with `status=open`, so a
+closed incident simply stops appearing — and deleting those would throw away
+exactly the history time-to-resolve is computed from. A row a **successful**
+read no longer returns is marked closed-since and keeps everything else it had.
+A lane that refused touches nothing. And an incident is dated by **its own
+`created_at`**, never by when this database inserted it: the insert time is a
+fact about the resync, and preferring it would put every incident read in one
+pass into the week somebody pressed the button.
+
+Per-lane tabs add **this lane's workflows** — open incidents by workflow, then by
+the node that actually failed, because the failing node is the useful unit — and
+**the advice given**, every open incident's `self_healing_strategy` **in full**.
+It is written as plain English for a person to act on and it is the most useful
+text on the page; truncating it to a line would throw away the only part that
+says what to do.
+
+**The Retries tab is the self-healing loop's own record.** The healer runs every
+five minutes and calls n8n's own retry endpoint with `loadWorkflow: true`, which
+resumes from the failed node rather than replaying the run — which is why a
+retry does not re-post Slack messages or re-write rows it already wrote. Backoff
+is 1 minute, then 4, then 15, each randomised by a fifth; three attempts is the
+cap and reaching it breaks the circuit deliberately.
+
+Two things that tab must not overstate, and both shape how it is drawn:
+**a retry that ran is not a retry that worked** — `Retrying` is genuinely
+undecided, so it is excluded from the recovery rate rather than counted either
+way — and **`Exhausted` is not always a failure of the system**: a pruned
+execution lands there immediately and correctly, which is why `last_result` is
+shown in full on every row.
+
+**Retry now posts to the same webhook the schedule posts to**, and is recorded
+the same way against the same cap; only `triggered_by` differs, so the button is
+not styled or described as a different mechanism. It is disabled at three
+attempts and at a row with no execution id, and the tooltip says which — the
+circuit is broken on purpose and a person should look before it is asked again.
+The browser never calls the healer: the request goes to this server, which holds
+the URL, like every other outbound call.
+
+Every figure on the page follows the same five rules the twins' pages follow: a
+percentage carries its denominator, no duration is ever a mean (p50 and p95),
+every card says what it excludes, nought is a number and an unread lane is a
+sentence, and colour marks only a genuinely bad direction — open incidents above
+nought, exhausted retries above nought, critical severity.
+
+### Media Twin, Genie and vFarm
+**Three single centred "coming soon" pages, and nothing else** (decisions
 2026-09-14 and 2026-09-16, Destiny). **Media Twin and Genie are systems in the
 engine and belong in the Systems group**, so they are there, as placeholders,
 rather than absent — nothing either of them does writes a row here yet, and a
@@ -912,26 +1047,16 @@ page of fixtures would be the thing section 2 forbids. Genie's executions are
 counted on the Executions page, under whichever system the workflow registry
 files them.
 
-**Engine health is a placeholder in full now** (decision 2026-09-16, Destiny).
-The execution roll-up it carried for a day — one figure per system for the
-current week, linking through to Executions — has come off with it. It was
-real, but it was a second drawing of counts the Executions page already draws
-with the month, the year, the per-workflow breakdown and the failing ids behind
-them; two drawings of the same counts drift, and the one a person happens to
-open first becomes the one they trust. The workflows-in-no-system card went the
-same way: those workflows are the **Archived** tab on Executions, where they are
-counted rather than only listed. The rest of this entry is the 14 Sep decision,
-unchanged: Every card, table and figure they held was computed from
-phase 1 fixtures: vFarm's live readings, rack state and readiness panel, and
-Engine health's incident list, state track, self-heal rate and retry counts.
-Nothing on the rack and no incident has ever written a row to this dashboard, so
-the pages looked like instrumentation without being any. Their fetches and their
-routes are gone rather than left running behind a hidden page, and the removed
-code lives in git history rather than commented out.
+Every card, table and figure they held was computed from phase 1 fixtures:
+vFarm's live readings, rack state and readiness panel. Nothing on the rack has
+ever written a row to this dashboard, so the page looked like instrumentation
+without being any. Its fetches and its routes are gone rather than left running
+behind a hidden page, and the removed code lives in git history rather than
+commented out.
 
-They keep their places in the sidebar, and Engine health keeps no badge. When
-the engine starts writing these rows, what each page should show is the spec
-that stood here before this entry — read it out of git.
+They keep their places in the sidebar. When the engine starts writing these
+rows, what each page should show is the spec that stood here before the 14 Sep
+entry — read it out of git.
 
 ### Open loops
 The densest screen.
