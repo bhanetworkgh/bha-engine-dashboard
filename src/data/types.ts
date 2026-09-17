@@ -144,8 +144,14 @@ export interface OverviewSeries {
   loops_raised_14d: SeriesPoint[];
   /** Codex entries per ISO week. */
   entries_by_week: SeriesPoint[];
-  /** Asks across both twins by outcome. */
-  asks_by_outcome: { answered: number; thin: number; failed: number };
+  /**
+   * Asks across both twins by outcome, read from their own ledgers since
+   * 17 Sep 2026. `refused` and `needs_human` are real outcomes rather than
+   * failures, so they are counted apart from both.
+   */
+  asks_by_outcome: { answered: number; thin: number; failed: number; refused: number; needs_human: number };
+  /** How often the two twins consult each other, across both ledgers. */
+  twin_handoffs: { n: number; of: number; note: string };
   /** Open loops per owner, table totals. */
   loops_by_owner: { owner: string; open: number; in_progress: number; oldest_days: number }[];
 }
@@ -648,7 +654,7 @@ export interface CodexEntryDetail extends CodexEntry {
  * The record kinds that have a statistics tab. Six pages, one engine — see
  * `server/src/stats.ts`.
  */
-export type StatKind = 'codex' | 'loops' | 'patterns' | 'commercial' | 'clients' | 'northstar' | 'researchtwin';
+export type StatKind = 'codex' | 'loops' | 'patterns' | 'commercial' | 'clients' | 'northstar' | 'researchtwin' | 'researchjobs';
 
 /**
  * One figure on a statistics tab, with the same figure a month ago.
@@ -994,171 +1000,371 @@ export interface Builder {
   source: Source;
 }
 
-/* ----------------------------------------------------------- north star */
+/* ------------------------------------------------------------ the twins */
 
 /**
- * The outcome of one ask, as North Star's own single-select records it.
- * These definitions are the engine's, not this dashboard's:
- *   answered  a real answer carrying at least one [S#] citation
- *   thin      an answer was produced with no citation behind it
- *   failed    no answer text at all
- * A row with the field empty is unclassified and is counted as unclassified.
+ * North Star and Research Twin, as their own ledgers record them since
+ * 17 Sep 2026.
+ *
+ * Both twins now finish every run with the same three steps — write the
+ * ledger row, mirror it here, ingest it into BHARAG — so a run that finished
+ * is a run that was recorded. The five `[LEGACY]` tables the pages read until
+ * today (NS Records, the Research Queue and its resolved-events table, the
+ * priority ledger and lane_status) have no writers left and are not read from
+ * anywhere in this code.
+ *
+ * **These ledgers start empty, deliberately.** September holds a handful of
+ * rows at most and October is the first clean month, which is why nothing here
+ * smooths a sparse month into a trend: a rate over two asks says it is over
+ * two asks, and a month with no rows says it was not recorded rather than
+ * drawing a bar at nought.
+ *
+ * Every select vocabulary below was read from the live bases on 17 Sep 2026,
+ * not taken from the brief — `Delivered` is Delivered / Not delivered / No
+ * target (and Self-delivered on Research Twin), and Research Twin's ask types
+ * carry an `External web search` option the brief did not mention.
  */
-export type NsOutcome = 'answered' | 'thin' | 'failed';
 
-/** One tool call inside an ask. `used` is how many hits ended up cited. */
-export interface NsSearch {
+/** One tool call, as an `Evidence Used` line records it. */
+export interface AskTool {
   tool: string;
-  hits: number;
-  used: number;
-  retrieved_at: string | null;
+  /**
+   * How many rows came back, and how many of them ended up cited.
+   *
+   * **Null, not nought, where the ledger does not record it.** North Star's
+   * line is `- tool -> 12 row(s), cited 3 time(s)`; Research Twin's is the tool
+   * and its arguments followed by the observation, with no counts at all. A
+   * nought here would read as "called and returned nothing", which is a
+   * different and much worse fact than "not recorded".
+   */
+  hits: number | null;
+  cited: number | null;
+  /** The tool's arguments as the line carried them, for the detail view. */
+  args: string | null;
 }
 
-export interface NsRecord {
+/** A share of something, never printed without the denominator it is over. */
+export interface Share {
+  n: number;
+  of: number;
+  /** Null where `of` is nought — a rate over no rows is unknown, not nought. */
+  pct: number | null;
+  note: string;
+}
+
+/** A named count in a distribution. `key` is the source value, verbatim. */
+export interface Slice {
+  key: string;
+  label: string;
+  n: number;
+}
+
+/**
+ * A duration, as p50 and p95 and never as a mean.
+ *
+ * A mean latency hides the tail, and the tail is what people experience. Both
+ * are null where nothing recorded a duration; `n` is how many rows carried one.
+ */
+export interface Percentiles {
+  p50: number | null;
+  p95: number | null;
+  n: number;
+  of: number;
+  note: string;
+}
+
+/** One cohort of asks — an asking system, a lane — with its own rates. */
+export interface Cohort {
+  key: string;
+  label: string;
+  asks: number;
+  answered: number;
+  delivered: number;
+  /** Research Twin only: how many of this cohort's asks went outside BHA. */
+  external: number | null;
+}
+
+/** One week of a stacked outcome column. `counts` is keyed by outcome, verbatim. */
+export interface OutcomeWeek {
+  week: string;
+  label: string;
+  total: number;
+  counts: Record<string, number>;
+}
+
+/** One week of a duration trend. */
+export interface DurationWeek {
+  week: string;
+  label: string;
+  p50: number | null;
+  p95: number | null;
+  n: number;
+}
+
+/**
+ * Twin-to-twin handoffs: how often the two actually consult each other.
+ *
+ * Until 17 Sep the twins could not reach each other at all — every handoff went
+ * through a person or through Bays — so this is the only way to tell whether
+ * being able to changed anything.
+ */
+export interface Handoffs {
+  n: number;
+  of: number;
+  pct: number | null;
+  /**
+   * Both sides of an exchange, where both are held.
+   *
+   * `direction` is asserted only where the row says which way it went —
+   * `Asked By System` naming the other twin. A row carrying only
+   * `Linked Twin Ask` proves the two are linked and nothing about who asked
+   * whom, so it is `linked` rather than a guess dressed as an arrow.
+   */
+  pairs: { ask_id: string; ask_at: string | null; ask_question: string | null; reply_id: string | null; reply_at: string | null; reply_summary: string | null; direction: 'ns→rt' | 'rt→ns' | 'linked'; ledger: 'North Star' | 'Research Twin' }[];
+  note: string;
+}
+
+/* ----------------------------------------------------------- north star */
+
+export interface NsAsk {
   id: string;
-  trace_id: string | null;
-  lane_id: string | null;
-  workflow: string | null;
-  request: string | null;
-  answer: string | null;
-  has_answer: boolean;
-  /** Null means the row predates the outcome field, or nothing wrote one. */
-  outcome: NsOutcome | null;
-  /** From research_required: Yes / No, or null when neither. */
-  research_required: boolean | null;
-  reason: string | null;
-  session_id: string | null;
-  searches: NsSearch[];
-  /** Citation coverage 0..1, as the agent computed it. Not a model-reported probability. */
-  confidence: number | null;
-  confidence_basis: string | null;
+  ask_id: string | null;
   asked_at: string | null;
   week: string | null;
+  asked_by_system: string | null;
+  /** A Slack user id, or a `SYSTEM-…` string where no person was behind it. */
+  asked_by_person: string | null;
+  question: string | null;
+  question_type: string | null;
+  /** Often empty. Empty is a fact about the routing, not an error. */
+  lane: string | null;
+  answer: string | null;
+  answer_summary: string | null;
+  has_answer: boolean;
+  /** Answered · Thin · Refused (not its lane) · Failed. Every new row carries one. */
+  outcome: string | null;
+  claimed_priority_score: number | null;
+  claimed_priority_tier: string | null;
+  claimed_lane_health: string | null;
+  claimed_strategic_importance: string | null;
+  architect_attention: boolean;
+  /** Parsed from `Evidence Used`; the raw text is kept beside it for the detail view. */
+  tools: AskTool[];
+  evidence_used: string | null;
+  /** 0–1, as the agent computed it. Not a model-reported confidence. */
+  citation_coverage: number | null;
+  confidence_stated: string | null;
+  response_seconds: number | null;
+  /** Delivered · Not delivered · No target. Written after the answer is sent. */
+  delivered: string | null;
+  delivery_target: string | null;
+  slack_link: string | null;
+  error: string | null;
+  run_id: string | null;
+  linked_twin_ask: string | null;
   source: Source;
   airtable: AirtableRef;
 }
 
 export interface NsData {
-  records: NsRecord[];
+  asks: NsAsk[];
   freshness: Freshness;
 }
 
 export interface NsMetrics {
   kind: 'ns';
   computed_at: string;
-  scope: { rows: number };
-  /** How many rows carry an outcome at all. Everything below is over these. */
-  classified: number;
-  unclassified: number;
-  unclassified_note: string;
+  scope: { rows: number; month: string | null };
   /**
-   * The headline: answers that look real and cite nothing, as a share of the
-   * classified rows. Null when nothing is classified — a thin rate computed
-   * over zero rows is not zero, it is unknown.
+   * The failure metric. North Star once ran green for six consecutive days
+   * while Slack rejected every post and nothing reported it, so anything below
+   * 100% is coloured.
    */
-  thin_rate: Metric;
-  outcome_mix: { outcome: NsOutcome | 'unclassified'; label: string; n: number }[];
-  /** Asks per week, and the same weeks split by outcome. */
+  delivery_rate: Share;
+  /** The outcome metric. */
+  answered_rate: Share;
+  asks: number;
+  response: Percentiles;
+  last_ask: { at: string | null; ask_id: string | null; note: string };
   asks_per_week: MetricSeries;
-  outcome_per_week: { label: string; week: string; answered: number; thin: number; failed: number; unclassified: number }[];
-  research_required_rate: Metric;
-  /** Tool calls: how many hits came back, and how many were actually cited. */
-  tool_usage: { tool: string; calls: number; hits: number; used: number; cited_rate: number | null }[];
-  tool_note: string;
-  /** From the searches blob's own citation-coverage figure. */
-  confidence_mix: { bucket: string; n: number }[];
-  confidence_note: string;
-  by_lane: { lane_id: string; asks: number; thin: number; unclassified: number }[];
-  /** When North Star was last asked anything. Silence is itself the signal. */
-  last_ask: { at: string | null; trace_id: string | null; note: string };
+  outcome_per_week: OutcomeWeek[];
+  outcome_mix: Slice[];
+  outcome_note: string;
+  delivery_mix: Slice[];
+  /** Where an undelivered answer was aimed, so a quietly failing target is nameable. */
+  failed_targets: { target: string; n: number; outcome: string }[];
+  delivery_note: string;
+  by_system: Cohort[];
+  by_system_note: string;
+  question_types: Slice[];
+  question_type_note: string;
+  citation: { mean: number | null; n: number; of: number; buckets: Slice[]; note: string };
+  tools: { tool: string; calls: number; hits: number | null; cited: number | null; cited_rate: number | null }[];
+  tools_note: string;
+  response_trend: DurationWeek[];
+  priority: { mix: Slice[]; by_lane: { lane: string; asks: number; critical_weeks: number; last_critical: string | null; mix: Slice[] }[]; note: string };
+  architect: { n: number; of: number; lanes: { lane: string; n: number; last_at: string | null }[]; note: string };
+  by_lane: Cohort[];
+  by_lane_note: string;
+  handoffs: Handoffs;
 }
 
 /* -------------------------------------------------------- research twin */
 
-/**
- * One row of the Research Queue — one research *attempt*, not one card.
- * `card_id` repeats across rows; anything counted per card collapses on it.
- */
-export interface RtAttempt {
+export interface RtAsk {
   id: string;
+  ask_id: string | null;
+  asked_at: string | null;
+  week: string | null;
+  asked_by_system: string | null;
+  asked_by_person: string | null;
+  /** Card research · Question · External web search · Watched client · Other. */
+  ask_type: string | null;
+  question: string | null;
   card_id: string | null;
-  lane_id: string | null;
-  hypothesis: string | null;
-  context_snippet: string | null;
-  /** pending / completed / resolved, or null — an untriaged card. */
-  status: string | null;
-  confidence_level: string | null;
-  research_sufficiency: string | null;
-  gap_classification: string | null;
-  missing_elements: string | null;
-  target_source_types: string | null;
-  research_summary: string | null;
-  links_or_sources: string | null;
-  learnings_gotchas: string | null;
-  answer_history: string | null;
-  run_count: number | null;
-  requires_human: boolean;
-  /** When it FIRST went stuck. Deliberately not re-stamped on later attempts. */
-  first_stuck_at: string | null;
-  source_system: string | null;
-  created_at: string | null;
+  lane: string | null;
+  answer: string | null;
+  answer_summary: string | null;
+  has_answer: boolean;
+  /** Answered · Thin · Needs human · Refused (not its lane) · Failed. */
+  outcome: string | null;
+  confidence_stated: string | null;
+  /**
+   * Did it go outside BHA. Research Twin's job is the outside world; Bays and
+   * North Star can both query BHARAG directly, so an ask that never left the
+   * building is one they could have answered themselves.
+   */
+  used_web_search: boolean;
+  /** Yes · No (degraded) · Not used. Recorded per run, never inferred. */
+  bharag_reachable: string | null;
+  sources_count: number | null;
+  sources: string | null;
+  tools: AskTool[];
+  evidence_used: string | null;
+  citation_coverage: number | null;
+  response_seconds: number | null;
+  /** Delivered · Not delivered · No target · Self-delivered. */
+  delivered: string | null;
+  delivery_target: string | null;
+  slack_link: string | null;
+  error: string | null;
+  run_id: string | null;
+  linked_twin_ask: string | null;
   source: Source;
   airtable: AirtableRef;
 }
 
-/** One card: its attempts collapsed, newest attempt deciding the current state. */
-export interface RtCard {
-  card_id: string;
-  lane_id: string | null;
-  hypothesis: string | null;
+/**
+ * One research job — **one row per job**, carrying its own status, attempts
+ * and outcome.
+ *
+ * This is the semantic change from the queue it replaces: that table held one
+ * row per *attempt* with a second table for outcomes, so "attempts" and "cards"
+ * were different counts of different things. Here `attempts` is a number on the
+ * job and a job is one row.
+ */
+export interface RtJob {
+  id: string;
+  job_id: string | null;
+  question: string | null;
+  context: string | null;
+  card_id: string | null;
+  lane: string | null;
+  /** Pending · In Progress · Resolved · Capped (needs human). */
   status: string | null;
-  status_label: string;
-  confidence_level: string | null;
-  gap_classification: string | null;
+  opened_by: string | null;
+  opened_at: string | null;
+  resolved_at: string | null;
+  /** Caps at three; the third pass without a usable answer hands it to a person. */
+  attempts: number | null;
+  finding: string | null;
+  answer_history: string | null;
+  sources: string | null;
+  verdict: string | null;
+  confidence: string | null;
+  gap_type: string | null;
   missing_elements: string | null;
   target_source_types: string | null;
-  research_summary: string | null;
-  /** The highest run_count seen on any attempt for this card. */
-  run_count: number;
-  requires_human: boolean;
-  first_stuck_at: string | null;
-  /** Whole days since first_stuck_at; null when it has never been stuck. */
-  days_stuck: number | null;
-  source_system: string | null;
-  created_at: string | null;
-  last_attempt_at: string | null;
-  /** How many rows in the table are this one card. */
-  attempts: number;
+  linked_asks: string[];
+  reported_in_digest: boolean;
+  /**
+   * Whole days, three different questions. `age_days` is always how long ago
+   * the job was opened. `days_open` is how long it has been *waiting* and is
+   * null once it is resolved or capped. `days_to_resolve` exists only once it
+   * has been resolved.
+   */
+  age_days: number | null;
+  days_open: number | null;
+  days_to_resolve: number | null;
+  open: boolean;
+  capped: boolean;
   source: Source;
   airtable: AirtableRef;
 }
 
 export interface RtData {
-  cards: RtCard[];
+  asks: RtAsk[];
+  jobs: RtJob[];
   freshness: Freshness;
-  /** Rows in the table against distinct cards — the shape caveat, stated. */
-  shape: { attempts: number; cards: number; note: string };
+  /** The jobs table is mirrored separately, so it carries its own age. */
+  jobs_freshness: Freshness;
 }
 
 export interface RtMetrics {
   kind: 'rt';
   computed_at: string;
-  scope: { rows: number; cards: number };
-  /** Cards needing a person, first, because that is the point of the page. */
-  requires_human: { n: number; note: string };
-  by_status: { status: string; label: string; n: number }[];
+  scope: { rows: number; month: string | null };
+  /** The first figure on the page: did the ask go outside BHA at all. */
+  external_rate: Share;
+  answered_rate: Share;
+  /** Correctly escalating beats a confident wrong answer, so this is never red. */
+  needs_human_rate: Share;
+  asks: number;
+  response: Percentiles;
+  last_ask: { at: string | null; ask_id: string | null; note: string };
+  asks_per_week: MetricSeries;
+  outcome_per_week: OutcomeWeek[];
+  outcome_mix: Slice[];
+  outcome_note: string;
+  external_per_week: { week: string; label: string; used: number; total: number }[];
+  external_note: string;
+  bharag: { mix: Slice[]; degraded: number; of: number; note: string };
+  sources: { buckets: Slice[]; none: number; of: number; mean: number | null; note: string };
+  citation: { mean: number | null; n: number; of: number; buckets: Slice[]; note: string };
+  confidence: { mix: Slice[]; by_outcome: { confidence: string; outcome: string; n: number }[]; high_no_sources: number; note: string };
+  ask_types: Slice[];
+  ask_type_note: string;
+  by_system: Cohort[];
+  by_system_note: string;
+  delivery_mix: Slice[];
+  delivery_note: string;
+  response_trend: DurationWeek[];
+  handoffs: Handoffs;
+}
+
+export interface RtJobMetrics {
+  kind: 'rt_jobs';
+  computed_at: string;
+  scope: { rows: number; month: string | null };
+  /** The number that matters on this page: any above nought needs a person. */
+  capped: Share;
+  open: number;
+  in_progress: number;
+  pending: number;
+  resolved_this_month: number;
+  /** Days from `Opened At` to `Resolved At`, p50 with p95 beside it. */
+  time_to_resolve: Percentiles;
+  oldest_open: { job_id: string | null; days: number | null; note: string };
+  status_mix: Slice[];
   status_note: string;
-  /** Cards that have ever been stuck, bucketed by how long. */
-  days_stuck: { bucket: string; n: number }[];
-  days_stuck_note: string;
-  oldest_stuck: { card_id: string | null; days: number | null; note: string };
-  run_count_mix: { runs: string; n: number }[];
-  run_count_note: string;
-  gap_mix: { gap: string; n: number }[];
-  confidence_mix: { level: string; n: number }[];
-  created_per_week: MetricSeries;
-  /** Cards whose status is blank — migrated in and not yet triaged. */
-  untriaged: { n: number; note: string };
+  attempts_mix: Slice[];
+  attempts_note: string;
+  gap_mix: Slice[];
+  gap_note: string;
+  resolve_trend: DurationWeek[];
+  opened_by: Slice[];
+  opened_by_note: string;
+  resolution_rate: Share;
 }
 
 /* --------------------------------------------------------------- clients */
@@ -1302,7 +1508,12 @@ export interface ClientsData {
  * questions table and the lane it belongs to, and each question row carries
  * both.
  */
-export type RecordKind = 'loops' | 'codex' | 'patterns' | 'commercial' | 'ns' | 'rt' | 'clients' | 'client_questions' | 'client_requests';
+/**
+ * `ns` and `rt` are the two twins' **ask ledgers** since 17 Sep 2026, and
+ * `rt_jobs` is Research Twin's research queue. The legacy tables those first
+ * two names used to mean are neither read nor written anywhere in this code.
+ */
+export type RecordKind = 'loops' | 'codex' | 'patterns' | 'commercial' | 'ns' | 'rt' | 'rt_jobs' | 'clients' | 'client_questions' | 'client_requests';
 
 export interface Metric {
   /** Null when nothing records what this needs; `note` then says what is missing. */
@@ -1435,7 +1646,7 @@ export interface CommercialMetrics {
   incomplete: { n: number; cards: { id: string; card_id: string | null; missing: string[] }[]; note: string };
 }
 
-export type RecordMetrics = LoopMetrics | CodexMetrics | PatternMetrics | CommercialMetrics | NsMetrics | RtMetrics;
+export type RecordMetrics = LoopMetrics | CodexMetrics | PatternMetrics | CommercialMetrics | NsMetrics | RtMetrics | RtJobMetrics;
 
 /* ------------------------------------------------------------- registry */
 

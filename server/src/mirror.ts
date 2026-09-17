@@ -44,8 +44,9 @@ export type MirrorKind =
   | 'layer0'
   | 'patterns'
   | 'commercial'
-  | 'ns'
-  | 'rt'
+  | 'ns-asks'
+  | 'rt-asks'
+  | 'rt-jobs'
   | 'client_lanes'
   | 'client_questions'
   | 'client_requests'
@@ -57,9 +58,9 @@ interface KindSpec {
   /** The Airtable field that names the row, as Airtable spells it. */
   naturalField: string | null;
   /**
-   * Whether a write may be matched on the natural id. False where the id is
-   * not unique in the source — the Research Queue is an attempt log and
-   * `card_id` repeats, so matching on it would fold every attempt into one.
+   * Whether a write may be matched on the natural id. False where the source
+   * carries no id of its own — a client question and a client request both
+   * have only Airtable's record id, so that is the only thing that can match.
    */
   keyOnNatural: boolean;
   /** Which builder table a row came from. The table IS the owner, never an assignee field. */
@@ -76,8 +77,22 @@ export const KINDS: Record<MirrorKind, KindSpec> = {
   layer0: { table: 'engine_layer0_holds', label: 'Layer 0', naturalField: 'Submission ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
   patterns: { table: 'engine_build_patterns', label: 'Build Patterns', naturalField: 'pattern_id', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
   commercial: { table: 'engine_commercial_cards', label: 'Commercial Opportunities', naturalField: 'card_id', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
-  ns: { table: 'engine_ns_records', label: 'NS Records', naturalField: 'trace_id', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
-  rt: { table: 'engine_rt_attempts', label: 'Research Queue', naturalField: 'card_id', keyOnNatural: false, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
+  /**
+   * The twins' own ask ledgers, and Research Twin's research queue (17 Sep
+   * 2026). Every one of the three has a real unique id of its own — `Ask ID`,
+   * `Job ID` — so all three key on the natural id as well as the record id.
+   *
+   * The queue this replaces did not: it was an attempt log whose `card_id`
+   * repeated, so matching on it would have folded twenty attempts into one row.
+   * A job is one row now and carries its own status, attempts and outcome.
+   *
+   * `lane_id` is promoted from the ledgers' `Lane` column, which is what these
+   * bases call it — the old tables spelled it `lane_id`, and `prepare()` reads
+   * both so neither spelling is assumed.
+   */
+  'ns-asks': { table: 'engine_ns_asks', label: 'North Star asks', naturalField: 'Ask ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
+  'rt-asks': { table: 'engine_rt_asks', label: 'Research Twin asks', naturalField: 'Ask ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
+  'rt-jobs': { table: 'engine_rt_jobs', label: 'Research jobs', naturalField: 'Job ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
   client_lanes: { table: 'engine_client_lanes', label: 'Watched Clients index', naturalField: 'Lane ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
   client_questions: { table: 'engine_client_questions', label: 'Client questions', naturalField: null, keyOnNatural: false, perBuilder: false, perLaneTable: true, promote: ['lane_id'] },
   /**
@@ -207,13 +222,7 @@ function prepare(kind: MirrorKind, input: MirrorInput): {
     );
   }
   if (!spec.keyOnNatural && !record_id) {
-    throw new MirrorError(
-      `"record_id" is required for ${kind}: ${
-        kind === 'rt'
-          ? 'the Research Queue is an attempt log and card_id repeats across attempts, so it cannot identify a row.'
-          : 'a client question carries no id of its own.'
-      }`,
-    );
+    throw new MirrorError(`"record_id" is required for ${kind}: a row of this kind carries no id of its own, so Airtable's record id is the only thing that identifies it.`);
   }
 
   const extra: Record<string, string | null> = {};
@@ -229,7 +238,10 @@ function prepare(kind: MirrorKind, input: MirrorInput): {
     extra.table_id = table;
   }
   for (const col of spec.promote) {
-    if (col === 'lane_id') extra.lane_id = text(input.lane_id) ?? text(fields.lane_id);
+    // `Lane` on the twins' ledgers, `lane_id` everywhere else. Both are read
+    // rather than one being assumed: a promoted column that silently comes back
+    // null files every row under "(no lane)".
+    if (col === 'lane_id') extra.lane_id = text(input.lane_id) ?? text(fields.lane_id) ?? text(fields.Lane);
     else if (col === 'builder_id') extra.builder_id = text(input.builder_id) ?? text(fields.builder_id);
     else if (col === 'status') extra.status = text(fields.status);
     else if (col === 'sent_at') extra.sent_at = text(fields.sent_at);

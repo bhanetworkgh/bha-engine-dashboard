@@ -20,6 +20,7 @@ import type {
   CommercialData,
   Lane,
   LaneFilter,
+  Handoffs,
   NsData,
   OpenLoopsData,
   OverviewData,
@@ -103,7 +104,17 @@ function countByDay(days: string[], dates: string[]): SeriesPoint[] {
 
 /* -------------------------------------------------------------- overview */
 
-export async function getOverview(q: Query): Promise<OverviewData> {
+/**
+ * The Overview reads no lane filter any more.
+ *
+ * It took one so the phase 1 fixtures on this page could be narrowed by lane.
+ * Those fixtures are gone from the twins' tiles (2026-09-17) and the rest of
+ * this page has read Postgres since the migration, so there is nothing left
+ * here that a lane would narrow. The parameter stays in the signature because
+ * the route passes it and the shell still holds a lane in session state; it is
+ * simply not read, rather than pretending to filter.
+ */
+export async function getOverview(_q: Query): Promise<OverviewData> {
   const loops = await store.loops();
   const openLoops = loops.filter((l) => l.status !== 'closed');
   const owners = await store.loopsByOwner();
@@ -115,18 +126,39 @@ export async function getOverview(q: Query): Promise<OverviewData> {
   const ingested = entries.filter((e) => e.has_entry).length;
   const loopsFreshness = await store.freshness('loops');
 
-  const ns = bySpineLane(f.NS_RECORDS, q);
-  const rt = bySpineLane(f.RT_RECORDS, q);
+  /**
+   * The twins, read from their own ledgers (2026-09-17) rather than from the
+   * phase 1 fixtures that stood here.
+   *
+   * Those fixtures were the last thing on this page still inventing an ask
+   * count, and they were harmless only while the twins genuinely wrote nothing
+   * — which stopped being true today. A tile whose headline came from a fixture
+   * and whose page now shows real rows is exactly the disagreement section 2
+   * forbids.
+   */
+  const ns = await store.nsAsks();
+  const rt = await store.rtAsks();
+  const jobs = await store.rtJobs();
+  const handoffs = await store.twinHandoffs();
   const asks = [...ns, ...rt];
-  const answered = asks.filter((a) => a.outcome === 'answered').length;
-  const thin = asks.filter((a) => a.outcome === 'thin').length;
-  const failed = asks.filter((a) => a.outcome === 'failed').length;
+  const answered = asks.filter((a) => a.outcome === 'Answered').length;
+  const thin = asks.filter((a) => a.outcome === 'Thin').length;
+  const failed = asks.filter((a) => a.outcome === 'Failed').length;
+  const refused = asks.filter((a) => a.outcome === 'Refused (not its lane)').length;
+  const needsHuman = rt.filter((a) => a.outcome === 'Needs human').length;
+  /**
+   * The failure signal on each twin's tile is the one its own page leads with:
+   * an answer that never reached anyone, and a job nothing but a person will
+   * move. Both are read from the rows, and both are nought until they are not.
+   */
+  const nsUndelivered = ns.filter((a) => a.delivered === 'Not delivered').length;
+  const cappedJobs = jobs.filter((j) => j.capped).length;
 
   const days7 = lastDays(REF_DATE, 7);
   const days14 = lastDays(REF_TODAY(), 14);
   const loops14d = countByDay(days14, loops.map((l) => l.raised_at).filter((d): d is string => Boolean(d)));
-  const nsByDay = countByDay(days7, ns.map((r) => r.at)).map((p) => p.value);
-  const rtByDay = countByDay(days7, rt.map((r) => r.at)).map((p) => p.value);
+  const nsByDay = countByDay(days7, ns.map((r) => r.asked_at).filter((d): d is string => Boolean(d))).map((p) => p.value);
+  const rtByDay = countByDay(days7, rt.map((r) => r.asked_at).filter((d): d is string => Boolean(d))).map((p) => p.value);
 
   const weeks = [...new Set(entries.map((e) => e.week).filter((w): w is string => Boolean(w)))].sort().slice(-8);
   const entriesByWeek: SeriesPoint[] = weeks.map((w) => ({ label: w.replace(/^\d{4}-/, ''), value: entries.filter((e) => e.week === w).length }));
@@ -148,8 +180,35 @@ export async function getOverview(q: Query): Promise<OverviewData> {
       { label: 'Entries this week', value: String(entriesThisWeek), health: 'ok' },
     ],
     tiles: [
-      { key: 'north-star', label: 'North Star', to: '/north-star', headline: String(ns.length), sublabel: 'asks this period', signal: `${bySpineLane(f.NS_GAPS, q).length} unanswered`, health: bySpineLane(f.NS_GAPS, q).length > 3 ? 'degraded' : 'ok', trend: nsByDay, share: { value: ns.filter((r) => r.outcome === 'answered').length, total: ns.length, label: 'answered' } },
-      { key: 'research-twin', label: 'Research Twin', to: '/research-twin', headline: String(rt.length), sublabel: 'asks this period', signal: `${bySpineLane(f.RT_GAPS, q).length} unanswered`, health: bySpineLane(f.RT_GAPS, q).length > 3 ? 'degraded' : 'ok', trend: rtByDay, share: { value: rt.filter((r) => r.outcome === 'answered').length, total: rt.length, label: 'answered' } },
+      {
+        key: 'north-star',
+        label: 'North Star',
+        to: '/north-star',
+        headline: String(ns.length),
+        sublabel: ns.length ? 'asks held' : 'no ask held yet',
+        // Delivery is the page's own failure metric, so it is the tile's too.
+        signal: ns.length === 0 ? 'the ledger opened on 17 Sep and nothing has arrived yet' : nsUndelivered ? `${nsUndelivered} answer${nsUndelivered === 1 ? '' : 's'} never reached anyone` : 'every answer reached someone',
+        health: nsUndelivered ? 'degraded' : 'ok',
+        trend: nsByDay,
+        share: { value: ns.filter((r) => r.outcome === 'Answered').length, total: ns.length, label: 'answered' },
+      },
+      {
+        key: 'research-twin',
+        label: 'Research Twin',
+        to: '/research-twin',
+        headline: String(rt.length),
+        sublabel: rt.length ? 'asks held' : 'no ask held yet',
+        // A capped job is the one thing on that page nothing else will move.
+        signal:
+          rt.length === 0 && jobs.length === 0
+            ? 'the ledger opened on 17 Sep and nothing has arrived yet'
+            : cappedJobs
+              ? `${cappedJobs} research job${cappedJobs === 1 ? '' : 's'} waiting on a person`
+              : `${jobs.filter((j) => j.open).length} research jobs open, none capped`,
+        health: cappedJobs ? 'degraded' : 'ok',
+        trend: rtByDay,
+        share: { value: rt.filter((r) => r.outcome === 'Answered').length, total: rt.length, label: 'answered' },
+      },
       // vFarm and Engine health are placeholders (2026-09-14, Destiny), so
       // their tiles carry no number. A headline figure for a page that says
       // "coming soon" would be a figure about nothing, which is the rule in
@@ -175,7 +234,8 @@ export async function getOverview(q: Query): Promise<OverviewData> {
     series: {
       loops_raised_14d: loops14d,
       entries_by_week: entriesByWeek,
-      asks_by_outcome: { answered, thin, failed },
+      asks_by_outcome: { answered, thin, failed, refused, needs_human: needsHuman },
+      twin_handoffs: { n: handoffs.n, of: handoffs.of, note: handoffs.note },
       loops_by_owner: owners.map(({ owner, open, in_progress, oldest_days }) => ({ owner, open, in_progress, oldest_days })),
     },
     rates: {
@@ -318,34 +378,44 @@ export function getCodexDetail(id: string): Promise<CodexEntryDetail | null> {
   return store.codexDetail(id);
 }
 
-/* ----------------------------------------------- north star telemetry */
+/* --------------------------------------------------- the twins' ledgers */
 
+/**
+ * North Star's ask log, as its own ledger has recorded it since 17 Sep 2026.
+ *
+ * Newest first: the most recent ask is what says whether North Star is being
+ * used at all, and silence here is itself the signal.
+ */
 export async function getNorthStarTelemetry(): Promise<NsData> {
   return {
-    // Newest first: the most recent ask is the one that says whether North
-    // Star is being used at all.
-    records: (await store.nsRecords()).sort((a, b) => (b.asked_at ?? '').localeCompare(a.asked_at ?? '')),
+    asks: (await store.nsAsks()).sort((a, b) => (b.asked_at ?? '').localeCompare(a.asked_at ?? '')),
     freshness: await store.freshness('ns'),
   };
 }
 
-/* -------------------------------------------- research twin telemetry */
-
+/**
+ * Research Twin's asks and its research queue.
+ *
+ * Two kinds, two mirror tables, and **two freshness lines**, because they are
+ * fed differently: an ask is mirrored the moment the run ends, while a job is
+ * updated in place and only reaches this database through the resync. One age
+ * printed above both would be quietly wrong about whichever was not written
+ * last, which is exactly the class of figure this dashboard exists to remove.
+ */
 export async function getResearchTwinTelemetry(): Promise<RtData> {
-  const cards = await store.rtCards();
-  const attempts = (await store.rtAttempts()).length;
   return {
-    cards,
+    asks: (await store.rtAsks()).sort((a, b) => (b.asked_at ?? '').localeCompare(a.asked_at ?? '')),
+    // Newest first, and a job waiting on a person sorts above the rest: it is
+    // the only thing on that tab nothing else in the engine will move.
+    jobs: (await store.rtJobs()).sort((a, b) => Number(b.capped) - Number(a.capped) || (b.opened_at ?? '').localeCompare(a.opened_at ?? '')),
     freshness: await store.freshness('rt'),
-    shape: {
-      attempts,
-      cards: cards.length,
-      note:
-        attempts === cards.length
-          ? 'One row per card in the Research Queue.'
-          : `The Research Queue holds ${attempts} rows across ${cards.length} distinct cards — it is an attempt log, one row per research attempt, and card_id repeats. Every figure on this page is per card, with the newest attempt deciding the card's state; the row count is given here so the two are never confused.`,
-    },
+    jobs_freshness: await store.freshness('rt_jobs'),
   };
+}
+
+/** How often the two twins actually consult each other, across both ledgers. */
+export function getTwinHandoffs(): Promise<Handoffs> {
+  return store.twinHandoffs();
 }
 
 /* --------------------------------------------------------- clients */

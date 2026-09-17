@@ -5937,3 +5937,162 @@ Not tested: the resync against the live table, because the rig holds no
             AIRTABLE_TOKEN. The route refuses cleanly without one; the first real
             run needs the token to have read on this base, which it already does
             for the index and the questions tables.
+
+## 2026-09-17 21:05 — The twins are rewired onto their own ledgers
+Intent:     Point North Star and Research Twin at the Airtable ledgers both twins
+            started writing to today, build the ingest endpoints n8n is already
+            posting to, and stop reading the five `[LEGACY]` tables. The orange
+            "none written since the migration backfill on 13 Sep 2026" line on
+            both pages was correct and the fix was to give it something live to
+            report, not to silence it.
+Files:      server/src/sources.ts, mirror.ts, migrations.ts, store.ts, stats.ts,
+            engine.ts, index.ts, registrySeed.ts
+            src/data/types.ts, src/data/index.ts
+            src/components/ui/Figures.tsx (new), src/components/ui/index.ts
+            src/screens/NorthStar.tsx, src/screens/ResearchTwin.tsx,
+            src/screens/Overview.tsx
+            CLAUDE.md, README.md, .env.example, render.yaml
+
+Problem:    **Two of the three field lists in the brief disagreed with the live
+            bases, and the live bases win.** Read from Airtable rather than from
+            the brief, on the habit CLAUDE.md section 4 sets:
+              - `Delivered` is **Delivered · Not delivered · No target**, plus
+                **Self-delivered** on Research Twin. The brief said the fourth
+                value was "Failed". A vocabulary invented here would have filed
+                every real undelivered row under a name Airtable never writes,
+                and the delivery rate — the one coloured figure on North Star —
+                would have read 100% while answers were being refused.
+              - Research Twin's `Ask Type` carries an **External web search**
+                option the brief did not list, and `Asked By System` carries
+                Commercial Extractor and Weekly Clock. `Opened By` on a job is
+                Person, not "Destiny", and there is no "Weekly Sweep".
+
+Problem:    `Evidence Used` is written in **two different formats**, and I had
+            to read the agents' own tail nodes in n8n to find out rather than
+            assume one. North Star writes
+            `- <tool> -> 12 row(s), cited 3 time(s) | args: {…}`; Research Twin
+            writes `- <tool> | args: {…}` and then `  -> <observation>` on a
+            second line, **with no counts at all**.
+Fix:        One parser that reads both. Research Twin's rows carry
+            `hits: null, cited: null` — **never nought**, because nought reads as
+            "called and came back with nothing", which is a different and much
+            worse fact than "not recorded". The ask view says so in words, and
+            the tool-usage tile shows its calls and leaves the other two blank.
+
+Problem:    Running the two real line formats through that parser caught two
+            bugs before they shipped, both of which would have looked like data
+            rather than like code:
+              1. Research Twin's continuation line `  -> Found 6 results…` was
+                 being stored as a tool named `> Found 6 results…`. `->` starts
+                 with a hyphen, so it matched the bullet pattern. Every RT ask
+                 would have reported twice as many tool calls as it made.
+              2. North Star's `| args:` sits **after** the counts, and the parser
+                 cut the line at the counts before reading the args, so every
+                 North Star tool call lost its arguments.
+Fix:        Skip a continuation line before the bullet match; read the args out
+            first, then the counts. This is exactly the failure mode the
+            `fields[]=""` note in CLAUDE.md records — a stand-in that shares the
+            assumption passes every test — which is why the formats were read out
+            of n8n rather than guessed at.
+
+Problem:    Three figures on the old North Star page — thin rate at 100%,
+            classified at 42%, unclassified at 58% — were artefacts of `outcome`
+            being added late to the legacy table.
+Decision:   **Not carried across, and there is no unclassified bucket.** Every
+            row in the new ledger carries an outcome. Thin is a slice of the
+            outcome mix now, and the headline is the **delivery rate**: North
+            Star once ran green for six consecutive days while Slack rejected
+            every post, and delivery is the only field recorded *after* the
+            answer is sent. It is the one coloured figure on the page.
+
+Decision:   **Needs human and the external-search rate are never coloured.**
+            Escalating correctly beats a confident wrong answer, and a month of
+            genuinely internal questions is a real month. Capped jobs and BHARAG
+            degraded are coloured, because those are genuinely bad in one
+            direction. Colour only where the direction is news.
+
+Decision:   **A job is one row.** `Research Jobs` carries its own status,
+            attempts and outcome, so nothing collapses on `card_id` any more and
+            none of the one-row-per-attempt language survives. `Attempts` is a
+            number on the job, capped at three. Three tabs on Research Twin now:
+            Asks · Jobs · Statistics.
+
+Decision:   **Research Twin's resync sweeps two tables.** A job is updated in
+            place as it is worked and the agent only mirrors on an ask write, so
+            a queue kept current by ask mirrors alone would show every job at the
+            state it was in when it was opened. `/api/engine/rt-jobs` exists for
+            when n8n is pointed at it; the button is what keeps the queue current
+            today. The Jobs tab therefore carries **its own freshness line** —
+            one age above both would be quietly wrong about whichever was not
+            written last.
+
+Decision:   **A handoff direction is only asserted where the row states one.**
+            The first cut labelled every linked ask with an arrow. But
+            `Asked By System` naming the other twin says who asked whom;
+            `Linked Twin Ask` on its own says the two rows are one exchange and
+            nothing about which end started it. Caught on the rig: a North Star
+            row asked from Slack and carrying `Linked Twin Ask` was being drawn
+            as `rt→ns`, which is the opposite of what happened. Those read
+            "linked" now. The known gap — the front doors do not yet pass
+            `Linked Twin Ask` through — is in the footnote, and the count reads
+            slightly high through its fallbacks rather than silently low.
+
+Problem:    Two statistics cards I had written rendered a **count** with a
+            per-cent sign: "Gap types" showed `1%` for one job, and "Confidence
+            mix" showed `1%` for one High-confidence-no-sources ask. `DistTile`
+            hardcoded a percent formatter.
+Fix:        `DistTile` takes a `format`; those two pass a count formatter.
+            Confidence mix now renders nought as `0` rather than falling through
+            to an empty state — "none of these" and "nothing recorded" are
+            different statements.
+
+Decision:   The five `[LEGACY]` tables are **read by nothing**, and
+            `engine_ns_records` and `engine_rt_attempts` keep their rows, unread,
+            like the `records` read model. Nothing drops a table. All five stay
+            in the System Registry's bases list, marked `[LEGACY]` with what
+            replaced them: a base that vanished from the registry would read as
+            one that was never there.
+
+Decision:   **The Overview's two twin tiles and its asks figure read the
+            ledgers.** They were the last fixtures on that page computing a
+            number about a section that now holds real rows, which is the
+            disagreement section 2 forbids. The tiles' signals are each page's
+            own failure metric — an answer that reached nobody, a job waiting on
+            a person — and twin-to-twin handoffs sits in the "This week" card.
+
+Verified:   Against a local Postgres 16 and a stub that **refuses exactly what
+            Airtable refuses** (`fields[]=` with no field named → 422
+            `Unknown field name: ""`), because a stub implementing the assumption
+            is how the last round of tests all passed against a shared bug.
+            - Migration 15 applied on boot: 15 migrations, three new tables.
+            - `POST /api/engine/ns-asks` inserted, then re-sent the identical
+              payload and reported `unchanged` — the upsert is idempotent, so
+              n8n retrying is safe.
+            - `POST /api/engine/rt-asks`, `POST /api/engine/rt-jobs` the same,
+              and a second post to the same job **updated it in place**
+              (In Progress → Resolved) rather than duplicating.
+            - `POST /api/engine/ns` now 404s naming the kinds that exist, and an
+              unauthenticated post is 401 before the router reads the body.
+            - Both resyncs against the stub: North Star +1 inserted / 1 updated /
+              1 deleted over one table; Research Twin 2 updated / 2 deleted over
+              **two** tables (asks and jobs), with the job's status changing in
+              place and `days_to_resolve` landing at 15.
+            - Killed the stub mid-flight and re-ran: `ran: false`, `deleted: 0`,
+              both tables named as unread with what Airtable said, and every row
+              still held. **A table that could not be read is never an emptied
+              table.**
+            - Every figure over a month with no rows: `pct: null` with a sentence
+              ("No ask is held for this month"), never 0%. Every rate carries its
+              denominator; every duration is p50/p95.
+            - A sparse month reads as one: two asks report "1 of 2", not a trend.
+Not tested: the resyncs against the live Airtable bases, because the rig holds no
+            real `AIRTABLE_TOKEN`. **The token needs read added on
+            `appRvx4u9V9BYp646` and `appv39nQzmfC9VVkG` before either button will
+            work** — it was scoped to the two legacy bases, and a token that is
+            not re-scoped authenticates and then refuses, which is the same
+            failure the submissions base had on 14 Sep. The resync names the
+            table rather than reading the refusal as an emptied one, so the
+            failure is legible, but it is a failure until the grant is widened.
+            Also untested with real rows: both ledgers are empty today, by
+            design, so every figure was exercised against rows posted through the
+            live ingest endpoints rather than against production data.

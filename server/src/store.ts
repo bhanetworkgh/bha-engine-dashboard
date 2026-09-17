@@ -62,18 +62,23 @@ import type {
   Metric,
   MetricSeries,
   NewLoop,
+  NsAsk,
   NsMetrics,
-  NsOutcome,
-  NsRecord,
   Opportunity,
   OwnerTotals,
   PatternMetrics,
   RecordKind,
   RecordMetrics,
-  RtAttempt,
-  RtCard,
+  RtAsk,
+  RtJob,
+  RtJobMetrics,
   RtMetrics,
   SeriesPoint,
+  Share,
+  Slice,
+  Percentiles,
+  Cohort,
+  Handoffs,
 } from '../../src/data/types';
 import {
   LAYER0_PENDING,
@@ -90,8 +95,23 @@ import {
   LOOP_TABLES,
   LOOPS_BASE,
   NORTH_STAR,
+  NS_DELIVERED,
+  NS_OUTCOMES,
+  NS_PRIORITY_TIERS,
+  NS_QUESTION_TYPES,
+  CONFIDENCE_STATED,
+  JOB_ATTEMPT_CAP,
+  JOB_GAP_TYPES,
+  JOB_OPENED_BY,
+  JOB_RESOLVED,
+  JOB_STATUSES,
   PATTERNS,
-  RESEARCH_QUEUE,
+  RESEARCH_JOBS,
+  RESEARCH_TWIN,
+  RT_ASK_TYPES,
+  RT_BHARAG,
+  RT_DELIVERED,
+  RT_OUTCOMES,
   type AtRecord,
   canonicalPerson,
   codexSummary,
@@ -106,17 +126,18 @@ import {
   mapCodex,
   mapLayer0,
   mapLoop,
-  mapNsRecord,
+  mapNsAsk,
   mapOpportunity,
   mapPattern,
-  mapRtAttempt,
+  mapRtAsk,
+  mapRtJob,
   missingLabel,
   patternSummary,
 } from './sources';
 
 export type { RecordKind, RecordMetrics, Metric };
 
-export const KINDS: RecordKind[] = ['loops', 'codex', 'patterns', 'commercial', 'ns', 'rt', 'clients', 'client_questions', 'client_requests'];
+export const KINDS: RecordKind[] = ['loops', 'codex', 'patterns', 'commercial', 'ns', 'rt', 'rt_jobs', 'clients', 'client_questions', 'client_requests'];
 
 /** Status vocabularies, in the dashboard's words. Loops and patterns and cards are the table's own selects lower-cased or verbatim. */
 export const STATUSES: Record<RecordKind, readonly string[]> = {
@@ -132,6 +153,7 @@ export const STATUSES: Record<RecordKind, readonly string[]> = {
   // dashboard reads them. No status is settable from here.
   ns: [],
   rt: [],
+  rt_jobs: [],
   clients: [],
   client_questions: [],
   /** Airtable owns the status here; nothing in this dashboard writes one. */
@@ -251,8 +273,9 @@ const MIRROR: Record<RecordKind, { table: string; base: string; at_table: string
   codex: { table: 'engine_codex_submissions', base: CODEX_BASE, at_table: null },
   patterns: { table: 'engine_build_patterns', base: PATTERNS.base, at_table: PATTERNS.table },
   commercial: { table: 'engine_commercial_cards', base: COMMERCIAL.base, at_table: COMMERCIAL.table },
-  ns: { table: 'engine_ns_records', base: NORTH_STAR.base, at_table: NORTH_STAR.table },
-  rt: { table: 'engine_rt_attempts', base: RESEARCH_QUEUE.base, at_table: RESEARCH_QUEUE.table },
+  ns: { table: 'engine_ns_asks', base: NORTH_STAR.base, at_table: NORTH_STAR.table },
+  rt: { table: 'engine_rt_asks', base: RESEARCH_TWIN.base, at_table: RESEARCH_TWIN.table },
+  rt_jobs: { table: 'engine_rt_jobs', base: RESEARCH_JOBS.base, at_table: RESEARCH_JOBS.table },
   clients: { table: 'engine_client_lanes', base: CLIENTS_INDEX.base, at_table: CLIENTS_INDEX.table },
   client_questions: { table: 'engine_client_questions', base: CLIENTS_INDEX.base, at_table: null },
   client_requests: { table: 'engine_client_requests', base: CLIENT_REQUESTS.base, at_table: CLIENT_REQUESTS.table },
@@ -264,8 +287,9 @@ const MIRROR_KIND: Record<RecordKind, mirror.MirrorKind> = {
   codex: 'codex',
   patterns: 'patterns',
   commercial: 'commercial',
-  ns: 'ns',
-  rt: 'rt',
+  ns: 'ns-asks',
+  rt: 'rt-asks',
+  rt_jobs: 'rt-jobs',
   clients: 'client_lanes',
   client_questions: 'client_questions',
   client_requests: 'client_requests',
@@ -273,7 +297,7 @@ const MIRROR_KIND: Record<RecordKind, mirror.MirrorKind> = {
 
 const HAS_BUILDER = new Set<RecordKind>(['loops', 'codex']);
 const HAS_TABLE = new Set<RecordKind>(['loops', 'codex', 'client_questions']);
-const HAS_LANE = new Set<RecordKind>(['commercial', 'ns', 'rt', 'client_questions']);
+const HAS_LANE = new Set<RecordKind>(['commercial', 'ns', 'rt', 'rt_jobs', 'client_questions']);
 
 interface MirrorRow {
   pk: string;
@@ -333,8 +357,9 @@ type Mapped =
   | { kind: 'codex'; obj: CodexEntryDetail }
   | { kind: 'patterns'; obj: BuildPatternDetail }
   | { kind: 'commercial'; obj: Opportunity }
-  | { kind: 'ns'; obj: NsRecord }
-  | { kind: 'rt'; obj: RtAttempt }
+  | { kind: 'ns'; obj: NsAsk }
+  | { kind: 'rt'; obj: RtAsk }
+  | { kind: 'rt_jobs'; obj: RtJob }
   | { kind: 'clients'; obj: ClientLane }
   | { kind: 'client_questions'; obj: ClientQuestion }
   | { kind: 'client_requests'; obj: ClientRequest };
@@ -366,9 +391,11 @@ export function mapRecord(kind: RecordKind, rec: AtRecord, table: string, lane?:
     case 'commercial':
       return { kind, obj: mapOpportunity(rec) };
     case 'ns':
-      return { kind, obj: mapNsRecord(rec) };
+      return { kind, obj: mapNsAsk(rec) };
     case 'rt':
-      return { kind, obj: mapRtAttempt(rec) };
+      return { kind, obj: mapRtAsk(rec) };
+    case 'rt_jobs':
+      return { kind, obj: mapRtJob(rec) };
     case 'clients':
       return { kind, obj: mapClientLane(rec) };
     case 'client_questions':
@@ -397,9 +424,15 @@ function statusOf(m: Mapped): string {
     case 'commercial':
       return m.obj.readiness_state ?? 'unset';
     case 'ns':
-      return m.obj.outcome ?? 'unclassified';
     case 'rt':
-      return m.obj.status ?? 'untriaged';
+      // The ledgers' own Outcome select. Every new row carries one, so there is
+      // no "unclassified" bucket any more; a row without one predates nothing
+      // and is simply a row the agent failed to finish writing.
+      return m.obj.outcome ?? 'no outcome';
+    case 'rt_jobs':
+      // A job's own Status, which is the whole point of the table: Pending,
+      // In Progress, Resolved, or capped and waiting on a person.
+      return m.obj.status ?? 'no status';
     case 'clients':
       return m.obj.run_state ?? 'unset';
     case 'client_questions':
@@ -424,9 +457,10 @@ function raisedOf(m: Mapped): string | null {
     case 'commercial':
       return m.obj.created_at ? m.obj.created_at.slice(0, 10) : null;
     case 'ns':
-      return m.obj.asked_at ? m.obj.asked_at.slice(0, 10) : null;
     case 'rt':
-      return m.obj.created_at ? m.obj.created_at.slice(0, 10) : null;
+      return m.obj.asked_at ? m.obj.asked_at.slice(0, 10) : null;
+    case 'rt_jobs':
+      return m.obj.opened_at ? m.obj.opened_at.slice(0, 10) : null;
     case 'clients':
       return m.obj.last_run_at ? m.obj.last_run_at.slice(0, 10) : null;
     case 'client_questions':
@@ -820,11 +854,14 @@ export async function searchPatterns(q: string): Promise<BuildPattern[]> {
 export async function opportunities(): Promise<Opportunity[]> {
   return (await rows('commercial')).map((r) => JSON.parse(r.json) as Opportunity);
 }
-export async function nsRecords(): Promise<NsRecord[]> {
-  return (await rows('ns')).map((r) => JSON.parse(r.json) as NsRecord);
+export async function nsAsks(): Promise<NsAsk[]> {
+  return (await rows('ns')).map((r) => JSON.parse(r.json) as NsAsk);
 }
-export async function rtAttempts(): Promise<RtAttempt[]> {
-  return (await rows('rt')).map((r) => JSON.parse(r.json) as RtAttempt);
+export async function rtAsks(): Promise<RtAsk[]> {
+  return (await rows('rt')).map((r) => JSON.parse(r.json) as RtAsk);
+}
+export async function rtJobs(): Promise<RtJob[]> {
+  return (await rows('rt_jobs')).map((r) => JSON.parse(r.json) as RtJob);
 }
 export async function clientLanes(): Promise<ClientLane[]> {
   return (await rows('clients')).map((r) => JSON.parse(r.json) as ClientLane);
@@ -1815,13 +1852,28 @@ function firstSources(kind: ResyncKind): ResyncSource[] {
    * refuses, which is exactly the failure the submissions base had on 14 Sep,
    * so the refusal names the base rather than reading as an empty table.
    *
-   * Research Twin is an **attempt log**: `card_id` repeats and `keyOnNatural`
-   * is false for that kind, so the sweep compares Airtable record ids, which
-   * are unique per attempt. Comparing on card_id would read four attempts on
-   * one card as three rows Airtable no longer has, and delete them.
+   * Since 17 Sep both twins write to their own ledgers, one row per ask, each
+   * carrying a unique `Ask ID`. The attempt log this replaced did not: its
+   * `card_id` repeated, and comparing on it would have read four attempts on
+   * one card as three rows Airtable no longer had, and deleted them. The sweep
+   * still compares Airtable record ids, which are unique everywhere.
    */
-  if (kind === 'ns') return [{ base: NORTH_STAR.base, table: NORTH_STAR.table, label: NORTH_STAR.label, kind: 'ns' }];
-  if (kind === 'rt') return [{ base: RESEARCH_QUEUE.base, table: RESEARCH_QUEUE.table, label: RESEARCH_QUEUE.label, kind: 'rt' }];
+  if (kind === 'ns') return [{ base: NORTH_STAR.base, table: NORTH_STAR.table, label: NORTH_STAR.label, kind: 'ns-asks' }];
+  /**
+   * Research Twin is **two** tables, swept together (2026-09-17): its ask
+   * ledger and its research queue.
+   *
+   * The queue has to be in the sweep rather than left to the mirror, because a
+   * job is *updated in place* — its status, attempts and finding all change as
+   * it is worked — and the agent only mirrors on an ask write. A queue kept
+   * current by ask mirrors alone would show every job at the state it was in
+   * when it was opened.
+   */
+  if (kind === 'rt')
+    return [
+      { base: RESEARCH_TWIN.base, table: RESEARCH_TWIN.table, label: RESEARCH_TWIN.label, kind: 'rt-asks' },
+      { base: RESEARCH_JOBS.base, table: RESEARCH_JOBS.table, label: RESEARCH_JOBS.label, kind: 'rt-jobs' },
+    ];
   /**
    * Clients sweeps three things: the index, every questions table the index
    * names, and the shared **Client Requests** table (2026-09-17). The requests
@@ -1908,6 +1960,8 @@ export async function resync(kind: ResyncKind, actor = 'dashboard'): Promise<Res
             // A request names its own lane in the row; a question is told which
             // lane by the table it came out of.
             lane_id: source.kind === 'client_requests' ? (typeof rec.fields?.['Lane ID'] === 'string' ? (rec.fields['Lane ID'] as string) : null) : (source.lane_id ?? null),
+            // `prepare()` reads `Lane` off the payload for the twins, so
+            // nothing needs to be told here; the sweep passes what it knows.
           },
           'airtable',
         );
@@ -2075,8 +2129,9 @@ const RECORD_KIND: Record<mirror.MirrorKind, RecordKind | null> = {
   layer0: null,
   patterns: 'patterns',
   commercial: 'commercial',
-  ns: 'ns',
-  rt: 'rt',
+  'ns-asks': 'ns',
+  'rt-asks': 'rt',
+  'rt-jobs': 'rt_jobs',
   client_lanes: 'clients',
   client_questions: 'client_questions',
   client_requests: 'client_requests',
@@ -2195,7 +2250,7 @@ export async function removeInbound(kind: RecordKind, id: string): Promise<boole
 export async function read(
   kind: RecordKind,
   id: string,
-): Promise<Loop | CodexEntry | BuildPattern | Opportunity | NsRecord | RtAttempt | ClientLane | ClientQuestion | null> {
+): Promise<Loop | CodexEntry | BuildPattern | Opportunity | NsAsk | RtAsk | RtJob | ClientLane | ClientQuestion | null> {
   const r = await rowById(kind, id);
   if (!r) return null;
   switch (kind) {
@@ -2804,6 +2859,8 @@ export async function metrics(kind: RecordKind, filter: { builder?: string | nul
       return nsMetrics(filter.month ?? null);
     case 'rt':
       return rtMetrics(filter.month ?? null);
+    case 'rt_jobs':
+      return rtJobMetrics(filter.month ?? null);
     default:
       throw new StoreError(`${kind} has no metrics of its own.`, 404);
   }
@@ -2848,271 +2905,593 @@ export async function held(): Promise<Record<RecordKind, number>> {
   return out;
 }
 
-/* ------------------------------------------------------- north star (NS) */
-
-const NS_OUTCOME_LABELS: Record<string, string> = { answered: 'Answered', thin: 'Thin', failed: 'Failed', unclassified: 'Unclassified' };
+/* ------------------------------------------------------------ the twins */
 
 /**
- * North Star telemetry.
+ * North Star and Research Twin, computed from the ledgers they have written to
+ * since 17 Sep 2026.
  *
- * Every figure below is computed over the rows that carry an `outcome`, and
- * the count that do not is stated beside it. That distinction is the whole
- * point: a thin rate of "0%" computed over zero classified rows would be a
- * lie told in the most reassuring possible direction.
+ * Four rules run through every figure below, and they are the reason this file
+ * is longer than the arithmetic needs:
+ *
+ *   - **A percentage always carries its denominator.** `Share` holds `n` and
+ *     `of` as well as the rate, and a rate over nought rows is null with a
+ *     sentence rather than 0%.
+ *   - **No duration is ever a mean.** p50 and p95, over the rows that actually
+ *     carried a duration, with how many did stated beside them. A mean hides
+ *     the tail, and the tail is what people feel.
+ *   - **Every figure says what it excludes**, in the note the tile prints.
+ *   - **Nothing is inferred from answer text.** A missing field is missing.
+ *
+ * And the fifth, which shapes what is *not* here: these ledgers started empty
+ * on 17 September. September holds a handful of rows and October is the first
+ * clean month, so no figure here is smoothed, averaged across months, or
+ * projected. A sparse month reads as a sparse month.
  */
+
+/** A rate with the denominator it is over. Null where there is nothing to divide by. */
+function share(n: number, of: number, note: (n: number, of: number) => string): Share {
+  return { n, of, pct: of ? Math.round((n / of) * 1000) / 10 : null, note: note(n, of) };
+}
+
+/**
+ * A distribution over a select, in the vocabulary's own order.
+ *
+ * `vocab` is the base's list, so the bars keep a stable order rather than
+ * reordering as counts change; anything the rows carry that the vocabulary does
+ * not know is appended rather than dropped, because a value Airtable has added
+ * and this code has not heard of is a real answer.
+ */
+function slices<T>(items: T[], of: (x: T) => string | null, vocab: readonly string[], blank: string): Slice[] {
+  const counts = new Map<string, number>();
+  for (const x of items) {
+    const key = of(x) ?? blank;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const known = vocab.filter((v) => counts.has(v)).map((v) => ({ key: v, label: v, n: counts.get(v)! }));
+  const rest = [...counts.entries()]
+    .filter(([k]) => !vocab.includes(k))
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, n]) => ({ key, label: key, n }));
+  return [...known, ...rest];
+}
+
+/**
+ * p50 and p95 of a set of numbers, over the rows that carry one.
+ *
+ * Nearest-rank, which for two values gives a real observation rather than an
+ * interpolation between them — on a ledger holding four asks that matters, and
+ * an interpolated p95 of a fortnight's data is a number nobody measured.
+ */
+function percentiles(values: number[], of: number, note: (n: number, of: number) => string): Percentiles {
+  const s = [...values].sort((a, b) => a - b);
+  const at = (p: number) => (s.length ? s[Math.min(s.length - 1, Math.ceil((p / 100) * s.length) - 1)] : null);
+  const round = (v: number | null) => (v === null ? null : Math.round(v * 10) / 10);
+  return { p50: round(at(50)), p95: round(at(95)), n: s.length, of, note: note(s.length, of) };
+}
+
+/** An asking system or a lane, with its own rates rather than the aggregate's. */
+function cohorts<T>(items: T[], key: (x: T) => string | null, blank: string, answered: (x: T) => boolean, delivered: (x: T) => boolean, external?: (x: T) => boolean): Cohort[] {
+  const groups = new Map<string, T[]>();
+  for (const x of items) {
+    const k = key(x) ?? blank;
+    groups.set(k, [...(groups.get(k) ?? []), x]);
+  }
+  return [...groups.entries()]
+    .map(([k, mine]) => ({
+      key: k,
+      label: k,
+      asks: mine.length,
+      answered: mine.filter(answered).length,
+      delivered: mine.filter(delivered).length,
+      external: external ? mine.filter(external).length : null,
+    }))
+    .sort((a, b) => b.asks - a.asks);
+}
+
+function inMonth(at: string | null, month: string | null | undefined): boolean {
+  return !month || at?.slice(0, 7) === month;
+}
+
+function weekOf(at: string | null): string | null {
+  return at ? weekStart(at.slice(0, 10)) : null;
+}
+
+const NO_LANE = '(no lane)';
+const NO_SYSTEM = '(no system named)';
+const NO_OUTCOME = '(no outcome)';
+const NOT_STATED = '(not stated)';
+
+/** How long since the newest ask, in the same words on both twins. */
+function lastAskOf(asks: { asked_at: string | null; ask_id: string | null }[], twin: string): { at: string | null; ask_id: string | null; note: string } {
+  const newest = asks.filter((a) => a.asked_at).sort((a, b) => b.asked_at!.localeCompare(a.asked_at!))[0] ?? null;
+  if (!newest?.asked_at) return { at: null, ask_id: null, note: `No ask in this month carries a timestamp, so there is nothing to date. Silence here is itself the signal.` };
+  const days = Math.floor((Date.now() - Date.parse(newest.asked_at)) / 86_400_000);
+  return {
+    at: newest.asked_at,
+    ask_id: newest.ask_id,
+    note: days === 0 ? `${twin} was asked something today, so the routing into it is working.` : `Nothing has reached ${twin} for ${days} ${days === 1 ? 'day' : 'days'}. Silence here is itself the signal.`,
+  };
+}
+
+/**
+ * Twin-to-twin handoffs, counted across both ledgers.
+ *
+ * **The `Linked Twin Ask` field is the real answer and it may be empty on early
+ * rows**, because the front doors do not yet pass it through. Until that is
+ * fixed this also counts an ask whose `Asked By System` names the other twin,
+ * and an Ask ID that appears in a research job's `Linked Asks`. Every one of
+ * those three is stated in the note rather than folded into one number, because
+ * a count that quietly changes definition when a field starts being written is
+ * worse than a smaller one that says what it is.
+ */
+function handoffsOf(ns: NsAsk[], rt: RtAsk[], jobs: RtJob[]): Handoffs {
+  const nsById = new Map(ns.filter((a) => a.ask_id).map((a) => [a.ask_id!, a]));
+  const rtById = new Map(rt.filter((a) => a.ask_id).map((a) => [a.ask_id!, a]));
+  const inJobs = new Set(jobs.flatMap((j) => j.linked_asks));
+
+  const nsHandoffs = ns.filter((a) => a.linked_twin_ask || a.asked_by_system === 'Research Twin');
+  const rtHandoffs = rt.filter((a) => a.linked_twin_ask || a.asked_by_system === 'North Star' || (a.ask_id && inJobs.has(a.ask_id)));
+  const n = nsHandoffs.length + rtHandoffs.length;
+  const of = ns.length + rt.length;
+
+  /**
+   * **A direction is only asserted where the row states one.**
+   *
+   * `Asked By System` naming the other twin says who asked whom. `Linked Twin
+   * Ask` on its own says the two rows are one exchange and nothing about which
+   * end started it — an ask in North Star's ledger carrying it could be North
+   * Star consulting Research Twin just as easily as the reverse. Those are
+   * `linked`, because an arrow this code picked would be a fact nobody
+   * recorded, printed with the same confidence as one that was.
+   */
+  const pairs: Handoffs['pairs'] = [];
+  for (const a of nsHandoffs) {
+    const other = a.linked_twin_ask ? (rtById.get(a.linked_twin_ask) ?? null) : null;
+    pairs.push({
+      ask_id: a.ask_id ?? a.id,
+      ask_at: a.asked_at,
+      ask_question: a.question,
+      reply_id: other?.ask_id ?? a.linked_twin_ask ?? null,
+      reply_at: other?.asked_at ?? null,
+      reply_summary: other?.answer_summary ?? null,
+      direction: a.asked_by_system === 'Research Twin' ? 'rt→ns' : 'linked',
+      ledger: 'North Star',
+    });
+  }
+  for (const a of rtHandoffs) {
+    const other = a.linked_twin_ask ? (nsById.get(a.linked_twin_ask) ?? null) : null;
+    pairs.push({
+      ask_id: a.ask_id ?? a.id,
+      ask_at: a.asked_at,
+      ask_question: a.question,
+      reply_id: other?.ask_id ?? a.linked_twin_ask ?? null,
+      reply_at: other?.asked_at ?? null,
+      reply_summary: other?.answer_summary ?? null,
+      direction: a.asked_by_system === 'North Star' ? 'ns→rt' : 'linked',
+      ledger: 'Research Twin',
+    });
+  }
+  pairs.sort((a, b) => (b.ask_at ?? '').localeCompare(a.ask_at ?? ''));
+
+  const linked = nsHandoffs.filter((a) => a.linked_twin_ask).length + rtHandoffs.filter((a) => a.linked_twin_ask).length;
+  return {
+    n,
+    of,
+    pct: of ? Math.round((n / of) * 1000) / 10 : null,
+    pairs: pairs.slice(0, 12),
+    note:
+      of === 0
+        ? 'Neither ledger holds an ask yet, so there is nothing to count. Until 17 Sep 2026 the twins could not reach each other at all; every handoff went through a person or through Bays.'
+        : `${n} of ${of} asks across both ledgers are a twin consulting the other. ${linked} of those carry \`Linked Twin Ask\`; the rest are counted from \`Asked By System\` naming the other twin, or from an Ask ID appearing in a research job's \`Linked Asks\`. That fallback exists because the front doors do not yet pass \`Linked Twin Ask\` through, so early rows leave it empty — when they do, this figure will be exact rather than larger.`,
+  };
+}
+
+export async function twinHandoffs(): Promise<Handoffs> {
+  return handoffsOf(await nsAsks(), await rtAsks(), await rtJobs());
+}
+
+/* ----------------------------------------------------------- north star */
+
 export async function nsMetrics(month?: string | null): Promise<NsMetrics> {
   const key = `ns:${month ?? '*'}`;
   const hit = metricsCache.get(key);
   if (hit && hit.version === storeVersion) return hit.value as NsMetrics;
-  const everything = await nsRecords();
+
+  const everything = await nsAsks();
   /**
-   * The month in view, chosen beside the search box (2026-09-16, Destiny). The
-   * strip and the telemetry are about the rows the list is showing — a strip
-   * reading 18 asks above a list of 6 is two right numbers to two different
-   * questions, which is the reconciliation fault the loops page had.
+   * The month the page is showing, chosen beside the search box. The strip and
+   * the list answer the same question, which is the reconciliation fault the
+   * loops page had and every record page has been held to since.
    */
-  const all = month ? everything.filter((r) => r.asked_at?.slice(0, 7) === month) : everything;
-  const classified = all.filter((r) => r.outcome);
-  const thin = classified.filter((r) => r.outcome === 'thin').length;
-  // The eight-week strips keep the whole history even when the page is scoped
-  // to one month: a trend cut to a month is not a trend.
+  const all = everything.filter((r) => inMonth(r.asked_at, month));
   const weeks = lastWeeks(8);
 
-  const outcomes: (NsOutcome | 'unclassified')[] = ['answered', 'thin', 'failed', 'unclassified'];
-  const inWeek = (r: NsRecord, w: string) => Boolean(r.asked_at) && weekStart(r.asked_at!.slice(0, 10)) === w;
+  const delivered = all.filter((r) => r.delivered === 'Delivered');
+  const answered = all.filter((r) => r.outcome === 'Answered');
+  const timed = all.filter((r) => r.response_seconds !== null);
+  const undelivered = all.filter((r) => r.delivered && r.delivered !== 'Delivered');
+  const withCoverage = all.filter((r) => r.citation_coverage !== null);
 
-  // Tool usage: hits that came back against hits that ended up cited.
-  const tools = new Map<string, { calls: number; hits: number; used: number }>();
+  const tools = new Map<string, { calls: number; hits: number | null; cited: number | null }>();
   for (const r of all)
-    for (const sch of r.searches) {
-      const t = tools.get(sch.tool) ?? { calls: 0, hits: 0, used: 0 };
-      t.calls++;
-      t.hits += sch.hits;
-      t.used += sch.used;
-      tools.set(sch.tool, t);
+    for (const t of r.tools) {
+      const held = tools.get(t.tool) ?? { calls: 0, hits: null, cited: null };
+      held.calls++;
+      // Null plus a number is that number; null plus null stays null. A tool
+      // whose lines never carried counts must not read as nought hits.
+      if (t.hits !== null) held.hits = (held.hits ?? 0) + t.hits;
+      if (t.cited !== null) held.cited = (held.cited ?? 0) + t.cited;
+      tools.set(t.tool, held);
     }
 
-  const withConfidence = all.filter((r) => r.confidence !== null);
-  const buckets: [string, (c: number) => boolean][] = [
-    ['nothing cited (0)', (c) => c === 0],
-    ['partly cited (0–1)', (c) => c > 0 && c < 1],
-    ['fully cited (1)', (c) => c >= 1],
+  const coverageBuckets: [string, (c: number) => boolean][] = [
+    ['nothing cited', (c) => c <= 0],
+    ['partly cited', (c) => c > 0 && c < 1],
+    ['fully cited', (c) => c >= 1],
   ];
 
-  const lanes = [...new Set(all.map((r) => r.lane_id ?? '(no lane_id)'))].sort();
-  const newest = all.filter((r) => r.asked_at).sort((a, b) => b.asked_at!.localeCompare(a.asked_at!))[0] ?? null;
-  const sinceLast = newest?.asked_at ? Math.floor((Date.now() - Date.parse(newest.asked_at)) / 86_400_000) : null;
+  const lanes = [...new Set(all.map((r) => r.lane ?? NO_LANE))];
+  const criticalWeeks = (lane: string) =>
+    new Set(all.filter((r) => (r.lane ?? NO_LANE) === lane && r.claimed_priority_tier === 'Critical').map((r) => weekOf(r.asked_at)).filter((w): w is string => Boolean(w)));
+
+  const architectLanes = [...new Set(all.filter((r) => r.architect_attention).map((r) => r.lane ?? NO_LANE))].map((lane) => {
+    const mine = all.filter((r) => r.architect_attention && (r.lane ?? NO_LANE) === lane);
+    return { lane, n: mine.length, last_at: mine.map((r) => r.asked_at).filter(Boolean).sort().reverse()[0] ?? null };
+  });
 
   const value: NsMetrics = {
     kind: 'ns',
     computed_at: nowIso(),
-    scope: { rows: all.length },
-    classified: classified.length,
-    unclassified: all.length - classified.length,
-    unclassified_note:
-      all.length - classified.length === 0
-        ? 'Every row carries an outcome.'
-        : `${all.length - classified.length} of ${all.length} rows carry no outcome. The field was added to the table on 10 Sept 2026; rows written before it, and any the agent has not classified since, are counted here and excluded from every rate below. Nothing is inferred from the answer text.`,
-    thin_rate: {
-      value: classified.length ? Math.round((thin / classified.length) * 100) : null,
-      /**
-       * Every hint on this strip runs to roughly the same length (2026-09-16,
-       * Destiny). Five cells whose footnotes were one line, five lines, one
-       * line and four read as a ragged block; the rule is the same one the
-       * record pages' `hintMinLines` already enforces, applied to the words
-       * rather than to the box.
-       */
-      note: classified.length
-        ? `${thin} of ${classified.length} classified asks answered with no [S#] citation behind them. ${all.length - classified.length} ${all.length - classified.length === 1 ? 'row carries' : 'rows carry'} no outcome and ${all.length - classified.length === 1 ? 'is' : 'are'} left out.`
-        : `Nothing carries an outcome yet, so this cannot be computed. It is the share of classified asks whose answer cites nothing at all.`,
-    },
-    outcome_mix: outcomes
-      .map((o) => ({ outcome: o, label: NS_OUTCOME_LABELS[o], n: o === 'unclassified' ? all.length - classified.length : all.filter((r) => r.outcome === o).length }))
-      .filter((r) => r.n > 0),
+    scope: { rows: all.length, month: month ?? null },
+    delivery_rate: share(delivered.length, all.length, (n, of) =>
+      of
+        ? `${n} of ${of} asks reached someone. Delivery is recorded after the answer is sent, so this is what actually arrived, not what was attempted. Anything below 100% is a real failure: North Star once ran green for six days while Slack rejected every post.`
+        : 'No ask is held for this month, so there is nothing whose delivery could be recorded.',
+    ),
+    answered_rate: share(answered.length, all.length, (n, of) =>
+      of
+        ? `${n} of ${of} asks came back Answered — an answer carrying at least one citation. Thin, Refused and Failed are the other three and are counted separately; nothing is inferred from the answer text.`
+        : 'No ask is held for this month.',
+    ),
+    asks: all.length,
+    response: percentiles(timed.map((r) => r.response_seconds!), all.length, (n, of) =>
+      n
+        ? `Seconds from question to answer, over the ${n} of ${of} asks that recorded a duration. p50 and p95, never a mean — a mean hides the slow tail, and the tail is what people feel.`
+        : of
+          ? `None of this month's ${of} asks recorded a response time, so there is no figure — not a figure of nought.`
+          : 'No ask is held for this month.',
+    ),
+    last_ask: lastAskOf(all, 'North Star'),
     asks_per_week: series(
-      weeks.map((w) => ({ label: weekLabel(w), value: all.filter((r) => inWeek(r, w)).length })),
-      'Asks by the week of their timestamp, last eight weeks.',
+      weeks.map((w) => ({ label: weekLabel(w), value: all.filter((r) => weekOf(r.asked_at) === w).length })),
+      'Asks by the week they were asked, over the last eight weeks. The ledger opened on 17 Sep 2026, so weeks before it were not quiet — they were not recorded.',
     ),
     outcome_per_week: weeks.map((w) => {
-      const mine = all.filter((r) => inWeek(r, w));
+      const mine = all.filter((r) => weekOf(r.asked_at) === w);
       return {
-        label: weekLabel(w),
         week: w,
-        answered: mine.filter((r) => r.outcome === 'answered').length,
-        thin: mine.filter((r) => r.outcome === 'thin').length,
-        failed: mine.filter((r) => r.outcome === 'failed').length,
-        unclassified: mine.filter((r) => !r.outcome).length,
+        label: weekLabel(w),
+        total: mine.length,
+        counts: Object.fromEntries([...NS_OUTCOMES, NO_OUTCOME].map((o) => [o, mine.filter((r) => (r.outcome ?? NO_OUTCOME) === o).length])),
       };
     }),
-    research_required_rate: (() => {
-      const known = all.filter((r) => r.research_required !== null);
-      const yes = known.filter((r) => r.research_required).length;
-      return {
-        value: known.length ? Math.round((yes / known.length) * 100) : null,
-        note: known.length
-          ? `${yes} of ${known.length} asks were flagged as needing research before answering. ${all.length - known.length ? `${all.length - known.length} rows record neither Yes nor No.` : 'Every row records one or the other.'}`.trim()
-          : 'No row records research_required.',
-      };
-    })(),
-    tool_usage: [...tools.entries()]
-      .map(([tool, t]) => ({ tool, calls: t.calls, hits: t.hits, used: t.used, cited_rate: t.hits ? Math.round((t.used / t.hits) * 100) : null }))
-      .sort((a, b) => b.calls - a.calls),
-    tool_note:
-      tools.size === 0
-        ? 'No ask records a tool call in its evidence blob.'
-        : 'From each ask’s own searches blob: calls made, hits returned, and how many of those hits ended up behind an [S#] citation. A tool with hits and no cited uses is being called and ignored.',
-    confidence_mix: buckets.map(([bucket, test]) => ({ bucket, n: withConfidence.filter((r) => test(r.confidence!)).length })).filter((b) => b.n > 0),
-    confidence_note: withConfidence.length
-      ? `Citation coverage as the agent computed it on ${withConfidence.length} of ${all.length} asks — the share of tool calls that produced a traceable citation. It is not a model-reported probability.`
-      : 'No ask records a confidence figure.',
-    by_lane: lanes
-      .map((lane_id) => {
-        const mine = all.filter((r) => (r.lane_id ?? '(no lane_id)') === lane_id);
-        return { lane_id, asks: mine.length, thin: mine.filter((r) => r.outcome === 'thin').length, unclassified: mine.filter((r) => !r.outcome).length };
-      })
-      .sort((a, b) => b.asks - a.asks),
-    last_ask: {
-      at: newest?.asked_at ?? null,
-      trace_id: newest?.trace_id ?? null,
-      note: newest?.asked_at
-        ? sinceLast === 0
-          ? 'North Star was asked something today, so the routing into it is working.'
-          : `Nothing has been routed to North Star for ${sinceLast} ${sinceLast === 1 ? 'day' : 'days'}. Silence here is itself the signal.`
-        : 'No ask carries a timestamp.',
+    outcome_mix: slices(all, (r) => r.outcome, NS_OUTCOMES, NO_OUTCOME),
+    outcome_note:
+      'Answered = an answer carrying at least one citation · Thin = an answer with nothing cited behind it · Refused = the question was not North Star’s lane · Failed = no answer at all. North Star’s own definitions, written by the agent at the end of the run. Every row in this ledger carries one, so there is no unclassified bucket; a row that carries none is a run that did not finish writing itself.',
+    delivery_mix: slices(all, (r) => r.delivered, NS_DELIVERED, '(not recorded)'),
+    failed_targets: [...new Map(undelivered.map((r) => [`${r.delivery_target ?? '(no target named)'}|${r.delivered}`, r])).values()].map((r) => ({
+      target: r.delivery_target ?? '(no target named)',
+      outcome: r.delivered ?? '(not recorded)',
+      n: undelivered.filter((x) => (x.delivery_target ?? '(no target named)') === (r.delivery_target ?? '(no target named)') && x.delivered === r.delivered).length,
+    })),
+    delivery_note:
+      'Where the answer went, as recorded after it was sent. "No target" is a correct outcome — an ask arrived with nowhere to reply to — and is counted apart from a delivery that was attempted and refused. Any target that appears under a failure is named, because a quietly failing channel is invisible in the aggregate.',
+    by_system: cohorts(all, (r) => r.asked_by_system, NO_SYSTEM, (r) => r.outcome === 'Answered', (r) => r.delivered === 'Delivered'),
+    by_system_note:
+      'Each caller with its own answered and delivery rates rather than the aggregate’s. This is the card that catches a quietly failing Slack path: the total is dominated by the scheduled sweep, which will keep it looking healthy while a human asking in Slack gets nothing back.',
+    question_types: slices(all, (r) => r.question_type, NS_QUESTION_TYPES, '(no type set)'),
+    question_type_note:
+      'What people actually ask for, over the rows carrying a Question Type. A shift here is a shift in what North Star is being used for; a row with no type is counted on its own rather than filed under Other, which is a real category.',
+    citation: {
+      mean: withCoverage.length ? Math.round((withCoverage.reduce((n, r) => n + r.citation_coverage!, 0) / withCoverage.length) * 100) / 100 : null,
+      n: withCoverage.length,
+      of: all.length,
+      buckets: coverageBuckets.map(([key, test]) => ({ key, label: key, n: withCoverage.filter((r) => test(r.citation_coverage!)).length })),
+      note: withCoverage.length
+        ? `The share of tool calls that produced a traceable citation, as the agent computed it — not a model-reported confidence. Over the ${withCoverage.length} of ${all.length} asks that recorded one; the rest are excluded rather than counted as nought.`
+        : `No ask this month records a citation coverage figure, so there is nothing to average. It is the share of tool calls that produced a traceable citation, as the agent computes it.`,
     },
+    tools: [...tools.entries()]
+      .map(([tool, t]) => ({ tool, calls: t.calls, hits: t.hits, cited: t.cited, cited_rate: t.hits ? Math.round(((t.cited ?? 0) / t.hits) * 100) : null }))
+      .sort((a, b) => b.calls - a.calls),
+    tools_note:
+      tools.size === 0
+        ? 'No ask this month records a tool call in its evidence. A run that called nothing answered from what the agent already had.'
+        : 'Parsed from each ask’s own Evidence Used: calls made, rows returned, and how many of those ended up cited. A tool with hits and no cited uses is being called and ignored. A call whose line records no counts shows its calls and leaves the other two blank rather than nought.',
+    response_trend: weeks.map((w) => {
+      const mine = all.filter((r) => weekOf(r.asked_at) === w && r.response_seconds !== null);
+      const p = percentiles(mine.map((r) => r.response_seconds!), mine.length, () => '');
+      return { week: w, label: weekLabel(w), p50: p.p50, p95: p.p95, n: mine.length };
+    }),
+    priority: {
+      mix: slices(all, (r) => r.claimed_priority_tier, NS_PRIORITY_TIERS, '(none claimed)'),
+      by_lane: lanes
+        .map((lane) => {
+          const mine = all.filter((r) => (r.lane ?? NO_LANE) === lane);
+          const crit = [...criticalWeeks(lane)].sort();
+          return {
+            lane,
+            asks: mine.length,
+            critical_weeks: crit.length,
+            last_critical: crit[crit.length - 1] ?? null,
+            mix: slices(mine, (r) => r.claimed_priority_tier, NS_PRIORITY_TIERS, '(none claimed)'),
+          };
+        })
+        .sort((a, b) => b.critical_weeks - a.critical_weeks || b.asks - a.asks),
+      note:
+        'The tier the answer itself claimed, by lane and by week. A lane called Critical three weeks running is the pattern this card exists to make visible — the tier is what North Star said, not a judgement this dashboard makes, and an ask that claimed none is counted as claiming none.',
+    },
+    architect: {
+      n: all.filter((r) => r.architect_attention).length,
+      of: all.length,
+      lanes: architectLanes.sort((a, b) => b.n - a.n),
+      note: all.filter((r) => r.architect_attention).length
+        ? `Asks whose answer called for the Architect's attention, with the lane and the date of the most recent. It is a checkbox the answer sets, so an unticked box means the answer did not ask — never that somebody looked and decided it was not needed.`
+        : `No ask this month asked for the Architect's attention. It is a checkbox the answer sets; an unticked box means the answer did not ask for it.`,
+    },
+    by_lane: cohorts(all, (r) => r.lane, NO_LANE, (r) => r.outcome === 'Answered', (r) => r.delivered === 'Delivered'),
+    by_lane_note:
+      'Asks by the lane they were about. `Lane` is often empty on this ledger and that is a fact about the routing rather than an error, so those asks are counted under "(no lane)" rather than dropped.',
+    handoffs: handoffsOf(all, (await rtAsks()).filter((r) => inMonth(r.asked_at, month)), await rtJobs()),
   };
+
   metricsCache.set(key, { version: storeVersion, value });
   return value;
 }
 
-/* ---------------------------------------------------- research twin (RT) */
-
-/**
- * Collapse the attempt log into one row per card.
- *
- * The Research Queue holds one row per research *attempt*, and `card_id`
- * repeats — a single card can carry twenty rows. Queue depth, run counts and
- * days stuck are all per-card questions, so they are answered against this
- * collapse; the page prints both figures so the shape is never hidden.
- *
- * The newest attempt decides the card's current state. `run_count` takes the
- * highest seen, and `first_stuck_at` the earliest, because that field is
- * deliberately not re-stamped and the earliest stamp is the real watermark.
- */
-export async function rtCards(): Promise<RtCard[]> {
-  const byCard = new Map<string, RtAttempt[]>();
-  for (const a of await rtAttempts()) {
-    const key = a.card_id ?? a.id;
-    const held = byCard.get(key) ?? [];
-    held.push(a);
-    byCard.set(key, held);
-  }
-  const now = today();
-  return [...byCard.entries()]
-    .map(([card_id, attempts]) => {
-      const ordered = [...attempts].sort((a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''));
-      const latest = ordered[ordered.length - 1];
-      const stuckStamps = ordered.map((a) => a.first_stuck_at).filter((v): v is string => Boolean(v)).sort();
-      const firstStuck = stuckStamps[0] ?? null;
-      const runs = ordered.map((a) => a.run_count ?? 0);
-      return {
-        card_id,
-        lane_id: latest.lane_id,
-        hypothesis: ordered.find((a) => a.hypothesis)?.hypothesis ?? null,
-        status: latest.status,
-        status_label: latest.status ?? 'untriaged',
-        confidence_level: latest.confidence_level,
-        gap_classification: ordered.reverse().find((a) => a.gap_classification)?.gap_classification ?? null,
-        missing_elements: latest.missing_elements,
-        target_source_types: latest.target_source_types,
-        research_summary: latest.research_summary,
-        run_count: runs.length ? Math.max(...runs) : 0,
-        requires_human: attempts.some((a) => a.requires_human),
-        first_stuck_at: firstStuck,
-        days_stuck: firstStuck ? Math.max(0, dayDiff(firstStuck.slice(0, 10), now)) : null,
-        source_system: latest.source_system,
-        created_at: ordered[0]?.created_at ?? null,
-        last_attempt_at: latest.created_at,
-        attempts: attempts.length,
-        source: latest.source,
-        airtable: latest.airtable,
-      };
-    })
-    .sort((a, b) => (b.last_attempt_at ?? '').localeCompare(a.last_attempt_at ?? ''));
-}
+/* -------------------------------------------------------- research twin */
 
 export async function rtMetrics(month?: string | null): Promise<RtMetrics> {
   const key = `rt:${month ?? '*'}`;
   const hit = metricsCache.get(key);
   if (hit && hit.version === storeVersion) return hit.value as RtMetrics;
-  const allAttempts = await rtAttempts();
-  const allCards = await rtCards();
-  /**
-   * Scoped to the month the page is showing, the same as every other record
-   * page. A card is in the month its `created_at` falls in, and its attempts
-   * go with it — the two figures on the strip are "cards" and "attempt rows"
-   * and they have to be counting the same set.
-   */
-  const cards = month ? allCards.filter((c) => c.created_at?.slice(0, 7) === month) : allCards;
-  // An attempt with no card_id belongs to no card, so it cannot be in the
-  // month's set — it is left out rather than matched against a null.
-  const keep = new Set(cards.map((c) => c.card_id));
-  const attempts = month ? allAttempts.filter((a) => a.card_id !== null && keep.has(a.card_id)) : allAttempts;
-  const needsHuman = cards.filter((c) => c.requires_human);
-  const untriaged = cards.filter((c) => !c.status);
-  const stuck = cards.filter((c) => c.days_stuck !== null);
+
+  const all = (await rtAsks()).filter((r) => inMonth(r.asked_at, month));
   const weeks = lastWeeks(8);
 
-  const statuses = [...new Set(cards.map((c) => c.status_label))].sort();
-  const gaps = [...new Set(cards.map((c) => c.gap_classification).filter((v): v is string => Boolean(v)))].sort();
-  const levels = [...new Set(cards.map((c) => c.confidence_level).filter((v): v is string => Boolean(v)))].sort();
-  const stuckBuckets: [string, (d: number) => boolean][] = [
-    ['0–2 days', (d) => d <= 2],
-    ['3–7 days', (d) => d > 2 && d <= 7],
-    ['8–14 days', (d) => d > 7 && d <= 14],
-    ['over 14 days', (d) => d > 14],
+  const external = all.filter((r) => r.used_web_search);
+  const answered = all.filter((r) => r.outcome === 'Answered');
+  const needsHuman = all.filter((r) => r.outcome === 'Needs human');
+  const timed = all.filter((r) => r.response_seconds !== null);
+  const withCoverage = all.filter((r) => r.citation_coverage !== null);
+  const withSources = all.filter((r) => r.sources_count !== null);
+  const noSources = withSources.filter((r) => r.sources_count === 0);
+  const degraded = all.filter((r) => r.bharag_reachable === 'No (degraded)');
+
+  const sourceBuckets: [string, (n: number) => boolean][] = [
+    ['none', (n) => n === 0],
+    ['1–2', (n) => n >= 1 && n <= 2],
+    ['3–5', (n) => n >= 3 && n <= 5],
+    ['6 or more', (n) => n >= 6],
   ];
-  const oldest = [...stuck].sort((a, b) => (b.days_stuck ?? 0) - (a.days_stuck ?? 0))[0] ?? null;
-  const runBuckets = ['0', '1', '2', '3 (capped)', 'over 3'];
-  const runBucket = (n: number) => (n >= 4 ? 'over 3' : n === 3 ? '3 (capped)' : String(n));
-  const overCap = cards.filter((c) => c.run_count > 3).length;
+  const coverageBuckets: [string, (c: number) => boolean][] = [
+    ['nothing cited', (c) => c <= 0],
+    ['partly cited', (c) => c > 0 && c < 1],
+    ['fully cited', (c) => c >= 1],
+  ];
+
+  const byOutcome: { confidence: string; outcome: string; n: number }[] = [];
+  for (const c of [...CONFIDENCE_STATED, NOT_STATED])
+    for (const o of [...RT_OUTCOMES, NO_OUTCOME]) {
+      const n = all.filter((r) => (r.confidence_stated ?? NOT_STATED) === c && (r.outcome ?? NO_OUTCOME) === o).length;
+      if (n) byOutcome.push({ confidence: c, outcome: o, n });
+    }
+
+  const highNoSources = all.filter((r) => r.confidence_stated === 'High' && r.sources_count === 0).length;
 
   const value: RtMetrics = {
     kind: 'rt',
     computed_at: nowIso(),
-    scope: { rows: attempts.length, cards: cards.length },
-    requires_human: {
-      n: needsHuman.length,
-      note: needsHuman.length
-        ? `${needsHuman.length} ${needsHuman.length === 1 ? 'card has' : 'cards have'} requires_human ticked — the hard stop the queue sets once a card has had three attempts. These need a person; nothing else in the queue will move them.`
-        : 'No card has reached the hard stop.',
-    },
-    by_status: statuses.map((st) => ({ status: st, label: st === 'untriaged' ? 'Untriaged' : st.charAt(0).toUpperCase() + st.slice(1), n: cards.filter((c) => c.status_label === st).length })).sort((a, b) => b.n - a.n),
-    status_note: `Queue depth by the status on each card’s newest attempt. ${untriaged.length ? `A blank status is a real state — a card migrated in and not yet triaged — and is shown as “untriaged”, not as an error.` : ''}`.trim(),
-    days_stuck: stuckBuckets.map(([bucket, test]) => ({ bucket, n: stuck.filter((c) => test(c.days_stuck!)).length })),
-    days_stuck_note: stuck.length
-      ? `${stuck.length} of ${cards.length} cards have ever been stuck. Counted from first_stuck_at — when the card FIRST went stuck, which the queue deliberately does not re-stamp on later attempts, so this is the true age of the problem rather than the age of the last retry.`
-      : 'No card carries a first_stuck_at, so nothing has been recorded as stuck.',
-    oldest_stuck: {
-      card_id: oldest?.card_id ?? null,
-      days: oldest?.days_stuck ?? null,
-      note: oldest ? `Longest-standing stuck card, ${oldest.days_stuck} days since it first went stuck.` : 'Nothing is stuck.',
-    },
-    run_count_mix: runBuckets.map((runs) => ({ runs, n: cards.filter((c) => runBucket(c.run_count) === runs).length })).filter((r) => r.n > 0),
-    run_count_note: `Attempts per card, taking the highest run_count on any of its rows. The queue caps at three and sets requires_human there.${overCap ? ` ${overCap} ${overCap === 1 ? 'card is' : 'cards are'} above the cap, which the cap alone does not explain.` : ''}`,
-    gap_mix: gaps.map((gap) => ({ gap: gap.replace(/_/g, ' '), n: cards.filter((c) => c.gap_classification === gap).length })).sort((a, b) => b.n - a.n),
-    confidence_mix: levels.map((level) => ({ level, n: cards.filter((c) => c.confidence_level === level).length })),
-    created_per_week: series(
-      weeks.map((w) => ({ label: weekLabel(w), value: cards.filter((c) => c.created_at && weekStart(c.created_at.slice(0, 10)) === w).length })),
-      'Cards by the week they first entered the queue, last eight weeks.',
+    scope: { rows: all.length, month: month ?? null },
+    external_rate: share(external.length, all.length, (n, of) =>
+      of
+        ? `${n} of ${of} asks went outside BHA. Research Twin's job is the outside world: Bays and North Star can both query BHARAG directly, so a low number here means it is being used as a lookup either of them could have done themselves. Read from the run's own checkbox, never from the answer text.`
+        : 'No ask is held for this month, so there is nothing that could have gone outside.',
     ),
-    untriaged: {
-      n: untriaged.length,
-      note: untriaged.length
-        ? `${untriaged.length} ${untriaged.length === 1 ? 'card carries' : 'cards carry'} no status. Blank is a real state here: these were migrated in and have not been triaged.`
-        : 'Every card carries a status.',
+    answered_rate: share(answered.length, all.length, (n, of) =>
+      of ? `${n} of ${of} asks came back Answered. Read beside "needs a human" below it: correctly escalating is a better outcome than a confident wrong answer.` : 'No ask is held for this month.',
+    ),
+    needs_human_rate: share(needsHuman.length, all.length, (n, of) =>
+      of
+        ? `${n} of ${of} asks were handed to a person. **This is not coloured, because it is not bad news on its own** — an escalation is Research Twin declining to guess, which is the behaviour that was asked of it. It is worth reading against the answered rate beside it.`
+        : 'No ask is held for this month.',
+    ),
+    asks: all.length,
+    response: percentiles(timed.map((r) => r.response_seconds!), all.length, (n, of) =>
+      n
+        ? `Seconds from request to answer, over the ${n} of ${of} asks that recorded a duration. p50 and p95, never a mean.`
+        : of
+          ? `None of this month's ${of} asks recorded a response time, so there is no figure — not a figure of nought.`
+          : 'No ask is held for this month.',
+    ),
+    last_ask: lastAskOf(all, 'Research Twin'),
+    asks_per_week: series(
+      weeks.map((w) => ({ label: weekLabel(w), value: all.filter((r) => weekOf(r.asked_at) === w).length })),
+      'Asks by the week they were asked, over the last eight weeks. The ledger opened on 17 Sep 2026, so weeks before it were not quiet — they were not recorded.',
+    ),
+    outcome_per_week: weeks.map((w) => {
+      const mine = all.filter((r) => weekOf(r.asked_at) === w);
+      return {
+        week: w,
+        label: weekLabel(w),
+        total: mine.length,
+        counts: Object.fromEntries([...RT_OUTCOMES, NO_OUTCOME].map((o) => [o, mine.filter((r) => (r.outcome ?? NO_OUTCOME) === o).length])),
+      };
+    }),
+    outcome_mix: slices(all, (r) => r.outcome, RT_OUTCOMES, NO_OUTCOME),
+    outcome_note:
+      'Research Twin’s own five outcomes, with **Needs human as a slice of its own** rather than folded into a failure. Answered = an answer with evidence behind it · Thin = an answer citing nothing · Needs human = escalated rather than guessed · Refused = not its lane · Failed = no answer at all.',
+    external_per_week: weeks.map((w) => {
+      const mine = all.filter((r) => weekOf(r.asked_at) === w);
+      return { week: w, label: weekLabel(w), used: mine.filter((r) => r.used_web_search).length, total: mine.length };
+    }),
+    external_note:
+      'The share of each week’s asks that went outside BHA — the single most important trend on this page, because an internal-only Research Twin is a BHARAG lookup with extra steps. A week with no asks has no rate and is drawn as no bar, not as nought.',
+    bharag: {
+      mix: slices(all, (r) => r.bharag_reachable, RT_BHARAG, '(not recorded)'),
+      degraded: degraded.length,
+      of: all.length,
+      note: `Whether the evidence store answered on each run, recorded per run and never inferred from a thin answer. **A degraded evidence store is not the same as a lane having no evidence**, which is why it is its own value rather than a missing source count. ${
+        degraded.length ? `${degraded.length} of ${all.length} runs found it degraded, and any at all is worth acting on.` : 'Nothing this month found it degraded.'
+      } "Not used" is a correct outcome: the ask did not need it.`,
     },
+    sources: {
+      buckets: sourceBuckets.map(([key, test]) => ({ key, label: key, n: withSources.filter((r) => test(r.sources_count!)).length })),
+      none: noSources.length,
+      of: withSources.length,
+      mean: withSources.length ? Math.round((withSources.reduce((n, r) => n + r.sources_count!, 0) / withSources.length) * 10) / 10 : null,
+      note: withSources.length
+        ? `How many sources backed each answer, over the ${withSources.length} of ${all.length} asks that recorded a count. ${noSources.length} cited nothing at all. An ask with no recorded count is excluded rather than counted as nought — the two are different facts.`
+        : `No ask this month records a source count, so there is nothing to distribute. It is how many sources backed the answer, as the run counted them.`,
+    },
+    citation: {
+      mean: withCoverage.length ? Math.round((withCoverage.reduce((n, r) => n + r.citation_coverage!, 0) / withCoverage.length) * 100) / 100 : null,
+      n: withCoverage.length,
+      of: all.length,
+      buckets: coverageBuckets.map(([key, test]) => ({ key, label: key, n: withCoverage.filter((r) => test(r.citation_coverage!)).length })),
+      note: withCoverage.length
+        ? `The share of tool calls that produced a traceable citation, as the agent computed it — not a model-reported confidence. The same definition North Star's card uses. Over the ${withCoverage.length} of ${all.length} asks that recorded one.`
+        : 'No ask this month records a citation coverage figure. It is the share of tool calls that produced a traceable citation, as the agent computes it — not a model-reported confidence.',
+    },
+    confidence: {
+      mix: slices(all, (r) => r.confidence_stated, CONFIDENCE_STATED, NOT_STATED),
+      by_outcome: byOutcome,
+      high_no_sources: highNoSources,
+      note: highNoSources
+        ? `The confidence the answer stated, cut against what it actually came back with. **${highNoSources} ${highNoSources === 1 ? 'ask is' : 'asks are'} High confidence with no sources at all**, which is the combination worth catching: the agent is sure and cannot show why. "Not stated" is a real value in this select and is counted as itself.`
+        : 'The confidence the answer stated, cut against its outcome. High confidence with zero sources is the combination worth catching — the agent sure of something it cannot show — and nothing this month is in it. "Not stated" is a real value in this select and is counted as itself.',
+    },
+    ask_types: slices(all, (r) => r.ask_type, RT_ASK_TYPES, '(no type set)'),
+    ask_type_note:
+      'What kind of work each request was. The base carries an **External web search** type the original spec for this page did not list, so it is here: a vocabulary this code invented would file real rows under a name Airtable never writes.',
+    by_system: cohorts(all, (r) => r.asked_by_system, NO_SYSTEM, (r) => r.outcome === 'Answered', (r) => r.delivered === 'Delivered' || r.delivered === 'Self-delivered', (r) => r.used_web_search),
+    by_system_note:
+      'Each caller with its own answered rate, external-search rate and delivery rate. The aggregate mixes the weekly clock with people asking in Slack, and a failure in either is invisible inside it. Self-delivered counts as delivered here, because it is.',
+    delivery_mix: slices(all, (r) => r.delivered, RT_DELIVERED, '(not recorded)'),
+    delivery_note:
+      '**Self-delivered is a correct outcome, not a failure**: the weekly Watched Clients report posts its own file during the run, so there is nothing left for the tail to send. "No target" means the ask arrived with nowhere to reply to, which is also not a failure. Only "Not delivered" is one.',
+    response_trend: weeks.map((w) => {
+      const mine = all.filter((r) => weekOf(r.asked_at) === w && r.response_seconds !== null);
+      const p = percentiles(mine.map((r) => r.response_seconds!), mine.length, () => '');
+      return { week: w, label: weekLabel(w), p50: p.p50, p95: p.p95, n: mine.length };
+    }),
+    handoffs: handoffsOf((await nsAsks()).filter((r) => inMonth(r.asked_at, month)), all, await rtJobs()),
   };
+
+  metricsCache.set(key, { version: storeVersion, value });
+  return value;
+}
+
+/* --------------------------------------------------------- research jobs */
+
+/**
+ * The research queue, as jobs.
+ *
+ * **One row per job**, carrying its own status, attempts and outcome — which is
+ * the semantic change from the queue this replaces. That one held a row per
+ * *attempt*, with a second table for outcomes, so "attempts" and "cards" were
+ * different counts of different things and every figure had to collapse on
+ * `card_id` first. Nothing here does, and nothing here should: `Attempts` is a
+ * number on the job.
+ */
+export async function rtJobMetrics(month?: string | null): Promise<RtJobMetrics> {
+  const key = `rt_jobs:${month ?? '*'}`;
+  const hit = metricsCache.get(key);
+  if (hit && hit.version === storeVersion) return hit.value as RtJobMetrics;
+
+  const everything = await rtJobs();
+  const all = everything.filter((j) => inMonth(j.opened_at, month));
+  const weeks = lastWeeks(8);
+
+  const capped = all.filter((j) => j.capped);
+  const pending = all.filter((j) => j.status === 'Pending');
+  const inProgress = all.filter((j) => j.status === 'In Progress');
+  const open = all.filter((j) => j.open);
+  const resolved = all.filter((j) => j.status === JOB_RESOLVED);
+  /**
+   * Resolved *this month* is dated by `Resolved At`, not by `Opened At`, so it
+   * counts jobs finished in the month rather than jobs opened in it. Everything
+   * else on this page is scoped by when the job was opened, which is what the
+   * month picker selects, and the two are deliberately different questions.
+   */
+  const resolvedThisMonth = everything.filter((j) => j.resolved_at && inMonth(j.resolved_at, month));
+  const timed = all.filter((j) => j.days_to_resolve !== null);
+  const oldest = [...open].sort((a, b) => (b.days_open ?? 0) - (a.days_open ?? 0))[0] ?? null;
+  const terminal = all.filter((j) => j.status === JOB_RESOLVED || j.capped);
+
+  const attemptKey = (n: number | null) => (n === null ? '(not recorded)' : n >= JOB_ATTEMPT_CAP ? `${JOB_ATTEMPT_CAP} (the cap)` : String(n));
+  const attemptVocab = ['0', '1', '2', `${JOB_ATTEMPT_CAP} (the cap)`, '(not recorded)'];
+
+  /** Gap types are set where research hit a wall, so they are counted there and the note says so. */
+  const stuck = all.filter((j) => j.capped || j.confidence === 'Low');
+
+  const value: RtJobMetrics = {
+    kind: 'rt_jobs',
+    computed_at: nowIso(),
+    scope: { rows: all.length, month: month ?? null },
+    capped: share(capped.length, all.length, (n, of) =>
+      of
+        ? `${n} of ${of} jobs reached three passes without a usable answer and are waiting on a person. **Any number above nought needs attention**: nothing else in the engine will move these. It is a real outcome the queue records, not a failure it is hiding.`
+        : 'No job is held for this month, so nothing can be waiting on a person.',
+    ),
+    open: open.length,
+    in_progress: inProgress.length,
+    pending: pending.length,
+    resolved_this_month: resolvedThisMonth.length,
+    time_to_resolve: percentiles(timed.map((j) => j.days_to_resolve!), resolved.length, (n, of) =>
+      n
+        ? `Whole days from Opened At to Resolved At, over the ${n} of ${of} resolved jobs that carry both stamps. p50 with p95 beside it, never a mean. Open jobs are excluded — they have not finished, so they have no duration.`
+        : of
+          ? `${of} ${of === 1 ? 'job was' : 'jobs were'} resolved but none carries both stamps, so there is no figure. Open jobs are excluded either way.`
+          : 'No job opened this month has been resolved yet.',
+    ),
+    oldest_open: {
+      job_id: oldest?.job_id ?? null,
+      days: oldest?.days_open ?? null,
+      note: oldest
+        ? `The oldest job still Pending or In Progress, counted from Opened At. Resolved and capped jobs are not open and are excluded.`
+        : all.length
+          ? 'No job opened this month is still open.'
+          : 'No job is held for this month.',
+    },
+    status_mix: slices(all, (j) => j.status, JOB_STATUSES, '(no status set)'),
+    status_note:
+      'Where the queue actually stands. Pending and In Progress are open work; Resolved and Capped are the two terminal states. A job with no status at all is counted as itself rather than assumed to be pending — nothing here guesses at a blank.',
+    attempts_mix: slices(all, (j) => attemptKey(j.attempts), attemptVocab, '(not recorded)'),
+    attempts_note:
+      'Passes made per job, against the cap of three. **Three attempts without a usable answer caps the job and hands it to a person. That is a real outcome, not a failure to hide.** A job with no recorded count is shown as not recorded rather than as nought passes.',
+    gap_mix: slices(stuck, (j) => j.gap_type, JOB_GAP_TYPES, '(no gap type set)'),
+    gap_note: stuck.length
+      ? `Why research kept hitting a wall, over the ${stuck.length} of ${all.length} jobs that are capped or came back Low confidence. Jobs that resolved cleanly carry no gap type and are excluded rather than counted under a gap of their own.`
+      : `No job this month is capped or came back Low confidence, so there is no wall to classify. This counts Gap Type over exactly those jobs.`,
+    resolve_trend: weeks.map((w) => {
+      const mine = everything.filter((j) => j.resolved_at && weekOf(j.resolved_at) === w && j.days_to_resolve !== null);
+      const p = percentiles(mine.map((j) => j.days_to_resolve!), mine.length, () => '');
+      return { week: w, label: weekLabel(w), p50: p.p50, p95: p.p95, n: mine.length };
+    }),
+    opened_by: slices(all, (j) => j.opened_by, JOB_OPENED_BY, '(not recorded)'),
+    opened_by_note:
+      'Which system generates the research load. The extractor opens jobs off commercial cards, Research Twin opens its own follow-ups, and a person opens one by hand — three quite different kinds of work in one queue.',
+    resolution_rate: share(resolved.length, terminal.length, (n, of) =>
+      of
+        ? `${n} of ${of} jobs that reached a terminal state were resolved; the rest were capped. **Open jobs are excluded**, because a job still being worked is not yet either one and counting it as unresolved would make a busy week look like a failing one.`
+        : all.length
+          ? `None of this month's ${all.length} jobs has reached a terminal state yet, so there is no rate — not a rate of nought.`
+          : 'No job is held for this month.',
+    ),
+  };
+
   metricsCache.set(key, { version: storeVersion, value });
   return value;
 }

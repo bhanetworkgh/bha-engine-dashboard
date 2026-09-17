@@ -38,11 +38,12 @@ import type {
   ClientQuestion,
   CodexEntry,
   Loop,
-  NsRecord,
+  NsAsk,
   Opportunity,
   RecordStatMetric,
   RecordStats,
-  RtAttempt,
+  RtAsk,
+  RtJob,
   StatKind,
 } from '../../src/data/types';
 
@@ -80,6 +81,20 @@ function span(from: string, to: string): string[] {
 
 function mean(values: number[]): number | null {
   return values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length) : null;
+}
+
+/**
+ * A percentile by nearest rank, never an interpolation.
+ *
+ * On a ledger holding four rows an interpolated p95 is a number nobody
+ * measured; nearest rank always returns a real observation. Rounded to the
+ * whole millisecond, because every duration here is reported in units far
+ * coarser than that.
+ */
+function p(values: number[], pct: number): number | null {
+  if (!values.length) return null;
+  const s = [...values].sort((a, b) => a - b);
+  return Math.round(s[Math.min(s.length - 1, Math.ceil((pct / 100) * s.length) - 1)]);
 }
 
 function median(values: number[]): number | null {
@@ -807,80 +822,208 @@ function clientsSpec(): KindSpec<ClientQuestion> {
 }
 
 /**
- * North Star.
+ * North Star, month against month.
  *
- * `outcome` is North Star's own single-select and is authoritative; a row
- * without one is **unclassified** and nothing is inferred from the answer text.
- * So every rate here is over the rows carrying an outcome and no others, and
- * the note says how many were left out.
+ * Every rate is over the asks that carry the field it reads, and says so.
+ * **The durations here are p50, never a mean** — the rule the twins' pages run
+ * on, for the same reason: a mean latency hides the slow tail, and the tail is
+ * what people feel. `average()` exists in this file for the kinds that were
+ * using it before that rule was written; nothing below calls it.
+ *
+ * This ledger opened on 17 Sep 2026 and starts empty on purpose, so September
+ * holds a handful of rows and October is the first clean month. Nothing here
+ * smooths that: a month of four asks reports four asks.
  */
-function northStarSpec(): KindSpec<NsRecord> {
+function northStarSpec(): KindSpec<NsAsk> {
   return {
     kind: 'northstar',
     createdOf: (r) => r.asked_at,
     metrics: [
       {
+        key: 'delivery_rate',
+        label: 'Delivery rate',
+        field: 'Delivered',
+        unit: 'percent',
+        better: 'up',
+        word: 'delivery rate',
+        figure: (c) =>
+          rate(
+            c.filter((r) => r.delivered === 'Delivered').length,
+            c.length,
+            c.length
+              ? `Answers that actually reached someone, over all ${plural(c.length, 'ask')} this month. Delivery is recorded after the answer is sent, so this is what arrived rather than what was attempted. Below 100% is a real failure — North Star once ran green for six days while Slack rejected every post.`
+              : 'Nothing was asked this month, so there is nothing whose delivery could be recorded.',
+          ),
+      },
+      {
+        key: 'answered_rate',
+        label: 'Answered rate',
+        field: 'Outcome',
+        unit: 'percent',
+        better: 'up',
+        word: 'answered rate',
+        figure: (c) =>
+          rate(
+            c.filter((r) => r.outcome === 'Answered').length,
+            c.length,
+            c.length
+              ? `Asks that came back Answered, over all ${plural(c.length, 'ask')} this month. Thin, Refused and Failed are the other three outcomes and are counted apart; nothing is inferred from the answer text.`
+              : 'Nothing was asked this month.',
+          ),
+      },
+      {
         key: 'asks',
         label: 'Asks',
-        field: 'asked_at',
+        field: 'Asked At',
         unit: 'count',
         better: null,
         word: 'asks',
         figure: (c) => count(c.length, 'Every ask North Star logged this month. Silence here is itself the signal, which is why nought is a real answer rather than a missing one.'),
       },
       {
-        key: 'thin_rate',
-        label: 'Thin rate',
-        field: 'outcome = thin',
-        unit: 'percent',
+        key: 'response_p50',
+        label: 'Response time (p50)',
+        field: 'Response Seconds',
+        unit: 'duration',
         better: 'down',
-        word: 'thin rate',
+        word: 'median response time',
         figure: (c) => {
-          const classified = c.filter((r) => r.outcome);
-          const unclassified = c.length - classified.length;
-          return rate(
-            classified.filter((r) => r.outcome === 'thin').length,
-            classified.length,
-            classified.length
-              ? `Over the ${plural(classified.length, 'ask')} carrying an outcome.${unclassified ? ` ${plural(unclassified, 'ask')} ${unclassified === 1 ? 'is' : 'are'} unclassified and left out — nothing is inferred from the answer text.` : ''}`
+          const timed = c.filter((r) => r.response_seconds !== null);
+          return {
+            value: p(timed.map((r) => r.response_seconds! * 1000), 50),
+            n: timed.length,
+            note: timed.length
+              ? `The median, over the ${timed.length} of ${plural(c.length, 'ask')} that recorded a duration. **Never a mean**: a mean hides the slow tail, and the slow tail is what people experience. The p95 is on the Asks tab beside it.`
               : c.length
-                ? `None of this month's ${plural(c.length, 'ask')} carries an outcome, so there is no rate — not a rate of nought.`
+                ? `None of this month's ${plural(c.length, 'ask')} recorded a response time, so there is no figure — not a figure of nought.`
                 : 'Nothing was asked this month.',
-          );
-        },
-      },
-      {
-        key: 'research_rate',
-        label: 'Research required',
-        field: 'research_required',
-        unit: 'percent',
-        better: null,
-        figure: (c) => {
-          const known = c.filter((r) => r.research_required !== null);
-          return rate(
-            known.filter((r) => r.research_required).length,
-            known.length,
-            known.length
-              ? `Over the ${plural(known.length, 'ask')} that record whether research was required. Neither direction is news on its own, so it is not coloured.`
-              : 'No ask this month records whether research was required.',
-          );
+          };
         },
       },
       {
         key: 'citation_rate',
         label: 'Citation coverage',
-        field: 'searches',
+        field: 'Citation Coverage',
         unit: 'percent',
         better: 'up',
         word: 'citation coverage',
         figure: (c) => {
-          const answered = c.filter((r) => r.has_answer);
+          const known = c.filter((r) => r.citation_coverage !== null);
+          return {
+            value: known.length ? Math.round((known.reduce((n, r) => n + r.citation_coverage!, 0) / known.length) * 1000) / 10 : null,
+            n: known.length,
+            note: known.length
+              ? `The share of tool calls that produced a traceable citation, averaged over the ${known.length} of ${plural(c.length, 'ask')} that recorded one — as the agent computed it, not a model-reported confidence. Asks recording none are excluded rather than counted as nought.`
+              : 'No ask this month records a citation coverage figure.',
+          };
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * Research Twin's asks, month against month.
+ *
+ * The headline is whether it went outside BHA at all. Bays and North Star can
+ * both query BHARAG directly, so an ask Research Twin answered without leaving
+ * the building is one either of them could have answered themselves.
+ */
+function researchTwinSpec(): KindSpec<RtAsk> {
+  return {
+    kind: 'researchtwin',
+    createdOf: (r) => r.asked_at,
+    metrics: [
+      {
+        key: 'external_rate',
+        label: 'Went outside BHA',
+        field: 'Used Web Search',
+        unit: 'percent',
+        better: null,
+        word: 'external-search rate',
+        figure: (c) =>
+          rate(
+            c.filter((r) => r.used_web_search).length,
+            c.length,
+            c.length
+              ? `Asks that needed a search outside BHA, over all ${plural(c.length, 'ask')} this month. Read from the run's own checkbox, never from the answer text. Neither direction is news on its own — a month of internal questions is a real month — so it is not coloured; the trend is what matters and it is on the statistics tab.`
+              : 'Nothing was asked this month.',
+          ),
+      },
+      {
+        key: 'answered_rate',
+        label: 'Answered rate',
+        field: 'Outcome',
+        unit: 'percent',
+        better: 'up',
+        word: 'answered rate',
+        figure: (c) =>
+          rate(
+            c.filter((r) => r.outcome === 'Answered').length,
+            c.length,
+            c.length ? `Asks that came back Answered, over all ${plural(c.length, 'ask')} this month. Read beside the escalation rate: correctly handing something to a person is a better outcome than a confident wrong answer.` : 'Nothing was asked this month.',
+          ),
+      },
+      {
+        key: 'needs_human_rate',
+        label: 'Needing a human',
+        field: 'Outcome = Needs human',
+        unit: 'percent',
+        better: null,
+        figure: (c) =>
+          rate(
+            c.filter((r) => r.outcome === 'Needs human').length,
+            c.length,
+            c.length
+              ? `Asks Research Twin escalated rather than guessed at, over all ${plural(c.length, 'ask')} this month. **Deliberately not coloured**: escalating correctly is the behaviour that was asked of it, so neither direction is bad news on its own.`
+              : 'Nothing was asked this month.',
+          ),
+      },
+      {
+        key: 'asks',
+        label: 'Asks',
+        field: 'Asked At',
+        unit: 'count',
+        better: null,
+        word: 'asks',
+        figure: (c) => count(c.length, 'Every ask Research Twin logged this month, whatever it came back with.'),
+      },
+      {
+        key: 'response_p50',
+        label: 'Response time (p50)',
+        field: 'Response Seconds',
+        unit: 'duration',
+        better: 'down',
+        word: 'median response time',
+        figure: (c) => {
+          const timed = c.filter((r) => r.response_seconds !== null);
+          return {
+            value: p(timed.map((r) => r.response_seconds! * 1000), 50),
+            n: timed.length,
+            note: timed.length
+              ? `The median, over the ${timed.length} of ${plural(c.length, 'ask')} that recorded a duration. Never a mean; the p95 is on the Asks tab beside it.`
+              : c.length
+                ? `None of this month's ${plural(c.length, 'ask')} recorded a response time, so there is no figure — not a figure of nought.`
+                : 'Nothing was asked this month.',
+          };
+        },
+      },
+      {
+        key: 'sources',
+        label: 'Answers citing nothing',
+        field: 'Sources Count',
+        unit: 'percent',
+        better: 'down',
+        figure: (c) => {
+          const known = c.filter((r) => r.sources_count !== null);
           return rate(
-            answered.filter((r) => r.searches.some((s) => s.used > 0)).length,
-            answered.length,
-            answered.length
-              ? `Answers citing at least one used source, over the ${plural(answered.length, 'answered ask')} this month. An answer that looks real and cites nothing is what the thin rate beside it counts.`
-              : 'Nothing was answered this month.',
+            known.filter((r) => r.sources_count === 0).length,
+            known.length,
+            known.length
+              ? `Answers backed by no source at all, over the ${known.length} of ${plural(c.length, 'ask')} that recorded a source count. Asks recording no count are excluded — "not recorded" and "nought sources" are different facts.`
+              : c.length
+                ? `None of this month's ${plural(c.length, 'ask')} records a source count.`
+                : 'Nothing was asked this month.',
           );
         },
       },
@@ -889,58 +1032,99 @@ function northStarSpec(): KindSpec<NsRecord> {
 }
 
 /**
- * Research Twin.
+ * Research jobs, month against month, dated by when the job was opened.
  *
- * It is an **attempt log** — one row per attempt, `card_id` repeats — so the
- * count of rows and the count of cards are different figures and both are
- * printed, the same rule the page itself follows.
+ * **One row per job**, carrying its own status and attempts — not the attempt
+ * log this replaced, where a card retried four times was four rows. Nothing
+ * here collapses anything, because there is nothing to collapse.
  */
-function researchTwinSpec(): KindSpec<RtAttempt> {
+function researchJobsSpec(): KindSpec<RtJob> {
   return {
-    kind: 'researchtwin',
-    createdOf: (a) => a.created_at,
+    kind: 'researchjobs',
+    createdOf: (j) => j.opened_at,
     metrics: [
       {
-        key: 'attempts',
-        label: 'Attempts',
-        field: 'created_at',
+        key: 'capped',
+        label: 'Capped, needing a person',
+        field: 'Status',
         unit: 'count',
-        better: null,
-        word: 'attempts',
-        figure: (c) => count(c.length, 'One row per attempt. A card that was retried four times is four rows here and one card in the figure beside it.'),
+        better: 'down',
+        word: 'capped jobs',
+        figure: (c) =>
+          count(
+            c.filter((j) => j.capped).length,
+            c.length
+              ? `Jobs opened this month that reached three passes without a usable answer. Any above nought needs attention: nothing else in the engine will move them. It is a real outcome the queue records, not a failure it is hiding.`
+              : 'No job was opened this month.',
+          ),
       },
       {
-        key: 'cards',
-        label: 'Cards worked',
-        field: 'card_id, distinct',
+        key: 'opened',
+        label: 'Jobs opened',
+        field: 'Opened At',
         unit: 'count',
         better: null,
-        word: 'cards worked',
+        word: 'jobs opened',
+        figure: (c) => count(c.length, 'Every research job opened this month, by the extractor, by Bays, by Research Twin itself or by a person.'),
+      },
+      {
+        key: 'resolution_rate',
+        label: 'Resolution rate',
+        field: 'Status',
+        unit: 'percent',
+        better: 'up',
+        word: 'resolution rate',
         figure: (c) => {
-          const cards = new Set(c.map((a) => a.card_id).filter(Boolean));
-          return count(
-            cards.size,
-            c.length
-              ? `${plural(c.length, 'attempt')} across ${plural(cards.size, 'card')} — ${c.length === cards.size ? 'one attempt each' : 'so some cards were retried'}.`
-              : 'No attempt was logged this month.',
+          const terminal = c.filter((j) => j.status === 'Resolved' || j.capped);
+          return rate(
+            terminal.filter((j) => j.status === 'Resolved').length,
+            terminal.length,
+            terminal.length
+              ? `Resolved over resolved-plus-capped, among the ${plural(terminal.length, 'job')} opened this month that have reached a terminal state. **Open jobs are excluded**: one still being worked is neither, and counting it as unresolved would make a busy month look like a failing one.`
+              : c.length
+                ? `None of the ${plural(c.length, 'job')} opened this month has reached a terminal state yet, so there is no rate — not a rate of nought.`
+                : 'No job was opened this month.',
           );
         },
       },
       {
-        key: 'human_rate',
-        label: 'Needing a human',
-        field: 'requires_human',
+        key: 'resolve_p50',
+        label: 'Time to resolve (p50)',
+        field: 'Resolved At − Opened At',
+        unit: 'duration',
+        better: 'down',
+        word: 'median time to resolve',
+        figure: (c) => {
+          const timed = c.filter((j) => j.days_to_resolve !== null);
+          return {
+            value: p(timed.map((j) => j.days_to_resolve! * 86_400_000), 50),
+            n: timed.length,
+            note: timed.length
+              ? `The median, over the ${timed.length} of ${plural(c.length, 'job')} opened this month that have been resolved and carry both stamps. Never a mean; the p95 is on the Jobs tab beside it. Jobs still open have no duration and are excluded.`
+              : c.length
+                ? `No job opened this month has both an Opened At and a Resolved At yet, so there is nothing to time.`
+                : 'No job was opened this month.',
+          };
+        },
+      },
+      {
+        key: 'attempts_at_cap',
+        label: 'Jobs at the cap',
+        field: 'Attempts',
         unit: 'percent',
         better: 'down',
-        word: 'attempts needing a human',
-        figure: (c) =>
-          rate(
-            c.filter((a) => a.requires_human).length,
-            c.length,
-            c.length
-              ? 'Read from the circuit breakers that already exist upstream — Research Stuck, Run Count at 3, or a quarantined lane — never recomputed here.'
-              : 'No attempt was logged this month, so there is no rate — not a rate of nought.',
-          ),
+        figure: (c) => {
+          const known = c.filter((j) => j.attempts !== null);
+          return rate(
+            known.filter((j) => j.attempts! >= 3).length,
+            known.length,
+            known.length
+              ? `Jobs that have used all three passes, over the ${known.length} of ${plural(c.length, 'job')} recording an attempt count. Three passes without a usable answer caps the job and hands it to a person; a job with no recorded count is excluded rather than read as nought passes.`
+              : c.length
+                ? `None of the ${plural(c.length, 'job')} opened this month records an attempt count.`
+                : 'No job was opened this month.',
+          );
+        },
       },
     ],
   };
@@ -948,7 +1132,7 @@ function researchTwinSpec(): KindSpec<RtAttempt> {
 
 /* -------------------------------------------------------------- dispatch */
 
-export const STAT_KINDS: StatKind[] = ['codex', 'loops', 'patterns', 'commercial', 'clients', 'northstar', 'researchtwin'];
+export const STAT_KINDS: StatKind[] = ['codex', 'loops', 'patterns', 'commercial', 'clients', 'northstar', 'researchtwin', 'researchjobs'];
 
 export function isStatKind(v: string): v is StatKind {
   return (STAT_KINDS as string[]).includes(v);
@@ -972,9 +1156,11 @@ export async function stats(kind: StatKind, month?: string | null): Promise<Reco
     case 'clients':
       return statsOf(clientsSpec(), await store.clientQuestions(), month);
     case 'northstar':
-      return statsOf(northStarSpec(), await store.nsRecords(), month);
+      return statsOf(northStarSpec(), await store.nsAsks(), month);
     case 'researchtwin':
-      return statsOf(researchTwinSpec(), await store.rtAttempts(), month);
+      return statsOf(researchTwinSpec(), await store.rtAsks(), month);
+    case 'researchjobs':
+      return statsOf(researchJobsSpec(), await store.rtJobs(), month);
     default:
       throw new store.StoreError(`${kind as string} has no statistics.`, 404);
   }

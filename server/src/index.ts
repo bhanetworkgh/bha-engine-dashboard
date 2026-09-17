@@ -312,6 +312,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
         return send(res, 200, await engine.getNorthStarTelemetry());
       case '/api/rt-telemetry':
         return send(res, 200, await engine.getResearchTwinTelemetry());
+      /**
+       * How often the two twins consult each other, across both ledgers. Its
+       * own route rather than a field on either page, because it is one figure
+       * about the pair — a copy on each would be two drawings of one count, and
+       * two drawings drift.
+       */
+      case '/api/twin-handoffs':
+        return send(res, 200, await engine.getTwinHandoffs());
       case '/api/clients':
         return send(res, 200, await engine.getClients());
       case '/api/ask-bays':
