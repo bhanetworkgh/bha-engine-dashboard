@@ -37,7 +37,7 @@ export function recordUrl(base: string, table: string, id: string): string {
 
 /** Airtable's record id, as a shape. A row the engine wrote before Airtable had one carries none. */
 const REC_ID = /^rec[A-Za-z0-9]{14}$/;
-import type { BuildPattern, BuildPatternDetail, ClientLane, ClientQuestion, ClientRequest, CodexEntry, CodexEntryDetail, Layer0Hold, Loop, LoopLaneTag, LoopStatus, NsOutcome, NsRecord, NsSearch, Opportunity, ReadinessState, RecordKind, RtAttempt, Source } from '../../src/data/types';
+import type { AskTool, BuildPattern, BuildPatternDetail, ClientLane, ClientQuestion, ClientRequest, CodexEntry, CodexEntryDetail, Layer0Hold, Loop, LoopLaneTag, LoopStatus, NsAsk, Opportunity, ReadinessState, RecordKind, RtAsk, RtJob, Source } from '../../src/data/types';
 
 /** Jason Status as the submission tables define it, lower-cased. 'unset' is a row he has not touched. */
 export type CodexApproval = 'approved' | 'pending' | 'input added' | 'unset';
@@ -119,7 +119,9 @@ export function baseFor(kind: RecordKind): string {
     case 'ns':
       return NORTH_STAR.base;
     case 'rt':
-      return RESEARCH_QUEUE.base;
+      return RESEARCH_TWIN.base;
+    case 'rt_jobs':
+      return RESEARCH_JOBS.base;
     case 'clients':
     case 'client_questions':
       return CLIENTS_INDEX.base;
@@ -712,128 +714,251 @@ export function incompleteFields(o: Opportunity): string[] {
   return COMMERCIAL_REQUIRED.filter((r) => o[r.key] === null || o[r.key] === undefined).map((r) => r.label);
 }
 
-/* ------------------------------------------------------- north star (NS) */
+/* ------------------------------------------------------------ the twins */
 
 /**
- * North Star's ask log. One row per question routed through the agent.
+ * North Star's and Research Twin's own ask ledgers, and Research Twin's
+ * research queue (2026-09-17).
  *
- * The table was cleaned on 2026-09-10: the 449 rows from the retired Priority
- * Engine are gone and every remaining row is North Star, so nothing here
- * filters on `workflow`.
+ * Both twins finish every run with the same three steps — write the ledger row,
+ * mirror it to this dashboard, ingest it into BHARAG — so nothing finishes
+ * without being recorded. The five tables marked `[LEGACY]` in Airtable have no
+ * writers left and appear nowhere in this file any more:
  *
- * `outcome` is a single-select the agent writes — answered / thin / failed —
- * and it is the authority. A row without one is unclassified and is counted
- * as unclassified; nothing is inferred from the answer text, because a
- * classification this dashboard invented would be indistinguishable on screen
- * from one the engine stands behind.
+ *   appkCTjhH8PtYRFI7 / tbl9OGZTyvBKrbeFm   NS Records
+ *   appud969Dw7H4tMwv / tblUl8YHhQReDgq8G   Research Queue
+ *   app4QnMJ2woiKlLc0 / tblWdsbejQ9IYYHm1   Research Queue Resolved Events
+ *   appSoakKvs7MLkRnX / tblvEivGSXUs5SXaG   Priority ledger
+ *   appxkIgnLL1zBsXqD / tblbuOUGPLt4nIi0G   Lane_status
+ *
+ * Every field name, id and select vocabulary below was read from the live bases
+ * on 17 Sep 2026. Two of them differ from the brief that asked for this work,
+ * and the live base wins: `Delivered` is **Delivered / Not delivered / No
+ * target** (plus **Self-delivered** on Research Twin) rather than ending in
+ * "Failed", and Research Twin's `Ask Type` carries an **External web search**
+ * option the brief did not list. A vocabulary this code invented would quietly
+ * file real rows under a name Airtable never writes.
  */
-export const NORTH_STAR = { base: 'appkCTjhH8PtYRFI7', table: 'tbl9OGZTyvBKrbeFm', label: 'NS Records' };
 
-export const NS_OUTCOMES: NsOutcome[] = ['answered', 'thin', 'failed'];
+export const NORTH_STAR = { base: 'appRvx4u9V9BYp646', table: 'tblSb9potJlYg2lZK', label: 'North Star asks' };
+export const RESEARCH_TWIN = { base: 'appv39nQzmfC9VVkG', table: 'tblDmsqI9f0xfAO5m', label: 'Research Twin asks' };
+export const RESEARCH_JOBS = { base: 'appv39nQzmfC9VVkG', table: 'tblOsznfDELJdbyDR', label: 'Research jobs' };
 
-function nsOutcome(raw: string | null): NsOutcome | null {
-  const v = (raw ?? '').trim().toLowerCase();
-  return (NS_OUTCOMES as string[]).includes(v) ? (v as NsOutcome) : null;
-}
+/** Read from the live bases, in the bases' own order. */
+export const NS_OUTCOMES = ['Answered', 'Thin', 'Refused (not its lane)', 'Failed'];
+export const NS_QUESTION_TYPES = ['Priority', 'Lane health', "What's moving", 'Capacity / load', 'Other'];
+export const NS_SYSTEMS = ['Bays', 'Genie', 'Research Twin', 'Slack', 'Scheduled', 'Unknown'];
+export const NS_DELIVERED = ['Delivered', 'Not delivered', 'No target'];
+export const NS_PRIORITY_TIERS = ['Critical', 'High', 'Medium', 'Low', 'Minimal', 'Not stated'];
+export const CONFIDENCE_STATED = ['High', 'Medium', 'Low', 'Not stated'];
 
-/** The searches blob, as the agent writes it. A malformed blob is no searches, never a guess. */
-function nsEvidence(raw: unknown): { searches: NsSearch[]; confidence: number | null; confidence_basis: string | null; session_id: string | null } {
+export const RT_OUTCOMES = ['Answered', 'Thin', 'Needs human', 'Refused (not its lane)', 'Failed'];
+export const RT_ASK_TYPES = ['Card research', 'Question', 'External web search', 'Watched client', 'Other'];
+export const RT_SYSTEMS = ['Bays', 'Genie', 'North Star', 'Commercial Extractor', 'Weekly Clock', 'Slack', 'Scheduled', 'Unknown'];
+export const RT_DELIVERED = ['Delivered', 'Not delivered', 'No target', 'Self-delivered'];
+export const RT_BHARAG = ['Yes', 'No (degraded)', 'Not used'];
+
+export const JOB_STATUSES = ['Pending', 'In Progress', 'Resolved', 'Capped (needs human)'];
+export const JOB_OPENED_BY = ['Commercial Extractor', 'Bays', 'Research Twin', 'North Star', 'Genie', 'Person'];
+export const JOB_GAP_TYPES = ['Missing sources', 'Conflicting sources', 'Unclear question', 'No path forward', 'Other'];
+export const JOB_CONFIDENCE = ['High', 'Medium', 'Low'];
+
+/** A job at three passes without a usable answer is handed to a person. */
+export const JOB_ATTEMPT_CAP = 3;
+export const JOB_CAPPED = 'Capped (needs human)';
+export const JOB_RESOLVED = 'Resolved';
+
+/**
+ * `Evidence Used`, parsed back into tool calls.
+ *
+ * The two twins write it differently, and both shapes are read here rather than
+ * one being assumed — the lines come from the agents' own tail nodes, which
+ * were read from n8n on 17 Sep 2026 rather than guessed at:
+ *
+ *   North Star     `- bharag_search -> 12 row(s), cited 3 time(s) | args: {…}`
+ *   Research Twin  `- bharag_search | args: {…}` then `  -> <observation>`
+ *
+ * **Research Twin's line carries no counts, so `hits` and `cited` are null on
+ * its rows and never nought.** Nought would read as "called and came back with
+ * nothing", which is a different and much worse fact than "not recorded", and
+ * it is exactly the kind of invented figure this dashboard exists to remove.
+ *
+ * Anything else — an empty blob, `No tools were called on this run.`, a shape
+ * neither twin writes — is no tool calls rather than a guess.
+ */
+const TOOL_LINE = /^[-•*]\s*(.+)$/;
+/** Research Twin's second line for a call: `  -> <observation>`. Not a call of its own. */
+const CONTINUATION = /^->/;
+const NS_COUNTS = /->\s*(\d+)\s*row\(?s?\)?\s*,\s*cited\s*(\d+)\s*time/i;
+
+export function parseEvidence(raw: unknown): AskTool[] {
   const text = str(raw);
-  const empty = { searches: [] as NsSearch[], confidence: null, confidence_basis: null, session_id: null };
-  if (!text) return empty;
-  try {
-    const parsed = JSON.parse(text) as Record<string, unknown>;
-    const rawSearches = Array.isArray(parsed.searches) ? parsed.searches : [];
-    const searches: NsSearch[] = rawSearches
-      .filter((s): s is Record<string, unknown> => Boolean(s) && typeof s === 'object')
-      .map((s) => ({
-        tool: str(s.tool) ?? '(unnamed tool)',
-        hits: num(s.hits) ?? 0,
-        // `used` is how many of those hits ended up behind an [S#] citation.
-        used: num(s.used) ?? 0,
-        retrieved_at: str(s.retrieved_at),
-      }));
-    return {
-      searches,
-      confidence: num(parsed.confidence),
-      confidence_basis: str(parsed.confidence_basis),
-      session_id: str(parsed.session_id),
-    };
-  } catch {
-    return empty;
+  if (!text || /^no tools were called/i.test(text)) return [];
+  const out: AskTool[] = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    // Checked before the bullet match, not after: `->` starts with a hyphen, so
+    // an observation line matches the bullet pattern and was being stored as a
+    // tool called "> Found 6 results…". Caught by running the two twins' real
+    // line formats through this, which is the only reason it is not in
+    // production — assuming a format is how the last four of these got written.
+    if (CONTINUATION.test(line)) continue;
+    const m = TOOL_LINE.exec(line);
+    if (!m) continue;
+    let rest = m[1];
+
+    // Arguments first. North Star puts `| args:` *after* the counts and
+    // Research Twin puts it in place of them, so cutting the line at the counts
+    // before reading the args threw North Star's away every time.
+    const argsAt = rest.indexOf('| args:');
+    const args = argsAt >= 0 ? rest.slice(argsAt + 7).trim() || null : null;
+    if (argsAt >= 0) rest = rest.slice(0, argsAt);
+
+    const counts = NS_COUNTS.exec(rest);
+    let hits: number | null = null;
+    let cited: number | null = null;
+    if (counts) {
+      hits = Number(counts[1]);
+      cited = Number(counts[2]);
+      rest = rest.slice(0, counts.index);
+    }
+
+    const name = rest.replace(/->.*$/, '').replace(/\|$/, '').trim();
+    if (!name) continue;
+    out.push({ tool: name, hits, cited, args });
   }
+  return out;
 }
 
-export function mapNsRecord(rec: AtRecord): NsRecord {
+/** Whole days between two stamps, or null where either is missing. */
+function daysBetween(from: string | null, to: string | null): number | null {
+  if (!from || !to) return null;
+  const a = Date.parse(from);
+  const b = Date.parse(to);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return Math.max(0, Math.round((b - a) / 86_400_000));
+}
+
+export function mapNsAsk(rec: AtRecord): NsAsk {
   const f = rec.fields;
-  const at = iso(f.timestamp);
-  const ev = nsEvidence(f.expected_result);
-  const answer = str(f.actual_result);
-  const required = (str(f.research_required) ?? '').trim().toLowerCase();
+  const at = iso(f['Asked At']);
+  const answer = str(f.Answer);
   return {
     id: rec.id,
-    trace_id: str(f.trace_id),
-    lane_id: str(f.lane_id),
-    workflow: str(f.workflow),
-    request: str(f.request),
-    answer,
-    has_answer: Boolean(answer),
-    outcome: nsOutcome(str(f.outcome)),
-    research_required: required === 'yes' ? true : required === 'no' ? false : null,
-    reason: str(f.reason),
-    session_id: ev.session_id,
-    searches: ev.searches,
-    confidence: ev.confidence,
-    confidence_basis: ev.confidence_basis,
+    ask_id: str(f['Ask ID']),
     asked_at: at,
     week: at ? isoWeek(at) : null,
+    asked_by_system: str(f['Asked By System']),
+    asked_by_person: str(f['Asked By Person']),
+    question: str(f.Question),
+    question_type: str(f['Question Type']),
+    lane: str(f.Lane),
+    answer,
+    answer_summary: str(f['Answer Summary']),
+    has_answer: Boolean(answer),
+    outcome: str(f.Outcome),
+    claimed_priority_score: num(f['Claimed Priority Score']),
+    claimed_priority_tier: str(f['Claimed Priority Tier']),
+    claimed_lane_health: str(f['Claimed Lane Health']),
+    claimed_strategic_importance: str(f['Claimed Strategic Importance']),
+    architect_attention: bool(f['Architect Attention']),
+    tools: parseEvidence(f['Evidence Used']),
+    evidence_used: str(f['Evidence Used']),
+    citation_coverage: num(f['Citation Coverage']),
+    confidence_stated: str(f['Confidence Stated']),
+    response_seconds: num(f['Response Seconds']),
+    delivered: str(f.Delivered),
+    delivery_target: str(f['Delivery Target']),
+    slack_link: str(f['Slack Link']),
+    error: str(f.Error),
+    run_id: str(f['Run ID']),
+    linked_twin_ask: str(f['Linked Twin Ask']),
     source: airtableSource(NORTH_STAR.base, NORTH_STAR.table, rec.id),
     airtable: { base: NORTH_STAR.base, table: NORTH_STAR.table, record_id: rec.id, url: recordUrl(NORTH_STAR.base, NORTH_STAR.table, rec.id) },
   };
 }
 
-/* ---------------------------------------------------- research twin (RT) */
-
-/**
- * The Research Queue.
- *
- * Note the shape: this is an attempt log, not one row per card. `card_id`
- * repeats — one card can carry twenty rows, one per research attempt — so
- * anything counted per card has to collapse by `card_id` first, and the page
- * says both figures rather than passing one off as the other.
- *
- * The table `research_twin_research_jobs` in the same base holds a single test
- * row and is never written to. It is deliberately not read here.
- */
-export const RESEARCH_QUEUE = { base: 'appud969Dw7H4tMwv', table: 'tblUl8YHhQReDgq8G', label: 'Research Queue' };
-
-export function mapRtAttempt(rec: AtRecord): RtAttempt {
+export function mapRtAsk(rec: AtRecord): RtAsk {
   const f = rec.fields;
-  const status = str(f.status);
+  const at = iso(f['Asked At']);
+  const answer = str(f.Answer);
   return {
     id: rec.id,
-    card_id: str(f.card_id),
-    lane_id: str(f.lane_id),
-    hypothesis: str(f.hypothesis_to_validate),
-    context_snippet: str(f.context_snippet),
-    /** Blank status is a real state — an untriaged card — not an error. */
+    ask_id: str(f['Ask ID']),
+    asked_at: at,
+    week: at ? isoWeek(at) : null,
+    asked_by_system: str(f['Asked By System']),
+    asked_by_person: str(f['Asked By Person']),
+    ask_type: str(f['Ask Type']),
+    question: str(f.Question),
+    card_id: str(f['Card ID']),
+    lane: str(f.Lane),
+    answer,
+    answer_summary: str(f['Answer Summary']),
+    has_answer: Boolean(answer),
+    outcome: str(f.Outcome),
+    confidence_stated: str(f['Confidence Stated']),
+    used_web_search: bool(f['Used Web Search']),
+    bharag_reachable: str(f['BHARAG Reachable']),
+    sources_count: num(f['Sources Count']),
+    sources: str(f.Sources),
+    tools: parseEvidence(f['Evidence Used']),
+    evidence_used: str(f['Evidence Used']),
+    citation_coverage: num(f['Citation Coverage']),
+    response_seconds: num(f['Response Seconds']),
+    delivered: str(f.Delivered),
+    delivery_target: str(f['Delivery Target']),
+    slack_link: str(f['Slack Link']),
+    error: str(f.Error),
+    run_id: str(f['Run ID']),
+    linked_twin_ask: str(f['Linked Twin Ask']),
+    source: airtableSource(RESEARCH_TWIN.base, RESEARCH_TWIN.table, rec.id),
+    airtable: { base: RESEARCH_TWIN.base, table: RESEARCH_TWIN.table, record_id: rec.id, url: recordUrl(RESEARCH_TWIN.base, RESEARCH_TWIN.table, rec.id) },
+  };
+}
+
+export function mapRtJob(rec: AtRecord, now = new Date().toISOString()): RtJob {
+  const f = rec.fields;
+  const opened = iso(f['Opened At']) ?? iso(rec.createdTime);
+  const resolved = iso(f['Resolved At']);
+  const status = str(f.Status);
+  const open = status !== JOB_RESOLVED && status !== JOB_CAPPED;
+  return {
+    id: rec.id,
+    job_id: str(f['Job ID']),
+    question: str(f.Question),
+    context: str(f.Context),
+    card_id: str(f['Card ID']),
+    lane: str(f.Lane),
     status,
-    confidence_level: str(f.confidence_level),
-    research_sufficiency: str(f.research_sufficiency),
-    gap_classification: str(f.gap_classification),
-    missing_elements: str(f.missing_elements),
-    target_source_types: str(f.target_source_types),
-    research_summary: str(f.research_summary),
-    links_or_sources: str(f.links_or_sources),
-    learnings_gotchas: str(f.learnings_gotchas),
-    answer_history: str(f.answer_history),
-    run_count: num(f.run_count),
-    requires_human: bool(f.requires_human),
-    first_stuck_at: iso(f.first_stuck_at),
-    source_system: str(f.source),
-    created_at: iso(f.created_time),
-    source: airtableSource(RESEARCH_QUEUE.base, RESEARCH_QUEUE.table, rec.id),
-    airtable: { base: RESEARCH_QUEUE.base, table: RESEARCH_QUEUE.table, record_id: rec.id, url: recordUrl(RESEARCH_QUEUE.base, RESEARCH_QUEUE.table, rec.id) },
+    opened_by: str(f['Opened By']),
+    opened_at: opened,
+    resolved_at: resolved,
+    attempts: num(f.Attempts),
+    finding: str(f.Finding),
+    answer_history: str(f['Answer History']),
+    sources: str(f.Sources),
+    verdict: str(f.Verdict),
+    confidence: str(f.Confidence),
+    gap_type: str(f['Gap Type']),
+    missing_elements: str(f['Missing Elements']),
+    target_source_types: str(f['Target Source Types']),
+    // Newline separated, newest last, as the field's own description says.
+    linked_asks: (str(f['Linked Asks']) ?? '').split('\n').map((v) => v.trim()).filter(Boolean),
+    reported_in_digest: bool(f['Reported In Digest']),
+    /**
+     * Three different questions, kept apart. `age_days` is always how long ago
+     * the job was opened; `days_open` is how long it has been *waiting*, which
+     * a resolved or capped job is no longer doing; `days_to_resolve` exists
+     * only once it has been resolved.
+     */
+    age_days: daysBetween(opened, now),
+    days_open: open ? daysBetween(opened, now) : null,
+    days_to_resolve: daysBetween(opened, resolved),
+    open,
+    capped: status === JOB_CAPPED,
+    source: airtableSource(RESEARCH_JOBS.base, RESEARCH_JOBS.table, rec.id),
+    airtable: { base: RESEARCH_JOBS.base, table: RESEARCH_JOBS.table, record_id: rec.id, url: recordUrl(RESEARCH_JOBS.base, RESEARCH_JOBS.table, rec.id) },
   };
 }
 

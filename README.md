@@ -14,7 +14,7 @@ This is that window. Internal team tooling, not a customer product.
 **Live on Render as one Node web service.** Sign-in is verified by the
 server, which sets a session cookie. Ask Bays goes through the server to the
 live agent workflow. **Open loops, Codex entries, build patterns, commercial
-cards, North Star's ask log, the research queue and the watched clients are
+cards, both twins' ask ledgers, the research queue and the watched clients are
 read out of this server's own Postgres tables**, which the engine writes to
 through `/api/engine/:kind`. A change made on a page is written to the same
 row. There is no Airtable read path left: the sync that used to rebuild a read
@@ -147,15 +147,29 @@ duplicating, so n8n retrying is safe. The response says which happened.
 | `layer0` | — | `Submission ID`, else `record_id` |
 | `patterns` | — | `pattern_id`, else `record_id` |
 | `commercial` | — | `card_id`, else `record_id` |
-| `ns` | — | `trace_id`, else `record_id` |
-| `rt` | `record_id` | `record_id` only |
+| `ns-asks` | — | `Ask ID`, else `record_id` |
+| `rt-asks` | — | `Ask ID`, else `record_id` |
+| `rt-jobs` | — | `Job ID`, else `record_id` |
 | `client_lanes` | — | `Lane ID`, else `record_id` |
 | `client_questions` | `table_id`, `record_id` | `record_id` only |
+| `client_requests` | `record_id` | `record_id` only |
 | `digests` | — | `session_id`, else `record_id` |
 
-`rt` and `client_questions` require `record_id`: the Research Queue is an attempt
-log where `card_id` repeats across attempts, and a client question carries no id
-of its own. Matching either on a natural id would fold separate rows into one.
+`client_questions` and `client_requests` require `record_id`: neither carries an
+id of its own, so Airtable's record id is the only thing that identifies a row.
+
+**`ns` and `rt` are gone as kinds** (17 Sep 2026). Both twins moved onto their
+own Airtable ledgers that day, and the endpoints are `ns-asks`, `rt-asks` and
+`rt-jobs`; the old names now 404 with the list of kinds that do exist. The kinds
+they replaced wrote to the legacy NS Records and Research Queue tables, which
+have no writers left. **The research queue is one row per job now, not one per
+attempt** — `Job ID` is unique, where `card_id` on the old table repeated, so
+`rt-jobs` keys on a natural id where `rt` could not.
+
+A job is *updated in place* as it is worked and the agent only mirrors on an ask
+write, so `rt-jobs` exists for when n8n is pointed at it and **Resync from
+Airtable on the Research Twin page is what actually keeps the queue current
+today** — that button sweeps the ask ledger and the jobs table together.
 
 For `loops` and `codex`, **`builder_id` is which builder's table the row lives in,
 and that is what decides ownership** — not `Assignee Slack User ID`, which
@@ -644,8 +658,8 @@ is missing, and the note is what the page shows.
 |---|---|
 | Overview | Headline numbers, what broke and what moved in 24h |
 | Ask Bays | Chat interface onto the Bays agent |
-| North Star | Asks routed through NS — records, runs, gaps |
-| Research Twin | Research jobs — records, runs, gaps |
+| North Star | Every ask in its own ledger: delivery rate first, then outcome, response p50/p95, and a statistics tab covering who is asking, tool usage, citation coverage and claimed priority by lane |
+| Research Twin | Asks, research jobs and statistics. "Went outside BHA" leads the asks; capped jobs lead the queue |
 | vFarm | Placeholder — nothing on the rack writes here yet |
 | Engine health | The execution roll-up, one figure per system for this week, with a link through to Executions. Incidents are still a placeholder — nothing upstream records one |
 | Open loops | Loops by age and owner, close from the interface |

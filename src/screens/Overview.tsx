@@ -178,7 +178,8 @@ export default function Overview() {
   const s = data.series;
   const maxOwner = Math.max(1, ...s.loops_by_owner.map((o) => o.open + o.in_progress));
   const asks = s.asks_by_outcome;
-  const askTotal = asks.answered + asks.thin + asks.failed;
+  const askTotal = asks.answered + asks.thin + asks.failed + asks.refused + asks.needs_human;
+  const handoffs = s.twin_handoffs;
   const halloween = data.pins.find((p) => p.label === 'Days to Halloween')?.value ?? '—';
   const attention = data.tiles.filter((t) => t.health !== 'ok');
 
@@ -230,16 +231,43 @@ export default function Overview() {
                 <Bars values={s.entries_by_week.map((p) => p.value)} labels={s.entries_by_week.map((p) => p.label)} height={30} tone="accent" highlightLast={false} />
               </div>
             </div>
+            {/*
+              Both twins' ledgers, read from the rows rather than from a
+              fixture (2026-09-17). Nought asks is a real answer here — the
+              ledgers opened on 17 Sep with nothing carried in — so it prints
+              as nought and the ring simply has nothing in it.
+            */}
             <div className="flex items-center gap-3 py-3">
               <span className="tile tile-sm tile-indigo"><Icon.star /></span>
               <div className="min-w-0 flex-1 leading-tight">
-                <div className="text-[12px] text-dim">Asks answered</div>
+                <div className="text-[12px] text-dim">Asks answered, both twins</div>
                 <div className="tabular text-[20px] font-semibold">
                   {asks.answered}
                   <span className="text-[13px] font-normal text-faint"> of {askTotal}</span>
                 </div>
               </div>
               <Ring value={asks.answered} total={askTotal} size={44} tone="accent" label="answered" />
+            </div>
+            {/*
+              The one figure about the pair rather than about either twin.
+              Until 17 Sep they could not reach each other at all — every
+              handoff went through a person or through Bays — so this is the
+              only way to tell whether being able to changed the behaviour or
+              merely made it possible. The footnote it carries on the twins'
+              pages names the known gap: `Linked Twin Ask` is empty on early
+              rows, so this counts the fallbacks too and reads slightly high
+              rather than silently low.
+            */}
+            <div className="flex items-center gap-3 py-3" title={handoffs.note}>
+              <span className="tile tile-sm tile-purple"><Icon.chat /></span>
+              <div className="min-w-0 flex-1 leading-tight">
+                <div className="text-[12px] text-dim">Twin-to-twin handoffs</div>
+                <div className="tabular text-[20px] font-semibold">
+                  {handoffs.n}
+                  <span className="text-[13px] font-normal text-faint"> of {handoffs.of} asks</span>
+                </div>
+              </div>
+              <Ring value={handoffs.n} total={Math.max(handoffs.of, 1)} size={44} tone="accent" label="consulted" />
             </div>
             <div className="flex items-center gap-3 py-3">
               <span className="tile tile-sm tile-teal"><Icon.loop /></span>

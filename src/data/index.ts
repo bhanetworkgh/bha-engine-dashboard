@@ -35,6 +35,7 @@ import type {
   Loop,
   LoopEdit,
   LoopStatus,
+  Handoffs,
   NewLoop,
   NsData,
   OpenLoopsData,
@@ -125,10 +126,23 @@ export const getCodexEntries = (q: Query) => api<CodexData>(withLane('/api/codex
 export const getBuildPatterns = (q: Query) => api<BuildPatternsData>(withLane('/api/build-patterns', q));
 export const getCommercial = (q: Query) => api<CommercialData>(withLane('/api/commercial', q));
 
-/** North Star's ask log, Research Twin's queue, and the watched-client lanes. */
+/**
+ * The twins' own ask ledgers, Research Twin's research queue, and the
+ * watched-client lanes.
+ *
+ * Both twins have written to their own ledgers since 17 Sep 2026 — a row per
+ * ask, mirrored the moment the run ends. The five `[LEGACY]` tables the pages
+ * read until then have no writers left and are read by nothing here.
+ */
 export const getNsTelemetry = () => api<NsData>('/api/ns-telemetry');
 export const getRtTelemetry = () => api<RtData>('/api/rt-telemetry');
 export const getClients = () => api<ClientsData>('/api/clients');
+
+/**
+ * How often the two twins actually consult each other. One figure about the
+ * pair, so it has one route rather than a copy computed on each page.
+ */
+export const getTwinHandoffs = () => api<Handoffs>('/api/twin-handoffs');
 
 /**
  * Executions, read from the rows this database holds — one row per n8n
@@ -221,9 +235,12 @@ export function resyncCodex(): Promise<Resync> {
 }
 
 /**
- * The same pass for Build patterns, Commercial and Clients. One shared table
- * each for the first two; Clients reads the watched-clients index and then the
- * questions table each index row names in `Table ID`.
+ * The same pass for Build patterns, Commercial, Clients, Open loops and the two
+ * twins. One shared table each for the first two; Clients reads the
+ * watched-clients index and then the questions table each index row names in
+ * `Table ID`; **Research Twin reads two tables** — its ask ledger and its
+ * research queue, because a job is updated in place and the ask mirror never
+ * touches it.
  *
  * Airtable wins every disagreement, and a table that could not be read is never
  * read as an emptied one.

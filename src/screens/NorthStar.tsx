@@ -1,40 +1,45 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { getNsTelemetry, getRecordMetrics, resyncRecords, type NsMetrics, type NsOutcome, type NsRecord } from '../data';
+import { getNsTelemetry, getRecordMetrics, resyncRecords, type NsAsk, type NsMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
 import {
-  CountCell,
+  CohortTable,
   CountUp,
+  DistTile,
+  DurationTrend,
   EmptyPanel,
   EmptyState,
+  FigureCell,
   HBar,
   LoadFailed,
   Loading,
   MetricCard,
-  MetricCell,
   MonthPicker,
   monthsFrom,
+  OutcomeColumns,
   PageHeader,
-  Tabs,
   Pagination,
+  PercentCell,
+  PercentileCell,
   Pill,
   RecordId,
   RecordTable,
+  ResyncButton,
   RowAction,
   RowActions,
+  RowsLine,
   SearchBox,
   Segmented,
   SeriesBlock,
   SourceLink,
   StatCell,
   StatStrip,
-  TileFigure,
-  ResyncButton,
-  RowsLine,
-  relativeTime,
+  Tabs,
   thisMonth,
+  TileFigure,
   Toast,
+  relativeTime,
   usePaged,
   useResync,
   useToast,
@@ -42,54 +47,77 @@ import {
 import RecordStatistics from '../components/RecordStatistics';
 
 /**
- * North Star telemetry, read from its own ask log (NS Records).
+ * North Star, read from its own ask ledger (2026-09-17).
  *
- * The headline is the thin rate: answers that were produced, look real, and
- * cite nothing behind them. It is deliberately computed over the rows that
- * carry an `outcome` and no others — the field is the engine's own
- * classification, and a rate this dashboard derived from the answer text
- * would be indistinguishable on screen from one North Star stands behind.
- * Where nothing is classified the figure is absent and says why, rather than
- * reading 0% and looking like good news.
+ * It used to read `[LEGACY] NS Records`, which nothing has written to since the
+ * migration backfill — the amber line on this page was telling the truth, and
+ * the fix was to point it somewhere live rather than to make the line go away.
+ * Three of the figures that stood here (thin rate at 100%, classified at 42%,
+ * unclassified at 58%) were artefacts of a field added late to that table and
+ * are not carried across: every row in the new ledger carries an outcome, so
+ * there is no unclassified bucket to count.
+ *
+ * **The headline is now the delivery rate**, and it is the one figure on this
+ * page that is coloured. North Star once ran green for six consecutive days
+ * while Slack rejected every post, and nothing on any screen reported it:
+ * delivery is recorded after the answer is sent, so it is the only figure that
+ * says something reached a person rather than that a run finished.
  */
 
-type Filter = 'all' | NsOutcome | 'unclassified';
+type Filter = 'all' | 'Answered' | 'Thin' | 'Refused (not its lane)' | 'Failed' | 'not-delivered';
 
-function OutcomePill({ outcome }: { outcome: NsOutcome | null }) {
-  if (outcome === 'answered') return <Pill tone="ok">answered</Pill>;
-  if (outcome === 'thin') return <Pill tone="degraded">thin</Pill>;
-  if (outcome === 'failed') return <Pill tone="failing">failed</Pill>;
-  return <Pill>unclassified</Pill>;
+/** One accent, and amber and red only on a genuinely bad state. */
+const OUTCOME_ORDER = ['Answered', 'Thin', 'Refused (not its lane)', 'Failed', '(no outcome)'];
+const OUTCOME_COLOUR = (o: string) =>
+  o === 'Answered' ? 'var(--accent)' : o === 'Thin' ? 'var(--degraded)' : o === 'Failed' ? 'var(--failing)' : 'var(--dim)';
+
+function OutcomePill({ outcome }: { outcome: string | null }) {
+  if (!outcome) return <Pill>no outcome</Pill>;
+  if (outcome === 'Answered') return <Pill tone="ok">answered</Pill>;
+  if (outcome === 'Thin') return <Pill tone="degraded">thin</Pill>;
+  if (outcome === 'Failed') return <Pill tone="failing">failed</Pill>;
+  return <Pill>{outcome.toLowerCase()}</Pill>;
+}
+
+/**
+ * Delivery, as a pill. **"No target" is not a failure** — an ask arrived with
+ * nowhere to reply to — so only "Not delivered" reads red.
+ */
+function DeliveredPill({ delivered }: { delivered: string | null }) {
+  if (!delivered) return <span className="text-faint">—</span>;
+  if (delivered === 'Delivered') return <Pill tone="ok">delivered</Pill>;
+  if (delivered === 'Not delivered') return <Pill tone="failing">not delivered</Pill>;
+  return <Pill>{delivered.toLowerCase()}</Pill>;
 }
 
 function when(iso: string | null): string {
   return iso ? iso.slice(0, 16).replace('T', ' ') : '—';
 }
 
-function matches(r: NsRecord, q: string): boolean {
+function matches(r: NsAsk, q: string): boolean {
   if (!q) return true;
   const n = q.toLowerCase();
-  return [r.trace_id, r.lane_id, r.request, r.answer, r.reason, r.session_id, ...r.searches.map((s) => s.tool)].some((v) => v && v.toLowerCase().includes(n));
+  return [r.ask_id, r.lane, r.question, r.answer, r.answer_summary, r.asked_by_system, r.asked_by_person, r.question_type, r.run_id, ...r.tools.map((t) => t.tool)].some(
+    (v) => v && v.toLowerCase().includes(n),
+  );
 }
 
-/* ---------------------------------------------------------------- metrics */
+/* ---------------------------------------------------------------- the strip */
 
 /**
- * The strip, and only the strip (2026-09-16, Destiny).
+ * The five headline figures: one failure metric, one outcome metric, then
+ * context.
  *
- * Everything that was a card under it — the classified ring, the outcome mix,
- * asks per week, outcome over time, tool usage, citation coverage and by lane
- * — is telemetry, which is a month-against-month question rather than a
- * "what is in the log right now" one. All of it is on the statistics tab, in
- * the same tiles every other record page uses, so the working surface here is
- * the five figures, the filters and the asks.
+ * Delivery leads and is the only coloured cell. Everything else is neutral —
+ * more asks is not good news and fewer is not bad, and a column of colour on a
+ * page where almost everything succeeds is decoration.
  */
-function NsMetricsPanel({ metrics, loading, error }: { metrics: NsMetrics | null; loading: boolean; error: string | null }) {
+function NsStrip({ m, loading, error }: { m: NsMetrics | null; loading: boolean; error: string | null }) {
   if (error) return <div className="card mx-6 mb-4 px-5 py-4 text-[12.5px] text-failing md:mx-8">Figures unavailable: {error}</div>;
-  if (!metrics) {
+  if (!m) {
     return (
       <StatStrip cols={5} className="opacity-60">
-        {['Thin rate', 'Asks', 'Classified', 'Research required', 'Last ask'].map((l) => (
+        {['Delivery rate', 'Answered rate', 'Asks', 'Response time', 'Last ask'].map((l) => (
           <StatCell key={l}>
             <div className="kicker truncate">{l}</div>
             <div className="mt-1 text-[15px] text-faint">{loading ? 'Counting' : 'No figures'}</div>
@@ -98,214 +126,204 @@ function NsMetricsPanel({ metrics, loading, error }: { metrics: NsMetrics | null
       </StatStrip>
     );
   }
-  const m = metrics;
   const lastAge = relativeTime(m.last_ask.at);
   const silent = m.last_ask.at ? Date.now() - Date.parse(m.last_ask.at) > 2 * 86_400_000 : true;
-
   return (
     <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
       <StatStrip cols={5}>
-        {/*
-          The thin rate leads because it is the one number that says whether
-          North Star's answers can be trusted. Null renders as "not recorded"
-          with the reason, never as zero.
-        */}
-        {/*
-          Five hints of roughly one length (2026-09-16, Destiny). One line, five
-          lines, one line and four read as a ragged block under a row of figures
-          that are all the same size; `noteMinLines` at 3 holds the boxes level
-          and the sentences are written to fill them.
-        */}
-        <MetricCell label="Thin rate" metric={m.thin_rate} suffix="%" noteMinLines={3} />
-        <CountCell
+        {/* Below 100% is a real failure, and the only thing coloured on this strip. */}
+        <PercentCell label="Delivery rate" share={m.delivery_rate} bad={(s) => (s.pct ?? 100) < 100} />
+        <PercentCell label="Answered rate" share={m.answered_rate} />
+        <FigureCell
           label="Asks"
-          value={m.scope.rows}
-          hint={`Every row in the ask log for this month, whatever outcome it carries or does not.`}
-          hintMinLines={3}
+          value={m.asks}
+          note={`Every ask in the ledger for this month, whatever outcome it carries. The ledger opened on 17 Sep 2026 with nothing carried in, so a month before it holds nothing — which is not a quiet month, it is an unrecorded one.`}
         />
-        <CountCell
-          label="Classified"
-          value={m.classified}
-          tone={m.classified === 0 ? 'degraded' : 'default'}
-          hint={
-            m.unclassified
-              ? `${m.unclassified} of ${m.scope.rows} asks ${m.unclassified === 1 ? 'carries' : 'carry'} no outcome, so every rate on this page is computed over the rest.`
-              : `Every ask carries an outcome, so the rates on this page are computed over all ${m.scope.rows} of them.`
-          }
-          hintMinLines={3}
-        />
-        <MetricCell label="Research required" metric={m.research_required_rate} suffix="%" noteMinLines={3} />
+        <PercentileCell label="Response time" p={m.response} unit="s" />
         <StatCell>
           <div className="min-w-0">
             <div className="kicker truncate">Last ask</div>
             <div className={`mt-1 text-[15px] leading-tight ${silent ? 'text-degraded' : 'text-ink'}`}>{lastAge ?? 'never'}</div>
-            <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={{ minHeight: '45px' }}>
+            <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={{ minHeight: '5.5em' }}>
               {m.last_ask.note}
             </div>
           </div>
         </StatCell>
       </StatStrip>
-
     </div>
   );
 }
 
-/**
- * The two week charts, on the Asks tab, under the strip (2026-09-16, Destiny).
- *
- * They came back off the statistics tab because they are not a
- * month-against-month question: they are what the last eight weeks looked like,
- * which is something a reader wants beside the asks themselves. Everything else
- * that was a card here is on the statistics tab.
- */
-function NsWeeklyPanel({ metrics, loading }: { metrics: NsMetrics | null; loading: boolean }) {
-  if (!metrics) return null;
-  const m = metrics;
-  const stacked = m.outcome_per_week;
+/** Asks per week and outcome over time — what the last eight weeks looked like. */
+function NsWeekly({ m, loading }: { m: NsMetrics | null; loading: boolean }) {
+  if (!m) return null;
   return (
     <div className={`mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-2 ${loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}`}>
-      <MetricCard title="Asks per week" right="asked_at">
+      <MetricCard title="Asks per week" right="Asked At">
         <SeriesBlock title="" series={m.asks_per_week} tone="accent" total bare />
       </MetricCard>
       <MetricCard
         title="Outcome over time"
-        right="answered · thin · failed · unclassified"
-        note="The same eight weeks, split by outcome. A column that is all unclassified is a week North Star answered without recording what kind of answer it gave."
+        right="Outcome"
+        note="The same eight weeks, split by outcome. A week with no asks is drawn as no column rather than as a column of nought — before 17 Sep 2026 this ledger did not exist, so those weeks were not quiet, they were not recorded."
       >
-        {stacked.every((w) => w.answered + w.thin + w.failed + w.unclassified === 0) ? (
-          <EmptyPanel>No ask in the last eight weeks.</EmptyPanel>
-        ) : (
-          <div>
-            <div className="flex w-full items-end gap-[3px]" style={{ height: 72 }} role="img" aria-label="Outcome by week">
-              {stacked.map((w) => {
-                const total = w.answered + w.thin + w.failed + w.unclassified;
-                const max = Math.max(1, ...stacked.map((x) => x.answered + x.thin + x.failed + x.unclassified));
-                const h = (total / max) * 100;
-                const seg = (n: number) => (total ? (n / total) * 100 : 0);
-                return (
-                  <div key={w.week} className="flex min-w-0 flex-1 flex-col justify-end self-stretch" title={`${w.label}: ${w.answered} answered, ${w.thin} thin, ${w.failed} failed, ${w.unclassified} unclassified`}>
-                    <div className="flex w-full flex-col-reverse overflow-hidden rounded-[3px]" style={{ height: `${Math.max(h, total ? 6 : 2)}%` }}>
-                      <div style={{ height: `${seg(w.answered)}%`, background: 'var(--accent)', opacity: 0.85 }} />
-                      <div style={{ height: `${seg(w.thin)}%`, background: 'var(--degraded)', opacity: 0.9 }} />
-                      <div style={{ height: `${seg(w.failed)}%`, background: 'var(--failing)', opacity: 0.9 }} />
-                      <div style={{ height: `${seg(w.unclassified)}%`, background: 'var(--dim)', opacity: 0.28 }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="mt-1 flex justify-between text-[10.5px] text-faint">
-              <span>{stacked[0]?.label}</span>
-              <span>{stacked[stacked.length - 1]?.label}</span>
-            </div>
-          </div>
-        )}
+        <OutcomeColumns weeks={m.outcome_per_week} order={OUTCOME_ORDER} colour={OUTCOME_COLOUR} />
       </MetricCard>
     </div>
   );
 }
 
+/* ------------------------------------------------------------- statistics */
+
 /**
- * North Star's telemetry, as statistics tiles (2026-09-16, Destiny).
+ * The statistics grid this page brings with it, beside the computed
+ * month-against-month tiles.
  *
- * **Every tile leads with a figure**, in the same 30px display face and with
- * the same quiet line under it that the computed tiles use, and the bars it
- * summarises sit beneath. Half a grid reading as numbers and half as charts is
- * two kinds of card in one place; `TileFigure` is the shape `StatTile` draws,
- * so there is one.
- *
- * The headline on each is derived from what that card already shows, never from
- * anything else, so a reader can check it against the bars underneath it.
+ * Every card is the same shape: title, source field, one figure, the line
+ * saying what it is a share of, the breakdown, and a footnote naming what the
+ * number excludes. The headline on each is derived from what that card already
+ * shows, so a reader can check it against its own bars.
  */
 export function NsStatTiles({ m }: { m: NsMetrics | null }) {
   if (!m) return null;
   const rows = m.scope.rows;
-  const maxTool = Math.max(1, ...m.tool_usage.map((t) => t.hits));
-  const maxLane = Math.max(1, ...m.by_lane.map((l) => l.asks));
-  const maxOutcome = Math.max(1, ...m.outcome_mix.map((o) => o.n));
   const pct = (n: number) => `${Math.round(n)}%`;
-
-  const answered = m.outcome_mix.find((o) => o.outcome === 'answered')?.n ?? 0;
-  const hits = m.tool_usage.reduce((n, t) => n + t.hits, 0);
-  const cited = m.tool_usage.reduce((n, t) => n + t.used, 0);
-  const coverage = m.confidence_mix.reduce((n, c) => n + c.n, 0);
-  const nothingCited = m.confidence_mix.find((c) => c.bucket.startsWith('nothing'))?.n ?? 0;
-  const busiest = m.by_lane[0];
+  const answered = m.outcome_mix.find((o) => o.key === 'Answered')?.n ?? 0;
+  const deliveredN = m.delivery_mix.find((d) => d.key === 'Delivered')?.n ?? 0;
+  const topType = m.question_types[0];
+  const busiestLane = m.by_lane[0];
+  const worstSystem = [...m.by_system].sort((a, b) => a.delivered / Math.max(1, a.asks) - b.delivered / Math.max(1, b.asks))[0];
+  const toolCalls = m.tools.reduce((n, t) => n + t.calls, 0);
+  const toolHits = m.tools.reduce((n, t) => n + (t.hits ?? 0), 0);
+  const toolCited = m.tools.reduce((n, t) => n + (t.cited ?? 0), 0);
+  const coverage = m.citation;
+  const topTier = [...m.priority.mix].sort((a, b) => b.n - a.n)[0];
+  const criticalLanes = m.priority.by_lane.filter((l) => l.critical_weeks > 0);
 
   return (
     <>
-      <MetricCard title="Classified" right="outcome" note={m.unclassified_note} noteMinLines={4} align="top">
-        <TileFigure
-          value={rows ? (m.classified / rows) * 100 : null}
-          format={pct}
-          tone={m.classified ? undefined : 'degraded'}
-          missing="No ask is held, so there is nothing to classify."
-          sub={`${m.classified} of ${rows} asks carry an outcome`}
-          replayKey={`ns-classified|${rows}`}
-        >
-          <HBar label="classified" value={m.classified} max={Math.max(1, rows)} tone="accent" valueNode={<CountUp value={m.classified} />} right={<span className="text-faint">of {rows}</span>} />
-        </TileFigure>
-      </MetricCard>
-
-      <MetricCard
+      <DistTile
         title="Outcome mix"
-        right="outcome"
-        note="answered = an answer carrying at least one [S#] citation · thin = an answer with nothing cited behind it · failed = no answer text at all. North Star's own definitions."
-        noteMinLines={4}
-        align="top"
+        field="Outcome"
+        note={m.outcome_note}
+        slices={m.outcome_mix}
+        headline={rows ? (answered / rows) * 100 : null}
+        tone="accent"
+        missing="No ask is held for this month, so there is nothing to classify."
+        sub={`${answered} of ${rows} answered`}
+        toneOf={(s) => (s.key === 'Thin' ? 'degraded' : s.key === 'Failed' ? 'failing' : s.key === 'Answered' ? 'accent' : 'ink')}
+      />
+
+      <DistTile
+        title="Delivery mix"
+        field="Delivered"
+        note={m.delivery_note}
+        slices={m.delivery_mix}
+        headline={rows ? (deliveredN / rows) * 100 : null}
+        tone={rows && deliveredN < rows ? 'degraded' : 'accent'}
+        missing="No ask is held for this month, so nothing could be delivered."
+        sub={`${deliveredN} of ${rows} reached someone`}
+        toneOf={(s) => (s.key === 'Not delivered' ? 'failing' : s.key === 'Delivered' ? 'accent' : 'ink')}
       >
+        {m.failed_targets.length > 0 && (
+          <div className="mt-3 border-t border-line pt-2 text-[11.5px] text-faint">
+            <div className="mb-1 text-[10.5px]">where it was aimed</div>
+            {m.failed_targets.map((t) => (
+              <div key={`${t.target}|${t.outcome}`} className="flex items-baseline justify-between gap-2">
+                <span className="truncate text-dim" title={t.target}>
+                  {t.target}
+                </span>
+                <span className="tabular shrink-0">
+                  {t.n} · {t.outcome.toLowerCase()}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </DistTile>
+
+      {/*
+        The most useful card here, and the reason it exists: the aggregate is
+        dominated by the scheduled sweep, and it will keep this page looking
+        healthy while a human asking in Slack gets nothing back.
+      */}
+      <MetricCard title="Who is asking" right="Asked By System" note={m.by_system_note} noteMinLines={5} align="top">
         <TileFigure
-          value={rows ? (answered / rows) * 100 : null}
-          format={pct}
-          tone="accent"
-          missing="No ask carries an outcome yet."
-          sub={`${answered} of ${rows} answered`}
-          replayKey={`ns-outcome|${rows}`}
+          value={m.by_system.length || null}
+          format={(n) => String(Math.round(n))}
+          missing="No ask is held for this month, so no caller has one."
+          sub={worstSystem && m.by_system.length > 1 ? `lowest delivery is ${worstSystem.label}, ${worstSystem.delivered} of ${worstSystem.asks}` : 'callers with an ask this month'}
+          replayKey={`ns-systems|${rows}`}
         >
-          {m.outcome_mix.length === 0 ? (
-            <EmptyPanel>No ask carries an outcome yet.</EmptyPanel>
-          ) : (
-            <div className="space-y-2">
-              {m.outcome_mix.map((o) => (
-                <HBar
-                  key={o.outcome}
-                  label={o.label}
-                  value={o.n}
-                  max={maxOutcome}
-                  tone={o.outcome === 'thin' ? 'degraded' : o.outcome === 'failed' ? 'failing' : o.outcome === 'answered' ? 'accent' : 'ink'}
-                  valueNode={<CountUp value={o.n} />}
-                  right={<span className="text-faint">{rows ? Math.round((o.n / rows) * 100) : 0}%</span>}
-                />
-              ))}
-            </div>
-          )}
+          <CohortTable rows={m.by_system} />
         </TileFigure>
       </MetricCard>
 
-      <MetricCard title="Tool usage" right="searches" note={m.tool_note} noteMinLines={4} align="top">
+      <DistTile
+        title="Question type mix"
+        field="Question Type"
+        note={m.question_type_note}
+        slices={m.question_types}
+        headline={rows && topType ? (topType.n / rows) * 100 : null}
+        missing="No ask is held for this month."
+        sub={topType ? `${topType.n} of ${rows} are ${topType.label.toLowerCase()}, the largest group` : undefined}
+      />
+
+      <MetricCard title="Citation coverage" right="Citation Coverage" note={coverage.note} noteMinLines={5} align="top">
         <TileFigure
-          value={hits ? (cited / hits) * 100 : null}
+          value={coverage.mean === null ? null : coverage.mean * 100}
           format={pct}
-          tone={hits && cited === 0 ? 'degraded' : undefined}
-          missing="No ask records a tool call in its evidence blob."
-          sub={`${cited} of ${hits} hits ended up cited`}
-          replayKey={`ns-tools|${hits}`}
+          tone={coverage.mean !== null && coverage.mean === 0 ? 'degraded' : undefined}
+          missing="No ask this month records a coverage figure."
+          sub={`mean over the ${coverage.n} of ${coverage.of} asks that recorded one`}
+          replayKey={`ns-coverage|${coverage.n}`}
         >
-          {m.tool_usage.length === 0 ? null : (
+          <div className="space-y-2">
+            {coverage.buckets.map((b) => (
+              <HBar
+                key={b.key}
+                label={b.label}
+                value={b.n}
+                max={Math.max(1, ...coverage.buckets.map((x) => x.n))}
+                tone={b.key === 'nothing cited' ? 'degraded' : 'ink'}
+                valueNode={<CountUp value={b.n} />}
+                right={<span className="text-faint">of {coverage.n}</span>}
+              />
+            ))}
+          </div>
+        </TileFigure>
+      </MetricCard>
+
+      <MetricCard title="Tool usage" right="Evidence Used" note={m.tools_note} noteMinLines={5} align="top">
+        <TileFigure
+          value={toolHits ? (toolCited / toolHits) * 100 : null}
+          format={pct}
+          tone={toolHits && toolCited === 0 ? 'degraded' : undefined}
+          missing={toolCalls ? 'Calls were made but none of their lines records hit counts, so there is no rate to compute.' : 'No ask this month records a tool call.'}
+          sub={`${toolCited} of ${toolHits} returned rows ended up cited, across ${toolCalls} calls`}
+          replayKey={`ns-tools|${toolCalls}`}
+        >
+          {m.tools.length === 0 ? null : (
             <div className="space-y-2">
-              {m.tool_usage.map((t) => (
+              {m.tools.map((t) => (
                 <HBar
                   key={t.tool}
                   label={t.tool}
-                  value={t.hits}
-                  max={maxTool}
-                  tone={t.used === 0 && t.hits > 0 ? 'degraded' : 'ink'}
+                  value={t.hits ?? t.calls}
+                  max={Math.max(1, ...m.tools.map((x) => x.hits ?? x.calls))}
+                  tone={t.cited === 0 && (t.hits ?? 0) > 0 ? 'degraded' : 'ink'}
                   valueNode={
                     <span>
-                      {t.hits} <span className="text-faint">· {t.used} cited</span>
+                      {t.calls} {t.calls === 1 ? 'call' : 'calls'}
+                      {t.hits !== null && (
+                        <span className="text-faint">
+                          {' '}
+                          · {t.hits} hits · {t.cited ?? 0} cited
+                        </span>
+                      )}
                     </span>
                   }
-                  right={<span className="text-faint">{t.cited_rate === null ? '—' : `${t.cited_rate}%`}</span>}
+                  right={<span className="text-faint">{t.cited_rate === null ? 'no counts' : `${t.cited_rate}%`}</span>}
                 />
               ))}
             </div>
@@ -313,31 +331,66 @@ export function NsStatTiles({ m }: { m: NsMetrics | null }) {
         </TileFigure>
       </MetricCard>
 
-      {/*
-        "Coverage mix", not "Citation coverage" — the statistics tab already
-        computes a tile by that name from the same blob, and two cards with one
-        title and two different figures is worse than either. This one is the
-        distribution, the way "Outcome mix" is; that one is the month's figure.
-      */}
-      <MetricCard title="Coverage mix" right="searches" note={m.confidence_note} noteMinLines={4} align="top">
+      <MetricCard title="Response time" right="Response Seconds" note={m.response.note} noteMinLines={5} align="top">
         <TileFigure
-          value={coverage ? ((coverage - nothingCited) / coverage) * 100 : null}
-          format={pct}
-          tone={coverage && nothingCited === coverage ? 'degraded' : undefined}
-          missing="No ask records a coverage figure."
-          sub={`${coverage - nothingCited} of ${coverage} cite something`}
-          replayKey={`ns-coverage|${coverage}`}
+          value={m.response.p50}
+          format={(n) => `${Math.round(n * 10) / 10}s`}
+          missing="No ask this month recorded a response time."
+          sub={m.response.p95 === null ? undefined : `p50, with p95 at ${m.response.p95}s — never a mean`}
+          replayKey={`ns-time|${m.response.n}`}
         >
-          {m.confidence_mix.length === 0 ? null : (
+          <DurationTrend weeks={m.response_trend} unit="s" />
+        </TileFigure>
+      </MetricCard>
+
+      <DistTile
+        title="Priority tier claimed"
+        field="Claimed Priority Tier"
+        note={m.priority.note}
+        slices={m.priority.mix}
+        headline={rows && topTier ? (topTier.n / rows) * 100 : null}
+        missing="No ask is held for this month."
+        sub={topTier ? `${topTier.n} of ${rows} claimed ${topTier.label.toLowerCase()}, the largest group` : undefined}
+        toneOf={(s) => (s.key === 'Critical' ? 'degraded' : 'ink')}
+      >
+        {criticalLanes.length > 0 && (
+          <div className="mt-3 border-t border-line pt-2 text-[11.5px] text-faint">
+            <div className="mb-1 text-[10.5px]">lanes called Critical, by distinct week</div>
+            {criticalLanes.slice(0, 5).map((l) => (
+              <div key={l.lane} className="flex items-baseline justify-between gap-2">
+                <span className="truncate text-dim" title={l.lane}>
+                  {l.lane}
+                </span>
+                <span className={`tabular shrink-0 ${l.critical_weeks >= 3 ? 'text-degraded' : ''}`}>
+                  {l.critical_weeks} {l.critical_weeks === 1 ? 'week' : 'weeks'}
+                  {l.last_critical ? ` · last ${l.last_critical}` : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </DistTile>
+
+      <MetricCard title="Architect attention" right="Architect Attention" note={m.architect.note} noteMinLines={5} align="top">
+        <TileFigure
+          value={m.architect.n}
+          format={(n) => String(Math.round(n))}
+          tone={m.architect.n ? 'degraded' : undefined}
+          missing="No ask is held for this month."
+          sub={`of ${m.architect.of} asks this month`}
+          replayKey={`ns-architect|${rows}`}
+        >
+          {m.architect.lanes.length === 0 ? null : (
             <div className="space-y-2">
-              {m.confidence_mix.map((c) => (
+              {m.architect.lanes.slice(0, 6).map((l) => (
                 <HBar
-                  key={c.bucket}
-                  label={c.bucket}
-                  value={c.n}
-                  max={Math.max(1, ...m.confidence_mix.map((x) => x.n))}
-                  tone={c.bucket.startsWith('nothing') ? 'degraded' : 'ink'}
-                  valueNode={<CountUp value={c.n} />}
+                  key={l.lane}
+                  label={l.lane}
+                  value={l.n}
+                  max={Math.max(1, ...m.architect.lanes.map((x) => x.n))}
+                  tone="degraded"
+                  valueNode={<CountUp value={l.n} />}
+                  right={<span className="text-faint">{l.last_at ? l.last_at.slice(0, 10) : 'undated'}</span>}
                 />
               ))}
             </div>
@@ -345,58 +398,110 @@ export function NsStatTiles({ m }: { m: NsMetrics | null }) {
         </TileFigure>
       </MetricCard>
 
-      <MetricCard
-        title="By lane"
-        right="lane_id"
-        note="Asks by the lane_id on each row. A row with none is counted under “(no lane_id)” rather than dropped, because a lane nobody set is a fact about the routing."
-        noteMinLines={4}
-        align="top"
-      >
+      <MetricCard title="By lane" right="Lane" note={m.by_lane_note} noteMinLines={5} align="top">
         <TileFigure
           value={m.by_lane.length || null}
           format={(n) => String(Math.round(n))}
-          missing="No ask is held, so no lane has one."
-          sub={busiest ? `busiest is ${busiest.lane_id} with ${busiest.asks}` : undefined}
+          missing="No ask is held for this month, so no lane has one."
+          sub={busiestLane ? `busiest is ${busiestLane.label} with ${busiestLane.asks}` : undefined}
           replayKey={`ns-lanes|${rows}`}
         >
-          {m.by_lane.length === 0 ? null : (
-            <div className="space-y-2">
-              {m.by_lane.slice(0, 8).map((l) => (
-                <HBar
-                  key={l.lane_id}
-                  label={l.lane_id}
-                  value={l.asks}
-                  max={maxLane}
-                  valueNode={<CountUp value={l.asks} />}
-                  right={l.thin ? <span className="text-degraded">{l.thin} thin</span> : undefined}
-                />
-              ))}
-            </div>
-          )}
+          <div className="space-y-2">
+            {m.by_lane.slice(0, 8).map((l) => (
+              <HBar
+                key={l.key}
+                label={l.label}
+                value={l.asks}
+                max={Math.max(1, ...m.by_lane.map((x) => x.asks))}
+                valueNode={<CountUp value={l.asks} />}
+                right={<span className="text-faint">{l.asks ? Math.round((l.answered / l.asks) * 100) : 0}% answered</span>}
+              />
+            ))}
+          </div>
         </TileFigure>
       </MetricCard>
+
+      <HandoffTile handoffs={m.handoffs} />
     </>
   );
 }
 
-/* ------------------------------------------------------------- ask view */
+/**
+ * Twin-to-twin handoffs, drawn the same way on both twins' pages so the one
+ * figure cannot be worded two ways.
+ */
+export function HandoffTile({ handoffs }: { handoffs: NsMetrics['handoffs'] }) {
+  return (
+    <MetricCard title="Twin-to-twin handoffs" right="Linked Twin Ask" note={handoffs.note} noteMinLines={5} align="top">
+      <TileFigure
+        value={handoffs.n}
+        format={(n) => String(Math.round(n))}
+        missing="Neither ledger holds an ask yet."
+        sub={`of ${handoffs.of} asks across both ledgers${handoffs.pct === null ? '' : ` · ${handoffs.pct}%`}`}
+        replayKey={`handoffs|${handoffs.of}`}
+      >
+        {handoffs.pairs.length === 0 ? (
+          <EmptyPanel min={56}>Neither twin has consulted the other in what is held.</EmptyPanel>
+        ) : (
+          <div className="space-y-1.5">
+            {handoffs.pairs.slice(0, 5).map((pr) => (
+              <div key={`${pr.ledger}|${pr.ask_id}`} className="text-[11.5px]">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span
+                    className="tabular truncate text-dim"
+                    title={
+                      pr.direction === 'linked'
+                        ? `${pr.ask_id}, in ${pr.ledger}'s ledger. It carries Linked Twin Ask but nothing that says which twin asked first, so no direction is claimed.`
+                        : `${pr.ask_id}, in ${pr.ledger}'s ledger`
+                    }
+                  >
+                    {/* "linked" where the row does not say which way it went. */}
+                    {pr.direction === 'linked' ? 'linked' : pr.direction} · {pr.ask_id}
+                  </span>
+                  <span className="shrink-0 text-faint">{pr.ask_at ? pr.ask_at.slice(0, 10) : 'undated'}</span>
+                </div>
+                <div className="truncate text-faint" title={pr.reply_summary ?? pr.ask_question ?? ''}>
+                  {pr.reply_summary ?? pr.ask_question ?? 'no text recorded'}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </TileFigure>
+    </MetricCard>
+  );
+}
 
-function AskView({ r, onClose }: { r: NsRecord; onClose: () => void }) {
+/* ------------------------------------------------------------- the ask view */
+
+function AskView({ r, onClose }: { r: NsAsk; onClose: () => void }) {
   return createPortal(
     <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/30 p-4 md:p-10" onClick={onClose}>
       <div className="card fade-up w-full max-w-[880px] px-6 py-5" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="North Star ask">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="kicker tabular truncate">{r.trace_id ?? r.id}</div>
-            <h2 className="mt-1 text-[18px] leading-tight">{r.lane_id ?? 'no lane'}</h2>
+            <div className="kicker tabular truncate">{r.ask_id ?? r.id}</div>
+            <h2 className="mt-1 text-[18px] leading-tight">{r.question_type ?? 'no question type'}</h2>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-faint">
               <span className="tabular">{when(r.asked_at)}</span>
               <OutcomePill outcome={r.outcome} />
-              {r.research_required !== null && <span>research {r.research_required ? 'required' : 'not required'}</span>}
-              {r.confidence !== null && <span>coverage {r.confidence}</span>}
+              <DeliveredPill delivered={r.delivered} />
+              <span>{r.lane ?? 'no lane'}</span>
+              <span>
+                {r.asked_by_system ?? 'no system named'}
+                {r.asked_by_person ? ` · ${r.asked_by_person}` : ''}
+              </span>
+              {r.response_seconds !== null && <span className="tabular">{r.response_seconds}s</span>}
+              {r.citation_coverage !== null && <span>coverage {r.citation_coverage}</span>}
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* The permalink where there is one; no placeholder link where there is not. */}
+            {r.slack_link && (
+              <a href={r.slack_link} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
+                Open in Slack
+              </a>
+            )}
             <a href={r.airtable.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
               Open in Airtable
             </a>
@@ -406,34 +511,16 @@ function AskView({ r, onClose }: { r: NsRecord; onClose: () => void }) {
           </div>
         </div>
 
-        {r.reason && (
+        {r.error && (
           <div className="mt-4 border-t border-line pt-4">
-            <div className="mb-1 text-[11px] text-faint">Why this outcome</div>
-            <p className="text-[13px] leading-relaxed text-ink">{r.reason}</p>
+            <div className="mb-1 text-[11px] text-faint">What went wrong</div>
+            <p className="text-[13px] leading-relaxed text-failing">{r.error}</p>
           </div>
         )}
 
         <div className="mt-4 border-t border-line pt-4">
-          <div className="mb-2 flex items-baseline justify-between gap-3">
-            <div className="text-[13px] font-medium text-ink">Tool calls</div>
-            <div className="text-[11px] text-faint">hits returned · hits cited</div>
-          </div>
-          {r.searches.length === 0 ? (
-            <p className="text-[12.5px] text-faint">This ask made no tool calls — it was answered from what the agent already had.</p>
-          ) : (
-            <div className="space-y-1.5">
-              {r.searches.map((s, i) => (
-                <div key={i} className="flex items-baseline justify-between gap-3 text-[12.5px]">
-                  <span className="truncate text-ink">{s.tool}</span>
-                  <span className="tabular shrink-0 text-dim">
-                    {s.hits} hit{s.hits === 1 ? '' : 's'} · <span className={s.used === 0 ? 'text-degraded' : ''}>{s.used} cited</span>
-                    {s.retrieved_at && <span className="text-faint"> · {s.retrieved_at}</span>}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-          {r.confidence_basis && <p className="mt-2 text-[11.5px] leading-snug text-faint">{r.confidence_basis}</p>}
+          <div className="mb-1 text-[11px] text-faint">The question, as it arrived</div>
+          <p className="max-h-[24vh] overflow-y-auto text-[13px] leading-relaxed whitespace-pre-wrap text-ink">{r.question ?? 'No question text was recorded.'}</p>
         </div>
 
         <div className="mt-4 border-t border-line pt-4">
@@ -445,60 +532,117 @@ function AskView({ r, onClose }: { r: NsRecord; onClose: () => void }) {
           )}
         </div>
 
-        {r.request && (
-          <details className="mt-4 border-t border-line pt-4">
-            <summary className="cursor-pointer text-[12.5px] text-dim">The prompt as it was sent</summary>
-            <p className="mt-2 max-h-[40vh] overflow-y-auto text-[12px] leading-relaxed whitespace-pre-wrap text-dim">{r.request}</p>
-          </details>
+        {(r.claimed_priority_tier || r.claimed_lane_health || r.claimed_strategic_importance || r.claimed_priority_score !== null || r.architect_attention) && (
+          <div className="mt-4 grid gap-3 border-t border-line pt-4 sm:grid-cols-2">
+            {/* What the answer itself claimed. Shown as claims, because that is what they are. */}
+            {r.claimed_priority_score !== null && <Claim label="Claimed priority score" value={String(r.claimed_priority_score)} />}
+            {r.claimed_priority_tier && <Claim label="Claimed priority tier" value={r.claimed_priority_tier} />}
+            {r.claimed_lane_health && <Claim label="Claimed lane health" value={r.claimed_lane_health} />}
+            {r.claimed_strategic_importance && <Claim label="Claimed strategic importance" value={r.claimed_strategic_importance} />}
+            {r.confidence_stated && <Claim label="Confidence stated" value={r.confidence_stated} />}
+            {r.architect_attention && <Claim label="Architect attention" value="asked for" />}
+          </div>
         )}
+
+        <div className="mt-4 border-t border-line pt-4">
+          <div className="mb-2 flex items-baseline justify-between gap-3">
+            <div className="text-[13px] font-medium text-ink">Tool calls</div>
+            <div className="text-[11px] text-faint">rows returned · rows cited</div>
+          </div>
+          {r.tools.length === 0 ? (
+            <p className="text-[12.5px] text-faint">This ask made no tool calls — it was answered from what the agent already had.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {r.tools.map((t, i) => (
+                <div key={i} className="flex items-baseline justify-between gap-3 text-[12.5px]">
+                  <span className="truncate text-ink" title={t.args ?? undefined}>
+                    {t.tool}
+                  </span>
+                  <span className="tabular shrink-0 text-dim">
+                    {/* Blank rather than nought where the line recorded no counts. */}
+                    {t.hits === null ? <span className="text-faint">no counts recorded</span> : <>{t.hits} rows · <span className={t.cited === 0 ? 'text-degraded' : ''}>{t.cited ?? 0} cited</span></>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3 text-[11.5px] text-faint">
+          <SourceLink source={r.source} />
+          <span>
+            {r.run_id ? `n8n execution ${r.run_id}` : 'no run id recorded'}
+            {r.delivery_target ? ` · sent to ${r.delivery_target}` : ''}
+          </span>
+        </div>
       </div>
     </div>,
     document.body,
   );
 }
 
-/* ------------------------------------------------------------------ page */
+function Claim({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[11px] text-faint">{label}</div>
+      <div className="mt-0.5 text-[12.5px] text-ink">{value}</div>
+    </div>
+  );
+}
 
-/**
- * The ask log, as columns. The outcome is the page's whole point, so it is a
- * pill in its own column; coverage is the citation coverage the agent itself
- * computed, and reads red at zero because an answer citing nothing is what
- * thin means.
- */
-function nsColumns(open: (r: NsRecord) => void): RecordColumn<NsRecord>[] {
+/* ------------------------------------------------------------------- page */
+
+function nsColumns(open: (r: NsAsk) => void): RecordColumn<NsAsk>[] {
   return [
     { key: 'date', header: 'date', className: 'tabular text-faint', cell: (r) => when(r.asked_at) },
+    { key: 'ask_id', header: 'ask id', width: '22ch', clip: true, title: (r) => r.ask_id ?? r.id, cell: (r) => <RecordId missing="no ask id">{r.ask_id}</RecordId> },
     {
-      key: 'trace',
-      header: 'trace id',
-      width: '24ch',
+      key: 'asked_by',
+      header: 'asked by',
+      width: '18ch',
       clip: true,
-      title: (r) => r.trace_id ?? r.id,
-      cell: (r) => <RecordId missing="no trace id">{r.trace_id}</RecordId>,
+      className: 'text-dim',
+      title: (r) => [r.asked_by_system, r.asked_by_person].filter(Boolean).join(' · ') || undefined,
+      cell: (r) =>
+        r.asked_by_system ? (
+          <span>
+            {r.asked_by_system}
+            {r.asked_by_person && <span className="text-faint"> · {r.asked_by_person}</span>}
+          </span>
+        ) : (
+          <span className="text-faint">not named</span>
+        ),
     },
-    { key: 'lane', header: 'lane', width: '20ch', clip: true, className: 'text-dim', title: (r) => r.lane_id ?? undefined, cell: (r) => r.lane_id ?? <span className="text-faint">no lane</span> },
+    { key: 'type', header: 'type', width: '14ch', clip: true, className: 'text-dim', cell: (r) => r.question_type ?? <span className="text-faint">no type</span> },
+    { key: 'lane', header: 'lane', width: '16ch', clip: true, className: 'text-dim', title: (r) => r.lane ?? undefined, cell: (r) => r.lane ?? <span className="text-faint">no lane</span> },
     {
-      key: 'reason',
-      header: 'reason',
+      key: 'question',
+      header: 'question',
       card: 'title',
-      width: '64ch',
+      width: '52ch',
       clip: true,
-      title: (r) => r.reason ?? (r.answer ? `No reason on this ask — showing the answer.\n\n${r.answer}` : undefined),
-      // The reason is what North Star wrote about the ask. Rows that carry no
-      // reason fall back to the answer, quietly, so the column is never blank
-      // where there is something to read — and the tooltip says which it is.
-      cell: (r) => r.reason ?? <span className="text-faint">{r.answer ?? 'No answer and no reason recorded for this ask.'}</span>,
+      title: (r) => r.question ?? undefined,
+      cell: (r) => r.answer_summary ?? r.question ?? <span className="text-faint">No question text was recorded.</span>,
     },
     { key: 'outcome', header: 'outcome', card: 'meta', className: 'card-meta', cell: (r) => <OutcomePill outcome={r.outcome} /> },
+    { key: 'delivered', header: 'delivered', card: 'meta', className: 'card-meta', cell: (r) => <DeliveredPill delivered={r.delivered} /> },
+    {
+      key: 'seconds',
+      header: 'seconds',
+      align: 'right',
+      card: 'meta',
+      className: 'card-meta tabular text-dim',
+      cell: (r) => (r.response_seconds === null ? <span className="text-faint">—</span> : r.response_seconds),
+    },
     {
       key: 'coverage',
       header: 'coverage',
       align: 'right',
       card: 'meta',
       className: 'card-meta tabular',
-      cellClass: (r) => (r.confidence === 0 ? 'text-degraded' : 'text-dim'),
-      title: (r) => (r.searches.length ? r.searches.map((x) => `${x.tool}: ${x.hits} hits, ${x.used} cited`).join('\n') : undefined),
-      cell: (r) => (r.confidence === null ? <span className="text-faint">—</span> : r.confidence),
+      cellClass: (r) => (r.citation_coverage === 0 ? 'text-degraded' : 'text-dim'),
+      title: (r) => (r.tools.length ? r.tools.map((t) => `${t.tool}: ${t.hits === null ? 'no counts recorded' : `${t.hits} rows, ${t.cited ?? 0} cited`}`).join('\n') : undefined),
+      cell: (r) => (r.citation_coverage === null ? <span className="text-faint">—</span> : r.citation_coverage),
     },
     { key: 'source', header: 'source', cell: (r) => <SourceLink source={r.source} /> },
     {
@@ -509,6 +653,7 @@ function nsColumns(open: (r: NsRecord) => void): RecordColumn<NsRecord>[] {
       cell: (r) => (
         <RowActions>
           <RowAction label="View" tone="accent" onClick={() => open(r)} />
+          {r.slack_link && <RowAction label="Open in Slack" onClick={() => window.open(r.slack_link!, '_blank', 'noreferrer')} />}
           <RowAction label="Open in Airtable" onClick={() => window.open(r.airtable.url, '_blank', 'noreferrer')} />
         </RowActions>
       ),
@@ -516,15 +661,6 @@ function nsColumns(open: (r: NsRecord) => void): RecordColumn<NsRecord>[] {
   ];
 }
 
-/**
- * Two views of the same rows (2026-09-16, Destiny), tabbed the way the System
- * Registry tabs its registries.
- *
- * **Asks** is the working surface. **Statistics** answers the other
- * question — is this getting better or worse — month against month. This kind
- * has no monthly rollup of its own, so its chart is drawn from the counts the
- * statistics return, by the same component, rather than by a second one.
- */
 const VIEWS = ['Asks', 'Statistics'] as const;
 type View = (typeof VIEWS)[number];
 
@@ -534,138 +670,143 @@ export default function NorthStar() {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [view, setView] = useState<View>('Asks');
-  /**
-   * The month the page is showing, and the month the statistics tab compares
-   * (2026-09-16, Destiny) — one selection, beside the search box, the same as
-   * every other record page.
-   */
   const [month, setMonth] = useState<string | null>(thisMonth());
   const [tick, setTick] = useState(0);
-  const [held, setHeld] = useState<NsRecord[]>([]);
+  const [held, setHeld] = useState<NsAsk[]>([]);
   const { toast, setToast } = useToast();
   const metrics = useData(() => getRecordMetrics('ns', { lane: 'all' }, null, month), [month, tick]);
 
   useEffect(() => {
-    if (loaded) setHeld(loaded.records);
+    if (loaded) setHeld(loaded.asks);
   }, [loaded]);
 
   const resync = useResync({
     run: () => resyncRecords('ns'),
     reload: async () => {
       setTick((n) => n + 1);
-      setHeld((await getNsTelemetry()).records);
+      setHeld((await getNsTelemetry()).asks);
     },
     setToast,
   });
 
-  const records = held;
-  const months = useMemo(() => monthsFrom(records.map((r) => r.asked_at)), [records]);
-  const inMonth = useMemo(() => records.filter((r) => !month || r.asked_at?.slice(0, 7) === month), [records, month]);
+  const asks = held;
+  const months = useMemo(() => monthsFrom(asks.map((r) => r.asked_at)), [asks]);
+  const inMonth = useMemo(() => asks.filter((r) => !month || r.asked_at?.slice(0, 7) === month), [asks, month]);
   const rows = useMemo(
-    () => inMonth.filter((r) => (filter === 'all' ? true : filter === 'unclassified' ? !r.outcome : r.outcome === filter)).filter((r) => matches(r, q.trim())),
+    () =>
+      inMonth
+        .filter((r) => (filter === 'all' ? true : filter === 'not-delivered' ? r.delivered === 'Not delivered' : r.outcome === filter))
+        .filter((r) => matches(r, q.trim())),
     [inMonth, filter, q],
   );
   const paged = usePaged(rows, `${filter}|${q.trim()}|${month ?? 'all'}`);
 
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
-  const current = open ? records.find((r) => r.id === open) : null;
-  // The filter counts follow the month, the same way every other page's do.
+  const current = open ? asks.find((r) => r.id === open) : null;
   const counts = {
     all: inMonth.length,
-    answered: inMonth.filter((r) => r.outcome === 'answered').length,
-    thin: inMonth.filter((r) => r.outcome === 'thin').length,
-    failed: inMonth.filter((r) => r.outcome === 'failed').length,
-    unclassified: inMonth.filter((r) => !r.outcome).length,
+    Answered: inMonth.filter((r) => r.outcome === 'Answered').length,
+    Thin: inMonth.filter((r) => r.outcome === 'Thin').length,
+    'Refused (not its lane)': inMonth.filter((r) => r.outcome === 'Refused (not its lane)').length,
+    Failed: inMonth.filter((r) => r.outcome === 'Failed').length,
+    'not-delivered': inMonth.filter((r) => r.delivered === 'Not delivered').length,
   };
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <PageHeader
         title="North Star"
-        subtitle="Every question routed through the agent, and what came back"
+        subtitle="Every question routed through the agent, what came back, and whether it reached anyone"
         right={<ResyncButton busy={resync.busy} onClick={resync.start} />}
         below={<Tabs tabs={VIEWS} value={view} onChange={setView} />}
       />
 
       {view === 'Statistics' ? (
         <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-4">
-          <RecordStatistics<NsRecord>
+          <RecordStatistics<NsAsk>
             kind="northstar"
             noun="Asks"
             month={month}
             onMonth={setMonth}
-            rows={records}
+            rows={asks}
             dateOf={(r) => r.asked_at}
             extraTiles={<NsStatTiles m={metrics.data} />}
             columns={[
-              { header: 'trace_id', value: (r) => r.trace_id },
+              { header: 'ask_id', value: (r) => r.ask_id },
               { header: 'airtable_record_id', value: (r) => r.id },
               { header: 'asked_at', value: (r) => r.asked_at },
-              { header: 'lane_id', value: (r) => r.lane_id },
-              { header: 'workflow', value: (r) => r.workflow },
-              { header: 'outcome', value: (r) => r.outcome ?? 'unclassified' },
-              { header: 'research_required', value: (r) => r.research_required },
-              { header: 'has_answer', value: (r) => r.has_answer },
-              { header: 'sources_used', value: (r) => r.searches.reduce((a, x) => a + x.used, 0) },
-              { header: 'request', value: (r) => r.request },
+              { header: 'asked_by_system', value: (r) => r.asked_by_system },
+              { header: 'asked_by_person', value: (r) => r.asked_by_person },
+              { header: 'question_type', value: (r) => r.question_type },
+              { header: 'lane', value: (r) => r.lane },
+              { header: 'outcome', value: (r) => r.outcome },
+              { header: 'delivered', value: (r) => r.delivered },
+              { header: 'delivery_target', value: (r) => r.delivery_target },
+              { header: 'response_seconds', value: (r) => r.response_seconds },
+              { header: 'citation_coverage', value: (r) => r.citation_coverage },
+              { header: 'confidence_stated', value: (r) => r.confidence_stated },
+              { header: 'claimed_priority_tier', value: (r) => r.claimed_priority_tier },
+              { header: 'architect_attention', value: (r) => r.architect_attention },
+              { header: 'linked_twin_ask', value: (r) => r.linked_twin_ask },
+              { header: 'run_id', value: (r) => r.run_id },
+              { header: 'question', value: (r) => r.question },
+              { header: 'answer_summary', value: (r) => r.answer_summary },
+              { header: 'slack_link', value: (r) => r.slack_link },
               { header: 'airtable_url', value: (r) => r.airtable.url },
             ]}
           />
         </div>
       ) : (
-      <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <div className="shrink-0 px-6 pb-3 md:px-8">
-          <RowsLine freshness={loaded.freshness} />
-        </div>
+        <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+          <div className="shrink-0 px-6 pb-3 md:px-8">
+            <RowsLine freshness={loaded.freshness} />
+          </div>
 
-        <NsMetricsPanel metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
+          <NsStrip m={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
+          <NsWeekly m={metrics.data} loading={metrics.status === 'loading'} />
 
-        {/*
-          Asks per week and outcome over time sit here, under the strip
-          (2026-09-16, Destiny). They are what the last eight weeks looked like,
-          not a month against a month, so they belong beside the asks.
-        */}
-        <NsWeeklyPanel metrics={metrics.data} loading={metrics.status === 'loading'} />
-
-        <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <Segmented<Filter>
-              ariaLabel="Filter by outcome"
-              value={filter}
-              onChange={setFilter}
-              options={[
-                { value: 'all', label: 'All', count: counts.all },
-                { value: 'answered', label: 'Answered', count: counts.answered },
-                { value: 'thin', label: 'Thin', count: counts.thin },
-                { value: 'failed', label: 'Failed', count: counts.failed },
-                ...(counts.unclassified ? [{ value: 'unclassified' as Filter, label: 'Unclassified', count: counts.unclassified }] : []),
-              ]}
-            />
-            <div className="flex flex-1 items-center justify-end gap-3">
-              {/* The month sits to the left of the search box, on every record page. */}
-              <MonthPicker months={months} value={month} onChange={setMonth} />
-              <SearchBox value={q} onChange={setQ} placeholder="Search asks, answers and tools" />
+          <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Segmented<Filter>
+                ariaLabel="Filter asks"
+                value={filter}
+                onChange={setFilter}
+                options={[
+                  { value: 'all', label: 'All', count: counts.all },
+                  { value: 'Answered', label: 'Answered', count: counts.Answered },
+                  { value: 'Thin', label: 'Thin', count: counts.Thin },
+                  { value: 'Refused (not its lane)', label: 'Refused', count: counts['Refused (not its lane)'] },
+                  { value: 'Failed', label: 'Failed', count: counts.Failed },
+                  { value: 'not-delivered', label: 'Not delivered', count: counts['not-delivered'] },
+                ]}
+              />
+              <div className="flex flex-1 items-center justify-end gap-3">
+                <MonthPicker months={months} value={month} onChange={setMonth} />
+                <SearchBox value={q} onChange={setQ} placeholder="Search questions, answers and callers" />
+              </div>
             </div>
           </div>
-        </div>
 
-        {rows.length === 0 ? (
-          <EmptyState>
-            {loaded.freshness.source === 'none'
-              ? (loaded.freshness.note ?? 'No North Star asks are held.')
-              : q.trim()
-                ? 'No ask matches that search in the selected outcome.'
-                : filter === 'unclassified'
-                  ? 'Every ask carries an outcome.'
-                  : `No ask is recorded as ${filter}. ${counts.unclassified ? `${counts.unclassified} asks carry no outcome at all and are under Unclassified.` : ''}`}
-          </EmptyState>
-        ) : (
-          <>
-            <RecordTable columns={nsColumns((r) => setOpen(r.id))} rows={paged.rows} rowKey={(r) => r.id} onOpen={(r) => setOpen(r.id)} label="North Star asks" />
-            <Pagination paged={paged} unit="asks" />
-          </>
-        )}
-      </div>
+          {rows.length === 0 ? (
+            <EmptyState>
+              {loaded.freshness.source === 'none'
+                ? (loaded.freshness.note ??
+                  'No North Star ask is held yet. The ledger was created on 17 Sep 2026 with no history carried in, so this fills as the agent runs — and Resync from Airtable will pull anything the mirror missed.')
+                : q.trim()
+                  ? 'No ask matches that search in this filter.'
+                  : filter === 'not-delivered'
+                    ? 'Every ask this month reached someone, or had no target to reach.'
+                    : filter === 'all'
+                      ? 'No ask is held for this month. Before 17 Sep 2026 this ledger did not exist, so an empty month is an unrecorded one rather than a quiet one.'
+                      : `No ask this month came back ${filter === 'Refused (not its lane)' ? 'refused' : filter.toLowerCase()}.`}
+            </EmptyState>
+          ) : (
+            <>
+              <RecordTable columns={nsColumns((r) => setOpen(r.id))} rows={paged.rows} rowKey={(r) => r.id} onOpen={(r) => setOpen(r.id)} label="North Star asks" />
+              <Pagination paged={paged} unit="asks" />
+            </>
+          )}
+        </div>
       )}
 
       {current && <AskView r={current} onClose={() => setOpen(null)} />}

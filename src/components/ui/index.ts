@@ -23,3 +23,4 @@ export * from './Records';
 export * from './Resync';
 export * from './Monthly';
 export * from './MonthPicker';
+export * from './Figures';

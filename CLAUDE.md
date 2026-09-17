@@ -99,15 +99,30 @@ table per builder. **Codex entries, BHA Submissions & Logs
 (`appEmdKshNVTl64Zf`), one table per builder** (decision 2026-09-10, Destiny) —
 the builder is the table a row lives in, never a field, and the completed entry
 is the `Orchestrator Layer2 Review` column. Build patterns `app5ni3E8r7Lvxk22`,
-commercial `appvLglfdCqOKqLpT`. Telemetry (decision 2026-09-10, Destiny): North
-Star's ask log `appkCTjhH8PtYRFI7 / tbl9OGZTyvBKrbeFm`; Research Twin's queue
-`appud969Dw7H4tMwv / tblUl8YHhQReDgq8G` (the `research_twin_research_jobs`
-table in that base holds one test row and is never read); the watched clients
+commercial `appvLglfdCqOKqLpT`. **The twins write to their own ledgers**
+(decision 2026-09-17, Destiny): North Star's asks
+`appRvx4u9V9BYp646 / tblSb9potJlYg2lZK`, Research Twin's asks
+`appv39nQzmfC9VVkG / tblDmsqI9f0xfAO5m` and its research queue
+`appv39nQzmfC9VVkG / tblOsznfDELJdbyDR`. The watched clients
 `appkSUSh9ijNjP2f8`, whose index row names its own questions table in
 `Table ID` — carried on each question row, never hardcoded.
-The twins are still phase 1 fixtures. The incident and vFarm fixtures are read
-only by the Overview's two 24-hour columns now; their own pages are placeholders
-and the Builders page is gone (2026-09-14, Destiny).
+The incident and vFarm fixtures are read only by the Overview's two 24-hour
+columns now; their own pages are placeholders and the Builders page is gone
+(2026-09-14, Destiny). **The Overview's two twin tiles and its asks figure read
+the ledgers** (2026-09-17): they were the last fixtures left computing a number
+about a page that now holds real rows, which is the disagreement section 2
+forbids.
+
+**Five Airtable tables are `[LEGACY]` and are read by nothing here** (decision
+2026-09-17, Destiny): `appkCTjhH8PtYRFI7 / tbl9OGZTyvBKrbeFm` (NS Records),
+`appud969Dw7H4tMwv / tblUl8YHhQReDgq8G` (Research Queue),
+`app4QnMJ2woiKlLc0 / tblWdsbejQ9IYYHm1` (its resolved-events table),
+`appSoakKvs7MLkRnX / tblvEivGSXUs5SXaG` (the priority ledger) and
+`appxkIgnLL1zBsXqD / tblbuOUGPLt4nIi0G` (Lane_status). They have no writers.
+They stay listed in the System Registry, because they hold real history and a
+base that vanished from the registry would read as one that was never there.
+`engine_ns_records` and `engine_rt_attempts` keep the rows they hold, unread,
+like the `records` read model — nothing drops a table.
 
 **State lives in Postgres** (decision 2026-09-12, Destiny): `bha-engine-db` on
 the same Render environment, reached through `DATABASE_URL`. It replaces the
@@ -292,17 +307,26 @@ explicitly for this. Therefore:
 - **The token reads seven bases and writes two.** `AIRTABLE_TOKEN` needs read
   and write on Open Loops and BHA Submissions as before, and **read only** on
   Build Patterns, Commercial Opportunities, BHA Client Research Loop and — from
-  2026-09-16 — **North Star's ask log (`appkCTjhH8PtYRFI7`) and Research Twin's
-  queue (`appud969Dw7H4tMwv`)**, for the five resyncs. Those five get **no base
-  variable of their own**: this server never writes to them, so it can never
-  write to a guess, and their ids stay in `sources.ts` where the record links
-  already read them. A token without read on one of them authenticates and then
-  refuses, which the resync names by table rather than reading as an emptied one.
-- **North Star and Research Twin resync too** (decision 2026-09-16, Destiny),
-  through the same shared pass and the same control as the other four. Research
-  Twin is an **attempt log**, so its sweep compares Airtable record ids and never
-  `card_id`: `card_id` repeats, and comparing on it would read four attempts on
-  one card as three rows Airtable no longer has, and delete them.
+  2026-09-17 — **BHA North Star Ledger (`appRvx4u9V9BYp646`) and BHA Research
+  Twin Ledger (`appv39nQzmfC9VVkG`)**, for the five resyncs. Those two replaced
+  the legacy ask log and queue the token was scoped to until then, so **a token
+  not re-scoped authenticates and then refuses both twins' resyncs** — the same
+  failure the submissions base had on 14 Sep, and the reason to check the grant
+  rather than assume it carried over. Those five get **no base variable of their
+  own**: this server never writes to them, so it can never write to a guess, and
+  their ids stay in `sources.ts` where the record links already read them. A
+  token without read on one of them authenticates and then refuses, which the
+  resync names by table rather than reading as an emptied one.
+- **Both twins resync, and Research Twin sweeps two tables** (decisions
+  2026-09-16 and 2026-09-17, Destiny), through the same shared pass and the same
+  control as the other four. Research Twin's sweep reads its ask ledger **and**
+  the research queue: a job is *updated in place* as it is worked — its status,
+  attempts and finding all change — and the agent only mirrors on an ask write,
+  so a queue kept current by ask mirrors alone would show every job at the state
+  it was in when it was opened. Every one of the three tables carries a unique
+  id of its own (`Ask ID`, `Job ID`), unlike the attempt log they replaced where
+  `card_id` repeated; the sweep still compares Airtable record ids, which are
+  unique everywhere.
 - **Executions are stored one row per execution, never as counters** (decision
   2026-09-15, Destiny — the second of that day, replacing the first). n8n's own
   execution id is the primary key of `engine_execution_runs`, and every figure
@@ -395,8 +419,9 @@ thread's `session_id` is stable for its life and is Bays's memory. The reply's
 `AIRTABLE_TOKEN`, `AIRTABLE_OPEN_LOOPS_BASE_ID` (Open Loops) and
 `AIRTABLE_SUBMISSIONS_BASE_ID` (BHA Submissions) — one token: read and write on
 those two bases for loop and Codex edits, and read only on Build Patterns,
-Commercial Opportunities and BHA Client Research Loop for the three resyncs,
-which have no base variable because nothing is ever written to them. Without the
+Commercial Opportunities, BHA Client Research Loop, **BHA North Star Ledger and
+BHA Research Twin Ledger** for the five resyncs, which have no base variable
+because nothing is ever written to them. Without the
 token nothing edited here reaches Airtable and no page can resync, and the
 server says so at boot and on every write — and `DATABASE_URL`, the one the
 server refuses to start without.
@@ -520,9 +545,11 @@ only item and almost everything on that page was a fixture; the roster and the
 two figures that were real are the **Builders** registry now. The Overview's
 Builders tile went with it, per the tile-per-section rule.
 
-North Star, Research Twin and vFarm each have four in-page sub-tabs:
-**Summary · Records · Runs · Gaps**. Sub-tabs live inside the page, not as
-sidebar dropdowns.
+Sub-tabs live inside the page, not as sidebar dropdowns. **North Star has two —
+Asks · Statistics — and Research Twin three — Asks · Jobs · Statistics**
+(2026-09-17, Destiny). The Summary · Records · Runs · Gaps shape they and vFarm
+carried was a phase 1 fixture layout; the twins have real rows now and the tabs
+are what those rows are.
 
 ---
 
@@ -563,50 +590,125 @@ Right-hand panel: new chat, chat history list, search past chats.
 against fixtures. It gets wired in a later phase.
 
 ### North Star
-**Two tabs** (decision 2026-09-16, Destiny). Asks is the working surface: the
-five figures, **asks per week and outcome over time**, the outcome filter, the
-month, the search and the asks. Those two charts are the last eight weeks
-rather than a month against a month, which is why they are beside the asks and
-not on the other tab.
+**Two tabs**: Asks and Statistics. Asks is the working surface — five figures,
+**asks per week and outcome over time**, the filter, the month, the search and
+the asks. Those two charts are the last eight weeks rather than a month against
+a month, which is why they are beside the asks and not on the other tab.
+**Resync from Airtable** is at the top, the same control the other pages carry.
 
-**Statistics is a 3×3 grid**: classified, outcome mix, tool usage, coverage mix
-and by lane, alongside the four the server computes. The month is chosen beside
-the search box and the strip follows it, so the figures and the list always
-answer the same question. **Resync from Airtable** is at the top, the same
-control the other pages carry.
+**It reads its own ledger** (`appRvx4u9V9BYp646 / tblSb9potJlYg2lZK`, decision
+2026-09-17, Destiny), one row per ask, written by the agent at the end of every
+run and mirrored to `POST /api/engine/ns-asks`. The legacy NS Records table it
+read until then has no writers; the orange "none written since the migration
+backfill" line was telling the truth and the fix was to point the page at
+something live rather than to silence the line.
 
-**Every hint on the strip runs to roughly one length** (decision 2026-09-16,
-Destiny). Five cells whose footnotes were one line, five lines, one line and
-four read as a ragged block under five figures of the same size. `noteMinLines`
-holds the boxes level and the sentences are written to fill them — the same rule
-`hintMinLines` already applies to the record pages.
+**Delivery rate is the headline, and it is the one coloured figure on the page.**
+`Delivered = "Delivered"` over all asks. Delivery is recorded *after* the answer
+is sent, so it is the only figure that says something reached a person rather
+than that a run finished — North Star once ran green for six consecutive days
+while Slack rejected every post and nothing reported it. Below 100% is bad.
+Then: **answered rate** (the outcome metric), **asks**, **median response time
+with p95 beside it**, and **last ask**, where silence is itself the signal.
 
-The ask log. **Thin rate is the headline** — answers that look real and cite
-nothing — computed over the rows carrying an `outcome` and no others, with the
-unclassified count stated beside it. `outcome` is North Star's own
-single-select (answered / thin / failed) and is authoritative; a row without
-one is *unclassified* and nothing is inferred from the answer text. Also: asks
-per week, outcome over time, research-required rate, tool hits against cited
-uses from the searches blob, citation coverage, by lane, and when it was last
-asked anything — silence there is itself the signal.
+**The old thin rate, classified and unclassified figures are not carried
+across.** Thin at 100%, classified at 42% and unclassified at 58% were artefacts
+of `outcome` being added late to the legacy table. Every row in this ledger
+carries an outcome, so **there is no unclassified bucket**: the four are
+Answered · Thin · Refused (not its lane) · Failed, and Thin is a slice of the
+outcome mix rather than a headline of its own.
+
+**Statistics**: outcome mix, delivery mix (naming the `Delivery Target` of
+anything undelivered), **who is asking** — `Asked By System` with each cohort's
+own answered and delivery rates, which is the card that catches a Slack path
+failing behind an 8am sweep that keeps the aggregate healthy — question type
+mix, citation coverage, tool usage parsed from `Evidence Used`, response time as
+p50/p95 with a trend, **claimed priority tier by lane over time** (a lane called
+Critical three weeks running is the pattern this makes visible), architect
+attention with the lanes and dates, by lane counting `(no lane)` rather than
+dropping it, and **twin-to-twin handoffs**.
 
 ### Research Twin
-**The same shape** (decision 2026-09-16, Destiny): the strip, **exactly two
-cards — confidence, then cards created per week** — the filter, the month and
-the search. The hard-stop ring, queue depth by status, days stuck, attempts per
-card and what kind of stuck are all statistics tiles. **Resync from Airtable**
-is at the top. The shape note under the filter bar — "the research queue holds
-212 rows across 36 distinct card_ids" — is gone: the strip already prints both
-figures side by side, and the export still carries the sentence, which is where
-a reader can act on it.
+**Three tabs**: Asks, Jobs and Statistics (decision 2026-09-17, Destiny). Asks
+are new — until then this page showed the queue and the twin's actual
+conversations were recorded nowhere. **Resync from Airtable** is at the top and
+sweeps both tables.
 
-The research queue. It is an **attempt log** — one row per attempt, `card_id`
-repeats — so every figure is per card, collapsed on `card_id` with the newest
-attempt deciding the state, and the row count is printed beside the card count.
-Cards at `requires_human` come first. Days stuck is counted from
-`first_stuck_at`, which is deliberately not re-stamped, so it is the age of the
-problem rather than of the last retry. A blank status is *untriaged*, a real
-state, not an error.
+**Asks** (`appv39nQzmfC9VVkG / tblDmsqI9f0xfAO5m`, mirrored to
+`POST /api/engine/rt-asks`). **"Went outside BHA" is the first figure on the
+page**: `Used Web Search` over all asks. Research Twin's job is the outside
+world, and Bays and North Star can both query BHARAG directly, so a low figure
+means it is being used as a lookup either of them could have done themselves. It
+is **not coloured** — a month of genuinely internal questions is a real month —
+and the weekly trend on the statistics tab is what actually reads. Then answered
+rate, **needs a human** (the escalation metric, beside the answered rate and
+**never red**: escalating correctly beats a confident wrong answer), asks, and
+median response time with p95.
+
+**Statistics**: outcome mix with Needs human as its own slice, **external search
+rate over time**, BHARAG reachable (a degraded evidence store is not the same as
+a lane having no evidence, and any `No (degraded)` at all is worth surfacing),
+sources per answer with the share citing nothing, citation coverage, confidence
+mix **cross-cut against outcome** (High confidence with zero sources is the
+combination worth catching), ask type mix, who is asking, delivery mix where
+**Self-delivered is a correct outcome** — the weekly Watched Clients report posts
+its own file during the run — response time as p50/p95, and twin-to-twin
+handoffs.
+
+**Jobs** (`appv39nQzmfC9VVkG / tblOsznfDELJdbyDR`). **A job is one row**, carrying
+its own status, attempts and outcome. That is the semantic change from the queue
+it replaced: that held one row per *attempt* with a second table for outcomes, so
+"attempts" and "cards" were different counts and every figure had to collapse on
+`card_id` first. `Attempts` is a number on the job now, capped at three, and
+**none of the one-row-per-attempt language is carried across.**
+
+**Capped, needing a person leads and is coloured**: any number above nought
+needs attention, because nothing else in the engine will move those jobs. It is a
+real outcome the queue records, not a failure it hides. Then open jobs
+(Pending + In Progress), resolved this month, median time to resolve with p95,
+and the age of the oldest open job. Its statistics cards: status depth, attempts
+against the cap, gap types over capped and low-confidence jobs, time to resolve
+trended, opened by, and a resolution rate over jobs that reached a terminal
+state with open jobs excluded and named as excluded.
+
+**The jobs tab carries its own freshness line.** An ask is mirrored the moment a
+run ends; a job is updated in place and reaches this database only through the
+resync. One age above both would be quietly wrong about whichever was not
+written last.
+
+### Both twins
+These ledgers were created empty on 17 Sep 2026 with no history carried in, so
+**September holds a handful of rows and October is the first clean month**.
+Nothing on either page smooths that: a rate over two asks says it is over two
+asks, an empty month says it was not recorded rather than drawing a bar at
+nought, and the existing "recording starts" marker and the *"it was not quiet, it
+was not recorded"* line stand as they are.
+
+Five rules hold on every figure on both pages:
+
+1. **A percentage always carries its denominator.** "25 of 59", never "42%".
+2. **No duration is ever a mean.** p50 and p95 only, over the rows that carried
+   one, with how many did stated beside them. A mean hides the tail and the tail
+   is what people feel.
+3. **Every card states what it excludes**, in its footnote, in plain English.
+4. **Cohorts that matter are segmented** — by asking system and by lane. An
+   aggregate mixing an automated sweep with human Slack questions hides a
+   failure in either, in the direction that looks healthy.
+5. **Colour only genuine bad directions**: delivery below 100%, capped jobs above
+   nought, BHARAG degraded. Needs human, external-search rate and everything else
+   stay neutral.
+
+**Twin-to-twin handoffs** is one figure about the pair, so it has one route
+(`/api/twin-handoffs`) rather than a copy computed on each page, and it appears
+on the Home page as well as on both statistics tabs. It counts asks in either
+ledger where `Linked Twin Ask` is set or `Asked By System` names the other twin,
+plus an Ask ID appearing in a job's `Linked Asks`. **The fallbacks are stated in
+the footnote rather than hidden**: the front doors do not yet pass
+`Linked Twin Ask` through, so early rows leave it empty and this reads slightly
+high rather than silently low. **A direction is only asserted where the row says
+one** — `Asked By System` naming the other twin. A row carrying only
+`Linked Twin Ask` proves the two are linked and nothing about who asked whom, so
+it reads "linked" rather than an arrow this code picked.
 
 ### Clients
 One row per watched lane, **grouped under the client that owns it** by the

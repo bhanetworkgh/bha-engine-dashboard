@@ -946,6 +946,76 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_client_requests_lane ON engine_client_requests (lane_id)`,
     ],
   },
+
+  {
+    id: 15,
+    name: 'the twins get their own ask ledgers and a research job queue',
+    statements: [
+      /**
+       * North Star and Research Twin write to new Airtable ledgers as of
+       * 17 Sep 2026 — one row per ask in each, plus a research queue that is
+       * one row per *job* rather than one per attempt.
+       *
+       * These are new tables rather than a reshaping of `engine_ns_records` and
+       * `engine_rt_attempts`. Those two hold the legacy tables' rows, which are
+       * real history: the rule is that nothing drops a table, so they stay
+       * exactly where they are, unread, like the `records` read model and
+       * `registry_credentials` before them. Nothing in this code reads or
+       * writes them any more.
+       *
+       * `natural_id` is `Ask ID` / `Job ID`, which are unique per row in all
+       * three — unlike the queue this replaces, where `card_id` repeated across
+       * attempts and could not identify a row. `lane_id` is promoted because
+       * every page here groups by lane; `card_id` because a Research Twin ask
+       * and a job both name the card they are about.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_ns_asks (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         lane_id             text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_ns_asks_natural ON engine_ns_asks (natural_id)`,
+
+      `CREATE TABLE IF NOT EXISTS engine_rt_asks (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         lane_id             text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_rt_asks_natural ON engine_rt_asks (natural_id)`,
+
+      /**
+       * A job is updated in place — its status, attempts and finding all change
+       * as it is worked — so this table is written far more often than it is
+       * inserted into. That is the ordinary upsert path and needs nothing
+       * special; it is the reason the queue cannot be kept current by ask
+       * mirrors alone, which is why the resync sweeps this table too.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_rt_jobs (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         lane_id             text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_rt_jobs_natural ON engine_rt_jobs (natural_id)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

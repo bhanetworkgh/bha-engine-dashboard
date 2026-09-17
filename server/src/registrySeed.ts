@@ -309,10 +309,27 @@ export const AIRTABLE_BASES: SeedRow[] = [
     'digest_deliveries (tblNuMju8l1kL3Sd1) was added on 13 Sep 2026. A row is written when a digest is handed to North Star and updated when the Callback Receiver posts it; status missing means the delivery check found one that never arrived.'),
   B('appvLglfdCqOKqLpT', 'BHA Commercial Opportunities', 'Commercial cards.', null),
   B('app5ni3E8r7Lvxk22', 'BHA Build Patterns', 'Reusable build patterns.', null),
-  B('appud969Dw7H4tMwv', 'Research Queue', "Research Twin's attempt log — one row per attempt.", 'Its research_twin_research_jobs table holds one test row and is never read.'),
   B('appMNvZsFRb9isRRq', 'Bays Tools Router', 'Lane Backlog and Deep Think Log.', null),
-  B('appSoakKvs7MLkRnX', 'Priority Ledger', "Lane priority evidence North Star reads.", null),
-  B('appxkIgnLL1zBsXqD', 'Lane_status', 'Per-lane state North Star reads alongside the Priority Ledger.', null),
+  /**
+   * The twins' own ledgers (17 Sep 2026). Each twin finishes every run by
+   * writing its row here, mirroring it to this dashboard and ingesting it into
+   * BHARAG, so nothing finishes without being recorded.
+   */
+  B('appRvx4u9V9BYp646', 'BHA North Star Ledger', 'One row per question North Star is asked, and what it answered.',
+    'Created 17 Sep 2026 with no history carried in, so October 2026 is the first clean month. Mirrored to this dashboard at POST /api/engine/ns-asks.'),
+  B('appv39nQzmfC9VVkG', 'BHA Research Twin Ledger', 'One row per ask Research Twin receives, plus Research Jobs — the research queue, one row per job.',
+    'Created 17 Sep 2026, no history carried in. Asks mirror to POST /api/engine/rt-asks; a job is updated in place and reaches this dashboard through the Resync from Airtable button on the Research Twin page.'),
+  /**
+   * `[LEGACY]` in Airtable and nothing writes to them. They are listed rather
+   * than deleted because they still hold real history somebody may need to
+   * read, and because a base that silently vanished from the registry would
+   * look like a base that was never there.
+   */
+  B('appkCTjhH8PtYRFI7', '[LEGACY] NS Records', "North Star's old ask log, replaced by the North Star Ledger on 17 Sep 2026.", 'No writers. Read by nothing in this dashboard.'),
+  B('appud969Dw7H4tMwv', '[LEGACY] Research Queue', "Research Twin's old attempt log — one row per attempt — replaced by Research Jobs on 17 Sep 2026.", 'No writers. Read by nothing in this dashboard.'),
+  B('app4QnMJ2woiKlLc0', '[LEGACY] Research Queue Resolved Events', 'The outcome table that sat beside the old attempt log.', 'No writers. A job now carries its own outcome, so there is nothing for a second table to hold.'),
+  B('appSoakKvs7MLkRnX', '[LEGACY] Priority ledger', 'Lane priority evidence North Star used to read.', 'No writers. The claimed priority is on the ask itself now.'),
+  B('appxkIgnLL1zBsXqD', '[LEGACY] Lane_status', 'Per-lane state North Star read alongside the priority ledger.', 'No writers.'),
 ];
 
 /** People. Slack ids as supplied, cross-checked against the live workflows. */
