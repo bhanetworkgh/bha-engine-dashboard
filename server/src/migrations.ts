@@ -913,6 +913,39 @@ const MIGRATIONS: Migration[] = [
       `UPDATE registry_services SET billing_owner = 'BHA', updated_at = now() WHERE billing_owner IS NULL AND deleted_at IS NULL`,
     ],
   },
+  {
+    id: 14,
+    name: 'client requests are mirrored like every other record kind',
+    statements: [
+      /**
+       * `Client Requests` (`tblhu29KejAPQfSuy`) appeared in the client research
+       * base on 17 Sep 2026, for LOOP-1789590960971-EHF9.
+       *
+       * Same shape as every other mirror table: the record id is the key, the
+       * whole `fields` blob is stored, and nothing is renamed. There is no
+       * natural id — the table's own `Created` column is an Airtable
+       * autoNumber, which belongs to Airtable rather than to the engine, so it
+       * is not a key this database can rely on.
+       *
+       * `lane_id` is promoted out of the blob because a request names the lane
+       * it belongs to and the page groups on it, the same way client questions
+       * do.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_client_requests (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         lane_id             text,
+         table_id            text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_client_requests_lane ON engine_client_requests (lane_id)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

@@ -43,6 +43,7 @@ import type {
   BuildPatternDetail,
   ClientLane,
   ClientQuestion,
+  ClientRequest,
   CodexApproval,
   CodexEntry,
   CodexEntryDetail,
@@ -76,6 +77,7 @@ import type {
 } from '../../src/data/types';
 import {
   LAYER0_PENDING,
+  CLIENT_REQUESTS,
   CLIENTS_INDEX,
   SLACK_TO_BUILDER,
   CODEX_BASE,
@@ -100,6 +102,7 @@ import {
   loopTableById,
   mapClientLane,
   mapClientQuestion,
+  mapClientRequest,
   mapCodex,
   mapLayer0,
   mapLoop,
@@ -113,7 +116,7 @@ import {
 
 export type { RecordKind, RecordMetrics, Metric };
 
-export const KINDS: RecordKind[] = ['loops', 'codex', 'patterns', 'commercial', 'ns', 'rt', 'clients', 'client_questions'];
+export const KINDS: RecordKind[] = ['loops', 'codex', 'patterns', 'commercial', 'ns', 'rt', 'clients', 'client_questions', 'client_requests'];
 
 /** Status vocabularies, in the dashboard's words. Loops and patterns and cards are the table's own selects lower-cased or verbatim. */
 export const STATUSES: Record<RecordKind, readonly string[]> = {
@@ -131,6 +134,8 @@ export const STATUSES: Record<RecordKind, readonly string[]> = {
   rt: [],
   clients: [],
   client_questions: [],
+  /** Airtable owns the status here; nothing in this dashboard writes one. */
+  client_requests: [],
 };
 
 /**
@@ -250,6 +255,7 @@ const MIRROR: Record<RecordKind, { table: string; base: string; at_table: string
   rt: { table: 'engine_rt_attempts', base: RESEARCH_QUEUE.base, at_table: RESEARCH_QUEUE.table },
   clients: { table: 'engine_client_lanes', base: CLIENTS_INDEX.base, at_table: CLIENTS_INDEX.table },
   client_questions: { table: 'engine_client_questions', base: CLIENTS_INDEX.base, at_table: null },
+  client_requests: { table: 'engine_client_requests', base: CLIENT_REQUESTS.base, at_table: CLIENT_REQUESTS.table },
 };
 
 /** Which kind is which in mirror.ts's vocabulary, for the write path. */
@@ -262,6 +268,7 @@ const MIRROR_KIND: Record<RecordKind, mirror.MirrorKind> = {
   rt: 'rt',
   clients: 'client_lanes',
   client_questions: 'client_questions',
+  client_requests: 'client_requests',
 };
 
 const HAS_BUILDER = new Set<RecordKind>(['loops', 'codex']);
@@ -329,7 +336,8 @@ type Mapped =
   | { kind: 'ns'; obj: NsRecord }
   | { kind: 'rt'; obj: RtAttempt }
   | { kind: 'clients'; obj: ClientLane }
-  | { kind: 'client_questions'; obj: ClientQuestion };
+  | { kind: 'client_questions'; obj: ClientQuestion }
+  | { kind: 'client_requests'; obj: ClientRequest };
 
 /**
  * What a mapper needs that is not on the record itself. Today that is one
@@ -368,6 +376,10 @@ export function mapRecord(kind: RecordKind, rec: AtRecord, table: string, lane?:
       // the per-lane table and the lane it belongs to, and the write path
       // records both. Nothing is hardcoded and nothing is inferred.
       return { kind, obj: mapClientQuestion(rec, lane ?? table, table) };
+    case 'client_requests':
+      // One shared table, and the row names its own lane and client, so there
+      // is nothing to be told from outside it.
+      return { kind, obj: mapClientRequest(rec) };
   }
 }
 
@@ -392,6 +404,10 @@ function statusOf(m: Mapped): string {
       return m.obj.run_state ?? 'unset';
     case 'client_questions':
       return m.obj.movement_tag ?? 'unset';
+    case 'client_requests':
+      // Airtable's own Status, which is the whole point of the table: a request
+      // stays Requested until every open check clears.
+      return m.obj.status ?? 'unset';
   }
 }
 function builderOf(m: Mapped): string | null {
@@ -415,6 +431,8 @@ function raisedOf(m: Mapped): string | null {
       return m.obj.last_run_at ? m.obj.last_run_at.slice(0, 10) : null;
     case 'client_questions':
       return m.obj.last_updated ? m.obj.last_updated.slice(0, 10) : null;
+    case 'client_requests':
+      return m.obj.date_requested ? m.obj.date_requested.slice(0, 10) : null;
   }
 }
 
@@ -813,6 +831,9 @@ export async function clientLanes(): Promise<ClientLane[]> {
 }
 export async function clientQuestions(): Promise<ClientQuestion[]> {
   return (await rows('client_questions')).map((r) => JSON.parse(r.json) as ClientQuestion);
+}
+export async function clientRequests(): Promise<ClientRequest[]> {
+  return (await rows('client_requests')).map((r) => JSON.parse(r.json) as ClientRequest);
 }
 
 export async function loopsByOwner(): Promise<OwnerTotals[]> {
@@ -1801,7 +1822,16 @@ function firstSources(kind: ResyncKind): ResyncSource[] {
    */
   if (kind === 'ns') return [{ base: NORTH_STAR.base, table: NORTH_STAR.table, label: NORTH_STAR.label, kind: 'ns' }];
   if (kind === 'rt') return [{ base: RESEARCH_QUEUE.base, table: RESEARCH_QUEUE.table, label: RESEARCH_QUEUE.label, kind: 'rt' }];
-  return [{ base: CLIENTS_INDEX.base, table: CLIENTS_INDEX.table, label: CLIENTS_INDEX.label, kind: 'client_lanes' }];
+  /**
+   * Clients sweeps three things: the index, every questions table the index
+   * names, and the shared **Client Requests** table (2026-09-17). The requests
+   * table is fixed rather than learned — it is one table for every client, not
+   * one per lane — so it is queued up front beside the index.
+   */
+  return [
+    { base: CLIENTS_INDEX.base, table: CLIENTS_INDEX.table, label: CLIENTS_INDEX.label, kind: 'client_lanes' },
+    { base: CLIENT_REQUESTS.base, table: CLIENT_REQUESTS.table, label: CLIENT_REQUESTS.label, kind: 'client_requests' },
+  ];
 }
 
 export async function resync(kind: ResyncKind, actor = 'dashboard'): Promise<Resync> {
@@ -1875,7 +1905,9 @@ export async function resync(kind: ResyncKind, actor = 'dashboard'): Promise<Res
             created_time: rec.createdTime ?? null,
             fields: rec.fields ?? {},
             table_id: source.kind === 'client_questions' ? source.table : null,
-            lane_id: source.lane_id ?? null,
+            // A request names its own lane in the row; a question is told which
+            // lane by the table it came out of.
+            lane_id: source.kind === 'client_requests' ? (typeof rec.fields?.['Lane ID'] === 'string' ? (rec.fields['Lane ID'] as string) : null) : (source.lane_id ?? null),
           },
           'airtable',
         );
@@ -2047,6 +2079,7 @@ const RECORD_KIND: Record<mirror.MirrorKind, RecordKind | null> = {
   rt: 'rt',
   client_lanes: 'clients',
   client_questions: 'client_questions',
+  client_requests: 'client_requests',
   digests: null,
 };
 

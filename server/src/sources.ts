@@ -37,7 +37,7 @@ export function recordUrl(base: string, table: string, id: string): string {
 
 /** Airtable's record id, as a shape. A row the engine wrote before Airtable had one carries none. */
 const REC_ID = /^rec[A-Za-z0-9]{14}$/;
-import type { BuildPattern, BuildPatternDetail, ClientLane, ClientQuestion, CodexEntry, CodexEntryDetail, Layer0Hold, Loop, LoopLaneTag, LoopStatus, NsOutcome, NsRecord, NsSearch, Opportunity, ReadinessState, RecordKind, RtAttempt, Source } from '../../src/data/types';
+import type { BuildPattern, BuildPatternDetail, ClientLane, ClientQuestion, ClientRequest, CodexEntry, CodexEntryDetail, Layer0Hold, Loop, LoopLaneTag, LoopStatus, NsOutcome, NsRecord, NsSearch, Opportunity, ReadinessState, RecordKind, RtAttempt, Source } from '../../src/data/types';
 
 /** Jason Status as the submission tables define it, lower-cased. 'unset' is a row he has not touched. */
 export type CodexApproval = 'approved' | 'pending' | 'input added' | 'unset';
@@ -123,6 +123,8 @@ export function baseFor(kind: RecordKind): string {
     case 'clients':
     case 'client_questions':
       return CLIENTS_INDEX.base;
+    case 'client_requests':
+      return CLIENT_REQUESTS.base;
   }
 }
 
@@ -904,6 +906,56 @@ export function mapClientQuestion(rec: AtRecord, laneId: string, table: string):
  * already computed upstream and written to the row; this reads them, it does
  * not recompute what they mean.
  */
+/**
+ * Client Requests — one row per thing a client has asked for
+ * (`tblhu29KejAPQfSuy`, created 17 Sep 2026 for LOOP-1789590960971-EHF9).
+ *
+ * It lives in the client research base and keys on the same `Client ID` the
+ * index does, so a request sits under the client that made it. The weekly
+ * Research Loop does not read it; nothing here writes to it.
+ */
+export const CLIENT_REQUESTS = { base: CLIENTS_INDEX.base, table: 'tblhu29KejAPQfSuy', label: 'Client Requests' };
+
+/**
+ * Read from the live base on 17 Sep 2026, not assumed.
+ *
+ * **The order of `REQUEST_STATUSES` is the pipeline's own order** and is what
+ * decides which end of it counts as settled: everything before `Confirmed` is
+ * still interest. `OPEN_REQUEST_STATUSES` names that literally rather than
+ * testing "not Delivered", because a status nobody planned for should read as
+ * open — the unsafe direction here is calling something a commitment.
+ */
+export const REQUEST_STATUSES = ['Requested', 'Under Review', 'Confirmed', 'Delivered', 'Declined'];
+export const REQUEST_CATEGORIES = ['Units', 'Kiosk', 'Idle Show', 'Signage', 'Other'];
+export const OPEN_CHECKS = ['Feasibility', 'Licensing', 'Food Safety', 'Pricing', 'Ownership'];
+
+/** Still interest rather than commitment. A status this list does not know is counted here. */
+export function requestIsOpen(status: string | null): boolean {
+  return status !== 'Confirmed' && status !== 'Delivered' && status !== 'Declined';
+}
+
+export function mapClientRequest(rec: AtRecord): ClientRequest {
+  const f = rec.fields;
+  return {
+    id: rec.id,
+    request: str(f.Request) ?? '(unnamed request)',
+    client_id: str(f['Client ID']),
+    lane_id: str(f['Lane ID']),
+    category: str(f.Category),
+    status: str(f.Status),
+    // A multipleSelects field arrives as an array of names. An empty one means
+    // nothing is outstanding, which is a different thing from a missing field
+    // and is why this is never null.
+    open_checks: Array.isArray(f['Open Checks']) ? (f['Open Checks'] as unknown[]).map((v) => String(v)).filter(Boolean) : [],
+    details: str(f.Details),
+    raised_by: str(f['Raised By']),
+    date_requested: iso(f['Date Requested']),
+    notes: str(f.Notes),
+    source: airtableSource(CLIENT_REQUESTS.base, CLIENT_REQUESTS.table, rec.id),
+    airtable: { base: CLIENT_REQUESTS.base, table: CLIENT_REQUESTS.table, record_id: rec.id, url: recordUrl(CLIENT_REQUESTS.base, CLIENT_REQUESTS.table, rec.id) },
+  };
+}
+
 export function questionNeedsHuman(q: ClientQuestion, lane: ClientLane | undefined): boolean {
   return q.research_stuck || q.run_count >= 3 || Boolean(lane?.quarantined);
 }

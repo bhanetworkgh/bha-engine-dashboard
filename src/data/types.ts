@@ -1209,6 +1209,38 @@ export interface ClientQuestion {
   airtable: AirtableRef;
 }
 
+/**
+ * One thing a client has asked for.
+ *
+ * A new table in the client research base (`Client Requests`,
+ * `tblhu29KejAPQfSuy`), created on 17 Sep 2026 for
+ * LOOP-1789590960971-EHF9. Its whole point is stated in its own description:
+ * **a request stays Requested or Under Review until every Open Check is
+ * cleared**, so that interest is never mistaken for a commitment. That is the
+ * one thing this dashboard has to render faithfully — a page that showed four
+ * requests and no open checks would be reporting four commitments.
+ *
+ * It is **not read by the weekly Research Loop**. It hangs off the same Client
+ * ID as the index, which is what lets it sit under the client that asked.
+ */
+export interface ClientRequest {
+  id: string;
+  /** Short name of what was asked for. */
+  request: string;
+  client_id: string | null;
+  lane_id: string | null;
+  category: string | null;
+  status: string | null;
+  /** What must be confirmed before this can move to Confirmed. Empty is "nothing outstanding". */
+  open_checks: string[];
+  details: string | null;
+  raised_by: string | null;
+  date_requested: string | null;
+  notes: string | null;
+  source: Source;
+  airtable: AirtableRef;
+}
+
 /** A lane with its questions counted. */
 export interface ClientLaneRow extends ClientLane {
   questions: number;
@@ -1239,13 +1271,25 @@ export interface ClientGroup {
   lanes: ClientLaneRow[];
   questions: number;
   needs_human: number;
+  /** What this client has asked for, newest first. */
+  requests: ClientRequest[];
+  /** Requests not yet Confirmed, Delivered or Declined — still interest, not commitment. */
+  open_requests: number;
 }
 
 export interface ClientsData {
   clients: ClientGroup[];
   lanes: ClientLaneRow[];
   questions: ClientQuestion[];
+  requests: ClientRequest[];
   freshness: Freshness;
+  /**
+   * How old the request rows are, separately from the lanes'. The two tabs read
+   * two different tables and a line saying "4 rows" above one while counting
+   * the other is exactly the kind of quietly-wrong figure this dashboard exists
+   * to remove.
+   */
+  requests_freshness: Freshness;
   /** Lanes whose index row names no questions table, so nothing could be read. */
   unreadable: { lane_id: string | null; name: string; reason: string }[];
 }
@@ -1258,7 +1302,7 @@ export interface ClientsData {
  * questions table and the lane it belongs to, and each question row carries
  * both.
  */
-export type RecordKind = 'loops' | 'codex' | 'patterns' | 'commercial' | 'ns' | 'rt' | 'clients' | 'client_questions';
+export type RecordKind = 'loops' | 'codex' | 'patterns' | 'commercial' | 'ns' | 'rt' | 'clients' | 'client_questions' | 'client_requests';
 
 export interface Metric {
   /** Null when nothing records what this needs; `note` then says what is missing. */

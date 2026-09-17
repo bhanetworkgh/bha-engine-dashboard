@@ -48,6 +48,7 @@ export type MirrorKind =
   | 'rt'
   | 'client_lanes'
   | 'client_questions'
+  | 'client_requests'
   | 'digests';
 
 interface KindSpec {
@@ -79,6 +80,13 @@ export const KINDS: Record<MirrorKind, KindSpec> = {
   rt: { table: 'engine_rt_attempts', label: 'Research Queue', naturalField: 'card_id', keyOnNatural: false, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
   client_lanes: { table: 'engine_client_lanes', label: 'Watched Clients index', naturalField: 'Lane ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
   client_questions: { table: 'engine_client_questions', label: 'Client questions', naturalField: null, keyOnNatural: false, perBuilder: false, perLaneTable: true, promote: ['lane_id'] },
+  /**
+   * One shared table, not one per lane, so `perLaneTable` is false and the
+   * sweep compares Airtable record ids across the whole of it. There is no
+   * natural id: `Created` is an autoNumber, which is Airtable's own counter and
+   * not something the engine writes, so the record id is the key.
+   */
+  client_requests: { table: 'engine_client_requests', label: 'Client Requests', naturalField: null, keyOnNatural: false, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
   digests: { table: 'engine_digest_deliveries', label: 'digest_deliveries', naturalField: 'session_id', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['builder_id', 'status', 'sent_at'] },
 };
 
