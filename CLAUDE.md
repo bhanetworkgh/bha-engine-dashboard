@@ -279,7 +279,8 @@ explicitly for this. Therefore:
   (`app5ni3E8r7Lvxk22 / tblaMXSMjmz30OvcU`) and Commercial
   (`appvLglfdCqOKqLpT / tblyXShZLOFT3jNMe`) are **one shared table each**, not
   one per builder, so each is a single sweep. Clients reads the watched-clients
-  index and then the table each index row names in `Table ID`; **a questions
+  index, the shared **Client Requests** table, and then the table each index row
+  names in `Table ID`; **a questions
   table no index row names is never read**, and a question row held against one
   is removed — but only once the index itself has been read, because without
   that guard the first refusal would empty the whole kind. Two things every
@@ -614,6 +615,28 @@ appear once, with the lanes nested beneath a heading row inside one table — on
 set of columns, so the lanes line up down the whole page. Clients are ordered by
 the **number** in the Client ID (2, 9, 12), not by its string, and the label is
 "Client 9" from that id rather than a lane's full name.
+
+**Requests are a third tab** (decision 2026-09-17, Destiny). `Client Requests`
+(`tblhu29KejAPQfSuy`) appeared in the same base on 17 Sep 2026, for
+LOOP-1789590960971-EHF9, and its own description states the rule this dashboard
+has to render faithfully: **a request stays Requested or Under Review until
+every Open Check is cleared**, so that interest is never mistaken for a
+commitment. The open checks are therefore a column rather than a detail behind a
+click, and a row with none outstanding says so in words — an empty cell would
+read either as "nothing needed" or as "nobody has filled this in". Nothing is a
+commitment until Airtable says **Confirmed**, and a status neither side knows
+counts as open: the unsafe direction here is calling something a commitment.
+
+Requests sit under the client whose `Client ID` they carry, the same grouping
+the lanes use. **A request whose client id no index row has still appears**, in
+a lane-less group of its own — it is a real thing a real client asked for, and
+dropping it because the index has not caught up would be this dashboard deciding
+a request does not exist. The tab has its own freshness line, because it reads a
+different table from the lanes and "4 rows" above one while counting the other
+is exactly the quietly-wrong figure this dashboard exists to remove. It is one
+shared table for every client, so the resync sweeps it as a fixed source beside
+the index rather than learning it from a row. Nothing here writes to it, and the
+weekly Research Loop does not read it.
 
 **The page renders what the `Index` table holds, never what tables exist in the
 base** (`appkSUSh9ijNjP2f8 / tblFJ1yuYcuanjPdn`, four rows). Question tables with

@@ -29,7 +29,7 @@ import type {
   TwinData,
 } from '../../src/data/types';
 import { MODEL_LABEL, askConfigured } from './ask';
-import { CODEX_CHOICES, CODEX_TABLES, loopTable, questionNeedsHuman } from './sources';
+import { CODEX_CHOICES, CODEX_TABLES, loopTable, questionNeedsHuman, requestIsOpen } from './sources';
 import * as store from './store';
 
 /** The builder's loops table id, for inbound payloads that name a builder rather than a table. */
@@ -359,6 +359,12 @@ function startOfToday(): number {
 export async function getClients(): Promise<ClientsData> {
   const lanes = await store.clientLanes();
   const questions = await store.clientQuestions();
+  /**
+   * What each client has asked for (2026-09-17). A new table in the same base,
+   * keyed on the same `Client ID` the index is, which is what lets a request
+   * sit under the client that made it rather than in a list of its own.
+   */
+  const requests = await store.clientRequests();
   const today = startOfToday();
 
   const rows: ClientLaneRow[] = lanes
@@ -404,11 +410,31 @@ export async function getClients(): Promise<ClientsData> {
     const id = r.client_id ?? `(no client id) ${r.lane_id ?? r.id}`;
     groups.set(id, [...(groups.get(id) ?? []), r]);
   }
+  /**
+   * A request carrying a client id no index row has gets a group of its own,
+   * with no lanes under it (2026-09-17). It is a real thing a real client asked
+   * for; dropping it because the index has not caught up would be this
+   * dashboard deciding a request does not exist, which is the opposite of what
+   * the table is for.
+   */
+  for (const r of requests) {
+    const id = r.client_id ?? '(no client id) requests';
+    if (!groups.has(id)) groups.set(id, []);
+  }
 
   return {
     clients: [...groups.entries()]
       .map(([client_id, ls]) => {
         const number = clientNumber(client_id);
+        /**
+         * A request belongs to the client whose id it carries. One whose id
+         * matches no index row still appears, in the lane-less group made for
+         * it above — a request nobody can see is worse than one under an odd
+         * heading.
+         */
+        const mine = requests
+          .filter((r) => (r.client_id ?? '') === client_id)
+          .sort((a, b) => (b.date_requested ?? '').localeCompare(a.date_requested ?? '') || a.request.localeCompare(b.request));
         return {
           client_id,
           label: number === null ? (ls.length === 1 ? ls[0].name : client_id) : `Client ${number}`,
@@ -416,6 +442,8 @@ export async function getClients(): Promise<ClientsData> {
           lanes: ls,
           questions: ls.reduce((n, l) => n + l.questions, 0),
           needs_human: ls.reduce((n, l) => n + l.needs_human, 0),
+          requests: mine,
+          open_requests: mine.filter((r) => requestIsOpen(r.status)).length,
         };
       })
       // Numerically, so the page reads Client 2, Client 9, Client 12 — and not
@@ -424,7 +452,9 @@ export async function getClients(): Promise<ClientsData> {
       .sort((a, b) => (a.number ?? Number.MAX_SAFE_INTEGER) - (b.number ?? Number.MAX_SAFE_INTEGER) || a.label.localeCompare(b.label)),
     lanes: rows,
     questions,
+    requests,
     freshness: await store.freshness('clients'),
+    requests_freshness: await store.freshness('client_requests'),
     unreadable: lanes
       .filter((l) => !l.questions_table)
       .map((l) => ({

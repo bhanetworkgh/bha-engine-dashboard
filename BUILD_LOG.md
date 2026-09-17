@@ -5877,3 +5877,63 @@ Verified:   Rendered grids read 9 cards in 3 columns on North Star and 8 in 3 on
             characters plus the last-ask note. Full sweep of all sixteen pages:
             no sidebar scroll, no body sideways scroll, no table sideways
             scroll, no page errors.
+
+## 2026-09-17 13:05 — The Clients page reads Client Requests
+Intent:     Destiny: "update the clients page so it reads the new data in the
+            client research base on Airtable."
+Files:      server/src/sources.ts, server/src/mirror.ts,
+            server/src/migrations.ts, server/src/store.ts, server/src/engine.ts,
+            src/data/types.ts, src/screens/Clients.tsx, CLAUDE.md
+Problem:    Not a fault — a table that did not exist yesterday. Read the live
+            base rather than guessing what had changed: `Client Requests`
+            (`tblhu29KejAPQfSuy`), created 17 Sep 2026 for
+            LOOP-1789590960971-EHF9, four rows, all Client 2's CRE vFarm + Kiosk
+            lane. Its own description carries the rule: "Tracks request status so
+            interest is never mistaken for a commitment: a request stays
+            Requested/Under Review until every Open Check is cleared. Not read by
+            the weekly Research Loop."
+            The second lane on that client — Client2_VFarmKiosk_Questions, added
+            to the index on 10 Sep — already flowed through, because the page
+            reads each lane's table off the index row's `Table ID` and has since
+            that map was removed from the pipeline.
+Fix:        A mirror kind and a table like every other: migration 14 creates
+            `engine_client_requests`, `mapClientRequest` reads Airtable's own
+            field names, and the select vocabularies (`REQUEST_STATUSES`,
+            `REQUEST_CATEGORIES`, `OPEN_CHECKS`) were read off the live schema on
+            17 Sep, not assumed. `Open Checks` is a multipleSelects, so it maps to
+            a string array and an empty one means nothing outstanding — which is
+            a different fact from a missing field, and why it is never null.
+            The clients resync sweeps it as a fixed source beside the index: it
+            is one shared table for every client, not one per lane, so unlike a
+            questions table it is queued up front rather than learned from a row.
+            `lane_id` is promoted off the row itself, because a request names its
+            own lane where a question is told which lane by the table it came out
+            of.
+            A third tab on the page, grouped under the client that asked, with
+            the open checks as their own column and a line above the table
+            stating the rule in Airtable's words. Four figures: requests, not yet
+            a commitment, open checks owed, clients asking.
+Decision:   **A status this code does not know counts as open.** `requestIsOpen`
+            names Confirmed, Delivered and Declined literally and treats
+            everything else as still interest, on the server and on the page in
+            the same words. The unsafe direction is the other one: a status
+            nobody planned for reading as a commitment.
+            **A request whose client id matches no index row still appears**, in
+            a lane-less group of its own, rather than being dropped for arriving
+            before the index caught up.
+            The Requests tab gets its own freshness line. It reads a different
+            table from the lanes, and the two happen to hold four rows each
+            today, which is exactly the coincidence that would hide the bug.
+Verified:   Migration 14 applied on boot. Seeded the rig with the four real
+            request rows and the four real index rows read from the live base, so
+            the page was checked against what it will actually see:
+            /api/clients returns 4 lanes and 4 requests, grouped Client 2
+            (2 lanes, 4 requests, 4 open) / Client 9 / Client 12, ordered 2, 9,
+            12. The tab reads Requests 4 · Not yet a commitment 4 · Open checks
+            14 · Clients asking 1, the filters count 4 / 4 / 4, and the table
+            does not scroll sideways (1496/1496). Full sweep of all sixteen
+            pages: no page errors, no sideways scroll, no sidebar scroll.
+Not tested: the resync against the live table, because the rig holds no
+            AIRTABLE_TOKEN. The route refuses cleanly without one; the first real
+            run needs the token to have read on this base, which it already does
+            for the index and the questions tables.

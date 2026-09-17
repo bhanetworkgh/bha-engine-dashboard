@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { Fragment, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
-import { getClients, resyncRecords, type ClientGroup, type ClientLaneRow, type ClientQuestion, type ClientsData } from '../data';
+import { getClients, resyncRecords, type ClientGroup, type ClientLaneRow, type ClientQuestion, type ClientRequest, type ClientsData } from '../data';
 import {
   CountCell,
   EmptyPanel,
@@ -19,6 +19,8 @@ import {
   Segmented,
   SourceLink,
   StatStrip,
+  TableFrame,
+  Th,
   RowsLine,
   Toast,
   relativeTime,
@@ -327,6 +329,125 @@ function LaneTable({ clients, lanes, onOpen }: { clients: ClientGroup[]; lanes: 
 /* ------------------------------------------------------------------ page */
 
 type Filter = 'all' | 'needs-human' | 'overdue';
+type RequestFilter = 'all' | 'open' | 'checks';
+
+/**
+ * Still interest rather than commitment — the same rule the server applies, in
+ * the same words, because the page's own filter and the server's `open_requests`
+ * count have to agree. A status neither side knows reads as open: the unsafe
+ * direction here is calling something a commitment.
+ */
+function isOpenRequest(status: string | null): boolean {
+  return status !== 'Confirmed' && status !== 'Delivered' && status !== 'Declined';
+}
+
+/**
+ * What each client has asked for (2026-09-17).
+ *
+ * A new table in the client research base, and the one thing it exists to make
+ * impossible is reading interest as commitment: **a request stays Requested or
+ * Under Review until every Open Check is cleared.** So the open checks are a
+ * column of their own rather than a detail behind a click, and a row with none
+ * outstanding says so in those words rather than showing an empty cell that
+ * could be read as "nothing needed" or as "nobody has filled this in".
+ *
+ * Grouped under the client that asked, the same way the lanes are, because that
+ * is what the page's shape already says: one heading per client.
+ */
+function statusTone(status: string | null): 'accent' | 'degraded' | 'default' {
+  if (status === 'Confirmed' || status === 'Delivered') return 'accent';
+  // Declined is settled, so it is quiet rather than amber. Requested and Under
+  // Review are the two that are not yet a commitment, and those are the ones
+  // worth a colour.
+  if (status === 'Declined') return 'default';
+  return 'degraded';
+}
+
+function RequestTable({ clients, requests }: { clients: ClientGroup[]; requests: (c: ClientGroup) => ClientRequest[] }) {
+  const shown = clients.filter((c) => requests(c).length > 0);
+  return (
+    <TableFrame grow={false} tableClass="rows-2" label="Client requests">
+      <thead>
+        <tr>
+          <Th className="w-[34%]">request</Th>
+          <Th>category</Th>
+          <Th>lane</Th>
+          <Th>status</Th>
+          <Th className="w-[24%]">open checks</Th>
+          <Th>requested</Th>
+          <Th>source</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {shown.length === 0 && (
+          <tr className="row-empty">
+            <td colSpan={7} className="td td-empty px-6 text-center align-middle text-[13px] text-dim">
+              No client has asked for anything that matches.
+            </td>
+          </tr>
+        )}
+        {shown.map((c) => (
+          <Fragment key={c.client_id}>
+            <tr className="row-group">
+              <td colSpan={7} className="td">
+                <span className="text-[13px] font-medium text-ink">{c.label}</span>
+                <span className="ml-2 text-[11.5px] text-faint">
+                  {requests(c).length} {requests(c).length === 1 ? 'request' : 'requests'}
+                  {c.open_requests > 0 && <span className="text-degraded"> · {c.open_requests} not yet a commitment</span>}
+                </span>
+              </td>
+            </tr>
+            {requests(c).map((r) => (
+              <tr key={r.id}>
+                <td className="td card-title" style={{ maxWidth: '44ch' }}>
+                  <TwoLineRequest r={r} />
+                </td>
+                <td className="td card-meta text-dim">{r.category ?? <span className="text-faint">—</span>}</td>
+                <td className="td td-clip text-faint" style={{ maxWidth: '22ch' }} title={r.lane_id ?? undefined}>
+                  {r.lane_id ?? '—'}
+                </td>
+                <td className="td card-meta">
+                  <Pill tone={statusTone(r.status)}>{(r.status ?? 'no status').toLowerCase()}</Pill>
+                </td>
+                <td className="td card-meta" style={{ maxWidth: '30ch' }}>
+                  {r.open_checks.length === 0 ? (
+                    <span className="text-[11.5px] text-ok">nothing outstanding</span>
+                  ) : (
+                    <span className="flex flex-wrap gap-1">
+                      {r.open_checks.map((k) => (
+                        <span key={k} className="tag">
+                          {k}
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                </td>
+                <td className="td tabular whitespace-nowrap text-faint">{r.date_requested?.slice(0, 10) ?? <span className="text-faint">no date</span>}</td>
+                <td className="td">
+                  <SourceLink source={r.source} />
+                </td>
+              </tr>
+            ))}
+          </Fragment>
+        ))}
+      </tbody>
+    </TableFrame>
+  );
+}
+
+/** The request, with the client's own words under it where there are any. */
+function TwoLineRequest({ r }: { r: ClientRequest }) {
+  return (
+    <div className="min-w-0">
+      <div className="truncate text-[13px] text-ink" title={r.request}>
+        {r.request}
+      </div>
+      <div className="truncate text-[11.5px] text-faint" title={r.details ?? r.notes ?? ''}>
+        {r.details ?? r.notes ?? 'Nothing further was written down.'}
+      </div>
+    </div>
+  );
+}
 
 /**
  * Two views of the same records (2026-09-16, Destiny), tabbed at the top the
@@ -337,13 +458,14 @@ type Filter = 'all' | 'needs-human' | 'overdue';
  * month-against-month figures rather than rows. Everything month-shaped lives
  * there: the chart, the month in view and the export.
  */
-const VIEWS = ['Clients', 'Statistics'] as const;
+const VIEWS = ['Clients', 'Requests', 'Statistics'] as const;
 type View = (typeof VIEWS)[number];
 
 export default function Clients() {
   const { status, data: loaded, error } = useData(getClients, []);
   const [live, setLive] = useState<ClientsData | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
+  const [requestFilter, setRequestFilter] = useState<RequestFilter>('all');
   // The month the statistics tab is looking at. The list is not filtered by
   // it: the month card came off this tab, and a list silently narrowed with
   // nothing on screen saying so is worse than no filter at all.
@@ -370,6 +492,20 @@ export default function Clients() {
     [lanes, filter, q],
   );
   const shown = useMemo(() => new Set(rows.map((l) => l.id)), [rows]);
+
+  const requests = d?.requests ?? [];
+  const requestRows = useMemo(
+    () =>
+      requests
+        .filter((r) => (requestFilter === 'all' ? true : requestFilter === 'open' ? isOpenRequest(r.status) : r.open_checks.length > 0))
+        .filter(
+          (r) =>
+            !q.trim() ||
+            [r.request, r.details, r.notes, r.lane_id, r.client_id, r.category, r.status, ...r.open_checks].some((v) => v && v.toLowerCase().includes(q.trim().toLowerCase())),
+        ),
+    [requests, requestFilter, q],
+  );
+  const requestShown = useMemo(() => new Set(requestRows.map((r) => r.id)), [requestRows]);
   /*
    * The export moved to the statistics tab and carries every question in the
    * month in view, not the lanes this tab happens to be filtered to: the
@@ -386,6 +522,10 @@ export default function Clients() {
     questions: lanes.reduce((n, l) => n + l.questions, 0),
     overdue: lanes.filter((l) => l.overdue).length,
     warming: lanes.filter((l) => l.warming_up).length,
+    requests: requests.length,
+    openRequests: requests.filter((r) => isOpenRequest(r.status)).length,
+    openChecks: requests.reduce((n, r) => n + r.open_checks.length, 0),
+    asking: d.clients.filter((c) => c.requests.length > 0).length,
   };
 
   return (
@@ -401,7 +541,61 @@ export default function Clients() {
         Everything month-shaped lives on the statistics tab: the chart, the
         month in view and the export. This tab is the list and its filters.
       */}
-      {view === 'Statistics' ? (
+      {view === 'Requests' ? (
+        <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+          <div className="shrink-0 px-6 pb-3 md:px-8">
+            {/* The requests table's own age, not the index's. */}
+            <RowsLine freshness={d.requests_freshness} writes={false} />
+          </div>
+
+          <StatStrip cols={4}>
+            <CountCell label="Requests" value={totals.requests} hint="rows in the Client Requests table" hintMinLines={2} />
+            <CountCell
+              label="Not yet a commitment"
+              value={totals.openRequests}
+              tone={totals.openRequests ? 'degraded' : 'dim'}
+              hint="still Requested or Under Review, so nothing is promised"
+              hintMinLines={2}
+            />
+            <CountCell label="Open checks" value={totals.openChecks} tone={totals.openChecks ? 'degraded' : 'dim'} hint="confirmations owed across every request" hintMinLines={2} />
+            <CountCell label="Clients asking" value={totals.asking} hint="clients with at least one request" hintMinLines={2} />
+          </StatStrip>
+
+          <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Segmented<RequestFilter>
+                ariaLabel="Filter requests"
+                value={requestFilter}
+                onChange={setRequestFilter}
+                options={[
+                  { value: 'all', label: 'All requests', count: totals.requests },
+                  { value: 'open', label: 'Not yet a commitment', count: totals.openRequests },
+                  { value: 'checks', label: 'Has open checks', count: (d.requests ?? []).filter((r) => r.open_checks.length > 0).length },
+                ]}
+              />
+              <div className="flex flex-1 items-center justify-end gap-3">
+                <SearchBox value={q} onChange={setQ} placeholder="Search requests, details and checks" />
+              </div>
+            </div>
+            {/*
+              Said once, at the top of the table rather than on every row: this
+              is what the Client Requests table is for, in its own words.
+            */}
+            <p className="max-w-[92ch] text-[11.5px] leading-relaxed text-faint">
+              A request stays <span className="text-ink">Requested</span> or <span className="text-ink">Under Review</span> until every open check is cleared. Nothing here is a
+              commitment until Airtable says <span className="text-ink">Confirmed</span>, and this dashboard never writes to that table.
+            </p>
+          </div>
+
+          {(d.requests ?? []).length === 0 ? (
+            <EmptyState>
+              No client request is held. The Client Requests table was added to the client research base on 17 Sept 2026; if it holds rows and this does not, press resync.
+            </EmptyState>
+          ) : (
+            <RequestTable clients={d.clients} requests={(c) => c.requests.filter((r) => requestShown.has(r.id))} />
+          )}
+        </div>
+      ) : view === 'Statistics' ? (
         <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-4">
           <RecordStatistics<ClientQuestion>
             kind="clients"
