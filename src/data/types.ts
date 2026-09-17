@@ -385,7 +385,15 @@ export interface IncidentAction {
   at: string;
 }
 
-export interface Incident {
+/**
+ * A phase 1 incident fixture. **Not the ledger incident** — that is `Incident`,
+ * further down, and it is read from BHARAG.
+ *
+ * Renamed on 2026-09-17 when the real one arrived and needed the name. These
+ * rows are read by exactly one thing: the Overview's two 24-hour columns, which
+ * have been fixtures since 14 Sep and say so.
+ */
+export interface FixtureIncident {
   id: string;
   opened_at: string;
   summary: string;
@@ -1365,6 +1373,217 @@ export interface RtJobMetrics {
   opened_by: Slice[];
   opened_by_note: string;
   resolution_rate: Share;
+}
+
+/* ----------------------------------------------------------- engine health */
+
+/**
+ * Engine Health: is the engine working right now, and if not, what broke, did
+ * it fix itself, and does anyone need to do something?
+ *
+ * Built 2026-09-17 from three sources that were already there and had never
+ * been read: the BHARAG incident ledger (one call per lane, each with its own
+ * credential), `error_counts` and `retry_attempts` in Airtable.
+ *
+ * **No incidents and no reporting look identical from the outside**, which is
+ * the one thing this page must never blur. Every figure here distinguishes
+ * them: a lane whose read succeeded and returned nothing says so, and a lane
+ * with no credential or a refused read says *that*, and neither is drawn as
+ * health. `lanes` below carries that per lane, on every payload.
+ */
+
+/** One lane's own read, and whether it happened at all. */
+export interface LaneRead {
+  lane: string;
+  label: string;
+  /** Whether this server holds a credential for this lane. */
+  configured: boolean;
+  /** Whether the last resync actually read it. */
+  read: boolean;
+  /** Why not, in the ledger's own words. */
+  reason: string | null;
+  /** When it was last read successfully. */
+  at: string | null;
+  open: number;
+}
+
+/**
+ * One incident from the ledger.
+ *
+ * **`payload.retry_policy.retries_attempted` is not on this type.** The healer
+ * does not maintain it — attempts live in `retry_attempts` — so the number on
+ * the incident is stale the moment a retry happens. It stays inside the stored
+ * payload, because nothing drops a field the engine owns, and it has no way
+ * onto the page.
+ */
+export interface Incident {
+  id: string;
+  entity_id: string;
+  type: string | null;
+  subsystem: string | null;
+  lane: string | null;
+  lane_label: string;
+  severity: string;
+  /** Whether the severity is the ledger's own or derived from the class. */
+  severity_from: 'the incident' | 'the error class';
+  summary: string | null;
+  resolution_status: string | null;
+  workflow: string | null;
+  failed_node: string | null;
+  /** Normalised to one spelling; a class this code does not know keeps its name. */
+  error_class: string;
+  error_class_known: boolean;
+  retryable: boolean;
+  retryable_from: 'the incident' | 'the error class';
+  error_message: string | null;
+  execution_id: string | null;
+  /** The execution's own page, where this database holds that execution. */
+  execution_url: string | null;
+  impact_tags: string[];
+  max_retries: number | null;
+  retry_interval: string | null;
+  /** Plain English, written for a person to act on. Never truncated on the page. */
+  self_healing_strategy: string | null;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  /** Set where the handler overrode its own first classification. */
+  reclassified_from: string | null;
+  first_seen_at: string | null;
+  /**
+   * Whether the lane's open query still returns it. **Never inferred from
+   * age**: it goes false only when a read that succeeded did not include it.
+   */
+  open_now: boolean;
+  last_seen_open: string | null;
+  hours_to_resolve: number | null;
+}
+
+export interface ErrorCount {
+  id: string;
+  signature: string;
+  workflow: string | null;
+  failed_node: string | null;
+  error_class: string;
+  /**
+   * Occurrences inside the current six-hour window. **A countdown, not a
+   * lifetime total** — it resets to nought once an alert fires — so nought
+   * means "recently alerted", not "never happened". Null is not recorded.
+   */
+  error_count: number | null;
+  last_seen: string | null;
+  last_alerted_at: string | null;
+  incident_id: string | null;
+  source: Source;
+  airtable: AirtableRef;
+}
+
+export interface RetryAttempt {
+  id: string;
+  incident_id: string;
+  lane: string | null;
+  lane_label: string;
+  workflow: string | null;
+  failed_node: string | null;
+  error_class: string;
+  execution_id: string | null;
+  /** 1–3. The cap is the circuit breaker. */
+  attempts: number | null;
+  first_attempt_at: string | null;
+  last_attempt_at: string | null;
+  /** Retrying · Recovered · Exhausted. Retrying is genuinely undecided. */
+  status: string;
+  retry_execution_id: string | null;
+  triggered_by: string | null;
+  /** The last attempt's outcome in plain English. Shown in full. */
+  last_result: string | null;
+  can_retry: boolean;
+  /** Why the button is disabled, where it is. */
+  blocked_reason: string | null;
+  source: Source;
+  airtable: AirtableRef;
+}
+
+/** A week of a stacked column, keyed by lane or by class. */
+export interface HealthWeek {
+  week: string;
+  label: string;
+  total: number;
+  counts: Record<string, number>;
+}
+
+/** One workflow's open incidents, grouped by the node that actually failed. */
+export interface WorkflowFaults {
+  workflow: string;
+  open: number;
+  nodes: { node: string; open: number; incidents: Incident[] }[];
+}
+
+export interface HealthData {
+  incidents: Incident[];
+  error_counts: ErrorCount[];
+  retries: RetryAttempt[];
+  lanes: LaneRead[];
+  freshness: Freshness;
+  retries_freshness: Freshness;
+  /** Whether the healer webhook is configured, so the button can say why not. */
+  heal_configured: boolean;
+}
+
+export interface HealthMetrics {
+  kind: 'health';
+  computed_at: string;
+  /** Null on All systems. */
+  lane: string | null;
+  scope: { incidents: number; open: number; retries: number };
+  lanes: LaneRead[];
+  open_incidents: { n: number; by_lane: Slice[]; note: string };
+  healed: Share;
+  needing_person: { n: number; exhausted: number; non_retryable: number; note: string };
+  most_recent: { at: string | null; entity_id: string | null; summary: string | null; note: string };
+  retries_24h: { n: number; recovered: number; retrying: number; exhausted: number; note: string };
+  per_week_lane: HealthWeek[];
+  per_week_class: HealthWeek[];
+  week_note: string;
+  by_lane: { key: string; label: string; open: number; retryable: number; note: string }[];
+  by_lane_note: string;
+  by_class: { key: string; label: string; n: number; retryable: boolean; known: boolean; what: string | null }[];
+  class_note: string;
+  by_severity: Slice[];
+  severity_note: string;
+  by_subsystem: Slice[];
+  subsystem_note: string;
+  top_faults: ErrorCount[];
+  faults_note: string;
+  time_to_resolve: Percentiles;
+  reclassified: { n: number; of: number; pairs: { from: string; to: string; n: number }[]; note: string };
+  /** Per-lane only: the failing node is the useful unit, not the workflow. */
+  workflows: WorkflowFaults[];
+  advice: Incident[];
+  advice_note: string;
+}
+
+export interface RetryMetrics {
+  kind: 'retries';
+  computed_at: string;
+  scope: { rows: number };
+  recovery_rate: Share;
+  retrying: number;
+  exhausted: number;
+  attempts_mix: Slice[];
+  attempts_note: string;
+  triggered_by: Slice[];
+  triggered_note: string;
+  by_class: Slice[];
+  class_note: string;
+  exhausted_note: string;
+  retrying_note: string;
+}
+
+/** What a manual retry did. The same path an automatic one takes. */
+export interface RetryResult {
+  ok: boolean;
+  incident_id: string;
+  message: string;
 }
 
 /* --------------------------------------------------------------- clients */

@@ -1016,6 +1016,81 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_rt_jobs_natural ON engine_rt_jobs (natural_id)`,
     ],
   },
+
+  {
+    id: 16,
+    name: 'engine health: the incident ledger, its occurrence counts and its retries',
+    statements: [
+      /**
+       * Engine Health's three tables (2026-09-17).
+       *
+       * `engine_incidents` is the odd one: its rows come from **BHARAG**, not
+       * Airtable, so there is no `airtable_record_id` to key on and
+       * `natural_id` holds the ledger's own `entity_id`. It keeps the mirror
+       * shape anyway — `fields` stored whole, names verbatim — because that is
+       * the one way a row gets in, and a second shape would drift from it.
+       *
+       * Two columns beyond the mirror standard, and they are the sweep's rather
+       * than the payload's:
+       *
+       *   `open_now`        whether the lane's open query still returns it.
+       *   `last_seen_open`  when it was last in that answer.
+       *
+       * They exist because **the ledger is read with `status=open`**, so an
+       * incident that has been closed simply stops appearing. Deleting those
+       * would throw away every resolved incident — which is exactly the history
+       * the time-to-resolve figure is computed from. So nothing is deleted:
+       * a row the open read no longer returns is marked closed-since, and only
+       * ever by a read that actually succeeded.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_incidents (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         lane_id             text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL,
+         open_now            boolean NOT NULL DEFAULT true,
+         last_seen_open      text
+       )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_incidents_entity ON engine_incidents (natural_id)`,
+      `CREATE INDEX IF NOT EXISTS engine_incidents_open ON engine_incidents (open_now, lane_id)`,
+
+      /** One row per fault signature, shared by all three lanes. */
+      `CREATE TABLE IF NOT EXISTS engine_error_counts (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_error_counts_natural ON engine_error_counts (natural_id)`,
+
+      /**
+       * One row per incident the healer has touched. `natural_id` is the
+       * incident id, which is unique in this table by the healer's own
+       * contract — it updates the row rather than adding one per attempt.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_retry_attempts (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         lane_id             text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_retry_attempts_natural ON engine_retry_attempts (natural_id)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

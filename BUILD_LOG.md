@@ -6096,3 +6096,146 @@ Not tested: the resyncs against the live Airtable bases, because the rig holds n
             Also untested with real rows: both ledgers are empty today, by
             design, so every figure was exercised against rows posted through the
             live ingest endpoints rather than against production data.
+
+## 2026-09-17 22:10 — Engine health, built from scratch
+Intent:     Build the page that says whether the engine is working right now —
+            what broke, whether it healed itself, and what is waiting on a
+            person. Nothing existed: the route served a single "coming soon"
+            card, and the three sources it needed had all been written for days
+            and never read.
+Files:      server/src/bharag.ts (new), server/src/health.ts (new),
+            server/src/sources.ts, mirror.ts, migrations.ts, store.ts,
+            engine.ts, index.ts
+            src/data/types.ts, src/data/index.ts
+            src/screens/EngineHealth/{index,LaneView,Retries,parts}.tsx
+            src/screens/Overview.tsx (its tile is real now)
+            CLAUDE.md, README.md, .env.example, render.yaml
+
+Decision:   **The page is built around one distinction: no incidents and no
+            reporting look identical from the outside, and only one of them is
+            good news.** Each lane needs its own BHARAG credential, so an
+            unkeyed or refused lane is a real and common state rather than an
+            edge case. Three sentences, never one: a lane with no key was never
+            asked; a lane that refused was asked and said no; a lane that
+            answered with nothing is the only one that is health. Every tab
+            leads with which lanes answered and every figure over an unread lane
+            carries that in its own note.
+
+Problem:    Rendered the page and the "By lane" card drew **a full-width amber
+            bar for Research Twin — a lane with no credential that had never
+            been read**. The bar is scaled to the largest lane, so whatever
+            count happened to be held for an unread lane read as the worst lane
+            on the page. Precisely the failure the whole page exists to prevent,
+            in the one card meant to make it visible.
+Fix:        A lane that was not read gets no bar at all — its row is the reason
+            it was not read. A bar is a measured value and there was no
+            measurement.
+
+Problem:    `first_seen_at` preferred the mirror row's insert time over the
+            incident's own `created_at`, so every incident read in one pass
+            landed in the week somebody pressed Resync. The weekly chart drew
+            one tall bar on the day of the import and time-to-resolve was
+            measured from the wrong end.
+Fix:        The ledger's `created_at` wins; the insert time is the fallback for
+            a row carrying no date of its own. Caught by reading the table on
+            screen and noticing a 14 Sep incident dated today.
+
+Problem:    **Markdown was rendering literally on screen** — `**like this**` and
+            backticked field names — across Engine health *and* both twins'
+            pages, which have been live since this morning. The notes are
+            written on the server and drawn as plain text; the emphasis was
+            never going to render.
+Fix:        Stripped from every user-visible string in health.ts, store.ts and
+            stats.ts, leaving the comments alone. 28 lines. Mine from this
+            morning as well as today's.
+
+Problem:    "Needing a person" summed exhausted retries and non-retryable open
+            incidents while its own footnote said an incident in both is counted
+            once. The footnote was the lie.
+Fix:        A union on the incident id, which is what the sentence claims.
+
+Decision:   **`retries_attempted` from the incident payload is displayed
+            nowhere**, as asked. The healer does not maintain it — attempts live
+            in `retry_attempts` — so it is stale the moment a retry happens. It
+            stays inside the stored blob, because nothing drops a field the
+            engine owns, and it has no way onto the page or onto the type.
+
+Decision:   **Nothing deletes an incident.** The ledger is read with
+            `status=open`, so a closed incident stops appearing — and a sweep
+            that deleted what it no longer saw would throw away exactly the
+            history time-to-resolve is computed from. A row a *successful* read
+            no longer returns is marked closed-since; a lane that refused
+            touches nothing. The two Airtable tables are read whole and swept
+            normally, because for them absence really is deletion.
+
+Problem:    The sources disagree about how to spell an error class:
+            `error_counts` holds `schema_validation` and `billing_quota` while
+            `retry_attempts` and the ledger hold `NETWORK_TIMEOUT`. Read off the
+            live tables, not assumed.
+Fix:        One normaliser, so the same fault is one bar rather than two. **A
+            class this dashboard has not heard of keeps its own name** rather
+            than being folded into `UNKNOWN` — `UNKNOWN` means the handler
+            looked and could not decide, which is a different fact, and a class
+            added upstream is worth seeing rather than hiding.
+
+Decision:   Severity and retryability **prefer the incident's own answer** and
+            fall back to the class map only where the row carries none, and each
+            says which of the two answered. This code does not contradict a
+            handler about an incident the handler classified.
+
+Decision:   Three lane tabs, one component. The handlers are deliberately
+            identical and a per-lane copy would drift the first time one changed.
+            "By lane" is on All systems only: on a lane tab the other two lanes'
+            counts are not context, they are noise.
+
+Decision:   The silence framing on "most recent incident" starts at three days,
+            not at one. A day without an incident is an ordinary good day, and
+            saying "silence here is itself the signal" about it is the page
+            crying wolf — which is how a reader learns to ignore the sentence by
+            the time it means something.
+
+Decision:   `/api/engine-health`, not `/api/health`: that one is the
+            unauthenticated liveness check the host polls. A page's data route
+            sharing its prefix is how one of them eventually shadows the other —
+            noticed while wiring the route, before it could.
+
+Verified:   Against a local Postgres 16 and stubs for the two hosts this sandbox
+            cannot reach, each refusing what the real thing refuses — a lane key
+            that is wrong gets a 401, an unknown table a 404, `fields[]=` with
+            no field named a 422.
+            - Migration 16 applied on boot; the boot line named the one lane
+              with no key, by variable name.
+            - Resync read 2 lanes + 2 Airtable tables, named the unkeyed third,
+              and inserted 5 rows.
+            - Deliberately left `retry_attempts` ids one character short first
+              time: all 5 rows were refused, counted as refused rather than as
+              "already matching", and each named in the log. That is the rule
+              working, so the stub was fixed rather than the check.
+            - Marked closed by absence: told the stub to stop returning
+              INC-BAYS.CODEX-014, resynced, and it stayed held with
+              `open_now: false` and a `last_seen_open` stamp. **0 deleted.**
+            - **Broke the Bays key and resynced**: the lane was named unread
+              with what BHARAG said, nothing under it was touched, its open
+              incident stayed open, and the figure said it was over what is held
+              rather than over what exists.
+            - Retry now: posted to the healer with the exact documented body;
+              refused at 3 attempts with the circuit-breaker sentence; refused
+              for an incident with no retry row. The answer says the retry was
+              *handed over*, never that it worked.
+            - `/api/engine/incidents` took the brief's payload, was idempotent
+              on a re-send, refused a row with no `entity_id`, 401'd without the
+              key, and landed on the Engine writes tab. Same for the other two.
+            - All five tabs rendered at 1440px with no sideways scroll and no
+              console errors.
+Not tested: anything against the live hosts. **The sandbox proxy refuses
+            `bharag2.duckdns.org` and the n8n webhook host** (403 on CONNECT),
+            so the ledger read and the healer call have only ever run against
+            stubs built to the documented contract. Both need a real run before
+            this page can be trusted: the ledger's list shape in particular is
+            read defensively — a bare array and `{items: […]}` are both
+            accepted, and anything else is an error naming what came back rather
+            than an empty lane — but that is a guess about a shape I could not
+            observe.
+            Also untested: the three lane keys themselves, which are not set on
+            this rig. Until they are set on Render every lane reads as unkeyed,
+            which the page states plainly and the boot line names.

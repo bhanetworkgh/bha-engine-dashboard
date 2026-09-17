@@ -192,7 +192,7 @@ export class StoreError extends Error {
 /* ------------------------------------------------------------------ dates */
 
 function dayDiff(a: string, b: string): number {
-  return Math.round((Date.parse(`${b.slice(0, 10)}T00:00:00Z`) - Date.parse(`${a.slice(0, 10)}T00:00:00Z`)) / 86_400_000);
+  return Math.round((Date.parse(`${b.slice(0, 10)}T00:00:00Z) - Date.parse(${a.slice(0, 10)}T00:00:00Z`)) / 86_400_000);
 }
 function weekStart(day: string): string {
   const d = new Date(`${day}T00:00:00Z`);
@@ -2135,6 +2135,16 @@ const RECORD_KIND: Record<mirror.MirrorKind, RecordKind | null> = {
   client_lanes: 'clients',
   client_questions: 'client_questions',
   client_requests: 'client_requests',
+  /**
+   * Engine Health's three are not record kinds. They have no monthly rollup,
+   * no status ledger and no record page, so — like `layer0` and `digests` —
+   * they map to nothing here and `recordEngineWrite` no-ops for them. They are
+   * read by `health.ts`, which owns their queries the way `executions.ts` owns
+   * its own.
+   */
+  incidents: null,
+  error_counts: null,
+  retry_attempts: null,
   digests: null,
 };
 
@@ -3083,7 +3093,7 @@ function handoffsOf(ns: NsAsk[], rt: RtAsk[], jobs: RtJob[]): Handoffs {
     note:
       of === 0
         ? 'Neither ledger holds an ask yet, so there is nothing to count. Until 17 Sep 2026 the twins could not reach each other at all; every handoff went through a person or through Bays.'
-        : `${n} of ${of} asks across both ledgers are a twin consulting the other. ${linked} of those carry \`Linked Twin Ask\`; the rest are counted from \`Asked By System\` naming the other twin, or from an Ask ID appearing in a research job's \`Linked Asks\`. That fallback exists because the front doors do not yet pass \`Linked Twin Ask\` through, so early rows leave it empty — when they do, this figure will be exact rather than larger.`,
+        : `${n} of ${of} asks across both ledgers are a twin consulting the other. ${linked} of those carry Linked Twin Ask; the rest are counted from Asked By System naming the other twin, or from an Ask ID appearing in a research job's Linked Asks. That fallback exists because the front doors do not yet pass Linked Twin Ask through, so early rows leave it empty — when they do, this figure will be exact rather than larger.`,
   };
 }
 
@@ -3242,7 +3252,7 @@ export async function nsMetrics(month?: string | null): Promise<NsMetrics> {
     },
     by_lane: cohorts(all, (r) => r.lane, NO_LANE, (r) => r.outcome === 'Answered', (r) => r.delivered === 'Delivered'),
     by_lane_note:
-      'Asks by the lane they were about. `Lane` is often empty on this ledger and that is a fact about the routing rather than an error, so those asks are counted under "(no lane)" rather than dropped.',
+      'Asks by the lane they were about. Lane is often empty on this ledger and that is a fact about the routing rather than an error, so those asks are counted under "(no lane)" rather than dropped.',
     handoffs: handoffsOf(all, (await rtAsks()).filter((r) => inMonth(r.asked_at, month)), await rtJobs()),
   };
 
@@ -3304,7 +3314,7 @@ export async function rtMetrics(month?: string | null): Promise<RtMetrics> {
     ),
     needs_human_rate: share(needsHuman.length, all.length, (n, of) =>
       of
-        ? `${n} of ${of} asks were handed to a person. **This is not coloured, because it is not bad news on its own** — an escalation is Research Twin declining to guess, which is the behaviour that was asked of it. It is worth reading against the answered rate beside it.`
+        ? `${n} of ${of} asks were handed to a person. This is not coloured, because it is not bad news on its own — an escalation is Research Twin declining to guess, which is the behaviour that was asked of it. It is worth reading against the answered rate beside it.`
         : 'No ask is held for this month.',
     ),
     asks: all.length,
@@ -3331,7 +3341,7 @@ export async function rtMetrics(month?: string | null): Promise<RtMetrics> {
     }),
     outcome_mix: slices(all, (r) => r.outcome, RT_OUTCOMES, NO_OUTCOME),
     outcome_note:
-      'Research Twin’s own five outcomes, with **Needs human as a slice of its own** rather than folded into a failure. Answered = an answer with evidence behind it · Thin = an answer citing nothing · Needs human = escalated rather than guessed · Refused = not its lane · Failed = no answer at all.',
+      'Research Twin’s own five outcomes, with Needs human as a slice of its own rather than folded into a failure. Answered = an answer with evidence behind it · Thin = an answer citing nothing · Needs human = escalated rather than guessed · Refused = not its lane · Failed = no answer at all.',
     external_per_week: weeks.map((w) => {
       const mine = all.filter((r) => weekOf(r.asked_at) === w);
       return { week: w, label: weekLabel(w), used: mine.filter((r) => r.used_web_search).length, total: mine.length };
@@ -3342,7 +3352,7 @@ export async function rtMetrics(month?: string | null): Promise<RtMetrics> {
       mix: slices(all, (r) => r.bharag_reachable, RT_BHARAG, '(not recorded)'),
       degraded: degraded.length,
       of: all.length,
-      note: `Whether the evidence store answered on each run, recorded per run and never inferred from a thin answer. **A degraded evidence store is not the same as a lane having no evidence**, which is why it is its own value rather than a missing source count. ${
+      note: `Whether the evidence store answered on each run, recorded per run and never inferred from a thin answer. A degraded evidence store is not the same as a lane having no evidence, which is why it is its own value rather than a missing source count. ${
         degraded.length ? `${degraded.length} of ${all.length} runs found it degraded, and any at all is worth acting on.` : 'Nothing this month found it degraded.'
       } "Not used" is a correct outcome: the ask did not need it.`,
     },
@@ -3369,18 +3379,18 @@ export async function rtMetrics(month?: string | null): Promise<RtMetrics> {
       by_outcome: byOutcome,
       high_no_sources: highNoSources,
       note: highNoSources
-        ? `The confidence the answer stated, cut against what it actually came back with. **${highNoSources} ${highNoSources === 1 ? 'ask is' : 'asks are'} High confidence with no sources at all**, which is the combination worth catching: the agent is sure and cannot show why. "Not stated" is a real value in this select and is counted as itself.`
+        ? `The confidence the answer stated, cut against what it actually came back with. ${highNoSources} ${highNoSources === 1 ? 'ask is' : 'asks are'} High confidence with no sources at all, which is the combination worth catching: the agent is sure and cannot show why. "Not stated" is a real value in this select and is counted as itself.`
         : 'The confidence the answer stated, cut against its outcome. High confidence with zero sources is the combination worth catching — the agent sure of something it cannot show — and nothing this month is in it. "Not stated" is a real value in this select and is counted as itself.',
     },
     ask_types: slices(all, (r) => r.ask_type, RT_ASK_TYPES, '(no type set)'),
     ask_type_note:
-      'What kind of work each request was. The base carries an **External web search** type the original spec for this page did not list, so it is here: a vocabulary this code invented would file real rows under a name Airtable never writes.',
+      'What kind of work each request was. The base carries an External web search type the original spec for this page did not list, so it is here: a vocabulary this code invented would file real rows under a name Airtable never writes.',
     by_system: cohorts(all, (r) => r.asked_by_system, NO_SYSTEM, (r) => r.outcome === 'Answered', (r) => r.delivered === 'Delivered' || r.delivered === 'Self-delivered', (r) => r.used_web_search),
     by_system_note:
       'Each caller with its own answered rate, external-search rate and delivery rate. The aggregate mixes the weekly clock with people asking in Slack, and a failure in either is invisible inside it. Self-delivered counts as delivered here, because it is.',
     delivery_mix: slices(all, (r) => r.delivered, RT_DELIVERED, '(not recorded)'),
     delivery_note:
-      '**Self-delivered is a correct outcome, not a failure**: the weekly Watched Clients report posts its own file during the run, so there is nothing left for the tail to send. "No target" means the ask arrived with nowhere to reply to, which is also not a failure. Only "Not delivered" is one.',
+      'Self-delivered is a correct outcome, not a failure: the weekly Watched Clients report posts its own file during the run, so there is nothing left for the tail to send. "No target" means the ask arrived with nowhere to reply to, which is also not a failure. Only "Not delivered" is one.',
     response_trend: weeks.map((w) => {
       const mine = all.filter((r) => weekOf(r.asked_at) === w && r.response_seconds !== null);
       const p = percentiles(mine.map((r) => r.response_seconds!), mine.length, () => '');
@@ -3442,7 +3452,7 @@ export async function rtJobMetrics(month?: string | null): Promise<RtJobMetrics>
     scope: { rows: all.length, month: month ?? null },
     capped: share(capped.length, all.length, (n, of) =>
       of
-        ? `${n} of ${of} jobs reached three passes without a usable answer and are waiting on a person. **Any number above nought needs attention**: nothing else in the engine will move these. It is a real outcome the queue records, not a failure it is hiding.`
+        ? `${n} of ${of} jobs reached three passes without a usable answer and are waiting on a person. Any number above nought needs attention: nothing else in the engine will move these. It is a real outcome the queue records, not a failure it is hiding.`
         : 'No job is held for this month, so nothing can be waiting on a person.',
     ),
     open: open.length,
@@ -3470,7 +3480,7 @@ export async function rtJobMetrics(month?: string | null): Promise<RtJobMetrics>
       'Where the queue actually stands. Pending and In Progress are open work; Resolved and Capped are the two terminal states. A job with no status at all is counted as itself rather than assumed to be pending — nothing here guesses at a blank.',
     attempts_mix: slices(all, (j) => attemptKey(j.attempts), attemptVocab, '(not recorded)'),
     attempts_note:
-      'Passes made per job, against the cap of three. **Three attempts without a usable answer caps the job and hands it to a person. That is a real outcome, not a failure to hide.** A job with no recorded count is shown as not recorded rather than as nought passes.',
+      'Passes made per job, against the cap of three. Three attempts without a usable answer caps the job and hands it to a person. That is a real outcome, not a failure to hide. A job with no recorded count is shown as not recorded rather than as nought passes.',
     gap_mix: slices(stuck, (j) => j.gap_type, JOB_GAP_TYPES, '(no gap type set)'),
     gap_note: stuck.length
       ? `Why research kept hitting a wall, over the ${stuck.length} of ${all.length} jobs that are capped or came back Low confidence. Jobs that resolved cleanly carry no gap type and are excluded rather than counted under a gap of their own.`
@@ -3485,7 +3495,7 @@ export async function rtJobMetrics(month?: string | null): Promise<RtJobMetrics>
       'Which system generates the research load. The extractor opens jobs off commercial cards, Research Twin opens its own follow-ups, and a person opens one by hand — three quite different kinds of work in one queue.',
     resolution_rate: share(resolved.length, terminal.length, (n, of) =>
       of
-        ? `${n} of ${of} jobs that reached a terminal state were resolved; the rest were capped. **Open jobs are excluded**, because a job still being worked is not yet either one and counting it as unresolved would make a busy week look like a failing one.`
+        ? `${n} of ${of} jobs that reached a terminal state were resolved; the rest were capped. Open jobs are excluded, because a job still being worked is not yet either one and counting it as unresolved would make a busy week look like a failing one.`
         : all.length
           ? `None of this month's ${all.length} jobs has reached a terminal state yet, so there is no rate — not a rate of nought.`
           : 'No job is held for this month.',

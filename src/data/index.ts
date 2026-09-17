@@ -36,6 +36,8 @@ import type {
   LoopEdit,
   LoopStatus,
   Handoffs,
+  HealthData,
+  HealthMetrics,
   NewLoop,
   NsData,
   OpenLoopsData,
@@ -48,6 +50,8 @@ import type {
   RegistryData,
   RegistryKind,
   RegistryRowOf,
+  RetryMetrics,
+  RetryResult,
   RtData,
   ServerStatus,
   SignInResult,
@@ -143,6 +147,40 @@ export const getClients = () => api<ClientsData>('/api/clients');
  * pair, so it has one route rather than a copy computed on each page.
  */
 export const getTwinHandoffs = () => api<Handoffs>('/api/twin-handoffs');
+
+/* -------------------------------------------------------- engine health */
+
+/**
+ * `/api/engine-health`, not `/api/health` — that one is the unauthenticated
+ * liveness check the host polls, and a page's data route sharing its prefix is
+ * how one of them eventually shadows the other.
+ */
+export const getEngineHealth = () => api<HealthData>('/api/engine-health');
+
+/** Every figure, for one lane or for all three. */
+export const getHealthMetrics = (lane?: string | null) =>
+  api<HealthMetrics>(`/api/engine-health/metrics${lane ? `?lane=${encodeURIComponent(lane)}` : ''}`);
+
+/** The retry loop's own record. */
+export const getRetryMetrics = () => api<RetryMetrics>('/api/engine-health/retries');
+
+/**
+ * Reads all five sources — three BHARAG lanes, each with its own credential,
+ * and the two Airtable tables — and makes this database match them.
+ *
+ * Slower than the record resyncs because the ledger is three sequential calls
+ * to another host, so it gets the same long timeout they do.
+ */
+export const resyncHealth = () => api<Resync>('/api/engine-health/resync', { method: 'POST', timeoutMs: 180_000 });
+
+/**
+ * Asks the healer to retry one incident — **the same path the 5-minute
+ * schedule takes**, not a different mechanism. The answer says the retry was
+ * handed over, never that it worked: that is decided by the retried run and
+ * arrives on the next resync.
+ */
+export const retryIncident = (incidentId: string) =>
+  api<RetryResult>(`/api/engine-health/retry/${encodeURIComponent(incidentId)}`, { method: 'POST', timeoutMs: 90_000 });
 
 /**
  * Executions, read from the rows this database holds — one row per n8n

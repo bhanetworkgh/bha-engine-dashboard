@@ -153,7 +153,14 @@ duplicating, so n8n retrying is safe. The response says which happened.
 | `client_lanes` | — | `Lane ID`, else `record_id` |
 | `client_questions` | `table_id`, `record_id` | `record_id` only |
 | `client_requests` | `record_id` | `record_id` only |
+| `incidents` | — | `entity_id`, else `record_id` |
+| `error_counts` | — | `signature`, else `record_id` |
+| `retry_attempts` | — | `incident_id`, else `record_id` |
 | `digests` | — | `session_id`, else `record_id` |
+
+**`incidents` comes from BHARAG rather than Airtable**, so it is the one kind
+with no `record_id` to send: the ledger's `entity_id` is the key. Everything
+else about the write is identical — same envelope, same header, same write log.
 
 `client_questions` and `client_requests` require `record_id`: neither carries an
 id of its own, so Airtable's record id is the only thing that identifies a row.
@@ -661,7 +668,7 @@ is missing, and the note is what the page shows.
 | North Star | Every ask in its own ledger: delivery rate first, then outcome, response p50/p95, and a statistics tab covering who is asking, tool usage, citation coverage and claimed priority by lane |
 | Research Twin | Asks, research jobs and statistics. "Went outside BHA" leads the asks; capped jobs lead the queue |
 | vFarm | Placeholder — nothing on the rack writes here yet |
-| Engine health | The execution roll-up, one figure per system for this week, with a link through to Executions. Incidents are still a placeholder — nothing upstream records one |
+| Engine health | Incidents, retries and self-healing across the three lanes, tabbed All systems · Bays · North Star · Research Twin · Retries. Each lane needs its own BHARAG credential, and a lane that was not read is never drawn as health |
 | Open loops | Loops by age and owner, close from the interface |
 | Codex entries | Session logs by builder and week |
 | Build patterns | Every pattern, by reusability. No `pattern_status` — the field was deleted from the base on 15 Sep |

@@ -893,7 +893,7 @@ function northStarSpec(): KindSpec<NsAsk> {
             value: p(timed.map((r) => r.response_seconds! * 1000), 50),
             n: timed.length,
             note: timed.length
-              ? `The median, over the ${timed.length} of ${plural(c.length, 'ask')} that recorded a duration. **Never a mean**: a mean hides the slow tail, and the slow tail is what people experience. The p95 is on the Asks tab beside it.`
+              ? `The median, over the ${timed.length} of ${plural(c.length, 'ask')} that recorded a duration. Never a mean: a mean hides the slow tail, and the slow tail is what people experience. The p95 is on the Asks tab beside it.`
               : c.length
                 ? `None of this month's ${plural(c.length, 'ask')} recorded a response time, so there is no figure — not a figure of nought.`
                 : 'Nothing was asked this month.',
@@ -975,7 +975,7 @@ function researchTwinSpec(): KindSpec<RtAsk> {
             c.filter((r) => r.outcome === 'Needs human').length,
             c.length,
             c.length
-              ? `Asks Research Twin escalated rather than guessed at, over all ${plural(c.length, 'ask')} this month. **Deliberately not coloured**: escalating correctly is the behaviour that was asked of it, so neither direction is bad news on its own.`
+              ? `Asks Research Twin escalated rather than guessed at, over all ${plural(c.length, 'ask')} this month. Deliberately not coloured: escalating correctly is the behaviour that was asked of it, so neither direction is bad news on its own.`
               : 'Nothing was asked this month.',
           ),
       },
@@ -1080,7 +1080,7 @@ function researchJobsSpec(): KindSpec<RtJob> {
             terminal.filter((j) => j.status === 'Resolved').length,
             terminal.length,
             terminal.length
-              ? `Resolved over resolved-plus-capped, among the ${plural(terminal.length, 'job')} opened this month that have reached a terminal state. **Open jobs are excluded**: one still being worked is neither, and counting it as unresolved would make a busy month look like a failing one.`
+              ? `Resolved over resolved-plus-capped, among the ${plural(terminal.length, 'job')} opened this month that have reached a terminal state. Open jobs are excluded: one still being worked is neither, and counting it as unresolved would make a busy month look like a failing one.`
               : c.length
                 ? `None of the ${plural(c.length, 'job')} opened this month has reached a terminal state yet, so there is no rate — not a rate of nought.`
                 : 'No job was opened this month.',
