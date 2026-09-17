@@ -6239,3 +6239,121 @@ Not tested: anything against the live hosts. **The sandbox proxy refuses
             Also untested: the three lane keys themselves, which are not set on
             this rig. Until they are set on Render every lane reads as unkeyed,
             which the page states plainly and the boot line names.
+
+## 2026-09-17 23:05 — Pay Tracker, built from scratch
+Intent:     Build the page that answers who is owed money, for what work, and
+            what has already been paid. Pay lived as a tick on a Slack card, so
+            answering "what do I owe Hardik for September" meant scrolling back
+            through weeks of messages.
+Files:      server/src/pay.ts (new), server/src/sources.ts, mirror.ts,
+            migrations.ts, store.ts, index.ts
+            src/data/types.ts, src/data/index.ts
+            src/screens/PayTracker/{index,Owed,Statements,Sessions,Statistics}.tsx
+            src/App.tsx, src/components/Layout.tsx
+            CLAUDE.md, README.md, .env.example, render.yaml
+
+Decision:   Read the live base before writing anything, as instructed. **This
+            time the brief and Airtable agreed exactly** — every field name, id
+            and select option matched. Worth recording precisely because the
+            last two briefs did not, and the habit is what caught those.
+            Sessions and Monthly Statements are both **empty**, which makes the
+            empty-state rule the live state rather than a hypothetical.
+
+Decision:   **The page counts work, not money.** There are no rates in the
+            system and none appear anywhere — no column, no figure, no schema
+            field waiting to be filled. Checked by grep before committing. If a
+            rate arrives it goes on the Builders row and this schema needs a
+            migration of its own, which is the point of saying so in the
+            migration rather than leaving a spare column somebody might use.
+
+Decision:   **Read-only, with no write path at all.** Paid status is set by the
+            Slack card or by a statement closing. Two places to change one fact
+            is how records drift, so there is no route, no button and nothing in
+            the data module that could become one.
+
+Decision:   **Monthly and daily are never summed into one rate.** Owed is two
+            tables rather than one with a column; time to pay is two figures
+            with their own denominators. A monthly builder is expected to wait
+            until the 1st, so a blended number describes nobody — and the
+            oldest-unpaid tile is only coloured past 30 days for the same
+            reason, because under a full cycle is the agreement working.
+
+Problem:    The strip read "This month so far 7" above "3 monthly · 3 daily".
+            Three plus three is six. The seventh session carried no Pay Mode at
+            all, and the split silently dropped it.
+Fix:        A third count, named — "1 no pay mode" — wherever a split is
+            printed, and its own group on the Owed tab. A split that does not
+            add up to the figure above it is exactly the quietly-wrong number
+            this dashboard exists to remove, and folding it into either mode
+            would have been guessing which agreement somebody is on.
+
+Problem:    The month read "Sep 26" on a page wall-to-wall with session dates,
+            where it reads as the twenty-sixth rather than as 2026.
+Fix:        Full year here, against the short form every other page uses. Four
+            characters to remove the one ambiguity that matters on a page about
+            which month somebody is owed for.
+
+Problem:    The same builder appeared on two rows of the Owed tab, which reads
+            as a duplicate.
+Fix:        It was correct — rows group on the Slack id where there is one, and
+            a session carrying none cannot be matched to one that does — but
+            correct and unexplained is indistinguishable from broken. The row
+            now says "no Slack id", which is also the thing worth fixing
+            upstream.
+
+Decision:   **`/api/engine/pay` takes one route with a `kind` in the body**,
+            which is what n8n was given, rather than three kind-named routes.
+            The body's kind is mapped onto the mirror kind before anything else
+            reads it, so a pay row lands with the same envelope, auth and write
+            log as every other. No default: a row with no kind is refused
+            naming the two options, because guessing which of three tables a row
+            belongs to is not a recoverable mistake.
+
+Decision:   The ledger's own age is on the page and is load-bearing rather than
+            polish. The ledger is kept in step with the approved logs by a
+            30-minute sync, and this dashboard reads the ledger on a button —
+            two hops, both stated. **Nothing owed and the sync not having run
+            look identical**, and on a pay page that is the difference between a
+            quiet month and an unpaid builder, so every empty state says which
+            of the two it is.
+
+Verified:   Against a local Postgres 16 and an Airtable stub built to the live
+            schema, seeded to exercise exactly the cases the rules are about.
+            - Migration 17 applied on boot.
+            - **Before any resync**: the page said "This dashboard has never
+              read the ledger", not "nothing is owed". That is the whole point.
+            - Resync read 3 tables, 14 rows, 0 refused.
+            - **The month rule**: a session worked 2026-08-31 and approved
+              2026-09-01 came back as Month 2026-08. Grouped to August.
+            - **Working days against session count**: Hardik shows 3 sessions
+              across 2 working days (two on the 15th); the Jeganathan statement
+              shows 12 working days and 17 sessions, and the panel says so in
+              words when they differ.
+            - **Time to pay is two figures**: Monthly "not recorded", Daily p50
+              1.4 d / p95 2.4 d. Never one number over both.
+            - **No roster match** surfaced 3 of 9 sessions in red, each with its
+              Slack id or "no slack id" — never dropped.
+            - Evidence rendered whole: three lines with dates and links, no
+              clamp.
+            - `/api/engine/pay` took the brief's payload for both kinds, was
+              idempotent on a re-send, refused a missing and a nonsense kind
+              naming the options, 401'd without the key, and landed on the
+              Engine writes tab.
+            - **Killed the stub mid-flight and resynced**: all three tables
+              named unread, nothing deleted, nothing changed, and the last-read
+              stamp deliberately not advanced — a failed read must not claim a
+              fresh one.
+            - Four tabs at 1440px: no sideways scroll, no console errors. The
+              sidebar still fits every item without scrolling at sixteen
+              (measured: scrollHeight equals clientHeight).
+            - Grepped for currency symbols, "amount", "salary", "day rate": the
+              only hit is the comment forbidding them.
+Not tested: anything against real pay data — Sessions and Monthly Statements are
+            both empty in the live base today, by design, so every figure was
+            exercised against rows written to the stub. The first real statement
+            is due on the 1st, and the first real session the next time one is
+            approved; both paths should be watched then.
+            Also untested: the token's read scope on `appwnt0mEtfwDtcN5`, which
+            is not set on this rig. Until it is granted on Render the resync
+            will refuse and name the table, which the page states plainly rather
+            than reading as nothing owed.

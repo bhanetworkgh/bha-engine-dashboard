@@ -37,7 +37,7 @@ export function recordUrl(base: string, table: string, id: string): string {
 
 /** Airtable's record id, as a shape. A row the engine wrote before Airtable had one carries none. */
 const REC_ID = /^rec[A-Za-z0-9]{14}$/;
-import type { AskTool, BuildPattern, BuildPatternDetail, ClientLane, ClientQuestion, ClientRequest, CodexEntry, CodexEntryDetail, ErrorCount, Incident, Layer0Hold, Loop, LoopLaneTag, LoopStatus, NsAsk, Opportunity, ReadinessState, RecordKind, RetryAttempt, RtAsk, RtJob, Source } from '../../src/data/types';
+import type { AskTool, BuildPattern, BuildPatternDetail, ClientLane, ClientQuestion, ClientRequest, CodexEntry, CodexEntryDetail, ErrorCount, Incident, Layer0Hold, PayBuilder, PaySession, PayStatement, Loop, LoopLaneTag, LoopStatus, NsAsk, Opportunity, ReadinessState, RecordKind, RetryAttempt, RtAsk, RtJob, Source } from '../../src/data/types';
 
 /** Jason Status as the submission tables define it, lower-cased. 'unset' is a row he has not touched. */
 export type CodexApproval = 'approved' | 'pending' | 'input added' | 'unset';
@@ -1219,6 +1219,155 @@ export function mapRetryAttempt(rec: AtRecord): RetryAttempt {
         : 'This row carries no execution id, and the healer refuses without one — there is nothing for it to resume from.',
     source: airtableSource(RETRY_ATTEMPTS.base, RETRY_ATTEMPTS.table, rec.id),
     airtable: { base: RETRY_ATTEMPTS.base, table: RETRY_ATTEMPTS.table, record_id: rec.id, url: recordUrl(RETRY_ATTEMPTS.base, RETRY_ATTEMPTS.table, rec.id) },
+  };
+}
+
+
+/* -------------------------------------------------------------- pay ledger */
+
+/**
+ * The BHA Pay Ledger (`appwnt0mEtfwDtcN5`, created 2026-09-17), three tables.
+ *
+ * It answers one question: who is owed money, for what work, and what has
+ * already been paid. Before it, pay was a tick on a Slack card, so answering
+ * "what do I owe Hardik for September" meant scrolling back through weeks of
+ * messages.
+ *
+ *   Builders    tblS6WMJugqP8GJNa   who is paid how
+ *   Sessions    tblPVfIicEiJ2uOYC   one row per approved session, owed or paid
+ *   Statements  tbl5iAdfhz91PZrUg   one row per monthly builder per month
+ *
+ * Every field name, id and select vocabulary here was read from the live base
+ * on 2026-09-17 and matched the brief exactly — which is worth recording, since
+ * the last two briefs did not.
+ *
+ * **There are no rates anywhere in this system, and none belong on this page.**
+ * It counts work, not money. If a rate is ever added it goes in the Builders
+ * table first, and until it does, any figure with a currency sign on it would
+ * be invented.
+ */
+
+export const PAY_BASE = 'appwnt0mEtfwDtcN5';
+export const PAY_BUILDERS = { base: PAY_BASE, table: 'tblS6WMJugqP8GJNa', label: 'Pay builders' };
+export const PAY_SESSIONS = { base: PAY_BASE, table: 'tblPVfIicEiJ2uOYC', label: 'Pay sessions' };
+export const PAY_STATEMENTS = { base: PAY_BASE, table: 'tbl5iAdfhz91PZrUg', label: 'Monthly statements' };
+
+/** Read from the live base. Two modes, and they are never summed into one rate. */
+export const PAY_MODES = ['Monthly', 'Daily'];
+export const PAID_BY = ['Jason', 'Builder', 'Monthly Statement', 'Autopay'];
+export const STATEMENT_STATUSES = ['Draft', 'Sent', 'Payment Sent', 'Disputed'];
+
+/**
+ * A statement that has been sent and not paid for longer than this reads amber.
+ * Not a rule the ledger enforces — a judgement about how long is too long —
+ * so it lives here by name rather than as a bare number in a component.
+ */
+export const STATEMENT_CHASE_DAYS = 14;
+/**
+ * An unpaid session past this reads as a problem. **Monthly builders are
+ * expected to wait until the 1st**, so anything under a full cycle is the
+ * agreement working rather than a late payment.
+ */
+export const UNPAID_ALARM_DAYS = 30;
+
+export function mapPayBuilder(rec: AtRecord): PayBuilder {
+  const f = rec.fields;
+  return {
+    id: rec.id,
+    builder: str(f.Builder) ?? '(unnamed builder)',
+    slack_user_id: str(f['Slack User ID']),
+    pay_mode: str(f['Pay Mode']),
+    // Unchecked rather than deleted when somebody stops building, so their
+    // history stays readable — which means inactive is a real state to show,
+    // not a row to filter away.
+    active: bool(f.Active),
+    channel_id: str(f['Channel ID']),
+    notes: str(f.Notes),
+    source: airtableSource(PAY_BUILDERS.base, PAY_BUILDERS.table, rec.id),
+    airtable: { base: PAY_BUILDERS.base, table: PAY_BUILDERS.table, record_id: rec.id, url: recordUrl(PAY_BUILDERS.base, PAY_BUILDERS.table, rec.id) },
+  };
+}
+
+/**
+ * One approved session.
+ *
+ * Two rules on this row that the rest of the page is built on:
+ *
+ * **`Month` comes from the session date, not the approval date.** A session
+ * worked on 30 September and approved on 1 October belongs to September. It is
+ * stored on the row rather than derived here, so this reads the field and only
+ * falls back to computing it from `Session Date` where the row carries none —
+ * and never from `Approved At`, which would put that session in October.
+ *
+ * **`Pay Mode` is frozen at the moment the session was approved.** If somebody
+ * moves from daily to monthly, their old sessions keep the mode they had. This
+ * reads the row's own value and never joins to the Builders table to decide how
+ * a past session should be treated.
+ */
+export function mapPaySession(rec: AtRecord): PaySession {
+  const f = rec.fields;
+  const sessionDay = day(f['Session Date']);
+  return {
+    id: rec.id,
+    codex_entry_id: str(f['Codex Entry ID']) ?? '(no codex id)',
+    builder: str(f.Builder) ?? '(unnamed builder)',
+    builder_slack_id: str(f['Builder Slack ID']),
+    pay_mode: str(f['Pay Mode']),
+    session_date: sessionDay,
+    approved_at: iso(f['Approved At']),
+    // The field, then the session date. Never `Approved At`.
+    month: str(f.Month) ?? (sessionDay ? sessionDay.slice(0, 7) : null),
+    paid: bool(f.Paid),
+    paid_at: iso(f['Paid At']),
+    paid_by: str(f['Paid By']),
+    statement_id: str(f['Statement ID']),
+    codex_link: str(f['Codex Link']),
+    slack_card_link: str(f['Slack Card Link']),
+    notes: str(f.Notes),
+    source: airtableSource(PAY_SESSIONS.base, PAY_SESSIONS.table, rec.id),
+    airtable: { base: PAY_SESSIONS.base, table: PAY_SESSIONS.table, record_id: rec.id, url: recordUrl(PAY_SESSIONS.base, PAY_SESSIONS.table, rec.id) },
+  };
+}
+
+/**
+ * One monthly statement.
+ *
+ * **Working Days and Session Count are different numbers on purpose.** Two
+ * sessions in one day is one working day and two sessions. Neither is ever
+ * derived from the other here, and neither is ever presented as the other.
+ */
+export function mapPayStatement(rec: AtRecord, now = new Date().toISOString()): PayStatement {
+  const f = rec.fields;
+  const sent = iso(f['Sent At']);
+  const paid = iso(f['Payment Sent At']);
+  const status = str(f.Status);
+  /**
+   * Open means sent and not yet paid. A Draft has not reached Jason, and a
+   * Disputed one is a different problem from an unanswered one — both are
+   * counted on their own rather than folded in here.
+   */
+  const open = status === 'Sent';
+  return {
+    id: rec.id,
+    statement_id: str(f['Statement ID']) ?? '(no statement id)',
+    builder: str(f.Builder) ?? '(unnamed builder)',
+    builder_slack_id: str(f['Builder Slack ID']),
+    month: str(f.Month),
+    working_days: num(f['Working Days']),
+    session_count: num(f['Session Count']),
+    // The proof Jason asked for. Stored whole and never truncated on the page.
+    evidence: str(f.Evidence),
+    status,
+    sent_at: sent,
+    payment_sent_at: paid,
+    confirmed_by: str(f['Confirmed By']),
+    slack_link: str(f['Slack Link']),
+    notes: str(f.Notes),
+    days_to_pay: daysBetween(sent, paid),
+    days_open: open ? daysBetween(sent, now) : null,
+    open,
+    source: airtableSource(PAY_STATEMENTS.base, PAY_STATEMENTS.table, rec.id),
+    airtable: { base: PAY_STATEMENTS.base, table: PAY_STATEMENTS.table, record_id: rec.id, url: recordUrl(PAY_STATEMENTS.base, PAY_STATEMENTS.table, rec.id) },
   };
 }
 

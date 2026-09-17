@@ -45,6 +45,12 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
       // executions: a run is a record, it is the same record whichever system
       // produced it, and one page with a tab per system beats three pages.
       { to: '/executions', label: 'Executions', icon: 'pulse' },
+      // Who is owed money, for what work, and what has been paid (2026-09-17).
+      // Pay was a tick on a Slack card until today, so the only way to answer
+      // "what do I owe Hardik for September" was to scroll back through weeks
+      // of messages. It counts work, never money: there are no rates in the
+      // system and none on the page.
+      { to: '/pay', label: 'Pay Tracker', icon: 'check' },
     ],
   },
   // People is gone (2026-09-14, Destiny). Builders was its only item, and

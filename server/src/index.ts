@@ -33,6 +33,7 @@ import * as loops from './loops';
 import * as mirror from './mirror';
 import * as executions from './executions';
 import * as health from './health';
+import * as pay from './pay';
 import * as bharag from './bharag';
 import { monthly } from './monthly';
 import { isStatKind, stats } from './stats';
@@ -225,6 +226,55 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     const m = p.match(/^\/api\/engine\/([^/]+)$/);
     if (!m) throw new HttpError(404, `POST /api/engine/:kind, where :kind is one of: ${mirror.KIND_LIST.join(', ')}.`);
     const kind = m[1];
+    /**
+     * The pay ledger posts to one route and says which of its tables the row
+     * belongs to in the body, rather than to three kind-named routes.
+     *
+     * That is what n8n was given, so it is what this accepts. The body's `kind`
+     * is read before anything else looks at it and mapped onto the mirror kind;
+     * everything after this point is the ordinary path, so a pay row lands with
+     * the same envelope, the same auth and the same write log as any other. The
+     * three kind-named routes work too — this only adds a name for them.
+     */
+    if (kind === 'pay') {
+      const peek = await readJson(req, 256 * 1024);
+      const said = typeof peek.kind === 'string' ? peek.kind.trim().toLowerCase() : '';
+      const PAY_KINDS: Record<string, mirror.MirrorKind> = { session: 'pay_sessions', sessions: 'pay_sessions', statement: 'pay_statements', statements: 'pay_statements', builder: 'pay_builders', builders: 'pay_builders' };
+      const mapped = PAY_KINDS[said];
+      if (!mapped) {
+        await mirror.logWrite({ endpoint, kind: 'pay', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: `kind was ${said ? `"${said}"` : 'absent'}` });
+        throw new HttpError(422, `"kind" is required on /api/engine/pay and must be "session" or "statement" — it decides which of the ledger's tables the row belongs to, and there is no safe default. Got ${said ? `"${said}"` : 'nothing'}.`);
+      }
+      try {
+        const result = await mirror.upsert(mapped, peek as mirror.MirrorInput, 'engine');
+        await mirror.logWrite({
+          endpoint,
+          kind: mapped,
+          method,
+          key_label: 'DASHBOARD_INBOUND_KEY',
+          airtable_record_id: result.airtable_record_id,
+          natural_id: result.natural_id,
+          outcome: result.inserted ? 'inserted' : result.changed ? 'updated' : 'unchanged',
+          detail: `via /api/engine/pay as "${said}", matched on ${result.matched_on}`,
+          ms: Date.now() - t0,
+        });
+        return send(res, 200, {
+          ok: true,
+          id: result.id,
+          kind: result.kind,
+          airtable_record_id: result.airtable_record_id,
+          natural_id: result.natural_id,
+          outcome: result.inserted ? 'inserted' : result.changed ? 'updated' : 'unchanged',
+          matched_on: result.matched_on,
+        });
+      } catch (e) {
+        if (e instanceof mirror.MirrorError) {
+          await mirror.logWrite({ endpoint, kind: mapped, method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          throw new HttpError(e.status, e.message);
+        }
+        throw e;
+      }
+    }
     if (!mirror.isKind(kind)) {
       await mirror.logWrite({ endpoint, kind, method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: 'unknown kind' });
       throw new HttpError(404, `"${kind}" is not a kind this engine holds. One of: ${mirror.KIND_LIST.join(', ')}.`);
@@ -336,6 +386,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
         return send(res, 200, await health.data());
       case '/api/engine-health/retries':
         return send(res, 200, await health.retryMetrics());
+      /** Pay Tracker: the ledger's rows, and the figures over them. */
+      case '/api/pay':
+        return send(res, 200, await pay.data());
+      case '/api/pay/metrics':
+        return send(res, 200, await pay.metrics());
       /** One lane, or all three when `lane` is absent. */
       case '/api/engine-health/metrics': {
         const lane = url.searchParams.get('lane');
@@ -650,6 +705,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
      * the shared one, which is Airtable-shaped. It answers in the same `Resync`
      * shape, so the shared button and its toast are unchanged.
      */
+    if (p === '/api/pay/resync') {
+      return send(res, 200, await pay.resync(sessionInfo(req).email));
+    }
     if (p === '/api/engine-health/resync') {
       return send(res, 200, await health.resync(sessionInfo(req).email));
     }

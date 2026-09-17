@@ -2145,6 +2145,10 @@ const RECORD_KIND: Record<mirror.MirrorKind, RecordKind | null> = {
   incidents: null,
   error_counts: null,
   retry_attempts: null,
+  /** The pay ledger's three, read by `pay.ts` the way health.ts reads its own. */
+  pay_builders: null,
+  pay_sessions: null,
+  pay_statements: null,
   digests: null,
 };
 

@@ -154,6 +154,9 @@ duplicating, so n8n retrying is safe. The response says which happened.
 | `client_questions` | `table_id`, `record_id` | `record_id` only |
 | `client_requests` | `record_id` | `record_id` only |
 | `incidents` | — | `entity_id`, else `record_id` |
+| `pay_builders` | — | `Slack User ID`, else `record_id` |
+| `pay_sessions` | — | `Codex Entry ID`, else `record_id` |
+| `pay_statements` | — | `Statement ID`, else `record_id` |
 | `error_counts` | — | `signature`, else `record_id` |
 | `retry_attempts` | — | `incident_id`, else `record_id` |
 | `digests` | — | `session_id`, else `record_id` |
@@ -161,6 +164,14 @@ duplicating, so n8n retrying is safe. The response says which happened.
 **`incidents` comes from BHARAG rather than Airtable**, so it is the one kind
 with no `record_id` to send: the ledger's `entity_id` is the key. Everything
 else about the write is identical — same envelope, same header, same write log.
+
+**The pay ledger posts to `/api/engine/pay`** with a `kind` of `"session"` or
+`"statement"` in the body, rather than to a kind-named route — that is what n8n
+was given, so that is what the server accepts. The body's `kind` is mapped onto
+the mirror kind and everything after that is the ordinary path, so a pay row
+lands with the same envelope, auth and write log as any other. There is no
+default: a row with no `kind` is refused, naming the two options, because
+guessing which of the ledger's tables a row belongs to is not recoverable.
 
 `client_questions` and `client_requests` require `record_id`: neither carries an
 id of its own, so Airtable's record id is the only thing that identifies a row.
@@ -675,6 +686,7 @@ is missing, and the note is what the page shows.
 | Commercial | One sortable table of opportunity cards, closest to ready first. Nothing on it groups the corpus: every candidate axis is constant or 1:1 with the card |
 | Clients | Watched client lanes grouped under the client that owns them, ordered by `Client ID` |
 | Executions | Every execution of every workflow, one row each, tabbed by system, weekly / monthly / yearly, against the period before, with a per-workflow drill-down and a downloadable report |
+| Pay Tracker | Who is owed, for what work, and what has been paid. Owed groups by builder with monthly and daily kept apart; statements show their evidence whole. Counts work, never money — there are no rates in the system — and is read-only |
 | System registry | Builders, Tools, Endpoint, Workflow, and the engine-writes surface |
 
 ## Repo layout

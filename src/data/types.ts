@@ -1586,6 +1586,161 @@ export interface RetryResult {
   message: string;
 }
 
+/* -------------------------------------------------------------- pay ledger */
+
+/**
+ * Pay Tracker: who is owed money, for what work, and what has already been
+ * paid.
+ *
+ * Built 2026-09-17 against a ledger created the same day. Before it, pay was a
+ * tick on a Slack card, so answering "what do I owe Hardik for September" meant
+ * scrolling back through weeks of messages.
+ *
+ * **This page counts work, not money.** There are no rates anywhere in the
+ * system and none appear here; a figure with a currency sign on it would be
+ * invented. If a rate is ever added it belongs in the Builders table first.
+ *
+ * **It is read-only.** Paid status is set by the Slack card or by a monthly
+ * statement closing, and two places to change the same fact is how records
+ * drift.
+ *
+ * **Monthly and daily are never summed into one rate.** They are different
+ * agreements — a monthly builder is *expected* to wait until the 1st — and a
+ * blended figure is meaningless.
+ */
+
+export interface PayBuilder {
+  id: string;
+  builder: string;
+  slack_user_id: string | null;
+  /** Monthly = one statement on the 1st. Daily = a card per session. */
+  pay_mode: string | null;
+  /** Unchecked rather than deleted, so history stays readable. */
+  active: boolean;
+  channel_id: string | null;
+  notes: string | null;
+  source: Source;
+  airtable: AirtableRef;
+}
+
+export interface PaySession {
+  id: string;
+  codex_entry_id: string;
+  builder: string;
+  builder_slack_id: string | null;
+  /** Frozen at approval. A later change to someone's pay mode does not rewrite this. */
+  pay_mode: string | null;
+  session_date: string | null;
+  approved_at: string | null;
+  /** YYYY-MM, from the session date. Never from `Approved At`. */
+  month: string | null;
+  paid: boolean;
+  paid_at: string | null;
+  paid_by: string | null;
+  statement_id: string | null;
+  codex_link: string | null;
+  slack_card_link: string | null;
+  notes: string | null;
+  source: Source;
+  airtable: AirtableRef;
+}
+
+export interface PayStatement {
+  id: string;
+  statement_id: string;
+  builder: string;
+  builder_slack_id: string | null;
+  month: string | null;
+  /**
+   * Distinct days with at least one approved session, and the count of
+   * sessions. **Different numbers on purpose** — two sessions in one day is one
+   * working day and two sessions — and neither is ever derived from the other.
+   */
+  working_days: number | null;
+  session_count: number | null;
+  /** Every session with its id and link. Shown in full; never truncated. */
+  evidence: string | null;
+  status: string | null;
+  sent_at: string | null;
+  payment_sent_at: string | null;
+  confirmed_by: string | null;
+  slack_link: string | null;
+  notes: string | null;
+  /** Whole days from Sent to Payment Sent, where both are recorded. */
+  days_to_pay: number | null;
+  /** Days since it was sent, while it is still open. */
+  days_open: number | null;
+  open: boolean;
+  source: Source;
+  airtable: AirtableRef;
+}
+
+/** One builder's outstanding work, which is the row the Owed tab is built from. */
+export interface OwedBuilder {
+  builder: string;
+  slack_user_id: string | null;
+  pay_mode: string | null;
+  /** False where no Builders row matches this session's Slack id. */
+  on_roster: boolean;
+  /** False where the sessions carry no Slack id, which is why they group alone. */
+  has_slack_id: boolean;
+  active: boolean;
+  sessions_owed: number;
+  /** Distinct session dates among the unpaid sessions. Never the session count. */
+  working_days_owed: number;
+  oldest_unpaid: string | null;
+  oldest_unpaid_days: number | null;
+  months: string[];
+  sessions: PaySession[];
+}
+
+export interface PayData {
+  builders: PayBuilder[];
+  sessions: PaySession[];
+  statements: PayStatement[];
+  freshness: Freshness;
+  statements_freshness: Freshness;
+  /** When this dashboard last read the ledger, and what that does and does not mean. */
+  synced: { at: string | null; note: string };
+}
+
+export interface PayMetrics {
+  kind: 'pay';
+  computed_at: string;
+  scope: { sessions: number; unpaid: number; builders: number; statements: number };
+  month: string;
+  /* ---- owed ---- */
+  /** `no_mode` is sessions carrying neither mode, so the split adds up to `n`. */
+  sessions_owed: { n: number; monthly: number; daily: number; no_mode: number; note: string };
+  builders_owed: { n: number; monthly: number; daily: number; no_mode: number; note: string };
+  oldest_unpaid: { days: number | null; builder: string | null; codex_entry_id: string | null; pay_mode: string | null; note: string };
+  this_month: { n: number; monthly: number; daily: number; no_mode: number; note: string };
+  owed: OwedBuilder[];
+  /* ---- statements ---- */
+  open_statements: { n: number; chasing: number; note: string };
+  settled_this_year: { n: number; year: string; note: string };
+  statement_time_to_pay: Percentiles;
+  /** In the base's own order, for the Statements tab's filters. */
+  statement_status_mix: Slice[];
+  oldest_open_statement: { statement_id: string | null; days: number | null; note: string };
+  /* ---- statistics ---- */
+  per_month: { month: string; label: string; total: number; counts: Record<string, number> }[];
+  per_month_note: string;
+  paid_per_week: { week: string; label: string; total: number; counts: Record<string, number> }[];
+  paid_week_note: string;
+  working_days: { builder: string; pay_mode: string | null; months: { month: string; working_days: number; sessions: number }[]; total_days: number; total_sessions: number }[];
+  working_days_note: string;
+  paid_by: Slice[];
+  paid_by_note: string;
+  /** Split, never blended: the two populations are not comparable. */
+  time_to_pay: { mode: string; p: Percentiles }[];
+  time_to_pay_note: string;
+  ageing: Slice[];
+  ageing_note: string;
+  /** Sessions whose Slack id matches nobody on the roster. Should be nought. */
+  no_roster_match: { n: number; of: number; sessions: PaySession[]; note: string };
+}
+
 /* --------------------------------------------------------------- clients */
 
 export interface ClientLane {
