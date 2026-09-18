@@ -6357,3 +6357,77 @@ Not tested: anything against real pay data — Sessions and Monthly Statements a
             is not set on this rig. Until it is granted on Render the resync
             will refuse and name the table, which the page states plainly rather
             than reading as nothing owed.
+
+## 2026-09-18 19:30 — Registry: a service can be given a url and a note
+Intent:     Destiny added GoDaddy from the Tools tab's "Add a service" form and
+            found nowhere to put its URL, and asked for GoDaddy to appear in the
+            notes card at the foot of the registry.
+Files:      src/screens/Registry/index.tsx, server/src/registrySeed.ts
+
+Problem:    `url` and `notes` are both registered fields on the services kind
+            (`server/src/registry.ts:114` and `:123`, accepted by create and
+            update) and **neither had any interface at all**. Not on the add
+            form, and not in the row: the url rendered as a read-only link
+            under the service name and notes rendered nowhere but a read-only
+            card. So a service created from the page could never be given
+            either, for as long as it existed. The only notes that could exist
+            were the ones seeded in this repo.
+Fix:        url and notes added to the add-a-service form; url made editable in
+            the row beside its link; every note in the card made editable in
+            place.
+
+Decision:   **The url keeps its link and gains an editor beside it**, rather
+            than becoming a plain editable cell like the Endpoints tab's. An
+            `<a>` inside `EditableCell`'s button is invalid markup and the
+            click would be swallowed, and the link is the useful thing on that
+            row. It is the shape the Builders tab already uses for lanes owned:
+            the value rendered as itself, with a quiet `edit` next to it. A
+            service with no url shows the dash, which clicks to add.
+
+Decision:   **The notes card lists every live service, not only the annotated
+            ones.** It was gated on `rows.some((s) => s.notes)` and listed only
+            services carrying a note, which meant a service with none was
+            invisible in the one place notes live — so there was nowhere to
+            click to write the first one. Annotated services lead, because it
+            is a card for reading notes, and the rest keep their line with a
+            dash on it. Absence drawn as absence, the same rule section 4
+            states for a metric.
+            Deliberately not filtered by the search box or the category tabs:
+            these are read as a set, and a note that vanishes because somebody
+            typed in an unrelated filter is a note nobody finds twice.
+
+Decision:   GoDaddy seeded with its url and its note rather than left to be
+            typed. Read from the #bha-coordination front-door thread today
+            rather than supplied, so every claim in the note is something
+            somebody wrote down: the Account Change off Jason's personal login
+            into admin@bhanetwork.org, why a delegate was not enough (GoDaddy
+            blocks a delegate from generating an API key, and the Domains
+            section is invisible below the Products & Domains level), and the
+            Website Builder site still on the apex. The Bitwarden **item name**
+            is recorded and no value of any kind is, per section 2 rule 1.
+            Filed under `other`: it is a registrar, not hosting, and there is
+            no `domains` category. Inventing an eighth value in the server's
+            vocabulary to file one row under was not worth a schema change.
+
+Problem:    Seeding is `INSERT ... ON CONFLICT (id) DO NOTHING` and a service
+            created from the page takes `slug(name)` as its id, so a GoDaddy
+            row already added by hand holds `godaddy` and **the seed is a
+            no-op against it** — it would keep whatever blanks it was created
+            with. Could not check the live table: Render's query tool refuses
+            the connection ("SSL/TLS required (SQLSTATE 28000)").
+Fix:        Left as is rather than made to overwrite. A seed that edits a row
+            somebody typed is worse than one that does not, and both fields are
+            now one click away on the page. Flagged to Destiny.
+
+Verified:   Local Postgres 16, twelve services.
+            - Boot: `registry: seeded 1 row(s): services 1`.
+            - The form carries url (placeholder `https://…`) after category and
+              notes on the second line; no overflow at 1440.
+            - Added a note to Onshape from the card and read it back out of
+              `registry_services`. Edited GoDaddy's url from the row: the
+              editor opened on the current value, saved, and the anchor's href
+              followed it to the new one.
+            - Notes card: annotated services first, then BHARAG, Onshape and
+              Slack each as a name and a clickable dash. `scrollWidth ===
+              clientWidth` at 1440, so the body still does not scroll sideways.
+Not tested: anything against the live database — see the seed no-op above.
