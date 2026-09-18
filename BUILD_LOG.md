@@ -6727,3 +6727,117 @@ Not tested: Nothing against the live Render service. There is **no CI on this
             repository** — PR #6 reported no check runs at all — so "green" here
             means the repo's own checks run by hand: typecheck, build, the
             scanner sweep over every page, and the browser pass above.
+
+## 2026-09-18 20:40 — the connector could not discover the endpoint, because GET was a 405
+Intent:     The MCP server is merged and live (07bd015) and adding it as a
+            Claude custom connector still failed. Destiny found why:
+            `GET https://dashboard.bhanetwork.org/mcp/<secret>` answered 405.
+            Claude's connector check **opens with a GET**, read the 405 as
+            "could not connect", could not then determine how the server signs
+            in, and fell back to OAuth dynamic client registration — which
+            fails, because this server deliberately has no OAuth.
+Files:      server/src/mcp/index.ts, README.md, CLAUDE.md
+
+Problem:    Refusing GET is spec-legal: this server sends no server-initiated
+            messages, so there is genuinely no stream to open. The comment in
+            the code said exactly that and it was true. It was also the wrong
+            call — **spec-legal and undiscoverable is still undiscoverable**,
+            and the failure surfaced two steps downstream as an OAuth error,
+            which points at the wrong thing entirely.
+Fix:        GET answers 200 `text/event-stream` and holds the stream open,
+            carrying no messages. A comment goes down it immediately and
+            another every 20 seconds.
+
+Decision:   **The keep-alive and the immediate first byte are not decoration.**
+            Render's router closes an idle connection, so a stream with nothing
+            on it would be dropped under the client; and a buffering proxy will
+            hold the headers back until a client cannot tell an open stream from
+            a hang, which is why the first byte goes out before anything else
+            and `X-Accel-Buffering: no` is on the response. `socket.setTimeout(0)`
+            stops Node timing the socket out from under a live stream, and the
+            keep-alive interval is `unref`ed so it can never be the reason this
+            process stays up.
+
+Decision:   **Nothing under `/mcp` answers 401, and that is now written down as
+            a rule rather than a fact about the code.** The original reason was
+            that a 401 tells a stranger the endpoint is there. The better reason
+            is the one this bug taught: a 401 is what *starts* an OAuth flow, so
+            a client that gets one goes off to discover an authorization server
+            this service does not have, and the error it eventually reports is
+            about OAuth rather than about the thing that went wrong. Swept 24
+            method/path combinations to confirm none of them answers 401.
+
+Decision:   **The secret is still checked first, for every method**, before
+            anything else is read — so OPTIONS, GET, HEAD, POST and DELETE are
+            all equally silent to a caller without it. Every one of them answers
+            the same `{"ok":false,"message":"No such route."}` with **no CORS
+            headers at all**, byte for byte what an unknown route answers. The
+            new GET handler must not leak the endpoint's existence, and a 404
+            that carried `Access-Control-Allow-Origin` would have done exactly
+            that.
+
+Decision:   **A session id is issued on initialize and then accepted forever.**
+            It is minted in the transport rather than in `handleRpc`, which
+            answers in JSON-RPC and has no way to set a header, and it goes back
+            in `Mcp-Session-Id` with `Access-Control-Expose-Headers` naming it —
+            without which a browser client cannot read the header it was just
+            sent. Nothing per-session is kept, so **an id this process does not
+            recognise is accepted rather than refused**: Render restarts on every
+            deploy and after every spin-down, so a client's id routinely
+            outlives the process that issued it, and the spec's 404 for an
+            expired session would be indistinguishable here from the 404 a wrong
+            secret gets — which is the one signal on this endpoint that has to
+            stay unambiguous. The store is bounded at 500 and exists for the
+            log line and nothing else.
+
+Problem:    The rejection log said "secret did not match" for a bare `/mcp` and
+            for `/mcp/<secret>/extra`, neither of which ever reaches the
+            comparison.
+Fix:        It names the real reason now — the path shape, the secret, or
+            `MCP_SECRET` not being set — and still never prints what was tried.
+
+Verified:   Locally, driving it exactly as a client does, against a server booted
+            on a local Postgres 16. `npm run typecheck` and `npm run build`
+            clean.
+            1. **OPTIONS** → 204, `Access-Control-Allow-Origin: https://claude.ai`
+               (the request's own origin, echoed, with `Vary: Origin`),
+               `Allow-Methods: GET, POST, DELETE, OPTIONS`, `Allow-Headers`
+               carrying `mcp-session-id` and `mcp-protocol-version`, and
+               **`Expose-Headers: Mcp-Session-Id, Mcp-Protocol-Version`**.
+            2. **GET** → `200`, `Content-Type: text/event-stream`,
+               `Connection: keep-alive`, `X-Accel-Buffering: no`, `: open` on the
+               wire straight away. curl timed out at 4s and again at 26s rather
+               than the server closing: at 26s the stream had `: open` and one
+               `: keep-alive`, 22 bytes, still open.
+            3. **POST initialize** → 200 with
+               `Mcp-Session-Id: d2451f5c-…`, protocolVersion echoed as
+               2025-06-18, `capabilities.tools`, serverInfo.
+            4. **notifications/initialized** with that id → 202, empty body.
+            5. **tools/list** with that id → 200, the id echoed back, all seven
+               tools.
+            6. A real call — `list_pages` over the session → 18 routes,
+               `isError: false`.
+            7. **DELETE** with the id → 204, no body, CORS present.
+            - **HEAD** (with `curl --head`, not `-X HEAD`, which waits for a body
+              it will never get) → 200 with the stream's headers.
+            - **No leak**: OPTIONS, GET, HEAD, POST, DELETE and PUT on
+              `/mcp/wrong-secret` all 404; bare `/mcp` 404; `/mcp/<secret>/extra`
+              404 on GET and on OPTIONS. Zero `access-control` headers on a 404.
+              PUT on the right secret is 405 with the Allow header, not 401.
+            - **No 401**: swept six methods across four paths — 24 combinations,
+              not one 401.
+            - An invented session id → 200, accepted.
+            - The app is untouched: `/` still serves the shell, `/api/overview`
+              without a cookie is still 401, and `/api/status`, `/api/overview`,
+              `/api/registry` and `/api/executions` all still 200 behind it.
+Not tested: **Against the deployed URL — this session cannot reach it.** The
+            egress policy on this container denies both
+            `dashboard.bhanetwork.org:443` and
+            `bha-engine-dashboard.onrender.com:443` with a 403 on CONNECT
+            (recorded in the agent proxy's own `recentRelayFailures`), and the
+            proxy's guidance is to report a policy denial rather than route
+            around it. So the deployed retest Destiny asked for was done the
+            only way available from here: confirming the deploy went live
+            through Render's API and reading this server's own `[mcp]` log lines
+            off the running instance. The curl sequence to run from a machine
+            that can reach the host is in the handover.

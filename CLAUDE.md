@@ -446,9 +446,35 @@ reasonable about.
   `/api/inbound/*` by name.
 - **`MCP_SECRET` is a path segment, and a miss is a 404.** Anything that is not
   exactly `/mcp/<MCP_SECRET>` — a wrong secret, a deeper path, every request
-  when the variable is unset — gets the 404 an unknown route gets. **Never a
-  401**: a 401 tells a stranger the endpoint is there and that they need a
-  credential. No default, on the rule the base ids follow.
+  when the variable is unset — gets the 404 an unknown route gets, on every
+  method, checked before anything else is read. **Never a 401, anywhere under
+  `/mcp`** (2026-09-18): a 401 tells a stranger the endpoint is there, and it is
+  also what starts an OAuth flow, so a client that gets one goes off to discover
+  an authorization server this service does not have. No default, on the rule
+  the base ids follow.
+- **`GET` opens an event stream and holds it, and refusing it was the bug**
+  (decision 2026-09-18, Destiny). This server pushes nothing, so answering
+  `GET` with 405 was spec-legal — and it made the endpoint undiscoverable.
+  Claude's connector check opens with a `GET`, read the 405 as "could not
+  connect", could not then work out how the server signs in, and fell back to
+  OAuth dynamic client registration, which fails here because there is no
+  OAuth. So `GET` answers 200 `text/event-stream`, writes a comment
+  immediately, and sends another every 20 seconds — Render's router closes an
+  idle connection, and a first byte is what tells a client an open stream from a
+  hang. It carries no messages, which is the truth; it opens, which is what the
+  client needs. **`OPTIONS` answers the CORS preflight with 204** and
+  `Access-Control-Expose-Headers: Mcp-Session-Id`, without which a browser
+  client cannot read the session id this server issued to it, and **`DELETE`
+  answers 204**. All three are behind the same secret check, so none of them
+  tells an unauthenticated caller the endpoint is there.
+- **A session id is issued on initialize and accepted forever after.** It comes
+  back in `Mcp-Session-Id` and the client sends it on every later request.
+  Nothing per-session is kept — every tool reads the same source tree and the
+  same database — so **an id this process does not recognise is accepted rather
+  than refused**: Render restarts on every deploy and after every spin-down, so
+  a client's id routinely outlives the process that issued it, and the spec's
+  404 for an expired session would be indistinguishable here from the 404 a
+  wrong secret gets.
 - **Nothing it says about structure is written by hand.** Routes come out of
   `src/App.tsx`, sidebar labels out of `Layout.tsx`, a page's title and purpose
   out of its own `PageHeader` falling back to that page's section in this file,
