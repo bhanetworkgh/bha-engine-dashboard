@@ -203,6 +203,19 @@ export const SERVICES: SeedRow[] = [
   S('aws', 'AWS', 'hosting',
     'Cloud infrastructure alongside Render.',
     'https://console.aws.amazon.com', null, null, null),
+  /**
+   * Added 18 Sep 2026, on the day the domain moved. Read from the
+   * #bha-coordination front-door thread rather than supplied, so every claim
+   * in the note is something somebody wrote down.
+   *
+   * Categorised `other`: it is a registrar, not hosting, and there is no
+   * `domains` category to put it in. The vocabulary is the server's and
+   * inventing an eighth value to file one row under is not this file's call.
+   */
+  S('godaddy', 'GoDaddy', 'other',
+    'Registrar and DNS for bhanetwork.org and every service hostname under it.',
+    'https://dcc.godaddy.com', 'Destiny Arupi', null,
+    'The one account where losing access loses everything downstream at once — every service address, every certificate, every device pin. Moved off Jason’s personal GoDaddy login into an org account under admin@bhanetwork.org by GoDaddy Account Change on 18 Sep 2026: the domain stays at GoDaddy and its DNS records travel with it, which is why it completed in minutes rather than the five to seven days a registrar transfer takes. The same consolidation Render, GitHub, AWS and n8n went through on 10 Sep. Delegate access was not enough on its own — GoDaddy blocks a delegate from generating an API key, so DNS would have stayed click-by-click for good, and the Domains section is invisible below the Products & Domains delegate level. Credentials are in Bitwarden as “GoDaddy – BHA Network (admin@bhanetwork.org)”; no value of any kind is recorded here. A published GoDaddy Website Builder site still sits on the apex: it cannot serve /vfarm and /cst from one repo or read the landing-config, so it is replaced rather than extended when the front door cuts over.'),
 ];
 
 /**
@@ -305,7 +318,7 @@ export const AIRTABLE_BASES: SeedRow[] = [
   B('appEmdKshNVTl64Zf', 'BHA Submissions & Logs', 'Codex entries and the Layer 0 completeness gate, one table per builder.', null),
   B('apprzpppxE2yV0q84', 'BHA Channel Tracking', 'One row per tracked Slack channel, pointing at its current capture doc.', null),
   B('appINvgEoZjuYQI2O', 'engine_events',
-    'The error_counts table the three error handlers share, and digest_deliveries \u2014 the send-and-arrival record for the daily open-loops digest and the 3-day check-in.',
+    'The error_counts table the three error handlers share, and digest_deliveries — the send-and-arrival record for the daily open-loops digest and the 3-day check-in.',
     'digest_deliveries (tblNuMju8l1kL3Sd1) was added on 13 Sep 2026. A row is written when a digest is handed to North Star and updated when the Callback Receiver posts it; status missing means the delivery check found one that never arrived.'),
   B('appvLglfdCqOKqLpT', 'BHA Commercial Opportunities', 'Commercial cards.', null),
   B('app5ni3E8r7Lvxk22', 'BHA Build Patterns', 'Reusable build patterns.', null),
@@ -315,6 +328,19 @@ export const AIRTABLE_BASES: SeedRow[] = [
    * writing its row here, mirroring it to this dashboard and ingesting it into
    * BHARAG, so nothing finishes without being recorded.
    */
+  /**
+   * Two bases this server has read for days and the registry never listed
+   * (added 18 Sep 2026). Nothing discovers a base: this list is seeded, so a
+   * base reaches it only by being written down here. A base the engine reads
+   * that is missing from the registry is the same failure as a base that
+   * vanished from it — it reads as one that was never there.
+   */
+  B('appkSUSh9ijNjP2f8', 'BHA Client Research Loop',
+    'The watched clients: the Index of lanes, the shared Client Requests table, and one questions table per lane.',
+    'The Clients page renders what Index (tblFJ1yuYcuanjPdn) holds, never what tables exist in the base — each lane’s questions table is read from its own row’s Table ID, so adding a client is a row rather than a deploy, and a questions table no index row names is an orphan being deleted upstream. Client Requests (tblhu29KejAPQfSuy) arrived on 17 Sep 2026 and is one shared table for every client. Read only; nothing here writes to it.'),
+  B('appwnt0mEtfwDtcN5', 'BHA Pay Ledger',
+    'Who is owed money, for what work, and what has been paid: Builders, Sessions and Monthly Statements.',
+    'Created 17 Sep 2026. Builders (tblS6WMJugqP8GJNa) is who is paid how, Sessions (tblPVfIicEiJ2uOYC) one row per approved session, Monthly Statements (tbl5iAdfhz91PZrUg) one per monthly builder per month. Kept in step with the approved logs by a sync every 30 minutes, and read here only when somebody presses Resync — two hops, which is why the Pay Tracker prints the ledger’s own age. Read only: paid status is set by the Slack card or by a statement closing, and a second way to change it is how records drift.'),
   B('appRvx4u9V9BYp646', 'BHA North Star Ledger', 'One row per question North Star is asked, and what it answered.',
     'Created 17 Sep 2026 with no history carried in, so October 2026 is the first clean month. Mirrored to this dashboard at POST /api/engine/ns-asks.'),
   B('appv39nQzmfC9VVkG', 'BHA Research Twin Ledger', 'One row per ask Research Twin receives, plus Research Jobs — the research queue, one row per job.',
