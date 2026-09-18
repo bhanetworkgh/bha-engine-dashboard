@@ -6357,3 +6357,201 @@ Not tested: anything against real pay data — Sessions and Monthly Statements a
             is not set on this rig. Until it is granted on Render the resync
             will refuse and name the table, which the page states plainly rather
             than reading as nothing owed.
+
+## 2026-09-18 19:58 — an MCP server on the dashboard, so Claude can see the app
+Intent:     Destiny talks to Claude about this dashboard constantly — "on this
+            page I can't do X", "this panel should show Y" — and Claude has no
+            way to see the app. The page is client-rendered, so fetching
+            https://dashboard.bhanetwork.org returns `<div id="root">` and
+            nothing else. Give an external Claude client the app's **structure**
+            (routes, pages, components, which data feeds which panel) and its
+            live data, over MCP, mounted on the existing service. Structure
+            matters more than data, so it got the larger share of the work.
+Files:      server/src/mcp/source.ts     (new) repo-relative reads, the file walk, the glob, the grep
+            server/src/mcp/jsx.ts        (new) the TSX scanner
+            server/src/mcp/structure.ts  (new) routes, pages, panels, data routes, sources — all derived
+            server/src/mcp/tools.ts      (new) the seven tools and their schemas
+            server/src/mcp/index.ts      (new) the streamable-HTTP transport
+            server/src/index.ts          mounted /mcp ahead of /api; added the in-process GET dispatcher and the boot line
+            render.yaml, .env.example, README.md, CLAUDE.md
+
+Decision:   **No new dependency.** The obvious way to do this is
+            `@modelcontextprotocol/sdk`, and CLAUDE.md rule 2.5 is explicit that
+            `pg` is the ceiling and not a precedent. Streamable HTTP is JSON-RPC
+            2.0 over a POST, so the transport is 180 lines here instead: parse
+            the body, switch on `method`, answer. It handles `initialize`,
+            `notifications/initialized`, `ping`, `tools/list`, `tools/call`, and
+            answers `-32601` for the resources and prompts methods rather than
+            an empty list, because an empty list reads as "there are none".
+            Raised with Destiny in the same message as the build rather than
+            blocking on it, since the answer the rule gives is not ambiguous.
+
+Decision:   **Mounted on the existing `node:http` handler, not Express.** The
+            brief said "mounted on the existing Express app"; there is no
+            Express in this repo and never has been — `server/src/index.ts` is
+            one `createServer` with its own router. So `/mcp` is a branch in
+            that handler, ahead of `/api` and ahead of the SPA fallback. Same
+            commit, same process, same Postgres, one service.
+
+Decision:   **The secret is a path segment and every miss is a 404.**
+            `MCP_SECRET`, no default, compared with `timingSafeEqual`. A wrong
+            secret, a deeper path like `/mcp/<secret>/x`, and every request when
+            the variable is unset all get the same `{"ok":false,"message":"No
+            such route."}` an unknown route gets. Not a 401 — a 401 tells a
+            stranger the endpoint exists and that they need a credential.
+
+Decision:   **Read-only means no write tool and no path to one.** There is no
+            guarded write, no confirmation-token write, nothing. `get_page_data`
+            needed the app's own fetching code so it cannot drift from what the
+            page shows, so it runs an **in-process GET through `api()` itself**
+            — the same function that answers the browser. That needed one line
+            in the existing router: the cookie guard became
+            `if (!internal && !readSession(req))`, with `internal` an optional
+            fourth parameter no request can set and only `dispatchApi` in the
+            same file passes. The dispatcher is GET-only and refuses
+            `/api/engine/*` and `/api/inbound/*` by name as well, because
+            "unreachable by construction" is worth asserting twice on a path
+            that skips the cookie. Verified after: `/api/overview` without a
+            cookie is still 401.
+
+Decision:   **Nothing about the structure is a list written by hand.** The
+            whole value of `get_page_structure` is that it cannot be out of date.
+            So: routes from the `<Route>` elements in `src/App.tsx` with each
+            element resolved through its own import to a file; sidebar label and
+            group from the `GROUPS` array in `Layout.tsx`; a page's title and
+            one-line purpose from its own `<PageHeader title subtitle>`, falling
+            back to the first sentence of that page's `###` section in
+            CLAUDE.md, with the source of each named in the answer beside it;
+            panels from a scan of the page's own JSX; data routes by resolving
+            each `src/data` function to its `api()` call; external sources from
+            the exported constants in `sources.ts` and `mirror.ts` as the
+            process actually holds them. A page with no subtitle and no spec
+            section returns `description: null` and says why, rather than a
+            sentence somebody composed.
+
+Problem:    Telling JSX from a TypeScript type argument. `useData<HealthData>(`,
+            `Record<string, unknown>` and `api<OverviewData>(` are
+            character-for-character an opening tag.
+Fix:        A `<` immediately after an identifier, a `)` or a `]` is a type
+            argument or a comparison, never an element — unless the identifier
+            is a keyword, so `return <PageHeader />` still reads as JSX. Across
+            all seventeen pages at expand_depth 3 the scanner now reports **zero
+            warnings**, and the only names it cannot resolve are `Ic`, `I` and
+            `W`, which are genuinely dynamic icon aliases assigned inside a
+            function body (`const I = Icon[meta.icon]`). Those come back
+            unresolved **with the reason**, which is the right answer.
+
+Problem:    The first version of the declaration-span finder answered with a
+            signature and no body. `function f(a, b) { … }` returns to bracket
+            depth nought at the `)` of its parameter list, so every page's
+            structure came back as **zero nodes** and five `src/data` functions
+            whose `api()` call sits on a second line resolved to no route at all.
+Fix:        When depth returns to nought, look ahead: `{`, `=>` or `:` means the
+            declaration carries on. `/engine-health` went from 0 nodes to 89.
+
+Problem:    `<LaneView>` on the Engine health page resolved to
+            `src/screens/Clients.tsx:90`. Both files declare a component with
+            that name and the resolver was ranking candidates and taking the
+            first. That is exactly the failure the brief calls out: a wrong
+            answer about structure, stated confidently, that gets acted on.
+Fix:        Components are resolved **through the importing file's own import**,
+            never by ranking same-named declarations — following `export *`
+            barrels where needed, since every screen imports its primitives from
+            `src/components/ui`. Where the import cannot be followed the answer
+            is `defined_at: null` with the candidates named. `get_component` on
+            an ambiguous name now **fails and names both files** rather than
+            picking one.
+
+Problem:    The barrel follower stopped before it reached `Figures.tsx`: the
+            cycle guard (`seen.size > 12`) was doubling as a breadth limit, and
+            `src/components/ui/index.ts` has twenty-five `export * from` lines.
+            Everything declared past the twelfth came back unresolved.
+Fix:        `seen` guards cycles only; depth is what is capped, at 6.
+
+Problem:    `/api/engine-health/metrics${lane ? `?lane=…` : ''}` is a template
+            literal with a template literal inside it, and the route extractor
+            stopped at the first inner backtick — so the route came back cut off
+            mid-expression.
+Fix:        A literal reader that counts `${}` nesting. Routes now carry both
+            `path` (verbatim) and `path_prefix` (the part before the first
+            `${`), and a parameterised route is never looked up by its prefix,
+            because `/api/` is not a route this server registers.
+
+Decision:   **Nothing is cut silently, and a cut payload is described rather
+            than sampled.** Every capped answer says what the cap was and how to
+            ask for the rest — `search_source` pages with an offset and prints
+            the total, `get_page_structure` has a node budget and names it. Where
+            a page's payload is past `get_page_data`'s 120 KB cap the answer
+            carries the payload's **shape** (keys, array lengths, leaf types) and
+            no rows at all. No "first three of": a fragment read as the whole is
+            the mistake this dashboard exists to stop, and a shape with counts on
+            it is enough to decide what to ask for next.
+
+Decision:   `get_health` probes rather than asserts. Postgres gets a `select 1`,
+            Airtable a one-field read of Build Patterns, n8n a `GET /workflows`
+            limited to one page, and each BHARAG lane its own `status=open` read
+            with its own key. A source with no credential set is reported
+            `configured: false, reachable: null` and **never as healthy** — the
+            same rule Engine health follows, because an unasked source and a
+            healthy one look identical from outside. The deployed commit is read
+            from `RENDER_GIT_COMMIT`; absent, it is `null` with a note saying it
+            is not guessed at from the checkout, which may have moved since the
+            build.
+
+Verified:   Against a local Postgres 16 and this checkout, with the client and
+            server both built (`npm run build`, clean) and `npm run typecheck`
+            passing.
+            - Boot line: `mcp: /mcp/<MCP_SECRET> — read-only tools over
+              streamable HTTP, MCP_SECRET set`. The secret is never printed.
+            - **404 on every miss**: wrong secret, bare `/mcp`, and
+              `/mcp/<secret>/extra` all 404. `GET` on the right path is 405 and
+              says the endpoint opens no stream. A notification gets 202 with an
+              empty body.
+            - `initialize` echoes the client's protocol version when it is one of
+              the three supported. `tools/list` returns all seven.
+            - Both response framings: `application/json` by default, and one
+              `event: message` SSE frame when `Accept` asks for a stream only.
+              A JSON-RPC batch answers as an array.
+            - `list_pages` returned all 18 routes with the right file for each
+              and a description for every one — nine from a `PageHeader`
+              subtitle, two from CLAUDE.md's own section, and the catch-all named
+              as a redirect to `/`.
+            - `get_page_structure` over **every page** at expand_depth 3: zero
+              scan warnings, nothing truncated, and 7 unresolved names in total,
+              all of them dynamic icon aliases reported with the reason.
+            - `get_page_data` on `/` read `/api/overview` through the app's own
+              router — 11,748 bytes, and against the empty database the Overview
+              says "none held" rather than nought, which is the page being
+              honest and not the tool. With `max_bytes: 4096` the same call came
+              back as a shape with the cap explained.
+            - `get_page_data` on `/engine-health` fetched two routes and
+              **skipped three, each with its reason**: one needs a lane filled
+              in, two are POSTs and "this tool set has no write tool, so it is
+              never called from here".
+            - `list_data_sources` returned 33 sources — 27 Airtable tables
+              (including all seven loop tables and all six Codex tables), three
+              BHARAG lanes, two n8n endpoints and Postgres — each with its
+              credential, whether it is set, its `engine_*` table and the pages
+              that read it.
+            - `get_component("LaneView")` failed with both candidates named.
+              `get_component("PageHeader")` returned the whole declaration and
+              its doc comment.
+            - **Existing behaviour unchanged**: `/api/overview` without a cookie
+              is still 401; sign-in still works; all fourteen page routes
+              (`/api/status` through `/api/twin-handoffs`) still 200 behind the
+              cookie; `/` and `/open-loops` still serve the SPA shell.
+            - **Every page still renders**: signed in through the real form in
+              Chromium at 1440×900 and walked all seventeen routes. Each painted
+              its own heading — "Good evening, Admin" on the Overview, then North
+              Star through Settings — no sideways scroll on any of them, and no
+              console or page error except the sandbox proxy's
+              `ERR_CERT_AUTHORITY_INVALID` on the web font and the weather call,
+              which are this container's and not the app's.
+Not tested: Anything against the live Render service, or against a real Claude
+            connector. `MCP_SECRET` is not set on the service yet, so until it is
+            the endpoint answers 404 to everything — which is the designed state
+            and is what the boot line says. The probes in `get_health` ran with
+            no Airtable token, no n8n key and no BHARAG keys on this rig, so each
+            reported "not configured" correctly but the reachable path was only
+            exercised against Postgres. Both should be watched on the first real
+            connector call.

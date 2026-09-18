@@ -636,6 +636,73 @@ systems exactly, which is how you can see that nothing has been dropped.
 week and a link through. It answers "is something failing somewhere"; the
 Executions page answers "what, and which".
 
+### The MCP server — how an external Claude client reads this app
+
+**Built 18 September 2026, on Destiny's instruction.** An MCP server mounted on
+this same service at `/mcp/<MCP_SECRET>`, over streamable HTTP.
+
+It exists because this dashboard is client-rendered: fetching
+`https://dashboard.bhanetwork.org` returns an empty shell, so a Claude client
+asked "on this page I can't do X" or "this panel should show Y" had no way to
+see the app at all. These tools give it the app's **structure** — routes, pages,
+panels, which data feeds which panel — and its **live data**. Structure is the
+larger half, deliberately, because it is what makes a page you cannot see
+reasonable about.
+
+**Mounted, not a second service.** It hangs off the same `createServer` handler
+as `/api`, ahead of it, so it deploys with the same commit and runs in the same
+process against the same Postgres. Nothing about any existing route, page or
+behaviour changed.
+
+**No new dependency.** CLAUDE.md caps this server's dependencies at `pg` and
+says the cap is the ceiling rather than a precedent, so the MCP SDK is not
+here. Streamable HTTP is JSON-RPC 2.0 over a POST; the transport is
+`server/src/mcp/index.ts` and it answers with a single JSON object, or with one
+SSE frame when the client's `Accept` asks for an event stream, because clients
+differ about which they send.
+
+**Read only, with no write path.** There is no write tool in v1 and no code
+path from a tool to a write — not a guarded one, none. `get_page_data` reads
+through an in-process GET against this server's own `/api` router, which is how
+it cannot drift from what the page shows; that loopback is GET-only and refuses
+`/api/engine/*` and `/api/inbound/*` by name.
+
+**The secret is a path segment and a miss is a 404.** `MCP_SECRET`, no default.
+Anything that is not exactly `/mcp/<MCP_SECRET>` — a wrong secret, a deeper
+path, or every request when the variable is unset — gets the same 404 an unknown
+route gets. Not a 401: a 401 tells a stranger the endpoint is there and that
+they need a credential.
+
+| Tool | What it answers |
+|---|---|
+| `list_pages` | Every route: path, title, the file that implements it, and a one-line description of what it is for |
+| `get_page_structure` | One page's panel layout in order — each component, where it is declared, the props that change what it shows, and the data expressions those props name |
+| `get_component` | The full source of one named component, with the doc comment above it |
+| `search_source` | Grep across the repo, with file, line and surrounding context, paged |
+| `list_data_sources` | Every external source — Airtable base and table, BHARAG per lane, the two n8n endpoints, Postgres — with its credential, whether that credential is set, its `engine_*` table and which pages consume it |
+| `get_page_data` | What a page would render right now, as JSON, read through the app's own routes |
+| `get_health` | The deployed commit and branch, uptime, and a live probe of every data source |
+
+**Nothing is a hand-written list.** The routes come out of `src/App.tsx`, the
+sidebar labels out of `src/components/Layout.tsx`, a page's title and purpose
+out of its own `PageHeader` (falling back to that page's section in
+`CLAUDE.md`), a page's panels out of a scan of that page's own JSX, its data
+routes out of `src/data/index.ts`, and the sources out of `sources.ts` and
+`mirror.ts` as the process holds them. A map of the interface typed by hand
+would be right on the day it was written and wrong by the next commit, and a
+reader acting on it could not tell.
+
+**Two rules run through every tool.** A tool that cannot answer returns an
+explicit error naming what was looked for and where — `get_component` on a name
+declared in two files fails and names both rather than picking, because a wrong
+answer about structure gets acted on. And nothing is cut silently: every capped
+answer says what the cap was and how to ask for the rest, and a payload past the
+size cap comes back as its *shape* rather than as a sample, because a fragment
+read as the whole is the mistake worth avoiding.
+
+Every call is logged with its name and arguments: `[mcp] get_page_structure
+{"path":"/engine-health"} — ok in 34ms, 51204 bytes`.
+
 ### The migration backfill
 
 Gone, with the Airtable client it read through (13 September 2026).
@@ -658,6 +725,7 @@ Airtable; those rows are in `git log` if it is ever needed again.
 | `N8N_API_URL` | Defaults to `N8N_BASE_URL` + `/api/v1`. Points the same client at a replay in a sandbox |
 | `AIRTABLE_API_URL` | Points the same client at a local replay of the API in a sandbox |
 | `DATABASE_URL` | Postgres. **Required** — the server exits if it is missing or unreachable |
+| `MCP_SECRET` | The path secret for the MCP server at `/mcp/<MCP_SECRET>` (18 Sep 2026). **No default** — unset, every request under `/mcp` gets a 404 and the boot line names the variable. A wrong secret gets the same 404 a wrong route gets, so the endpoint is not discoverable |
 
 Auth is a single shared team login, matching the pattern used by BHARAG's admin
 console. No per-user accounts.
@@ -741,6 +809,12 @@ server/
     migrations.ts     Forward-only numbered migrations, run on boot under an advisory lock.
     db.ts             The meta key/value state and the date helpers.
     hash.ts           `npm run hash-password`.
+    mcp/              The MCP server, mounted at /mcp/<MCP_SECRET>. Read-only.
+      index.ts        Streamable-HTTP transport: JSON-RPC over POST, the secret check, the 404 on a miss.
+      tools.ts        The seven tools and their schemas. No write tool, and no path to one.
+      structure.ts    Routes, pages, panels and sources, all derived from source at runtime.
+      jsx.ts          The TSX scanner behind get_page_structure.
+      source.ts       Repo-relative reads, the file walk, the glob and the grep.
 tsconfig.server.json  Compiles server/ plus src/data/{types,fixtures} to server-dist/.
 render.yaml           Render blueprint: one web service, one Postgres instance.
 .env.example          Every server variable, documented.
@@ -805,6 +879,7 @@ is used any more: the bundle contains no configuration and no secrets.
 | `DATABASE_CA_CERT` | PEM of the CA for a TLS connection, when using an external Postgres URL. Without it TLS is still used but the certificate is not verified, and the server says so at boot. |
 | `DATABASE_POOL_MAX` | Pool size. Defaults to 8. |
 | `PORT` | Listen port. Render sets it. Defaults to `8787`. |
+| `MCP_SECRET` | The path secret for the MCP server. The endpoint is `/mcp/<MCP_SECRET>` on this same service, read-only, over streamable HTTP. **No default**: unset, `/mcp/*` answers 404 to everything and the boot line says so by name. It also goes into the Claude connector URL, which is why it is `sync: false` in the blueprint rather than a generated value. |
 
 ### Contracts
 
