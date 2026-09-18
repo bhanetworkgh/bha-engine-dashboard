@@ -6431,3 +6431,30 @@ Verified:   Local Postgres 16, twelve services.
               Slack each as a name and a clickable dash. `scrollWidth ===
               clientWidth` at 1440, so the body still does not scroll sideways.
 Not tested: anything against the live database — see the seed no-op above.
+
+## 2026-09-18 19:32 — Two Airtable bases the registry never listed
+Intent:     Destiny mentioned two new Airtable bases and then withdrew it,
+            saying they had shown up here on their own. Checked rather than
+            taken on trust, because nothing about this list is automatic.
+Files:      server/src/registrySeed.ts
+
+Problem:    **Nothing discovers an Airtable base.** `AIRTABLE_BASES` is a seed
+            list and `registry_bases` has no writer anywhere in the server, so
+            a base reaches the registry only by being written down in this
+            file. What Destiny saw was the two twin ledgers arriving after
+            yesterday's deploy — new ids do not conflict, so a seed addition
+            does insert on the next boot — which reads as automatic and is not.
+            Two bases this server has read for days were missing outright:
+            `appkSUSh9ijNjP2f8` (the watched clients, behind the Clients page
+            since 15 Sep) and `appwnt0mEtfwDtcN5` (BHA Pay Ledger, built
+            yesterday). Fourteen listed, sixteen read.
+Fix:        Both seeded, with their table ids and what each is for.
+Decision:   Section 4 says a legacy base stays listed because one that vanished
+            from the registry would read as one that was never there. A base
+            the engine actively reads and the registry omits is the same
+            sentence from the other end, and it is the worse half: the five
+            legacy bases are listed and the Clients base, which is live, was
+            not.
+Verified:   `registry: seeded 2 row(s): bases 2` on boot; sixteen bases on the
+            Endpoint tab, both new rows carrying their ids and notes, no
+            sideways scroll at 1440.
