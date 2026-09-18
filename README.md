@@ -670,8 +670,40 @@ it cannot drift from what the page shows; that loopback is GET-only and refuses
 **The secret is a path segment and a miss is a 404.** `MCP_SECRET`, no default.
 Anything that is not exactly `/mcp/<MCP_SECRET>` — a wrong secret, a deeper
 path, or every request when the variable is unset — gets the same 404 an unknown
-route gets. Not a 401: a 401 tells a stranger the endpoint is there and that
-they need a credential.
+route gets, on every method, checked before anything else is read. Not a 401: a
+401 tells a stranger the endpoint is there and that they need a credential, and
+it is also what starts an OAuth flow, so a client that gets one goes looking for
+an authorization server this service does not have. **Nothing under `/mcp`
+returns 401.**
+
+### What the endpoint answers, per method
+
+| Method | Answer |
+|---|---|
+| `OPTIONS` | 204 with the CORS headers, including `Access-Control-Expose-Headers: Mcp-Session-Id` |
+| `GET` | 200 `text/event-stream`, opened and held. A comment immediately, another every 20 seconds |
+| `HEAD` | 200 with the stream's own headers and no body |
+| `POST` | The JSON-RPC answer — one JSON object, or one SSE frame where `Accept` asks only for a stream |
+| `DELETE` | 204. Session termination |
+| anything else | 405 with `Allow: GET, POST, DELETE, OPTIONS` |
+
+**Refusing `GET` was what broke the connector** (18 September 2026). This server
+pushes nothing, so a 405 on `GET` was spec-legal — and it made the endpoint
+undiscoverable. Claude's connector check opens with a `GET`, read the 405 as
+"could not connect", could not then determine how the server signs in, and fell
+back to OAuth dynamic client registration, which fails because there is no
+OAuth here. The stream now opens and carries no messages, which is honest, and
+the keep-alive is not decoration: Render's router closes an idle connection, and
+the immediate first byte plus `X-Accel-Buffering: no` are what stop a buffering
+proxy holding the headers back until the client cannot tell an open stream from
+a hang.
+
+**A session id is issued on initialize**, returned in `Mcp-Session-Id`, and
+accepted on every later request. Nothing per-session is kept, so an id this
+process does not recognise is accepted rather than refused — Render restarts on
+every deploy and after every spin-down, so a client's id routinely outlives the
+process that issued it, and the spec's 404 for an expired session would be
+indistinguishable here from the 404 a wrong secret gets.
 
 | Tool | What it answers |
 |---|---|

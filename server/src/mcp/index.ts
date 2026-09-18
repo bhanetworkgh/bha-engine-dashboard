@@ -26,11 +26,30 @@
  * unknown route gets. Not a 401: a 401 tells a stranger the endpoint is there
  * and that they need a credential. A 404 tells them nothing.
  *
+ * **Nothing under `/mcp` ever answers 401** (2026-09-18, Destiny). A 401 is
+ * what starts an OAuth flow, and this server deliberately has none, so a 401
+ * would send a client off to discover an authorization server that does not
+ * exist. The secret in the path is the whole of the authentication, and a
+ * request that fails it is a request to a route that does not exist.
+ *
+ * **Discovery needs the GET stream, and refusing it is what broke the
+ * connector** (2026-09-18, Destiny). This server sends no server-initiated
+ * messages, so a 405 on `GET` was spec-legal — and it made the endpoint
+ * undiscoverable in practice. Claude's connector check opens with a `GET`,
+ * read the 405 as "could not connect", could not then determine how the server
+ * signs in, and fell back to OAuth dynamic client registration, which fails
+ * here because there is no OAuth. So `GET` now opens a real event stream and
+ * holds it: it carries no messages, which is honest, but it opens, which is
+ * what the client needs to see. `OPTIONS` answers the CORS preflight and
+ * `DELETE` ends a session. **The secret is still checked before any of them**,
+ * so none of the three tells an unauthenticated caller that the endpoint is
+ * there.
+ *
  * **Read only.** There is no write tool, and no code path from a tool to a
  * write. See tools.ts.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { McpError } from './source';
 import { toolByName, toolCatalogue, sourceWarning, type ToolDeps } from './tools';
 
@@ -189,22 +208,52 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
+/* ----------------------------------------------------------------- CORS */
+
+/**
+ * The cross-origin headers every answer past the secret check carries.
+ *
+ * `Access-Control-Expose-Headers: Mcp-Session-Id` is the load-bearing one: a
+ * browser client cannot read a response header it is not exposed, so without it
+ * the session id this server issues on initialize is invisible to the very
+ * client it was issued to.
+ *
+ * The origin is echoed where the request names one, with `Vary: Origin`, rather
+ * than always `*` — that keeps the answer correct for a caller that sends
+ * credentials, which `*` forbids. No origin, no echo: `*`.
+ */
+function cors(req: IncomingMessage, sessionId?: string | null): Record<string, string> {
+  const origin = req.headers.origin;
+  const headers: Record<string, string> = {
+    'Access-Control-Allow-Origin': typeof origin === 'string' && origin ? origin : '*',
+    Vary: 'Origin',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'authorization, content-type, accept, last-event-id, mcp-session-id, mcp-protocol-version, x-requested-with',
+    'Access-Control-Expose-Headers': 'Mcp-Session-Id, Mcp-Protocol-Version',
+    'Access-Control-Max-Age': '86400',
+  };
+  if (sessionId) headers['Mcp-Session-Id'] = sessionId;
+  return headers;
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}): void {
   const text = JSON.stringify(body);
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(text),
     'Cache-Control': 'no-store',
+    ...extra,
   });
   res.end(text);
 }
 
 /** One SSE frame carrying the response, then the stream closes. */
-function sendEventStream(res: ServerResponse, body: unknown): void {
+function sendEventStream(res: ServerResponse, body: unknown, extra: Record<string, string> = {}): void {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-store',
     Connection: 'keep-alive',
+    ...extra,
   });
   res.write(`event: message\ndata: ${JSON.stringify(body)}\n\n`);
   res.end();
@@ -212,6 +261,8 @@ function sendEventStream(res: ServerResponse, body: unknown): void {
 
 /** The 404 every miss gets, so the endpoint is not discoverable. */
 function notFound(res: ServerResponse): void {
+  // Deliberately carries no CORS and no hint of its own: byte for byte what an
+  // unknown route answers, because that is what a wrong secret is.
   sendJson(res, 404, { ok: false, message: 'No such route.' });
 }
 
@@ -222,58 +273,215 @@ function secretMatches(given: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/* --------------------------------------------------------------- sessions */
+
 /**
- * Handles anything under `/mcp`. Returns false when the request is not for this
- * server at all, so the caller can carry on to its own routes — though in
- * practice nothing else in this app serves `/mcp`.
+ * The session ids this process has issued.
+ *
+ * Nothing per-session is actually kept — every tool reads the same source tree
+ * and the same database — so this exists to answer initialize with an id, to
+ * log which conversation a call belongs to, and for nothing else.
+ *
+ * **An id this process does not recognise is accepted, never refused.** Render
+ * restarts on every deploy and after every spin-down, so a client's id
+ * routinely outlives the process that issued it. Refusing it would end a
+ * working conversation to defend state that does not exist; the spec's 404 for
+ * an expired session would also be indistinguishable here from the 404 a wrong
+ * secret gets, which is the one signal this endpoint needs to keep unambiguous.
+ */
+const sessions = new Map<string, { created: string; seen: number }>();
+const MAX_SESSIONS = 500;
+
+function rememberSession(id: string): void {
+  if (!sessions.has(id) && sessions.size >= MAX_SESSIONS) {
+    // Oldest first; Map keeps insertion order.
+    const oldest = sessions.keys().next().value;
+    if (oldest) sessions.delete(oldest);
+  }
+  const held = sessions.get(id);
+  if (held) held.seen = Date.now();
+  else sessions.set(id, { created: new Date().toISOString(), seen: Date.now() });
+}
+
+function sessionHeader(req: IncomingMessage): string | null {
+  const v = req.headers['mcp-session-id'];
+  const id = Array.isArray(v) ? v[0] : v;
+  return typeof id === 'string' && id.trim() ? id.trim() : null;
+}
+
+/* -------------------------------------------------------------- the stream */
+
+/**
+ * How often a comment goes down an idle stream. Below the 60 seconds most
+ * proxies idle a connection out at, and Render's router is one of them.
+ */
+const KEEPALIVE_MS = 20_000;
+
+let openStreams = 0;
+
+/**
+ * Opens an event stream and holds it.
+ *
+ * It carries no messages, because this server has none to push. That is the
+ * whole point of what it fixes: the client needs the stream to *open*, and a
+ * stream that opens and says nothing is an honest answer where a 405 was a
+ * misleading one.
+ *
+ * The keep-alive comments are not decoration. Render's router closes an idle
+ * connection, and `X-Accel-Buffering: no` plus an immediate first byte are what
+ * stop a buffering proxy from holding the headers back so long that the client
+ * cannot tell an open stream from a hang.
+ */
+function holdEventStream(req: IncomingMessage, res: ServerResponse): void {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-store, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+    ...cors(req, sessionHeader(req)),
+  });
+  res.write(': open\n\n');
+
+  const socket = res.socket;
+  if (socket) {
+    socket.setNoDelay(true);
+    socket.setKeepAlive(true);
+    // Node would otherwise time an idle socket out from under a live stream.
+    socket.setTimeout(0);
+  }
+
+  const timer = setInterval(() => {
+    if (!res.writableEnded) res.write(': keep-alive\n\n');
+  }, KEEPALIVE_MS);
+  // Never a reason to keep the process alive on its own.
+  timer.unref();
+
+  openStreams += 1;
+  const opened = Date.now();
+  console.log(`[mcp] GET stream opened — ${openStreams} open${sessionHeader(req) ? `, session ${sessionHeader(req)}` : ''}`);
+
+  let closed = false;
+  const close = (): void => {
+    if (closed) return;
+    closed = true;
+    clearInterval(timer);
+    openStreams -= 1;
+    console.log(`[mcp] GET stream closed after ${Math.round((Date.now() - opened) / 1000)}s — ${openStreams} open`);
+  };
+  req.on('close', close);
+  req.on('aborted', close);
+  res.on('close', close);
+}
+
+/* ------------------------------------------------------------ the handler */
+
+/**
+ * Handles anything under `/mcp`.
+ *
+ * The secret is checked first, for every method, before anything else is read —
+ * so `OPTIONS`, `GET`, `POST` and `DELETE` are all equally silent to a caller
+ * who does not have it.
  */
 export async function handleMcp(req: IncomingMessage, res: ServerResponse, url: URL, deps: ToolDeps): Promise<void> {
   const parts = url.pathname.replace(/\/+$/, '').split('/').filter(Boolean);
+  const method = req.method ?? 'GET';
+
   // Exactly /mcp/<secret>. A deeper path is not this endpoint.
-  if (parts.length !== 2 || parts[0] !== 'mcp' || !secretMatches(decodeURIComponent(parts[1]))) {
-    console.log(`[mcp] rejected ${req.method ?? 'GET'} ${parts.length} path segment(s) under /mcp — ${MCP_SECRET ? 'secret did not match' : `${MCP_SECRET_VAR} is not set on this service`}; answered 404`);
+  //
+  // The reason is logged as it actually is: a bare /mcp and a deeper path never
+  // reach the comparison at all, and saying "secret did not match" for those
+  // sends whoever is debugging this to check the wrong thing.
+  const wellFormed = parts.length === 2 && parts[0] === 'mcp';
+  if (!wellFormed || !secretMatches(decodeURIComponent(parts[1]))) {
+    const why = !wellFormed
+      ? `the path is not /mcp/<secret> (${parts.length} segment(s))`
+      : MCP_SECRET
+        ? 'the secret did not match'
+        : `${MCP_SECRET_VAR} is not set on this service`;
+    console.log(`[mcp] rejected ${method} ${url.pathname.split('/').slice(0, 2).join('/')}/… — ${why}; answered 404`);
     return notFound(res);
   }
 
-  const method = req.method ?? 'GET';
+  const given = sessionHeader(req);
+  if (given) rememberSession(given);
 
-  // This server never pushes to the client, so there is no stream to open.
+  // The CORS preflight. A browser sends this before the real request, so it has
+  // to answer before anything else can.
+  if (method === 'OPTIONS') {
+    res.writeHead(204, { 'Content-Length': '0', ...cors(req, given) });
+    res.end();
+    return;
+  }
+
+  /**
+   * The stream a client opens to discover the server. It stays open and carries
+   * nothing; see holdEventStream for why that is the right answer and a 405 was
+   * not.
+   */
   if (method === 'GET') {
-    res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8', Allow: 'POST, DELETE', 'Cache-Control': 'no-store' });
-    res.end(JSON.stringify(failure(null, INVALID_REQUEST, 'This endpoint answers POSTed JSON-RPC only. It opens no server-initiated stream, so there is nothing to GET.')));
-    return;
-  }
-  // Ending a session. Nothing is kept between calls, so there is nothing to end.
-  if (method === 'DELETE') return sendJson(res, 200, { ok: true, message: 'Nothing is kept between calls, so there was no session to end.' });
-  if (method !== 'POST') {
-    res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8', Allow: 'POST, DELETE', 'Cache-Control': 'no-store' });
-    res.end(JSON.stringify(failure(null, INVALID_REQUEST, `${method} is not accepted here. POST a JSON-RPC request.`)));
+    holdEventStream(req, res);
     return;
   }
 
-  const accept = String(req.headers.accept ?? '');
-  const wantsStream = accept.includes('text/event-stream') && !accept.includes('application/json');
-  const reply = (status: number, body: unknown): void => (wantsStream && status === 200 ? sendEventStream(res, body) : sendJson(res, status, body));
+  // HEAD cannot carry a body, so it answers with the stream's own headers and
+  // stops there — enough for a probe that only wants to know the route is live.
+  if (method === 'HEAD') {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', ...cors(req, given) });
+    res.end();
+    return;
+  }
+
+  // Ending a session. Nothing per-session is kept, so there is nothing to tear
+  // down — but the client is entitled to a clean 204 rather than a body it did
+  // not ask for.
+  if (method === 'DELETE') {
+    if (given) {
+      sessions.delete(given);
+      console.log(`[mcp] DELETE — session ${given} forgotten`);
+    }
+    res.writeHead(204, { 'Content-Length': '0', ...cors(req, given) });
+    res.end();
+    return;
+  }
+
+  if (method !== 'POST') {
+    res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8', Allow: 'GET, POST, DELETE, OPTIONS', 'Cache-Control': 'no-store', ...cors(req, given) });
+    res.end(JSON.stringify(failure(null, INVALID_REQUEST, `${method} is not accepted here. POST a JSON-RPC request, or GET the event stream.`)));
+    return;
+  }
 
   let text: string;
   try {
     text = await readBody(req);
   } catch (e) {
-    return sendJson(res, 400, failure(null, INVALID_REQUEST, e instanceof Error ? e.message : 'The request body could not be read.'));
+    return sendJson(res, 400, failure(null, INVALID_REQUEST, e instanceof Error ? e.message : 'The request body could not be read.'), cors(req, given));
   }
 
   let payload: unknown;
   try {
     payload = text.trim() ? JSON.parse(text) : null;
   } catch {
-    return sendJson(res, 400, failure(null, PARSE_ERROR, 'The request body was not JSON.'));
+    return sendJson(res, 400, failure(null, PARSE_ERROR, 'The request body was not JSON.'), cors(req, given));
   }
   if (!payload || typeof payload !== 'object') {
-    return sendJson(res, 400, failure(null, INVALID_REQUEST, 'Expected a JSON-RPC request object, or an array of them.'));
+    return sendJson(res, 400, failure(null, INVALID_REQUEST, 'Expected a JSON-RPC request object, or an array of them.'), cors(req, given));
   }
 
   const batch = Array.isArray(payload) ? (payload as RpcRequest[]) : [payload as RpcRequest];
-  if (!batch.length) return sendJson(res, 400, failure(null, INVALID_REQUEST, 'An empty batch is not a request.'));
+  if (!batch.length) return sendJson(res, 400, failure(null, INVALID_REQUEST, 'An empty batch is not a request.'), cors(req, given));
+
+  /**
+   * A session id is issued on initialize and returned in `Mcp-Session-Id`, the
+   * header the client then sends back. Minted here rather than inside
+   * handleRpc, which answers in JSON-RPC and has no way to set a header.
+   */
+  const initialising = batch.some((one) => one?.method === 'initialize');
+  let sessionId = given;
+  if (initialising) {
+    sessionId = randomUUID();
+    rememberSession(sessionId);
+    console.log(`[mcp] initialize — issued session ${sessionId}`);
+  }
 
   const answers: Record<string, unknown>[] = [];
   for (const one of batch) {
@@ -286,11 +494,17 @@ export async function handleMcp(req: IncomingMessage, res: ServerResponse, url: 
     }
   }
 
+  const headers = cors(req, sessionId);
+
   // Every message was a notification: accepted, with nothing to say back.
   if (!answers.length) {
-    res.writeHead(202, { 'Content-Length': '0', 'Cache-Control': 'no-store' });
+    res.writeHead(202, { 'Content-Length': '0', ...headers });
     res.end();
     return;
   }
-  return reply(200, Array.isArray(payload) ? answers : answers[0]);
+
+  const accept = String(req.headers.accept ?? '');
+  const wantsStream = accept.includes('text/event-stream') && !accept.includes('application/json');
+  const body = Array.isArray(payload) ? answers : answers[0];
+  return wantsStream ? sendEventStream(res, body, headers) : sendJson(res, 200, body, headers);
 }
