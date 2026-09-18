@@ -6841,3 +6841,47 @@ Not tested: **Against the deployed URL — this session cannot reach it.** The
             through Render's API and reading this server's own `[mcp]` log lines
             off the running instance. The curl sequence to run from a machine
             that can reach the host is in the handover.
+
+## 2026-09-18 20:42 — what the live request log proved, and what it could not
+Intent:     Addendum to the 20:40 entry. Destiny asked for the retest to be
+            driven against the deployed URL rather than locally, so this records
+            exactly how far that got and where it stopped.
+Files:      none — verification only.
+
+Verified:   **The diagnosis is confirmed against the live service, not merely
+            believed.** Render's own request log for dashboard.bhanetwork.org at
+            20:27:01 holds the failing request verbatim:
+            `GET /mcp/<secret>` → **405**, `level=warning`,
+            `responseTimeMS=6`, `responseBytes=462`, user agent
+            `Claude-User/1.0 (+claude-user@anthropic.com)` — the connector
+            check, opening with a GET, getting the 405 this commit removes.
+            The deploy of 01c0cf4 went live at 20:37:35 on instance
+            `srv-dagj84ijnfac73ds5100-gd6nk`, and that instance's own boot line
+            reads `mcp: /mcp/<MCP_SECRET> — read-only tools over streamable
+            HTTP, MCP_SECRET set`.
+
+Not tested: **The post-fix GET against the deployed URL. This session cannot
+            reach the host by any route.** The container's egress policy denies
+            `dashboard.bhanetwork.org:443` and
+            `bha-engine-dashboard.onrender.com:443` with a 403 on CONNECT
+            (recorded in the agent proxy's `recentRelayFailures`), and the
+            Anthropic-side fetch is denied the same domain
+            (`EGRESS_BLOCKED`). The proxy's own guidance is to report a policy
+            denial rather than route around it, so that is what this says: the
+            fix is proven locally against the exact client sequence, and the
+            deployed leg of it is one curl away from somebody who can reach the
+            host. It will also show up in Render's request log as
+            `GET /mcp/<secret>` → 200 the moment the connector is retried,
+            which is checkable from here afterwards even though originating it
+            is not.
+
+Decision:   Worth writing down because it is a consequence of the design rather
+            than a bug: **a path-segment secret appears in plaintext in
+            Render's request logs**, which is where this session read it from.
+            That is inherent to putting the credential in the URL — the
+            connector URL is what Claude's client accepts, so the trade was
+            made deliberately — but it means the log is as sensitive as the
+            variable, and rotating the secret means rotating it in two places
+            (the Render env var and the connector URL). Nothing in this repo
+            ever prints it; Render's edge does, before the process sees the
+            request.
