@@ -634,6 +634,17 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
   const late = new Set(spend.overdue);
   const uncounted = new Set(spend.not_monthly_ids);
 
+  /*
+    The notes card below, in its own order: a service that carries a note
+    first, then the ones that do not, each group still in the table's order
+    because sort is stable. Deleted rows are left out — a note on something
+    nobody runs any more is history, and this card is the standing reference.
+    Deliberately not filtered by the search box or the category tabs: these
+    are read as a set, and a note that disappears because somebody typed in
+    an unrelated filter is a note nobody finds twice.
+  */
+  const noteworthy = rows.filter((s) => !s.deleted_at).sort((a, b) => Number(Boolean(b.notes)) - Number(Boolean(a.notes)));
+
   return (
     <>
       <SpendPanel spend={spend} services={rows} />
@@ -661,15 +672,23 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
           label="service"
           onError={p.fail}
           onCreate={(v) => p.add('services', v)}
+          /*
+            url and notes were missing here until 18 Sep 2026, and they are the
+            two fields nothing else on this tab could fill either: every other
+            column is editable in the row, so a service added without one of
+            these had no way of ever getting it. GoDaddy is how that surfaced.
+          */
           fields={[
             { name: 'name', label: 'name', required: true },
             { name: 'category', label: 'category', type: 'select', options: CATEGORIES },
+            { name: 'url', label: 'url', type: 'url', placeholder: 'https://…' },
             { name: 'managed_by', label: 'managed by' },
             { name: 'plan', label: 'plan' },
             { name: 'cost_amount', label: 'cost', type: 'number' },
             { name: 'cost_currency', label: 'currency', placeholder: 'USD' },
             { name: 'billing_cycle', label: 'billing cycle', type: 'select', options: CYCLES },
             { name: 'renewal_date', label: 'renews', type: 'date' },
+            { name: 'notes', label: 'notes' },
           ]}
         />
       </div>
@@ -709,16 +728,45 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
             <tr key={s.id} className={s.deleted_at ? 'opacity-50' : ''}>
               <td className="td card-title td-clip" style={{ maxWidth: '24ch' }}>
                 {cell(p, 'services', s, 'name')}
-                {s.url && (
-                  <a
-                    href={s.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block truncate text-[10.5px] text-faint hover:text-accent-ink"
-                    title={s.url}
-                  >
-                    {s.url.replace(/^https?:\/\//, '')}
-                  </a>
+                {/*
+                  The url is editable here, not only readable. It was neither
+                  on the add form nor anywhere in the row, so a service created
+                  from the form above could never be given one — which is how
+                  GoDaddy came to sit here with a blank where its console link
+                  belongs. The link stays clickable and the editor sits beside
+                  it, the same shape the Builders tab uses for lanes owned.
+                */}
+                {s.url ? (
+                  <span className="flex items-baseline gap-1.5">
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="min-w-0 truncate text-[10.5px] text-faint hover:text-accent-ink"
+                      title={s.url}
+                    >
+                      {s.url.replace(/^https?:\/\//, '')}
+                    </a>
+                    <EditableCell
+                      value={s.url}
+                      type="url"
+                      disabled={Boolean(s.deleted_at)}
+                      onSave={(v) => p.save('services', s.id, 'url', v)}
+                      onError={p.fail}
+                      inline
+                      render={() => <span className="text-[10.5px] text-faint">edit</span>}
+                    />
+                  </span>
+                ) : (
+                  <EditableCell
+                    value={null}
+                    type="url"
+                    placeholder="https://…"
+                    disabled={Boolean(s.deleted_at)}
+                    onSave={(v) => p.save('services', s.id, 'url', v)}
+                    onError={p.fail}
+                    inline
+                  />
                 )}
               </td>
               <td className="td card-meta">{cell(p, 'services', s, 'category', { type: 'select', options: CATEGORIES })}</td>
@@ -755,17 +803,46 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
       </Grid>
       <Pagination paged={paged} unit="services" />
 
-      {rows.some((s) => s.notes) && (
+      {/*
+        Every live service, not only the ones that already carry a note, and
+        every note editable in place (18 Sep 2026). `notes` was a registered
+        field with no interface at all — not on the add form, not in the row —
+        so the only notes that could ever exist were the ones seeded in this
+        repo, and a service added from the page could never be annotated.
+        Noted services lead, because this is a card for reading notes; the
+        rest keep their line with a dash on it, which says nobody has written
+        one rather than hiding that there is nothing to read.
+      */}
+      {noteworthy.length > 0 && (
         <div className="shrink-0 px-6 pb-6 md:px-8">
           <MetricCard title="Notes on these services">
             <div className="space-y-2.5 text-[12.5px] leading-relaxed">
-              {rows
-                .filter((s) => s.notes)
-                .map((s) => (
-                  <div key={s.id} className="text-dim">
-                    <span className="text-ink">{s.name}</span> — {s.notes}
-                  </div>
-                ))}
+              {noteworthy.map((s) => (
+                <div key={s.id} className="text-dim">
+                  <span className="text-ink">{s.name}</span>{' '}
+                  {s.notes ? (
+                    <>
+                      {'— '}{s.notes}{' '}
+                      <EditableCell
+                        value={s.notes}
+                        type="longtext"
+                        onSave={(v) => p.save('services', s.id, 'notes', v)}
+                        onError={p.fail}
+                        inline
+                        render={() => <span className="text-[10.5px] text-faint">edit</span>}
+                      />
+                    </>
+                  ) : (
+                    <EditableCell
+                      value={null}
+                      type="longtext"
+                      onSave={(v) => p.save('services', s.id, 'notes', v)}
+                      onError={p.fail}
+                      inline
+                    />
+                  )}
+                </div>
+              ))}
             </div>
           </MetricCard>
         </div>
