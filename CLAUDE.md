@@ -422,6 +422,53 @@ calls with three keys and cannot be collapsed. `server/src/bharag.ts` is the
 only code that holds them. Nothing here writes to the ledger: the handlers
 create incidents and the healer closes them.
 
+**An MCP server is mounted on this same service** (decision 2026-09-18,
+Destiny), at `/mcp/:secret` over streamable HTTP, so an external Claude client
+can read this app. It is there because the page is client-rendered: fetching the
+dashboard's URL returns an empty shell, so a client asked "on this page I can't
+do X" could not see the app at all. It reads the app's **structure** — routes,
+pages, panels, which data feeds which panel — and its **live data**, and
+structure is the larger half because it is what makes a page nobody can see
+reasonable about.
+
+- **Not a second service and not a second dependency.** It hangs off the same
+  `createServer` handler as `/api`, ahead of it, so it deploys with the same
+  commit and runs in the same process against the same Postgres. The MCP SDK is
+  not added: rule 5 of section 2 says `pg` is the ceiling and not a precedent,
+  and streamable HTTP is JSON-RPC 2.0 over a POST. The transport answers with a
+  single JSON object, or one SSE frame where the client's `Accept` asks for a
+  stream, because clients differ about which they send.
+- **Read only, and there is no write path to close.** v1 has no write tool and
+  no code route from a tool to a write. `get_page_data` reads through an
+  in-process GET against this server's own `/api` router — the same function
+  that answers the browser, which is what stops the tool drifting from the
+  page — and that loopback is GET-only and refuses `/api/engine/*` and
+  `/api/inbound/*` by name.
+- **`MCP_SECRET` is a path segment, and a miss is a 404.** Anything that is not
+  exactly `/mcp/<MCP_SECRET>` — a wrong secret, a deeper path, every request
+  when the variable is unset — gets the 404 an unknown route gets. **Never a
+  401**: a 401 tells a stranger the endpoint is there and that they need a
+  credential. No default, on the rule the base ids follow.
+- **Nothing it says about structure is written by hand.** Routes come out of
+  `src/App.tsx`, sidebar labels out of `Layout.tsx`, a page's title and purpose
+  out of its own `PageHeader` falling back to that page's section in this file,
+  its panels out of a scan of the page's own JSX, its data routes out of
+  `src/data/index.ts`, and the sources out of `sources.ts` and `mirror.ts` as
+  the process holds them. A hand-written map of the interface would be right on
+  the day it was written and wrong by the next commit, and a reader acting on it
+  could not tell.
+- **A tool that cannot answer says why, and nothing is cut silently.** An
+  explicit error names what was looked for and where — `get_component` on a name
+  declared in two files fails and names both rather than picking one, because
+  `LaneView` is two different panels and a wrong answer about structure gets
+  acted on. Every capped answer says what the cap was and how to ask for the
+  rest, and a payload past the size cap comes back as its **shape** rather than
+  as a sample: a fragment read as the whole is the failure worth designing out.
+- Every call is logged with its name and arguments. Seven tools: `list_pages`,
+  `get_page_structure` (the one that matters — it is what lets somebody reason
+  about a page they cannot see), `get_component`, `search_source`,
+  `list_data_sources`, `get_page_data`, `get_health`.
+
 **Environment (all server-side, none in the bundle):** `AUTH_EMAIL`,
 `AUTH_PASSWORD_HASH`, `SESSION_SECRET`, `ASK_BAYS_API_KEY`, `ASK_BAYS_URL`,
 `DASHBOARD_INBOUND_KEY` (nothing reaches the record tables without it),
@@ -448,6 +495,10 @@ line names every lane that is not keyed. `AIRTABLE_TOKEN` also needs read on
 the live webhook as its default. `AIRTABLE_TOKEN` also needs read on
 `appwnt0mEtfwDtcN5` (BHA Pay Ledger) for Pay Tracker — read only, and no base
 variable, because nothing here ever writes to it.
+`MCP_SECRET` — the path secret for the MCP server at `/mcp/<MCP_SECRET>`, read
+only. **No default**, and unset the endpoint answers 404 to everything and the
+boot line names the variable; it is `sync: false` in the blueprint rather than a
+generated value because the same string goes into the Claude connector URL.
 `DATABASE_CA_CERT`, `DATABASE_POOL_MAX`, `N8N_API_URL`, `BHARAG_API_URL` and
 `AIRTABLE_API_URL` are optional.
 `DATA_DIR` is gone, and so are `AIRTABLE_RESYNC_MINUTES`, the

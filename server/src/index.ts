@@ -38,6 +38,7 @@ import * as bharag from './bharag';
 import { monthly } from './monthly';
 import { isStatKind, stats } from './stats';
 import { N8N_API_VAR, n8nBase, n8nConfigured } from './n8n';
+import { handleMcp, mcpConfigured, mcpMountPath, MCP_SECRET_VAR } from './mcp';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
 
 /**
@@ -119,7 +120,13 @@ function str(v: unknown, max = 4000): string {
 
 /* ------------------------------------------------------------------ api */
 
-async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+/**
+ * `internal` is only ever true for a call this process made to itself — see
+ * dispatchApi below, which is how the MCP server reads a page's data through
+ * the same handlers the browser hits. It cannot be set from outside: nothing
+ * about a request sets it, and the only caller that passes it is in this file.
+ */
+async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal = false): Promise<void> {
   const method = req.method ?? 'GET';
   const p = url.pathname.replace(/\/+$/, '') || '/api';
   const q = { lane: engine.parseLane(url.searchParams.get('lane')) };
@@ -317,8 +324,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     }
   }
 
-  // Everything else needs the cookie.
-  if (!readSession(req)) throw new HttpError(401, 'Sign in to continue.');
+  // Everything else needs the cookie. An internal call has no browser and no
+  // cookie to carry; it is authenticated by whatever let it into the process.
+  if (!internal && !readSession(req)) throw new HttpError(401, 'Sign in to continue.');
 
   if (method === 'GET') {
     switch (p) {
@@ -760,6 +768,66 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   throw new HttpError(404, 'No such route.');
 }
 
+/* ----------------------------------------------------------- in-process GET */
+
+/**
+ * Runs one GET through this server's own /api router, in this process.
+ *
+ * This is what the MCP server's `get_page_data` reads through, and the reason
+ * it is a loopback rather than a second set of queries: it is literally the
+ * function that answers the browser, against the same Postgres, so the tool
+ * cannot report something the page would not show. A copy of the read logic
+ * would be right until the first time one of them changed.
+ *
+ * GET only, and /api only. Every write route in the router above sits behind a
+ * POST, PATCH or DELETE, so a GET cannot reach one — and the two service-key
+ * routes are refused by name as well, because "unreachable by construction" is
+ * a claim worth making twice on a path that skips the cookie.
+ */
+async function dispatchApi(pathWithQuery: string): Promise<{ status: number; body: unknown }> {
+  const url = new URL(pathWithQuery, 'http://localhost');
+  if (url.pathname !== '/api' && !url.pathname.startsWith('/api/')) {
+    throw new HttpError(400, `"${pathWithQuery}" is not an /api route, so it cannot be read this way.`);
+  }
+  if (url.pathname.startsWith('/api/engine/') || url.pathname.startsWith('/api/inbound/')) {
+    throw new HttpError(403, 'The engine write routes are not readable. Nothing in this process reads a page through them.');
+  }
+  const req = {
+    method: 'GET',
+    url: pathWithQuery,
+    headers: {},
+    socket: { remoteAddress: '127.0.0.1' },
+    on: () => undefined,
+  } as unknown as IncomingMessage;
+  let status = 200;
+  let text = '';
+  const res = {
+    setHeader: () => undefined,
+    getHeader: () => undefined,
+    writeHead: (s: number) => {
+      status = s;
+      return res;
+    },
+    write: () => true,
+    end: (chunk?: unknown) => {
+      if (typeof chunk === 'string') text = chunk;
+      return res;
+    },
+  } as unknown as ServerResponse;
+
+  try {
+    await api(req, res, url, true);
+  } catch (e) {
+    if (e instanceof HttpError) return { status: e.status, body: { ok: false, message: e.message } };
+    throw e;
+  }
+  try {
+    return { status, body: text ? (JSON.parse(text) as unknown) : null };
+  } catch {
+    return { status, body: { ok: false, message: 'That route answered with something that was not JSON.' } };
+  }
+}
+
 /* --------------------------------------------------------------- static */
 
 const TYPES: Record<string, string> = {
@@ -807,6 +875,18 @@ const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
+  /**
+   * The MCP server, for an external Claude client (2026-09-18). Ahead of
+   * /api and of the SPA fallback, and it never touches either: a request that
+   * is not exactly /mcp/<MCP_SECRET> gets the same 404 an unknown route gets.
+   */
+  if (url.pathname === '/mcp' || url.pathname.startsWith('/mcp/')) {
+    handleMcp(req, res, url, { dispatch: dispatchApi, startedAt: STARTED_AT }).catch((e: unknown) => {
+      console.error('[mcp] unhandled', e);
+      return send(res, 500, { ok: false, message: 'The server hit an error handling that request.' });
+    });
+    return;
+  }
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
     api(req, res, url).catch((e: unknown) => {
       if (e instanceof HttpError) return send(res, e.status, { ok: false, message: e.message });
@@ -871,6 +951,14 @@ async function boot(): Promise<void> {
      * the lane simply never gets asked, and an unasked lane looks exactly like
      * a healthy one on any page that does not say otherwise.
      */
+    // Said by name, like every other credential line: with MCP_SECRET unset the
+    // endpoint answers 404 to everything, which is indistinguishable from it
+    // not being deployed at all.
+    console.log(
+      mcpConfigured()
+        ? `  mcp:      ${mcpMountPath()} — read-only tools over streamable HTTP, ${MCP_SECRET_VAR} set`
+        : `  mcp:      NOT configured — ${MCP_SECRET_VAR} is not set, so /mcp/* answers 404 to everything.`,
+    );
     const laneKeys = bharag.configuredLanes();
     console.log(
       laneKeys.length === 3

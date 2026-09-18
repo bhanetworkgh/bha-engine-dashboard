@@ -166,6 +166,21 @@ services:
       # BHA Submissions & Logs — the Codex base. Same token covers both.
       - key: AIRTABLE_SUBMISSIONS_BASE_ID
         value: appEmdKshNVTl64Zf
+      # The MCP server's path secret (18 Sep 2026). The endpoint is
+      # /mcp/<MCP_SECRET> on this same service — an MCP server mounted on the
+      # existing handler, not a second service, so it deploys with this commit
+      # and runs in this process against this database.
+      #
+      # sync: false rather than generateValue: true, deliberately: the value
+      # has to go into the Claude connector URL as well, so it is set by hand
+      # in both places and a generated one nobody can read would leave the
+      # connector pointing at a 404.
+      #
+      # No default in the code. Unset, every request under /mcp gets a 404 and
+      # the boot line names the variable. A wrong secret gets the same 404 a
+      # wrong route gets, so the endpoint is not discoverable.
+      - key: MCP_SECRET
+        sync: false
 
 # Confirmed against the live Render API (2026-09-12), not inferred: the plan
 # string is the one the API reports. basic-256mb is an accepted alias for the
