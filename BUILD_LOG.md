@@ -6655,3 +6655,75 @@ Decision:   Section 4 says a legacy base stays listed because one that vanished
 Verified:   `registry: seeded 2 row(s): bases 2` on boot; sixteen bases on the
             Endpoint tab, both new rows carrying their ids and notes, no
             sideways scroll at 1440.
+
+## 2026-09-18 20:30 — one route the extractor could not see, on the page that lists everything
+Intent:     PR #6 merged while this session was still open — Destiny resolved
+            the BUILD_LOG conflict and merged at 20:18, so the MCP server is on
+            `main`. This entry is the one change that came after it, found by
+            reading the merged tree's own answer rather than by a test.
+Files:      server/src/mcp/structure.ts
+
+Problem:    `get_page_structure("/registry")` listed one route,
+            `GET /api/engine-writes`, and **not `/api/registry`** — so the
+            System registry read as a page that fetches no data of its own, and
+            `get_page_data` on it would have answered with the write log and
+            nothing else. `getRegistry` wraps its route in a ternary:
+            `api<RegistryData>(includeDeleted ? '/api/registry?deleted=true' :
+            '/api/registry')`. The extractor read only the token immediately
+            after `api(` — a string, a template, or a `withLane(` — and a
+            ternary is none of the three, so it found no literal and dropped the
+            function entirely.
+Fix:        Read the **first `/api/…` literal anywhere in the call** rather than
+            only the next token, and strip the query string as well as the `${`
+            when deriving `path_prefix`: `/api/registry` is what index.ts
+            registers and `/api/registry?deleted=true` is not. Forty data
+            functions now resolve to a route where thirty-five did, and because
+            a prefix without its query matches the route literal in index.ts,
+            the source-to-page chain in `list_data_sources` went from 27 of 33
+            sources carrying a page link to 30.
+
+Decision:   Worth stating plainly, because it is the failure mode the whole tool
+            set is built against and it arrived from the direction the design
+            did not guard. The "never guess" rule protects against a **wrong**
+            answer; this was an **incomplete** one, and an incomplete answer
+            about a page reads exactly as confidently as a complete one. Nothing
+            warned. The guard against the next one is that the extractor now
+            searches for what it needs instead of assuming the shape it will be
+            written in.
+
+Decision:   Restarted this branch from `main` rather than stacking on the
+            already-merged history. A merged pull request is finished, so the
+            merge commit this session made to resolve the conflict is
+            superseded — Destiny's own resolution (a66ba25) is what landed, and
+            it kept both sides' entries, which is what section 9 requires. Its
+            ordering puts 19:58 above 19:30; that is left exactly as merged,
+            because reordering an entry somebody else committed is rewriting it.
+
+Verified:   Against `main` plus this one file, with a local Postgres 16.
+            - `npm run typecheck` and `npm run build` clean.
+            - `get_page_structure` over **every page** at expand_depth 3: 1,172
+              nodes, **zero scan warnings**. `/registry` reads 159 nodes where
+              it read 155 before main's registry commits, having picked up the
+              new url and notes form fields without a line of this code
+              changing — which is the point of deriving structure from source.
+            - `/registry` now lists `GET /api/registry` **and**
+              `GET /api/engine-writes`, and `get_page_data` on it returned
+              40,854 bytes carrying all six registries, `spend` and
+              `digest_health`, skipping the parameterised write-log route by
+              name.
+            - Boot on the merged tree: 17 migrations, `registry: seeded 103
+              row(s) … services 11, bases 16` — main's new seed rows land — and
+              the mcp boot line still names MCP_SECRET.
+            - Still 404 on a wrong secret and on a deeper path; still 401 on
+              `/api/overview` without a cookie; `/api/status`,
+              `/api/registry`, `/api/overview`, `/api/open-loops`, `/api/codex`
+              and `/api/executions` all still 200 behind the cookie.
+            - Re-rendered `/`, `/registry`, `/engine-health`, `/executions` and
+              `/open-loops` in Chromium at 1440×900: each painted its own
+              heading, no sideways scroll, and no console error but this
+              container's proxy certificate on the web font and the weather
+              call.
+Not tested: Nothing against the live Render service. There is **no CI on this
+            repository** — PR #6 reported no check runs at all — so "green" here
+            means the repo's own checks run by hand: typecheck, build, the
+            scanner sweep over every page, and the browser pass above.

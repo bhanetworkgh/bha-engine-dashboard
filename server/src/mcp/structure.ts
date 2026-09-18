@@ -525,7 +525,11 @@ export interface DataFunction {
   method: string;
   /** The route as written. A template with a `${}` in it cannot be called without filling it. */
   path: string;
-  /** The part before the first `${`, which is the route as the server registers it. */
+  /**
+   * The route as this server registers it: the part before the first `${` and
+   * before any query string. `/api/registry?deleted=true` registers as
+   * `/api/registry`, and that is what index.ts can be looked up by.
+   */
   path_prefix: string;
   parameterised: boolean;
   declared_at: string;
@@ -589,17 +593,21 @@ export function dataFunctions(): Map<string, DataFunction> {
       const body = file.text.slice(d.start, d.end);
       const call = /\bapi<[^>]*>\(|\bapi\(/.exec(body);
       if (!call) continue;
-      const after = body.slice((call.index ?? 0) + call[0].length);
-      const lead = /^[\s(]*(?:withLane\(\s*)?/.exec(after)?.[0].length ?? 0;
-      const lit = readLiteral(after, lead);
-      if (!lit) continue;
-      const path = lit.value;
+      /**
+       * The first `/api/...` literal anywhere in the call, not merely the one
+       * sitting immediately after `api(`. `getRegistry` wraps its route in a
+       * ternary — `includeDeleted ? '/api/registry?deleted=true' :
+       * '/api/registry'` — and reading only the next token found nothing, so
+       * the System registry came back as a page that reads no data of its own.
+       */
+      const path = firstApiLiteral(body.slice((call.index ?? 0) + call[0].length));
+      if (path === null) continue;
       const method = /method:\s*'([A-Z]+)'/.exec(body)?.[1] ?? 'GET';
       out.set(name, {
         name,
         method,
         path,
-        path_prefix: path.split('${')[0],
+        path_prefix: path.split('${')[0].split('?')[0],
         parameterised: path.includes('${'),
         declared_at: `${DATA_MODULE}:${d.line}`,
       });
@@ -608,6 +616,19 @@ export function dataFunctions(): Map<string, DataFunction> {
   }
   dataFns = out;
   return out;
+}
+
+/** The first `/api/...` string or template literal in a stretch of source. */
+function firstApiLiteral(text: string): string | null {
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c !== '"' && c !== "'" && c !== '`') continue;
+    const lit = readLiteral(text, i);
+    if (!lit) continue;
+    if (lit.value.startsWith('/api/') || lit.value === '/api') return lit.value;
+    i = lit.end - 1;
+  }
+  return null;
 }
 
 /* --------------------------------------------------------------- pages */
