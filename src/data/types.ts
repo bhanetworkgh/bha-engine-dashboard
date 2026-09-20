@@ -1503,6 +1503,83 @@ export interface RetryAttempt {
   airtable: AirtableRef;
 }
 
+/* ------------------------------------------------------------- the repairs */
+
+/**
+ * One automated repair attempt, as `engine_repairs` holds it.
+ *
+ * The outcome is the whole truth of a repair: `repaired` only where the bridge
+ * said so and a new workflow version came back. The bridge having been called
+ * is not a repair, and a run that could not report its own result is
+ * `needs_human` rather than assumed to have worked.
+ */
+export type RepairOutcome = 'repaired' | 'not_repaired' | 'needs_human' | 'skipped' | 'error';
+
+export interface Repair {
+  id: number;
+  /** The bridge's own id. One row per repair, so a repeated report updates rather than duplicates. */
+  repair_id: string;
+  outcome: RepairOutcome | string;
+  workflow_id: string | null;
+  workflow_name: string | null;
+  failed_node: string | null;
+  error_class: string | null;
+  error_message: string | null;
+  execution_id: string | null;
+  /** What was actually wrong, in the repair agent's own words. */
+  root_cause: string | null;
+  /** What it changed, precisely. */
+  change_summary: string | null;
+  nodes_changed: string[];
+  /** The whole value of a needs-human outcome: what a person should do, in order. */
+  human_action: string | null;
+  version_before: string | null;
+  version_after: string | null;
+  duration_ms: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  reverted_at: string | null;
+  reverted_by: string | null;
+  created_at: string;
+  execution_url: string | null;
+  /** Decided on the server, so the button and the endpoint cannot disagree. */
+  can_revert: boolean;
+  revert_blocked_reason: string | null;
+}
+
+export interface RepairSummary {
+  total: number;
+  last_7_days: number;
+  last_30_days: number;
+  by_outcome: { key: string; label: string; n: number }[];
+  /** Repaired and not since put back — what the engine currently claims to have fixed. */
+  repaired_standing: number;
+  reverted: number;
+  /** p50 and p95 only, never a mean, over the repairs that recorded a duration. */
+  median_repair_ms: number | null;
+  p95_repair_ms: number | null;
+  timed: number;
+  duration_note: string;
+  newest_at: string | null;
+}
+
+export interface RepairsData {
+  repairs: Repair[];
+  summary: RepairSummary;
+  /** Whether a revert can reach n8n at all, said once rather than on every row. */
+  n8n_configured: boolean;
+}
+
+export interface RevertResult {
+  ok: boolean;
+  repair_id: string;
+  message: string;
+  /** Which guard refused it, where one did. */
+  refused: 'not_found' | 'not_a_repair' | 'already_reverted' | 'no_restore_point' | 'no_snapshot' | 'version_moved_on' | 'not_configured' | 'n8n_refused' | null;
+  /** The row as it now stands, so a page can update it in place. */
+  repair: Repair | null;
+}
+
 /** A week of a stacked column, keyed by lane or by class. */
 export interface HealthWeek {
   week: string;

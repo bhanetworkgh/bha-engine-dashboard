@@ -52,8 +52,10 @@ import type {
   RegistryData,
   RegistryKind,
   RegistryRowOf,
+  RepairsData,
   RetryMetrics,
   RetryResult,
+  RevertResult,
   RtData,
   ServerStatus,
   SignInResult,
@@ -177,6 +179,26 @@ export const getRetryMetrics = () => api<RetryMetrics>('/api/engine-health/retri
  * to another host, so it gets the same long timeout they do.
  */
 export const resyncHealth = () => api<Resync>('/api/engine-health/resync', { method: 'POST', timeoutMs: 180_000 });
+
+/**
+ * The repair record: every automated repair the bridge attempted.
+ *
+ * One route for the rows and the summary together, because the summary is
+ * computed over exactly the rows the list holds — a strip answering one
+ * question beside a table answering another is the reconciliation bug the
+ * record pages already learned once.
+ */
+export const getRepairs = () => api<RepairsData>('/api/repairs');
+
+/**
+ * Puts one repair back: restores the workflow as it stood before it.
+ *
+ * Every guard is on the server and the answer names which one refused, so this
+ * function never decides whether a revert is allowed — it asks. The message it
+ * returns is worded as what happened rather than as success, because a revert
+ * also brings back the failure the repair addressed.
+ */
+export const revertRepair = (repairId: string) => api<RevertResult>(`/api/repairs/${encodeURIComponent(repairId)}/revert`, { method: 'POST', timeoutMs: 90_000 });
 
 /* ------------------------------------------------------------ pay tracker */
 

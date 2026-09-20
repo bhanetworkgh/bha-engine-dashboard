@@ -33,6 +33,7 @@ import * as loops from './loops';
 import * as mirror from './mirror';
 import * as executions from './executions';
 import * as health from './health';
+import * as repairs from './repairs';
 import * as pay from './pay';
 import * as bharag from './bharag';
 import { monthly } from './monthly';
@@ -321,6 +322,45 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       );
     }
 
+    /**
+     * The repair bridge's result (2026-09-20). Not a mirror kind: the row is
+     * born of this engine's own repair loop rather than copied out of Airtable,
+     * so it has its own table and its own shape.
+     *
+     * It is here, inside the engine block, so it carries exactly the same
+     * authentication as every other engine write — one service key, already in
+     * n8n's hands — and lands on the same write log, so a repair that was
+     * refused is visible on the Engine writes tab beside everything else.
+     *
+     * An upsert on the bridge's own `repair_id`: it posts once when a run
+     * finishes and n8n retries a failed HTTP node, so the same result arriving
+     * twice must update one row rather than add a second.
+     */
+    if (p === '/api/engine/repair' || p === '/api/engine/repairs') {
+      if (method !== 'POST') throw new HttpError(405, 'POST. An upsert on repair_id, so the same result twice updates rather than duplicating.');
+      const body = await readJson(req, 1024 * 1024);
+      try {
+        const result = await repairs.store(body);
+        await mirror.logWrite({
+          endpoint,
+          kind: 'repairs',
+          method,
+          key_label: 'DASHBOARD_INBOUND_KEY',
+          natural_id: result.repair_id,
+          outcome: result.inserted ? 'inserted' : 'updated',
+          detail: `repair reported as ${result.outcome}`,
+          ms: Date.now() - t0,
+        });
+        return send(res, result.inserted ? 201 : 200, { ok: true, repair_id: result.repair_id, outcome: result.outcome, stored: result.inserted ? 'inserted' : 'updated' });
+      } catch (e) {
+        if (e instanceof repairs.RepairError) {
+          await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          throw new HttpError(e.status, e.message);
+        }
+        throw e;
+      }
+    }
+
     const m = p.match(/^\/api\/engine\/([^/]+)$/);
     if (!m) throw new HttpError(404, `POST /api/engine/:kind, where :kind is one of: ${mirror.KIND_LIST.join(', ')}.`);
     const kind = m[1];
@@ -485,6 +525,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await health.data());
       case '/api/engine-health/retries':
         return send(res, 200, await health.retryMetrics());
+      /**
+       * The repair record. Newest first, with the summary computed over the
+       * same rows the list holds, so the strip above the table can never
+       * disagree with the table under it.
+       */
+      case '/api/repairs':
+        return send(res, 200, await repairs.list());
       /** Pay Tracker: the ledger's rows, and the figures over them. */
       case '/api/pay':
         return send(res, 200, await pay.data());
@@ -836,6 +883,21 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     if (p === '/api/engine-health/resync') {
       return send(res, 200, await health.resync(sessionInfo(req).email));
     }
+    /**
+     * Put one repair back (2026-09-20). The only thing in this application that
+     * changes a workflow, and it changes it in one direction: back to how it
+     * was before an automated repair.
+     *
+     * Every guard is on the server — the outcome, the restore point, whether it
+     * has already been reverted, and whether the workflow has been edited since
+     * — and the answer names which one refused it. A guard that lives only in
+     * the button is not a guard.
+     */
+    const revert = p.match(/^\/api\/repairs\/([^/]+)\/revert$/);
+    if (revert) {
+      return send(res, 200, await repairs.revert(decodeURIComponent(revert[1]), sessionInfo(req).email));
+    }
+
     /** One manual retry. The same path the 5-minute schedule takes. */
     const retryNow = p.match(/^\/api\/engine-health\/retry\/(.+)$/);
     if (retryNow) {
