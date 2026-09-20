@@ -183,6 +183,35 @@ export async function listRecordIds(base: string, table: string, timeoutMs?: num
 }
 
 /**
+ * Is Airtable answering? One request, no field named, one record at most.
+ *
+ * **Deliberately not `listRecordIds`, for two reasons.** That function names a
+ * field — `Submission ID`, which exists on the six builder tables and on Layer
+ * 0 and nowhere else — so pointed at any other table it asks for a column that
+ * table has not got and Airtable refuses the whole request with
+ * `Unknown field name: "…"`. Against Build Patterns that is exactly what
+ * happened: the liveness probe reported Airtable as unreachable while the token
+ * was working perfectly, which is the worst direction for a health check to
+ * fail in, because it sends somebody to check a credential that is fine. And it
+ * pages to the end at a hundred records a page with a pace delay between pages,
+ * which is 175 records of Build Patterns walked to answer a yes/no question.
+ *
+ * So a liveness probe **names no field at all**: any field name it hardcodes is
+ * a field that can be absent from whichever table it is later pointed at, and
+ * the next person to repoint it would rediscover this the same way. `maxRecords=1`
+ * keeps the answer to one record, and there is no `offset` to follow — a probe
+ * that pages is a probe whose cost depends on the size of the table it happens
+ * to be aimed at.
+ *
+ * Returns how many records came back (0 or 1). The number is not the point;
+ * having got an answer at all is.
+ */
+export async function probeReachable(base: string, table: string, timeoutMs?: number): Promise<number> {
+  const page = await call<{ records: { id: string }[] }>('GET', `/${base}/${table}?maxRecords=1`, undefined, timeoutMs);
+  return page.records.length;
+}
+
+/**
  * Every record in a table, whole.
  *
  * The counterpart of `listRecordIds`: that one asks for as little as Airtable
