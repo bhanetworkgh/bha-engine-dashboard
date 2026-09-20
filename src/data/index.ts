@@ -58,6 +58,9 @@ import type {
   ServerStatus,
   SignInResult,
   TwinData,
+  VfarmLead,
+  VfarmLeadStatus,
+  VfarmLeadsData,
 } from './types';
 
 export * from './types';
@@ -456,4 +459,23 @@ export function restoreRegistryRow<K extends RegistryKind>(kind: K, id: string):
  */
 export function getEngineWrites(limit = 50): Promise<EngineWrites> {
   return api<EngineWrites>(`/api/engine-writes?limit=${limit}`);
+}
+
+/* ----------------------------------------------- vFarm Early Access */
+
+/**
+ * The Early Access leads and the figures over them.
+ *
+ * Behind the session cookie like every other page read. The route that
+ * *writes* these rows is public — it is the form on bhanetwork.org — and it can
+ * never read one back; see server/src/earlyAccess.ts.
+ */
+export const getVfarmLeads = () => api<VfarmLeadsData>('/api/vfarm/leads');
+
+/**
+ * A lead's status, or its notes, or both. Nothing else about a lead is
+ * editable, and the server refuses anything else rather than ignoring it.
+ */
+export function editVfarmLead(id: string, changes: { status?: VfarmLeadStatus; notes?: string | null }): Promise<VfarmLead> {
+  return api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}`, { method: 'PATCH', body: changes });
 }
