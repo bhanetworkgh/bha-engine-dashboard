@@ -905,6 +905,76 @@ a window function, and the only editable fields are `status` and `notes` — the
 rest of the row is what a person told the site about themselves, and a record
 somebody can quietly rewrite is not a record.
 
+### The repair record — the one write to n8n
+
+**Built 20 September 2026, on Destiny's instruction**, as the dashboard half of
+the self-healing repair layer. The other half is `bha-repair-bridge`, a separate
+always-on service.
+
+```
+n8n  Bays — Error Handler  →  bha-repair-bridge  →  Claude Code against the workflow
+                                      ↓
+                          POST /api/engine/repair  →  engine_repairs  →  /engine-health, Repairs
+                                                                              ↓  Revert
+                                                        PUT /api/v1/workflows/{id}  →  n8n
+```
+
+The error handler classifies a failure, refuses the classes no code change can
+fix and the three error handlers and the healer by name, and posts a repair
+request to the bridge. The bridge runs Claude Code headless against the failing
+workflow and posts its result here. **Nothing in this repo calls the bridge and
+nothing here runs a repair**: this is where a repair is read and undone.
+
+| | |
+|---|---|
+| `POST /api/engine/repair` | The bridge's result. Same `DASHBOARD_INBOUND_KEY` as every other engine write, same `engine_writes` log. An upsert on `repair_id`, because the bridge posts once and n8n retries a failed HTTP node |
+| `GET /api/repairs` | Every repair newest first, with the summary computed over the same rows the list holds. Behind the session cookie like every other page route |
+| `POST /api/repairs/:id/revert` | Restores the workflow as it stood before one repair. The only thing in this application that changes a workflow |
+
+**The rule the surface exists for: nothing heals invisibly.** Every failure ends
+as retried, repaired, or waiting on a person, and every repair shows the error,
+the root cause, the exact change, and a way back.
+
+- **A repair is repaired only where the bridge said so and a `version_after`
+  came back.** The bridge having been called is not a repair, and a run that
+  finished without a parseable result is `needs_human` rather than assumed to
+  have worked. An outcome that is not one of the five agreed names is refused
+  with a 422 naming it, rather than filed under one of them.
+- **`human_action` is on the row**, not behind the click. A repair that ended by
+  naming what a person should do has already said the most useful thing it will
+  say.
+- **`reverted_at` is stamped only once n8n has taken the older version back.** A
+  refused revert leaves the row exactly as it was: a row claiming a revert that
+  did not happen is worse than no revert.
+- **Four guards, and the answer names which one refused** — not a repair,
+  already reverted, no restore point, or **the workflow's version has moved on
+  since the repair**, which means somebody edited it and a blind restore would
+  throw that away. Only the last one costs a live read of n8n, so it happens
+  when somebody asks to revert rather than on every row.
+- **A restore needs the workflow, not a version id.** n8n's public API has
+  `PUT /workflows/{id}`, which replaces a workflow with a body you supply, and
+  no endpoint that fetches a historical version by id. So the revert restores
+  from the snapshot the bridge reads before it edits anything, carried on its
+  result; where that is absent, Revert is **refused with that reason and the
+  manual route named**, never drawn as a revert that happened. The restore mints
+  a new version holding the old content rather than resurrecting the old id, so
+  the row records what n8n actually produced. `active` is never sent — a restore
+  that switched a live workflow on or off would be a second change nobody asked
+  for.
+- **The whole payload is stored beside the columns.** The columns are the read
+  model; the blob is the record, on the same rule that keeps `retries_attempted`
+  inside the incident blob with no way onto the page.
+
+**The Repairs tab** is the sixth on `/engine-health`, beside Retries: five
+figures (repairs this week, repaired and standing, needing a person, not
+repaired, median time to repair with p95), the list newest first, and the whole
+repair on click — error, root cause, change, nodes changed, both version ids,
+and the Revert button with a confirmation that names the workflow and says what
+reverting means. "Standing" excludes a repair since put back, and that figure is
+counted from the rows on screen so the strip cannot disagree with the table under
+it. `repaired` is not green: a machine changed a live workflow, which is worth
+reading rather than celebrating.
+
 ### The migration backfill
 
 Gone, with the Airtable client it read through (13 September 2026).
@@ -923,7 +993,7 @@ Airtable; those rows are in `git log` if it is ever needed again.
 | `AIRTABLE_TOKEN` | Read **and** write on Open Loops and BHA Submissions, for loop and Codex edits; read on Build Patterns (`app5ni3E8r7Lvxk22`), Commercial Opportunities (`appvLglfdCqOKqLpT`) and BHA Client Research Loop (`appkSUSh9ijNjP2f8`), for the resync those three pages gained on 15 Sep. Five bases, one token; nothing is ever written to the last three. Without it nothing edited here reaches Airtable and no page can resync; the server says so at boot and on every write. **Note the name** — the client deleted on 13 Sep read `AIRTABLE_API_KEY` |
 | `AIRTABLE_OPEN_LOOPS_BASE_ID` | The Open Loops base (`appUVlBSGGPHw6DGh`). **No default** — unset, the boot line says so by name and every loop edit is refused and marked. Called `AIRTABLE_BASE_ID` until 14 Sep 2026; that name is read by nothing |
 | `AIRTABLE_SUBMISSIONS_BASE_ID` | BHA Submissions, for Codex entries. Defaults to `appEmdKshNVTl64Zf` |
-| `N8N_API_KEY` | The n8n **instance API key**, for the Executions page. Read only — two endpoints, `GET /api/v1/executions` and `GET /api/v1/workflows` (names only, so a workflow with no registry row still appears under its own name). Not the same credential as `ASK_BAYS_API_KEY`, which is a webhook header. Without it no execution is ever read and the page says so rather than reading zero |
+| `N8N_API_KEY` | The n8n **instance API key**, for the Executions page and the repair revert. Three reads — `GET /api/v1/executions`, `GET /api/v1/workflows` (names only, so a workflow with no registry row still appears under its own name) and `GET /api/v1/workflows/{id}` — and, from 20 Sep 2026, **one write**: `PUT /api/v1/workflows/{id}`, reached only from the revert. **The key needs workflow write scope for that**, or every revert is refused with n8n's own reason and the row is left untouched. Not the same credential as `ASK_BAYS_API_KEY`, which is a webhook header. Without it no execution is ever read, the Executions page says so rather than reading zero, and the Repairs tab says no repair can be put back from here |
 | `N8N_API_URL` | Defaults to `N8N_BASE_URL` + `/api/v1`. Points the same client at a replay in a sandbox |
 | `AIRTABLE_API_URL` | Points the same client at a local replay of the API in a sandbox |
 | `DATABASE_URL` | Postgres. **Required** — the server exits if it is missing or unreachable |
@@ -952,7 +1022,7 @@ is missing, and the note is what the page shows.
 | North Star | Every ask in its own ledger: delivery rate first, then outcome, response p50/p95, and a statistics tab covering who is asking, tool usage, citation coverage and claimed priority by lane |
 | Research Twin | Asks, research jobs and statistics. "Went outside BHA" leads the asks; capped jobs lead the queue |
 | vFarm | Placeholder — nothing on the rack writes here yet |
-| Engine health | Incidents, retries and self-healing across the three lanes, tabbed All systems · Bays · North Star · Research Twin · Retries. Each lane needs its own BHARAG credential, and a lane that was not read is never drawn as health |
+| Engine health | Incidents, retries, self-healing and automated repairs, tabbed All systems · Bays · North Star · Research Twin · Retries · Repairs. Each lane needs its own BHARAG credential, and a lane that was not read is never drawn as health. Repairs is the repair bridge's record and carries the Revert |
 | Open loops | Loops by age and owner, close from the interface |
 | Codex entries | Session logs by builder and week |
 | Build patterns | Every pattern, by reusability. No `pattern_status` — the field was deleted from the base on 15 Sep |

@@ -617,6 +617,27 @@ The re-read is the point: `redeem` is handed an operation built from a **fresh**
 read, never from the preview. Passing the preview's own operation back in would
 compare a value with itself and prove nothing.
 
+**The repair record is the one write to n8n** (decision 2026-09-20, Destiny).
+`engine_repairs`, migration 20, one row per repair attempt the bridge reported —
+`repair_id` unique, because the bridge posts once and n8n retries a failed HTTP
+node, so the same result twice must update one row rather than add a second. It
+is not a mirror table: the rows are born of this engine's own repair loop rather
+than copied out of Airtable, so the columns are real columns, and the whole
+payload is stored beside them — the columns are the read model, the blob is the
+record, and a field the bridge adds before this dashboard reads it is kept
+rather than dropped.
+
+`POST /api/engine/repair` carries the same `DASHBOARD_INBOUND_KEY` as every
+other engine write and lands on the same `engine_writes` log, so a repair
+refused for an unknown outcome is visible on the Engine writes tab beside
+everything else. `GET /api/repairs` is behind the cookie like every other page
+route, and `POST /api/repairs/:id/revert` is the only thing in this application
+that changes a workflow — see the Repairs tab in section 7 for the four guards,
+why a restore needs the workflow rather than a version id, and why `active` is
+never sent. **No new environment variable**: the revert uses the `N8N_API_KEY`
+the Executions page already reads with, which is now read-and-one-write rather
+than read-only, and that is the only change to what this server needs.
+
 **The vFarm Early Access funnel is the one public write route** (decision
 2026-09-20, Destiny). The form on bhanetwork.org posts to
 `POST /api/public/vfarm-early-access`, the row lands in `engine_vfarm_leads`,
@@ -681,11 +702,16 @@ because nothing is ever written to them. Without the
 token nothing edited here reaches Airtable and no page can resync, and the
 server says so at boot and on every write — and `DATABASE_URL`, the one the
 server refuses to start without.
-`N8N_API_KEY` — the n8n **instance** API key, read only, two endpoints
-(`GET /api/v1/executions` and `GET /api/v1/workflows`, the second for names
-only), for the Executions page; not the same credential as `ASK_BAYS_API_KEY`,
-which is a webhook header. Without it no execution is ever read and the page
-says so rather than reading zero.
+`N8N_API_KEY` — the n8n **instance** API key. Three endpoints read
+(`GET /api/v1/executions`, `GET /api/v1/workflows` for names only, and
+`GET /api/v1/workflows/{id}` whole) and, from 2026-09-20, **one written**:
+`PUT /api/v1/workflows/{id}`, reached only from the repair revert. It was
+read-only until then and that is the only write it will do — **the key now needs
+workflow write scope**, or every revert is refused with n8n's own reason and the
+row stays exactly as it was. Not the same credential as `ASK_BAYS_API_KEY`,
+which is a webhook header. Without it no execution is ever read, the Executions
+page says so rather than reading zero, and the Repairs tab says no repair can be
+put back from here.
 `BHARAG_BAYS_KEY`, `BHARAG_NORTH_STAR_KEY` and `BHARAG_RESEARCH_TWIN_KEY` — the
 incident ledger, one per lane, read only, no defaults. A lane with no key is
 never read and Engine health says so rather than showing it healthy; the boot
@@ -1224,10 +1250,13 @@ says so in its own note, and **a lane that was not read is never drawn as a
 bar** — a bar is a measured value, and whatever count is held for an unread lane
 is what happened to be stored.
 
-**Five tabs**: All systems · Bays · North Star · Research Twin · Retries. **The
+**Six tabs**: All systems · Bays · North Star · Research Twin · Retries ·
+**Repairs** (the last one added 2026-09-20, with the repair bridge). **The
 three lane tabs are one component with a different lane**, because the handlers
 are deliberately identical and a per-lane copy would drift the first time one of
-them changed. All systems is the same component with no lane.
+them changed. All systems is the same component with no lane. Retries and
+Repairs are the two halves of what happened *after* a failure — what the healer
+retried on its own, and what the bridge changed in a workflow.
 
 **Five figures**: open incidents (the failure metric, coloured above nought,
 with the per-lane split), healed without a person (`Recovered ÷ (Recovered +
@@ -1298,6 +1327,73 @@ attempts and at a row with no execution id, and the tooltip says which — the
 circuit is broken on purpose and a person should look before it is asked again.
 The browser never calls the healer: the request goes to this server, which holds
 the URL, like every other outbound call.
+
+**The Repairs tab is the repair bridge's record, and the way back from one**
+(decision 2026-09-20, Destiny). `bha-repair-bridge` is a separate always-on
+service: n8n's `Bays — Error Handler` classifies a failure, refuses the classes
+no code change can fix and the three error handlers and the healer by name, and
+posts a repair request to it; the bridge runs Claude Code headless against the
+failing workflow and posts its result to `POST /api/engine/repair`, which lands
+in `engine_repairs`. Nothing here calls the bridge and nothing here runs a
+repair: this dashboard is where a repair is read and undone.
+
+**The rule the tab exists for: nothing heals invisibly.** Every failure ends as
+retried, repaired, or waiting on a person, and every repair shows the error, the
+root cause, the exact change, and a way back. So:
+
+- **A repair is repaired only where the bridge said so and a `version_after`
+  came back.** The bridge having been *called* is not a repair, and a run that
+  finished without a parseable result is `needs_human` rather than assumed to
+  have worked — enforced in the bridge and again here, because a guard that
+  lives only in the caller is not a guard. The five outcomes are `repaired`,
+  `not_repaired`, `needs_human`, `skipped` and `error`, and a sixth is refused
+  with a 422 naming it rather than filed under one of them: the vocabulary is
+  what the two services share, and one drifting is worth an error.
+- **`human_action` is on the row, not behind the click.** A repair that ended by
+  naming what a person should do has already said the most useful thing it will
+  say, and the demo case is the shape to copy — "select an existing credential
+  and verify it, or create a new one", never silence.
+- **A revert restores the workflow and is stamped only once n8n has taken it.**
+  `reverted_at` is a claim about another system's state, so it is written after
+  that system agrees; a refused revert leaves the row exactly as it was, because
+  a row that says it was reverted when it was not is worse than no revert.
+- **Four guards, and the answer names which one refused**: the outcome is not
+  `repaired`, it has already been reverted, no restore point was recorded, or
+  **the workflow's current version is no longer the one the repair produced** —
+  which means somebody has edited it since, and a blind restore would throw
+  their work away. That last one is the only guard that costs a live read of
+  n8n, so it happens when somebody asks to revert rather than on every row of
+  the list.
+- **A restore needs the workflow, not a version id.** n8n's public API offers
+  `PUT /workflows/{id}`, which replaces a workflow with a body you supply, and
+  no endpoint that fetches a historical version by its id — a version id names a
+  restore point without containing it. So a revert restores from the snapshot
+  the bridge reads before it edits anything, carried on its result payload;
+  where that snapshot is absent the button is **refused with that reason and the
+  manual route named** (the workflow's own history in n8n), never drawn as a
+  revert that happened. The restore also mints a *new* version holding the old
+  content rather than resurrecting the old id, so the row records what n8n
+  actually produced.
+- **The revert is the one write to n8n in this application** and it is used for
+  nothing else. `server/src/n8n.ts` holds it beside its reads, so every use of
+  `N8N_API_KEY` stays in one file, and nothing there edits, activates,
+  deactivates or deletes a workflow. Section 3 still holds everywhere else:
+  workflows are read, never modified. **`active` is deliberately not sent** — a
+  restore that switched a live workflow off, or on, would be a second change
+  nobody asked for.
+- **Five figures**: repairs this week, repaired and standing, needing a person
+  (coloured), not repaired (coloured), and median time to repair with p95.
+  **"Standing" excludes a repair since put back**, because a reverted repair is
+  not a fix the engine currently has — and those two figures are counted from
+  the rows on screen rather than from the summary the server computed before the
+  revert, so the strip cannot disagree with the table under it. A skipped or
+  errored attempt is left out of the duration figures: they take milliseconds
+  and would read as repairs being fast rather than as most attempts never
+  running.
+- **`repaired` is not green.** A machine changed a live workflow, which is worth
+  reading rather than celebrating, so it carries the accent rather than the
+  healthy tone. Colour marks only what needs somebody: needing a person, and not
+  repaired.
 
 Every figure on the page follows the same five rules the twins' pages follow: a
 percentage carries its denominator, no duration is ever a mean (p50 and p95),
