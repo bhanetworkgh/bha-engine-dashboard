@@ -735,6 +735,75 @@ read as the whole is the mistake worth avoiding.
 Every call is logged with its name and arguments: `[mcp] get_page_structure
 {"path":"/engine-health"} — ok in 34ms, 51204 bytes`.
 
+### vFarm Early Access — the one public write route
+
+**Built 20 September 2026, on Destiny's instruction.** The form on
+bhanetwork.org posts an expression of interest to this server, the row lands in
+`engine_vfarm_leads`, an n8n webhook announces it in `#vfarm-early-access`, and
+the Early Access tab on `/vfarm` is where somebody reads and annotates it.
+
+```
+bhanetwork.org  →  POST /api/public/vfarm-early-access  →  engine_vfarm_leads
+                                                        ↘  EARLY_ACCESS_NOTIFY_URL  →  n8n  →  #vfarm-early-access
+```
+
+**`POST /api/public/vfarm-early-access` is the only public write route in this
+application.** It sits among the open routes above the cookie guard because the
+static site has no session; nothing else was opened up to make it work. All of
+it lives in `server/src/earlyAccess.ts`, so what it accepts, what it refuses,
+how often, and what it is allowed to say back are in one file rather than
+spread through the router.
+
+Three things it will not do:
+
+- **It never answers with data.** `{ "ok": true }` and a status code, and that
+  is the whole of it — never the stored row, never a count, never whether the
+  address was already on file. A public endpoint that confirms "you are already
+  on the list" is an address oracle. The repeat is recorded and shown on the
+  dashboard, where the audience is the six people who should see it.
+- **It records an expression of interest and nothing else.** No subscriber,
+  payment, entitlement, reservation or delivery state is set, read or implied
+  anywhere in the handler, the table or the response. `status` is this
+  dashboard's own note about whether anybody has replied.
+- **It never stores an address.** `ip_hash` is a salted SHA-256 under
+  `IP_HASH_SALT`, for the rate limiter and for telling one flood apart from
+  twenty real people. It has no way onto the page and is left out of the read
+  route's response.
+
+The order in the handler is origin, method, rate, shape, write: a refused origin
+never reaches the body and a flood is turned away before it costs a database
+round trip. Rate limits are 5 in 10 minutes and 20 in a day per hashed address,
+held in this process — the volume is a handful a day, and a shared counter in
+Postgres would mean a write on every refused request, which is what a flood is
+trying to make us do.
+
+**On CORS, said plainly:** an `Origin` that is present and not on the allow-list
+is refused with 403 rather than merely left without a header, and the preflight
+is refused too. But **CORS is a browser mechanism and cannot be an
+authorization boundary** — a request with no `Origin` at all is allowed through,
+because `Origin` is unauthenticated and refusing its absence would only
+inconvenience honest callers. What protects this route is the validation, the
+rate limit, and the fact that it can answer with nothing.
+
+**Unknown body fields are ignored rather than rejected.** The site and this
+server deploy separately, so a field added there before it is read here must not
+start failing every submission.
+
+**The notification is started and never awaited.** The lead is already stored,
+and Slack being down is not a reason to hold a browser open or to answer
+anything other than 201. A failure logs and leaves `notified_at` null — which is
+the useful part: it says this one was never announced, which is exactly what
+somebody wants to know when they are wondering why they missed it. The timeout
+is five seconds. With `EARLY_ACCESS_NOTIFY_URL` unset the hop is skipped, the
+boot line says so once, and the endpoint is unchanged.
+
+**The dashboard side is ordinary.** `GET /api/vfarm/leads` and
+`PATCH /api/vfarm/leads/:id` are behind the session cookie like every other page
+route, `email` is not unique so repeats are stored and flagged at read time with
+a window function, and the only editable fields are `status` and `notes` — the
+rest of the row is what a person told the site about themselves, and a record
+somebody can quietly rewrite is not a record.
+
 ### The migration backfill
 
 Gone, with the Airtable client it read through (13 September 2026).
@@ -757,6 +826,9 @@ Airtable; those rows are in `git log` if it is ever needed again.
 | `N8N_API_URL` | Defaults to `N8N_BASE_URL` + `/api/v1`. Points the same client at a replay in a sandbox |
 | `AIRTABLE_API_URL` | Points the same client at a local replay of the API in a sandbox |
 | `DATABASE_URL` | Postgres. **Required** — the server exits if it is missing or unreachable |
+| `EARLY_ACCESS_NOTIFY_URL` | The n8n webhook that posts a new vFarm Early Access lead into `#vfarm-early-access`. No Slack token is in this repo and nothing here calls Slack directly. Unset, the hop is skipped, the boot line says so once, and the endpoint still works |
+| `IP_HASH_SALT` | Salt for the stored `ip_hash`. Unset, a random per-process salt is generated — never an unsalted digest, which for an IPv4 address is reversible |
+| `EARLY_ACCESS_ALLOWED_ORIGINS` | Optional. Comma-separated origins the form may be posted from. Defaults to `https://bhanetwork.org`, `https://www.bhanetwork.org` and `http://localhost:5173` |
 | `MCP_SECRET` | The path secret for the MCP server at `/mcp/<MCP_SECRET>` (18 Sep 2026). **No default** — unset, every request under `/mcp` gets a 404 and the boot line names the variable. A wrong secret gets the same 404 a wrong route gets, so the endpoint is not discoverable |
 
 Auth is a single shared team login, matching the pattern used by BHARAG's admin
@@ -787,6 +859,7 @@ is missing, and the note is what the page shows.
 | Clients | Watched client lanes grouped under the client that owns them, ordered by `Client ID` |
 | Executions | Every execution of every workflow, one row each, tabbed by system, weekly / monthly / yearly, against the period before, with a per-workflow drill-down and a downloadable report |
 | Pay Tracker | Who is owed, for what work, and what has been paid. Owed groups by builder with monthly and daily kept apart; statements show their evidence whole. Counts work, never money — there are no rates in the system — and is read-only |
+| vFarm | Overview is a placeholder — nothing on the rack writes here yet. **Early Access** is real: the leads the form on bhanetwork.org posts, as a small CRM to read and annotate |
 | System registry | Builders, Tools, Endpoint, Workflow, and the engine-writes surface |
 
 ## Repo layout

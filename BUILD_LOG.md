@@ -6885,3 +6885,177 @@ Decision:   Worth writing down because it is a consequence of the design rather
             (the Render env var and the connector URL). Nothing in this repo
             ever prints it; Render's edge does, before the process sees the
             request.
+
+## 2026-09-20 19:05 — the vFarm Early Access funnel: a public write route, a lead table, a Slack hop and a tab
+Intent:     Build the receiving end of the vFarm Early Access funnel. The form
+            on bhanetwork.org had nowhere to post to; /vfarm was a ComingSoon
+            with no data of its own. So: a table, one public endpoint, a
+            notification through n8n into #vfarm-early-access, and an Early
+            Access tab that is a small CRM.
+Files:      server/src/migrations.ts (migration 18)
+            server/src/earlyAccess.ts (new — the whole funnel)
+            server/src/index.ts (the public route, the read and patch routes, boot lines)
+            src/data/types.ts, src/data/index.ts
+            src/screens/VFarm/index.tsx (tabs), src/screens/VFarm/EarlyAccess.tsx (new)
+            .env.example, render.yaml, README.md, CLAUDE.md
+
+Decision:   **`engine_vfarm_leads` is not shaped like a mirror table, and that
+            is deliberate.** Every other `engine_*` table here holds
+            `{ airtable_record_id, created_time, fields }` because the engine
+            owns those rows and this dashboard copies them — and section 4's
+            rule about never renaming what the engine writes exists because
+            n8n writes those names. These rows are *born here*: the site posts
+            to this server and nothing upstream has a copy. There is no
+            Airtable field name to keep verbatim, so they get real columns.
+            Worth writing down because the convention looked like it applied
+            and does not.
+
+Decision:   **`email` is not unique.** A unique constraint has two failure
+            modes and both are bad: reject the submission, which tells a
+            stranger their address is already on file, or drop it silently,
+            which loses a real signal. Repeats are stored and flagged at read
+            time with a window function — `row_number() over (partition by
+            email order by created_at, id) > 1` — so the *first* row is never
+            the repeat and the flag survives a delete.
+
+Decision:   **The public endpoint answers `{ ok: true }` and a status code, and
+            that is the entire contract.** Never the stored row, never a count,
+            never whether the address was already known. A public route that
+            confirms "you are already on the list" is an address oracle, and
+            the repeat it would be confirming is exactly the thing the
+            dashboard shows to the six people who should see it. Verified by
+            posting a duplicate: byte-identical 201 body.
+
+Decision:   **It records an expression of interest and nothing else.** No
+            subscriber, payment, entitlement, reservation or delivery state is
+            set, read or implied in the handler, the table or the response, and
+            no such column belongs in that table. `status` is this dashboard's
+            own note about whether anybody has replied — which is why the strip
+            says "expressions of interest, not commitments" under the count.
+
+Decision:   **On CORS, said plainly rather than implied.** An `Origin` that is
+            present and not on the list is refused 403, and its preflight too.
+            But **CORS is a browser mechanism and cannot be an authorization
+            boundary**: a request with no `Origin` is allowed through, because
+            `Origin` is unauthenticated and refusing its absence would only
+            inconvenience honest callers while stopping nobody. What actually
+            protects the route is the validation, the rate limit, and the fact
+            that it can answer with nothing. The comment in the code says this,
+            so the next person does not mistake the 403 for a security control.
+
+Decision:   **Order in the handler: origin, method, rate, shape, write.** A
+            refused origin never reaches the body, and a flood is turned away
+            before it costs a database round trip. **A failed validation still
+            spends a rate-limit slot** — otherwise an attacker floods with
+            invalid bodies for free — and five in ten minutes is still generous
+            for a human who mistyped.
+
+Decision:   **`IP_HASH_SALT` unset generates a random per-process salt rather
+            than falling back to no salt.** An unsalted SHA-256 of an IPv4
+            address is reversible by anyone with an afternoon and four billion
+            guesses, so "salted" with an empty string would be the kind of
+            security that reads as security and is not. The cost is that stored
+            digests stop comparing across a restart, and the boot line says so.
+
+Decision:   **The notification is started and never awaited**, five seconds,
+            and a failure is logged and never fatal. `notified_at` staying null
+            is the useful part rather than a gap: the row prints "not announced",
+            which is exactly what somebody wants when they are wondering why
+            they never saw one. No Slack token is in this repo and nothing calls
+            Slack directly — the n8n webhook holds that credential, the same
+            way `ENGINE_HEAL_URL` does.
+
+Decision:   **Nothing new was introduced on the page.** Tabs, StatStrip,
+            RecordTable, SearchBox, Segmented, Pagination, Pill and Toast were
+            already here, and inline editing already existed as the registry's
+            own `EditableCell` — which does select and longtext, and reverts a
+            refused write. Reusing it meant the CRM needed no new component and
+            no new colour. A repeat email is a **neutral** tag: somebody asking
+            twice is a real signal and not a fault, and section 5 keeps amber
+            and red for a genuinely bad state.
+
+Decision:   **Overview keeps its ComingSoon, untouched.** The funnel arriving
+            does not make the rack instrumented. Early Access is a second tab,
+            not a replacement — a page that quietly started implying vFarm was
+            wired up would be the thing section 2 forbids.
+
+Problem:    Acceptance check 7 passed and the result was worthless. The server
+            meant to have a *failing* notify URL never started —
+            `Error: listen EADDRINUSE: address already in use 0.0.0.0:8797` —
+            so the submission was answered by the previous process, the one
+            with notifications switched **off**. `notified_at` was null for the
+            wrong reason, and a null read exactly like a pass.
+Fix:        Killed the holder by pid, confirmed the port free, restarted, and
+            checked the boot line said `notifying … via EARLY_ACCESS_NOTIFY_URL`
+            before trusting the result. Then asserted the webhook was actually
+            called — the stub's delivery count went 9 → 10 — and read the log
+            line naming the 500. The lesson is the general one: a test whose
+            pass condition is an absence has to prove the mechanism ran.
+
+Problem:    The first browser run of check 10 died on
+            `strict mode violation: getByRole('button', { name: /^contacted/ })
+            resolved to 2 elements` — the status filter and the status pill on a
+            row both read "contacted".
+Fix:        Scoped the filter clicks to `[role=group][aria-label="Filter by
+            status"]`. A test-only fix; the page was right.
+
+Verified:   Eleven checks, against Postgres 16 and Chromium at 1440×900.
+            1. **Migration** — empty database applied 1–18; a database brought
+               to 17 with the pre-change `migrations.ts` then applied **18
+               alone** (`applied: 18 | already: 17`); both re-ran as
+               `applied: | already: 18`. Columns, defaults and all three
+               indexes match the spec, `id` defaulting to `gen_random_uuid()`.
+            2. **201** — from `Origin: https://bhanetwork.org`, body
+               `{"ok":true}`, `Access-Control-Allow-Origin` echoed. Stored with
+               the name trimmed and the address lowercased
+               (`"  ADA@Example.COM "` → `ada@example.com`), the provenance
+               fields kept, `submitted_at` parsed, and an unknown field
+               (`some_field_added_later`) ignored rather than refused.
+            3. **CORS** — POST from `https://evil.example` → 403 with no
+               `Access-Control-Allow-Origin`; its preflight → 403; a preflight
+               from `http://localhost:5173` → 204 with the full header set.
+               Nothing stored.
+            4. **400** — ten malformed bodies, each with its own reason: no
+               email, empty email, no `@`, no dot in the domain, a space in the
+               address, no name, a name of only spaces, a 201-character name, a
+               201-character organisation, and a body that is not an object.
+               Row count unchanged.
+            5. **429** — six submissions from one address: five 201, the sixth
+               429 with `Retry-After: 600`, five stored. A different address on
+               the next request → 201.
+            6. **Notify unset** — boot line `notifications OFF …  The endpoint
+               still works`; POST → 201, stored, `notified_at` null, no
+               delivery attempted.
+            7. **Notify erroring** — boot line confirmed notifications on, the
+               stub was called (deliveries 9 → 10) and returned 500; POST → 201,
+               lead stored, `notified_at` **NULL**, and the log reads "was
+               refused: 500 … The lead is stored; notified_at stays null."
+               Also checked a notify URL that hangs 30s: the POST returned 201
+               in 9ms.
+            8. **No lead data** — GET, GET with `?id=`, and PUT on the public
+               route all 405 with `{"ok":false,"message":"POST a submission."}`;
+               a duplicate address gets the byte-identical `{"ok":true}`.
+            9. **Auth** — `GET /api/vfarm/leads` and `PATCH /api/vfarm/leads/:id`
+               both 401 without the cookie and 200 signed in. No `ip_hash` on
+               any lead in the response.
+           10. **The tab** — Overview still renders its ComingSoon; tabs read
+               `Overview` and `Early Access 11`. The strip
+               (11 / 11 / 11 / "11 / 0") matched the API exactly; 11 rows newest
+               first; one repeat flagged, matching the API. An inline status
+               change moved the strip to "10 / 1" immediately, a note was typed,
+               and after a reload the server had both. Filters returned
+               10/1/0/0/11 with "No lead matches that filter." on the empty
+               ones; search matched a name, an address and an organisation
+               separately. Copy-email put one address on the clipboard and
+               copy-all put ten. A refused PATCH (injected 422) left the row
+               reading `contacted` and put the server's own sentence in the
+               toast. No sideways scroll, no console error but the injected 422.
+           11. **`npm run build`** — clean, and `npm run typecheck` with it.
+Not tested: Against the live site or the real n8n webhook. The notification was
+            exercised against a local stub on 200, 500 and a hang, and the
+            envelope it received was checked field by field — but nobody has
+            confirmed the webhook at the other end parses it or that it posts to
+            `C0C36GPEB3L`. That is the first thing to watch after the variables
+            are set. Nothing was tested against the production database; the
+            migration was proved on a copy brought to 17 by the pre-change code,
+            which is the same shape but not the same rows.

@@ -2562,3 +2562,54 @@ export interface ExecutionWorkflowDetail {
   runs_total: number;
   n8n_base: string | null;
 }
+
+/* ------------------------------------------------- vFarm Early Access */
+
+/**
+ * What somebody did about a lead. This dashboard's own note to itself — it is
+ * not a subscriber state, a payment state or an entitlement, and the funnel
+ * records none of those.
+ */
+export type VfarmLeadStatus = 'new' | 'contacted' | 'qualified' | 'archived';
+
+export const VFARM_LEAD_STATUSES: VfarmLeadStatus[] = ['new', 'contacted', 'qualified', 'archived'];
+
+/**
+ * One expression of interest in vFarm Early Access, as the static site sent it.
+ *
+ * Born in this dashboard rather than mirrored from anywhere: the site posts to
+ * this server's one public route and this is the only copy. `ip_hash` is
+ * deliberately absent — it is a rate-limiting artefact and has no way onto the
+ * page.
+ */
+export interface VfarmLead {
+  id: string;
+  full_name: string;
+  email: string;
+  organization_name: string | null;
+  source_surface: string;
+  source_page: string | null;
+  source_campaign: string | null;
+  page_contract_version: string | null;
+  mechanics_contract_version: string | null;
+  claim_state: string | null;
+  status: string;
+  notes: string | null;
+  /** When the Slack notification landed. Null means this one was never announced. */
+  notified_at: string | null;
+  submitted_at: string | null;
+  created_at: string;
+  user_agent: string | null;
+  /** This address was already on an earlier row. Computed at read time, never stored. */
+  is_repeat_email: boolean;
+}
+
+export interface VfarmLeadsData {
+  leads: VfarmLead[];
+  summary: {
+    total: number;
+    last_7_days: number;
+    last_30_days: number;
+    by_status: Record<string, number>;
+  };
+}

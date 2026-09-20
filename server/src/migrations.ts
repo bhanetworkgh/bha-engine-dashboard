@@ -1149,6 +1149,66 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_pay_statements_natural ON engine_pay_statements (natural_id)`,
     ],
   },
+
+  {
+    id: 18,
+    name: 'vfarm early access leads',
+    statements: [
+      /**
+       * The receiving end of the vFarm Early Access funnel (2026-09-20).
+       *
+       * **This table is not a mirror and does not look like one.** Every other
+       * `engine_*` table here holds `{ airtable_record_id, created_time, fields }`
+       * because the engine owns those rows and this dashboard copies them. These
+       * rows are born here: the static site posts to this server, this server
+       * writes them, and nothing upstream has a copy. So the columns are real
+       * columns rather than a jsonb blob — there is no Airtable field name to
+       * keep verbatim, and section 4's rule about not renaming what the engine
+       * writes does not apply to a row the engine never wrote.
+       *
+       * **`email` is deliberately not unique.** A person may express interest
+       * twice, and the second time is a fact about them worth seeing. A unique
+       * constraint would either reject the submission — losing the signal and
+       * telling a stranger their address is already on file — or silently drop
+       * it. Repeats are stored and flagged at read time instead.
+       *
+       * **What this table records is an expression of interest and nothing
+       * else.** There is no subscriber, payment, entitlement, reservation or
+       * delivery column, and none should be added here: a state like that
+       * belongs to whatever system actually owns it. `status` is this
+       * dashboard's own note to itself about whether anyone has replied.
+       *
+       * `ip_hash` is a salted digest, never an address. It exists for the rate
+       * limiter and for telling one flood apart from twenty real people; it
+       * cannot be turned back into who somebody is.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_vfarm_leads (
+         id                          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+         full_name                   text NOT NULL,
+         email                       text NOT NULL,
+         organization_name           text,
+         source_surface              text NOT NULL,
+         source_page                 text,
+         source_campaign             text,
+         page_contract_version       text,
+         mechanics_contract_version  text,
+         claim_state                 text,
+         status                      text NOT NULL DEFAULT 'new',
+         notes                       text,
+         notified_at                 timestamptz,
+         submitted_at                timestamptz,
+         created_at                  timestamptz NOT NULL DEFAULT now(),
+         user_agent                  text,
+         ip_hash                     text
+       )`,
+
+      /** The repeat-email flag is computed over this index on every read. */
+      `CREATE INDEX IF NOT EXISTS engine_vfarm_leads_email ON engine_vfarm_leads (email)`,
+      /** Newest first is the only order this list is ever shown in. */
+      `CREATE INDEX IF NOT EXISTS engine_vfarm_leads_created ON engine_vfarm_leads (created_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_vfarm_leads_status ON engine_vfarm_leads (status)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

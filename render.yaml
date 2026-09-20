@@ -181,6 +181,23 @@ services:
       # wrong route gets, so the endpoint is not discoverable.
       - key: MCP_SECRET
         sync: false
+      # vFarm Early Access (20 Sep 2026). The n8n webhook that posts a new
+      # lead into #vfarm-early-access. sync: false — it is a webhook URL with
+      # its own Slack credential behind it, and no Slack token belongs in this
+      # repo. Unset, the endpoint still works and leads arrive unannounced,
+      # which the boot line and the row both say.
+      - key: EARLY_ACCESS_NOTIFY_URL
+        sync: false
+      # The salt for the stored ip_hash. generateValue, like SESSION_SECRET:
+      # nobody needs to read it, and it must not be a value somebody picked.
+      # Unset, a random one is generated per process and stored hashes stop
+      # comparing across a restart.
+      - key: IP_HASH_SALT
+        generateValue: true
+      # EARLY_ACCESS_ALLOWED_ORIGINS is deliberately not declared. The three
+      # origins the form is served from are the code's own default, so the
+      # variable only exists to add or remove one — and a blueprint literal
+      # that repeats a default is a second place for it to drift.
 
 # Confirmed against the live Render API (2026-09-12), not inferred: the plan
 # string is the one the API reports. basic-256mb is an accepted alias for the

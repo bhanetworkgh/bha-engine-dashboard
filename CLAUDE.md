@@ -495,6 +495,58 @@ reasonable about.
   about a page they cannot see), `get_component`, `search_source`,
   `list_data_sources`, `get_page_data`, `get_health`.
 
+**The vFarm Early Access funnel is the one public write route** (decision
+2026-09-20, Destiny). The form on bhanetwork.org posts to
+`POST /api/public/vfarm-early-access`, the row lands in `engine_vfarm_leads`,
+an n8n webhook announces it in `#vfarm-early-access`, and the Early Access tab
+on `/vfarm` is where somebody reads and annotates it. All of it is in
+`server/src/earlyAccess.ts`.
+
+- **Public by necessity, and the only one.** The static site has no session, so
+  the route sits among the open routes above the cookie guard. Nothing else was
+  opened up, and a route a stranger can POST to is worth naming rather than
+  burying — which is why the whole of it is one file.
+- **It answers with nothing.** `{ ok: true }` and a status code: never the
+  stored row, never a count, never whether the address was already on file. A
+  public endpoint that confirms "you are already on the list" is an address
+  oracle. The repeat is recorded and flagged on the dashboard instead.
+- **It records an expression of interest and nothing else.** No subscriber,
+  payment, entitlement, reservation or delivery state is set, read or implied —
+  not in the handler, not in the table, not in the response, and none of those
+  columns belongs in that table. `status` (`new`, `contacted`, `qualified`,
+  `archived`) is this dashboard's own note about whether anybody has replied.
+- **It never stores an address.** `ip_hash` is a salted SHA-256 under
+  `IP_HASH_SALT`, for the rate limiter. It has no way onto the page and the read
+  route leaves it out. Unset, a random per-process salt is used rather than an
+  unsalted digest — SHA-256 of an IPv4 address is reversible by anyone with an
+  afternoon — and the boot line says so.
+- **Origin, method, rate, shape, write, in that order.** A refused origin never
+  reaches the body; a flood is turned away before it costs a database round
+  trip. Five in ten minutes and twenty a day per hashed address, in-process,
+  because a shared counter in Postgres would mean a write on every refused
+  request, which is what a flood is trying to make us do.
+- **CORS is not an authorization boundary and the code says so.** An `Origin`
+  that is present and not on `EARLY_ACCESS_ALLOWED_ORIGINS` is refused 403, and
+  so is its preflight — but a request with no `Origin` is allowed, because
+  `Origin` is unauthenticated and refusing its absence only inconveniences
+  honest callers. The validation and the rate limit are what protect this route.
+- **Unknown body fields are ignored, never rejected.** The site and this server
+  deploy separately, so a field added there before it is read here must not
+  start failing every submission.
+- **The notification is started and never awaited**, five-second timeout, and a
+  failure is logged and never fatal. `notified_at` stays null, which is the
+  useful part: the row says "not announced", which is what somebody wants when
+  they are wondering why they missed one. No Slack token is in this repo and
+  nothing here calls Slack directly — the webhook holds that credential, the
+  same way `ENGINE_HEAL_URL` does.
+- **`email` is not unique.** A person may express interest twice and the second
+  time is a fact worth seeing. A unique constraint would either reject the
+  submission, telling a stranger their address is on file, or drop it silently.
+  Repeats are stored and flagged at read time.
+- **Only `status` and `notes` are editable.** The rest of the row is what a
+  person told the site about themselves, and a record somebody can quietly
+  rewrite is not a record.
+
 **Environment (all server-side, none in the bundle):** `AUTH_EMAIL`,
 `AUTH_PASSWORD_HASH`, `SESSION_SECRET`, `ASK_BAYS_API_KEY`, `ASK_BAYS_URL`,
 `DASHBOARD_INBOUND_KEY` (nothing reaches the record tables without it),
@@ -521,6 +573,14 @@ line names every lane that is not keyed. `AIRTABLE_TOKEN` also needs read on
 the live webhook as its default. `AIRTABLE_TOKEN` also needs read on
 `appwnt0mEtfwDtcN5` (BHA Pay Ledger) for Pay Tracker — read only, and no base
 variable, because nothing here ever writes to it.
+`EARLY_ACCESS_NOTIFY_URL` — the n8n webhook that posts a new vFarm Early Access
+lead into `#vfarm-early-access`. Unset, the hop is skipped, the boot line says
+so once, and the endpoint still works. `IP_HASH_SALT` — the salt for the stored
+`ip_hash`; unset, a random per-process one is used and the boot line says the
+stored hashes will not compare across a restart.
+`EARLY_ACCESS_ALLOWED_ORIGINS` is optional, comma-separated, and defaults to
+bhanetwork.org, www.bhanetwork.org and localhost:5173 — it has no blueprint
+entry, because a literal repeating a default is a second place for it to drift.
 `MCP_SECRET` — the path secret for the MCP server at `/mcp/<MCP_SECRET>`, read
 only. **No default**, and unset the endpoint answers 404 to everything and the
 boot line names the variable; it is `sync: false` in the blueprint rather than a
@@ -613,7 +673,7 @@ SYSTEMS
   Research Twin
   Media Twin             ← placeholder
   Genie                  ← placeholder
-  vFarm                  ← placeholder
+  vFarm                  ← Overview is a placeholder; Early Access is real
   Engine health
 
 RECORDS
@@ -1117,6 +1177,39 @@ percentage carries its denominator, no duration is ever a mean (p50 and p95),
 every card says what it excludes, nought is a number and an unread lane is a
 sentence, and colour marks only a genuinely bad direction — open incidents above
 nought, exhausted retries above nought, critical severity.
+
+### vFarm — Early Access
+**Built 2026-09-20, Destiny.** Two tabs, and the split is the point.
+
+**Overview is unchanged and still says the page is not wired up.** Nothing on
+the rack has ever written a row here, so the live-readings table, the lifecycle
+timeline and the readiness panel are still gone and the sentence explaining why
+is still the whole of that tab. The funnel arriving does not make the rack
+instrumented, and a tab that quietly started implying it did would be the thing
+section 2 forbids — which is why Early Access is a second tab rather than a
+replacement for the first.
+
+**Early Access is the funnel's receiving end, as a small CRM.** A summary row
+(leads, last 7 days, last 30 days, new against contacted), then the leads newest
+first: date, name, email, organisation, where they came from, status, notes.
+Status and notes are editable inline and nothing else is. An edit lands on
+screen first and is put back if the server refuses it, and the summary counts are
+recomputed from the rows on screen so the strip cannot disagree with the table
+under it — which is the reconciliation bug the record pages already learned once.
+
+**A repeat email is a neutral tag, not a warning.** Somebody asking twice is a
+real signal and not a fault, so it gets no colour: amber and red are for a
+genuinely bad state, per section 5.
+
+**A lead that was never announced in Slack says so on its row.** It is the one
+thing about the row a reader cannot see anywhere else, and it is exactly what
+somebody needs when they are wondering why they missed one.
+
+**It is a record to read and annotate, and nothing more.** No export, no email
+sending, no bulk action beyond copying addresses out. The moment this page could
+email somebody it would need to know who had already been emailed, and that is a
+second system, not a tab. Nothing on it is a commitment: a row says a person
+filled in a form.
 
 ### Media Twin, Genie and vFarm
 **Three single centred "coming soon" pages, and nothing else** (decisions
