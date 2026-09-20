@@ -712,8 +712,14 @@ indistinguishable here from the 404 a wrong secret gets.
 | `get_component` | The full source of one named component, with the doc comment above it |
 | `search_source` | Grep across the repo, with file, line and surrounding context, paged |
 | `list_data_sources` | Every external source — Airtable base and table, BHARAG per lane, the two n8n endpoints, Postgres — with its credential, whether that credential is set, its `engine_*` table and which pages consume it |
-| `get_page_data` | What a page would render right now, as JSON, read through the app's own routes |
+| `get_page_data` | What a page would render right now, as JSON, read through the app's own routes. `fields` takes dot paths, so two numbers cost two numbers |
 | `get_health` | The deployed commit and branch, uptime, and a live probe of every data source |
+| `query_postgres` | One read-only `SELECT` against the live database, with positional parameters, a 5-second timeout and a stated row cap |
+| `describe_schema` | The real columns, types and indexes of the `engine_*` tables, read from `information_schema` rather than from the repository |
+| `get_mirror_status` | Every record kind's row count, newest row and where it came from — and whether an empty kind is stopped or merely unread |
+| `diff_source_vs_mirror` | One kind's Airtable record ids against the ones held here: what the source has and this database does not, and the other way round |
+| `search_logs` | What this process has served and printed since it booted, filtered by route, status class, substring or minutes |
+| `resync` | Runs a page's own resync, through the same code path the button calls. One run per pass per 60 seconds |
 
 **Nothing is a hand-written list.** The routes come out of `src/App.tsx`, the
 sidebar labels out of `src/components/Layout.tsx`, a page's title and purpose
@@ -734,6 +740,101 @@ read as the whole is the mistake worth avoiding.
 
 Every call is logged with its name and arguments: `[mcp] get_page_structure
 {"path":"/engine-health"} — ok in 34ms, 51204 bytes`.
+
+**Every tool carries MCP annotations** (20 Sep 2026). The spec's default for a
+tool that declares none is *potentially destructive*, so twelve read-only tools
+that said nothing about themselves were being offered to clients as though any
+of them might delete something. The twelve reads are
+`readOnlyHint: true, destructiveHint: false, idempotentHint: true`, with
+`openWorldHint` true only on the three that call out of the process;
+`resync` is `readOnlyHint: false, destructiveHint: false, idempotentHint: true`,
+which is what it is — it copies rows that already exist, and running it twice
+lands the same rows.
+
+#### The second half, and why it exists
+
+The five read tools above `resync` were built on 20 September 2026 after two
+faults in one day, both diagnosed through this server and both slower than they
+should have been. Pay Tracker showed nothing because an n8n workflow had written
+no rows into Airtable: four calls here plus two elsewhere, because nothing could
+compare a source against its mirror. Then, after the upstream fix, the page
+*still* showed nothing — the mirror only fills when somebody presses Resync, and
+the server reported that correctly and uselessly, having no way to press it.
+
+So `get_mirror_status` now answers, for all eighteen kinds in one call, whether
+an empty kind is stopped or merely unread; `diff_source_vs_mirror` settles one
+kind against Airtable and names the record ids on each side; and `resync` runs
+the page's own pass rather than a second copy of it. The resync is rate-limited
+to one run per pass per 60 seconds and a call inside that window is told
+"ran N seconds ago" rather than queued — a queue turns an impatient client into
+a load test on somebody else's API.
+
+**`query_postgres` is read-only in three independent ways**, because one would
+be a single point of failure on a tool a model drives: the statement is parsed
+and refused unless it is exactly one `SELECT`/`WITH` with no writable CTE and no
+second statement; it runs inside `BEGIN TRANSACTION READ ONLY`; and the
+transaction is rolled back unconditionally, success or failure. The row cap
+(100 by default, 1,000 at most) is a `LIMIT` in the wrapping query and is
+reported as a floor rather than a total — a capped read never prints a count it
+did not make.
+
+**Output is budgeted, and that is a correctness rule.** A tool answer lands in a
+context window and every token spent on rows nobody asked for displaces
+reasoning about the fault, so every tool defaults to summaries and counts and
+makes the caller ask for rows. `diff_source_vs_mirror` names at most ten record
+ids a side; `search_logs` distinguishes "nothing matched" from "this process has
+only been up four minutes", so an empty result cannot read as silence upstream.
+
+#### The write gate
+
+`server/src/mcp/gate.ts`, built 20 September 2026 as **scaffolding, ahead of the
+first tool that needs it**. Nothing destructive ships through it: `resync`
+deliberately does not use it, because re-reading rows from a source this
+dashboard already reads is not a change anybody needs to approve. It is here so
+the first real mutation does not have to invent the shape, and it is tested
+before anything depends on it — `npm run test:gate`, eight assertions.
+
+It is enforced **on the server**, not in a client's confirmation dialog and not
+in the model's judgement: those change with which client is connected and what a
+model decides in the moment. A mutating tool called without a token performs no
+change and hands back a preview; the only thing that can mint a token is a
+preview this process computed.
+
+```
+tools/call  set_lead_status  { "id": "c6e2fae0-…", "status": "contacted" }
+  → { "status": "preview", "changes": [ { "field": "status",
+                                         "current": "new",
+                                         "proposed": "contacted" } ],
+      "token": "4f1c…", "expires_in_seconds": 60 }          nothing changed
+
+tools/call  set_lead_status  { "id": "c6e2fae0-…", "status": "contacted",
+                               "token": "4f1c…" }
+  → { "status": "applied", "audit_id": 41 }                  changed once
+```
+
+The token is bound to a SHA-256 digest of the whole operation — tool, target,
+changes and **the record as it is now, hashed whole**, not merely the fields the
+change names. Sixty seconds, one use; a caller may ask for a shorter window and
+the knob is clamped so it can only shorten. The second call re-reads the record
+and rebuilds the operation from that fresh read, never from the preview: passing
+the preview's own values back would compare a value with itself and prove
+nothing.
+
+Four refusals, each named separately because each wants a different next move:
+`token_expired` (re-preview), `token_used` (stop and read what already
+happened — refused rather than repeated, so a retry cannot double-apply),
+`record_changed` (re-read; the change was computed against values that are no
+longer there) and `token_unknown` (a wrong tool's token, and every token
+outstanding when the process restarted). A create also requires an idempotency
+key, claimed through a partial unique index on `(tool, idempotency_key)`, so two
+identical creates racing cannot both insert.
+
+`engine_mcp_writes` (migration 19) records every outcome, refusals included:
+tool, arguments, digest, token, idempotency key, target, before, after, outcome,
+detail, actor. A preview is deliberately not logged — a preview is not a write,
+and a log that records intentions beside actions stops being a record of what
+happened. The audit write throws rather than swallowing: if the change cannot be
+recorded, it does not happen.
 
 ### vFarm Early Access — the one public write route
 
