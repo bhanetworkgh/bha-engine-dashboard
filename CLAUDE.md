@@ -262,6 +262,22 @@ explicitly for this. Therefore:
   seven tables. **The replay used for testing must refuse exactly what Airtable
   refuses**: it implemented the assumption instead, so every test passed
   against a stand-in that shared the bug.
+- **A liveness probe names no field and reads one record** (decision
+  2026-09-20, Destiny). `airtable.probeReachable` is `?maxRecords=1` and nothing
+  else, and it is deliberately not `listRecordIds`: that function hardcodes
+  `Submission ID`, which exists on the six builder tables and Layer 0 and
+  nowhere else, so pointed at Build Patterns it asked for a column that table
+  has not got and Airtable refused the whole request — `get_health` then
+  reported Airtable as unreachable while the token was working perfectly, which
+  is the worst direction for a health check to fail in. It also pages to the
+  end, so it was walking 175 records to answer a yes/no question: 2,244ms to say
+  something false, and still 2,661ms once it was pointed at a table that does
+  carry the field. **Any field name a probe hardcodes is a field that can be
+  absent from whichever table it is later pointed at**, which is why the fix is
+  to name none rather than to pick a better one. `listRecordIds` keeps the field
+  and the paging, both of which are right for its real callers: the Codex
+  reconciliation reads the builder tables, where the field exists and a partial
+  read would look like an emptied table.
 - **The resync's outcome is a toast, not a table** (decision 2026-09-14,
   Destiny): how long it took and three totals — inserted, updated, deleted. The
   per-table breakdown stays in the server log, in full, where somebody goes when

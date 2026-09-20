@@ -7415,3 +7415,95 @@ Not tested: Against the live n8n instance or the production database. No revert
             failure as the Airtable token re-scoping on 14 and 17 Sep. The
             bridge does not exist yet, so nothing has posted a real result and
             no payload has carried a real snapshot.
+
+## 2026-09-20 21:05 — the Airtable liveness probe names no field
+Intent:     Fix `get_health`'s Airtable probe properly. It called
+            `airtable.listRecordIds`, which hardcodes the field `Submission ID`
+            — present on the six builder tables and Layer 0 and nowhere else —
+            against Build Patterns, whose id field is `pattern_id`. Airtable
+            refuses the whole request on one unknown field name, so the probe
+            reported the whole of Airtable as unreachable while the token was
+            working perfectly.
+Files:      server/src/airtable.ts (probeReachable, new, beside listRecordIds)
+            server/src/mcp/tools.ts (the get_health probe)
+            CLAUDE.md
+Problem:    Confirmed live on 2026-09-20 at 19:43 UTC: `reachable false`, 2244ms,
+            `Unknown field name: "Submission ID"`. The same call also explains
+            the eight seconds seen on 18 Sep — `listRecordIds` pages to the end
+            at 100 records a page with a 220ms pace delay between pages, and
+            Build Patterns holds 175 records, so the probe was walking the whole
+            table to answer a yes/no question.
+Problem:    **My own first fix, earlier today, was the wrong one and this is
+            worth writing down.** It moved the probe to the Layer 0 table, which
+            *does* carry `Submission ID`. That made the answer true and left the
+            trap armed: the field name was still hardcoded, so the next person
+            to repoint the probe would have found it exactly the same way. And
+            it did not make the probe cheap — measured live on main through the
+            deployed connector at 21:00 UTC today, commit 8ba479a: **reachable
+            true, 2,661ms**, which is *slower* than the broken version's 2,244ms,
+            because it now walks Layer 0 to completion instead of being refused
+            on the first page. A probe that takes two and a half seconds to
+            answer "yes" is still the wrong shape.
+Fix:        `probeReachable(base, table, timeoutMs)` — one request,
+            `?maxRecords=1`, **no `fields[]` at all**, no `offset` followed. It
+            returns how many records came back (0 or 1); the number is not the
+            point, having got an answer at all is. `get_health` points at
+            `sources.PATTERNS` again, because the probe can no longer break on a
+            table's schema: it asks about no schema.
+Decision:   **The rule, rather than the repair: a liveness probe names no
+            field.** Any field name a probe hardcodes is a field that can be
+            absent from whichever table it is later pointed at. Picking a better
+            field would have been a fix for today and a bug for whoever repoints
+            it.
+Decision:   **`listRecordIds` and `ID_PROBE_FIELD` are untouched.** They are
+            correct for their real callers — the Codex reconciliation reads the
+            six builder tables and Layer 0, where the field exists — and both
+            the field and the paging are load-bearing there: a partial read
+            would look exactly like a table somebody had emptied, which is the
+            one mistake that pass must never make. This was not a rename.
+Decision:   **The `get_health` contract is unchanged.** Same keys, same
+            ordering, same per-source keys, same credentials, same
+            not-configured wording. Exactly one line of its output differs — the
+            `source` label, which names which table is probed and how, and had
+            to change because both of those did.
+Verified:   Five checks. The stub used is a replay that **refuses exactly what
+            Airtable refuses** — 422 `Unknown field name: "…"` on any field the
+            table has not got — and that offers an `offset` even on a
+            `maxRecords=1` read, which the real API would not, deliberately, so
+            that a probe which followed offset would be caught here rather than
+            in production.
+            1. **One request, no field, no paging** — `probeReachable` against
+               Build Patterns issued exactly one request,
+               `GET /v0/app5ni3E8r7Lvxk22/tblaMXSMjmz30OvcU?maxRecords=1`:
+               `fields[]` empty, no `pageSize`, no `offset`, and the offset the
+               stub offered was not followed. Returned 1.
+            2. **Reachable true** — `get_health`'s Airtable probe now answers
+               `reachable: true, detail: "answered"` against the Build Patterns
+               table it used to fail on. **Not yet measured live**: this session
+               holds no `AIRTABLE_TOKEN` and the deployed commit is main, so the
+               live figure has to be read with one `get_health` call after this
+               deploys. The baseline to beat is the 2,661ms measured on main
+               today, and the new probe is one round trip with no pace delay —
+               the other single-call probes on that deploy answer in 65–355ms.
+               Live evidence for the request itself: the Airtable connector read
+               that exact table with `pageSize=1` successfully, 175 records
+               total, one returned.
+            3. **Output otherwise identical** — the two builds run against the
+               same stub with the same environment differ by a single line, the
+               `source` label. Top-level keys, source count and order,
+               per-source keys, credentials, `configured` flags and every
+               `is not set` sentence are byte-identical.
+            4. **Existing callers unchanged** — `listRecordIds` against a
+               submissions-shaped table still returns its 12 ids, still asks for
+               `Submission ID`, still pages at 100. `ID_PROBE_FIELD` is still
+               `Submission ID`. The fault also still reproduces against Build
+               Patterns, refused on its first page, which is the proof the stub
+               is faithful.
+            5. **`npm run build`** — clean, and `npm run typecheck` with it.
+            Every other caller of `listRecordIds` was checked: there is exactly
+            one, `server/src/codex.ts:191`, and it reads the six builder tables
+            and Layer 0 through `SUBMISSIONS_BASE_ID` — all of which carry
+            `Submission ID`. Nothing else in the server calls it.
+Not tested: The live latency of the new probe, for the reason above. Nothing ran
+            against the production database or a real Airtable token from this
+            session.
