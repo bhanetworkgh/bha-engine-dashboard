@@ -1257,6 +1257,77 @@ const MIGRATIONS: Migration[] = [
       `CREATE UNIQUE INDEX IF NOT EXISTS engine_mcp_writes_idem ON engine_mcp_writes (tool, idempotency_key) WHERE idempotency_key IS NOT NULL`,
     ],
   },
+
+  {
+    id: 20,
+    name: 'the repair record: one row per automated repair attempt',
+    statements: [
+      /**
+       * Every repair the bridge attempts, whatever came of it (2026-09-20).
+       *
+       * **Not a mirror table**, for the same reason `engine_vfarm_leads` is
+       * not: these rows are born of this engine's own repair loop rather than
+       * copied out of Airtable, so there is no upstream field name to keep
+       * verbatim and the columns are real columns.
+       *
+       * **`repair_id` is unique because the bridge may report twice.** It
+       * posts once when a run finishes, and n8n retries a failed HTTP node, so
+       * the same result arriving again must update the row rather than add a
+       * second one. The read model is keyed on the bridge's own id for exactly
+       * the reason the execution table is keyed on n8n's: a counter cannot
+       * notice it is being told the same thing twice, and a primary key cannot
+       * fail to.
+       *
+       * **`outcome` is the whole truth of a repair and nothing else is.** A
+       * repair counts as done only where the bridge says `repaired` *and* a
+       * `version_after` came back — the bridge having been called is not a
+       * repair, and a run that could not report its own result is recorded as
+       * needing a person rather than assumed to have worked.
+       *
+       * **`payload` holds what the bridge sent, whole.** The named columns are
+       * the read model; the blob is the record. A field the bridge adds before
+       * this dashboard reads it is kept rather than dropped, on the same rule
+       * that keeps `retries_attempted` inside the incident blob with no way
+       * onto the page. It is also where a pre-repair workflow snapshot lives if
+       * the bridge sends one — see `server/src/repairs.ts` for why a revert
+       * needs the nodes and not only the version id.
+       *
+       * **`reverted_at` and `reverted_by` are this dashboard's own.** The
+       * bridge never writes them: a revert is something a person did here, and
+       * it is stamped only once n8n has actually taken the older version back.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_repairs (
+         id             bigserial PRIMARY KEY,
+         repair_id      text NOT NULL UNIQUE,
+         outcome        text NOT NULL,
+         workflow_id    text,
+         workflow_name  text,
+         failed_node    text,
+         error_class    text,
+         error_message  text,
+         execution_id   text,
+         root_cause     text,
+         change_summary text,
+         nodes_changed  jsonb NOT NULL DEFAULT '[]'::jsonb,
+         human_action   text,
+         version_before text,
+         version_after  text,
+         duration_ms    integer,
+         report_channel text,
+         payload        jsonb NOT NULL DEFAULT '{}'::jsonb,
+         started_at     timestamptz,
+         finished_at    timestamptz,
+         reverted_at    timestamptz,
+         reverted_by    text,
+         created_at     timestamptz NOT NULL DEFAULT now()
+       )`,
+      /** Newest first is the only order this list is ever shown in. */
+      `CREATE INDEX IF NOT EXISTS engine_repairs_created ON engine_repairs (created_at DESC)`,
+      /** Every repair of one workflow, which is how a workflow being repaired repeatedly becomes visible. */
+      `CREATE INDEX IF NOT EXISTS engine_repairs_workflow ON engine_repairs (workflow_id)`,
+      `CREATE INDEX IF NOT EXISTS engine_repairs_outcome ON engine_repairs (outcome)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

@@ -1,12 +1,23 @@
 /**
- * The n8n public API, read only.
+ * The n8n public API. Read, with one write: the repair revert.
  *
- * Two endpoints are read — `GET /api/v1/executions` and `GET /api/v1/workflows`
- * — and nothing here ever writes. CLAUDE.md section 3 is explicit that
- * workflows are read and never modified, and this client has no method that
- * could. The workflows read exists so a workflow with no registry row still
- * appears under its own name rather than as an opaque id: a workflow must never
- * be invisible because a registry row is missing.
+ * Three endpoints are read — `GET /api/v1/executions`, `GET /api/v1/workflows`
+ * and `GET /api/v1/workflows/{id}` — and exactly one writes:
+ * `PUT /api/v1/workflows/{id}`, reached only from `repairs.revert`.
+ *
+ * **That write is a deliberate exception and the only one** (2026-09-20, on
+ * Destiny's instruction, with the repair record). Until it, nothing in this
+ * server could change a workflow, and this file said so. The self-healing
+ * repair layer changes that in one direction only: a repair Claude Code made
+ * can be *put back*, because a repair nobody can undo is a change nobody should
+ * have let happen automatically. It restores the workflow as it stood before
+ * the repair and it is used for nothing else — there is no method here that
+ * edits, activates, deactivates or deletes a workflow, and CLAUDE.md section 3
+ * still holds for every other purpose: workflows are read, never modified.
+ *
+ * The workflows list is read so a workflow with no registry row still appears
+ * under its own name rather than as an opaque id: a workflow must never be
+ * invisible because a registry row is missing.
  *
  * **Why the executions are copied into Postgres rather than queried live.**
  * Not because n8n discards them — that has never been observed here, and this
@@ -226,6 +237,83 @@ export async function executionsAfter(afterId: number, maxPages = MAX_PAGES): Pr
   // Ran out of pages before reaching the watermark. The caller still commits
   // what it read — and says so, rather than pretending it saw everything.
   return { executions: out, truncated: true, stalled: false, pages, reported };
+}
+
+/* ------------------------------------------- one workflow, and the one write */
+
+/**
+ * One workflow, whole, by id — the nodes included.
+ *
+ * Read for the repair revert, which needs two things from it: the current
+ * `versionId`, so a workflow somebody has edited since a repair is never
+ * silently overwritten, and the `name`, so a restore that carries no name of
+ * its own keeps the one the workflow has now.
+ */
+export interface N8nWorkflowFull {
+  id: string;
+  name: string;
+  versionId: string | null;
+  nodes: unknown[];
+  connections: Record<string, unknown>;
+  settings?: unknown;
+  active?: boolean;
+}
+
+export async function workflow(id: string): Promise<N8nWorkflowFull> {
+  const w = await call<N8nWorkflowFull>(`/workflows/${encodeURIComponent(id)}`);
+  return {
+    id: String(w.id),
+    name: String(w.name ?? id),
+    versionId: typeof w.versionId === 'string' ? w.versionId : null,
+    nodes: Array.isArray(w.nodes) ? w.nodes : [],
+    connections: w.connections && typeof w.connections === 'object' ? w.connections : {},
+    settings: w.settings,
+    active: w.active,
+  };
+}
+
+/**
+ * **The one write in this file.** Replaces a workflow's content with the body
+ * given, and is called from exactly one place: `repairs.revert`.
+ *
+ * `PUT /api/v1/workflows/{id}` is the only way back that the public API offers.
+ * There is no endpoint that restores a historical version by its id — a version
+ * id identifies a restore point without containing it — so a revert has to hand
+ * n8n the nodes and connections as they stood, which is why the repair record
+ * keeps the snapshot the bridge read before it edited anything.
+ *
+ * The restore creates a **new** version holding the old content rather than
+ * bringing the old version id back, which is why the caller re-reads afterwards
+ * instead of assuming which version it is now on.
+ *
+ * `active` is deliberately not sent. Whether a workflow is running is not a
+ * fact about a repair, and a restore that switched a live workflow off — or on
+ * — would be a second change nobody asked for.
+ */
+export async function replaceWorkflow(id: string, body: { name: string; nodes: unknown[]; connections: Record<string, unknown>; settings?: unknown }): Promise<void> {
+  if (!KEY) throw new N8nError(`${N8N_API_VAR} is not set on this server, so n8n could not be asked anything.`, 503);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  let res: Response;
+  let text: string;
+  try {
+    res = await fetch(`${BASE}/workflows/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'X-N8N-API-KEY': KEY, Accept: 'application/json', 'Content-Type': 'application/json' },
+      // `settings` is only sent where the snapshot carried one: n8n rejects a
+      // null, and inventing an empty object would be this code deciding what a
+      // workflow's settings are.
+      body: JSON.stringify(body.settings === undefined || body.settings === null ? { name: body.name, nodes: body.nodes, connections: body.connections } : body),
+      signal: controller.signal,
+    });
+    text = await res.text();
+  } catch (e) {
+    const timedOut = e instanceof Error && e.name === 'AbortError';
+    throw new N8nError(timedOut ? `n8n did not answer within ${Math.round(TIMEOUT_MS / 1000)} seconds, so it is not known whether the restore landed.` : 'Could not reach n8n.', 0);
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) throw new N8nError(`n8n answered ${res.status}${text ? `: ${text.slice(0, 300)}` : '.'}`, res.status);
 }
 
 /**

@@ -3,6 +3,7 @@ import { useData } from '../../app/useData';
 import { getEngineHealth, resyncHealth, type HealthData } from '../../data';
 import { LoadFailed, Loading, PageHeader, ResyncButton, Tabs, Toast, useResync, useToast } from '../../components/ui';
 import LaneView from './LaneView';
+import Repairs from './Repairs';
 import Retries from './Retries';
 
 /**
@@ -24,7 +25,14 @@ import Retries from './Retries';
  * so an unkeyed or refused lane is a real and common state — and no figure is
  * allowed to imply an answer a lane never gave.
  */
-const TABS = ['All systems', 'Bays', 'North Star', 'Research Twin', 'Retries'] as const;
+/**
+ * Six tabs. **Repairs is last because it is the newest half of the same
+ * question** (2026-09-20): Retries is what the healer did on its own, and
+ * Repairs is what the bridge changed in a workflow. A failure ends as retried,
+ * repaired, or waiting on a person, and those two tabs are where the last two
+ * of those are read.
+ */
+const TABS = ['All systems', 'Bays', 'North Star', 'Research Twin', 'Retries', 'Repairs'] as const;
 type Tab = (typeof TABS)[number];
 
 /** Which lane each tab reads. All systems and Retries read every lane. */
@@ -82,7 +90,15 @@ export default function EngineHealth() {
         }
       />
 
-      {tab === 'Retries' ? (
+      {tab === 'Repairs' ? (
+        /*
+          Repairs reads its own route rather than the health payload: the rows
+          come from this engine's repair loop, not from the three lanes, and
+          folding them into a payload keyed on lanes would put them behind the
+          lane reads they have nothing to do with.
+        */
+        <Repairs />
+      ) : tab === 'Retries' ? (
         <Retries data={data} tick={tick} onChanged={() => void reload()} />
       ) : (
         <LaneView data={data} lane={LANE_OF[tab] ?? null} tick={tick} />

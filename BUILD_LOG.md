@@ -7229,3 +7229,189 @@ Not tested: Against the deployed service. Egress to `dashboard.bhanetwork.org`
             it was on 18 Sep — the connector's own tools answering against the
             deployed commit is what confirmed that one. Nothing ran against the
             production database: migration 19 was proved on a copy.
+
+## 2026-09-20 20:50 — the repair record: engine_repairs, the Repairs tab, and the one write to n8n
+Intent:     Part two of the self-healing repair layer. Part one is a separate
+            service, `bha-repair-bridge`, which receives a workflow failure from
+            n8n, runs Claude Code against the failing workflow and reports what
+            it did. This is the dashboard half: the row that keeps the result,
+            the tab that shows it, and the revert that undoes it. The design
+            rule set earlier and not negotiable — nothing heals invisibly: every
+            failure ends as retried, repaired, or waiting on a person, and every
+            repair shows the error, the root cause, the exact change, and a way
+            back.
+Files:      server/src/migrations.ts (migration 20, engine_repairs)
+            server/src/repairs.ts (new, 480) — the write, the read, the revert
+            server/src/n8n.ts — workflow(id) whole, and the one write
+            server/src/index.ts — three routes
+            src/data/types.ts, src/data/index.ts
+            src/screens/EngineHealth/Repairs.tsx (new, 430)
+            src/screens/EngineHealth/index.tsx — the sixth tab
+            CLAUDE.md, README.md
+Problem:    Part one could not be built in this session. `bhanetworkgh/bha-repair-bridge`
+            does not exist yet: `list_repos` does not show it and `add_repo`
+            answered `you don't have access to bhanetworkgh/bha-repair-bridge`.
+            The prompt's own fallback is written the other way round — do part
+            one, then check whether the dashboard can be opened — so the same
+            rule was applied inverted: build the part that belongs to the repo
+            this session has, in full, and say plainly that the other part needs
+            a session on its own repo. No bridge code was written into this
+            repo.
+
+Problem:    **The spec's revert cannot be implemented as written, and it took
+            reading n8n's actual API to see why.** The brief says the revert
+            "restores the workflow to `version_before` through the n8n API".
+            n8n's public API offers `PUT /api/v1/workflows/{id}`, which replaces
+            a workflow with a body you supply, and **no endpoint that fetches a
+            historical version by its id** — workflow history lives behind the
+            internal REST API. So `version_before` names a restore point without
+            containing it: on its own there is nothing to restore *from*.
+Fix:        The revert restores from a **snapshot**, and the snapshot already
+            exists at exactly the moment it matters — part one, step 5, reads the
+            whole workflow before it edits anything, to capture the restore
+            point. So `repairs.revert` reads the snapshot off the stored payload
+            (`workflow_before`, and three other spellings, because the bridge is
+            a separate deployment and this must work the day it sends one
+            without a migration here), and where there is none it **refuses with
+            that reason and names the manual route** — the workflow's own version
+            history in n8n — rather than drawing a revert that did not happen.
+            That is a fifth refusal the brief did not anticipate, `no_snapshot`,
+            and it is the one the bridge's current result contract actually
+            produces. **Part one should carry the snapshot on its result
+            payload**; it is one field and the bridge already holds it.
+            Checked against the live instance rather than assumed: the n8n
+            connector's `get_workflow_history` on `iSr9sOV2AfhUQN7C` returns
+            three versions, so history exists on this instance — but through a
+            path this server's API key does not reach.
+
+Problem:    A revert moved the row and left the strip above it reading the
+            server's counts: "repaired and standing 3" over a table showing two.
+Fix:        The two figures a revert moves — standing, and put back — are counted
+            from the rows on screen rather than from the summary the server
+            computed before the revert. Nothing else there changes on a revert,
+            so the windows and the percentiles stay as the server computed them.
+            This is the reconciliation bug the record pages and the Early Access
+            tab each learned once; it is now three for three, which says the
+            shape is worth pulling out rather than re-deriving.
+
+Problem:    Two test-rig faults worth recording because both produced a
+            confident wrong reading. `pkill -f "node n8n-stub.cjs"` killed its
+            own shell (exit 144) — the third time that pattern has bitten this
+            week. And the PUT-failure case was "tested" by putting
+            `STUB_PUT_FAILS=1` in front of the *curl* rather than the stub, so
+            the stub never refused anything and the check passed on a path that
+            was never exercised.
+Fix:        Kill by pid from `ss`, never by pattern. And prove the mechanism
+            before trusting an absence: the stub was restarted in refusing mode
+            and a direct PUT confirmed as 400 *before* the revert was driven
+            through the server. Same lesson as the notify-URL check earlier
+            today, applied without being re-taught.
+Decision:   **`engine_repairs` is not a mirror table**, for the reason
+            `engine_vfarm_leads` is not: the rows are born of this engine's own
+            repair loop rather than copied out of Airtable, so there is no
+            upstream field name to keep verbatim and the columns are real
+            columns. `repair_id` is unique because the bridge posts once and n8n
+            retries a failed HTTP node — the same reason the execution table is
+            keyed on n8n's own id.
+
+            **The whole payload is stored beside the columns.** The columns are
+            the read model, the blob is the record. A field the bridge adds
+            before this dashboard reads it is kept rather than dropped, which is
+            the rule that keeps `retries_attempted` inside the incident blob with
+            no way onto the page — and it is what makes the snapshot work the
+            day part one starts sending one.
+
+            **An unknown outcome is refused with a 422 naming it**, never filed
+            under `error` or `unknown`. The five names are the vocabulary the two
+            services share; a sixth arriving means they have drifted, and a row
+            nobody can interpret is worse than a refused write.
+
+            **`reverted_at` is stamped only after n8n agrees**, and a refused
+            revert leaves the row exactly as it was — it stays revertible, with
+            the new reason. A row claiming a revert that did not happen is worse
+            than no revert at all.
+
+            **Every guard is on the server and the answer names which one
+            refused.** `can_revert` and its reason are computed once, server
+            side, and the page asks rather than deciding a second time, so the
+            button and the endpoint cannot disagree. The version check is the
+            one guard that costs a live read, so it runs when somebody asks to
+            revert rather than forty times for a list of forty rows.
+
+            **The revert is the one write to n8n and it lives in `n8n.ts`.**
+            That file declared itself read-only and now declares the exception
+            instead, so every use of `N8N_API_KEY` stays in one file. Nothing
+            there edits, activates, deactivates or deletes a workflow, and
+            section 3 still holds everywhere else. **`active` is never sent**: a
+            restore that switched a live workflow on or off would be a second
+            change nobody asked for.
+
+            **`repaired` is not green.** A machine changed a live workflow, which
+            is worth reading rather than celebrating, so it carries the accent.
+            Colour marks only what needs somebody: needing a person, and not
+            repaired.
+
+            **Repairs is a sixth tab rather than a section inside an existing
+            one.** Retries is what the healer retried on its own and Repairs is
+            what the bridge changed in a workflow — the two halves of what
+            happened after a failure — and the tab reads its own route rather
+            than the health payload, which is keyed on the three lanes and has
+            nothing to do with these rows.
+Verified:   Eight acceptance checks, against Postgres 16 on 5603, an n8n stub on
+            8903 and the server on 8801.
+            1. **Migration** — a database brought to 19 by the pre-change
+               `migrations.ts` (`applied 1–19`) then applied **20 alone**
+               (`applied: [20] | already: 19`), and re-ran as
+               `applied: [] | already: 20`. All 23 columns, three indexes and
+               the unique constraint on `repair_id` match the spec.
+            2. **The write** — 201 `inserted`, then the same `repair_id` again
+               201→200 `updated`, one row, total unchanged. An unknown outcome
+               and a missing `repair_id` each 422 with their own sentence; no
+               `x-dashboard-key` 401. All five outcomes, refusals included, on
+               the `engine_writes` log as `kind=repairs`.
+            3. **The read** — 401 signed out, 200 signed in. 8 rows newest
+               first, summary `{total 8, 7d 8, standing, reverted, p50, p95,
+               timed}` matching the rows, `by_outcome` summing to the total, and
+               `can_revert` false on every non-repaired row with the reason
+               naming the guard.
+            4. **The revert** — `ok: true`, the stub's held workflow went from
+               `[{"name":"After the repair"}]` to `[{"name":"Codex Read Builder
+               Tab"}]` on a new version id, one PUT carrying name, nodes,
+               connections and settings, `reverted_by` and `reverted_at` stamped,
+               the restored version recorded in the payload, and the PUT on the
+               write log.
+            5. **Refused where the version moved on** — the stub moved to
+               `v-someone-edited-it`; the revert answered `version_moved_on`
+               naming both versions, `reverted_at` stayed null and **zero PUTs
+               were made**.
+            6. **The tab** — six tabs; the strip read 8 / 2 standing / 1 needing
+               a person / 2 not repaired / 71 s with p95 142 s; eight rows newest
+               first with repaired, needs-a-person, not-repaired, bridge-error,
+               skipped and reverted each drawn differently; the needs-human row
+               carried its `human_action` on the row; the panel showed the root
+               cause, the change, the nodes, both version ids and the error; the
+               confirmation named the workflow and said the failure returns; the
+               revert landed and the row and the strip both moved (standing 3→2,
+               put back 1→2). No horizontal overflow. The only console errors
+               are the Google Fonts stylesheet failing this sandbox's TLS
+               interception, on every page.
+            7. **No sample data** — there was none to remove. The brief expected
+               placeholder repair rows marked `sample`; this repo has no repair
+               fixture, and `src/data/fixtures/` holds only builders, chat,
+               incidents, twins and vfarm. Engine health has read real mirrored
+               rows since it was built on 17 Sep.
+            8. **`npm run build`** — clean, and `npm run typecheck` with it.
+            Also proved: the other four guards by name (`already_reverted`,
+            `not_a_repair`, `not_found`, `no_snapshot`), and `n8n_refused` with
+            the stub actually refusing the PUT — the row untouched, still
+            revertible, and the refusal on the write log.
+Not tested: Against the live n8n instance or the production database. No revert
+            has been made against a real workflow: the stub mimics the one
+            behaviour the code depends on (a PUT mints a new version rather than
+            resurrecting the old id) but nobody has confirmed that
+            `PUT /api/v1/workflows/{id}` is accepted by the key on Render —
+            **that key has been read-only until now and may need workflow write
+            scope**, which is the first thing to check, and the same class of
+            failure as the Airtable token re-scoping on 14 and 17 Sep. The
+            bridge does not exist yet, so nothing has posted a real result and
+            no payload has carried a real snapshot.
