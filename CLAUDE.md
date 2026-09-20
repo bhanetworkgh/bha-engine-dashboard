@@ -438,8 +438,9 @@ reasonable about.
   and streamable HTTP is JSON-RPC 2.0 over a POST. The transport answers with a
   single JSON object, or one SSE frame where the client's `Accept` asks for a
   stream, because clients differ about which they send.
-- **Read only, and there is no write path to close.** v1 has no write tool and
-  no code route from a tool to a write. `get_page_data` reads through an
+- **Every tool reads, and the one that acts only re-runs a button the page
+  already has.** There is no destructive tool, and no code route from a tool to
+  a write that was not already a page's own. `get_page_data` reads through an
   in-process GET against this server's own `/api` router — the same function
   that answers the browser, which is what stops the tool drifting from the
   page — and that loopback is GET-only and refuses `/api/engine/*` and
@@ -490,10 +491,131 @@ reasonable about.
   acted on. Every capped answer says what the cap was and how to ask for the
   rest, and a payload past the size cap comes back as its **shape** rather than
   as a sample: a fragment read as the whole is the failure worth designing out.
-- Every call is logged with its name and arguments. Seven tools: `list_pages`,
-  `get_page_structure` (the one that matters — it is what lets somebody reason
-  about a page they cannot see), `get_component`, `search_source`,
-  `list_data_sources`, `get_page_data`, `get_health`.
+- Every call is logged with its name and arguments. **Thirteen tools**
+  (twelve read, one act), and **every one of them carries MCP annotations**
+  (decision 2026-09-20, Destiny), because the spec's default for a tool that
+  declares none is *potentially destructive* — twelve read-only tools that
+  said nothing about themselves were being offered to every client as though
+  any of them might delete something.
+
+  Structure and source: `list_pages`, `get_page_structure` (the one that
+  matters — it is what lets somebody reason about a page they cannot see),
+  `get_component`, `search_source`, `list_data_sources`.
+  Live data: `get_page_data` (with a `fields` list of dot paths, so two numbers
+  cost two numbers rather than a whole payload), `query_postgres`,
+  `describe_schema`, `get_health`.
+  Whether the copy is current: `get_mirror_status`, `diff_source_vs_mirror`,
+  `search_logs`. And `resync`, the one tool that acts.
+
+- **The second half was built because two real faults were slow to find**
+  (decision 2026-09-20, Destiny). Both were diagnosed through this server and
+  both took longer than they should have. Pay Tracker showed nothing because an
+  n8n workflow had written no rows into Airtable — four calls here and two
+  elsewhere, because nothing could compare a source against its mirror. Then,
+  after the upstream fix, the page *still* showed nothing, because the mirror
+  only fills when somebody presses Resync; the server reported that correctly
+  and uselessly, having no way to press it. So: `get_mirror_status` answers
+  "which kinds are empty, and is that stopped or merely unread" for all
+  eighteen kinds in one call, `diff_source_vs_mirror` settles one kind against
+  Airtable and names the record ids on each side, and `resync` runs the page's
+  own code path rather than a second copy of it — **one run per pass per 60
+  seconds**, and a second call inside that window is told "ran N seconds ago"
+  rather than queued, because a queue turns an impatient client into a load
+  test on somebody else's API.
+- **`query_postgres` is read-only in three independent ways**, because one
+  would be a single point of failure on a tool a model drives: the statement is
+  parsed and refused unless it is exactly one `SELECT` or `WITH` with no
+  writable CTE and no second statement; it runs inside
+  `BEGIN TRANSACTION READ ONLY`; and the transaction is rolled back
+  unconditionally, success or failure. A 5-second `statement_timeout` is set on
+  the transaction, and the row cap (100 by default, 1,000 at most) is applied as
+  a `LIMIT` in the wrapping query and **stated in the answer as a floor, not a
+  total** — a capped read says how many it fetched and that there are more,
+  never a count it did not actually make.
+- **Output is budgeted, and that is a correctness rule rather than a courtesy.**
+  A tool answer lands in a context window, and every token spent on rows nobody
+  asked for displaces reasoning about the fault. So every tool defaults to
+  summaries and counts and makes the caller ask for rows: `get_mirror_status`
+  answers in counts and verdicts, `diff_source_vs_mirror` names at most ten
+  record ids per side and says the difference in full, and `search_logs`
+  distinguishes "nothing matched" from "this process has only been up four
+  minutes" rather than letting an empty result read as silence upstream.
+
+**The write gate: preview, then token, then act once** (decision 2026-09-20,
+Destiny). `server/src/mcp/gate.ts`. It is **scaffolding, shipped ahead of the
+first tool that needs it** — nothing destructive goes through it today, and
+`resync` deliberately does not use it, because re-reading rows from a source
+this dashboard already reads is not a change anybody needs to approve. It is
+here so that the first real mutation does not have to invent the shape, and so
+that the shape is tested before anything depends on it
+(`npm run test:gate`, eight assertions).
+
+It is **enforced on the server**, not in a client's confirmation dialog and not
+in the model's judgement: both of those change with which client is connected
+and what a model decides in the moment. A mutating tool called without a token
+performs no change, and the only thing that can mint a token is a preview this
+process computed.
+
+- **The token is bound to a digest of the whole operation** — the tool, the
+  target, the changes, and the record as it is *now*, hashed whole. Not just
+  the fields the change names: a token minted against a row somebody has since
+  edited stops matching, which is how "it changed underneath you" is detected
+  rather than assumed.
+- **Sixty seconds, one use.** Long enough to read a preview, short enough that a
+  stale one cannot act. The caller may ask for a shorter window; the knob is
+  clamped so it can only ever shorten, never extend.
+- **Four refusals, each with its own name**, because they want four different
+  next moves: `token_expired` (wait and re-preview), `token_used` (stop and read
+  what already happened — it is refused rather than repeated, so a retry cannot
+  double-apply), `record_changed` (re-read the record; the change was computed
+  against values that are no longer there) and `token_unknown` (including a
+  token spent by the wrong tool, and every token outstanding when the process
+  restarted). A single "invalid token" would collapse all four into a shrug.
+- **A create requires an idempotency key**; an update does not, because setting
+  a status twice leaves it set. The claim is a partial unique index on
+  `(tool, idempotency_key)`, so two identical creates racing cannot both
+  insert — the loser reads the winner's row and replays its result.
+- **`engine_mcp_writes` records every outcome, refusals included.** Tool,
+  arguments, digest, token, idempotency key, target, before, after, outcome,
+  detail, actor. A preview is deliberately *not* logged: a preview is not a
+  write, and a log that records intentions beside actions stops being a record
+  of what happened. The audit write **throws rather than swallowing** — if the
+  change cannot be recorded it does not happen, the opposite of the Early Access
+  notification hop and deliberately so: a lead nobody announced is still a lead,
+  but a mutation nobody recorded undercuts the premise that these tables are the
+  record.
+
+The two calls, worked through, so the next tool added through the gate does not
+reinvent the shape. Call one names no token:
+
+```
+tools/call  set_lead_status  { "id": "c6e2fae0-…", "status": "contacted" }
+
+{ "status": "preview",
+  "tool": "set_lead_status",
+  "target": "engine_vfarm_leads c6e2fae0-…",
+  "changes": [ { "field": "status", "current": "new", "proposed": "contacted" } ],
+  "token": "4f1c…", "digest": "9ab3…",
+  "expires_at": "2026-09-20T14:02:31.000Z", "expires_in_seconds": 60,
+  "note": "Nothing has changed. Call set_lead_status again with token=\"4f1c…\"
+           to make exactly this change. The token is good for 60 seconds, works
+           once, and stops working if the record changes in the meantime — re-run
+           without a token to get a fresh preview." }
+```
+
+Call two carries it, and the server re-reads the record before spending it:
+
+```
+tools/call  set_lead_status  { "id": "c6e2fae0-…", "status": "contacted", "token": "4f1c…" }
+
+{ "status": "applied", "target": "engine_vfarm_leads c6e2fae0-…",
+  "changes": [ { "field": "status", "current": "new", "proposed": "contacted" } ],
+  "audit_id": 41 }
+```
+
+The re-read is the point: `redeem` is handed an operation built from a **fresh**
+read, never from the preview. Passing the preview's own operation back in would
+compare a value with itself and prove nothing.
 
 **The vFarm Early Access funnel is the one public write route** (decision
 2026-09-20, Destiny). The form on bhanetwork.org posts to
@@ -585,6 +707,11 @@ entry, because a literal repeating a default is a second place for it to drift.
 only. **No default**, and unset the endpoint answers 404 to everything and the
 boot line names the variable; it is `sync: false` in the blueprint rather than a
 generated value because the same string goes into the Claude connector URL.
+**The 2026-09-20 upgrade added no variable of its own**: `query_postgres` and
+`describe_schema` read the pool `DATABASE_URL` already opens, `resync` calls the
+same routes the buttons call with the credentials they already use, and the write
+gate keeps its tokens in memory. Nothing to set before it merges, which is worth
+saying rather than leaving to be discovered.
 `DATABASE_CA_CERT`, `DATABASE_POOL_MAX`, `N8N_API_URL`, `BHARAG_API_URL` and
 `AIRTABLE_API_URL` are optional.
 `DATA_DIR` is gone, and so are `AIRTABLE_RESYNC_MINUTES`, the

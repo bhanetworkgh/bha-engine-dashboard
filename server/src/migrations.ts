@@ -1209,6 +1209,54 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_vfarm_leads_status ON engine_vfarm_leads (status)`,
     ],
   },
+
+  {
+    id: 19,
+    name: 'the MCP write audit log',
+    statements: [
+      /**
+       * Every write that goes through the MCP write gate, before it returns
+       * (2026-09-20).
+       *
+       * **The whole premise of this dashboard is that the record cannot lie,
+       * and a write path with no record of itself undercuts that.** So the row
+       * is written by the gate rather than by each tool, and it is written for
+       * the refusals too: an expired token, a replay and a record that changed
+       * underneath a preview are all outcomes worth being able to count later.
+       *
+       * `before` and `after` are stored whole rather than as a summary. A diff
+       * computed at read time can be recomputed; a diff stored instead of its
+       * operands cannot be checked.
+       *
+       * Append-only by convention and by having nothing that updates it. It is
+       * a log, and a log somebody can edit is a draft.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_mcp_writes (
+         id          bigserial PRIMARY KEY,
+         at          timestamptz NOT NULL DEFAULT now(),
+         tool        text NOT NULL,
+         arguments   jsonb NOT NULL DEFAULT '{}'::jsonb,
+         digest      text NOT NULL,
+         token       text,
+         idempotency_key text,
+         target      text,
+         before      jsonb,
+         after       jsonb,
+         outcome     text NOT NULL,
+         detail      text,
+         actor       text
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_mcp_writes_at ON engine_mcp_writes (at DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_mcp_writes_tool ON engine_mcp_writes (tool)`,
+      /**
+       * An idempotency key is claimed once per tool. The unique index is what
+       * makes the claim atomic — two identical creates racing cannot both
+       * insert, so the loser reads the winner's row and returns its result
+       * rather than acting twice.
+       */
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_mcp_writes_idem ON engine_mcp_writes (tool, idempotency_key) WHERE idempotency_key IS NOT NULL`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
