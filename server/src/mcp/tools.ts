@@ -418,23 +418,30 @@ const getHealth: ToolDefinition = {
     });
 
     /**
-     * Probed with the Codex base, not Build Patterns, and that is a fix
-     * (2026-09-20).
+     * Probed with `probeReachable`, which names no field and reads one record
+     * (2026-09-20, the second fix of the day and the right one).
      *
-     * `listRecordIds` asks for the field `Submission ID` — the one spelling
-     * that exists in all seven loop and Codex tables, and in none of the
-     * others. Pointed at Build Patterns it asked that table for a column it
-     * has not got, Airtable answered `Unknown field name: "Submission ID"`,
-     * and this probe reported the whole of Airtable as unreachable while the
-     * token was working perfectly. A false negative on a health surface is
-     * worse than no probe: it sends somebody to check a credential that is
-     * fine.
+     * This probe called `listRecordIds`, which hardcodes the field
+     * `Submission ID` — present on the six builder tables and Layer 0 and
+     * nowhere else. Against Build Patterns, whose id field is `pattern_id`,
+     * Airtable refused the whole request with
+     * `Unknown field name: "Submission ID"` and this probe reported the whole
+     * of Airtable as unreachable while the token was working perfectly: 2,244ms
+     * to say something false, live at 19:43 UTC. The same call also explains the
+     * eight seconds seen on 18 Sep — it pages to the end, so it was walking all
+     * 175 Build Patterns records to answer a yes/no question.
+     *
+     * The first attempt at this fix moved the probe to a table that *does*
+     * carry `Submission ID`, which worked and left the trap armed: the field
+     * name was still hardcoded, so the next person to repoint the probe would
+     * have found it the same way. A liveness probe names no field, and this one
+     * cannot break on a table's schema because it asks about no schema.
      */
     const atOk = airtable.airtableConfigured();
-    const probeTable = sources.CODEX_LAYER0;
-    const at = doProbe && atOk ? await timed(() => airtable.listRecordIds(probeTable.base, probeTable.table, 8000)) : null;
+    const probeTable = sources.PATTERNS;
+    const at = doProbe && atOk ? await timed(() => airtable.probeReachable(probeTable.base, probeTable.table, 8000)) : null;
     probes.push({
-      source: `airtable ${airtable.AIRTABLE_URL} (probed with a read of ${probeTable.label} ${probeTable.base}/${probeTable.table}, the smallest table carrying the ${airtable.ID_PROBE_FIELD} field listRecordIds asks for)`,
+      source: `airtable ${airtable.AIRTABLE_URL} (probed with a one-record read of ${probeTable.label} ${probeTable.base}/${probeTable.table}, naming no field)`,
       credential: 'AIRTABLE_TOKEN',
       configured: atOk,
       reachable: at ? at.ok : null,
