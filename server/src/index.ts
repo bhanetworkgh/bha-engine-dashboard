@@ -39,6 +39,7 @@ import { monthly } from './monthly';
 import { isStatKind, stats } from './stats';
 import { N8N_API_VAR, n8nBase, n8nConfigured } from './n8n';
 import { handleMcp, mcpConfigured, mcpMountPath, MCP_SECRET_VAR } from './mcp';
+import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
 
@@ -991,6 +992,23 @@ const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
+
+  /**
+   * Every request, into the MCP server's in-memory ring, so `search_logs` can
+   * answer "what has this process been serving" without somebody opening
+   * Render.
+   *
+   * **The path is redacted for /mcp.** The MCP secret is a path segment, so
+   * logging the pathname verbatim would put the credential into a buffer a
+   * tool reads back — which is the one thing this must not do. Render's own
+   * request log already carries it, and that is a separate problem noted in
+   * the README; this buffer will not add a second copy.
+   */
+  const startedAtMs = Date.now();
+  res.on('finish', () => {
+    const shown = url.pathname === '/mcp' || url.pathname.startsWith('/mcp/') ? '/mcp/<secret>' : url.pathname;
+    mcpLogs.recordRequest(req.method ?? 'GET', shown, res.statusCode, Date.now() - startedAtMs);
+  });
   /**
    * The MCP server, for an external Claude client (2026-09-18). Ahead of
    * /api and of the SPA fallback, and it never touches either: a request that
@@ -1025,6 +1043,9 @@ const server = createServer((req, res) => {
  * anyone noticing.
  */
 async function boot(): Promise<void> {
+  // First, so the boot lines below are in the buffer too: which credentials are
+  // configured is exactly what somebody asks search_logs about later.
+  mcpLogs.install();
   const db = await assertDatabase();
   const m = await migrate();
   await store.initStore();

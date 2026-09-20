@@ -123,7 +123,17 @@ async function handleRpc(req: RpcRequest, deps: ToolDeps): Promise<Record<string
         capabilities: { tools: { listChanged: false } },
         serverInfo: SERVER_INFO,
         instructions:
-          'This dashboard is client-rendered, so fetching its URL returns an empty shell. Read its structure here instead. Start with list_pages, then get_page_structure for the page in question — that is the tool that says what a panel is and what feeds it. get_page_data returns what a page would render right now. Every tool is read-only, and every one of them reports what it could not answer rather than guessing.',
+          [
+            'This dashboard is client-rendered, so fetching its URL returns an empty shell. Read it here instead.',
+            '',
+            'When something looks wrong or empty on a page, start at get_health and get_mirror_status. A page showing nothing usually means an unread mirror rather than an empty system: every record kind is a copy of an upstream table, and a copy nobody has filled looks exactly like a source with nothing in it. get_mirror_status says which of the two in one call; diff_source_vs_mirror settles it against the source, at the cost of reading that source whole; resync fills it by running the page\u2019s own button.',
+            '',
+            'When you want to understand the app rather than debug it: list_pages, then get_page_structure for the page in question — that is the tool that says what a panel is and what feeds it. get_page_data says what a page would render right now, and takes a `fields` list of dot paths when you want two numbers rather than a whole payload.',
+            '',
+            'query_postgres answers anything about the held data directly, as one read-only SELECT — bind values as parameters. describe_schema gives the real column names, read from the database rather than from the repository. search_logs covers what this process has served since it booted, and says so rather than implying silence.',
+            '',
+            'Two things hold across every tool. Each one reports what it could not answer rather than guessing — an unconfigured source is "not configured" and never "healthy", a cut payload says it was cut, and a name that is ambiguous is refused with the candidates named. And every mutating tool previews before it acts: called without a token it changes nothing and hands back what it would do, plus a short-lived token that works once.',
+          ].join('\n'),
       });
     }
 
