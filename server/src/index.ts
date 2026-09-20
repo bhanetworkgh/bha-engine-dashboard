@@ -39,6 +39,7 @@ import { monthly } from './monthly';
 import { isStatKind, stats } from './stats';
 import { N8N_API_VAR, n8nBase, n8nConfigured } from './n8n';
 import { handleMcp, mcpConfigured, mcpMountPath, MCP_SECRET_VAR } from './mcp';
+import * as earlyAccess from './earlyAccess';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
 
 /**
@@ -77,12 +78,13 @@ class HttpError extends Error {
   }
 }
 
-function send(res: ServerResponse, status: number, body: unknown): void {
+function send(res: ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}): void {
   const text = JSON.stringify(body);
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(text),
     'Cache-Control': 'no-store',
+    ...extra,
   });
   res.end(text);
 }
@@ -151,6 +153,94 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
   }
   if (p === '/api/health' && method === 'GET') {
     return send(res, 200, { ok: true, started_at: STARTED_AT });
+  }
+
+  /**
+   * The vFarm Early Access form (2026-09-20, on Destiny's instruction).
+   *
+   * **The one public write route in this application.** It is here, among the
+   * open routes and above the cookie guard, because the static site at
+   * bhanetwork.org calls it and has no session. Everything past the guard is
+   * unchanged; nothing else was opened up to make this work.
+   *
+   * What it will say back is `{ ok: true }` and a status code, and that is the
+   * whole of it: never the stored row, never a count, never whether the address
+   * was already on file. It records an expression of interest — no subscriber,
+   * payment, entitlement, reservation or delivery state is set, read or implied
+   * anywhere in this handler.
+   *
+   * The order matters. Origin, then method, then rate, then shape, then the
+   * write: a refused origin never reaches the body, and a flood is turned away
+   * before it costs a database round trip.
+   */
+  if (p === '/api/public/vfarm-early-access') {
+    const origin = earlyAccess.originOf(req);
+    const cors = earlyAccess.corsHeaders(origin);
+
+    // The preflight. Answered for an allowed origin and refused for anything
+    // else, so a browser on another site never gets as far as the POST.
+    if (method === 'OPTIONS') {
+      if (!earlyAccess.originAllowed(origin)) {
+        console.log(`[early-access] preflight refused for origin ${origin ?? '(none)'}`);
+        return send(res, 403, { ok: false, message: 'Origin not allowed.' });
+      }
+      res.writeHead(204, { 'Content-Length': '0', 'Cache-Control': 'no-store', ...cors });
+      res.end();
+      return;
+    }
+    if (method !== 'POST') {
+      res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8', Allow: 'POST, OPTIONS', 'Cache-Control': 'no-store', ...cors });
+      res.end(JSON.stringify({ ok: false, message: 'POST a submission.' }));
+      return;
+    }
+
+    /**
+     * An Origin that is present and not on the list is refused outright, not
+     * merely left without a CORS header.
+     *
+     * Said plainly because it is easy to overstate: **CORS is a browser
+     * mechanism and cannot be an authorization boundary.** A request with no
+     * Origin at all — curl, a server, anything not a browser — is allowed
+     * through, because Origin is unauthenticated and refusing its absence would
+     * only inconvenience honest callers. What actually protects this route is
+     * the validation and the rate limit below, and the fact that it can answer
+     * with nothing.
+     */
+    if (origin && !earlyAccess.originAllowed(origin)) {
+      console.log(`[early-access] refused a submission from origin ${origin}`);
+      return send(res, 403, { ok: false, message: 'Origin not allowed.' }, cors);
+    }
+
+    const ipHash = earlyAccess.hashIp(earlyAccess.clientIp(req));
+    const rate = earlyAccess.checkRate(ipHash);
+    if (!rate.ok) {
+      // The reason is logged, never sent: how close somebody is to a limit is
+      // information about the limit.
+      console.log(`[early-access] rate limited (${rate.reason})`);
+      return send(res, 429, { ok: false, message: 'Too many submissions. Try again later.' }, { ...cors, 'Retry-After': String(rate.retry_after_seconds ?? 600) });
+    }
+
+    let submission: earlyAccess.Submission;
+    try {
+      submission = earlyAccess.readSubmission(await readJson(req, 32 * 1024));
+    } catch (e) {
+      if (e instanceof earlyAccess.SubmissionError) return send(res, e.status, { ok: false, message: e.message }, cors);
+      if (e instanceof HttpError) return send(res, e.status, { ok: false, message: e.message }, cors);
+      throw e;
+    }
+
+    const ua = req.headers['user-agent'];
+    const stored = await earlyAccess.store(submission, ipHash, (Array.isArray(ua) ? ua[0] : ua)?.slice(0, 500) ?? null);
+    console.log(`[early-access] stored ${stored.id}${stored.is_repeat_email ? ' (repeat address)' : ''} from ${submission.source_page ?? 'an unstated page'}`);
+
+    /**
+     * The notification is started and not awaited. The lead is already stored,
+     * and Slack being down is not a reason to hold a browser open or to answer
+     * anything other than 201.
+     */
+    void earlyAccess.notify(stored, submission);
+
+    return send(res, 201, { ok: true }, cors);
   }
 
   /**
@@ -407,6 +497,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       }
       case '/api/clients':
         return send(res, 200, await engine.getClients());
+      /**
+       * The Early Access leads, for the tab on /vfarm. Behind the cookie like
+       * every other page route — the public endpoint above writes these rows
+       * and can never read one back.
+       */
+      case '/api/vfarm/leads':
+        return send(res, 200, await earlyAccess.leads());
       case '/api/ask-bays':
         return send(res, 200, engine.getAskBays(q));
       case '/api/engine-writes': {
@@ -484,6 +581,25 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
   }
 
   if (method === 'PATCH') {
+    /**
+     * One lead's status, or its notes, or both. Nothing else about a lead is
+     * editable: the rest of the row is what a person told the site about
+     * themselves, and a record somebody can quietly rewrite is not a record.
+     */
+    const lead = p.match(/^\/api\/vfarm\/leads\/([^/]+)$/);
+    if (lead) {
+      const body = await readJson(req);
+      const changes: { status?: string; notes?: string | null } = {};
+      if (typeof body.status === 'string') changes.status = body.status.trim();
+      if (body.notes === null || typeof body.notes === 'string') changes.notes = body.notes === null ? null : String(body.notes);
+      try {
+        return send(res, 200, await earlyAccess.patch(decodeURIComponent(lead[1]), changes));
+      } catch (e) {
+        if (e instanceof earlyAccess.SubmissionError) throw new HttpError(e.status, e.message);
+        throw e;
+      }
+    }
+
     /**
      * One loop, edited. What, status, lane and the builder — which is a move,
      * not a field, because the builder is which table the row sits in.
@@ -959,6 +1075,25 @@ async function boot(): Promise<void> {
         ? `  mcp:      ${mcpMountPath()} — read-only tools over streamable HTTP, ${MCP_SECRET_VAR} set`
         : `  mcp:      NOT configured — ${MCP_SECRET_VAR} is not set, so /mcp/* answers 404 to everything.`,
     );
+    /**
+     * The one public write route, said out loud at boot.
+     *
+     * Three things are worth a line each: notifications being off means leads
+     * arrive silently and are only seen by somebody opening the page; a salt
+     * that is not set means the stored digests do not compare across a restart;
+     * and the origin list decides whose browser can post at all.
+     */
+    console.log(
+      earlyAccess.notifyConfigured()
+        ? `  early access: notifying #vfarm-early-access via ${earlyAccess.NOTIFY_URL_VAR}`
+        : `  early access: notifications OFF — ${earlyAccess.NOTIFY_URL_VAR} is not set, so a lead is stored and nothing is announced. The endpoint still works.`,
+    );
+    console.log(
+      `                origins ${earlyAccess.ALLOWED_ORIGINS.join(', ')} ${earlyAccess.ORIGINS_FROM_ENV ? `(${earlyAccess.ALLOWED_ORIGINS_VAR})` : '(built-in default)'}`,
+    );
+    if (!earlyAccess.SALT_FROM_ENV) {
+      console.log(`                ${earlyAccess.SALT_VAR} is not set — a random salt was generated for this process, so stored ip_hash values will not compare across a restart.`);
+    }
     const laneKeys = bharag.configuredLanes();
     console.log(
       laneKeys.length === 3
