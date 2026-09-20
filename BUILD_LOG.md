@@ -7059,3 +7059,173 @@ Not tested: Against the live site or the real n8n webhook. The notification was
             are set. Nothing was tested against the production database; the
             migration was proved on a copy brought to 17 by the pre-change code,
             which is the same shape but not the same rows.
+
+## 2026-09-20 20:20 — MCP upgrade: five read tools, one resync, and the write gate
+Intent:     Close the gap that made both of today's faults slow. The Pay Tracker
+            showed nothing because an n8n workflow had written no rows into
+            Airtable, and finding that took four tool calls here plus two
+            elsewhere because nothing could compare a source against its mirror.
+            Then, after the upstream fix, the page still showed nothing — the
+            mirror only fills on `POST /api/pay/resync`, and this server
+            reported that correctly and uselessly, having no way to press it.
+            So: tools that say whether an empty kind is stopped or merely unread,
+            a tool that can press the button, and the scaffolding for the first
+            tool that will one day change a row.
+Files:      server/src/mcp/sql.ts (new, 313)  — read-only SELECT, schema reads
+            server/src/mcp/inventory.ts (new, 353) — mirror status and the diff
+            server/src/mcp/logs.ts (new, 175) — the in-process ring and search
+            server/src/mcp/gate.ts (new, 284) — preview / token / audit
+            server/src/mcp/tools.ts — 7 tools to 13, annotations on all of them,
+              `fields` on get_page_data, the get_health probe fixed
+            server/src/mcp/index.ts — the rewritten `instructions` string
+            server/src/index.ts — mcpLogs.install(), request recording with the
+              secret redacted to `/mcp/<secret>`
+            server/src/migrations.ts — migration 19, engine_mcp_writes
+            server/test/write-gate.test.cjs (new) + `npm run test:gate`
+            CLAUDE.md, README.md
+Problem:    Five things, in the order they bit.
+
+            1. `get_health` reported Airtable unreachable with
+               `Unknown field name: "Submission ID"`. My own probe from 18 Sep
+               called `listRecordIds` on Build Patterns, and `Submission ID`
+               exists only in the seven loop/Codex tables. A false negative on
+               a health surface, which is the worst direction for one to fail
+               in: it said the engine was broken when the engine was fine.
+
+            2. `resync` reported `0 rows added, refused: 5` against the stub.
+               The stub's record ids were `rec` + 12 characters. Airtable's are
+               `rec` + exactly 14, and `mirror.prepare()`'s own regex refused
+               every row. The mechanism was right and my test data was wrong —
+               and the refusal count is precisely the thing I had added to
+               `store.resync` on 15 Sep so that "read five, stored none" could
+               never read as "five already matched".
+
+            3. A comment I had written in `sql.ts` claimed the query fetched
+               `cap + 1` rows to detect a capped read, while the code fetched
+               the whole result set and sliced. The comment described the design
+               and the code did something else, so the reported count would have
+               been a total on a read that was actually capped.
+
+            4. `describe_schema` printed `"type": "oid:19"` — `name` and `oid`
+               were missing from the type map.
+
+            5. Acceptance check 7 for the *vFarm* work earlier today had passed
+               spuriously, and it is worth recording next to this because the
+               lesson shaped how I tested the gate. The server meant to have a
+               failing notify URL never started — `Error: listen EADDRINUSE:
+               address already in use 0.0.0.0:8797` — so the POST was answered
+               by the previous process with notifications off. `notified_at` was
+               null for the wrong reason, and a null reads identically either
+               way.
+Fix:        1. Probe `sources.CODEX_LAYER0` instead, with a comment saying why
+               that table and not another: it is one of the seven that carries
+               `Submission ID`, which is the one field name present in all of
+               them. Section 4's note that there is no way to ask Airtable for
+               record ids alone is the same bug's other half.
+            2. Stub ids to exactly 14 characters. 0 rows became 5.
+            3. Wrapped the caller's SQL in `LIMIT cap + 1` for real, and changed
+               the note to say the count is a floor rather than a total.
+            4. Added 19 and 26 to `typeName`.
+            5. Re-ran it after confirming the boot line said notifications were
+               *on* and asserting the webhook had actually been called (stub
+               deliveries 9 → 10). Every test whose pass condition is an absence
+               now proves the mechanism ran first.
+Decision:   **The write gate ships as scaffolding with nothing destructive
+            through it.** `resync` deliberately does not use it: copying rows
+            that already exist, from a source this dashboard already reads, is
+            not a change anybody needs to approve, and putting it behind a
+            confirmation would teach a client that the confirmation is noise.
+            The gate is here so the first real mutation does not invent the
+            shape, and so the shape is tested before anything depends on it.
+
+            **Enforced server-side, not in the client and not in the model.**
+            Both of those vary with which client is connected and what a model
+            decides in the moment. A mutating tool called without a token
+            performs no change; the only thing that can mint a token is a
+            preview this process computed.
+
+            **The digest covers the whole record, not just the fields being
+            changed.** A token minted against a row somebody has since edited
+            stops matching, so "it changed underneath you" is detected rather
+            than assumed. `redeem` is handed an operation rebuilt from a fresh
+            read — passing the preview's own operation back would compare a
+            value with itself and prove nothing.
+
+            **Four refusals, not one "invalid token".** `token_expired`,
+            `token_used`, `record_changed` and `token_unknown` want four
+            different next moves: wait and re-preview, stop and read what
+            already happened, re-read the record, and get a fresh preview. One
+            collapsed error would be a shrug.
+
+            **A replayed token is refused rather than repeated**, so a retry
+            cannot double-apply, and **the audit write throws rather than
+            swallowing** — if a change cannot be recorded it does not happen.
+            That is the opposite of the Early Access notification hop, on
+            purpose: a lead nobody announced is still a lead, but a mutation
+            nobody recorded undercuts the premise that these tables are the
+            record. A **preview is not logged**: a log that records intentions
+            beside actions stops being a record of what happened.
+
+            **`query_postgres` is read-only three separate ways** — statement
+            shape, `BEGIN TRANSACTION READ ONLY`, unconditional rollback —
+            because one would be a single point of failure on a tool a model
+            drives. The row cap is a `LIMIT` and is reported as a floor.
+
+            **The resync cooldown is keyed on the pass, not the kind.** Several
+            kinds share one pass (`codex`, `clients`, `rt`, `pay`, `health`), so
+            keying on the kind would let five calls run the same sweep five
+            times. A second call inside 60 seconds is told "ran N seconds ago"
+            rather than queued: a queue turns an impatient client into a load
+            test on somebody else's API.
+
+            **Annotations on every tool, old ones included.** The spec's default
+            for an unannotated tool is *potentially destructive*, so twelve
+            read-only tools that said nothing about themselves were being
+            offered to clients as though any might delete something.
+
+            **`SOURCE_OF` and `RESYNC_ROUTE` are `Record<MirrorKind, …>`**, so a
+            new record kind cannot compile without declaring where it comes from
+            and how it is refilled. `digests` declares `null` explicitly, which
+            is a statement rather than an omission.
+
+            **The request log redacts the secret.** `/mcp/<secret>` is recorded
+            as the literal `/mcp/<secret>`, because `search_logs` reads that
+            buffer and a tool that hands back the path secret would be a way to
+            read the credential out through the endpoint it protects.
+Verified:   Eleven acceptance checks, all against a local Postgres (5602) and an
+            Airtable stub (8901) with the server on 8799.
+             1. A `SELECT` with a bound parameter returns rows; an `UPDATE`, two
+                semicolon-joined statements and a writable CTE are each refused
+                by name. The cap is stated as a floor.
+             2. `query_timeout` after 5000ms on `pg_sleep(10)`.
+             3. `get_mirror_status` with no argument: all 18 kinds, each with a
+                verdict; `pay_sessions` matched a direct count.
+             4. `diff_source_vs_mirror('pay_sessions')`: source 5, mirror 0,
+                difference 5, all five record ids named, pointing at `resync` —
+                which is this morning's fault, reproduced exactly. After the
+                resync: `Matched: 5 row(s) on both sides`.
+             5. `describe_schema` returns real columns from `information_schema`;
+                a table that does not exist gets a typed `not_found`.
+             6. `get_page_data` with `fields: ["sessions_owed.n", …]` returned
+                only those values, reported `nope.not_here` as not found, and
+                omitted the byte cap entirely.
+             7. `resync('pay_sessions')` 0 → 5 with the per-table report; the
+                second call and a sibling kind both `too_soon`; `digests` →
+                `no_resync`.
+             8. `tools/list`: 13 tools, every one annotated, the twelve reads
+                `readOnlyHint: true`.
+             9. + 10. `npm run test:gate`: preview changes nothing, the token
+                works once, and expired, replayed, stale-record and unknown
+                tokens are each refused by name. `engine_mcp_writes` held
+                `{"applied":1,"refused":4}` with before/after on the applied row
+                — five rows for five outcomes.
+            11. `npm run typecheck` and `npm run build` clean; `initialize`
+                returns the new instructions; `search_logs` matched by route,
+                status class and substring, with the secret appearing nowhere in
+                the buffer.
+Not tested: Against the deployed service. Egress to `dashboard.bhanetwork.org`
+            and `bha-engine-dashboard.onrender.com` is 403 at the proxy from
+            this session, so the live leg of the handshake is unverified here as
+            it was on 18 Sep — the connector's own tools answering against the
+            deployed commit is what confirmed that one. Nothing ran against the
+            production database: migration 19 was proved on a copy.
