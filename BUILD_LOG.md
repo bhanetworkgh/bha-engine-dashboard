@@ -7507,3 +7507,242 @@ Verified:   Five checks. The stub used is a replay that **refuses exactly what
 Not tested: The live latency of the new probe, for the reason above. Nothing ran
             against the production database or a real Airtable token from this
             session.
+
+## 2026-09-21 13:20 — n8n can read and part-update the engine tables; the Airtable write-back goes behind a flag
+Intent:     Cut Airtable out of the engine. BHA's shared Airtable workspace hit
+            its monthly API cap on 20 Sep at about 23:00 UTC and every n8n
+            workflow that reads or writes Airtable is failing. Every Airtable
+            node becomes an HTTPS call to this dashboard and this dashboard's
+            Postgres becomes the only record. n8n could already WRITE a whole
+            record through `POST /api/engine/:kind`; it could not read one back
+            and it could not change part of one, which an Airtable node does
+            constantly. Both, now. And the write-back this server does to
+            Airtable when somebody edits a page is about to be pointless, so it
+            goes behind a flag rather than being left to fail or deleted.
+Files:      server/src/mirror.ts     lookup(), patchFields(), columnsOf(), the
+                                     `read` outcome on the write log
+            server/src/index.ts      GET /api/engine/:kind,
+                                     PATCH /api/engine/:kind/:id, the boot line,
+                                     airtable_writeback on /api/status
+            server/src/airtable.ts   AIRTABLE_WRITEBACK, writebackEnabled(),
+                                     WRITEBACK_OFF_REASON
+            server/src/loops.ts      apply() and retryDelete() behind the flag
+            server/src/codex.ts      setStatus() and remove() behind the flag
+            server/src/store.ts      a builder move lands in Postgres when the
+                                     write-back is off
+            src/data/types.ts        ServerStatus.airtable_writeback
+            src/data/index.ts        deleteCodexEntry returns the Airtable state
+            src/screens/Settings.tsx three states on the Airtable row, not two
+            src/screens/Codex.tsx    the delete toast is worded from what
+                                     actually happened on the other side
+            src/screens/Registry/index.tsx  "Lookups answered" as its own figure
+            README.md, CLAUDE.md, render.yaml, .env.example
+Decision:   **n8n never connects to Postgres.** `bha-engine-db` stays closed to
+            everything outside its own Render environment, exactly as
+            render.yaml intends. These two routes are the whole of what reaches
+            it from outside, behind the service key that is already in n8n's
+            hands. A second credential would be a second thing to rotate.
+Decision:   **The lookup is the only readable thing under `/api/engine`.** The
+            403 that covered the whole prefix still covers every other method
+            and path, and the in-process loopback `get_page_data` reads through
+            (`dispatchApi`) still refuses the prefix by name whatever the method
+            — that guard is untouched, at index.ts:1126.
+Decision:   **Which columns a table has is read from `information_schema`, not
+            derived from the kind's spec.** Deriving it looked obvious and is
+            already wrong on a live table: `engine_client_requests` carries
+            `table_id` although its `KindSpec` sets `perLaneTable: false`, so a
+            guess from the flags would have refused a filter the column
+            supports. Cached for the life of the process, because the schema
+            only changes in a migration and migrations run at boot. Two of the
+            three faults found through the MCP server on 20 Sep were a name
+            assumed rather than read; this reads.
+Decision:   **A filter naming a column that kind has not got is a 400, not a
+            shrug.** `GET /api/engine/patterns?builder_id=hardik` answers
+            `"builder_id" is not a column Build Patterns holds … patterns can be
+            filtered on: id, airtable_record_id, natural_id`. Ignoring an
+            unsupported filter would answer a different question confidently,
+            which is the failure this dashboard exists to remove.
+Decision:   **`count` is every row that matched, never the page.** A window
+            function in the same statement rather than a second query: two
+            statements can disagree across a concurrent write and one cannot,
+            and `count(*) OVER ()` is evaluated before the LIMIT.
+Decision:   **Field names are bound parameters.** They arrive from the query
+            string — `f.Jason%20Status`, `f.Layer1%20Review%20` with the
+            trailing space that field really has — and go into the statement as
+            `$n` on the right of `->>`. The only things interpolated into the
+            SQL are the table and column names, and both come from `KINDS` and
+            from the database's own `information_schema`, so neither can carry
+            anything a caller sent.
+Decision:   **PATCH re-derives the promoted columns from the merged blob**, the
+            same way `prepare()` derives them on a POST, so they cannot drift
+            from the thing they are a copy of. `builder_id` and `table_id` are
+            deliberately not among them: those are not fields, they are which of
+            the seven tables the row sits in, and changing one is a move rather
+            than an edit — the rule section 4 already states.
+Decision:   **A key sent as `null` is removed, and that is why the merge is not
+            just `||`.** `fields || $patch` would store a JSON null and the
+            field would read as present and empty. The null keys are stripped
+            out of the patch object and applied as `- $keys::text[]` instead, so
+            removing and setting in one body both work and neither is a string
+            concatenation.
+Decision:   **A lookup is logged as `read`.** It is on `engine_writes` because
+            it is the same surface with the same key; it is its own outcome
+            because a reader counting what the engine wrote has to be able to
+            leave the reads out. The Engine writes tab therefore gained a
+            "Lookups answered" figure of its own rather than folding them into
+            "Writes accepted" — a strip whose figures no longer add up to the
+            rows beneath it is the quietly-wrong number this dashboard exists to
+            remove.
+Decision:   **`AIRTABLE_WRITEBACK` is off by default and the code is not
+            deleted.** The four write paths (`loops.apply`, `loops.retryDelete`,
+            `codex.setStatus`, `codex.remove`) answer `skipped` rather than
+            `failed`, and `unlanded()` in the interface treats only `failed` and
+            `duplicate` as a disagreement — so the row carries no marker, the
+            panel carries no warning, and the toast says what the save said.
+            A loop edit that tried and failed would cost fifteen seconds of
+            somebody's time and then mark the row "not in Airtable", which is a
+            warning about a system that is deliberately no longer the record.
+Decision:   **With the write-back off, a builder move lands in Postgres.** The
+            standing rule is that a move is claimed only once Airtable has made
+            it, because which table a row sits in is a fact about Airtable. With
+            nothing asking Airtable that rule has no arbiter: the move lands
+            here or it has not happened, and holding it back would leave the
+            save doing nothing with nothing on screen saying so — the same
+            failure the rule was written to prevent, in the other direction.
+Decision:   **Retry now on a duplicate still reports the duplicate.** That is
+            not a page edit that saved: it is a button that exists to delete a
+            row in Airtable, the loop really is still in two tables, and saying
+            nothing would be claiming a repair that did not happen. It stays
+            `duplicate`, names the flag, and works the moment the flag goes on.
+Decision:   **The resync buttons and their code are untouched**, as asked. They
+            are reads, not write-backs, and they are how the final import
+            happens once the cap resets. They come out in their own change.
+Problem:    `column reference "fields" is ambiguous` — the first PATCH against a
+            real row. The merge expression was `((fields || $2::jsonb) - …)` and
+            the CTE holding the before-image carries a `fields` column too, so
+            the reference was ambiguous once it was joined in and Postgres
+            refused the whole statement. `upsert()` twenty lines above already
+            carries a note about exactly this on its own two COALESCEs, which is
+            where the fix came from.
+Fix:        Qualified with the target alias: `((t.fields || $2::jsonb) - …)`.
+            Worth recording because the refusal was total and the row was left
+            untouched — which is the right failure, but it means a smoke test
+            that only checked the HTTP status of a 404 would have passed.
+Verified:   Against a local Postgres 16 seeded with **twelve real production
+            rows read out of bha-engine-db** — six loops whole, six Codex
+            submissions with six long text fields (`Transcript`, `Summary`,
+            `Session Description`, both reviews, `Builder Channel Post`) left
+            behind because they are transcripts. Every field name and value
+            below is the engine's own. **Nothing was written to production**:
+            the deployed commit does not carry this code, and the only
+            production access used was read-only SELECTs through the MCP
+            server. The predicates the route builds were then run against the
+            **full live tables** separately — see 10 below.
+            1. **GET, no filter** — `count: 6, rows: 6`, newest first:
+               id=5 rec2iARVZbn30iLMD LOOP-1788610001003-ORGA jason In Progress
+               id=4 recBwqXmgnsPIdDbj LOOP-1787940296462-6075 jason In Progress
+               id=2 recoIcI39nOYVJ3D0 LOOP-1787940022681-3NI1 hardik Open
+               id=1 rec0ABnymhjUdZc31 LOOP-1788044070650-3DBC hardik Open
+               id=6 rec5nyLa185vkEJRa LOOP-1788044070647-91IC jason Closed
+               id=3 recNeFQnR31JEdwGk LOOP-1788044070646-TFYK jason In Progress
+            2. **Each column filter** — `id=3` → 1 (LOOP-…-TFYK);
+               `airtable_record_id=rec2iARVZbn30iLMD` → 1 (LOOP-…-ORGA);
+               `natural_id=LOOP-1788044070647-91IC` → 1;
+               `builder_id=hardik` → 2; `table_id=tblVOLhWULskNiIUt` → 4.
+               And `patterns?builder_id=hardik` → **HTTP 400**, naming
+               `id, airtable_record_id, natural_id` as the ones that kind has.
+            3. **One `f.` filter** — `f.Status=Open` → 2, both lane_tag NS.
+            4. **Two `f.` filters** — `f.Status=In Progress` AND
+               `f.lane_tag=VFARM_HARDWARE` → 2 (…-6075, …-TFYK). The same first
+               filter with `f.lane_tag=BAYS` → 1 (…-ORGA), which is the proof
+               they AND rather than OR.
+            5. **A field name with a space** — `f.Raised By=Jeganathan` → 2,
+               both carrying `"Raised By": "Jeganathan"`;
+               `f.Date Raised=2026-08-28` → 2; and on Codex,
+               `f.Jason Status=Approved` AND `f.Session Type=Build` → 3, two
+               spaced names ANDed in one request.
+            6. **order and limit** — `order=created_asc&limit=3` returned the
+               three oldest and `count: 6`, so the count is the total and not
+               the page; `created_desc&limit=3` the three newest.
+               `limit=lots`, `order=sideways` and `id=notanumber` are each a 400
+               naming the parameter; `limit=99999` is clamped, not refused.
+            7. **PATCH one field on a real row** — id=3,
+               LOOP-1788044070646-TFYK, `{"fields":{"Status":"Closed"}}` →
+               `ok: true, changed: true`. Read back and diffed key by key:
+               **8 of 9 keys untouched, 1 changed.** `What`, `loop_id`,
+               `lane_tag`, `Raised By`, `Date Raised`, `Source Link`,
+               `last_modified` and `Assignee Slack User ID` byte-identical;
+               `Status` "In Progress" → "Closed". `id`, `airtable_record_id`,
+               `natural_id`, `builder_id`, `table_id` and `created_time`
+               unchanged; `source` airtable → engine and `updated_at`
+               2026-09-13T21:27:27.366Z → 2026-09-21T13:10:03.437Z, both
+               intended. The same PATCH again → `changed: false`.
+               Adding `raised_in` → 10 keys; sending it as `null` → 9 keys and
+               the key absent, not null. Patching `loop_id` moved the
+               `natural_id` column with it and moving it back moved it back;
+               on a commercial card, patching `lane_id` inside `fields` moved
+               the promoted `lane_id` column, which nothing sent in the
+               envelope. A row id that does not exist → **404**.
+            8. **401 without the key** — GET with no header, GET with a wrong
+               key, PATCH with no header, PATCH with a wrong key and POST with
+               no header all answer **401** with the identical body,
+               `The x-dashboard-key header is missing or wrong.` The row the two
+               refused PATCHes named was read back afterwards and had not moved.
+            9. **POST is exactly as before** — insert → `inserted / insert`;
+               the same payload again → `unchanged / airtable_record_id`; a
+               changed payload → `updated / airtable_record_id`; no `fields` →
+               the same 422; `/api/engine/pay` with no `kind` → the same 422;
+               a malformed `record_id` (rec + 13) → the same refusal. A `PUT`
+               still 405s, now naming all three methods the route answers.
+               And the difference the whole change is for, on one row: a POST
+               carrying two keys left the row holding two keys; a PATCH naming
+               one key left it holding three, `Status` kept.
+           10. **The same predicates against the live tables** (read-only, via
+               the deployed MCP server, 946 loops and 199 Codex rows):
+               `f.Status=Open` → 636; `f.Status=Open AND f.lane_tag=VFARM_HARDWARE`
+               → 47; `f.Raised By=Jeganathan` → 32; `builder_id=hardik` → 146;
+               `table_id=tblVOLhWULskNiIUt` → 19;
+               `f.Jason Status=Approved` → 179; with `f.Session Type=Build`
+               → 106; `f.Layer1 Review ` — **the name that really ends in a
+               space** — is non-null on all 199.
+           11. **Injection is a value, not SQL.** `f.Status') OR 1=1 --=x`,
+               `f.Status" OR ""="=x` and
+               `f.Status=Open'; DROP TABLE engine_loops; --` each answer
+               HTTP 200 `count: 0`; both tables still hold their rows, locally
+               and (the last one, as a parameter) against production. A bare
+               `f.=x` is refused, which is the rule Airtable itself enforces on
+               an empty field name.
+           12. **The write log tells them apart** — GET read 20, GET rejected 4,
+               GET unauthorised 4, PATCH updated 6, PATCH unchanged 1, PATCH
+               rejected 5, PATCH unauthorised 2, POST inserted 2, POST rejected
+               7, POST unauthorised 1. A lookup's detail line is what was asked
+               and what came back: `no filter → 6 of 6`, `id=3 → 1 of 1`.
+           13. **The write-back flag, both ways.** Unset: `writebackEnabled()`
+               false; `loops.apply`, `codex.setStatus` and `codex.remove` all
+               `skipped` naming the variable; `loops.retryDelete` `duplicate`
+               naming it. `store.editLoop` saved Status and What to Postgres
+               with `source = ui`, returned `writeback.state = "skipped"`, and
+               `unlanded` — the marker the row would carry — was **false**.
+               `writebackFailures()`, which is what Settings prints, stayed 0.
+               A builder move with the flag off moved the row in Postgres:
+               hardik/tblaloC4JIRdBq5EM → destiny/tblBJekl3ROpNZxQW.
+               With `AIRTABLE_WRITEBACK=true` the same four paths ran again and
+               failed for want of a token, which is the proof they were reached
+               rather than removed. `1 true on yes TRUE` → on; `0 false off no`,
+               empty and unset → off.
+           14. **The Airtable cap, confirmed live** — `get_health` against the
+               deployed service at 12:57 UTC today: postgres reachable 4ms,
+               all three BHARAG lanes reachable, n8n reachable, and
+               **airtable `reachable: false`, 398ms, `Airtable answered 429.`**
+               The token is fine; the workspace is over its cap.
+           15. **`npm run build`, `npm run typecheck` and `npm run test:gate`**
+               — all clean, the gate's eight assertions included.
+Not tested: Against the production database or the deployed service — neither
+            has this code until this commit deploys. No production row was
+            written by any part of this. The n8n side does not exist yet: no
+            workflow has been repointed at these routes, so nothing has called
+            them except this session. The volume question is open and worth
+            watching — once n8n reads through the lookup, `engine_writes` will
+            carry a row per read, and the Recent writes list on the Engine
+            writes tab is unfiltered; if reads start drowning the writes there,
+            that list wants a filter rather than the logging being dropped.

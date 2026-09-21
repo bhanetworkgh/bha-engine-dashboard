@@ -98,14 +98,23 @@ export default function Settings() {
                   tone={s.inbound_configured ? 'ok' : 'off'}
                 />
                 <Row label="Records editable here" value={s.writable.join(' · ')} />
+                {/*
+                  Three states, not two, since 2026-09-21. With AIRTABLE_WRITEBACK
+                  off, a page edit is saved here and deliberately not sent
+                  anywhere — so this says that plainly and carries no tone. It
+                  is where the record is, not a fault, and the token being set
+                  or not does not change it.
+                */}
                 <Row
-                  label="Loop edits to Airtable"
+                  label="Loop and Codex edits to Airtable"
                   value={
-                    s.airtable_configured
-                      ? `Token set · written directly${s.writeback_failures ? ` · ${s.writeback_failures} loop${s.writeback_failures === 1 ? '' : 's'} did not land` : ''}`
-                      : 'No AIRTABLE_TOKEN · loops edited here will not reach Airtable'
+                    !s.airtable_writeback
+                      ? 'Off · AIRTABLE_WRITEBACK is not set, so edits are saved to this dashboard only'
+                      : s.airtable_configured
+                        ? `Token set · written directly${s.writeback_failures ? ` · ${s.writeback_failures} record${s.writeback_failures === 1 ? '' : 's'} did not land` : ''}`
+                        : 'No AIRTABLE_TOKEN · loops edited here will not reach Airtable'
                   }
-                  tone={s.airtable_configured && !s.writeback_failures ? 'ok' : 'off'}
+                  tone={!s.airtable_writeback ? undefined : s.airtable_configured && !s.writeback_failures ? 'ok' : 'off'}
                 />
                 <Row
                   label="Open Loops base"

@@ -1114,8 +1114,20 @@ export async function editLoop(id: string, patch: loops_.LoopPatch, actor = 'das
    * on the old one has to follow: the status events, the note, and this loop's
    * own write log.
    */
+  /**
+   * With the write-back off (AIRTABLE_WRITEBACK, 2026-09-21) Airtable is not
+   * the arbiter of which table a row sits in, because nothing is asking it:
+   * these tables are the record, and the move lands here or it does not happen
+   * at all. Holding it back would leave the save doing nothing with nothing on
+   * screen saying so, which is the exact failure the paragraph above describes
+   * in the other direction.
+   *
+   * With the write-back on, the rule stands unchanged: the move is claimed
+   * only once Airtable has made it.
+   */
+  const airtableDecidesTheMove = airtable.writebackEnabled();
   let nowId = id;
-  if (destination && (r.state === 'ok' || r.state === 'duplicate')) {
+  if (destination && (r.state === 'ok' || r.state === 'duplicate' || !airtableDecidesTheMove)) {
     // The assignee moves with the table here too, so the row this dashboard
     // shows never names one builder while sitting in another's.
     const moved = await mirrorRowById('loops', id);

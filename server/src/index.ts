@@ -27,7 +27,7 @@ import { assertDatabase, closePool, DATABASE_URL } from './pg';
 import * as engine from './engine';
 import * as store from './store';
 import * as registry from './registry';
-import { LOOPS_BASE_ID, OPEN_LOOPS_BASE_VAR, SUBMISSIONS_BASE_FROM_ENV, SUBMISSIONS_BASE_ID, SUBMISSIONS_BASE_VAR, airtableConfigured } from './airtable';
+import { LOOPS_BASE_ID, OPEN_LOOPS_BASE_VAR, SUBMISSIONS_BASE_FROM_ENV, SUBMISSIONS_BASE_ID, SUBMISSIONS_BASE_VAR, WRITEBACK_VAR, airtableConfigured, writebackEnabled as airtableWritebackEnabled } from './airtable';
 import * as codex from './codex';
 import * as loops from './loops';
 import * as mirror from './mirror';
@@ -361,7 +361,160 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       }
     }
 
-    const m = p.match(/^\/api\/engine\/([^/]+)$/);
+    const one = p.match(/^\/api\/engine\/([^/]+)$/);
+    const withId = p.match(/^\/api\/engine\/([^/]+)\/([^/]+)$/);
+
+    /**
+     * The lookup: GET /api/engine/:kind (2026-09-21, Destiny).
+     *
+     * BHA's Airtable workspace hit its monthly API cap on 20 Sep at about
+     * 23:00 UTC and every n8n workflow that reads or writes Airtable is
+     * failing, so Airtable is being cut out of the engine: every Airtable node
+     * becomes an HTTPS call to this dashboard, and these tables become the
+     * only record. n8n could already write a whole record here. It could not
+     * read one back, which an Airtable node does constantly — so this exists,
+     * and **it is the only readable thing under /api/engine.**
+     *
+     * The 403 that used to cover the whole prefix still covers everything
+     * else, on every other method and on the internal loopback (see
+     * dispatchApi), which refuses this prefix by name whatever the method.
+     *
+     * Same key, same header, same log. A lookup lands on engine_writes as
+     * `read` rather than as one of the write outcomes, so a reader counting
+     * what the engine actually wrote can leave the reads out — which is why it
+     * is its own outcome rather than a detail on an existing one.
+     */
+    if (method === 'GET') {
+      const kind = one?.[1] ?? null;
+      if (!kind || !mirror.isKind(kind)) {
+        const detail = withId ? 'a row id in the path' : kind ? 'unknown kind' : 'no kind';
+        await mirror.logWrite({ endpoint, kind: kind ?? '-', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail, ms: Date.now() - t0 });
+        throw new HttpError(
+          404,
+          withId
+            ? `GET /api/engine/${withId[1]} reads rows; a row id is a query parameter rather than a path segment — GET /api/engine/${withId[1]}?id=${withId[2]}. The path with an id on it is PATCH only.`
+            : `"${kind ?? ''}" is not a kind this engine holds. One of: ${mirror.KIND_LIST.join(', ')}.`,
+        );
+      }
+
+      const columns: Partial<Record<mirror.FilterColumn, string>> = {};
+      for (const c of mirror.LOOKUP_FILTER_COLUMNS) {
+        const v = url.searchParams.get(c);
+        if (v !== null) columns[c] = v;
+      }
+      /**
+       * `f.<Field Name>=<value>` — an exact match on a key inside the jsonb
+       * blob. The names are Airtable's own, spaces and all, so they arrive
+       * percent-encoded and `URLSearchParams` has already decoded them:
+       * `f.Jason%20Status` is the key `Jason Status`, and `f.Layer1%20Review%20`
+       * keeps the trailing space that field really has. The name goes into the
+       * statement as a bound parameter, never concatenated — see mirror.lookup.
+       */
+      const fields: { key: string; value: string }[] = [];
+      for (const [k, v] of url.searchParams) {
+        if (!k.startsWith('f.')) continue;
+        const name = k.slice(2);
+        if (!name) throw new HttpError(400, 'A field filter needs a field name after "f." — f.Jason%20Status=Approved. Airtable itself refuses a request that names an empty field, and so does this.');
+        fields.push({ key: name, value: v });
+      }
+
+      const orderParam = url.searchParams.get('order');
+      if (orderParam !== null && orderParam !== 'created_asc' && orderParam !== 'created_desc') {
+        throw new HttpError(400, `"order": "${orderParam}" is not an order. One of: created_desc (the default), created_asc.`);
+      }
+      const limitParam = url.searchParams.get('limit');
+      if (limitParam !== null && !/^\d+$/.test(limitParam.trim())) {
+        throw new HttpError(400, `"limit": "${limitParam}" is not a number. Between 1 and ${mirror.LOOKUP_LIMIT_MAX}; the default is ${mirror.LOOKUP_LIMIT_DEFAULT}.`);
+      }
+
+      try {
+        const r = await mirror.lookup(kind, {
+          columns,
+          fields,
+          limit: limitParam === null ? mirror.LOOKUP_LIMIT_DEFAULT : Number(limitParam),
+          order: orderParam === 'created_asc' ? 'created_asc' : 'created_desc',
+        });
+        const named = [...Object.entries(columns).map(([c, v]) => `${c}=${v}`), ...fields.map((f) => `f.${f.key}=${f.value}`)];
+        await mirror.logWrite({
+          endpoint,
+          kind,
+          method,
+          key_label: 'DASHBOARD_INBOUND_KEY',
+          outcome: 'read',
+          // What was asked and what came back, so an empty answer on the log
+          // can be told apart from a filter nobody sent.
+          detail: `${named.length ? named.join(' AND ') : 'no filter'} → ${r.rows.length} of ${r.count}`,
+          ms: Date.now() - t0,
+        });
+        return send(res, 200, { kind: r.kind, count: r.count, rows: r.rows });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        const status = e instanceof mirror.MirrorError ? e.status : 500;
+        await mirror.logWrite({ endpoint, kind, method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: status >= 500 ? 'error' : 'rejected', detail: message, ms: Date.now() - t0 });
+        throw new HttpError(status, message);
+      }
+    }
+
+    /**
+     * The partial update: PATCH /api/engine/:kind/:id (2026-09-21, Destiny).
+     *
+     * The other half of what an Airtable node does that a whole-record POST
+     * cannot: set one field and leave the rest of the row alone. `fields` is
+     * merged into the stored blob, keys not sent are untouched, and a key sent
+     * as null is removed. The promoted columns are re-derived from the merged
+     * blob so they cannot drift from it — see mirror.patchFields, which is
+     * also where the single-statement merge and the `changed` comparison live.
+     *
+     * The id in the path is this table's own bigint id, which is what the
+     * lookup above returns. Not the Airtable record id: a row the engine wrote
+     * before Airtable had it has no record id at all, and after the cut there
+     * will be rows that never have one.
+     */
+    if (method === 'PATCH') {
+      if (!withId) {
+        await mirror.logWrite({ endpoint, kind: one?.[1] ?? '-', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: 'no row id in the path', ms: Date.now() - t0 });
+        throw new HttpError(404, `PATCH /api/engine/:kind/:id, where :id is the row id GET /api/engine/:kind returns. :kind is one of: ${mirror.KIND_LIST.join(', ')}.`);
+      }
+      const kind = withId[1];
+      const rowId = decodeURIComponent(withId[2]);
+      if (!mirror.isKind(kind)) {
+        await mirror.logWrite({ endpoint, kind, method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: 'unknown kind', ms: Date.now() - t0 });
+        throw new HttpError(404, `"${kind}" is not a kind this engine holds. One of: ${mirror.KIND_LIST.join(', ')}.`);
+      }
+      const body = await readJson(req, 256 * 1024);
+      const patch = body.fields;
+      if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+        await mirror.logWrite({ endpoint, kind, method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: '"fields" was missing or not an object', ms: Date.now() - t0 });
+        throw new HttpError(422, '"fields" is required and must be an object holding only the keys to change — { "fields": { "Status": "Closed" } }. Send null for a key to remove it; a key not sent is left exactly as it is.');
+      }
+      try {
+        const r = await mirror.patchFields(kind, rowId, patch as Record<string, unknown>, 'engine');
+        // Same as a POST: the row is stored, and this dates the status it was
+        // left in. It is the only place a status change is timestamped, and a
+        // patch that sets Status is exactly such a change.
+        await store.recordEngineWrite(kind, r.id);
+        await mirror.logWrite({
+          endpoint,
+          kind,
+          method,
+          key_label: 'DASHBOARD_INBOUND_KEY',
+          airtable_record_id: r.airtable_record_id,
+          natural_id: r.natural_id,
+          outcome: r.changed ? 'updated' : 'unchanged',
+          detail: `merged ${Object.keys(patch).join(', ')} into row ${r.id}`,
+          ms: Date.now() - t0,
+        });
+        // `r` already carries `changed`, decided by Postgres, beside the whole row.
+        return send(res, 200, { ok: true, ...r });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        const status = e instanceof mirror.MirrorError ? e.status : 500;
+        await mirror.logWrite({ endpoint, kind, method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: status >= 500 ? 'error' : 'rejected', detail: message, ms: Date.now() - t0 });
+        throw new HttpError(status, message);
+      }
+    }
+
+    const m = one;
     if (!m) throw new HttpError(404, `POST /api/engine/:kind, where :kind is one of: ${mirror.KIND_LIST.join(', ')}.`);
     const kind = m[1];
     /**
@@ -374,7 +527,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * the same envelope, the same auth and the same write log as any other. The
      * three kind-named routes work too — this only adds a name for them.
      */
-    if (kind === 'pay') {
+    if (kind === 'pay' && method === 'POST') {
       const peek = await readJson(req, 256 * 1024);
       const said = typeof peek.kind === 'string' ? peek.kind.trim().toLowerCase() : '';
       const PAY_KINDS: Record<string, mirror.MirrorKind> = { session: 'pay_sessions', sessions: 'pay_sessions', statement: 'pay_statements', statements: 'pay_statements', builder: 'pay_builders', builders: 'pay_builders' };
@@ -417,7 +570,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       await mirror.logWrite({ endpoint, kind, method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: 'unknown kind' });
       throw new HttpError(404, `"${kind}" is not a kind this engine holds. One of: ${mirror.KIND_LIST.join(', ')}.`);
     }
-    if (method !== 'POST') throw new HttpError(405, 'POST. An upsert, so the same row twice updates rather than duplicating.');
+    if (method !== 'POST') throw new HttpError(405, 'POST to upsert a whole record — the same row twice updates rather than duplicating. GET /api/engine/:kind to read rows back, PATCH /api/engine/:kind/:id to change part of one.');
 
     const body = await readJson(req, 256 * 1024);
     try {
@@ -477,6 +630,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           started_at: STARTED_AT,
           inbound_configured: Boolean(INBOUND_KEY),
           airtable_configured: airtableConfigured(),
+          airtable_writeback: airtableWritebackEnabled(),
           airtable_base: LOOPS_BASE_ID,
           airtable_submissions_base: SUBMISSIONS_BASE_ID,
           writeback_failures: await store.writebackFailures(),
@@ -1128,6 +1282,19 @@ async function boot(): Promise<void> {
     // configured one, because a URL on its own cannot tell you nobody chose it.
     console.log(`  ask bays: ${askConfigured() ? `${ASK_URL} ${ASK_URL_FROM_ENV ? '(ASK_BAYS_URL)' : '(built-in default — ASK_BAYS_URL is not set on this service)'}` : 'NOT configured — set ASK_BAYS_API_KEY'}`);
     console.log(`  inbound:  ${INBOUND_KEY ? 'DASHBOARD_INBOUND_KEY set' : 'NOT configured — set DASHBOARD_INBOUND_KEY so the engine can write'}`);
+    /**
+     * The write-back first, because when it is off nothing below it applies
+     * (2026-09-21). Off is the default and is not a warning: the workspace is
+     * over its monthly API cap and these tables are the record. The line says
+     * which state the server is in either way, because a server that silently
+     * stopped writing to Airtable is exactly the kind of quiet this dashboard
+     * exists to remove.
+     */
+    console.log(
+      airtableWritebackEnabled()
+        ? `  airtable write-back: ON (${WRITEBACK_VAR}) — loop and Codex edits made here are also sent to Airtable.`
+        : `  airtable write-back: off — ${WRITEBACK_VAR} is not set, so loop and Codex edits are saved to this database only. The resync buttons still read Airtable.`,
+    );
     // Said loudly and by name. Without the token a loop edited here never
     // reaches Airtable, and the 08:00 digest reads Airtable — so this is a line
     // worth reading on every boot, not a quiet default.

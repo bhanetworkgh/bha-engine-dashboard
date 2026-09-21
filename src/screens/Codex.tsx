@@ -483,7 +483,13 @@ function EntryView({
     try {
       const r = await deleteCodexEntry(id, confirm.trim());
       onDeleted(id);
-      setToast({ text: `${r.identifier} deleted from Airtable and from here.`, tone: 'ok' });
+      // Worded from what actually happened on the other side. It is still an
+      // `ok` toast either way — the entry is gone from here, which is what was
+      // asked for — but it never claims a deletion Airtable did not make.
+      setToast({
+        text: r.airtable.state === 'ok' ? `${r.identifier} deleted from Airtable and from here.` : `${r.identifier} deleted. ${r.airtable.reason ?? 'The Airtable row was left in place.'}`,
+        tone: 'ok',
+      });
       onClose();
     } catch (e) {
       setToast({ text: e instanceof Error ? e.message : 'The submission was not deleted.', tone: 'failing' });

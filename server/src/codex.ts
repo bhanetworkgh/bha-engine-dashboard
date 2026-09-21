@@ -99,6 +99,12 @@ export function asJasonStatus(raw: string): JasonStatus {
  */
 export async function setStatus(table: string, recordId: string | null, status: JasonStatus): Promise<CodexWriteResult> {
   const steps: string[] = [];
+  // Off by default from 2026-09-21 — see AIRTABLE_WRITEBACK in airtable.ts.
+  // `skipped`, so the entry carries no "not in Airtable" marker for a system
+  // that is deliberately no longer the record.
+  if (!airtable.writebackEnabled()) {
+    return { state: 'skipped', reason: airtable.WRITEBACK_OFF_REASON, http: null, steps };
+  }
   if (!airtable.airtableConfigured()) {
     return { state: 'failed', reason: 'AIRTABLE_TOKEN is not set on this server, so nothing was written to Airtable and the row there still holds the old status.', http: null, steps };
   }
@@ -127,6 +133,15 @@ export async function setStatus(table: string, recordId: string | null, status: 
  */
 export async function remove(table: string, recordId: string | null): Promise<CodexWriteResult> {
   const steps: string[] = [];
+  /**
+   * With the write-back off the Airtable row is left in place, and the caller
+   * says so rather than claiming both sides let go — `deleteCodex` writes the
+   * whole row to `record_deletions` either way, so nothing is lost, and the
+   * next resync after the cap resets is what reconciles the two.
+   */
+  if (!airtable.writebackEnabled()) {
+    return { state: 'skipped', reason: `${airtable.WRITEBACK_VAR} is off, so the row was removed here and the Airtable row was left in place.`, http: null, steps };
+  }
   if (!recordId) {
     return { state: 'skipped', reason: 'Airtable had no row for this submission; only the row held here was removed.', http: null, steps };
   }

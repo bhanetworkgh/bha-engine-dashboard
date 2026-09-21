@@ -1143,6 +1143,9 @@ const OUTCOME_TONE: Record<string, string> = {
   rejected: 'text-degraded',
   unauthorised: 'text-failing',
   error: 'text-failing',
+  // A lookup through GET /api/engine/:kind (2026-09-21). Quiet: it changed
+  // nothing, and it is on this log so that the writes can be counted without it.
+  read: 'text-faint',
 };
 
 /**
@@ -1168,6 +1171,14 @@ function EngineWritesTab() {
 
   const refused = (d.tally.rejected ?? 0) + (d.tally.unauthorised ?? 0) + (d.tally.error ?? 0);
   const accepted = (d.tally.inserted ?? 0) + (d.tally.updated ?? 0) + (d.tally.unchanged ?? 0);
+  /*
+    Lookups are counted on their own (2026-09-21) rather than folded into
+    either figure above. They are on this log because they use the same
+    surface and the same key, but a read is not a write, and a strip whose
+    two figures no longer add up to the rows beneath it is the quietly-wrong
+    number this dashboard exists to remove.
+  */
+  const lookups = d.tally.read ?? 0;
   const wired = d.held.filter((h) => h.from_engine > 0).length;
 
   return (
@@ -1184,7 +1195,7 @@ function EngineWritesTab() {
         </div>
       )}
 
-      <StatStrip cols={4}>
+      <StatStrip cols={5}>
         <CountCell label="Writes accepted" value={accepted} hint={`in the last ${d.window_hours} hours`} hintMinLines={2} />
         <CountCell label="Refused" value={refused} tone={refused ? 'failing' : 'dim'} hint="rejected, unauthorised or errored" hintMinLines={2} />
         {/*
@@ -1200,6 +1211,12 @@ function EngineWritesTab() {
           value={wired}
           tone={wired < d.held.length ? 'failing' : 'dim'}
           hint={wired < d.held.length ? `of ${d.held.length}. The rest have only backfilled rows — n8n has never written to them.` : `all ${d.held.length} of them`}
+          hintMinLines={2}
+        />
+        <CountCell
+          label="Lookups answered"
+          value={lookups}
+          hint={`GET /api/engine/:kind, in the last ${d.window_hours} hours. Never counted as a write.`}
           hintMinLines={2}
         />
         <CountCell label="Writes recorded, all time" value={d.total} hint={d.last_at ? `newest ${when(d.last_at)}` : 'none yet'} hintMinLines={2} />

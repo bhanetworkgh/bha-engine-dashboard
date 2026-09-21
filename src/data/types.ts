@@ -98,6 +98,12 @@ export interface ServerStatus {
   inbound_configured: boolean;
   /** Whether AIRTABLE_TOKEN is set, so a loop edited here can reach Airtable. */
   airtable_configured: boolean;
+  /**
+   * Whether AIRTABLE_WRITEBACK is on (2026-09-21). Off, a page edit is saved
+   * to this dashboard's tables and not sent to Airtable — which is a statement
+   * about where the record is, not a fault, so nothing coloured hangs off it.
+   */
+  airtable_writeback: boolean;
   /** The Open Loops base this server writes to. */
   /** The Open Loops base, from AIRTABLE_OPEN_LOOPS_BASE_ID. Null when that variable is not set — there is no default. */
   airtable_base: string | null;
