@@ -7746,3 +7746,259 @@ Not tested: Against the production database or the deployed service — neither
             carry a row per read, and the Recent writes list on the Engine
             writes tab is unfiltered; if reads start drowning the writes there,
             that list wants a filter rather than the logging being dropped.
+
+## 2026-09-22 09:10 — everything Bays needs to come off Airtable, and a final import that loses nothing
+Intent:     North Star's four workflows are through the cutover and reading and
+            writing through /api/engine. Bays is next: ~19 workflows and 100+
+            Airtable nodes. The lookup shipped yesterday only does equality, an
+            Airtable node does a great deal more, four tables Bays uses were
+            never mirrored at all, and a plain resync after the cap resets
+            would silently undo everything the engine has done since. All four.
+Files:      server/src/mirror.ts        six lookup operators, four new kinds,
+                                        an explicit natural_id, resolveNatural,
+                                        needsTableId
+            server/src/index.ts         the operators, PATCH by-natural, the
+                                        final-import route, the 410s, the boot
+                                        line, airtable_retired on /api/status
+            server/src/finalImport.ts   new — the last read of Airtable
+            server/src/airtable.ts      AIRTABLE_RETIRED, RETIRED_REASON
+            server/src/store.ts         the loops-resync fault, and the Codex
+                                        reconciliation behind the retirement
+            server/src/migrations.ts    migration 21: four tables, three
+                                        registry notes
+            server/src/mcp/tools.ts     get_health, and the resync tool
+            server/src/mcp/inventory.ts SOURCE_OF, RESYNC_ROUTE, the retirement
+            src/App.tsx                 the two record routes, as splats
+            src/components/Layout.tsx   the fade-in keyed on the page
+            src/components/ui/RecordLink.tsx   new — the shared link hook
+            src/components/ui/Resync.tsx       the buttons hide when retired
+            src/screens/EngineHealth/FinalImport.tsx   new — the button and report
+            src/screens/EngineHealth/index.tsx, OpenLoops/index.tsx, Codex.tsx
+            src/data/index.ts, src/data/types.ts
+            README.md, CLAUDE.md, render.yaml, .env.example
+Decision:   **Six operators, and `nf.` is the one with a rule behind it.**
+            `f.` equals, `nf.` does not, `c.` contains case-insensitively,
+            `in.` any of, `gte.`/`lte.` string comparison. `nf.` is
+            `IS DISTINCT FROM`, not `<>`: a missing field reads NULL and
+            `NULL <> 'Closed'` is NULL rather than true, so `<>` would silently
+            drop every row that never had a Status — on a schema that grew over
+            months, most of the old ones. "Not closed" has to include "never
+            had a status".
+Decision:   **`c.` is `strpos` on the lower-cased pair, never `ILIKE '%…%'`.**
+            A value containing `%` or `_` would otherwise be read as a wildcard
+            and a search for "100%" would match everything.
+Decision:   **`gte.`/`lte.` are string comparisons and are refused on `id`.**
+            Airtable's dates are ISO strings and sort correctly as text, so they
+            are exact on a date and wrong on a number. `id` is the one genuinely
+            numeric thing here, so it is exact-match only rather than quietly
+            sorting 9 after 100.
+Decision:   **The five column names are reserved, and that was checked rather
+            than assumed.** A filter naming `id`, `airtable_record_id`,
+            `natural_id`, `builder_id` or `table_id` addresses the column, never
+            a blob key of the same name. Queried across all eighteen mirror
+            tables first: the only blob key with one of those names is
+            `builder_id` on the 61 digest rows, and that column is derived from
+            precisely that key, so the two answer identically.
+Decision:   **An explicit `natural_id` in the envelope, and only where the kind
+            has no natural field.** Review Returns, Lane Backlog and Deep Think
+            Log have no id column this dashboard can name, so n8n supplies one;
+            `keyOnNatural: true` then makes it a real key, which is the only way
+            a kind with no Airtable record id can be idempotent. Sending it for
+            a kind that derives its own is **refused**, not ignored and not
+            preferred: the blob and the column would be two statements about one
+            key, and the column is what every lookup and every upsert matches on.
+Decision:   **Nothing needed a `keyOnNatural` fix.** The brief expected some of
+            the twelve kinds Bays creates rows in to refuse a write with no
+            record id. None of them did — all twelve were already
+            `keyOnNatural: true`. Said plainly rather than claiming a fix that
+            was not made; the test below is the evidence, and it covers all
+            sixteen kinds rather than the twelve asked for.
+Decision:   **`by-natural` refuses a duplicate rather than picking.**
+            `natural_id` is indexed and deliberately not unique — a row the
+            engine wrote before Airtable had one can sit beside the Airtable
+            copy until the two are adopted — so two matches is a real state. A
+            409 names both ids and the caller says which with PATCH /:id.
+Decision:   **The four new kinds are engine-only and no table id is recorded for
+            two of them.** Nothing resyncs any of them, and after the cutover no
+            second copy exists. Lane Backlog and Deep Think Log are named by
+            their base alone: this server never reads that base, so a table id
+            would be a constant with no caller, and a constant with no caller is
+            one nobody notices going stale.
+Decision:   **The final import is a different pass, not a flag on the resync.**
+            A resync is Airtable-wins and deletes what Airtable no longer has.
+            Run after the cutover it would take a loop Bays closed here and
+            reopen it, because the Airtable row still says Open — and it would
+            delete every row the engine has created here since, because none of
+            them has an Airtable copy. One function that sometimes lets Airtable
+            win and sometimes does not is one nobody can reason about at the
+            moment they are about to run it, so it is its own file with its own
+            rule and **no delete anywhere in it**.
+Decision:   **The cutover line is a constant, not a parameter.** 2026-09-21T00:00Z.
+            A caller that could move it could move it past a real change, and
+            the entire value of this pass is that it cannot silently overwrite
+            one. The decision is made from the row's own `source` and
+            `updated_at`, afresh on every run, which is what makes it safe to
+            run twice.
+Decision:   **The final-import button runs the nine groups one after another.**
+            Nine full sweeps of somebody else's API from one click is how a
+            careful pass turns into a rate limit — and the workspace is over its
+            cap already, which is why this exists. A group that fails is named
+            and the rest still run.
+Decision:   **`AIRTABLE_RETIRED` reports Airtable as retired, not healthy and
+            not unreachable.** Both of those are claims about a live dependency
+            and it is neither; an amber line about a system nothing depends on
+            is a warning nobody can act on. The routes answer **410**, not 404:
+            the route was there, it did something, and it is finished, which is
+            what somebody re-running a saved request needs to be told.
+Decision:   **Retired forces the write-back off.** A flag saying "do not look at
+            Airtable" and one saying "do write to Airtable" cannot both be
+            honoured, and only one of them can be honoured safely, so the
+            retirement decides rather than whichever was read last.
+Decision:   **Records are addressed by their own id.** `/open-loops/<loop_id>`,
+            `/codex/<Codex Entry ID>` — never this database's row id, which
+            means nothing outside it, and never the Airtable record id, which
+            **changes when a loop moves between builder tables**: a link built on
+            one breaks at exactly the moment somebody is following it.
+Problem:    **The Open loops "Resync from Airtable" button has never stored a
+            row, and still had not on main this morning.** Measured against a
+            replay of all seven builder tables: `ran=true, inserted=0,
+            updated=0, unchanged=0, deleted=0, refused=7`, with
+            `"builder_id" is required for loops` against every record.
+Fix:        `store.resync` passed `table_id` for client questions and null for
+            everything else; `loops` is a per-builder kind, where the table a
+            row sits in *is* its owner, so `prepare()` refused every row. Now
+            `mirror.needsTableId(kind)`, derived from the spec rather than
+            listed, so the next per-builder kind cannot be forgotten the same
+            way. The same one-line fault was in the new final import and was
+            found by it. The Codex resync was always correct — it passes both —
+            which is why only loops was affected. After the fix, against the
+            same replay: 1 inserted, 0 updated, 5 unchanged, 1 kept, **0 refused**.
+Problem:    **A link to a record this dashboard does not hold answered with
+            silence.** The page set the toast saying so and the toast vanished
+            within milliseconds. Found in a browser; invisible in the code.
+Fix:        Three attempts, two of which look right and are worth recording.
+            (1) Two `<Route>`s for one component are two elements, so moving
+            between `/open-loops/X` and `/open-loops` unmounts one and mounts
+            the other. (2) One route with an **optional** param (`:recordId?`)
+            reads like the fix and is not — React Router expands an optional
+            segment into two ranked branches internally, so it still remounts;
+            confirmed by the hook logging `ready: false, rows: 0` on the second
+            pass. (3) The real cause was underneath both: `Layout` keyed the
+            page container on `location.pathname` to replay the fade-in, so
+            **every** URL change rebuilt the page. Keyed on the first path
+            segment now — the page, which is what the animation is about — and
+            the route is a splat so one pattern matches both shapes.
+Problem:    **With the retirement on, the Codex page still read Airtable on
+            every load — and deleted.** Its reconciliation removes rows Airtable
+            no longer has. Pointed at a replay that answered the six builder
+            tables with no records, one page load took the page from six entries
+            to none.
+Fix:        `runReconcile` returns early when `airtable.retired()`, naming the
+            reason. This is the most important half of the flag: left running
+            after the cutover, the first page load would quietly delete every
+            Codex entry the engine had written since.
+Problem:    A race between the two effects in the record-link hook: the first
+            set the open record, the second still saw `openId` as null in the
+            same commit and navigated back to the bare page, wiping the id out
+            of the path before the first had been reflected. The link opened
+            nothing, silently.
+Fix:        A `settled` flag, set by the first effect and required by the
+            second.
+Verified:   Against a local Postgres 16 holding twelve real production rows read
+            out of bha-engine-db, an Airtable replay that refuses exactly what
+            Airtable refuses, and **a real browser** (Chromium via Playwright,
+            installed outside the repo so nothing was added to package.json).
+            **Nothing was written to production**: the only production access
+            was read-only SELECTs through the MCP server.
+            1. **Every operator, against the six real loops** — `f.Status=Open`
+               2; `nf.Status=Closed` 5; `in.Status=Open,Closed` 3;
+               `c.Status=progress` 3 (case-insensitive);
+               `gte.Date Raised=2026-08-28` 3; `lte.Date Raised=2026-08-25` 3;
+               the two ANDed 4. `nf.Source Link=x` returned **6 of 6**,
+               including the three rows that have no Source Link at all, which
+               is the rule that operator exists for. `c.What=100%` returned 0 of
+               6 — a literal percent, not a wildcard.
+            2. **On the promoted columns** — `in.builder_id=hardik,jason` 6;
+               `nf.builder_id=jason` 2; `c.natural_id=17880` 3;
+               `gte.natural_id=LOOP-1788` 4; `in.id=1,3,6` 3.
+            3. **The refusals** — `gte.id=3` 400 naming why ("id is a number, so
+               it would sort 9 after 100"); `in.Status=` 400; `f.=x` 400;
+               `c.builder_id` on patterns 400 naming the columns that kind has.
+            4. **Against the LIVE tables** (read-only, through the deployed MCP
+               server, 946 loops and 199 Codex rows): `f.Status=Open` **636**,
+               `f.Status=In Progress` **73**, `f.Status=Closed` **237**, and
+               **`nf.Status=Closed` 709 — exactly 636 + 73**, which is the
+               figure the brief named. `in.Status=Open,In Progress` is 709 too.
+               `gte.Date Raised=2026-09-01` 319 and `lte.…=2026-08-31` 627 sum
+               to 946, the whole table. Loops with no Status at all: 0, so on
+               this data `nf.` and `in.` agree — the difference shows on a table
+               where the field is sometimes absent, which is why the six-row
+               `nf.Source Link` case above is the one that proves it.
+            5. **POST with no `record_id`, one payload per kind, all sixteen** —
+               loops, codex, layer0, patterns, commercial, pay_sessions,
+               pay_statements, digests, error_counts, retry_attempts, rt-asks,
+               rt-jobs, and the four new ones. **16 of 16 inserted**, every one
+               `matched_on=insert` with `airtable_record_id: null`. The same
+               sixteen payloads again: **16 of 16 `unchanged`, matched on
+               `natural_id`** — an upsert, never a duplicate.
+            6. **PATCH by-natural on a real loop** — LOOP-1788044070646-TFYK,
+               `{"fields":{"Status":"Closed"}}` → HTTP 200, `changed: true`,
+               id 3. Read back and diffed key by key: **8 of 9 keys untouched**,
+               `Status` "In Progress" → "Closed", every column unchanged but
+               `source` (airtable → engine) and `updated_at`. A natural id
+               naming nothing → **404**; a deliberately duplicated natural id →
+               **409** naming both rows, `3 (recNeFQnR31JEdwGk), 7 (no Airtable
+               record id)`.
+            7. **The final import** — against a replay holding the six real
+               loops with one edited in Airtable, plus one loop Airtable has and
+               this database does not, and with LOOP-…-TFYK marked as changed
+               here after the cutover. Result: **inserted 1** (the Airtable-only
+               loop), **updated 0**, **unchanged 5**, **kept_newer_here 1**,
+               **refused 0**. The kept row is named with the field that differs:
+               `Status`, here `"Closed"`, Airtable `"In Progress"`, 2 fields
+               differing, written here by `engine` at 2026-09-21T14:00. After
+               the run the row still reads Closed and all seven rows are
+               present — **nothing deleted**. Run again: 0 inserted, 0 updated,
+               6 unchanged, 1 kept — the decision is made afresh and holds.
+            8. **`AIRTABLE_RETIRED=true`** — the boot line says RETIRED; all ten
+               Airtable routes answer **410** with the one reason
+               (`/api/{codex,loops,patterns,commercial,clients,ns,rt,pay,engine-health}/resync`
+               and `/api/engine/final-import/loops`); `/api/status` reports
+               `airtable_retired: true` and `airtable_writeback: false` even
+               though the write-back variable was not set to false;
+               `get_health` reports `reachable: null, retired: true` and the
+               reason rather than probing; `get_mirror_status("loops")` reports
+               `source.system: engine-only` and `resync.available: false`; the
+               MCP `resync` and `diff_source_vs_mirror` tools both refuse with
+               `airtable_retired`. The engine lookup still answered normally,
+               because it touches no Airtable.
+            9. **In a browser, both flag states.** Retired on: Resync button 0,
+               Final import button 0, on Engine health and on Open loops. Off:
+               both present. `/open-loops/LOOP-1788044070646-TFYK` opens that
+               loop's panel and the address stays; `/codex/CODEX-20260908-…`
+               opens that entry; `/open-loops/LOOP-DOES-NOT-EXIST` says
+               "No loop here is called LOOP-DOES-NOT-EXIST"; clicking a row
+               moves the bar from `/open-loops` to
+               `/open-loops/LOOP-ONLY-IN-AIRTABLE` and closing it puts it back.
+               Clicking **Final import from Airtable** ran all nine groups and
+               printed "Inserted 1 · Updated 0 · Unchanged 11 · Kept, newer
+               here 1 · Refused 0". No page errors on any of it.
+           10. **Migration 21** applied to a database already at 20: the four
+               tables exist and the three registry base rows carry their notes.
+           11. **`npm run build`, `npm run typecheck` and `npm run test:gate`** —
+               all clean, the gate's eight assertions included. (The gate counts
+               its audit rows all-time, so it fails on a database an earlier run
+               has used; cleared its own rows and it passes.)
+Not tested: Against the production database or the deployed service — neither
+            has this code until this commit deploys, and the Airtable cap is
+            still in force, so **the final import has never run against real
+            Airtable**. It has only been run against a replay, which is the
+            honest limit of what could be proved before the cap resets: the
+            replay serves records and refuses an unknown field name the way
+            Airtable does, but it is not Airtable. The first real run should be
+            read carefully rather than trusted, and `kept_newer_here` is the
+            column to read. No n8n workflow has been repointed at any of this
+            yet. `channel_tracking` holds one test row and no real one: Message
+            Capture has still not been cut over, so Slack messages have still
+            not been archived since 20 Sep — this change makes that possible,
+            it does not do it.

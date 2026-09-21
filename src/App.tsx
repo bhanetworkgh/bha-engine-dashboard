@@ -64,8 +64,42 @@ export default function App() {
         <Route path="/vfarm" element={<Suspense fallback={<Loading />}><VFarm /></Suspense>} />
         <Route path="/engine-health" element={<Suspense fallback={<Loading />}><EngineHealth /></Suspense>} />
         <Route path="/pay" element={<Suspense fallback={<Loading />}><PayTracker /></Suspense>} />
-        <Route path="/open-loops" element={<Suspense fallback={<Loading />}><OpenLoops /></Suspense>} />
-        <Route path="/codex" element={<Suspense fallback={<Loading />}><Codex /></Suspense>} />
+        {/*
+          A stable link per record (2026-09-22, Destiny), so Bays can stop
+          linking people into Airtable.
+
+          The path segment is the record's **own** id — `loop_id`,
+          `Codex Entry ID` — never this database's row id and never the Airtable
+          record id. Those are the two things that change: a row id is local to
+          this database, and an Airtable record id changes the moment a loop is
+          moved between builder tables, so a link built on either goes stale in
+          the one situation somebody most wants to follow it. The natural id
+          travels with the row through both.
+
+          **A splat, and it took three attempts to get here — worth writing
+          down because two of them look right.**
+
+          Two `<Route>`s for the same component (`/open-loops` and
+          `/open-loops/:recordId`) are two different elements to React Router,
+          so moving between them unmounts one and mounts the other: the page is
+          rebuilt and every piece of its state goes with it. Found in a browser,
+          not by reading — a link naming a loop this dashboard does not hold set
+          the toast saying so, and the remount destroyed the toast a few
+          milliseconds later, so the page answered a bad link with silence.
+
+          One route with an **optional** param (`:recordId?`) reads like the
+          fix and is not: React Router expands an optional segment into two
+          ranked branches internally, so the two paths still match different
+          routes and the component still remounts. Confirmed the same way —
+          the hook logged `ready: false, rows: 0` on the second pass, which is
+          a fresh mount.
+
+          A splat is one pattern that matches both, so there is one element and
+          the segment simply changes underneath it. The record id is
+          `useParams()['*']`.
+        */}
+        <Route path="/open-loops/*" element={<Suspense fallback={<Loading />}><OpenLoops /></Suspense>} />
+        <Route path="/codex/*" element={<Suspense fallback={<Loading />}><Codex /></Suspense>} />
         <Route path="/build-patterns" element={<Suspense fallback={<Loading />}><BuildPatterns /></Suspense>} />
         <Route path="/commercial" element={<Suspense fallback={<Loading />}><Commercial /></Suspense>} />
         <Route path="/clients" element={<Suspense fallback={<Loading />}><Clients /></Suspense>} />

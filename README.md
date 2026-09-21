@@ -160,6 +160,10 @@ duplicating, so n8n retrying is safe. The response says which happened.
 | `error_counts` | — | `signature`, else `record_id` |
 | `retry_attempts` | — | `incident_id`, else `record_id` |
 | `digests` | — | `session_id`, else `record_id` |
+| `channel_tracking` | — | `channel_id`, else `record_id` |
+| `review_returns` | `natural_id` in the envelope | `natural_id` |
+| `lane_backlog` | `natural_id` in the envelope | `natural_id` |
+| `deep_think_log` | `natural_id` in the envelope | `natural_id` |
 
 ### Reading and part-updating from n8n
 
@@ -194,9 +198,30 @@ Every query parameter is optional and they are ANDed:
 | `natural_id` | the kind's own id — `loop_id`, `Submission ID`, `Ask ID` … |
 | `builder_id` | loops and Codex entries: whose table the row sits in |
 | `table_id` | the Airtable table the row came from |
-| `f.<Field Name>` | exact match on a key inside `fields`. Airtable's own names, spaces and all, percent-encoded: `f.Jason%20Status=Approved`. Several `f.` parameters AND together |
+| `f.<name>` | equals. Airtable's own field names, spaces and all, percent-encoded: `f.Jason%20Status=Approved` |
+| `nf.<name>` | does **not** equal — **and matches a row that has not got the field at all** |
+| `c.<name>` | contains, case-insensitive. A literal `%` or `_` is a character, not a wildcard |
+| `in.<name>` | equals any of a comma-separated list: `in.Status=Open,In%20Progress` |
+| `gte.<name>` / `lte.<name>` | string comparison, for the ISO dates and timestamps Airtable stores |
 | `limit` | default 100, maximum 1,000 |
 | `order` | `created_desc` (the default) or `created_asc`. Nulls last either way, row id as the tiebreak |
+
+Every operator works on a field inside `fields` **and** on the promoted columns
+`natural_id`, `builder_id` and `table_id` — `c.natural_id=LOOP-17880` is a
+filter. The five column names are reserved: a filter naming one addresses the
+column, never a blob key of the same name.
+
+`nf.` is `IS DISTINCT FROM` rather than `<>`, and that is the whole point of it:
+a missing field reads NULL, `NULL <> 'Closed'` is NULL rather than true, and a
+plain `<>` would silently drop every row that never had a Status. Against the
+live tables: 946 loops, `f.Status=Open` 636, `f.Status=In Progress` 73,
+`f.Status=Closed` 237, and **`nf.Status=Closed` 709** — which is 636 + 73
+exactly, and matches `in.Status=Open,In%20Progress`.
+
+`gte.`/`lte.` are **string** comparisons, which is exact on the ISO dates
+Airtable stores and wrong on a number, so they are refused on `id` rather than
+sorting 9 after 100. An `in.` that comes out empty is refused rather than
+matching nothing: an empty list is usually a value that did not get filled in.
 
 A filter naming a column that kind's table has not got is a 400 saying which it
 does have — `patterns` has no `builder_id`, and silently ignoring the filter
@@ -236,8 +261,17 @@ from POST, which is a whole-record write and replaces the blob — an Airtable
 node that sets one field would otherwise drop the other twenty-two.
 
 ```
-PATCH /api/engine/loops/3     { "fields": { "Status": "Closed" } }
+PATCH /api/engine/loops/3                                      { "fields": { "Status": "Closed" } }
+PATCH /api/engine/loops/by-natural/LOOP-1788044070646-TFYK     { "fields": { "Status": "Closed" } }
 ```
+
+**`by-natural` takes the record's own id**, because that is what n8n holds —
+`loop_id`, `Submission ID` — rather than this database's row id. Making every
+workflow look the id up first and feed it back in is two calls for one change
+with a race in between. None matching is a 404; **more than one is a 409 naming
+both ids**, never a pick: `natural_id` is deliberately not unique, so a
+duplicate is a real state and choosing one would write into whichever happened
+to sort first.
 
 It answers with the whole row after the merge plus `changed`, decided by
 Postgres with `IS DISTINCT FROM` rather than by comparing JSON in this process.
@@ -247,10 +281,66 @@ not among them: those are not fields, they are which of the seven tables the row
 sits in, and changing one is a move rather than an edit. An id that is not in
 that kind's table is a 404.
 
+### The final import, and retiring Airtable
+
+Added 2026-09-22, for after the monthly cap resets. One last read of Airtable,
+so that nothing somebody typed into a base by hand between the cap hitting and
+the cutover finishing is lost.
+
+```
+POST /api/engine/final-import/:group     (session cookie, like the resync buttons)
+```
+
+Groups: `loops`, `codex`, `patterns`, `commercial`, `clients`, `ns`, `rt`,
+`pay`, `engine_events`. Incidents are not among them — they come from BHARAG,
+so there is no Airtable copy to import. One button on **Engine health** runs all
+nine in turn and prints the report.
+
+**It is not a resync, and it is deliberately not a flag on one.** A resync is
+Airtable-wins and deletes what Airtable no longer has, which is right while
+Airtable is the record and catastrophic afterwards: every row the engine has
+written here since the cutover has no Airtable copy at all. So, per record:
+
+| | |
+|---|---|
+| the row is not here | **insert** it |
+| nothing has written it here since the cutover, or its last write was a resync | **update** it, exactly as a resync would |
+| the engine or a page has written it here since the cutover | **keep** what is here, and report it with both values |
+
+**It never deletes.** The cutover line is `2026-09-21T00:00Z` and is a constant
+rather than a parameter: a caller that could move it could move it past a real
+change. The answer carries `inserted`, `updated`, `unchanged`, `kept_newer_here`
+and `refused`, plus every kept row with the field that differs, both values, and
+who wrote it here and when.
+
+Once the import has run and its report has been read, **`AIRTABLE_RETIRED`**
+ends the dependency — see the environment table below for exactly what changes.
+
+### A stable link per record
+
+`/open-loops/<loop_id>` and `/codex/<Codex Entry ID>` open that record, and
+opening one from the list puts its address in the bar so it can be copied. This
+is what lets Bays stop linking people into Airtable.
+
+**Addressed by the record's own id**, never this database's row id and never the
+Airtable record id: a row id means nothing outside this database, and an
+Airtable record id *changes* when a loop is moved between builder tables — which
+is the moment somebody most wants to follow a link. A link naming a record this
+dashboard does not hold says so rather than quietly showing the list.
+
 **Both land on `engine_writes` like every other engine call.** A lookup is
 logged with the outcome `read` rather than one of the write outcomes, so the
 writes can still be counted without it — the Engine writes tab counts lookups in
 their own figure for the same reason.
+
+**A row can be created with no Airtable id at all**, in every kind the engine
+writes: `record_id` is optional wherever the kind has a natural id, and a repeat
+post matches on that id and updates rather than duplicating. For the three kinds
+whose table has no id column this dashboard can name — `review_returns`,
+`lane_backlog`, `deep_think_log` — n8n sends **`natural_id` in the envelope**
+instead, which is the only way such a kind can be idempotent. Never both: an
+explicit `natural_id` on a kind that derives its own is refused, because the
+blob and the column would then be two statements about one key.
 
 **`incidents` comes from BHARAG rather than Airtable**, so it is the one kind
 with no `record_id` to send: the ledger's `entity_id` is the key. Everything
@@ -1084,6 +1174,7 @@ Airtable; those rows are in `git log` if it is ever needed again.
 | `AIRTABLE_TOKEN` | Read **and** write on Open Loops and BHA Submissions, for loop and Codex edits; read on Build Patterns (`app5ni3E8r7Lvxk22`), Commercial Opportunities (`appvLglfdCqOKqLpT`) and BHA Client Research Loop (`appkSUSh9ijNjP2f8`), for the resync those three pages gained on 15 Sep. Five bases, one token; nothing is ever written to the last three. Without it nothing edited here reaches Airtable and no page can resync; the server says so at boot and on every write. **Note the name** — the client deleted on 13 Sep read `AIRTABLE_API_KEY` |
 | `AIRTABLE_OPEN_LOOPS_BASE_ID` | The Open Loops base (`appUVlBSGGPHw6DGh`). **No default** — unset, the boot line says so by name and every loop edit is refused and marked. Called `AIRTABLE_BASE_ID` until 14 Sep 2026; that name is read by nothing |
 | `AIRTABLE_SUBMISSIONS_BASE_ID` | BHA Submissions, for Codex entries. Defaults to `appEmdKshNVTl64Zf` |
+| `AIRTABLE_RETIRED` | Whether this dashboard has stopped depending on Airtable at all (`1`/`true`/`on`/`yes`). **Off unless set**, from 22 Sep 2026, and turned on only after the final import has run and its report has been read. On: `get_health` reports Airtable as *retired* rather than probing it, `get_mirror_status` reports every kind's source as the engine, the resync and final-import buttons come off the pages and their routes answer 410, and the Codex page's on-load reconciliation stops — that last one matters most, because its job is to delete rows Airtable no longer has. It forces `AIRTABLE_WRITEBACK` off whatever that is set to. Nothing is deleted and the flag is reversible |
 | `AIRTABLE_WRITEBACK` | Whether a loop or Codex edit made on a page is **also** sent to Airtable. **Off unless set** (`1`/`true`/`on`/`yes`), from 21 Sep 2026: the workspace is over its monthly API cap, every call answers 429, and these tables are the record. Off, an edit is saved here and the page says nothing — no error and no "not in Airtable" marker, because nothing failed. The resync buttons are **not** behind this flag; they are reads, and they are how the final import happens once the cap resets |
 | `N8N_API_KEY` | The n8n **instance API key**, for the Executions page and the repair revert. Three reads — `GET /api/v1/executions`, `GET /api/v1/workflows` (names only, so a workflow with no registry row still appears under its own name) and `GET /api/v1/workflows/{id}` — and, from 20 Sep 2026, **one write**: `PUT /api/v1/workflows/{id}`, reached only from the revert. **The key needs workflow write scope for that**, or every revert is refused with n8n's own reason and the row is left untouched. Not the same credential as `ASK_BAYS_API_KEY`, which is a webhook header. Without it no execution is ever read, the Executions page says so rather than reading zero, and the Repairs tab says no repair can be put back from here |
 | `N8N_API_URL` | Defaults to `N8N_BASE_URL` + `/api/v1`. Points the same client at a replay in a sandbox |

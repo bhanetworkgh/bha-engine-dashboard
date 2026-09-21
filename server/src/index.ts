@@ -27,7 +27,9 @@ import { assertDatabase, closePool, DATABASE_URL } from './pg';
 import * as engine from './engine';
 import * as store from './store';
 import * as registry from './registry';
-import { LOOPS_BASE_ID, OPEN_LOOPS_BASE_VAR, SUBMISSIONS_BASE_FROM_ENV, SUBMISSIONS_BASE_ID, SUBMISSIONS_BASE_VAR, WRITEBACK_VAR, airtableConfigured, writebackEnabled as airtableWritebackEnabled } from './airtable';
+import * as airtable_ from './airtable';
+import { LOOPS_BASE_ID, OPEN_LOOPS_BASE_VAR, RETIRED_VAR, SUBMISSIONS_BASE_FROM_ENV, SUBMISSIONS_BASE_ID, SUBMISSIONS_BASE_VAR, WRITEBACK_VAR, airtableConfigured, retired as airtableRetired, writebackEnabled as airtableWritebackEnabled } from './airtable';
+import { IMPORT_GROUPS, finalImport as runFinalImport, isImportGroup } from './finalImport';
 import * as codex from './codex';
 import * as loops from './loops';
 import * as mirror from './mirror';
@@ -303,7 +305,19 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
    * The key is checked here, before the router looks at the kind or reads the
    * body, so an unauthenticated request never reaches a handler.
    */
-  if (p === '/api/engine' || p.startsWith('/api/engine/')) {
+  /**
+   * The one path under `/api/engine` that is NOT the service key's, and it is
+   * spelled out here rather than left to be discovered (2026-09-22).
+   *
+   * `POST /api/engine/final-import/:group` is a button on a page, so it is
+   * behind the session cookie like every other resync, and it is handled far
+   * below with them. It lives under this prefix because it is the last act of
+   * the engine cutover and belongs beside the routes that made it — but a
+   * prefix that means "service key" with one exception in it is a trap unless
+   * the exception is named where the rule is, which is what this is.
+   */
+  const FINAL_IMPORT = /^\/api\/engine\/final-import\/([^/]+)$/;
+  if ((p === '/api/engine' || p.startsWith('/api/engine/')) && !FINAL_IMPORT.test(p)) {
     const t0 = Date.now();
     const endpoint = p;
     if (!INBOUND_KEY) {
@@ -397,25 +411,42 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         );
       }
 
-      const columns: Partial<Record<mirror.FilterColumn, string>> = {};
-      for (const c of mirror.LOOKUP_FILTER_COLUMNS) {
-        const v = url.searchParams.get(c);
-        if (v !== null) columns[c] = v;
-      }
       /**
-       * `f.<Field Name>=<value>` — an exact match on a key inside the jsonb
-       * blob. The names are Airtable's own, spaces and all, so they arrive
+       * Every filter, in the order it arrived, all ANDed (2026-09-22).
+       *
+       * Two spellings, and both end up in the same list. A bare reserved column
+       * name — `natural_id=…`, `builder_id=…` — is an equality filter, which is
+       * what it has always been. A prefixed one is an operator: `f.` equals,
+       * `nf.` does not (and matches a row missing the field), `c.` contains,
+       * `in.` any of, `gte.`/`lte.` string comparison. The prefix form works on
+       * a reserved column too, which is what makes `c.natural_id=LOOP-17880`
+       * possible.
+       *
+       * The names are Airtable's own, spaces and all, so they arrive
        * percent-encoded and `URLSearchParams` has already decoded them:
        * `f.Jason%20Status` is the key `Jason Status`, and `f.Layer1%20Review%20`
-       * keeps the trailing space that field really has. The name goes into the
-       * statement as a bound parameter, never concatenated — see mirror.lookup.
+       * keeps the trailing space that field really has. A field name goes into
+       * the statement as a bound parameter, never concatenated — see
+       * mirror.lookup.
+       *
+       * Anything else in the query string is left alone: `limit`, `order` and
+       * `lane` are read below, and an unprefixed name that is not a reserved
+       * column is not a filter, so a stray parameter cannot silently narrow a
+       * result.
        */
-      const fields: { key: string; value: string }[] = [];
+      const filters: mirror.LookupFilter[] = [];
+      const reserved = new Set<string>(mirror.LOOKUP_FILTER_COLUMNS);
       for (const [k, v] of url.searchParams) {
-        if (!k.startsWith('f.')) continue;
-        const name = k.slice(2);
-        if (!name) throw new HttpError(400, 'A field filter needs a field name after "f." — f.Jason%20Status=Approved. Airtable itself refuses a request that names an empty field, and so does this.');
-        fields.push({ key: name, value: v });
+        const dot = k.indexOf('.');
+        if (dot > 0 && mirror.isLookupOperator(k.slice(0, dot))) {
+          const name = k.slice(dot + 1);
+          if (!name) {
+            throw new HttpError(400, `A filter needs a name after "${k.slice(0, dot)}." — f.Jason%20Status=Approved. Airtable itself refuses a request that names an empty field, and so does this.`);
+          }
+          filters.push({ op: k.slice(0, dot) as mirror.LookupOperator, name, value: v });
+          continue;
+        }
+        if (reserved.has(k)) filters.push({ op: 'f', name: k, value: v });
       }
 
       const orderParam = url.searchParams.get('order');
@@ -429,12 +460,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
 
       try {
         const r = await mirror.lookup(kind, {
-          columns,
-          fields,
+          filters,
           limit: limitParam === null ? mirror.LOOKUP_LIMIT_DEFAULT : Number(limitParam),
           order: orderParam === 'created_asc' ? 'created_asc' : 'created_desc',
         });
-        const named = [...Object.entries(columns).map(([c, v]) => `${c}=${v}`), ...fields.map((f) => `f.${f.key}=${f.value}`)];
+        const named = filters.map((f) => mirror.describeFilter(f));
         await mirror.logWrite({
           endpoint,
           kind,
@@ -471,15 +501,52 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * will be rows that never have one.
      */
     if (method === 'PATCH') {
-      if (!withId) {
+      /**
+       * Two paths, one merge (2026-09-22).
+       *
+       *   PATCH /api/engine/:kind/:id
+       *   PATCH /api/engine/:kind/by-natural/:natural_id
+       *
+       * The second exists because n8n holds `loop_id` and `Submission ID`, not
+       * this database's bigint id. Making every workflow look the id up first
+       * and feed it back in is two calls for one change with a race in between,
+       * which is the shape an Airtable node never had.
+       *
+       * `by-natural` resolves to exactly one row or refuses — 404 for none, 409
+       * naming both ids for more than one — and everything after that point is
+       * the ordinary path, so the two cannot merge differently.
+       */
+      const byNatural = p.match(/^\/api\/engine\/([^/]+)\/by-natural\/(.+)$/);
+      if (!withId && !byNatural) {
         await mirror.logWrite({ endpoint, kind: one?.[1] ?? '-', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: 'no row id in the path', ms: Date.now() - t0 });
-        throw new HttpError(404, `PATCH /api/engine/:kind/:id, where :id is the row id GET /api/engine/:kind returns. :kind is one of: ${mirror.KIND_LIST.join(', ')}.`);
+        throw new HttpError(
+          404,
+          `PATCH /api/engine/:kind/:id, where :id is the row id GET /api/engine/:kind returns — or PATCH /api/engine/:kind/by-natural/:natural_id to name the row by its own id instead. :kind is one of: ${mirror.KIND_LIST.join(', ')}.`,
+        );
       }
-      const kind = withId[1];
-      const rowId = decodeURIComponent(withId[2]);
+      const kind = byNatural ? byNatural[1] : withId![1];
       if (!mirror.isKind(kind)) {
         await mirror.logWrite({ endpoint, kind, method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: 'unknown kind', ms: Date.now() - t0 });
         throw new HttpError(404, `"${kind}" is not a kind this engine holds. One of: ${mirror.KIND_LIST.join(', ')}.`);
+      }
+      /**
+       * Resolved before the body is read, so a natural id that names no row —
+       * or two — costs nothing and is refused with the same shape whether the
+       * body was valid or not.
+       */
+      let rowId: string;
+      const naturalKey = byNatural ? decodeURIComponent(byNatural[2]) : null;
+      if (naturalKey !== null) {
+        try {
+          rowId = String(await mirror.resolveNatural(kind, naturalKey));
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          const status = e instanceof mirror.MirrorError ? e.status : 500;
+          await mirror.logWrite({ endpoint, kind, method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: naturalKey, outcome: status >= 500 ? 'error' : 'rejected', detail: message, ms: Date.now() - t0 });
+          throw new HttpError(status, message);
+        }
+      } else {
+        rowId = decodeURIComponent(withId![2]);
       }
       const body = await readJson(req, 256 * 1024);
       const patch = body.fields;
@@ -501,7 +568,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           airtable_record_id: r.airtable_record_id,
           natural_id: r.natural_id,
           outcome: r.changed ? 'updated' : 'unchanged',
-          detail: `merged ${Object.keys(patch).join(', ')} into row ${r.id}`,
+          detail: `merged ${Object.keys(patch).join(', ')} into row ${r.id}${naturalKey === null ? '' : ` (by-natural ${naturalKey})`}`,
           ms: Date.now() - t0,
         });
         // `r` already carries `changed`, decided by Postgres, beside the whole row.
@@ -631,6 +698,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           inbound_configured: Boolean(INBOUND_KEY),
           airtable_configured: airtableConfigured(),
           airtable_writeback: airtableWritebackEnabled(),
+          airtable_retired: airtableRetired(),
           airtable_base: LOOPS_BASE_ID,
           airtable_submissions_base: SUBMISSIONS_BASE_ID,
           writeback_failures: await store.writebackFailures(),
@@ -1011,6 +1079,38 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * field of every row and it deletes. Slow by nature: the client gives it
      * its own timeout.
      */
+    /**
+     * Every route that reads Airtable answers 410 once it is retired
+     * (2026-09-22). Checked in one place, above all of them, so a route cannot
+     * be added later that quietly still reads.
+     *
+     * **410 rather than 404**: the route was here, it did something, and it is
+     * finished. A 404 would read as a typo to whoever is re-running a saved
+     * request, and send them looking for a path that never existed.
+     */
+    if (/^\/api\/(codex|patterns|commercial|clients|loops|ns|rt|pay|engine-health)\/resync$/.test(p) || FINAL_IMPORT.test(p)) {
+      if (airtableRetired()) throw new HttpError(410, airtable_.RETIRED_REASON);
+    }
+
+    /**
+     * The final import (2026-09-22, Destiny): the last read of Airtable, and
+     * the one that must not lose anything.
+     *
+     * Not a flag on the resync, deliberately. A resync is Airtable-wins by
+     * design, which is right while Airtable is the record and wrong the moment
+     * the engine is writing here — it would take a loop Bays closed after the
+     * cutover and reopen it. This keeps what this database has changed since
+     * then, names it, and deletes nothing. See server/src/finalImport.ts.
+     */
+    const finalImport = p.match(FINAL_IMPORT);
+    if (finalImport) {
+      const group = finalImport[1];
+      if (!isImportGroup(group)) {
+        throw new HttpError(404, `"${group}" is not a group the final import knows. One of: ${IMPORT_GROUPS.join(', ')}. Incidents are not among them: they come from BHARAG rather than Airtable, so there is no Airtable copy to import.`);
+      }
+      return send(res, 200, await runFinalImport(group, sessionInfo(req).email));
+    }
+
     if (p === '/api/codex/resync') {
       return send(res, 200, await store.resyncCodex(sessionInfo(req).email));
     }
@@ -1290,15 +1390,20 @@ async function boot(): Promise<void> {
      * stopped writing to Airtable is exactly the kind of quiet this dashboard
      * exists to remove.
      */
-    console.log(
-      airtableWritebackEnabled()
-        ? `  airtable write-back: ON (${WRITEBACK_VAR}) — loop and Codex edits made here are also sent to Airtable.`
-        : `  airtable write-back: off — ${WRITEBACK_VAR} is not set, so loop and Codex edits are saved to this database only. The resync buttons still read Airtable.`,
-    );
+    if (airtableRetired()) {
+      console.log(`  airtable: RETIRED (${RETIRED_VAR}) — nothing here reads or writes Airtable. The resync and final-import routes answer 410 and Engine health reports it as retired rather than probing it.`);
+    } else {
+      console.log(
+        airtableWritebackEnabled()
+          ? `  airtable write-back: ON (${WRITEBACK_VAR}) — loop and Codex edits made here are also sent to Airtable.`
+          : `  airtable write-back: off — ${WRITEBACK_VAR} is not set, so loop and Codex edits are saved to this database only. The resync buttons still read Airtable.`,
+      );
+    }
     // Said loudly and by name. Without the token a loop edited here never
     // reaches Airtable, and the 08:00 digest reads Airtable — so this is a line
-    // worth reading on every boot, not a quiet default.
-    console.log(
+    // worth reading on every boot, not a quiet default. Skipped entirely once
+    // Airtable is retired: a token that is not used is not news.
+    if (!airtableRetired()) console.log(
       airtableConfigured()
         ? `  airtable: loops ${LOOPS_BASE_ID ? `${LOOPS_BASE_ID} (${OPEN_LOOPS_BASE_VAR})` : `NOT SET — ${OPEN_LOOPS_BASE_VAR} is missing, so no loop edited here will reach Airtable`} · submissions ${SUBMISSIONS_BASE_ID} ${SUBMISSIONS_BASE_FROM_ENV ? `(${SUBMISSIONS_BASE_VAR})` : '(default)'}`
         : '  airtable: NOT configured — AIRTABLE_TOKEN is not set on this server. Loop and Codex edits made here will NOT reach Airtable.',

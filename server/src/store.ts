@@ -1968,7 +1968,21 @@ export async function resync(kind: ResyncKind, actor = 'dashboard'): Promise<Res
             record_id: rec.id,
             created_time: rec.createdTime ?? null,
             fields: rec.fields ?? {},
-            table_id: source.kind === 'client_questions' ? source.table : null,
+            /**
+             * The table the row came out of, for every kind that needs one —
+             * not only client questions (fixed 2026-09-22).
+             *
+             * **This is why the Open loops resync had never stored a row.** It
+             * was built on 2026-09-16 passing `table_id` for client questions
+             * and null for everything else, and `loops` is a per-builder kind:
+             * the table a row sits in *is* its owner, so `prepare()` refused
+             * every one of them. All seven tables were read in full and
+             * `refused: 7` came back on every run — visible in the toast, and
+             * plainly never acted on. Measured again here against a replay of
+             * the seven tables before the fix: 0 inserted, 0 updated,
+             * 0 unchanged, 7 refused.
+             */
+            table_id: mirror.needsTableId(source.kind) ? source.table : null,
             // A request names its own lane in the row; a question is told which
             // lane by the table it came out of.
             lane_id: source.kind === 'client_requests' ? (typeof rec.fields?.['Lane ID'] === 'string' ? (rec.fields['Lane ID'] as string) : null) : (source.lane_id ?? null),
@@ -2068,6 +2082,23 @@ export async function resync(kind: ResyncKind, actor = 'dashboard'): Promise<Res
 
 async function runReconcile(): Promise<CodexReconciliation> {
   const at = nowIso();
+  /**
+   * Retired first, and this one matters more than the buttons (2026-09-22).
+   *
+   * This pass runs on **every load of the Codex page** and its job is to
+   * *delete* rows Airtable no longer has. Once Airtable is retired it is not
+   * the record any more, and a table it answers about with nothing is not an
+   * emptied table — it is a base nobody maintains. Left running, the first
+   * page load after the cutover would quietly delete every Codex entry the
+   * engine had written since.
+   *
+   * Caught in a browser rather than by reading: with the rest of the
+   * retirement in place, a replay that answered the six builder tables with no
+   * records took the page from six entries to none on one load.
+   */
+  if (airtable.retired()) {
+    return { ran: false, checked: 0, removed: 0, removed_ids: [], blocked: [], at, note: `${airtable.RETIRED_REASON} Nothing was compared and nothing was removed.` };
+  }
   if (!codex_.CODEX_TABLES.length) return { ran: false, checked: 0, removed: 0, removed_ids: [], blocked: [], at, note: 'No submission tables are configured.' };
   let live: Awaited<ReturnType<typeof codex_.liveIds>>;
   try {
@@ -2162,6 +2193,16 @@ const RECORD_KIND: Record<mirror.MirrorKind, RecordKind | null> = {
   pay_sessions: null,
   pay_statements: null,
   digests: null,
+  /**
+   * The four Bays tables (2026-09-22). None of them is a record kind: there is
+   * no page reading them and no status ledger to date, so nothing here maps
+   * them onto one. Null is the statement, not an omission — this map is a
+   * Record<MirrorKind, …> precisely so a new kind cannot skip the question.
+   */
+  channel_tracking: null,
+  review_returns: null,
+  lane_backlog: null,
+  deep_think_log: null,
 };
 
 /**

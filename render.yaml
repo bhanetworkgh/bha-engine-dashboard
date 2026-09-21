@@ -184,6 +184,27 @@ services:
       # NOT behind it — they are reads, and they are that import.
       - key: AIRTABLE_WRITEBACK
         value: ""
+      # Whether this dashboard still depends on Airtable at all (22 Sep 2026).
+      #
+      # OFF unless set to 1, true, on or yes, and off is the state this service
+      # ships in. Turned on only AFTER the final import has run and its report
+      # has been read: it is the end of the cutover, not a step in it.
+      #
+      # On, nothing here reads or writes Airtable. Engine health reports it as
+      # retired rather than probing it — not healthy and not unreachable,
+      # because both are claims about a live dependency and it is neither. The
+      # resync and final-import routes answer 410 and their buttons come off
+      # the pages. And the Codex page's on-load reconciliation stops, which is
+      # the one that matters most: its job is to delete rows Airtable no longer
+      # has, so left running after the cutover the first page load would
+      # quietly delete every Codex entry the engine had written since.
+      #
+      # Declared with an empty value for the same reason the write-back flag
+      # is: turning it on is then an edit to a line that exists rather than a
+      # variable somebody has to know the name of. Nothing is deleted when it
+      # goes on and the flag is reversible.
+      - key: AIRTABLE_RETIRED
+        value: ""
       # The MCP server's path secret (18 Sep 2026). The endpoint is
       # /mcp/<MCP_SECRET> on this same service — an MCP server mounted on the
       # existing handler, not a second service, so it deploys with this commit

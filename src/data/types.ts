@@ -104,6 +104,14 @@ export interface ServerStatus {
    * about where the record is, not a fault, so nothing coloured hangs off it.
    */
   airtable_writeback: boolean;
+  /**
+   * Whether AIRTABLE_RETIRED is on (2026-09-22). On, this dashboard no longer
+   * reads Airtable at all: the resync and final-import buttons come off the
+   * pages, their routes answer 410, and Engine health reports Airtable as
+   * retired rather than probing it. Not a fault state and never coloured — it
+   * is the end of the cutover, not a failure of it.
+   */
+  airtable_retired: boolean;
   /** The Open Loops base this server writes to. */
   /** The Open Loops base, from AIRTABLE_OPEN_LOOPS_BASE_ID. Null when that variable is not set — there is no default. */
   airtable_base: string | null;
@@ -837,6 +845,65 @@ export interface Resync {
   refused: number;
   /** Rows whose local change never landed in Airtable and has now been overwritten. */
   overwritten: { record_id: string; natural_id: string | null }[];
+  note: string;
+}
+
+/**
+ * The final import from Airtable (2026-09-22, Destiny) — the last read of it,
+ * and the one that must not lose anything.
+ *
+ * Deliberately **not** a Resync and deliberately not shaped like one. A resync
+ * is Airtable-wins and deletes what Airtable no longer has, which is right
+ * while Airtable is the record and catastrophic afterwards: every row the
+ * engine has written here since the cutover has no Airtable copy at all. This
+ * keeps what has changed here, names it, and deletes nothing — so it has
+ * `kept_newer_here` where a resync has `deleted`, and the two cannot be read
+ * for one another.
+ */
+export interface FinalImportKept {
+  kind: string;
+  table: string;
+  label: string;
+  record_id: string;
+  natural_id: string | null;
+  /** The field the two copies disagree about — Status wherever it is one of them. */
+  field: string | null;
+  here: string | null;
+  airtable: string | null;
+  /** How many keys differ in all, so "one field" and "the whole row" read differently. */
+  differing: number;
+  source: string;
+  updated_at: string;
+}
+
+export interface FinalImportTable {
+  table: string;
+  label: string;
+  kind: string;
+  read: boolean;
+  reason: string | null;
+  rows: number | null;
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  kept_newer_here: number;
+  refused: number;
+}
+
+export interface FinalImport {
+  group: string;
+  ran: boolean;
+  at: string;
+  ms: number;
+  /** The line the decision is made against: nothing written here before it can be a decision made here. */
+  cutover_at: string;
+  tables: FinalImportTable[];
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  kept_newer_here: number;
+  refused: number;
+  kept: FinalImportKept[];
   note: string;
 }
 

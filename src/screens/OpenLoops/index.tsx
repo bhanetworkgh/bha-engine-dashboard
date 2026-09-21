@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../../app/useData';
 import { BUILDER_NAMES, createLoop, getOpenLoops, getRecordMetrics, removeLoopDuplicate, resyncRecords, saveLoop, type Loop, type LoopEdit, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
-import { Icon, LoadFailed, Loading, MonthPicker, monthsFrom, thisMonth, PageHeader, ResyncButton, Tabs, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useResync, useToast } from '../../components/ui';
+import { Icon, LoadFailed, Loading, MonthPicker, monthsFrom, thisMonth, PageHeader, ResyncButton, Tabs, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useRecordLink, useResync, useToast } from '../../components/ui';
 import { LoopPanel } from './LoopPanel';
 import { Loops, type StatusFilter } from './Loops';
 import { LoopMetricsPanel, LoopStatusStrip } from './Metrics';
@@ -108,6 +108,25 @@ export default function OpenLoops() {
 
   /** A working copy so a status change updates the page without a refetch. */
   const [data, setData] = useState<OpenLoopsData | null>(null);
+  /**
+   * `/open-loops/<loop_id>` opens that loop, and opening one puts its address
+   * in the bar (2026-09-22) — so Bays can link a person straight at a loop
+   * rather than at the Airtable row it is about to stop writing to.
+   *
+   * Addressed by `loop_id`, not by the Airtable record id: a move between
+   * builder tables mints a new record id, and a link that breaks the moment a
+   * loop changes hands is broken exactly when somebody is following it.
+   */
+  useRecordLink({
+    base: '/open-loops',
+    rows: data?.loops ?? [],
+    ready: Boolean(data),
+    keyOf: (l) => ({ natural: l.loop_id, id: l.id }),
+    openId,
+    setOpenId,
+    onMissing: (id) => setToast({ text: `No loop here is called ${id}. It may have been closed and removed, or the link may be to a loop this dashboard never held.`, tone: 'failing' }),
+  });
+
   useEffect(() => {
     setData(loaded);
   }, [loaded]);

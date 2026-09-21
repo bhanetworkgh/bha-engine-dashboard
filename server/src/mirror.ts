@@ -56,7 +56,11 @@ export type MirrorKind =
   | 'pay_builders'
   | 'pay_sessions'
   | 'pay_statements'
-  | 'digests';
+  | 'digests'
+  | 'channel_tracking'
+  | 'review_returns'
+  | 'lane_backlog'
+  | 'deep_think_log';
 
 interface KindSpec {
   table: string;
@@ -137,9 +141,48 @@ export const KINDS: Record<MirrorKind, KindSpec> = {
   pay_sessions: { table: 'engine_pay_sessions', label: 'Pay sessions', naturalField: 'Codex Entry ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
   pay_statements: { table: 'engine_pay_statements', label: 'Monthly statements', naturalField: 'Statement ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
   digests: { table: 'engine_digest_deliveries', label: 'digest_deliveries', naturalField: 'session_id', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['builder_id', 'status', 'sent_at'] },
+  /**
+   * Four tables the Bays workflows use that were never mirrored (2026-09-22),
+   * added because Bays is the second system to come off Airtable and a node
+   * with nowhere to point cannot be cut over. All four are engine-only: nothing
+   * resyncs them, and after the cutover there is no newer copy anywhere else.
+   *
+   * **`channel_tracking` is the urgent one.** `Bays — Message Capture` reads it
+   * on every Slack message to find that channel's current capture doc, and it
+   * has been failing since the Airtable cap hit at about 23:00 UTC on 20 Sep,
+   * so no Slack message has been archived since. `channel_id` is the key.
+   *
+   * **The other three carry no id this dashboard can derive**, so
+   * `naturalField` is null and n8n supplies `natural_id` in the envelope —
+   * which `keyOnNatural: true` then makes a real key, so a repeat post updates
+   * rather than duplicating. That pairing is deliberate and is the only way a
+   * kind with no Airtable record id can be idempotent.
+   */
+  channel_tracking: { table: 'engine_channel_tracking', label: 'Channel Tracking', naturalField: 'channel_id', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
+  review_returns: { table: 'engine_review_returns', label: 'Review Returns', naturalField: null, keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
+  lane_backlog: { table: 'engine_lane_backlog', label: 'Lane Backlog', naturalField: null, keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
+  deep_think_log: { table: 'engine_deep_think_log', label: 'Deep Think Log', naturalField: null, keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
 };
 
 export const KIND_LIST = Object.keys(KINDS) as MirrorKind[];
+
+/**
+ * Whether a write of this kind has to be told which Airtable table the row came
+ * out of (2026-09-22).
+ *
+ * True for the per-builder kinds, where the table **is** the owner, and for the
+ * per-lane ones, where it is which client's questions table a row belongs to.
+ * A sweep that does not pass it gets `prepare()`'s refusal on every single row.
+ *
+ * This exists because that is exactly what the Open loops resync did from the
+ * day it was built: it passed `table_id` for client questions and null for
+ * everything else, so all seven builder tables were read in full and every row
+ * was refused. Derived from the spec rather than listed, so the next
+ * per-builder kind cannot be forgotten the same way.
+ */
+export function needsTableId(kind: MirrorKind): boolean {
+  return KINDS[kind].perBuilder || KINDS[kind].perLaneTable;
+}
 
 export function isKind(v: string): v is MirrorKind {
   return Object.prototype.hasOwnProperty.call(KINDS, v);
@@ -163,6 +206,17 @@ export interface MirrorInput {
    * what was wrong rather than a cast that pretends it was right.
    */
   fields?: unknown;
+  /**
+   * The row's own key, supplied by the caller (2026-09-22).
+   *
+   * Only read where the kind's `naturalField` is null — a table with no id
+   * column this dashboard can name. Where the kind **does** have a natural
+   * field the id is derived from the blob and this is refused, because two
+   * sources for one key is how they drift: the blob would say one thing and
+   * the column another, and the column is what every lookup and every upsert
+   * matches on.
+   */
+  natural_id?: string | null;
   /** Loops and Codex: whose table this row lives in. Either the builder or the table id. */
   builder_id?: string | null;
   table_id?: string | null;
@@ -247,12 +301,31 @@ function prepare(kind: MirrorKind, input: MirrorInput): {
     throw new MirrorError(`"record_id": "${record_id}" is not an Airtable record id (rec followed by 14 characters). Leave it out entirely if this row is not in Airtable yet.`);
   }
 
-  const natural_id = spec.naturalField ? text(fields[spec.naturalField]) : null;
+  /**
+   * The key, from exactly one place (2026-09-22).
+   *
+   * A kind with a `naturalField` reads it out of the blob, as it always has. A
+   * kind without one — Review Returns, Lane Backlog, Deep Think Log — takes it
+   * from the envelope, because the table has no id column this dashboard can
+   * name and n8n is the only thing that knows what identifies the row.
+   *
+   * Never both. An explicit `natural_id` on a kind that derives its own is
+   * refused rather than quietly ignored or quietly preferred: the blob and the
+   * column would then be two statements about one key, and every lookup and
+   * every upsert matches on the column.
+   */
+  const supplied = text(input.natural_id);
+  if (supplied && spec.naturalField) {
+    throw new MirrorError(
+      `"natural_id" cannot be sent for ${kind}: this kind takes its id from "${spec.naturalField}" inside "fields", and two sources for one key drift. Set "${spec.naturalField}" and leave "natural_id" out.`,
+    );
+  }
+  const natural_id = spec.naturalField ? text(fields[spec.naturalField]) : supplied;
   if (!record_id && !natural_id) {
     throw new MirrorError(
       spec.naturalField
         ? `Nothing to match this row on: send "record_id" (the Airtable rec… id) or set "${spec.naturalField}" inside "fields".`
-        : 'Nothing to match this row on: send "record_id" (the Airtable rec… id). This table has no natural id of its own.',
+        : `Nothing to match this row on: send "natural_id" (this row's own key, which only you know — ${kind} has no id column this dashboard can read) or "record_id" (the Airtable rec… id).`,
     );
   }
   if (!spec.keyOnNatural && !record_id) {
@@ -490,17 +563,65 @@ async function columnsOf(kind: MirrorKind): Promise<Set<string>> {
   return set;
 }
 
-/** The columns a lookup may filter on, in the order the refusal lists them. */
+/**
+ * The columns a lookup may filter on, in the order the refusal lists them.
+ *
+ * **These five names are reserved.** A filter naming one of them addresses the
+ * column, never a key of the same name inside the blob — so the resolution is
+ * one rule rather than a guess about which the caller meant. Checked against
+ * the live tables before the rule was written: across all eighteen mirror
+ * tables the only blob key with one of these names is `builder_id` on the 61
+ * digest rows, and that column is derived from precisely that key, so the two
+ * answer identically. If an Airtable base ever adds a field genuinely called
+ * `natural_id`, this is where that collision surfaces.
+ */
 export const LOOKUP_FILTER_COLUMNS = ['id', 'airtable_record_id', 'natural_id', 'builder_id', 'table_id'] as const;
 export type FilterColumn = (typeof LOOKUP_FILTER_COLUMNS)[number];
 
+/**
+ * What a lookup filter can ask (2026-09-22, Destiny), added for the Bays
+ * cutover: ~19 workflows and 100+ Airtable nodes, and an Airtable node does
+ * more than equality. Every one is ANDed with every other and with the plain
+ * column filters, and every one works on a blob field or on a reserved column.
+ *
+ *   f.    equals                  the original, and still the default
+ *   nf.   does not equal          **and matches a row where the field is absent**
+ *   c.    contains, case-insensitive
+ *   in.   equals any of a,b,c
+ *   gte.  >=   string comparison
+ *   lte.  <=   string comparison
+ *
+ * `gte.` and `lte.` are **string** comparisons and are documented as such. The
+ * blob holds Airtable's values as Airtable shaped them, and its dates are ISO
+ * strings, which sort correctly as text — so `gte.Date Raised=2026-09-01` is
+ * exact. On a number it is not: '9' sorts after '100'. That is why they are
+ * refused on `id`, which is the one genuinely numeric thing here, rather than
+ * being quietly wrong on it.
+ */
+export const LOOKUP_OPERATORS = ['f', 'nf', 'c', 'in', 'gte', 'lte'] as const;
+export type LookupOperator = (typeof LOOKUP_OPERATORS)[number];
+
+export function isLookupOperator(v: string): v is LookupOperator {
+  return (LOOKUP_OPERATORS as readonly string[]).includes(v);
+}
+
+export interface LookupFilter {
+  op: LookupOperator;
+  /** A reserved column name, or an Airtable field name exactly as it is stored. */
+  name: string;
+  value: string;
+}
+
 export interface LookupQuery {
-  /** Column filters. Only the ones the caller sent, all ANDed. */
-  columns: Partial<Record<FilterColumn, string>>;
-  /** `f.<Field Name>=<value>` — exact match inside the jsonb blob, ANDed. */
-  fields: { key: string; value: string }[];
+  /** Every filter the caller sent, in the order they arrived. All ANDed. */
+  filters: LookupFilter[];
   limit: number;
   order: 'created_asc' | 'created_desc';
+}
+
+/** How a filter reads back in an error and on the write log. */
+export function describeFilter(f: LookupFilter): string {
+  return `${f.op}.${f.name}=${f.value}`;
 }
 
 export interface LookupRow {
@@ -546,40 +667,109 @@ export const LOOKUP_LIMIT_MAX = 1000;
  * gave a createdTime to is not the oldest row, it is an undated one, and
  * leading a page with it would read as a date.
  */
+/**
+ * `in.<name>=a,b,c` — the comma-separated values, trimmed, with the empties
+ * dropped.
+ *
+ * A list that comes out empty is refused rather than matching nothing: `in.` on
+ * an empty string is far more likely to be a variable n8n failed to fill in
+ * than a genuine request for none of anything, and a filter that silently
+ * matches nothing reads on the page as a table that has gone empty.
+ */
+function splitList(f: LookupFilter): string[] {
+  const parts = f.value.split(',').map((v) => v.trim()).filter(Boolean);
+  if (!parts.length) {
+    throw new MirrorError(`"${describeFilter(f)}": "in." needs at least one value — in.${f.name}=a,b,c. An empty list is refused rather than matching no rows, because an empty one is usually a value that did not get filled in.`, 400);
+  }
+  return parts;
+}
+
 export async function lookup(kind: MirrorKind, q: LookupQuery): Promise<LookupResult> {
   const spec = KINDS[kind];
   const cols = await columnsOf(kind);
 
   const where: string[] = [];
   const params: unknown[] = [];
+  /** Binds a value and returns its placeholder. Nothing reaches the SQL any other way. */
+  const bind = (v: unknown): string => {
+    params.push(v);
+    return `$${params.length}`;
+  };
 
-  for (const col of LOOKUP_FILTER_COLUMNS) {
-    const v = q.columns[col];
-    if (v === undefined) continue;
-    if (!cols.has(col)) {
+  for (const f of q.filters) {
+    const reserved = (LOOKUP_FILTER_COLUMNS as readonly string[]).includes(f.name);
+
+    /**
+     * `id` is the one genuinely numeric thing here, so it is exact-match only
+     * and is compared as a bigint. A string comparison on it would sort '9'
+     * after '100', and a filter that is quietly wrong about order is worse
+     * than one that is refused.
+     */
+    if (f.name === 'id') {
+      if (f.op !== 'f' && f.op !== 'in') {
+        throw new MirrorError(`"${describeFilter(f)}": "${f.op}." is a text comparison and "id" is a number, so it would sort 9 after 100. Use id= or in.id=, or compare a field inside "fields".`, 400);
+      }
+      const ids = f.op === 'in' ? splitList(f) : [f.value];
+      for (const v of ids) {
+        if (!/^\d+$/.test(v)) throw new MirrorError(`"id": "${v}" is not a row id. It is this table's own bigint id — send "airtable_record_id" or "natural_id" to look a row up by an id the engine knows.`, 400);
+      }
+      where.push(f.op === 'in' ? `id = ANY(${bind(ids)}::bigint[])` : `id = ${bind(f.value)}::bigint`);
+      continue;
+    }
+
+    if (reserved && !cols.has(f.name)) {
       throw new MirrorError(
-        `"${col}" is not a column ${spec.label} holds, so it cannot be filtered on. ${kind} can be filtered on: ${LOOKUP_FILTER_COLUMNS.filter((c) => cols.has(c)).join(', ')}, and on any field inside "fields" as f.<Field Name>.`,
+        `"${f.name}" is not a column ${spec.label} holds, so it cannot be filtered on. ${kind} can be filtered on: ${LOOKUP_FILTER_COLUMNS.filter((c) => cols.has(c)).join(', ')}, and on any field inside "fields" — f.<Field Name>, and nf. c. in. gte. lte. for the other comparisons.`,
         400,
       );
     }
-    if (col === 'id') {
-      if (!/^\d+$/.test(v)) throw new MirrorError(`"id": "${v}" is not a row id. It is this table's own bigint id — send "airtable_record_id" or "natural_id" to look a row up by an id the engine knows.`, 400);
-      params.push(v);
-      where.push(`id = $${params.length}::bigint`);
-    } else {
-      params.push(v);
-      where.push(`${col} = $${params.length}`);
-    }
-  }
 
-  for (const f of q.fields) {
-    params.push(f.key);
-    const k = `$${params.length}::text`;
-    params.push(f.value);
-    // `->>` on a text key, so the comparison is against the field's text form:
-    // a number 3 matches "3" and a checkbox matches "true", which is how
-    // Airtable's own values arrive through n8n.
-    where.push(`fields ->> ${k} = $${params.length}`);
+    /**
+     * The text this filter compares against: a real column where the name is
+     * one of the reserved five, otherwise the blob key. The column name is only
+     * ever interpolated after being matched against `LOOKUP_FILTER_COLUMNS`
+     * *and* against the database's own `information_schema`, so it can never
+     * carry anything a caller sent. A field name is always a bound parameter.
+     */
+    const expr = reserved ? f.name : `fields ->> ${bind(f.name)}::text`;
+
+    switch (f.op) {
+      case 'f':
+        // `->>` on a text key, so the comparison is against the field's text
+        // form: a number 3 matches "3" and a checkbox matches "true", which is
+        // how Airtable's own values arrive through n8n.
+        where.push(`${expr} = ${bind(f.value)}`);
+        break;
+      case 'nf':
+        /**
+         * `IS DISTINCT FROM`, not `<>`, and that is the whole point of this
+         * operator. A row that has not got the field at all reads NULL, and
+         * `NULL <> 'Closed'` is NULL rather than true — so `<>` would silently
+         * drop every row missing the field, which on a schema that grew over
+         * months is most of the older ones. "Not closed" has to include "never
+         * had a Status".
+         */
+        where.push(`${expr} IS DISTINCT FROM ${bind(f.value)}`);
+        break;
+      case 'c':
+        /**
+         * `strpos` on the lower-cased pair rather than `ILIKE '%…%'`, because a
+         * value containing `%` or `_` would otherwise be read as a wildcard and
+         * a search for "100%" would match everything. This is a substring test
+         * and nothing else.
+         */
+        where.push(`strpos(lower(${expr}), lower(${bind(f.value)})) > 0`);
+        break;
+      case 'in':
+        where.push(`${expr} = ANY(${bind(splitList(f))}::text[])`);
+        break;
+      case 'gte':
+        where.push(`${expr} >= ${bind(f.value)}`);
+        break;
+      case 'lte':
+        where.push(`${expr} <= ${bind(f.value)}`);
+        break;
+    }
   }
 
   const direction = q.order === 'created_asc' ? 'ASC' : 'DESC';
@@ -651,6 +841,47 @@ export interface PatchResult extends LookupRow {
  * deliberately not among them: those are not fields, they are which of the
  * seven tables the row sits in, and changing one is a move rather than an edit.
  */
+/**
+ * The row id a natural id names, or a refusal that names the problem
+ * (2026-09-22, Destiny).
+ *
+ * n8n holds `loop_id` and `Submission ID`, not this database's bigint id — an
+ * Airtable node updates by the key it already has, and making every workflow
+ * do a lookup first only to feed the id back in is two calls for one change
+ * and a race in between.
+ *
+ * **More than one match is a 409 naming the ids, never a pick.** `natural_id`
+ * is indexed and deliberately not unique — a row the engine wrote before
+ * Airtable had one can sit beside the Airtable copy until the two are adopted —
+ * so a duplicate is a real state, and choosing one of them would write a change
+ * into whichever happened to sort first. The answer hands back both ids so the
+ * caller can say which with PATCH /:id.
+ */
+export async function resolveNatural(kind: MirrorKind, naturalId: string): Promise<number> {
+  const spec = KINDS[kind];
+  const key = naturalId.trim();
+  if (!key) throw new MirrorError(`A natural id is required in the path: PATCH /api/engine/${kind}/by-natural/<${spec.naturalField ?? 'natural_id'}>.`, 400);
+
+  const r = await query<{ id: string; airtable_record_id: string | null }>(
+    `SELECT id, airtable_record_id FROM ${spec.table} WHERE natural_id = $1 ORDER BY id LIMIT 10`,
+    [key],
+  );
+  if (!r.rows.length) {
+    throw new MirrorError(
+      `No ${spec.label} row has ${spec.naturalField ? `"${spec.naturalField}"` : 'a natural id'} "${key}". GET /api/engine/${kind}?natural_id=${encodeURIComponent(key)} to check what is held.`,
+      404,
+    );
+  }
+  if (r.rows.length > 1) {
+    const ids = r.rows.map((x) => `${x.id}${x.airtable_record_id ? ` (${x.airtable_record_id})` : ' (no Airtable record id)'}`).join(', ');
+    throw new MirrorError(
+      `"${key}" matches ${r.rows.length} ${spec.label} rows, so there is no one row to change: ${ids}. PATCH /api/engine/${kind}/<id> with the one you mean.`,
+      409,
+    );
+  }
+  return Number(r.rows[0].id);
+}
+
 export async function patchFields(kind: MirrorKind, id: string, patch: Record<string, unknown>, source: 'engine' | 'ui' = 'engine'): Promise<PatchResult> {
   const spec = KINDS[kind];
   const cols = await columnsOf(kind);
