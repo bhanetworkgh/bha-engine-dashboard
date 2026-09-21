@@ -29,7 +29,18 @@ import { query } from './pg';
 
 /* ------------------------------------------------------------------ config */
 
-const DEFAULT_ORIGINS = ['https://bhanetwork.org', 'https://www.bhanetwork.org', 'http://localhost:5173'];
+/**
+ * The apex and the www host are the front door. The onrender.com host is the
+ * same static site on its Render address, which is what serves it before DNS
+ * cuts over and what stays reachable if the apex is ever pointed elsewhere —
+ * without it, a form on that host is refused with "Origin not allowed."
+ */
+const DEFAULT_ORIGINS = [
+  'https://bhanetwork.org',
+  'https://www.bhanetwork.org',
+  'https://bhanetwork-site.onrender.com',
+  'http://localhost:5173',
+];
 
 export const ALLOWED_ORIGINS_VAR = 'EARLY_ACCESS_ALLOWED_ORIGINS';
 
