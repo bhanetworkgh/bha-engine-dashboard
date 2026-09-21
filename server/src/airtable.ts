@@ -57,6 +57,47 @@ export function airtableConfigured(): boolean {
   return Boolean(TOKEN);
 }
 
+/**
+ * Whether a change made on a page is also sent to Airtable (2026-09-21,
+ * Destiny). **Off unless AIRTABLE_WRITEBACK is set.**
+ *
+ * BHA's Airtable workspace hit its monthly API cap on 20 Sep at about 23:00
+ * UTC. Every call from here answers 429 — confirmed live through get_health on
+ * 21 Sep, `Airtable answered 429.` — so the write-back cannot land, and the
+ * engine is being moved off Airtable entirely: n8n reads and writes this
+ * dashboard's Postgres through /api/engine/:kind, and these tables are the
+ * record.
+ *
+ * So the write-back is **not deleted, and not left running into a 429.** It is
+ * a flag, defaulting off, for two reasons. A loop edit that tries and fails
+ * costs fifteen seconds of a person's time and then marks the row "not in
+ * Airtable" — a warning about a system that is deliberately no longer the
+ * record, which is worse than no warning at all. And the code has to stay
+ * until the cap resets, because the final import still needs the reads beside
+ * it.
+ *
+ * Off, every write path here answers `skipped` rather than `failed`: the edit
+ * saved, there is nothing to warn about, and the page says nothing. The
+ * *reads* — the resync and the Codex reconciliation — are deliberately not
+ * behind this flag: they are how the final import happens and they are removed
+ * in their own change.
+ */
+export const WRITEBACK_VAR = 'AIRTABLE_WRITEBACK';
+const WRITEBACK = /^(1|true|on|yes)$/i.test(process.env.AIRTABLE_WRITEBACK?.trim() ?? '');
+
+export function writebackEnabled(): boolean {
+  return WRITEBACK;
+}
+
+/**
+ * The one sentence every write path gives when the flag is off. Written once
+ * so the loop panel, the Codex panel and the write log cannot word it three
+ * ways — and worded as a statement of where the record is, not as a failure,
+ * because nothing failed.
+ */
+export const WRITEBACK_OFF_REASON =
+  `${WRITEBACK_VAR} is off, so this change was saved to this dashboard's own database and not sent to Airtable. These tables are the record.`;
+
 export class AirtableError extends Error {
   constructor(
     message: string,

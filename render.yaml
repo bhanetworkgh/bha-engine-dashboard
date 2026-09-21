@@ -166,6 +166,24 @@ services:
       # BHA Submissions & Logs — the Codex base. Same token covers both.
       - key: AIRTABLE_SUBMISSIONS_BASE_ID
         value: appEmdKshNVTl64Zf
+      # Whether an edit made on a page is ALSO written to Airtable (21 Sep 2026).
+      #
+      # OFF unless set to 1, true, on or yes, and off is the state this service
+      # ships in. BHA's Airtable workspace hit its monthly API cap on 20 Sep at
+      # about 23:00 UTC — confirmed live through the dashboard's own health
+      # probe, `Airtable answered 429.` — so every write-back call fails, and
+      # the engine is moving onto this dashboard's Postgres, which is the
+      # record. Off, a loop or Codex edit is saved here and the page says
+      # nothing about Airtable: nothing failed, so there is nothing to warn
+      # about, and a warning about a system that is deliberately no longer the
+      # record is worse than none.
+      #
+      # Declared here with an empty value rather than left out, so that turning
+      # it back on for the final import is an edit to a line that exists rather
+      # than a variable somebody has to know the name of. The resync buttons are
+      # NOT behind it — they are reads, and they are that import.
+      - key: AIRTABLE_WRITEBACK
+        value: ""
       # The MCP server's path secret (18 Sep 2026). The endpoint is
       # /mcp/<MCP_SECRET> on this same service — an MCP server mounted on the
       # existing handler, not a second service, so it deploys with this commit

@@ -166,6 +166,21 @@ explicitly for this. Therefore:
   stored on the loop and shown on it — a loop the dashboard calls closed while
   Airtable still says open must never look cleanly closed. See
   `server/src/loops.ts` and `server/src/airtable.ts`.
+- **The write-back is behind `AIRTABLE_WRITEBACK` and is off** (decision
+  2026-09-21, Destiny). The workspace is over its monthly API cap, so every one
+  of those calls answers 429, and these tables are the record. The code is not
+  deleted — the cap resets and the final import still needs the reads beside it
+  — it is gated, and the four write paths answer `skipped` rather than `failed`.
+  **Off, a page edit says nothing about Airtable**: no error, no "not in
+  Airtable" marker, because nothing failed, and a warning about a system that is
+  deliberately no longer the record is worse than no warning. Two things follow
+  from it. **A builder move lands in Postgres**, because with nothing asking
+  Airtable it lands here or it has not happened at all — the rule above holds
+  only while the write-back is on. And a **Retry now on a duplicate stays a
+  duplicate** and says why: that button exists to delete an Airtable row, the
+  copy really is still in two tables, and saying nothing would be claiming a
+  repair that did not happen. **The resync buttons are not behind this flag**:
+  they are reads, and they are how the final import happens.
 - **Changing a loop's builder is a move, not an edit.** There is no builder
   field: the builder *is* which of the seven tables the row sits in. Read the
   source row, create in the destination, confirm a record id came back, and
@@ -405,6 +420,52 @@ explicitly for this. Therefore:
   still writes the same rows, but `record` is required there now. Every write —
   accepted or refused, with the reason — lands in `engine_writes` and on the
   Engine writes tab.
+- **n8n can read and part-update through the same surface** (decision
+  2026-09-21, Destiny). BHA's shared Airtable workspace hit its monthly API cap
+  on 20 Sep at about 23:00 UTC and every n8n workflow that touches Airtable is
+  failing, so Airtable is being cut out of the engine: every Airtable node
+  becomes an HTTPS call here, and these tables become the only record. n8n could
+  already write a whole record. It could not read one back and it could not
+  change part of one, which an Airtable node does constantly, so
+  `GET /api/engine/:kind` and `PATCH /api/engine/:kind/:id` exist. Same key,
+  same header, same log. **n8n never connects to Postgres**: `bha-engine-db`
+  stays closed to everything outside its Render environment, exactly as
+  render.yaml intends, and these two routes are the whole of what reaches it
+  from outside.
+- **The lookup is the only readable thing under `/api/engine`.** Every other
+  method and path there is still refused, and the in-process loopback
+  `get_page_data` reads through still refuses the whole prefix by name whatever
+  the method. Filters — `id`, `airtable_record_id`, `natural_id`, `builder_id`,
+  `table_id`, and `f.<Field Name>` for a key inside the blob — are all optional
+  and all ANDed, with `limit` (100, at most 1,000) and `order`. **A filter
+  naming a column that kind's table has not got is refused** and the answer
+  names the ones it has: `patterns` has no `builder_id`, and quietly ignoring
+  the filter would answer a different question confidently. Which columns a
+  table has is **read from `information_schema`, not derived from the kind's
+  spec** — `engine_client_requests` carries `table_id` although its spec says it
+  is not per-lane, so the obvious derivation is already wrong on a live table.
+  `count` is every row that matched rather than the page, because a caller that
+  asked for twenty of six hundred needs to know there are six hundred. **Field
+  names are bound parameters**, never concatenated: the only things interpolated
+  are the table and column names, and both come from this code and from the
+  database.
+- **PATCH merges into `fields` and touches nothing else.** A key not sent is
+  left exactly as it is and a key sent as `null` is removed — which is the whole
+  reason it exists beside POST, a whole-record write that replaces the blob: an
+  Airtable node setting one field would otherwise drop the other twenty-two,
+  the same rule this section already states for an interface edit. The promoted
+  columns are **re-derived from the merged blob** so they cannot drift from it,
+  and `changed` is decided by Postgres with `IS DISTINCT FROM`, as on the
+  upsert. `builder_id` and `table_id` are deliberately not re-derived: those are
+  not fields, they are which of the seven tables the row sits in, and changing
+  one is a move rather than an edit.
+- **A lookup is logged as `read`, not as a write.** It is on `engine_writes`
+  because it is the same surface with the same key, and it is its own outcome so
+  that the writes can still be counted without it; the Engine writes tab counts
+  lookups in a figure of their own for the same reason. The id in a PATCH path
+  is the row's own bigint id, which is what the lookup returns — never the
+  Airtable record id, because after the cut there will be rows that never have
+  one.
 - **The status-change history accumulates, and is now the whole ledger.** The
   events table (status changes with timestamps) is the only place a close is
   dated, and a record's previous status is its last event. An engine write
@@ -718,6 +779,12 @@ because nothing is ever written to them. Without the
 token nothing edited here reaches Airtable and no page can resync, and the
 server says so at boot and on every write — and `DATABASE_URL`, the one the
 server refuses to start without.
+`AIRTABLE_WRITEBACK` — whether a loop or Codex edit is **also** sent to
+Airtable. **Off unless set** (`1`, `true`, `on`, `yes`), from 2026-09-21. It is
+declared in the blueprint with an empty value rather than left out, so turning
+it back on for the final import is an edit to a line that exists rather than a
+variable somebody has to know the name of, and the boot line states which of the
+two states the server is in either way.
 `N8N_API_KEY` — the n8n **instance** API key. Three endpoints read
 (`GET /api/v1/executions`, `GET /api/v1/workflows` for names only, and
 `GET /api/v1/workflows/{id}` whole) and, from 2026-09-20, **one written**:

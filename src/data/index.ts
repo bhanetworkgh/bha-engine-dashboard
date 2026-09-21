@@ -336,8 +336,15 @@ export function setCodexStatus(id: string, jasonStatus: string): Promise<CodexEn
  * Deletes one submission from Airtable and from here. `confirm` is the Codex
  * entry id typed back — the server refuses anything else.
  */
-export function deleteCodexEntry(id: string, confirm: string): Promise<{ ok: true; identifier: string }> {
-  return api<{ ok: true; identifier: string }>(`/api/codex/${encodeURIComponent(id)}`, { method: 'DELETE', body: { confirm }, timeoutMs: 60_000 });
+/**
+ * `airtable.state` is what actually happened on the other side, and the panel
+ * words the confirmation from it rather than asserting both sides let go. With
+ * AIRTABLE_WRITEBACK off (2026-09-21) the Airtable row is deliberately left in
+ * place, and a toast saying "deleted from Airtable and from here" would be a
+ * plain untruth.
+ */
+export function deleteCodexEntry(id: string, confirm: string): Promise<{ ok: true; identifier: string; airtable: { state: 'ok' | 'skipped' | 'failed'; reason: string | null } }> {
+  return api(`/api/codex/${encodeURIComponent(id)}`, { method: 'DELETE', body: { confirm }, timeoutMs: 60_000 });
 }
 
 export function createLoop(input: NewLoop): Promise<Loop> {

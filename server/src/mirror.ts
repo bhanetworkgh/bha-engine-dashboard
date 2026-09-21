@@ -411,7 +411,14 @@ export interface WriteLogEntry {
   key_label: string | null;
   airtable_record_id?: string | null;
   natural_id?: string | null;
-  outcome: 'inserted' | 'updated' | 'unchanged' | 'rejected' | 'unauthorised' | 'error';
+  /**
+   * `read` is a lookup through GET /api/engine/:kind (2026-09-21). It is on
+   * this log rather than on one of its own because it is the same surface with
+   * the same key, and it is its own outcome rather than folded into the others
+   * because a reader counting what the engine wrote must be able to leave the
+   * reads out. Nothing on the page adds it to "writes accepted".
+   */
+  outcome: 'inserted' | 'updated' | 'unchanged' | 'rejected' | 'unauthorised' | 'error' | 'read';
   detail?: string | null;
   ms?: number;
 }
@@ -435,6 +442,308 @@ export async function logWrite(e: WriteLogEntry): Promise<void> {
   } catch (err) {
     console.error(`engine-write log failed: ${err instanceof Error ? err.message : String(err)}`);
   }
+}
+
+/* ------------------------------------------------- the lookup and the patch */
+
+/**
+ * n8n's read and partial-write surface (2026-09-21, Destiny).
+ *
+ * BHA's Airtable workspace hit its monthly API cap on 20 Sep and every n8n
+ * workflow that touches Airtable is failing, so Airtable is being cut out of
+ * the engine: every Airtable node becomes an HTTPS call to this dashboard, and
+ * these tables become the only record. n8n could already write a whole record
+ * here through POST /api/engine/:kind. It could not **read** one back, and it
+ * could not change **part** of one — an Airtable node does both routinely, so
+ * without them the cut could not be made.
+ *
+ * n8n never connects to Postgres. bha-engine-db stays closed to everything
+ * outside its own Render environment, exactly as render.yaml intends; these
+ * two functions are the whole of what reaches it from outside, behind the same
+ * service key every other engine route uses.
+ */
+
+/**
+ * Which columns a kind's table actually has, read from the database rather
+ * than derived from KindSpec.
+ *
+ * Deriving them looked obvious and is wrong on a live table: `engine_client_requests`
+ * carries `table_id` although its spec sets `perLaneTable: false`, so a guess
+ * from the flags would have refused a filter the column supports. Two of the
+ * three faults found through this server on 20 Sep were a name assumed rather
+ * than read, so this reads.
+ *
+ * Cached for the life of the process: the schema only changes in a migration,
+ * and migrations run once at boot before anything serves.
+ */
+const COLUMNS = new Map<MirrorKind, Set<string>>();
+
+async function columnsOf(kind: MirrorKind): Promise<Set<string>> {
+  const held = COLUMNS.get(kind);
+  if (held) return held;
+  const r = await query<{ column_name: string }>(
+    `SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1`,
+    [KINDS[kind].table],
+  );
+  const set = new Set(r.rows.map((x) => x.column_name));
+  COLUMNS.set(kind, set);
+  return set;
+}
+
+/** The columns a lookup may filter on, in the order the refusal lists them. */
+export const LOOKUP_FILTER_COLUMNS = ['id', 'airtable_record_id', 'natural_id', 'builder_id', 'table_id'] as const;
+export type FilterColumn = (typeof LOOKUP_FILTER_COLUMNS)[number];
+
+export interface LookupQuery {
+  /** Column filters. Only the ones the caller sent, all ANDed. */
+  columns: Partial<Record<FilterColumn, string>>;
+  /** `f.<Field Name>=<value>` — exact match inside the jsonb blob, ANDed. */
+  fields: { key: string; value: string }[];
+  limit: number;
+  order: 'created_asc' | 'created_desc';
+}
+
+export interface LookupRow {
+  id: number;
+  airtable_record_id: string | null;
+  natural_id: string | null;
+  builder_id: string | null;
+  table_id: string | null;
+  created_time: string | null;
+  fields: Record<string, unknown>;
+  source: string;
+  updated_at: string;
+}
+
+export interface LookupResult {
+  kind: MirrorKind;
+  /** Every row that matched, not the page. A caller paging needs to know there is more. */
+  count: number;
+  rows: LookupRow[];
+}
+
+export const LOOKUP_LIMIT_DEFAULT = 100;
+export const LOOKUP_LIMIT_MAX = 1000;
+
+/**
+ * Reads rows back out of a mirror table.
+ *
+ * **Every value is a bound parameter, the field names included.** A field name
+ * arrives from the query string — `f.Jason Status`, `f.Layer1 Review ` with its
+ * trailing space — and goes into the statement as `$n` on the right of `->>`,
+ * never concatenated into the SQL. The only things this function interpolates
+ * are the table and column names, and both come from KINDS and from the
+ * database's own information_schema, so neither can carry anything a caller
+ * sent.
+ *
+ * `count` is the total that matched, computed with a window function in the
+ * same statement. Two statements could disagree with each other across a
+ * concurrent write; one cannot, and a `count(*) OVER ()` is evaluated before
+ * the LIMIT, which is exactly what is wanted here.
+ *
+ * Ordering is `created_time` with `NULLS LAST` on both directions and the row
+ * id as the tiebreak. Nulls last either way on purpose: a row Airtable never
+ * gave a createdTime to is not the oldest row, it is an undated one, and
+ * leading a page with it would read as a date.
+ */
+export async function lookup(kind: MirrorKind, q: LookupQuery): Promise<LookupResult> {
+  const spec = KINDS[kind];
+  const cols = await columnsOf(kind);
+
+  const where: string[] = [];
+  const params: unknown[] = [];
+
+  for (const col of LOOKUP_FILTER_COLUMNS) {
+    const v = q.columns[col];
+    if (v === undefined) continue;
+    if (!cols.has(col)) {
+      throw new MirrorError(
+        `"${col}" is not a column ${spec.label} holds, so it cannot be filtered on. ${kind} can be filtered on: ${LOOKUP_FILTER_COLUMNS.filter((c) => cols.has(c)).join(', ')}, and on any field inside "fields" as f.<Field Name>.`,
+        400,
+      );
+    }
+    if (col === 'id') {
+      if (!/^\d+$/.test(v)) throw new MirrorError(`"id": "${v}" is not a row id. It is this table's own bigint id — send "airtable_record_id" or "natural_id" to look a row up by an id the engine knows.`, 400);
+      params.push(v);
+      where.push(`id = $${params.length}::bigint`);
+    } else {
+      params.push(v);
+      where.push(`${col} = $${params.length}`);
+    }
+  }
+
+  for (const f of q.fields) {
+    params.push(f.key);
+    const k = `$${params.length}::text`;
+    params.push(f.value);
+    // `->>` on a text key, so the comparison is against the field's text form:
+    // a number 3 matches "3" and a checkbox matches "true", which is how
+    // Airtable's own values arrive through n8n.
+    where.push(`fields ->> ${k} = $${params.length}`);
+  }
+
+  const direction = q.order === 'created_asc' ? 'ASC' : 'DESC';
+  params.push(Math.min(Math.max(Math.trunc(q.limit), 1), LOOKUP_LIMIT_MAX));
+  const limit = `$${params.length}`;
+
+  const select = [
+    'id',
+    'airtable_record_id',
+    'natural_id',
+    cols.has('builder_id') ? 'builder_id' : 'NULL::text AS builder_id',
+    cols.has('table_id') ? 'table_id' : 'NULL::text AS table_id',
+    'created_time',
+    'fields',
+    'source',
+    'updated_at',
+    'count(*) OVER () AS total',
+  ].join(', ');
+
+  const r = await query<LookupRow & { id: string; total: string }>(
+    `SELECT ${select} FROM ${spec.table}
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY created_time ${direction} NULLS LAST, id ${direction}
+      LIMIT ${limit}`,
+    params,
+  );
+
+  return {
+    kind,
+    count: Number(r.rows[0]?.total ?? 0),
+    rows: r.rows.map((row) => ({
+      id: Number(row.id),
+      airtable_record_id: row.airtable_record_id,
+      natural_id: row.natural_id,
+      builder_id: row.builder_id,
+      table_id: row.table_id,
+      created_time: row.created_time,
+      fields: row.fields,
+      source: row.source,
+      updated_at: row.updated_at,
+    })),
+  };
+}
+
+export interface PatchResult extends LookupRow {
+  kind: MirrorKind;
+  /** Decided by Postgres comparing the row before against the row after, same as the upsert. */
+  changed: boolean;
+}
+
+/**
+ * Changes some of the keys inside one row's `fields`, and nothing else.
+ *
+ * The merge is `fields || $patch`, so **a key that is not sent is untouched**.
+ * That is the whole point of the route: an Airtable node that sets one field
+ * leaves the other twenty-two alone, and a full POST that replaced the blob
+ * with the two keys the caller happened to know about would drop the rest —
+ * the same rule section 4 of CLAUDE.md already states for an interface edit.
+ *
+ * **A key sent as `null` is removed**, which is the one thing `||` cannot do on
+ * its own: it would store a JSON null and the field would read as present and
+ * empty. The null keys are stripped out of the patch object and applied as
+ * `- $keys::text[]` instead, so removing and setting in one body both work and
+ * neither is a string concatenation.
+ *
+ * **Promoted columns are re-derived from the merged fields**, exactly as
+ * `prepare()` derives them on a POST, so they cannot drift from the blob they
+ * are a copy of. `builder_id` and `table_id` on loops and Codex entries are
+ * deliberately not among them: those are not fields, they are which of the
+ * seven tables the row sits in, and changing one is a move rather than an edit.
+ */
+export async function patchFields(kind: MirrorKind, id: string, patch: Record<string, unknown>, source: 'engine' | 'ui' = 'engine'): Promise<PatchResult> {
+  const spec = KINDS[kind];
+  const cols = await columnsOf(kind);
+  if (!/^\d+$/.test(id)) throw new MirrorError(`"${id}" is not a row id. The id in the path is this table's own bigint id, as GET /api/engine/${kind} returns it.`, 400);
+
+  const set: Record<string, unknown> = {};
+  const drop: string[] = [];
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) drop.push(k);
+    else set[k] = v;
+  }
+  if (!Object.keys(set).length && !drop.length) {
+    throw new MirrorError('"fields" was empty, so there is nothing to change. Send the keys to set, and null for a key to remove.', 422);
+  }
+
+  return withTransaction(async (db) => {
+    const before = await db.query<{ id: string }>(`SELECT id FROM ${spec.table} WHERE id = $1::bigint FOR UPDATE`, [id]);
+    if (!before.rows[0]) {
+      throw new MirrorError(`No ${spec.label} row has id ${id}. GET /api/engine/${kind} to find it — the id in the path is this table's own id, not the Airtable record id.`, 404);
+    }
+
+    /**
+     * The merge, and the removals, in one expression. Both operands are bound.
+     *
+     * **Qualified with the target alias.** `b` carries a `fields` column too,
+     * and an unqualified reference inside the SET is ambiguous once the CTE is
+     * joined in — Postgres refuses the whole statement with
+     * `column reference "fields" is ambiguous`, which is exactly what the
+     * first run of this against a real row did. The upsert above already
+     * carries the same note about its own two COALESCEs.
+     */
+    const merged = `((t.fields || $2::jsonb) - $3::text[])`;
+    const at = nowIso();
+
+    /**
+     * Two statements rather than one, and deliberately: the promoted columns
+     * are derived from the *merged* fields, which do not exist until the merge
+     * has run. Inside one transaction, so nothing else sees the row between
+     * them, and `changed` is still decided by Postgres on the fields alone.
+     */
+    const r = await db.query<{ id: string; fields: Record<string, unknown>; changed: boolean }>(
+      `WITH b AS (SELECT id, fields FROM ${spec.table} WHERE id = $1::bigint)
+       UPDATE ${spec.table} AS t
+          SET fields = ${merged}, source = $4, updated_at = $5
+         FROM b
+        WHERE t.id = b.id
+       RETURNING t.id, t.fields, (b.fields IS DISTINCT FROM t.fields) AS changed`,
+      [id, JSON.stringify(set), drop, source, at],
+    );
+    const row = r.rows[0];
+
+    // Re-derived from the merged blob, never from the patch: a patch that did
+    // not mention the natural field must still leave natural_id agreeing with
+    // whatever the blob now says.
+    const promoted: Record<string, string | null> = {};
+    if (spec.naturalField) promoted.natural_id = text(row.fields[spec.naturalField]);
+    for (const col of spec.promote) {
+      if (col === 'lane_id') promoted.lane_id = text(row.fields.lane_id) ?? text(row.fields.Lane) ?? text(row.fields.lane) ?? text(row.fields.source);
+      else if (col === 'builder_id') promoted.builder_id = text(row.fields.builder_id);
+      else if (col === 'status') promoted.status = text(row.fields.status);
+      else if (col === 'sent_at') promoted.sent_at = text(row.fields.sent_at);
+    }
+    const promotable = Object.entries(promoted).filter(([c]) => cols.has(c));
+    if (promotable.length) {
+      await db.query(
+        `UPDATE ${spec.table} SET ${promotable.map(([c], i) => `${c} = $${i + 2}`).join(', ')} WHERE id = $1::bigint`,
+        [id, ...promotable.map(([, v]) => v)],
+      );
+    }
+
+    const out = await db.query<LookupRow & { id: string }>(
+      `SELECT id, airtable_record_id, natural_id,
+              ${cols.has('builder_id') ? 'builder_id' : 'NULL::text AS builder_id'},
+              ${cols.has('table_id') ? 'table_id' : 'NULL::text AS table_id'},
+              created_time, fields, source, updated_at
+         FROM ${spec.table} WHERE id = $1::bigint`,
+      [id],
+    );
+    const f = out.rows[0];
+    return {
+      kind,
+      id: Number(f.id),
+      airtable_record_id: f.airtable_record_id,
+      natural_id: f.natural_id,
+      builder_id: f.builder_id,
+      table_id: f.table_id,
+      created_time: f.created_time,
+      fields: f.fields,
+      source: f.source,
+      updated_at: f.updated_at,
+      changed: row.changed,
+    };
+  });
 }
 
 /* ------------------------------------------------------------ the reads */

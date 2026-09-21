@@ -160,6 +160,21 @@ function why(e: unknown): { reason: string; http: number | null } {
 export async function apply(input: ApplyInput): Promise<LoopWriteResult> {
   const steps: string[] = [];
 
+  /**
+   * The write-back is off by default as of 2026-09-21 — see AIRTABLE_WRITEBACK
+   * in airtable.ts. Checked first, before the token and the base, because when
+   * it is off neither of those matters and neither is a thing to report.
+   *
+   * `skipped`, not `failed`: the edit is saved, this dashboard's tables are the
+   * record, and there is nothing for a person to do. `unlanded()` in the
+   * interface treats only `failed` and `duplicate` as a disagreement, so the
+   * row carries no marker, the panel carries no warning and the toast says
+   * what the save said.
+   */
+  if (!airtable.writebackEnabled()) {
+    return { state: 'skipped', record_id: input.record_id, reason: airtable.WRITEBACK_OFF_REASON, http: null, steps, from_table: input.table, to_table: null };
+  }
+
   if (!airtable.airtableConfigured()) {
     return failed('AIRTABLE_TOKEN is not set on this server, so nothing was written to Airtable and the row there still holds the old values.', null, steps, input.table, null);
   }
@@ -304,6 +319,18 @@ export async function retryDelete(input: { table: string; record_id: string; to_
     from_record_id: input.record_id,
   });
 
+  /**
+   * Deliberately still a `duplicate` when the write-back is off, and
+   * deliberately not silent.
+   *
+   * This is not a page edit that saved: it is somebody pressing a button that
+   * exists to delete a row in Airtable, and the copy really is still sitting in
+   * two tables. Saying nothing would be claiming the repair happened. The
+   * action stays on offer, and it works the moment the flag goes back on.
+   */
+  if (!airtable.writebackEnabled()) {
+    return stillTwo(`${airtable.WRITEBACK_VAR} is off, so nothing was sent to Airtable and the copy was left where it is.`, null);
+  }
   if (!airtable.airtableConfigured()) {
     return stillTwo('AIRTABLE_TOKEN is not set on this server, so nothing was sent to Airtable.', null);
   }
