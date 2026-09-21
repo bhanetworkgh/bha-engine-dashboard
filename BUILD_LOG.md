@@ -8002,3 +8002,186 @@ Not tested: Against the production database or the deployed service — neither
             Capture has still not been cut over, so Slack messages have still
             not been archived since 20 Sep — this change makes that possible,
             it does not do it.
+
+## 2026-09-23 10:40 — two Airtable-backed kinds, the Bays four in the final import, and onboarding without a deploy
+Intent:     Follow-up to 74fbd54. Four things the Bays cutover still needed:
+            two kinds that were never mirrored and hold real data, the four
+            kinds added yesterday as engine-only brought into the final import
+            because each holds real Airtable history, a way to add a builder
+            that does not need a code change or an Airtable table, and the
+            lookup's owner columns pinned rather than assumed.
+Files:      server/src/migrations.ts    migration 22: two tables, two registry rows
+            server/src/sources.ts       PATTERN_CANDIDATES, BUILDER_PROFILES,
+                                        LANE_BACKLOG, DEEP_THINK_LOG,
+                                        CHANNEL_TRACKING, REVIEW_RETURNS
+            server/src/mirror.ts        the two kinds, lane_backlog's real
+                                        natural field, resolveBuilder reading
+                                        Builder Profiles, prepare() async
+            server/src/finalImport.ts   the `builders` and `bays` groups, and
+                                        keying on the Airtable record id
+            server/src/store.ts         the patterns sweep takes both tables,
+                                        the `builders` sweep
+            server/src/index.ts         /api/builders/resync
+            server/src/mcp/inventory.ts SOURCE_OF, RESYNC_ROUTE
+            server/test/lookup-shape.test.cjs   new — the owner columns, pinned
+            package.json                npm run test:lookup
+            src/data/index.ts, src/screens/EngineHealth/FinalImport.tsx
+            README.md, CLAUDE.md
+Decision:   **`builder_profiles` and `pattern_candidates` are Airtable-backed,
+            not engine-only.** Both hold real rows in Airtable today, so both
+            are swept by a resync and both are in the final import — the
+            opposite of yesterday's four, which are written here and read back
+            here.
+Decision:   **Pattern candidates ride the Build patterns resync.** Same base,
+            same page's subject, so that page's one button sweeps both tables —
+            the precedent is Research Twin, whose one button sweeps its ask
+            ledger and its job queue. No new grant on the token, because it is
+            a base it already reads.
+Decision:   **Builder Profiles has no resync button on any page.** Nothing in
+            the interface reads it — the Builders registry tab is
+            `registry_people`, a different list — and a control that filled a
+            table no screen shows is one nobody could check the result of.
+            `POST /api/builders/resync` exists for the MCP `resync` tool and
+            the final import, and `get_mirror_status` names it and says so,
+            which is where somebody looking at that kind actually is. Said
+            plainly rather than adding a button to have one.
+Decision:   **`lane_backlog` takes `task_id` from the blob after all.**
+            Migration 21 had its natural field as null on the understanding
+            that n8n minted the key; the live table carries `task_id`, so it is
+            read off the blob like every other kind with an id column — and an
+            explicit envelope `natural_id` is now refused for it, by the same
+            rule that refuses one for loops.
+Decision:   **Review Returns, Deep Think Log and Pattern Candidates are keyed
+            on Airtable's record id when imported.** None has an id column this
+            dashboard can name, and the record id is the only stable thing an
+            imported row carries; without it they would come across with a null
+            key and a second import could not match them. `held()` works the key
+            out the same way the write does, so the decision cannot be made
+            about one row and written to another.
+Decision:   **How n8n should key new rows in those three.** Review Returns and
+            Deep Think Log: send `natural_id` in the envelope, minted by n8n and
+            stable for that row — `RR-<ms>` and `DT-<ms>` are the shapes already
+            in use. Pattern Candidates: `CAND-<ms>-<4>`, as n8n already mints.
+            **Rows imported from Airtable carry the record id as their key
+            instead**, so a row created before the cutover and a row created
+            after it are keyed differently — which is correct and worth knowing:
+            a PATCH by-natural against an imported candidate names its `rec…`
+            id, not a `CAND-` one. `GET /api/engine/pattern_candidates` is what
+            says which a given row has.
+Decision:   **Adding a builder is a row, not a deploy.** `builder_id` is now
+            one of the seven *or* any Slack user id with a row in Builder
+            Profiles, with no `table_id`. `Bays — Onboarding` creates a
+            builder's table through Airtable's Meta API, which stops working
+            the moment Airtable is retired and needed a deploy here even while
+            it worked. Post the profile, and that builder's loops and Codex
+            entries are accepted from the next request.
+Decision:   **A Slack id belonging to one of the seven resolves to their name.**
+            Not to a new builder — `builder_id` on those rows keeps the one
+            spelling every page already groups by. The raw value is checked
+            against the roster **before** it is lower-cased, because a Slack id
+            is upper case and lower-casing first would miss every one of them.
+Decision:   **`table_id` stays null for a profile builder**, which is the honest
+            answer: there is no Airtable table, and writing one would be
+            inventing a location. Everything that needs a table already falls
+            back through `tableOf()`, as it does for a row the engine wrote
+            before Airtable had one.
+Decision:   **The profile lookup is on the cold path only.** It is reached only
+            when the name is not one of the seven and no `table_id` was sent, so
+            a resync of nine hundred loops still costs no extra round trip.
+            `prepare()` became async to allow it; `upsert` is its only caller.
+Decision:   **`engine_builder_profiles.natural_id` is UNIQUE**, unlike every
+            other mirror table's. A Slack id names one person, two profile rows
+            for one id is a fault rather than a state, and this table decides
+            who owns a loop. The others leave it non-unique because a row the
+            engine wrote before Airtable had one can legitimately sit beside the
+            Airtable copy until the two are adopted; a profile has no such phase.
+Decision:   **The lookup's owner columns are a test, not a comment.** n8n's
+            update-a-loop path reads `builder_id` and `table_id` to find the
+            owner, and a lookup that stopped sending them would not fail — it
+            would answer, and every workflow downstream would quietly lose the
+            owner. `npm run test:lookup` asserts the whole key set on every row,
+            that neither column is ever `undefined`, and that a kind without
+            those columns answers `null` rather than leaving them out.
+Problem:    The first final-import run against the extended replay refused every
+            row of the six new sources: `"record_id": "recCHAN00000000A" is not
+            an Airtable record id (rec followed by 14 characters).`
+Fix:        The replay's ids were `rec` + 13. Airtable's are `rec` + 14 and the
+            validator has always said so — the replay was wrong, not the code,
+            the same mistake as the `recTESTPOST00001` payload on 21 Sep.
+            Regenerated them and the same run inserted 5, kept 1, refused 0.
+            Worth recording twice because it is now twice: **a stand-in has to
+            be as strict as the thing it stands in for, or a test passes against
+            a fiction.**
+Problem:    `POST /api/builders/resync` answered 404 after it was written.
+Fix:        Nothing wrong with the route — the cell that added it ran
+            `npm run typecheck`, which does not emit, so the running server was
+            the previous build. Rebuilt and restarted: 200, two profiles read.
+            Noted because it is the second time this session a stale process
+            has read as a code fault, and the tell is the same: the behaviour
+            predates the edit exactly.
+Verified:   Against a local Postgres 16 holding the twelve real production rows,
+            an Airtable replay extended to nine tables, and read-only SELECTs
+            against production through the MCP server. **Nothing was written to
+            production.**
+            1. **Migration 22** applied to a database already at 21:
+               `engine_builder_profiles` and `engine_pattern_candidates` exist,
+               the Builder Profiles base is a new registry row and the Build
+               Patterns row now names its second table.
+            2. **POST with no `record_id`, one per new kind** — builder_profiles,
+               pattern_candidates, channel_tracking, review_returns,
+               lane_backlog, deep_think_log: **6 of 6** stored, every one
+               `matched_on=insert` with `airtable_record_id: null`. The same six
+               again: **6 of 6 `unchanged`, matched on `natural_id`**.
+               `lane_backlog` keyed on `task_id` from the blob, and an envelope
+               `natural_id` for it is refused naming `task_id` as the fix.
+            3. **The onboarding contract, in order.** A loop for `U0RITA9K2LM`
+               before the profile exists → **422**, naming Builder Profiles and
+               the five fields. The profile → inserted. The same loop and a
+               Codex entry, `builder_id` only, **no `table_id`** → both
+               inserted. Read back: `builder_id='U0RITA9K2LM'`,
+               `table_id=None` on both. `builder_id` sent as `'destiny'` and as
+               `'U0AEW3TBYH1'` both stored `builder_id='destiny'`,
+               `table_id='tblBJekl3ROpNZxQW'` — the seven are undisturbed either
+               way. `U0NOBODYATALL` → 422 with the same fix named.
+            4. **The final import, new groups.** `bays`: **5 inserted, 1 kept,
+               0 refused** — Channel Tracking read 3 and inserted 2, keeping
+               `C0AFPJ5S1C1`, which this database had already moved to a new
+               capture doc after the cutover. The report names it:
+               `field="doc_url"`, here `…/THE-NEW-DOC-BAYS-ROLLED-TO`, Airtable
+               `…/THE-OLD-AIRTABLE-DOC`, written here by `engine` at
+               2026-09-22T10:00. After the run that row still points at the new
+               doc and the other two are in — which is exactly what Message
+               Capture needs: the existing mapping, without losing the one that
+               moved. `builders`: 2 profiles inserted. `patterns`: 1 candidate
+               inserted beside the patterns sweep. Re-run of `bays`: 0 inserted,
+               5 unchanged, 1 kept — idempotent, and the keep decided afresh.
+            5. **The resyncs.** `POST /api/builders/resync` → 200, 2 read,
+               2 unchanged. `POST /api/patterns/resync` → both tables named in
+               the result, Build Patterns and Pattern Candidates.
+            6. **`get_mirror_status` knows all 24 kinds**, with the two new ones
+               as `system: airtable` and the four Bays ones as `engine-only`
+               with their real table ids — `tblmQF2ajJtsNQUft` and
+               `tbloh8gnxAfivJBx4` recorded now that the final import reads
+               them, having been left out while nothing did.
+            7. **`AIRTABLE_RETIRED=true`** still refuses the new routes with the
+               rest: `/api/builders/resync`, `/api/engine/final-import/bays` and
+               `/api/engine/final-import/builders` all **410**.
+            8. **The lookup shape, live.** Against production, read-only:
+               **946 of 946 loops** carry `builder_id` and `table_id`, across 7
+               distinct builders and 7 distinct tables; **199 of 199 Codex rows**
+               carry both, across 6 builders (Jason reviews logs, he does not
+               submit them). `npm run test:lookup` — 7 checks, all pass.
+            9. **`npm run build`, `npm run typecheck` and `npm run test:gate`** —
+               all clean.
+Not tested: Against the production database or the deployed service — neither
+            has this code until this commit deploys, and the Airtable cap is
+            still in force, so **the final import has still never run against
+            real Airtable**. The nine-table replay is stricter than it was and
+            still is not Airtable. Nothing has been repointed in n8n: no builder
+            profile has been posted by `Bays — Onboarding`, `channel_tracking`
+            holds no real row in production, and Slack messages are still not
+            being archived. The field lists for the two new kinds are what the
+            brief named and were not read off the live bases — the cap prevents
+            it — so a field spelled differently there will arrive verbatim in
+            the blob and simply not be one this dashboard names, which is the
+            safe direction but worth checking on the first real import.

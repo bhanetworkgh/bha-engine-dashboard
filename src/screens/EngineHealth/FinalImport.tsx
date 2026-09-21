@@ -32,6 +32,8 @@ const GROUP_LABEL: Record<FinalImportGroup, string> = {
   rt: 'Research Twin',
   pay: 'Pay Tracker',
   engine_events: 'Engine health — error_counts and retry_attempts',
+  builders: 'Builder profiles',
+  bays: 'Bays — channel tracking, review returns, lane backlog, deep think log',
 };
 
 type State =

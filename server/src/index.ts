@@ -1088,7 +1088,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * finished. A 404 would read as a typo to whoever is re-running a saved
      * request, and send them looking for a path that never existed.
      */
-    if (/^\/api\/(codex|patterns|commercial|clients|loops|ns|rt|pay|engine-health)\/resync$/.test(p) || FINAL_IMPORT.test(p)) {
+    if (/^\/api\/(codex|patterns|commercial|clients|loops|ns|rt|pay|engine-health|builders)\/resync$/.test(p) || FINAL_IMPORT.test(p)) {
       if (airtableRetired()) throw new HttpError(410, airtable_.RETIRED_REASON);
     }
 
@@ -1157,7 +1157,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     if (retryNow) {
       return send(res, 200, await health.retryNow(decodeURIComponent(retryNow[1]), sessionInfo(req).email));
     }
-    const sweep = p.match(/^\/api\/(patterns|commercial|clients|loops|ns|rt)\/resync$/);
+    /**
+     * `builders` has no button on any page (2026-09-23): nothing in the
+     * interface reads Builder Profiles yet, and a control that filled a table
+     * no screen shows would be one nobody could check the result of. The route
+     * exists because the MCP `resync` tool and the final import need it, and
+     * because a kind with no way to be filled is the fault mcp/inventory.ts
+     * was written to stop.
+     */
+    const sweep = p.match(/^\/api\/(patterns|commercial|clients|loops|ns|rt|builders)\/resync$/);
     if (sweep) {
       return send(res, 200, await store.resync(sweep[1] as store.ResyncKind, sessionInfo(req).email));
     }

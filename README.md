@@ -162,8 +162,10 @@ duplicating, so n8n retrying is safe. The response says which happened.
 | `digests` | — | `session_id`, else `record_id` |
 | `channel_tracking` | — | `channel_id`, else `record_id` |
 | `review_returns` | `natural_id` in the envelope | `natural_id` |
-| `lane_backlog` | `natural_id` in the envelope | `natural_id` |
+| `lane_backlog` | — | `task_id`, else `record_id` |
 | `deep_think_log` | `natural_id` in the envelope | `natural_id` |
+| `builder_profiles` | — | `user_id`, else `record_id` |
+| `pattern_candidates` | `natural_id` in the envelope | `natural_id` |
 
 ### Reading and part-updating from n8n
 
@@ -292,9 +294,19 @@ POST /api/engine/final-import/:group     (session cookie, like the resync button
 ```
 
 Groups: `loops`, `codex`, `patterns`, `commercial`, `clients`, `ns`, `rt`,
-`pay`, `engine_events`. Incidents are not among them — they come from BHARAG,
-so there is no Airtable copy to import. One button on **Engine health** runs all
-nine in turn and prints the report.
+`pay`, `engine_events`, `builders`, `bays`. Incidents are not among them — they
+come from BHARAG, so there is no Airtable copy to import. One button on **Engine
+health** runs all eleven in turn and prints the report.
+
+`bays` is the four tables the Bays workflows use. They are engine-only from here
+on — nothing resyncs them and n8n writes them directly — but each holds real
+history in Airtable that has to come across once. **`channel_tracking` is the
+one that matters**: it maps each Slack channel to the capture doc it is writing
+into, and `Bays — Message Capture` reads it on every message, so cutting over
+against an empty table would start every channel from nothing. For the tables
+with no id column of their own — Review Returns, Deep Think Log, Pattern
+Candidates — imported rows are keyed on Airtable's record id, because that is
+the only stable thing they carry.
 
 **It is not a resync, and it is deliberately not a flag on one.** A resync is
 Airtable-wins and deletes what Airtable no longer has, which is right while
@@ -341,6 +353,34 @@ whose table has no id column this dashboard can name — `review_returns`,
 instead, which is the only way such a kind can be idempotent. Never both: an
 explicit `natural_id` on a kind that derives its own is refused, because the
 blob and the column would then be two statements about one key.
+
+### Adding a builder
+
+`builder_id` on a loop or a Codex write is **one of the seven builders with a
+table of their own, or any Slack user id with a row in Builder Profiles.** The
+second is what makes onboarding a row rather than a deploy: the seven tables are
+a fixed list in `sources.ts`, and `Bays — Onboarding` created a new builder's
+table through Airtable's Meta API, which stops working the moment Airtable is
+retired.
+
+```
+POST /api/engine/builder_profiles   { "fields": { "user_id": "U0…", "name": "…",
+                                                  "pronouns": "…", "lane": "…", "role": "…" } }
+POST /api/engine/loops              { "builder_id": "U0…", "fields": { … } }     ← no table_id
+POST /api/engine/codex              { "builder_id": "U0…", "fields": { … } }
+```
+
+The profile first, then everything else follows. An id with no profile is
+refused, and the refusal names Builder Profiles as the fix. A Slack id belonging
+to one of the seven resolves to **their name**, not to a new builder, so
+`builder_id` on those rows keeps the one spelling every page groups by;
+`table_id` stays null for a profile builder, because there is no Airtable table
+and writing one would be inventing a location.
+
+**`GET /api/engine/loops` and `/codex` return `builder_id` and `table_id` on
+every row** — n8n's update-a-loop path reads them to find the owner, so it is
+pinned by `npm run test:lookup` rather than left as a comment. A kind whose
+table has neither column answers `null`, never absent.
 
 **`incidents` comes from BHARAG rather than Airtable**, so it is the one kind
 with no `record_id` to send: the ledger's `entity_id` is the key. Everything

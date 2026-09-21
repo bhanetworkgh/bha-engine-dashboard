@@ -1446,6 +1446,85 @@ const MIGRATIONS: Migration[] = [
         WHERE id = 'appEmdKshNVTl64Zf' AND (notes IS NULL OR notes = '')`,
     ],
   },
+  {
+    id: 22,
+    name: 'builder profiles and pattern candidates',
+    statements: [
+      /**
+       * Two more Airtable-backed kinds (2026-09-23), and unlike migration 21's
+       * four these are **not** engine-only: both hold real rows in Airtable
+       * today, both are swept by a resync, and both are in the final import.
+       *
+       * **`builder_profiles` (app6wGosV52Ur4mIF / tblsgl1O3iskbrR8t) is the
+       * one that unblocks onboarding.** Loops and Codex entries resolve their
+       * owner from the seven fixed tables in `sources.ts`, and
+       * `Bays — Onboarding` creates a new builder's table through Airtable's
+       * Meta API — which stops working the moment Airtable is retired, and
+       * would need a code change and a deploy either way. With a profile row,
+       * a new builder's loops and Codex entries are accepted on their Slack id
+       * with no table at all. `user_id` is the Slack id and is the natural id.
+       *
+       * **`pattern_candidates` (app5ni3E8r7Lvxk22 / tblqTkT6hEWESdd1y)** sits
+       * in the Build Patterns base and is swept by that page's resync, the way
+       * Research Twin's one button sweeps its ask ledger and its job queue.
+       * Its ids are minted by n8n as `CAND-<ms>-<4>` and are not a column this
+       * dashboard can name, so they arrive as `natural_id` in the envelope.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_builder_profiles (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      /**
+       * Unique, unlike every other mirror table's `natural_id`, and
+       * deliberately: a Slack id names one person, two profile rows for one id
+       * is a fault rather than a state, and this table is about to decide who
+       * owns a loop. The other tables leave it non-unique because a row the
+       * engine wrote before Airtable had one can legitimately sit beside the
+       * Airtable copy until the two are adopted; a profile has no such phase.
+       */
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_builder_profiles_natural ON engine_builder_profiles (natural_id)`,
+
+      `CREATE TABLE IF NOT EXISTS engine_pattern_candidates (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         lane_id             text,
+         builder_id          text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_pattern_candidates_natural ON engine_pattern_candidates (natural_id)`,
+      `CREATE INDEX IF NOT EXISTS engine_pattern_candidates_lane ON engine_pattern_candidates (lane_id)`,
+
+      /**
+       * The profiles base is new to the registry; the Build Patterns base is
+       * already a row and gains a mention of its second table. Both guarded on
+       * the notes still being what they are now, so a wording Destiny has
+       * since written by hand stands — the rule migration 21 follows.
+       */
+      `INSERT INTO registry_airtable_bases (id, name, what_it_is_for, url, notes, created_at, updated_at)
+       VALUES ('app6wGosV52Ur4mIF', 'BHA Builder Profiles',
+               'One row per builder: name, pronouns, lane, role and Slack user id.',
+               'https://airtable.com/app6wGosV52Ur4mIF',
+               'Builder Profiles (tblsgl1O3iskbrR8t), keyed on user_id — the Slack id. Mirrored at POST /api/engine/builder_profiles from 23 Sep 2026, and it is what makes onboarding a row rather than a deploy: a loop or Codex entry is accepted on a builder_id this table knows, with no Airtable table of their own. Bays — Onboarding should write the profile first and everything else follows.',
+               to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+               to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
+       ON CONFLICT (id) DO NOTHING`,
+      `UPDATE registry_airtable_bases
+          SET notes = 'Build Patterns (tblaMXSMjmz30OvcU) and Pattern Candidates (tblqTkT6hEWESdd1y) — a candidate is a pattern somebody flagged and an architect has not yet turned into one. Both are swept by the Build patterns page''s one Resync from Airtable, and both are in the final import. Candidate ids are minted by n8n as CAND-<ms>-<4> and arrive as "natural_id" in the envelope, because they are not a column this dashboard can name.',
+              updated_at = to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = 'app5ni3E8r7Lvxk22' AND (notes IS NULL OR notes = '')`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

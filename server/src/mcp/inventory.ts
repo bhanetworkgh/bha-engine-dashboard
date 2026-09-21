@@ -103,15 +103,28 @@ export const SOURCE_OF: Record<MirrorKind, SourceSpec> = {
   },
   lane_backlog: {
     system: 'engine-only',
-    tables: [],
-    dynamic: 'In the Bays Tools Router base (appMNvZsFRb9isRRq). No table id is recorded, deliberately: nothing in this server reads Airtable for it, so a table id here would be a constant with no caller — and a constant with no caller is one nobody notices going stale.',
-    note: 'Written only by the engine posting to /api/engine/lane_backlog, with "natural_id" supplied in the envelope.',
+    tables: [at(sources.LANE_BACKLOG)],
+    note: 'In the Bays Tools Router base, keyed on task_id. Written by the engine posting to /api/engine/lane_backlog. The table id is recorded from 23 Sep 2026 because the final import reads it — it was left out while nothing did, on the rule that a constant with no caller is one nobody notices going stale.',
   },
   deep_think_log: {
     system: 'engine-only',
-    tables: [],
-    dynamic: 'In the Bays Tools Router base (appMNvZsFRb9isRRq), the same base as lane_backlog and for the same reason no table id is recorded here.',
-    note: 'Written only by the engine posting to /api/engine/deep_think_log, with "natural_id" supplied in the envelope.',
+    tables: [at(sources.DEEP_THINK_LOG)],
+    note: 'In the Bays Tools Router base. Written by the engine posting to /api/engine/deep_think_log with "natural_id" in the envelope; the final import keys the rows it brings across on their Airtable record id, because the table has no id column of its own.',
+  },
+  /**
+   * The two Airtable-backed kinds added on 2026-09-23. Unlike the four above
+   * these are not engine-only: both hold real rows in Airtable, both are swept
+   * by a resync, and both are in the final import.
+   */
+  builder_profiles: {
+    system: 'airtable',
+    tables: [at(sources.BUILDER_PROFILES)],
+    note: 'One row per builder, keyed on user_id — the Slack id. It is what makes onboarding a row rather than a deploy: a loop or a Codex entry is accepted for any builder this table knows, with no Airtable table of their own. Its resync has no button on any page, because nothing in the interface reads it yet; run it from here.',
+  },
+  pattern_candidates: {
+    system: 'airtable',
+    tables: [at(sources.PATTERN_CANDIDATES)],
+    note: 'A pattern somebody flagged that an architect has not yet turned into one. Same base as Build Patterns, and that page\'s one Resync from Airtable sweeps both.',
   },
 };
 
@@ -133,6 +146,7 @@ interface ResyncRoute {
   run: (actor: string) => Promise<Resync>;
 }
 
+const patternsRoute: ResyncRoute = { label: 'Build patterns — Resync from Airtable', fills: ['patterns', 'pattern_candidates'], run: (a) => store.resync('patterns', a) };
 const clientsRoute: ResyncRoute = { label: 'Clients — Resync from Airtable', fills: ['client_lanes', 'client_questions', 'client_requests'], run: (a) => store.resync('clients', a) };
 const codexRoute: ResyncRoute = { label: 'Codex entries — Resync from Airtable', fills: ['codex', 'layer0'], run: (a) => store.resyncCodex(a) };
 const rtRoute: ResyncRoute = { label: 'Research Twin — Resync from Airtable', fills: ['rt-asks', 'rt-jobs'], run: (a) => store.resync('rt', a) };
@@ -143,7 +157,7 @@ export const RESYNC_ROUTE: Record<MirrorKind, ResyncRoute | null> = {
   loops: { label: 'Open loops — Resync from Airtable', fills: ['loops'], run: (a) => store.resync('loops', a) },
   codex: codexRoute,
   layer0: codexRoute,
-  patterns: { label: 'Build patterns — Resync from Airtable', fills: ['patterns'], run: (a) => store.resync('patterns', a) },
+  patterns: patternsRoute,
   commercial: { label: 'Commercial — Resync from Airtable', fills: ['commercial'], run: (a) => store.resync('commercial', a) },
   'ns-asks': { label: 'North Star — Resync from Airtable', fills: ['ns-asks'], run: (a) => store.resync('ns', a) },
   'rt-asks': rtRoute,
@@ -170,6 +184,14 @@ export const RESYNC_ROUTE: Record<MirrorKind, ResyncRoute | null> = {
   review_returns: null,
   lane_backlog: null,
   deep_think_log: null,
+  /**
+   * These two do resync (2026-09-23). Build patterns' own button sweeps the
+   * candidates beside the patterns; Builder Profiles has a pass of its own
+   * with no button on any page, because nothing in the interface reads it yet
+   * — this tool is how it is run.
+   */
+  builder_profiles: { label: 'Builder Profiles — resync (no page button; run it from here)', fills: ['builder_profiles'], run: (a) => store.resync('builders', a) },
+  pattern_candidates: patternsRoute,
 };
 
 export function assertKind(kind: string): MirrorKind {

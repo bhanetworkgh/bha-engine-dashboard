@@ -24,7 +24,7 @@
  */
 import { nowIso } from './db';
 import { query, withTransaction, type Queryable } from './pg';
-import { CODEX_TABLES, LOOP_TABLES, type AtRecord } from './sources';
+import { CODEX_TABLES, LOOP_TABLES, SLACK_TO_BUILDER, type AtRecord } from './sources';
 
 export class MirrorError extends Error {
   constructor(
@@ -60,7 +60,9 @@ export type MirrorKind =
   | 'channel_tracking'
   | 'review_returns'
   | 'lane_backlog'
-  | 'deep_think_log';
+  | 'deep_think_log'
+  | 'builder_profiles'
+  | 'pattern_candidates';
 
 interface KindSpec {
   table: string;
@@ -160,8 +162,34 @@ export const KINDS: Record<MirrorKind, KindSpec> = {
    */
   channel_tracking: { table: 'engine_channel_tracking', label: 'Channel Tracking', naturalField: 'channel_id', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
   review_returns: { table: 'engine_review_returns', label: 'Review Returns', naturalField: null, keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
-  lane_backlog: { table: 'engine_lane_backlog', label: 'Lane Backlog', naturalField: null, keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
+  /**
+   * `task_id` is the natural field after all (2026-09-23). Migration 21 had it
+   * as null on the understanding that n8n minted the key; the live table
+   * carries one, so it is read off the blob like every other kind that has an
+   * id column, and an explicit envelope `natural_id` is refused for it now.
+   */
+  lane_backlog: { table: 'engine_lane_backlog', label: 'Lane Backlog', naturalField: 'task_id', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
   deep_think_log: { table: 'engine_deep_think_log', label: 'Deep Think Log', naturalField: null, keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
+  /**
+   * Two more Airtable-backed kinds (2026-09-23) — not engine-only like the four
+   * above: both hold real rows in Airtable, both are swept by a resync, and
+   * both are in the final import.
+   *
+   * **`builder_profiles` is the one that unblocks onboarding.** `user_id` is
+   * the Slack id and is the key, and `resolveBuilder` reads this table: a loop
+   * or a Codex entry is accepted for any builder it knows, with no Airtable
+   * table of their own. Adding a builder is a row here rather than a deploy —
+   * which it had to become, because `Bays — Onboarding` creates a builder's
+   * table through Airtable's Meta API and that stops working the moment
+   * Airtable is retired.
+   *
+   * **`pattern_candidates`** ids are minted by n8n as `CAND-<ms>-<4>` and are
+   * not a column this dashboard can name, so they arrive as `natural_id` in
+   * the envelope. `builder_id` is promoted because a candidate names the
+   * builder who flagged it, and that is what the page would group by.
+   */
+  builder_profiles: { table: 'engine_builder_profiles', label: 'Builder Profiles', naturalField: 'user_id', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
+  pattern_candidates: { table: 'engine_pattern_candidates', label: 'Pattern Candidates', naturalField: null, keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id', 'builder_id'] },
 };
 
 export const KIND_LIST = Object.keys(KINDS) as MirrorKind[];
@@ -255,7 +283,7 @@ const TBL = /^tbl[A-Za-z0-9]{14}$/;
  * 7 Sep. So this takes the table id or the builder name and never looks at
  * `Assignee Slack User ID`, even when one is sitting right there in `fields`.
  */
-function resolveBuilder(kind: MirrorKind, input: MirrorInput): { builder_id: string; table_id: string | null } {
+async function resolveBuilder(kind: MirrorKind, input: MirrorInput): Promise<{ builder_id: string; table_id: string | null }> {
   const byTable = kind === 'loops' ? LOOP_TABLE_IDS : CODEX_TABLE_IDS;
   const table = text(input.table_id);
   if (table) {
@@ -267,28 +295,71 @@ function resolveBuilder(kind: MirrorKind, input: MirrorInput): { builder_id: str
     }
     return { builder_id: owner, table_id: table };
   }
-  const builder = text(input.builder_id)?.toLowerCase() ?? null;
-  if (!builder) {
-    throw new MirrorError(`"builder_id" is required for ${kind}: which builder's table this row lives in decides who owns it. Send "builder_id" (e.g. "destiny") or "table_id" (the tbl… id).`);
+  const sent = text(input.builder_id);
+  if (!sent) {
+    throw new MirrorError(
+      `"builder_id" is required for ${kind}: it is what decides who owns this row. Send "builder_id" — one of the seven names (e.g. "destiny"), or a Slack user id that has a row in Builder Profiles — or "table_id" (the tbl… id) for one of the seven tables.`,
+    );
   }
-  if (!BUILDERS.has(builder)) {
-    throw new MirrorError(`"builder_id": "${builder}" is not a builder this engine knows. One of: ${[...BUILDERS].sort().join(', ')}.`);
+
+  /**
+   * One of the seven, by either name.
+   *
+   * A Slack id belonging to one of them resolves to their name rather than
+   * being treated as a new builder, so `builder_id` on those rows keeps the
+   * one spelling every page already groups by. The raw value is checked
+   * against the roster before it is lower-cased, because a Slack id is upper
+   * case and lower-casing it first would miss.
+   */
+  const named = (SLACK_TO_BUILDER[sent] ?? sent.toLowerCase()).trim();
+  if (BUILDERS.has(named)) {
+    const known = [...byTable.entries()].find(([, owner]) => owner === named);
+    if (!known) {
+      throw new MirrorError(`"builder_id": "${named}" has no ${kind === 'loops' ? 'Open Loops' : 'submissions'} table. ${kind === 'codex' ? 'Jason reviews logs, he does not submit them.' : ''}`.trim());
+    }
+    return { builder_id: named, table_id: known[0] };
   }
-  const known = [...byTable.entries()].find(([, owner]) => owner === builder);
-  if (!known) {
-    throw new MirrorError(`"builder_id": "${builder}" has no ${kind === 'loops' ? 'Open Loops' : 'submissions'} table. ${kind === 'codex' ? 'Jason reviews logs, he does not submit them.' : ''}`.trim());
-  }
-  return { builder_id: builder, table_id: known[0] };
+
+  /**
+   * Anybody else: a builder with a row in Builder Profiles and no Airtable
+   * table of their own (2026-09-23, Destiny).
+   *
+   * **This is what makes onboarding a row rather than a deploy.** The seven
+   * tables are a fixed list in `sources.ts`, and `Bays — Onboarding` created a
+   * new builder's table through Airtable's Meta API — which stops working the
+   * moment Airtable is retired, and needed a code change and a deploy to be
+   * read here even while it worked. A profile row is enough now: post the
+   * profile, and that builder's loops and Codex entries are accepted on their
+   * Slack id from the next request.
+   *
+   * `table_id` stays **null**, which is the honest answer: there is no
+   * Airtable table, and writing one would be inventing a location. Everything
+   * that needs a table falls back through `tableOf()` as it already does for a
+   * row the engine wrote before Airtable had one.
+   *
+   * The lookup only happens on this path — a name among the seven, or a
+   * `table_id`, never reaches it — so a resync of nine hundred loops still
+   * costs no extra round trip.
+   */
+  const profile = await query<{ natural_id: string }>(
+    `SELECT natural_id FROM ${KINDS.builder_profiles.table} WHERE natural_id = $1 LIMIT 1`,
+    [sent],
+  );
+  if (profile.rows[0]) return { builder_id: profile.rows[0].natural_id, table_id: null };
+
+  throw new MirrorError(
+    `"builder_id": "${sent}" is not a builder this engine knows. It is one of the seven with a table of their own — ${[...BUILDERS].sort().join(', ')} — or any Slack user id with a row in Builder Profiles. If this is a new builder, POST their profile to /api/engine/builder_profiles first (fields: user_id, name, pronouns, lane, role) and this write will be accepted; adding a builder is a row, not a deploy.`,
+  );
 }
 
 /** Validates the envelope and works out the columns to promote. */
-function prepare(kind: MirrorKind, input: MirrorInput): {
+async function prepare(kind: MirrorKind, input: MirrorInput): Promise<{
   record_id: string | null;
   natural_id: string | null;
   created_time: string | null;
   fields: Record<string, unknown>;
   extra: Record<string, string | null>;
-} {
+}> {
   const spec = KINDS[kind];
 
   if (!input.fields || typeof input.fields !== 'object' || Array.isArray(input.fields)) {
@@ -334,7 +405,7 @@ function prepare(kind: MirrorKind, input: MirrorInput): {
 
   const extra: Record<string, string | null> = {};
   if (spec.perBuilder) {
-    const r = resolveBuilder(kind, input);
+    const r = await resolveBuilder(kind, input);
     extra.builder_id = r.builder_id;
     extra.table_id = r.table_id;
   }
@@ -353,7 +424,10 @@ function prepare(kind: MirrorKind, input: MirrorInput): {
     // being assumed: a promoted column that silently comes back null files
     // every row under "(no lane)".
     if (col === 'lane_id') extra.lane_id = text(input.lane_id) ?? text(fields.lane_id) ?? text(fields.Lane) ?? text(fields.lane) ?? text(fields.source);
-    else if (col === 'builder_id') extra.builder_id = text(input.builder_id) ?? text(fields.builder_id);
+    // `builder_id` on a digest, `Builder Slack ID` or `Builder` on a pattern
+    // candidate. All of them read rather than one assumed, on the rule the
+    // lane spellings above already follow.
+    else if (col === 'builder_id') extra.builder_id = text(input.builder_id) ?? text(fields.builder_id) ?? text(fields['Builder Slack ID']) ?? text(fields.Builder);
     else if (col === 'status') extra.status = text(fields.status);
     else if (col === 'sent_at') extra.sent_at = text(fields.sent_at);
   }
@@ -377,7 +451,7 @@ function prepare(kind: MirrorKind, input: MirrorInput): {
  */
 export async function upsert(kind: MirrorKind, input: MirrorInput, source: 'airtable' | 'engine' | 'ui', on?: Queryable): Promise<MirrorResult> {
   const spec = KINDS[kind];
-  const p = prepare(kind, input);
+  const p = await prepare(kind, input);
   const at = nowIso();
 
   const run = async (db: Queryable): Promise<MirrorResult> => {

@@ -53,6 +53,12 @@ import {
   RESEARCH_JOBS,
   RESEARCH_TWIN,
   RETRY_ATTEMPTS,
+  BUILDER_PROFILES,
+  CHANNEL_TRACKING,
+  DEEP_THINK_LOG,
+  LANE_BACKLOG,
+  PATTERN_CANDIDATES,
+  REVIEW_RETURNS,
   mapClientLane,
   type AtRecord,
 } from './sources';
@@ -70,7 +76,7 @@ import {
 export const CUTOVER_AT = '2026-09-21T00:00:00.000Z';
 
 /** The groups, named after the resync buttons they correspond to. */
-export const IMPORT_GROUPS = ['loops', 'codex', 'patterns', 'commercial', 'clients', 'ns', 'rt', 'pay', 'engine_events'] as const;
+export const IMPORT_GROUPS = ['loops', 'codex', 'patterns', 'commercial', 'clients', 'ns', 'rt', 'pay', 'engine_events', 'builders', 'bays'] as const;
 export type ImportGroup = (typeof IMPORT_GROUPS)[number];
 
 export function isImportGroup(v: string): v is ImportGroup {
@@ -93,6 +99,19 @@ interface ImportSource {
   kind: mirror.MirrorKind;
   /** Client questions: the lane the table belongs to, learned from the index. */
   lane_id?: string | null;
+  /**
+   * Key the imported rows on Airtable's record id (2026-09-23).
+   *
+   * For a kind whose table has no id column this dashboard can name — Review
+   * Returns, Deep Think Log — that is the only stable thing an imported row
+   * carries, so it goes into `natural_id` as well as `airtable_record_id`.
+   * Without it those rows would come across with a null key and a second
+   * import would be unable to match them.
+   *
+   * Only legal where `naturalField` is null, which is the same rule `prepare()`
+   * enforces on the envelope.
+   */
+  naturalFromRecordId?: boolean;
 }
 
 function sourcesFor(group: ImportGroup): ImportSource[] {
@@ -107,7 +126,32 @@ function sourcesFor(group: ImportGroup): ImportSource[] {
         { base: airtable.SUBMISSIONS_BASE_ID, table: CODEX_LAYER0.table, label: CODEX_LAYER0.label, kind: 'layer0' as const },
       ];
     case 'patterns':
-      return [{ base: PATTERNS.base, table: PATTERNS.table, label: PATTERNS.label, kind: 'patterns' }];
+      return [
+        { base: PATTERNS.base, table: PATTERNS.table, label: PATTERNS.label, kind: 'patterns' },
+        { base: PATTERN_CANDIDATES.base, table: PATTERN_CANDIDATES.table, label: PATTERN_CANDIDATES.label, kind: 'pattern_candidates', naturalFromRecordId: true },
+      ];
+    case 'builders':
+      return [{ base: BUILDER_PROFILES.base, table: BUILDER_PROFILES.table, label: BUILDER_PROFILES.label, kind: 'builder_profiles' }];
+    /**
+     * The four Bays tables (2026-09-23). They are engine-only from here on —
+     * nothing resyncs them and n8n writes them directly — but every one holds
+     * real history in Airtable that has to come across once, which is exactly
+     * what this pass is for and why they are in it without being on a resync
+     * button.
+     *
+     * **`channel_tracking` is the one that matters.** It maps each Slack
+     * channel to the capture doc it is currently writing into, and
+     * `Bays — Message Capture` reads it on every message. Cut over against an
+     * empty table it would start every channel from nothing and lose the
+     * mapping; this is what makes it start from the existing one.
+     */
+    case 'bays':
+      return [
+        { base: CHANNEL_TRACKING.base, table: CHANNEL_TRACKING.table, label: CHANNEL_TRACKING.label, kind: 'channel_tracking' },
+        { base: REVIEW_RETURNS.base, table: REVIEW_RETURNS.table, label: REVIEW_RETURNS.label, kind: 'review_returns', naturalFromRecordId: true },
+        { base: LANE_BACKLOG.base, table: LANE_BACKLOG.table, label: LANE_BACKLOG.label, kind: 'lane_backlog' },
+        { base: DEEP_THINK_LOG.base, table: DEEP_THINK_LOG.table, label: DEEP_THINK_LOG.label, kind: 'deep_think_log', naturalFromRecordId: true },
+      ];
     case 'commercial':
       return [{ base: COMMERCIAL.base, table: COMMERCIAL.table, label: COMMERCIAL.label, kind: 'commercial' }];
     case 'ns':
@@ -240,12 +284,18 @@ interface HeldRow {
  * claimed. Matching any other way would decide about one row and then write to
  * a different one.
  */
-async function held(kind: mirror.MirrorKind, rec: AtRecord): Promise<HeldRow | null> {
+async function held(kind: mirror.MirrorKind, rec: AtRecord, naturalFromRecordId = false): Promise<HeldRow | null> {
   const spec = mirror.KINDS[kind];
   const byRecord = await query<HeldRow>(`SELECT id, airtable_record_id, natural_id, fields, source, updated_at FROM ${spec.table} WHERE airtable_record_id = $1`, [rec.id]);
   if (byRecord.rows[0]) return byRecord.rows[0];
-  if (!spec.keyOnNatural || !spec.naturalField) return null;
-  const natural = rec.fields?.[spec.naturalField];
+  if (!spec.keyOnNatural) return null;
+  /**
+   * The key this row would land on: the kind's own field, or Airtable's record
+   * id where the table has no id column. It has to be worked out the same way
+   * the write below works it out, or the decision would be made about one row
+   * and written to another.
+   */
+  const natural = spec.naturalField ? rec.fields?.[spec.naturalField] : naturalFromRecordId ? rec.id : null;
   if (typeof natural !== 'string' || !natural.trim()) return null;
   const byNatural = await query<HeldRow>(
     `SELECT id, airtable_record_id, natural_id, fields, source, updated_at FROM ${spec.table}
@@ -316,7 +366,7 @@ export async function finalImport(group: ImportGroup, actor = 'dashboard'): Prom
 
     for (const rec of records) {
       try {
-        const mine = await held(source.kind, rec);
+        const mine = await held(source.kind, rec, source.naturalFromRecordId === true);
 
         /**
          * The whole decision, in one condition.
@@ -353,6 +403,9 @@ export async function finalImport(group: ImportGroup, actor = 'dashboard'): Prom
             // questions — the fault that had kept the Open loops resync from
             // ever storing a row. See mirror.needsTableId.
             table_id: mirror.needsTableId(source.kind) ? source.table : null,
+            // Only where the kind has no id column of its own; `prepare()`
+            // refuses it otherwise, which is the guard rather than a comment.
+            natural_id: source.naturalFromRecordId ? rec.id : null,
             lane_id:
               source.kind === 'client_requests'
                 ? (typeof rec.fields?.['Lane ID'] === 'string' ? (rec.fields['Lane ID'] as string) : null)
