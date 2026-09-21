@@ -437,16 +437,32 @@ const getHealth: ToolDefinition = {
      * have found it the same way. A liveness probe names no field, and this one
      * cannot break on a table's schema because it asks about no schema.
      */
+    /**
+     * Retired is its own answer, and deliberately neither of the other two
+     * (2026-09-22). Not `reachable: true` — nothing was asked, and claiming
+     * health for an unasked source is the exact failure this whole file is
+     * written against. Not `reachable: false` either — that reads as a fault
+     * and sends somebody to check a credential that is fine. So Airtable is
+     * simply not probed, and the line says why in words.
+     */
+    const atRetired = airtable.retired();
     const atOk = airtable.airtableConfigured();
     const probeTable = sources.PATTERNS;
-    const at = doProbe && atOk ? await timed(() => airtable.probeReachable(probeTable.base, probeTable.table, 8000)) : null;
+    const at = doProbe && atOk && !atRetired ? await timed(() => airtable.probeReachable(probeTable.base, probeTable.table, 8000)) : null;
     probes.push({
-      source: `airtable ${airtable.AIRTABLE_URL} (probed with a one-record read of ${probeTable.label} ${probeTable.base}/${probeTable.table}, naming no field)`,
+      source: atRetired
+        ? `airtable ${airtable.AIRTABLE_URL} — retired for this engine, not probed`
+        : `airtable ${airtable.AIRTABLE_URL} (probed with a one-record read of ${probeTable.label} ${probeTable.base}/${probeTable.table}, naming no field)`,
       credential: 'AIRTABLE_TOKEN',
       configured: atOk,
-      reachable: at ? at.ok : null,
+      reachable: atRetired ? null : at ? at.ok : null,
       ms: at?.ms ?? null,
-      detail: atOk ? (at ? at.detail : 'not probed') : 'AIRTABLE_TOKEN is not set, so nothing edited here reaches Airtable and no page can resync.',
+      detail: atRetired
+        ? airtable.RETIRED_REASON
+        : atOk
+          ? (at ? at.detail : 'not probed')
+          : 'AIRTABLE_TOKEN is not set, so nothing edited here reaches Airtable and no page can resync.',
+      ...(atRetired ? { retired: true } : {}),
     });
 
     for (const [lane, envVar] of Object.entries(bharag.LANE_KEY_VARS)) {
@@ -634,6 +650,9 @@ const resyncTool: ToolDefinition = {
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Fill a mirror from its source' },
   handler: async (args) => {
     const kind = assertKind(str(args, 'kind', true)!);
+    // Retired before anything else: the one tool here that acts must not act on
+    // a source the engine no longer depends on (2026-09-22).
+    if (airtable.retired()) throw new McpError('airtable_retired', airtable.RETIRED_REASON);
     const route = RESYNC_ROUTE[kind];
     if (!route) {
       throw new McpError(

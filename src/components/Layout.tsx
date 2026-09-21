@@ -203,8 +203,26 @@ export default function Layout() {
           </button>
         )}
 
+        {/*
+          The fade-in is keyed on the **page**, not on the whole path
+          (2026-09-22).
+
+          This div is remounted whenever its key changes, which is what replays
+          the fade — and on the full pathname that meant every change to the URL
+          rebuilt the page and threw away everything it held. That was invisible
+          until records gained addresses of their own: opening a loop puts its
+          id in the path, and on the old key that unmounted the page the panel
+          was on. Found in a browser, where a link to a loop this dashboard does
+          not hold set the toast saying so and the remount destroyed it
+          milliseconds later — the page answered a bad link with silence.
+
+          The first path segment is the page, which is what the animation is
+          about: moving from loops to Codex still fades, and moving from a loop
+          to the loop beside it does not, because the reader has not gone
+          anywhere.
+        */}
         <main className={cx('flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto md:overflow-hidden', !bare && '[&>div>*]:pt-[72px]')}>
-          <div key={location.pathname} className="page-in flex min-h-0 flex-1 flex-col">
+          <div key={location.pathname.split('/')[1] ?? ''} className="page-in flex min-h-0 flex-1 flex-col">
             <Outlet />
           </div>
         </main>

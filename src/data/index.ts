@@ -57,6 +57,7 @@ import type {
   RetryResult,
   RevertResult,
   RtData,
+  FinalImport,
   ServerStatus,
   SignInResult,
   TwinData,
@@ -121,6 +122,22 @@ export async function signOutOnServer(): Promise<void> {
   } catch {
     // The cookie is cleared locally regardless.
   }
+}
+
+/**
+ * The groups the final import runs, in the order the button runs them.
+ *
+ * Incidents are deliberately absent: they come from BHARAG rather than
+ * Airtable, so there is no Airtable copy to import. `engine_events` is the two
+ * Airtable tables Engine health reads — `error_counts` and `retry_attempts`.
+ */
+export const FINAL_IMPORT_GROUPS = ['loops', 'codex', 'patterns', 'commercial', 'clients', 'ns', 'rt', 'pay', 'engine_events'] as const;
+export type FinalImportGroup = (typeof FINAL_IMPORT_GROUPS)[number];
+
+export function runFinalImport(group: FinalImportGroup): Promise<FinalImport> {
+  // It reads every field of every row in a whole base group, so it is given the
+  // same room the resyncs are rather than being cut off mid-sweep.
+  return api<FinalImport>(`/api/engine/final-import/${group}`, { method: 'POST', timeoutMs: 180_000 });
 }
 
 export function getServerStatus(): Promise<ServerStatus> {

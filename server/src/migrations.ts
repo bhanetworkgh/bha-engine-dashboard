@@ -1328,6 +1328,124 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_repairs_outcome ON engine_repairs (outcome)`,
     ],
   },
+  {
+    id: 21,
+    name: 'four tables Bays reads that were never mirrored',
+    statements: [
+      /**
+       * Four Airtable tables the Bays workflows use that this dashboard has
+       * never held a copy of (2026-09-22). They are being mirrored now because
+       * Bays is the second system to come off Airtable — ~19 workflows and
+       * 100+ Airtable nodes — and a node with nowhere to point cannot be cut
+       * over.
+       *
+       * **These four are engine-only.** Nothing resyncs them, there is no page
+       * that reads them, and after the cutover Airtable holds no newer copy —
+       * n8n writes here and reads here. `SOURCE_OF` in mcp/inventory.ts says so
+       * explicitly for each, because a kind that quietly has no way to be
+       * refreshed is exactly the fault that module exists to stop.
+       *
+       * Same shape as every other mirror table: Airtable's own field names
+       * verbatim inside `fields`, `airtable_record_id` unique and nullable
+       * because most of these rows will never have one, `natural_id` indexed
+       * and not unique.
+       */
+
+      /**
+       * `channel_tracking` (apprzpppxE2yV0q84 / tblboJRTsFSkHW0ra) — one row
+       * per tracked Slack channel and the capture doc it is currently writing
+       * into. `Bays — Message Capture` looks this up on **every Slack message**,
+       * which is why it is first: that workflow has been failing since the
+       * Airtable cap hit at about 23:00 UTC on 20 Sep, so no Slack message has
+       * been archived since. `channel_id` is the natural id and is what the
+       * lookup will be keyed on.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_channel_tracking (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_channel_tracking_natural ON engine_channel_tracking (natural_id)`,
+
+      /**
+       * `review_returns` (appEmdKshNVTl64Zf / tblStfkeUZH7n2vmt) — the
+       * send-back rounds on a submitted log, one row per round. It carries no
+       * id of its own that this dashboard can name, so **n8n supplies the
+       * natural id in the envelope**; see `natural_id` on MirrorInput.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_review_returns (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_review_returns_natural ON engine_review_returns (natural_id)`,
+
+      /**
+       * `lane_backlog` and `deep_think_log`, both in the Bays Tools Router base
+       * (appMNvZsFRb9isRRq). Their table ids are not written down here: nothing
+       * in this server reads Airtable for either, so a table id would be a
+       * constant with no caller, and a constant with no caller is one nobody
+       * notices going stale. The base is named in the System Registry.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_lane_backlog (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         lane_id             text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_lane_backlog_natural ON engine_lane_backlog (natural_id)`,
+      `CREATE INDEX IF NOT EXISTS engine_lane_backlog_lane ON engine_lane_backlog (lane_id)`,
+
+      `CREATE TABLE IF NOT EXISTS engine_deep_think_log (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_deep_think_natural ON engine_deep_think_log (natural_id)`,
+
+      /**
+       * The three bases these tables live in are already registry rows, seeded
+       * with no notes. Filled in here rather than in the seed, because seeding
+       * is ON CONFLICT DO NOTHING and would never reach a row that exists.
+       *
+       * Guarded on the notes still being empty, the same way migration 4 guards
+       * the engine_events row: if Destiny has already written something there,
+       * the WHERE matches nothing and his wording stands.
+       */
+      `UPDATE registry_airtable_bases
+          SET notes = 'Channel Tracking (tblboJRTsFSkHW0ra) is one row per tracked Slack channel and the capture doc it is currently writing into. Bays — Message Capture reads it on every Slack message. Mirrored to this dashboard at POST /api/engine/channel_tracking from 22 Sep 2026, keyed on channel_id; after the Bays cutover that mirror is the record and this base is history.',
+              updated_at = to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = 'apprzpppxE2yV0q84' AND (notes IS NULL OR notes = '')`,
+      `UPDATE registry_airtable_bases
+          SET notes = 'Lane Backlog and Deep Think Log, both read and written by the Bays Tools Router. Mirrored to this dashboard at POST /api/engine/lane_backlog and POST /api/engine/deep_think_log from 22 Sep 2026. Neither carries an id this dashboard can derive, so n8n supplies "natural_id" in the envelope. Nothing here resyncs them and no table id is recorded: this server never reads this base.',
+              updated_at = to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = 'appMNvZsFRb9isRRq' AND (notes IS NULL OR notes = '')`,
+      `UPDATE registry_airtable_bases
+          SET notes = 'Codex entries and the Layer 0 completeness gate, one table per builder, plus Review Returns (tblStfkeUZH7n2vmt) — the send-back rounds on a submitted log, mirrored at POST /api/engine/review_returns from 22 Sep 2026 with the natural id supplied by n8n. The token needs read and write here for the Codex page''s own edits.',
+              updated_at = to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = 'appEmdKshNVTl64Zf' AND (notes IS NULL OR notes = '')`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

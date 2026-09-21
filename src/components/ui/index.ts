@@ -20,6 +20,7 @@ export * from './Tabs';
 export * from './TagRow';
 export * from './CountUp';
 export * from './Records';
+export * from './RecordLink';
 export * from './Resync';
 export * from './Monthly';
 export * from './MonthPicker';

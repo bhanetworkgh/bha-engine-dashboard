@@ -181,6 +181,38 @@ explicitly for this. Therefore:
   copy really is still in two tables, and saying nothing would be claiming a
   repair that did not happen. **The resync buttons are not behind this flag**:
   they are reads, and they are how the final import happens.
+- **The final import is a different pass from the resync, deliberately**
+  (decision 2026-09-22, Destiny). `POST /api/engine/final-import/:group`,
+  behind the session cookie like the resync buttons, and one button on Engine
+  health that runs all nine Airtable-backed groups in turn.
+  A resync is Airtable-wins and **deletes what Airtable no longer has**, which
+  is right while Airtable is the record and catastrophic afterwards: every row
+  the engine has written here since the cutover has no Airtable copy at all. So
+  the final import inserts what is missing, updates a row **only** where nothing
+  has written it here since the cutover or its last write was a resync, and
+  otherwise **keeps what is here and names it** with both values and the field
+  that differs. **It never deletes.** It is not a flag on the resync: one
+  function that sometimes lets Airtable win and sometimes does not is one nobody
+  can reason about at the moment they are about to run it. The cutover line is
+  `2026-09-21T00:00Z` and is a constant rather than a parameter — a caller that
+  could move it could move it past a real change. Incidents are not a group:
+  they come from BHARAG, so there is no Airtable copy to import.
+- **`AIRTABLE_RETIRED` ends the dependency** (decision 2026-09-22, Destiny),
+  off until the final import has run and been read. On: `get_health` reports
+  Airtable as **retired** rather than probing it — not healthy and not
+  unreachable, because both are claims about a live dependency and it is
+  neither; `get_mirror_status` reports every kind's source as the engine;
+  the resync and final-import buttons come off the pages and their routes answer
+  **410 Gone** with the reason, a 410 rather than a 404 because the route was
+  there, it did something, and it is finished. **The Codex page's on-load
+  reconciliation stops too**, and that one matters most: its job is to *delete*
+  rows Airtable no longer has, so left running after the cutover the first page
+  load would quietly delete every Codex entry the engine had written since.
+  Retired also forces the write-back off, because a flag saying "do not look at
+  Airtable" and one saying "do write to Airtable" cannot both be honoured and
+  only one of them can be honoured safely. **Nothing is deleted** — the client,
+  the resyncs and the final import all stay exactly as they are, because the
+  flag is reversible and a deletion is not.
 - **Changing a loop's builder is a move, not an edit.** There is no builder
   field: the builder *is* which of the seven tables the row sits in. Read the
   source row, create in the destination, confirm a record id came back, and
@@ -459,6 +491,60 @@ explicitly for this. Therefore:
   upsert. `builder_id` and `table_id` are deliberately not re-derived: those are
   not fields, they are which of the seven tables the row sits in, and changing
   one is a move rather than an edit.
+- **Six operators, not one** (decision 2026-09-22, Destiny), added for the Bays
+  cutover — ~19 workflows and 100+ Airtable nodes, and an Airtable node does
+  more than equality. `f.` equals, **`nf.` does not equal *and matches a row
+  that has not got the field at all***, `c.` contains case-insensitively, `in.`
+  equals any of a comma-separated list, `gte.` and `lte.` compare as strings.
+  Every one of them works on a blob field and on a promoted column alike, so
+  `c.natural_id=LOOP-17880` is a filter.
+  **`nf.` is `IS DISTINCT FROM`, and that is the operator's whole point**: a
+  missing field reads NULL and `NULL <> 'Closed'` is NULL rather than true, so a
+  plain `<>` would silently drop every row that never had a Status — on a schema
+  that grew over months, most of the old ones. **`c.` is `strpos` on the
+  lower-cased pair, never `ILIKE '%…%'`**, so a value containing `%` or `_` is a
+  character and not a wildcard. **`gte.`/`lte.` are string comparisons** and are
+  documented as such: Airtable's dates are ISO strings and sort correctly as
+  text, which is why they are refused on `id`, the one genuinely numeric thing
+  here, rather than being quietly wrong on it. An `in.` that comes out empty is
+  refused rather than matching nothing — an empty list is usually a value n8n
+  failed to fill in, and a filter that silently matches nothing reads as a table
+  that has gone empty.
+  **The five column names are reserved**: a filter naming one addresses the
+  column, never a blob key of the same name. Checked against the live tables
+  before the rule was written — across all eighteen mirror tables the only blob
+  key with one of those names is `builder_id` on the 61 digest rows, and that
+  column is derived from precisely that key.
+- **A row can be created without an Airtable id, in every kind Bays writes**
+  (2026-09-22). `record_id` is optional wherever the kind has a natural id, and
+  a repeat post matches on that id and updates rather than duplicating — proved
+  one kind at a time for all sixteen. **For a kind whose table has no id column
+  this dashboard can name** — Review Returns, Lane Backlog, Deep Think Log —
+  n8n supplies `natural_id` **in the envelope**, and `keyOnNatural` makes it a
+  real key, which is the only way such a kind can be idempotent. Never both: an
+  explicit `natural_id` on a kind that derives its own is refused rather than
+  quietly ignored, because the blob and the column would then be two statements
+  about one key and the column is what every lookup matches on.
+- **`PATCH /api/engine/:kind/by-natural/:natural_id`** (2026-09-22) takes the
+  same merge, because n8n holds `loop_id` and `Submission ID` rather than this
+  database's row id — making every workflow look the id up first and feed it
+  back in is two calls for one change with a race in between. **More than one
+  match is a 409 naming both ids, never a pick**: `natural_id` is deliberately
+  not unique, so a duplicate is a real state and choosing one would write into
+  whichever happened to sort first. None is a 404.
+- **Four more kinds, engine-only** (decision 2026-09-22, Destiny), for tables
+  the Bays workflows use that were never mirrored: **`channel_tracking`**
+  (`apprzpppxE2yV0q84 / tblboJRTsFSkHW0ra`, keyed on `channel_id`) — read by
+  `Bays — Message Capture` on **every Slack message**, and failing since the cap
+  hit at about 23:00 UTC on 20 Sep, so no Slack message has been archived
+  since; **`review_returns`** (`appEmdKshNVTl64Zf / tblStfkeUZH7n2vmt`), the
+  send-back rounds on a submitted log; and **`lane_backlog`** and
+  **`deep_think_log`** in the Bays Tools Router base (`appMNvZsFRb9isRRq`).
+  Nothing resyncs any of them and after the cutover no second copy exists, which
+  `get_mirror_status` says rather than naming a base nothing reads. **No table
+  id is recorded for the last two**: this server never reads that base, so a
+  table id would be a constant with no caller, and a constant with no caller is
+  one nobody notices going stale.
 - **A lookup is logged as `read`, not as a write.** It is on `engine_writes`
   because it is the same surface with the same key, and it is its own outcome so
   that the writes can still be counted without it; the Engine writes tab counts
@@ -779,6 +865,10 @@ because nothing is ever written to them. Without the
 token nothing edited here reaches Airtable and no page can resync, and the
 server says so at boot and on every write — and `DATABASE_URL`, the one the
 server refuses to start without.
+`AIRTABLE_RETIRED` — whether this dashboard has stopped depending on Airtable
+at all. **Off unless set** (`1`, `true`, `on`, `yes`), from 2026-09-22, and
+turned on only after the final import has run and its report has been read. It
+forces `AIRTABLE_WRITEBACK` off whatever that is set to.
 `AIRTABLE_WRITEBACK` — whether a loop or Codex edit is **also** sent to
 Airtable. **Off unless set** (`1`, `true`, `on`, `yes`), from 2026-09-21. It is
 declared in the blueprint with an empty value rather than left out, so turning
@@ -1333,6 +1423,17 @@ says so in its own note, and **a lane that was not read is never drawn as a
 bar** — a bar is a measured value, and whatever count is held for an unread lane
 is what happened to be stored.
 
+**The final import lives here** (2026-09-22, Destiny), on the All systems tab
+and under the page's own content: one button that runs every Airtable-backed
+group in turn and prints what it did — inserted, updated, unchanged, **kept
+newer here**, refused — with every kept row named beside both values. It is on
+this page because it is not about any one record kind, and it is below the
+figures because it is a one-off control for the cutover rather than part of
+what this page is for. The groups run one after another, never in parallel:
+nine full sweeps of somebody else's API from one click is how a careful pass
+turns into a rate limit, and the workspace is over its cap already. It takes
+itself off the page once `AIRTABLE_RETIRED` is on.
+
 **Six tabs**: All systems · Bays · North Star · Research Twin · Retries ·
 **Repairs** (the last one added 2026-09-20, with the repair bridge). **The
 three lane tabs are one component with a different lane**, because the handlers
@@ -1550,6 +1651,12 @@ The densest screen.
   supporting citation and a reason. The user approves or rejects. **Nothing ever
   auto-closes.**
 - A reconciliation view for loops that went missing during data migration.
+- **Every loop has an address**: `/open-loops/<loop_id>` opens it, and opening
+  one puts that address in the bar so it can be copied (2026-09-22, Destiny).
+  Keyed on `loop_id`, never the Airtable record id — a move between builder
+  tables mints a new record id, so a link built on one breaks at exactly the
+  moment somebody is following it. A link naming a loop this dashboard does not
+  hold says so rather than quietly showing the list.
 
 ### Codex entries / Build patterns / Commercial
 Entries by builder and week, session type, link to the narration, and the
@@ -1560,6 +1667,20 @@ question and a gate question in one row, so "Complete" overlapped "Approved".
 Clicking a row opens the whole entry: the generated codex and the review in
 full and collapsible, Jason Status and notes, the completeness verdict with what
 it found missing, and Approve / Send back to pending / Delete.
+
+**Every entry has an address too**: `/codex/<Codex Entry ID>` opens it, the
+same shape Open loops has and from the same hook so the two cannot drift. The
+Codex entry id where there is one and the submission id where there is not — a
+log still at the completeness check has no Codex entry id yet and a link to it
+has to work anyway, which is the same pair the delete confirmation falls back
+through.
+
+**The page fade-in is keyed on the page, not on the whole path** (2026-09-22).
+It always was keyed on `location.pathname`, which remounted the page on every
+URL change and threw away everything it held. That was invisible until records
+gained addresses of their own, and it is why a link to a record that is not held
+used to answer with silence: the toast saying so was destroyed milliseconds
+after it was set.
 
 Build patterns and Commercial share the Codex page's shape — the same filter
 bar, the same truncated list rows with the full record on click, the same chart

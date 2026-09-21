@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import type { Resync } from '../../data';
+import { useEffect, useState } from 'react';
+import { getServerStatus, type Resync } from '../../data';
 
 /**
  * Resync from Airtable — the control and the line it leaves behind, in one
@@ -56,8 +56,50 @@ export function resyncToast(r: Resync): { text: string; tone: 'ok' | 'failing' }
   return { text: `Resync complete in ${secs} · ${totals}${refused}${reverted}`, tone: refused || reverted ? 'failing' : 'ok' };
 }
 
-/** The button, in the page header's right slot, the same on every page that has one. */
+/**
+ * Whether Airtable is retired on this server (2026-09-22).
+ *
+ * Read once for the whole app and shared, rather than each page asking: six
+ * pages carry a resync button and six requests for one boolean on every
+ * navigation is a cost for nothing. It cannot change without a deploy — it is
+ * an environment variable — so a value read once is a value that stays right
+ * for as long as the tab is open.
+ *
+ * `null` while it is still being asked, and on a failure it stays `null` and
+ * the button is drawn. That direction is deliberate: a button that is there
+ * when it need not be costs a 410 and a sentence, and one that is missing when
+ * it is needed costs somebody the final import with nothing on screen saying
+ * where it went.
+ */
+let retiredOnce: Promise<boolean> | null = null;
+
+export function useAirtableRetired(): boolean | null {
+  const [retired, setRetired] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    retiredOnce ??= getServerStatus()
+      .then((s) => s.airtable_retired === true)
+      .catch(() => {
+        retiredOnce = null;
+        return false;
+      });
+    void retiredOnce.then((v) => {
+      if (live) setRetired(v);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  return retired;
+}
+
+/**
+ * The button, in the page header's right slot, the same on every page that has
+ * one — and gone from all six at once when Airtable is retired, because the
+ * check is here rather than on each page.
+ */
 export function ResyncButton({ busy, onClick }: { busy: boolean; onClick: () => void }) {
+  if (useAirtableRetired()) return null;
   return (
     <button type="button" onClick={onClick} disabled={busy} className="btn btn-primary gap-1.5">
       {busy ? 'Reading Airtable…' : 'Resync from Airtable'}

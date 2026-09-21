@@ -86,7 +86,12 @@ export const WRITEBACK_VAR = 'AIRTABLE_WRITEBACK';
 const WRITEBACK = /^(1|true|on|yes)$/i.test(process.env.AIRTABLE_WRITEBACK?.trim() ?? '');
 
 export function writebackEnabled(): boolean {
-  return WRITEBACK;
+  // Retired wins. A flag saying "do not look at Airtable" and a flag saying
+  // "do write to Airtable" cannot both be honoured, and of the two only one
+  // can be honoured safely — so the retirement decides, and a service left
+  // with both set behaves as the more conservative of them rather than as
+  // whichever was read last.
+  return WRITEBACK && !RETIRED;
 }
 
 /**
@@ -97,6 +102,48 @@ export function writebackEnabled(): boolean {
  */
 export const WRITEBACK_OFF_REASON =
   `${WRITEBACK_VAR} is off, so this change was saved to this dashboard's own database and not sent to Airtable. These tables are the record.`;
+
+/**
+ * Airtable, retired (decision 2026-09-22, Destiny). **Off unless
+ * AIRTABLE_RETIRED is set**, and turned on only after the final import has run
+ * and been read.
+ *
+ * The write-back flag says "do not write there". This one says "do not look
+ * there either, and stop reporting it as a thing that could be broken". Once
+ * the engine is fully cut over, an Airtable probe that answers 429 — or 200 —
+ * is a fact about a system this dashboard no longer depends on, and an
+ * amber line about it on Engine health is a warning nobody can act on, which is
+ * the same failure the standing Codex reconciliation banner was.
+ *
+ * What changes when it is on, and nothing else:
+ *
+ *   - `get_health` reports Airtable as **retired** rather than probing it. Not
+ *     "healthy" and not "unreachable": both of those are claims about a live
+ *     dependency, and it is neither.
+ *   - `get_mirror_status` reports every kind's source as the engine, because
+ *     that is then true — n8n writes these tables and reads them back.
+ *   - The resync and final-import routes answer **410 Gone** with the reason,
+ *     and their buttons come off the pages. A 410 rather than a 404: the route
+ *     was there, it did something, and it is finished — which is what somebody
+ *     re-running a saved request needs to be told.
+ *
+ * **Nothing is deleted.** The client, the resync passes and the final import
+ * all stay exactly as they are, because the flag is reversible and a deletion
+ * is not. This is a statement about what the engine depends on, not a tidy-up.
+ */
+export const RETIRED_VAR = 'AIRTABLE_RETIRED';
+const RETIRED = /^(1|true|on|yes)$/i.test(process.env.AIRTABLE_RETIRED?.trim() ?? '');
+
+export function retired(): boolean {
+  return RETIRED;
+}
+
+/**
+ * The one sentence every retired route answers with, written once so the six
+ * of them cannot word it differently.
+ */
+export const RETIRED_REASON =
+  `Airtable is retired for this engine (${RETIRED_VAR} is on), so this dashboard no longer reads it. These tables are the record: n8n writes them through /api/engine/:kind and reads them back the same way. The final import has already run; nothing here is waiting on Airtable.`;
 
 export class AirtableError extends Error {
   constructor(

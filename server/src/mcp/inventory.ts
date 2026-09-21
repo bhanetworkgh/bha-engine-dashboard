@@ -85,6 +85,34 @@ export const SOURCE_OF: Record<MirrorKind, SourceSpec> = {
     tables: [at(mirror.DIGESTS)],
     note: 'Written only by the engine pushing to /api/engine/digests. No page resyncs it, so a gap here means n8n stopped posting rather than that nobody pressed a button.',
   },
+  /**
+   * The four Bays tables (2026-09-22). All engine-only: n8n writes them here
+   * and reads them back here, nothing resyncs them, and after the cutover
+   * Airtable holds no newer copy. The base each came out of is named so a
+   * reader can still find the history; the mirror is the record from here.
+   */
+  channel_tracking: {
+    system: 'engine-only',
+    tables: [{ base: 'apprzpppxE2yV0q84', table: 'tblboJRTsFSkHW0ra', label: 'Channel Tracking' }],
+    note: 'One row per tracked Slack channel and the capture doc it is writing into, keyed on channel_id. `Bays — Message Capture` reads it on every Slack message, which is why an empty table here means Slack messages are not being archived — it is the kind to check first when the capture pipeline looks quiet. Written only by the engine posting to /api/engine/channel_tracking.',
+  },
+  review_returns: {
+    system: 'engine-only',
+    tables: [{ base: 'appEmdKshNVTl64Zf', table: 'tblStfkeUZH7n2vmt', label: 'Review Returns' }],
+    note: 'The send-back rounds on a submitted log, one row per round. It carries no id this dashboard can derive, so n8n supplies "natural_id" in the envelope. Written only by the engine posting to /api/engine/review_returns.',
+  },
+  lane_backlog: {
+    system: 'engine-only',
+    tables: [],
+    dynamic: 'In the Bays Tools Router base (appMNvZsFRb9isRRq). No table id is recorded, deliberately: nothing in this server reads Airtable for it, so a table id here would be a constant with no caller — and a constant with no caller is one nobody notices going stale.',
+    note: 'Written only by the engine posting to /api/engine/lane_backlog, with "natural_id" supplied in the envelope.',
+  },
+  deep_think_log: {
+    system: 'engine-only',
+    tables: [],
+    dynamic: 'In the Bays Tools Router base (appMNvZsFRb9isRRq), the same base as lane_backlog and for the same reason no table id is recorded here.',
+    note: 'Written only by the engine posting to /api/engine/deep_think_log, with "natural_id" supplied in the envelope.',
+  },
 };
 
 /* ------------------------------------------------------------ the resyncs */
@@ -132,6 +160,16 @@ export const RESYNC_ROUTE: Record<MirrorKind, ResyncRoute | null> = {
   // Nothing resyncs the digest deliveries: the engine posts them or they do not
   // arrive. Said explicitly, because a null here is a fact and not an omission.
   digests: null,
+  /**
+   * Nor the four Bays tables (2026-09-22), and for a stronger reason than the
+   * digests: after the cutover n8n writes them here and reads them back here,
+   * so there is no second copy that could be newer. A resync would have nothing
+   * to read and nothing to reconcile against.
+   */
+  channel_tracking: null,
+  review_returns: null,
+  lane_backlog: null,
+  deep_think_log: null,
 };
 
 export function assertKind(kind: string): MirrorKind {
@@ -202,6 +240,15 @@ export async function status(only: MirrorKind | null): Promise<{ kinds: KindStat
           : `Empty, and nothing resyncs this kind — it is filled only by the engine posting to /api/engine/${kind}. An empty table here means those posts are not arriving.`
         : `${rows} row(s), last changed ${last ?? 'never recorded'}.${by_source.engine ? ` ${by_source.engine} arrived from the engine.` : ' None arrived from the engine.'}${by_source.airtable ? ` ${by_source.airtable} came in on a resync.` : ''}`;
 
+    /**
+     * Once Airtable is retired every kind's source **is** the engine, and this
+     * says so rather than going on naming a base nothing reads (2026-09-22).
+     * The tables stay listed, because they are where the history came from and
+     * somebody will want to find it; what changes is the claim about where the
+     * rows come from now, and that a resync is no longer a thing that can be
+     * run.
+     */
+    const retired = airtable.retired() && src.system === 'airtable';
     out.push({
       kind,
       table: spec.table,
@@ -211,13 +258,17 @@ export async function status(only: MirrorKind | null): Promise<{ kinds: KindStat
       first_seen: iso(agg.rows[0]?.first ?? null),
       by_source,
       source: {
-        system: src.system,
+        system: retired ? 'engine-only' : src.system,
         tables: src.tables.map((t) => ({ ...t, link: `https://airtable.com/${t.base}/${t.table}` })),
         dynamic: src.dynamic ?? null,
-        note: src.note ?? null,
+        note: retired
+          ? `${airtable.RETIRED_REASON}${src.note ? ` — ${src.note}` : ''} The table(s) listed are where these rows came from before the cutover, kept here so the history can still be found.`
+          : (src.note ?? null),
       },
-      resync: { available: Boolean(route), label: route?.label ?? null, also_fills: route ? route.fills.filter((k) => k !== kind) : [] },
-      verdict,
+      resync: retired
+        ? { available: false, label: null, also_fills: [] }
+        : { available: Boolean(route), label: route?.label ?? null, also_fills: route ? route.fills.filter((k) => k !== kind) : [] },
+      verdict: retired && rows === 0 ? `Empty, and Airtable is retired — this kind is filled only by the engine posting to /api/engine/${kind}, so an empty table here means those posts are not arriving.` : verdict,
     });
   }
 
@@ -267,6 +318,15 @@ export async function diff(kind: MirrorKind): Promise<DiffResult> {
   const src = SOURCE_OF[kind];
   const t0 = Date.now();
 
+  /**
+   * Retired first, because it is the more specific answer (2026-09-22). Once
+   * Airtable is retired there is no second copy for either of these tools to
+   * compare against or refill from — the mirror is the record — so both refuse
+   * by name rather than reading a base nothing depends on any more.
+   */
+  if (airtable.retired()) {
+    throw new McpError('airtable_retired', `${airtable.RETIRED_REASON} There is no second copy to compare "${kind}" against: get_mirror_status("${kind}") is what this database holds, and it is the whole of it.`);
+  }
   if (src.system !== 'airtable') {
     throw new McpError(
       'not_comparable',

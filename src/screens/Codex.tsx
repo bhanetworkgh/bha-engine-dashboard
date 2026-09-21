@@ -48,6 +48,7 @@ import {
   unlanded,
   usePaged,
   useResync,
+  useRecordLink,
   useToast,
   writeWarning,
 } from '../components/ui';
@@ -795,6 +796,32 @@ export default function Codex() {
   const [open, setOpen] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const { toast, setToast } = useToast();
+  /**
+   * `/codex/<Codex Entry ID>` opens that entry, and opening one puts its
+   * address in the bar (2026-09-22) — the same shape Open loops has, from the
+   * same hook, so the two cannot drift.
+   *
+   * The Codex entry id where there is one and the submission id where there is
+   * not: a log still at the completeness check has no Codex entry id yet, and a
+   * link to it has to work anyway. That is the same pair the delete
+   * confirmation already falls back through.
+   */
+  useRecordLink({
+    base: '/codex',
+    rows: entries,
+    /*
+      `entries` is copied out of `loaded` by an effect, so for one commit the
+      fetch has come back and the list is still empty. Saying "ready" then would
+      report every link as naming a record this dashboard does not hold — so
+      ready means the rows are final, which is either some rows or a load that
+      genuinely returned none.
+    */
+    ready: Boolean(loaded) && (entries.length > 0 || loaded!.entries.length === 0),
+    keyOf: (e) => ({ natural: e.codex_entry_id ?? e.submission_id, id: e.id }),
+    openId: open,
+    setOpenId: setOpen,
+    onMissing: (id) => setToast({ text: `No Codex entry here is called ${id}. It may have been deleted, or the link may be to a submission this dashboard never held.`, tone: 'failing' }),
+  });
   const metrics = useData((query) => getRecordMetrics('codex', query, builder, month), [builder, month, tick]);
 
   useEffect(() => {
