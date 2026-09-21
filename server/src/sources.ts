@@ -91,6 +91,30 @@ export function codexTableById(table: string): { owner: string; table: string; l
   return CODEX_TABLES.find((t) => t.table === table) ?? null;
 }
 export const PATTERNS = { base: 'app5ni3E8r7Lvxk22', table: 'tblaMXSMjmz30OvcU', label: 'Build Patterns' };
+/**
+ * Pattern Candidates (2026-09-23) — a pattern somebody flagged that an
+ * architect has not yet turned into one. Same base as Build Patterns, so the
+ * one Resync from Airtable on that page sweeps both, the way Research Twin's
+ * one button sweeps its ask ledger and its job queue.
+ */
+export const PATTERN_CANDIDATES = { base: 'app5ni3E8r7Lvxk22', table: 'tblqTkT6hEWESdd1y', label: 'Pattern Candidates' };
+/**
+ * Builder Profiles (2026-09-23) — one row per builder, keyed on `user_id`,
+ * the Slack id. This is what makes onboarding a row rather than a deploy: see
+ * `resolveBuilder` in mirror.ts, which accepts a loop or a Codex entry for any
+ * builder this table knows, with no Airtable table of their own.
+ */
+export const BUILDER_PROFILES = { base: 'app6wGosV52Ur4mIF', table: 'tblsgl1O3iskbrR8t', label: 'Builder Profiles' };
+/**
+ * The two Bays Tools Router tables, named now that the final import reads them
+ * (2026-09-23). They were recorded by their base alone in migration 21,
+ * deliberately, because nothing then read them; the final import does, so the
+ * table ids exist and have a caller.
+ */
+export const LANE_BACKLOG = { base: 'appMNvZsFRb9isRRq', table: 'tblmQF2ajJtsNQUft', label: 'Lane Backlog' };
+export const DEEP_THINK_LOG = { base: 'appMNvZsFRb9isRRq', table: 'tbloh8gnxAfivJBx4', label: 'Deep Think Log' };
+export const CHANNEL_TRACKING = { base: 'apprzpppxE2yV0q84', table: 'tblboJRTsFSkHW0ra', label: 'Channel Tracking' };
+export const REVIEW_RETURNS = { base: CODEX_BASE, table: 'tblStfkeUZH7n2vmt', label: 'Review Returns' };
 export const COMMERCIAL = { base: 'appvLglfdCqOKqLpT', table: 'tblyXShZLOFT3jNMe', label: 'Commercial Opportunities' };
 
 export function loopTable(owner: string): { owner: string; table: string; label: string } | null {

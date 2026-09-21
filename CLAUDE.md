@@ -194,9 +194,22 @@ explicitly for this. Therefore:
   that differs. **It never deletes.** It is not a flag on the resync: one
   function that sometimes lets Airtable win and sometimes does not is one nobody
   can reason about at the moment they are about to run it. The cutover line is
-  `2026-09-21T00:00Z` and is a constant rather than a parameter — a caller that
-  could move it could move it past a real change. Incidents are not a group:
-  they come from BHARAG, so there is no Airtable copy to import.
+  `2026-09-21T00:00Z` and is a constant rather than a parameter — a caller able
+  to move it could move it past a real change. Incidents are not a group: they
+  come from BHARAG, so there is no Airtable copy to import.
+  **Eleven groups from 2026-09-23**, the two new ones being `builders` and
+  `bays`. The four Bays tables are engine-only from here on — nothing resyncs
+  them and n8n writes them directly — but every one holds real history in
+  Airtable that has to come across once, which is exactly what this pass is for
+  and why they are in it without being on a resync button.
+  **`channel_tracking` is the one that matters**: it maps each Slack channel to
+  the capture doc it is currently writing into, and `Bays — Message Capture`
+  reads it on every message. Cut over against an empty table it would start
+  every channel from nothing and lose the mapping. For the tables with no id
+  column of their own — Review Returns, Deep Think Log, Pattern Candidates —
+  imported rows are keyed on **Airtable's record id**, because that is the only
+  stable thing they carry; the same key decides whether a row is already held,
+  so the decision cannot be made about one row and written to another.
 - **`AIRTABLE_RETIRED` ends the dependency** (decision 2026-09-22, Destiny),
   off until the final import has run and been read. On: `get_health` reports
   Airtable as **retired** rather than probing it — not healthy and not
@@ -545,6 +558,54 @@ explicitly for this. Therefore:
   id is recorded for the last two**: this server never reads that base, so a
   table id would be a constant with no caller, and a constant with no caller is
   one nobody notices going stale.
+- **Two more Airtable-backed kinds** (decision 2026-09-23, Destiny), and unlike
+  the four above these are **not** engine-only: both hold real rows in Airtable,
+  both are swept by a resync, and both are in the final import.
+  **`builder_profiles`** (`app6wGosV52Ur4mIF / tblsgl1O3iskbrR8t`, keyed on
+  `user_id` — the Slack id) is the one that unblocks onboarding, below.
+  **`pattern_candidates`** (`app5ni3E8r7Lvxk22 / tblqTkT6hEWESdd1y`) is a
+  pattern somebody flagged that an architect has not yet turned into one; it is
+  in the Build Patterns base, so that page's one Resync from Airtable sweeps
+  both tables, the way Research Twin's one button sweeps its ask ledger and its
+  job queue. Its ids are minted by n8n as `CAND-<ms>-<4>` and are not a column
+  this dashboard can name, so they arrive as `natural_id` in the envelope.
+  **Builder Profiles has no resync button on any page**, deliberately: nothing
+  in the interface reads it yet — the Builders registry tab is
+  `registry_people`, a different list — and a control that filled a table no
+  screen shows is one nobody could check the result of. `POST /api/builders/resync`
+  exists for the MCP `resync` tool and the final import, and
+  `get_mirror_status` names it, which is where somebody looking at that kind is.
+- **Adding a builder is a row, not a deploy** (decision 2026-09-23, Destiny).
+  Loops and Codex entries resolve their owner from the seven fixed tables in
+  `sources.ts`, and `Bays — Onboarding` created a new builder's table through
+  Airtable's Meta API — which stops working the moment Airtable is retired, and
+  needed a code change and a deploy to be read here even while it worked. So
+  `builder_id` on a loop or a Codex write is now **either** one of the seven
+  **or any Slack user id with a row in Builder Profiles**, with no `table_id`.
+  **The onboarding contract, in order**: POST the profile to
+  `/api/engine/builder_profiles` with `user_id`, `name`, `pronouns`, `lane` and
+  `role`; from the next request that builder's loops and Codex entries are
+  accepted on their Slack id. An id with no profile is **refused**, and the
+  refusal names Builder Profiles as the fix rather than listing seven names and
+  stopping.
+  Two things this must not disturb. **A Slack id belonging to one of the seven
+  resolves to their name**, not to a new builder, so `builder_id` on those rows
+  keeps the one spelling every page already groups by — the raw value is
+  checked against the roster before it is lower-cased, because a Slack id is
+  upper case. And **`table_id` stays null** for a profile builder, which is the
+  honest answer: there is no Airtable table, and writing one would be inventing
+  a location. The profile lookup is only reached when the name is not one of
+  the seven and no `table_id` was sent, so a resync of nine hundred loops costs
+  no extra round trip.
+- **`GET /api/engine/loops` and `/codex` return `builder_id` and `table_id` on
+  every row**, and that is pinned by a test (`npm run test:lookup`) rather than
+  left as a comment. n8n's update-a-loop path reads them to find the owner — the
+  builder *is* which table a row sits in — so a lookup that stopped sending them
+  would not fail, it would answer, and every workflow downstream would quietly
+  lose the owner. A kind whose table has neither column answers **null**, never
+  absent, so a caller can tell "no table" from "this route stopped sending it".
+  Live at the time of writing: 946 of 946 loops and 199 of 199 Codex rows carry
+  both.
 - **A lookup is logged as `read`, not as a write.** It is on `engine_writes`
   because it is the same surface with the same key, and it is its own outcome so
   that the writes can still be counted without it; the Engine writes tab counts

@@ -129,9 +129,11 @@ export async function signOutOnServer(): Promise<void> {
  *
  * Incidents are deliberately absent: they come from BHARAG rather than
  * Airtable, so there is no Airtable copy to import. `engine_events` is the two
- * Airtable tables Engine health reads — `error_counts` and `retry_attempts`.
+ * Airtable tables Engine health reads — `error_counts` and `retry_attempts`,
+ * and `bays` is the four tables the Bays workflows use, which are engine-only
+ * from here on but each hold real history that has to come across once.
  */
-export const FINAL_IMPORT_GROUPS = ['loops', 'codex', 'patterns', 'commercial', 'clients', 'ns', 'rt', 'pay', 'engine_events'] as const;
+export const FINAL_IMPORT_GROUPS = ['loops', 'codex', 'patterns', 'commercial', 'clients', 'ns', 'rt', 'pay', 'engine_events', 'builders', 'bays'] as const;
 export type FinalImportGroup = (typeof FINAL_IMPORT_GROUPS)[number];
 
 export function runFinalImport(group: FinalImportGroup): Promise<FinalImport> {

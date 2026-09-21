@@ -120,6 +120,8 @@ import {
   isoWeek,
   loopTable,
   loopTableById,
+  BUILDER_PROFILES,
+  PATTERN_CANDIDATES,
   mapClientLane,
   mapClientQuestion,
   mapClientRequest,
@@ -1762,7 +1764,16 @@ function reasonsOf(blocked: { label: string; reason: string }[], total = blocked
  * Manual only — not on load, not on a schedule — because it reads every field
  * of every row and it deletes.
  */
-export type ResyncKind = 'patterns' | 'commercial' | 'clients' | 'loops' | 'ns' | 'rt';
+/**
+ * `builders` (2026-09-23) has **no button on any page**, deliberately: nothing
+ * in the interface reads Builder Profiles yet — the Builders registry tab is
+ * `registry_people`, a different list — and a control that filled a table no
+ * screen shows would be a button nobody could check the result of. It is
+ * reachable from the MCP `resync` tool and from the final import, and
+ * `get_mirror_status` names it, which is where somebody looking at that kind
+ * actually is.
+ */
+export type ResyncKind = 'patterns' | 'commercial' | 'clients' | 'loops' | 'ns' | 'rt' | 'builders';
 
 interface ResyncSource {
   base: string;
@@ -1851,7 +1862,18 @@ function firstSources(kind: ResyncKind): ResyncSource[] {
    * must not be guessed.
    */
   if (kind === 'loops') return LOOP_TABLES.map((t) => ({ base: airtable.loopsBase(), table: t.table, label: `${t.label} loops`, kind: 'loops' as const }));
-  if (kind === 'patterns') return [{ base: PATTERNS.base, table: PATTERNS.table, label: PATTERNS.label, kind: 'patterns' }];
+  /**
+   * Build patterns is **two** tables from 2026-09-23 — the patterns and the
+   * candidates flagged against them — swept by the page's one button, the way
+   * Research Twin's one button sweeps its ask ledger and its job queue. Same
+   * base, so no new grant on the token.
+   */
+  if (kind === 'patterns')
+    return [
+      { base: PATTERNS.base, table: PATTERNS.table, label: PATTERNS.label, kind: 'patterns' },
+      { base: PATTERN_CANDIDATES.base, table: PATTERN_CANDIDATES.table, label: PATTERN_CANDIDATES.label, kind: 'pattern_candidates' },
+    ];
+  if (kind === 'builders') return [{ base: BUILDER_PROFILES.base, table: BUILDER_PROFILES.table, label: BUILDER_PROFILES.label, kind: 'builder_profiles' }];
   if (kind === 'commercial') return [{ base: COMMERCIAL.base, table: COMMERCIAL.table, label: COMMERCIAL.label, kind: 'commercial' }];
   /**
    * The two twins, one table each (2026-09-16, Destiny), so that a row changed
@@ -2203,6 +2225,12 @@ const RECORD_KIND: Record<mirror.MirrorKind, RecordKind | null> = {
   review_returns: null,
   lane_backlog: null,
   deep_think_log: null,
+  /**
+   * Nor these two. Neither is a record kind: no page reads them and there is no
+   * status ledger to date. Null is the statement, not an omission.
+   */
+  builder_profiles: null,
+  pattern_candidates: null,
 };
 
 /**
