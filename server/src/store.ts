@@ -193,8 +193,14 @@ export class StoreError extends Error {
 
 /* ------------------------------------------------------------------ dates */
 
+/**
+ * Whole days from a to b. The two parses are two template literals (fixed
+ * 2026-09-22): a commit on 17 Sep ran them into one string, `Date.parse`
+ * answered NaN, and every loop's age went out as null — "nulld" on every row
+ * of Open loops and an age chart that said nothing was open.
+ */
 function dayDiff(a: string, b: string): number {
-  return Math.round((Date.parse(`${b.slice(0, 10)}T00:00:00Z) - Date.parse(${a.slice(0, 10)}T00:00:00Z`)) / 86_400_000);
+  return Math.round((Date.parse(`${b.slice(0, 10)}T00:00:00Z`) - Date.parse(`${a.slice(0, 10)}T00:00:00Z`)) / 86_400_000);
 }
 function weekStart(day: string): string {
   const d = new Date(`${day}T00:00:00Z`);
@@ -790,7 +796,10 @@ export async function reconcile(only?: RecordKind): Promise<ReconcileResult[]> {
 function hydrateLoop(r: Row): Loop {
   const base = JSON.parse(r.json) as Loop;
   const end = r.closed_at ?? today();
-  return { ...base, status: r.status as LoopStatus, closed_at: r.closed_at, age_days: r.raised_at ? Math.max(0, dayDiff(r.raised_at, end)) : 0 };
+  const days = r.raised_at ? dayDiff(r.raised_at, end) : 0;
+  // A Date Raised that does not parse is age 0 rather than NaN: NaN leaves as
+  // null and every figure built on it falls over quietly.
+  return { ...base, status: r.status as LoopStatus, closed_at: r.closed_at, age_days: Number.isFinite(days) ? Math.max(0, days) : 0 };
 }
 export async function loops(): Promise<Loop[]> {
   return (await rows('loops')).map(hydrateLoop);
