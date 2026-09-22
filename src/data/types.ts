@@ -1920,7 +1920,20 @@ export interface PayMetrics {
 
 /* --------------------------------------------------------------- clients */
 
+/**
+ * When this database last changed a row and what changed it (2026-09-22). A
+ * client lane can sit on a resync for days with nothing on the page saying so;
+ * this is what lets a stale lane read as stale.
+ */
+export interface HeldStamp {
+  updated_at: string;
+  /** `engine` = n8n posted it; `resync` = copied from Airtable; `page` = edited here. */
+  via: 'engine' | 'resync' | 'page';
+}
+
 export interface ClientLane {
+  /** Filled by the store from the mirror row; absent where a lane is built elsewhere. */
+  held?: HeldStamp;
   id: string;
   name: string;
   lane_id: string | null;
@@ -1947,6 +1960,7 @@ export interface ClientLane {
 }
 
 export interface ClientQuestion {
+  held?: HeldStamp;
   id: string;
   lane_id: string;
   table: string;
@@ -1981,6 +1995,7 @@ export interface ClientQuestion {
  * ID as the index, which is what lets it sit under the client that asked.
  */
 export interface ClientRequest {
+  held?: HeldStamp;
   id: string;
   /** Short name of what was asked for. */
   request: string;
@@ -2011,6 +2026,8 @@ export interface ClientLaneRow extends ClientLane {
    * so it is what says a lane is late — not the age of the last run, which only
    * says how long ago something happened.
    */
+  /** The newest change to this lane or any of its questions, and how it arrived. */
+  last_update: HeldStamp | null;
   overdue: boolean;
   /** How many days past `Next Run Due`, or null when the lane has no due date. */
   days_overdue: number | null;
@@ -2049,6 +2066,12 @@ export interface ClientsData {
   requests_freshness: Freshness;
   /** Lanes whose index row names no questions table, so nothing could be read. */
   unreadable: { lane_id: string | null; name: string; reason: string }[];
+  /**
+   * The last time n8n itself wrote each of the three kinds, from the write log
+   * (2026-09-22). Null is never — distinct from a row's own stamp, which a
+   * resync overwrites.
+   */
+  engine_last_write: { lanes: string | null; questions: string | null; requests: string | null };
 }
 
 /* --------------------------------------------------------------- records */
