@@ -76,13 +76,15 @@ export function Loops({ data, loops, total, busyId, onStatus, onOpen, onRemoveDu
       className: 'card-meta tabular',
       cellClass: (l) => (l.status === 'closed' ? 'text-faint' : ageTone(l.age_days)),
       title: (l) => (l.raised_at ? 'Days since raised' : 'No Date Raised on this row'),
-      cell: (l) => (l.raised_at ? `${l.age_days}d` : '—'),
+      cell: (l) => (l.raised_at && Number.isFinite(l.age_days) ? `${l.age_days}d` : '—'),
     },
     {
       key: 'loop',
       header: 'loop',
-      title: (l) => l.id,
-      cell: (l) => <RecordId missing="no loop_id">{l.loop_id}</RecordId>,
+      // The same fallback LoopPanel has always had (2026-09-22): a loop with no
+      // loop_id shows its record id, marked as such, never an empty cell.
+      title: (l) => (l.loop_id ? l.loop_id : `No loop_id on this row — ${l.id} is its record id`),
+      cell: (l) => (l.loop_id ? <RecordId>{l.loop_id}</RecordId> : <span className="tabular text-faint">{l.id}</span>),
     },
     {
       key: 'what',

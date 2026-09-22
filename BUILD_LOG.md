@@ -8347,3 +8347,32 @@ Decision:   Customer Service Twin: /cs-twin, Systems group, the same
 Tested:     Local build, three NS and two RT asks and one job posted through
             /api/engine: both strips render as one even row with one caption
             each, definitions under the filters, the jobs line reads correctly.
+
+## 2026-09-22 18:50 — Open loops: "nulld" was every loop's age, not a missing loop_id
+Intent:     Brief §7: rows in the time-in-status list print a literal "null".
+Files:      server/src/store.ts, src/screens/OpenLoops/Loops.tsx
+Verified:   The brief's cause does not hold. engine_loops 975 rows, 739 from an
+            Airtable resync — but only **2** have no `loop_id` (fields and
+            natural_id both null); no row stores the string "null". Reproduced
+            locally with three loops, one without a loop_id: the "null" was in
+            the **age** column, reading `nulld` on every row, and "How long
+            these have been sitting" said 0 open beside a strip saying 2.
+Problem:    `dayDiff` in store.ts, since f128037 ("Engine health is a real
+            page", 2026-09-17 21:16Z), read
+            `Date.parse(\`${b}T00:00:00Z) - Date.parse(${a}T00:00:00Z\`)` — the
+            two parses had been run into one template literal, so it parsed a
+            nonsense string, returned NaN, and `Math.max(0, NaN)` sent every
+            loop's `age_days` out as null. Everything built on it went with it:
+            the age column, the age distribution, the Overview's oldest-loop
+            figure and the Builders registry's oldest-loop age.
+Fix:        Two template literals again, and a non-finite result is 0 rather
+            than NaN. The age cell prints "—" rather than "nulld" if an age is
+            ever missing. The loop column falls back to the record id, as
+            LoopPanel already does, faint and titled "No loop_id on this row —
+            … is its record id", rather than an amber "no loop_id".
+Audit:      Every loop-id render: LoopPanel header (`loop_id ?? id`, fine),
+            LoopPanel read-only field (blank-safe), Loops.tsx duplicate banner
+            (`loop_id ?? id`), the record link (`natural ?? id`), the CSV
+            (blank for null). None printed "null"; only the table cell changed.
+Tested:     Local: ages 20d and 21d for loops raised 2 and 1 Sep, age chart
+            15–30 days 2 of 2.
