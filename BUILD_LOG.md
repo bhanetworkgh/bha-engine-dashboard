@@ -8219,3 +8219,83 @@ Fix:        The retirement is gated on the source actually being Airtable.
 Decision:   Retired Airtable tables are left out of the pass's table list rather
             than listed as unread — an unread source reads as a failure in the
             toast, and nothing failed.
+
+## 2026-09-22 18:30 — Engine health: 17 incidents in, close from the page, charts that give a number
+Intent:     6.1 verified live, then 6.2–6.5 of the brief, and global rules (a) and
+            (b) as shared components the other pages use.
+Files:      server/src/bharag.ts, server/src/health.ts, server/src/index.ts,
+            server/src/sources.ts, server/src/store.ts, src/data/index.ts,
+            src/data/types.ts, src/components/ui/InfoTip.tsx (new),
+            src/components/ui/Figures.tsx, src/components/ui/Records.tsx,
+            src/components/ui/Tabs.tsx, src/components/ui/index.ts,
+            src/screens/EngineHealth/{index,LaneView}.tsx,
+            src/screens/EngineHealth/FinalImport.tsx (deleted)
+Verified:   6.1 after the deploy of ed45ffb, through the MCP `resync("incidents")`:
+            37 → 54 rows. Bays read 23 (3 new), North Star 22 (14 new),
+            Research Twin 9 (0 new). The 17 new ones occurred between
+            2026-09-21 08:00 and 2026-09-22 08:06 UTC — none on 18, 19 or 20
+            Sep among the ones still open. All 37 older ones are still open in
+            the ledger itself, not just here.
+Problem:    Every incident was dated by its import. `mapIncident` read
+            `f.created_at`, and the ledger's rows carry `occurred_at` and
+            `recorded_at` and no `created_at` at all, so every row fell back to
+            `first_seen_at` — 2026-09-17T22:28Z for all 37 — and "Incidents
+            over time" drew one column in the week of 14 Sep. That, as much as
+            the missing axis, is why the chart said nothing.
+Fix:        `occurred_at` first, `created_at` kept as a fallback.
+Decision:   **The close route is BHARAG's own, read from its source, not
+            guessed.** The n8n agent found the only close in the engine:
+            `BHA — Self Healer Reports` → `POST /api/v1/incidents/{id}/status`
+            with `resolution_status: 'self_healed'`. The BHARAG repo
+            (bhanetworkgh/bharag, `backend/core/incidents/lifecycle.ts`) gives
+            the six states and the transitions: `open → manually_resolved` is
+            legal directly, terminal states have no way out. Its `/close` route
+            is the one meant for a person but requires a control-plane session
+            and refuses a workspace key (`INCIDENT_CLOSE_CONTROL_PLANE_REQUIRED`);
+            this server holds only the three lane keys, so it uses `/status`
+            with `manually_resolved` and names the dashboard login in
+            `resolved_by` and `payload_patch.resolved_by`. The incidents router
+            has no `requirePermission`, so a lane key can make the call.
+Decision:   Ledger first, one incident at a time, each with its own lane's key.
+            A row here is marked closed only after BHARAG answers 200, and takes
+            the ledger's returned incident as its blob. A refusal leaves the row
+            open and red ("close refused", BHARAG's reason in the tooltip).
+            Every attempt is a `record_writes` line, `kind = 'incidents'`,
+            actor = login. `writebackFailures()` without a kind now excludes
+            `incidents` — it counts Airtable write-backs and a refused close is
+            not one. The confirm dialog's count travels as `expected` and the
+            server refuses a request whose selection differs.
+Tested:     Locally against Postgres 16 and a stand-in BHARAG implementing the
+            real lifecycle table: 3 selected + one unknown id → 2 closed (Bays
+            with the Bays key, North Star with the North Star key), 1 refused
+            `409 INCIDENT_ALREADY_CLOSED` (flipped to self_healed behind our
+            back) and left open with the reason, 1 skipped as not held; a
+            mismatched `expected` refused with nothing sent. **Not run against
+            production BHARAG** — that is Destiny's click, and the 37 are hers
+            to select.
+Decision:   6.3: All systems ends at the table. The cards stay on lane tabs.
+            The final-import panel, already hidden when retired, is deleted.
+Decision:   6.4: one column per week with its count printed and its Monday
+            under it, a lane × week grid of numbers below, and class over time
+            as a class × week grid of counts rather than a seven-colour stack.
+            The window is named in the note. Every lane is read, so a quiet week
+            is a real 0 and is printed as one.
+Decision:   Rule (a) is a component, not copy: `caption` on `FigureCell`,
+            `PercentCell`, `PercentileCell` and `CountCell` puts one line (≤55
+            characters, warned in dev) under the figure and moves the whole
+            explanation behind an ⓘ beside the label (`InfoTip`, hover and
+            keyboard focus). Rule (b) is `Definition` under a filter row plus a
+            `title` on each segment.
+Decision:   6.5: filter and class words defined from the handlers' code:
+            `retryable = !(['billing_quota','config_auth','schema_validation']
+            .includes(cls) || cancelled)`; the healer retries network_timeout,
+            upstream_5xx and model_output_invalid, sends schema_validation and
+            unknown to the repair bridge, billing and auth to a person.
+            `ERROR_CLASSES.what` corrected to match: 502/503 are UPSTREAM_5XX
+            since 17 Sep, not timeouts.
+Found:      Reported, not fixed (outside this repo): the Retry now webhook
+            `/webhook/engine-heal` belongs to `Engine — Self-Healing Retry`,
+            which is **inactive**, so the button's production webhook is not
+            live; the active `BHA — Self Healer` writes no `retry_attempts`
+            rows, so Retries shows nothing it does; nothing posts to
+            `/api/engine/incidents`.

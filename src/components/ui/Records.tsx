@@ -6,6 +6,7 @@ import { StatCell } from './Card';
 import { EmptyPanel } from './EmptyState';
 import { CountUp } from './CountUp';
 import { Segmented } from './Tabs';
+import { StatCaption, StatLabel } from './InfoTip';
 
 /**
  * Shared pieces for the four records pages. Every figure on those pages is
@@ -28,6 +29,7 @@ export function CountCell({
   hint,
   hintMinLines,
   replayKey,
+  caption,
 }: {
   label: string;
   value: number;
@@ -35,16 +37,18 @@ export function CountCell({
   hint?: ReactNode;
   hintMinLines?: number;
   replayKey?: string | number;
+  /** One line of at most 55 characters; given, `hint` moves behind the label's info mark. */
+  caption?: string;
 }) {
   const toneClass = tone === 'accent' ? 'text-accent-ink' : tone === 'degraded' ? 'text-degraded' : tone === 'failing' ? 'text-failing' : tone === 'dim' ? 'text-dim' : 'text-ink';
   return (
     <StatCell>
       <div className="min-w-0">
-        <div className="kicker truncate">{label}</div>
+        {caption ? <StatLabel label={label} detail={hint} /> : <div className="kicker truncate">{label}</div>}
         <div className={`font-display tabular mt-1 text-[28px] leading-none ${toneClass}`}>
           <CountUp value={value} replayKey={replayKey} />
         </div>
-        {hint && (
+        {caption ? <StatCaption>{caption}</StatCaption> : hint && (
           // 1.375 is leading-snug; the floor is that many lines of it.
           <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={hintMinLines ? { minHeight: `${hintMinLines * 1.375}em` } : undefined}>
             {hint}

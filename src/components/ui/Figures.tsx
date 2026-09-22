@@ -4,6 +4,7 @@ import { CountUp, TileFigure } from './CountUp';
 import { HBar } from './Charts';
 import { EmptyPanel } from './EmptyState';
 import { MetricCard, StatCell } from './Card';
+import { StatCaption, StatLabel } from './InfoTip';
 
 /**
  * The figures the twins' pages are built out of.
@@ -50,18 +51,24 @@ export function PercentCell({
   share,
   bad,
   hintMinLines = 4,
+  caption,
 }: {
   label: string;
   share: Share;
   /** Returns true where this value is the genuinely bad direction. */
   bad?: (share: Share) => boolean;
   hintMinLines?: number;
+  /**
+   * One line of at most 55 characters (2026-09-22). Given, the server's note
+   * moves behind the label's info mark rather than sitting under the figure.
+   */
+  caption?: string;
 }) {
   const isBad = share.pct !== null && bad?.(share);
   return (
     <StatCell>
       <div className="min-w-0">
-        <div className="kicker truncate">{label}</div>
+        {caption ? <StatLabel label={label} detail={share.note} /> : <div className="kicker truncate">{label}</div>}
         {share.pct === null ? (
           <div className="mt-1 text-[15px] leading-tight text-faint">Not recorded</div>
         ) : (
@@ -75,20 +82,24 @@ export function PercentCell({
             </span>
           </div>
         )}
-        <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={{ minHeight: `${hintMinLines * 1.375}em` }}>
-          {share.note}
-        </div>
+        {caption ? (
+          <StatCaption>{caption}</StatCaption>
+        ) : (
+          <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={{ minHeight: `${hintMinLines * 1.375}em` }}>
+            {share.note}
+          </div>
+        )}
       </div>
     </StatCell>
   );
 }
 
 /** p50 with p95 beside it. Never a mean — the headline is the median and says so. */
-export function PercentileCell({ label, p, unit, hintMinLines = 4 }: { label: string; p: Percentiles; unit: string; hintMinLines?: number }) {
+export function PercentileCell({ label, p, unit, hintMinLines = 4, caption }: { label: string; p: Percentiles; unit: string; hintMinLines?: number; caption?: string }) {
   return (
     <StatCell>
       <div className="min-w-0">
-        <div className="kicker truncate">{label}</div>
+        {caption ? <StatLabel label={label} detail={p.note} /> : <div className="kicker truncate">{label}</div>}
         {p.p50 === null ? (
           <div className="mt-1 text-[15px] leading-tight text-faint">Not recorded</div>
         ) : (
@@ -102,32 +113,40 @@ export function PercentileCell({ label, p, unit, hintMinLines = 4 }: { label: st
             </span>
           </div>
         )}
-        <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={{ minHeight: `${hintMinLines * 1.375}em` }}>
-          {p.note}
-        </div>
+        {caption ? (
+          <StatCaption>{caption}</StatCaption>
+        ) : (
+          <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={{ minHeight: `${hintMinLines * 1.375}em` }}>
+            {p.note}
+          </div>
+        )}
       </div>
     </StatCell>
   );
 }
 
 /** A plain count on the strip, with its own footnote held to the row's depth. */
-export function FigureCell({ label, value, unit, note, tone, hintMinLines = 4 }: { label: string; value: number | null; unit?: string; note: ReactNode; tone?: 'degraded' | 'dim'; hintMinLines?: number }) {
+export function FigureCell({ label, value, unit, note, tone, hintMinLines = 4, caption, missing }: { label: string; value: number | null; unit?: string; note: ReactNode; tone?: 'degraded' | 'dim'; hintMinLines?: number; caption?: string; /** What a null prints instead of "Not recorded". */ missing?: string }) {
   const toneClass = tone === 'degraded' ? 'text-degraded' : tone === 'dim' ? 'text-dim' : 'text-ink';
   return (
     <StatCell>
       <div className="min-w-0">
-        <div className="kicker truncate">{label}</div>
+        {caption ? <StatLabel label={label} detail={note} /> : <div className="kicker truncate">{label}</div>}
         {value === null ? (
-          <div className="mt-1 text-[15px] leading-tight text-faint">Not recorded</div>
+          <div className="mt-1 text-[15px] leading-tight text-faint">{missing ?? 'Not recorded'}</div>
         ) : (
           <div className={`font-display tabular mt-1 text-[28px] leading-none ${toneClass}`}>
             <CountUp value={value} />
             {unit && <span className="ml-0.5 text-[13px] text-faint">{unit}</span>}
           </div>
         )}
-        <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={{ minHeight: `${hintMinLines * 1.375}em` }}>
-          {note}
-        </div>
+        {caption ? (
+          <StatCaption>{caption}</StatCaption>
+        ) : (
+          <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={{ minHeight: `${hintMinLines * 1.375}em` }}>
+            {note}
+          </div>
+        )}
       </div>
     </StatCell>
   );

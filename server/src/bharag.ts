@@ -13,8 +13,18 @@
  * separately — which is also what makes "this lane was not read" expressible
  * rather than looking like "this lane has no incidents".
  *
- * Nothing here writes. The handlers create incidents and the healer closes
- * them; this dashboard reads what they leave behind.
+ * **One write, from 2026-09-22 (Destiny): a person closing an incident.** The
+ * handlers create incidents and `BHA — Self Healer Reports` closes the ones it
+ * healed, with `POST /incidents/{id}/status` and `resolution_status:
+ * 'self_healed'`. Nothing closed the ones a person fixed by hand, so 37 stayed
+ * open for days after the fix. `closeIncident` uses the same route with the
+ * ledger's own state for that case, `manually_resolved` — read off BHARAG's
+ * `core/incidents/lifecycle.ts`, where `open -> manually_resolved` and
+ * `retrying -> manually_resolved` are legal and a terminal state has no way
+ * back. BHARAG's `/close` route is the one meant for a person, but it demands
+ * a control-plane session and refuses a workspace key; this server only holds
+ * the three lane keys, so `/status` is the route it can use, and
+ * `resolved_by` names the dashboard login rather than a BHARAG principal.
  */
 
 /** The ledger's REST base. One host, configured once. */
@@ -79,14 +89,16 @@ export interface LedgerIncident {
   [k: string]: unknown;
 }
 
-async function call<T>(path: string, key: string): Promise<T> {
+async function call<T>(path: string, key: string, body?: unknown): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let res: Response;
   let text: string;
   try {
     res = await fetch(`${BHARAG_URL}${path}`, {
-      headers: { 'x-api-key': key, Accept: 'application/json' },
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { 'x-api-key': key, Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: controller.signal,
     });
     text = await res.text();
@@ -103,13 +115,15 @@ async function call<T>(path: string, key: string): Promise<T> {
     throw new BharagError(`BHARAG answered ${res.status} with a body that was not JSON.`, res.status);
   }
   if (!res.ok) {
-    const err = json && typeof json === 'object' ? (json as { error?: unknown; message?: unknown; detail?: unknown }) : {};
+    const raw = json && typeof json === 'object' ? (json as Record<string, unknown>) : {};
+    // BHARAG nests its error as `{ error: { message, code } }`; older answers were flat.
+    const err = (raw.error && typeof raw.error === 'object' ? raw.error : raw) as { error?: unknown; message?: unknown; detail?: unknown; code?: unknown };
     const msg =
       (typeof err.message === 'string' && err.message) ||
       (typeof err.detail === 'string' && err.detail) ||
       (typeof err.error === 'string' && err.error) ||
       `BHARAG answered ${res.status}.`;
-    throw new BharagError(msg, res.status);
+    throw new BharagError(typeof err.code === 'string' ? `${msg} (${err.code})` : msg, res.status);
   }
   return json as T;
 }
@@ -136,6 +150,24 @@ export async function openIncidents(lane: string): Promise<LedgerIncident[]> {
     }
   }
   throw new BharagError('BHARAG answered with a shape this server does not recognise — neither a list of incidents nor an object carrying one.', 0);
+}
+
+/**
+ * Close one incident as fixed by a person: `POST /incidents/{id}/status` with
+ * `manually_resolved`, the lane's own key, and `resolved_at` / `resolved_by`
+ * in the payload patch — the same two keys the healer's close writes, so both
+ * kinds of close read the same on the ledger. Returns the ledger's own copy of
+ * the incident after the transition; throws with BHARAG's code on a refusal
+ * (`INCIDENT_INVALID_TRANSITION`, `INCIDENT_ALREADY_CLOSED`, `INCIDENT_NOT_FOUND`).
+ */
+export async function closeIncident(lane: string, entityId: string, resolvedBy: string, at: string): Promise<LedgerIncident> {
+  const key = keyFor(lane);
+  if (!key) throw new BharagError(`${LANE_KEY_VARS[lane] ?? `a key for ${lane}`} is not set on this server, so this lane's incidents cannot be closed from here.`, 503);
+  return call<LedgerIncident>(`/incidents/${encodeURIComponent(entityId)}/status`, key, {
+    resolution_status: 'manually_resolved',
+    resolved_by: resolvedBy,
+    payload_patch: { resolved_at: at, resolved_by: resolvedBy },
+  });
 }
 
 /* ------------------------------------------------------------- the healer */

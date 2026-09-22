@@ -13,6 +13,7 @@
 import { api, ApiError } from './api';
 import type {
   AskBaysData,
+  IncidentCloseResult,
   AskReply,
   AuthSession,
   BuildPattern,
@@ -238,6 +239,14 @@ export const resyncPay = () => api<Resync>('/api/pay/resync', { method: 'POST', 
  * handed over, never that it worked: that is decided by the retried run and
  * arrives on the next resync.
  */
+/**
+ * Closes incidents a person fixed, in the BHARAG ledger first (2026-09-22).
+ * `expected` is the count the confirm dialog named; the server refuses a
+ * request whose selection no longer matches it.
+ */
+export const closeIncidents = (ids: string[]) =>
+  api<IncidentCloseResult>('/api/engine-health/incidents/close', { method: 'POST', body: { ids, expected: ids.length }, timeoutMs: 180_000 });
+
 export const retryIncident = (incidentId: string) =>
   api<RetryResult>(`/api/engine-health/retry/${encodeURIComponent(incidentId)}`, { method: 'POST', timeoutMs: 90_000 });
 

@@ -1332,7 +1332,7 @@ export async function writebackFailures(kind?: RecordKind): Promise<number> {
   const r = await db().query<{ n: string }>(
     `SELECT count(*)::text AS n FROM (
        SELECT DISTINCT ON (kind, record_id) state FROM record_writes
-        ${kind ? 'WHERE kind = $1' : ''}
+        ${kind ? 'WHERE kind = $1' : "WHERE kind IS DISTINCT FROM 'incidents'"}
         ORDER BY kind, record_id, seq DESC
      ) latest WHERE state IN ('failed', 'duplicate')`,
     kind ? [kind] : [],

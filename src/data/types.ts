@@ -1529,6 +1529,33 @@ export interface Incident {
   open_now: boolean;
   last_seen_open: string | null;
   hours_to_resolve: number | null;
+  /**
+   * The newest close attempted from this dashboard, if any (2026-09-22): who,
+   * when, and whether the ledger took it. A refused close is kept on the row
+   * rather than greyed out, because a row that looks closed while the ledger
+   * still has it open is the failure this exists to prevent.
+   */
+  close_attempt: IncidentClose | null;
+}
+
+export interface IncidentClose {
+  state: 'ok' | 'failed';
+  at: string;
+  actor: string | null;
+  /** BHARAG's own reason on a refusal, verbatim. */
+  reason: string | null;
+  http: number | null;
+}
+
+export interface IncidentCloseResult {
+  at: string;
+  actor: string;
+  requested: number;
+  closed: number;
+  failed: number;
+  skipped: number;
+  results: { id: string; outcome: 'closed' | 'failed' | 'skipped'; reason: string | null; http: number | null }[];
+  note: string;
 }
 
 export interface ErrorCount {

@@ -1035,14 +1035,19 @@ export function laneLabelOf(lane: string | null): string {
  * differently every run so a retry usually works, the second because a server
  * error is not a billing refusal and was being treated as one.
  */
+/**
+ * `what` re-read against the three error handlers and \`BHA — Self Healer\` on
+ * 2026-09-22: 502 and 503 are UPSTREAM_5XX now rather than timeouts, and the
+ * healer sends SCHEMA_VALIDATION and UNKNOWN to the repair bridge, not a person.
+ */
 export const ERROR_CLASSES: { key: string; retryable: boolean; severity: string; what: string }[] = [
-  { key: 'NETWORK_TIMEOUT', retryable: true, severity: 'warning', what: 'Connection refused, a timeout, a 502 or 503 — and rate limiting. A 429 is not a billing problem: the caller sent requests too fast.' },
-  { key: 'MODEL_OUTPUT_INVALID', retryable: true, severity: 'warning', what: 'A model produced output its own parser rejected. It answers differently every run, so a retry usually works. New on 17 Sep 2026.' },
-  { key: 'UPSTREAM_5XX', retryable: true, severity: 'warning', what: 'A service returned a server error rather than refusing on credit. New on 17 Sep 2026, split out of billing.' },
-  { key: 'BILLING_QUOTA', retryable: false, severity: 'critical', what: 'A 402: credit exhausted. Retrying burns calls without changing the answer.' },
-  { key: 'CONFIG_AUTH', retryable: false, severity: 'critical', what: 'A 401 or 403, including Google PERMISSION_DENIED — the token is valid but the account has no access to the file.' },
-  { key: 'SCHEMA_VALIDATION', retryable: false, severity: 'high', what: 'A malformed payload, a 404, a 400, or Airtable’s ambiguous 403. Fails identically on every retry.' },
-  { key: 'UNKNOWN', retryable: false, severity: 'info', what: 'The handler did not classify it. Not the same as a class this dashboard has not heard of, which is shown under its own name.' },
+  { key: 'NETWORK_TIMEOUT', retryable: true, severity: 'warning', what: 'A timeout, a dropped connection, a 429 rate limit, or a run that crashed or ran out of memory. Retried by the self-healer.' },
+  { key: 'MODEL_OUTPUT_INVALID', retryable: true, severity: 'warning', what: 'A model answered in a shape its own parser rejected. Retried, because a model answers differently each run.' },
+  { key: 'UPSTREAM_5XX', retryable: true, severity: 'warning', what: 'Another service answered 500, 502, 503 or 504. Retried.' },
+  { key: 'BILLING_QUOTA', retryable: false, severity: 'critical', what: 'A 402, payment required, or credits or quota exhausted. Not retried; goes to a person.' },
+  { key: 'CONFIG_AUTH', retryable: false, severity: 'critical', what: 'A credential or access failure, such as a Google permission denied. Not retried; goes to a person.' },
+  { key: 'SCHEMA_VALIDATION', retryable: false, severity: 'high', what: 'A request that cannot work as sent: a 404, a missing or forbidden Airtable field, or a 400. Not retried; sent to the repair bridge.' },
+  { key: 'UNKNOWN', retryable: false, severity: 'info', what: 'Neither the handler’s rules nor its model classifier could place it. Sent to the repair bridge. Not the same as a class this dashboard has not heard of, which is shown under its own name.' },
 ];
 
 const CLASS_BY_KEY = new Map(ERROR_CLASSES.map((c) => [c.key, c]));
@@ -1129,7 +1134,7 @@ export function mapIncident(rec: AtRecord, ctx?: { open_now?: boolean; last_seen
   const cls = errorClass(payload.error_class);
   const ownRetryable = typeof policy.retryable === 'boolean' ? policy.retryable : null;
   const lane = str(f.source) ?? str(payload.lane) ?? null;
-  const resolved = iso(payload.resolved_at);
+  const resolved = iso(payload.resolved_at) ?? iso(f.resolved_at);
   /**
    * **The incident's own date wins.** `ctx.first_seen_at` is when *this
    * database* inserted the row, which is a fact about the resync rather than
@@ -1139,7 +1144,10 @@ export function mapIncident(rec: AtRecord, ctx?: { open_now?: boolean; last_seen
    * `created_at` is when the thing actually broke; the insert time is only the
    * fallback for a row that carries no date of its own.
    */
-  const firstSeen = iso(f.created_at) ?? iso(rec.createdTime) ?? ctx?.first_seen_at ?? null;
+  // `occurred_at` is what the ledger actually carries (2026-09-22): it has no
+  // `created_at`, so until this read it every incident was dated by its import
+  // on 17 Sep and the weekly chart drew one bar.
+  const firstSeen = iso(f.occurred_at) ?? iso(f.created_at) ?? iso(rec.createdTime) ?? ctx?.first_seen_at ?? null;
 
   return {
     id: str(f.entity_id) ?? rec.id,
@@ -1175,6 +1183,7 @@ export function mapIncident(rec: AtRecord, ctx?: { open_now?: boolean; last_seen
     open_now: ctx?.open_now ?? true,
     last_seen_open: ctx?.last_seen_open ?? null,
     hours_to_resolve: hoursBetween(firstSeen, resolved),
+    close_attempt: null,
     /**
      * **No `source` link, deliberately.** The incident ledger has no per-record
      * page to open, and inventing a URL that 404s is worse than not offering

@@ -25,3 +25,4 @@ export * from './Resync';
 export * from './Monthly';
 export * from './MonthPicker';
 export * from './Figures';
+export * from './InfoTip';

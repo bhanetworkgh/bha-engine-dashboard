@@ -1144,6 +1144,22 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       return send(res, 200, await health.resync(sessionInfo(req).email));
     }
     /**
+     * Close incidents a person fixed (2026-09-22, Destiny). Written to the
+     * BHARAG ledger first, one at a time with the incident's own lane key; a
+     * row here is marked closed only once the ledger has accepted it, and a
+     * refusal comes back per incident with BHARAG's own reason.
+     */
+    if (p === '/api/engine-health/incidents/close') {
+      const body = await readJson(req);
+      const ids = Array.isArray(body.ids) ? body.ids.filter((v): v is string => typeof v === 'string' && v.trim() !== '').map((v) => v.trim()) : [];
+      if (!ids.length) throw new HttpError(400, 'Send `ids`: the incident ids to close, as the page lists them.');
+      if (ids.length > 500) throw new HttpError(400, `${ids.length} incidents in one request is more than the 500 this closes at once.`);
+      // The confirm step's own count, checked here too: a selection that changed
+      // between the dialog and the request is not the one somebody agreed to.
+      if (body.expected !== ids.length) throw new HttpError(400, `The confirmation named ${String(body.expected)} incident(s) and the request carries ${ids.length}. Nothing was closed; reopen the dialog.`);
+      return send(res, 200, await health.closeIncidents([...new Set(ids)], sessionInfo(req).email));
+    }
+    /**
      * Put one repair back (2026-09-20). The only thing in this application that
      * changes a workflow, and it changes it in one direction: back to how it
      * was before an automated repair.
