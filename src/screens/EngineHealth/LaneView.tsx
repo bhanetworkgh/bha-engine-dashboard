@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useData } from '../../app/useData';
-import { getHealthMetrics, type HealthData, type HealthMetrics, type Incident } from '../../data';
+import { closeIncidents, getHealthMetrics, type HealthData, type HealthMetrics, type HealthWeek, type Incident, type IncidentCloseResult } from '../../data';
 import type { RecordColumn } from '../../components/ui';
 import {
   CountUp,
+  Definition,
   DistTile,
   EmptyPanel,
   EmptyState,
@@ -11,7 +13,6 @@ import {
   HBar,
   Loading,
   MetricCard,
-  OutcomeColumns,
   Pagination,
   PercentCell,
   Pill,
@@ -21,7 +22,9 @@ import {
   RowActions,
   SearchBox,
   Segmented,
+  StatCaption,
   StatCell,
+  StatLabel,
   StatStrip,
   TileFigure,
   relativeTime,
@@ -43,20 +46,41 @@ import { ClassPill, IncidentPanel, LaneReads, SeverityPill, when } from './parts
  * useful unit and it means nothing pooled across three engines.
  */
 
-const LANE_COLOUR = (label: string) =>
-  label === 'Bays' ? 'var(--accent)' : label === 'North Star' ? 'var(--ok)' : label === 'Research Twin' ? 'var(--degraded)' : 'var(--dim)';
-
-/** Retryable classes read as the accent; the rest as the colour of a thing nobody will fix on its own. */
-const CLASS_COLOUR = (cls: string) =>
-  cls === 'NETWORK_TIMEOUT' || cls === 'MODEL_OUTPUT_INVALID' || cls === 'UPSTREAM_5XX'
-    ? 'var(--accent)'
-    : cls === 'BILLING_QUOTA' || cls === 'CONFIG_AUTH'
-      ? 'var(--failing)'
-      : cls === 'SCHEMA_VALIDATION'
-        ? 'var(--degraded)'
-        : 'var(--dim)';
-
 type Filter = 'open' | 'needs-person' | 'retryable' | 'closed' | 'all';
+
+/**
+ * What each filter word means, read off the code that sets it (2026-09-22).
+ *
+ * `retryable` is the incident's own `retry_policy.retryable`, which every error
+ * handler computes as `!(MANUAL_ONLY_CLASSES.includes(errorClass) ||
+ * isCancellation)` with `MANUAL_ONLY_CLASSES = ['billing_quota',
+ * 'config_auth', 'schema_validation']`; the class map here is only the
+ * fallback. `BHA — Self Healer` then routes by class: `network_timeout`,
+ * `upstream_5xx` and `model_output_invalid` to a retry (1, 4, 15 minutes, three
+ * attempts), `schema_validation` and `unknown` to the repair bridge, and
+ * `billing_quota` and `config_auth` to a person. "No longer open" is this
+ * dashboard's own word: the ledger is read with `status=open`, so a row it
+ * stops returning has moved on, and the read does not say where to.
+ */
+const FILTER_DEFS: Record<Filter, { term: string; def: string }> = {
+  open: {
+    term: 'Open',
+    def: 'The ledger still returned it as open at the last read, and nobody has closed it from here.',
+  },
+  'needs-person': {
+    term: 'Needs a person',
+    def: 'Open, and its error handler marked it not retryable: billing or quota, credentials or access, a malformed request, or a run a user cancelled. No automatic retry will touch it.',
+  },
+  retryable: {
+    term: 'Retryable',
+    def: 'Open, and its error handler marked it retryable: a timeout or rate limit, unparseable model output, an upstream 5xx, or an error it could not classify. The self-healer retries the first three up to three times and sends unclassified ones to the repair bridge.',
+  },
+  closed: {
+    term: 'No longer open',
+    def: 'A later read of the ledger stopped returning it as open, or it was closed from this page. It may have been healed, moved to retrying, or resolved by hand — the open-only read does not say which unless the row was closed here.',
+  },
+  all: { term: 'All', def: 'Every incident this dashboard has held, open or not.' },
+};
 
 function matches(i: Incident, q: string): boolean {
   if (!q) return true;
@@ -66,9 +90,60 @@ function matches(i: Incident, q: string): boolean {
   );
 }
 
-function columns(open: (i: Incident) => void): RecordColumn<Incident>[] {
+/** Whether a row can be closed from here: open, and not already closed by a close that landed. */
+const closable = (i: Incident) => i.open_now && i.close_attempt?.state !== 'ok';
+
+function StateCell({ i }: { i: Incident }) {
+  const c = i.close_attempt;
+  // A refused close is shown on the row, in red, with BHARAG's reason — never
+  // greyed out as though it had worked.
+  if (c?.state === 'failed' && i.open_now) {
+    return (
+      <span title={`Close refused by the BHARAG ledger at ${when(c.at)}${c.http ? ` (HTTP ${c.http})` : ''}: ${c.reason ?? 'no reason given'}`}>
+        <Pill tone="failing">close refused</Pill>
+      </span>
+    );
+  }
+  if (i.open_now) return <Pill tone="degraded">open</Pill>;
+  if (c?.state === 'ok') {
+    return (
+      <span className="text-faint" title={`Closed in the BHARAG ledger as manually resolved by ${c.actor ?? 'the dashboard login'} at ${when(c.at)}`}>
+        resolved by hand
+      </span>
+    );
+  }
+  return <span className="text-faint">no longer open</span>;
+}
+
+function columns(open: (i: Incident) => void, sel: Set<string>, toggle: (id: string) => void, allOn: boolean, someOn: boolean, toggleAll: () => void, anyClosable: boolean): RecordColumn<Incident>[] {
   return [
-    { key: 'seen', header: 'first seen', className: 'tabular text-faint', cell: (i) => when(i.first_seen_at) },
+    {
+      key: 'select',
+      header: (
+        <input
+          type="checkbox"
+          aria-label="Select every open incident in this filter"
+          title="Select every open incident in this filter, on every page"
+          checked={allOn}
+          disabled={!anyClosable}
+          ref={(el) => {
+            if (el) el.indeterminate = someOn && !allOn;
+          }}
+          onChange={toggleAll}
+        />
+      ),
+      cell: (i) =>
+        closable(i) ? (
+          <input
+            type="checkbox"
+            aria-label={`Select ${i.entity_id}`}
+            checked={sel.has(i.entity_id)}
+            onClick={(e) => e.stopPropagation()}
+            onChange={() => toggle(i.entity_id)}
+          />
+        ) : null,
+    },
+    { key: 'seen', header: 'occurred', className: 'tabular text-faint', cell: (i) => when(i.first_seen_at) },
     { key: 'id', header: 'incident', width: '26ch', clip: true, title: (i) => i.entity_id, cell: (i) => <RecordId>{i.entity_id}</RecordId> },
     { key: 'lane', header: 'lane', width: '14ch', clip: true, className: 'text-dim', cell: (i) => i.lane_label },
     {
@@ -81,15 +156,21 @@ function columns(open: (i: Incident) => void): RecordColumn<Incident>[] {
       cell: (i) => i.summary ?? <span className="text-faint">No summary was recorded.</span>,
     },
     { key: 'node', header: 'failed node', width: '22ch', clip: true, className: 'text-dim', title: (i) => i.failed_node ?? undefined, cell: (i) => i.failed_node ?? <span className="text-faint">not named</span> },
-    { key: 'class', header: 'class', card: 'meta', className: 'card-meta', cell: (i) => <ClassPill cls={i.error_class} retryable={i.retryable} known={i.error_class_known} /> },
+    {
+      key: 'class',
+      header: 'class',
+      card: 'meta',
+      className: 'card-meta',
+      title: (i) => `${CLASS_DEFS[i.error_class] ?? 'A class this page has not heard of; it keeps its own name.'} ${i.retryable ? 'Marked retryable' : 'Marked not retryable'} by ${i.retryable_from}.`,
+      cell: (i) => <ClassPill cls={i.error_class} retryable={i.retryable} known={i.error_class_known} />,
+    },
     { key: 'severity', header: 'severity', card: 'meta', className: 'card-meta', cell: (i) => <SeverityPill severity={i.severity} /> },
     {
       key: 'state',
       header: 'state',
       card: 'meta',
       className: 'card-meta',
-      title: (i) => (i.open_now ? undefined : `The ledger's open query stopped returning this${i.last_seen_open ? ` after ${when(i.last_seen_open)}` : ''}`),
-      cell: (i) => (i.open_now ? <Pill tone="degraded">open</Pill> : <span className="text-faint">closed</span>),
+      cell: (i) => <StateCell i={i} />,
     },
     {
       key: 'actions',
@@ -106,11 +187,16 @@ function columns(open: (i: Incident) => void): RecordColumn<Incident>[] {
   ];
 }
 
-export default function LaneView({ data, lane, tick }: { data: HealthData; lane: string | null; tick: number }) {
+export default function LaneView({ data, lane, tick, onChanged }: { data: HealthData; lane: string | null; tick: number; onChanged: () => Promise<void> }) {
   const { status, data: m, error } = useData(() => getHealthMetrics(lane), [lane, tick]);
   const [filter, setFilter] = useState<Filter>('open');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<IncidentCloseResult | null>(null);
+  const [closeError, setCloseError] = useState<string | null>(null);
 
   const mine = useMemo(() => (lane ? data.incidents.filter((i) => i.lane === lane) : data.incidents), [data.incidents, lane]);
   const rows = useMemo(
@@ -132,6 +218,37 @@ export default function LaneView({ data, lane, tick }: { data: HealthData; lane:
   );
   const paged = usePaged(rows, `${lane ?? 'all'}|${filter}|${q.trim()}`);
   const current = open ? mine.find((i) => i.entity_id === open) : null;
+
+  // The selection is kept to rows that are still closable and still in view,
+  // so the count the dialog names is exactly what is sent.
+  const closableRows = rows.filter(closable);
+  const selected = closableRows.filter((i) => sel.has(i.entity_id));
+  const allOn = closableRows.length > 0 && selected.length === closableRows.length;
+  const toggle = (id: string) =>
+    setSel((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const toggleAll = () => setSel(allOn ? new Set() : new Set(closableRows.map((i) => i.entity_id)));
+
+  const runClose = async () => {
+    const ids = selected.map((i) => i.entity_id);
+    setBusy(true);
+    setCloseError(null);
+    try {
+      const r = await closeIncidents(ids);
+      setResult(r);
+      setSel(new Set(r.results.filter((x) => x.outcome === 'failed').map((x) => x.id)));
+      await onChanged();
+    } catch (e) {
+      setCloseError(e instanceof Error ? e.message : 'The request did not reach the server, so nothing was closed.');
+    } finally {
+      setBusy(false);
+      setConfirming(false);
+    }
+  };
 
   const counts = {
     open: mine.filter((i) => i.open_now).length,
@@ -159,30 +276,57 @@ export default function LaneView({ data, lane, tick }: { data: HealthData; lane:
           <Strip m={m} />
           <Charts m={m} />
 
-          <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
+          <div className="shrink-0 space-y-2 px-6 pb-3 md:px-8">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <Segmented<Filter>
                 ariaLabel="Filter incidents"
                 value={filter}
                 onChange={setFilter}
-                options={[
-                  { value: 'open', label: 'Open', count: counts.open },
-                  { value: 'needs-person', label: 'Needs a person', count: counts['needs-person'] },
-                  { value: 'retryable', label: 'Retryable', count: counts.retryable },
-                  { value: 'closed', label: 'No longer open', count: counts.closed },
-                  { value: 'all', label: 'All', count: counts.all },
-                ]}
+                options={(['open', 'needs-person', 'retryable', 'closed', 'all'] as Filter[]).map((f) => ({ value: f, label: FILTER_DEFS[f].term, count: counts[f], title: FILTER_DEFS[f].def }))}
               />
               <div className="flex flex-1 items-center justify-end gap-3">
                 <SearchBox value={q} onChange={setQ} placeholder="Search incidents, nodes and advice" />
               </div>
             </div>
+            <Definition term={FILTER_DEFS[filter].term}>{FILTER_DEFS[filter].def}</Definition>
+
+            {(selected.length > 0 || result || closeError) && (
+              <div className="card flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-[12.5px]">
+                {closeError ? (
+                  <span className="text-failing">Nothing was closed: {closeError}</span>
+                ) : result && selected.length === 0 ? (
+                  <span className={result.failed ? 'text-failing' : 'text-dim'}>{result.note}</span>
+                ) : (
+                  <span className="text-dim">
+                    {selected.length} open incident{selected.length === 1 ? '' : 's'} selected
+                    {result?.failed ? <span className="text-failing"> · {result.failed} refused by the ledger last time — hover the red rows for why</span> : null}
+                  </span>
+                )}
+                <div className="flex items-center gap-2">
+                  {selected.length > 0 && (
+                    <>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSel(new Set())} disabled={busy}>
+                        Clear
+                      </button>
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => setConfirming(true)} disabled={busy}>
+                        Mark resolved…
+                      </button>
+                    </>
+                  )}
+                  {selected.length === 0 && (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setResult(null); setCloseError(null); }}>
+                      Dismiss
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {rows.length === 0 ? (
             <EmptyState>
               {data.lanes.filter((l) => !lane || l.lane === lane).every((l) => !l.read)
-                ? 'No lane here has been read, so this is not an empty engine — it is no answer at all. Press Resync from Airtable above, and check the lane credentials named in the panel.'
+                ? 'No lane here has been read, so this is not an empty engine — it is no answer at all. Press Resync above, and check the lane credentials named in the panel.'
                 : q.trim()
                   ? 'No incident matches that search in this filter.'
                   : filter === 'open'
@@ -195,24 +339,90 @@ export default function LaneView({ data, lane, tick }: { data: HealthData; lane:
             </EmptyState>
           ) : (
             <>
-              <RecordTable columns={columns((i) => setOpen(i.entity_id))} rows={paged.rows} rowKey={(i) => i.entity_id} onOpen={(i) => setOpen(i.entity_id)} label="Incidents" />
+              <RecordTable
+                columns={columns((i) => setOpen(i.entity_id), sel, toggle, allOn, selected.length > 0, toggleAll, closableRows.length > 0)}
+                rows={paged.rows}
+                rowKey={(i) => i.entity_id}
+                onOpen={(i) => setOpen(i.entity_id)}
+                label="Incidents"
+              />
               <Pagination paged={paged} unit="incidents" />
             </>
           )}
 
-          <Cards m={m} lane={lane} onOpen={(id) => setOpen(id)} />
+          {/*
+            All systems ends at the table (2026-09-22, Destiny): the table is
+            the page. The cards stay on the lane tabs, where the failing node
+            and the advice are the useful units.
+          */}
+          {lane && <Cards m={m} lane={lane} onOpen={(id) => setOpen(id)} />}
         </>
       )}
 
+      {confirming && (
+        <CloseConfirm
+          incidents={selected}
+          busy={busy}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => void runClose()}
+        />
+      )}
       {current && <IncidentPanel incident={current} retry={data.retries.find((r) => r.incident_id === current.entity_id)} onClose={() => setOpen(null)} />}
     </div>
   );
 }
 
+/**
+ * The confirm step. It names the count, the lanes and exactly what will be
+ * written, and that it cannot be undone: in the ledger a terminal state has no
+ * transition out of it, so reopening means a new incident.
+ */
+function CloseConfirm({ incidents, busy, onCancel, onConfirm }: { incidents: Incident[]; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  const byLane = [...new Set(incidents.map((i) => i.lane_label))].map((l) => `${incidents.filter((i) => i.lane_label === l).length} ${l}`).join(' · ');
+  const n = incidents.length;
+  return createPortal(
+    <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/30 p-4 md:p-10" onClick={busy ? undefined : onCancel}>
+      <div className="card fade-up w-full max-w-[560px] px-6 py-5" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Close incidents">
+        <h2 className="text-[18px] leading-tight">
+          Close {n} incident{n === 1 ? '' : 's'} as resolved?
+        </h2>
+        <p className="mt-2 text-[13px] leading-relaxed text-dim">
+          {byLane}. Each is written to the BHARAG incident ledger with its own lane’s key, as <span className="font-medium text-ink">manually_resolved</span>, and recorded here against the dashboard login with the time. The ledger has no way back from a closed state — an incident that recurs will open as a new one.
+        </p>
+        <p className="mt-2 text-[12.5px] leading-relaxed text-faint">
+          A row is marked closed only once the ledger accepts it. Any the ledger refuses stay open, in red, with its reason.
+        </p>
+        <div className="mt-3 max-h-[28vh] overflow-y-auto rounded-[10px] bg-raised px-3 py-2 text-[12px]">
+          {incidents.map((i) => (
+            <div key={i.entity_id} className="flex items-baseline justify-between gap-3">
+              <span className="tabular truncate text-ink">{i.entity_id}</span>
+              <span className="truncate text-faint">{i.summary ?? i.failed_node ?? ''}</span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-primary" onClick={onConfirm} disabled={busy}>
+            {busy ? `Closing ${n}…` : `Close ${n} in the ledger`}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 /* ------------------------------------------------------------- the strip */
 
+/**
+ * Five figures, one caption line each (2026-09-22). The server's notes are
+ * kept whole behind each label's info mark.
+ */
 function Strip({ m }: { m: HealthMetrics }) {
   const age = relativeTime(m.most_recent.at);
+  const daysQuiet = m.most_recent.at ? Math.floor((Date.now() - Date.parse(m.most_recent.at)) / 86_400_000) : null;
   return (
     <StatStrip cols={5}>
       {/*
@@ -223,42 +433,29 @@ function Strip({ m }: { m: HealthMetrics }) {
         label="Open incidents"
         value={m.open_incidents.n}
         tone={m.open_incidents.n ? 'degraded' : undefined}
-        note={
-          <>
-            {m.open_incidents.by_lane.length > 0 && (
-              <span className="mb-1 block text-dim">{m.open_incidents.by_lane.map((s) => `${s.label} ${s.n}`).join(' · ')}</span>
-            )}
-            {m.open_incidents.note}
-          </>
-        }
+        caption={m.open_incidents.by_lane.filter((s) => s.n).map((s) => `${s.label} ${s.n}`).join(' · ') || (m.lanes.some((l) => l.read) ? 'none open in the lanes read' : 'no lane read')}
+        note={m.open_incidents.note}
       />
-      <PercentCell label="Healed without a person" share={m.healed} />
+      <PercentCell label="Healed, no person" share={m.healed} caption="recovered retries ÷ retries that finished" />
       <FigureCell
         label="Needing a person"
         value={m.needing_person.n}
         tone={m.needing_person.n ? 'degraded' : undefined}
+        caption={`${m.needing_person.non_retryable} not retryable · ${m.needing_person.exhausted} out of retries`}
         note={m.needing_person.note}
       />
       <StatCell>
         <div className="min-w-0">
-          <div className="kicker truncate">Most recent incident</div>
-          <div className="mt-1 text-[15px] leading-tight text-ink">{age ?? 'none held'}</div>
-          <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={{ minHeight: '5.5em' }}>
-            {m.most_recent.note}
-          </div>
+          <StatLabel label="Latest incident" detail={m.most_recent.note} />
+          <div className={`mt-1 text-[15px] leading-tight ${daysQuiet !== null && daysQuiet >= 3 ? 'text-degraded' : 'text-ink'}`}>{age ?? 'none held'}</div>
+          <StatCaption>{m.most_recent.at ? `occurred ${when(m.most_recent.at)} UTC` : 'nothing held to date'}</StatCaption>
         </div>
       </StatCell>
       <FigureCell
-        label="Retries in the last 24h"
+        label="Retries, 24h"
         value={m.retries_24h.n}
-        note={
-          <>
-            <span className="mb-1 block text-dim">
-              {m.retries_24h.recovered} recovered · {m.retries_24h.retrying} retrying · {m.retries_24h.exhausted} exhausted
-            </span>
-            {m.retries_24h.note}
-          </>
-        }
+        caption={`${m.retries_24h.recovered} recovered · ${m.retries_24h.retrying} retrying · ${m.retries_24h.exhausted} exhausted`}
+        note={m.retries_24h.note}
       />
     </StatStrip>
   );
@@ -266,24 +463,161 @@ function Strip({ m }: { m: HealthMetrics }) {
 
 /* ------------------------------------------------------------- the charts */
 
+/**
+ * The two weekly charts, rebuilt (2026-09-22, Destiny).
+ *
+ * The stacked columns carried no numbers, no axis and no dates between the
+ * first and last week, so a reader could not get a count out of them — and
+ * every incident was dated by its import, so the one column that had anything
+ * in it was the week somebody pressed Resync. Now: one column per week with its
+ * count printed on it and its dates under it, the lane split as numbers in a
+ * grid below, and class over time as a grid of counts — a stack of seven
+ * colours over eight weeks is the wrong shape for "what kind of thing is
+ * breaking", and a table of numbers is the right one.
+ */
 function Charts({ m }: { m: HealthMetrics }) {
-  const laneKeys = m.per_week_lane[0] ? Object.keys(m.per_week_lane[0].counts) : [];
-  const classKeys = m.per_week_class[0] ? Object.keys(m.per_week_class[0].counts) : [];
+  const noRead = !m.lanes.some((l) => l.read);
+  const total = m.per_week_lane.reduce((n, w) => n + w.total, 0);
+  const window = `${m.per_week_lane[0]?.label ?? ''} to ${m.per_week_lane[m.per_week_lane.length - 1]?.label ?? ''}`;
+  const laneRows = m.lanes.map((l) => l.label);
+  const classRows = [...new Set(m.per_week_class.flatMap((w) => Object.keys(w.counts)))].filter((c) => m.per_week_class.some((w) => (w.counts[c] ?? 0) > 0));
   return (
     <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-2">
-      <MetricCard title="Incidents over time" right="created_at" note={m.week_note}>
-        <OutcomeColumns weeks={m.per_week_lane} order={laneKeys} colour={LANE_COLOUR} />
+      <MetricCard title="Incidents per week" right={`${total} in 8 weeks`} note={m.week_note} align="top">
+        {noRead ? (
+          <EmptyPanel>No lane has been read, so there is no count for any week — not a count of nought.</EmptyPanel>
+        ) : total === 0 ? (
+          <EmptyPanel>No incident occurred in the eight weeks {window}, in the lanes that were read.</EmptyPanel>
+        ) : (
+          <>
+            <WeekBars weeks={m.per_week_lane} unit="incidents" />
+            <WeekGrid weeks={m.per_week_lane} rows={laneRows} rowLabel={(r) => r} tone={() => 'ink'} />
+          </>
+        )}
       </MetricCard>
       <MetricCard
-        title="Incidents by class, over time"
+        title="Incidents by class, per week"
         right="error_class"
-        note="The same eight weeks split by what kind of thing broke, so a shift in the kind of failure is visible rather than only the amount. Retryable classes are drawn in the accent; the ones a retry cannot fix are not."
+        note={`Each cell is how many incidents of that class occurred that week, ${window}. Blue classes are retried by the self-healer; amber ones are not. Hover a class for what it means. A class with no incident in the window is left out.`}
+        align="top"
       >
-        <OutcomeColumns weeks={m.per_week_class} order={classKeys} colour={CLASS_COLOUR} />
+        {noRead ? (
+          <EmptyPanel>No lane has been read, so no class has a count.</EmptyPanel>
+        ) : classRows.length === 0 ? (
+          <EmptyPanel>No incident occurred in the eight weeks {window}, so no class has one.</EmptyPanel>
+        ) : (
+          <WeekGrid
+            weeks={m.per_week_class}
+            rows={classRows}
+            rowLabel={(c) => <span title={CLASS_DEFS[c] ?? 'A class this page has not heard of.'}>{c.toLowerCase().replace(/_/g, ' ')}</span>}
+            tone={(c) => (RETRIED.has(c) ? 'accent' : 'degraded')}
+            shaded
+            header
+          />
+        )}
       </MetricCard>
     </div>
   );
 }
+
+/** "3 Aug" from a week's Monday, so every column carries its own month. */
+function weekStartLabel(week: string): string {
+  const d = new Date(`${week}T00:00:00Z`);
+  return `${d.getUTCDate()} ${d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' })}`;
+}
+
+/** The grid both charts share: a label column, one column per week, a total. */
+const gridCols = (n: number) => `minmax(0,8.5rem) repeat(${n}, minmax(0,1fr)) 2.5rem`;
+
+/**
+ * One column per week, its count printed on it and its week under it. A nought
+ * is drawn as a nought — every lane was read, so a quiet week is a real 0.
+ */
+function WeekBars({ weeks, unit }: { weeks: HealthWeek[]; unit: string }) {
+  const max = Math.max(1, ...weeks.map((w) => w.total));
+  const cols = gridCols(weeks.length);
+  return (
+    <div role="img" aria-label={`${unit} per week: ${weeks.map((w) => `${w.label} ${w.total}`).join(', ')}`}>
+      <div className="grid items-end gap-x-1" style={{ gridTemplateColumns: cols, height: 96 }}>
+        <span className="self-end pb-0.5 text-[10px] text-faint">{unit}</span>
+        {weeks.map((w) => (
+          <div key={w.week} className="flex min-w-0 flex-col items-center justify-end self-stretch" title={`${w.label}: ${w.total} ${unit}`}>
+            <span className={`tabular mb-1 text-[11.5px] ${w.total ? 'text-ink' : 'text-faint'}`}>{w.total}</span>
+            <div className="w-full rounded-[4px]" style={{ height: w.total ? `${Math.max((w.total / max) * 72, 4)}px` : '1px', background: w.total ? 'var(--accent)' : 'var(--line-strong)', opacity: 0.85 }} />
+          </div>
+        ))}
+        <span className="tabular self-end pb-0.5 text-right text-[11.5px] font-medium text-ink">{weeks.reduce((n, w) => n + w.total, 0)}</span>
+      </div>
+      <WeekHeader weeks={weeks} />
+    </div>
+  );
+}
+
+function WeekHeader({ weeks }: { weeks: HealthWeek[] }) {
+  return (
+    <div className="grid items-baseline gap-x-1 border-t border-line pt-1 text-[10px] text-faint" style={{ gridTemplateColumns: gridCols(weeks.length) }}>
+      <span>week of (Mon, UTC)</span>
+      {weeks.map((w) => (
+        <span key={w.week} className="truncate text-center" title={w.label}>
+          {weekStartLabel(w.week)}
+        </span>
+      ))}
+      <span className="text-right">total</span>
+    </div>
+  );
+}
+
+/** A grid of counts: one row per lane or class, one column per week, a total at the end. */
+function WeekGrid({ weeks, rows, rowLabel, tone, shaded, header }: { weeks: HealthWeek[]; rows: string[]; rowLabel: (r: string) => ReactNode; tone: (r: string) => 'ink' | 'accent' | 'degraded'; shaded?: boolean; header?: boolean }) {
+  const max = Math.max(1, ...weeks.flatMap((w) => rows.map((r) => w.counts[r] ?? 0)));
+  const cols = gridCols(weeks.length);
+  return (
+    <div className="mt-1 text-[11.5px]">
+      {header && <WeekHeader weeks={weeks} />}
+      {rows.map((r) => {
+        const sum = weeks.reduce((n, w) => n + (w.counts[r] ?? 0), 0);
+        return (
+          <div key={r} className="grid items-center gap-x-1 border-t border-line py-[3px]" style={{ gridTemplateColumns: cols }}>
+            <span className="truncate text-dim">{rowLabel(r)}</span>
+            {weeks.map((w) => {
+              const n = w.counts[r] ?? 0;
+              const colour = tone(r) === 'accent' ? 'var(--accent)' : tone(r) === 'degraded' ? 'var(--degraded)' : 'var(--ink)';
+              return (
+                <span
+                  key={w.week}
+                  className={`tabular rounded-[4px] text-center ${n ? 'text-ink' : 'text-faint'}`}
+                  style={shaded && n ? { background: `color-mix(in srgb, ${colour} ${Math.round(12 + (n / max) * 38)}%, transparent)` } : undefined}
+                  title={`${w.label}: ${n}`}
+                >
+                  {n}
+                </span>
+              );
+            })}
+            <span className="tabular text-right font-medium text-ink">{sum}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The classes the self-healer retries, from `Decide Lane` in `BHA — Self Healer`. */
+const RETRIED = new Set(['NETWORK_TIMEOUT', 'UPSTREAM_5XX', 'MODEL_OUTPUT_INVALID']);
+
+/**
+ * One line per error class, read off the three error handlers' own rules
+ * ("Build AI Payload", "Parse Classification", "Compute Incident Payload") and
+ * the self-healer's routing (2026-09-22).
+ */
+export const CLASS_DEFS: Record<string, string> = {
+  NETWORK_TIMEOUT: 'A timeout, a dropped connection, a 429 rate limit, or a run that crashed or ran out of memory. Retried by the self-healer.',
+  MODEL_OUTPUT_INVALID: 'A model answered in a shape its own parser rejected. Retried, because a model answers differently each run.',
+  UPSTREAM_5XX: 'Another service answered 500, 502, 503 or 504. Retried.',
+  BILLING_QUOTA: 'A 402, payment required, or credits or quota exhausted. Not retried; goes to a person.',
+  CONFIG_AUTH: 'A credential or access failure, such as a Google permission denied. Not retried; goes to a person.',
+  SCHEMA_VALIDATION: 'A request that cannot work as sent: a 404, a missing or forbidden Airtable field, or a 400. Not retried; sent to the repair bridge.',
+  UNKNOWN: 'Neither the handler’s rules nor its model classifier could place it. Sent to the repair bridge.',
+};
 
 /* -------------------------------------------------------------- the cards */
 

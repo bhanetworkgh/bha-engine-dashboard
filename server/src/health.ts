@@ -50,6 +50,8 @@ import type {
   HealthMetrics,
   HealthWeek,
   Incident,
+  IncidentClose,
+  IncidentCloseResult,
   LaneRead,
   Percentiles,
   Resync,
@@ -173,6 +175,16 @@ export async function incidents(): Promise<Incident[]> {
       const wf = i.execution_id ? byId.get(i.execution_id) : undefined;
       if (wf && i.execution_id) i.execution_url = executionUrl(wf, i.execution_id);
     }
+  }
+  // The newest close this dashboard attempted, per incident: who, when, and
+  // whether the ledger took it. Read from the one append-only write log.
+  const closes = await query<{ record_id: string; state: string; at: string; actor: string | null; reason: string | null; http: number | null }>(
+    `SELECT DISTINCT ON (record_id) record_id, state, at, actor, reason, http FROM record_writes WHERE kind = 'incidents' ORDER BY record_id, seq DESC`,
+  );
+  const closeOf = new Map(closes.rows.map((c) => [c.record_id, c]));
+  for (const i of mapped) {
+    const c = closeOf.get(i.entity_id);
+    if (c) i.close_attempt = { state: c.state === 'ok' ? 'ok' : 'failed', at: c.at, actor: c.actor, reason: c.reason, http: c.http } satisfies IncidentClose;
   }
   // Newest first, and an open incident above a closed one: the open ones are
   // the only rows anybody opens this page to act on.
@@ -461,6 +473,88 @@ async function setLaneRead(lane: string, read: boolean, reason: string | null, a
   ]);
 }
 
+/* -------------------------------------------------------------- the close */
+
+/** The ledger's terminal states, from BHARAG's `core/incidents/lifecycle.ts`. */
+const TERMINAL = new Set(['self_healed', 'manually_resolved', 'wont_fix']);
+
+/**
+ * Close incidents a person fixed by hand (2026-09-22, Destiny).
+ *
+ * **The ledger first, then this database, one incident at a time.** Each is
+ * sent to BHARAG with its own lane's key; only an accepted transition marks
+ * the row here closed, and the row takes the ledger's own answer as its new
+ * blob, so what is held is what BHARAG says rather than what this code hoped.
+ * A refusal changes nothing here but the write log, which the page reads to
+ * put the reason on the row. Sequential on purpose: a partial failure then
+ * names exactly which ones landed, and it is three lanes of somebody else's
+ * API rather than a place to go fast.
+ *
+ * Every attempt, landed or refused, is one line in `record_writes` with
+ * `kind = 'incidents'` and the dashboard login as the actor.
+ */
+export async function closeIncidents(ids: string[], actor: string): Promise<IncidentCloseResult> {
+  const at = nowIso();
+  const held = await query<{ natural_id: string; lane_id: string | null; open_now: boolean | null; status: string | null }>(
+    `SELECT natural_id, lane_id, open_now, fields->>'resolution_status' AS status FROM engine_incidents WHERE natural_id = ANY($1::text[])`,
+    [ids],
+  );
+  const byId = new Map(held.rows.map((r) => [r.natural_id, r]));
+  const results: IncidentCloseResult['results'] = [];
+
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (!row) {
+      results.push({ id, outcome: 'skipped', reason: 'Not held on this dashboard, so there is no lane to close it with.', http: null });
+      continue;
+    }
+    if (row.open_now === false || (row.status && TERMINAL.has(row.status))) {
+      results.push({ id, outcome: 'skipped', reason: `Already closed${row.status ? ` (${row.status})` : ''}.`, http: null });
+      continue;
+    }
+    const lane = row.lane_id ?? '';
+    try {
+      const after = await bharag.closeIncident(lane, id, actor, at);
+      const status = typeof after?.resolution_status === 'string' ? after.resolution_status : 'manually_resolved';
+      // The ledger's own copy where it sent one back; otherwise the two keys
+      // this transition set, merged into what was held.
+      const whole = after && typeof after === 'object' && after.entity_id === id;
+      await query(
+        whole
+          ? `UPDATE engine_incidents SET fields = $2::jsonb, open_now = false, updated_at = $3 WHERE natural_id = $1`
+          : `UPDATE engine_incidents SET fields = fields || $2::jsonb, open_now = false, updated_at = $3 WHERE natural_id = $1`,
+        [id, JSON.stringify(whole ? after : { resolution_status: status }), at],
+      );
+      await logClose(id, 'ok', status, null, 200, actor, lane);
+      results.push({ id, outcome: 'closed', reason: null, http: 200 });
+    } catch (e) {
+      const http = e instanceof bharag.BharagError ? e.status || null : null;
+      const reason = why(e);
+      await logClose(id, 'failed', row.status ?? 'open', reason, http, actor, lane);
+      results.push({ id, outcome: 'failed', reason, http });
+    }
+  }
+
+  const n = (o: string) => results.filter((r) => r.outcome === o).length;
+  const note = [
+    `${n('closed')} of ${ids.length} closed in the BHARAG ledger as manually resolved by ${actor}.`,
+    n('failed') ? `${n('failed')} refused by the ledger and still open there and here — each row says why.` : '',
+    n('skipped') ? `${n('skipped')} skipped (already closed, or not held).` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  console.log(`incident close by ${actor}: ${note}`);
+  return { at, actor, requested: ids.length, closed: n('closed'), failed: n('failed'), skipped: n('skipped'), results, note };
+}
+
+async function logClose(id: string, state: 'ok' | 'failed', status: string, reason: string | null, http: number | null, actor: string, lane: string): Promise<void> {
+  await query(
+    `INSERT INTO record_writes (kind, record_id, natural_id, state, status, reason, http, action, detail, actor, at)
+     VALUES ('incidents', $1, $1, $2, $3, $4, $5, 'close', $6, $7, $8)`,
+    [id, state, status, reason, http, `POST ${bharag.BHARAG_URL}/incidents/${id}/status → manually_resolved (lane ${lane || 'none'})`, actor, nowIso()],
+  );
+}
+
 /* -------------------------------------------------------------- the retry */
 
 /**
@@ -671,7 +765,7 @@ export async function metrics(lane: string | null): Promise<HealthMetrics> {
         counts: Object.fromEntries(classVocab.map((c) => [c, ours.filter((i) => i.error_class === c).length])),
       } as HealthWeek;
     }),
-    week_note: `Incidents by the week they were first seen, over the last eight weeks. A week with none is drawn as no column rather than a column of nought — and a week nothing was read is the same picture as a quiet week, which is why the lane reads are printed above.`,
+    week_note: `Incidents by the week the ledger says they occurred (its occurred_at), Monday to Sunday UTC, over the eight weeks ${weekLabel(weeks[0])} to ${weekLabel(weeks[weeks.length - 1])}. Counted over incidents this dashboard has seen open at least once: the ledger is read with status=open, so one opened and closed between two reads never arrives here.${caveat}`,
     by_lane: HEALTH_LANES.map((l) => {
       const ours = everything.filter((i) => i.lane === l.key && i.open_now);
       return {

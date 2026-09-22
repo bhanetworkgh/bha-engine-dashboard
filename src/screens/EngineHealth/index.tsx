@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react';
 import { useData } from '../../app/useData';
 import { getEngineHealth, resyncHealth, type HealthData } from '../../data';
 import { LoadFailed, Loading, PageHeader, ResyncButton, Tabs, Toast, useResync, useToast } from '../../components/ui';
-import FinalImportPanel from './FinalImport';
 import LaneView from './LaneView';
 import Repairs from './Repairs';
 import Retries from './Retries';
@@ -102,24 +101,14 @@ export default function EngineHealth() {
       ) : tab === 'Retries' ? (
         <Retries data={data} tick={tick} onChanged={() => void reload()} />
       ) : (
-        <LaneView data={data} lane={LANE_OF[tab] ?? null} tick={tick} />
+        <LaneView data={data} lane={LANE_OF[tab] ?? null} tick={tick} onChanged={reload} />
       )}
 
       {/*
-        The final import (2026-09-22), on All systems only and under the page's
-        own content.
-
-        It is a one-off control for the Airtable cutover rather than part of
-        this page's subject, so it does not push the incident figures down, and
-        it is not repeated on a lane tab or on Repairs where it would read as
-        something to do with that tab. All systems is where the engine as a
-        whole is, it is the tab this page opens on, and it is the only one that
-        is about every source at once — which is what this button is.
-
-        It takes itself off the page once Airtable is retired, on the same
-        check the resync buttons use.
+        Nothing below the table on All systems (2026-09-22, Destiny): the
+        table is the page. The final-import panel that stood here was already
+        off the page once Airtable was retired; it is no longer mounted at all.
       */}
-      {tab === 'All systems' && <FinalImportPanel />}
 
       <Toast toast={toast} />
     </div>
