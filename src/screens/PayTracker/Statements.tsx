@@ -151,9 +151,24 @@ export default function Statements({ data, m }: { data: PayData; m: PayMetrics }
 
       {rows.length === 0 ? (
         <EmptyState>
-          {data.statements_freshness.source === 'none'
-            ? (data.statements_freshness.note ??
-              'No statement is held. The first are written on the 1st, one per monthly builder — and if it is past the 1st, check the ledger age above before assuming none were due.')
+          {data.statements_freshness.source === 'none' ? (
+            /*
+              Said in full (2026-09-22): which system writes statements, where
+              to, when, and that none has ever arrived. An empty list with no
+              explanation is the failure this page keeps being fixed for.
+            */
+            <span className="block max-w-[640px] text-left">
+              <span className="block font-medium text-ink">No monthly statement has ever been posted to this dashboard.</span>
+              <span className="mt-1 block">
+                Statements are written by the n8n workflow <span className="text-ink">Bays — Pay Tracking</span>, on the 1st of each month at 09:00: one per
+                monthly builder, for the month just ended, posted to <span className="tabular text-ink">/api/engine/pay_statements</span> and to the pay-reviews
+                channel in Slack. It was created on 17 Sep 2026, so its first run is 1 Oct 2026 — until then an empty list is expected, not a fault.
+                {data.statements_last_write
+                  ? ` The engine last wrote a statement on ${data.statements_last_write.slice(0, 10)}.`
+                  : ' The write log holds no statement from the engine at all.'}
+              </span>
+            </span>
+          )
             : q.trim()
               ? 'No statement matches that search in this filter.'
               : filter === 'open'

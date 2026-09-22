@@ -29,6 +29,7 @@
  * printed in the freshness line and every empty state says which it is.
  */
 import { getMeta, nowIso, setMeta } from './db';
+import { lastEngineWrite } from './store';
 import { query, withTransaction } from './pg';
 import * as airtable from './airtable';
 import * as mirror from './mirror';
@@ -164,13 +165,14 @@ interface HeldRow {
   fields: Record<string, unknown> | null;
   first_seen_at: string;
   updated_at: string;
+  source?: string;
 }
 
 function asRecord(r: HeldRow): AtRecord {
   return { id: r.airtable_record_id ?? r.natural_id ?? `row-${r.pk}`, createdTime: r.created_time ?? '', fields: r.fields ?? {} };
 }
 
-const SELECT = 'SELECT id::text AS pk, airtable_record_id, natural_id, created_time, fields, first_seen_at, updated_at FROM';
+const SELECT = 'SELECT id::text AS pk, airtable_record_id, natural_id, created_time, fields, first_seen_at, updated_at, source FROM';
 
 export async function builders(): Promise<PayBuilder[]> {
   const r = await query<HeldRow>(`${SELECT} engine_pay_builders`);
@@ -181,13 +183,44 @@ export async function builders(): Promise<PayBuilder[]> {
     .sort((a, b) => Number(b.active) - Number(a.active) || a.builder.localeCompare(b.builder));
 }
 
-export async function sessions(): Promise<PaySession[]> {
+/**
+ * Every session, **once** (2026-09-22).
+ *
+ * 57 sessions were held twice: the Airtable resync of 20 Sep brought each in
+ * under its Airtable record id, and from 21 Sep `Bays — Pay Tracking` posted the
+ * same session again with no record id, so the two never matched and every
+ * figure on this page counted both — 132 rows for 75 sessions. Keyed on the
+ * Codex Entry ID, which is one per approved session; the engine's copy is kept
+ * because it is the newer statement, and where two copies disagree about Paid
+ * the pair is counted so the page can say so rather than pick silently.
+ */
+export async function sessionsHeld(): Promise<{ sessions: PaySession[]; duplicates: PayData['duplicates'] }> {
   const r = await query<HeldRow>(`${SELECT} engine_pay_sessions`);
+  const all = r.rows.map((row) => ({ s: { ...mapPaySession(asRecord(row)), held_via: row.source === 'engine' ? ('engine' as const) : ('resync' as const) }, at: row.updated_at }));
+  const byKey = new Map<string, { s: PaySession; at: string }[]>();
+  for (const x of all) {
+    const key = x.s.codex_entry_id && x.s.codex_entry_id !== '(no codex id)' ? x.s.codex_entry_id : `row:${x.s.id}`;
+    byKey.set(key, [...(byKey.get(key) ?? []), x]);
+  }
+  let merged = 0;
+  let disagree = 0;
+  const out: PaySession[] = [];
+  for (const copies of byKey.values()) {
+    if (copies.length > 1) {
+      merged += copies.length - 1;
+      if (new Set(copies.map((c) => String(c.s.paid))).size > 1) disagree++;
+    }
+    const keep = [...copies].sort((a, b) => Number(b.s.held_via === 'engine') - Number(a.s.held_via === 'engine') || b.at.localeCompare(a.at))[0];
+    out.push(keep.s);
+  }
   // Newest session first, and an unpaid one above a paid one of the same date:
   // what is owed is what anybody opens this page for.
-  return r.rows
-    .map((row) => mapPaySession(asRecord(row)))
-    .sort((a, b) => (b.session_date ?? '').localeCompare(a.session_date ?? '') || Number(a.paid) - Number(b.paid));
+  out.sort((a, b) => (b.session_date ?? '').localeCompare(a.session_date ?? '') || Number(a.paid === true) - Number(b.paid === true));
+  return { sessions: out, duplicates: { rows: all.length, sessions: out.length, merged, disagree } };
+}
+
+export async function sessions(): Promise<PaySession[]> {
+  return (await sessionsHeld()).sessions;
 }
 
 export async function statements(): Promise<PayStatement[]> {
@@ -213,11 +246,17 @@ async function freshnessOf(table: string, kind: string, label: string): Promise<
 }
 
 export async function data(): Promise<PayData> {
-  const at = await getMeta(SYNCED_AT);
-  const held = await sessions();
+  // The engine posts every thirty minutes now; the resync is retired. The
+  // newer of the two is when this ledger was last written.
+  const resyncAt = await getMeta(SYNCED_AT);
+  const engineAt = await lastEngineWrite('pay_sessions');
+  const at = [resyncAt, engineAt].filter((v): v is string => Boolean(v)).sort().reverse()[0] ?? null;
+  const { sessions: held, duplicates } = await sessionsHeld();
   return {
     builders: await builders(),
     sessions: held,
+    duplicates,
+    statements_last_write: await lastEngineWrite('pay_statements'),
     statements: await statements(),
     freshness: await freshnessOf('engine_pay_sessions', 'pay_sessions', 'Sessions'),
     statements_freshness: await freshnessOf('engine_pay_statements', 'pay_statements', 'Monthly statements'),
@@ -233,8 +272,8 @@ export async function data(): Promise<PayData> {
     synced: {
       at,
       note: at
-        ? `This dashboard last read the ledger then. The ledger itself is kept in step with the approved session logs by a sync that runs every 30 minutes, so a tick made in Slack in the last half hour may be in neither yet.`
-        : `This dashboard has never read the ledger — press Resync from Airtable. Until it does, an empty page here means nobody has looked, not that nothing is owed.`,
+        ? `The last time the ledger was written here — by the engine's pay sync, which posts every 30 minutes, or by a resync, whichever was later. A tick made in Slack in the last half hour may not be here yet.`
+        : `Nothing has ever written the ledger here. Until it is, an empty page means nobody has looked, not that nothing is owed.`,
     },
   };
 }
@@ -356,8 +395,11 @@ export async function metrics(): Promise<PayMetrics> {
   const year = month.slice(0, 4);
 
   const bySlack = new Map(roster.filter((b) => b.slack_user_id).map((b) => [b.slack_user_id!, b]));
-  const unpaid = all.filter((s) => !s.paid);
-  const paid = all.filter((s) => s.paid);
+  // Owed is an explicit `Paid = false`. A row with no Paid at all is not known
+  // either way and is counted apart (2026-09-22) — never folded into owed.
+  const unpaid = all.filter((s) => s.paid === false);
+  const unconfirmed = all.filter((s) => s.paid === null);
+  const paid = all.filter((s) => s.paid === true);
   const monthly = (rows: PaySession[]) => rows.filter((s) => s.pay_mode === 'Monthly');
   const daily = (rows: PaySession[]) => rows.filter((s) => s.pay_mode === 'Daily');
   /**
@@ -370,33 +412,45 @@ export async function metrics(): Promise<PayMetrics> {
   const noMode = (rows: PaySession[]) => rows.filter((s) => s.pay_mode !== 'Monthly' && s.pay_mode !== 'Daily');
 
   /* ---- owed, one row per builder ---- */
-  const owedKeys = [...new Set(unpaid.map((s) => s.builder_slack_id ?? s.builder))];
+  const owedKeys = [...new Set([...unpaid, ...unconfirmed].map((s) => s.builder_slack_id ?? s.builder))];
   const owed: OwedBuilder[] = owedKeys
     .map((key) => {
       const mine = unpaid.filter((s) => (s.builder_slack_id ?? s.builder) === key);
-      const onRoster = mine[0]?.builder_slack_id ? bySlack.has(mine[0].builder_slack_id) : false;
-      const rosterRow = mine[0]?.builder_slack_id ? bySlack.get(mine[0].builder_slack_id) : undefined;
+      const unknown = unconfirmed.filter((s) => (s.builder_slack_id ?? s.builder) === key);
+      const any = mine[0] ?? unknown[0];
+      const onRoster = any?.builder_slack_id ? bySlack.has(any.builder_slack_id) : false;
+      const rosterRow = any?.builder_slack_id ? bySlack.get(any.builder_slack_id) : undefined;
       const oldest = [...mine].sort((a, b) => (a.session_date ?? '9999').localeCompare(b.session_date ?? '9999'))[0];
+      /**
+       * Which table the builder sits in is the roster's Pay Mode (2026-09-22,
+       * Destiny) — a fact about the person. Each session keeps the mode frozen
+       * on it at approval, and any that differ are counted on the row rather
+       * than moving the builder: the old rule took the mode of whichever
+       * unpaid session happened to come first.
+       */
+      const mode = rosterRow?.pay_mode ?? any?.pay_mode ?? null;
       return {
-        builder: rosterRow?.builder ?? mine[0]?.builder ?? key,
-        slack_user_id: mine[0]?.builder_slack_id ?? null,
+        builder: rosterRow?.builder ?? any?.builder ?? key,
+        slack_user_id: any?.builder_slack_id ?? null,
+        mode_from: (rosterRow?.pay_mode ? 'roster' : 'sessions') as OwedBuilder['mode_from'],
+        mode_mismatch: [...mine, ...unknown].filter((s) => s.pay_mode && mode && s.pay_mode !== mode).length,
+        sessions_unconfirmed: unknown.length,
         /**
          * Sessions are grouped on the Slack id where one is present, so two
          * spellings of a name are one person. A session carrying no id cannot
          * be matched to one that does, so it lands in its own row — which looks
          * like a duplicate unless the row says why.
          */
-        has_slack_id: Boolean(mine[0]?.builder_slack_id),
-        // The session's own frozen mode, never the roster's current one.
-        pay_mode: mine[0]?.pay_mode ?? null,
+        has_slack_id: Boolean(any?.builder_slack_id),
+        pay_mode: mode,
         on_roster: onRoster,
         active: rosterRow?.active ?? false,
         sessions_owed: mine.length,
         working_days_owed: workingDays(mine),
         oldest_unpaid: oldest?.session_date ?? null,
         oldest_unpaid_days: daysSince(oldest?.session_date ?? null),
-        months: [...new Set(mine.map((s) => s.month).filter((m): m is string => Boolean(m)))].sort(),
-        sessions: [...mine].sort((a, b) => (b.session_date ?? '').localeCompare(a.session_date ?? '')),
+        months: [...new Set([...mine, ...unknown].map((s) => s.month).filter((m): m is string => Boolean(m)))].sort(),
+        sessions: [...mine, ...unknown].sort((a, b) => (b.session_date ?? '').localeCompare(a.session_date ?? '')),
       };
     })
     .sort((a, b) => (b.oldest_unpaid_days ?? -1) - (a.oldest_unpaid_days ?? -1) || b.sessions_owed - a.sessions_owed);
@@ -461,14 +515,23 @@ export async function metrics(): Promise<PayMetrics> {
       daily: daily(unpaid).length,
       no_mode: noMode(unpaid).length,
       note: all.length
-        ? `Approved sessions with no Paid tick, across every builder. ${monthly(unpaid).length} monthly and ${daily(unpaid).length} daily, counted apart because they are different agreements — a monthly builder is expected to wait until the 1st.${noMode(unpaid).length ? ` ${noMode(unpaid).length} carr${noMode(unpaid).length === 1 ? 'ies' : 'y'} no pay mode at all and ${noMode(unpaid).length === 1 ? 'is' : 'are'} counted apart from both, because guessing which agreement they fall under is not this page's to do.` : ''} Paid status is set in Slack or by a statement closing; this page never sets it.`
+        ? `Approved sessions whose Paid is explicitly false, across every builder. A session whose row carries no Paid at all is not counted here — it is not known to be unpaid — and has its own figure beside this one. ${monthly(unpaid).length} monthly and ${daily(unpaid).length} daily, counted apart because they are different agreements — a monthly builder is expected to wait until the 1st.${noMode(unpaid).length ? ` ${noMode(unpaid).length} carr${noMode(unpaid).length === 1 ? 'ies' : 'y'} no pay mode at all and ${noMode(unpaid).length === 1 ? 'is' : 'are'} counted apart from both, because guessing which agreement they fall under is not this page's to do.` : ''} Paid status is set in Slack or by a statement closing; this page never sets it.`
         : `No session is held at all, which on this page most likely means the ledger has not been read rather than that nothing is owed. The freshness line above says when it last was.`,
     },
+    sessions_unconfirmed: {
+      n: unconfirmed.length,
+      monthly: monthly(unconfirmed).length,
+      daily: daily(unconfirmed).length,
+      from_resync: unconfirmed.filter((s) => s.held_via === 'resync').length,
+      note: unconfirmed.length
+        ? `Sessions whose row carries no Paid at all, so this page does not know whether they are paid — and does not count them as owed. ${unconfirmed.filter((s) => s.held_via === 'resync').length} of the ${unconfirmed.length} came in on the Airtable resync, and Airtable leaves an unticked checkbox out of the record, so they were most likely unticked when copied; nothing has written them since. Bays — Pay Tracking's own readers treat a missing Paid as unpaid, so these will appear on the next monthly statement and in the Monday reminders.`
+        : `Every session carries a Paid value, so nothing here is unknown.`,
+    },
     builders_owed: {
-      n: owed.length,
-      monthly: owed.filter((o) => o.pay_mode === 'Monthly').length,
-      daily: owed.filter((o) => o.pay_mode === 'Daily').length,
-      no_mode: owed.filter((o) => o.pay_mode !== 'Monthly' && o.pay_mode !== 'Daily').length,
+      n: owed.filter((o) => o.sessions_owed > 0).length,
+      monthly: owed.filter((o) => o.sessions_owed > 0 && o.pay_mode === 'Monthly').length,
+      daily: owed.filter((o) => o.sessions_owed > 0 && o.pay_mode === 'Daily').length,
+      no_mode: owed.filter((o) => o.sessions_owed > 0 && o.pay_mode !== 'Monthly' && o.pay_mode !== 'Daily').length,
       note: owed.length
         ? `Distinct people with at least one unpaid session. Counted on the Slack id where a session carries one, so two spellings of a name are one person. A builder whose id matches nobody on the roster is still counted here — they did the work — and named on the statistics tab.`
         : all.length
@@ -546,10 +609,10 @@ export async function metrics(): Promise<PayMetrics> {
         week: w,
         label: weekLabel(w),
         total: mine.length,
-        counts: { paid: mine.filter((s) => s.paid).length, unpaid: mine.filter((s) => !s.paid).length },
+        counts: { paid: mine.filter((s) => s.paid === true).length, unpaid: mine.filter((s) => s.paid === false).length, 'not recorded': mine.filter((s) => s.paid === null).length },
       };
     }),
-    paid_week_note: `Every session by the week it was worked, split by whether it has been paid. The recent weeks lean unpaid by design: a monthly builder's work is not settled until the 1st, so the right-hand end of this chart is expected to be dark.`,
+    paid_week_note: `Every session by the week it was worked, split by whether it has been paid — and a third slice for sessions whose row carries no Paid at all, which are not known either way. The recent weeks lean unpaid by design: a monthly builder's work is not settled until the 1st, so the right-hand end of this chart is expected to be dark.`,
     working_days: builderMonths,
     working_days_note: `Distinct days each builder had at least one approved session, by month — the shape of who is actually building. Working days and session count are different numbers and both are shown: two sessions in one day is one working day and two sessions, and neither is derived from the other.`,
     paid_by: slices(paid, (s) => s.paid_by, PAID_BY, '(not recorded)'),
@@ -561,7 +624,7 @@ export async function metrics(): Promise<PayMetrics> {
       const gaps = payGap(rows);
       return {
         mode,
-        p: percentiles(gaps, rows.filter((s) => s.paid).length, (n, of) =>
+        p: percentiles(gaps, rows.filter((s) => s.paid === true).length, (n, of) =>
           n
             ? `Whole days from the session date to Paid At, over the ${n} of ${of} paid ${mode.toLowerCase()} session${of === 1 ? '' : 's'} carrying both. p50 and p95, never a mean.`
             : of

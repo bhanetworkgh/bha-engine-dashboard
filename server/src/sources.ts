@@ -1350,7 +1350,11 @@ export function mapPaySession(rec: AtRecord): PaySession {
     approved_at: iso(f['Approved At']),
     // The field, then the session date. Never `Approved At`.
     month: str(f.Month) ?? (sessionDay ? sessionDay.slice(0, 7) : null),
-    paid: bool(f.Paid),
+    // Tri-state (2026-09-22): a row carrying no Paid at all is not known to be
+    // unpaid. Airtable leaves an unticked checkbox out of the record, so a row
+    // imported from it with no Paid was unticked *then* — which is a fact about
+    // the import, not about today, and the page says which.
+    paid: f.Paid === undefined || f.Paid === null ? null : bool(f.Paid),
     paid_at: iso(f['Paid At']),
     paid_by: str(f['Paid By']),
     statement_id: str(f['Statement ID']),

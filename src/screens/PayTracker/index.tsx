@@ -58,7 +58,8 @@ export default function PayTracker() {
   if (status === 'error' && !data) return <LoadFailed error={error} />;
   if (!data) return <Loading />;
 
-  const unpaid = data.sessions.filter((s) => !s.paid).length;
+  // Owed is an explicit Paid = false; a row with no Paid is not known either way.
+  const unpaid = data.sessions.filter((s) => s.paid === false).length;
   const openStatements = data.statements.filter((s) => s.open).length;
 
   return (

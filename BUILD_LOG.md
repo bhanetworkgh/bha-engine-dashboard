@@ -8458,3 +8458,49 @@ Found:      Other workflows distorted the same way (Sep rate high, 0 of the
             14 new North Star incidents.
 Tested:     Local: 23 Error Handler rows (12 failing on 21 Sep then 11 ok) and
             20 North Star rows (last 3 failing) render as described.
+
+## 2026-09-22 19:35 — Pay Tracker: 132 rows were 75 sessions; missing Paid is its own figure
+Intent:     Brief §13.
+Files:      server/src/pay.ts, server/src/sources.ts, src/data/types.ts,
+            src/screens/PayTracker/{index,Owed,Sessions,Statements,Statistics}.tsx
+Verified:   engine_pay_builders: Daily = Kaiqi Yang, Ahad, Destiny Arupi;
+            Monthly = Kavin G N, Hardik Bhatt, Jeganathan — as the brief said.
+            engine_pay_sessions row counts exactly as the brief said (132: 78
+            daily paid, 1 daily no flag, 41 monthly paid, 3 monthly unpaid, 9
+            monthly no flag) — **but those are rows, not sessions.**
+Problem:    57 sessions are held twice under the same Codex Entry ID: once from
+            the Airtable resync of 20 Sep (with its rec… id) and once as
+            `Bays — Pay Tracking` posted it from 21 Sep (no record id), so the
+            two never matched on the way in. Every figure counted both. Real
+            count: **75 sessions** — daily 42 (41 paid, 1 no flag), monthly 33
+            (21 paid, 3 explicitly unpaid, 9 no flag). All 57 pairs agree about
+            Paid. The 10 with no flag exist only in the Airtable import, and
+            Airtable leaves an unticked checkbox out of the record, so they were
+            most likely unticked on 20 Sep; the engine's pay sync has never
+            posted them.
+Problem:    **13.1 could not be reproduced.** Hardik's 17 rows all carry
+            `Pay Mode = Monthly` and his roster row says Monthly; the live
+            /api/pay/metrics files him under Monthly with 4 unpaid. The rule
+            that could misfile somebody is real, though: the owed row took the
+            mode of whichever unpaid session came first.
+Fix:        `sessionsHeld()` counts each Codex Entry ID once, the engine's copy
+            kept, and reports rows / sessions / merged / pairs that disagree;
+            the Sessions tab says so in a line. `paid` is tri-state: null where
+            the row has no Paid. Owed = explicit false only; "Paid not
+            recorded" is its own figure and its own filter, never added to
+            owed, with the resync explanation in its note. A builder is listed
+            under the **roster's** Pay Mode; each session keeps its frozen mode
+            and any that differ are counted on the row ("n on another mode").
+            13.2: the empty Statements tab names Bays — Pay Tracking, the 1st at
+            09:00, /api/engine/pay_statements and the pay-reviews channel, says
+            the workflow was created 17 Sep so the first run is 1 Oct, and says
+            the write log holds no statement at all. 13.4: six figures, one
+            caption each. "Ledger last read" is now "Ledger last written" and
+            takes the newer of the resync stamp and the engine's last post
+            (it said "press Resync from Airtable" on a page with no button).
+Found:      Bays — Pay Tracking's own readers use `!paid(f['Paid'])`, so a
+            missing flag is unpaid to them: the 9 monthly no-flag sessions will
+            be on the 1 Oct statements and in the Monday reminders.
+Tested:     Local: five rows (one duplicated paid pair, two flagless from a
+            resync, one explicit unpaid) → 4 sessions, 1 owed, 2 not recorded,
+            Hardik under Monthly with "+1 paid not recorded".
