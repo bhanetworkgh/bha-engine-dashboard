@@ -8782,3 +8782,17 @@ Not done:   CLAUDE.md says one tile per sidebar section; Customer Service Twin,
             Clients, Executions and Pay Tracker have none. Not in the brief, so
             raised rather than built. The two 24-hour columns are still the
             phase 1 fixtures CLAUDE.md says they are, dated 7 Sep.
+
+## 2026-09-22 19:50 UTC — Production check after bb8a19b
+Verified:   Live /api/overview: every signal is a sentence; Engine health "0
+            incidents open" beside "1 exhausted retry needs a person." (was 5);
+            Open loops 712, oldest 52 d; Codex 4 awaiting; Commercial 86 open
+            research questions, which is what SQL gives by the rule as shipped
+            (count wins, a 0 or no count beside listed questions counts the list;
+            all 28 cards state something). The 21:45 entry's "80" was a
+            list-first draft of the rule, not what shipped. North Star and
+            Research Twin now show real 7-day trends (NS 0,0,7,14,7,1,17). Retries:
+            currently retrying 0 (was 2), exhausted 5 on the record tab.
+Not read:   /api/pay/metrics?month= and /api/engine-health/metrics are templated
+            routes the MCP read tool will not resolve, so Pay's scoped figures
+            on production rest on the SQL check and the local test above.
