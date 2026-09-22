@@ -40,6 +40,22 @@ const whenFull = (iso: string | null) => (iso ? `${iso.slice(0, 16).replace('T',
 type Filter = 'all' | VfarmLeadStatus;
 
 /**
+ * The attribution fields, in the order the lead envelope lists them.
+ *
+ * Every clip between now and 31 Oct points at /vfarm, so which clip a lead
+ * came from is the question this page exists to answer next.
+ */
+const ATTRIBUTION = [
+  ['utm_source', 'utm_source'],
+  ['utm_medium', 'utm_medium'],
+  ['utm_campaign', 'utm_campaign'],
+  ['asset_id', 'asset_id'],
+  ['source_channel', 'source_channel'],
+  ['landing_variant', 'landing_variant'],
+  ['contract_version', 'contract_version'],
+] as const satisfies readonly (readonly [keyof VfarmLead, string])[];
+
+/**
  * Puts text on the clipboard.
  *
  * `navigator.clipboard` needs a secure context, which this dashboard has, but a
@@ -179,6 +195,10 @@ export default function EarlyAccess({ data, onChange }: { data: VfarmLeadsData; 
           l.claim_state ? `the page was in state "${l.claim_state}"` : null,
           l.page_contract_version ? `page contract ${l.page_contract_version}` : null,
           l.mechanics_contract_version ? `mechanics contract ${l.mechanics_contract_version}` : null,
+          l.contract_version ? `attribution contract ${l.contract_version}` : null,
+          l.landing_variant ? `landing variant ${l.landing_variant}` : null,
+          l.source_channel ? `channel ${l.source_channel}` : null,
+          l.utm_campaign ? `utm_campaign ${l.utm_campaign}` : null,
         ]
           .filter(Boolean)
           .join(' · '),
@@ -188,6 +208,39 @@ export default function EarlyAccess({ data, onChange }: { data: VfarmLeadsData; 
           {l.source_campaign && <span className="truncate text-faint">{l.source_campaign}</span>}
         </span>
       ),
+    },
+    {
+      /*
+        Attribution, as captured. An empty string is a link that carried no
+        value and shows as "—"; a null is a row written before these columns
+        existed and shows as "not captured". Conflating the two would make the
+        older rows look like badly tagged links.
+      */
+      key: 'attribution',
+      header: 'attribution',
+      card: 'meta',
+      width: '22ch',
+      clip: true,
+      className: 'text-dim',
+      title: (l) => {
+        if (l.contract_version === null) return 'Recorded before attribution was captured.';
+        const shown = ATTRIBUTION.map(([key, label]) => `${label} ${l[key] || '—'}`);
+        return shown.join(' · ');
+      },
+      cell: (l) => {
+        if (l.contract_version === null) {
+          return <span className="text-faint">not captured</span>;
+        }
+        const asset = l.asset_id || '';
+        const utm = [l.utm_source, l.utm_medium].filter(Boolean).join(' / ');
+        if (!asset && !utm) return <span className="text-faint">—</span>;
+        return (
+          <span className="flex items-center gap-1.5">
+            {asset && <Pill>{asset}</Pill>}
+            {utm && <span className="truncate">{utm}</span>}
+          </span>
+        );
+      },
     },
     {
       key: 'status',

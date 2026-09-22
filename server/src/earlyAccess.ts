@@ -222,6 +222,25 @@ export interface Submission {
   mechanics_contract_version: string | null;
   claim_state: string | null;
   submitted_at: string | null;
+  /**
+   * Attribution, exactly as the page captured it.
+   *
+   * Stored as '' where the URL did not carry a value, never as null and never
+   * inferred: an empty string says "the link did not say", which is a fact,
+   * and a guess would look like evidence.
+   */
+  utm_source: string;
+  utm_medium: string;
+  utm_campaign: string;
+  asset_id: string;
+  source_channel: string;
+  landing_variant: string;
+  contract_version: string;
+}
+
+/** A tag as given, clipped, or '' — never null, so "absent" stays one value. */
+function tag(v: unknown): string {
+  return typeof v === 'string' ? v.trim().slice(0, MAX_TAG) : '';
 }
 
 /**
@@ -263,6 +282,13 @@ export function readSubmission(body: Record<string, unknown>): Submission {
     mechanics_contract_version: text(body.mechanics_contract_version, MAX_TAG),
     claim_state: text(body.claim_state, MAX_TAG),
     submitted_at: submitted && !Number.isNaN(Date.parse(submitted)) ? new Date(submitted).toISOString() : null,
+    utm_source: tag(body.utm_source),
+    utm_medium: tag(body.utm_medium),
+    utm_campaign: tag(body.utm_campaign),
+    asset_id: tag(body.asset_id),
+    source_channel: tag(body.source_channel),
+    landing_variant: tag(body.landing_variant),
+    contract_version: tag(body.contract_version),
   };
 }
 
@@ -283,8 +309,9 @@ export async function store(s: Submission, ipHash: string, userAgent: string | n
   const r = await query<{ id: string; created_at: string }>(
     `INSERT INTO engine_vfarm_leads
        (full_name, email, organization_name, source_surface, source_page, source_campaign,
-        page_contract_version, mechanics_contract_version, claim_state, submitted_at, user_agent, ip_hash)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        page_contract_version, mechanics_contract_version, claim_state, submitted_at, user_agent, ip_hash,
+        utm_source, utm_medium, utm_campaign, asset_id, source_channel, landing_variant, contract_version)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      RETURNING id, created_at`,
     [
       s.full_name,
@@ -299,6 +326,13 @@ export async function store(s: Submission, ipHash: string, userAgent: string | n
       s.submitted_at,
       userAgent,
       ipHash,
+      s.utm_source,
+      s.utm_medium,
+      s.utm_campaign,
+      s.asset_id,
+      s.source_channel,
+      s.landing_variant,
+      s.contract_version,
     ],
   );
   const row = r.rows[0];
@@ -334,6 +368,13 @@ export async function notify(lead: Stored, s: Submission): Promise<void> {
     organization_name: s.organization_name,
     source_page: s.source_page,
     source_campaign: s.source_campaign,
+    utm_source: s.utm_source,
+    utm_medium: s.utm_medium,
+    utm_campaign: s.utm_campaign,
+    asset_id: s.asset_id,
+    source_channel: s.source_channel,
+    landing_variant: s.landing_variant,
+    contract_version: s.contract_version,
     is_repeat_email: lead.is_repeat_email,
     created_at: lead.created_at,
   };
@@ -382,6 +423,14 @@ export interface Lead {
   submitted_at: string | null;
   created_at: string;
   user_agent: string | null;
+  /** Attribution as captured. Null only on rows written before it was stored. */
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  asset_id: string | null;
+  source_channel: string | null;
+  landing_variant: string | null;
+  contract_version: string | null;
   /** True where this address was already on an earlier row. Computed, never stored. */
   is_repeat_email: boolean;
 }
@@ -408,6 +457,8 @@ export async function leads(): Promise<LeadsData> {
     `SELECT id, full_name, email, organization_name, source_surface, source_page, source_campaign,
             page_contract_version, mechanics_contract_version, claim_state, status, notes,
             notified_at, submitted_at, created_at, user_agent,
+            utm_source, utm_medium, utm_campaign, asset_id, source_channel,
+            landing_variant, contract_version,
             row_number() OVER (PARTITION BY email ORDER BY created_at, id) AS seq
        FROM engine_vfarm_leads
       ORDER BY created_at DESC, id DESC`,

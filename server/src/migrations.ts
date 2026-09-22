@@ -1525,6 +1525,40 @@ const MIGRATIONS: Migration[] = [
         WHERE id = 'app5ni3E8r7Lvxk22' AND (notes IS NULL OR notes = '')`,
     ],
   },
+
+  {
+    id: 23,
+    name: 'attribution on a vFarm Early Access lead',
+    statements: [
+      /**
+       * Where a lead actually came from (2026-09-22, Subscription Mechanics
+       * v0.2.2 §3 and §17.1).
+       *
+       * Every clip between now and 31 Oct points at /vfarm, and until now a
+       * row could not say which clip. These eight columns are what the site
+       * captures from the URL it was opened with, plus the two the contract
+       * fixes: `source_campaign` (already present) and `contract_version`.
+       *
+       * They default to '' rather than NULL because the site stores an empty
+       * string for a value the URL did not carry — and "the URL did not say"
+       * is a different fact from "nobody has looked", which is what NULL means
+       * on the rows written before this migration. Existing rows keep their
+       * NULLs for exactly that reason.
+       */
+      `ALTER TABLE engine_vfarm_leads
+         ADD COLUMN IF NOT EXISTS utm_source      text,
+         ADD COLUMN IF NOT EXISTS utm_medium      text,
+         ADD COLUMN IF NOT EXISTS utm_campaign    text,
+         ADD COLUMN IF NOT EXISTS asset_id        text,
+         ADD COLUMN IF NOT EXISTS source_channel  text,
+         ADD COLUMN IF NOT EXISTS landing_variant text,
+         ADD COLUMN IF NOT EXISTS contract_version text`,
+
+      /** The two a person actually filters a campaign report by. */
+      `CREATE INDEX IF NOT EXISTS engine_vfarm_leads_campaign ON engine_vfarm_leads (source_campaign)`,
+      `CREATE INDEX IF NOT EXISTS engine_vfarm_leads_asset ON engine_vfarm_leads (asset_id)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
