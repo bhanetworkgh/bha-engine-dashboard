@@ -245,7 +245,7 @@ async function laneReads(open: Incident[]): Promise<LaneRead[]> {
       label: l.label,
       configured: bharag.laneConfigured(l.key),
       read,
-      reason: reason ?? (bharag.laneConfigured(l.key) ? (raw ? null : 'never read — press Resync from Airtable') : `${bharag.LANE_KEY_VARS[l.key]} is not set on this server`),
+      reason: reason ?? (bharag.laneConfigured(l.key) ? (raw ? null : 'never read — press Resync') : `${bharag.LANE_KEY_VARS[l.key]} is not set on this server`),
       at,
       open: open.filter((i) => i.lane === l.key && i.open_now).length,
     };
@@ -377,7 +377,15 @@ export async function resync(actor = 'dashboard'): Promise<Resync> {
   }
 
   /* ---------------------- the two Airtable tables ---------------------- */
-  for (const src of [
+  /**
+   * Once Airtable is retired (2026-09-22) these two are the engine's to write
+   * through /api/engine/error_counts and /api/engine/retry_attempts, and this
+   * pass reads only the ledger. They are left out of the tables rather than
+   * listed as unread: nothing failed, and a failure line about a system that
+   * is deliberately no longer read is the warning section 4 says not to give.
+   */
+  const airtableRetired = airtable.retired();
+  for (const src of airtableRetired ? [] : [
     { ...ERROR_COUNTS, kind: 'error_counts' as const },
     { ...RETRY_ATTEMPTS, kind: 'retry_attempts' as const },
   ]) {
@@ -430,6 +438,7 @@ export async function resync(actor = 'dashboard'): Promise<Resync> {
   const ran = tables.some((t) => t.read);
   const note = [
     ran ? '' : 'Nothing was read, so nothing was changed.',
+    airtableRetired ? 'Incidents were read from BHARAG; error_counts and retry_attempts were not read, because Airtable is retired and the engine writes those directly.' : '',
     ran ? `${sum('inserted')} inserted, ${sum('updated')} updated, ${sum('deleted')} deleted, ${sum('unchanged')} already matching.` : '',
     closed ? `${closed} incident${closed === 1 ? '' : 's'} the ledger no longer returns as open ${closed === 1 ? 'was' : 'were'} marked closed rather than deleted — a closed incident is the history the time-to-resolve figure is computed from.` : '',
     sum('refused') ? `${sum('refused')} row${sum('refused') === 1 ? ' was' : 's were'} read and refused by this database; the server log names each one and why.` : '',

@@ -8185,3 +8185,37 @@ Not tested: Against the production database or the deployed service — neither
             it — so a field spelled differently there will arrive verbatim in
             the blob and simply not be one this dashboard names, which is the
             safe direction but worth checking on the first real import.
+
+## 2026-09-22 18:10 — Engine health: the incident resync was refused by the Airtable retirement
+Intent:     Page-by-page data-correctness pass (Destiny's brief of 22 Sep). First,
+            6.1: incidents have not reached this page since 17 Sep.
+Files:      server/src/index.ts, server/src/health.ts, server/src/mcp/tools.ts,
+            server/src/mcp/inventory.ts, src/components/ui/Resync.tsx,
+            src/screens/EngineHealth/index.tsx
+Problem:    Confirmed live before touching anything: `engine_incidents` holds 37
+            rows (bays 20, north_star 8, research_twin 9), every one
+            `open_now = true` and `resolution_status = 'open'`, newest
+            `occurred_at` 2026-09-17 15:32 UTC, and `meta.health.lane.*` shows
+            the last read of all three lanes at 2026-09-17T22:32Z. Nothing has
+            read the ledger since. Three places refused it, not one:
+            1. the HTTP route — `/api/engine-health/resync` was in the 410 regex
+               in index.ts beside the eight Airtable resyncs;
+            2. the MCP `resync` tool — `if (airtable.retired()) throw` before the
+               route lookup, whatever the kind's source;
+            3. `diff_source_vs_mirror` — the retired check ran before the
+               `system !== 'airtable'` check, so incidents got
+               `airtable_retired` rather than anything about BHARAG.
+            And the page's button is `ResyncButton`, which hides itself on every
+            page once Airtable is retired, so there was no way to press it.
+Fix:        The retirement is gated on the source actually being Airtable.
+            `engine-health` leaves the 410 regex; the pass reads the three BHARAG
+            lanes as before and skips `error_counts` and `retry_attempts` when
+            retired (the engine writes those directly), saying so in its note.
+            The MCP resync checks `SOURCE_OF[kind].system === 'airtable'`.
+            `diff` gets a BHARAG branch: open in the ledger against open here,
+            lane by lane, with an unread lane named and never counted as empty.
+            `ResyncButton` takes `alsoReads`; Engine health passes "BHARAG", so
+            its button stays when retired and reads "Resync from BHARAG".
+Decision:   Retired Airtable tables are left out of the pass's table list rather
+            than listed as unread — an unread source reads as a failure in the
+            toast, and nothing failed.

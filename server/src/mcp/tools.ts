@@ -24,7 +24,7 @@ import * as sources from '../sources';
 import { grepSource, McpError, REPO_ROOT, sourceAvailable, assertSource } from './source';
 import { component, dataSources, pageByPath, pageData, pageFiles, pages, pageStructure } from './structure';
 import { describeTables, DEFAULT_ROWS, MAX_ROWS, runSelect } from './sql';
-import { assertKind, diff, RESYNC_ROUTE, status as mirrorStatus } from './inventory';
+import { assertKind, diff, RESYNC_ROUTE, SOURCE_OF, status as mirrorStatus } from './inventory';
 import * as logs from './logs';
 
 /** What the tools need from the server they are mounted on. */
@@ -651,8 +651,10 @@ const resyncTool: ToolDefinition = {
   handler: async (args) => {
     const kind = assertKind(str(args, 'kind', true)!);
     // Retired before anything else: the one tool here that acts must not act on
-    // a source the engine no longer depends on (2026-09-22).
-    if (airtable.retired()) throw new McpError('airtable_retired', airtable.RETIRED_REASON);
+    // a source the engine no longer depends on (2026-09-22). **Only where that
+    // source is Airtable** — incidents come from BHARAG, and refusing them with
+    // the rest is how the ledger went unread from 17 Sep.
+    if (airtable.retired() && SOURCE_OF[kind].system === 'airtable') throw new McpError('airtable_retired', airtable.RETIRED_REASON);
     const route = RESYNC_ROUTE[kind];
     if (!route) {
       throw new McpError(
