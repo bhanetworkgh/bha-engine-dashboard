@@ -15,7 +15,8 @@ import {
 } from '../../data';
 import { buildReport, reportName } from '../../lib/executionReport';
 import { downloadCsv } from '../../lib/csv';
-import { CountUpText, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, monthLabel, MonthPicker, PageHeader, relativeTime, Tabs, Toast, useToast, yearOf } from '../../components/ui';
+import { COVERAGE_DEFS, MODE_DEFS, MODE_OTHER, RECENT_DEF, STATUS_DEFS, STATUS_OTHER, tabDef } from './definitions';
+import { CountUpText, Definition, InfoTip, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, monthLabel, MonthPicker, PageHeader, relativeTime, Tabs, Toast, useToast, yearOf } from '../../components/ui';
 
 /**
  * Executions — every run of every workflow in the engine, one row per run.
@@ -134,6 +135,22 @@ function Figure({ value, delta, tone, count, format, replayKey }: { value: strin
   );
 }
 
+/**
+ * A tile's title with its whole explanation behind the mark (2026-09-22,
+ * Destiny). The explanation is kept word for word; the tile's foot carries one
+ * caption line of at most 55 characters, read off the same figures.
+ */
+function TileTitle({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {label}
+      <InfoTip label={`About ${label.toLowerCase()}`}>{children}</InfoTip>
+    </span>
+  );
+}
+
+const n = (x: number) => x.toLocaleString('en-GB');
+
 /* ------------------------------------------------------------------ chart */
 
 /*
@@ -240,7 +257,7 @@ function WorkflowPanel({ workflowId, grain, period, onClose }: { workflowId: str
               <div className="text-[12.5px] font-medium text-ink">Executions</div>
               <div className="flex items-center gap-3 text-[11.5px] text-faint">
                 {detail.workflow.failed > 0 && (
-                  <button type="button" className="hover:text-accent-ink" onClick={() => setFailedOnly((v) => !v)}>
+                  <button type="button" className="hover:text-accent-ink" onClick={() => setFailedOnly((v) => !v)} title="Failures are runs whose outcome is error or crashed.">
                     {failedOnly ? 'show all' : 'failures only'}
                   </button>
                 )}
@@ -276,8 +293,12 @@ function WorkflowPanel({ workflowId, grain, period, onClose }: { workflowId: str
                         {r.started_at.slice(0, 10)} {clock(r.started_at)}
                       </td>
                       <td className="tabular px-2 py-1.5 text-right text-dim">{r.duration_ms === null ? 'no end recorded' : duration(r.duration_ms)}</td>
-                      <td className="px-2 py-1.5 text-right text-faint">{r.mode ?? '—'}</td>
-                      <td className={`px-2 py-1.5 text-right ${statusTone(r.status)}`}>{r.status}</td>
+                      <td className="px-2 py-1.5 text-right text-faint" title={r.mode ? `${r.mode} — ${MODE_DEFS[r.mode] ?? MODE_OTHER}` : 'n8n recorded no mode for this run.'}>
+                        {r.mode ?? '—'}
+                      </td>
+                      <td className={`px-2 py-1.5 text-right ${statusTone(r.status)}`} title={`${r.status} — ${STATUS_DEFS[r.status] ?? STATUS_OTHER}`}>
+                        {r.status}
+                      </td>
                     </tr>
                   ))}
                   {runs.length === 0 && (
@@ -306,11 +327,12 @@ function WorkflowPanel({ workflowId, grain, period, onClose }: { workflowId: str
  * this is what says whether the workflow is failing **now**.
  */
 function Recent({ r }: { r: ExecutionWorkflow['recent'] }) {
-  if (!r || !r.runs) return <span className="text-faint">none finished</span>;
+  if (!r || !r.runs) return <span className="text-faint" title={RECENT_DEF}>none finished</span>;
   const last = r.last_failure_at ? r.last_failure_at.slice(0, 16).replace('T', ' ') : null;
   const title = [
     `The last ${r.runs} finished run${r.runs === 1 ? '' : 's'}, whenever they ran: ${r.failed} failed.`,
     last ? `Last failure ${last} UTC; ${r.succeeded_since_failure} succeeded since.` : 'No failure held for this workflow at all.',
+    RECENT_DEF,
   ].join(' ');
   return (
     <span title={title} className={r.failed ? 'text-failing' : 'text-dim'}>
@@ -325,7 +347,11 @@ function WorkflowRow({ w, onOpen }: { w: ExecutionWorkflow; onOpen: () => void }
     <tr className="cursor-pointer" onClick={onOpen}>
       <td className="td card-title td-clip" style={{ maxWidth: '36ch' }} title={w.registered ? w.workflow_name : `${w.workflow_name} — no workflow registry row names a system for this one`}>
         {w.workflow_name}
-        {!w.registered && <span className="ml-1.5 text-[10.5px] text-degraded">archived</span>}
+        {!w.registered && (
+          <span className="ml-1.5 text-[10.5px] text-degraded" title={tabDef('Archived')}>
+            archived
+          </span>
+        )}
       </td>
       <td className="td card-meta tabular text-right text-ink">
         {w.executions}
@@ -475,6 +501,7 @@ function SystemView({
   const period = system.period;
   const c = system.comparison;
   const nothing = system.periods.every((p) => p.executions === 0);
+  const unregistered = system.workflows.filter((w) => !w.registered).length;
   /**
    * The year as a `MonthlySeries`, so the same chart the record pages use can
    * draw it. Executions have no "advanced" second series — a run is one thing —
@@ -529,20 +556,48 @@ function SystemView({
       </div>
 
       <div className="mx-6 mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 md:mx-8">
-        <MetricCard title="Executions" right="every run read from n8n" align="top" noteMinLines={3}
-          note={period.unfinished ? `${period.unfinished} of them are still running and are counted with the status they were read at.` : 'Every run n8n recorded in this month, whatever its outcome.'}>
+        <MetricCard
+          title={
+            <TileTitle label="Executions">
+              {period.unfinished ? `${period.unfinished} of them are still running and are counted with the status they were read at.` : 'Every run n8n recorded in this month, whatever its outcome.'}
+            </TileTitle>
+          }
+          right="every run read from n8n"
+          align="top"
+          note={nothing ? 'None held for this month' : period.unfinished ? `${n(period.finished)} finished · ${period.unfinished} without a final outcome` : `All ${n(period.finished)} finished`}
+        >
           <Figure value="—" count={nothing ? null : period.executions} replayKey={`${system.system}|${period.key}`} delta={<Delta d={c.executions} />} />
         </MetricCard>
-        <MetricCard title="Succeeded" right="status = success" align="top" noteMinLines={3}
-          note={period.canceled ? `${period.canceled} further ${period.canceled === 1 ? 'run was' : 'runs were'} canceled by hand, which is neither a success nor a failure.` : 'Runs that finished without an error.'}>
+        <MetricCard
+          title={
+            <TileTitle label="Succeeded">
+              {period.canceled ? `${period.canceled} further ${period.canceled === 1 ? 'run was' : 'runs were'} canceled by hand, which is neither a success nor a failure.` : 'Runs that finished without an error.'}
+            </TileTitle>
+          }
+          right="status = success"
+          align="top"
+          note={period.finished ? `Of ${n(period.finished)} finished${period.canceled ? ` · ${period.canceled} canceled, not counted` : ''}` : 'No run finished this month'}
+        >
           <Figure value="—" count={nothing ? null : period.succeeded} replayKey={`${system.system}|${period.key}`} delta={<Delta d={c.successes} />} />
         </MetricCard>
-        <MetricCard title="Failed" right="status = error" align="top" noteMinLines={3}
-          note={`${pct(period.failure_rate)} of the ${period.finished} runs that finished. A run still going is not counted either way.`}>
+        <MetricCard
+          title={<TileTitle label="Failed">{`${pct(period.failure_rate)} of the ${period.finished} runs that finished. A run still going is not counted either way.`}</TileTitle>}
+          right="status = error"
+          align="top"
+          note={period.finished ? `Error or crashed · ${n(period.failed)} of ${n(period.finished)} finished` : 'No run finished this month'}
+        >
           <Figure value="—" count={nothing ? null : period.failed} replayKey={`${system.system}|${period.key}`} tone={period.failed ? 'failing' : undefined} delta={<Delta d={c.failures} />} />
         </MetricCard>
-        <MetricCard title="Failure rate" right="failed ÷ finished" align="top" noteMinLines={3}
-          note={period.finished ? `Over the ${period.finished} runs that finished this month.` : 'No run finished this month, so there is no rate — not a rate of nought.'}>
+        <MetricCard
+          title={
+            <TileTitle label="Failure rate">
+              {period.finished ? `Over the ${period.finished} runs that finished this month.` : 'No run finished this month, so there is no rate — not a rate of nought.'}
+            </TileTitle>
+          }
+          right="failed ÷ finished"
+          align="top"
+          note={period.finished ? `${n(period.failed)} of ${n(period.finished)} finished runs` : 'No rate — not a rate of nought'}
+        >
           <Figure
             value="—"
             count={period.finished ? period.failure_rate : null}
@@ -551,8 +606,16 @@ function SystemView({
             delta={<Delta d={c.failure_rate} />}
           />
         </MetricCard>
-        <MetricCard title="Average time" right="duration, per run" align="top" noteMinLines={3}
-          note={period.timed ? `Over the ${period.timed} of ${period.executions} runs that recorded an end. A run with no end is left out rather than counted as nought.` : 'No run recorded an end, so there is no average.'}>
+        <MetricCard
+          title={
+            <TileTitle label="Average time">
+              {period.timed ? `Over the ${period.timed} of ${period.executions} runs that recorded an end. A run with no end is left out rather than counted as nought.` : 'No run recorded an end, so there is no average.'}
+            </TileTitle>
+          }
+          right="duration, per run"
+          align="top"
+          note={period.timed ? `Mean over ${n(period.timed)} of ${n(period.executions)} runs with an end` : 'No run recorded an end'}
+        >
           <Figure
             value="—"
             count={period.avg_ms}
@@ -561,8 +624,12 @@ function SystemView({
             delta={<Delta d={c.avg_ms} format={(n) => duration(n)} />}
           />
         </MetricCard>
-        <MetricCard title="Workflows run" right="distinct workflows" align="top" noteMinLines={3}
-          note={`Workflows with at least one execution this month. A workflow the registry names no system for is still counted, under Archived.`}>
+        <MetricCard
+          title={<TileTitle label="Workflows run">{`Workflows with at least one execution this month. A workflow the registry names no system for is still counted, under Archived.`}</TileTitle>}
+          right="distinct workflows"
+          align="top"
+          note={unregistered ? `${unregistered} with no registry row, under Archived` : 'At least one execution this month'}
+        >
           <Figure value="—" count={nothing ? null : system.workflows.length} replayKey={`${system.system}|${period.key}`} />
         </MetricCard>
       </div>
@@ -576,7 +643,15 @@ function SystemView({
       */}
       <div className="mx-6 mb-4 md:mx-8">
         <MetricCard
-          title="Every month held"
+          title={
+            <TileTitle label="Every month held">
+              {(['full', 'partial', 'none'] as const).map((k) => (
+                <span key={k} className="mt-1 block first:mt-0">
+                  <span className="font-medium text-ink">{k}</span> — {COVERAGE_DEFS[k]}
+                </span>
+              ))}
+            </TileTitle>
+          }
           right={
             <span className="flex items-center gap-2">
               <span className="seg" role="group" aria-label="Chart shape">
@@ -601,7 +676,17 @@ function SystemView({
               />
             </span>
           }
-          note={<Legend series={yearSeries} />}
+          note={
+            <div className="space-y-1.5">
+              <Legend series={yearSeries} />
+              {!nothing && (
+                <Definition term={`${period.label}: ${period.coverage}`}>
+                  {COVERAGE_DEFS[period.coverage]}
+                  {period.note ? ` ${period.note}` : ''}
+                </Definition>
+              )}
+            </div>
+          }
           align="top"
         >
           {shape === 'bars' ? (
@@ -630,7 +715,7 @@ function SystemView({
                 <thead>
                   <tr>
                     {['workflow', `executions, ${period.label}`, 'failed', `failure rate, ${period.label}`, 'average time', `recent (last ${10} runs)`, ''].map((h, i) => (
-                      <th key={i} className={`border-b border-line bg-panel px-3 py-2 text-left text-[11.5px] font-medium whitespace-nowrap text-faint ${i > 0 && i < 6 ? 'text-right' : ''}`}>
+                      <th key={i} title={i === 5 ? RECENT_DEF : undefined} className={`border-b border-line bg-panel px-3 py-2 text-left text-[11.5px] font-medium whitespace-nowrap text-faint ${i > 0 && i < 6 ? 'text-right' : ''}`}>
                         {h}
                       </th>
                     ))}
@@ -763,7 +848,7 @@ export default function Executions() {
             </button>
           </div>
         }
-        below={<Tabs tabs={data.systems.map((s) => s.label)} value={tab} onChange={setTab} counts={counts} />}
+        below={<Tabs tabs={data.systems.map((s) => s.label)} value={tab} onChange={setTab} counts={counts} titles={Object.fromEntries(data.systems.map((s) => [s.label, tabDef(s.label)]))} />}
       />
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">

@@ -383,7 +383,7 @@ async function commercialMonthly(): Promise<MonthlySeries> {
       created_label: 'Cards written',
       created_field: 'created_at',
       advanced_label: 'Now at zero open questions',
-      advanced_field: 'missing_research_count = 0',
+      advanced_field: 'no question listed and missing_research_count = 0',
       rate_label: 'Resolution rate',
       partial: {
         [EXTRACTOR_FIXED.slice(0, 7)]: `Card creation stopped on 2026-09-09 and the upstream bug was not fixed until ${EXTRACTOR_FIXED}, so this month undercounts. That is real history, not a rendering fault.`,
@@ -397,7 +397,7 @@ async function commercialMonthly(): Promise<MonthlySeries> {
       id: o.id,
       key: o.card_id,
       created: o.created_at,
-      advanced: (o.missing_research_count ?? o.missing_research_questions.length) === 0,
+      advanced: o.open_questions === 0,
     })),
     arrived,
   );

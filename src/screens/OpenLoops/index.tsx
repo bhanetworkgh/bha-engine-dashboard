@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../../app/useData';
 import { BUILDER_NAMES, createLoop, getOpenLoops, getRecordMetrics, removeLoopDuplicate, resyncRecords, saveLoop, type Loop, type LoopEdit, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
-import { Icon, LoadFailed, Loading, MonthPicker, monthsFrom, thisMonth, PageHeader, ResyncButton, Tabs, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useRecordLink, useResync, useToast } from '../../components/ui';
+import { Definition, Icon, LoadFailed, Loading, MonthPicker, monthsFrom, thisMonth, PageHeader, ResyncButton, Tabs, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useRecordLink, useResync, useToast } from '../../components/ui';
 import { LoopPanel } from './LoopPanel';
 import { Loops, type StatusFilter } from './Loops';
 import { LoopMetricsPanel, LoopStatusStrip } from './Metrics';
 import { NewLoopForm } from './NewLoop';
 import RecordStatistics from '../../components/RecordStatistics';
+import { ALL_TABLES_DEF, LOOP_STATUS_DEFS, LOOP_STATUS_TERMS, VIEW_DEFS, builderTableDef } from './definitions';
 
 /** Case-insensitive match on loop_id, title, who raised it and where. */
 function matches(l: Loop, q: string): boolean {
@@ -269,7 +270,7 @@ export default function OpenLoops() {
             <ResyncButton busy={resync.busy} onClick={resync.start} />
           </div>
         }
-        below={<Tabs tabs={VIEWS} value={view} onChange={setView} />}
+        below={<Tabs tabs={VIEWS} value={view} onChange={setView} titles={VIEW_DEFS} />}
       />
 
       {showNew && (
@@ -337,8 +338,8 @@ export default function OpenLoops() {
               value={owner}
               onChange={setOwner}
               options={[
-                { value: 'all', label: 'All tables', count: inMonth.length },
-                ...data.by_owner.map((o) => ({ value: o.owner, label: BUILDER_NAMES[o.owner] ?? o.owner, count: ownerCounts[o.owner] ?? 0 })),
+                { value: 'all', label: 'All tables', count: inMonth.length, title: ALL_TABLES_DEF },
+                ...data.by_owner.map((o) => ({ value: o.owner, label: BUILDER_NAMES[o.owner] ?? o.owner, count: ownerCounts[o.owner] ?? 0, title: builderTableDef(BUILDER_NAMES[o.owner] ?? o.owner) })),
               ]}
             />
             <MonthPicker months={months} value={month} onChange={setMonth} />
@@ -349,15 +350,17 @@ export default function OpenLoops() {
               value={statusFilter}
               onChange={setStatusFilter}
               options={[
-                { value: 'open', label: 'Open', count: counts.open },
-                { value: 'in progress', label: 'In progress', count: counts['in progress'] },
-                { value: 'closed', label: 'Closed', count: counts.closed },
+                { value: 'open', label: 'Open', count: counts.open, title: LOOP_STATUS_DEFS.open },
+                { value: 'in progress', label: 'In progress', count: counts['in progress'], title: LOOP_STATUS_DEFS['in progress'] },
+                { value: 'closed', label: 'Closed', count: counts.closed, title: LOOP_STATUS_DEFS.closed },
               ]}
             />
             <div className="flex flex-1 items-center justify-end gap-3">
               <SearchBox value={q} onChange={setQ} placeholder="Search by loop id or text" />
             </div>
           </div>
+          {/* What puts a loop under the selected status — read off mapLoop; see definitions.ts. */}
+          {statusFilter !== 'all' && <Definition term={LOOP_STATUS_TERMS[statusFilter]}>{LOOP_STATUS_DEFS[statusFilter]}</Definition>}
         </div>
         <Loops
           data={data}

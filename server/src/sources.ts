@@ -684,6 +684,23 @@ export function mapOpportunity(rec: AtRecord): Opportunity {
     media_readiness: str(f.media_readiness),
     missing_research_count: num(f.missing_research_count),
     missing_research_questions: questions,
+    /**
+     * The card's open research questions, one rule for every figure that
+     * counts them (2026-09-22). The count wins, as it always has — it is not
+     * the length of the list, which holds at most three pilot questions while
+     * the count runs to eight. One value is not believed: a count of 0 beside
+     * listed questions. "Comm Write Card to Sheet" in Bays — Commercial &
+     * Pattern Extractors posts missing_research_count as a literal 0 on every
+     * new card, so a card listing three questions read as settled; there the
+     * listed questions are counted instead. No count at all falls back to the
+     * list too, and a card stating neither is null, never nought. Home, the
+     * Commercial strip, the list and the monthly chart all read this.
+     */
+    open_questions: (() => {
+      const count = num(f.missing_research_count);
+      if (count !== null && count > 0) return count;
+      return questions.length ? questions.length : count;
+    })(),
     next_action: str(f.next_action),
     pain_point: str(f.pain_point),
     offer: str(f.offer),

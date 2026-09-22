@@ -5,6 +5,7 @@ import { getBuildPatterns, getPatternDetail, getRecordMetrics, resyncRecords, se
 import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
+  Definition,
   EmptyPanel,
   EmptyState,
   HBar,
@@ -12,6 +13,7 @@ import {
   Loading,
   MetricCard,
   MonthPicker,
+  monthLabel,
   monthsFrom,
   PageHeader,
   Tabs,
@@ -36,6 +38,7 @@ import {
   useToast,
 } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
+import { REUSE_DEFS } from './recordDefinitions';
 
 /**
  * Build patterns.
@@ -77,6 +80,30 @@ function reuseKey(p: BuildPattern): string {
   return v.length > 24 || /\s/.test(v) ? '(written out in prose)' : v;
 }
 
+/**
+ * The systems caption: the names themselves where they fit on one line, and
+ * otherwise as many as fit with the rest counted. The whole list, and the rows
+ * filed under none, are behind the mark.
+ */
+function systemsCaption(names: string[], unfiled: number): string {
+  if (!names.length) return 'no pattern_id names a system';
+  const all = names.join(', ');
+  const tail = unfiled ? `; ${unfiled} unfiled` : '';
+  if ((all + tail).length <= 55) return all + tail;
+  const shown: string[] = [];
+  for (const n of names) {
+    const next = [...shown, n].join(', ') + ` +${names.length - shown.length - 1} more`;
+    if (next.length > 55) break;
+    shown.push(n);
+  }
+  return `${shown.join(', ')} +${names.length - shown.length} more`;
+}
+
+/** A reusability bucket as the filter and the definition line word it. */
+function reuseLabel(key: string): string {
+  return key.startsWith('(') ? key.slice(1, -1) : key.toLowerCase();
+}
+
 /* ---------------------------------------------------------------- metrics */
 
 function PatternMetricsPanel({ metrics, loading, error }: { metrics: PatternMetrics | null; loading: boolean; error: string | null }) {
@@ -99,28 +126,31 @@ function PatternMetricsPanel({ metrics, loading, error }: { metrics: PatternMetr
   return (
     <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
       <StatStrip cols={4}>
-        {/* The hint says which rows, because the strip follows the month picker. */}
-        <CountCell label="Patterns" value={m.scope.rows} hint={m.scope.month ? 'created in this month' : 'rows in the table'} hintMinLines={2} />
+        {/*
+          Caption rule (2026-09-22): one line under each figure, the full
+          explanation behind the mark beside the label. The caption says which
+          rows, because the strip follows the month picker.
+        */}
+        <CountCell
+          label="Patterns"
+          value={m.scope.rows}
+          caption={m.scope.month ? `created in ${monthLabel(m.scope.month)}` : 'every row in the table'}
+          hint="Rows whose created_at falls in the month chosen beside the search box; All time counts every row in the table. A count of rows, not of distinct pattern ids."
+        />
         <CountCell
           label="Distinct pattern ids"
           value={m.duplicates.distinct_ids}
           tone={m.duplicates.duplicate_rows ? 'degraded' : 'dim'}
-          hint={m.duplicates.duplicate_rows ? `${m.duplicates.duplicate_rows} more ${m.duplicates.duplicate_rows === 1 ? 'row' : 'rows'} than patterns` : 'one row per pattern'}
-          hintMinLines={2}
+          caption={m.duplicates.duplicate_rows ? `${m.duplicates.duplicate_rows} more ${m.duplicates.duplicate_rows === 1 ? 'row' : 'rows'} than patterns` : 'one row per pattern'}
+          hint={m.duplicates.note}
         />
         {/*
           A fourth figure (2026-09-16, Destiny): three wide cells read sparse
           beside the four and five the other record pages carry. It is the
           system segment of each pattern's own id, which the rows already print.
         */}
-        <CountCell
-          label="Systems covered"
-          value={m.systems.n}
-          tone={m.systems.n ? 'default' : 'dim'}
-          hint={m.systems.names.length ? m.systems.names.join(', ') : 'no pattern_id names a system'}
-          hintMinLines={2}
-        />
-        <CountCell label="Broadly reusable" value={broad} tone={broad ? 'accent' : 'dim'} hint="reusability = Broad" hintMinLines={2} />
+        <CountCell label="Systems covered" value={m.systems.n} tone={m.systems.n ? 'default' : 'dim'} caption={systemsCaption(m.systems.names, m.systems.unfiled)} hint={m.systems.note} />
+        <CountCell label="Broadly reusable" value={broad} tone={broad ? 'accent' : 'dim'} caption={`${broad} of ${m.scope.rows} rows, reusability = Broad`} hint={REUSE_DEFS.Broad} />
       </StatStrip>
 
       <div className="mx-6 mb-4 grid items-stretch gap-4 md:mx-8 md:grid-cols-2">
@@ -132,7 +162,7 @@ function PatternMetricsPanel({ metrics, loading, error }: { metrics: PatternMetr
               {m.reusability_mix.map((r) => (
                 <HBar
                   key={r.reusability}
-                  label={r.reusability.startsWith('(') ? r.reusability : r.reusability.toLowerCase()}
+                  label={<span title={REUSE_DEFS[r.reusability]}>{r.reusability.startsWith('(') ? r.reusability : r.reusability.toLowerCase()}</span>}
                   value={r.n}
                   max={maxReuse}
                   tone={r.reusability.toLowerCase() === 'broad' ? 'accent' : 'ink'}
@@ -282,7 +312,8 @@ function patternColumns(open: (p: BuildPattern) => void): RecordColumn<BuildPatt
       clip: true,
       className: 'card-meta',
       cellClass: (p) => (p.reusability?.trim().toLowerCase() === 'broad' ? 'text-accent-ink' : 'text-faint'),
-      title: (p) => p.reusability ?? undefined,
+      // A sentence shows itself on hover; a single word shows what it means.
+      title: (p) => (reuseKey(p) === '(written out in prose)' ? (p.reusability ?? undefined) : REUSE_DEFS[reuseKey(p)]),
       cell: (p) => (p.reusability ? (reuseKey(p) === '(written out in prose)' ? 'in prose' : p.reusability.toLowerCase()) : <span className="text-faint">—</span>),
     },
     {
@@ -483,7 +514,10 @@ export default function BuildPatterns() {
               ariaLabel="Filter by reusability"
               value={reuse}
               onChange={setReuse}
-              options={[{ value: 'all', label: 'All', count: inMonth.length }, ...reuseOptions.map(([r, n]) => ({ value: r, label: r.startsWith('(') ? r.slice(1, -1) : r.toLowerCase(), count: n }))]}
+              options={[
+                { value: 'all', label: 'All', count: inMonth.length, title: 'Every pattern in the month in view, whatever its reusability.' },
+                ...reuseOptions.map(([r, n]) => ({ value: r, label: reuseLabel(r), count: n, title: REUSE_DEFS[r] })),
+              ]}
             />
             <div className="flex flex-1 items-center justify-end gap-3">
               {/* The month in view, to the left of the search box, on every record page. */}
@@ -492,6 +526,8 @@ export default function BuildPatterns() {
               {q.trim() && hits === null && <span className="tabular whitespace-nowrap text-[11.5px] text-faint">Searching…</span>}
             </div>
           </div>
+          {/* The selected bucket, defined from the code that files a row there — see recordDefinitions.ts. */}
+          {reuse !== 'all' && REUSE_DEFS[reuse] && <Definition term={reuseLabel(reuse)}>{REUSE_DEFS[reuse]}</Definition>}
           {keywordCounts.length > 0 && (
             <div className="flex flex-wrap items-center gap-1">
               <span className="mr-1 text-[11px] text-faint">Keywords</span>

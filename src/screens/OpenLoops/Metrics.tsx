@@ -1,5 +1,6 @@
 import type { LoopMetrics } from '../../data';
 import { BUILDER_NAMES } from '../../data';
+import { LOOP_STATUS_DEFS } from './definitions';
 import { CountCell, CountUp, EmptyPanel, HBar, MetricCard, StatCell, StatStrip } from '../../components/ui';
 
 /**
@@ -42,6 +43,13 @@ export function LoopStatusStrip({ metrics, view, loading }: { metrics: LoopMetri
     );
   }
   const total = metrics.open + metrics.in_progress + metrics.closed;
+  /**
+   * One caption line per figure (2026-09-22, the caption rule): the share of
+   * the loops in view, which the three sum to. The explanation that used to sit
+   * under Open is behind the mark, word for word, with each word's definition
+   * from definitions.ts beside it.
+   */
+  const of = metrics.scope.builder ? `of ${total} in ${BUILDER_NAMES[metrics.scope.builder] ?? metrics.scope.builder}’s table` : `of ${total} in view`;
   return (
     <StatStrip cols={3}>
       <CountCell
@@ -49,14 +57,18 @@ export function LoopStatusStrip({ metrics, view, loading }: { metrics: LoopMetri
         value={metrics.open}
         tone="accent"
         replayKey={view}
+        caption={of}
         hint={
-          metrics.scope.builder
-            ? `Of the ${total} in ${BUILDER_NAMES[metrics.scope.builder] ?? metrics.scope.builder}’s table`
-            : `Of the ${total} in view. Open + in progress + closed = ${total}.`
+          <>
+            {metrics.scope.builder
+              ? `Of the ${total} in ${BUILDER_NAMES[metrics.scope.builder] ?? metrics.scope.builder}’s table`
+              : `Of the ${total} in view. Open + in progress + closed = ${total}.`}{' '}
+            {LOOP_STATUS_DEFS.open}
+          </>
         }
       />
-      <CountCell label="In progress" value={metrics.in_progress} replayKey={view} />
-      <CountCell label="Closed" value={metrics.closed} tone="dim" replayKey={view} />
+      <CountCell label="In progress" value={metrics.in_progress} replayKey={view} caption={of} hint={LOOP_STATUS_DEFS['in progress']} />
+      <CountCell label="Closed" value={metrics.closed} tone="dim" replayKey={view} caption={of} hint={LOOP_STATUS_DEFS.closed} />
     </StatStrip>
   );
 }

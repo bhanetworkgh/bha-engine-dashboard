@@ -60,13 +60,13 @@ export function CountCell({
 }
 
 /** A figure that may be unknown. Null renders as "Not recorded" and the reason; never as 0. */
-export function MetricCell({ label, metric, suffix, compareLabel = 'last week', noteMinLines, replayKey }: { label: string; metric: Metric; suffix?: string; compareLabel?: string; /** A floor under the footnote, so a row of cells is one block of text rather than four of different depths. The counterpart of CountCell's `hintMinLines`. */ noteMinLines?: number; replayKey?: string | number }) {
+export function MetricCell({ label, metric, suffix, compareLabel = 'last week', noteMinLines, replayKey, caption }: { label: string; metric: Metric; suffix?: string; compareLabel?: string; /** A floor under the footnote, so a row of cells is one block of text rather than four of different depths. The counterpart of CountCell's `hintMinLines`. */ noteMinLines?: number; replayKey?: string | number; /** One line of at most 55 characters; given, the metric's note moves behind the label's info mark. */ caption?: string }) {
   const { value, compare, note } = metric;
   const delta = value !== null && compare !== null && compare !== undefined ? value - compare : null;
   return (
     <StatCell>
       <div className="min-w-0">
-        <div className="kicker truncate">{label}</div>
+        {caption ? <StatLabel label={label} detail={note} /> : <div className="kicker truncate">{label}</div>}
         {value === null ? (
           <div className="mt-1 text-[15px] leading-tight text-faint">Not recorded</div>
         ) : (
@@ -82,7 +82,9 @@ export function MetricCell({ label, metric, suffix, compareLabel = 'last week', 
             )}
           </div>
         )}
-        {note && (
+        {caption ? (
+          <StatCaption>{caption}</StatCaption>
+        ) : note && (
           <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={noteMinLines ? { minHeight: `${noteMinLines * 15}px` } : undefined} title={note}>
             {note}
           </div>
