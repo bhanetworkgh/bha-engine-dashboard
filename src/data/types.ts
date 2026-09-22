@@ -1905,7 +1905,18 @@ export interface PayMetrics {
   kind: 'pay';
   computed_at: string;
   scope: { sessions: number; unpaid: number; builders: number; statements: number };
+  /** The month the figures are for, or the current month when every month is. */
   month: string;
+  /** The month asked for; null is every month. */
+  selected: string | null;
+  /** Every month a session or statement is held for, newest first. */
+  months_held: string[];
+  /**
+   * What is outstanding in months other than the selected one — never scoped
+   * away, because a picker that hid last month's unpaid work on the 1st would
+   * hide the thing payday is for. Nought with every month selected.
+   */
+  outside: { sessions_owed: number; sessions_unconfirmed: number; months: string[] };
   /* ---- owed ---- */
   /** `no_mode` is sessions carrying neither mode, so the split adds up to `n`. */
   sessions_owed: { n: number; monthly: number; daily: number; no_mode: number; note: string };

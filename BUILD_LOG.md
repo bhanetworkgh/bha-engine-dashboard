@@ -8581,3 +8581,42 @@ Found:      Production engine_incidents holds 54 rows (bays 23, north_star 22,
             ledger's status=open read. The stored blob still says
             resolution_status "open" on all 54, because a row the open-only read
             stops returning is marked closed-since and not re-fetched.
+
+## 2026-09-22 20:35 — Pay Tracker: one month for the whole page; Owed says what it lists
+Intent:     Brief 2, item 2. One month picker at the top of Pay scoping Owed,
+            Statements, Sessions and Statistics together; the strip recomputes
+            and says which month; Owed says it lists people with something
+            outstanding rather than the roster, Ahad reads as "nothing owed · 1
+            payment not recorded", and an empty mode group says it is paid up.
+Files:      server/src/pay.ts, server/src/index.ts, src/data/{index,types}.ts,
+            src/screens/PayTracker/{index,Owed,Sessions}.tsx
+Data:       Production before the change: 134 session rows, 77 sessions once
+            the resync/engine pairs are merged, every one in Month 2026-09. Owed
+            5 (Hardik 1, Jeganathan 2, Kavin 2 — all monthly), Paid not recorded
+            10, builders owed 3, statements 0. Ahad: 15 paid, 1 with no Paid,
+            nothing owed — so the daily group has nobody owed. So today the
+            picker holds one month and September and All time agree; the scope
+            only starts to differ in October.
+Fix:        `pay.metrics(selected)`; `/api/pay/metrics?month=YYYY-MM`, refusing
+            anything else with a 400 rather than reading it as every month. The
+            sessions are cut by their own Month, the statements by theirs. Two
+            things are not scoped and say so: the month-against-month chart
+            (scoped it is one bar), and `outside` — what is owed or unrecorded in
+            other months — because on 1 October a picker opened on October would
+            otherwise hide exactly the September work being paid. The Owed tab
+            names it in a line with "Show every month". The picker sits in the
+            header beside Resync and opens on the current month like the record
+            pages, with All time last as they have it; the Sessions tab's own
+            picker is gone, one month for the page. Under the freshness line:
+            "Showing Sep 2026 · 4 of 5 sessions held". The strip's fifth figure
+            is "Sessions in Sep 2026" / "Sessions, all months", not "this
+            month". A builder with nothing owed shows "—" in the owed columns and
+            "nothing owed · 1 payment not recorded" by the name; a group with
+            rows but nothing owed opens with "Every daily builder is paid up for
+            Sep 2026." and says the rows below are not owed; a group with no rows
+            says paid up, or that no session counts toward the month, or that the
+            ledger is unread — in that order of checking.
+Tested:     Local, with an August unpaid row added: all months owed 2 / unconf 2;
+            ?month=2026-09 owed 1, outside {owed 1, months [2026-08]};
+            ?month=2026-08 owed 1, outside {owed 1, unconfirmed 2}; ?month=bad
+            400. Screenshot shows the Ahad row and the paid-up line as above.

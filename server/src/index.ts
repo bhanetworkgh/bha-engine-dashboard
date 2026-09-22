@@ -757,8 +757,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** Pay Tracker: the ledger's rows, and the figures over them. */
       case '/api/pay':
         return send(res, 200, await pay.data());
-      case '/api/pay/metrics':
-        return send(res, 200, await pay.metrics());
+      case '/api/pay/metrics': {
+        // The month the page is showing; omitted is every month. A value that
+        // is not a month is refused rather than read as "every month", which
+        // would answer a different question without saying so.
+        const mon = url.searchParams.get('month');
+        if (mon && !/^\d{4}-\d{2}$/.test(mon)) throw new HttpError(400, `month must be YYYY-MM, not "${mon}".`);
+        return send(res, 200, await pay.metrics(mon || null));
+      }
       /** One lane, or all three when `lane` is absent. */
       case '/api/engine-health/metrics': {
         const lane = url.searchParams.get('lane');
