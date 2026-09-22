@@ -25,8 +25,12 @@ export interface SeedRow {
 }
 
 const N8N = 'https://bayshorizonnetwork.app.n8n.cloud';
-/** The note every row added on 2026-09-22 carries, so it can be told from a row somebody wrote. */
-const NEW = 'Added 2026-09-22 from the live n8n workflow list. System chosen from the workflow name; folder, owner and trigger were not read unless stated.';
+/**
+ * The note the rows added on 2026-09-22 carry. They were seeded first with
+ * folder, owner and trigger null; migration 25 filled them from n8n and holds
+ * the earlier note text it matches on.
+ */
+const READ = 'Added 2026-09-22 from the live n8n workflow list; system chosen from the name. Folder is the n8n parent folder and trigger the workflow\'s own trigger nodes, both read 2026-09-22. Owner follows the convention every BHA Engine row has (Destiny Arupi): n8n records no owner on a team-project workflow.';
 const wfUrl = (id: string) => `${N8N}/workflow/${id}`;
 
 /**
@@ -132,34 +136,36 @@ export const WORKFLOWS: SeedRow[] = [
    * owner and trigger were not read and are null rather than guessed.
    * Inactive workflows are `retired`, except where a note says otherwise.
    */
-  W('oOAZaW1aQaRP2arc', 'BHA — Self Healer', 'Engine', null, null, null, 'sub-workflow', 'Handed every failure by the three error handlers',
-    'The one self-healing layer for all three lanes: routes each failure to retry, Claude Code repair, or a person, and reports every outcome.', 'production', NEW),
-  W('wZpWp9ov6exxoez0', 'BHA — Self Healer Reports', 'Engine', null, null, null, 'webhook', 'POST /webhook/repair-result',
-    'Receives a repair or retry result, reports it in #bha-self-healing whatever the outcome, and closes the BHARAG incident when the result was a fix.', 'production', NEW),
-  W('3Pzm0DlJZSNu6DU4', 'Engine — Self-Healing Retry', 'Engine', null, null, null, 'schedule + webhook', 'Every 5 minutes; POST /webhook/engine-heal',
-    'Retries the failures a retry can fix, with backoff and a circuit breaker, and writes retry_attempts.', 'retired',
-    `${NEW} Inactive in n8n. Its webhook /webhook/engine-heal is what this dashboard's Retry now posts to, so Retry now is not live while it is off.`),
-  W('MtjakyCf90lgah7S', 'TEST — Self-healing, Bays lane', 'Test', null, null, null, null, null,
-    'Deliberately broken test workflow for the Bays self-healing lane. Safe to delete after testing.', 'experimental', NEW),
-  W('xIVt2cO0VHDJ7jT6', 'TEST — Self-healing, North Star lane', 'Test', null, null, null, null, null,
-    'Deliberately broken test workflow for the North Star self-healing lane. Safe to delete after testing.', 'experimental', NEW),
-  W('4beRTMIlgJ0njPna', 'TEST — Self-healing, Research Twin lane', 'Test', null, null, null, null, null,
-    'Deliberately broken test workflow for the Research Twin self-healing lane. Safe to delete after testing.', 'experimental', NEW),
-  W('LR7M1POhHvJ0j7Vm', 'Bays — Pay Tracking', 'Bays', null, null, null, 'schedule + sub-workflow', 'Called on each approval; 1st of the month 09:00; Mondays 10:00',
-    'Records every approved session, sends one statement per monthly builder on the 1st, and reminds daily builders to confirm sessions still showing unpaid.', 'production', NEW),
-  W('t79s1mXSHink3dAM', 'Bays — Pay Ledger Sync', 'Bays', null, null, null, 'schedule', 'Every 30 minutes',
-    'Keeps the pay ledger in step with the approved session logs, in both directions, without touching the live approval path or the Yes, Paid button.', 'production', NEW),
-  W('GES8UIM3dJRbrLSx', 'BHA — Dashboard Loop Write-Back', 'Bays', null, null, null, 'webhook', null,
-    'Wrote loop status changes from this dashboard back to the Airtable Open Loops tables. Retired 14 Sep, when loop edits began writing to Airtable directly.', 'retired', NEW),
-  W('xxME1VLRkPdlLpaV', 'vFarm Early Access — Lead Notifier', 'vFarm', null, null, null, 'webhook', 'Called by this dashboard on a new Early Access lead',
-    'Receives a vFarm Early Access lead notification from the BHA Engine Dashboard and posts it into #vfarm-early-access.', 'production', NEW),
-  W('rt2oje925OyiSttf', 'GenieContextTest-20260918220730', 'Genie', null, null, null, 'webhook', null,
-    'Webhook trigger that replies with JSON {"ok":true}. Unpublished, no Slack, Gmail or OAuth — a connectivity test.', 'retired', NEW),
-  W('N9kIvHF8Vohy8OeM', 'Add source_campaign Header (one-off)', 'One-off', null, null, null, null, null, null, 'retired',
-    `${NEW} A one-off job, inactive; n8n carries no description for it.`),
-  W('PEdHH8OZuplhTidg', 'ONE-OFF — Ingest vFarm clip patterns v0.2 (D565)', 'One-off', null, null, null, null, null,
-    "One-off: ingest Hardik's eight vFarm clip patterns plus the patched v0.2 contract into BHARAG as nine documents, then read each back by exact pattern_id. LOOP-1789929222645-D565.",
-    'retired', NEW),
+  W('oOAZaW1aQaRP2arc', 'BHA — Self Healer', 'Engine', 'Engine Self-Healing', null, 'Destiny Arupi', 'sub-workflow + webhook', 'Handed every failure by the three error handlers; POST /webhook/engine-heal (Retry now, moved here 22 Sep)',
+    'The one self-healing layer for all three lanes: routes each failure to retry, Claude Code repair, or a person, and reports every outcome.', 'production', READ),
+  W('wZpWp9ov6exxoez0', 'BHA — Self Healer Reports', 'Engine', 'Engine Self-Healing', null, 'Destiny Arupi', 'webhook', 'POST /webhook/repair-result',
+    'Receives a repair or retry result, reports it in #bha-self-healing whatever the outcome, and closes the BHARAG incident when the result was a fix.', 'production', READ),
+  W('3Pzm0DlJZSNu6DU4', 'Engine — Self-Healing Retry', 'Engine', null, null, 'Destiny Arupi', 'schedule + webhook', 'Every 5 minutes; POST /webhook/engine-heal',
+    'Retries the failures a retry can fix, with backoff and a circuit breaker, and writes retry_attempts.', 'retired', `${READ} Archived in n8n, so its folder cannot be read. Its /webhook/engine-heal trigger moved to BHA — Self Healer on 22 Sep, which is what Retry now reaches.`),
+  W('MtjakyCf90lgah7S', 'TEST — Self-healing, Bays lane', 'Test', 'Sandbox (For Testing & One-Off Builds)', null, 'Destiny Arupi', 'webhook', 'POST /webhook/heal-test-bays-0921',
+    'Deliberately broken test workflow for the Bays self-healing lane. Safe to delete after testing.', 'experimental', READ),
+  W('xIVt2cO0VHDJ7jT6', 'TEST — Self-healing, North Star lane', 'Test', 'Sandbox (For Testing & One-Off Builds)', null, 'Destiny Arupi', 'webhook', 'POST /webhook/heal-test-ns-0921',
+    'Deliberately broken test workflow for the North Star self-healing lane. Safe to delete after testing.', 'experimental', READ),
+  W('4beRTMIlgJ0njPna', 'TEST — Self-healing, Research Twin lane', 'Test', 'Sandbox (For Testing & One-Off Builds)', null, 'Destiny Arupi', 'webhook', 'POST /webhook/heal-test-rt-0921',
+    'Deliberately broken test workflow for the Research Twin self-healing lane. Safe to delete after testing.', 'experimental', READ),
+  W('LR7M1POhHvJ0j7Vm', 'Bays — Pay Tracking', 'Bays', 'Pay', null, 'Destiny Arupi', 'schedule + sub-workflow', 'Called by Bays — Submit Actions on each approval; 1st of the month 09:00; Mondays 10:00',
+    'Records every approved session, sends one statement per monthly builder on the 1st, and reminds daily builders to confirm sessions still showing unpaid.', 'production', READ),
+  W('t79s1mXSHink3dAM', 'Bays — Pay Ledger Sync', 'Bays', 'Pay', null, 'Destiny Arupi', 'schedule', 'Every 30 minutes',
+    'Keeps the pay ledger in step with the approved session logs, in both directions, without touching the live approval path or the Yes, Paid button.', 'production', READ),
+  W('GES8UIM3dJRbrLSx', 'BHA — Dashboard Loop Write-Back', 'Bays', 'Open Loops', null, 'Destiny Arupi', 'webhook', 'POST /webhook/dashboard-loop-writeback (X-N8N-API-KEY header)',
+    'Wrote loop status changes from this dashboard back to the Airtable Open Loops tables. Retired 14 Sep, when loop edits began writing to Airtable directly.', 'retired', READ),
+  W('xxME1VLRkPdlLpaV', 'vFarm Early Access — Lead Notifier', 'vFarm', 'vFarm', null, null, 'webhook', 'POST /webhook/vfarm-early-access-lead, called by this dashboard on a new Early Access lead',
+    'Receives a vFarm Early Access lead notification from the BHA Engine Dashboard and posts it into #vfarm-early-access.', 'production', `${READ} Owner left blank: the one comparable row, the vFarm lead workflow it replaced, is Hardik Bhatt's, while this one was built for the dashboard — two conventions, so no owner is assumed.`),
+  W('rt2oje925OyiSttf', 'GenieContextTest-20260918220730', 'Genie', null, null, 'Destiny Arupi', 'webhook', 'POST /webhook/geniecontexttest-20260918220730-a7k9m2',
+    'Webhook trigger that replies with JSON {"ok":true}. Unpublished, no Slack, Gmail or OAuth — a connectivity test.', 'retired', `${READ} In Destiny Arupi's personal n8n project, at its root, not in the BHA Engine project — so no folder, and the owner is that project's.`),
+  W('N9kIvHF8Vohy8OeM', 'Add source_campaign Header (one-off)', 'One-off', 'Sandbox (For Testing & One-Off Builds)', null, 'Destiny Arupi', null, null,
+    null, 'retired', `${READ} Trigger not read: MCP access is turned off on this workflow in n8n. A one-off job, inactive; n8n carries no description for it.`),
+  W('PEdHH8OZuplhTidg', 'ONE-OFF — Ingest vFarm clip patterns v0.2 (D565)', 'One-off', null, null, 'Destiny Arupi', 'webhook', 'POST /webhook/oneoff-vfarm-clip-patterns-d565',
+    "One-off: ingest Hardik's eight vFarm clip patterns plus the patched v0.2 contract into BHARAG as nine documents, then read each back by exact pattern_id. LOOP-1789929222645-D565.", 'retired', `${READ} At the root of the BHA Engine project, in no folder.`),
+  /* Created in n8n at 19:07 UTC on 22 Sep, after the list above was taken — the run that closed 37 stale incidents. */
+  W('QqSeahroA4ez2iOp', 'ONE-OFF — Close stale incidents (22 Sep audit)', 'One-off', null, null, 'Destiny Arupi', 'webhook', 'POST /webhook/close-stale-incidents',
+    "One-off: closes incidents left open on the BHARAG ledger after being fixed by hand, using each lane's own incident key, and reports every refusal with BHARAG's reason.",
+    'retired', `${READ} At the root of the BHA Engine project, in no folder. Inactive in n8n.`),
 ];
 
 /**
@@ -356,7 +362,7 @@ export const ENDPOINTS: SeedRow[] = [
     'Received by BHA — Self Healer Reports, which posts to #bha-self-healing and closes the BHARAG incident when the result was a fix.'),
   E('ep-engine-heal', 'Engine heal webhook', `${N8N}/webhook/engine-heal`, 'POST', null, 'n8n Cloud',
     "This dashboard's Retry now button, through its server",
-    'Owned by Engine — Self-Healing Retry, which is inactive in n8n, so this production webhook is not live.'),
+    'Owned by BHA — Self Healer since 22 Sep, when the webhook moved there from Engine — Self-Healing Retry (archived in n8n).'),
   E('ep-bharag-incident-status', 'BHARAG incident status', 'https://bharag2.duckdns.org/api/v1/incidents/:entity_id/status', 'POST', 'x-api-key header (one key per lane)', 'BHARAG cluster',
     "The error handlers (open → retrying), BHA — Self Healer Reports (→ self_healed), and this dashboard's Engine health close (→ manually_resolved)",
     'The only route that moves an incident between states. A terminal state has no transition out of it.'),
