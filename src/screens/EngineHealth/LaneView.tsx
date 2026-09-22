@@ -107,7 +107,7 @@ function StateCell({ i }: { i: Incident }) {
   if (i.open_now) return <Pill tone="degraded">open</Pill>;
   if (c?.state === 'ok') {
     return (
-      <span className="text-faint" title={`Closed in the BHARAG ledger as manually resolved by ${c.actor ?? 'the dashboard login'} at ${when(c.at)}`}>
+      <span className="text-faint" title={`Closed from this dashboard by ${c.actor ?? 'the dashboard login'} at ${when(c.at)}. The BHARAG ledger records it as manually resolved by the lane, not by a person.`}>
         resolved by hand
       </span>
     );
@@ -387,7 +387,7 @@ function CloseConfirm({ incidents, busy, onCancel, onConfirm }: { incidents: Inc
           Close {n} incident{n === 1 ? '' : 's'} as resolved?
         </h2>
         <p className="mt-2 text-[13px] leading-relaxed text-dim">
-          {byLane}. Each is written to the BHARAG incident ledger with its own lane’s key, as <span className="font-medium text-ink">manually_resolved</span>, and recorded here against the dashboard login with the time. The ledger has no way back from a closed state — an incident that recurs will open as a new one.
+          {byLane}. Each is written to the BHARAG incident ledger with its own lane’s key, as <span className="font-medium text-ink">manually_resolved</span>. Who clicked and when is recorded here; the ledger itself records the lane as the resolver, not a person. The ledger has no way back from a closed state — an incident that recurs will open as a new one.
         </p>
         <p className="mt-2 text-[12.5px] leading-relaxed text-faint">
           A row is marked closed only once the ledger accepts it. Any the ledger refuses stay open, in red, with its reason.

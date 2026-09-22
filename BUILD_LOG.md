@@ -8545,3 +8545,39 @@ Found:      New systems on the Executions page: Engine, Test, One-off and Genie
 Tested:     Local boot: "applied 1 migration(s): 24", "seeded 21 row(s):
             workflows 13, endpoints 8"; the three stale rows corrected; the
             Endpoint tab renders the new rows and the history label.
+
+## 2026-09-22 20:10 — Engine health: the close body the ledger actually accepts
+Intent:     Brief 2, item 1. The bulk close shipped in the last pass sent
+            `resolved_by` at the top level of the status body; the deployed
+            ledger refuses that.
+Files:      server/src/bharag.ts, server/src/health.ts,
+            src/screens/EngineHealth/LaneView.tsx
+Problem:    Live, per Destiny: HTTP 400 LEDGER_PAYLOAD_SCHEMA_MISMATCH
+            "/ must NOT have additional properties". The BHARAG repository copy
+            this code was written against (last commit 11 Sep) parses the status
+            body with a non-strict schema and would have accepted it — the
+            deployed service is stricter than its repo, which is why the local
+            mock passed.
+Fix:        `closeIncident` sends exactly `{ resolution_status:
+            'manually_resolved', payload_patch: { resolved_at, resolved_by } }`
+            and nothing else. The comment says the ledger overwrites both on a
+            terminal transition and stores the lane principal as resolved_by
+            ("bays", "north_star", "research_twin" were what it returned), so
+            the dashboard does not promise the login it sent is kept. The login
+            and time are still written to record_writes here. The confirm
+            dialog, the closed-row tooltip and the server's result note now say
+            the ledger records the lane as the resolver, not a person.
+Tested:     Mock ledger made strict (refuses any top-level key but
+            resolution_status/payload_patch, and any patch key outside the
+            schema, with the live error text; sets resolved_by = source). The
+            old body is refused by it; the UI flow — select two, Mark
+            resolved…, Close 2 in the ledger — sent the new body with each
+            lane's own key, both closed, ledger resolved_by "bays" /
+            "north_star", record_writes actor the login.
+Found:      Production engine_incidents holds 54 rows (bays 23, north_star 22,
+            research_twin 9), open_now false on all 54, last lane read
+            2026-09-22T19:19:34Z. So the page reads 0 open, not 17: the brief
+            said 37 were closed, and the other 17 are also absent from the
+            ledger's status=open read. The stored blob still says
+            resolution_status "open" on all 54, because a row the open-only read
+            stops returning is marked closed-since and not re-fetched.

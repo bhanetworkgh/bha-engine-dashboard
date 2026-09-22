@@ -537,7 +537,7 @@ export async function closeIncidents(ids: string[], actor: string): Promise<Inci
 
   const n = (o: string) => results.filter((r) => r.outcome === o).length;
   const note = [
-    `${n('closed')} of ${ids.length} closed in the BHARAG ledger as manually resolved by ${actor}.`,
+    `${n('closed')} of ${ids.length} closed in the BHARAG ledger as manually resolved, from this dashboard by ${actor} — the ledger itself records the lane as the resolver.`,
     n('failed') ? `${n('failed')} refused by the ledger and still open there and here — each row says why.` : '',
     n('skipped') ? `${n('skipped')} skipped (already closed, or not held).` : '',
   ]
