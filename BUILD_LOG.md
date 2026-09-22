@@ -8299,3 +8299,51 @@ Found:      Reported, not fixed (outside this repo): the Retry now webhook
             live; the active `BHA — Self Healer` writes no `retry_attempts`
             rows, so Retries shows nothing it does; nothing posts to
             `/api/engine/incidents`.
+
+## 2026-09-22 18:40 — North Star, Research Twin, Customer Service Twin
+Intent:     Brief §3, §4, §5: a comprehension pass on the twins, rules (a) and
+            (b), and a placeholder for the Customer Service Twin.
+Files:      src/screens/NorthStar.tsx, src/screens/ResearchTwin.tsx,
+            src/screens/twinDefinitions.ts (new), src/screens/CsTwin/index.tsx
+            (new), src/App.tsx, src/components/Layout.tsx,
+            src/components/ui/Tabs.tsx, server/src/store.ts, server/src/stats.ts,
+            CLAUDE.md (navigation tree)
+Verified:   engine_ns_asks 46 rows, all from the engine, 2026-09-18 07:00Z to
+            2026-09-22 08:45Z: 45 Thin + 1 Answered, 46 Delivered. So for Sep:
+            delivery 46 of 46, answered 1 of 46. engine_rt_asks 5 rows: 3
+            Answered, 2 Needs human, all Delivered. engine_rt_jobs 3 rows, all
+            `source=engine`, all Pending with 0 attempts, first arriving
+            2026-09-22T10:11:55Z (the brief said "3 rows since 22 Sept" — right).
+Decision:   Every definition is taken from the n8n node that writes the value,
+            quoted in the header of twinDefinitions.ts. Two places the brief's
+            reference list was not quite what the code does:
+            - **Research Twin "Needs human" is not "capped after 3 attempts".**
+              It is set on an *ask* when the answer text itself matches
+              `/needs? a (person|human)|capped after|requires_human|flagged for
+              (a )?human/i`. "Capped (needs human)" is a different thing, a
+              *job* status, set by the Tools Router at the third low-confidence
+              attempt. They are defined separately on the two tabs.
+            - **"Not delivered" is never written by either agent.** A refused
+              Slack post throws in "Assert Slack OK" before the ask row is
+              built, so a failed delivery leaves no row at all. The Not
+              delivered filter is therefore always 0 by construction; its
+              definition and empty state now say so, and the delivery-rate
+              note says 100% cannot on its own prove every post arrived.
+            - Refused is only reachable on a *cited* answer: North Star tests
+              Thin before Refused, so an uncited refusal is recorded as Thin.
+            The notes that said "nothing is inferred from the answer text" were
+            wrong — the agent infers all of it from the answer text; this
+            dashboard only counts it. Corrected in store.ts and stats.ts.
+Decision:   The page sentence the brief asked for is the PageHeader subtitle and
+            names the table. Research Twin gets a line under its tabs saying
+            what the selected section is, and each tab carries it as a tooltip.
+Decision:   The Jobs tab no longer opens on an empty Capped filter when nothing
+            is capped — it opens on All — and carries a line reading "N jobs
+            recorded since the first arrived on …, x pending · …", with "none
+            has been worked yet" when every job is still Pending.
+Decision:   Customer Service Twin: /cs-twin, Systems group, the same
+            ComingSoon shape as Genie, no fetch and no figure. Sidebar is now
+            sixteen items; CLAUDE.md's navigation tree and "sixteen fit" updated.
+Tested:     Local build, three NS and two RT asks and one job posted through
+            /api/engine: both strips render as one even row with one caption
+            each, definitions under the filters, the jobs line reads correctly.

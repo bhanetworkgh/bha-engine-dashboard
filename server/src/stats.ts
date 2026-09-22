@@ -867,7 +867,7 @@ function northStarSpec(): KindSpec<NsAsk> {
             c.filter((r) => r.outcome === 'Answered').length,
             c.length,
             c.length
-              ? `Asks that came back Answered, over all ${plural(c.length, 'ask')} this month. Thin, Refused and Failed are the other three outcomes and are counted apart; nothing is inferred from the answer text.`
+              ? `Asks that came back Answered, over all ${plural(c.length, 'ask')} this month. Thin, Refused and Failed are the other three outcomes and are counted apart. The agent sets the outcome from its own answer text; this dashboard only counts it.`
               : 'Nothing was asked this month.',
           ),
       },

@@ -5,8 +5,11 @@ export function Tabs<T extends string>({
   onChange,
   counts,
   soon,
+  titles,
 }: {
   tabs: readonly T[];
+  /** What each tab is, as a tooltip (2026-09-22). */
+  titles?: Partial<Record<T, string>>;
   value: T;
   onChange: (t: T) => void;
   counts?: Partial<Record<T, { n: number; tone?: 'default' | 'degraded' | 'failing' }>>;
@@ -27,6 +30,7 @@ export function Tabs<T extends string>({
             aria-selected={value === t}
             onClick={() => onChange(t)}
             className="tab"
+            title={titles?.[t]}
           >
             {t}
             {soon?.includes(t) && <span className="ml-1.5 text-[10.5px] text-faint">soon</span>}
