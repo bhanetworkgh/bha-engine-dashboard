@@ -23,8 +23,13 @@
  * `retrying -> manually_resolved` are legal and a terminal state has no way
  * back. BHARAG's `/close` route is the one meant for a person, but it demands
  * a control-plane session and refuses a workspace key; this server only holds
- * the three lane keys, so `/status` is the route it can use, and
- * `resolved_by` names the dashboard login rather than a BHARAG principal.
+ * the three lane keys, so `/status` is the route it can use.
+ *
+ * **The ledger decides who resolved it, not this dashboard** (2026-09-22,
+ * after a live refusal). The person who clicked is recorded here, in
+ * `record_writes`; the ledger stores the lane — it answered "bays",
+ * "north_star" and "research_twin" when the 37 were closed. Nothing on the
+ * page promises that the login sent is what BHARAG keeps.
  */
 
 /** The ledger's REST base. One host, configured once. */
@@ -154,18 +159,23 @@ export async function openIncidents(lane: string): Promise<LedgerIncident[]> {
 
 /**
  * Close one incident as fixed by a person: `POST /incidents/{id}/status` with
- * `manually_resolved`, the lane's own key, and `resolved_at` / `resolved_by`
- * in the payload patch — the same two keys the healer's close writes, so both
- * kinds of close read the same on the ledger. Returns the ledger's own copy of
- * the incident after the transition; throws with BHARAG's code on a refusal
- * (`INCIDENT_INVALID_TRANSITION`, `INCIDENT_ALREADY_CLOSED`, `INCIDENT_NOT_FOUND`).
+ * the lane's own key and **exactly** `{ resolution_status, payload_patch }`.
+ *
+ * Nothing else goes at the top level (2026-09-22). The first live close through
+ * n8n that also sent a top-level `resolved_by` was refused:
+ * `400 LEDGER_PAYLOAD_SCHEMA_MISMATCH "/ must NOT have additional properties"`.
+ * The incidents schema is `additionalProperties: false`, and `payload_patch`
+ * carries only keys that schema defines — `resolved_at` and `resolved_by`.
+ * On a terminal transition the ledger overwrites both with its own clock and
+ * its own principal, so the values sent here are a courtesy, not a record:
+ * `resolved_by` comes back as the lane. Returns the ledger's own copy of the
+ * incident; throws with BHARAG's code on a refusal.
  */
 export async function closeIncident(lane: string, entityId: string, resolvedBy: string, at: string): Promise<LedgerIncident> {
   const key = keyFor(lane);
   if (!key) throw new BharagError(`${LANE_KEY_VARS[lane] ?? `a key for ${lane}`} is not set on this server, so this lane's incidents cannot be closed from here.`, 503);
   return call<LedgerIncident>(`/incidents/${encodeURIComponent(entityId)}/status`, key, {
     resolution_status: 'manually_resolved',
-    resolved_by: resolvedBy,
     payload_patch: { resolved_at: at, resolved_by: resolvedBy },
   });
 }
