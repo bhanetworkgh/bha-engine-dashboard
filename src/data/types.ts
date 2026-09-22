@@ -2591,6 +2591,13 @@ export interface ExecutionWorkflow extends ExecutionTotals {
   /** The failing execution ids, newest first, so each one opens in n8n. */
   failed_ids: string[];
   n8n_url: string | null;
+  /**
+   * The workflow's last ten finished runs, whenever they ran, and when it last
+   * failed (2026-09-22). Beside the period's failure rate so a workflow that has
+   * been fixed does not read as broken for the rest of the month. Null where
+   * nothing has finished.
+   */
+  recent: { runs: number; failed: number; last_failure_at: string | null; succeeded_since_failure: number; last_run_at: string | null } | null;
 }
 
 /** Which calendar grain the page is reporting on. */

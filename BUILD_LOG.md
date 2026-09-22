@@ -8408,3 +8408,53 @@ Fix:        Every lane, question and request carries `held: { updated_at, via }`
             row on screen arrived through a resync.
 Tested:     Local: one lane seeded as a resync row dated 17 Sep renders
             "2026-09-17 · resync" in amber and the line reads correctly.
+
+## 2026-09-22 19:15 — Executions: recent health beside the month, and 320 runs the poll never read
+Intent:     Brief §12: the failure rate carries its window, recent health reads
+            apart from the month, and the totals checked against n8n.
+Files:      server/src/executions.ts, src/data/types.ts,
+            src/screens/Executions/index.tsx
+Verified:   Bays — Error Handler against n8n itself: n8n 203 executions (68
+            before 21 Sep + 135 since), 128 failed; this database 203 / 128 —
+            exact. The brief's story is right in shape and wrong in size: the
+            failures run from **20 Sep 23:00** (the Airtable cap) to 21 Sep
+            15:31 — 3 on the 20th, 124 on the 21st, 127 in 16½ hours, not ~100
+            between 13:28 and 15:31 — plus one on 14 Sep. Every run since has
+            succeeded, and there are **11** of them, not 4: 21 Sep 16:21 (×2),
+            19:30, 21:31, 21:36, 22:00, 22:29, 23:00, 23:25, then 22 Sep 04:30
+            and 12:49.
+Problem:    **The totals do not match n8n.** n8n `count` 13,771; this database
+            13,451, both ending at id 13830. Bisected by day: 21 more here than
+            n8n before 15 Sep (rows kept after n8n dropped them — expected),
+            then short by 154 (15–18 Sep), 94 (19–20), 38 (21), 55 (22). Ids
+            13595–13794 compared one by one: the ten missing (13599, 13601,
+            13641, 13647, 13666, 13680, 13691, 13710, 13759, 13779) are every
+            one a run of 39 s to 106 s — Conversational Agent turns, Submit
+            Actions, the Self Healer. n8n's list leaves out a run still going,
+            and the poll stopped at the highest id it held, so a long run was
+            skipped for good as soon as a later, shorter one finished first.
+            The pass's own warning line had been saying "short by N" all along.
+Fix:        Every poll now reads from `highest − 400` rather than `highest`
+            (two pages, an upsert, so re-reading changes nothing twice), and
+            the log line fires on inserts rather than on every read. The next
+            boot runs one full read (`executions.gap_backfill_2026_09_22` in
+            meta, so it happens once) to recover what was skipped; "Read n8n
+            again" on the page does the same.
+Decision:   Recent health, per workflow: its last ten finished runs whenever
+            they ran, when it last failed, how many succeeded since — one SQL
+            pass over engine_execution_runs. Shown as a column beside the
+            month's rate ("last 10 ok · last failed 1 d ago" / "3 of last 10
+            failed", red only in the second case). The month's own figures are
+            not touched. Column headers name the window ("failure rate, Sep").
+Found:      Other workflows distorted the same way (Sep rate high, 0 of the
+            last 10 failed): BHA — Self Healer 18% (7 of 38), Bays — Parked Log
+            Reminder 14% (12 of 85), Bays — Digest Delivery Check 8% (18 of
+            215), North Star — Tools Router 7% (10 of 149), Bays — Message
+            Capture 5% (68 of 1,385), Bays — Front Door 1% (42 of 4,668) — all
+            failures in the 20–21 Sep Airtable window or earlier. The opposite
+            case, **failing now**: North Star — Front Door 7 of last 10
+            failed, North Star — Conversational Agent 5 of 10, North Star —
+            Error Handler 4 of 10, all at 22 Sep 08:00 — the same burst as the
+            14 new North Star incidents.
+Tested:     Local: 23 Error Handler rows (12 failing on 21 Sep then 11 ok) and
+            20 North Star rows (last 3 failing) render as described.

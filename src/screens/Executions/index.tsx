@@ -15,7 +15,7 @@ import {
 } from '../../data';
 import { buildReport, reportName } from '../../lib/executionReport';
 import { downloadCsv } from '../../lib/csv';
-import { CountUpText, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, monthLabel, MonthPicker, PageHeader, Tabs, Toast, useToast, yearOf } from '../../components/ui';
+import { CountUpText, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, monthLabel, MonthPicker, PageHeader, relativeTime, Tabs, Toast, useToast, yearOf } from '../../components/ui';
 
 /**
  * Executions — every run of every workflow in the engine, one row per run.
@@ -300,6 +300,26 @@ function WorkflowPanel({ workflowId, grain, period, onClose }: { workflowId: str
 
 /* ------------------------------------------------------------- workflows */
 
+/**
+ * The workflow's last ten finished runs, whatever month is in view, and when it
+ * last failed (2026-09-22). The month's failure rate stays exactly as it was;
+ * this is what says whether the workflow is failing **now**.
+ */
+function Recent({ r }: { r: ExecutionWorkflow['recent'] }) {
+  if (!r || !r.runs) return <span className="text-faint">none finished</span>;
+  const last = r.last_failure_at ? r.last_failure_at.slice(0, 16).replace('T', ' ') : null;
+  const title = [
+    `The last ${r.runs} finished run${r.runs === 1 ? '' : 's'}, whenever they ran: ${r.failed} failed.`,
+    last ? `Last failure ${last} UTC; ${r.succeeded_since_failure} succeeded since.` : 'No failure held for this workflow at all.',
+  ].join(' ');
+  return (
+    <span title={title} className={r.failed ? 'text-failing' : 'text-dim'}>
+      {r.failed ? `${r.failed} of last ${r.runs} failed` : `last ${r.runs} ok`}
+      {!r.failed && last && <span className="text-faint"> · last failed {relativeTime(r.last_failure_at!) ?? last}</span>}
+    </span>
+  );
+}
+
 function WorkflowRow({ w, onOpen }: { w: ExecutionWorkflow; onOpen: () => void }) {
   return (
     <tr className="cursor-pointer" onClick={onOpen}>
@@ -322,6 +342,9 @@ function WorkflowRow({ w, onOpen }: { w: ExecutionWorkflow; onOpen: () => void }
       <td className="td card-meta tabular text-right text-dim" title={w.timed ? `Mean over the ${w.timed} of ${w.executions} runs that recorded an end` : 'No run recorded an end, so there is no average'}>
         {duration(w.avg_ms)}
         <span className="text-faint md:hidden"> average</span>
+      </td>
+      <td className="td card-meta tabular text-right whitespace-nowrap">
+        <Recent r={w.recent} />
       </td>
       <td className="td card-meta text-right text-[11px] text-faint">open</td>
     </tr>
@@ -594,7 +617,7 @@ function SystemView({
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-line px-5 py-3">
             <div className="text-[13px] font-medium text-ink">By workflow</div>
             <div className="tabular text-[11.5px] text-faint">
-              {period.label} · click a workflow for its own executions
+              {period.label} for the counts and the failure rate · “recent” is each workflow’s last ten finished runs, whenever they ran · click a workflow for its own executions
             </div>
           </div>
           {system.workflows.length === 0 ? (
@@ -606,8 +629,8 @@ function SystemView({
               <table className="table-cards w-full border-collapse text-[12.5px]" aria-label={`${system.label} workflows`}>
                 <thead>
                   <tr>
-                    {['workflow', 'executions', 'failed', 'failure rate', 'average time', ''].map((h, i) => (
-                      <th key={i} className={`border-b border-line bg-panel px-3 py-2 text-left text-[11.5px] font-medium whitespace-nowrap text-faint ${i > 0 && i < 5 ? 'text-right' : ''}`}>
+                    {['workflow', `executions, ${period.label}`, 'failed', `failure rate, ${period.label}`, 'average time', `recent (last ${10} runs)`, ''].map((h, i) => (
+                      <th key={i} className={`border-b border-line bg-panel px-3 py-2 text-left text-[11.5px] font-medium whitespace-nowrap text-faint ${i > 0 && i < 6 ? 'text-right' : ''}`}>
                         {h}
                       </th>
                     ))}
