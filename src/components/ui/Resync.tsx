@@ -98,11 +98,18 @@ export function useAirtableRetired(): boolean | null {
  * one — and gone from all six at once when Airtable is retired, because the
  * check is here rather than on each page.
  */
-export function ResyncButton({ busy, onClick }: { busy: boolean; onClick: () => void }) {
-  if (useAirtableRetired()) return null;
+export function ResyncButton({ busy, onClick, alsoReads }: { busy: boolean; onClick: () => void; /**
+   * A source this page's pass reads that is **not** Airtable (2026-09-22).
+   * Engine health reads the incident ledger from BHARAG, so its button stays
+   * when Airtable is retired and says what it reads instead. Every other page
+   * reads Airtable alone and loses the button.
+   */ alsoReads?: string }) {
+  const retired = useAirtableRetired();
+  if (retired && !alsoReads) return null;
+  const from = retired ? alsoReads! : alsoReads ? `Airtable and ${alsoReads}` : 'Airtable';
   return (
-    <button type="button" onClick={onClick} disabled={busy} className="btn btn-primary gap-1.5">
-      {busy ? 'Reading Airtable…' : 'Resync from Airtable'}
+    <button type="button" onClick={onClick} disabled={busy} className="btn btn-primary gap-1.5" title={`Reads ${from} and brings this page up to date with it`}>
+      {busy ? `Reading ${from}…` : retired ? `Resync from ${alsoReads}` : 'Resync from Airtable'}
     </button>
   );
 }

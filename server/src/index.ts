@@ -1088,7 +1088,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * finished. A 404 would read as a typo to whoever is re-running a saved
      * request, and send them looking for a path that never existed.
      */
-    if (/^\/api\/(codex|patterns|commercial|clients|loops|ns|rt|pay|engine-health|builders)\/resync$/.test(p) || FINAL_IMPORT.test(p)) {
+    /**
+     * **Engine health is not in this list** (2026-09-22). Its resync reads the
+     * incident ledger from BHARAG, which is not Airtable, and refusing it with
+     * the rest stopped every incident after 17 Sep reaching this page. The
+     * pass itself skips its two Airtable tables when Airtable is retired.
+     */
+    if (/^\/api\/(codex|patterns|commercial|clients|loops|ns|rt|pay|builders)\/resync$/.test(p) || FINAL_IMPORT.test(p)) {
       if (airtableRetired()) throw new HttpError(410, airtable_.RETIRED_REASON);
     }
 

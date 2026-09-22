@@ -73,7 +73,7 @@ export const SOURCE_OF: Record<MirrorKind, SourceSpec> = {
   incidents: {
     system: 'bharag',
     tables: [],
-    note: `Not Airtable: the incident ledger is BHARAG's ${bharag.BHARAG_URL}/incidents, read once per lane with that lane's own credential. There is no table to count against, so diff_source_vs_mirror refuses this kind rather than inventing a comparison.`,
+    note: `Not Airtable: the incident ledger is BHARAG's ${bharag.BHARAG_URL}/incidents, read once per lane with that lane's own credential and \`status=open\`. diff_source_vs_mirror compares the ledger's open incidents, lane by lane, against the rows held here as open. It is not Airtable, so AIRTABLE_RETIRED does not stop it being read or resynced.`,
   },
   error_counts: { system: 'airtable', tables: [at(sources.ERROR_COUNTS)] },
   retry_attempts: { system: 'airtable', tables: [at(sources.RETRY_ATTEMPTS)] },
@@ -346,7 +346,11 @@ export async function diff(kind: MirrorKind): Promise<DiffResult> {
    * compare against or refill from — the mirror is the record — so both refuse
    * by name rather than reading a base nothing depends on any more.
    */
-  if (airtable.retired()) {
+  // BHARAG, not Airtable: compared on its own terms, and never stopped by the
+  // Airtable retirement (2026-09-22) — the ledger is still the source.
+  if (kind === 'incidents') return diffIncidents(t0);
+
+  if (airtable.retired() && src.system === 'airtable') {
     throw new McpError('airtable_retired', `${airtable.RETIRED_REASON} There is no second copy to compare "${kind}" against: get_mirror_status("${kind}") is what this database holds, and it is the whole of it.`);
   }
   if (src.system !== 'airtable') {
@@ -431,5 +435,58 @@ export async function diff(kind: MirrorKind): Promise<DiffResult> {
     ms: Date.now() - t0,
     verdict,
     note: `Compared on Airtable record ids, which are unique everywhere. Up to ${KEY_CAP} keys are named on each side — enough to see a pattern, not a list to work through. A row the engine wrote before Airtable had one carries no record id and is counted in the mirror total but cannot be compared; ${held.rows.filter((r) => !r.airtable_record_id).length} of the ${mirrorRows} held rows are in that position.`,
+  };
+}
+
+/**
+ * The incident ledger against what is held, lane by lane (2026-09-22).
+ *
+ * The ledger is read with `status=open`, so the comparison is between the
+ * incidents BHARAG calls open now and the rows this database holds as open —
+ * not a row count, because closed incidents are kept here on purpose and are
+ * never in the ledger's answer. A lane that is not keyed or refused is named
+ * and never counted as a lane with nothing open.
+ */
+async function diffIncidents(t0: number): Promise<DiffResult> {
+  const spec = mirror.KINDS.incidents;
+  const read: DiffResult['tables_read'] = [];
+  const ledger = new Map<string, string>();
+  let anyFailed = false;
+  for (const lane of Object.keys(bharag.LANE_KEY_VARS)) {
+    try {
+      const rows = await bharag.openIncidents(lane);
+      read.push({ label: `BHARAG incidents — ${lane}`, table: lane, rows: rows.length, error: null });
+      for (const r of rows) if (typeof r.entity_id === 'string') ledger.set(r.entity_id, lane);
+    } catch (e) {
+      anyFailed = true;
+      read.push({ label: `BHARAG incidents — ${lane}`, table: lane, rows: null, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  const held = await query<{ natural_id: string | null; lane_id: string | null; open_now: boolean | null }>(
+    `SELECT natural_id, lane_id, open_now FROM "${spec.table}"`,
+  );
+  const heldOpen = new Map(held.rows.filter((r) => r.open_now !== false && r.natural_id).map((r) => [r.natural_id!, r.lane_id]));
+  const readLanes = new Set(read.filter((r) => !r.error).map((r) => r.table));
+  const sourceOnly = [...ledger.keys()].filter((id) => !heldOpen.has(id));
+  const mirrorOnly = [...heldOpen.entries()].filter(([id, lane]) => lane && readLanes.has(lane) && !ledger.has(id)).map(([id]) => id);
+  const sourceRows = anyFailed ? null : ledger.size;
+  const verdict = anyFailed
+    ? `Incomplete: ${read.filter((r) => r.error).length} lane(s) could not be read, so nothing is reported missing under them. ${read.filter((r) => r.error).map((r) => `${r.table}: ${r.error}`).join(' · ')}`
+    : sourceOnly.length === 0 && mirrorOnly.length === 0
+      ? `Matched: the ledger has ${ledger.size} open incident(s) and this database holds the same ${heldOpen.size} as open.`
+      : `The ledger has ${ledger.size} open and this database holds ${heldOpen.size} as open: ${sourceOnly.length} open in the ledger are not held as open here, and ${mirrorOnly.length} held as open here are no longer open in the ledger. resync("incidents") reconciles both, and deletes nothing.`;
+  return {
+    kind: 'incidents',
+    table: spec.table,
+    source_rows: sourceRows,
+    mirror_rows: heldOpen.size,
+    difference: sourceRows === null ? null : sourceRows - heldOpen.size,
+    in_source_only: sourceOnly.slice(0, KEY_CAP).map((id) => ({ key: id, table: ledger.get(id) ?? 'unknown' })),
+    in_mirror_only: mirrorOnly.slice(0, KEY_CAP).map((id) => ({ key: id, table: heldOpen.get(id) ?? null })),
+    tables_read: read,
+    keys_shown_cap: KEY_CAP,
+    ms: Date.now() - t0,
+    verdict,
+    note: `Compared on the ledger's entity_id, open against open. ${held.rows.length} incident row(s) are held in total; the ones held as closed are history this database keeps and the ledger's open list never returns, so they are not part of the comparison.`,
   };
 }

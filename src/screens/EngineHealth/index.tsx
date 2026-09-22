@@ -72,7 +72,7 @@ export default function EngineHealth() {
       <PageHeader
         title="Engine health"
         subtitle="What broke, whether it healed itself, and what is waiting on a person"
-        right={<ResyncButton busy={resync.busy} onClick={resync.start} />}
+        right={<ResyncButton busy={resync.busy} onClick={resync.start} alsoReads="BHARAG" />}
         below={
           <Tabs
             tabs={TABS}
