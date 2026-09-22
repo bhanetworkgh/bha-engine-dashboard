@@ -15,7 +15,7 @@ import { EmptyState, MonthPicker, monthsFrom, Pagination, Pill, RecordId, Record
 const when = (iso: string | null) => (iso ? iso.slice(0, 10) : '—');
 const whenFull = (iso: string | null) => (iso ? iso.slice(0, 16).replace('T', ' ') : '—');
 
-type Filter = 'all' | 'unpaid' | 'paid' | 'Monthly' | 'Daily';
+type Filter = 'all' | 'unpaid' | 'unknown' | 'paid' | 'Monthly' | 'Daily';
 
 function columns(): RecordColumn<PaySession>[] {
   return [
@@ -43,7 +43,11 @@ function columns(): RecordColumn<PaySession>[] {
       header: 'paid',
       card: 'meta',
       className: 'card-meta',
-      cell: (s) => (s.paid ? <Pill tone="ok">paid</Pill> : <Pill tone="degraded">owed</Pill>),
+      title: (s) =>
+        s.paid === null
+          ? `No Paid value on this row, so it is not known whether it is paid.${s.held_via === 'resync' ? ' It came in on the Airtable resync, and Airtable leaves an unticked box out of the record — so it was most likely unticked then.' : ''}`
+          : undefined,
+      cell: (s) => (s.paid === true ? <Pill tone="ok">paid</Pill> : s.paid === false ? <Pill tone="degraded">owed</Pill> : <Pill>not recorded</Pill>),
     },
     { key: 'paid_at', header: 'paid at', className: 'tabular text-faint', cell: (s) => when(s.paid_at) },
     { key: 'paid_by', header: 'paid by', card: 'meta', className: 'card-meta text-dim', cell: (s) => s.paid_by ?? <span className="text-faint">—</span> },
@@ -93,7 +97,7 @@ export default function Sessions({ data }: { data: PayData }) {
   const rows = useMemo(
     () =>
       data.sessions
-        .filter((s) => (filter === 'all' ? true : filter === 'unpaid' ? !s.paid : filter === 'paid' ? s.paid : s.pay_mode === filter))
+        .filter((s) => (filter === 'all' ? true : filter === 'unpaid' ? s.paid === false : filter === 'unknown' ? s.paid === null : filter === 'paid' ? s.paid === true : s.pay_mode === filter))
         .filter((s) => builder === 'all' || s.builder === builder)
         .filter((s) => !month || s.month === month)
         .filter((s) => !q.trim() || [s.codex_entry_id, s.builder, s.statement_id].some((v) => v && v.toLowerCase().includes(q.trim().toLowerCase()))),
@@ -103,8 +107,9 @@ export default function Sessions({ data }: { data: PayData }) {
 
   const counts = {
     all: data.sessions.length,
-    unpaid: data.sessions.filter((s) => !s.paid).length,
-    paid: data.sessions.filter((s) => s.paid).length,
+    unpaid: data.sessions.filter((s) => s.paid === false).length,
+    unknown: data.sessions.filter((s) => s.paid === null).length,
+    paid: data.sessions.filter((s) => s.paid === true).length,
     Monthly: data.sessions.filter((s) => s.pay_mode === 'Monthly').length,
     Daily: data.sessions.filter((s) => s.pay_mode === 'Daily').length,
   };
@@ -119,7 +124,8 @@ export default function Sessions({ data }: { data: PayData }) {
             onChange={setFilter}
             options={[
               { value: 'all', label: 'All', count: counts.all },
-              { value: 'unpaid', label: 'Unpaid', count: counts.unpaid },
+              { value: 'unpaid', label: 'Unpaid', count: counts.unpaid, title: 'Paid is explicitly false on the row.' },
+              { value: 'unknown', label: 'Paid not recorded', count: counts.unknown, title: 'The row carries no Paid value at all — not known either way, and never counted as owed.' },
               { value: 'paid', label: 'Paid', count: counts.paid },
               { value: 'Monthly', label: 'Monthly', count: counts.Monthly },
               { value: 'Daily', label: 'Daily', count: counts.Daily },
@@ -141,6 +147,13 @@ export default function Sessions({ data }: { data: PayData }) {
             <SearchBox value={q} onChange={setQ} placeholder="Search Codex ids and builders" />
           </div>
         </div>
+        {data.duplicates.merged > 0 && (
+          <p className="text-[12px] text-dim">
+            {data.duplicates.rows} rows are held for {data.duplicates.sessions} sessions: {data.duplicates.merged} sessions were held twice — once from the
+            Airtable resync of 20 Sep and once as the engine posted them — and are counted once here, the engine’s copy kept.
+            {data.duplicates.disagree ? ` ${data.duplicates.disagree} pair${data.duplicates.disagree === 1 ? ' disagrees' : 's disagree'} about Paid.` : ' Every pair agrees about Paid.'}
+          </p>
+        )}
       </div>
 
       {rows.length === 0 ? (
@@ -152,7 +165,9 @@ export default function Sessions({ data }: { data: PayData }) {
               ? 'No session matches those filters.'
               : filter === 'unpaid'
                 ? 'Every approved session held is paid. Nothing is owed.'
-                : filter === 'paid'
+                : filter === 'unknown'
+                  ? 'Every session carries a Paid value.'
+                  : filter === 'paid'
                   ? 'No session held has been marked paid yet.'
                   : `No ${filter.toLowerCase()} session is held.`}
         </EmptyState>

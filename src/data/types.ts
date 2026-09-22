@@ -1811,7 +1811,10 @@ export interface PaySession {
   approved_at: string | null;
   /** YYYY-MM, from the session date. Never from `Approved At`. */
   month: string | null;
-  paid: boolean;
+  /** True, false, or null where the row carries no Paid at all — not known, never read as unpaid. */
+  paid: boolean | null;
+  /** How this row reached the database: posted by the engine, or copied in by a resync. */
+  held_via?: 'engine' | 'resync';
   paid_at: string | null;
   paid_by: string | null;
   statement_id: string | null;
@@ -1856,7 +1859,16 @@ export interface PayStatement {
 export interface OwedBuilder {
   builder: string;
   slack_user_id: string | null;
+  /**
+   * Which table the builder is listed under: the roster's Pay Mode where they
+   * are on it (2026-09-22), the sessions' own frozen mode otherwise. Each
+   * session keeps its own mode; `mode_mismatch` counts the ones that differ.
+   */
   pay_mode: string | null;
+  mode_from: 'roster' | 'sessions';
+  mode_mismatch: number;
+  /** Sessions with no Paid flag at all — not known to be unpaid, and never added to `sessions_owed`. */
+  sessions_unconfirmed: number;
   /** False where no Builders row matches this session's Slack id. */
   on_roster: boolean;
   /** False where the sessions carry no Slack id, which is why they group alone. */
@@ -1879,6 +1891,14 @@ export interface PayData {
   statements_freshness: Freshness;
   /** When this dashboard last read the ledger, and what that does and does not mean. */
   synced: { at: string | null; note: string };
+  /**
+   * Sessions held twice (2026-09-22): once from the Airtable resync of 20 Sep
+   * and once as the engine posted them, under the same Codex Entry ID. Counted
+   * once, the engine's copy preferred; `disagree` is pairs whose Paid differs.
+   */
+  duplicates: { rows: number; sessions: number; merged: number; disagree: number };
+  /** When the engine last wrote a statement — null is never. */
+  statements_last_write: string | null;
 }
 
 export interface PayMetrics {
@@ -1889,6 +1909,8 @@ export interface PayMetrics {
   /* ---- owed ---- */
   /** `no_mode` is sessions carrying neither mode, so the split adds up to `n`. */
   sessions_owed: { n: number; monthly: number; daily: number; no_mode: number; note: string };
+  /** Sessions carrying no Paid flag, counted apart from owed (2026-09-22). */
+  sessions_unconfirmed: { n: number; monthly: number; daily: number; from_resync: number; note: string };
   builders_owed: { n: number; monthly: number; daily: number; no_mode: number; note: string };
   oldest_unpaid: { days: number | null; builder: string | null; codex_entry_id: string | null; pay_mode: string | null; note: string };
   this_month: { n: number; monthly: number; daily: number; no_mode: number; note: string };

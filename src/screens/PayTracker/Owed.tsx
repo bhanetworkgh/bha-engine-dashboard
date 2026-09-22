@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { OwedBuilder, PayData, PayMetrics } from '../../data';
-import { CountUp, EmptyPanel, FigureCell, Pill, StatCell, StatStrip, relativeTime } from '../../components/ui';
+import { CountUp, EmptyPanel, FigureCell, Pill, StatCaption, StatCell, StatLabel, StatStrip, relativeTime } from '../../components/ui';
 
 /**
  * The question the page exists for: who is owed, for what, and how long.
@@ -34,68 +34,46 @@ export default function Owed({ data, m }: { data: PayData; m: PayMetrics }) {
 
   return (
     <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-      <StatStrip cols={5}>
-        {/*
-          The number that matters. Coloured above nought — somebody is waiting —
-          but the split is printed under it, because the two halves mean
-          different things.
-        */}
+      {/*
+        One caption line per figure (2026-09-22, rule (a)); the full notes are
+        behind each label's mark. Owed is an explicit Paid = false, and a
+        session with no Paid at all has its own figure rather than being added
+        to owed.
+      */}
+      <StatStrip cols={6}>
         <FigureCell
           label="Sessions owed"
           value={m.sessions_owed.n}
           tone={m.sessions_owed.n ? 'degraded' : undefined}
-          note={
-            <>
-              <span className="mb-1 block text-dim">
-                {m.sessions_owed.monthly} monthly · {m.sessions_owed.daily} daily
-                {/* Named rather than folded into either, so the split adds up. */}
-                {m.sessions_owed.no_mode > 0 && ` · ${m.sessions_owed.no_mode} no pay mode`}
-              </span>
-              {m.sessions_owed.note}
-            </>
-          }
+          caption={`${m.sessions_owed.monthly} monthly · ${m.sessions_owed.daily} daily${m.sessions_owed.no_mode ? ` · ${m.sessions_owed.no_mode} no mode` : ''}`}
+          note={m.sessions_owed.note}
+        />
+        <FigureCell
+          label="Paid not recorded"
+          value={m.sessions_unconfirmed.n}
+          caption={m.sessions_unconfirmed.n ? `${m.sessions_unconfirmed.monthly} monthly · ${m.sessions_unconfirmed.daily} daily · not counted as owed` : 'every session carries a Paid value'}
+          note={m.sessions_unconfirmed.note}
         />
         <FigureCell
           label="Builders owed"
           value={m.builders_owed.n}
-          note={
-            <>
-              <span className="mb-1 block text-dim">
-                {m.builders_owed.monthly} monthly · {m.builders_owed.daily} daily
-                {m.builders_owed.no_mode > 0 && ` · ${m.builders_owed.no_mode} no pay mode`}
-              </span>
-              {m.builders_owed.note}
-            </>
-          }
+          caption={`${m.builders_owed.monthly} monthly · ${m.builders_owed.daily} daily`}
+          note={m.builders_owed.note}
         />
         <FigureCell
           label="Oldest unpaid"
           value={m.oldest_unpaid.days}
           unit="d"
+          missing="nothing unpaid"
           tone={(m.oldest_unpaid.days ?? 0) > 30 ? 'degraded' : undefined}
-          note={
-            <>
-              {m.oldest_unpaid.builder && (
-                <span className="mb-1 block truncate text-dim">
-                  {m.oldest_unpaid.builder} · {m.oldest_unpaid.pay_mode ?? 'no pay mode'}
-                </span>
-              )}
-              {m.oldest_unpaid.note}
-            </>
-          }
+          caption={m.oldest_unpaid.builder ? `${m.oldest_unpaid.builder} · ${m.oldest_unpaid.pay_mode ?? 'no pay mode'}` : 'no session is explicitly unpaid'}
+          note={m.oldest_unpaid.note}
         />
         <FigureCell
-          label="This month so far"
+          label="Sessions this month"
           value={m.this_month.n}
-          note={
-            <>
-              <span className="mb-1 block text-dim">
-                {m.this_month.monthly} monthly · {m.this_month.daily} daily
-                {m.this_month.no_mode > 0 && ` · ${m.this_month.no_mode} no pay mode`}
-              </span>
-              {m.this_month.note}
-            </>
-          }
+          caption={`${m.this_month.monthly} monthly · ${m.this_month.daily} daily, paid or not`}
+          note={m.this_month.note}
         />
         {/*
           The freshness cell, and the reason this page has one at all: nothing
@@ -104,11 +82,9 @@ export default function Owed({ data, m }: { data: PayData; m: PayMetrics }) {
         */}
         <StatCell>
           <div className="min-w-0">
-            <div className="kicker truncate">Ledger last read</div>
+            <StatLabel label="Ledger last written" detail={data.synced.note} />
             <div className={`mt-1 text-[15px] leading-tight ${data.synced.at ? 'text-ink' : 'text-degraded'}`}>{lastSynced ?? 'never'}</div>
-            <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={{ minHeight: '5.5em' }}>
-              {data.synced.note}
-            </div>
+            <StatCaption>{data.synced.at ? data.synced.at.slice(0, 16).replace('T', ' ') + ' UTC' : 'nothing has written it'}</StatCaption>
           </div>
         </StatCell>
       </StatStrip>
@@ -173,6 +149,7 @@ function Group({
 }) {
   if (rows.length === 0 && empty === null) return null;
   const total = rows.reduce((n, r) => n + r.sessions_owed, 0);
+  const unknown = rows.reduce((n, r) => n + r.sessions_unconfirmed, 0);
   const days = rows.reduce((n, r) => n + r.working_days_owed, 0);
   return (
     <div className="card px-5 py-4">
@@ -181,7 +158,8 @@ function Group({
         {rows.length > 0 && (
           <span className="tabular text-[11.5px] text-faint">
             {/* Both numbers, never one standing for the other. */}
-            {total} {total === 1 ? 'session' : 'sessions'} · {days} working {days === 1 ? 'day' : 'days'} · {rows.length} {rows.length === 1 ? 'builder' : 'builders'}
+            {total} owed {total === 1 ? 'session' : 'sessions'} · {days} working {days === 1 ? 'day' : 'days'}
+            {unknown ? ` · ${unknown} with Paid not recorded` : ''} · {rows.length} {rows.length === 1 ? 'builder' : 'builders'}
           </span>
         )}
       </div>
@@ -219,6 +197,16 @@ function Group({
                       </span>
                     )}
                     {r.on_roster && !r.active && <span className="ml-2 text-[11px] text-faint">inactive</span>}
+                    {r.sessions_unconfirmed > 0 && (
+                      <span className="ml-2 text-[11px] text-faint" title="Sessions whose row carries no Paid value — not known either way, so not counted in this builder's owed figure">
+                        +{r.sessions_unconfirmed} paid not recorded
+                      </span>
+                    )}
+                    {r.mode_mismatch > 0 && (
+                      <span className="ml-2 text-[11px] text-degraded" title={`Listed under the roster's pay mode (${r.pay_mode}). ${r.mode_mismatch} of these sessions carry a different mode, frozen on them when they were approved.`}>
+                        {r.mode_mismatch} on another mode
+                      </span>
+                    )}
                     {/*
                       Rows are grouped on the Slack id where there is one, so a
                       session carrying none cannot be matched to one that does
@@ -249,6 +237,7 @@ function Group({
                           <span className="tabular text-faint">{when(s.session_date)}</span>
                           <span className="tabular truncate text-dim" title={s.codex_entry_id}>
                             {s.codex_entry_id}
+                            {s.paid === null && <span className="ml-2 text-faint">· paid not recorded</span>}
                           </span>
                           <span className="flex items-center gap-2">
                             {s.codex_link && (

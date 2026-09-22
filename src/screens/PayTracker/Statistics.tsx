@@ -13,7 +13,7 @@ import { CountUp, DistTile, HBar, MetricCard, OutcomeColumns, TileFigure } from 
  */
 
 const MODE_COLOUR = (mode: string) => (mode === 'Monthly' ? 'var(--accent)' : mode === 'Daily' ? 'var(--ok)' : 'var(--dim)');
-const PAID_COLOUR = (k: string) => (k === 'paid' ? 'var(--accent)' : 'var(--degraded)');
+const PAID_COLOUR = (k: string) => (k === 'paid' ? 'var(--accent)' : k === 'unpaid' ? 'var(--degraded)' : 'var(--dim)');
 
 export default function Statistics({ m }: { m: PayMetrics }) {
   const monthKeys = m.per_month[0] ? Object.keys(m.per_month[0].counts) : [];
@@ -30,7 +30,7 @@ export default function Statistics({ m }: { m: PayMetrics }) {
           <OutcomeColumns weeks={m.per_month.map((x) => ({ week: x.month, label: x.label, total: x.total, counts: x.counts }))} order={monthKeys} colour={MODE_COLOUR} />
         </MetricCard>
         <MetricCard title="Paid against unpaid" right="Paid" note={m.paid_week_note}>
-          <OutcomeColumns weeks={m.paid_per_week} order={['paid', 'unpaid']} colour={PAID_COLOUR} />
+          <OutcomeColumns weeks={m.paid_per_week} order={['paid', 'unpaid', 'not recorded']} colour={PAID_COLOUR} />
         </MetricCard>
       </div>
 
