@@ -387,12 +387,29 @@ export async function resync(actor = 'dashboard'): Promise<Resync> {
 
 const NO_MODE = '(no pay mode)';
 
-export async function metrics(): Promise<PayMetrics> {
+/**
+ * The figures, for one month or for every month (2026-09-22, Destiny's brief).
+ *
+ * `selected` scopes everything a month can scope: the sessions are the ones
+ * counting toward that month by their own Month, the statements the ones for
+ * that month. Two things are deliberately *not* scoped, and each says so in
+ * its own note: the month-against-month chart, which is a comparison across
+ * months and would be one bar otherwise, and the count of what is owed in
+ * *other* months — `outside` — because on a pay page a month picker that
+ * quietly hid September's unpaid work on 1 October would be hiding the one
+ * thing payday is for.
+ */
+export async function metrics(selected: string | null = null): Promise<PayMetrics> {
   const roster = await builders();
-  const all = await sessions();
-  const stmts = await statements();
-  const month = thisMonth();
+  const every = await sessions();
+  const everyStatement = await statements();
+  const all = selected ? every.filter((s) => s.month === selected) : every;
+  const stmts = selected ? everyStatement.filter((s) => s.month === selected) : everyStatement;
+  const month = selected ?? thisMonth();
   const year = month.slice(0, 4);
+  const where = selected ? `in ${monthLabel(selected)}` : 'across every month';
+  const otherOwed = selected ? every.filter((s) => s.month !== selected && s.paid === false) : [];
+  const otherUnknown = selected ? every.filter((s) => s.month !== selected && s.paid === null) : [];
 
   const bySlack = new Map(roster.filter((b) => b.slack_user_id).map((b) => [b.slack_user_id!, b]));
   // Owed is an explicit `Paid = false`. A row with no Paid at all is not known
@@ -458,7 +475,9 @@ export async function metrics(): Promise<PayMetrics> {
   const oldestSession = [...unpaid].sort((a, b) => (a.session_date ?? '9999').localeCompare(b.session_date ?? '9999'))[0] ?? null;
   const oldestDays = daysSince(oldestSession?.session_date ?? null);
 
-  const thisMonthSessions = all.filter((s) => s.month === month);
+  // The month in view. With every month selected this is every session held,
+  // and the label on the page says so rather than calling it "this month".
+  const thisMonthSessions = selected ? all : every;
 
   /* ---- statements ---- */
   const open = stmts.filter((s) => s.open);
@@ -508,6 +527,13 @@ export async function metrics(): Promise<PayMetrics> {
     computed_at: nowIso(),
     scope: { sessions: all.length, unpaid: unpaid.length, builders: roster.length, statements: stmts.length },
     month,
+    selected,
+    months_held: [...new Set([...every.map((s) => s.month), ...everyStatement.map((s) => s.month)].filter((m): m is string => Boolean(m)))].sort().reverse(),
+    outside: {
+      sessions_owed: otherOwed.length,
+      sessions_unconfirmed: otherUnknown.length,
+      months: [...new Set([...otherOwed, ...otherUnknown].map((s) => s.month).filter((m): m is string => Boolean(m)))].sort(),
+    },
 
     sessions_owed: {
       n: unpaid.length,
@@ -515,7 +541,7 @@ export async function metrics(): Promise<PayMetrics> {
       daily: daily(unpaid).length,
       no_mode: noMode(unpaid).length,
       note: all.length
-        ? `Approved sessions whose Paid is explicitly false, across every builder. A session whose row carries no Paid at all is not counted here — it is not known to be unpaid — and has its own figure beside this one. ${monthly(unpaid).length} monthly and ${daily(unpaid).length} daily, counted apart because they are different agreements — a monthly builder is expected to wait until the 1st.${noMode(unpaid).length ? ` ${noMode(unpaid).length} carr${noMode(unpaid).length === 1 ? 'ies' : 'y'} no pay mode at all and ${noMode(unpaid).length === 1 ? 'is' : 'are'} counted apart from both, because guessing which agreement they fall under is not this page's to do.` : ''} Paid status is set in Slack or by a statement closing; this page never sets it.`
+        ? `Approved sessions ${where} whose Paid is explicitly false, across every builder. A session whose row carries no Paid at all is not counted here — it is not known to be unpaid — and has its own figure beside this one. ${monthly(unpaid).length} monthly and ${daily(unpaid).length} daily, counted apart because they are different agreements — a monthly builder is expected to wait until the 1st.${noMode(unpaid).length ? ` ${noMode(unpaid).length} carr${noMode(unpaid).length === 1 ? 'ies' : 'y'} no pay mode at all and ${noMode(unpaid).length === 1 ? 'is' : 'are'} counted apart from both, because guessing which agreement they fall under is not this page's to do.` : ''} Paid status is set in Slack or by a statement closing; this page never sets it.`
         : `No session is held at all, which on this page most likely means the ledger has not been read rather than that nothing is owed. The freshness line above says when it last was.`,
     },
     sessions_unconfirmed: {
@@ -524,7 +550,7 @@ export async function metrics(): Promise<PayMetrics> {
       daily: daily(unconfirmed).length,
       from_resync: unconfirmed.filter((s) => s.held_via === 'resync').length,
       note: unconfirmed.length
-        ? `Sessions whose row carries no Paid at all, so this page does not know whether they are paid — and does not count them as owed. ${unconfirmed.filter((s) => s.held_via === 'resync').length} of the ${unconfirmed.length} came in on the Airtable resync, and Airtable leaves an unticked checkbox out of the record, so they were most likely unticked when copied; nothing has written them since. Bays — Pay Tracking's own readers treat a missing Paid as unpaid, so these will appear on the next monthly statement and in the Monday reminders.`
+        ? `Sessions ${where} whose row carries no Paid at all, so this page does not know whether they are paid — and does not count them as owed. ${unconfirmed.filter((s) => s.held_via === 'resync').length} of the ${unconfirmed.length} came in on the Airtable resync, and Airtable leaves an unticked checkbox out of the record, so they were most likely unticked when copied; nothing has written them since. Bays — Pay Tracking's own readers treat a missing Paid as unpaid, so these will appear on the next monthly statement and in the Monday reminders.`
         : `Every session carries a Paid value, so nothing here is unknown.`,
     },
     builders_owed: {
@@ -533,7 +559,7 @@ export async function metrics(): Promise<PayMetrics> {
       daily: owed.filter((o) => o.sessions_owed > 0 && o.pay_mode === 'Daily').length,
       no_mode: owed.filter((o) => o.sessions_owed > 0 && o.pay_mode !== 'Monthly' && o.pay_mode !== 'Daily').length,
       note: owed.length
-        ? `Distinct people with at least one unpaid session. Counted on the Slack id where a session carries one, so two spellings of a name are one person. A builder whose id matches nobody on the roster is still counted here — they did the work — and named on the statistics tab.`
+        ? `Distinct people with at least one unpaid session ${where}. Counted on the Slack id where a session carries one, so two spellings of a name are one person. A builder whose id matches nobody on the roster is still counted here — they did the work — and named on the statistics tab.`
         : all.length
           ? `Every approved session held is paid, so nobody is waiting. This is a nought rather than an absence: ${all.length} session${all.length === 1 ? '' : 's'} ${all.length === 1 ? 'is' : 'are'} held and none is outstanding.`
           : `No session is held, so there is nobody to owe. Check the freshness line: an unread ledger looks exactly like a settled one.`,
@@ -554,7 +580,7 @@ export async function metrics(): Promise<PayMetrics> {
       monthly: monthly(thisMonthSessions).length,
       daily: daily(thisMonthSessions).length,
       no_mode: noMode(thisMonthSessions).length,
-      note: `Sessions counting toward ${monthLabel(month)}, by the session's own Month — which comes from the session date, so one worked on the 30th and approved on the 1st counts to the month it was worked. ${monthly(thisMonthSessions).length} monthly and ${daily(thisMonthSessions).length} daily${noMode(thisMonthSessions).length ? `, and ${noMode(thisMonthSessions).length} with no pay mode on the row` : ''}.`,
+      note: `${selected ? `Sessions counting toward ${monthLabel(selected)}` : 'Every session held, in every month'}, by the session's own Month — which comes from the session date, so one worked on the 30th and approved on the 1st counts to the month it was worked. ${monthly(thisMonthSessions).length} monthly and ${daily(thisMonthSessions).length} daily${noMode(thisMonthSessions).length ? `, and ${noMode(thisMonthSessions).length} with no pay mode on the row` : ''}.`,
     },
     owed,
 
@@ -594,7 +620,7 @@ export async function metrics(): Promise<PayMetrics> {
     },
 
     per_month: months.map((m) => {
-      const mine = all.filter((s) => s.month === m);
+      const mine = every.filter((s) => s.month === m);
       return {
         month: m,
         label: monthLabel(m),
@@ -602,7 +628,7 @@ export async function metrics(): Promise<PayMetrics> {
         counts: Object.fromEntries([...PAY_MODES.map((mode) => [mode, mine.filter((s) => s.pay_mode === mode).length]), [NO_MODE, mine.filter((s) => !s.pay_mode).length]]),
       };
     }),
-    per_month_note: `Sessions by the month they count toward, split by the pay mode frozen on the session. The last twelve months; a month with none is drawn as no column rather than a column of nought. The ledger was created on 17 Sep 2026, so months before it hold nothing — they were not quiet, they were not recorded.`,
+    per_month_note: `Sessions by the month they count toward, split by the pay mode frozen on the session. Not scoped to the month picked above — it is the month-against-month chart, and scoped it would be one bar. The last twelve months; a month with none is drawn as no column rather than a column of nought. The ledger was created on 17 Sep 2026, so months before it hold nothing — they were not quiet, they were not recorded.`,
     paid_per_week: weeks.map((w) => {
       const mine = all.filter((s) => s.session_date && weekStart(s.session_date) === w);
       return {
@@ -612,7 +638,7 @@ export async function metrics(): Promise<PayMetrics> {
         counts: { paid: mine.filter((s) => s.paid === true).length, unpaid: mine.filter((s) => s.paid === false).length, 'not recorded': mine.filter((s) => s.paid === null).length },
       };
     }),
-    paid_week_note: `Every session by the week it was worked, split by whether it has been paid — and a third slice for sessions whose row carries no Paid at all, which are not known either way. The recent weeks lean unpaid by design: a monthly builder's work is not settled until the 1st, so the right-hand end of this chart is expected to be dark.`,
+    paid_week_note: `${selected ? `Sessions counting toward ${monthLabel(selected)}` : 'Every session'} by the week it was worked, split by whether it has been paid — and a third slice for sessions whose row carries no Paid at all, which are not known either way. The recent weeks lean unpaid by design: a monthly builder's work is not settled until the 1st, so the right-hand end of this chart is expected to be dark.`,
     working_days: builderMonths,
     working_days_note: `Distinct days each builder had at least one approved session, by month — the shape of who is actually building. Working days and session count are different numbers and both are shown: two sessions in one day is one working day and two sessions, and neither is derived from the other.`,
     paid_by: slices(paid, (s) => s.paid_by, PAID_BY, '(not recorded)'),

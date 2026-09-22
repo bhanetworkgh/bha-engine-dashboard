@@ -1,7 +1,7 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useData } from '../../app/useData';
 import { getPay, getPayMetrics, resyncPay, type PayData } from '../../data';
-import { LoadFailed, Loading, PageHeader, ResyncButton, RowsLine, Tabs, Toast, useResync, useToast } from '../../components/ui';
+import { LoadFailed, Loading, MonthPicker, monthLabel, monthsFrom, PageHeader, ResyncButton, RowsLine, Tabs, thisMonth, Toast, useResync, useToast } from '../../components/ui';
 import Owed from './Owed';
 import Statements from './Statements';
 import Sessions from './Sessions';
@@ -41,11 +41,33 @@ export default function PayTracker() {
   const [tab, setTab] = useState<Tab>('Owed');
   const [tick, setTick] = useState(0);
   const [held, setHeld] = useState<PayData | null>(null);
+  /**
+   * One month for the whole page (2026-09-22, Destiny's brief): Owed,
+   * Statements, Sessions and Statistics all answer for the same month, so a
+   * figure on one tab cannot be about a different period from its neighbour.
+   * It opens on the current month like every record page; `null` is every
+   * month. What is outstanding in *other* months is never scoped away — the
+   * Owed tab names it — because on the 1st the month just ended is the one
+   * being paid.
+   */
+  const [month, setMonth] = useState<string | null>(thisMonth());
   const { toast, setToast } = useToast();
   const { status, data: loaded, error } = useData(getPay, []);
-  const metrics = useData(getPayMetrics, [tick]);
+  const metrics = useData(() => getPayMetrics(month), [tick, month]);
 
-  const data = held ?? loaded;
+  const all = held ?? loaded;
+  const months = useMemo(
+    () => (all ? monthsFrom([...all.sessions.map((s) => s.month), ...all.statements.map((s) => s.month)].map((m) => (m ? `${m}-01` : null))) : [thisMonth()]),
+    [all],
+  );
+  /** The rows the tabs list, cut to the month by each row's own Month. */
+  const data = useMemo(
+    () =>
+      all && month
+        ? { ...all, sessions: all.sessions.filter((s) => s.month === month), statements: all.statements.filter((s) => s.month === month) }
+        : all,
+    [all, month],
+  );
 
   const reload = useCallback(async () => {
     setTick((n) => n + 1);
@@ -56,7 +78,7 @@ export default function PayTracker() {
 
   if (status === 'loading' && !data) return <Loading />;
   if (status === 'error' && !data) return <LoadFailed error={error} />;
-  if (!data) return <Loading />;
+  if (!data || !all) return <Loading />;
 
   // Owed is an explicit Paid = false; a row with no Paid is not known either way.
   const unpaid = data.sessions.filter((s) => s.paid === false).length;
@@ -67,7 +89,12 @@ export default function PayTracker() {
       <PageHeader
         title="Pay Tracker"
         subtitle="Who is owed, for what work, and what has already been paid"
-        right={<ResyncButton busy={resync.busy} onClick={resync.start} />}
+        right={
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <MonthPicker months={months} value={month} onChange={setMonth} />
+            <ResyncButton busy={resync.busy} onClick={resync.start} />
+          </div>
+        }
         below={
           <Tabs
             tabs={TABS}
@@ -94,6 +121,11 @@ export default function PayTracker() {
       */}
       <div className="shrink-0 px-6 pb-3 md:px-8">
         <RowsLine freshness={tab === 'Statements' ? data.statements_freshness : data.freshness} />
+        <div className="mt-1 text-[12px] text-dim">
+          {/* Which month every figure below is for, said once in words. */}
+          Showing {month ? monthLabel(month) : 'every month'}
+          {month ? ` · ${data.sessions.length} of ${all.sessions.length} sessions held` : ` · ${all.sessions.length} sessions held`}
+        </div>
       </div>
 
       {metrics.error ? (
@@ -101,7 +133,7 @@ export default function PayTracker() {
       ) : !metrics.data ? (
         <Loading />
       ) : tab === 'Owed' ? (
-        <Owed data={data} m={metrics.data} />
+        <Owed data={data} m={metrics.data} held={all.sessions.length} showAll={() => setMonth(null)} />
       ) : tab === 'Statements' ? (
         <Statements data={data} m={metrics.data} />
       ) : tab === 'Sessions' ? (

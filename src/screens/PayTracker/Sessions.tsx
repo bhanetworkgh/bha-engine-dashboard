@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { PayData, PaySession } from '../../data';
 import type { RecordColumn } from '../../components/ui';
-import { EmptyState, MonthPicker, monthsFrom, Pagination, Pill, RecordId, RecordTable, SearchBox, Segmented, SourceLink, usePaged } from '../../components/ui';
+import { EmptyState, Pagination, Pill, RecordId, RecordTable, SearchBox, Segmented, SourceLink, usePaged } from '../../components/ui';
 
 /**
  * Every session row, the full record.
@@ -88,10 +88,8 @@ function columns(): RecordColumn<PaySession>[] {
 export default function Sessions({ data }: { data: PayData }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [builder, setBuilder] = useState<string>('all');
-  const [month, setMonth] = useState<string | null>(null);
   const [q, setQ] = useState('');
-
-  const months = useMemo(() => monthsFrom(data.sessions.map((s) => (s.month ? `${s.month}-01` : null))), [data.sessions]);
+  // The month is the page's, chosen once above the tabs; `data` arrives cut to it.
   const builders = useMemo(() => [...new Set(data.sessions.map((s) => s.builder))].sort(), [data.sessions]);
 
   const rows = useMemo(
@@ -99,11 +97,10 @@ export default function Sessions({ data }: { data: PayData }) {
       data.sessions
         .filter((s) => (filter === 'all' ? true : filter === 'unpaid' ? s.paid === false : filter === 'unknown' ? s.paid === null : filter === 'paid' ? s.paid === true : s.pay_mode === filter))
         .filter((s) => builder === 'all' || s.builder === builder)
-        .filter((s) => !month || s.month === month)
         .filter((s) => !q.trim() || [s.codex_entry_id, s.builder, s.statement_id].some((v) => v && v.toLowerCase().includes(q.trim().toLowerCase()))),
-    [data.sessions, filter, builder, month, q],
+    [data.sessions, filter, builder, q],
   );
-  const paged = usePaged(rows, `${filter}|${builder}|${month ?? 'all'}|${q.trim()}`);
+  const paged = usePaged(rows, `${filter}|${builder}|${data.sessions.length}|${q.trim()}`);
 
   const counts = {
     all: data.sessions.length,
@@ -143,7 +140,6 @@ export default function Sessions({ data }: { data: PayData }) {
                 ))}
               </select>
             </label>
-            <MonthPicker months={months} value={month} onChange={setMonth} />
             <SearchBox value={q} onChange={setQ} placeholder="Search Codex ids and builders" />
           </div>
         </div>
@@ -161,7 +157,9 @@ export default function Sessions({ data }: { data: PayData }) {
           {data.freshness.source === 'none'
             ? (data.freshness.note ??
               'No session is held. A row appears here the moment a session is approved — so an empty ledger means either nothing has been approved or nobody has read it. The age above says which.')
-            : q.trim() || builder !== 'all' || month
+            : data.sessions.length === 0
+              ? 'No session held counts toward the month picked above. Pick another month, or All time.'
+              : q.trim() || builder !== 'all'
               ? 'No session matches those filters.'
               : filter === 'unpaid'
                 ? 'Every approved session held is paid. Nothing is owed.'

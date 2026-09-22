@@ -229,7 +229,7 @@ export const revertRepair = (repairId: string) => api<RevertResult>(`/api/repair
  * drift — so there is no write in this module and no route to make one.
  */
 export const getPay = () => api<PayData>('/api/pay');
-export const getPayMetrics = () => api<PayMetrics>('/api/pay/metrics');
+export const getPayMetrics = (month: string | null = null) => api<PayMetrics>(`/api/pay/metrics${month ? `?month=${encodeURIComponent(month)}` : ''}`);
 export const resyncPay = () => api<Resync>('/api/pay/resync', { method: 'POST', timeoutMs: 180_000 });
 
 /**
