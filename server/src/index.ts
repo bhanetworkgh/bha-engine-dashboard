@@ -776,13 +776,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await earlyAccess.leads());
       case '/api/ask-bays':
         return send(res, 200, engine.getAskBays(q));
-      case '/api/engine-writes': {
-        // The dual-write comparison surface. Behind the cookie, not the
-        // service key: this is for a person looking at the page, and the
-        // service key is n8n's alone.
-        const limit = Number(url.searchParams.get('limit') ?? 50);
-        return send(res, 200, await mirror.writesView(Number.isFinite(limit) ? limit : 50, 24, Boolean(INBOUND_KEY)));
-      }
       case '/api/registry': {
         // Everything the page shows, in one response. Five small tables; a
         // request per tab would only make the age of each one harder to state.

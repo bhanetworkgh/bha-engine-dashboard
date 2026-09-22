@@ -25,6 +25,8 @@ export interface SeedRow {
 }
 
 const N8N = 'https://bayshorizonnetwork.app.n8n.cloud';
+/** The note every row added on 2026-09-22 carries, so it can be told from a row somebody wrote. */
+const NEW = 'Added 2026-09-22 from the live n8n workflow list. System chosen from the workflow name; folder, owner and trigger were not read unless stated.';
 const wfUrl = (id: string) => `${N8N}/workflow/${id}`;
 
 /**
@@ -40,7 +42,7 @@ const W = (
   id: string,
   name: string,
   system: string,
-  folder: string,
+  folder: string | null,
   pillar: string | null,
   owner: string | null,
   trigger_type: string | null,
@@ -123,6 +125,41 @@ export const WORKFLOWS: SeedRow[] = [
   // vFarm
   W('fhQNvRFdh1H6Li0E', 'vFarm Early Access Lead → Buyer Link', 'vFarm', 'vFarm', null, 'Hardik Bhatt', null, null, null, 'production',
     "n8n titles this 'vFarm Early Access Lead → Buyer Link [MIGRATED]', reports it inactive, and has MCP access turned off, so its pillar, trigger and purpose could not be read back (13 Sep 2026). Status here is as briefed, not as observed — worth confirming."),
+  /*
+   * Added 2026-09-22 from the live n8n workflow list (42 workflows; these 14
+   * had no row). Name, active state and description are n8n's own; `system`
+   * is chosen from the workflow's name and says so in its notes; folder,
+   * owner and trigger were not read and are null rather than guessed.
+   * Inactive workflows are `retired`, except where a note says otherwise.
+   */
+  W('oOAZaW1aQaRP2arc', 'BHA — Self Healer', 'Engine', null, null, null, 'sub-workflow', 'Handed every failure by the three error handlers',
+    'The one self-healing layer for all three lanes: routes each failure to retry, Claude Code repair, or a person, and reports every outcome.', 'production', NEW),
+  W('wZpWp9ov6exxoez0', 'BHA — Self Healer Reports', 'Engine', null, null, null, 'webhook', 'POST /webhook/repair-result',
+    'Receives a repair or retry result, reports it in #bha-self-healing whatever the outcome, and closes the BHARAG incident when the result was a fix.', 'production', NEW),
+  W('3Pzm0DlJZSNu6DU4', 'Engine — Self-Healing Retry', 'Engine', null, null, null, 'schedule + webhook', 'Every 5 minutes; POST /webhook/engine-heal',
+    'Retries the failures a retry can fix, with backoff and a circuit breaker, and writes retry_attempts.', 'retired',
+    `${NEW} Inactive in n8n. Its webhook /webhook/engine-heal is what this dashboard's Retry now posts to, so Retry now is not live while it is off.`),
+  W('MtjakyCf90lgah7S', 'TEST — Self-healing, Bays lane', 'Test', null, null, null, null, null,
+    'Deliberately broken test workflow for the Bays self-healing lane. Safe to delete after testing.', 'experimental', NEW),
+  W('xIVt2cO0VHDJ7jT6', 'TEST — Self-healing, North Star lane', 'Test', null, null, null, null, null,
+    'Deliberately broken test workflow for the North Star self-healing lane. Safe to delete after testing.', 'experimental', NEW),
+  W('4beRTMIlgJ0njPna', 'TEST — Self-healing, Research Twin lane', 'Test', null, null, null, null, null,
+    'Deliberately broken test workflow for the Research Twin self-healing lane. Safe to delete after testing.', 'experimental', NEW),
+  W('LR7M1POhHvJ0j7Vm', 'Bays — Pay Tracking', 'Bays', null, null, null, 'schedule + sub-workflow', 'Called on each approval; 1st of the month 09:00; Mondays 10:00',
+    'Records every approved session, sends one statement per monthly builder on the 1st, and reminds daily builders to confirm sessions still showing unpaid.', 'production', NEW),
+  W('t79s1mXSHink3dAM', 'Bays — Pay Ledger Sync', 'Bays', null, null, null, 'schedule', 'Every 30 minutes',
+    'Keeps the pay ledger in step with the approved session logs, in both directions, without touching the live approval path or the Yes, Paid button.', 'production', NEW),
+  W('GES8UIM3dJRbrLSx', 'BHA — Dashboard Loop Write-Back', 'Bays', null, null, null, 'webhook', null,
+    'Wrote loop status changes from this dashboard back to the Airtable Open Loops tables. Retired 14 Sep, when loop edits began writing to Airtable directly.', 'retired', NEW),
+  W('xxME1VLRkPdlLpaV', 'vFarm Early Access — Lead Notifier', 'vFarm', null, null, null, 'webhook', 'Called by this dashboard on a new Early Access lead',
+    'Receives a vFarm Early Access lead notification from the BHA Engine Dashboard and posts it into #vfarm-early-access.', 'production', NEW),
+  W('rt2oje925OyiSttf', 'GenieContextTest-20260918220730', 'Genie', null, null, null, 'webhook', null,
+    'Webhook trigger that replies with JSON {"ok":true}. Unpublished, no Slack, Gmail or OAuth — a connectivity test.', 'retired', NEW),
+  W('N9kIvHF8Vohy8OeM', 'Add source_campaign Header (one-off)', 'One-off', null, null, null, null, null, null, 'retired',
+    `${NEW} A one-off job, inactive; n8n carries no description for it.`),
+  W('PEdHH8OZuplhTidg', 'ONE-OFF — Ingest vFarm clip patterns v0.2 (D565)', 'One-off', null, null, null, null, null,
+    "One-off: ingest Hardik's eight vFarm clip patterns plus the patched v0.2 contract into BHARAG as nine documents, then read each back by exact pattern_id. LOOP-1789929222645-D565.",
+    'retired', NEW),
 ];
 
 /**
@@ -304,6 +341,27 @@ export const ENDPOINTS: SeedRow[] = [
   E('ep-genie-messages', 'Genie messages', 'https://genie-v3-migration-u82u.onrender.com/api/genie/messages', 'POST', null, 'Genie v3',
     'Bays — Tools Router (ask_genie)',
     'Repointed 16 Sep 2026 to the canonical Genie deployment. The host recorded before this never resolved.'),
+  /* Added 2026-09-22 from the engine's own nodes and this server's code. */
+  E('ep-dashboard-engine', 'Dashboard engine surface', 'https://bha-engine-dashboard.onrender.com/api/engine/:kind', 'POST', 'x-dashboard-key header (DASHBOARD_INBOUND_KEY)', 'BHA Engine Dashboard',
+    'Every n8n workflow that used to read or write Airtable: posts (POST), looks up (GET) and part-updates (PATCH /:id and /by-natural/:id) each record kind',
+    'Airtable was retired on 22 Sep 2026; these tables are the record. Every call, lookups and refusals included, is logged to engine_writes.'),
+  E('ep-dashboard-repair', 'Dashboard repair record', 'https://bha-engine-dashboard.onrender.com/api/engine/repair', 'POST', 'x-dashboard-key header (DASHBOARD_INBOUND_KEY)', 'BHA Engine Dashboard',
+    'The repair bridge, with each repair result', null),
+  E('ep-dashboard-early-access', 'vFarm Early Access form', 'https://bha-engine-dashboard.onrender.com/api/public/vfarm-early-access', 'POST', 'none (public; origin-checked and rate-limited)', 'BHA Engine Dashboard',
+    'The Early Access form on bhanetwork.org', 'The only public write route on the dashboard.'),
+  E('ep-repair-bridge', 'Repair bridge', 'https://heal.bhanetwork.org/fix-workflow', 'POST', 'x-api-key header', 'bha-repair-bridge',
+    'BHA — Self Healer, for failures routed to a Claude Code repair (schema_validation, unknown)', null),
+  E('ep-repair-result', 'Self-healing result webhook', `${N8N}/webhook/repair-result`, 'POST', null, 'n8n Cloud',
+    'BHA — Self Healer (a retry that recovered) and the repair bridge (a repair result)',
+    'Received by BHA — Self Healer Reports, which posts to #bha-self-healing and closes the BHARAG incident when the result was a fix.'),
+  E('ep-engine-heal', 'Engine heal webhook', `${N8N}/webhook/engine-heal`, 'POST', null, 'n8n Cloud',
+    "This dashboard's Retry now button, through its server",
+    'Owned by Engine — Self-Healing Retry, which is inactive in n8n, so this production webhook is not live.'),
+  E('ep-bharag-incident-status', 'BHARAG incident status', 'https://bharag2.duckdns.org/api/v1/incidents/:entity_id/status', 'POST', 'x-api-key header (one key per lane)', 'BHARAG cluster',
+    "The error handlers (open → retrying), BHA — Self Healer Reports (→ self_healed), and this dashboard's Engine health close (→ manually_resolved)",
+    'The only route that moves an incident between states. A terminal state has no transition out of it.'),
+  E('ep-n8n-api', 'n8n public API', `${N8N}/api/v1`, 'GET', 'X-N8N-API-KEY header', 'n8n Cloud',
+    "This dashboard's server (executions, workflow names, the repair revert) and BHA — Self Healer (execution reads and retries)", null),
 ];
 
 /**

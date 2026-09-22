@@ -1912,8 +1912,14 @@ past fourteen days.
 
 ### System registry
 **Four registries on one page** (decision 2026-09-14, Destiny) — Builders,
-Tools, Endpoint, Workflow — plus **Engine writes** as a fifth tab, which is the
-dual-write surface rather than a registry.
+Tools, Endpoint, Workflow. **Engine writes is gone** (2026-09-22, Destiny): it
+compared this database against Airtable, and Airtable is retired, so it
+compared against nothing. `/api/engine-writes` went with it; the
+`engine_writes` log itself is kept and still read. The Airtable bases on the
+Endpoint tab are labelled as history, not live. A service's url is shown, not
+edited, on the Tools tab. The workflow registry was brought in step with the
+live n8n list on 2026-09-22 (13 rows added by seed, 3 corrected by migration 24,
+each only where the row still held its seeded value).
 
 **There is no credentials registry.** The `registry_credentials` table is not
 dropped, because nothing drops a table, but it is neither read nor served.
