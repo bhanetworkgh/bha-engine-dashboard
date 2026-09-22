@@ -3,12 +3,10 @@ import { useData } from '../../app/useData';
 import {
   createRegistryRow,
   deleteRegistryRow,
-  getEngineWrites,
   getRegistry,
   restoreRegistryRow,
   updateRegistryRow,
   type DigestHealth,
-  type EngineWrites,
   type RegistryData,
   type ShownKind,
   type RegistryRowOf,
@@ -72,7 +70,13 @@ import { DASH, EditableCell, NewRow, type CellType } from './Editable';
  * somewhere to keep a key. The table is not dropped, because nothing drops a
  * table; it is simply neither read nor served.
  */
-const TABS = ['Builders', 'Tools', 'Endpoint', 'Workflow', 'Engine writes'] as const;
+/**
+ * Engine writes came off on 2026-09-22 (Destiny). It compared this database
+ * against Airtable's copy while both were written; Airtable is retired, so it
+ * compared against nothing. The write log itself (`engine_writes`) is kept and
+ * still read — by the Clients and Pay pages and by the MCP tools.
+ */
+const TABS = ['Builders', 'Tools', 'Endpoint', 'Workflow'] as const;
 type Tab = (typeof TABS)[number];
 
 const WORKFLOW_STATUS = ['production', 'experimental', 'retired'] as const;
@@ -274,7 +278,6 @@ export default function Registry() {
         {tab === 'Tools' && <ServicesTab rows={d.services} spend={d.spend} {...shared} />}
         {tab === 'Endpoint' && <EndpointsTab rows={d.endpoints} bases={d.bases} digests={d.digest_health} {...shared} />}
         {tab === 'Workflow' && <WorkflowsTab rows={d.workflows} {...shared} />}
-        {tab === 'Engine writes' && <EngineWritesTab />}
       </div>
 
       <Toast toast={toast} />
@@ -736,37 +739,22 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
                   belongs. The link stays clickable and the editor sits beside
                   it, the same shape the Builders tab uses for lanes owned.
                 */}
+                {/*
+                  The url is shown, not edited here (2026-09-22, Destiny): the
+                  small "edit" beside it came off. The link stays clickable.
+                */}
                 {s.url ? (
-                  <span className="flex items-baseline gap-1.5">
-                    <a
-                      href={s.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="min-w-0 truncate text-[10.5px] text-faint hover:text-accent-ink"
-                      title={s.url}
-                    >
-                      {s.url.replace(/^https?:\/\//, '')}
-                    </a>
-                    <EditableCell
-                      value={s.url}
-                      type="url"
-                      disabled={Boolean(s.deleted_at)}
-                      onSave={(v) => p.save('services', s.id, 'url', v)}
-                      onError={p.fail}
-                      inline
-                      render={() => <span className="text-[10.5px] text-faint">edit</span>}
-                    />
-                  </span>
+                  <a
+                    href={s.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block min-w-0 truncate text-[10.5px] text-faint hover:text-accent-ink"
+                    title={s.url}
+                  >
+                    {s.url.replace(/^https?:\/\//, '')}
+                  </a>
                 ) : (
-                  <EditableCell
-                    value={null}
-                    type="url"
-                    placeholder="https://…"
-                    disabled={Boolean(s.deleted_at)}
-                    onSave={(v) => p.save('services', s.id, 'url', v)}
-                    onError={p.fail}
-                    inline
-                  />
+                  <span className="text-[10.5px] text-faint">no url recorded</span>
                 )}
               </td>
               <td className="td card-meta">{cell(p, 'services', s, 'category', { type: 'select', options: CATEGORIES })}</td>
@@ -955,12 +943,14 @@ function EndpointsTab({ rows, bases, digests, ...p }: TabProps & { rows: Registr
       */}
       <div className="shrink-0 px-6 pb-2 md:px-8">
         <div className="flex items-baseline gap-2 pt-2">
-          <span className="text-[13px] font-medium text-ink">Airtable bases</span>
+          <span className="text-[13px] font-medium text-ink">Airtable bases — history</span>
           <span className="tabular text-[11.5px] text-faint">{bases.filter((b) => !b.deleted_at).length}</span>
         </div>
         <p className="mt-1 mb-2 max-w-[80ch] text-[11.5px] leading-relaxed text-faint">
-          The other set of addresses the engine reads and writes. They are not billed separately — Airtable is one
-          service on the Tools tab — so they are listed here rather than there.
+          <span className="font-medium text-dim">Not live.</span> These are the Airtable bases and tables the engine read and wrote before
+          the migration. Airtable was retired on 22 Sep 2026 and the engine now reads and writes this dashboard’s own tables through
+          /api/engine; the list is kept because the history in these bases is real and a base that vanished from here would read as one
+          that never existed.
         </p>
       </div>
 
@@ -1130,199 +1120,6 @@ function BuildersTab({ rows, ...p }: TabProps & { rows: RegistryData['people'] }
         })}
       </Grid>
 
-    </>
-  );
-}
-
-/* --------------------------------------------------------- engine writes */
-
-const OUTCOME_TONE: Record<string, string> = {
-  inserted: 'text-ink',
-  updated: 'text-ink',
-  unchanged: 'text-faint',
-  rejected: 'text-degraded',
-  unauthorised: 'text-failing',
-  error: 'text-failing',
-  // A lookup through GET /api/engine/:kind (2026-09-21). Quiet: it changed
-  // nothing, and it is on this log so that the writes can be counted without it.
-  read: 'text-faint',
-};
-
-/**
- * What the engine has written into this dashboard, and what each record table
- * currently holds.
- *
- * Since 13 Sep 2026 these are not a mirror of anything: the Airtable sync is
- * gone and every page reads these tables directly. So this tab has become the
- * page that answers whether the engine is still feeding them — and a kind
- * whose `from_engine` is zero now matters more than it did, because its rows
- * are frozen at the migration backfill and nothing is refreshing them.
- *
- * That is a fact about the wiring, not a fault of any row, so the column says
- * it plainly rather than colouring the whole table as broken.
- */
-function EngineWritesTab() {
-  const [reload, setReload] = useState(0);
-  const { status, data, error } = useData(() => getEngineWrites(50), [reload]);
-
-  if (status === 'loading') return <Loading />;
-  if (status === 'error') return <LoadFailed error={error} />;
-  const d: EngineWrites = data;
-
-  const refused = (d.tally.rejected ?? 0) + (d.tally.unauthorised ?? 0) + (d.tally.error ?? 0);
-  const accepted = (d.tally.inserted ?? 0) + (d.tally.updated ?? 0) + (d.tally.unchanged ?? 0);
-  /*
-    Lookups are counted on their own (2026-09-21) rather than folded into
-    either figure above. They are on this log because they use the same
-    surface and the same key, but a read is not a write, and a strip whose
-    two figures no longer add up to the rows beneath it is the quietly-wrong
-    number this dashboard exists to remove.
-  */
-  const lookups = d.tally.read ?? 0;
-  const wired = d.held.filter((h) => h.from_engine > 0).length;
-
-  return (
-    <>
-      {!d.configured && (
-        <div className="mx-6 mb-4 md:mx-8">
-          <div className="flex items-start gap-3 rounded-[14px] bg-failing-soft px-4 py-3">
-            <span className="mt-[6px] h-[7px] w-[7px] shrink-0 rounded-full bg-failing" />
-            <p className="text-[12.5px] leading-relaxed text-failing">
-              <span className="font-medium">DASHBOARD_INBOUND_KEY is not set on this server</span>, so every engine write is
-              refused before it reaches a handler. Nothing can arrive until it is set.
-            </p>
-          </div>
-        </div>
-      )}
-
-      <StatStrip cols={5}>
-        <CountCell label="Writes accepted" value={accepted} hint={`in the last ${d.window_hours} hours`} hintMinLines={2} />
-        <CountCell label="Refused" value={refused} tone={refused ? 'failing' : 'dim'} hint="rejected, unauthorised or errored" hintMinLines={2} />
-        {/*
-          "Kinds receiving writes" told a reader nothing (2026-09-16, Destiny).
-          What it counts is record tables n8n has written to at least once —
-          rows whose `source` is not the migration backfill — so that is what it
-          says. Red when any table has none, because a table at nought is a
-          kind n8n has never been pointed at: its rows are exactly as the
-          backfill left them and nothing is adding to them.
-        */}
-        <CountCell
-          label="Record tables n8n writes to"
-          value={wired}
-          tone={wired < d.held.length ? 'failing' : 'dim'}
-          hint={wired < d.held.length ? `of ${d.held.length}. The rest have only backfilled rows — n8n has never written to them.` : `all ${d.held.length} of them`}
-          hintMinLines={2}
-        />
-        <CountCell
-          label="Lookups answered"
-          value={lookups}
-          hint={`GET /api/engine/:kind, in the last ${d.window_hours} hours. Never counted as a write.`}
-          hintMinLines={2}
-        />
-        <CountCell label="Writes recorded, all time" value={d.total} hint={d.last_at ? `newest ${when(d.last_at)}` : 'none yet'} hintMinLines={2} />
-      </StatStrip>
-
-      <div className="shrink-0 px-6 pb-3 md:px-8">
-        <p className="max-w-[86ch] text-[11.5px] leading-relaxed text-faint">
-          These tables are the record. The Airtable sync was removed on 13 September 2026 and every page reads them
-          directly, so a kind the engine is not writing is not stale — it is stopped, and its rows will stay exactly as
-          the migration backfill left them until n8n is pointed at it.
-        </p>
-      </div>
-
-      <div className="shrink-0 px-6 pb-2 md:px-8">
-        <div className="flex items-baseline justify-between gap-3 pt-2">
-          <span className="text-[13px] font-medium text-ink">What each record table holds</span>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setReload((n) => n + 1)}>
-            Refresh
-          </button>
-        </div>
-      </div>
-
-      <Grid
-        label="Record tables"
-        min={1080}
-        head={
-          <>
-            <Th width="18%">what it holds</Th>
-            <Th>postgres table</Th>
-            <Th right>rows</Th>
-            <Th right>last from the backfill</Th>
-            <Th right>last from the engine</Th>
-            <Th right>last from a page</Th>
-            <Th>newest row</Th>
-          </>
-        }
-      >
-        {d.held.map((h) => (
-          <tr key={h.kind}>
-            <td className="td card-title">{h.label}</td>
-            <td className="td tabular text-faint">{h.table}</td>
-            <td className="td tabular text-right text-ink">{h.rows}</td>
-            <td className="td tabular text-right text-dim">{h.from_airtable}</td>
-            <td className={`td tabular text-right ${h.from_engine ? 'text-ink' : 'text-degraded'}`}>
-              {h.from_engine || <span title="n8n has not been pointed at this kind, so these rows are frozen at the backfill">not wired yet</span>}
-            </td>
-            <td className="td tabular text-right text-dim">{h.from_ui}</td>
-            <td className="td tabular whitespace-nowrap text-faint" title={h.latest ?? ''}>
-              {when(h.latest)}
-            </td>
-          </tr>
-        ))}
-      </Grid>
-
-      <div className="shrink-0 px-6 pb-2 md:px-8">
-        <div className="flex items-baseline gap-2 pt-2">
-          <span className="text-[13px] font-medium text-ink">Recent writes</span>
-          <span className="tabular text-[11.5px] text-faint">{d.recent.length} newest</span>
-        </div>
-        <p className="mt-1 mb-2 max-w-[86ch] text-[11.5px] leading-relaxed text-faint">
-          Every write the engine attempted, accepted or refused. A refusal carries the reason it was refused — a 422
-          nobody can see is the same as silence, which is what this migration exists to remove.
-        </p>
-      </div>
-
-      {d.recent.length === 0 ? (
-        <EmptyState>
-          No engine write has reached this server yet. Point n8n at{' '}
-          <span className="text-ink">POST /api/engine/&lt;kind&gt;</span> with the{' '}
-          <span className="text-ink">x-dashboard-key</span> header and the first one will appear here.
-        </EmptyState>
-      ) : (
-        <Grid
-          label="Recent engine writes"
-          min={1120}
-          head={
-            <>
-              <Th>when</Th>
-              <Th>kind</Th>
-              <Th>outcome</Th>
-              <Th>row</Th>
-              <Th width="34%">detail</Th>
-              <Th>key</Th>
-              <Th right>ms</Th>
-            </>
-          }
-        >
-          {d.recent.map((w) => (
-            <tr key={w.seq}>
-              <td className="td tabular whitespace-nowrap text-faint" title={w.at}>
-                {when(w.at)}
-              </td>
-              <td className="td card-meta text-dim">{w.kind}</td>
-              <td className={`td card-meta ${OUTCOME_TONE[w.outcome] ?? 'text-dim'}`}>{w.outcome}</td>
-              <td className="td tabular td-clip text-faint" style={{ maxWidth: '24ch' }} title={w.airtable_record_id ?? w.natural_id ?? ''}>
-                {w.airtable_record_id ?? w.natural_id ?? DASH}
-              </td>
-              <td className="td td-clip text-dim" style={{ maxWidth: '52ch' }} title={w.detail ?? ''}>
-                {w.detail ?? DASH}
-              </td>
-              <td className="td text-faint">{w.key_label ?? DASH}</td>
-              <td className="td tabular text-right text-faint">{w.ms ?? DASH}</td>
-            </tr>
-          ))}
-        </Grid>
-      )}
     </>
   );
 }

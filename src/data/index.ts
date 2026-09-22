@@ -49,7 +49,6 @@ import type {
   Query,
   RecordKind,
   RecordMetrics,
-  EngineWrites,
   RegistryData,
   RegistryKind,
   RegistryRowOf,
@@ -509,14 +508,6 @@ export function restoreRegistryRow<K extends RegistryKind>(kind: K, id: string):
 
 /* --------------------------------------------------------- engine writes */
 
-/**
- * What the engine has written directly into this dashboard, and what each
- * mirror table holds. Read-only and behind the session cookie: the service key
- * that authorises a write belongs to n8n and never reaches the browser.
- */
-export function getEngineWrites(limit = 50): Promise<EngineWrites> {
-  return api<EngineWrites>(`/api/engine-writes?limit=${limit}`);
-}
 
 /* ----------------------------------------------- vFarm Early Access */
 

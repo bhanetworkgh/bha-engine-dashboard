@@ -1119,37 +1119,8 @@ export interface WriteRow {
   ms: number | null;
 }
 
-export interface WritesView {
-  /** Every write ever recorded, and the window the tallies below cover. */
-  total: number;
-  window_hours: number;
-  tally: Record<string, number>;
-  recent: WriteRow[];
-  first_at: string | null;
-  last_at: string | null;
-  held: HeldCount[];
-  /** Whether the server can accept an engine write at all. */
-  configured: boolean;
-}
-
-export async function writesView(limit = 50, windowHours = 24, configured = false): Promise<WritesView> {
-  const since = new Date(Date.now() - windowHours * 3_600_000).toISOString();
-  const [totals, tally, recent] = await Promise.all([
-    query<{ total: string; first_at: string | null; last_at: string | null }>('SELECT count(*) AS total, min(at) AS first_at, max(at) AS last_at FROM engine_writes'),
-    query<{ outcome: string; n: string }>('SELECT outcome, count(*) AS n FROM engine_writes WHERE at >= $1 GROUP BY outcome', [since]),
-    query<WriteRow>('SELECT seq, at, endpoint, kind, method, key_label, airtable_record_id, natural_id, outcome, detail, ms FROM engine_writes ORDER BY seq DESC LIMIT $1', [Math.min(Math.max(limit, 1), 200)]),
-  ]);
-  return {
-    total: Number(totals.rows[0]?.total ?? 0),
-    window_hours: windowHours,
-    tally: Object.fromEntries(tally.rows.map((r) => [r.outcome, Number(r.n)])),
-    recent: recent.rows.map((r) => ({ ...r, seq: Number(r.seq), ms: r.ms === null ? null : Number(r.ms) })),
-    first_at: totals.rows[0]?.first_at ?? null,
-    last_at: totals.rows[0]?.last_at ?? null,
-    held: await held(),
-    configured,
-  };
-}
+/* The Engine writes tab and its writesView() came off 2026-09-22: Airtable is
+   retired, so the dual-write comparison compared against nothing. */
 
 export interface DigestHealth {
   /**

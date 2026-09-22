@@ -8504,3 +8504,44 @@ Found:      Bays — Pay Tracking's own readers use `!paid(f['Paid'])`, so a
 Tested:     Local: five rows (one duplicated paid pair, two flagless from a
             resync, one explicit unpaid) → 4 sessions, 1 owed, 2 not recorded,
             Hardik under Monthly with "+1 paid not recorded".
+
+## 2026-09-22 19:55 — System registry: no url edit, no Engine writes, workflows and endpoints in step with n8n
+Intent:     Brief §14.
+Files:      src/screens/Registry/index.tsx, src/data/index.ts,
+            server/src/index.ts, server/src/mirror.ts, server/src/registrySeed.ts,
+            server/src/migrations.ts (migration 24), CLAUDE.md
+Verified:   The live n8n list (42 workflows) against registry_workflows (31):
+            13 had no row — BHA — Self Healer, BHA — Self Healer Reports,
+            Engine — Self-Healing Retry (inactive), the three TEST self-healing
+            lanes, Bays — Pay Tracking, Bays — Pay Ledger Sync, BHA — Dashboard
+            Loop Write-Back (inactive), vFarm Early Access — Lead Notifier,
+            GenieContextTest (inactive), and the two one-offs (source_campaign
+            header, D565 clip-pattern ingest). 3 were stale:
+            `lEyirYDareupAmlB` is "Bays — Builder Chasers" in n8n, not "Parked
+            Log Reminder"; `fhQNvRFdh1H6Li0E` is marked [MIGRATED]; and
+            "North Star — Weekly Status" (`aPP4AMtcB4xmOSCW`) is no longer in n8n
+            at all but read `production`. The brief's "check-in workflow"
+            (`Bays — In Progress Loops Check-in`) was already registered.
+Fix:        The 13 go in as seed rows, which insert on boot and never touch an
+            existing row. Name, description and active state are n8n's own;
+            system is chosen from the name (Engine / Test / Bays / vFarm / Genie
+            / One-off) and every row's notes say so; folder, owner and trigger
+            are null where not read. Migration 24 corrects the three stale rows,
+            each only while the row still holds the seeded value, so a page edit
+            wins. Endpoints: 8 added from the engine's own nodes and this code —
+            the dashboard's /api/engine surface, /api/engine/repair, the public
+            Early Access route, the repair bridge, /webhook/repair-result,
+            /webhook/engine-heal (noted as not live), BHARAG's /incidents/:id/
+            status, and the n8n public API.
+Fix:        The "edit" beside a service's url is gone; the url is a link or
+            "no url recorded". The Airtable bases section is titled "— history"
+            and says it is not live and why it is kept. The Engine writes tab,
+            its component, `getEngineWrites`, the `/api/engine-writes` route and
+            `mirror.writesView` are removed; `engine_writes` stays.
+Found:      New systems on the Executions page: Engine, Test, One-off and Genie
+            each get a tab once these rows exist, where they read as Unregistered
+            before. The TEST lanes are deliberately broken, so the Test tab will
+            show failures by design.
+Tested:     Local boot: "applied 1 migration(s): 24", "seeded 21 row(s):
+            workflows 13, endpoints 8"; the three stale rows corrected; the
+            Endpoint tab renders the new rows and the history label.

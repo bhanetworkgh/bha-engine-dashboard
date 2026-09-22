@@ -1559,6 +1559,23 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_vfarm_leads_asset ON engine_vfarm_leads (asset_id)`,
     ],
   },
+  {
+    id: 24,
+    name: 'registry workflows brought in step with n8n',
+    statements: [
+      /**
+       * Three workflow rows the live n8n list contradicts (2026-09-22). Each
+       * update fires only while the row still holds the value the seed gave
+       * it, so an edit made on the page is never overwritten.
+       */
+      `UPDATE registry_workflows SET name = 'Bays — Builder Chasers', notes = concat_ws(' ', notes, 'Renamed in n8n from Bays — Parked Log Reminder; name brought in step 2026-09-22.'), updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = 'lEyirYDareupAmlB' AND name = 'Bays — Parked Log Reminder'`,
+      `UPDATE registry_workflows SET name = 'vFarm Early Access Lead → Buyer Link [MIGRATED]', notes = concat_ws(' ', notes, 'n8n marks this [MIGRATED]; the live notifier is vFarm Early Access — Lead Notifier. Name brought in step 2026-09-22.'), updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = 'fhQNvRFdh1H6Li0E' AND name = 'vFarm Early Access Lead → Buyer Link'`,
+      `UPDATE registry_workflows SET status = 'retired', notes = concat_ws(' ', notes, 'Not in the live n8n workflow list on 2026-09-22 — deleted or archived there.'), updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = 'aPP4AMtcB4xmOSCW' AND status = 'production'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
