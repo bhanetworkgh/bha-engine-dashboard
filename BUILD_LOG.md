@@ -8620,3 +8620,56 @@ Tested:     Local, with an August unpaid row added: all months owed 2 / unconf 2
             ?month=2026-09 owed 1, outside {owed 1, months [2026-08]};
             ?month=2026-08 owed 1, outside {owed 1, unconfirmed 2}; ?month=bad
             400. Screenshot shows the Ahad row and the paid-up line as above.
+
+## 2026-09-22 21:05 — System registry: folder, trigger and owner for the 22 Sep rows
+Intent:     Brief 2, item 5. Fill folder (from parentFolderId, resolved through
+            the project), trigger (from the workflow's own trigger nodes) and
+            owner (from the convention on comparable rows) on the 13 rows added
+            this morning; leave blank what the instance cannot say, and say why.
+Files:      server/src/registrySeed.ts, server/src/migrations.ts (25)
+Data:       n8n, read only: two projects — BHA Engine (team,
+            HjupolvfBya6b0ox, 20 folders) and Destiny's personal project (no
+            folders). search_workflows on the team project for parentFolderId;
+            get_workflow_details for trigger nodes, and the full node list for
+            Self Healer and Pay Tracking to catch executeWorkflowTrigger, which
+            the trigger summary leaves out.
+Found:      - BHA — Self Healer now holds the /webhook/engine-heal trigger
+              ("Retry Now (Dashboard Button)", moved there 22 Sep) beside its
+              executeWorkflowTrigger. So Retry now IS live, and the registry
+              said it was not, on both the workflow row and the endpoint row.
+            - Engine — Self-Healing Retry is archived in n8n; its folder cannot
+              be read.
+            - GenieContextTest is not in the BHA Engine project at all — it is at
+              the root of Destiny's personal project.
+            - Add source_campaign Header has MCP access off: folder read from the
+              workflow list (Sandbox), trigger not readable.
+            - Pay Tracking's third trigger is "Session Approved (From Submit
+              Actions)", a sub-workflow trigger — so "called on each approval"
+              is by Bays — Submit Actions.
+            - A 42nd workflow, "ONE-OFF — Close stale incidents (22 Sep audit)"
+              (QqSeahroA4ez2iOp), was created at 19:07 UTC today, after this
+              morning's list: the run that closed the 37 incidents. Added as a
+              seed row so its runs do not read as unregistered.
+            - n8n records no owner on a team-project workflow. Every existing
+              BHA Engine row with an owner says Destiny Arupi except the vFarm
+              lead workflow (Hardik Bhatt); that convention is applied and the
+              notes say it is a convention. The vFarm Lead Notifier's owner is
+              left blank: its one comparable row is Hardik's, but it was built
+              for the dashboard — two conventions, so none is assumed.
+            - Existing rows record the second-level folder ("Bays Subsystems")
+              although n8n now files those workflows one level deeper (Pay,
+              Open Loops, Slack In & Out, Logs & Review, Error Handling). The new
+              rows carry the folder n8n actually names; the older rows were not
+              changed — not in the brief, and the page is where they are edited.
+            - Security, reported not fixed (n8n is read only here): Self
+              Healer's "Call Repair Bridge" node carries the bridge's x-api-key
+              as plain text in the node, not in an n8n credential.
+Fix:        Seed rows carry the values for a fresh database; migration 25 sets
+            them on the live one, each UPDATE guarded on the row still holding
+            the exact seeded note, so a row edited on the page is untouched. The
+            ep-engine-heal endpoint note is corrected the same way.
+Tested:     Local: "applied 1 migration(s): 25"; all 13 rows read back with the
+            values above; blanks: folder on Self-Healing Retry (archived),
+            GenieContextTest (personal project root), D565 one-off (project
+            root); trigger on source_campaign (MCP off); owner on the Lead
+            Notifier.
