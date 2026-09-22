@@ -8376,3 +8376,35 @@ Audit:      Every loop-id render: LoopPanel header (`loop_id ?? id`, fine),
             (blank for null). None printed "null"; only the table cell changed.
 Tested:     Local: ages 20d and 21d for loops raised 2 and 1 Sep, age chart
             15–30 days 2 of 2.
+
+## 2026-09-22 19:00 — Codex, Build patterns, Commercial verified; Clients says how old each lane is
+Intent:     Brief §8–§11.
+Files:      server/src/store.ts, server/src/engine.ts, src/data/types.ts,
+            src/screens/Clients.tsx
+Verified:   Codex — engine_codex_submissions holds **209**, not 208: the 209th
+            arrived today at 17:53Z. The page's own /api/codex serves 209, and
+            its stages match a SQL recomputation of the three rules exactly:
+            203 Approved (186 `Approved` + 17 `Input Added`), 6 Awaiting
+            approval (`Pending`), 0 Needs input — the three Layer 0 rows are all
+            `completed`. By builder: Destiny 48, Kaiqi 45, Hardik 32, Kavin 32,
+            Jegan 31, Ahad 21 = 209.
+            Build patterns — table 181, page 181. engine_pattern_candidates
+            holds 40 and **no page reads them**; CLAUDE.md says so on purpose
+            (they are swept with the patterns resync). Reported, not built.
+            Commercial — table 27, page 27.
+            Clients — as the brief said: 4 lanes, 13 questions, 4 requests, every
+            row `source=airtable`, all last changed by the resync of
+            2026-09-17 15:13Z. engine_writes has no client_lanes or
+            client_requests write at all, and the last client_questions write
+            was 2026-09-14 08:05Z (26 updates) — since overwritten by the
+            resync, which is why the rows' own source says airtable.
+Fix:        Every lane, question and request carries `held: { updated_at, via }`
+            from its mirror row (`engine` / `resync` / `page`). A lane row gets
+            `last_update`, the newest of itself and its questions, shown in a
+            new "last updated here" column ("2026-09-17 · resync"), amber at
+            three days or more. Both tabs carry a line: when the engine last
+            wrote lanes / questions / requests (from engine_writes, lookups and
+            refusals excluded, "never" where it never has), and whether every
+            row on screen arrived through a resync.
+Tested:     Local: one lane seeded as a resync row dated 17 Sep renders
+            "2026-09-17 · resync" in amber and the line reads correctly.

@@ -42,6 +42,7 @@ import type {
   BuildPattern,
   BuildPatternDetail,
   ClientLane,
+  HeldStamp,
   ClientQuestion,
   ClientRequest,
   CodexApproval,
@@ -874,14 +875,31 @@ export async function rtAsks(): Promise<RtAsk[]> {
 export async function rtJobs(): Promise<RtJob[]> {
   return (await rows('rt_jobs')).map((r) => JSON.parse(r.json) as RtJob);
 }
+/** Where a held row's last change came from, in the page's words. */
+function heldOf(r: Row): HeldStamp {
+  return { updated_at: r.updated_at, via: r.source === 'engine' ? 'engine' : r.source === 'ui' ? 'page' : 'resync' };
+}
 export async function clientLanes(): Promise<ClientLane[]> {
-  return (await rows('clients')).map((r) => JSON.parse(r.json) as ClientLane);
+  return (await rows('clients')).map((r) => ({ ...(JSON.parse(r.json) as ClientLane), held: heldOf(r) }));
 }
 export async function clientQuestions(): Promise<ClientQuestion[]> {
-  return (await rows('client_questions')).map((r) => JSON.parse(r.json) as ClientQuestion);
+  return (await rows('client_questions')).map((r) => ({ ...(JSON.parse(r.json) as ClientQuestion), held: heldOf(r) }));
 }
 export async function clientRequests(): Promise<ClientRequest[]> {
-  return (await rows('client_requests')).map((r) => JSON.parse(r.json) as ClientRequest);
+  return (await rows('client_requests')).map((r) => ({ ...(JSON.parse(r.json) as ClientRequest), held: heldOf(r) }));
+}
+
+/**
+ * The newest write n8n itself made to a kind, from `engine_writes` — lookups and
+ * refusals excluded. A resync overwrites a row's own `source`, so this is the
+ * only place "the engine last wrote this on …" survives.
+ */
+export async function lastEngineWrite(kind: string): Promise<string | null> {
+  const r = await db().query<{ at: string | null }>(
+    `SELECT max(at) AS at FROM engine_writes WHERE kind = $1 AND outcome NOT IN ('read', 'refused')`,
+    [kind],
+  );
+  return r.rows[0]?.at ?? null;
 }
 
 export async function loopsByOwner(): Promise<OwnerTotals[]> {

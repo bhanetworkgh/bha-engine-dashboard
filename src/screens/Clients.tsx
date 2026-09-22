@@ -208,8 +208,44 @@ const HEADERS: { label: string; right?: boolean }[] = [
   { label: 'at 3 runs', right: true },
   { label: 'missing research', right: true },
   { label: 'report' },
+  { label: 'last updated here' },
   { label: '' },
 ];
+
+const VIA: Record<string, string> = { engine: 'written by the engine', resync: 'copied in by a resync', page: 'edited on this page' };
+
+/**
+ * When this lane (or any of its questions) last changed in this database, and
+ * how it got here (2026-09-22). Nothing has written these rows since the
+ * resync of 17 Sep, and a lane sitting on that copy must not read as current.
+ */
+function LastUpdate({ h }: { h: ClientLaneRow['last_update'] }) {
+  if (!h) return <span className="text-faint">not recorded</span>;
+  const days = Math.floor((Date.now() - Date.parse(h.updated_at)) / 86_400_000);
+  return (
+    <span className={days >= 3 ? 'text-degraded' : 'text-dim'} title={`${VIA[h.via] ?? h.via}, ${h.updated_at.slice(0, 16).replace('T', ' ')} UTC`}>
+      {day(h.updated_at)} · {h.via === 'resync' ? 'resync' : h.via === 'engine' ? 'engine' : 'page'}
+    </span>
+  );
+}
+
+/** One sentence over the whole kind: when n8n itself last wrote any of it. */
+function EngineWritesLine({ d, kinds }: { d: ClientsData; kinds: ('lanes' | 'questions' | 'requests')[] }) {
+  const parts = kinds.map((k) => {
+    const at = d.engine_last_write[k];
+    return `${k}: ${at ? `${day(at)} (${relativeTime(at) ?? ''})` : 'never'}`;
+  });
+  const rows = kinds.flatMap((k) => (k === 'lanes' ? d.lanes.map((l) => l.held) : k === 'questions' ? d.questions.map((q) => q.held) : d.requests.map((r) => r.held)));
+  const viaResync = rows.filter((h) => h?.via === 'resync').length;
+  return (
+    <p className="text-[12px] text-dim">
+      Last written by the engine — {parts.join(' · ')}.{' '}
+      {rows.length > 0 && viaResync === rows.length
+        ? `Every one of the ${rows.length} rows here arrived through a resync from Airtable, so this is a copy as of that resync, not a live feed.`
+        : `${viaResync} of ${rows.length} rows here arrived through a resync from Airtable; the rest were written by the engine.`}
+    </p>
+  );
+}
 
 /**
  * One table for every lane, with a row per client heading its own lanes.
@@ -308,6 +344,9 @@ function LaneTable({ clients, lanes, onOpen }: { clients: ClientGroup[]; lanes: 
                       ) : (
                         <span className="text-faint">no report</span>
                       )}
+                    </td>
+                    <td className="td card-meta tabular whitespace-nowrap">
+                      <LastUpdate h={l.last_update} />
                     </td>
                     <td className="td card-actions td-actions">
                       <RowActions>
@@ -546,6 +585,7 @@ export default function Clients() {
           <div className="shrink-0 px-6 pb-3 md:px-8">
             {/* The requests table's own age, not the index's. */}
             <RowsLine freshness={d.requests_freshness} writes={false} />
+            <EngineWritesLine d={d} kinds={['requests']} />
           </div>
 
           <StatStrip cols={4}>
@@ -623,8 +663,9 @@ export default function Clients() {
         </div>
       ) : (
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <div className="shrink-0 px-6 pb-3 md:px-8">
+        <div className="shrink-0 space-y-1 px-6 pb-3 md:px-8">
           <RowsLine freshness={d.freshness} writes={false} />
+          <EngineWritesLine d={d} kinds={['lanes', 'questions']} />
         </div>
 
         <StatStrip cols={5}>

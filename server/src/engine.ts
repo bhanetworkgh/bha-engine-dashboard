@@ -508,6 +508,9 @@ export async function getClients(): Promise<ClientsData> {
         // A lane with no run yet is warming up, not failing. The distinction
         // matters: Client 2's kiosk lane was added on 10 Sep and has never run.
         warming_up: !everRun,
+        // The newest of the lane's own row and its questions' rows, so a lane
+        // whose questions moved yesterday does not read as untouched.
+        last_update: [lane.held, ...mine.map((q) => q.held)].filter((h): h is NonNullable<typeof h> => Boolean(h)).sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0] ?? null,
       };
     })
     .sort((a, b) => (b.last_run_at ?? '').localeCompare(a.last_run_at ?? '') || a.name.localeCompare(b.name));
@@ -564,6 +567,11 @@ export async function getClients(): Promise<ClientsData> {
     requests,
     freshness: await store.freshness('clients'),
     requests_freshness: await store.freshness('client_requests'),
+    engine_last_write: {
+      lanes: await store.lastEngineWrite('client_lanes'),
+      questions: await store.lastEngineWrite('client_questions'),
+      requests: await store.lastEngineWrite('client_requests'),
+    },
     unreadable: lanes
       .filter((l) => !l.questions_table)
       .map((l) => ({
