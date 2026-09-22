@@ -3,8 +3,9 @@ import { createPortal } from 'react-dom';
 import { useData } from '../../app/useData';
 import { getRepairs, revertRepair, type Repair, type RepairsData, type RepairSummary } from '../../data';
 import type { RecordColumn } from '../../components/ui';
-import { EmptyState, FigureCell, Loading, LoadFailed, Pagination, Pill, RecordId, RecordTable, SearchBox, Segmented, StatStrip, usePaged } from '../../components/ui';
+import { Definition, EmptyState, FigureCell, Loading, LoadFailed, Pagination, Pill, RecordId, RecordTable, SearchBox, Segmented, StatStrip, usePaged } from '../../components/ui';
 import { Fact, when } from './parts';
+import { REPAIR_OUTCOME_DEFS, REPAIR_STATE_DEFS, REVERT_GUARD_DEFS } from './definitions';
 
 /**
  * The repair record — every automated repair, and the way back from one.
@@ -32,6 +33,28 @@ import { Fact, when } from './parts';
 
 type Filter = 'all' | 'repaired' | 'needs_human' | 'not_repaired' | 'reverted';
 
+/** One line per filter word, from repairs.ts and the bridge's vocabulary — see definitions.ts. */
+const FILTER_DEF: Record<Filter, string> = {
+  all: 'Every result the repair bridge has reported, whatever came of it, including skipped attempts, which no other filter shows.',
+  repaired: REPAIR_OUTCOME_DEFS.repaired,
+  needs_human: REPAIR_OUTCOME_DEFS.needs_human,
+  not_repaired: `Two outcomes. Not repaired: ${REPAIR_OUTCOME_DEFS.not_repaired} Bridge error: ${REPAIR_OUTCOME_DEFS.error}`,
+  reverted: REPAIR_STATE_DEFS.reverted,
+};
+const FILTER_TERM: Record<Filter, string> = {
+  all: 'All',
+  repaired: 'Repaired',
+  needs_human: 'Needs a person',
+  not_repaired: 'Not repaired',
+  reverted: 'Reverted',
+};
+
+/** The definition a row's pill carries, reverted first because the pill says so first. */
+function outcomeTitle(repair: Repair): string {
+  if (repair.reverted_at) return REPAIR_STATE_DEFS.reverted;
+  return REPAIR_OUTCOME_DEFS[repair.outcome] ?? `${repair.outcome} — an outcome this page has no definition for.`;
+}
+
 function matches(r: Repair, q: string): boolean {
   if (!q) return true;
   const n = q.toLowerCase();
@@ -42,6 +65,14 @@ function matches(r: Repair, q: string): boolean {
 
 /** The outcome, with colour only on the directions that are genuinely bad. */
 export function OutcomePill({ repair }: { repair: Repair }) {
+  return (
+    <span title={outcomeTitle(repair)}>
+      <OutcomeWord repair={repair} />
+    </span>
+  );
+}
+
+function OutcomeWord({ repair }: { repair: Repair }) {
   if (repair.reverted_at) return <Pill>reverted</Pill>;
   switch (repair.outcome) {
     // Not green: a repair is a machine having changed a live workflow, which is
@@ -80,15 +111,16 @@ export default function Repairs() {
   const [open, setOpen] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [said, setSaid] = useState<{ id: string; ok: boolean; message: string } | null>(null);
+  const [said, setSaid] = useState<{
+    id: string;
+    ok: boolean;
+    message: string;
+  } | null>(null);
 
   const repairs = data?.repairs ?? [];
 
   const rows = useMemo(
-    () =>
-      repairs
-        .filter((r) => (filter === 'all' ? true : filter === 'reverted' ? Boolean(r.reverted_at) : r.outcome === filter))
-        .filter((r) => matches(r, q.trim())),
+    () => repairs.filter((r) => (filter === 'all' ? true : filter === 'reverted' ? Boolean(r.reverted_at) : r.outcome === filter)).filter((r) => matches(r, q.trim())),
     [repairs, filter, q],
   );
   const paged = usePaged(rows, `${filter}|${q.trim()}`);
@@ -117,12 +149,19 @@ export default function Repairs() {
         setSaid({ id: r.repair_id, ok: res.ok, message: res.message });
         if (res.repair && data) {
           const updated = res.repair;
-          setHeld({ ...data, repairs: data.repairs.map((x) => (x.repair_id === updated.repair_id ? updated : x)) });
+          setHeld({
+            ...data,
+            repairs: data.repairs.map((x) => (x.repair_id === updated.repair_id ? updated : x)),
+          });
         } else {
           setTick((n) => n + 1);
         }
       } catch (e) {
-        setSaid({ id: r.repair_id, ok: false, message: e instanceof Error ? e.message : 'The revert could not be sent.' });
+        setSaid({
+          id: r.repair_id,
+          ok: false,
+          message: e instanceof Error ? e.message : 'The revert could not be sent.',
+        });
       } finally {
         setBusy(null);
       }
@@ -134,7 +173,13 @@ export default function Repairs() {
   if (!data) return <Loading />;
 
   const columns: RecordColumn<Repair>[] = [
-    { key: 'when', header: 'when', width: '17ch', className: 'tabular text-faint', cell: (r) => when(r.created_at) },
+    {
+      key: 'when',
+      header: 'when',
+      width: '17ch',
+      className: 'tabular text-faint',
+      cell: (r) => when(r.created_at),
+    },
     {
       key: 'workflow',
       header: 'workflow',
@@ -160,7 +205,13 @@ export default function Repairs() {
       className: 'card-meta text-dim',
       cell: (r) => (r.error_class ? r.error_class.toLowerCase().replace(/_/g, ' ') : <span className="text-faint">not classified</span>),
     },
-    { key: 'outcome', header: 'outcome', card: 'meta', className: 'card-meta', cell: (r) => <OutcomePill repair={r} /> },
+    {
+      key: 'outcome',
+      header: 'outcome',
+      card: 'meta',
+      className: 'card-meta',
+      cell: (r) => <OutcomePill repair={r} />,
+    },
     {
       key: 'what',
       header: 'what it did',
@@ -174,14 +225,23 @@ export default function Repairs() {
       */
       title: (r) => r.human_action ?? r.change_summary ?? r.root_cause ?? undefined,
       cell: (r) =>
-        r.human_action ? (
-          <span className="text-degraded">{r.human_action}</span>
-        ) : (
-          (r.change_summary ?? r.root_cause ?? <span className="text-faint">nothing recorded</span>)
-        ),
+        r.human_action ? <span className="text-degraded">{r.human_action}</span> : (r.change_summary ?? r.root_cause ?? <span className="text-faint">nothing recorded</span>),
     },
-    { key: 'took', header: 'took', align: 'right', className: 'tabular text-faint', cell: (r) => seconds(r.duration_ms) },
-    { key: 'id', header: 'repair', width: '16ch', clip: true, title: (r) => r.repair_id, cell: (r) => <RecordId>{r.repair_id}</RecordId> },
+    {
+      key: 'took',
+      header: 'took',
+      align: 'right',
+      className: 'tabular text-faint',
+      cell: (r) => seconds(r.duration_ms),
+    },
+    {
+      key: 'id',
+      header: 'repair',
+      width: '16ch',
+      clip: true,
+      title: (r) => r.repair_id,
+      cell: (r) => <RecordId>{r.repair_id}</RecordId>,
+    },
     {
       key: 'actions',
       align: 'right',
@@ -206,7 +266,10 @@ export default function Repairs() {
               disabled={!r.can_revert || busy !== null}
               // Where it is disabled, the tooltip is the server's own reason
               // rather than a shrug — which guard refused, in a sentence.
-              title={r.revert_blocked_reason ?? 'Restores this workflow to the version it was on before this repair.'}
+              title={
+                r.revert_blocked_reason ??
+                (busy !== null ? 'Another revert from this page is still waiting for n8n.' : 'Restores this workflow to the version it was on before this repair.')
+              }
               onClick={(e) => {
                 e.stopPropagation();
                 setConfirming(r.repair_id);
@@ -244,17 +307,43 @@ export default function Repairs() {
             value={filter}
             onChange={setFilter}
             options={[
-              { value: 'all', label: 'All', count: counts.all },
-              { value: 'repaired', label: 'Repaired', count: counts.repaired },
-              { value: 'needs_human', label: 'Needs a person', count: counts.needs_human },
-              { value: 'not_repaired', label: 'Not repaired', count: counts.not_repaired },
-              { value: 'reverted', label: 'Reverted', count: counts.reverted },
+              {
+                value: 'all',
+                label: 'All',
+                count: counts.all,
+                title: FILTER_DEF.all,
+              },
+              {
+                value: 'repaired',
+                label: 'Repaired',
+                count: counts.repaired,
+                title: FILTER_DEF.repaired,
+              },
+              {
+                value: 'needs_human',
+                label: 'Needs a person',
+                count: counts.needs_human,
+                title: FILTER_DEF.needs_human,
+              },
+              {
+                value: 'not_repaired',
+                label: 'Not repaired',
+                count: counts.not_repaired,
+                title: FILTER_DEF.not_repaired,
+              },
+              {
+                value: 'reverted',
+                label: 'Reverted',
+                count: counts.reverted,
+                title: FILTER_DEF.reverted,
+              },
             ]}
           />
           <div className="flex flex-1 items-center justify-end gap-3">
             <SearchBox value={q} onChange={setQ} placeholder="Search workflows, nodes, causes and changes" />
           </div>
         </div>
+        <Definition term={FILTER_TERM[filter]}>{FILTER_DEF[filter]}</Definition>
       </div>
 
       {rows.length === 0 ? (
@@ -316,11 +405,16 @@ function Strip({ summary: s, repairs }: { summary: RepairSummary; repairs: Repai
    */
   const standing = repairs.filter((r) => r.outcome === 'repaired' && !r.reverted_at).length;
   const reverted = repairs.filter((r) => r.reverted_at).length;
+  const notRepaired = s.by_outcome.find((o) => o.key === 'not_repaired')?.n ?? 0;
+  const errored = s.by_outcome.find((o) => o.key === 'error')?.n ?? 0;
+  const skipped = s.by_outcome.find((o) => o.key === 'skipped')?.n ?? 0;
+  const repaired = repairs.filter((r) => r.outcome === 'repaired').length;
   return (
     <StatStrip cols={5}>
       <FigureCell
         label="Repairs this week"
         value={s.last_7_days}
+        caption={`${s.last_30_days} in 30 days · ${s.total} held in all`}
         note={
           <>
             <span className="mb-1 block text-dim">
@@ -333,10 +427,12 @@ function Strip({ summary: s, repairs }: { summary: RepairSummary; repairs: Repai
       <FigureCell
         label="Repaired and standing"
         value={standing}
+        caption={`of ${repaired} repaired · ${reverted} since put back`}
         note={
           <>
             <span className="mb-1 block text-dim">{reverted} since put back</span>
-            Repairs the engine currently claims, so a reverted one is excluded rather than still counted. A repair counts only where the bridge said `repaired` and a new workflow version came back.
+            Repairs the engine currently claims, so a reverted one is excluded rather than still counted. A repair counts only where the bridge said `repaired` and a new workflow
+            version came back.
           </>
         }
       />
@@ -344,21 +440,28 @@ function Strip({ summary: s, repairs }: { summary: RepairSummary; repairs: Repai
         label="Needs a person"
         value={needsHuman}
         tone={needsHuman ? 'degraded' : undefined}
+        caption={`of ${s.total} attempts held`}
         note="Repairs that ended by naming what somebody should do — a run that could not fix the fault, or could not report its own result. Nothing else in the engine will move these."
       />
       <FigureCell
         label="Not repaired"
         value={failed}
         tone={failed ? 'degraded' : undefined}
+        caption={`${notRepaired} not repaired · ${errored} bridge error · ${skipped} skipped apart`}
         note="Attempts that changed nothing and asked for nothing: a repair the agent judged too large, and a bridge that errored. Skipped attempts — rate limits, the never-heal list — are counted apart, on the All filter."
       />
       <FigureCell
         label="Median time to repair"
         value={s.median_repair_ms === null ? null : Math.round(s.median_repair_ms / 1000)}
         unit="s"
+        caption={s.p95_repair_ms !== null ? `p95 ${Math.round(s.p95_repair_ms / 1000)} s over ${s.timed} repaired runs` : 'no repaired run recorded a duration'}
         note={
           <>
-            {s.p95_repair_ms !== null && <span className="mb-1 block text-dim">p95 {Math.round(s.p95_repair_ms / 1000)} s over {s.timed}</span>}
+            {s.p95_repair_ms !== null && (
+              <span className="mb-1 block text-dim">
+                p95 {Math.round(s.p95_repair_ms / 1000)} s over {s.timed}
+              </span>
+            )}
             {s.duration_note}
           </>
         }
@@ -492,6 +595,16 @@ function RepairPanel({ repair: r, busy, onRevert, onClose }: { repair: Repair; b
           ) : (
             <p className="text-[12.5px] leading-relaxed text-faint">{r.revert_blocked_reason ?? 'This repair cannot be reverted from here.'}</p>
           )}
+          {/* The four guards, from `revert` in repairs.ts — see definitions.ts. */}
+          <details className="mt-3">
+            <summary className="cursor-pointer text-[12px] text-faint">What can refuse a revert</summary>
+            <div className="mt-2 space-y-1.5">
+              <Definition term="Not a repair">{REVERT_GUARD_DEFS.not_a_repair}</Definition>
+              <Definition term="Already reverted">{REVERT_GUARD_DEFS.already_reverted}</Definition>
+              <Definition term="No restore point">{REVERT_GUARD_DEFS.no_restore_point}</Definition>
+              <Definition term="Version moved on">{REVERT_GUARD_DEFS.version_moved_on}</Definition>
+            </div>
+          </details>
         </div>
       </div>
     </div>,

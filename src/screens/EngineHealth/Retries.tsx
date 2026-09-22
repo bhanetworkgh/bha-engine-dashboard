@@ -3,6 +3,7 @@ import { useData } from '../../app/useData';
 import { getRetryMetrics, retryIncident, type HealthData, type RetryAttempt, type RetryMetrics } from '../../data';
 import type { RecordColumn } from '../../components/ui';
 import {
+  Definition,
   DistTile,
   EmptyState,
   FigureCell,
@@ -20,6 +21,7 @@ import {
   usePaged,
 } from '../../components/ui';
 import { ClassPill, RetryStatusPill, when } from './parts';
+import { RETRY_STATUS_DEFS, RETRY_TRIGGER_DEFS } from './definitions';
 
 /**
  * The self-healing loop's own record, entirely from `retry_attempts`.
@@ -39,6 +41,22 @@ import { ClassPill, RetryStatusPill, when } from './parts';
 
 type Filter = 'all' | 'Retrying' | 'Recovered' | 'Exhausted' | 'manual';
 
+/** One line per filter word, from the healer's own code — see definitions.ts. */
+const FILTER_DEF: Record<Filter, string> = {
+  all: 'Every retry row the healer has written and this database holds, one per incident it touched.',
+  Retrying: RETRY_STATUS_DEFS.Retrying,
+  Recovered: RETRY_STATUS_DEFS.Recovered,
+  Exhausted: RETRY_STATUS_DEFS.Exhausted,
+  manual: RETRY_TRIGGER_DEFS.Dashboard,
+};
+const FILTER_TERM: Record<Filter, string> = {
+  all: 'All',
+  Retrying: 'Retrying',
+  Recovered: 'Recovered',
+  Exhausted: 'Exhausted',
+  manual: 'Started here',
+};
+
 function matches(r: RetryAttempt, q: string): boolean {
   if (!q) return true;
   const n = q.toLowerCase();
@@ -50,7 +68,11 @@ export default function Retries({ data, tick, onChanged }: { data: HealthData; t
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
-  const [said, setSaid] = useState<{ id: string; ok: boolean; message: string } | null>(null);
+  const [said, setSaid] = useState<{
+    id: string;
+    ok: boolean;
+    message: string;
+  } | null>(null);
 
   const rows = useMemo(
     () => data.retries.filter((r) => (filter === 'all' ? true : filter === 'manual' ? r.triggered_by === 'Dashboard' : r.status === filter)).filter((r) => matches(r, q.trim())),
@@ -76,7 +98,11 @@ export default function Retries({ data, tick, onChanged }: { data: HealthData; t
         setSaid({ id: r.incident_id, ok: res.ok, message: res.message });
         if (res.ok) onChanged();
       } catch (e) {
-        setSaid({ id: r.incident_id, ok: false, message: e instanceof Error ? e.message : 'The retry could not be sent.' });
+        setSaid({
+          id: r.incident_id,
+          ok: false,
+          message: e instanceof Error ? e.message : 'The retry could not be sent.',
+        });
       } finally {
         setBusy(null);
       }
@@ -84,9 +110,31 @@ export default function Retries({ data, tick, onChanged }: { data: HealthData; t
   };
 
   const columns: RecordColumn<RetryAttempt>[] = [
-    { key: 'incident', header: 'incident', width: '26ch', clip: true, title: (r) => r.incident_id, cell: (r) => <RecordId>{r.incident_id}</RecordId> },
-    { key: 'lane', header: 'lane', width: '14ch', clip: true, className: 'text-dim', cell: (r) => r.lane_label },
-    { key: 'workflow', header: 'workflow', width: '24ch', clip: true, className: 'text-dim', title: (r) => r.workflow ?? undefined, cell: (r) => r.workflow ?? <span className="text-faint">not named</span> },
+    {
+      key: 'incident',
+      header: 'incident',
+      width: '26ch',
+      clip: true,
+      title: (r) => r.incident_id,
+      cell: (r) => <RecordId>{r.incident_id}</RecordId>,
+    },
+    {
+      key: 'lane',
+      header: 'lane',
+      width: '14ch',
+      clip: true,
+      className: 'text-dim',
+      cell: (r) => r.lane_label,
+    },
+    {
+      key: 'workflow',
+      header: 'workflow',
+      width: '24ch',
+      clip: true,
+      className: 'text-dim',
+      title: (r) => r.workflow ?? undefined,
+      cell: (r) => r.workflow ?? <span className="text-faint">not named</span>,
+    },
     {
       key: 'node',
       header: 'failed node',
@@ -96,7 +144,13 @@ export default function Retries({ data, tick, onChanged }: { data: HealthData; t
       title: (r) => r.failed_node ?? undefined,
       cell: (r) => r.failed_node ?? <span className="text-faint">not named</span>,
     },
-    { key: 'class', header: 'class', card: 'meta', className: 'card-meta', cell: (r) => <ClassPill cls={r.error_class} retryable known /> },
+    {
+      key: 'class',
+      header: 'class',
+      card: 'meta',
+      className: 'card-meta',
+      cell: (r) => <ClassPill cls={r.error_class} retryable known />,
+    },
     {
       key: 'attempts',
       header: 'attempts',
@@ -106,8 +160,23 @@ export default function Retries({ data, tick, onChanged }: { data: HealthData; t
       cellClass: (r) => ((r.attempts ?? 0) >= 3 ? 'text-degraded' : 'text-dim'),
       cell: (r) => (r.attempts === null ? <span className="text-faint">—</span> : `${r.attempts}/3`),
     },
-    { key: 'status', header: 'status', card: 'meta', className: 'card-meta', cell: (r) => <RetryStatusPill status={r.status} /> },
-    { key: 'last', header: 'last attempt', className: 'tabular text-faint', cell: (r) => when(r.last_attempt_at) },
+    {
+      key: 'status',
+      header: 'status',
+      card: 'meta',
+      className: 'card-meta',
+      cell: (r) => (
+        <span title={RETRY_STATUS_DEFS[r.status] ?? `${r.status} — a status the healer wrote that this page has no definition for.`}>
+          <RetryStatusPill status={r.status} />
+        </span>
+      ),
+    },
+    {
+      key: 'last',
+      header: 'last attempt',
+      className: 'tabular text-faint',
+      cell: (r) => when(r.last_attempt_at),
+    },
     {
       key: 'result',
       header: 'what happened',
@@ -118,7 +187,11 @@ export default function Retries({ data, tick, onChanged }: { data: HealthData; t
       title: (r) => r.last_result ?? undefined,
       cell: (r) => r.last_result ?? <span className="text-faint">nothing recorded</span>,
     },
-    { key: 'source', header: 'source', cell: (r) => <SourceLink source={r.source} /> },
+    {
+      key: 'source',
+      header: 'source',
+      cell: (r) => <SourceLink source={r.source} />,
+    },
     {
       key: 'actions',
       align: 'right',
@@ -138,7 +211,10 @@ export default function Retries({ data, tick, onChanged }: { data: HealthData; t
             title={
               !data.heal_configured
                 ? 'ENGINE_HEAL_URL is not set on this server, so there is nothing to ask for a retry.'
-                : (r.blocked_reason ?? 'Asks the healer to retry this incident — the same call the 5-minute schedule makes.')
+                : (r.blocked_reason ??
+                  (busy !== null
+                    ? 'Another Retry now from this page is still waiting for the healer to answer.'
+                    : 'Asks the healer to retry this incident — the same healer the error handlers hand failures to, recorded as Dashboard.'))
             }
             onClick={(e) => {
               e.stopPropagation();
@@ -162,7 +238,7 @@ export default function Retries({ data, tick, onChanged }: { data: HealthData; t
         ) : null
       ) : (
         <>
-          <Strip m={m} />
+          <Strip m={m} retries={data.retries} />
 
           {said && (
             <div className={`card mx-6 mb-4 px-5 py-3 text-[12.5px] md:mx-8 ${said.ok ? 'text-ink' : 'text-failing'}`} role="status">
@@ -177,24 +253,49 @@ export default function Retries({ data, tick, onChanged }: { data: HealthData; t
                 value={filter}
                 onChange={setFilter}
                 options={[
-                  { value: 'all', label: 'All', count: counts.all },
-                  { value: 'Retrying', label: 'Retrying', count: counts.Retrying },
-                  { value: 'Recovered', label: 'Recovered', count: counts.Recovered },
-                  { value: 'Exhausted', label: 'Exhausted', count: counts.Exhausted },
-                  { value: 'manual', label: 'Started here', count: counts.manual },
+                  {
+                    value: 'all',
+                    label: 'All',
+                    count: counts.all,
+                    title: FILTER_DEF.all,
+                  },
+                  {
+                    value: 'Retrying',
+                    label: 'Retrying',
+                    count: counts.Retrying,
+                    title: FILTER_DEF.Retrying,
+                  },
+                  {
+                    value: 'Recovered',
+                    label: 'Recovered',
+                    count: counts.Recovered,
+                    title: FILTER_DEF.Recovered,
+                  },
+                  {
+                    value: 'Exhausted',
+                    label: 'Exhausted',
+                    count: counts.Exhausted,
+                    title: FILTER_DEF.Exhausted,
+                  },
+                  {
+                    value: 'manual',
+                    label: 'Started here',
+                    count: counts.manual,
+                    title: FILTER_DEF.manual,
+                  },
                 ]}
               />
               <div className="flex flex-1 items-center justify-end gap-3">
                 <SearchBox value={q} onChange={setQ} placeholder="Search incidents, nodes and outcomes" />
               </div>
             </div>
+            <Definition term={FILTER_TERM[filter]}>{FILTER_DEF[filter]}</Definition>
           </div>
 
           {rows.length === 0 ? (
             <EmptyState>
               {data.retries_freshness.source === 'none'
-                ? (data.retries_freshness.note ??
-                  'No retry is held. The healer writes a row the first time it touches an incident, and Resync from Airtable brings them across.')
+                ? (data.retries_freshness.note ?? 'No retry is held. The healer writes a row the first time it touches an incident, and Resync from Airtable brings them across.')
                 : q.trim()
                   ? 'No retry matches that search in this filter.'
                   : filter === 'Exhausted'
@@ -217,18 +318,42 @@ export default function Retries({ data, tick, onChanged }: { data: HealthData; t
   );
 }
 
-function Strip({ m }: { m: RetryMetrics }) {
+/**
+ * Five figures, one caption line each (2026-09-22). The server's notes are kept
+ * word for word behind the mark next to each label; the caption is a short
+ * line read off the same rows.
+ */
+function Strip({ m, retries }: { m: RetryMetrics; retries: RetryAttempt[] }) {
   const atCap = m.attempts_mix.find((a) => a.key === '3')?.n ?? 0;
   const manual = m.triggered_by.find((t) => t.key === 'Dashboard')?.n ?? 0;
+  const decided = m.recovery_rate.of;
+  // The oldest undecided row, because a Retrying row nothing has rewritten is
+  // the thing worth seeing on that figure.
+  const oldestRetrying = retries
+    .filter((r) => r.status === 'Retrying' && r.last_attempt_at)
+    .map((r) => r.last_attempt_at as string)
+    .sort()[0];
   return (
     <StatStrip cols={5}>
-      <PercentCell label="Recovery rate" share={m.recovery_rate} />
-      <FigureCell label="Currently retrying" value={m.retrying} note={m.retrying_note} />
+      <PercentCell label="Recovery rate" share={m.recovery_rate} caption={`${m.recovery_rate.n} of ${decided} with a verdict · ${m.retrying} retrying`} />
+      <FigureCell
+        label="Currently retrying"
+        value={m.retrying}
+        note={m.retrying_note}
+        caption={m.retrying ? (oldestRetrying ? `oldest last attempt ${when(oldestRetrying)}` : 'no last attempt recorded') : 'none in flight'}
+      />
       {/* The one coloured cell here: each of these has already been escalated. */}
-      <FigureCell label="Exhausted" value={m.exhausted} tone={m.exhausted ? 'degraded' : undefined} note={m.exhausted_note} />
+      <FigureCell
+        label="Exhausted"
+        value={m.exhausted}
+        tone={m.exhausted ? 'degraded' : undefined}
+        note={m.exhausted_note}
+        caption={`${m.exhausted} of ${decided} that reached a verdict`}
+      />
       <FigureCell
         label="At the third attempt"
         value={atCap}
+        caption={`attempts used — ${m.attempts_mix.map((a) => `${a.key === '(not recorded)' ? 'unrecorded' : a.label}: ${a.n}`).join(' · ') || 'none held'}`}
         note={
           <>
             <span className="mb-1 block text-dim">{m.attempts_mix.map((a) => `${a.label}: ${a.n}`).join(' · ')}</span>
@@ -239,6 +364,7 @@ function Strip({ m }: { m: RetryMetrics }) {
       <FigureCell
         label="Started from this page"
         value={manual}
+        caption={`of ${m.scope.rows} retries held`}
         note={
           <>
             <span className="mb-1 block text-dim">of {m.scope.rows} retries held</span>
@@ -255,6 +381,10 @@ function Cards({ m }: { m: RetryMetrics }) {
   const one = m.attempts_mix.find((a) => a.key === '1')?.n ?? 0;
   const topClass = [...m.by_class].sort((a, b) => b.n - a.n)[0];
   const classTotal = m.by_class.reduce((n, c) => n + c.n, 0);
+  // Automatic is Schedule (the loop retired 21 Sep) and Handler (the healer
+  // since) — see RETRY_TRIGGER_DEFS. Counting Schedule alone would read every
+  // retry the current healer writes as not automatic.
+  const automatic = m.triggered_by.filter((t) => t.key === 'Schedule' || t.key === 'Handler').reduce((n, t) => n + t.n, 0);
 
   return (
     <div className="grid gap-4 px-6 pb-6 md:grid-cols-2 md:px-8">
@@ -274,10 +404,19 @@ function Cards({ m }: { m: RetryMetrics }) {
         field="triggered_by"
         note={m.triggered_note}
         slices={m.triggered_by}
-        headline={rows ? ((m.triggered_by.find((t) => t.key === 'Schedule')?.n ?? 0) / rows) * 100 : null}
+        headline={rows ? (automatic / rows) * 100 : null}
         missing="No retry is held."
-        sub={`of ${rows} retries were picked up by the schedule rather than started by hand`}
-      />
+        sub={`of ${rows} retries were started automatically (schedule or error handler) rather than by hand`}
+      >
+        {/* Every value present, defined from the healer's code — see definitions.ts. */}
+        <div className="mt-3 space-y-1.5">
+          {m.triggered_by.map((t) => (
+            <Definition key={t.key} term={t.label}>
+              {RETRY_TRIGGER_DEFS[t.key] ?? 'A value the healer wrote that this page has no definition for.'}
+            </Definition>
+          ))}
+        </div>
+      </DistTile>
 
       <DistTile
         title="What is being retried"
@@ -300,16 +439,16 @@ function Cards({ m }: { m: RetryMetrics }) {
           <div className="space-y-2 text-[12px] leading-relaxed text-dim">
             <p>
               The healer runs every 5 minutes and calls n8n's own retry endpoint with <span className="text-ink">loadWorkflow: true</span>, which resumes the run
-              <span className="text-ink"> from the failed node</span> rather than replaying it from the start. That is why a retry does not re-post Slack messages or
-              re-write rows it already wrote.
+              <span className="text-ink"> from the failed node</span> rather than replaying it from the start. That is why a retry does not re-post Slack messages or re-write rows
+              it already wrote.
             </p>
             <p>
-              Backoff is <span className="text-ink">1 minute, then 4, then 15</span>, each randomised by a fifth either way. Three attempts is the cap, and reaching it
-              breaks the circuit on purpose.
+              Backoff is <span className="text-ink">1 minute, then 4, then 15</span>, each randomised by a fifth either way. Three attempts is the cap, and reaching it breaks the
+              circuit on purpose.
             </p>
             <p>
-              <span className="text-ink">Retry now</span> posts to the same webhook the schedule posts to and is recorded the same way against the same cap. The only
-              thing that differs is who is recorded as having started it.
+              <span className="text-ink">Retry now</span> posts to the same webhook the schedule posts to and is recorded the same way against the same cap. The only thing that
+              differs is who is recorded as having started it.
             </p>
           </div>
         </TileFigure>

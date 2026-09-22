@@ -4,6 +4,7 @@ import { useData } from '../app/useData';
 import { getClients, resyncRecords, type ClientGroup, type ClientLaneRow, type ClientQuestion, type ClientRequest, type ClientsData } from '../data';
 import {
   CountCell,
+  Definition,
   EmptyPanel,
   EmptyState,
   LoadFailed,
@@ -28,6 +29,25 @@ import {
   useToast,
 } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
+import {
+  ACTIVE_DEF,
+  AT_THREE_DEF,
+  LANE_STATUS_DEF,
+  LAST_RUN_DEF,
+  LAST_UPDATED_HERE_DEF,
+  MISSING_RESEARCH_DEF,
+  MOVEMENT_TAG_DEF,
+  MOVEMENT_TAG_DEFS,
+  NEEDS_HUMAN_DEF,
+  NOT_COMMITTED_DEF,
+  OPEN_CHECKS_DEF,
+  OVERDUE_DEF,
+  QUARANTINED_DEF,
+  RUN_STATE_DEF,
+  VIEW_DEFS,
+  WARMING_UP_DEF,
+  requestStatusDef,
+} from './clientDefinitions';
 
 /**
  * Watched clients: one row per lane, grouped under the client that owns it.
@@ -54,18 +74,24 @@ import RecordStatistics from '../components/RecordStatistics';
  */
 
 function LaneStatusPill({ lane }: { lane: ClientLaneRow }) {
-  if (!lane.lane_status) return <span className="text-faint">not set</span>;
+  if (!lane.lane_status) return <span className="text-faint" title={LANE_STATUS_DEF}>not set</span>;
   // warming_up is a stage, not a fault: a lane added and not yet run has no run
   // history to judge it by, and is never drawn as a failure.
-  return <Pill>{lane.lane_status.replace(/_/g, ' ')}</Pill>;
+  return (
+    <span title={LANE_STATUS_DEF}>
+      <Pill>{lane.lane_status.replace(/_/g, ' ')}</Pill>
+    </span>
+  );
 }
 
 function RunStatePill({ lane }: { lane: ClientLaneRow }) {
-  if (!lane.run_state) return <span className="text-faint">no run state</span>;
-  if (lane.run_state === 'stuck') return <Pill tone="degraded">stuck</Pill>;
-  if (lane.run_state === 'contradicted') return <Pill tone="degraded">contradicted</Pill>;
-  if (lane.run_state === 'resolved') return <Pill tone="ok">resolved</Pill>;
-  return <Pill>{lane.run_state.replace(/_/g, ' ')}</Pill>;
+  if (!lane.run_state) return <span className="text-faint" title={RUN_STATE_DEF}>no run state</span>;
+  const tone = lane.run_state === 'stuck' || lane.run_state === 'contradicted' ? 'degraded' : lane.run_state === 'resolved' ? 'ok' : 'default';
+  return (
+    <span title={RUN_STATE_DEF}>
+      <Pill tone={tone}>{lane.run_state.replace(/_/g, ' ')}</Pill>
+    </span>
+  );
 }
 
 function day(iso: string | null): string {
@@ -104,11 +130,15 @@ function LaneView({ lane, questions, onClose }: { lane: ClientLaneRow; questions
               <span className="flex items-center gap-1.5">
                 last run <RunStatePill lane={lane} />
               </span>
-              {lane.quarantined && <Pill tone="failing">quarantined</Pill>}
+              {lane.quarantined && (
+                <span title={QUARANTINED_DEF}>
+                  <Pill tone="failing">quarantined</Pill>
+                </span>
+              )}
               {lane.infra_fix_required && <Pill tone="degraded">infra fix required</Pill>}
-              <span>{lane.last_run_at ? `ran ${relativeTime(lane.last_run_at) ?? day(lane.last_run_at)}` : 'never run'}</span>
+              <span title={LAST_RUN_DEF}>{lane.last_run_at ? `ran ${relativeTime(lane.last_run_at) ?? day(lane.last_run_at)}` : 'never run'}</span>
               {lane.next_run_due && (
-                <span className={lane.overdue ? 'text-degraded' : ''}>
+                <span className={lane.overdue ? 'text-degraded' : ''} title={OVERDUE_DEF}>
                   next due {day(lane.next_run_due)}
                   {lane.overdue && lane.days_overdue !== null ? ` — ${lane.days_overdue} days ago` : ''}
                 </span>
@@ -163,12 +193,20 @@ function LaneView({ lane, questions, onClose }: { lane: ClientLaneRow; questions
                   <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
                     <div className="min-w-0 flex-1 text-[12.5px] font-medium text-ink">{q.question}</div>
                     <div className="flex shrink-0 flex-wrap items-center gap-2 text-[11.5px] text-faint">
-                      {needsHuman(q) && <Pill tone="degraded">needs a human</Pill>}
-                      {q.missing_research && <Pill>missing research</Pill>}
-                      {q.movement_tag && <span>{q.movement_tag}</span>}
+                      {needsHuman(q) && (
+                        <span title={NEEDS_HUMAN_DEF}>
+                          <Pill tone="degraded">needs a human</Pill>
+                        </span>
+                      )}
+                      {q.missing_research && (
+                        <span title={MISSING_RESEARCH_DEF}>
+                          <Pill>missing research</Pill>
+                        </span>
+                      )}
+                      {q.movement_tag && <span title={MOVEMENT_TAG_DEFS[q.movement_tag] ?? MOVEMENT_TAG_DEF}>{q.movement_tag}</span>}
                       {q.confidence && <span>confidence {q.confidence.toLowerCase()}</span>}
                       {/* Run Count caps at 3: a question at 3 is skipped by the weekly clock and needs a person. */}
-                      <span className={q.run_count >= 3 ? 'text-degraded' : ''} title={q.run_count >= 3 ? 'At three runs: the weekly clock skips this question until a person moves it' : 'Weekly research attempts on this question'}>
+                      <span className={q.run_count >= 3 ? 'text-degraded' : ''} title={q.run_count >= 3 ? AT_THREE_DEF : 'Weekly research attempts on this question. The Weekly Clock adds one before each attempt and stops at 3.'}>
                         {q.run_count} of 3 runs
                       </span>
                     </div>
@@ -197,18 +235,18 @@ function LaneView({ lane, questions, onClose }: { lane: ClientLaneRow; questions
 
 /* --------------------------------------------------------- the lane table */
 
-const HEADERS: { label: string; right?: boolean }[] = [
+const HEADERS: { label: string; right?: boolean; title?: string }[] = [
   { label: 'lane' },
-  { label: 'lane status' },
-  { label: 'run state' },
-  { label: 'last run' },
-  { label: 'next run due' },
-  { label: 'active', right: true },
-  { label: 'needs human', right: true },
-  { label: 'at 3 runs', right: true },
-  { label: 'missing research', right: true },
+  { label: 'lane status', title: LANE_STATUS_DEF },
+  { label: 'run state', title: RUN_STATE_DEF },
+  { label: 'last run', title: LAST_RUN_DEF },
+  { label: 'next run due', title: OVERDUE_DEF },
+  { label: 'active', right: true, title: ACTIVE_DEF },
+  { label: 'needs human', right: true, title: NEEDS_HUMAN_DEF },
+  { label: 'at 3 runs', right: true, title: AT_THREE_DEF },
+  { label: 'missing research', right: true, title: MISSING_RESEARCH_DEF },
   { label: 'report' },
-  { label: 'last updated here' },
+  { label: 'last updated here', title: LAST_UPDATED_HERE_DEF },
   { label: '' },
 ];
 
@@ -262,7 +300,7 @@ function LaneTable({ clients, lanes, onOpen }: { clients: ClientGroup[]; lanes: 
         <thead>
           <tr>
             {HEADERS.map((h, i) => (
-              <th key={i} className={`sticky top-0 z-10 border-b border-line bg-panel px-3 py-2 text-left text-[11.5px] font-medium whitespace-nowrap text-faint ${h.right ? 'text-right' : ''}`}>
+              <th key={i} title={h.title} className={`sticky top-0 z-10 border-b border-line bg-panel px-3 py-2 text-left text-[11.5px] font-medium whitespace-nowrap text-faint ${h.right ? 'text-right' : ''} ${h.title ? 'cursor-help' : ''}`}>
                 {h.label}
               </th>
             ))}
@@ -294,7 +332,11 @@ function LaneTable({ clients, lanes, onOpen }: { clients: ClientGroup[]; lanes: 
                   <tr key={l.id} className="cursor-pointer" onClick={() => onOpen(l.id)}>
                     <td className="td card-title td-clip" style={{ maxWidth: '34ch' }} title={l.name}>
                       {l.name}
-                      {l.quarantined && <span className="ml-2 text-[10.5px] text-failing">quarantined</span>}
+                      {l.quarantined && (
+                        <span className="ml-2 text-[10.5px] text-failing" title={QUARANTINED_DEF}>
+                          quarantined
+                        </span>
+                      )}
                     </td>
                     <td className="td card-meta">
                       <LaneStatusPill lane={l} />
@@ -318,7 +360,11 @@ function LaneTable({ clients, lanes, onOpen }: { clients: ClientGroup[]; lanes: 
                       title={l.overdue && l.days_overdue !== null ? `${l.days_overdue} days past due` : (l.next_run_due ?? 'no due date recorded')}
                     >
                       {l.next_run_due ? `due ${day(l.next_run_due)}` : 'no due date'}
-                      {l.overdue && <span className="ml-1.5 text-[10.5px]">overdue</span>}
+                      {l.overdue && (
+                        <span className="ml-1.5 text-[10.5px]" title={OVERDUE_DEF}>
+                          overdue
+                        </span>
+                      )}
                     </td>
                     <td className="td card-meta tabular text-right text-ink">
                       {l.active_questions}
@@ -328,7 +374,7 @@ function LaneTable({ clients, lanes, onOpen }: { clients: ClientGroup[]; lanes: 
                       {l.needs_human}
                       <span className="text-faint md:hidden"> need a human</span>
                     </td>
-                    <td className={`td card-meta tabular text-right ${l.capped ? 'text-degraded' : 'text-faint'}`} title="Questions at three runs: the weekly clock skips them until a person moves them">
+                    <td className={`td card-meta tabular text-right ${l.capped ? 'text-degraded' : 'text-faint'}`} title={AT_THREE_DEF}>
                       {l.capped}
                       <span className="text-faint md:hidden"> at 3 runs</span>
                     </td>
@@ -369,6 +415,19 @@ function LaneTable({ clients, lanes, onOpen }: { clients: ClientGroup[]; lanes: 
 
 type Filter = 'all' | 'needs-human' | 'overdue';
 type RequestFilter = 'all' | 'open' | 'checks';
+
+/** One line per filter word, from the server's own tests — see clientDefinitions.ts. */
+const LANE_FILTER_DEF: Record<Filter, string> = {
+  all: 'Every lane on the watched-clients index.',
+  'needs-human': `Lanes with at least one question that needs a human, or that are Quarantined. ${NEEDS_HUMAN_DEF}`,
+  overdue: OVERDUE_DEF,
+};
+
+const REQUEST_FILTER_DEF: Record<RequestFilter, string> = {
+  all: 'Every row in the Client Requests table.',
+  open: NOT_COMMITTED_DEF,
+  checks: 'Requests with at least one Open Check still named: Feasibility, Licensing, Food Safety, Pricing or Ownership.',
+};
 
 /**
  * Still interest rather than commitment — the same rule the server applies, in
@@ -411,8 +470,16 @@ function RequestTable({ clients, requests }: { clients: ClientGroup[]; requests:
           <Th className="w-[34%]">request</Th>
           <Th>category</Th>
           <Th>lane</Th>
-          <Th>status</Th>
-          <Th className="w-[24%]">open checks</Th>
+          <Th>
+            <span title="Airtable’s own Status on the request. Requested and Under Review are still interest; Confirmed and Delivered are commitments; Declined is settled." className="cursor-help">
+              status
+            </span>
+          </Th>
+          <Th className="w-[24%]">
+            <span title={OPEN_CHECKS_DEF} className="cursor-help">
+              open checks
+            </span>
+          </Th>
           <Th>requested</Th>
           <Th>source</Th>
         </tr>
@@ -432,7 +499,12 @@ function RequestTable({ clients, requests }: { clients: ClientGroup[]; requests:
                 <span className="text-[13px] font-medium text-ink">{c.label}</span>
                 <span className="ml-2 text-[11.5px] text-faint">
                   {requests(c).length} {requests(c).length === 1 ? 'request' : 'requests'}
-                  {c.open_requests > 0 && <span className="text-degraded"> · {c.open_requests} not yet a commitment</span>}
+                  {c.open_requests > 0 && (
+                    <span className="text-degraded" title={NOT_COMMITTED_DEF}>
+                      {' '}
+                      · {c.open_requests} not yet a commitment
+                    </span>
+                  )}
                 </span>
               </td>
             </tr>
@@ -446,11 +518,15 @@ function RequestTable({ clients, requests }: { clients: ClientGroup[]; requests:
                   {r.lane_id ?? '—'}
                 </td>
                 <td className="td card-meta">
-                  <Pill tone={statusTone(r.status)}>{(r.status ?? 'no status').toLowerCase()}</Pill>
+                  <span title={requestStatusDef(r.status)}>
+                    <Pill tone={statusTone(r.status)}>{(r.status ?? 'no status').toLowerCase()}</Pill>
+                  </span>
                 </td>
                 <td className="td card-meta" style={{ maxWidth: '30ch' }}>
                   {r.open_checks.length === 0 ? (
-                    <span className="text-[11.5px] text-ok">nothing outstanding</span>
+                    <span className="text-[11.5px] text-ok" title={OPEN_CHECKS_DEF}>
+                      nothing outstanding
+                    </span>
                   ) : (
                     <span className="flex flex-wrap gap-1">
                       {r.open_checks.map((k) => (
@@ -566,6 +642,19 @@ export default function Clients() {
     openChecks: requests.reduce((n, r) => n + r.open_checks.length, 0),
     asking: d.clients.filter((c) => c.requests.length > 0).length,
   };
+  /*
+   * The breakdowns the captions print, from the same rows the figures count.
+   * Questions are taken lane by lane, on the key the server groups them by, so
+   * the breakdown is over exactly the questions the headline counts.
+   */
+  const laneQuestions = lanes.flatMap((l) => d.questions.filter((qq) => qq.lane_id === (l.lane_id ?? l.id)));
+  const stuckQs = laneQuestions.filter((qq) => qq.research_stuck).length;
+  const atThreeQs = laneQuestions.filter((qq) => qq.run_count >= 3).length;
+  const quarantinedLanes = lanes.filter((l) => l.quarantined).length;
+  const datedLanes = lanes.filter((l) => l.next_run_due).length;
+  const worstOverdue = lanes.reduce((m, l) => Math.max(m, l.days_overdue ?? 0), 0);
+  const withChecks = requests.filter((r) => r.open_checks.length > 0).length;
+  const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -573,7 +662,7 @@ export default function Clients() {
         title="Clients"
         subtitle="Every watched lane, grouped under the client it belongs to"
         right={<ResyncButton busy={resync.busy} onClick={resync.start} />}
-        below={<Tabs tabs={VIEWS} value={view} onChange={setView} />}
+        below={<Tabs tabs={VIEWS} value={view} onChange={setView} titles={VIEW_DEFS} />}
       />
 
       {/*
@@ -589,16 +678,35 @@ export default function Clients() {
           </div>
 
           <StatStrip cols={4}>
-            <CountCell label="Requests" value={totals.requests} hint="rows in the Client Requests table" hintMinLines={2} />
+            <CountCell label="Requests" value={totals.requests} caption="rows in the Client Requests table" hint="Every row in the Client Requests table, whatever its status. Nothing in this dashboard writes to that table." />
             <CountCell
               label="Not yet a commitment"
               value={totals.openRequests}
               tone={totals.openRequests ? 'degraded' : 'dim'}
-              hint="still Requested or Under Review, so nothing is promised"
-              hintMinLines={2}
+              caption={`${totals.openRequests} of ${plural(totals.requests, 'request')}`}
+              hint={
+                <>
+                  still Requested or Under Review, so nothing is promised. {NOT_COMMITTED_DEF}
+                </>
+              }
             />
-            <CountCell label="Open checks" value={totals.openChecks} tone={totals.openChecks ? 'degraded' : 'dim'} hint="confirmations owed across every request" hintMinLines={2} />
-            <CountCell label="Clients asking" value={totals.asking} hint="clients with at least one request" hintMinLines={2} />
+            <CountCell
+              label="Open checks"
+              value={totals.openChecks}
+              tone={totals.openChecks ? 'degraded' : 'dim'}
+              caption={`on ${withChecks} of ${plural(totals.requests, 'request')}`}
+              hint={
+                <>
+                  confirmations owed across every request. {OPEN_CHECKS_DEF}
+                </>
+              }
+            />
+            <CountCell
+              label="Clients asking"
+              value={totals.asking}
+              caption={`of ${plural(d.clients.length, 'client')} on this page`}
+              hint="clients with at least one request, counted by the Client ID the request carries."
+            />
           </StatStrip>
 
           <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
@@ -608,15 +716,16 @@ export default function Clients() {
                 value={requestFilter}
                 onChange={setRequestFilter}
                 options={[
-                  { value: 'all', label: 'All requests', count: totals.requests },
-                  { value: 'open', label: 'Not yet a commitment', count: totals.openRequests },
-                  { value: 'checks', label: 'Has open checks', count: (d.requests ?? []).filter((r) => r.open_checks.length > 0).length },
+                  { value: 'all', label: 'All requests', count: totals.requests, title: REQUEST_FILTER_DEF.all },
+                  { value: 'open', label: 'Not yet a commitment', count: totals.openRequests, title: REQUEST_FILTER_DEF.open },
+                  { value: 'checks', label: 'Has open checks', count: withChecks, title: REQUEST_FILTER_DEF.checks },
                 ]}
               />
               <div className="flex flex-1 items-center justify-end gap-3">
                 <SearchBox value={q} onChange={setQ} placeholder="Search requests, details and checks" />
               </div>
             </div>
+            <Definition term={requestFilter === 'all' ? 'All requests' : requestFilter === 'open' ? 'Not yet a commitment' : 'Has open checks'}>{REQUEST_FILTER_DEF[requestFilter]}</Definition>
             {/*
               Said once, at the top of the table rather than on every row: this
               is what the Client Requests table is for, in its own words.
@@ -669,11 +778,56 @@ export default function Clients() {
         </div>
 
         <StatStrip cols={5}>
-          <CountCell label="Clients" value={totals.clients} hint={`${totals.lanes} lanes between them`} hintMinLines={2} />
-          <CountCell label="Needs a human" value={totals.needsHuman} tone={totals.needsHuman ? 'degraded' : 'dim'} hint="questions stuck, at three runs, or in a quarantined lane" hintMinLines={2} />
-          <CountCell label="Questions" value={totals.questions} hint="standing questions across every lane" hintMinLines={2} />
-          <CountCell label="Overdue" value={totals.overdue} tone={totals.overdue ? 'degraded' : 'dim'} hint="Next Run Due is in the past" hintMinLines={2} />
-          <CountCell label="Warming up" value={totals.warming} hint="added, never run — not failing" hintMinLines={2} />
+          <CountCell
+            label="Clients"
+            value={totals.clients}
+            caption={`${plural(totals.lanes, 'lane')} between them`}
+            hint="Distinct Client ID values on the watched-clients index, plus any Client ID a request carries that no index row has. Two lanes with one Client ID are one client."
+          />
+          <CountCell
+            label="Needs a human"
+            value={totals.needsHuman}
+            tone={totals.needsHuman ? 'degraded' : 'dim'}
+            caption={`${stuckQs} stuck · ${atThreeQs} at 3 runs · ${quarantinedLanes} quarantined`}
+            hint={
+              <>
+                questions stuck, at three runs, or in a quarantined lane. {NEEDS_HUMAN_DEF} A question can be both stuck and at three runs, so the caption’s parts can overlap; the figure counts it once.
+              </>
+            }
+          />
+          <CountCell
+            label="Questions"
+            value={totals.questions}
+            caption={`across ${plural(totals.lanes, 'lane')} · ${laneQuestions.length - totals.needsHuman} still active`}
+            hint={
+              <>
+                standing questions across every lane. Active: {ACTIVE_DEF}
+              </>
+            }
+          />
+          <CountCell
+            label="Overdue"
+            value={totals.overdue}
+            tone={totals.overdue ? 'degraded' : 'dim'}
+            caption={
+              datedLanes === 0
+                ? 'no lane carries a Next Run Due'
+                : totals.overdue
+                  ? `${totals.overdue} of ${datedLanes} dated lanes, up to ${worstOverdue} days late`
+                  : `0 of ${plural(datedLanes, 'dated lane')}`
+            }
+            hint={
+              <>
+                Next Run Due is in the past. {OVERDUE_DEF}
+              </>
+            }
+          />
+          <CountCell
+            label="Warming up"
+            value={totals.warming}
+            caption="added, never run — not failing"
+            hint={WARMING_UP_DEF}
+          />
         </StatStrip>
 
         {/*
@@ -710,14 +864,17 @@ export default function Clients() {
               value={filter}
               onChange={setFilter}
               options={[
-                { value: 'all', label: 'All lanes', count: totals.lanes },
-                { value: 'needs-human', label: 'Needs a human', count: lanes.filter((l) => l.needs_human > 0 || l.quarantined).length },
-                { value: 'overdue', label: 'Overdue', count: totals.overdue },
+                { value: 'all', label: 'All lanes', count: totals.lanes, title: LANE_FILTER_DEF.all },
+                { value: 'needs-human', label: 'Needs a human', count: lanes.filter((l) => l.needs_human > 0 || l.quarantined).length, title: LANE_FILTER_DEF['needs-human'] },
+                { value: 'overdue', label: 'Overdue', count: totals.overdue, title: LANE_FILTER_DEF.overdue },
               ]}
             />
             <div className="flex flex-1 items-center justify-end gap-3">
               <SearchBox value={q} onChange={setQ} placeholder="Search clients and lanes" />
             </div>
+          </div>
+          <div className="mt-2">
+            <Definition term={filter === 'all' ? 'All lanes' : filter === 'needs-human' ? 'Needs a human' : 'Overdue'}>{LANE_FILTER_DEF[filter]}</Definition>
           </div>
         </div>
 

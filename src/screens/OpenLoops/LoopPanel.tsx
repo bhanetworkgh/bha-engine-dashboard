@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BUILDER_NAMES, LOOP_LANE_TAGS, type Loop, type LoopEdit, type LoopLaneTag, type LoopStatus } from '../../data';
+import { LOOP_STATUS_DEFS } from './definitions';
 import { laneLabel } from '../../lib';
 
 /**
@@ -177,9 +178,9 @@ export function LoopPanel({
 
           <div className="grid gap-4 md:grid-cols-3">
             <Field label="Status">
-              <select value={status} onChange={(e) => setStatus(e.target.value as LoopStatus)} className="input mt-1.5">
+              <select value={status} onChange={(e) => setStatus(e.target.value as LoopStatus)} className="input mt-1.5" title={LOOP_STATUS_DEFS[status]}>
                 {STATUSES.map((v) => (
-                  <option key={v} value={v}>
+                  <option key={v} value={v} title={LOOP_STATUS_DEFS[v]}>
                     {v}
                   </option>
                 ))}

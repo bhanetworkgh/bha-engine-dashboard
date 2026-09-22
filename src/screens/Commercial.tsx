@@ -5,6 +5,7 @@ import { getCommercial, getRecordMetrics, resyncRecords, setRecordStatus, type C
 import type { RecordColumn } from '../components/ui';
 import {
   CountCell,
+  Definition,
   EmptyPanel,
   EmptyState,
   HBar,
@@ -13,6 +14,7 @@ import {
   MetricCard,
   MetricCell,
   MonthPicker,
+  monthLabel,
   monthsFrom,
   PageHeader,
   Tabs,
@@ -39,6 +41,7 @@ import {
   useToast,
 } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
+import { CLEAR_DEF, CONFIDENCE_DEFS, INCOMPLETE_DEF, MEDIA_DEFS, PIPELINE_DEFS, READINESS_DEFS } from './recordDefinitions';
 
 /**
  * Commercial opportunity cards. 21 of them.
@@ -81,16 +84,20 @@ function level(v: string | null): number {
 }
 
 function ReadinessPill({ state }: { state: ReadinessState | null }) {
-  if (state === 'Media-Ready') return <Pill tone="accent">media-ready</Pill>;
-  if (state === 'Research-First') return <Pill>research-first</Pill>;
-  if (state === 'INCUBATE') return <Pill>incubate</Pill>;
-  return <Pill>no readiness</Pill>;
+  // Pill takes no title, so the definition sits on a wrapper — see recordDefinitions.ts.
+  const pill =
+    state === 'Media-Ready' ? <Pill tone="accent">media-ready</Pill> : state === 'Research-First' ? <Pill>research-first</Pill> : state === 'INCUBATE' ? <Pill>incubate</Pill> : <Pill>no readiness</Pill>;
+  return <span title={READINESS_DEFS[state ?? 'none']}>{pill}</span>;
 }
 
-/** Open research questions on a card: the table's own count, or the listed questions, or genuinely nothing. */
+/** A level's definition, with an absent value filed under "(not set)". */
+function levelDef(defs: Record<string, string>, v: string | null): string | undefined {
+  return defs[v ?? '(not set)'] ?? defs[(v ?? '').trim().charAt(0).toUpperCase() + (v ?? '').trim().slice(1).toLowerCase()];
+}
+
+/** Open research questions on a card, by the server's one rule: the listed questions, else the count, else nothing. */
 function openQuestions(o: Opportunity): number | null {
-  if (o.missing_research_count !== null) return o.missing_research_count;
-  return o.missing_research_questions.length ? o.missing_research_questions.length : null;
+  return o.open_questions;
 }
 
 function matches(o: Opportunity, q: string): boolean {
@@ -163,7 +170,7 @@ function SortHeader({ label, k, sort, onSort }: { label: string; k: SortKey; sor
 
 /* ---------------------------------------------------------------- metrics */
 
-function CommercialMetricsPanel({ metrics, loading, error }: { metrics: CommercialMetrics | null; loading: boolean; error: string | null }) {
+function CommercialMetricsPanel({ metrics, rows, loading, error }: { metrics: CommercialMetrics | null; /** The cards in the month in view — the same set the server scoped the figures to. */ rows: Opportunity[]; loading: boolean; error: string | null }) {
   if (error) return <div className="card mx-6 mb-4 px-5 py-4 text-[12.5px] text-failing md:mx-8">Figures unavailable: {error}</div>;
   if (!metrics) {
     return (
@@ -179,21 +186,50 @@ function CommercialMetricsPanel({ metrics, loading, error }: { metrics: Commerci
   }
   const m = metrics;
   const maxConfidence = Math.max(1, ...m.confidence_mix.map((c) => c.n));
+  // Captions read off the same rows the figures count, so the two cannot disagree.
+  const counted = rows.filter((o) => o.open_questions !== null).length;
+  const zeroButListed = rows.filter((o) => o.missing_research_count === 0 && o.missing_research_questions.length > 0).length;
 
   return (
     <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
       <StatStrip cols={4}>
-        {/* The hint says which rows, because the strip follows the month picker. */}
-        <CountCell label="Cards" value={m.cards} hint={m.scope.month ? 'created in this month' : 'rows in the table'} hintMinLines={2} />
-        <CountCell label="Nothing left to answer" value={m.clear} tone={m.clear ? 'accent' : 'dim'} hint="no open research question on the card" hintMinLines={2} />
-        <CountCell label="Media-ready" value={m.media_ready} tone={m.media_ready ? 'accent' : 'dim'} hint="readiness_state = Media-Ready" hintMinLines={2} />
-        <MetricCell label="Open research questions" metric={m.unresolved_questions} />
+        {/*
+          Caption rule (2026-09-22): one line under each figure, the full
+          explanation behind the mark beside the label. The caption says which
+          rows, because the strip follows the month picker.
+        */}
+        <CountCell
+          label="Cards"
+          value={m.cards}
+          caption={m.scope.month ? `created in ${monthLabel(m.scope.month)}` : 'every row in the table'}
+          hint="Cards whose created_at falls in the month chosen beside the search box; All time counts every row in the table, including a card with no created_at."
+        />
+        {/*
+          A card that lists questions is never clear, whatever its count says:
+          the extractor writes the count as 0 on every new card.
+        */}
+        <CountCell
+          label="Nothing left to answer"
+          value={m.clear}
+          tone={m.clear ? 'accent' : 'dim'}
+          caption={`${m.clear} of ${m.cards} cards, nothing listed and a count of 0`}
+          hint={CLEAR_DEF}
+        />
+        <CountCell label="Media-ready" value={m.media_ready} tone={m.media_ready ? 'accent' : 'dim'} caption={`${m.media_ready} of ${m.cards} cards, readiness_state = Media-Ready`} hint={READINESS_DEFS['Media-Ready']} />
+        <MetricCell
+          label="Open research questions"
+          metric={m.unresolved_questions}
+          caption={m.unresolved_questions.value === null ? 'no card states any' : `over ${counted} of ${m.cards} cards${zeroButListed ? ` · ${zeroButListed} say 0 but list some` : ''}`}
+        />
       </StatStrip>
 
       {/* One malformed record, named. Not a fourth readiness and not a bucket. */}
       {m.incomplete.n > 0 && (
         <div className="mx-6 mb-4 md:mx-8">
           <MetricCard title="Cards a complete extractor run did not finish" note={m.incomplete.note}>
+            <div className="mb-2">
+              <Definition term="Incomplete">{INCOMPLETE_DEF}</Definition>
+            </div>
             <div className="space-y-1.5 text-[12.5px]">
               {m.incomplete.cards.map((c) => (
                 <div key={c.id} className="text-dim">
@@ -222,7 +258,7 @@ function CommercialMetricsPanel({ metrics, loading, error }: { metrics: Commerci
               {m.confidence_mix.map((c) => (
                 <HBar
                   key={c.confidence}
-                  label={c.confidence === '(unset)' ? 'no confidence set' : c.confidence.toLowerCase()}
+                  label={<span title={levelDef(CONFIDENCE_DEFS, c.confidence === '(unset)' ? null : c.confidence)}>{c.confidence === '(unset)' ? 'no confidence set' : c.confidence.toLowerCase()}</span>}
                   value={c.n}
                   max={maxConfidence}
                   tone={c.confidence === 'High' ? 'accent' : 'ink'}
@@ -267,7 +303,7 @@ function CommercialStatTiles({ m }: { m: CommercialMetrics | null }) {
             {m.media_readiness_mix.map((c) => (
               <HBar
                 key={c.media_readiness}
-                label={c.media_readiness === '(unset)' ? 'no media readiness set' : c.media_readiness.toLowerCase()}
+                label={<span title={levelDef(MEDIA_DEFS, c.media_readiness === '(unset)' ? null : c.media_readiness)}>{c.media_readiness === '(unset)' ? 'no media readiness set' : c.media_readiness.toLowerCase()}</span>}
                 value={c.n}
                 max={maxMedia}
                 tone={c.media_readiness === 'High' ? 'accent' : 'ink'}
@@ -339,8 +375,8 @@ function CardView({ o, trend, busy, onReadiness, onClose }: { o: Opportunity; tr
             <h2 className="mt-1 text-[18px] leading-tight">{o.title}</h2>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-faint">
               <ReadinessPill state={o.readiness_state} />
-              {o.confidence && <span>confidence {o.confidence.toLowerCase()}</span>}
-              {o.media_readiness && <span>media {o.media_readiness.toLowerCase()}</span>}
+              {o.confidence && <span title={levelDef(CONFIDENCE_DEFS, o.confidence)}>confidence {o.confidence.toLowerCase()}</span>}
+              {o.media_readiness && <span title={levelDef(MEDIA_DEFS, o.media_readiness)}>media {o.media_readiness.toLowerCase()}</span>}
               {o.created_at ? <span className="tabular">{o.created_at.slice(0, 10)}</span> : <span className="text-degraded">no created_at</span>}
               <CardTrend trend={trend} now={o.missing_research_count} />
             </div>
@@ -406,7 +442,9 @@ function CardView({ o, trend, busy, onReadiness, onClose }: { o: Opportunity; tr
                 ] as [string, string | null][]
               ).map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-3">
-                  <span className="text-faint">{k}</span>
+                  <span className="text-faint" title={PIPELINE_DEFS[k]}>
+                    {k}
+                  </span>
                   <span className="truncate text-dim" title={v ?? ''}>
                     {v ?? '—'}
                   </span>
@@ -464,6 +502,7 @@ function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportuni
       width: '16ch',
       className: 'card-meta',
       cellClass: (o) => (o.confidence === 'High' ? 'text-accent-ink' : 'text-dim'),
+      title: (o) => levelDef(CONFIDENCE_DEFS, o.confidence),
       cell: (o) => o.confidence?.toLowerCase() ?? <span className="text-faint">not set</span>,
     },
     {
@@ -473,6 +512,7 @@ function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportuni
       width: '16ch',
       className: 'card-meta',
       cellClass: (o) => (o.media_readiness === 'High' ? 'text-accent-ink' : 'text-dim'),
+      title: (o) => levelDef(MEDIA_DEFS, o.media_readiness),
       cell: (o) => o.media_readiness?.toLowerCase() ?? <span className="text-faint">not set</span>,
     },
     {
@@ -669,7 +709,7 @@ export default function Commercial() {
           <RowsLine freshness={loaded.freshness} writes={false} />
         </div>
 
-        <CommercialMetricsPanel metrics={metrics.data} loading={metrics.status === 'loading'} error={metrics.error} />
+        <CommercialMetricsPanel metrics={metrics.data} rows={inMonth} loading={metrics.status === 'loading'} error={metrics.error} />
 
 
 
@@ -686,7 +726,10 @@ export default function Commercial() {
               ariaLabel="Filter by confidence"
               value={confidence}
               onChange={setConfidence}
-              options={[{ value: 'all', label: 'All confidence', count: inMonth.length }, ...confidenceOptions.map(([v, n]) => ({ value: v, label: v === '(not set)' ? 'not set' : v.toLowerCase(), count: n }))]}
+              options={[
+                { value: 'all', label: 'All confidence', count: inMonth.length, title: 'Every card in the month in view, whatever its confidence.' },
+                ...confidenceOptions.map(([v, n]) => ({ value: v, label: v === '(not set)' ? 'not set' : v.toLowerCase(), count: n, title: levelDef(CONFIDENCE_DEFS, v === '(not set)' ? null : v) })),
+              ]}
             />
             <div className="flex flex-1 items-center justify-end gap-3">
               {/* The month in view, to the left of the search box, on every record page. */}
@@ -694,6 +737,10 @@ export default function Commercial() {
               <SearchBox value={q} onChange={setQ} placeholder="Search cards and research questions" />
             </div>
           </div>
+          {/* The selected confidence, defined from the extractor prompt that writes it — see recordDefinitions.ts. */}
+          {confidence !== 'all' && levelDef(CONFIDENCE_DEFS, confidence === '(not set)' ? null : confidence) && (
+            <Definition term={confidence === '(not set)' ? 'Not set' : confidence}>{levelDef(CONFIDENCE_DEFS, confidence === '(not set)' ? null : confidence)}</Definition>
+          )}
           {keywordCounts.length > 0 && (
             <div className="flex flex-wrap items-center gap-1">
               <span className="mr-1 text-[11px] text-faint">Keywords</span>

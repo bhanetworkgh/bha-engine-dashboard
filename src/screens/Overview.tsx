@@ -119,17 +119,39 @@ function Hero({ data }: { data: OverviewData }) {
   );
 }
 
+/**
+ * One section's tile (2026-09-22, Destiny's brief): the same shape for every
+ * section, so a row of them reads as one set. Icon and name; one figure in the
+ * display face at one size — a dash where the section has none, at the same
+ * size, so a placeholder does not read as a smaller number; what the figure
+ * counts; and the section's worst current signal as a sentence, with the
+ * health dot beside it. The signal gets two lines whatever its length, which is
+ * what keeps the tiles the same height.
+ */
 function SystemTile({ t }: { t: OverviewTile }) {
   const meta = TILE_META[t.key] ?? { icon: 'overview' as IconName, tint: 'tile-graphite' };
   const I = Icon[meta.icon];
+  const none = t.headline === '—';
+  // Green is health, so a section with nothing wired up gets no colour at all rather than a green it has not earned.
+  const dot = t.health === 'failing' ? 'bg-failing' : t.health === 'degraded' ? 'bg-degraded' : none ? 'bg-line-strong' : 'bg-ok';
   return (
-    <Link to={t.to} className="dock-item group flex flex-col items-center rounded-[14px] px-2 pt-4 pb-3 text-center transition-colors hover:bg-hover active:scale-[0.98]">
-      <span className={`tile dock-tile ${meta.tint} h-12 w-12 rounded-[14px]`}>
-        <I className="h-6 w-6" />
+    <Link
+      to={t.to}
+      className="group flex h-full flex-col rounded-[14px] bg-raised px-3.5 pt-3 pb-3 text-left transition-colors hover:bg-hover active:scale-[0.99]"
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        <span className={`tile ${meta.tint} h-7 w-7 shrink-0 rounded-[9px]`}>
+          <I className="h-4 w-4" />
+        </span>
+        <span className="truncate text-[13px] font-medium">{t.label}</span>
       </span>
-      <span className="mt-2.5 text-[13px] font-medium">{t.label}</span>
-      <span className="tabular text-[12px] text-dim">
-        {t.headline} {t.sublabel}
+      <span className={`font-display tabular mt-3 text-[26px] leading-none ${none ? 'text-faint' : 'text-ink'}`}>{t.headline}</span>
+      <span className="mt-1 truncate text-[12px] text-dim">{t.sublabel}</span>
+      <span className="mt-2 flex flex-1 items-start gap-1.5 border-t border-line pt-2 text-[12px] leading-snug text-dim">
+        <span className={`mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} aria-hidden />
+        <span className="line-clamp-2 min-h-[2.75em]" title={t.signal}>
+          {t.signal}
+        </span>
       </span>
     </Link>
   );
@@ -212,7 +234,7 @@ export default function Overview() {
         {/* Row 2 */}
         <Card className="frost p-5">
           <CardTitle title="Your systems" right={<span className="text-[12.5px] text-faint">{data.tiles.length} sections</span>} />
-          <div className="dock grid grid-cols-3 gap-1 sm:grid-cols-5">
+          <div className="grid grid-cols-2 items-stretch gap-2.5 sm:grid-cols-3 xl:grid-cols-5">
             {data.tiles.map((t) => (
               <SystemTile key={t.key} t={t} />
             ))}

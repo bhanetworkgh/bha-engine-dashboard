@@ -34,6 +34,7 @@ import {
   RowAction,
   RowActions,
   MonthPicker,
+  monthLabel,
   monthsFrom,
   thisMonth,
   SearchBox,
@@ -52,6 +53,7 @@ import {
   useToast,
   writeWarning,
 } from '../components/ui';
+import { COMPLETENESS_DEFS, ENTRY_DEFS, JASON_STATUS_DEFS, PAID_DEFS, QUALITY_DEF, STAGE_DEFS } from './codexDefinitions';
 
 /**
  * What a stage says when it holds nothing.
@@ -171,15 +173,30 @@ function matches(e: CodexEntry, q: string): boolean {
  * worth distinguishing from a plain approval.
  */
 function StagePill({ entry }: { entry: CodexEntry }) {
-  if (entry.stage === 'approved') return <Pill tone="ok">approved</Pill>;
-  if (entry.stage === 'needs_input') return <Pill tone="degraded">needs input</Pill>;
-  return <Pill>awaiting approval</Pill>;
+  // Pill takes no title, so the definition sits on a wrapper (see codexDefinitions.ts).
+  const pill =
+    entry.stage === 'approved' ? <Pill tone="ok">approved</Pill> : entry.stage === 'needs_input' ? <Pill tone="degraded">needs input</Pill> : <Pill>awaiting approval</Pill>;
+  return <span title={STAGE_DEFS[entry.stage]}>{pill}</span>;
+}
+
+/**
+ * "input added" beside the stage. It used to be drawn only at `awaiting`, which
+ * Input Added can never reach — mapCodex files it under Approved — so it never
+ * showed. It is drawn wherever Jason Status says it.
+ */
+function InputAddedPill({ entry }: { entry: CodexEntry }) {
+  if (entry.approval !== 'input added') return null;
+  return (
+    <span title={JASON_STATUS_DEFS['input added']}>
+      <Pill tone="accent">input added</Pill>
+    </span>
+  );
 }
 
 
 /* ---------------------------------------------------------------- metrics */
 
-function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMetrics | null; loading: boolean; error: string | null; view: string }) {
+function CodexMetricsPanel({ metrics, loading, error, view, month }: { metrics: CodexMetrics | null; loading: boolean; error: string | null; view: string; month: string | null }) {
   if (error) return <div className="card mx-6 mb-4 px-5 py-4 text-[12.5px] text-failing md:mx-8">Figures unavailable: {error}</div>;
   if (!metrics) {
     return (
@@ -204,28 +221,40 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
   return (
     <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
       {/*
-        Four cells, four footnotes of about the same length, on a two-line
-        floor. They were one line, four lines, two and one, which read as four
-        unrelated facts rather than one strip.
+        One caption line per figure (2026-09-22, Destiny); the full explanation
+        each used to print is word for word behind the mark beside its label.
       */}
       <StatStrip cols={4}>
         <CountCell
           label="Submissions"
           value={m.entries}
           replayKey={view}
-          hintMinLines={2}
+          caption={`${m.scope.builder ? 'this builder’s table' : 'the six builder tables'} · ${month ? monthLabel(month) : 'all time'}`}
           hint={m.scope.builder ? 'One builder’s table. The table a row sits in is what makes it theirs.' : 'The six builder tables. The table a row sits in is its builder.'}
         />
-        {/* The builder codex is what Layer 2 writes. The footnote is the count
-            that has none, which is the figure worth acting on. */}
-        <CountCell label="Codex generated" value={m.with_entry.n} tone="accent" replayKey={view} hintMinLines={2} hint={m.with_entry.note} />
-        <CountCell label="Approved" value={tab('approved')} replayKey={view} hintMinLines={2} hint="Jason Status is Approved or Input Added, and nothing is parked waiting on the builder." />
+        {/* The builder codex is what Layer 2 writes. The note behind the mark
+            is the count that has none, which is the figure worth acting on. */}
+        <CountCell
+          label="Codex generated"
+          value={m.with_entry.n}
+          tone="accent"
+          replayKey={view}
+          caption={`of ${m.entries} · ${m.entries - m.with_entry.n} with Layer2 Review empty`}
+          hint={m.with_entry.note}
+        />
+        <CountCell
+          label="Approved"
+          value={tab('approved')}
+          replayKey={view}
+          caption={`of ${m.entries} · Jason Status Approved or Input Added`}
+          hint="Jason Status is Approved or Input Added, and nothing is parked waiting on the builder."
+        />
         <CountCell
           label="Completeness flagged"
           value={m.layer0.flagged}
           tone={m.layer0.flagged ? 'degraded' : 'dim'}
           replayKey={view}
-          hintMinLines={2}
+          caption={`of ${m.entries} · Layer0 Flagged ticked, ever`}
           hint="Layer0 Flagged is ticked: something was missing on the way in. It no longer places a log at Needs input."
         />
       </StatStrip>
@@ -248,7 +277,7 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
               <HBar
                 key={t.tab}
                 label={
-                  <span>
+                  <span title={STAGE_DEFS[t.tab]}>
                     {t.label} <span className="text-faint">{t.layer}</span>
                   </span>
                 }
@@ -272,7 +301,7 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
           ) : (
             <div className="space-y-2">
               <HBar
-                label="Flagged incomplete"
+                label={<span title={COMPLETENESS_DEFS.flagged}>Flagged incomplete</span>}
                 value={m.layer0.flagged}
                 max={Math.max(1, m.entries)}
                 tone="degraded"
@@ -287,7 +316,7 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
               {m.missing_mix.map((x) => (
                 <HBar
                   key={x.element}
-                  label={x.element}
+                  label={<span title={COMPLETENESS_DEFS.missing}>{x.element}</span>}
                   value={x.n}
                   max={maxMissing}
                   replayKey={view}
@@ -315,7 +344,7 @@ function CodexMetricsPanel({ metrics, loading, error, view }: { metrics: CodexMe
               {m.narration_quality_mix.map((qq, i) => (
                 <HBar
                   key={qq.quality}
-                  label={qq.quality}
+                  label={<span title={QUALITY_DEF}>{qq.quality}</span>}
                   value={qq.n}
                   max={maxQuality}
                   tone={i === 0 ? 'accent' : 'ink'}
@@ -518,9 +547,13 @@ function EntryView({
                   <span className="tabular">{when(detail.logged_at)}</span>
                   {detail.week && <span className="tabular">{detail.week}</span>}
                   <StagePill entry={detail} />
-                  {detail.stage === 'awaiting' && detail.approval === 'input added' && <Pill tone="accent">input added</Pill>}
-                  {!detail.has_entry && <Pill>no codex generated</Pill>}
-                  {detail.narration_quality && <span>narration {detail.narration_quality.toLowerCase()}</span>}
+                  <InputAddedPill entry={detail} />
+                  {!detail.has_entry && (
+                    <span title={ENTRY_DEFS.none}>
+                      <Pill>no codex generated</Pill>
+                    </span>
+                  )}
+                  {detail.narration_quality && <span title={QUALITY_DEF}>narration {detail.narration_quality.toLowerCase()}</span>}
                   {unlanded(detail.writeback) && <NotLanded write={detail.writeback!} />}
                 </div>
               </div>
@@ -566,7 +599,9 @@ function EntryView({
                     not recorded
                   </div>
                 ) : (
-                  <div className="text-ink">{detail.paid ? 'yes' : 'no'}</div>
+                  <div className="text-ink" title={detail.paid ? PAID_DEFS.paid : PAID_DEFS.unpaid}>
+                    {detail.paid ? 'yes' : 'no'}
+                  </div>
                 )}
               </div>
               {detail.jason_notes && (
@@ -739,7 +774,7 @@ function codexColumns(open: (e: CodexEntry) => void): RecordColumn<CodexEntry>[]
       cell: (e) => (
         <span className="inline-flex items-center gap-1.5">
           <StagePill entry={e} />
-          {e.stage === 'awaiting' && e.approval === 'input added' && <Pill tone="accent">input added</Pill>}
+          <InputAddedPill entry={e} />
           {unlanded(e.writeback) && <NotLanded write={e.writeback!} />}
         </span>
       ),
@@ -749,13 +784,13 @@ function codexColumns(open: (e: CodexEntry) => void): RecordColumn<CodexEntry>[]
       header: 'paid',
       card: 'meta',
       className: 'card-meta',
-      title: (e) => (e.paid === null ? 'Paid carries no value on this row. The field was added to the builder tables after this log was written and nothing backfills it.' : undefined),
+      title: (e) => (e.paid === null ? 'Paid carries no value on this row. The field was added to the builder tables after this log was written and nothing backfills it.' : e.paid ? PAID_DEFS.paid : PAID_DEFS.unpaid),
       // Not coloured either way. Paid is not a healthy state and unpaid is not
       // a failing one — they are two ordinary facts about a log — so the pill
       // is the quiet default and amber and red stay meaning what they mean.
       cell: (e) => (e.paid === null ? <span className="text-faint">not recorded</span> : <Pill>{e.paid ? 'paid' : 'unpaid'}</Pill>),
     },
-    { key: 'quality', header: 'quality', className: 'text-faint', cell: (e) => e.narration_quality?.toLowerCase() ?? '—' },
+    { key: 'quality', header: 'quality', className: 'text-faint', title: (e) => (e.narration_quality ? QUALITY_DEF : undefined), cell: (e) => e.narration_quality?.toLowerCase() ?? '—' },
     { key: 'source', header: 'source', cell: (e) => <SourceLink source={e.source} /> },
     {
       key: 'actions',
@@ -923,7 +958,7 @@ export default function Codex() {
           */}
         </div>
 
-        <CodexMetricsPanel metrics={m} loading={metrics.status === 'loading'} error={metrics.error} view={builder} />
+        <CodexMetricsPanel metrics={m} loading={metrics.status === 'loading'} error={metrics.error} view={builder} month={month} />
 
         <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
           {/* One tab per submissions table. There is no Jason tab — he reviews
@@ -948,7 +983,7 @@ export default function Codex() {
             <MonthPicker months={months} value={month} onChange={setMonth} />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Segmented<Tab> ariaLabel="Stage" value={tab} onChange={setTab} options={TABS.map((t) => ({ value: t.value, label: t.label, count: scoped.filter((e) => inTab(e, t.value)).length }))} />
+            <Segmented<Tab> ariaLabel="Stage" value={tab} onChange={setTab} options={TABS.map((t) => ({ value: t.value, label: t.label, title: STAGE_DEFS[t.value], count: scoped.filter((e) => inTab(e, t.value)).length }))} />
             <div className="flex flex-1 items-center justify-end gap-3">
               <SearchBox value={q} onChange={setQ} placeholder="Search entries" />
             </div>

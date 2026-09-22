@@ -8673,3 +8673,112 @@ Tested:     Local: "applied 1 migration(s): 25"; all 13 rows read back with the
             GenieContextTest (personal project root), D565 one-off (project
             root); trigger on source_campaign (MCP off); owner on the Lead
             Notifier.
+
+## 2026-09-22 21:40 — Captions and code-read definitions on eight pages (rules (a) and (b))
+Intent:     Brief 2, item 3: apply the caption rule and the status-word rule to
+            Codex, Open loops, Build patterns, Commercial, Clients, Executions,
+            and Engine health's Retries and Repairs tabs, with the shared pieces
+            (InfoTip, caption mode, a twinDefinitions-style constant per page).
+Files:      src/components/ui/Records.tsx (MetricCell gains caption mode — the
+            one strip cell that had none); src/screens/Codex.tsx +
+            codexDefinitions.ts; OpenLoops/{Metrics,index,Loops,LoopPanel}.tsx
+            + OpenLoops/definitions.ts; BuildPatterns.tsx, Commercial.tsx +
+            recordDefinitions.ts; Clients.tsx + clientDefinitions.ts;
+            Executions/index.tsx + Executions/definitions.ts;
+            EngineHealth/{Retries,Repairs}.tsx + EngineHealth/definitions.ts.
+            Pages done in parallel, one worker per page group, each confined to
+            its own files; shared components touched only by me.
+Decision:   Every strip figure: one caption ≤55 characters read off the data,
+            the old footnote kept word for word behind the mark. Every status
+            word: a definition read from the code that computes it, cited in the
+            definitions file's header, shown as tab/option/pill tooltips or a
+            Definition line under the filter. Codex keeps its stage rules off the
+            page as a paragraph (2026-09-14 decision) — tooltips only. Where no
+            code defines a word the definition says so rather than inventing one:
+            Codex narration quality tiers; Commercial reusability words, Medium /
+            Low media readiness, how readiness_state is derived, lane_state (no
+            writer); Clients Lane Status / Run State / Quarantined and the three
+            infra fields (no workflow read writes them); Executions "how it ran"
+            (n8n's own mode, never mapped here).
+Verified:   (page vs database, 22 Sep)
+            Open loops: open 638 / in progress 74 / closed 268 of 980, per
+            builder all seven match; oldest open 52 d (destiny, raised 1 Aug) on
+            page, registry and SQL alike.
+            Codex: 209 rows; approved 205, awaiting 4, needs input 0 (3 Layer 0
+            rows, all completed); Sep 2026 100/4/0 of 104; codex generated 193
+            of 209; flagged 11.
+            Build patterns: 182 rows, 178 ids (4 duplicate rows), Broad 147.
+            Sep 2026: 34, Broad 30, 10 systems.
+            Clients: 3 clients, 4 lanes, 13 questions, needs a human 0, overdue
+            3 (due 31 Aug), warming up 1, requests 4 (all Requested), open checks
+            14, clients asking 1.
+            Executions (Sep, All systems): 13,888 runs, 13,472 succeeded, 406
+            failed (error+crashed), 2.9% of 13,884 finished, 28.5 s mean over
+            13,888, 50 workflows; tabs sum to 13,888.
+            Retries: 8 rows, recovered 1, exhausted 5, rate 1 of 6. Repairs: 22
+            held, 9 repaired and standing, 1 needs a person, 0 not repaired, 12
+            skipped, p50 163 s / p95 204 s over 9.
+Problem:    get_page_data could not read the month-scoped metrics routes
+            (/api/records/{kind}/metrics, /api/executions?grain=…): the MCP
+            resolver skips templated URLs, so those strips were verified against
+            SQL by the server's own rule rather than against the served JSON.
+Fix:        Codex's "input added" pill could never render (it required stage
+            awaiting, and mapCodex files Input Added under approved); it now
+            shows on the 17 rows that carry it. Retries' manual-vs-automatic
+            card counted only Schedule as automatic, which would have put every
+            row the current healer writes (Handler) on the manual side.
+
+## 2026-09-22 21:45 — Commercial: one open-questions rule; Home disagreed with the page
+Intent:     Brief 2, item 4 (tiles agree with their pages) — Commercial did not.
+Problem:    Home counted open research questions as count-or-listed (62); the
+            page summed missing_research_count alone (53). Underneath both: the
+            extractor's "Comm Write Card to Sheet" posts missing_research_count
+            as a literal 0 on every new card, so 9 cards listing 2–3 questions
+            each read as "nothing left to answer". The count and the list are
+            not the same quantity — August cards list 3 questions and count up
+            to 8 — so the list cannot simply replace the count.
+Fix:        `open_questions` on each card, derived once in mapOpportunity: the
+            count wins, except a count of 0 (or none) beside listed questions,
+            where the listed ones are counted; neither is null, never nought.
+            Home, the Commercial strip and list, "Nothing left to answer" and
+            the monthly advanced figure all read it. Nothing the engine writes
+            is renamed or changed.
+Data:       Production under the rule: 28 cards (one arrived at 19:30 today),
+            all 28 state something, 0 clear, 9 say 0 while listing questions.
+            The page's figure moves from 53 and Home's from 62 to one number.
+            The extractor is n8n's to fix, not this repo's.
+
+## 2026-09-22 21:50 — Engine health: finished incidents stop reading as needing a person
+Problem:    Home's Engine health tile read "0 incidents open" beside "5 retries
+            have used all three attempts", amber. All five are on incidents the
+            ledger has since closed (open_now false) — finished, not waiting on
+            anybody. And the Retries tab's "currently retrying 2" were Retrying
+            rows from 17 Sep for PIPELINE-009 and -014, each overtaken by an
+            Exhausted row on 21 Sep.
+Fix:        exhaustedStillOpen(): an exhausted retry on an incident held here
+            and not open is left out of "needing a person" and of Home's signal
+            (it stays on the Retries tab, the retry record); an incident not held
+            at all stays in — unknown is not closed. stillRetrying(): a Retrying
+            row with a later Recovered/Exhausted row for the same incident is not
+            in flight. Production then reads: needing a person 1 (CHANNELARCHIVES
+            -008, not held here), currently retrying 0.
+
+## 2026-09-22 21:55 — Home: tiles agree with their pages, and look like one set
+Intent:     Brief 2, item 4.
+Verified:   Open loops 712 = 638 + 74, oldest 52 d (matches page). Codex 10
+            this week, 4 awaiting (now counted by stage, as the page does, not
+            by Jason Status alone). Build patterns 182 / 147 broad. North Star
+            46 asks, Research Twin 5 (3 answered, 2 needs human). Engine health
+            0 open (all 54 held are closed) — its signal now follows the page.
+Problem:    The twins' 7-day trend was counted against the fixtures' reference
+            date (7 Sep), so it was all zeros; now today.
+Fix:        Each tile: icon and name, one figure at 26px in the display face (a
+            dash at the same size where there is none), what it counts, then the
+            signal as a sentence with the health dot — two lines reserved so the
+            tiles are even. Grid 5 across on wide screens. Signals rewritten as
+            sentences ("The oldest has been open 52 days."). Green only on a tile
+            with data; a "not wired up" tile gets a neutral dot.
+Not done:   CLAUDE.md says one tile per sidebar section; Customer Service Twin,
+            Clients, Executions and Pay Tracker have none. Not in the brief, so
+            raised rather than built. The two 24-hour columns are still the
+            phase 1 fixtures CLAUDE.md says they are, dated 7 Sep.

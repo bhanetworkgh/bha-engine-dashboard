@@ -1001,6 +1001,8 @@ export interface Opportunity {
   media_readiness: string | null;
   missing_research_count: number | null;
   missing_research_questions: string[];
+  /** missing_research_count, except a 0 (or no count) beside listed questions counts the listed ones; null if neither is written. */
+  open_questions: number | null;
   next_action: string | null;
   pain_point: string | null;
   offer: string | null;

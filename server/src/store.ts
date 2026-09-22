@@ -2906,13 +2906,13 @@ export async function commercialMetrics(month?: string | null): Promise<Commerci
    * month would be cutting a history by when it was written down.
    */
   const all = month ? everything.filter((o) => o.created_at?.slice(0, 7) === month) : everything;
-  const withCount = all.filter((o) => o.missing_research_count !== null);
-  const total = withCount.reduce((n, o) => n + (o.missing_research_count ?? 0), 0);
+  const withCount = all.filter((o) => o.open_questions !== null);
+  const total = withCount.reduce((n, o) => n + (o.open_questions ?? 0), 0);
+  const zeroButListed = all.filter((o) => o.missing_research_count === 0 && o.missing_research_questions.length > 0).length;
   const obs = await observations('commercial', 'unresolved_questions');
   const distinctDays = new Set(obs.map((o) => o.at.slice(0, 10)));
   const confidence = [...new Set(all.map((o) => o.confidence ?? '(unset)'))];
   const mediaMix = [...new Set(all.map((o) => o.media_readiness ?? '(unset)'))];
-  const open = (o: Opportunity) => o.missing_research_count ?? o.missing_research_questions.length;
   const incomplete = all.map((o) => ({ id: o.id, card_id: o.card_id, missing: incompleteFields(o) })).filter((c) => c.missing.length > 0);
   const weeks = month ? weeksIn(month) : lastWeeks(8);
   const created = series(
@@ -2935,7 +2935,8 @@ export async function commercialMetrics(month?: string | null): Promise<Commerci
     computed_at: nowIso(),
     scope: { rows: all.length, month: month ?? null },
     cards: all.length,
-    clear: all.filter((o) => open(o) === 0).length,
+    // Nothing listed and a count of 0: a card with neither says nothing, and is not clear.
+    clear: all.filter((o) => o.open_questions === 0).length,
     media_ready: all.filter((o) => o.readiness_state === 'Media-Ready').length,
     // Both mixes read strongest first, which is what their cards say they do.
     confidence_mix: confidence
@@ -2948,8 +2949,8 @@ export async function commercialMetrics(month?: string | null): Promise<Commerci
     unresolved_questions: {
       value: withCount.length ? total : null,
       note: withCount.length
-        ? `Sum of missing_research_count over the ${withCount.length} of ${all.length} cards that carry it. ${all.length - withCount.length} ${all.length - withCount.length === 1 ? 'card has' : 'cards have'} no count; their listed questions are shown on the card.`
-        : 'No card carries a missing_research_count.',
+        ? `Open research questions over the ${withCount.length} of ${all.length} cards that state any: each card's missing_research_count, except where it is 0 or missing while the card lists questions in missing_research_questions — there the listed questions are counted. The extractor posts missing_research_count as a literal 0 on every new card${zeroButListed ? `, and ${zeroButListed} ${zeroButListed === 1 ? 'card says' : 'cards say'} 0 while listing questions` : ''}.${all.length - withCount.length ? ` ${all.length - withCount.length} ${all.length - withCount.length === 1 ? 'card states' : 'cards state'} neither and ${all.length - withCount.length === 1 ? 'is' : 'are'} not counted.` : ''}`
+        : 'No card lists a question or carries a missing_research_count.',
     },
     unresolved_trend:
       distinctDays.size >= 2

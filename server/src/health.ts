@@ -639,8 +639,9 @@ export async function metrics(lane: string | null): Promise<HealthMetrics> {
 
   const recovered = myRetries.filter((r) => r.status === 'Recovered');
   const exhausted = myRetries.filter((r) => r.status === 'Exhausted');
-  const retrying = myRetries.filter((r) => r.status === 'Retrying');
+  const retrying = stillRetrying(myRetries);
   const decided = recovered.length + exhausted.length;
+  const stillExhausted = exhaustedStillOpen(myRetries, mine);
 
   const nonRetryableOpen = open.filter((i) => !i.retryable);
   const resolved = mine.filter((i) => i.hours_to_resolve !== null);
@@ -713,10 +714,10 @@ export async function metrics(lane: string | null): Promise<HealthMetrics> {
        * non-retryable class, and the note says it is counted once — so it has
        * to actually be counted once, or the note is the lie.
        */
-      n: new Set([...exhausted.map((r) => r.incident_id), ...nonRetryableOpen.map((i) => i.entity_id)]).size,
-      exhausted: exhausted.length,
+      n: new Set([...stillExhausted.map((r) => r.incident_id), ...nonRetryableOpen.map((i) => i.entity_id)]).size,
+      exhausted: stillExhausted.length,
       non_retryable: nonRetryableOpen.length,
-      note: `${exhausted.length} retr${exhausted.length === 1 ? 'y has' : 'ies have'} used all ${RETRY_CAP} attempts, and ${nonRetryableOpen.length} open incident${nonRetryableOpen.length === 1 ? ' is' : 's are'} in a class a retry cannot fix — billing, auth, schema. Nothing in the engine will move either group on its own. An incident can be in both and is counted once here.${caveat}`,
+      note: `${stillExhausted.length} retr${stillExhausted.length === 1 ? 'y has' : 'ies have'} used all ${RETRY_CAP} attempts on an incident not known to be closed${exhausted.length > stillExhausted.length ? ` (${exhausted.length - stillExhausted.length} more exhausted on incidents the ledger has since closed are left out — they are on the Retries tab)` : ''}, and ${nonRetryableOpen.length} open incident${nonRetryableOpen.length === 1 ? ' is' : 's are'} in a class a retry cannot fix — billing, auth, schema. Nothing in the engine will move either group on its own. An incident can be in both and is counted once here.${caveat}`,
     },
     most_recent: {
       at: newest?.first_seen_at ?? null,
@@ -743,7 +744,7 @@ export async function metrics(lane: string | null): Promise<HealthMetrics> {
     retries_24h: {
       n: recent.length,
       recovered: recent.filter((r) => r.status === 'Recovered').length,
-      retrying: recent.filter((r) => r.status === 'Retrying').length,
+      retrying: stillRetrying(allRetries).filter((r) => recent.includes(r)).length,
       exhausted: recent.filter((r) => r.status === 'Exhausted').length,
       note: `Retry rows whose last attempt was inside the last 24 hours, by the status they are in now. A row is one incident, not one attempt — the healer updates the row rather than adding one per pass.`,
     },
@@ -813,12 +814,44 @@ export async function metrics(lane: string | null): Promise<HealthMetrics> {
   };
 }
 
+/**
+ * A Retrying row that a later verdict for the same incident has overtaken
+ * (2026-09-22). The 5-minute schedule wrote one row per incident and the
+ * healer that replaced it on 21 Sep writes its own, so an incident can hold a
+ * Retrying row from 17 Sep beside an Exhausted one from 21 Sep. The first is
+ * history, not a retry in flight, and counting it as "still retrying" put two
+ * finished incidents in the undecided figure.
+ */
+function stillRetrying(rows: RetryAttempt[]): RetryAttempt[] {
+  return rows.filter(
+    (r) =>
+      r.status === 'Retrying' &&
+      !rows.some(
+        (o) => o !== r && o.incident_id === r.incident_id && (o.status === 'Recovered' || o.status === 'Exhausted') && (o.last_attempt_at ?? '') >= (r.last_attempt_at ?? ''),
+      ),
+  );
+}
+
+/**
+ * Exhausted retries that still want a person (2026-09-22). An exhausted retry
+ * whose incident this database holds and the ledger no longer returns as open
+ * has been dealt with — 37 were closed by hand on 22 Sep — so it is left out
+ * of "needing a person" and of Home's signal. It stays on the Retries tab,
+ * which is the retry record. An incident this database does not hold at all
+ * is kept in: nothing here says it was closed, and unknown is not closed.
+ */
+export function exhaustedStillOpen(retryRows: RetryAttempt[], incidents: { entity_id: string; open_now: boolean }[]): RetryAttempt[] {
+  const closed = new Set(incidents.filter((i) => !i.open_now).map((i) => i.entity_id));
+  return retryRows.filter((r) => r.status === 'Exhausted' && !closed.has(r.incident_id));
+}
+
 /** The retry loop's own record. Everything here is `retry_attempts` and nothing else. */
 export async function retryMetrics(): Promise<RetryMetrics> {
   const rows = await retries();
   const recovered = rows.filter((r) => r.status === 'Recovered');
   const exhausted = rows.filter((r) => r.status === 'Exhausted');
-  const retrying = rows.filter((r) => r.status === 'Retrying');
+  const retrying = stillRetrying(rows);
+  const overtaken = rows.filter((r) => r.status === 'Retrying').length - retrying.length;
   const decided = recovered.length + exhausted.length;
   const attemptKey = (n: number | null) => (n === null ? '(not recorded)' : String(n));
 
@@ -835,7 +868,7 @@ export async function retryMetrics(): Promise<RetryMetrics> {
     ),
     retrying: retrying.length,
     exhausted: exhausted.length,
-    retrying_note: `Incidents the healer is still working, with attempts left. Undecided rather than optimistic — the status comes from the retried execution's own outcome, and until that finishes this is neither a success nor a failure.`,
+    retrying_note: `Incidents the healer is still working, with attempts left. Undecided rather than optimistic — the status comes from the retried execution's own outcome, and until that finishes this is neither a success nor a failure.${overtaken ? ` ${overtaken} older Retrying row${overtaken === 1 ? ' is' : 's are'} left out: a later Recovered or Exhausted row for the same incident has already decided it.` : ''}`,
     exhausted_note: exhausted.length
       ? `Three attempts without success. Each of these has already been escalated to Slack and the circuit is broken deliberately. Not always a failure of the system: a pruned execution — one n8n no longer holds the data for — lands here immediately and correctly, and last_result on the row says which happened.`
       : `Nothing has used all ${RETRY_CAP} attempts. When something does it is escalated to Slack and the circuit is broken deliberately; a pruned execution lands here immediately and correctly, which is why last_result is shown in full on every row.`,

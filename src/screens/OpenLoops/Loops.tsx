@@ -4,6 +4,7 @@ import type { RecordColumn } from '../../components/ui';
 import { EmptyState, NotLanded, Pill, RecordId, RecordTable, RowAction, RowActions, SourceLink, unlanded, writeWarning } from '../../components/ui';
 import { duplicateSource } from './LoopPanel';
 import { ageTone, laneLabel } from '../../lib';
+import { LOOP_STATUS_DEFS, LOOP_STATUS_TERMS, ageBandDef } from './definitions';
 
 export type StatusFilter = 'all' | LoopStatus;
 
@@ -75,7 +76,8 @@ export function Loops({ data, loops, total, busyId, onStatus, onOpen, onRemoveDu
       card: 'meta',
       className: 'card-meta tabular',
       cellClass: (l) => (l.status === 'closed' ? 'text-faint' : ageTone(l.age_days)),
-      title: (l) => (l.raised_at ? 'Days since raised' : 'No Date Raised on this row'),
+      // The colour band and what the number counts, from ageTone and hydrateLoop.
+      title: (l) => (l.raised_at ? ageBandDef(l.age_days, l.status === 'closed') : 'No Date Raised on this row'),
       cell: (l) => (l.raised_at && Number.isFinite(l.age_days) ? `${l.age_days}d` : '—'),
     },
     {
@@ -101,7 +103,15 @@ export function Loops({ data, loops, total, busyId, onStatus, onOpen, onRemoveDu
       // under every row was furniture, not information.
       cell: (l) => l.title,
     },
-    { key: 'status', header: 'status', card: 'meta', className: 'card-meta', cell: (l) => <LoopStatusCell loop={l} /> },
+    {
+      key: 'status',
+      header: 'status',
+      card: 'meta',
+      className: 'card-meta',
+      // What put the row under this word, read off mapLoop — see definitions.ts.
+      title: (l) => `${LOOP_STATUS_TERMS[l.status]} — ${LOOP_STATUS_DEFS[l.status]}`,
+      cell: (l) => <LoopStatusCell loop={l} />,
+    },
     // Named for what it holds. It was "table" because the builder *is* the
     // table in Airtable, but the reader is looking at a person.
     { key: 'table', header: 'Builder', card: 'meta', className: 'card-meta text-dim', cell: (l) => BUILDER_NAMES[l.owner] ?? l.owner },

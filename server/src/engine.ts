@@ -45,9 +45,13 @@ export function codexTableFor(owner: string): string | null {
   return CODEX_TABLES.find((t) => t.owner === owner)?.table ?? null;
 }
 
-/** Reference date the fixtures are written against. Live kinds use REF_TODAY. */
-const REF_DATE = '2026-09-07';
+/** Today, for the live kinds. (The fixtures' own date, 7 Sep, is no longer read by any tile.) */
 const REF_TODAY = () => new Date().toISOString().slice(0, 10);
+
+/** The Codex tile's signal, counted by the page's own stage rule rather than by Jason Status alone. */
+function awaitingSentence(n: number): string {
+  return n === 0 ? 'Nothing is awaiting Jason’s approval.' : `${n} ${n === 1 ? 'is' : 'are'} awaiting Jason’s approval.`;
+}
 
 function isoWeekOf(dayStr: string): string {
   const d = new Date(`${dayStr}T00:00:00Z`);
@@ -162,7 +166,8 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
   const healthRetries = healthData.retries;
   const healthLanes = healthData.lanes;
 
-  const days7 = lastDays(REF_DATE, 7);
+  // The twins' ledgers are live rows, so their week is this week — not the fixture date.
+  const days7 = lastDays(REF_TODAY(), 7);
   const days14 = lastDays(REF_TODAY(), 14);
   const loops14d = countByDay(days14, loops.map((l) => l.raised_at).filter((d): d is string => Boolean(d)));
   const nsByDay = countByDay(days7, ns.map((r) => r.asked_at).filter((d): d is string => Boolean(d))).map((p) => p.value);
@@ -179,7 +184,8 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
   // Cards blocked on research used to read lane_state_blocked_reason, which is
   // dead scaffold: a single-select whose only options are English sentences and
   // which the extractor has never populated. The open research count is real.
-  const openQuestions = opps.reduce((n, o) => n + (o.missing_research_count ?? o.missing_research_questions.length), 0);
+  // The same per-card rule the Commercial page counts by (open_questions).
+  const openQuestions = opps.reduce((n, o) => n + (o.open_questions ?? 0), 0);
 
   return {
     pins: [
@@ -195,7 +201,7 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
         headline: String(ns.length),
         sublabel: ns.length ? 'asks held' : 'no ask held yet',
         // Delivery is the page's own failure metric, so it is the tile's too.
-        signal: ns.length === 0 ? 'the ledger opened on 17 Sep and nothing has arrived yet' : nsUndelivered ? `${nsUndelivered} answer${nsUndelivered === 1 ? '' : 's'} never reached anyone` : 'every answer reached someone',
+        signal: ns.length === 0 ? 'The ledger opened on 17 Sep and nothing has arrived yet.' : nsUndelivered ? `${nsUndelivered} answer${nsUndelivered === 1 ? '' : 's'} never reached anyone.` : 'Every answer reached someone.',
         health: nsUndelivered ? 'degraded' : 'ok',
         trend: nsByDay,
         share: { value: ns.filter((r) => r.outcome === 'Answered').length, total: ns.length, label: 'answered' },
@@ -209,10 +215,10 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
         // A capped job is the one thing on that page nothing else will move.
         signal:
           rt.length === 0 && jobs.length === 0
-            ? 'the ledger opened on 17 Sep and nothing has arrived yet'
+            ? 'The ledger opened on 17 Sep and nothing has arrived yet.'
             : cappedJobs
-              ? `${cappedJobs} research job${cappedJobs === 1 ? '' : 's'} waiting on a person`
-              : `${jobs.filter((j) => j.open).length} research jobs open, none capped`,
+              ? `${cappedJobs} research job${cappedJobs === 1 ? ' is' : 's are'} waiting on a person.`
+              : `${jobs.filter((j) => j.open).length} research job${jobs.filter((j) => j.open).length === 1 ? ' is' : 's are'} open, none capped.`,
         health: cappedJobs ? 'degraded' : 'ok',
         trend: rtByDay,
         share: { value: rt.filter((r) => r.outcome === 'Answered').length, total: rt.length, label: 'answered' },
@@ -221,9 +227,9 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
       // their tiles carry no number. A headline figure for a page that says
       // "coming soon" would be a figure about nothing, which is the rule in
       // section 2 rather than a matter of taste.
-      { key: 'media-twin', label: 'Media Twin', to: '/media-twin', headline: '—', sublabel: 'not wired up', signal: 'nothing Media Twin does writes here yet', health: 'ok' },
-      { key: 'genie', label: 'Genie', to: '/genie', headline: '—', sublabel: 'not wired up', signal: 'nothing Genie does writes here yet', health: 'ok' },
-      { key: 'vfarm', label: 'vFarm', to: '/vfarm', headline: '—', sublabel: 'not wired up', signal: 'nothing on the rack writes here yet', health: 'ok' },
+      { key: 'media-twin', label: 'Media Twin', to: '/media-twin', headline: '—', sublabel: 'not wired up', signal: 'Nothing Media Twin does writes here yet.', health: 'ok' },
+      { key: 'genie', label: 'Genie', to: '/genie', headline: '—', sublabel: 'not wired up', signal: 'Nothing Genie does writes here yet.', health: 'ok' },
+      { key: 'vfarm', label: 'vFarm', to: '/vfarm', headline: '—', sublabel: 'not wired up', signal: 'Nothing on the rack writes here yet.', health: 'ok' },
       /**
        * Real from 2026-09-17: the incident ledger, its occurrence counts and
        * its retries are read now, so the tile carries the figure its page
@@ -237,7 +243,9 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
         const read = healthLanes.filter((l) => l.read);
         const unread = healthLanes.filter((l) => !l.read);
         const openIncidents = healthIncidents.filter((i) => i.open_now).length;
-        const capped = healthRetries.filter((r) => r.status === 'Exhausted').length;
+        // The page's own "needing a person": an exhausted retry on an incident
+        // since closed is finished, not waiting on anybody.
+        const capped = health.exhaustedStillOpen(healthRetries, healthIncidents).length;
         return {
           key: 'engine-health',
           label: 'Engine health',
@@ -245,14 +253,14 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
           headline: read.length ? String(openIncidents) : '—',
           sublabel: read.length ? (openIncidents === 1 ? 'incident open' : 'incidents open') : 'no lane was read',
           signal: !read.length
-            ? `no lane answered — ${unread.map((l) => l.label).join(', ')} ${unread.length === 1 ? 'was' : 'were'} not read`
+            ? `No lane answered: ${unread.map((l) => l.label).join(', ')} ${unread.length === 1 ? 'was' : 'were'} not read.`
             : unread.length
-              ? `${unread.map((l) => l.label).join(' and ')} could not be read, so this counts what is held`
+              ? `${unread.map((l) => l.label).join(' and ')} could not be read, so this counts what is held.`
               : capped
-                ? `${capped} retr${capped === 1 ? 'y has' : 'ies have'} used all three attempts`
+                ? `${capped} exhausted retr${capped === 1 ? 'y needs' : 'ies need'} a person.`
                 : openIncidents
-                  ? 'the healer is working what it can'
-                  : 'nothing is open in any lane',
+                  ? 'The healer is working on what it can.'
+                  : 'Nothing is open in any lane.',
           health: (!read.length || openIncidents || capped ? 'degraded' : 'ok') as OverviewTile['health'],
         };
       })(),
@@ -262,13 +270,13 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
         to: '/open-loops',
         headline: loopsFreshness.source === 'none' ? '—' : String(totalOpen),
         sublabel: loopsFreshness.source === 'none' ? 'none held' : 'open',
-        signal: loopsFreshness.source === 'none' ? (loopsFreshness.note ?? 'nothing held') : `oldest ${oldest} days`,
+        signal: loopsFreshness.source === 'none' ? (loopsFreshness.note ?? 'No loop is held.') : `The oldest has been open ${oldest} day${oldest === 1 ? '' : 's'}.`,
         health: loopsFreshness.source === 'none' ? 'degraded' : oldest > 30 ? 'degraded' : 'ok',
         trend: loops14d.map((p) => p.value),
       },
-      { key: 'codex', label: 'Codex entries', to: '/codex', headline: String(entriesThisWeek), sublabel: 'logged this week', signal: `${entries.filter((e) => e.approval === 'pending' || e.approval === 'unset').length} awaiting Jason’s approval`, health: 'ok', trend: entriesByWeek.map((p) => p.value), share: { value: ingested, total: entries.length, label: 'with an entry written' } },
-      { key: 'build-patterns', label: 'Build patterns', to: '/build-patterns', headline: String(patterns.length), sublabel: 'patterns', signal: `${broad} broadly reusable`, health: 'ok', share: { value: broad, total: patterns.length, label: 'broadly reusable' } },
-      { key: 'commercial', label: 'Commercial', to: '/commercial', headline: String(opps.length), sublabel: 'cards', signal: `${openQuestions} open research ${openQuestions === 1 ? 'question' : 'questions'}`, health: 'ok', share: { value: opps.filter((o) => o.readiness_state === 'Media-Ready').length, total: opps.length, label: 'media-ready' } },
+      { key: 'codex', label: 'Codex entries', to: '/codex', headline: String(entriesThisWeek), sublabel: 'logged this week', signal: awaitingSentence(entries.filter((e) => e.stage === 'awaiting').length), health: 'ok', trend: entriesByWeek.map((p) => p.value), share: { value: ingested, total: entries.length, label: 'with an entry written' } },
+      { key: 'build-patterns', label: 'Build patterns', to: '/build-patterns', headline: String(patterns.length), sublabel: 'patterns', signal: `${broad} ${broad === 1 ? 'is' : 'are'} broadly reusable.`, health: 'ok', share: { value: broad, total: patterns.length, label: 'broadly reusable' } },
+      { key: 'commercial', label: 'Commercial', to: '/commercial', headline: String(opps.length), sublabel: 'cards', signal: `${openQuestions} research question${openQuestions === 1 ? ' is' : 's are'} still open.`, health: 'ok', share: { value: opps.filter((o) => o.readiness_state === 'Media-Ready').length, total: opps.length, label: 'media-ready' } },
     ],
     series: {
       loops_raised_14d: loops14d,
