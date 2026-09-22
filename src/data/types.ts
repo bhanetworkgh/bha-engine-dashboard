@@ -2750,6 +2750,20 @@ export interface VfarmLead {
   submitted_at: string | null;
   created_at: string;
   user_agent: string | null;
+  /**
+   * Attribution the site captured from the URL the visitor arrived on.
+   *
+   * '' means the link did not carry that value; null means the row predates
+   * the columns. The two are different facts and the page shows them
+   * differently.
+   */
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  asset_id: string | null;
+  source_channel: string | null;
+  landing_variant: string | null;
+  contract_version: string | null;
   /** This address was already on an earlier row. Computed at read time, never stored. */
   is_repeat_email: boolean;
 }
