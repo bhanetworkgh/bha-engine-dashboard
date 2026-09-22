@@ -3241,12 +3241,12 @@ export async function nsMetrics(month?: string | null): Promise<NsMetrics> {
     scope: { rows: all.length, month: month ?? null },
     delivery_rate: share(delivered.length, all.length, (n, of) =>
       of
-        ? `${n} of ${of} asks reached someone. Delivery is recorded after the answer is sent, so this is what actually arrived, not what was attempted. Anything below 100% is a real failure: North Star once ran green for six days while Slack rejected every post.`
+        ? `${n} of ${of} asks reached someone. Delivery is recorded after the answer is sent, so this is what actually arrived, not what was attempted. "No target" (nowhere to reply) counts against it. Caution: the agent never writes "Not delivered" — a Slack post that is refused stops the run before the ask is logged — so a failed delivery leaves no row here at all, and 100% cannot on its own prove every post arrived. Failed runs are on Executions. North Star once ran green for six days while Slack rejected every post.`
         : 'No ask is held for this month, so there is nothing whose delivery could be recorded.',
     ),
     answered_rate: share(answered.length, all.length, (n, of) =>
       of
-        ? `${n} of ${of} asks came back Answered — an answer carrying at least one citation. Thin, Refused and Failed are the other three and are counted separately; nothing is inferred from the answer text.`
+        ? `${n} of ${of} asks came back Answered — an answer carrying at least one [S#] citation marker. Thin, Refused and Failed are the other three and are counted separately. The outcome is set by the agent from its own answer text at the end of the run; this dashboard only counts it.`
         : 'No ask is held for this month.',
     ),
     asks: all.length,
@@ -3273,7 +3273,7 @@ export async function nsMetrics(month?: string | null): Promise<NsMetrics> {
     }),
     outcome_mix: slices(all, (r) => r.outcome, NS_OUTCOMES, NO_OUTCOME),
     outcome_note:
-      'Answered = an answer carrying at least one citation · Thin = an answer with nothing cited behind it · Refused = the question was not North Star’s lane · Failed = no answer at all. North Star’s own definitions, written by the agent at the end of the run. Every row in this ledger carries one, so there is no unclassified bucket; a row that carries none is a run that did not finish writing itself.',
+      'Answered = an answer with at least one [S#] citation marker · Thin = an answer with no [S#] marker (an uncited refusal lands here too) · Refused = a cited answer saying the question is Bays’ or Research Twin’s · Failed = no answer text, or the research step failed. Set by the agent at the end of the run, from its own answer text. Every row in this ledger carries one, so there is no unclassified bucket; a row that carries none is a run that did not finish writing itself.',
     delivery_mix: slices(all, (r) => r.delivered, NS_DELIVERED, '(not recorded)'),
     failed_targets: [...new Map(undelivered.map((r) => [`${r.delivery_target ?? '(no target named)'}|${r.delivered}`, r])).values()].map((r) => ({
       target: r.delivery_target ?? '(no target named)',
@@ -3426,7 +3426,7 @@ export async function rtMetrics(month?: string | null): Promise<RtMetrics> {
     }),
     outcome_mix: slices(all, (r) => r.outcome, RT_OUTCOMES, NO_OUTCOME),
     outcome_note:
-      'Research Twin’s own five outcomes, with Needs human as a slice of its own rather than folded into a failure. Answered = an answer with evidence behind it · Thin = an answer citing nothing · Needs human = escalated rather than guessed · Refused = not its lane · Failed = no answer at all.',
+      'Research Twin’s own five outcomes, with Needs human as a slice of its own rather than folded into a failure. Answered = an answer with at least one [S#] citation marker · Thin = an answer with no [S#] marker · Needs human = the answer says it needs a person (capped, flagged for a human) · Refused = a cited answer saying it belongs to North Star or Bays · Failed = no answer text. Set by the agent from its own answer text.',
     external_per_week: weeks.map((w) => {
       const mine = all.filter((r) => weekOf(r.asked_at) === w);
       return { week: w, label: weekLabel(w), used: mine.filter((r) => r.used_web_search).length, total: mine.length };

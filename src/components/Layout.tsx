@@ -23,6 +23,8 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
       // same plain "coming soon" vFarm is, rather than a page of fixtures.
       { to: '/media-twin', label: 'Media Twin', icon: 'tag' },
       { to: '/genie', label: 'Genie', icon: 'sparkle' },
+      // A placeholder too (2026-09-22, Destiny), for the same reason.
+      { to: '/cs-twin', label: 'Customer Service Twin', icon: 'mic' },
       { to: '/vfarm', label: 'vFarm', icon: 'leaf' },
       // No red count beside this one any more (2026-09-14, Destiny). The page
       // is a placeholder and the badge was counting phase 1 fixtures, so it was

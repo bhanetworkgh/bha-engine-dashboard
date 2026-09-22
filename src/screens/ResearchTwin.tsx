@@ -8,6 +8,7 @@ import {
   CountUp,
   DistTile,
   DurationTrend,
+  Definition,
   EmptyState,
   FigureCell,
   HBar,
@@ -43,6 +44,7 @@ import {
   useToast,
 } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
+import { JOB_STATUS_DEFS, RT_OUTCOME_DEFS } from './twinDefinitions';
 import { HandoffTile } from './NorthStar';
 
 /**
@@ -66,6 +68,33 @@ import { HandoffTile } from './NorthStar';
 
 type AskFilter = 'all' | 'Answered' | 'Thin' | 'Needs human' | 'Refused (not its lane)' | 'Failed' | 'external' | 'internal';
 type JobFilter = 'all' | 'capped' | 'open' | 'Pending' | 'In Progress' | 'Resolved';
+
+/** One line per filter word, from the agent's and the Tools Router's own code — see twinDefinitions.ts. */
+const ASK_FILTER_DEF: Record<AskFilter, { term: string; def: string }> = {
+  all: { term: 'All', def: 'Every ask this month, whatever came back.' },
+  Answered: { term: 'Answered', def: RT_OUTCOME_DEFS.Answered },
+  Thin: { term: 'Thin', def: RT_OUTCOME_DEFS.Thin },
+  'Needs human': { term: 'Needs human', def: RT_OUTCOME_DEFS['Needs human'] },
+  'Refused (not its lane)': { term: 'Refused', def: RT_OUTCOME_DEFS['Refused (not its lane)'] },
+  Failed: { term: 'Failed', def: RT_OUTCOME_DEFS.Failed },
+  external: { term: 'Went outside', def: 'The run called the Web_Search tool at least once — it looked beyond what BHA already holds.' },
+  internal: { term: 'Internal only', def: 'No web search in the run: answered from BHARAG or from what the agent already had.' },
+};
+const JOB_FILTER_DEF: Record<JobFilter, { term: string; def: string }> = {
+  capped: { term: 'Capped', def: JOB_STATUS_DEFS['Capped (needs human)'] },
+  open: { term: 'Open', def: 'Pending and In progress together — jobs the weekly sweep will still work on.' },
+  Pending: { term: 'Pending', def: JOB_STATUS_DEFS.Pending },
+  'In Progress': { term: 'In progress', def: JOB_STATUS_DEFS['In Progress'] },
+  Resolved: { term: 'Resolved', def: JOB_STATUS_DEFS.Resolved },
+  all: { term: 'All', def: 'Every job opened this month, whatever its status.' },
+};
+
+/** What each of the three sections is, in one line, under the tabs. */
+const VIEW_LINE: Record<'Asks' | 'Jobs' | 'Statistics', string> = {
+  Asks: 'Asks — the questions Research Twin received (from Slack, the other twins and the weekly client clock) and what it answered.',
+  Jobs: 'Jobs — research it opened for itself when an answer needed more digging. The weekly sweep works each one until it resolves or is capped at three attempts.',
+  Statistics: 'Statistics — the asks, month against month, and what they are made of.',
+};
 
 const OUTCOME_ORDER = ['Answered', 'Thin', 'Needs human', 'Refused (not its lane)', 'Failed', '(no outcome)'];
 const OUTCOME_COLOUR = (o: string) =>
@@ -146,16 +175,17 @@ function RtStrip({ m, loading, error }: { m: RtMetrics | null; loading: boolean;
           coloured — a month of genuinely internal questions is a real month,
           and the trend on the statistics tab is what actually reads.
         */}
-        <PercentCell label="Went outside BHA" share={m.external_rate} />
-        <PercentCell label="Answered rate" share={m.answered_rate} />
+        <PercentCell label="Went outside BHA" share={m.external_rate} caption={m.external_rate.of ? `${m.external_rate.n} of ${m.external_rate.of} used web search` : 'no ask this month'} />
+        <PercentCell label="Answered rate" share={m.answered_rate} caption={m.answered_rate.of ? `${m.answered_rate.n} of ${m.answered_rate.of} carried an [S#] citation` : 'no ask this month'} />
         {/* Beside the answered rate, and never red: see the note it carries. */}
-        <PercentCell label="Needs a human" share={m.needs_human_rate} />
+        <PercentCell label="Needs a human" share={m.needs_human_rate} caption={m.needs_human_rate.of ? `${m.needs_human_rate.n} of ${m.needs_human_rate.of} said a person is needed` : 'no ask this month'} />
         <FigureCell
           label="Asks"
           value={m.asks}
+          caption="this month, any outcome"
           note="Every ask in the ledger for this month. The ledger opened on 17 Sep 2026 with no history carried in, so a month before it holds nothing — which is an unrecorded month rather than a quiet one."
         />
-        <PercentileCell label="Response time" p={m.response} unit="s" />
+        <PercentileCell label="Response time" p={m.response} unit="s" caption={m.response.p50 === null ? 'no ask recorded a duration' : `median, over the ${m.response.n} timed`} />
       </StatStrip>
     </div>
   );
@@ -390,29 +420,28 @@ function JobStrip({ m, loading, error }: { m: RtJobMetrics | null; loading: bool
     <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
       <StatStrip cols={5}>
         {/* The one figure on this tab that is coloured: anything above nought needs a person. */}
-        <PercentCell label="Capped, needing a person" share={m.capped} bad={() => m.capped.n > 0} />
+        <PercentCell label="Capped, needs a person" share={m.capped} bad={() => m.capped.n > 0} caption={m.capped.of ? `${m.capped.n} of ${m.capped.of} jobs out of attempts` : 'no job opened this month'} />
         <FigureCell
           label="Open jobs"
           value={m.open}
+          caption={`${m.pending} pending · ${m.in_progress} in progress`}
           note={`Pending and In Progress together — ${m.pending} pending, ${m.in_progress} in progress. Resolved and capped jobs are terminal and are not counted here; a capped job is waiting on a person rather than on the queue.`}
         />
         <FigureCell
           label="Resolved this month"
           value={m.resolved_this_month}
+          caption="by the day it resolved, not opened"
           note="Jobs whose Resolved At falls in this month, whenever they were opened. Every other figure on this strip is scoped by when the job was opened, which is what the month picker selects — these are deliberately different questions."
         />
-        <PercentileCell label="Time to resolve" p={m.time_to_resolve} unit="d" />
+        <PercentileCell label="Time to resolve" p={m.time_to_resolve} unit="d" caption={m.time_to_resolve.p50 === null ? 'no job has resolved yet' : `median, over the ${m.time_to_resolve.n} resolved`} />
         <FigureCell
           label="Oldest open job"
           value={m.oldest_open.days}
           unit="d"
+          missing="none open"
           tone={(m.oldest_open.days ?? 0) > 14 ? 'degraded' : undefined}
-          note={
-            <>
-              {m.oldest_open.job_id && <span className="tabular block truncate text-dim">{m.oldest_open.job_id}</span>}
-              {m.oldest_open.note}
-            </>
-          }
+          caption={m.oldest_open.job_id ?? 'no job is open'}
+          note={m.oldest_open.note}
         />
       </StatStrip>
     </div>
@@ -841,6 +870,27 @@ function jobColumns(open: (j: RtJob) => void): RecordColumn<RtJob>[] {
  * The Jobs tab carries its own figures and its own statistics cards, because a
  * job and an ask are different things counted different ways.
  */
+/**
+ * How many jobs this database holds and since when, in words (2026-09-22). A
+ * near-empty queue must read as "three, since the first on 22 Sep", never as a
+ * bare nought on a filter with nothing in it.
+ */
+function JobsSince({ jobs }: { jobs: RtJob[] }) {
+  const firsts = jobs.map((j) => j.opened_at).filter((v): v is string => Boolean(v)).sort();
+  if (!jobs.length) return <p className="text-[12px] text-dim">No research job has been recorded yet. Research Twin writes one to /api/engine/rt-jobs when an answer needs more digging.</p>;
+  const by = (st: string) => jobs.filter((j) => j.status === st).length;
+  const first = firsts[0];
+  return (
+    <p className="text-[12px] text-dim">
+      <span className="font-medium text-ink">{jobs.length}</span> {jobs.length === 1 ? 'job' : 'jobs'} recorded
+      {first ? ` since the first arrived on ${new Date(first).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}` : ''}
+      {' · '}
+      {by('Pending')} pending · {by('In Progress')} in progress · {by('Resolved')} resolved · {by('Capped (needs human)')} capped
+      {by('Pending') === jobs.length ? ' — none has been worked yet; the weekly sweep picks up pending jobs.' : ''}
+    </p>
+  );
+}
+
 const VIEWS = ['Asks', 'Jobs', 'Statistics'] as const;
 type View = (typeof VIEWS)[number];
 
@@ -848,7 +898,7 @@ export default function ResearchTwin() {
   const { status, data: loaded, error } = useData(getRtTelemetry, []);
   const [view, setView] = useState<View>('Asks');
   const [askFilter, setAskFilter] = useState<AskFilter>('all');
-  const [jobFilter, setJobFilter] = useState<JobFilter>('capped');
+  const [jobFilterSet, setJobFilter] = useState<JobFilter | null>(null);
   const [q, setQ] = useState('');
   const [openAsk, setOpenAsk] = useState<string | null>(null);
   const [openJob, setOpenJob] = useState<string | null>(null);
@@ -896,6 +946,9 @@ export default function ResearchTwin() {
         .filter((r) => askMatches(r, q.trim())),
     [asksInMonth, askFilter, q],
   );
+  // Capped leads when anything is capped; otherwise the whole queue, so a tab
+  // holding three pending jobs does not open on an empty filter.
+  const jobFilter: JobFilter = jobFilterSet ?? (jobs.some((j) => j.capped) ? 'capped' : 'all');
   const jobRows = useMemo(
     () =>
       jobsInMonth
@@ -934,9 +987,14 @@ export default function ResearchTwin() {
     <div className="relative flex h-full min-h-0 flex-col">
       <PageHeader
         title="Research Twin"
-        subtitle="Every ask it received, and the research queue of what is still open"
+        subtitle="Reads engine_rt_asks and engine_rt_jobs: every question Research Twin was asked, and the research it opened to answer them"
         right={<ResyncButton busy={resync.busy} onClick={resync.start} />}
-        below={<Tabs tabs={VIEWS} value={view} onChange={setView} counts={{ Jobs: { n: jobCounts.capped, tone: 'failing' } }} />}
+        below={
+          <div className="space-y-2">
+            <Tabs tabs={VIEWS} value={view} onChange={setView} counts={{ Jobs: { n: jobCounts.capped, tone: 'failing' } }} titles={VIEW_LINE} />
+            <p className="text-[12.5px] text-dim">{VIEW_LINE[view]}</p>
+          </div>
+        }
       />
 
       {view === 'Statistics' ? (
@@ -981,8 +1039,9 @@ export default function ResearchTwin() {
             differently: an ask is mirrored the moment a run ends, a job is
             updated in place and only arrives here through the resync above.
           */}
-          <div className="shrink-0 px-6 pb-3 md:px-8">
+          <div className="shrink-0 space-y-1 px-6 pb-3 md:px-8">
             <RowsLine freshness={loaded.jobs_freshness} />
+            <JobsSince jobs={jobs} />
           </div>
 
           <JobStrip m={jobMetrics.data} loading={jobMetrics.status === 'loading'} error={jobMetrics.error} />
@@ -994,12 +1053,7 @@ export default function ResearchTwin() {
                 value={jobFilter}
                 onChange={setJobFilter}
                 options={[
-                  { value: 'capped', label: 'Capped', count: jobCounts.capped },
-                  { value: 'open', label: 'Open', count: jobCounts.open },
-                  { value: 'Pending', label: 'Pending', count: jobCounts.Pending },
-                  { value: 'In Progress', label: 'In progress', count: jobCounts['In Progress'] },
-                  { value: 'Resolved', label: 'Resolved', count: jobCounts.Resolved },
-                  { value: 'all', label: 'All', count: jobCounts.all },
+                  ...(['capped', 'open', 'Pending', 'In Progress', 'Resolved', 'all'] as JobFilter[]).map((f) => ({ value: f, label: JOB_FILTER_DEF[f].term, count: jobCounts[f], title: JOB_FILTER_DEF[f].def })),
                 ]}
               />
               <div className="flex flex-1 items-center justify-end gap-3">
@@ -1007,6 +1061,7 @@ export default function ResearchTwin() {
                 <SearchBox value={q} onChange={setQ} placeholder="Search jobs, findings and gaps" />
               </div>
             </div>
+            <Definition term={JOB_FILTER_DEF[jobFilter].term}>{JOB_FILTER_DEF[jobFilter].def}</Definition>
           </div>
 
           {jobRows.length === 0 ? (
@@ -1019,7 +1074,9 @@ export default function ResearchTwin() {
                   : jobFilter === 'capped'
                     ? 'No job has used all three passes. Nothing in the queue is waiting on a person.'
                     : jobFilter === 'all'
-                      ? 'No job was opened this month.'
+                      ? jobs.length
+                        ? `No job was opened this month. ${jobs.length} ${jobs.length === 1 ? 'job is' : 'jobs are'} held in other months — pick one above.`
+                        : 'No research job has been recorded yet.'
                       : `No job this month is ${jobFilter.toLowerCase()}.`}
             </EmptyState>
           ) : (
@@ -1048,22 +1105,19 @@ export default function ResearchTwin() {
                 ariaLabel="Filter asks"
                 value={askFilter}
                 onChange={setAskFilter}
-                options={[
-                  { value: 'all', label: 'All', count: askCounts.all },
-                  { value: 'Answered', label: 'Answered', count: askCounts.Answered },
-                  { value: 'Thin', label: 'Thin', count: askCounts.Thin },
-                  { value: 'Needs human', label: 'Needs human', count: askCounts['Needs human'] },
-                  { value: 'Refused (not its lane)', label: 'Refused', count: askCounts['Refused (not its lane)'] },
-                  { value: 'Failed', label: 'Failed', count: askCounts.Failed },
-                  { value: 'external', label: 'Went outside', count: askCounts.external },
-                  { value: 'internal', label: 'Internal only', count: askCounts.internal },
-                ]}
+                options={(['all', 'Answered', 'Thin', 'Needs human', 'Refused (not its lane)', 'Failed', 'external', 'internal'] as AskFilter[]).map((f) => ({
+                  value: f,
+                  label: ASK_FILTER_DEF[f].term,
+                  count: askCounts[f],
+                  title: ASK_FILTER_DEF[f].def,
+                }))}
               />
               <div className="flex flex-1 items-center justify-end gap-3">
                 <MonthPicker months={months} value={month} onChange={setMonth} />
                 <SearchBox value={q} onChange={setQ} placeholder="Search requests, answers and sources" />
               </div>
             </div>
+            <Definition term={ASK_FILTER_DEF[askFilter].term}>{ASK_FILTER_DEF[askFilter].def}</Definition>
           </div>
 
           {askRows.length === 0 ? (

@@ -1060,6 +1060,7 @@ SYSTEMS
   Research Twin
   Media Twin             ← placeholder
   Genie                  ← placeholder
+  Customer Service Twin  ← placeholder (2026-09-22)
   vFarm                  ← Overview is a placeholder; Early Access is real
   Engine health
 
@@ -1079,7 +1080,7 @@ REFERENCE
 **The sidebar shows every item at once and never scrolls** (decision
 2026-09-16, Destiny). A dashboard whose navigation is half below the fold is one
 where people miss pages. The rows are 32px and the group spacing is sized so all
-fifteen fit the shortest laptop; `overflow-y-auto` is kept only as the failure
+sixteen fit the shortest laptop; `overflow-y-auto` is kept only as the failure
 mode if the list ever outgrows that, because navigation that clips an item
 silently is worse than navigation that scrolls.
 

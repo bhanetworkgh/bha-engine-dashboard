@@ -6,6 +6,7 @@ import type { RecordColumn } from '../components/ui';
 import {
   CohortTable,
   CountUp,
+  Definition,
   DistTile,
   DurationTrend,
   EmptyPanel,
@@ -33,7 +34,9 @@ import {
   Segmented,
   SeriesBlock,
   SourceLink,
+  StatCaption,
   StatCell,
+  StatLabel,
   StatStrip,
   Tabs,
   thisMonth,
@@ -45,6 +48,7 @@ import {
   useToast,
 } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
+import { DELIVERY_DEFS, NS_OUTCOME_DEFS } from './twinDefinitions';
 
 /**
  * North Star, read from its own ask ledger (2026-09-17).
@@ -65,6 +69,16 @@ import RecordStatistics from '../components/RecordStatistics';
  */
 
 type Filter = 'all' | 'Answered' | 'Thin' | 'Refused (not its lane)' | 'Failed' | 'not-delivered';
+
+/** One line per filter word, from the agent's own code — see twinDefinitions.ts. */
+const FILTER_DEF: Record<Filter, string> = {
+  all: 'Every ask this month, whatever came back and wherever it went.',
+  Answered: NS_OUTCOME_DEFS.Answered,
+  Thin: NS_OUTCOME_DEFS.Thin,
+  'Refused (not its lane)': NS_OUTCOME_DEFS['Refused (not its lane)'],
+  Failed: NS_OUTCOME_DEFS.Failed,
+  'not-delivered': DELIVERY_DEFS['Not delivered'],
+};
 
 /** One accent, and amber and red only on a genuinely bad state. */
 const OUTCOME_ORDER = ['Answered', 'Thin', 'Refused (not its lane)', 'Failed', '(no outcome)'];
@@ -132,21 +146,20 @@ function NsStrip({ m, loading, error }: { m: NsMetrics | null; loading: boolean;
     <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
       <StatStrip cols={5}>
         {/* Below 100% is a real failure, and the only thing coloured on this strip. */}
-        <PercentCell label="Delivery rate" share={m.delivery_rate} bad={(s) => (s.pct ?? 100) < 100} />
-        <PercentCell label="Answered rate" share={m.answered_rate} />
+        <PercentCell label="Delivery rate" share={m.delivery_rate} bad={(s) => (s.pct ?? 100) < 100} caption={m.delivery_rate.of ? `${m.delivery_rate.n} of ${m.delivery_rate.of} reached a channel or callback` : 'no ask this month'} />
+        <PercentCell label="Answered rate" share={m.answered_rate} caption={m.answered_rate.of ? `${m.answered_rate.n} of ${m.answered_rate.of} carried an [S#] citation` : 'no ask this month'} />
         <FigureCell
           label="Asks"
           value={m.asks}
+          caption="this month, any outcome"
           note={`Every ask in the ledger for this month, whatever outcome it carries. The ledger opened on 17 Sep 2026 with nothing carried in, so a month before it holds nothing — which is not a quiet month, it is an unrecorded one.`}
         />
-        <PercentileCell label="Response time" p={m.response} unit="s" />
+        <PercentileCell label="Response time" p={m.response} unit="s" caption={m.response.p50 === null ? 'no ask recorded a duration' : `median, over the ${m.response.n} timed`} />
         <StatCell>
           <div className="min-w-0">
-            <div className="kicker truncate">Last ask</div>
+            <StatLabel label="Last ask" detail={m.last_ask.note} />
             <div className={`mt-1 text-[15px] leading-tight ${silent ? 'text-degraded' : 'text-ink'}`}>{lastAge ?? 'never'}</div>
-            <div className="mt-1.5 text-[11.5px] leading-snug text-faint" style={{ minHeight: '5.5em' }}>
-              {m.last_ask.note}
-            </div>
+            <StatCaption>{m.last_ask.at ? `asked ${when(m.last_ask.at)} UTC` : 'no ask held'}</StatCaption>
           </div>
         </StatCell>
       </StatStrip>
@@ -716,7 +729,7 @@ export default function NorthStar() {
     <div className="relative flex h-full min-h-0 flex-col">
       <PageHeader
         title="North Star"
-        subtitle="Every question routed through the agent, what came back, and whether it reached anyone"
+        subtitle="Reads engine_ns_asks: every question routed through the North Star agent, what came back, and whether it reached anyone"
         right={<ResyncButton busy={resync.busy} onClick={resync.start} />}
         below={<Tabs tabs={VIEWS} value={view} onChange={setView} />}
       />
@@ -772,12 +785,12 @@ export default function NorthStar() {
                 value={filter}
                 onChange={setFilter}
                 options={[
-                  { value: 'all', label: 'All', count: counts.all },
-                  { value: 'Answered', label: 'Answered', count: counts.Answered },
-                  { value: 'Thin', label: 'Thin', count: counts.Thin },
-                  { value: 'Refused (not its lane)', label: 'Refused', count: counts['Refused (not its lane)'] },
-                  { value: 'Failed', label: 'Failed', count: counts.Failed },
-                  { value: 'not-delivered', label: 'Not delivered', count: counts['not-delivered'] },
+                  { value: 'all', label: 'All', count: counts.all, title: FILTER_DEF.all },
+                  { value: 'Answered', label: 'Answered', count: counts.Answered, title: FILTER_DEF.Answered },
+                  { value: 'Thin', label: 'Thin', count: counts.Thin, title: FILTER_DEF.Thin },
+                  { value: 'Refused (not its lane)', label: 'Refused', count: counts['Refused (not its lane)'], title: FILTER_DEF['Refused (not its lane)'] },
+                  { value: 'Failed', label: 'Failed', count: counts.Failed, title: FILTER_DEF.Failed },
+                  { value: 'not-delivered', label: 'Not delivered', count: counts['not-delivered'], title: FILTER_DEF['not-delivered'] },
                 ]}
               />
               <div className="flex flex-1 items-center justify-end gap-3">
@@ -785,6 +798,7 @@ export default function NorthStar() {
                 <SearchBox value={q} onChange={setQ} placeholder="Search questions, answers and callers" />
               </div>
             </div>
+            <Definition term={filter === 'all' ? 'All' : filter === 'not-delivered' ? 'Not delivered' : filter === 'Refused (not its lane)' ? 'Refused' : filter}>{FILTER_DEF[filter]}</Definition>
           </div>
 
           {rows.length === 0 ? (
@@ -795,7 +809,7 @@ export default function NorthStar() {
                 : q.trim()
                   ? 'No ask matches that search in this filter.'
                   : filter === 'not-delivered'
-                    ? 'Every ask this month reached someone, or had no target to reach.'
+                    ? 'No ask this month is recorded as not delivered — and none can be yet: the agent stops before logging an ask whose Slack post was refused. Failed runs are on Executions.'
                     : filter === 'all'
                       ? 'No ask is held for this month. Before 17 Sep 2026 this ledger did not exist, so an empty month is an unrecorded one rather than a quiet one.'
                       : `No ask this month came back ${filter === 'Refused (not its lane)' ? 'refused' : filter.toLowerCase()}.`}
