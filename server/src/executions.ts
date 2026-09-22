@@ -60,6 +60,22 @@ const SYNC_AT = 'executions.synced_at';
 const SYNC_WARNING = 'executions.warning';
 /** When the history was last read whole, rather than from the highest id held. */
 const BACKFILL_AT = 'executions.backfilled_at';
+/** Set once the full re-read that recovers the runs the old watermark skipped has run. */
+const GAP_BACKFILL = 'executions.gap_backfill_2026_09_22';
+
+/**
+ * How far below the highest id held every poll reads again (2026-09-22).
+ *
+ * n8n's list leaves out a run that is still going. The poll used to stop at the
+ * highest id it held, so a long run — an agent turn of a minute or more — was
+ * passed over for good the moment a later, shorter run finished first and moved
+ * the watermark past it. On 22 Sep this database held 13,451 executions where
+ * n8n held 13,771, and every one of the ten missing from 12:00–17:00 that day
+ * was a run of 39 seconds or more. Reading the last 400 ids again on every
+ * pass — two pages, an upsert, so it changes nothing twice — catches any run
+ * that finishes within a few hours of starting.
+ */
+const LOOKBACK_IDS = 400;
 
 /** Every system with a tab of its own, in the order the page draws them. */
 export const SYSTEMS: { system: string; label: string }[] = [
@@ -206,7 +222,7 @@ export async function sync(full = false): Promise<SyncResult> {
   }
 
   const held = await query<{ highest: string | null }>(`SELECT max(execution_id)::text AS highest FROM engine_execution_runs`);
-  const from = full ? 0 : Number(held.rows[0]?.highest ?? 0);
+  const from = full ? 0 : Math.max(0, Number(held.rows[0]?.highest ?? 0) - LOOKBACK_IDS);
 
   let read: n8n.ExecutionRead;
   try {
@@ -326,7 +342,7 @@ export async function sync(full = false): Promise<SyncResult> {
   // Logged when something happened, when a pass is short of n8n, and on every
   // full read — a quiet poll that found nothing new and agrees with n8n has
   // nothing to say and says nothing.
-  if (read.executions.length || resolved || full || shortBy) console.log(`executions ${full ? 'backfill' : 'sync'}: ${note}${warning ? ` ${warning}` : ''}`);
+  if (inserted || resolved || full || shortBy) console.log(`executions ${full ? 'backfill' : 'sync'}: ${note}${warning ? ` ${warning}` : ''}`);
 
   return { ran: true, at, ms: Date.now() - started, read: read.executions.length, inserted, updated, resolved, open, highest, pages: read.pages, full, held: heldNow, reported: read.reported, note, warning };
 }
@@ -357,7 +373,11 @@ export function startPolling(): void {
   void (async () => {
     try {
       const held = await query<{ n: string }>(`SELECT count(*)::text AS n FROM engine_execution_runs`);
-      await runSync(Number(held.rows[0]?.n ?? 0) === 0);
+      // A full read once more, after the watermark fix, to recover the runs the
+      // old poll skipped. Recorded, so it happens on one boot and not on every one.
+      const recover = !(await getMeta(GAP_BACKFILL));
+      await runSync(Number(held.rows[0]?.n ?? 0) === 0 || recover);
+      if (recover) await setMeta(GAP_BACKFILL, nowIso());
     } catch (e) {
       console.error('executions first pass failed', e);
     }
@@ -619,6 +639,46 @@ async function failedIds(start: string, end: string, limit = 500): Promise<Map<s
   return out;
 }
 
+/** How many finished runs "recent" means. Ten is enough to see a fix hold, few enough that one bad afternoon ages out. */
+export const RECENT_RUNS = 10;
+
+/**
+ * Each workflow's recent health, **whatever the period in view** (2026-09-22,
+ * Destiny). A month's failure rate is honest and can still mislead: Bays —
+ * Error Handler read 63% for September because 127 runs failed in one sixteen-
+ * hour window when Airtable's cap hit, and every run since has succeeded. So
+ * beside the month's rate, each workflow carries its last ten finished runs,
+ * when it last failed, and how many have succeeded since — a fixed workflow
+ * stops reading as a broken one without the month's figure being touched.
+ */
+async function recentHealth(): Promise<Map<string, ExecutionWorkflow['recent']>> {
+  const r = await query<{ workflow_id: string; n: string; failed: string; last_failure_at: string | null; since_failure: string; last_run_at: string | null }>(
+    `WITH finished AS (
+       SELECT workflow_id, started_at, status IN ('error','crashed') AS bad,
+              row_number() OVER (PARTITION BY workflow_id ORDER BY started_at DESC) AS rn
+         FROM engine_execution_runs
+        WHERE status IN ('success','error','crashed')
+     ), lastfail AS (
+       SELECT workflow_id, max(started_at) AS at FROM finished WHERE bad GROUP BY workflow_id
+     )
+     SELECT f.workflow_id,
+            count(*) FILTER (WHERE f.rn <= $1)::text AS n,
+            count(*) FILTER (WHERE f.rn <= $1 AND f.bad)::text AS failed,
+            max(l.at) AS last_failure_at,
+            count(*) FILTER (WHERE NOT f.bad AND (l.at IS NULL OR f.started_at > l.at))::text AS since_failure,
+            max(f.started_at) AS last_run_at
+       FROM finished f LEFT JOIN lastfail l USING (workflow_id)
+      GROUP BY f.workflow_id`,
+    [RECENT_RUNS],
+  );
+  return new Map(
+    r.rows.map((x) => [
+      x.workflow_id,
+      { runs: Number(x.n), failed: Number(x.failed), last_failure_at: x.last_failure_at, succeeded_since_failure: Number(x.since_failure), last_run_at: x.last_run_at },
+    ]),
+  );
+}
+
 interface Held {
   rows: number;
   oldest: string | null;
@@ -682,6 +742,7 @@ export async function read(grain: ExecutionGrain = 'week', wanted?: string): Pro
   const days = await dayRows(windowStart);
   const wfRows = await workflowRows(selected.start, selected.end);
   const failing = await failedIds(selected.start, selected.end);
+  const recent = await recentHealth();
 
   // Which tabs exist: the three known systems, then anything else the registry
   // has filed a running workflow under, then Archived where anything is
@@ -822,6 +883,7 @@ export async function read(grain: ExecutionGrain = 'week', wanted?: string): Pro
         registered: e.row.registered,
         n8n_url: e.row.n8n_url,
         failed_ids: failing.get(id) ?? [],
+        recent: recent.get(id) ?? null,
         ...figures(e.tally),
       }))
       .sort((x, y) => y.failed - x.failed || y.executions - x.executions);
@@ -1006,6 +1068,7 @@ export async function workflow(workflowId: string, grain: ExecutionGrain, wanted
       system: meta?.system ?? null,
       registered: Boolean(meta?.reg_name),
       n8n_url: meta?.n8n_url ?? null,
+      recent: (await recentHealth()).get(workflowId) ?? null,
       failed_ids: failing,
       ...figures(tally),
     },
