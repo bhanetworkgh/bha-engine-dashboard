@@ -9147,3 +9147,12 @@ Decision:   Gold primary per Destiny, over the design system and the
             paint rgb(20,20,22)), no sideways scroll, at most one .btn-primary
             per screen; only console error is Google Fonts' certificate in this
             sandbox's proxy. Build, test:pay (9/9) and test:lookup pass.
+
+## 2026-09-23 14:45 — Correction to the 14:40 entry
+Intent:     Put the right count on the record.
+Files:      BUILD_LOG.md only.
+Problem:    The 14:40 entry says "52 buttons" moved onto <Button>; that was
+            written before counting.
+Fix:        Counted in the source after the commit (0b40d91): 55 <Button>, 7
+            <ButtonAnchor>, 1 <ButtonLink>.
+Decision:   Recorded as its own entry rather than editing the earlier one.
