@@ -9276,3 +9276,30 @@ Decision:   The ledger is the queue; engine_recovery holds decisions, not
             or CONFIG_AUTH incident through to one message in
             #bha-self-healing). There are no open incidents in the ledger
             mirror tonight, and it has to run against the deployed service.
+
+## 2026-09-23 20:25 — Engine recovery: first live run
+Intent:     Confirm the deploy and trace a case end to end.
+Files:      BUILD_LOG.md.
+Problem:    None in the code. Worth recording what the first tick found: the
+            engine_incidents mirror held no open incidents, but the live ledger
+            held 23 open BILLING_QUOTA incidents (the oldest from 4 Sep), all
+            from the OpenRouter outage. The mirror only fills on a Resync from
+            BHARAG. The watcher reads the ledger live, so it saw them all.
+Fix:        —
+Decision:   Deploy dep-daq359jtqb8s73bpftbg (c12e1d7) went live 20:13; migration
+            28 applied; the five `never` rows are right. First tick 20:14: the
+            probe said OpenRouter ok ($30.78, floor $1), and one batch of 23
+            (rec-openrouter-20260923201417-ji6c) drained to 20:22:
+              18 chat_not_rerun: Bays — Conversational Agent 10,
+                 North Star — Conversational Agent 4, North Star — Front Door 4.
+                 Closed in the ledger as wont_fix; the ledger accepted it.
+              4 data_gone: n8n had pruned 87571, 89965, 89966, 89967.
+              1 already_done: Bays — Submit Actions. n8n held a successful
+                 retry (3068), so it was closed self_healed.
+            One summary went out, HTTP 2xx, "Sent: 23 run(s)".
+            Not traced live: a heal call carrying recovery: true. No incident in
+            that batch was a re-runnable workflow. `TEST — Self-healing, Bays
+            lane` no longer fails (it was repaired on 22 Sep), and making it fail
+            with BILLING_QUOTA or CONFIG_AUTH means editing an n8n workflow,
+            which CLAUDE.md section 3 does not allow from here. That path is
+            covered only by npm run test:recovery until a real failure takes it.
