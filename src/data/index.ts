@@ -61,7 +61,6 @@ import type {
   FinalImport,
   ServerStatus,
   SignInResult,
-  TwinData,
   VfarmLead,
   VfarmLeadStatus,
   VfarmLeadsData,
@@ -150,8 +149,6 @@ export function getServerStatus(): Promise<ServerStatus> {
 /* ----------------------------------------------------------------- reads */
 
 export const getOverview = (q: Query) => api<OverviewData>(withLane('/api/overview', q));
-export const getNorthStar = (q: Query) => api<TwinData>(withLane('/api/north-star', q));
-export const getResearchTwin = (q: Query) => api<TwinData>(withLane('/api/research-twin', q));
 export const getOpenLoops = (q: Query) => api<OpenLoopsData>(withLane('/api/open-loops', q));
 export const getCodexEntries = (q: Query) => api<CodexData>(withLane('/api/codex', q));
 export const getBuildPatterns = (q: Query) => api<BuildPatternsData>(withLane('/api/build-patterns', q));

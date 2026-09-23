@@ -537,7 +537,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           detail: `${named.length ? named.join(' AND ') : 'no filter'} → ${r.rows.length} of ${r.count}`,
           ms: Date.now() - t0,
         });
-        return send(res, 200, { kind: r.kind, count: r.count, rows: r.rows });
+        // Loops also carry the one open-loop total (2026-09-23), so a workflow
+        // asking "how many loops are open" gets the figure Home prints rather
+        // than whatever its own filter happened to count.
+        return send(res, 200, { kind: r.kind, count: r.count, rows: r.rows, ...(kind === 'loops' ? { open_loops: await store.countOpenLoops() } : {}) });
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         const status = e instanceof mirror.MirrorError ? e.status : 500;
@@ -799,10 +802,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       }
       case '/api/overview':
         return send(res, 200, await engine.getOverview(q));
-      case '/api/north-star':
-        return send(res, 200, engine.getNorthStar(q));
-      case '/api/research-twin':
-        return send(res, 200, engine.getResearchTwin(q));
       case '/api/open-loops':
         return send(res, 200, await engine.getOpenLoops(q));
       case '/api/codex':

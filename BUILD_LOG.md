@@ -9048,3 +9048,47 @@ Decision:   Read off engine_writes (endpoint 'boot', 12:56:18Z): 79 checked,
             id) of unpaid sessions, given the fields n8n's copies already had;
             none changed Paid. After it: 0 pay rows disagree with their log
             about Paid; 147 rows for 79 sessions, as before.
+
+## 2026-09-23 14:05 — Home: every number read (Part B)
+Intent:     Make every figure on Home real: the two 24-hour feeds, one
+            definition of open loops, North Star's tile, the placeholder tiles,
+            and live updates on every panel.
+Files:      server/src/feeds.ts (new), server/src/engine.ts, server/src/store.ts
+            (countOpenLoops), server/src/index.ts (open_loops on GET
+            /api/engine/loops; /api/north-star and /api/research-twin removed),
+            src/data/types.ts (FeedItem, tile figures/muted, open_count),
+            src/data/index.ts, src/screens/Overview.tsx,
+            src/screens/OpenLoops/index.tsx, src/screens/BuildPatterns.tsx,
+            src/screens/Commercial.tsx, src/screens/VFarm/{index,EarlyAccess}.tsx,
+            src/screens/EngineHealth/{index,LaneView}.tsx; CLAUDE.md.
+Problem:    engine.getOverview returned 11 "broke" and 11 "moved" rows typed
+            by hand in phase 1 ("pH above ceiling on rack-a/tier-3", "North
+            Star credential rotated") under a heading claiming the last 24
+            hours. The open-loop "discrepancy": Home 713, "about 311" quoted
+            elsewhere. Read production: 638 Open + 75 In Progress = 713 rows,
+            713 distinct loop_ids, 710 distinct What texts, no archived or
+            deleted field on any of the 984 rows. The 311 is Bays' digest to
+            Destiny on 21 Sep in #workflow-logs-destiny — "Your top 5 of 311"
+            — Destiny's own table (324 today), not the team total.
+            North Star's tile read "Every answer reached someone." beside a ring
+            "1 of 46 answered": Delivered and Answered in one breath.
+Fix:        feeds.ts reads engine_incidents (own date in window), error_counts
+            and retry_attempts (updated_at in window, folded into a listed
+            incident), codex (Jason Reviewed At, Approved/Input Added), events
+            (loops closed, via engine/ui/inbound), patterns, pattern
+            candidates, commercial and engine_vfarm_leads. Each item has a
+            `to`; Engine health opens ?incident=, Build patterns and Commercial
+            ?open=, vFarm ?tab=early-access&lead=. countOpenLoops() keeps one
+            row per loop_id (newest) and counts Open + In Progress; Home's pin,
+            tile and Loops by builder, the Open loops header and the engine
+            lookup all read it. NS tile: two figures, Delivered (reached a
+            person) and Answered, N of M; the sentence speaks for the weaker.
+            vFarm tile: leads, last 7 days, newest date. Media Twin / Genie:
+            "Not connected yet", greyed. Home passes kinds for every panel.
+            Also removed: /api/north-star and /api/research-twin (fixture
+            twins, no page read them since 17 Sep) and Ask Bays' seeded sample
+            chat threads (fixtures/chat.ts); the history panel shows only
+            threads this browser has had.
+Decision:   Verified locally with Playwright: an approval PATCHed to
+            /api/engine/codex appeared in "What moved" on an open Home tab
+            after 869ms, and clicking it opened /codex/<id> with the entry.

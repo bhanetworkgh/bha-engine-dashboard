@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom';
 import { useCallback, useEffect, useState } from 'react';
 import { useData } from '../../app/useData';
 import { getVfarmLeads, type VfarmLead, type VfarmLeadsData } from '../../data';
@@ -33,7 +34,10 @@ const TABS = ['Overview', 'Early Access'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function VFarm() {
-  const [tab, setTab] = useState<Tab>('Overview');
+  // `?tab=early-access&lead=<id>` lands on a lead — Home's vFarm tile and its
+  // "What moved" rows link here (2026-09-23).
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => (params.get('tab') === 'early-access' ? 'Early Access' : 'Overview'));
   const [held, setHeld] = useState<VfarmLeadsData | null>(null);
   const { status, data: loaded, error } = useData(getVfarmLeads, [], { kinds: VFARM_KINDS });
 
@@ -92,7 +96,7 @@ export default function VFarm() {
       ) : !data ? (
         <Loading />
       ) : (
-        <EarlyAccess data={data} onChange={onChange} />
+        <EarlyAccess initialOpen={params.get('lead')} data={data} onChange={onChange} />
       )}
     </div>
   );

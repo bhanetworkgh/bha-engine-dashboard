@@ -804,6 +804,55 @@ function hydrateLoop(r: Row): Loop {
   // null and every figure built on it falls over quietly.
   return { ...base, status: r.status as LoopStatus, closed_at: r.closed_at, age_days: Number.isFinite(days) ? Math.max(0, days) : 0 };
 }
+/**
+ * The one definition of "open loops" (2026-09-23, Destiny). Home, the Open
+ * loops page and the API all count through this, so no two of them can print a
+ * different total.
+ *
+ * **A loop is its `loop_id`, not a row.** One row per `loop_id` is kept — the
+ * most recently written, so a move that left a copy behind in its old table is
+ * one loop, and the copy's stale status cannot count it twice or keep a closed
+ * loop open — and then counted where its `Status` is `Open` or `In Progress`.
+ * A row with no `loop_id` is still one loop, by its own row id, rather than
+ * silently dropped.
+ *
+ * **There is no archived or deleted state to exclude**: the loop tables carry
+ * neither field (checked across all 984 rows on 23 Sep — the only keys are
+ * loop_id, What, Status, Date Raised, Raised By, Assignee Slack User ID,
+ * Source Link, lane_tag, raised_in and last_modified), and a deleted loop is a
+ * row that is no longer in `engine_loops` at all.
+ *
+ * `by_builder` is counted from the same kept rows, so it always sums to
+ * `total` — a builder column that added up to something else would be two
+ * definitions again.
+ */
+export interface OpenLoopCount {
+  total: number;
+  open: number;
+  in_progress: number;
+  by_builder: { builder_id: string; open: number; in_progress: number }[];
+}
+export async function countOpenLoops(on?: Queryable): Promise<OpenLoopCount> {
+  const r = await db(on).query<{ builder_id: string | null; open: string; in_progress: string }>(
+    `WITH one AS (
+       SELECT DISTINCT ON (COALESCE(natural_id, 'row:' || id)) builder_id, fields->>'Status' AS status
+         FROM engine_loops
+        ORDER BY COALESCE(natural_id, 'row:' || id), updated_at DESC, id DESC
+     )
+     SELECT builder_id,
+            count(*) FILTER (WHERE status = 'Open')::text        AS open,
+            count(*) FILTER (WHERE status = 'In Progress')::text AS in_progress
+       FROM one
+      WHERE status IN ('Open', 'In Progress')
+      GROUP BY builder_id
+      ORDER BY count(*) DESC, builder_id`,
+  );
+  const by_builder = r.rows.map((x) => ({ builder_id: x.builder_id ?? '(no builder)', open: Number(x.open), in_progress: Number(x.in_progress) }));
+  const open = by_builder.reduce((n, b) => n + b.open, 0);
+  const in_progress = by_builder.reduce((n, b) => n + b.in_progress, 0);
+  return { total: open + in_progress, open, in_progress, by_builder };
+}
+
 export async function loops(): Promise<Loop[]> {
   return (await rows('loops')).map(hydrateLoop);
 }

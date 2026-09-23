@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
@@ -578,7 +579,9 @@ export default function Commercial() {
    */
   const [month, setMonth] = useState<string | null>(thisMonth());
   const [view, setView] = useState<View>('Cards');
-  const [open, setOpen] = useState<string | null>(null);
+  // `?open=<id>` opens a card on arrival — Home's "What moved" links here (2026-09-23).
+  const [params] = useSearchParams();
+  const [open, setOpen] = useState<string | null>(() => params.get('open'));
   const [busyId, setBusyId] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   // missing_research_count ascending, then media_readiness descending: the

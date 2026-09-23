@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom';
 import { useCallback, useState } from 'react';
 import { useData } from '../../app/useData';
 import { getEngineHealth, resyncHealth, type HealthData } from '../../data';
@@ -44,7 +45,10 @@ const LANE_OF: Partial<Record<Tab, string>> = {
 };
 
 export default function EngineHealth() {
-  const [tab, setTab] = useState<Tab>('All systems');
+  // `?incident=<id>` opens an incident on All systems, `?tab=retries` lands on
+  // Retries — Home's "What broke" links here (2026-09-23).
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => (params.get('tab') === 'retries' ? 'Retries' : 'All systems'));
   const [tick, setTick] = useState(0);
   const [held, setHeld] = useState<HealthData | null>(null);
   const { toast, setToast } = useToast();
@@ -102,7 +106,7 @@ export default function EngineHealth() {
       ) : tab === 'Retries' ? (
         <Retries data={data} tick={tick} onChanged={() => void reload()} />
       ) : (
-        <LaneView data={data} lane={LANE_OF[tab] ?? null} tick={tick} onChanged={reload} />
+        <LaneView data={data} lane={LANE_OF[tab] ?? null} tick={tick} onChanged={reload} initialOpen={tab === 'All systems' ? params.get('incident') : null} />
       )}
 
       {/*
