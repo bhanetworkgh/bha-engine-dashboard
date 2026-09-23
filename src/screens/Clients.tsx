@@ -49,6 +49,9 @@ import {
   requestStatusDef,
 } from './clientDefinitions';
 
+/** The record kinds this page is built from: a change to one re-reads it (live since 2026-09-23). */
+const CLIENT_KINDS = ['client_lanes', 'client_questions', 'client_requests'] as const;
+
 /**
  * Watched clients: one row per lane, grouped under the client that owns it.
  *
@@ -573,7 +576,7 @@ const VIEWS = ['Clients', 'Requests', 'Statistics'] as const;
 type View = (typeof VIEWS)[number];
 
 export default function Clients() {
-  const { status, data: loaded, error } = useData(getClients, []);
+  const { status, data: loaded, error } = useData(getClients, [], { kinds: CLIENT_KINDS });
   const [live, setLive] = useState<ClientsData | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [requestFilter, setRequestFilter] = useState<RequestFilter>('all');

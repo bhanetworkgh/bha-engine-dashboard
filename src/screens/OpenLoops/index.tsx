@@ -9,6 +9,9 @@ import { NewLoopForm } from './NewLoop';
 import RecordStatistics from '../../components/RecordStatistics';
 import { ALL_TABLES_DEF, LOOP_STATUS_DEFS, LOOP_STATUS_TERMS, VIEW_DEFS, builderTableDef } from './definitions';
 
+/** The record kinds this page is built from: a change to one re-reads it (live since 2026-09-23). */
+const LOOP_KINDS = ['loops'] as const;
+
 /** Case-insensitive match on loop_id, title, who raised it and where. */
 function matches(l: Loop, q: string): boolean {
   if (!q) return true;
@@ -66,7 +69,7 @@ export default function OpenLoops() {
     setToast,
   });
   const [reloadTick, setReloadTick] = useState(0);
-  const { status, data: loaded, error } = useData(getOpenLoops, [reloadTick]);
+  const { status, data: loaded, error } = useData(getOpenLoops, [reloadTick], { kinds: LOOP_KINDS });
 
   /**
    * The figures arrive once, unscoped, carrying every builder's figures with
@@ -75,7 +78,7 @@ export default function OpenLoops() {
    * run up again.
    */
   const [metricsTick, setMetricsTick] = useState(0);
-  const metrics = useData((query) => getRecordMetrics('loops', query, null, month), [metricsTick, month]);
+  const metrics = useData((query) => getRecordMetrics('loops', query, null, month), [metricsTick, month], { kinds: LOOP_KINDS });
   /**
    * The figures for the builder tab in view — the status strip at the top, which
    * follows both the builder and the month.

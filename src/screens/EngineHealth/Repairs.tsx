@@ -6,6 +6,7 @@ import type { RecordColumn } from '../../components/ui';
 import { Definition, EmptyState, FigureCell, Loading, LoadFailed, Pagination, Pill, RecordId, RecordTable, SearchBox, Segmented, StatStrip, usePaged } from '../../components/ui';
 import { Fact, when } from './parts';
 import { REPAIR_OUTCOME_DEFS, REPAIR_STATE_DEFS, REVERT_GUARD_DEFS } from './definitions';
+import { HEALTH_KINDS } from './kinds';
 
 /**
  * The repair record — every automated repair, and the way back from one.
@@ -103,7 +104,7 @@ function seconds(ms: number | null): string {
 export default function Repairs() {
   const [tick, setTick] = useState(0);
   const [held, setHeld] = useState<RepairsData | null>(null);
-  const { status, data: loaded, error } = useData(getRepairs, [tick]);
+  const { status, data: loaded, error } = useData(getRepairs, [tick], { kinds: HEALTH_KINDS });
   const data = held ?? loaded;
 
   const [filter, setFilter] = useState<Filter>('all');

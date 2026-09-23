@@ -50,6 +50,9 @@ import {
 import { COMPLETENESS_DEFS, PAID_DEFS, QUALITY_DEF, STAGE_DEFS } from './codexDefinitions';
 import { CodexEntryDialog, InputAddedPill, StagePill, when } from './CodexEntryDialog';
 
+/** The record kinds this page is built from: a change to one re-reads it (live since 2026-09-23). */
+const CODEX_KINDS = ['codex', 'layer0'] as const;
+
 /**
  * What a stage says when it holds nothing.
  *
@@ -474,7 +477,7 @@ function codexColumns(open: (e: CodexEntry) => void): RecordColumn<CodexEntry>[]
 /* ------------------------------------------------------------------ page */
 
 export default function Codex() {
-  const { status, data: loaded, error } = useData(getCodexEntries, []);
+  const { status, data: loaded, error } = useData(getCodexEntries, [], { kinds: CODEX_KINDS });
   const [entries, setEntries] = useState<CodexEntry[]>([]);
   const [builder, setBuilder] = useState('all');
   const [tab, setTab] = useState<Tab>('approved');
@@ -521,7 +524,7 @@ export default function Codex() {
     setOpenId: setOpen,
     onMissing: (id) => setToast({ text: `No Codex entry here is called ${id}. It may have been deleted, or the link may be to a submission this dashboard never held.`, tone: 'failing' }),
   });
-  const metrics = useData((query) => getRecordMetrics('codex', query, builder, month), [builder, month, tick]);
+  const metrics = useData((query) => getRecordMetrics('codex', query, builder, month), [builder, month, tick], { kinds: CODEX_KINDS });
 
   useEffect(() => {
     if (loaded) setEntries(loaded.entries);

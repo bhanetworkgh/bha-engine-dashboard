@@ -5,6 +5,7 @@ import { LoadFailed, Loading, PageHeader, ResyncButton, Tabs, Toast, useResync, 
 import LaneView from './LaneView';
 import Repairs from './Repairs';
 import Retries from './Retries';
+import { HEALTH_KINDS } from './kinds';
 
 /**
  * Engine Health — built 2026-09-17, where a "coming soon" page stood.
@@ -47,7 +48,7 @@ export default function EngineHealth() {
   const [tick, setTick] = useState(0);
   const [held, setHeld] = useState<HealthData | null>(null);
   const { toast, setToast } = useToast();
-  const { status, data: loaded, error } = useData(getEngineHealth, [tick === -1]);
+  const { status, data: loaded, error } = useData(getEngineHealth, [tick === -1], { kinds: HEALTH_KINDS });
 
   const data = held ?? loaded;
 

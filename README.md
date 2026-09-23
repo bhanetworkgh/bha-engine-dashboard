@@ -283,6 +283,43 @@ not among them: those are not fields, they are which of the seven tables the row
 sits in, and changing one is a move rather than an edit. An id that is not in
 that kind's table is a 404.
 
+### The pay ledger follows the session log
+
+Since 2026-09-23 the pay ledger is written in the same request as the session
+log that changes it (`server/src/paySync.ts`), so n8n's `Bays — Pay Ledger
+Sync` (every 30 minutes) has nothing left to do. Any stored change to a `codex`
+row that carries a `Codex Entry ID` upserts that session's `pay_sessions`
+row(s), with the rules ported from the workflow's `Build Ledger Rows` node; Pay
+Mode is frozen at first write and Paid At is when the log turned "Yes". The log
+is the source of truth for Paid: every `pay_sessions` POST or PATCH has Paid,
+Paid At and Paid By replaced with what the log says. A Sent statement closes
+itself once every session behind it is paid.
+
+The backfill, and the thing to run if a write ever logs that its pay row did not
+land:
+
+```
+POST /api/engine/pay/reconcile
+x-dashboard-key: <DASHBOARD_INBOUND_KEY>
+
+200 { "ok": true, "checked": <logs with a Codex Entry ID>, "created": n,
+      "updated": n, "unchanged": n, "statements_closed": n, "failed": [], "ms": n }
+```
+
+Safe to repeat: the second run reports every session unchanged. `npm run
+test:pay` pins the rules.
+
+### Live pages
+
+Open pages refresh themselves. Every write announces `{kind, id, at}` on an
+in-process bus after its transaction commits (`server/src/events.ts`), and
+`GET /api/events` — behind the page cookie — streams it as Server-Sent Events
+with a comment every 25 seconds. The client keeps one EventSource
+(`src/app/live.tsx`) and `useData(fn, deps, { kinds: [...] })` re-reads quietly
+750ms after a matching change, on focus and when the tab becomes visible, and
+every 30 seconds while the stream has been down for more than a minute. The
+event names the kind, never the row: the page re-reads its own route.
+
 ### The final import, and retiring Airtable
 
 Added 2026-09-22, for after the monthly cap resets. One last read of Airtable,

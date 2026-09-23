@@ -27,6 +27,7 @@
  * naming a column that is not in the spec is a 422 rather than a query.
  */
 import { query, withTransaction, type Queryable } from './pg';
+import * as events from './events';
 import { nowIso, today } from './db';
 import * as seed from './registrySeed';
 
@@ -337,6 +338,7 @@ export async function create(kind: RegistryKind, input: Record<string, unknown>)
       `INSERT INTO ${spec.table} (${all.join(', ')}) VALUES (${placeholders}) RETURNING ${cols}`,
       [id, ...params, at, at],
     );
+    events.changed('registry', id);
     return r.rows[0];
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -363,6 +365,7 @@ export async function update(kind: RegistryKind, id: string, input: Record<strin
     [id, ...params, nowIso()],
   );
   if (!r.rows[0]) throw new RegistryError(`No ${spec.label} with that id.`, 404);
+  events.changed('registry', id);
   return r.rows[0];
 }
 
@@ -379,6 +382,7 @@ export async function setDeleted(kind: RegistryKind, id: string, deleted: boolea
     [id, deleted ? nowIso() : null, nowIso()],
   );
   if (!r.rows[0]) throw new RegistryError(`No ${spec.label} with that id.`, 404);
+  events.changed('registry', id);
   return r.rows[0];
 }
 

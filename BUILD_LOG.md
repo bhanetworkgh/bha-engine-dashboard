@@ -8956,3 +8956,69 @@ Tested:     Local build; migration 27 applied; a Playwright scan of 17 routes'
             "Update Jason Review (Airtable)". That is engine data, shown as
             written. Final grep: 162 hits, all comments, identifiers, payload
             types, fixtures or the registry's history section.
+
+## 2026-09-23 12:55 — Pay at write time, and live pages
+Intent:     Two parts, one pass. (A) Keep the pay ledger in step with the
+            session logs inside the write that changes a log, so n8n's
+            "Bays — Pay Ledger Sync" (every 30 min) can be retired. (B) Make
+            open pages refresh themselves the moment data changes. Dashboard
+            repo only; nothing in n8n changed (the workflow was read, not
+            edited).
+Files:      server/src/paySync.ts (new), server/src/events.ts (new),
+            server/src/pg.ts (afterCommit), server/src/mirror.ts (hooks in
+            upsert and patchFields), server/src/index.ts (POST
+            /api/engine/pay/reconcile, GET /api/events, loopback refuses
+            /api/events), server/src/store.ts, health.ts, pay.ts,
+            executions.ts, repairs.ts, earlyAccess.ts, registry.ts (change
+            events on every other write and delete path);
+            server/test/pay-sync.test.cjs (new), package.json (test:pay);
+            src/app/live.tsx (new), src/app/useData.ts, src/main.tsx,
+            src/components/ui/Live.tsx (new), src/components/ui/index.ts,
+            src/screens/PayTracker/{index,Owed}.tsx, Codex.tsx,
+            OpenLoops/index.tsx, BuildPatterns.tsx, Commercial.tsx,
+            NorthStar.tsx, ResearchTwin.tsx, Clients.tsx, VFarm/index.tsx,
+            EngineHealth/{index,LaneView,Retries,Repairs,kinds}.tsx/.ts,
+            Executions/index.tsx, Registry/index.tsx; CLAUDE.md; README.md.
+Problem:    Read the live ledger before writing anything: 147 pay_sessions
+            rows for 79 Codex Entry IDs. 68 are bound to an Airtable record id
+            (the 20 Sep import) and 79 are n8n's own posts with none; upsert's
+            natural-id match only adopts an unclaimed row, so the two never
+            merged. pay.sessionsHeld already dedupes, preferring the engine
+            copy. A sync that updated one copy would leave the page reading the
+            other.
+            Also found: n8n's node wrote Paid At = Jason Reviewed At (the
+            approval, not the payment) and re-wrote Pay Mode every half hour.
+            And test:gate fails its "every outcome reached engine_mcp_writes"
+            check on any second run against the same database
+            ("3 !== 1") — it counts audit rows by tool and never deletes them.
+            Pre-existing; not touched.
+Fix:        paySync writes every copy of a session to the same state (one Paid
+            At for all: the earliest already set, else now). The pay_sessions
+            override (applyLogPaid) runs inside upsert and patchFields, so a
+            late Paid:false from Pay Tracking — or any PATCH — cannot undo a
+            payment. Statement close counts sessions by distinct Codex Entry ID.
+            The codex hook runs behind SAVEPOINT pay_sync: a pay failure is
+            logged to engine_writes and the Slack approval still lands.
+            Events are queued on the transaction client and emitted only after
+            COMMIT (pg.afterCommit); a rollback drops them — pinned in the test.
+            store.bumpVersion subscribes to the bus so memoised figures cannot
+            outlive an engine write.
+            useData: third argument takes { refreshMs, kinds } (a bare number
+            still works); quiet re-read debounced 750ms; sequence numbers so a
+            slow older answer never overwrites a newer one. LiveProvider's
+            subscribe is a stable useCallback — a new function on every
+            connect/disconnect would have re-run every page's first load and
+            flashed it. Pay and vFarm kept a local copy (held ?? loaded) that
+            shadowed every later read; Pay's is gone (its resync is retired),
+            vFarm's is cleared on each fresh read.
+Decision:   Pay Mode frozen, Paid At = flip time, and Slack Card Link kept —
+            per the brief, and each a deliberate departure from the node.
+            The Pay header's Resync button and the "last synced by the 30-min
+            sync" wording are replaced by a Live indicator (green dot "Live",
+            grey "Not live"); grey not amber, because a dropped stream is the
+            page catching up slowly, not an engine fault.
+            Verified locally: npm run test:pay 9/9; test:lookup passes; build
+            passes. Playwright with /pay and /codex already open: an approval
+            POSTed to /api/engine/codex appeared on /pay after 802ms; a Paid
+            PATCH by-natural showed "paid · Jason" on /pay after 818ms.
+            Reconcile run twice locally: second run 0 created, 0 updated.

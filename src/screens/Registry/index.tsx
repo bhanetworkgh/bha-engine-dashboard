@@ -161,7 +161,7 @@ function Grid({
 export default function Registry() {
   const [showDeleted, setShowDeleted] = useState(false);
   const load = useCallback(() => getRegistry(showDeleted), [showDeleted]);
-  const { status, data: loaded, error } = useData(load, [showDeleted]);
+  const { status, data: loaded, error } = useData(load, [showDeleted], { kinds: ['registry', 'loops', 'codex'] });
 
   // A local mirror so an edit shows the moment the server takes it, rather than
   // waiting on a refetch of all six tables.

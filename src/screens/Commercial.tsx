@@ -43,6 +43,9 @@ import {
 import RecordStatistics from '../components/RecordStatistics';
 import { CLEAR_DEF, CONFIDENCE_DEFS, INCOMPLETE_DEF, MEDIA_DEFS, PIPELINE_DEFS, READINESS_DEFS } from './recordDefinitions';
 
+/** The record kinds this page is built from: a change to one re-reads it (live since 2026-09-23). */
+const COMMERCIAL_KINDS = ['commercial'] as const;
+
 /**
  * Commercial opportunity cards. 21 of them.
  *
@@ -564,7 +567,7 @@ const VIEWS = ['Cards', 'Statistics'] as const;
 type View = (typeof VIEWS)[number];
 
 export default function Commercial() {
-  const { status, data: loaded, error } = useData(getCommercial, []);
+  const { status, data: loaded, error } = useData(getCommercial, [], { kinds: COMMERCIAL_KINDS });
   const [cards, setCards] = useState<Opportunity[]>([]);
   const [confidence, setConfidence] = useState('all');
   const [q, setQ] = useState('');
@@ -582,7 +585,7 @@ export default function Commercial() {
   // closest to ready at the top, which is the question this page answers.
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'open', dir: 1 });
   const { toast, setToast } = useToast();
-  const metrics = useData((query) => getRecordMetrics('commercial', query, null, month), [month, tick]);
+  const metrics = useData((query) => getRecordMetrics('commercial', query, null, month), [month, tick], { kinds: COMMERCIAL_KINDS });
 
   useEffect(() => {
     if (loaded) setCards(loaded.opportunities);

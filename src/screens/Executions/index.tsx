@@ -749,7 +749,7 @@ export default function Executions() {
   const [tick, setTick] = useState(0);
   const { toast, setToast } = useToast();
 
-  const { status, data, error } = useData(() => getExecutions('month', period ?? undefined), [period, tick], REFRESH_MS);
+  const { status, data, error } = useData(() => getExecutions('month', period ?? undefined), [period, tick], { refreshMs: REFRESH_MS, kinds: ['executions'] });
 
   if (status === 'loading' || !data) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
 

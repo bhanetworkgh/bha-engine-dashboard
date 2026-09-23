@@ -50,6 +50,9 @@ import {
 import RecordStatistics from '../components/RecordStatistics';
 import { DELIVERY_DEFS, NS_OUTCOME_DEFS } from './twinDefinitions';
 
+/** The record kinds this page is built from: a change to one re-reads it (live since 2026-09-23). */
+const NS_KINDS = ['ns-asks', 'digests'] as const;
+
 /**
  * North Star, read from its own ask ledger (2026-09-17).
  *
@@ -673,7 +676,7 @@ const VIEWS = ['Asks', 'Statistics'] as const;
 type View = (typeof VIEWS)[number];
 
 export default function NorthStar() {
-  const { status, data: loaded, error } = useData(getNsTelemetry, []);
+  const { status, data: loaded, error } = useData(getNsTelemetry, [], { kinds: NS_KINDS });
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
@@ -682,7 +685,7 @@ export default function NorthStar() {
   const [tick, setTick] = useState(0);
   const [held, setHeld] = useState<NsAsk[]>([]);
   const { toast, setToast } = useToast();
-  const metrics = useData(() => getRecordMetrics('ns', { lane: 'all' }, null, month), [month, tick]);
+  const metrics = useData(() => getRecordMetrics('ns', { lane: 'all' }, null, month), [month, tick], { kinds: NS_KINDS });
 
   useEffect(() => {
     if (loaded) setHeld(loaded.asks);

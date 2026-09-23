@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { OwedBuilder, PayData, PayMetrics } from '../../data';
 import { CodexEntryDialog } from '../CodexEntryDialog';
 import { getPaySessionCodex } from '../../data';
-import { CountUp, EmptyPanel, FigureCell, monthLabel, Pill, StatCaption, StatCell, StatLabel, StatStrip, relativeTime } from '../../components/ui';
+import { CountUp, EmptyPanel, FigureCell, LiveIndicator, monthLabel, Pill, StatCaption, StatCell, StatLabel, StatStrip, relativeTime } from '../../components/ui';
 
 /**
  * The question the page exists for: who is owed, for what, and how long.
@@ -94,14 +94,19 @@ export default function Owed({ data, m, held, showAll }: { data: PayData; m: Pay
         />
         {/*
           The freshness cell, and the reason this page has one at all: nothing
-          owed and the sync not having run look identical, and on a pay page
-          that is the difference between a quiet month and an unpaid builder.
+          owed and nothing ever written look identical, and on a pay page that
+          is the difference between a quiet month and an unpaid builder. The
+          ledger is written with the session log now (2026-09-23), so what is
+          worth saying is whether this page is live, and when the ledger last
+          changed.
         */}
         <StatCell>
           <div className="min-w-0">
-            <StatLabel label="Ledger last written" detail={data.synced.note} />
-            <div className={`mt-1 text-[15px] leading-tight ${data.synced.at ? 'text-ink' : 'text-degraded'}`}>{lastSynced ?? 'never'}</div>
-            <StatCaption>{data.synced.at ? data.synced.at.slice(0, 16).replace('T', ' ') + ' UTC' : 'nothing has written it'}</StatCaption>
+            <StatLabel label="Ledger" detail={data.synced.note} />
+            <div className="mt-1 text-[15px] leading-tight">
+              <LiveIndicator />
+            </div>
+            <StatCaption>{data.synced.at ? `last written ${lastSynced ?? data.synced.at.slice(0, 16).replace('T', ' ') + ' UTC'}` : 'nothing has written it yet'}</StatCaption>
           </div>
         </StatCell>
       </StatStrip>

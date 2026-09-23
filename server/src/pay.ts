@@ -31,6 +31,7 @@
 import { getMeta, nowIso, setMeta } from './db';
 import { lastEngineWrite } from './store';
 import { query, withTransaction } from './pg';
+import * as events from './events';
 import * as airtable from './airtable';
 import * as mirror from './mirror';
 import {
@@ -246,8 +247,9 @@ async function freshnessOf(table: string, kind: string, label: string): Promise<
 }
 
 export async function data(): Promise<PayData> {
-  // The engine posts every thirty minutes now; the resync is retired. The
-  // newer of the two is when this ledger was last written.
+  // The ledger is written in the same request as the session log since
+  // 2026-09-23 (paySync.ts), and the resync is retired. The newer of the two
+  // is when this ledger was last written.
   const resyncAt = await getMeta(SYNCED_AT);
   const engineAt = await lastEngineWrite('pay_sessions');
   const at = [resyncAt, engineAt].filter((v): v is string => Boolean(v)).sort().reverse()[0] ?? null;
@@ -261,18 +263,16 @@ export async function data(): Promise<PayData> {
     freshness: await freshnessOf('engine_pay_sessions', 'pay_sessions', 'Sessions'),
     statements_freshness: await freshnessOf('engine_pay_statements', 'pay_statements', 'Monthly statements'),
     /**
-     * Two hops, and both are stated.
-     *
-     * The ledger is kept in step with the approved logs by a sync that runs
-     * every 30 minutes, and this dashboard reads the ledger when somebody
-     * presses Resync. So a tick made in Slack a few minutes ago may be in
-     * neither yet, and "nothing owed" and "nobody has looked" are different
-     * facts that look the same.
+     * One hop now (2026-09-23). The ledger is written in the same request as
+     * the session log that changed it — an approval, a Paid tick — so there is
+     * no half-hour window left to warn about; the page is live and says so.
+     * "Nothing owed" and "nothing ever written" still look the same, which is
+     * why the time is still on the page.
      */
     synced: {
       at,
       note: at
-        ? `The last time the ledger was written here — by the engine's pay sync, which posts every 30 minutes, or by a resync, whichever was later. A tick made in Slack in the last half hour may not be here yet.`
+        ? `The last time anything wrote the pay ledger. It is written in the same request as the session log it follows — an approval or a Paid tick on the log lands here at once — and this page re-reads itself when it does.`
         : `Nothing has ever written the ledger here. Until it is, an empty page means nobody has looked, not that nothing is owed.`,
     },
   };
@@ -354,6 +354,7 @@ export async function resync(actor = 'dashboard'): Promise<Resync> {
     if (gone.length) {
       await withTransaction(async (client) => {
         for (const row of gone) await client.query(`DELETE FROM ${table} WHERE id = $1`, [row.id]);
+        events.changed(src.kind, null, client);
       });
     }
 
