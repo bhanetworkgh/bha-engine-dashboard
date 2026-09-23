@@ -9022,3 +9022,17 @@ Decision:   Pay Mode frozen, Paid At = flip time, and Slack Card Link kept —
             POSTed to /api/engine/codex appeared on /pay after 802ms; a Paid
             PATCH by-natural showed "paid · Jason" on /pay after 818ms.
             Reconcile run twice locally: second run 0 created, 0 updated.
+
+## 2026-09-23 13:05 — Pay reconcile also runs at boot
+Intent:     Run the first production reconcile and report its counts.
+Files:      server/src/index.ts (boot), CLAUDE.md.
+Problem:    POST /api/engine/pay/reconcile needs DASHBOARD_INBOUND_KEY, which
+            this session does not hold, and the Render tools asked for a
+            workspace to be chosen, which is not mine to guess.
+Fix:        boot() runs paySync.reconcile() in the background after the
+            migrations, prints the counts, and writes them to engine_writes
+            (endpoint 'boot', method 'RECONCILE'), where query_postgres reads
+            them. Idempotent, so running it every boot costs a few hundred ms
+            and changes nothing when the ledger is already in step.
+Decision:   Every boot rather than once: a log written while the process was
+            restarting never reached the hook, and this is what catches it.

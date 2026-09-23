@@ -664,7 +664,10 @@ explicitly for this. Therefore:
   `POST /api/engine/pay/reconcile` (`x-dashboard-key`) runs every approved log
   through the same sync and every Sent statement through the same check,
   answers `{checked, created, updated, unchanged, statements_closed, failed}`,
-  and is safe to repeat — the second run reports everything unchanged.
+  and is safe to repeat — the second run reports everything unchanged. The
+  same pass also runs **once at every boot**, in the background, and its counts
+  land on `engine_writes` as endpoint `boot` — it catches a log written while
+  the process was down, and it put the first production run on the record.
   `npm run test:pay` pins all of it.
 - **Open pages refresh themselves** (decision 2026-09-23, Destiny). Every write
   path announces `{kind, id, at}` on an in-process bus (`server/src/events.ts`)
