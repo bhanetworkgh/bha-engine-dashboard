@@ -2006,6 +2006,21 @@ asked for and a one-line summary of it would defeat the point of writing it down
 Sessions is the full ledger for when an answer needs checking. Statistics is the
 shape over time.
 
+**A session opens its Codex entry, in place** (2026-09-23, Destiny). The row
+links were wrong twice over: "Codex" opened `Codex Link`, which is the Otter
+recording, and "Airtable" opened a retired base. Both are gone, with every
+other Airtable link and word on /pay; **Open** shows the entry in the same
+dialog the Codex page uses (`src/screens/CodexEntryDialog.tsx`, moved there
+from Codex.tsx, not copied), **read-only** — no Approve, Send back, Delete or
+Airtable button, because this page has no write path. The recording is the
+narration link inside it. `GET /api/pay/sessions/:id/codex` resolves the
+session on the server: by `Codex Entry ID` where exactly one Codex row carries
+it, else by `Codex Link` = the entry's `Session Url` where exactly one does —
+only 67 of 211 Codex rows carry a `Codex Entry ID`, and on 23 Sep that split
+the 78 sessions 67 by id and 11 by recording, none ambiguous, none unresolved.
+Two matches is a 409 naming both, never a pick; none is a 404 the dialog
+states plainly, not in red.
+
 **Status colour on a statement: only `Disputed`, and `Sent` once it is older than
 fourteen days.** `Payment Sent` is not a success to celebrate, it is the normal
 state, so it carries none. A statement closes itself to Payment Sent once every

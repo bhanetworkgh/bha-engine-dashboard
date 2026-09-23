@@ -385,6 +385,10 @@ export function getPatternDetail(id: string): Promise<BuildPatternDetail> {
 }
 
 /** The full Codex entry text, fetched one entry at a time. The list carries only its opening. */
+/** The Codex entry behind one pay session, resolved on the server. A 404 says no entry is held for it. */
+export function getPaySessionCodex(sessionId: string): Promise<CodexEntryDetail> {
+  return api<{ entry: CodexEntryDetail; matched_by: string }>(`/api/pay/sessions/${encodeURIComponent(sessionId)}/codex`).then((r) => r.entry);
+}
 export function getCodexDetail(id: string): Promise<CodexEntryDetail> {
   return api<CodexEntryDetail>(`/api/codex/${encodeURIComponent(id)}`);
 }

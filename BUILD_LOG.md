@@ -8873,3 +8873,45 @@ Tested:     Local, seeded one pattern and three candidates: route returns them
             screenshots of the tab at ?view=candidates, the candidate dialog
             with the Pattern ID, and the click through to that pattern's dialog
             on the Patterns tab.
+
+## 2026-09-23 11:45 — Pay Tracker: Open shows the Codex entry; no Airtable on /pay
+Intent:     Destiny, 23 Sep. "Codex" on a pay session opened s.codex_link, which
+            is the Otter recording, and "Airtable" pointed at a retired base
+            (AIRTABLE_RETIRED=true). One "Open" button that shows the session's
+            Codex entry in the Codex page's own dialog; no Airtable on /pay; and
+            LOOP-1790112860892-45ZS, the Sessions tab listing every month.
+Files:      src/screens/CodexEntryDialog.tsx (new: the dialog and its helpers,
+            moved whole from Codex.tsx), src/screens/Codex.tsx,
+            src/screens/PayTracker/{Owed,Sessions,Statements}.tsx,
+            server/src/store.ts (codexForPaySession), server/src/index.ts
+            (GET /api/pay/sessions/:id/codex), server/src/pay.ts (wording),
+            src/data/index.ts, CLAUDE.md
+Data:       engine_pay_sessions: natural_id = Codex Entry ID, fields carry
+            "Codex Entry ID" and "Codex Link" (Otter). engine_codex_submissions
+            is keyed by Submission ID; only 67 of 211 rows carry "Codex Entry
+            ID". CODEX-20260921-ahad-vfarm-integration is row 206
+            (U0AC6RFNP3P_1790028328627) by id. CODEX-20260917-ahad-cst-tenancy-
+            voice-boundaries matches no Codex Entry ID at all: its row is 186
+            (U0AC6RFNP3P_1789681773186), which carries none, and whose "Session
+            Url" is exactly the pay session's Codex Link. Across all 78 sessions:
+            67 resolve by id, 11 only by recording URL, 0 ambiguous, 0 none.
+Decision:   Resolved on the server, id first then recording URL, each only on
+            exactly one match — two is a 409 naming both, none a 404 ("No Codex
+            entry is held for this session."), shown neutral rather than red.
+            The dialog is read-only on /pay (no Approve / Send back / Delete /
+            Airtable) because Pay Tracker has no write path; the Codex page keeps
+            all of them. The Otter link stays in the dialog as the narration
+            link. Every other Airtable word on /pay went too: the Owed empty
+            state, two Sessions notes, the Sessions SourceLink ("Airtable ↗"),
+            Statements' "Open in Airtable", and two notes pay.ts writes.
+Problem:    Sessions was already month-scoped (4ba4feb, 19:25 UTC on 22 Sep); the
+            loop was raised at 21:34. With an August row seeded locally the tab
+            shows only September — but its "N rows are held for M sessions" line
+            counted the whole ledger. It now says so ("Across the whole ledger,
+            not only this month"). Every production session is in 2026-09, so
+            the month scope cannot be seen there until October.
+Tested:     Local: CODEX-1 → 200 by codex_entry_id; CODEX-2 → 200 by
+            session_url; CODEX-3 → 404 with the sentence. Screenshots: Sessions
+            scoped to Sep (4 of 5 held), Open from Sessions and from Owed shows
+            the read-only dialog with the Otter link inside, the 404 dialog, and
+            the Codex page's dialog still carrying its actions.

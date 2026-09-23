@@ -879,6 +879,21 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       if (!d) throw new HttpError(404, 'That pattern is not held by this dashboard.');
       return send(res, 200, d);
     }
+    /**
+     * The Codex entry behind a pay session, for the Open button on Pay
+     * Tracker (2026-09-23). Resolved here, never guessed in the client.
+     */
+    const payCodex = p.match(/^\/api\/pay\/sessions\/([^/]+)\/codex$/);
+    if (payCodex) {
+      try {
+        const r = await store.codexForPaySession(decodeURIComponent(payCodex[1]));
+        if (!r) throw new HttpError(404, 'No Codex entry is held for this session.');
+        return send(res, 200, r);
+      } catch (e) {
+        if (e instanceof store.AmbiguousCodex) throw new HttpError(409, e.message);
+        throw e;
+      }
+    }
     // The full Codex entry (Orchestrator Layer2 Review) is thousands of words,
     // so it is fetched one entry at a time rather than carried on the list.
     const codexDetail = p.match(/^\/api\/codex\/([^/]+)$/);

@@ -813,6 +813,48 @@ export async function codexDetail(id: string): Promise<CodexEntryDetail | null> 
   return r ? (JSON.parse(r.json) as CodexEntryDetail) : null;
 }
 
+/**
+ * The Codex entry behind one pay session (2026-09-23, Destiny). The session
+ * row carries `Codex Entry ID` and `Codex Link`; the Codex rows are keyed by
+ * Submission ID, and only 67 of 211 carry a `Codex Entry ID` at all, so the id
+ * alone reaches 67 of the 78 sessions held. The other 11 resolve by recording:
+ * the session's `Codex Link` is the same Otter URL as the entry's `Session Url`
+ * (checked on 23 Sep: 67 by id, 11 by url, none ambiguous, none unresolved).
+ *
+ * Id first, then url, and each only when it names exactly one row — two
+ * matches is a conflict to report, never a pick. Nothing found is null, and
+ * the page says "No Codex entry is held for this session" rather than opening
+ * an empty dialog.
+ */
+export class AmbiguousCodex extends Error {}
+export async function codexForPaySession(sessionId: string): Promise<{ entry: CodexEntryDetail; matched_by: 'codex_entry_id' | 'session_url' } | null> {
+  const s = await db().query<{ cid: string | null; link: string | null }>(
+    `SELECT fields->>'Codex Entry ID' AS cid, fields->>'Codex Link' AS link
+       FROM engine_pay_sessions
+      WHERE natural_id = $1 OR fields->>'Codex Entry ID' = $1
+      ORDER BY updated_at DESC LIMIT 1`,
+    [sessionId],
+  );
+  const cid = s.rows[0]?.cid ?? sessionId;
+  const link = s.rows[0]?.link ?? null;
+  const key = (r: { airtable_record_id: string | null; pk: string }) => r.airtable_record_id ?? `row-${r.pk}`;
+  const tryBy = async (sql: string, v: string) => (await db().query<{ airtable_record_id: string | null; pk: string }>(sql, [v])).rows;
+  const byId = await tryBy(`SELECT airtable_record_id, id::text AS pk FROM engine_codex_submissions WHERE fields->>'Codex Entry ID' = $1`, cid);
+  if (byId.length > 1) throw new AmbiguousCodex(`${byId.length} Codex rows carry the Codex Entry ID ${cid}: ${byId.map(key).join(', ')}.`);
+  if (byId.length === 1) {
+    const entry = await codexDetail(key(byId[0]));
+    if (entry) return { entry, matched_by: 'codex_entry_id' };
+  }
+  if (!link) return null;
+  const byUrl = await tryBy(`SELECT airtable_record_id, id::text AS pk FROM engine_codex_submissions WHERE fields->>'Session Url' = $1`, link);
+  if (byUrl.length > 1) throw new AmbiguousCodex(`${byUrl.length} Codex rows share this session's recording link: ${byUrl.map(key).join(', ')}.`);
+  if (byUrl.length === 1) {
+    const entry = await codexDetail(key(byUrl[0]));
+    if (entry) return { entry, matched_by: 'session_url' };
+  }
+  return null;
+}
+
 /* --------------------------------------------------- layer 0 holding table */
 
 /**
