@@ -226,6 +226,21 @@ explicitly for this. Therefore:
   only one of them can be honoured safely. **Nothing is deleted** — the client,
   the resyncs and the final import all stay exactly as they are, because the
   flag is reversible and a deletion is not.
+- **Airtable is gone from the interface** (decision 2026-09-23, Destiny).
+  Every "Open in Airtable" button and row action, the "Airtable record" field,
+  the `airtable_url` CSV columns (the id column stays, headed `record_id`), the
+  source links that drew "Airtable ↗", and every hint or definition that
+  named it are removed or reworded to say the engine writes these rows. The
+  Resync button draws only where its pass reads a live source — Engine
+  health's "Resync from BHARAG" — and nothing on the other pages. The
+  not-landed marker, banner and toasts stop drawing (`unlanded()` is false):
+  with the write-back forced off, the only failures left were stale ones from
+  before the cutover. **The data is untouched**: `airtable_record_id`, the
+  `airtable` fields on API payloads and the importers all stay, as history.
+  The registry keeps Airtable as a **retired** service (migration 27), its
+  url shown unlinked, and its bases as the history section with no action.
+  An incident whose own n8n node name says "(Airtable)" is engine data and
+  is shown as written.
 - **Changing a loop's builder is a move, not an edit.** There is no builder
   field: the builder *is* which of the seven tables the row sits in. Read the
   source row, create in the destination, confirm a record id came back, and

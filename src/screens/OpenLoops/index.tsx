@@ -187,7 +187,7 @@ export default function OpenLoops() {
         wb?.state === 'duplicate'
           ? { text: wb.reason ?? 'The loop is now in two tables.', tone: 'failing' }
           : wb?.state === 'failed'
-            ? { text: `Saved here, but Airtable did not take it: ${wb.reason ?? 'no reason given'}`, tone: 'failing' }
+            ? { text: `Saved here, but the write-back did not land: ${wb.reason ?? 'no reason given'}`, tone: 'failing' }
             : { text: said, tone: 'ok' },
       );
     } catch (e) {
@@ -295,7 +295,7 @@ export default function OpenLoops() {
             dateOf={(l) => l.raised_at}
             columns={[
               { header: 'loop_id', value: (l) => l.loop_id },
-              { header: 'airtable_record_id', value: (l) => l.id },
+              { header: 'record_id', value: (l) => l.id },
               { header: 'what', value: (l) => l.title },
               { header: 'owner', value: (l) => l.owner },
               { header: 'status', value: (l) => l.status },
@@ -304,7 +304,6 @@ export default function OpenLoops() {
               { header: 'date_raised', value: (l) => l.raised_at },
               { header: 'closed_at', value: (l) => l.closed_at },
               { header: 'age_days', value: (l) => l.age_days },
-              { header: 'airtable_url', value: (l) => l.airtable.url },
             ]}
           />
         </div>

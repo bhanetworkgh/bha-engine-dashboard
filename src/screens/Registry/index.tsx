@@ -741,9 +741,15 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
                 */}
                 {/*
                   The url is shown, not edited here (2026-09-22, Destiny): the
-                  small "edit" beside it came off. The link stays clickable.
+                  small "edit" beside it came off. The link stays clickable —
+                  except on a retired service (2026-09-23): Airtable is kept as
+                  the tool BHA paid for, but nothing here sends anybody to it.
                 */}
-                {s.url ? (
+                {s.url && s.status === 'retired' ? (
+                  <span className="block min-w-0 truncate text-[10.5px] text-faint" title="Retired — kept as a record, not linked">
+                    {s.url.replace(/^https?:\/\//, '')}
+                  </span>
+                ) : s.url ? (
                   <a
                     href={s.url}
                     target="_blank"
@@ -987,7 +993,6 @@ function EndpointsTab({ rows, bases, digests, ...p }: TabProps & { rows: Registr
                 {...p}
                 kind="bases"
                 row={b}
-                extra={b.url ? <RowAction label="Open in Airtable" onClick={() => window.open(b.url!, '_blank', 'noreferrer')} /> : undefined}
               />
             </td>
           </tr>

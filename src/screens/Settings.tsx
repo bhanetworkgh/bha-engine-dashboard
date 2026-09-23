@@ -98,29 +98,6 @@ export default function Settings() {
                   tone={s.inbound_configured ? 'ok' : 'off'}
                 />
                 <Row label="Records editable here" value={s.writable.join(' · ')} />
-                {/*
-                  Three states, not two, since 2026-09-21. With AIRTABLE_WRITEBACK
-                  off, a page edit is saved here and deliberately not sent
-                  anywhere — so this says that plainly and carries no tone. It
-                  is where the record is, not a fault, and the token being set
-                  or not does not change it.
-                */}
-                <Row
-                  label="Loop and Codex edits to Airtable"
-                  value={
-                    !s.airtable_writeback
-                      ? 'Off · AIRTABLE_WRITEBACK is not set, so edits are saved to this dashboard only'
-                      : s.airtable_configured
-                        ? `Token set · written directly${s.writeback_failures ? ` · ${s.writeback_failures} record${s.writeback_failures === 1 ? '' : 's'} did not land` : ''}`
-                        : 'No AIRTABLE_TOKEN · loops edited here will not reach Airtable'
-                  }
-                  tone={!s.airtable_writeback ? undefined : s.airtable_configured && !s.writeback_failures ? 'ok' : 'off'}
-                />
-                <Row
-                  label="Open Loops base"
-                  value={s.airtable_base ? <span className="break-all tabular">{s.airtable_base}</span> : 'Not set — AIRTABLE_OPEN_LOOPS_BASE_ID · loop edits have no base to write to'}
-                  tone={s.airtable_base ? undefined : 'off'}
-                />
                 <Row label="Incidents, twins, vFarm, builders" value="Phase 1 fixtures, served by this server" tone="off" />
                 <Row label="Status history since" value={s.history_since ? new Date(s.history_since).toLocaleString() : 'not started'} />
                 <Row

@@ -1,9 +1,15 @@
 import type { Source } from '../../data';
 
-const SOURCE_LABEL = { slack: 'Slack', airtable: 'Airtable', n8n: 'n8n' } as const;
+const SOURCE_LABEL: Record<string, string> = { slack: 'Slack', n8n: 'n8n' };
 
 /** Every row links back to where it came from. */
 export function SourceLink({ source }: { source: Source }) {
+  /*
+   * A row whose source is the retired store draws nothing (2026-09-23): the
+   * record lives in this dashboard now, and a link there opens a stale,
+   * capped copy. Slack and n8n sources still link out.
+   */
+  if (!SOURCE_LABEL[source.kind]) return null;
   return (
     <a
       href={source.url}

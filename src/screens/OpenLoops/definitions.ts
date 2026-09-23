@@ -37,7 +37,7 @@ import type { LoopStatus } from '../../data';
  */
 
 export const LOOP_STATUS_DEFS: Record<LoopStatus, string> = {
-  open: 'Status is Open in Airtable’s loop table. An empty Status, or a value other than Open, In Progress or Closed, is also read as open.',
+  open: 'Status is Open on the loop. An empty Status, or a value other than Open, In Progress or Closed, is also read as open.',
   'in progress': 'Status is In Progress — set by Start on this page or written by the engine.',
   closed:
     'Status is Closed. The closed date is set only when this dashboard saw the change happen; a loop already Closed when first held has none.',

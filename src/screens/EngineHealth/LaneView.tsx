@@ -615,7 +615,7 @@ export const CLASS_DEFS: Record<string, string> = {
   UPSTREAM_5XX: 'Another service answered 500, 502, 503 or 504. Retried.',
   BILLING_QUOTA: 'A 402, payment required, or credits or quota exhausted. Not retried; goes to a person.',
   CONFIG_AUTH: 'A credential or access failure, such as a Google permission denied. Not retried; goes to a person.',
-  SCHEMA_VALIDATION: 'A request that cannot work as sent: a 404, a missing or forbidden Airtable field, or a 400. Not retried; sent to the repair bridge.',
+  SCHEMA_VALIDATION: 'A request that cannot work as sent: a 404, a missing or forbidden field, or a 400. Not retried; sent to the repair bridge.',
   UNKNOWN: 'Neither the handler’s rules nor its model classifier could place it. Sent to the repair bridge.',
 };
 

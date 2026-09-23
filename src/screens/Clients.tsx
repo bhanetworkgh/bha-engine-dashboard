@@ -151,9 +151,6 @@ function LaneView({ lane, questions, onClose }: { lane: ClientLaneRow; questions
                 Latest report
               </a>
             )}
-            <a href={lane.airtable.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
-              Open in Airtable
-            </a>
             <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
               Close
             </button>
@@ -279,8 +276,8 @@ function EngineWritesLine({ d, kinds }: { d: ClientsData; kinds: ('lanes' | 'que
     <p className="text-[12px] text-dim">
       Last written by the engine — {parts.join(' · ')}.{' '}
       {rows.length > 0 && viaResync === rows.length
-        ? `Every one of the ${rows.length} rows here arrived through a resync from Airtable, so this is a copy as of that resync, not a live feed.`
-        : `${viaResync} of ${rows.length} rows here arrived through a resync from Airtable; the rest were written by the engine.`}
+        ? `Every one of the ${rows.length} rows here were copied in before the engine began writing here, so this is a copy as of that import, not a live feed.`
+        : `${viaResync} of ${rows.length} rows here were copied in before the engine began writing here; the rest were written by the engine.`}
     </p>
   );
 }
@@ -397,7 +394,6 @@ function LaneTable({ clients, lanes, onOpen }: { clients: ClientGroup[]; lanes: 
                     <td className="td card-actions td-actions">
                       <RowActions>
                         <RowAction label="View" tone="accent" onClick={() => onOpen(l.id)} />
-                        <RowAction label="Open in Airtable" onClick={() => window.open(l.airtable.url, '_blank', 'noreferrer')} />
                       </RowActions>
                     </td>
                   </tr>
@@ -471,7 +467,7 @@ function RequestTable({ clients, requests }: { clients: ClientGroup[]; requests:
           <Th>category</Th>
           <Th>lane</Th>
           <Th>
-            <span title="Airtable’s own Status on the request. Requested and Under Review are still interest; Confirmed and Delivered are commitments; Declined is settled." className="cursor-help">
+            <span title="The request’s own Status. Requested and Under Review are still interest; Confirmed and Delivered are commitments; Declined is settled." className="cursor-help">
               status
             </span>
           </Th>
@@ -732,7 +728,7 @@ export default function Clients() {
             */}
             <p className="max-w-[92ch] text-[11.5px] leading-relaxed text-faint">
               A request stays <span className="text-ink">Requested</span> or <span className="text-ink">Under Review</span> until every open check is cleared. Nothing here is a
-              commitment until Airtable says <span className="text-ink">Confirmed</span>, and this dashboard never writes to that table.
+              commitment until its Status says <span className="text-ink">Confirmed</span>, and this dashboard never writes to that table.
             </p>
           </div>
 
@@ -766,7 +762,6 @@ export default function Clients() {
               { header: 'missing_research', value: (q) => q.missing_research },
               { header: 'research_stuck', value: (q) => q.research_stuck },
               { header: 'last_updated', value: (q) => q.last_updated },
-              { header: 'airtable_url', value: (q) => q.airtable.url },
             ]}
           />
         </div>

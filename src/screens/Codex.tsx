@@ -3,7 +3,7 @@ import { useData } from '../app/useData';
 import {
   getCodexEntries,
   getRecordMetrics,
-  resyncCodex as resyncCodexFromAirtable,
+  resyncCodex,
   type CodexEntry,
   type CodexData,
   type CodexMetrics,
@@ -34,7 +34,6 @@ import {
   thisMonth,
   SearchBox,
   Segmented,
-  SourceLink,
   StatCell,
   Tabs,
   StatStrip,
@@ -458,7 +457,6 @@ function codexColumns(open: (e: CodexEntry) => void): RecordColumn<CodexEntry>[]
       cell: (e) => (e.paid === null ? <span className="text-faint">not recorded</span> : <Pill>{e.paid ? 'paid' : 'unpaid'}</Pill>),
     },
     { key: 'quality', header: 'quality', className: 'text-faint', title: (e) => (e.narration_quality ? QUALITY_DEF : undefined), cell: (e) => e.narration_quality?.toLowerCase() ?? '—' },
-    { key: 'source', header: 'source', cell: (e) => <SourceLink source={e.source} /> },
     {
       key: 'actions',
       align: 'right',
@@ -467,7 +465,6 @@ function codexColumns(open: (e: CodexEntry) => void): RecordColumn<CodexEntry>[]
       cell: (e) => (
         <RowActions>
           <RowAction label="Read entry" tone="accent" onClick={() => open(e)} />
-          <RowAction label="Open in Airtable" onClick={() => window.open(e.airtable.url, '_blank', 'noreferrer')} />
         </RowActions>
       ),
     },
@@ -540,7 +537,7 @@ export default function Codex() {
    * total looks wrong.
    */
   const resync = useResync({
-    run: resyncCodexFromAirtable,
+    run: resyncCodex,
     reload: async () => {
       setTick((n) => n + 1);
       setEntries((await getCodexEntries({ lane: 'all' })).entries);
@@ -598,7 +595,7 @@ export default function Codex() {
             columns={[
               { header: 'codex_entry_id', value: (e) => e.codex_entry_id },
               { header: 'submission_id', value: (e) => e.submission_id },
-              { header: 'airtable_record_id', value: (e) => e.id },
+              { header: 'record_id', value: (e) => e.id },
               { header: 'builder', value: (e) => e.builder_id },
               { header: 'logged_at', value: (e) => e.logged_at },
               { header: 'jason_status', value: (e) => e.jason_status },
@@ -608,7 +605,6 @@ export default function Codex() {
               { header: 'session_description', value: (e) => e.description_excerpt },
               { header: 'session_type', value: (e) => e.session_type },
               { header: 'layer0_flagged', value: (e) => e.layer0_flagged },
-              { header: 'airtable_url', value: (e) => e.airtable.url },
             ]}
           />
         </div>

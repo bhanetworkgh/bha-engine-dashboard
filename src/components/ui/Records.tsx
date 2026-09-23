@@ -257,15 +257,23 @@ export function RowsLine({ freshness, writes = true }: { freshness: Freshness; w
  * delete did not — but it belongs here with `failed` because the reader's
  * problem is the same either way: what is on screen is not what Airtable holds.
  */
-export function unlanded(w: RecordWrite | null | undefined): boolean {
-  return w?.state === 'failed' || w?.state === 'duplicate';
+export function unlanded(_w: RecordWrite | null | undefined): boolean {
+  /*
+   * Always false since 2026-09-23 (Destiny): Airtable is retired, the
+   * write-back is forced off, and these tables are the record. A write can no
+   * longer fail to land anywhere, so the only failures left to show are stale
+   * ones from before the cutover — a marker saying this dashboard disagrees
+   * with a system that is no longer the record. The row data is untouched;
+   * only its marker, banner and toast stop drawing.
+   */
+  return false;
 }
 
 /** The whole sentence, for the tooltip and the panel. */
 export function writeWarning(w: RecordWrite, digestNote?: string): string {
   const tail = w.steps ? ` Completed: ${w.steps}.` : '';
   if (w.state === 'duplicate') return `${w.reason ?? 'This record exists in two tables.'}${tail}`;
-  return `The change did not reach Airtable${w.http ? ` (HTTP ${w.http})` : ''}, so it still holds the old values. ${w.reason ?? 'No reason was given.'}${tail}${digestNote ? ` ${digestNote}` : ''}`;
+  return `The change did not land${w.http ? ` (HTTP ${w.http})` : ''}. ${w.reason ?? 'No reason was given.'}${tail}${digestNote ? ` ${digestNote}` : ''}`;
 }
 
 /**
@@ -277,7 +285,7 @@ export function NotLanded({ write }: { write: RecordWrite }) {
   return (
     <span className="inline-flex items-center gap-1 text-[11px] leading-tight whitespace-nowrap text-failing">
       <span aria-hidden className="h-[6px] w-[6px] shrink-0 rounded-full bg-failing" />
-      {write.state === 'duplicate' ? 'in two tables' : 'not in Airtable'}
+      {write.state === 'duplicate' ? 'in two tables' : 'did not land'}
     </span>
   );
 }

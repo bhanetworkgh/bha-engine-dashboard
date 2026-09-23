@@ -60,7 +60,7 @@ export const MEDIA_DEFS: Record<string, string> = {
 export const READINESS_DEFS: Record<string, string> = {
   'Research-First': `readiness_state is "Research-First". ${COMM_EXTRACTOR}. The prompt says it is "derived mechanically" from infra, data and media readiness but gives no rule for the derivation, so the model decides it.`,
   'Media-Ready': `readiness_state is "Media-Ready". ${COMM_EXTRACTOR}, or set here with "Set media-ready". The prompt says it is "derived mechanically" from infra, data and media readiness but gives no rule for the derivation, so the model decides it.`,
-  INCUBATE: 'readiness_state is "INCUBATE". An option on the Airtable field that this page can set; the extractor never writes it (its prompt offers Research-First, Media-Ready and Outbound-Ready).',
+  INCUBATE: 'readiness_state is "INCUBATE". An option of the field that this page can set; the extractor never writes it (its prompt offers Research-First, Media-Ready and Outbound-Ready).',
   none: 'readiness_state is blank, or holds a value this page does not know — anything other than INCUBATE, Research-First or Media-Ready, which includes the extractor’s own Outbound-Ready.',
 };
 

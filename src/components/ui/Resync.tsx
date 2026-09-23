@@ -52,7 +52,7 @@ export function resyncToast(r: Resync): { text: string; tone: 'ok' | 'failing' }
    * the two agree. The reason for each is in the server log.
    */
   const refused = r.refused ? ` · ${r.refused} ${r.refused === 1 ? 'row was' : 'rows were'} refused by this database` : '';
-  const reverted = r.overwritten.length ? ` · ${r.overwritten.length} ${r.overwritten.length === 1 ? 'change' : 'changes'} made here and never landed in Airtable ${r.overwritten.length === 1 ? 'was' : 'were'} reverted` : '';
+  const reverted = r.overwritten.length ? ` · ${r.overwritten.length} ${r.overwritten.length === 1 ? 'change' : 'changes'} made here ${r.overwritten.length === 1 ? 'was' : 'were'} reverted` : '';
   return { text: `Resync complete in ${secs} · ${totals}${refused}${reverted}`, tone: refused || reverted ? 'failing' : 'ok' };
 }
 
@@ -94,22 +94,18 @@ export function useAirtableRetired(): boolean | null {
 }
 
 /**
- * The button, in the page header's right slot, the same on every page that has
- * one — and gone from all six at once when Airtable is retired, because the
- * check is here rather than on each page.
+ * The button, in the page header's right slot (2026-09-23, Destiny): drawn
+ * only where the page's pass reads a live source, and labelled by that source.
+ * Engine health reads the incident ledger from BHARAG, so it keeps a "Resync
+ * from BHARAG" button. Every other page's pass read the retired store alone,
+ * so on those pages the button draws nothing — the call sites stay, the
+ * button does not.
  */
-export function ResyncButton({ busy, onClick, alsoReads }: { busy: boolean; onClick: () => void; /**
-   * A source this page's pass reads that is **not** Airtable (2026-09-22).
-   * Engine health reads the incident ledger from BHARAG, so its button stays
-   * when Airtable is retired and says what it reads instead. Every other page
-   * reads Airtable alone and loses the button.
-   */ alsoReads?: string }) {
-  const retired = useAirtableRetired();
-  if (retired && !alsoReads) return null;
-  const from = retired ? alsoReads! : alsoReads ? `Airtable and ${alsoReads}` : 'Airtable';
+export function ResyncButton({ busy, onClick, alsoReads }: { busy: boolean; onClick: () => void; /** The live source this page's pass reads, e.g. "BHARAG". None, no button. */ alsoReads?: string }) {
+  if (!alsoReads) return null;
   return (
-    <button type="button" onClick={onClick} disabled={busy} className="btn btn-primary gap-1.5" title={`Reads ${from} and brings this page up to date with it`}>
-      {busy ? `Reading ${from}…` : retired ? `Resync from ${alsoReads}` : 'Resync from Airtable'}
+    <button type="button" onClick={onClick} disabled={busy} className="btn btn-primary gap-1.5" title={`Reads ${alsoReads} and brings this page up to date with it`}>
+      {busy ? `Reading ${alsoReads}…` : `Resync from ${alsoReads}`}
     </button>
   );
 }

@@ -295,7 +295,7 @@ export default function Retries({ data, tick, onChanged }: { data: HealthData; t
           {rows.length === 0 ? (
             <EmptyState>
               {data.retries_freshness.source === 'none'
-                ? (data.retries_freshness.note ?? 'No retry is held. The healer writes a row the first time it touches an incident, and Resync from Airtable brings them across.')
+                ? (data.retries_freshness.note ?? 'No retry is held. The healer writes a row here the first time it touches an incident.')
                 : q.trim()
                   ? 'No retry matches that search in this filter.'
                   : filter === 'Exhausted'

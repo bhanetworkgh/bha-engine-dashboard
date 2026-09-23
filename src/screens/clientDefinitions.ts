@@ -88,7 +88,7 @@ export const NOT_COMMITTED_DEF =
   'Any request whose Status is not Confirmed, Delivered or Declined — Requested, Under Review, blank, or a status this dashboard has not seen.';
 
 export const OPEN_CHECKS_DEF =
-  'The request’s Open Checks, as Airtable holds them: any of Feasibility, Licensing, Food Safety, Pricing and Ownership. Each named check is a confirmation still owed; none named is written as nothing outstanding. The table’s rule is that a request stays Requested or Under Review until every check is cleared — this dashboard shows both and enforces neither.';
+  'The request’s Open Checks, as the request holds them: any of Feasibility, Licensing, Food Safety, Pricing and Ownership. Each named check is a confirmation still owed; none named is written as nothing outstanding. The table’s rule is that a request stays Requested or Under Review until every check is cleared — this dashboard shows both and enforces neither.';
 
 export function requestStatusDef(status: string | null): string {
   return (status && REQUEST_STATUS_DEFS[status]) || REQUEST_STATUS_UNKNOWN;
