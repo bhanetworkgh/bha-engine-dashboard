@@ -3,33 +3,7 @@ import { createPortal } from 'react-dom';
 import { useData } from '../../app/useData';
 import { closeIncidents, getHealthMetrics, type HealthData, type HealthMetrics, type HealthWeek, type Incident, type IncidentCloseResult } from '../../data';
 import type { RecordColumn } from '../../components/ui';
-import {
-  CountUp,
-  Definition,
-  DistTile,
-  EmptyPanel,
-  EmptyState,
-  FigureCell,
-  HBar,
-  Loading,
-  MetricCard,
-  Pagination,
-  PercentCell,
-  Pill,
-  RecordId,
-  RecordTable,
-  RowAction,
-  RowActions,
-  SearchBox,
-  Segmented,
-  StatCaption,
-  StatCell,
-  StatLabel,
-  StatStrip,
-  TileFigure,
-  relativeTime,
-  usePaged,
-} from '../../components/ui';
+import { Pagination, Button, CountUp, Definition, DistTile, FigureCell, HBar, TileFigure, Pill, Loading, MetricCard, EmptyPanel, EmptyState, PercentCell, RecordId, RecordTable, relativeTime, RowAction, RowActions, SearchBox, Segmented, StatCaption, StatCell, StatLabel, StatStrip, usePaged } from '../../components/ui';
 import { ClassPill, IncidentPanel, LaneReads, SeverityPill, when } from './parts';
 import { HEALTH_KINDS } from './kinds';
 
@@ -308,18 +282,18 @@ export default function LaneView({ data, lane, tick, onChanged, initialOpen = nu
                 <div className="flex items-center gap-2">
                   {selected.length > 0 && (
                     <>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSel(new Set())} disabled={busy}>
+                      <Button variant="ghost" size="sm" onClick={() => setSel(new Set())} disabled={busy}>
                         Clear
-                      </button>
-                      <button type="button" className="btn btn-primary btn-sm" onClick={() => setConfirming(true)} disabled={busy}>
+                      </Button>
+                      <Button variant="primary" size="sm" onClick={() => setConfirming(true)} disabled={busy}>
                         Mark resolved…
-                      </button>
+                      </Button>
                     </>
                   )}
                   {selected.length === 0 && (
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setResult(null); setCloseError(null); }}>
+                    <Button variant="ghost" size="sm" onClick={() => { setResult(null); setCloseError(null); }}>
                       Dismiss
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -404,12 +378,12 @@ function CloseConfirm({ incidents, busy, onCancel, onConfirm }: { incidents: Inc
           ))}
         </div>
         <div className="mt-4 flex justify-end gap-2">
-          <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>
+          <Button variant="ghost" onClick={onCancel} disabled={busy}>
             Cancel
-          </button>
-          <button type="button" className="btn btn-primary" onClick={onConfirm} disabled={busy}>
+          </Button>
+          <Button variant="primary" onClick={onConfirm} disabled={busy}>
             {busy ? `Closing ${n}…` : `Close ${n} in the ledger`}
-          </button>
+          </Button>
         </div>
       </div>
     </div>,

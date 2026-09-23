@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../app/useData';
 import { askBays, forgetThread, getAskBays, saveLocalThreads, type ChatMessage, type ChatThread } from '../data';
-import { Icon, LoadFailed, Loading } from '../components/ui';
+import { Button, Icon, LoadFailed, Loading } from '../components/ui';
 import { ClockChip, ThemeChip } from '../components/ClockChip';
 import { cx } from '../lib';
 
@@ -181,14 +181,14 @@ function ThreadMenu({
   );
   return (
     <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setOpen((v) => !v)}
         aria-label="Thread options"
-        className={cx('btn btn-ghost h-7 w-7 rounded-full p-0 text-faint transition-colors hover:text-ink', open && 'bg-hover text-ink')}
+        className={cx('h-7 w-7 rounded-full p-0 text-faint transition-colors hover:text-ink', open && 'bg-hover text-ink')}
       >
         <Icon.more />
-      </button>
+      </Button>
       {open && (
         <div className="card fade-up absolute top-full right-0 z-20 mt-1 w-[150px] p-1 shadow-[var(--shadow-pop)]">
           {item(thread.pinned ? 'Unpin' : 'Pin', Icon.pin, onPin)}
@@ -576,12 +576,12 @@ export default function AskBays() {
                 className="input min-h-[36px] flex-1 resize-none border-0 bg-transparent shadow-none focus:shadow-none"
                 style={{ height: 'auto' }}
               />
-              <button
-                type="button"
+              <Button
+                variant="ghost"
                 onClick={toggleMic}
                 aria-label={listening ? 'Stop dictation' : 'Dictate a message'}
                 aria-pressed={listening}
-                className={cx('btn btn-ghost h-8 rounded-full p-0', listening ? 'w-auto gap-1.5 bg-accent-soft px-2.5 text-accent-ink' : 'w-8')}
+                className={cx('h-8 rounded-full p-0', listening ? 'w-auto gap-1.5 bg-accent-soft px-2.5 text-accent-ink' : 'w-8')}
               >
                 {listening ? (
                   <>
@@ -596,19 +596,18 @@ export default function AskBays() {
                 ) : (
                   <Icon.mic />
                 )}
-              </button>
-              <button
-                type="button"
-                onClick={() => void send()}
-                disabled={!draft.trim() || inFlight}
-                className="btn btn-primary h-8 w-8 rounded-full p-0"
-                aria-label="Send"
-              >
+              </Button>
+              <Button
+ onClick={() => void send()}
+ disabled={!draft.trim() || inFlight}
+ variant="primary" className="h-8 w-8 rounded-full p-0"
+ aria-label="Send"
+ >
                 <Icon.send />
-              </button>
-              <button type="button" onClick={() => setPanelOpen(true)} aria-label="Open chat history" className="btn btn-ghost h-8 md:hidden">
+              </Button>
+              <Button onClick={() => setPanelOpen(true)} aria-label="Open chat history" variant="ghost" className="h-8 md:hidden">
                 Chats
-              </button>
+              </Button>
             </div>
             <div className="mt-1.5 flex items-center justify-between px-1 text-[11px] text-faint">
               <span>Enter to send · shift+enter for a new line</span>
@@ -626,12 +625,12 @@ export default function AskBays() {
 
       {panelHidden ? (
         <div className="hidden w-[52px] shrink-0 flex-col items-center border-l border-line bg-panel py-3 md:flex">
-          <button type="button" onClick={() => setPanelHidden(false)} className="btn btn-ghost h-8 w-8 rounded-full p-0" aria-label="Show chat history" title="Show chat history">
+          <Button onClick={() => setPanelHidden(false)} variant="ghost" className="h-8 w-8 rounded-full p-0" aria-label="Show chat history" title="Show chat history">
             <Icon.sidebar />
-          </button>
-          <button type="button" onClick={newChat} className="btn btn-ghost mt-1 h-8 w-8 rounded-full p-0" aria-label="New chat" title="New chat">
+          </Button>
+          <Button onClick={newChat} variant="ghost" className="mt-1 h-8 w-8 rounded-full p-0" aria-label="New chat" title="New chat">
             <Icon.plus />
-          </button>
+          </Button>
         </div>
       ) : (
         <aside
@@ -641,10 +640,10 @@ export default function AskBays() {
           )}
         >
           <div className="space-y-2 p-3 pt-4">
-            <button type="button" onClick={newChat} className="btn w-full justify-start gap-2">
+            <Button onClick={newChat} className="w-full justify-start gap-2">
               <Icon.plus />
               New chat
-            </button>
+            </Button>
             <div className="relative">
               <Icon.search className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-faint" />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search chats" className="input h-8 pr-7 pl-8 text-[12px]" aria-label="Search chats" />
@@ -677,10 +676,10 @@ export default function AskBays() {
           </div>
 
           <div className="flex items-center justify-between border-t border-line px-3 py-2">
-            <button type="button" onClick={() => setPanelHidden(true)} className="btn btn-ghost btn-sm gap-1.5 text-faint" aria-label="Hide chat history">
+            <Button onClick={() => setPanelHidden(true)} variant="ghost" size="sm" className="gap-1.5 text-faint" aria-label="Hide chat history">
               <Icon.sidebar />
               <span className="hidden md:inline">Hide</span>
-            </button>
+            </Button>
             <span className="text-[11px] text-faint">{threads.length} chat{threads.length === 1 ? '' : 's'}</span>
           </div>
         </aside>

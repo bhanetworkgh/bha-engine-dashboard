@@ -1,7 +1,7 @@
 import type { Loop, LoopStatus, RecordWrite, OpenLoopsData } from '../../data';
 import { BUILDER_NAMES } from '../../data';
 import type { RecordColumn } from '../../components/ui';
-import { EmptyState, NotLanded, Pill, RecordId, RecordTable, RowAction, RowActions, unlanded, writeWarning } from '../../components/ui';
+import { Button, Pill, EmptyState, NotLanded, RecordId, RecordTable, RowAction, RowActions, unlanded, writeWarning } from '../../components/ui';
 import { duplicateSource } from './LoopPanel';
 import { ageTone, laneLabel } from '../../lib';
 import { LOOP_STATUS_DEFS, LOOP_STATUS_TERMS, ageBandDef } from './definitions';
@@ -187,14 +187,13 @@ export function Loops({ data, loops, total, busyId, onStatus, onOpen, onRemoveDu
                   <div key={l.id}>
                     <span className="tabular">{l.loop_id ?? l.id}</span> — {l.writeback?.reason ?? 'no reason was given'}
                     {l.writeback?.state === 'duplicate' && (
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm ml-2 align-baseline"
-                        disabled={busyId === l.id}
-                        onClick={() => onRemoveDuplicate(l)}
-                      >
+                      <Button
+ variant="ghost" size="sm" className="ml-2 align-baseline"
+ disabled={busyId === l.id}
+ onClick={() => onRemoveDuplicate(l)}
+ >
                         {busyId === l.id ? 'Removing…' : `Remove the copy in ${duplicateSource(l.writeback.from_builder)}`}
-                      </button>
+                      </Button>
                     )}
                   </div>
                 ))}

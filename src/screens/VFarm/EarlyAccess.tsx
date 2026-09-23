@@ -1,19 +1,7 @@
 import { useMemo, useState } from 'react';
 import { editVfarmLead, VFARM_LEAD_STATUSES, type VfarmLead, type VfarmLeadStatus, type VfarmLeadsData } from '../../data';
 import type { RecordColumn } from '../../components/ui';
-import {
-  Pagination,
-  Pill,
-  RecordTable,
-  SearchBox,
-  Segmented,
-  Stat,
-  StatCell,
-  StatStrip,
-  Toast,
-  usePaged,
-  useToast,
-} from '../../components/ui';
+import { Pagination, Button, Pill, Toast, RecordTable, SearchBox, Segmented, Stat, StatCell, StatStrip, usePaged, useToast } from '../../components/ui';
 import { EditableCell } from '../Registry/Editable';
 import { FORM_A_GROUPS, FORM_A_QUESTIONS } from '../../data/formA';
 
@@ -328,24 +316,23 @@ export default function EarlyAccess({ data, onChange, initialOpen = null }: { da
       <div className="flex shrink-0 flex-wrap items-center gap-3 px-6 pb-3 md:px-8">
         <Segmented options={options} value={filter} onChange={setFilter} ariaLabel="Filter by status" />
         <SearchBox value={q} onChange={setQ} placeholder="Search name, email or organisation" />
-        <button
-          type="button"
-          className="btn h-8 px-3 text-[12.5px]"
-          disabled={shown.length === 0}
-          onClick={async () => {
-            // The filtered set, in the order on screen — so what lands on the
-            // clipboard is what the reader was looking at, not the whole table.
-            const emails = [...new Set(shown.map((l) => l.email))];
-            const ok = await copy(emails.join(', '));
-            setToast(
-              ok
-                ? { text: `Copied ${emails.length} ${emails.length === 1 ? 'address' : 'addresses'}`, tone: 'ok' }
-                : { text: 'The browser would not let the page write to the clipboard.', tone: 'failing' },
-            );
-          }}
-        >
+        <Button
+ className="h-8 px-3 text-[12.5px]"
+ disabled={shown.length === 0}
+ onClick={async () => {
+ // The filtered set, in the order on screen — so what lands on the
+ // clipboard is what the reader was looking at, not the whole table.
+ const emails = [...new Set(shown.map((l) => l.email))];
+ const ok = await copy(emails.join(', '));
+ setToast(
+ ok
+ ? { text: `Copied ${emails.length} ${emails.length === 1 ? 'address' : 'addresses'}`, tone: 'ok' }
+ : { text: 'The browser would not let the page write to the clipboard.', tone: 'failing' },
+ );
+ }}
+ >
           Copy all emails
-        </button>
+        </Button>
         {shown.length !== leads.length && (
           <span className="text-[12px] text-faint">
             {shown.length} of {leads.length}
@@ -411,9 +398,9 @@ function LeadAnswers({ lead, onClose }: { lead: VfarmLead; onClose: () => void }
             {lead.organization_name ? ` · ${lead.organization_name}` : ''}
           </div>
         </div>
-        <button type="button" className="link text-[12px]" onClick={onClose}>
+        <Button variant="ghost" size="sm" onClick={onClose}>
           Close
-        </button>
+        </Button>
       </div>
 
       {!f ? (

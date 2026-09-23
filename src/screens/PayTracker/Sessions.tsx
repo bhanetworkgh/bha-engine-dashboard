@@ -3,7 +3,7 @@ import type { PayData, PaySession } from '../../data';
 import { getPaySessionCodex } from '../../data';
 import { CodexEntryDialog } from '../CodexEntryDialog';
 import type { RecordColumn } from '../../components/ui';
-import { EmptyState, Pagination, Pill, RecordId, RecordTable, SearchBox, Segmented, usePaged } from '../../components/ui';
+import { Button, EmptyState, Pagination, Pill, RecordId, RecordTable, SearchBox, Segmented, usePaged } from '../../components/ui';
 
 /**
  * Every session row, the full record.
@@ -71,9 +71,8 @@ function columns(openCodex: (id: string) => void): RecordColumn<PaySession>[] {
       cell: (s) => (
         <span className="flex items-center justify-end gap-2 text-[11.5px]">
           {s.codex_entry_id && (
-            <button
-              type="button"
-              className="link"
+            <Button
+              variant="secondary" size="sm"
               title="Opens this session's Codex entry here. The recording is linked inside it."
               onClick={(e) => {
                 e.stopPropagation();
@@ -81,7 +80,7 @@ function columns(openCodex: (id: string) => void): RecordColumn<PaySession>[] {
               }}
             >
               Open
-            </button>
+            </Button>
           )}
           {s.slack_card_link && (
             <a href={s.slack_card_link} target="_blank" rel="noreferrer" className="link" onClick={(e) => e.stopPropagation()}>

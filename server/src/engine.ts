@@ -291,7 +291,7 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
         headline: String(leads.n),
         sublabel: leads.n === 1 ? 'Early Access lead' : 'Early Access leads',
         signal: leads.n
-          ? `${leads.week} in the last 7 days; newest ${leads.newest ? new Date(leads.newest).toISOString().slice(0, 10) : 'undated'}.`
+          ? `${leads.week} in the last 7 days; newest ${leads.newest ? new Date(leads.newest).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : 'undated'}.`
           : 'No Early Access lead has arrived yet.',
         health: 'ok',
       },

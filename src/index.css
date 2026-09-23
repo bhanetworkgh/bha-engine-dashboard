@@ -29,10 +29,43 @@
   --dim: #6e6e73;
   --faint: #a1a1a6;
 
-  /* One accent: system blue. Links, selection, the single active thing. */
-  --accent: #0a7aff;
+  /* One accent: system blue. Links, selection, focus, the active tab.
+     #0a6ee6 rather than #0a7aff (Bays Horizon Network design system,
+     2026-09-23): same hue one step darker, so it clears 3:1 as a focus ring
+     on every ground. tint-blue keeps #0a7aff on purpose. */
+  --accent: #0a6ee6;
   --accent-soft: rgba(10, 122, 255, 0.12);
   --accent-ink: #0066d6;
+  /* The label on an accent fill: white in light, near-black in dark. */
+  --accent-on: #ffffff;
+
+  /* Brand gold (the design system's brand layer, matched to bhanetwork.org).
+     On the dashboard it fills the primary button and nothing else
+     (decision 2026-09-23, Destiny). */
+  --brand-gold: #e0b84a;
+  --brand-gold-bright: #eac765;
+  --brand-gold-deep: #9a7b2e;
+  --brand-black: #0a0a0a;
+
+  /* The primary action: gold, near-black label (10.49:1). In light the fill
+     is 1.7:1 on the page, so it carries a brand-gold-deep hairline (3.68:1)
+     to read as a control; in dark the fill itself is 9.75:1. */
+  --primary: var(--brand-gold);
+  --primary-hover: var(--brand-gold-bright);
+  --primary-on: var(--brand-black);
+  --primary-edge: var(--brand-gold-deep);
+
+  /* Destructive: filled red with a label that clears AA (white 6.54:1). */
+  --danger: #b3261e;
+  --danger-hover: #9f1f18;
+  --danger-on: #ffffff;
+
+  /* A glyph inside a coloured icon tile. */
+  --on-tile: #ffffff;
+  --shadow-glass: 0 10px 28px rgba(0, 0, 0, 0.08);
+  /* The select chevron, in dim. A data URI cannot read a variable, so the
+     whole image is the token and dark mode gets its own. */
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%236e6e73' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");
 
   /* Colour carries meaning. Healthy is green only on a status dot. */
   --ok: #34c759;
@@ -91,6 +124,27 @@
   --accent: #3d95ff;
   --accent-soft: rgba(61, 149, 255, 0.18);
   --accent-ink: #6aaeff;
+  /* White on #3d95ff is 3.03:1; near-black is 6.08:1. */
+  --accent-on: #141416;
+
+  --brand-gold: #e0b84a;
+  --brand-gold-bright: #eac765;
+  --brand-gold-deep: #9a7b2e;
+  --brand-black: #0a0a0a;
+  --primary: var(--brand-gold);
+  --primary-hover: var(--brand-gold-bright);
+  --primary-on: var(--brand-black);
+  /* The fill is 9.75:1 on the dark page; the edge is the fill itself. */
+  --primary-edge: var(--brand-gold);
+
+  /* #ff6961 with a near-black label, 6.52:1. */
+  --danger: #ff6961;
+  --danger-hover: #ff8078;
+  --danger-on: #141416;
+
+  --on-tile: #ffffff;
+  --shadow-glass: 0 10px 28px rgba(0, 0, 0, 0.35);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%23a1a1a8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");
 
   --ok: #30d158;
   --ok-soft: rgba(48, 209, 88, 0.16);
@@ -145,9 +199,13 @@
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
   --color-accent-ink: var(--accent-ink);
-  /* Legacy names, kept so nothing compiles against a missing token. */
-  --color-gold: var(--accent);
-  --color-gold-dim: var(--accent-ink);
+  --color-accent-on: var(--accent-on);
+  --color-primary: var(--primary);
+  --color-primary-on: var(--primary-on);
+  --color-danger: var(--danger);
+  /* The brand gold, for the primary button. Kept under its own name. */
+  --color-gold: var(--brand-gold);
+  --color-gold-dim: var(--brand-gold-deep);
 
   --color-ok: var(--ok);
   --color-ok-soft: var(--ok-soft);
@@ -578,7 +636,7 @@
     box-shadow:
       inset 0 0 0 1px var(--glass-edge),
       inset 0 1px 0 var(--gloss),
-      0 10px 28px rgba(0, 0, 0, 0.08);
+      var(--shadow-glass);
   }
 
   /* The gradient summary banner. */
@@ -601,7 +659,7 @@
     height: 36px;
     flex: none;
     border-radius: 10px;
-    color: #fff;
+    color: var(--on-tile);
     background: var(--tint-graphite);
   }
   .tile svg {
@@ -695,7 +753,7 @@
       color 120ms ease;
     white-space: nowrap;
   }
-  .btn:hover {
+  .btn:hover:not(:disabled):not([aria-busy="true"]) {
     background: var(--hover);
   }
   .btn:active {
@@ -714,24 +772,38 @@
     cursor: default;
   }
 
+  /* The four variants (2026-09-23). Every button in the app is the shared
+     <Button> component, which sets exactly one of these. One primary per
+     panel; Resync, Open, filters and tabs are secondary or ghost. */
+  .btn-secondary {
+    /* The quiet default: panel with a line-strong ring, as .btn itself. */
+  }
   .btn-primary {
-    background: var(--accent);
-    color: #fff;
-    box-shadow: none;
+    background: var(--primary);
+    color: var(--primary-on);
+    box-shadow: 0 0 0 1px var(--primary-edge) inset;
   }
-  .btn-primary:hover {
-    background: var(--accent);
-    opacity: 0.92;
+  .btn-primary:hover:not(:disabled):not([aria-busy="true"]) {
+    background: var(--primary-hover);
   }
-
+  /* The accent fill, kept for anything still naming it; the label is
+     accent-on, never a literal white. */
   .btn-accent {
     background: var(--accent);
-    color: #fff;
+    color: var(--accent-on);
     box-shadow: none;
   }
-  .btn-accent:hover {
+  .btn-accent:hover:not(:disabled):not([aria-busy="true"]) {
     background: var(--accent);
     opacity: 0.92;
+  }
+  .btn-danger {
+    background: var(--danger);
+    color: var(--danger-on);
+    box-shadow: none;
+  }
+  .btn-danger:hover:not(:disabled):not([aria-busy="true"]) {
+    background: var(--danger-hover);
   }
 
   .btn-ghost {
@@ -739,9 +811,44 @@
     box-shadow: none;
     color: var(--dim);
   }
-  .btn-ghost:hover {
+  .btn-ghost:hover:not(:disabled):not([aria-busy="true"]) {
     background: var(--hover);
     color: var(--ink);
+  }
+
+  /* Hover never lands on a disabled or busy button: every :hover above is
+     written :hover:not(:disabled):not([aria-busy]). */
+  .btn:disabled:active,
+  .btn[aria-busy="true"]:active {
+    transform: none;
+  }
+  /* Focus: the 2px accent ring at 2px offset from the base layer, on every
+     variant — it sits on the page, not on the fill, so it reads on gold too. */
+  .btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Loading: the label stays (so the width holds) and a spinner sits in
+     front of it in the label's own colour. */
+  .btn-spinner {
+    width: 12px;
+    height: 12px;
+    flex: none;
+    border-radius: 999px;
+    border: 1.5px solid currentColor;
+    border-right-color: transparent;
+    animation: btn-spin 700ms linear infinite;
+  }
+  @keyframes btn-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .btn-spinner {
+      animation-duration: 2s;
+    }
   }
 
   .btn-sm {
@@ -788,7 +895,7 @@
   select.input {
     appearance: none;
     padding-right: 28px;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%239a958d' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");
+    background-image: var(--select-chevron);
     background-repeat: no-repeat;
     background-position: right 10px center;
   }
@@ -870,22 +977,25 @@
     white-space: nowrap;
   }
   .tag-degraded {
-    color: var(--degraded);
+    /* ink on the soft ground: the status hue on 10.5px text failed AA. */
+    color: var(--ink);
     background: var(--degraded-soft);
     box-shadow: none;
   }
   .tag-failing {
-    color: var(--failing);
+    /* ink on the soft ground: the status hue on 10.5px text failed AA. */
+    color: var(--ink);
     background: var(--failing-soft);
     box-shadow: none;
   }
   .tag-accent {
-    color: var(--accent-ink);
+    color: var(--ink);
     background: var(--accent-soft);
     box-shadow: none;
   }
   .tag-ok {
-    color: var(--ok);
+    /* ink on the soft ground: the status hue on 10.5px text failed AA. */
+    color: var(--ink);
     background: var(--ok-soft);
     box-shadow: none;
   }

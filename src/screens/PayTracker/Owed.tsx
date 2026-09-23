@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { OwedBuilder, PayData, PayMetrics } from '../../data';
 import { CodexEntryDialog } from '../CodexEntryDialog';
 import { getPaySessionCodex } from '../../data';
-import { CountUp, EmptyPanel, FigureCell, LiveIndicator, monthLabel, Pill, StatCaption, StatCell, StatLabel, StatStrip, relativeTime } from '../../components/ui';
+import { Button, CountUp, EmptyPanel, FigureCell, LiveIndicator, monthLabel, Pill, StatCaption, StatCell, StatLabel, StatStrip, relativeTime } from '../../components/ui';
 
 /**
  * The question the page exists for: who is owed, for what, and how long.
@@ -138,9 +138,9 @@ export default function Owed({ data, m, held, showAll }: { data: PayData; m: Pay
                 .join(' · ')}
               {m.outside.months.length ? ` in ${m.outside.months.map(monthLabel).join(', ')}` : ''} — not in the figures above.
             </span>
-            <button type="button" className="link text-[12px]" onClick={showAll}>
+            <Button variant="ghost" size="sm" onClick={showAll}>
               Show every month
-            </button>
+            </Button>
           </div>
         )}
         <Group
@@ -319,9 +319,8 @@ function Group({
                           </span>
                           <span className="flex items-center gap-2">
                             {s.codex_entry_id && (
-                              <button
-                                type="button"
-                                className="link text-[11.5px]"
+                              <Button
+                                variant="secondary" size="sm"
                                 title="Opens this session's Codex entry here. The recording is linked inside it."
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -329,7 +328,7 @@ function Group({
                                 }}
                               >
                                 Open
-                              </button>
+                              </Button>
                             )}
                             {s.slack_card_link && (
                               <a href={s.slack_card_link} target="_blank" rel="noreferrer" className="link text-[11.5px]" onClick={(e) => e.stopPropagation()}>

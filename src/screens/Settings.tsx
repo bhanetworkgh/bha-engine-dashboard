@@ -3,7 +3,7 @@ import { useData } from '../app/useData';
 import { useTheme, type ThemeChoice } from '../app/theme';
 import { useZoom, ZOOMS, type ZoomChoice } from '../app/zoom';
 import { getServerStatus, TEAM_EMAIL } from '../data';
-import { Card, Icon, PageHeader, Segmented } from '../components/ui';
+import { PageHeader, Button, Card, Icon, Segmented } from '../components/ui';
 
 function Row({ label, value, tone = 'default' }: { label: string; value: React.ReactNode; tone?: 'default' | 'ok' | 'off' }) {
   return (
@@ -70,10 +70,10 @@ export default function Settings() {
             <Row label="Session ends" value={expires} />
             <Row label="Verified by" value="the dashboard server, with a cookie this browser cannot read" />
           </div>
-          <button type="button" onClick={signOut} className="btn mt-3 gap-2">
+          <Button onClick={signOut} className="mt-3 gap-2">
             <Icon.lock />
             Sign out
-          </button>
+          </Button>
         </Card>
 
         <Card className="p-5">

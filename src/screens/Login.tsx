@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useSession } from '../app/session';
 import { useTheme } from '../app/theme';
-import { Icon } from '../components/ui';
+import { Button, Icon } from '../components/ui';
 
 /**
  * One shared team login, the same pattern as BHARAG's console. The password
@@ -28,14 +28,13 @@ export default function Login() {
   return (
     <div className="flex h-full flex-col bg-bg">
       <div className="flex items-center justify-end px-5 py-4">
-        <button
-          type="button"
-          onClick={() => setChoice(resolved === 'dark' ? 'light' : 'dark')}
-          className="btn btn-ghost btn-sm gap-1.5"
-          aria-label="Toggle theme"
-        >
+        <Button
+ onClick={() => setChoice(resolved === 'dark' ? 'light' : 'dark')}
+ variant="ghost" size="sm" className="gap-1.5"
+ aria-label="Toggle theme"
+ >
           {resolved === 'dark' ? <Icon.sun /> : <Icon.moon />}
-        </button>
+        </Button>
       </div>
 
       <div className="flex flex-1 items-center justify-center px-4 pb-16">
@@ -91,9 +90,9 @@ export default function Login() {
               </div>
             )}
 
-            <button type="submit" disabled={busy} className="btn btn-primary mt-5 h-9 w-full">
+            <Button type="submit" disabled={busy} variant="primary" className="mt-5 h-9 w-full">
               {busy ? 'Signing in' : 'Sign in'}
-            </button>
+            </Button>
           </div>
 
           <p className="mt-4 flex items-start justify-center gap-1.5 text-center text-[11.5px] leading-relaxed text-faint">

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useSession } from '../app/session';
-import { Icon, type IconName } from './ui';
+import { Button, Icon, type IconName } from './ui';
 import { ClockChip, ThemeChip } from './ClockChip';
 import { cx } from '../lib';
 
@@ -139,9 +139,9 @@ function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }
       <div className="flex items-center gap-3 px-6 pt-5 pb-3.5">
         <img src="/logo.svg" alt="" className="mark h-7 w-7" />
         <span className="text-[15px] font-semibold">BHA Engine</span>
-        <button type="button" onClick={onNavigate} className="btn btn-ghost btn-sm ml-auto md:hidden" aria-label="Close navigation">
+        <Button onClick={onNavigate} variant="ghost" size="sm" className="ml-auto md:hidden" aria-label="Close navigation">
           <Icon.close />
-        </button>
+        </Button>
       </div>
 
       {/*
@@ -154,7 +154,7 @@ function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }
       <div className="scroll-thin flex-1 overflow-y-auto px-3">
         {GROUPS.map((g, i) => (
           <div key={g.group ?? `top-${i}`} className={g.group ? 'mt-3' : ''}>
-            {g.group && <div className="kicker px-3 pb-1">{g.group}</div>}
+            {g.group && <div className="kicker px-3 pb-1 text-dim">{g.group}</div>}
             <div className="space-y-[1px]">
               {g.items.map((item) => {
                 const I = Icon[item.icon];
@@ -190,9 +190,9 @@ export default function Layout() {
       <div className="relative flex min-w-0 flex-1 flex-col">
         {!bare && (
           <div className="frost-bar absolute inset-x-0 top-0 z-20 flex h-[84px] items-center gap-2 px-4 pb-3 md:px-8">
-            <button type="button" onClick={() => setNavOpen(true)} aria-label="Open navigation" className="btn btn-ghost btn-sm -ml-2 md:hidden">
+            <Button onClick={() => setNavOpen(true)} aria-label="Open navigation" variant="ghost" size="sm" className="-ml-2 md:hidden">
               <Icon.menu />
-            </button>
+            </Button>
             <div className="ml-auto flex min-w-0 items-center gap-2">
               <ClockChip />
               <ThemeChip />
@@ -200,9 +200,9 @@ export default function Layout() {
           </div>
         )}
         {bare && (
-          <button type="button" onClick={() => setNavOpen(true)} aria-label="Open navigation" className="btn btn-ghost btn-sm absolute top-3 left-3 z-30 md:hidden">
+          <Button onClick={() => setNavOpen(true)} aria-label="Open navigation" variant="ghost" size="sm" className="absolute top-3 left-3 z-30 md:hidden">
             <Icon.menu />
-          </button>
+          </Button>
         )}
 
         {/*

@@ -1176,8 +1176,41 @@ them. The reference is the "My Apple" mockup Destiny supplied on 2026-09-08.
   this dashboard has always been.
 - **Palette:** cool light grey page (`#f5f5f7`) with white cards in light mode,
   near-black page with charcoal cards in dark. **One accent: system blue**, for
-  links, the active tab, primary buttons, progress and focus. No gold, no
-  terracotta, no orange as accent (decision 2026-09-08, Destiny).
+  links, the active tab, progress and focus — `#0a6ee6` in light since
+  2026-09-23 (one step darker than `#0a7aff`, so it clears 3:1 as a focus ring
+  on every ground), `#3d95ff` in dark, with `accent-on` as the label on an
+  accent fill (white in light, near-black in dark — never a literal `#fff`).
+  No terracotta, no orange as accent (decision 2026-09-08, Destiny).
+- **The design system is "Bays Horizon Network"** (Claude Design,
+  https://claude.ai/artifact/SeZtHVhnw6MKm1PSPv6xMs), copied out of this repo's
+  own `index.css` and `components/ui`, plus three accessibility corrections
+  applied here on 2026-09-23: the darker light accent, status tag labels in
+  `ink` on their soft ground, and sidebar group labels in `dim`. It is the
+  source of truth for tokens and controls; where it is silent, what exists
+  stays.
+- **Primary buttons are gold** (decision 2026-09-23, Destiny — an explicit
+  override of both the 2026-09-08 "no gold" rule above and the design system,
+  whose brand layer reserves gold for the public site's Early Access button;
+  the design system has not been updated to say this yet). `--primary` is the
+  design system's `brand-gold` `#e0b84a` with `brand-black` `#0a0a0a` as its
+  label (10.49:1) in both themes, a `brand-gold-deep` hairline in light
+  (the fill alone is 1.7:1 on the page; the edge is 3.68:1), hover to
+  `brand-gold-bright`. Gold is the primary button and the wordmark and nothing
+  else — not tabs, links, focus, tags or charts, which stay blue or neutral.
+- **Every button is `<Button>`** (`src/components/ui/Button.tsx`), or
+  `ButtonLink` / `ButtonAnchor` where it navigates: `primary` (gold),
+  `secondary` (panel with a hairline ring, the default), `ghost`, and
+  `destructive` (filled red, `danger-on` label, 6.5:1). Hover, the 2px accent
+  focus ring at 2px offset, disabled (0.5 opacity, no hover or press) and
+  loading (spinner, `aria-busy`, click refused) are states of that one element.
+  **One primary per panel.** Resync, Open, Export, Cancel, filters and row
+  actions are secondary or ghost. Tabs, segmented controls, chips and clickable
+  rows are their own shared primitives, not buttons.
+- **Every colour, radius and shadow is a token in `src/index.css`**; no
+  component names a hex or rgb value, and the only literals in the stylesheet
+  are in its two token blocks. **The theme is set before first paint** by an
+  inline script in `index.html` reading the same `bha.theme` key the provider
+  reads, so a dark-theme reader never sees a white flash.
 - **Colour carries meaning.** Green dot = healthy. Amber = degraded. Red =
   failing. Amber and red appear only on a genuinely bad state, never on a
   label, a default, or a decoration. Coloured rounded-square **icon tiles**

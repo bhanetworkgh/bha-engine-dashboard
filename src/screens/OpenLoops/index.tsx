@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../../app/useData';
 import { BUILDER_NAMES, createLoop, getOpenLoops, getRecordMetrics, removeLoopDuplicate, resyncRecords, saveLoop, type Loop, type LoopEdit, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
-import { Definition, Icon, LoadFailed, Loading, MonthPicker, monthsFrom, thisMonth, PageHeader, ResyncButton, Tabs, Pagination, SearchBox, Segmented, RowsLine, Toast, usePaged, useRecordLink, useResync, useToast } from '../../components/ui';
+import { Tabs, PageHeader, Pagination, Button, Definition, thisMonth, Icon, LoadFailed, Loading, MonthPicker, monthsFrom, Toast, ResyncButton, RowsLine, SearchBox, Segmented, usePaged, useRecordLink, useResync, useToast } from '../../components/ui';
 import { LoopPanel } from './LoopPanel';
 import { Loops, type StatusFilter } from './Loops';
 import { LoopMetricsPanel, LoopStatusStrip } from './Metrics';
@@ -273,10 +273,10 @@ export default function OpenLoops() {
                 <span className="tabular font-semibold text-ink">{data.open_count.total}</span> open in all
               </span>
             )}
-            <button type="button" onClick={() => setShowNew((v) => !v)} className="btn btn-primary gap-1.5">
+            <Button onClick={() => setShowNew((v) => !v)} variant="primary" className="gap-1.5">
               <Icon.plus />
               New loop
-            </button>
+            </Button>
             {/*
               The fifth page to get one (2026-09-16, Destiny). Without it a loop
               closed or raised in Airtable by hand never reached this database,

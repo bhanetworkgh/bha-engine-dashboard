@@ -2,24 +2,7 @@ import { useMemo, useState } from 'react';
 import { useData } from '../../app/useData';
 import { getRetryMetrics, retryIncident, type HealthData, type RetryAttempt, type RetryMetrics } from '../../data';
 import type { RecordColumn } from '../../components/ui';
-import {
-  Definition,
-  DistTile,
-  EmptyState,
-  FigureCell,
-  Loading,
-  MetricCard,
-  Pagination,
-  PercentCell,
-  RecordId,
-  RecordTable,
-  SearchBox,
-  Segmented,
-  SourceLink,
-  StatStrip,
-  TileFigure,
-  usePaged,
-} from '../../components/ui';
+import { Pagination, Button, Definition, DistTile, FigureCell, TileFigure, Loading, MetricCard, EmptyState, PercentCell, RecordId, RecordTable, SearchBox, Segmented, SourceLink, StatStrip, usePaged } from '../../components/ui';
 import { ClassPill, RetryStatusPill, when } from './parts';
 import { RETRY_STATUS_DEFS, RETRY_TRIGGER_DEFS } from './definitions';
 import { HEALTH_KINDS } from './kinds';
@@ -205,25 +188,24 @@ export default function Retries({ data, tick, onChanged }: { data: HealthData; t
             a plain label — not styled as something more powerful. Disabled at
             the cap, and the tooltip says why rather than leaving it dead.
           */}
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            disabled={!r.can_retry || busy !== null || !data.heal_configured}
-            title={
-              !data.heal_configured
-                ? 'ENGINE_HEAL_URL is not set on this server, so there is nothing to ask for a retry.'
-                : (r.blocked_reason ??
-                  (busy !== null
-                    ? 'Another Retry now from this page is still waiting for the healer to answer.'
-                    : 'Asks the healer to retry this incident — the same healer the error handlers hand failures to, recorded as Dashboard.'))
-            }
-            onClick={(e) => {
-              e.stopPropagation();
-              run(r);
-            }}
-          >
+          <Button
+ variant="ghost" size="sm"
+ disabled={!r.can_retry || busy !== null || !data.heal_configured}
+ title={
+ !data.heal_configured
+ ? 'ENGINE_HEAL_URL is not set on this server, so there is nothing to ask for a retry.'
+ : (r.blocked_reason ??
+ (busy !== null
+ ? 'Another Retry now from this page is still waiting for the healer to answer.'
+ : 'Asks the healer to retry this incident — the same healer the error handlers hand failures to, recorded as Dashboard.'))
+ }
+ onClick={(e) => {
+ e.stopPropagation();
+ run(r);
+ }}
+ >
             {busy === r.incident_id ? 'Asking…' : 'Retry now'}
-          </button>
+          </Button>
         </div>
       ),
     },

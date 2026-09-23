@@ -4,41 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useData } from '../app/useData';
 import { getBuildPatterns, getPatternCandidates, getPatternDetail, getRecordMetrics, resyncRecords, searchPatterns, type BuildPattern, type BuildPatternDetail, type PatternCandidate, type PatternCandidatesData, type PatternMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
-import {
-  CountCell,
-  Definition,
-  EmptyPanel,
-  EmptyState,
-  HBar,
-  LoadFailed,
-  Loading,
-  MetricCard,
-  MonthPicker,
-  monthLabel,
-  monthsFrom,
-  PageHeader,
-  Pill,
-  relativeTime,
-  Tabs,
-  Pagination,
-  RecordId,
-  RecordTable,
-  ResyncButton,
-  RowAction,
-  RowActions,
-  SearchBox,
-  Segmented,
-  SeriesBlock,
-  StatCell,
-  StatStrip,
-  RowsLine,
-  Toast,
-  TwoLine,
-  thisMonth,
-  usePaged,
-  useResync,
-  useToast,
-} from '../components/ui';
+import { ButtonAnchor, Tabs, PageHeader, Pagination, Button, CountCell, Definition, HBar, thisMonth, Pill, LoadFailed, Loading, MetricCard, monthLabel, MonthPicker, monthsFrom, EmptyPanel, EmptyState, Toast, RecordId, RecordTable, relativeTime, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, StatCell, StatStrip, usePaged, useResync, useToast, TwoLine } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 import { REUSE_DEFS } from './recordDefinitions';
 
@@ -247,9 +213,9 @@ function PatternView({ id, onClose }: { id: string; onClose: () => void }) {
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+                <Button variant="ghost" size="sm" onClick={onClose}>
                   Close
-                </button>
+                </Button>
               </div>
             </div>
             <div className="mt-4 space-y-4">
@@ -802,13 +768,13 @@ function CandidateView({ c, onClose, patternRecord, onOpenPattern }: { c: Patter
           </div>
           <div className="flex items-center gap-2">
             {c.source_link && (
-              <a href={c.source_link} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
+              <ButtonAnchor variant="ghost" size="sm" href={c.source_link} target="_blank" rel="noreferrer">
                 Open the Slack thread
-              </a>
+              </ButtonAnchor>
             )}
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            <Button variant="ghost" size="sm" onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
         </div>
         <div className="mt-4 space-y-4">

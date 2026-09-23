@@ -9092,3 +9092,58 @@ Fix:        feeds.ts reads engine_incidents (own date in window), error_counts
 Decision:   Verified locally with Playwright: an approval PATCHed to
             /api/engine/codex appeared in "What moved" on an open Home tab
             after 869ms, and clicking it opened /codex/<id> with the entry.
+
+## 2026-09-23 14:40 — Design system pass, gold primary, one Button (Part A)
+Intent:     Apply the Claude Design handoff across every page, with gold
+            primary buttons, one shared Button, tokens only, both themes right
+            and no theme flash.
+Files:      src/index.css (tokens, controls), index.html (pre-paint theme),
+            src/components/ui/Button.tsx (new: Button, ButtonLink,
+            ButtonAnchor), src/components/ui/{index,RowActions,Resync,
+            Pagination}.tsx, src/components/{Layout,RecordStatistics}.tsx, and
+            every screen with a button: AskBays, BuildPatterns, Clients,
+            CodexEntryDialog, Commercial, EngineHealth/{LaneView,Repairs,
+            Retries,parts}, Executions, Login, NorthStar, OpenLoops/{index,
+            LoopPanel,Loops,NewLoop}, Overview, PayTracker/{Owed,Sessions,
+            Statements}, Registry/Editable, ResearchTwin, Settings,
+            VFarm/EarlyAccess; server/src/engine.ts (a date in copy); CLAUDE.md.
+Problem:    The brief's handoff block was an unfilled placeholder ("<<< PASTE
+            CLAUDE DESIGN HANDOFF HERE >>>"). The handoff is the Design System
+            artifact "Bays Horizon Network" (SeZtHVhnw6MKm1PSPv6xMs), read
+            whole: it is this repo's own tokens and controls plus three
+            accessibility corrections — and it says "Gold is not a UI colour.
+            No gold buttons ... on the dashboard", reserving brand-gold for the
+            public site. Asked Destiny; answer: "my brief, but if you check the
+            design system, it has not been updated". Its lastChange confirms
+            that: only "Brand gold matched to the live site".
+            The first codemod run died with "ValueError: no end" on
+            Repairs.tsx:264 — a `// ... the server's own reason` comment
+            between JSX attributes, whose apostrophe the tag scanner read as
+            a quote. Fixed by skipping line comments that start a line.
+Fix:        Tokens: accent #0a6ee6 (light), accent-on (#fff / #141416),
+            brand-gold #e0b84a / bright #eac765 / deep #9a7b2e / black #0a0a0a,
+            --primary* mapped to them, --danger* (#b3261e white 6.54:1; dark
+            #ff6961 near-black 6.52:1), --on-tile, --shadow-glass, and the
+            select chevron as a per-theme token. No colour literal outside the
+            two token blocks; no component names a hex or rgb value (grep
+            clean). Tag labels ink; sidebar group labels dim; two uppercase
+            headings removed. Button: primary / secondary / ghost / destructive
+            with hover (never on disabled or busy), focus-visible 2px accent at
+            2px offset, disabled 0.5, loading spinner + aria-busy. 52 buttons,
+            7 external links and 1 router link moved onto it; Resync, Open,
+            Commercial's readiness setters, filters and row actions are
+            secondary/ghost; Codex Delete is destructive. Theme set before
+            first paint by an inline script reading bha.theme.
+Decision:   Gold primary per Destiny, over the design system and the
+            2026-09-08 "no gold" rule, recorded in CLAUDE.md §5. Label
+            #0a0a0a on #e0b84a is 10.49:1; the fill is 1.73:1 on the light page,
+            so light adds a brand-gold-deep hairline (3.68:1). The dashboard's
+            12px button shape is kept — the design system's pill and glow are
+            the public site's signature, not the dashboard's. Tabs, segmented
+            controls, keyword chips and clickable rows stay their own shared
+            primitives rather than becoming Buttons.
+            Verified: Playwright over 23 routes (tabs included) in each theme —
+            data-theme correct at domcontentloaded on every one (dark first
+            paint rgb(20,20,22)), no sideways scroll, at most one .btn-primary
+            per screen; only console error is Google Fonts' certificate in this
+            sandbox's proxy. Build, test:pay (9/9) and test:lookup pass.

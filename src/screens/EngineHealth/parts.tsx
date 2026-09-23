@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import type { Incident, LaneRead, RetryAttempt } from '../../data';
-import { Pill } from '../../components/ui';
+import { ButtonAnchor, Button, Pill } from '../../components/ui';
 
 /**
  * The pieces Engine Health's five tabs share.
@@ -129,13 +129,13 @@ export function IncidentPanel({ incident, retry, onClose }: { incident: Incident
           <div className="flex items-center gap-2">
             {/* Only where this database actually holds that execution. */}
             {i.execution_url && (
-              <a href={i.execution_url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
+              <ButtonAnchor variant="ghost" size="sm" href={i.execution_url} target="_blank" rel="noreferrer">
                 Open in n8n
-              </a>
+              </ButtonAnchor>
             )}
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            <Button variant="ghost" size="sm" onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
         </div>
 

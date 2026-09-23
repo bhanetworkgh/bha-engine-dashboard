@@ -2,32 +2,7 @@ import { createPortal } from 'react-dom';
 import { Fragment, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
 import { getClients, resyncRecords, type ClientGroup, type ClientLaneRow, type ClientQuestion, type ClientRequest, type ClientsData } from '../data';
-import {
-  CountCell,
-  Definition,
-  EmptyPanel,
-  EmptyState,
-  LoadFailed,
-  Loading,
-  MetricCard,
-  PageHeader,
-  Tabs,
-  Pill,
-  ResyncButton,
-  RowAction,
-  RowActions,
-  SearchBox,
-  Segmented,
-  SourceLink,
-  StatStrip,
-  TableFrame,
-  Th,
-  RowsLine,
-  Toast,
-  relativeTime,
-  useResync,
-  useToast,
-} from '../components/ui';
+import { ButtonAnchor, TableFrame, Tabs, PageHeader, Button, CountCell, Definition, Th, Pill, LoadFailed, Loading, MetricCard, EmptyPanel, EmptyState, Toast, relativeTime, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SourceLink, StatStrip, useResync, useToast } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 import {
   ACTIVE_DEF,
@@ -150,13 +125,13 @@ function LaneView({ lane, questions, onClose }: { lane: ClientLaneRow; questions
           </div>
           <div className="flex items-center gap-2">
             {lane.latest_memo && (
-              <a href={lane.latest_memo} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
+              <ButtonAnchor variant="ghost" size="sm" href={lane.latest_memo} target="_blank" rel="noreferrer">
                 Latest report
-              </a>
+              </ButtonAnchor>
             )}
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            <Button variant="ghost" size="sm" onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
         </div>
 
