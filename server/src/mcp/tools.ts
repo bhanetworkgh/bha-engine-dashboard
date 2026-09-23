@@ -19,6 +19,7 @@ import path from 'node:path';
 import { databaseIdentity, query as pgQuery, DATABASE_URL } from '../pg';
 import * as airtable from '../airtable';
 import * as bharag from '../bharag';
+import * as recovery from '../recovery';
 import * as n8n from '../n8n';
 import * as sources from '../sources';
 import { grepSource, McpError, REPO_ROOT, sourceAvailable, assertSource } from './source';
@@ -705,6 +706,17 @@ const resyncTool: ToolDefinition = {
   },
 };
 
+/* -------------------------------------------------------- recovery */
+
+const getRecoveryStatus: ToolDefinition = {
+  name: 'get_recovery_status',
+  description:
+    'The engine recovery watcher (2026-09-23): which open incidents are waiting on a dependency that was down (OpenRouter, Slack, Google, BHARAG), which were passed over and why, what the next five-minute tick would do, the last dependency probe, and the last recovery batch with the outcomes its Slack summary carried. **Calls nothing** — the same plan GET /api/engine/recovery/plan answers, read from what this database holds, plus the last batch. Use it to see whether a waiting failure will be re-run, and why not.',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  annotations: { ...READS_DB, title: 'What the recovery watcher is waiting on, and what it did last' },
+  handler: async () => ({ ...(await recovery.plan()), last_batch: await recovery.lastBatch() }),
+};
+
 export const TOOLS: ToolDefinition[] = [
   // The reads, in the order the instructions suggest reaching for them.
   listPages,
@@ -719,6 +731,7 @@ export const TOOLS: ToolDefinition[] = [
   queryPostgres,
   describeSchema,
   searchLogs,
+  getRecoveryStatus,
   // The one that is not a read.
   resyncTool,
 ];

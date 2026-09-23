@@ -791,8 +791,8 @@ reasonable about.
   acted on. Every capped answer says what the cap was and how to ask for the
   rest, and a payload past the size cap comes back as its **shape** rather than
   as a sample: a fragment read as the whole is the failure worth designing out.
-- Every call is logged with its name and arguments. **Thirteen tools**
-  (twelve read, one act), and **every one of them carries MCP annotations**
+- Every call is logged with its name and arguments. **Fourteen tools**
+  (thirteen read, one act — `get_recovery_status` added 2026-09-23), and **every one of them carries MCP annotations**
   (decision 2026-09-20, Destiny), because the spec's default for a tool that
   declares none is *potentially destructive* — twelve read-only tools that
   said nothing about themselves were being offered to every client as though
@@ -805,7 +805,9 @@ reasonable about.
   cost two numbers rather than a whole payload), `query_postgres`,
   `describe_schema`, `get_health`.
   Whether the copy is current: `get_mirror_status`, `diff_source_vs_mirror`,
-  `search_logs`. And `resync`, the one tool that acts.
+  `search_logs`. Recovery: `get_recovery_status` — the same plan as
+  `GET /api/engine/recovery/plan` plus the last batch, calling nothing. And
+  `resync`, the one tool that acts.
 
 - **The second half was built because two real faults were slow to find**
   (decision 2026-09-20, Destiny). Both were diagnosed through this server and
@@ -916,6 +918,68 @@ tools/call  set_lead_status  { "id": "c6e2fae0-…", "status": "contacted", "tok
 The re-read is the point: `redeem` is handed an operation built from a **fresh**
 read, never from the preview. Passing the preview's own operation back in would
 compare a value with itself and prove nothing.
+
+**The recovery watcher re-runs what failed because a dependency was down**
+(decision 2026-09-23, Destiny — brief D2). `server/src/recovery.ts`. When
+OpenRouter runs out of credit, a Slack or Google login lapses or BHARAG stops
+answering, each failure is already an open ledger incident; the healer retries
+for about twenty minutes and stops, and nothing re-ran them once the dependency
+came back. **The ledger is the queue**: nothing here holds a payload — n8n still
+holds each failed run's input and the healer resumes it from the failed step.
+
+- **What an incident waits on is worked out from what it carries, never written
+  to BHARAG** (whose `/status` takes only `{ resolution_status, payload_patch }`).
+  `BILLING_QUOTA` → OpenRouter. `CONFIG_AUTH` → the failed node's credential in
+  the failed execution (`GET /executions/{id}?includeData=true`): `openRouterApi`,
+  `slackApi`, `google*`/`gmail*`, an `httpHeaderAuth` named `BHARAG*`, falling
+  back to the node's URL host. `UPSTREAM_5XX` / `NETWORK_TIMEOUT` → the URL host
+  (`openrouter.ai`, `slack.com`, `*.googleapis.com`, `bharag2.duckdns.org`),
+  falling back to the credential, **and only once 30 minutes old** — younger,
+  the healer still owns it. Anything else waits on nothing and is left to the
+  healer and people. The answer is cached per incident for the process's life.
+- **`engine_recovery`**, one row per incident (migration 28): `waiting`,
+  `replaying`, `recovered`, `already_done`, `chat_not_rerun`, `failed_again`,
+  `data_gone`. One row means **one recovery per incident**: a `failed_again` is
+  never picked up again — a person owns it. `engine_recovery_batches`, one row
+  per batch, holds the probe it started on and the one summary it sent.
+- **Every five minutes, and only while something is waiting**
+  (`setInterval`, `unref`, never two ticks at once, first look a minute after
+  boot). Nothing waiting means **no probe**. The probe is
+  `POST /webhook/engine-dependency-probe` with `x-dashboard-key` for OpenRouter,
+  Slack and Google; BHARAG is the ledger read the tick already made (ok where any
+  keyed lane answered). The ledger is read live, `open` and `retrying` both —
+  an unread lane falls back to the mirror and is never taken to mean an
+  incident has gone.
+- **A batch per dependency that is waited on and answers ok**, drained oldest
+  first, **twenty seconds apart**, re-reading the off switch between runs. For
+  each: the ledger read live (not open → `already_done`); n8n (`404` →
+  `data_gone`; `retrySuccessId` → `already_done`, closed `self_healed`); the
+  workflow's `replay` in the registry (`never` → closed `wont_fix`, falling back
+  to `manually_resolved` where the ledger refuses it, `chat_not_rerun`);
+  otherwise `heal({… , recovery: true})` → `replaying`. A close the watcher
+  makes itself goes `open → retrying → <state>` with `{ resolution_status }`
+  and then `{ resolution_status, payload_patch }`, exactly as Self Healer
+  Reports does, and is mirrored and logged to `record_writes` as actor
+  `recovery`. A ledger or n8n that cannot be asked puts the row back to
+  `waiting`, outside the batch, rather than guessing.
+- **Settled from `retry_attempts`** by `natural_id = incident_id` — `Recovered`
+  → `recovered`, `Exhausted` → `failed_again` — **only a row written after the
+  re-run started**: an incident the schedule already exhausted carries an old
+  `Exhausted` row, and reading that as this re-run's answer would fail every
+  recovery before it began. Nothing after 45 minutes → `failed_again`, "no
+  result from the healer".
+- **One summary per batch**, `POST /webhook/engine-recovery-summary`, once every
+  row in it is settled. `summary_sent_at` is claimed in the same statement that
+  checks it is null, so two ticks — or a tick and Re-run now — cannot both send.
+  A summary that does not land is recorded on the batch, not retried.
+- **The off switch** is a toggle on Engine health stored in `meta`
+  (`recovery.enabled`), **on by default**, every flip a `record_writes` line
+  with who made it; `RECOVERY_ENABLED=false` on the service overrides it.
+- **`GET /api/engine/recovery/plan`** (`x-dashboard-key`, logged as `read`)
+  answers what the next tick would do — waiting and replaying rows, what was
+  passed over and why, the last probe — **calling nothing**.
+  `npm run test:recovery` pins all of it against a local stand-in for BHARAG,
+  n8n and the healer, and refuses to run against anything but a local database.
 
 **The repair record is the one write to n8n** (decision 2026-09-20, Destiny).
 `engine_repairs`, migration 20, one row per repair attempt the bridge reported —
@@ -1124,6 +1188,11 @@ line names every lane that is not keyed. `AIRTABLE_TOKEN` also needs read on
 the live webhook as its default. `AIRTABLE_TOKEN` also needs read on
 `appwnt0mEtfwDtcN5` (BHA Pay Ledger) for Pay Tracker — read only, and no base
 variable, because nothing here ever writes to it.
+`RECOVERY_ENABLED` — `false` (or `0`, `off`, `no`) switches the recovery
+watcher off whatever the Engine health toggle says; anything else, including
+unset, leaves it to the toggle, which is on by default. The watcher needs
+`DASHBOARD_INBOUND_KEY` (its two n8n webhooks check it), `N8N_API_KEY` (to read
+failed executions) and the BHARAG lane keys it already has — nothing new.
 `EARLY_ACCESS_NOTIFY_URL` — the n8n webhook that posts a lead from the
 superseded public route into `#vfarm-early-access`; Form A leads are announced
 by Hardik's tracker and never touch it. Unset, the hop is skipped, the boot line says
@@ -1730,8 +1799,9 @@ nine full sweeps of somebody else's API from one click is how a careful pass
 turns into a rate limit, and the workspace is over its cap already. It takes
 itself off the page once `AIRTABLE_RETIRED` is on.
 
-**Six tabs**: All systems · Bays · North Star · Research Twin · Retries ·
-**Repairs** (the last one added 2026-09-20, with the repair bridge). **The
+**Seven tabs**: All systems · Bays · North Star · Research Twin · Retries ·
+**Repairs** (added 2026-09-20, with the repair bridge) · **Recovery** (added
+2026-09-23, `?tab=recovery`). **The
 three lane tabs are one component with a different lane**, because the handlers
 are deliberately identical and a per-lane copy would drift the first time one of
 them changed. All systems is the same component with no lane. Retries and
@@ -1874,6 +1944,21 @@ root cause, the exact change, and a way back. So:
   reading rather than celebrating, so it carries the accent rather than the
   healthy tone. Colour marks only what needs somebody: needing a person, and not
   repaired.
+
+**The Recovery tab is "Waiting on a dependency"** (2026-09-23, Destiny). The
+watcher's switch at the top — on or off, who flipped it last, and a sentence
+where `RECOVERY_ENABLED=false` overrides it rather than a button that silently
+does nothing. Then **one card per dependency** — OpenRouter, Slack, Google,
+BHARAG — with its state from the last probe (OpenRouter's `remaining_usd`
+beside it) and every incident waiting on it: workflow, failed at, error class,
+status and **Re-run now**, which runs the same per-incident steps a batch does
+for that one incident, ignoring the probe, as a batch of one with its own
+summary. A dependency nothing waits on is still drawn: a probe saying Slack is
+down matters before anything has failed on it. Then **the last batch, read from
+the runs its Slack summary carried**, so the page and the channel say the same
+thing; what the next tick would do, with the incidents passed over and why; and
+every settled recovery. `failed_again` is the one red, `data_gone` amber;
+`recovered` is the accent, not green, the same rule Repairs follows.
 
 Every figure on the page follows the same five rules the twins' pages follow: a
 percentage carries its denominator, no duration is ever a mean (p50 and p95),
@@ -2196,6 +2281,15 @@ Endpoint tab are labelled as history, not live. A service's url is shown, not
 edited, on the Tools tab. The workflow registry was brought in step with the
 live n8n list on 2026-09-22 (13 rows added by seed, 3 corrected by migration 24,
 each only where the row still held its seeded value).
+
+**Workflow carries a `replay` column** (2026-09-23, Destiny): `auto` or `never`,
+editable in place, never empty. It is the recovery watcher's policy — `never`
+means a failure of this workflow is not re-run once its dependency is back but
+closed as won't fix, because a chat reply arriving hours late to a thread that
+has moved on is worse than none. Seeded `never` for Bays — Conversational Agent,
+Bays — Front Door, Bays — Dashboard Agent, North Star — Conversational Agent and
+North Star — Front Door (migration 28 on a live database, the seed on a new
+one); everything else `auto`.
 
 **There is no credentials registry.** The `registry_credentials` table is not
 dropped, because nothing drops a table, but it is neither read nor served.

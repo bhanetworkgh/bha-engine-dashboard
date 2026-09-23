@@ -38,6 +38,7 @@ import * as paySync from './paySync';
 import * as executions from './executions';
 import * as health from './health';
 import * as repairs from './repairs';
+import * as recovery from './recovery';
 import * as pay from './pay';
 import * as bharag from './bharag';
 import { monthly } from './monthly';
@@ -434,6 +435,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         }
         throw e;
       }
+    }
+
+    /**
+     * The recovery plan (2026-09-23): what the next five-minute tick would do,
+     * read from what is held and calling nothing. Above the kind routes,
+     * because `recovery/plan` would otherwise read as kind + row id.
+     */
+    if (p === '/api/engine/recovery/plan') {
+      if (method !== 'GET') throw new HttpError(405, 'GET the plan. It calls nothing; the watcher itself runs on its own clock.');
+      const plan = await recovery.plan();
+      await mirror.logWrite({ endpoint, kind: 'recovery', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `plan: ${plan.waiting.length} waiting, ${plan.replaying.length} replaying`, ms: Date.now() - t0 });
+      return send(res, 200, plan);
     }
 
     const one = p.match(/^\/api\/engine\/([^/]+)$/);
@@ -839,6 +852,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await health.data());
       case '/api/engine-health/retries':
         return send(res, 200, await health.retryMetrics());
+      /** The recovery watcher: what waits on a dependency, the last probe, the last batch. */
+      case '/api/engine-health/recovery':
+        return send(res, 200, await recovery.data());
       /**
        * The repair record. Newest first, with the summary computed over the
        * same rows the list holds, so the strip above the table can never
@@ -1280,6 +1296,22 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       return send(res, 200, await repairs.revert(decodeURIComponent(revert[1]), sessionInfo(req).email));
     }
 
+    /**
+     * The recovery switch (2026-09-23). Stored in Postgres so it flips without a
+     * deploy; RECOVERY_ENABLED=false on the service still overrides it. Every
+     * flip is logged with who made it.
+     */
+    if (p === '/api/engine-health/recovery/toggle') {
+      const body = await readJson(req);
+      if (typeof body.on !== 'boolean') throw new HttpError(400, 'Send { on: true } or { on: false }.');
+      return send(res, 200, await recovery.setEnabled(body.on, sessionInfo(req).email));
+    }
+    /** Re-run now: one waiting incident, through the same steps a batch takes, ignoring the probe. */
+    const rerun = p.match(/^\/api\/engine-health\/recovery\/rerun\/(.+)$/);
+    if (rerun) {
+      return send(res, 200, await recovery.rerun(decodeURIComponent(rerun[1]), sessionInfo(req).email));
+    }
+
     /** One manual retry. The same path the 5-minute schedule takes. */
     const retryNow = p.match(/^\/api\/engine-health\/retry\/(.+)$/);
     if (retryNow) {
@@ -1623,8 +1655,10 @@ async function boot(): Promise<void> {
     // load at boot. What does run is the ledger catch-up: any status that
     // changed in the database while this process was not running has to be
     // written down, because nothing upstream keeps that history.
+    console.log(recovery.describe());
     void catchUp();
     executions.startPolling();
+    recovery.startWatching();
   });
 }
 

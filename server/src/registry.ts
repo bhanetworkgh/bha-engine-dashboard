@@ -59,6 +59,8 @@ interface Field {
    * count toward the spend denominator while displaying as "not recorded".
    */
   defaultOnCreate?: string;
+  /** Refused as empty on every write, not only on create — the column is NOT NULL. */
+  notNull?: boolean;
 }
 
 interface KindSpec {
@@ -77,6 +79,7 @@ const STATUS_WORKFLOW = ['production', 'experimental', 'retired'] as const;
 const STATUS_SERVICE = ['active', 'trial', 'retired'] as const;
 const CATEGORIES = ['hosting', 'automation', 'data', 'ai', 'comms', 'storage', 'other'] as const;
 const CYCLES = ['monthly', 'quarterly', 'yearly', 'one-off'] as const;
+export const REPLAY = ['auto', 'never'] as const;
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 
 export const KINDS: Record<RegistryKind, KindSpec> = {
@@ -99,6 +102,10 @@ export const KINDS: Record<RegistryKind, KindSpec> = {
       { name: 'purpose', type: 'longtext', max: 600 },
       { name: 'n8n_url', type: 'url', max: 500 },
       { name: 'notes', type: 'longtext', max: 2000 },
+      // Whether the recovery watcher may re-run this workflow's failures once
+      // the dependency they waited on is back (2026-09-23). Never empty: a
+      // cleared cell would read as a third answer nobody defined.
+      { name: 'replay', type: 'select', options: REPLAY, defaultOnCreate: 'auto', notNull: true },
     ],
   },
   services: {
@@ -213,6 +220,12 @@ function fieldOf(kind: RegistryKind, name: string): Field {
  * rather than storing a blank that then reads as a real answer.
  */
 function clean(field: Field, raw: unknown): unknown {
+  const v = cleanValue(field, raw);
+  if (v === null && field.notNull) throw new RegistryError(`"${field.name}" cannot be empty. One of: ${field.options?.join(', ') ?? 'a value'}.`);
+  return v;
+}
+
+function cleanValue(field: Field, raw: unknown): unknown {
   if (raw === null || raw === undefined) return null;
 
   if (field.type === 'array') {

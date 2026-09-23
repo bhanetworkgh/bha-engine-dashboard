@@ -171,13 +171,55 @@ export async function openIncidents(lane: string): Promise<LedgerIncident[]> {
  * `resolved_by` comes back as the lane. Returns the ledger's own copy of the
  * incident; throws with BHARAG's code on a refusal.
  */
-export async function closeIncident(lane: string, entityId: string, resolvedBy: string, at: string): Promise<LedgerIncident> {
+export async function closeIncident(lane: string, entityId: string, resolvedBy: string, at: string, state: LedgerTerminal = 'manually_resolved'): Promise<LedgerIncident> {
   const key = keyFor(lane);
   if (!key) throw new BharagError(`${LANE_KEY_VARS[lane] ?? `a key for ${lane}`} is not set on this server, so this lane's incidents cannot be closed from here.`, 503);
   return call<LedgerIncident>(`/incidents/${encodeURIComponent(entityId)}/status`, key, {
-    resolution_status: 'manually_resolved',
+    resolution_status: state,
     payload_patch: { resolved_at: at, resolved_by: resolvedBy },
   });
+}
+
+/** The ledger's terminal states, from BHARAG's `core/incidents/lifecycle.ts`. */
+export type LedgerTerminal = 'manually_resolved' | 'self_healed' | 'wont_fix';
+
+/**
+ * Moves an incident `open -> retrying`, the step the ledger requires before
+ * `self_healed` and the one `BHA — Self Healer Reports` takes, with the same
+ * body it sends: `{ resolution_status: 'retrying' }` and nothing else.
+ */
+export async function markRetrying(lane: string, entityId: string): Promise<LedgerIncident> {
+  const key = keyFor(lane);
+  if (!key) throw new BharagError(`${LANE_KEY_VARS[lane] ?? `a key for ${lane}`} is not set on this server, so this lane's incidents cannot be moved from here.`, 503);
+  return call<LedgerIncident>(`/incidents/${encodeURIComponent(entityId)}/status`, key, { resolution_status: 'retrying' });
+}
+
+/**
+ * Every **live** incident for one lane: `open` and `retrying` both.
+ *
+ * An incident the error handler matched as a repeat has already moved to
+ * `retrying` — it is still live, just not `open` — which is why Self Healer
+ * Reports reads both. The `retrying` read is allowed to fail on its own (an
+ * older ledger may not filter on it); the `open` read is not.
+ */
+export async function liveIncidents(lane: string): Promise<LedgerIncident[]> {
+  const open = await openIncidents(lane);
+  const key = keyFor(lane)!;
+  let retrying: LedgerIncident[] = [];
+  try {
+    const q = new URLSearchParams({ status: 'retrying', source: lane });
+    const body = await call<unknown>(`/incidents?${q.toString()}`, key);
+    const list = Array.isArray(body)
+      ? body
+      : body && typeof body === 'object'
+        ? (['items', 'incidents', 'results', 'data'].map((k) => (body as Record<string, unknown>)[k]).find(Array.isArray) as unknown[] | undefined) ?? []
+        : [];
+    retrying = (list as LedgerIncident[]).filter((i) => i.resolution_status === 'retrying');
+  } catch {
+    retrying = [];
+  }
+  const seen = new Set(open.map((i) => i.entity_id));
+  return [...open, ...retrying.filter((i) => !seen.has(i.entity_id))];
 }
 
 /* ------------------------------------------------------------- the healer */
@@ -206,7 +248,16 @@ export interface HealRequest {
   workflow: string;
   failed_node: string;
   error_class: string;
-  attempts_before: number;
+  attempts_before?: number;
+  error_message?: string;
+  /**
+   * Set by the recovery watcher only (2026-09-23). With it the healer retries
+   * from the failed step up to three times, writes the outcome to
+   * `retry_attempts` under the incident id, closes the ledger incident as
+   * `self_healed` on success, posts nothing per run, and never hands a failed
+   * recovery to Claude Code.
+   */
+  recovery?: boolean;
 }
 
 /**

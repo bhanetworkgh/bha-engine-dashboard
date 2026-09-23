@@ -80,6 +80,8 @@ const TABS = ['Builders', 'Tools', 'Endpoint', 'Workflow'] as const;
 type Tab = (typeof TABS)[number];
 
 const WORKFLOW_STATUS = ['production', 'experimental', 'retired'] as const;
+/** Whether the recovery watcher may re-run this workflow's failures once a dependency is back (2026-09-23). */
+const WORKFLOW_REPLAY = ['auto', 'never'] as const;
 const SERVICE_STATUS = ['active', 'trial', 'retired'] as const;
 const CATEGORIES = ['hosting', 'automation', 'data', 'ai', 'comms', 'storage', 'other'] as const;
 const CYCLES = ['monthly', 'quarterly', 'yearly', 'one-off'] as const;
@@ -448,8 +450,8 @@ function WorkflowsTab({ rows, ...p }: TabProps & { rows: RegistryData['workflows
             {!collapsed[name] && (
               <Grid
                 label={`${name} workflows`}
-                min={1320}
-                cols={9}
+                min={1400}
+                cols={10}
                 empty="No workflow is registered under this pillar."
 
                 head={
@@ -460,6 +462,7 @@ function WorkflowsTab({ rows, ...p }: TabProps & { rows: RegistryData['workflows
                     <Th>trigger</Th>
                     <Th>when it runs</Th>
                     <Th>status</Th>
+                    <Th>replay</Th>
                     <Th width="26%">purpose</Th>
                     <Th>updated</Th>
                     <Th />
@@ -482,6 +485,15 @@ function WorkflowsTab({ rows, ...p }: TabProps & { rows: RegistryData['workflows
                     </td>
                     <td className="td card-meta">
                       {cell(p, 'workflows', w, 'status', { type: 'select', options: WORKFLOW_STATUS })}
+                    </td>
+                    {/*
+                      Whether a failure of this workflow is re-run once the
+                      dependency it waited on is back. "never" is for chat
+                      replies: an answer hours late to a thread that has moved
+                      on is worse than none.
+                    */}
+                    <td className="td card-meta" title={w.replay === 'never' ? 'Never re-run by the recovery watcher: its failed runs are closed as won’t fix once the dependency is back.' : 'Re-run from the failed step by the recovery watcher once the dependency it waited on is back.'}>
+                      {cell(p, 'workflows', w, 'replay', { type: 'select', options: WORKFLOW_REPLAY })}
                     </td>
                     <td className="td td-clip text-dim" style={{ maxWidth: '46ch' }}>
                       {cell(p, 'workflows', w, 'purpose', { type: 'longtext', width: '46ch' })}

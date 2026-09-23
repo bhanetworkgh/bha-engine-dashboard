@@ -1792,6 +1792,122 @@ export interface RetryResult {
   message: string;
 }
 
+/* -------------------------------------------------------- engine recovery */
+
+/**
+ * The recovery watcher (2026-09-23): an incident waiting on a dependency that
+ * was down, re-run from its failed step once that dependency answers again.
+ * See `server/src/recovery.ts`.
+ */
+export type RecoveryDependency = 'openrouter' | 'slack' | 'google' | 'bharag';
+export type RecoveryStatus = 'waiting' | 'replaying' | 'recovered' | 'already_done' | 'chat_not_rerun' | 'failed_again' | 'data_gone';
+
+export interface RecoveryRow {
+  incident_id: string;
+  lane: string | null;
+  workflow: string | null;
+  workflow_id: string | null;
+  execution_id: string | null;
+  failed_node: string | null;
+  error_class: string | null;
+  failed_at: string | null;
+  dependency: RecoveryDependency;
+  /** How the dependency was worked out, in a phrase: "error class", "credential slackApi", "host openrouter.ai". */
+  dependency_from: string | null;
+  status: RecoveryStatus;
+  batch_id: string | null;
+  retry_execution_id: string | null;
+  note: string | null;
+  replay_started_at: string | null;
+  first_seen_at: string;
+  updated_at: string;
+  execution_url: string | null;
+}
+
+export interface DependencyState {
+  ok: boolean | null;
+  status: string | null;
+  detail: string | null;
+  /** OpenRouter only. */
+  remaining_usd?: number | null;
+  floor_usd?: number | null;
+}
+
+export interface RecoveryProbe {
+  checked_at: string;
+  dependencies: Record<RecoveryDependency, DependencyState>;
+  /** Set where the probe itself could not be asked. */
+  error: string | null;
+}
+
+export interface RecoveryRun {
+  workflow: string;
+  execution_id: string;
+  outcome: Exclude<RecoveryStatus, 'waiting' | 'replaying'>;
+  retry_execution_id?: string;
+  note?: string;
+}
+
+export interface RecoveryBatch {
+  batch_id: string;
+  dependency: RecoveryDependency;
+  started_by: string;
+  started_at: string;
+  settled_at: string | null;
+  summary_sent_at: string | null;
+  summary_http: number | null;
+  summary_detail: string | null;
+  /** The rows in the batch, in the shape the Slack summary carries. */
+  runs: RecoveryRun[];
+  /** How many of the batch's rows are still replaying. */
+  pending: number;
+}
+
+/** An open incident the watcher looked at and is not waiting on anything for, and why. */
+export interface RecoverySkip {
+  incident_id: string;
+  lane: string | null;
+  workflow: string | null;
+  error_class: string | null;
+  reason: string;
+}
+
+export interface RecoveryPlan {
+  at: string;
+  enabled: boolean;
+  /** Why it is off, where it is: the env override or the page toggle. */
+  disabled_by: 'env' | 'toggle' | null;
+  /** The page switch's own position, whatever the env override says. */
+  switch_on: boolean;
+  toggled_by: string | null;
+  toggled_at: string | null;
+  waiting: RecoveryRow[];
+  replaying: RecoveryRow[];
+  skipped: RecoverySkip[];
+  /** Incidents open in the mirror that the watcher has not classified yet — the next tick reads their executions. */
+  unclassified: string[];
+  last_probe: RecoveryProbe | null;
+  /** In words, what the next tick would do. Computed from what is held; nothing is called. */
+  next_tick: string[];
+  last_tick_at: string | null;
+  interval_seconds: number;
+}
+
+export interface RecoveryData extends RecoveryPlan {
+  /** Every row, newest first, settled ones included. */
+  rows: RecoveryRow[];
+  last_batch: RecoveryBatch | null;
+  heal_configured: boolean;
+  n8n_configured: boolean;
+}
+
+export interface RecoveryRerunResult {
+  ok: boolean;
+  incident_id: string;
+  status: RecoveryStatus | null;
+  message: string;
+}
+
 /* -------------------------------------------------------------- pay ledger */
 
 /**
@@ -2331,6 +2447,8 @@ export interface RegistryWorkflow extends RegistryBase {
   status: WorkflowStatus | null;
   purpose: string | null;
   n8n_url: string | null;
+  /** Whether the recovery watcher re-runs this workflow's failures (2026-09-23). `never` for chat replies. */
+  replay: 'auto' | 'never';
 }
 
 export type ServiceStatus = 'active' | 'trial' | 'retired';

@@ -9209,3 +9209,70 @@ Decision:   Every page but Ask Bays; the chat keeps its pinned input. The zoom
             carries blank margin at 80% zoom (1800×1502 for 1440×1202) — a
             quirk of its CDP capture under CSS zoom; the page reports its true
             size, which is what scroll-and-stitch extensions read.
+
+## 2026-09-23 20:20 — Engine recovery: the dashboard side (brief D2)
+Intent:     When a workflow fails because something it depends on is down
+            (OpenRouter credit, a Slack or Google login, BHARAG), re-run it
+            from the failed step once that thing is back, close the ledger
+            incident, and send one Slack summary per recovery. The n8n side
+            (Engine — Dependency Probe, Engine — Recovery Summary, the healer's
+            `recovery: true`) was already built; this is the watcher.
+Files:      server/src/recovery.ts (new), server/src/bharag.ts (closeIncident
+            takes the target state; markRetrying; liveIncidents reads open and
+            retrying; HealRequest gains recovery and error_message),
+            server/src/n8n.ts (executionDetail, includeData=true),
+            server/src/migrations.ts (28: engine_recovery,
+            engine_recovery_batches, registry_workflows.replay + five `never`),
+            server/src/registry.ts + registrySeed.ts (replay field, notNull),
+            server/src/index.ts (GET /api/engine/recovery/plan, the page route,
+            toggle, Re-run now, boot line, startWatching),
+            server/src/mcp/tools.ts (get_recovery_status),
+            src/screens/EngineHealth/Recovery.tsx (new) + index.tsx + kinds.ts,
+            src/screens/Registry/index.tsx (replay column), src/data/*,
+            server/test/recovery.test.cjs + package.json (test:recovery),
+            render.yaml (RECOVERY_ENABLED), CLAUDE.md.
+Problem:    Nothing re-ran a failure once its dependency came back: the healer
+            gives up after three attempts over ~20 minutes, and an outage lasts
+            longer. Two traps found while building, both before they shipped:
+            (1) an incident the schedule already exhausted carries an old
+            `Exhausted` retry_attempts row, so settling a re-run by "the row's
+            status" would have failed every recovery the moment it started;
+            (2) the ledger's `status=open` read misses incidents the error
+            handler moved to `retrying` as repeats — Self Healer Reports reads
+            both for the same reason.
+Fix:        Settling only accepts a retry row written after the re-run started
+            (last_attempt_at, else updated_at, against replay_started_at).
+            The live read asks for open and retrying both, the retrying half
+            allowed to fail alone. The close path copies Self Healer Reports
+            exactly: `{ resolution_status: 'retrying' }`, then
+            `{ resolution_status, payload_patch: { resolved_at, resolved_by } }`
+            and nothing else at the top level.
+Decision:   The ledger is the queue; engine_recovery holds decisions, not
+            payloads. One row per incident, so an incident is recovered at
+            most once — failed_again belongs to a person. What an incident
+            waits on is worked out every time from its class, its failed
+            node's credential or URL host (each falling back to the other),
+            never written to BHARAG. Where the ledger or n8n cannot be asked the
+            row goes back to waiting rather than being guessed at. Re-run now is
+            a batch of one with its own summary, so a manual recovery is in the
+            same channel as an automatic one, and it is refused while recovery
+            is switched off. The summary is claimed with
+            `UPDATE … WHERE summary_sent_at IS NULL` so it can go only once.
+            Recovery is a seventh Engine health tab rather than a panel on All
+            systems, which the 22 Sep decision keeps to the table.
+            Verified: typecheck and build clean; npm run test:recovery (new —
+            local stand-ins for BHARAG, n8n, both webhooks and the healer; 30+
+            assertions: classification by class / credential / host, the 30-min
+            rule, no probe when nothing waits, heal carries recovery: true,
+            chat reply closed retrying → wont_fix → manually_resolved on
+            refusal, data_gone, already_done via retrySuccessId, the old
+            Exhausted row ignored, exactly one summary across three ticks, the
+            plan makes no call, off makes no call, the flip is logged);
+            test:gate, test:pay and test:lookup still pass on a local database;
+            the server boots, the plan answers 200 with the key and 401
+            without; the Recovery tab and the registry's replay column render
+            with no page errors (five `never` rows).
+            Not verified here: the live end-to-end trace (a real BILLING_QUOTA
+            or CONFIG_AUTH incident through to one message in
+            #bha-self-healing). There are no open incidents in the ledger
+            mirror tonight, and it has to run against the deployed service.

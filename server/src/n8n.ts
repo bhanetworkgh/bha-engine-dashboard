@@ -155,6 +155,36 @@ export async function execution(id: string): Promise<N8nExecution | null> {
 }
 
 /**
+ * One execution with its data, for the recovery watcher (2026-09-23).
+ *
+ * `includeData=true` carries `workflowData` — the workflow exactly as it ran,
+ * nodes and credentials included — which is how the watcher learns what a
+ * failed node depends on without asking anything else. `retrySuccessId` is
+ * n8n's own statement that a retry of this run already worked. Null where n8n
+ * no longer holds the run: a pruned execution is an outcome, not an error.
+ */
+export interface N8nExecutionDetail extends N8nExecution {
+  retrySuccessId?: string | null;
+  workflowData?: { id?: string; name?: string; nodes?: N8nNode[] } | null;
+}
+
+export interface N8nNode {
+  name: string;
+  type?: string;
+  parameters?: Record<string, unknown>;
+  credentials?: Record<string, { id?: string; name?: string }>;
+}
+
+export async function executionDetail(id: string): Promise<N8nExecutionDetail | null> {
+  try {
+    return await call<N8nExecutionDetail>(`/executions/${encodeURIComponent(id)}?includeData=true`);
+  } catch (e) {
+    if (e instanceof N8nError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/**
  * Every execution newer than `afterId`, newest first. `afterId` of 0 reads the
  * whole history the instance holds.
  *
