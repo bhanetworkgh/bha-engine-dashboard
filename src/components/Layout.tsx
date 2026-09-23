@@ -131,7 +131,7 @@ function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }
   return (
     <nav
       className={cx(
-        'frost-side w-[240px] shrink-0 flex-col border-r border-line md:static md:flex',
+        'shell-nav frost-side w-[240px] shrink-0 flex-col border-r border-line md:static md:flex',
         open ? 'fixed inset-y-0 left-0 z-50 flex shadow-[var(--shadow-pop)]' : 'hidden',
       )}
       aria-label="Primary"
@@ -181,15 +181,21 @@ export default function Layout() {
   /* Ask Bays owns its whole column, so the top row steps aside there. */
   const bare = location.pathname.startsWith('/ask-bays');
 
+  // The window scrolls on every page but Ask Bays, so a full-page screenshot
+  // captures the whole page (2026-09-23). See the note in index.css.
+  useEffect(() => {
+    document.documentElement.dataset.scroll = bare ? 'shell' : 'document';
+  }, [bare]);
+
   return (
-    <div className="aurora flex h-full bg-bg">
+    <div className="shell aurora flex h-full bg-bg">
       <Sidebar open={navOpen} onNavigate={() => setNavOpen(false)} />
 
       {navOpen && <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setNavOpen(false)} aria-hidden />}
 
       <div className="relative flex min-w-0 flex-1 flex-col">
         {!bare && (
-          <div className="frost-bar absolute inset-x-0 top-0 z-20 flex h-[84px] items-center gap-2 px-4 pb-3 md:px-8">
+          <div className="shell-bar frost-bar absolute inset-x-0 top-0 z-20 flex h-[84px] items-center gap-2 px-4 pb-3 md:px-8">
             <Button onClick={() => setNavOpen(true)} aria-label="Open navigation" variant="ghost" size="sm" className="-ml-2 md:hidden">
               <Icon.menu />
             </Button>
@@ -223,7 +229,7 @@ export default function Layout() {
           to the loop beside it does not, because the reader has not gone
           anywhere.
         */}
-        <main className={cx('flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto md:overflow-hidden', !bare && '[&>div>*]:pt-[72px]')}>
+        <main className={cx('shell-main flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto md:overflow-hidden', !bare && '[&>div>*]:pt-[72px]')}>
           <div key={location.pathname.split('/')[1] ?? ''} className="page-in flex min-h-0 flex-1 flex-col">
             <Outlet />
           </div>

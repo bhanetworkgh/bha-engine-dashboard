@@ -1215,6 +1215,20 @@ them. The reference is the "My Apple" mockup Destiny supplied on 2026-09-08.
   are in its two token blocks. **The theme is set before first paint** by an
   inline script in `index.html` reading the same `bha.theme` key the provider
   reads, so a dark-theme reader never sees a white flash.
+- **The window scrolls, not a panel inside it** (decision 2026-09-23,
+  Destiny). The shell was pinned to the viewport's height with each page
+  scrolling inside its own panel, so a full-page screenshot — a Chrome
+  extension, DevTools' "Capture full size screenshot", print — scrolled a
+  window that never moved and cut every page after the first screen. Now
+  `data-scroll="document"` on `<html>` (set by Layout, and before first paint
+  by the script in `index.html`) lets html, body and the page grow with their
+  content; the sidebar and the frosted top bar are `position: sticky`. The rules
+  sit **outside every CSS layer** at the end of `index.css`, because Tailwind's
+  utilities are in a later layer and beat them otherwise. **`vh` is scaled by
+  the zoom on `<html>`**, so anything that must fill the window divides by the
+  `--zoom` variable the zoom provider sets — `100vh` alone left the sidebar at
+  80% of the window. **Ask Bays keeps the old shell** (`data-scroll="shell"`):
+  a chat has to hold its input at the bottom while the thread scrolls above it.
 - **Colour carries meaning.** Green dot = healthy. Amber = degraded. Red =
   failing. Amber and red appear only on a genuinely bad state, never on a
   label, a default, or a decoration. Coloured rounded-square **icon tiles**

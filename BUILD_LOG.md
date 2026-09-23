@@ -9175,3 +9175,37 @@ Decision:   The stale row is left where it is: this dashboard does not delete
             an engine row it was not asked to touch. It still appears on the
             Open loops list under Destiny and in any digest that reads
             Destiny's table row by row.
+
+## 2026-09-23 14:55 — Full-page screenshots no longer cut
+Intent:     Destiny: "when i'm using a chrome screenshot extension to screenshot
+            the full page its always cut".
+Files:      src/index.css (a document-scroll block at the end, outside the
+            layers), src/components/Layout.tsx, src/app/zoom.tsx, index.html,
+            CLAUDE.md.
+Problem:    The shell was h-full all the way down with main md:overflow-hidden,
+            so the window never scrolled: every page scrolled inside its own
+            `min-h-0 flex-1 overflow-y-auto` panel (40-odd of them). A full-page
+            capture measures and scrolls the window, so it got one screen.
+            First fix: the sticky sidebar still scrolled away — computed
+            `position: static`, because Tailwind's `md:static` lives in the
+            utilities layer, which beats a more specific rule in an earlier
+            layer. Second: the sidebar stopped 20% short of the window —
+            `vh` inside the 80% zoom on <html> is scaled by it.
+Fix:        html[data-scroll="document"] makes html, body, #root and the
+            shell grow with their content, so every page panel grows too and
+            none needs a scrollbar; the sidebar is sticky at
+            calc(100vh / var(--zoom)), the top bar sticky with a -84px margin so
+            it still overlays; the aurora wash is fixed to the viewport. The
+            block moved out of the layers. ZoomProvider publishes --zoom.
+            index.html sets data-scroll before first paint.
+Decision:   Every page but Ask Bays; the chat keeps its pinned input. The zoom
+            stays on <html>: moving it to <body> was tried and changes nothing
+            the page reports (scrollHeight 1202 either way, correct), and it
+            would have split portals from the page.
+            Verified with Playwright: the window scrolls on every route
+            (Home 1202 over an 800 viewport), no element inside main scrolls on
+            its own, sidebar and bar at top 0 after scrolling to the bottom, 46
+            route captures in both themes clean. Playwright's own fullPage PNG
+            carries blank margin at 80% zoom (1800×1502 for 1440×1202) — a
+            quirk of its CDP capture under CSS zoom; the page reports its true
+            size, which is what scroll-and-stitch extensions read.
