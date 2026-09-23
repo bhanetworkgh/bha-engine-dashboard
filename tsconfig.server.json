@@ -14,5 +14,5 @@
     "noUnusedParameters": true,
     "resolveJsonModule": true
   },
-  "include": ["server/src/**/*.ts", "src/data/types.ts", "src/data/fixtures/**/*.ts"]
+  "include": ["server/src/**/*.ts", "src/data/types.ts", "src/data/formA.ts", "src/data/fixtures/**/*.ts"]
 }

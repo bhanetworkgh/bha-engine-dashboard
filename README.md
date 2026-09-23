@@ -1057,7 +1057,101 @@ and a log that records intentions beside actions stops being a record of what
 happened. The audit write throws rather than swallowing: if the change cannot be
 recorded, it does not happen.
 
-### vFarm Early Access — the one public write route
+### vFarm Early Access — Form A leads from n8n
+
+**`POST /api/engine/vfarm-leads`** — one Form A lead per call, from Hardik's n8n
+tracker (2026-09-23, Destiny). Every Early Access lead now arrives through
+Hardik's Google Form A, either directly or from the bhanetwork.org/vfarm form,
+which submits into Form A.
+
+- **Auth:** `x-dashboard-key: <DASHBOARD_INBOUND_KEY>`, the same header and key
+  as every other `/api/engine` write. A missing or wrong key gets a 401 and is
+  logged to `engine_writes` like the others.
+- **Stored in `engine_vfarm_leads`:** `name`, `email` (lower-cased) and
+  `organisation` go in the existing `full_name`, `email` and
+  `organization_name` columns. Each one falls back to the matching answer
+  (`Full name`, `Email address`, `Organization / household name`) if the top
+  level leaves it out. Everything else goes in the `form_a` jsonb column,
+  stored as sent: `answers`, `early_access_lead_id`, `buyer_intake_id`,
+  `correlation_id`, `source_campaign` and `submitted_at`. `source_campaign`
+  is also copied into its own column. `submitted_at` is copied into its
+  timestamp column only if it is ISO 8601; Google Forms' `9/23/2026 14:05:09`
+  stays in the blob as sent. `source_surface` is `form_a`.
+- **Upsert key:** `buyer_intake_id`, matched through a unique index on
+  `form_a->>'buyer_intake_id'`. The same submission posted twice updates one
+  row. An update replaces the columns and the whole blob, and never touches
+  `status` or `notes`, which belong to the dashboard.
+- **Answers** are keyed by Form A's question text, character for character.
+  Two questions end in a space, and a key without that space is a different
+  key. The 23 questions live in `src/data/formA.ts`. A key that is not one of
+  them is still stored, shown on the page under its own heading, and named in
+  the reply as `unexpected_questions`. Any of the 23 not sent is named as
+  `missing_questions`.
+- **No Slack.** This route posts nothing to Slack; the tracker sends its own
+  alert. `notified_at` stays null on these rows, and the page does not mark a
+  Form A lead "not announced".
+- **Replies:**
+  - `201` for a new row, `200` for an update:
+    `{ ok, stored: "inserted"|"updated", id, buyer_intake_id, inserted, answers, unexpected_questions, missing_questions, ignored_fields }`.
+  - `422` for no `buyer_intake_id`, a missing name or email, or `answers` that is not an object.
+  - `405` for any method but POST.
+
+```
+POST /api/engine/vfarm-leads
+x-dashboard-key: <DASHBOARD_INBOUND_KEY>
+content-type: application/json
+
+{
+  "name": "Ama Mensah",
+  "email": "ama.mensah@example.org",
+  "organisation": "Mensah Family Farm",
+  "early_access_lead_id": "VFLEAD-1790150000000-K3F9QZ",
+  "buyer_intake_id": "VFBUYER-FORMA-1A2B3C",
+  "correlation_id": "VFARM-FORMA-1A2B3C",
+  "source_campaign": "vfarm_flagship_1031",
+  "submitted_at": "9/23/2026 14:05:09",
+  "answers": {
+    "Full name": "Ama Mensah",
+    "Email address": "ama.mensah@example.org",
+    "Organization / household name": "Mensah Family Farm",
+    "Which best describes you or your organization?": "Household / individual",
+    "City": "Kumasi",
+    "State / Province / Region": "Ashanti",
+    "Country": "Ghana",
+    "What is your primary use case for vFarm?": "Home food production",
+    "What would you like vFarm to help you accomplish?": "Grow leafy greens year round",
+    "Approximately how much space could you make available?": "A spare room, about 10 m²",
+    "Do you have an indoor or protected space available?": "Yes",
+    "Is electrical power available near the potential installation area?": "Yes",
+    "Is a water source available near the potential installation area?": "Yes",
+    "What type of environment would the first vFarm most likely operate in? ": "Home",
+    "Are there any site constraints we should know about?": "Power cuts a few times a month",
+    "How would you most want to monitor or interact with your vFarm?": "Phone app",
+    "How serious is your interest in becoming an early vFarm buyer or pilot partner? ": "Very serious",
+    "When could you realistically consider a vFarm pilot or purchase?": "Within 3 months",
+    "Which best describes your current budget readiness?": "Budget set aside",
+    "Would you consider a small Early Access reservation commitment in exchange for priority consideration as pilot units become available?": "Yes",
+    "Would you be willing to provide structured feedback during an Early Access pilot?": "Yes",
+    "Anything else you'd like us to know?": "Happy to host a demo.",
+    "How did you hear about vFarm?": "LinkedIn"
+  }
+}
+```
+
+The Early Access tab on `/vfarm` opens a lead on click and shows every stored
+answer. The answers are grouped by subject in Form A's own order. **Those
+headings are the dashboard's, not the form's section titles**: nothing the
+dashboard can read (the n8n workflows, the response sheet) names the form's
+sections. To use the real titles, change `FORM_A_GROUPS` in
+`src/data/formA.ts`.
+
+### vFarm Early Access — the public route (superseded, unused by the site)
+
+**Superseded on 23 September 2026.** The route below is kept, but the site no
+longer posts to it and nothing current does: it is origin-checked for browsers,
+so n8n cannot call it, and it stores only name, email and organisation. Leads
+arrive at `POST /api/engine/vfarm-leads` above. What follows describes the route
+as it was built.
 
 **Built 20 September 2026, on Destiny's instruction.** The form on
 bhanetwork.org posts an expression of interest to this server, the row lands in
@@ -1220,7 +1314,7 @@ Airtable; those rows are in `git log` if it is ever needed again.
 | `N8N_API_URL` | Defaults to `N8N_BASE_URL` + `/api/v1`. Points the same client at a replay in a sandbox |
 | `AIRTABLE_API_URL` | Points the same client at a local replay of the API in a sandbox |
 | `DATABASE_URL` | Postgres. **Required** — the server exits if it is missing or unreachable |
-| `EARLY_ACCESS_NOTIFY_URL` | The n8n webhook that posts a new vFarm Early Access lead into `#vfarm-early-access`. No Slack token is in this repo and nothing here calls Slack directly. Unset, the hop is skipped, the boot line says so once, and the endpoint still works |
+| `EARLY_ACCESS_NOTIFY_URL` | Used only by the superseded public route: the n8n webhook that posts a lead from it into `#vfarm-early-access`. Form A leads are announced by Hardik's tracker, not from here. No Slack token is in this repo and nothing here calls Slack directly. Unset, the hop is skipped, the boot line says so once, and the endpoint still works |
 | `IP_HASH_SALT` | Salt for the stored `ip_hash`. Unset, a random per-process salt is generated — never an unsalted digest, which for an IPv4 address is reversible |
 | `EARLY_ACCESS_ALLOWED_ORIGINS` | Optional. Comma-separated origins the form may be posted from. Defaults to `https://bhanetwork.org`, `https://www.bhanetwork.org` and `http://localhost:5173` |
 | `MCP_SECRET` | The path secret for the MCP server at `/mcp/<MCP_SECRET>` (18 Sep 2026). **No default** — unset, every request under `/mcp` gets a 404 and the boot line names the variable. A wrong secret gets the same 404 a wrong route gets, so the endpoint is not discoverable |
@@ -1253,7 +1347,7 @@ is missing, and the note is what the page shows.
 | Clients | Watched client lanes grouped under the client that owns them, ordered by `Client ID` |
 | Executions | Every execution of every workflow, one row each, tabbed by system, weekly / monthly / yearly, against the period before, with a per-workflow drill-down and a downloadable report |
 | Pay Tracker | Who is owed, for what work, and what has been paid. Owed groups by builder with monthly and daily kept apart; statements show their evidence whole. Counts work, never money — there are no rates in the system — and is read-only |
-| vFarm | Overview is a placeholder — nothing on the rack writes here yet. **Early Access** is real: the leads the form on bhanetwork.org posts, as a small CRM to read and annotate |
+| vFarm | Overview is a placeholder — nothing on the rack writes here yet. **Early Access** is real: every Form A lead Hardik's n8n tracker posts to `/api/engine/vfarm-leads`, with every answer, as a small CRM to read and annotate |
 | System registry | Builders, Tools, Endpoint, Workflow, and the engine-writes surface |
 
 ## Repo layout

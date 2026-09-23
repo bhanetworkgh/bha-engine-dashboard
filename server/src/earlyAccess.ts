@@ -1,4 +1,15 @@
 /**
+ * **SUPERSEDED (2026-09-23, Destiny): the public route below is kept but no
+ * longer used by the site.** Every Early Access lead now arrives through
+ * Hardik's Google Form A — directly, or from bhanetwork.org/vfarm, which
+ * submits into Form A — and his n8n tracker pushes each one to
+ * `POST /api/engine/vfarm-leads` (`storeFormA`, at the foot of this file),
+ * behind the engine's service key, with every answer. The public route is
+ * origin-checked for browsers, so n8n cannot call it, and it stores only name,
+ * email and organisation. It stays because removing a public endpoint a stale
+ * page might still post to would turn a lead into an error; nothing current
+ * posts to it. The description below is of that route.
+ *
  * The receiving end of the vFarm Early Access funnel (2026-09-20, on Destiny's
  * instruction).
  *
@@ -26,6 +37,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { query } from './pg';
+import { FORM_A_QUESTIONS } from '../../src/data/formA';
 
 /* ------------------------------------------------------------------ config */
 
@@ -431,6 +443,8 @@ export interface Lead {
   source_channel: string | null;
   landing_variant: string | null;
   contract_version: string | null;
+  /** Everything Form A asked and the tracker's ids; null on a lead from the old public route. */
+  form_a: FormAStored | null;
   /** True where this address was already on an earlier row. Computed, never stored. */
   is_repeat_email: boolean;
 }
@@ -458,7 +472,7 @@ export async function leads(): Promise<LeadsData> {
             page_contract_version, mechanics_contract_version, claim_state, status, notes,
             notified_at, submitted_at, created_at, user_agent,
             utm_source, utm_medium, utm_campaign, asset_id, source_channel,
-            landing_variant, contract_version,
+            landing_variant, contract_version, form_a,
             row_number() OVER (PARTITION BY email ORDER BY created_at, id) AS seq
        FROM engine_vfarm_leads
       ORDER BY created_at DESC, id DESC`,
@@ -517,4 +531,122 @@ export async function patch(id: string, changes: { status?: string; notes?: stri
   const updated = all.leads.find((l) => l.id === id);
   if (!updated) throw new SubmissionError(404, 'No lead with that id.');
   return updated;
+}
+
+/* ---------------------------------------------------- the engine route */
+
+/**
+ * What Form A leads are stored as (2026-09-23, Destiny): every answer keyed by
+ * its question text exactly as Form A words it, and the tracker's identifiers,
+ * all as the tracker sent them.
+ */
+export interface FormAStored {
+  answers: Record<string, unknown>;
+  early_access_lead_id: string | null;
+  buyer_intake_id: string;
+  correlation_id: string | null;
+  source_campaign: string | null;
+  submitted_at: string | null;
+}
+
+export interface FormAWrite {
+  id: string;
+  buyer_intake_id: string;
+  inserted: boolean;
+  answers: number;
+  /** Keys sent that are not one of Form A's 23 questions — stored anyway, and shown. */
+  unexpected_questions: string[];
+  /** Form A questions the body did not carry. Usually a key typed differently. */
+  missing_questions: string[];
+  /** Top-level fields this route does not read. */
+  ignored_fields: string[];
+}
+
+const ENGINE_FIELDS = ['name', 'email', 'organisation', 'organization', 'answers', 'early_access_lead_id', 'buyer_intake_id', 'correlation_id', 'source_campaign', 'submitted_at'];
+
+function opt(v: unknown, max: number): string | null {
+  if (v === null || v === undefined) return null;
+  const t = String(v).trim();
+  return t ? t.slice(0, max) : null;
+}
+
+/**
+ * POST /api/engine/vfarm-leads — one Form A lead from Hardik's n8n tracker.
+ *
+ * **Superseding the public route**, which is kept but no longer used by the
+ * site: that one is origin-checked for browsers, so n8n cannot call it, and it
+ * stores three fields, so it would lose twenty of the answers. This one is
+ * behind the engine's service key like every other engine write.
+ *
+ * **It never announces anything.** The tracker posts the Slack alert itself;
+ * a second announcement from here would be the same lead twice. `notified_at`
+ * is left null on these rows, and the page does not read that as "missed",
+ * because for a Form A lead the announcement is not this server's to make.
+ *
+ * **An upsert on buyer_intake_id**, which the tracker derives from the email
+ * and the Form A timestamp: the same submission posted twice updates one row.
+ * An update replaces the answers and the identifiers — the newer post is the
+ * newer statement of the same submission — and never touches `status` or
+ * `notes`, which are this dashboard's own.
+ */
+export async function storeFormA(body: Record<string, unknown>): Promise<FormAWrite> {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new SubmissionError(400, 'Send one lead as a JSON object.');
+  const rawAnswers = body.answers;
+  if (rawAnswers !== undefined && (rawAnswers === null || typeof rawAnswers !== 'object' || Array.isArray(rawAnswers))) {
+    throw new SubmissionError(422, 'answers must be an object keyed by Form A question text, e.g. { "Country": "Ghana" }.');
+  }
+  const answers: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries((rawAnswers ?? {}) as Record<string, unknown>)) {
+    if (v === null || v === undefined) continue;
+    if (typeof v === 'string' && !v.trim()) continue;
+    answers[k.slice(0, 500)] = typeof v === 'string' ? v.slice(0, 8000) : v;
+  }
+
+  const buyer = opt(body.buyer_intake_id, 200);
+  if (!buyer) throw new SubmissionError(422, 'buyer_intake_id is required: it is the key a repeat of the same submission is matched on.');
+
+  // The columns: from the top level, falling back to the answer that asked for it.
+  const name = opt(body.name, 200) ?? opt(answers['Full name'], 200);
+  const email = (opt(body.email, 320) ?? opt(answers['Email address'], 320))?.toLowerCase() ?? null;
+  const org = opt(body.organisation ?? body.organization, 300) ?? opt(answers['Organization / household name'], 300);
+  if (!name) throw new SubmissionError(422, 'name is required (or answers["Full name"]).');
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new SubmissionError(422, 'email is required and must look like an address (or answers["Email address"]).');
+
+  const submitted = opt(body.submitted_at, 100);
+  const stored: FormAStored = {
+    answers,
+    early_access_lead_id: opt(body.early_access_lead_id, 200),
+    buyer_intake_id: buyer,
+    correlation_id: opt(body.correlation_id, 200),
+    source_campaign: opt(body.source_campaign, 200),
+    submitted_at: submitted,
+  };
+  // The column takes a time only where the value is one unambiguously; the
+  // blob keeps whatever was sent, Google Forms' "9/23/2026 14:05:09" included.
+  const submittedAt = submitted && /^\d{4}-\d{2}-\d{2}T/.test(submitted) && Number.isFinite(Date.parse(submitted)) ? new Date(submitted).toISOString() : null;
+
+  const r = await query<{ id: string; inserted: boolean }>(
+    `INSERT INTO engine_vfarm_leads (full_name, email, organization_name, source_surface, source_campaign, submitted_at, form_a)
+     VALUES ($1, $2, $3, 'form_a', $4, $5, $6::jsonb)
+     ON CONFLICT ((form_a->>'buyer_intake_id')) WHERE form_a ? 'buyer_intake_id'
+     DO UPDATE SET full_name = EXCLUDED.full_name,
+                   email = EXCLUDED.email,
+                   organization_name = EXCLUDED.organization_name,
+                   source_campaign = EXCLUDED.source_campaign,
+                   submitted_at = EXCLUDED.submitted_at,
+                   form_a = EXCLUDED.form_a
+     RETURNING id, (xmax = 0) AS inserted`,
+    [name, email, org, stored.source_campaign, submittedAt, JSON.stringify(stored)],
+  );
+
+  const known = new Set(FORM_A_QUESTIONS);
+  return {
+    id: r.rows[0].id,
+    buyer_intake_id: buyer,
+    inserted: r.rows[0].inserted,
+    answers: Object.keys(answers).length,
+    unexpected_questions: Object.keys(answers).filter((k) => !known.has(k)),
+    missing_questions: FORM_A_QUESTIONS.filter((q) => !(q in answers)),
+    ignored_fields: Object.keys(body).filter((k) => !ENGINE_FIELDS.includes(k)),
+  };
 }

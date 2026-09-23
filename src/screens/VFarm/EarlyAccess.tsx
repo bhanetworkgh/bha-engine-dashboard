@@ -15,6 +15,7 @@ import {
   useToast,
 } from '../../components/ui';
 import { EditableCell } from '../Registry/Editable';
+import { FORM_A_GROUPS, FORM_A_QUESTIONS } from '../../data/formA';
 
 /**
  * The receiving end of the vFarm Early Access funnel, as a small CRM.
@@ -75,6 +76,8 @@ async function copy(text: string): Promise<boolean> {
 export default function EarlyAccess({ data, onChange }: { data: VfarmLeadsData; onChange: (leads: VfarmLead[]) => void }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
+  /** The lead whose answers are open. Clicking a row opens it; the panel sits above the list. */
+  const [openId, setOpenId] = useState<string | null>(null);
   const { toast, setToast } = useToast();
 
   const leads = data.leads;
@@ -113,6 +116,7 @@ export default function EarlyAccess({ data, onChange }: { data: VfarmLeadsData; 
   }, [leads, filter, q]);
 
   const paged = usePaged(shown, `${filter}:${q}`);
+  const openLead = openId ? leads.find((l) => l.id === openId) ?? null : null;
 
   const counts = data.summary.by_status;
   const options: { value: Filter; label: string; count?: number }[] = [
@@ -130,15 +134,17 @@ export default function EarlyAccess({ data, onChange }: { data: VfarmLeadsData; 
         A null notified_at means this lead was never announced in Slack. It is
         the one thing about the row a reader cannot see anywhere else, and it is
         exactly what somebody wants when they are wondering why they missed one.
+        Only for the old public route: a Form A lead is announced by Hardik's
+        n8n tracker, never by this server, so its null says nothing.
       */
       title: (l) =>
         `${whenFull(l.created_at)}${l.submitted_at && l.submitted_at.slice(0, 16) !== l.created_at.slice(0, 16) ? ` · the browser said ${whenFull(l.submitted_at)}` : ''}${
-          l.notified_at ? '' : ' · never announced in Slack'
+          l.notified_at || l.form_a ? '' : ' · never announced in Slack'
         }`,
       cell: (l) => (
         <span className="flex items-center gap-1.5">
           {when(l.created_at)}
-          {!l.notified_at && <span className="text-[10.5px] text-faint">not announced</span>}
+          {!l.notified_at && !l.form_a && <span className="text-[10.5px] text-faint">not announced</span>}
         </span>
       ),
     },
@@ -348,14 +354,16 @@ export default function EarlyAccess({ data, onChange }: { data: VfarmLeadsData; 
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 md:px-8">
+        {openLead && <LeadAnswers lead={openLead} onClose={() => setOpenId(null)} />}
         <RecordTable
           columns={columns}
           rows={paged.rows}
           rowKey={(l) => l.id}
+          onOpen={(l) => setOpenId(l.id === openId ? null : l.id)}
           label="vFarm Early Access leads"
           empty={
             leads.length === 0
-              ? 'Nobody has joined Early Access yet. The form on bhanetwork.org writes here the moment somebody does; until then this is empty because nothing has arrived, not because nothing is being recorded.'
+              ? 'No Early Access lead is held. Every lead arrives through Form A, and Hardik’s n8n tracker posts each one here as it comes in; until one does, this is empty because nothing has arrived, not because nothing is being recorded.'
               : 'No lead matches that filter.'
           }
         />
@@ -363,6 +371,102 @@ export default function EarlyAccess({ data, onChange }: { data: VfarmLeadsData; 
       </div>
 
       <Toast toast={toast} />
+    </div>
+  );
+}
+
+/** An answer as it was sent: text as text, a checkbox list as a list, anything else as JSON. */
+function answerText(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (Array.isArray(v)) return v.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(', ');
+  return JSON.stringify(v);
+}
+
+/**
+ * Every answer a lead gave, grouped the way FORM_A_GROUPS groups Form A
+ * (2026-09-23). A question the lead left blank says so in words — an empty
+ * cell would read as "not captured". A key the tracker sent that is not one of
+ * Form A's questions is shown under its own heading rather than dropped: a
+ * renamed question should be visible, not lost.
+ */
+function LeadAnswers({ lead, onClose }: { lead: VfarmLead; onClose: () => void }) {
+  const f = lead.form_a;
+  const extra = f ? Object.keys(f.answers).filter((k) => !FORM_A_QUESTIONS.includes(k)) : [];
+  const ids: [string, string | null][] = f
+    ? [
+        ['buyer_intake_id', f.buyer_intake_id],
+        ['early_access_lead_id', f.early_access_lead_id],
+        ['correlation_id', f.correlation_id],
+        ['source_campaign', f.source_campaign],
+        ['submitted_at', f.submitted_at],
+      ]
+    : [];
+  return (
+    <div className="card mb-4 px-5 py-4">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <div className="min-w-0">
+          <h2 className="truncate text-[14px] font-medium text-ink">{lead.full_name}</h2>
+          <div className="truncate text-[12px] text-dim">
+            {lead.email}
+            {lead.organization_name ? ` · ${lead.organization_name}` : ''}
+          </div>
+        </div>
+        <button type="button" className="link text-[12px]" onClick={onClose}>
+          Close
+        </button>
+      </div>
+
+      {!f ? (
+        <p className="text-[12.5px] text-dim">
+          This lead came through the old public form route, which stored only name, email and organisation. There are no Form A answers for it.
+        </p>
+      ) : (
+        <div className="space-y-4">
+          {FORM_A_GROUPS.map((g) => (
+            <section key={g.title}>
+              <h3 className="kicker mb-1.5">{g.title}</h3>
+              <dl className="divide-y divide-line rounded-[10px] border border-line">
+                {g.questions.map((qn) => {
+                  const v = f.answers[qn];
+                  return (
+                    <div key={qn} className="grid gap-x-4 px-3 py-2 text-[12.5px] sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                      <dt className="text-dim">{qn.trim()}</dt>
+                      <dd className={`whitespace-pre-wrap ${v === undefined ? 'text-faint' : 'text-ink'}`}>{v === undefined ? 'not answered' : answerText(v)}</dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            </section>
+          ))}
+          {extra.length > 0 && (
+            <section>
+              <h3 className="kicker mb-1.5">Answers to questions this page does not know</h3>
+              <dl className="divide-y divide-line rounded-[10px] border border-line">
+                {extra.map((k) => (
+                  <div key={k} className="grid gap-x-4 px-3 py-2 text-[12.5px] sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                    <dt className="text-dim">{k}</dt>
+                    <dd className="whitespace-pre-wrap text-ink">{answerText(f.answers[k])}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          )}
+          <section>
+            <h3 className="kicker mb-1.5">From the tracker</h3>
+            <dl className="grid gap-x-4 gap-y-1 text-[12px] sm:grid-cols-[auto_minmax(0,1fr)]">
+              {ids.map(([k, v]) => (
+                <div key={k} className="contents">
+                  <dt className="text-faint">{k}</dt>
+                  <dd className={`tabular truncate ${v ? 'text-dim' : 'text-faint'}`}>{v ?? 'not sent'}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+          <p className="text-[11.5px] text-faint">
+            Grouped by subject in Form A&rsquo;s own order. These headings are this page&rsquo;s, not the form&rsquo;s section titles, which nothing here can read.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

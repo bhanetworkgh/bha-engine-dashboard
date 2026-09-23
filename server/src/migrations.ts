@@ -1622,6 +1622,33 @@ const MIGRATIONS: Migration[] = [
       `UPDATE registry_endpoints SET notes = $v$Owned by BHA — Self Healer since 22 Sep, when the webhook moved there from Engine — Self-Healing Retry (archived in n8n).$v$, updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
         WHERE id = 'ep-engine-heal' AND notes = $v$Owned by Engine — Self-Healing Retry, which is inactive in n8n, so this production webhook is not live.$v$`,
     ],
+  },  {
+    id: 26,
+    name: 'vFarm leads: every Form A answer, and the buyer_intake_id upsert key',
+    statements: [
+      /**
+       * Every Early Access lead now arrives through Hardik's Form A, pushed by
+       * his n8n tracker to POST /api/engine/vfarm-leads (2026-09-23, Destiny).
+       * Name, email and organisation keep their columns; everything else Form A
+       * asked, and the tracker's identifiers, go in one jsonb blob, stored as
+       * sent — twenty-three answers are what a person said, and a column per
+       * question would be a migration every time Hardik edits the form.
+       *
+       * Rows written by the old public route have no blob and keep NULL, which
+       * reads as "this lead predates Form A", not as a lead who answered
+       * nothing.
+       */
+      `ALTER TABLE engine_vfarm_leads ADD COLUMN IF NOT EXISTS form_a jsonb`,
+      /**
+       * The upsert key. The tracker's buyer_intake_id is derived from the
+       * normalised email and the Form A timestamp, so the same submission
+       * posted twice — an n8n retry, a re-run — carries the same id and must
+       * land on one row. Partial, because the public route's rows have none.
+       */
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_vfarm_leads_buyer_intake
+         ON engine_vfarm_leads ((form_a->>'buyer_intake_id'))
+         WHERE form_a ? 'buyer_intake_id'`,
+    ],
   },
 ];
 
