@@ -25,6 +25,8 @@ import type {
   OpenLoopsData,
   OverviewData,
   OverviewTile,
+  PatternCandidate,
+  PatternCandidatesData,
   Query,
   RtData,
   SeriesPoint,
@@ -34,6 +36,7 @@ import { MODEL_LABEL, askConfigured } from './ask';
 import * as health from './health';
 import { CODEX_CHOICES, CODEX_TABLES, loopTable, questionNeedsHuman, requestIsOpen } from './sources';
 import * as store from './store';
+import { query } from './pg';
 
 /** The builder's loops table id, for inbound payloads that name a builder rather than a table. */
 export function loopTableFor(owner: string): string | null {
@@ -633,3 +636,52 @@ export async function getCommercial(_q: Query): Promise<CommercialData> {
   };
 }
 
+
+/**
+ * Pattern candidates (2026-09-23, Destiny): ideas Bays flags from real work
+ * before an architect registers them as build patterns. They moved from
+ * Airtable into engine_pattern_candidates on 21 Sep and nothing showed them.
+ *
+ * Read straight from that table — it is a mirror kind with no store mapper —
+ * with the column names describe_schema reports (natural_id, fields,
+ * updated_at) and the field names exactly as the rows carry them: Candidate,
+ * Summary, Lane, Status, Builder, Builder Slack ID, Suggested Architect,
+ * Architect Slack ID, Why This Architect, Flagged By, Source Link, Date
+ * Flagged, Pattern ID, Registered At. Read only: registering a candidate is
+ * the Bays Tools Router's log_build_pattern, not this dashboard's.
+ */
+export async function getPatternCandidates(): Promise<PatternCandidatesData> {
+  const r = await query<{ pk: string; natural_id: string | null; airtable_record_id: string | null; fields: Record<string, unknown> | null; updated_at: string }>(
+    'SELECT id::text AS pk, natural_id, airtable_record_id, fields, updated_at FROM engine_pattern_candidates',
+  );
+  const s = (f: Record<string, unknown>, k: string): string | null => {
+    const v = f[k];
+    if (v === null || v === undefined) return null;
+    const t = String(v).trim();
+    return t ? t : null;
+  };
+  const candidates: PatternCandidate[] = r.rows.map((row) => {
+    const f = row.fields ?? {};
+    return {
+      id: row.natural_id ?? row.airtable_record_id ?? `row-${row.pk}`,
+      candidate: s(f, 'Candidate'),
+      summary: s(f, 'Summary'),
+      lane: s(f, 'Lane'),
+      status: s(f, 'Status'),
+      builder: s(f, 'Builder'),
+      builder_slack_id: s(f, 'Builder Slack ID'),
+      suggested_architect: s(f, 'Suggested Architect'),
+      architect_slack_id: s(f, 'Architect Slack ID'),
+      why_this_architect: s(f, 'Why This Architect'),
+      flagged_by: s(f, 'Flagged By'),
+      source_link: s(f, 'Source Link'),
+      date_flagged: s(f, 'Date Flagged'),
+      pattern_id: s(f, 'Pattern ID'),
+      registered_at: s(f, 'Registered At'),
+    };
+  });
+  // Newest Date Flagged first; within a day, the newer CAND-<ms> id first. Undated last.
+  candidates.sort((a, b) => (b.date_flagged ?? '').localeCompare(a.date_flagged ?? '') || b.id.localeCompare(a.id));
+  const updated = r.rows.map((x) => x.updated_at).filter(Boolean).sort().pop() ?? null;
+  return { candidates, held: r.rows.length, updated_at: updated };
+}

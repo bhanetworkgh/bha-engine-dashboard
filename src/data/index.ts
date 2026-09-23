@@ -13,6 +13,7 @@
 import { api, ApiError } from './api';
 import type {
   AskBaysData,
+  PatternCandidatesData,
   IncidentCloseResult,
   AskReply,
   AuthSession,
@@ -154,6 +155,7 @@ export const getResearchTwin = (q: Query) => api<TwinData>(withLane('/api/resear
 export const getOpenLoops = (q: Query) => api<OpenLoopsData>(withLane('/api/open-loops', q));
 export const getCodexEntries = (q: Query) => api<CodexData>(withLane('/api/codex', q));
 export const getBuildPatterns = (q: Query) => api<BuildPatternsData>(withLane('/api/build-patterns', q));
+export const getPatternCandidates = () => api<PatternCandidatesData>('/api/pattern-candidates');
 export const getCommercial = (q: Query) => api<CommercialData>(withLane('/api/commercial', q));
 
 /**

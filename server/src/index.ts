@@ -756,6 +756,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await engine.getCodexEntries(q));
       case '/api/build-patterns':
         return send(res, 200, await engine.getBuildPatterns(q));
+      /** The Candidates tab on /build-patterns. Behind the cookie like every page route; read only. */
+      case '/api/pattern-candidates':
+        return send(res, 200, await engine.getPatternCandidates());
       case '/api/commercial':
         return send(res, 200, await engine.getCommercial(q));
       case '/api/ns-telemetry':
