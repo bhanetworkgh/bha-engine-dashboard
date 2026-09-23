@@ -1471,7 +1471,7 @@ export async function deleteCodex(id: string, confirm: string, actor = 'dashboar
   // Layer 0 — is identified by its submission id instead, so the guard is
   // never something nobody can satisfy.
   const identifier = codexId || submissionId;
-  if (!identifier) throw new StoreError('This submission carries neither a Codex entry id nor a submission id, so there is nothing to confirm it by. Delete it in Airtable.', 422);
+  if (!identifier) throw new StoreError('This submission carries neither a Codex entry id nor a submission id, so there is nothing to confirm it by, and it cannot be deleted from here.', 422);
   if (confirm.trim() !== identifier) {
     throw new StoreError(`That does not match. Type ${identifier} exactly to delete this submission.`, 422);
   }
@@ -2997,7 +2997,7 @@ export async function commercialMetrics(month?: string | null): Promise<Commerci
     unresolved_trend:
       distinctDays.size >= 2
         ? series(obs.map((o) => ({ label: o.at.slice(5, 10), value: Math.round(o.value) })), 'Total unresolved research questions as observed at each resync, since this database started recording.')
-        : series(null, 'A trend needs the count observed on at least two different days. Airtable keeps no history of this field, so the series starts from this dashboard\u2019s own first observation.'),
+        : series(null, 'A trend needs the count observed on at least two different days. Nothing kept a history of this field before, so the series starts from this dashboard\u2019s own first observation.'),
     incomplete: {
       n: incomplete.length,
       cards: incomplete,
@@ -3539,7 +3539,7 @@ export async function rtMetrics(month?: string | null): Promise<RtMetrics> {
     },
     ask_types: slices(all, (r) => r.ask_type, RT_ASK_TYPES, '(no type set)'),
     ask_type_note:
-      'What kind of work each request was. The base carries an External web search type the original spec for this page did not list, so it is here: a vocabulary this code invented would file real rows under a name Airtable never writes.',
+      'What kind of work each request was. The base carries an External web search type the original spec for this page did not list, so it is here: a vocabulary this code invented would file real rows under a name the engine never writes.',
     by_system: cohorts(all, (r) => r.asked_by_system, NO_SYSTEM, (r) => r.outcome === 'Answered', (r) => r.delivered === 'Delivered' || r.delivered === 'Self-delivered', (r) => r.used_web_search),
     by_system_note:
       'Each caller with its own answered rate, external-search rate and delivery rate. The aggregate mixes the weekly clock with people asking in Slack, and a failure in either is invisible inside it. Self-delivered counts as delivered here, because it is.',

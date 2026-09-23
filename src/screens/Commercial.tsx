@@ -382,9 +382,6 @@ function CardView({ o, trend, busy, onReadiness, onClose }: { o: Opportunity; tr
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <a href={o.airtable.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
-              Open in Airtable
-            </a>
             <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
               Close
             </button>
@@ -536,7 +533,6 @@ function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportuni
       // No date is rendered as no date. A card that never got one is not dated today.
       cell: (o) => o.created_at?.slice(0, 10) ?? <span className="text-degraded">no date</span>,
     },
-    { key: 'source', header: 'source', cell: (o) => <SourceLink source={o.source} /> },
     {
       key: 'actions',
       align: 'right',
@@ -548,7 +544,6 @@ function commercialColumns(open: (o: Opportunity) => void, change: (o: Opportuni
           <RowActions>
             <RowAction label="View" tone="accent" onClick={() => open(o)} />
             {o.readiness_state !== 'Media-Ready' && <RowAction label="Set media-ready" tone="accent" disabled={busy} onClick={() => change(o, 'Media-Ready')} />}
-            <RowAction label="Open in Airtable" onClick={() => window.open(o.airtable.url, '_blank', 'noreferrer')} />
           </RowActions>
         );
       },
@@ -652,7 +647,7 @@ export default function Commercial() {
       const updated = await setRecordStatus('commercial', o.id, next);
       setCards((list) => list.map((x) => (x.id === updated.id ? updated : x)));
       setTick((n) => n + 1);
-      setToast({ text: `readiness_state set to ${next}. It is held here; a resync takes Airtable's value back.`, tone: 'ok' });
+      setToast({ text: `readiness_state set to ${next}. It is held here.`, tone: 'ok' });
     } catch (err) {
       setToast({ text: err instanceof Error ? err.message : 'The change did not save.', tone: 'failing' });
     } finally {
@@ -690,7 +685,7 @@ export default function Commercial() {
             extraTiles={<CommercialStatTiles m={metrics.data} />}
             columns={[
               { header: 'card_id', value: (o) => o.card_id },
-              { header: 'airtable_record_id', value: (o) => o.id },
+              { header: 'record_id', value: (o) => o.id },
               { header: 'opportunity_title', value: (o) => o.title },
               { header: 'lane_id', value: (o) => o.lane_id },
               { header: 'confidence', value: (o) => o.confidence },
@@ -699,7 +694,6 @@ export default function Commercial() {
               { header: 'missing_research_count', value: (o) => o.missing_research_count },
               { header: 'missing_research_questions', value: (o) => o.missing_research_questions.join(' | ') },
               { header: 'created_at', value: (o) => o.created_at },
-              { header: 'airtable_url', value: (o) => o.airtable.url },
             ]}
           />
         </div>

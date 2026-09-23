@@ -187,6 +187,7 @@ const S = (
   managed_by: string | null,
   plan: string | null = null,
   notes: string | null = null,
+  status: 'active' | 'trial' | 'retired' = 'active',
 ): SeedRow => ({
   id, name, category, what_it_is_for, url, managed_by, plan,
   /**
@@ -197,7 +198,7 @@ const S = (
    * as unpriced and says so.
    */
   billing_owner: 'BHA', cost_amount: null, cost_currency: 'USD', billing_cycle: null, renewal_date: null,
-  status: 'active', notes,
+  status, notes,
 });
 
 export const SERVICES: SeedRow[] = [
@@ -210,9 +211,9 @@ export const SERVICES: SeedRow[] = [
     'https://dashboard.render.com', 'Kaiqi Yang', null,
     "Workspace “Bays' workspace” (tea-dafco81t0dsc73djsv4g). Live inventory read from the Render API on 13 Sep 2026 — eight paid resources, none of them priced here: bha-engine-dashboard (web, 0.5c-512mb), bha-engine-db (postgres 18, 0.1c-256mb, 1 GB), genie-v3-migration (web, starter), genie-v3-migration-ldye (web, starter), ragingester (web, starter), smartcursorbrowser (web, starter), Genie-RSS (web, free), vfarm-device-sdk-docs (static site, starter build). All in Oregon."),
   S('airtable', 'Airtable', 'data',
-    'System of record for open loops, submissions, the research queue, build patterns, commercial cards and lane state.',
+    'Was the system of record for open loops, submissions, the research queue, build patterns, commercial cards and lane state.',
     'https://airtable.com', 'Destiny Arupi', 'Free',
-    'Ten bases are in use; they are listed on the Endpoints tab.'),
+    'Retired 21 Sep 2026: every record now lives in this dashboard, written by n8n through /api/engine. Its bases are kept as history on the Endpoints tab.', 'retired'),
   S('bharag', 'BHARAG', 'data',
     'The RAG and incident store every subsystem reads from and writes to.',
     'https://bharag2.duckdns.org', 'Jeganathan', null, null),

@@ -1649,6 +1649,23 @@ const MIGRATIONS: Migration[] = [
          ON engine_vfarm_leads ((form_a->>'buyer_intake_id'))
          WHERE form_a ? 'buyer_intake_id'`,
     ],
+  },  {
+    id: 27,
+    name: 'registry: Airtable is a retired service',
+    statements: [
+      /**
+       * Airtable was retired from the engine on 21 Sep 2026 (AIRTABLE_RETIRED),
+       * and the registry still called it active with "ten bases in use". Kept as
+       * a registry entry — it is a tool BHA paid for — marked retired. Only
+       * while the row still holds the seeded values, so a page edit wins.
+       */
+      `UPDATE registry_services
+          SET status = 'retired',
+              what_it_is_for = 'Was the system of record for open loops, submissions, the research queue, build patterns, commercial cards and lane state.',
+              notes = 'Retired 21 Sep 2026: every record now lives in this dashboard, written by n8n through /api/engine. Its bases are kept as history on the Endpoints tab.',
+              updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = 'airtable' AND status = 'active' AND notes = 'Ten bases are in use; they are listed on the Endpoints tab.'`,
+    ],
   },
 ];
 

@@ -1,7 +1,7 @@
 import type { Loop, LoopStatus, RecordWrite, OpenLoopsData } from '../../data';
 import { BUILDER_NAMES } from '../../data';
 import type { RecordColumn } from '../../components/ui';
-import { EmptyState, NotLanded, Pill, RecordId, RecordTable, RowAction, RowActions, SourceLink, unlanded, writeWarning } from '../../components/ui';
+import { EmptyState, NotLanded, Pill, RecordId, RecordTable, RowAction, RowActions, unlanded, writeWarning } from '../../components/ui';
 import { duplicateSource } from './LoopPanel';
 import { ageTone, laneLabel } from '../../lib';
 import { LOOP_STATUS_DEFS, LOOP_STATUS_TERMS, ageBandDef } from './definitions';
@@ -33,7 +33,7 @@ function StatusPill({ status }: { status: LoopStatus }) {
 }
 
 /** The loop-specific consequence, appended to the shared sentence. */
-const DIGEST_NOTE = 'The 8am Open Loops digest reads Airtable, so this loop will be raised again tomorrow morning.';
+const DIGEST_NOTE = 'The 8am Open Loops digest may raise it again tomorrow morning.';
 
 export function writebackWarning(w: RecordWrite): string {
   return writeWarning(w, DIGEST_NOTE);
@@ -134,7 +134,6 @@ export function Loops({ data, loops, total, busyId, onStatus, onOpen, onRemoveDu
       cellClass: (l) => (unlanded(l.writeback) ? 'text-failing' : 'text-faint'),
       cell: (l) => l.closed_at ?? '—',
     },
-    { key: 'source', header: 'source', cell: (l) => <SourceLink source={l.source} /> },
     {
       key: 'actions',
       align: 'right',
@@ -148,7 +147,6 @@ export function Loops({ data, loops, total, busyId, onStatus, onOpen, onRemoveDu
             {l.status === 'open' && <RowAction label="Start" disabled={busy} onClick={() => onStatus(l, 'in progress')} />}
             {l.status === 'in progress' && <RowAction label="Back to open" disabled={busy} onClick={() => onStatus(l, 'open')} />}
             {l.status === 'closed' && <RowAction label="Reopen" disabled={busy} onClick={() => onStatus(l, 'open')} />}
-            <RowAction label="Open in Airtable" onClick={() => window.open(l.airtable.url, '_blank', 'noreferrer')} />
           </RowActions>
         );
       },
@@ -174,10 +172,9 @@ export function Loops({ data, loops, total, busyId, onStatus, onOpen, onRemoveDu
             <span aria-hidden className="mt-[6px] h-[7px] w-[7px] shrink-0 rounded-full bg-failing" />
             <div className="text-[12.5px] leading-relaxed text-failing">
               <span className="font-medium">
-                {stranded.length} {stranded.length === 1 ? 'loop did' : 'loops did'} not land in Airtable.
+                {stranded.length} {stranded.length === 1 ? 'loop did' : 'loops did'} not land.
               </span>{' '}
-              The 8am Open Loops digest reads Airtable, not this dashboard, so what is on screen here and what it sends
-              tomorrow morning disagree. Marked in the status column; open the loop for the reason and what completed.
+              What is on screen here and what the 8am digest sends tomorrow morning may disagree. Marked in the status column; open the loop for the reason and what completed.
               {/*
                 Three, with the repair on the ones that have one. A duplicate is
                 the single case here this dashboard can fix by itself — the copy

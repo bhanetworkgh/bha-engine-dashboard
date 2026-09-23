@@ -127,13 +127,6 @@ export function LoopPanel({
               {loop.closed_at && <span className="tabular">closed {loop.closed_at}</span>}
             </div>
           </div>
-          {/* Only the link up here (2026-09-16, Destiny). Closing the panel is
-              one of the actions on the footer row, beside the others. */}
-          <div className="flex items-center gap-2">
-            <a href={loop.airtable.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
-              Open in Airtable
-            </a>
-          </div>
         </div>
 
         {/*
@@ -145,7 +138,7 @@ export function LoopPanel({
           <div className="mt-4 flex items-start gap-3 rounded-[14px] bg-failing-soft px-4 py-3">
             <span aria-hidden className="mt-[6px] h-[7px] w-[7px] shrink-0 rounded-full bg-failing" />
             <div className="min-w-0 text-[12.5px] leading-relaxed text-failing">
-              <span className="font-medium">{wb.state === 'duplicate' ? 'This loop is in two tables.' : 'The last change did not reach Airtable.'}</span>{' '}
+              <span className="font-medium">{wb.state === 'duplicate' ? 'This loop is in two tables.' : 'The last change did not land.'}</span>{' '}
               {wb.reason}
               {wb.steps && <div className="mt-1 text-[11.5px] text-failing/90">Completed: {wb.steps}.</div>}
               {/*
@@ -220,13 +213,12 @@ export function LoopPanel({
             <ReadOnly label="Raised in" value={loop.raised_in} />
             <ReadOnly label="Assignee Slack id" value={loop.assignee_slack_id} />
             <ReadOnly label="Last modified" value={loop.last_modified ? loop.last_modified.replace('T', ' ').slice(0, 16) : null} />
-            <ReadOnly label="Airtable record" value={loop.airtable.record_id} href={loop.airtable.url} />
           </div>
         </div>
 
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
           <div className="text-[11.5px] text-faint">
-            {loop.note ? `Note: ${loop.note}` : 'Saved here first, then written to Airtable.'}
+            {loop.note ? `Note: ${loop.note}` : 'Saved to this dashboard.'}
           </div>
           <div className="flex items-center gap-2">
             {/*

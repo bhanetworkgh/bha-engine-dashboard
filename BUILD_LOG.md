@@ -8915,3 +8915,44 @@ Tested:     Local: CODEX-1 → 200 by codex_entry_id; CODEX-2 → 200 by
             scoped to Sep (4 of 5 held), Open from Sessions and from Owed shows
             the read-only dialog with the Otter link inside, the 404 dialog, and
             the Codex page's dialog still carrying its actions.
+
+## 2026-09-23 12:30 — Airtable removed from the interface; Pay session buttons confirmed live
+Intent:     Destiny, 23 Sep. Two jobs: remove every trace of Airtable from the
+            UI (AIRTABLE_RETIRED=true since 21 Sep; any link there opens a stale,
+            capped copy), and the Pay Tracker "Open" buttons + Sessions month
+            scope (LOOP-1790112860892-45ZS).
+Job 2:      Already built and pushed as 5a809bc in the previous turn, and live:
+            production's search_source shows codexForPaySession in store.ts and
+            the /api/pay/sessions/:id/codex route in index.ts. Not redone.
+Files:      src/components/ui/{Records,Resync,SourceLink}.tsx;
+            src/screens/{BuildPatterns,Clients,Codex,CodexEntryDialog,
+            Commercial,NorthStar,ResearchTwin,Settings,clientDefinitions,
+            recordDefinitions}.tsx/.ts; src/screens/OpenLoops/{LoopPanel,Loops,
+            definitions,index}; src/screens/EngineHealth/{LaneView,Retries}.tsx;
+            src/screens/Registry/index.tsx; server/src/{engine,health,store,
+            registrySeed,migrations}.ts (27); CLAUDE.md.
+Fix:        grep -rniE airtable src/ started at 241 hits; worked through each.
+            Removed: 8 "Open in Airtable" dialog buttons, 9 row actions (incl.
+            Registry's base action), the LoopPanel "Airtable record" field, 7
+            airtable_url CSV columns (airtable_record_id → record_id, same
+            value), 7 "source" columns and every SourceLink of kind airtable
+            (the component now draws nothing for it), and two Settings rows
+            about the write-back. ResyncButton draws only with a live source
+            (Engine health: "Resync from BHARAG"). unlanded() returns false, so
+            the not-landed marker, the stranded-loops banner and the "Airtable
+            did not take it" toasts stop drawing. Reworded: every "Resync from
+            Airtable" hint, the Clients provenance line and status tooltip,
+            four definitions, the Codex delete wording and toast, and five
+            server notes a page shows (loops note, Commercial trend note, the
+            empty-kind note and resync line in health.ts, a delete refusal).
+Decision:   Registry keeps Airtable as a service, now retired (migration 27,
+            guarded on the seeded row), with its url shown unlinked; the bases
+            stay as the "history" section, with no action. API payloads,
+            airtable_record_id and the importers are untouched. Resync call
+            sites on the Airtable-only pages stay; the button draws nothing.
+Tested:     Local build; migration 27 applied; a Playwright scan of 17 routes'
+            rendered text, title attributes and hrefs finds "airtable" on one
+            only — Engine health, where an incident's own n8n node is named
+            "Update Jason Review (Airtable)". That is engine data, shown as
+            written. Final grep: 162 hits, all comments, identifiers, payload
+            types, fixtures or the registry's history section.

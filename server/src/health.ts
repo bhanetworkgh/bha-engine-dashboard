@@ -222,7 +222,7 @@ async function freshnessOf(table: string, kind: string, label: string): Promise<
     rows: n,
     from_engine: Number(row?.from_engine ?? 0),
     tables: n ? [{ table, label, n }] : [],
-    note: n ? null : `Nothing of this kind is held yet. ${label} reaches this dashboard through the Resync from Airtable button above, and through POST /api/engine/${kind}.`,
+    note: n ? null : `Nothing of this kind is held yet. The engine writes ${label.toLowerCase()} here through POST /api/engine/${kind}; until it does, this is empty because nothing has arrived, not because nothing happened.`,
   };
 }
 
@@ -450,7 +450,7 @@ export async function resync(actor = 'dashboard'): Promise<Resync> {
   const ran = tables.some((t) => t.read);
   const note = [
     ran ? '' : 'Nothing was read, so nothing was changed.',
-    airtableRetired ? 'Incidents were read from BHARAG; error_counts and retry_attempts were not read, because Airtable is retired and the engine writes those directly.' : '',
+    airtableRetired ? 'Incidents were read from BHARAG; error_counts and retry_attempts were not read, because the engine writes those here directly.' : '',
     ran ? `${sum('inserted')} inserted, ${sum('updated')} updated, ${sum('deleted')} deleted, ${sum('unchanged')} already matching.` : '',
     closed ? `${closed} incident${closed === 1 ? '' : 's'} the ledger no longer returns as open ${closed === 1 ? 'was' : 'were'} marked closed rather than deleted — a closed incident is the history the time-to-resolve figure is computed from.` : '',
     sum('refused') ? `${sum('refused')} row${sum('refused') === 1 ? ' was' : 's were'} read and refused by this database; the server log names each one and why.` : '',

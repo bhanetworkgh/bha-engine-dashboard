@@ -138,7 +138,7 @@ export function CodexEntryDialog({
       // point. Same words as the row marker.
       setToast?.(
         unlanded(updated.writeback)
-          ? { text: `Saved here, but Airtable did not take it: ${updated.writeback!.reason ?? 'no reason given'}`, tone: 'failing' }
+          ? { text: `Saved here, but the write-back did not land: ${updated.writeback!.reason ?? 'no reason given'}`, tone: 'failing' }
           : { text: `Jason Status set to ${status}.`, tone: 'ok' },
       );
     } catch (e) {
@@ -158,7 +158,7 @@ export function CodexEntryDialog({
       // `ok` toast either way — the entry is gone from here, which is what was
       // asked for — but it never claims a deletion Airtable did not make.
       setToast?.({
-        text: r.airtable.state === 'ok' ? `${r.identifier} deleted from Airtable and from here.` : `${r.identifier} deleted. ${r.airtable.reason ?? 'The Airtable row was left in place.'}`,
+        text: `${r.identifier} deleted.`,
         tone: 'ok',
       });
       onClose();
@@ -213,11 +213,6 @@ export function CodexEntryDialog({
                   <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void review('Pending')}>
                     Send back to pending
                   </button>
-                )}
-                {!readOnly && (
-                  <a href={detail.airtable.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
-                    Open in Airtable
-                  </a>
                 )}
                 <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
                   Close
@@ -332,7 +327,7 @@ export function CodexEntryDialog({
               ) : (
                 <div className="rounded-[14px] bg-failing-soft px-4 py-3">
                   <div className="text-[12.5px] leading-relaxed text-failing">
-                    This removes the row from Airtable and from this dashboard. It cannot be undone — the full record is kept in the deletion log and nowhere else. Type{' '}
+                    This removes the submission from this dashboard. It cannot be undone — the full record is kept in the deletion log and nowhere else. Type{' '}
                     <span className="tabular font-medium">{detail.codex_entry_id ?? detail.submission_id}</span> to confirm.
                   </div>
                   <div className="mt-2.5 flex flex-wrap items-center gap-2">

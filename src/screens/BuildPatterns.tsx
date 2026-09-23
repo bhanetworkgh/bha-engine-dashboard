@@ -29,7 +29,6 @@ import {
   SearchBox,
   Segmented,
   SeriesBlock,
-  SourceLink,
   StatCell,
   StatStrip,
   RowsLine,
@@ -245,9 +244,6 @@ function PatternView({ id, onClose }: { id: string; onClose: () => void }) {
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <a href={detail.airtable.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
-                  Open in Airtable
-                </a>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
                   Close
                 </button>
@@ -342,7 +338,6 @@ function patternColumns(open: (p: BuildPattern) => void): RecordColumn<BuildPatt
       className: 'tabular text-faint',
       cell: (p) => p.created_at?.slice(0, 10) ?? <span className="text-faint">no date</span>,
     },
-    { key: 'source', header: 'source', cell: (p) => <SourceLink source={p.source} /> },
     {
       key: 'actions',
       align: 'right',
@@ -351,7 +346,6 @@ function patternColumns(open: (p: BuildPattern) => void): RecordColumn<BuildPatt
       cell: (p) => (
         <RowActions>
           <RowAction label="View" tone="accent" onClick={() => open(p)} />
-          <RowAction label="Open in Airtable" onClick={() => window.open(p.airtable.url, '_blank', 'noreferrer')} />
         </RowActions>
       ),
     },
@@ -525,13 +519,12 @@ export default function BuildPatterns() {
             dateOf={(p) => p.created_at}
             columns={[
               { header: 'pattern_id', value: (p) => p.pattern_id },
-              { header: 'airtable_record_id', value: (p) => p.id },
+              { header: 'record_id', value: (p) => p.id },
               { header: 'pattern_name', value: (p) => p.title },
               { header: 'bha_system', value: (p) => p.bha_system },
               { header: 'reusability', value: (p) => p.reusability },
               { header: 'created_at', value: (p) => p.created_at },
               { header: 'problem', value: (p) => p.excerpt },
-              { header: 'airtable_url', value: (p) => p.airtable.url },
             ]}
           />
         </div>

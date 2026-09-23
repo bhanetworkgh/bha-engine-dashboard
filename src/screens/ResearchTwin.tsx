@@ -576,9 +576,6 @@ function AskView({ r, onClose }: { r: RtAsk; onClose: () => void }) {
                 Open in Slack
               </a>
             )}
-            <a href={r.airtable.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
-              Open in Airtable
-            </a>
             <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
               Close
             </button>
@@ -676,9 +673,6 @@ function JobView({ j, onClose }: { j: RtJob; onClose: () => void }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <a href={j.airtable.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
-              Open in Airtable
-            </a>
             <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
               Close
             </button>
@@ -779,7 +773,6 @@ function askColumns(open: (r: RtAsk) => void): RecordColumn<RtAsk>[] {
       className: 'card-meta tabular text-dim',
       cell: (r) => (r.response_seconds === null ? <span className="text-faint">—</span> : r.response_seconds),
     },
-    { key: 'source', header: 'source', cell: (r) => <SourceLink source={r.source} /> },
     {
       key: 'actions',
       align: 'right',
@@ -788,7 +781,6 @@ function askColumns(open: (r: RtAsk) => void): RecordColumn<RtAsk>[] {
       cell: (r) => (
         <RowActions>
           <RowAction label="View" tone="accent" onClick={() => open(r)} />
-          <RowAction label="Open in Airtable" onClick={() => window.open(r.airtable.url, '_blank', 'noreferrer')} />
         </RowActions>
       ),
     },
@@ -846,7 +838,6 @@ function jobColumns(open: (j: RtJob) => void): RecordColumn<RtJob>[] {
         ),
     },
     { key: 'opened_by', header: 'opened by', card: 'meta', className: 'card-meta text-dim', cell: (j) => j.opened_by ?? <span className="text-faint">not recorded</span> },
-    { key: 'source', header: 'source', cell: (j) => <SourceLink source={j.source} /> },
     {
       key: 'actions',
       align: 'right',
@@ -855,7 +846,6 @@ function jobColumns(open: (j: RtJob) => void): RecordColumn<RtJob>[] {
       cell: (j) => (
         <RowActions>
           <RowAction label="View" tone="accent" onClick={() => open(j)} />
-          <RowAction label="Open in Airtable" onClick={() => window.open(j.airtable.url, '_blank', 'noreferrer')} />
         </RowActions>
       ),
     },
@@ -1009,7 +999,7 @@ export default function ResearchTwin() {
             extraTiles={<RtStatTiles m={metrics.data} />}
             columns={[
               { header: 'ask_id', value: (r) => r.ask_id },
-              { header: 'airtable_record_id', value: (r) => r.id },
+              { header: 'record_id', value: (r) => r.id },
               { header: 'asked_at', value: (r) => r.asked_at },
               { header: 'asked_by_system', value: (r) => r.asked_by_system },
               { header: 'asked_by_person', value: (r) => r.asked_by_person },
@@ -1028,7 +1018,6 @@ export default function ResearchTwin() {
               { header: 'run_id', value: (r) => r.run_id },
               { header: 'question', value: (r) => r.question },
               { header: 'answer_summary', value: (r) => r.answer_summary },
-              { header: 'airtable_url', value: (r) => r.airtable.url },
             ]}
           />
         </div>
@@ -1068,7 +1057,7 @@ export default function ResearchTwin() {
             <EmptyState>
               {loaded.jobs_freshness.source === 'none'
                 ? (loaded.jobs_freshness.note ??
-                  'No research job is held yet. Research Jobs was created on 17 Sep 2026 with no history carried in; a job is updated in place, so Resync from Airtable is what brings the queue across.')
+                  'No research job is held yet. Research Jobs was created on 17 Sep 2026 with no history carried in; the engine writes each job here as it opens one and updates it in place as it is worked.')
                 : q.trim()
                   ? 'No job matches that search in this filter.'
                   : jobFilter === 'capped'
@@ -1124,7 +1113,7 @@ export default function ResearchTwin() {
             <EmptyState>
               {loaded.freshness.source === 'none'
                 ? (loaded.freshness.note ??
-                  'No Research Twin ask is held yet. The ledger was created on 17 Sep 2026 with no history carried in, so this fills as the agent runs — and Resync from Airtable will pull anything the mirror missed.')
+                  'No Research Twin ask is held yet. The ledger was created on 17 Sep 2026 with no history carried in, so this fills as the agent runs: it writes each ask here at the end of the run.')
                 : q.trim()
                   ? 'No ask matches that search in this filter.'
                   : askFilter === 'external'

@@ -515,9 +515,6 @@ function AskView({ r, onClose }: { r: NsAsk; onClose: () => void }) {
                 Open in Slack
               </a>
             )}
-            <a href={r.airtable.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
-              Open in Airtable
-            </a>
             <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
               Close
             </button>
@@ -657,7 +654,6 @@ function nsColumns(open: (r: NsAsk) => void): RecordColumn<NsAsk>[] {
       title: (r) => (r.tools.length ? r.tools.map((t) => `${t.tool}: ${t.hits === null ? 'no counts recorded' : `${t.hits} rows, ${t.cited ?? 0} cited`}`).join('\n') : undefined),
       cell: (r) => (r.citation_coverage === null ? <span className="text-faint">—</span> : r.citation_coverage),
     },
-    { key: 'source', header: 'source', cell: (r) => <SourceLink source={r.source} /> },
     {
       key: 'actions',
       align: 'right',
@@ -667,7 +663,6 @@ function nsColumns(open: (r: NsAsk) => void): RecordColumn<NsAsk>[] {
         <RowActions>
           <RowAction label="View" tone="accent" onClick={() => open(r)} />
           {r.slack_link && <RowAction label="Open in Slack" onClick={() => window.open(r.slack_link!, '_blank', 'noreferrer')} />}
-          <RowAction label="Open in Airtable" onClick={() => window.open(r.airtable.url, '_blank', 'noreferrer')} />
         </RowActions>
       ),
     },
@@ -746,7 +741,7 @@ export default function NorthStar() {
             extraTiles={<NsStatTiles m={metrics.data} />}
             columns={[
               { header: 'ask_id', value: (r) => r.ask_id },
-              { header: 'airtable_record_id', value: (r) => r.id },
+              { header: 'record_id', value: (r) => r.id },
               { header: 'asked_at', value: (r) => r.asked_at },
               { header: 'asked_by_system', value: (r) => r.asked_by_system },
               { header: 'asked_by_person', value: (r) => r.asked_by_person },
@@ -765,7 +760,6 @@ export default function NorthStar() {
               { header: 'question', value: (r) => r.question },
               { header: 'answer_summary', value: (r) => r.answer_summary },
               { header: 'slack_link', value: (r) => r.slack_link },
-              { header: 'airtable_url', value: (r) => r.airtable.url },
             ]}
           />
         </div>
@@ -805,7 +799,7 @@ export default function NorthStar() {
             <EmptyState>
               {loaded.freshness.source === 'none'
                 ? (loaded.freshness.note ??
-                  'No North Star ask is held yet. The ledger was created on 17 Sep 2026 with no history carried in, so this fills as the agent runs — and Resync from Airtable will pull anything the mirror missed.')
+                  'No North Star ask is held yet. The ledger was created on 17 Sep 2026 with no history carried in, so this fills as the agent runs: it writes each ask here at the end of the run.')
                 : q.trim()
                   ? 'No ask matches that search in this filter.'
                   : filter === 'not-delivered'
