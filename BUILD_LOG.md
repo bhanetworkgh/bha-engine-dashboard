@@ -8837,3 +8837,39 @@ Tested:     Local: migration 26 applied; the same body posted twice → 201
             inserted then 200 updated, same id, one row, 23 answers; no key →
             401; no buyer_intake_id → 422; status 'contacted' and notes set by
             hand survive a third post. Screenshot shows the grouped answers.
+
+## 2026-09-23 10:20 — Build patterns: a Candidates tab for engine_pattern_candidates
+Intent:     Destiny, 23 Sep. Pattern candidates moved from Airtable into
+            engine_pattern_candidates on 21 Sep (the final import landed 40) and
+            nothing showed them; Bays' instructions still link the retired
+            Airtable view. A read-only tab at /build-patterns?view=candidates.
+Files:      server/src/engine.ts (getPatternCandidates), server/src/index.ts
+            (GET /api/pattern-candidates, cookie), src/data/{index,types}.ts,
+            src/screens/BuildPatterns.tsx, CLAUDE.md
+Data:       describe_schema on engine_pattern_candidates: id, airtable_record_id,
+            natural_id, lane_id, builder_id, created_time, fields, source,
+            first_seen_at, updated_at; 45 rows. mirror.ts KINDS:
+            pattern_candidates → engine_pattern_candidates, naturalField null,
+            keyOnNatural. Field keys read off the rows (jsonb_object_keys): the
+            twelve every row has, plus Pattern ID and Registered At on 5.
+            Status: Proposed 40 (flagged 16–20 Sep), Registered 5 (flagged 22
+            Sep, registered 23 Sep 11:05), Approved 0. All 45 have
+            airtable_record_id null. The five Pattern IDs all exist in
+            engine_build_patterns (checked by natural_id).
+Problem:    My first check guessed the patterns table as engine_patterns:
+            "relation \"engine_patterns\" does not exist". The mirror map says
+            engine_build_patterns — the same class of mistake the brief warned
+            about, caught by reading mirror.ts rather than guessing again.
+Decision:   The tab is in the URL (?view=candidates / ?view=statistics; Patterns
+            carries none) through react-router's useSearchParams — no page kept
+            a tab in the address before, and the brief needs a linkable one.
+            The Pattern ID link finds the pattern in the list the page already
+            holds and calls the Patterns tab's own setOpen after switching tab:
+            the same dialog, not a second one. Status counts are a Segmented
+            filter (the page's existing clickable-count control). An unknown
+            status would get its own "Other status" option rather than vanish.
+Tested:     Local, seeded one pattern and three candidates: route returns them
+            newest first; no cookie → 401 and the inbound key alone → 401;
+            screenshots of the tab at ?view=candidates, the candidate dialog
+            with the Pattern ID, and the click through to that pattern's dialog
+            on the Patterns tab.

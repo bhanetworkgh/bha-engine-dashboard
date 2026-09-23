@@ -1888,6 +1888,22 @@ That derivation used to require a slug after the sequence number, so
 segment and nothing more is needed to read it. The slug is what the keywords
 come from, and only that.
 
+**Pattern candidates are a tab on Build patterns** (2026-09-23, Destiny):
+Patterns · **Candidates** · Statistics, at `/build-patterns?view=candidates` — the
+tab is in the address, and that URL is the one Bays' instructions give in place
+of the retired Airtable view. `GET /api/pattern-candidates`, behind the cookie,
+reads `engine_pattern_candidates` directly (a mirror kind with no store mapper),
+with the field names exactly as the rows carry them — `Candidate`, `Summary`,
+`Lane`, `Status`, `Builder`, `Suggested Architect`, `Why This Architect`,
+`Flagged By`, `Source Link`, `Date Flagged`, `Pattern ID`, `Registered At`.
+Newest Date Flagged first. Status counts are the filter; the page's own month
+picker and search box scope it too, the month being the month flagged. A row
+opens in the same dialog shape a pattern does, and a Registered row's Pattern
+ID opens that pattern through the Patterns tab's own `setOpen` — no second
+mechanism. **Read only**: a candidate is registered through the Bays Tools
+Router's `log_build_pattern`, never from here. A failed read says so on the tab
+rather than drawing an empty list.
+
 **Build patterns has no status** (decision 2026-09-15, Destiny). `pattern_status`
 was deleted from the base and removed from every workflow that wrote it, so the
 canonical / draft / no-status split, its tabs, its pill, its filter and the two

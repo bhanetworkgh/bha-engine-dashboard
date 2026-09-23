@@ -2882,3 +2882,40 @@ export interface VfarmLeadsData {
     by_status: Record<string, number>;
   };
 }
+
+/* ------------------------------------------------------ pattern candidates */
+
+/**
+ * An idea Bays flagged from real work before it became a registered build
+ * pattern (2026-09-23). One row of engine_pattern_candidates, whose `fields`
+ * carry the Airtable table's own names verbatim; these are those fields, and
+ * nothing is derived except the id.
+ */
+export interface PatternCandidate {
+  /** natural_id (CAND-<ms>-<4>), else the Airtable record id, else the row id. */
+  id: string;
+  candidate: string | null;
+  summary: string | null;
+  lane: string | null;
+  /** Proposed, Approved or Registered — as written; an unknown value keeps its own name. */
+  status: string | null;
+  builder: string | null;
+  builder_slack_id: string | null;
+  suggested_architect: string | null;
+  architect_slack_id: string | null;
+  why_this_architect: string | null;
+  flagged_by: string | null;
+  source_link: string | null;
+  /** YYYY-MM-DD as the row carries it. */
+  date_flagged: string | null;
+  /** Set only on Registered rows. */
+  pattern_id: string | null;
+  registered_at: string | null;
+}
+
+export interface PatternCandidatesData {
+  candidates: PatternCandidate[];
+  /** Rows in the table, and when any of them last changed here. */
+  held: number;
+  updated_at: string | null;
+}
