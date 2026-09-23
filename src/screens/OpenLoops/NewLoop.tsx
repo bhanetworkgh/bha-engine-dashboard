@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { BUILDER_NAMES, LOOP_LANE_TAGS, type LoopLaneTag, type NewLoop } from '../../data';
 import { laneLabel } from '../../lib';
+import { Button } from '../../components/ui';
 
 /**
  * Opens a loop. The server writes it into the builder's own loops table in
@@ -69,12 +70,12 @@ export function NewLoopForm({ defaultOwner, busy, onSubmit, onCancel }: { defaul
         <input id="loop-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Context, a link, who asked" className="input mt-1.5" />
       </div>
       <div className="mt-4 flex items-center justify-end gap-2">
-        <button type="button" onClick={onCancel} className="btn btn-ghost btn-sm">
+        <Button onClick={onCancel} variant="ghost" size="sm">
           Cancel
-        </button>
-        <button type="submit" disabled={!title.trim() || busy} className="btn btn-primary btn-sm">
+        </Button>
+        <Button type="submit" disabled={!title.trim() || busy} variant="primary" size="sm">
           {busy ? 'Opening…' : 'Open loop'}
-        </button>
+        </Button>
       </div>
     </form>
   );

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getServerStatus, type Resync } from '../../data';
+import { Button } from './Button';
 
 /**
  * Resync from Airtable — the control and the line it leaves behind, in one
@@ -104,9 +105,9 @@ export function useAirtableRetired(): boolean | null {
 export function ResyncButton({ busy, onClick, alsoReads }: { busy: boolean; onClick: () => void; /** The live source this page's pass reads, e.g. "BHARAG". None, no button. */ alsoReads?: string }) {
   if (!alsoReads) return null;
   return (
-    <button type="button" onClick={onClick} disabled={busy} className="btn btn-primary gap-1.5" title={`Reads ${alsoReads} and brings this page up to date with it`}>
+    <Button onClick={onClick} loading={busy} className="gap-1.5" title={`Reads ${alsoReads} and brings this page up to date with it`}>
       {busy ? `Reading ${alsoReads}…` : `Resync from ${alsoReads}`}
-    </button>
+    </Button>
   );
 }
 

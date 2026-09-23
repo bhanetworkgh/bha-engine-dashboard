@@ -10,7 +10,7 @@ import {
   type RecordStats,
   type StatKind,
 } from '../data';
-import { CountUpText, EmptyPanel, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, yearOf, yearsOf } from './ui';
+import { yearOf, yearsOf, Button, CountUpText, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, EmptyPanel } from './ui';
 import { csvRow, downloadCsv, toCsv, type CsvColumn } from '../lib/csv';
 
 /**
@@ -367,14 +367,13 @@ export default function RecordStatistics<T>({
                 ))}
               </select>
             </label>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => downloadCsv(`${kind}-${data.selected}.csv`, report(data, inMonth, columns, noun, rowsNoun ?? noun))}
-              title={`The figures above with every caveat, then the ${(rowsNoun ?? noun).toLowerCase()} in this month`}
-            >
+            <Button
+ variant="ghost" size="sm"
+ onClick={() => downloadCsv(`${kind}-${data.selected}.csv`, report(data, inMonth, columns, noun, rowsNoun ?? noun))}
+ title={`The figures above with every caveat, then the ${(rowsNoun ?? noun).toLowerCase()} in this month`}
+ >
               Export CSV
-            </button>
+            </Button>
           </div>
         </div>
         <p className="mt-3 text-[13px] leading-relaxed text-ink">{data.prose}</p>

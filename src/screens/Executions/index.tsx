@@ -16,7 +16,7 @@ import {
 import { buildReport, reportName } from '../../lib/executionReport';
 import { downloadCsv } from '../../lib/csv';
 import { COVERAGE_DEFS, MODE_DEFS, MODE_OTHER, RECENT_DEF, STATUS_DEFS, STATUS_OTHER, tabDef } from './definitions';
-import { CountUpText, Definition, InfoTip, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, monthLabel, MonthPicker, PageHeader, relativeTime, Tabs, Toast, useToast, yearOf } from '../../components/ui';
+import { Tabs, PageHeader, yearOf, Button, CountUpText, Definition, InfoTip, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, monthLabel, MonthPicker, Toast, relativeTime, useToast } from '../../components/ui';
 
 /**
  * Executions — every run of every workflow in the engine, one row per run.
@@ -204,9 +204,9 @@ function WorkflowPanel({ workflowId, grain, period, onClose }: { workflowId: str
                   {detail.period.label} · {detail.period.start} to {detail.period.end} · workflow {detail.workflow.workflow_id}
                 </div>
               </div>
-              <button type="button" className="btn" onClick={onClose}>
+              <Button onClick={onClose}>
                 Close
-              </button>
+              </Button>
             </div>
 
             {/*
@@ -442,16 +442,15 @@ function MonthDownload({ months, systemKey, systemLabel, onFail }: { months: str
 
   return (
     <span className="relative" ref={box as React.RefObject<HTMLDivElement>}>
-      <button
-        type="button"
-        className="btn btn-ghost btn-sm"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        title={`A month of ${systemLabel.toLowerCase()} as a CSV — the figures, the per-workflow breakdown and every caveat`}
-      >
+      <Button
+ variant="ghost" size="sm"
+ aria-haspopup="menu"
+ aria-expanded={open}
+ onClick={() => setOpen((v) => !v)}
+ title={`A month of ${systemLabel.toLowerCase()} as a CSV — the figures, the per-workflow breakdown and every caveat`}
+ >
         Download month
-      </button>
+      </Button>
       {open && (
         <div className="card absolute right-0 z-30 mt-1 max-h-[280px] w-[168px] overflow-y-auto p-1 shadow-lg" role="menu">
           {months.length === 0 ? (
@@ -828,24 +827,23 @@ export default function Executions() {
               the year should be that year. The month is downloaded from the
               chart of months, where the months are.
             */}
-            <button
-              type="button"
-              className="btn"
-              disabled={report !== null}
-              title={`${year} for ${system.label.toLowerCase()} — the figures, the per-workflow breakdown and every month held, with every caveat inside the file`}
-              onClick={() => {
-                setReport(String(year));
-                void downloadPeriod('year', String(year), system.system)
-                  .then((err) => err && setToast({ text: err, tone: 'failing' }))
-                  .catch((e: unknown) => setToast({ text: e instanceof Error ? e.message : 'The report could not be built.', tone: 'failing' }))
-                  .finally(() => setReport(null));
-              }}
-            >
+            <Button
+ 
+ disabled={report !== null}
+ title={`${year} for ${system.label.toLowerCase()} — the figures, the per-workflow breakdown and every month held, with every caveat inside the file`}
+ onClick={() => {
+ setReport(String(year));
+ void downloadPeriod('year', String(year), system.system)
+ .then((err) => err && setToast({ text: err, tone: 'failing' }))
+ .catch((e: unknown) => setToast({ text: e instanceof Error ? e.message : 'The report could not be built.', tone: 'failing' }))
+ .finally(() => setReport(null));
+ }}
+ >
               {report ? 'Building…' : `Download ${year} report`}
-            </button>
-            <button type="button" className="btn" disabled={busy} onClick={reread} title="Reads every execution n8n holds again. Safe to run at any time: each row is keyed on its n8n execution id.">
+            </Button>
+            <Button disabled={busy} onClick={reread} title="Reads every execution n8n holds again. Safe to run at any time: each row is keyed on its n8n execution id.">
               {busy ? 'Reading n8n…' : 'Read n8n again'}
-            </button>
+            </Button>
           </div>
         }
         below={<Tabs tabs={data.systems.map((s) => s.label)} value={tab} onChange={setTab} counts={counts} titles={Object.fromEntries(data.systems.map((s) => [s.label, tabDef(s.label)]))} />}

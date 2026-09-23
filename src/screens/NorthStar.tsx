@@ -3,50 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
 import { getNsTelemetry, getRecordMetrics, resyncRecords, type NsAsk, type NsMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
-import {
-  CohortTable,
-  CountUp,
-  Definition,
-  DistTile,
-  DurationTrend,
-  EmptyPanel,
-  EmptyState,
-  FigureCell,
-  HBar,
-  LoadFailed,
-  Loading,
-  MetricCard,
-  MonthPicker,
-  monthsFrom,
-  OutcomeColumns,
-  PageHeader,
-  Pagination,
-  PercentCell,
-  PercentileCell,
-  Pill,
-  RecordId,
-  RecordTable,
-  ResyncButton,
-  RowAction,
-  RowActions,
-  RowsLine,
-  SearchBox,
-  Segmented,
-  SeriesBlock,
-  SourceLink,
-  StatCaption,
-  StatCell,
-  StatLabel,
-  StatStrip,
-  Tabs,
-  thisMonth,
-  TileFigure,
-  Toast,
-  relativeTime,
-  usePaged,
-  useResync,
-  useToast,
-} from '../components/ui';
+import { ButtonAnchor, Tabs, PageHeader, Pagination, Button, CohortTable, CountUp, Definition, DistTile, DurationTrend, FigureCell, HBar, thisMonth, TileFigure, Pill, LoadFailed, Loading, MetricCard, MonthPicker, monthsFrom, EmptyPanel, EmptyState, Toast, OutcomeColumns, PercentCell, PercentileCell, RecordId, RecordTable, relativeTime, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, SourceLink, StatCaption, StatCell, StatLabel, StatStrip, usePaged, useResync, useToast } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 import { DELIVERY_DEFS, NS_OUTCOME_DEFS } from './twinDefinitions';
 
@@ -514,13 +471,13 @@ function AskView({ r, onClose }: { r: NsAsk; onClose: () => void }) {
           <div className="flex items-center gap-2">
             {/* The permalink where there is one; no placeholder link where there is not. */}
             {r.slack_link && (
-              <a href={r.slack_link} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
+              <ButtonAnchor variant="ghost" size="sm" href={r.slack_link} target="_blank" rel="noreferrer">
                 Open in Slack
-              </a>
+              </ButtonAnchor>
             )}
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            <Button variant="ghost" size="sm" onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
         </div>
 

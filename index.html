@@ -8,6 +8,23 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
     <title>BHA engine</title>
+    <!--
+      The theme, before the first paint (2026-09-23). ThemeProvider stamps
+      data-theme too, but only once React has run, so a dark-theme reader saw
+      a white page first. This reads the same key the provider reads, resolves
+      "system" the same way, and sets the attribute before any CSS applies.
+    -->
+    <script>
+      (function () {
+        var t = 'light';
+        try {
+          var v = localStorage.getItem('bha.theme');
+          if (v === 'dark' || v === 'light') t = v;
+          else if (v === 'system' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) t = 'dark';
+        } catch (e) {}
+        document.documentElement.dataset.theme = t;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

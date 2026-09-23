@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { BUILDER_NAMES, LOOP_LANE_TAGS, type Loop, type LoopEdit, type LoopLaneTag, type LoopStatus } from '../../data';
 import { LOOP_STATUS_DEFS } from './definitions';
 import { laneLabel } from '../../lib';
+import { Button } from '../../components/ui';
 
 /**
  * One loop, opened from its row.
@@ -149,9 +150,9 @@ export function LoopPanel({
               */}
               {wb.state === 'duplicate' && (
                 <div className="mt-2">
-                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={onRemoveDuplicate}>
+                  <Button variant="ghost" size="sm" disabled={busy} onClick={onRemoveDuplicate}>
                     {busy ? 'Removing…' : `Remove the copy in ${duplicateSource(wb.from_builder)}`}
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>
@@ -229,12 +230,12 @@ export function LoopPanel({
               through. Two ways to make the same write, one of them ambiguously
               labelled, is worse than one way that is plain.
             */}
-            <button type="button" className="btn btn-ghost" onClick={onClose}>
+            <Button variant="ghost" onClick={onClose}>
               Close panel
-            </button>
-            <button type="button" className="btn btn-primary" disabled={busy || !dirty} onClick={() => save()}>
+            </Button>
+            <Button variant="primary" disabled={busy || !dirty} onClick={() => save()}>
               {busy ? 'Saving…' : moving ? `Move to ${BUILDER_NAMES[builder] ?? builder}` : 'Save'}
-            </button>
+            </Button>
           </div>
         </div>
       </div>

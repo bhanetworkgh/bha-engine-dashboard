@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Button } from '../../components/ui';
 
 /**
  * Inline editing for the registry tables.
@@ -251,9 +252,9 @@ export function NewRow({
 
   if (!open) {
     return (
-      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen(true)}>
+      <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
         Add {article} {label}
-      </button>
+      </Button>
     );
   }
 
@@ -288,12 +289,12 @@ export function NewRow({
           </label>
         ))}
         <div className="flex shrink-0 items-center gap-2">
-          <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void submit()}>
+          <Button variant="primary" size="sm" disabled={busy} onClick={() => void submit()}>
             {busy ? 'Saving…' : 'Create'}
-          </button>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen(false)}>
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
             Cancel
-          </button>
+          </Button>
         </div>
       </div>
       <p className="mt-3 text-[11.5px] leading-snug text-faint">

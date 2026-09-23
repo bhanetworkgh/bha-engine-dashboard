@@ -3,46 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
 import { getRecordMetrics, getRtTelemetry, resyncRecords, type RtAsk, type RtJob, type RtJobMetrics, type RtMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
-import {
-  CohortTable,
-  CountUp,
-  DistTile,
-  DurationTrend,
-  Definition,
-  EmptyState,
-  FigureCell,
-  HBar,
-  LoadFailed,
-  Loading,
-  MetricCard,
-  MonthPicker,
-  monthsFrom,
-  OutcomeColumns,
-  PageHeader,
-  Pagination,
-  PercentCell,
-  PercentileCell,
-  Pill,
-  RecordId,
-  RecordTable,
-  ResyncButton,
-  RowAction,
-  RowActions,
-  RowsLine,
-  SearchBox,
-  Segmented,
-  SeriesBlock,
-  SourceLink,
-  StatCell,
-  StatStrip,
-  Tabs,
-  thisMonth,
-  TileFigure,
-  Toast,
-  usePaged,
-  useResync,
-  useToast,
-} from '../components/ui';
+import { ButtonAnchor, Tabs, PageHeader, Pagination, Button, CohortTable, CountUp, Definition, DistTile, DurationTrend, FigureCell, HBar, thisMonth, TileFigure, Pill, LoadFailed, Loading, MetricCard, MonthPicker, monthsFrom, EmptyState, Toast, OutcomeColumns, PercentCell, PercentileCell, RecordId, RecordTable, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, SourceLink, StatCell, StatStrip, usePaged, useResync, useToast } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 import { JOB_STATUS_DEFS, RT_OUTCOME_DEFS } from './twinDefinitions';
 import { HandoffTile } from './NorthStar';
@@ -575,13 +536,13 @@ function AskView({ r, onClose }: { r: RtAsk; onClose: () => void }) {
           </div>
           <div className="flex items-center gap-2">
             {r.slack_link && (
-              <a href={r.slack_link} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
+              <ButtonAnchor variant="ghost" size="sm" href={r.slack_link} target="_blank" rel="noreferrer">
                 Open in Slack
-              </a>
+              </ButtonAnchor>
             )}
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            <Button variant="ghost" size="sm" onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -676,9 +637,9 @@ function JobView({ j, onClose }: { j: RtJob; onClose: () => void }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            <Button variant="ghost" size="sm" onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
         </div>
 

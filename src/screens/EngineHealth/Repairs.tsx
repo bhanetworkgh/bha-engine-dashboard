@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useData } from '../../app/useData';
 import { getRepairs, revertRepair, type Repair, type RepairsData, type RepairSummary } from '../../data';
 import type { RecordColumn } from '../../components/ui';
-import { Definition, EmptyState, FigureCell, Loading, LoadFailed, Pagination, Pill, RecordId, RecordTable, SearchBox, Segmented, StatStrip, usePaged } from '../../components/ui';
+import { ButtonAnchor, Pagination, Button, Definition, FigureCell, Pill, LoadFailed, Loading, EmptyState, RecordId, RecordTable, SearchBox, Segmented, StatStrip, usePaged } from '../../components/ui';
 import { Fact, when } from './parts';
 import { REPAIR_OUTCOME_DEFS, REPAIR_STATE_DEFS, REVERT_GUARD_DEFS } from './definitions';
 import { HEALTH_KINDS } from './kinds';
@@ -252,32 +252,31 @@ export default function Repairs() {
         confirming === r.repair_id ? (
           <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
             <span className="max-w-[34ch] truncate text-[11.5px] text-dim">Put {r.workflow_name ?? r.workflow_id} back?</span>
-            <button type="button" className="btn btn-ghost btn-sm text-degraded" disabled={busy !== null} onClick={() => revert(r)}>
+            <Button variant="ghost" size="sm" className="text-degraded" disabled={busy !== null} onClick={() => revert(r)}>
               Revert
-            </button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirming(null)}>
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>
               Cancel
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="flex items-center justify-end gap-2">
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              disabled={!r.can_revert || busy !== null}
-              // Where it is disabled, the tooltip is the server's own reason
-              // rather than a shrug — which guard refused, in a sentence.
-              title={
-                r.revert_blocked_reason ??
-                (busy !== null ? 'Another revert from this page is still waiting for n8n.' : 'Restores this workflow to the version it was on before this repair.')
-              }
-              onClick={(e) => {
-                e.stopPropagation();
-                setConfirming(r.repair_id);
-              }}
-            >
+            <Button
+ variant="ghost" size="sm"
+ disabled={!r.can_revert || busy !== null}
+ // Where it is disabled, the tooltip is the server's own reason
+ // rather than a shrug — which guard refused, in a sentence.
+ title={
+ r.revert_blocked_reason ??
+ (busy !== null ? 'Another revert from this page is still waiting for n8n.' : 'Restores this workflow to the version it was on before this repair.')
+ }
+ onClick={(e) => {
+ e.stopPropagation();
+ setConfirming(r.repair_id);
+ }}
+ >
               {busy === r.repair_id ? 'Reverting…' : 'Revert'}
-            </button>
+            </Button>
           </div>
         ),
     },
@@ -497,13 +496,13 @@ function RepairPanel({ repair: r, busy, onRevert, onClose }: { repair: Repair; b
           </div>
           <div className="flex items-center gap-2">
             {r.execution_url && (
-              <a href={r.execution_url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
+              <ButtonAnchor variant="ghost" size="sm" href={r.execution_url} target="_blank" rel="noreferrer">
                 Open in n8n
-              </a>
+              </ButtonAnchor>
             )}
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            <Button variant="ghost" size="sm" onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -577,20 +576,20 @@ function RepairPanel({ repair: r, busy, onRevert, onClose }: { repair: Repair; b
                   failure it addressed is no longer fixed.
                 </p>
                 <div className="mt-2 flex items-center gap-2">
-                  <button type="button" className="btn btn-ghost btn-sm text-degraded" disabled={busy} onClick={onRevert}>
+                  <Button variant="ghost" size="sm" className="text-degraded" disabled={busy} onClick={onRevert}>
                     {busy ? 'Reverting…' : 'Yes, revert it'}
-                  </button>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirming(false)}>
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>
                     Keep the repair
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : (
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-[12px] text-faint">Restores the workflow as it stood before this repair. Refused if anybody has edited it since.</p>
-                <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setConfirming(true)}>
+                <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirming(true)}>
                   Revert
-                </button>
+                </Button>
               </div>
             )
           ) : (

@@ -7,7 +7,7 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useState } from 'react';
 import { deleteCodexEntry, getCodexDetail, setCodexStatus, type CodexEntry, type CodexEntryDetail } from '../data';
-import { NotLanded, Pill, unlanded } from '../components/ui';
+import { Button, Pill, NotLanded, unlanded } from '../components/ui';
 import { ENTRY_DEFS, JASON_STATUS_DEFS, PAID_DEFS, QUALITY_DEF, STAGE_DEFS } from './codexDefinitions';
 
 export function when(iso: string | null): string {
@@ -60,7 +60,7 @@ function EntryText({ text }: { text: string }) {
         const body = isHeading ? lines.slice(1) : lines;
         return (
           <div key={i}>
-            {isHeading && <div className="mb-1 text-[12px] font-medium tracking-wide text-faint uppercase">{head}</div>}
+            {isHeading && <div className="mb-1 text-[12px] font-medium text-dim">{head}</div>}
             <div className="space-y-1">
               {body.map((line, j) => {
                 const t = line.trim();
@@ -175,9 +175,9 @@ export function CodexEntryDialog({
         {err ? (
           <div className="flex items-start justify-between gap-3">
             <div className={`text-[13px] ${missing ? 'text-dim' : 'text-failing'}`}>{err}</div>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            <Button variant="ghost" size="sm" onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
         ) : !detail ? (
           <div className="text-[13px] text-faint">Loading the entry…</div>
@@ -205,18 +205,18 @@ export function CodexEntryDialog({
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {!readOnly && detail.approval !== 'approved' && (
-                  <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void review('Approved')}>
+                  <Button variant="primary" size="sm" disabled={busy} onClick={() => void review('Approved')}>
                     {busy ? 'Writing…' : 'Approve'}
-                  </button>
+                  </Button>
                 )}
                 {!readOnly && detail.approval === 'approved' && (
-                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void review('Pending')}>
+                  <Button variant="ghost" size="sm" disabled={busy} onClick={() => void review('Pending')}>
                     Send back to pending
-                  </button>
+                  </Button>
                 )}
-                <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+                <Button variant="ghost" size="sm" onClick={onClose}>
                   Close
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -321,9 +321,9 @@ export function CodexEntryDialog({
             {!readOnly && (
             <div className="mt-5 border-t border-line pt-4">
               {!deleting ? (
-                <button type="button" className="btn btn-ghost btn-sm text-failing" onClick={() => setDeleting(true)}>
+                <Button variant="ghost" size="sm" className="text-failing" onClick={() => setDeleting(true)}>
                   Delete this submission
-                </button>
+                </Button>
               ) : (
                 <div className="rounded-[14px] bg-failing-soft px-4 py-3">
                   <div className="text-[12.5px] leading-relaxed text-failing">
@@ -338,17 +338,17 @@ export function CodexEntryDialog({
                       className="input tabular max-w-[320px] flex-1"
                       aria-label="Type the codex id to confirm"
                     />
-                    <button
-                      type="button"
-                      className="btn btn-sm bg-failing text-bg"
-                      disabled={busy || confirm.trim() !== (detail.codex_entry_id ?? detail.submission_id ?? '')}
-                      onClick={() => void remove()}
-                    >
+                    <Button
+                      variant="destructive"
+                      size="sm"
+ disabled={busy || confirm.trim() !== (detail.codex_entry_id ?? detail.submission_id ?? '')}
+ onClick={() => void remove()}
+ >
                       {busy ? 'Deleting…' : 'Delete'}
-                    </button>
-                    <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { setDeleting(false); setConfirm(''); }}>
+                    </Button>
+                    <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setDeleting(false); setConfirm(''); }}>
                       Cancel
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}

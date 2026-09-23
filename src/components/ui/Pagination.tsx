@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Button } from './Button';
 
 /**
  * Long lists are paged rather than rendered whole: twenty rows, next and
@@ -72,15 +73,15 @@ export function Pagination({ paged, unit }: { paged: Paged<unknown>; unit: strin
       </span>
       {!single && (
         <div className="flex items-center gap-2">
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPage(page - 1)} disabled={page === 0}>
+          <Button variant="ghost" size="sm" onClick={() => setPage(page - 1)} disabled={page === 0}>
             Previous
-          </button>
+          </Button>
           <span className="tabular px-1 text-[11.5px] text-faint">
             Page {page + 1} of {pages}
           </span>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPage(page + 1)} disabled={page >= pages - 1}>
+          <Button variant="ghost" size="sm" onClick={() => setPage(page + 1)} disabled={page >= pages - 1}>
             Next
-          </button>
+          </Button>
         </div>
       )}
     </div>

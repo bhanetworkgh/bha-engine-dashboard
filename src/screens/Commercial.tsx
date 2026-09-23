@@ -4,43 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
 import { getCommercial, getRecordMetrics, resyncRecords, setRecordStatus, type CommercialMetrics, type MetricSeries, type Opportunity, type ReadinessState } from '../data';
 import type { RecordColumn } from '../components/ui';
-import {
-  CountCell,
-  Definition,
-  EmptyPanel,
-  EmptyState,
-  HBar,
-  LoadFailed,
-  Loading,
-  MetricCard,
-  MetricCell,
-  MonthPicker,
-  monthLabel,
-  monthsFrom,
-  PageHeader,
-  Tabs,
-  Pagination,
-  Pill,
-  RecordId,
-  RecordTable,
-  ResyncButton,
-  RowAction,
-  RowActions,
-  SearchBox,
-  Segmented,
-  SeriesBlock,
-  SourceLink,
-  Sparkline,
-  StatCell,
-  StatStrip,
-  RowsLine,
-  thisMonth,
-  Toast,
-  TwoLine,
-  usePaged,
-  useResync,
-  useToast,
-} from '../components/ui';
+import { Tabs, PageHeader, Pagination, Button, CountCell, Definition, HBar, thisMonth, Pill, LoadFailed, Loading, MetricCard, MetricCell, monthLabel, MonthPicker, monthsFrom, EmptyPanel, EmptyState, Toast, RecordId, RecordTable, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, SourceLink, Sparkline, StatCell, StatStrip, usePaged, useResync, useToast, TwoLine } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 import { CLEAR_DEF, CONFIDENCE_DEFS, INCOMPLETE_DEF, MEDIA_DEFS, PIPELINE_DEFS, READINESS_DEFS } from './recordDefinitions';
 
@@ -386,9 +350,9 @@ function CardView({ o, trend, busy, onReadiness, onClose }: { o: Opportunity; tr
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            <Button variant="ghost" size="sm" onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -458,9 +422,9 @@ function CardView({ o, trend, busy, onReadiness, onClose }: { o: Opportunity; tr
             <SourceLink source={o.source} />
             <div className="flex flex-wrap gap-2">
               {READINESS.filter((r) => r !== o.readiness_state).map((r) => (
-                <button key={r} type="button" className={`btn btn-sm ${r === 'Media-Ready' ? 'btn-primary' : 'btn-ghost'}`} disabled={busy} onClick={() => onReadiness(o, r)}>
+                <Button key={r} size="sm" variant={r === 'Media-Ready' ? 'secondary' : 'ghost'} disabled={busy} onClick={() => onReadiness(o, r)}>
                   {busy ? 'Writing…' : `Set ${r.toLowerCase()}`}
-                </button>
+                </Button>
               ))}
             </div>
           </div>

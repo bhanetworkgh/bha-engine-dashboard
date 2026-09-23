@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useData } from '../app/useData';
 import { BUILDER_NAMES, getOverview, type FeedItem, type OverviewData, type OverviewTile } from '../data';
-import { Bars, Card, Icon, LoadFailed, Loading, Pill, Ring, type IconName } from '../components/ui';
+import { Button, ButtonLink, Bars, Card, Icon, LoadFailed, Loading, Pill, Ring, type IconName } from '../components/ui';
 import { ageTone, healthText } from '../lib';
 
 /**
@@ -99,7 +99,7 @@ function Hero({ data }: { data: OverviewData }) {
   return (
     <section className="hero flex h-full min-h-[320px] flex-col justify-center px-7 py-8 md:px-9">
       <div className="relative z-10 max-w-[54%] md:max-w-[50%]">
-        <div className="mb-3 text-[11.5px] font-medium tracking-[0.12em] text-accent-ink uppercase">Bays summary</div>
+        <div className="mb-3 text-[11.5px] font-medium text-accent-ink">Bays summary</div>
         <h2
           className="font-display text-[26px] leading-[1.15] transition-[opacity,transform] duration-700 ease-[cubic-bezier(0.2,0.7,0.2,1)] md:text-[29px]"
           style={{ opacity: shown ? 1 : 0, transform: shown ? 'none' : 'translateY(6px)' }}
@@ -109,9 +109,9 @@ function Hero({ data }: { data: OverviewData }) {
           {HEADLINES[i][1]}
         </h2>
         <p className="mt-3 max-w-[46ch] text-[14px] leading-relaxed text-dim">{sentence}</p>
-        <Link to="/ask-bays" className="btn mt-5 h-9 rounded-full bg-panel px-4 text-[13px] shadow-[var(--shadow-card)]">
+        <ButtonLink to="/ask-bays" className="mt-5 h-9 rounded-full px-4 text-[13px] shadow-[var(--shadow-card)]">
           Ask Bays about today
-        </Link>
+        </ButtonLink>
       </div>
 
       {/* The orb sits just left of three uniform glass chips that step down to the right, clear of the edge. */}
@@ -239,9 +239,9 @@ function Feed({ title, items, empty, all }: { title: string; items: FeedItem[]; 
             ))}
           </div>
           {items.length > 6 && (
-            <button type="button" className="link mt-2 text-[12.5px]" onClick={() => setMore((v) => !v)}>
+            <Button variant="ghost" size="sm" className="mt-2 text-[12.5px]" onClick={() => setMore((v) => !v)}>
               {more ? 'Show fewer' : `Show all ${items.length}`}
-            </button>
+            </Button>
           )}
         </>
       )}

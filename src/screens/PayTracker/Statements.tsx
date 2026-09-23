@@ -2,20 +2,7 @@ import { createPortal } from 'react-dom';
 import { useMemo, useState } from 'react';
 import type { PayData, PayMetrics, PayStatement } from '../../data';
 import type { RecordColumn } from '../../components/ui';
-import {
-  EmptyState,
-  FigureCell,
-  Pagination,
-  PercentileCell,
-  Pill,
-  RecordId,
-  RecordTable,
-  SearchBox,
-  Segmented,
-  Segmented as Seg,
-  StatStrip,
-  usePaged,
-} from '../../components/ui';
+import { ButtonAnchor, Pagination, Button, FigureCell, Pill, EmptyState, PercentileCell, RecordId, RecordTable, SearchBox, Segmented, Segmented as Seg, StatStrip, usePaged } from '../../components/ui';
 
 /**
  * Every monthly statement, newest first.
@@ -75,9 +62,9 @@ function columns(open: (s: PayStatement) => void): RecordColumn<PayStatement>[] 
       className: 'card-actions',
       cell: (s) => (
         <div className="flex items-center justify-end gap-2">
-          <button type="button" className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); open(s); }}>
+          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); open(s); }}>
             Evidence
-          </button>
+          </Button>
         </div>
       ),
     },
@@ -220,13 +207,13 @@ function EvidencePanel({ s, onClose }: { s: PayStatement; onClose: () => void })
           </div>
           <div className="flex items-center gap-2">
             {s.slack_link && (
-              <a href={s.slack_link} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
+              <ButtonAnchor variant="ghost" size="sm" href={s.slack_link} target="_blank" rel="noreferrer">
                 Open in Slack
-              </a>
+              </ButtonAnchor>
             )}
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            <Button variant="ghost" size="sm" onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
         </div>
 

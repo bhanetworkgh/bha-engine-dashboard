@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Button } from './Button';
 
 /**
  * Row actions are revealed on hover or keyboard focus and never buried in a
@@ -22,17 +23,18 @@ export function RowAction({
         ? 'hover:text-accent-ink hover:bg-accent-soft'
         : '';
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="sm"
       disabled={disabled}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
       }}
-      className={`btn btn-ghost btn-sm focus:opacity-100 ${toneClass}`}
+      className={`focus:opacity-100 ${toneClass}`}
     >
       {label}
-    </button>
+    </Button>
   );
 }
 
