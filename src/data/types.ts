@@ -2856,6 +2856,19 @@ export interface VfarmLead {
   source_channel: string | null;
   landing_variant: string | null;
   contract_version: string | null;
+  /**
+   * Everything Form A asked, keyed by the question's own text, and the n8n
+   * tracker's identifiers (2026-09-23). Null on a lead the old public route
+   * wrote, which predates Form A reaching this dashboard.
+   */
+  form_a: {
+    answers: Record<string, unknown>;
+    early_access_lead_id: string | null;
+    buyer_intake_id: string;
+    correlation_id: string | null;
+    source_campaign: string | null;
+    submitted_at: string | null;
+  } | null;
   /** This address was already on an earlier row. Computed at read time, never stored. */
   is_repeat_email: boolean;
 }

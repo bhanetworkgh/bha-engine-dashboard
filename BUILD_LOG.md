@@ -8796,3 +8796,44 @@ Verified:   Live /api/overview: every signal is a sentence; Engine health "0
 Not read:   /api/pay/metrics?month= and /api/engine-health/metrics are templated
             routes the MCP read tool will not resolve, so Pay's scoped figures
             on production rest on the SQL check and the local test above.
+
+## 2026-09-23 08:40 — vFarm Early Access: Form A leads from n8n, every answer kept
+Intent:     Destiny, 23 Sep. All Early Access leads now arrive through Hardik's
+            Google Form A (directly, or from bhanetwork.org/vfarm, which submits
+            into Form A). His n8n tracker pushes each one here and sends the
+            Slack alert. The public route is origin-checked for browsers and
+            keeps three fields, so n8n cannot use it and it would lose the rest.
+Files:      server/src/earlyAccess.ts (storeFormA), server/src/index.ts (route in
+            the engine block), server/src/migrations.ts (26),
+            src/data/formA.ts (new: the 23 questions and their grouping),
+            tsconfig.server.json, src/data/types.ts,
+            src/screens/VFarm/EarlyAccess.tsx, README.md, CLAUDE.md
+Data:       Question text read, not assumed: the "Check The Signup" node of n8n
+            "vFarm Early Access — Website Intake" (xxME1VLRkPdlLpaV) keys its row
+            by the response sheet's headers "character for character", and the
+            sheet itself (1ssxxdB5…, "Form Responses 1") carries the same 24
+            headers — Timestamp plus 23 answers, two ending in a space.
+            Tracker (fhQNvRFdh1H6Li0E): buyer_intake_id = VFBUYER-FORMA-<hash of
+            email|Timestamp>, correlation_id = VFARM-FORMA-<same>,
+            early_access_lead_id = VFLEAD-<ms>-<6> (reused per email),
+            source_campaign "vfarm_flagship_1031"; it has no submitted_at field
+            of its own (created_at = the Form A Timestamp).
+Found:      - The tracker has no HTTP node and no Slack node today: nothing posts
+              to this dashboard or to Slack yet. The website intake's sticky
+              note says the tracker does both; it does not. Hardik's to add.
+            - Form A's section titles are not readable from anything this
+              dashboard can reach (n8n, the sheet, Drive search). The grouping
+              on the page is by subject in the form's order, labelled as this
+              page's, in one constant to replace when the real titles are read.
+Fix:        POST /api/engine/vfarm-leads behind x-dashboard-key, logged to
+            engine_writes as kind vfarm_leads. Columns for name, email, org;
+            form_a jsonb for answers + the five tracker fields; upsert on a
+            unique index over form_a->>'buyer_intake_id'; status and notes never
+            touched by an update. No Slack from here. The public route is marked
+            superseded in code, README and CLAUDE.md, and kept. The Early Access
+            tab opens a lead to every answer, grouped; the "not announced" marker
+            is limited to old-route leads.
+Tested:     Local: migration 26 applied; the same body posted twice → 201
+            inserted then 200 updated, same id, one row, 23 answers; no key →
+            401; no buyer_intake_id → 422; status 'contacted' and notes set by
+            hand survive a third post. Screenshot shows the grouped answers.

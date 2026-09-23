@@ -177,6 +177,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
    * write: a refused origin never reaches the body, and a flood is turned away
    * before it costs a database round trip.
    */
+  /*
+   * SUPERSEDED (2026-09-23): kept, but the site no longer posts here. Form A
+   * leads arrive at POST /api/engine/vfarm-leads from Hardik's n8n tracker —
+   * see earlyAccess.ts.
+   */
   if (p === '/api/public/vfarm-early-access') {
     const origin = earlyAccess.originOf(req);
     const cors = earlyAccess.corsHeaders(origin);
@@ -369,6 +374,38 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       } catch (e) {
         if (e instanceof repairs.RepairError) {
           await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          throw new HttpError(e.status, e.message);
+        }
+        throw e;
+      }
+    }
+
+    /**
+     * One vFarm Early Access lead from Hardik's Form A tracker (2026-09-23).
+     * Not a mirror kind — the row lives in engine_vfarm_leads beside the
+     * Early Access tab's own status and notes — so it is handled here, with
+     * the same key and the same write log as every other engine write. An
+     * upsert on buyer_intake_id. It posts nothing to Slack: the tracker does.
+     */
+    if (p === '/api/engine/vfarm-leads') {
+      if (method !== 'POST') throw new HttpError(405, 'POST one lead. An upsert on buyer_intake_id, so the same submission twice updates one row.');
+      const body = await readJson(req, 256 * 1024);
+      try {
+        const w = await earlyAccess.storeFormA(body as Record<string, unknown>);
+        await mirror.logWrite({
+          endpoint,
+          kind: 'vfarm_leads',
+          method,
+          key_label: 'DASHBOARD_INBOUND_KEY',
+          natural_id: w.buyer_intake_id,
+          outcome: w.inserted ? 'inserted' : 'updated',
+          detail: `${w.answers} answers${w.missing_questions.length ? `, ${w.missing_questions.length} Form A questions not sent` : ''}${w.unexpected_questions.length ? `, ${w.unexpected_questions.length} unexpected` : ''}`,
+          ms: Date.now() - t0,
+        });
+        return send(res, w.inserted ? 201 : 200, { ok: true, stored: w.inserted ? 'inserted' : 'updated', ...w });
+      } catch (e) {
+        if (e instanceof earlyAccess.SubmissionError) {
+          await mirror.logWrite({ endpoint, kind: 'vfarm_leads', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
           throw new HttpError(e.status, e.message);
         }
         throw e;
