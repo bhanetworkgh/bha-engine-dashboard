@@ -54,7 +54,14 @@ const W = (
   purpose: string | null,
   status = 'production',
   notes: string | null = null,
-): SeedRow => ({ id, name, system, folder, pillar, owner, trigger_type, trigger_detail, purpose, status, n8n_url: wfUrl(id), notes });
+): SeedRow => ({ id, name, system, folder, pillar, owner, trigger_type, trigger_detail, purpose, status, n8n_url: wfUrl(id), notes, replay: NEVER_REPLAY.has(name) ? 'never' : 'auto' });
+
+/**
+ * The chat replies, which the recovery watcher never re-runs (2026-09-23): an
+ * answer arriving hours late, to a person who has moved on, is worse than none.
+ * Migration 28 sets the same five on a database that already holds them.
+ */
+const NEVER_REPLAY = new Set(['Bays — Conversational Agent', 'Bays — Front Door', 'Bays — Dashboard Agent', 'North Star — Conversational Agent', 'North Star — Front Door']);
 
 export const WORKFLOWS: SeedRow[] = [
   // Research Twin / Agent

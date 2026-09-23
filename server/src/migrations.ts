@@ -1667,6 +1667,70 @@ const MIGRATIONS: Migration[] = [
         WHERE id = 'airtable' AND status = 'active' AND notes = 'Ten bases are in use; they are listed on the Endpoints tab.'`,
     ],
   },
+  {
+    id: 28,
+    name: 'engine recovery: one row per waiting incident, one per batch, and a replay policy per workflow',
+    statements: [
+      /**
+       * The recovery watcher (2026-09-23, Destiny). **The ledger is the queue**:
+       * nothing here holds a payload to replay — n8n still holds each failed
+       * run's input, and the healer resumes it from the failed step. This table
+       * is only what the watcher decided about each incident and what came of
+       * it, so the page and the Slack summary can say so.
+       *
+       * One row per incident, keyed on the ledger's own id, so an incident is
+       * recovered at most once: a failed_again row stays failed_again and is
+       * never picked up a second time — a person owns it from there.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_recovery (
+         incident_id        text PRIMARY KEY,
+         lane               text,
+         workflow           text,
+         workflow_id        text,
+         execution_id       text,
+         failed_node        text,
+         error_class        text,
+         error_message      text,
+         failed_at          text,
+         dependency         text NOT NULL,
+         dependency_from    text,
+         status             text NOT NULL,
+         batch_id           text,
+         retry_execution_id text,
+         note               text,
+         replay_started_at  text,
+         first_seen_at      text NOT NULL,
+         updated_at         text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_recovery_status ON engine_recovery (status)`,
+      `CREATE INDEX IF NOT EXISTS engine_recovery_batch ON engine_recovery (batch_id)`,
+      /**
+       * One row per batch — the dependency that came back, who or what started
+       * it, and the one summary it sent. `summary_sent_at` is what makes the
+       * summary go **once**: it is set in the same statement that claims it.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_recovery_batches (
+         batch_id        text PRIMARY KEY,
+         dependency      text NOT NULL,
+         started_by      text NOT NULL,
+         probe           jsonb,
+         started_at      text NOT NULL,
+         settled_at      text,
+         summary_sent_at text,
+         summary_http    integer,
+         summary_detail  text,
+         runs            jsonb
+       )`,
+      /**
+       * Replay policy per workflow. `never` for the chat replies: re-running one
+       * hours later answers a person who has long since moved on, in a thread
+       * that has moved on too. Everything else re-runs.
+       */
+      `ALTER TABLE registry_workflows ADD COLUMN IF NOT EXISTS replay text NOT NULL DEFAULT 'auto'`,
+      `UPDATE registry_workflows SET replay = 'never', updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE name IN ('Bays — Conversational Agent', 'Bays — Front Door', 'Bays — Dashboard Agent', 'North Star — Conversational Agent', 'North Star — Front Door')`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

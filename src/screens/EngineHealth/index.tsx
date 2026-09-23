@@ -4,6 +4,7 @@ import { useData } from '../../app/useData';
 import { getEngineHealth, resyncHealth, type HealthData } from '../../data';
 import { LoadFailed, Loading, PageHeader, ResyncButton, Tabs, Toast, useResync, useToast } from '../../components/ui';
 import LaneView from './LaneView';
+import Recovery from './Recovery';
 import Repairs from './Repairs';
 import Retries from './Retries';
 import { HEALTH_KINDS } from './kinds';
@@ -28,13 +29,17 @@ import { HEALTH_KINDS } from './kinds';
  * allowed to imply an answer a lane never gave.
  */
 /**
- * Six tabs. **Repairs is last because it is the newest half of the same
+ * Seven tabs. **Recovery** (2026-09-23) is the third thing that can happen
+ * after a failure: it waited on a dependency that was down, and was re-run once
+ * that dependency answered again. It reads its own route, like Repairs.
+ *
+ * **Repairs follows Retries because it is the newest half of the same
  * question** (2026-09-20): Retries is what the healer did on its own, and
  * Repairs is what the bridge changed in a workflow. A failure ends as retried,
  * repaired, or waiting on a person, and those two tabs are where the last two
  * of those are read.
  */
-const TABS = ['All systems', 'Bays', 'North Star', 'Research Twin', 'Retries', 'Repairs'] as const;
+const TABS = ['All systems', 'Bays', 'North Star', 'Research Twin', 'Retries', 'Repairs', 'Recovery'] as const;
 type Tab = (typeof TABS)[number];
 
 /** Which lane each tab reads. All systems and Retries read every lane. */
@@ -48,7 +53,7 @@ export default function EngineHealth() {
   // `?incident=<id>` opens an incident on All systems, `?tab=retries` lands on
   // Retries — Home's "What broke" links here (2026-09-23).
   const [params] = useSearchParams();
-  const [tab, setTab] = useState<Tab>(() => (params.get('tab') === 'retries' ? 'Retries' : 'All systems'));
+  const [tab, setTab] = useState<Tab>(() => (params.get('tab') === 'retries' ? 'Retries' : params.get('tab') === 'recovery' ? 'Recovery' : 'All systems'));
   const [tick, setTick] = useState(0);
   const [held, setHeld] = useState<HealthData | null>(null);
   const { toast, setToast } = useToast();
@@ -95,7 +100,9 @@ export default function EngineHealth() {
         }
       />
 
-      {tab === 'Repairs' ? (
+      {tab === 'Recovery' ? (
+        <Recovery />
+      ) : tab === 'Repairs' ? (
         /*
           Repairs reads its own route rather than the health payload: the rows
           come from this engine's repair loop, not from the three lanes, and

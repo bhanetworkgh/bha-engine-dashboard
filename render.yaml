@@ -184,6 +184,13 @@ services:
       # NOT behind it — they are reads, and they are that import.
       - key: AIRTABLE_WRITEBACK
         value: ""
+      # The recovery watcher (23 Sep 2026): re-runs what failed because
+      # OpenRouter, Slack, Google or BHARAG was down, once it answers again.
+      # ON unless this is false / 0 / off / no — the Engine health toggle
+      # decides otherwise, and this overrides the toggle. Declared empty so
+      # the hard off switch is an edit to a line that exists.
+      - key: RECOVERY_ENABLED
+        value: ""
       # Whether this dashboard still depends on Airtable at all (22 Sep 2026).
       #
       # OFF unless set to 1, true, on or yes, and off is the state this service
