@@ -31,6 +31,7 @@ import {
   usePaged,
 } from '../../components/ui';
 import { ClassPill, IncidentPanel, LaneReads, SeverityPill, when } from './parts';
+import { HEALTH_KINDS } from './kinds';
 
 /**
  * One lane, or all three.
@@ -188,7 +189,7 @@ function columns(open: (i: Incident) => void, sel: Set<string>, toggle: (id: str
 }
 
 export default function LaneView({ data, lane, tick, onChanged }: { data: HealthData; lane: string | null; tick: number; onChanged: () => Promise<void> }) {
-  const { status, data: m, error } = useData(() => getHealthMetrics(lane), [lane, tick]);
+  const { status, data: m, error } = useData(() => getHealthMetrics(lane), [lane, tick], { kinds: HEALTH_KINDS });
   const [filter, setFilter] = useState<Filter>('open');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);

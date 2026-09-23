@@ -37,6 +37,7 @@
  * is n8n's own version history. It is never drawn as a revert that happened.
  */
 import { query, withTransaction, type Queryable } from './pg';
+import * as events from './events';
 import * as mirror from './mirror';
 import { N8N_API_VAR, n8nConfigured, n8nHost, replaceWorkflow, workflow, N8nError } from './n8n';
 
@@ -172,6 +173,7 @@ export async function store(payload: Record<string, unknown>, db: Queryable = { 
     ],
   );
 
+  events.changed('repairs', repairId, db);
   return { repair_id: repairId, outcome, inserted: Boolean(r.rows[0]?.inserted) };
 }
 
@@ -543,6 +545,7 @@ export async function revert(repairId: string, actor: string): Promise<RevertRes
         WHERE repair_id = $1`,
       [repairId, actor, after, row.version_after],
     );
+    events.changed('repairs', repairId, db);
     const again = await db.query<Row>(`${SELECT} WHERE repair_id = $1`, [repairId]);
     return again.rows[0] ? toRepair(again.rows[0]) : held;
   });

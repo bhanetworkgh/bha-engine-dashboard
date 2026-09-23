@@ -22,6 +22,7 @@ import {
 } from '../../components/ui';
 import { ClassPill, RetryStatusPill, when } from './parts';
 import { RETRY_STATUS_DEFS, RETRY_TRIGGER_DEFS } from './definitions';
+import { HEALTH_KINDS } from './kinds';
 
 /**
  * The self-healing loop's own record, entirely from `retry_attempts`.
@@ -64,7 +65,7 @@ function matches(r: RetryAttempt, q: string): boolean {
 }
 
 export default function Retries({ data, tick, onChanged }: { data: HealthData; tick: number; onChanged: () => void }) {
-  const { status, data: m, error } = useData(getRetryMetrics, [tick]);
+  const { status, data: m, error } = useData(getRetryMetrics, [tick], { kinds: HEALTH_KINDS });
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState<string | null>(null);

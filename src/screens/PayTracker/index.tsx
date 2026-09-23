@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useData } from '../../app/useData';
-import { getPay, getPayMetrics, resyncPay, type PayData } from '../../data';
-import { LoadFailed, Loading, MonthPicker, monthLabel, monthsFrom, PageHeader, ResyncButton, RowsLine, Tabs, thisMonth, Toast, useResync, useToast } from '../../components/ui';
+import { getPay, getPayMetrics } from '../../data';
+import { LiveIndicator, LoadFailed, Loading, MonthPicker, monthLabel, monthsFrom, PageHeader, RowsLine, Tabs, thisMonth } from '../../components/ui';
 import Owed from './Owed';
 import Statements from './Statements';
 import Sessions from './Sessions';
@@ -29,18 +29,26 @@ import Statistics from './Statistics';
  * agreements — a monthly builder is expected to wait until the 1st — so a
  * blended figure describes nobody.
  *
- * **Nothing owed and the sync not having run look identical**, and on a pay
- * page that is the difference between a quiet month and an unpaid builder. The
- * ledger's own age is on the Owed tab and in the line under the header, and
- * every empty state says which of the two it is.
+ * **The ledger is written in the same request as the session log** (2026-09-23):
+ * an approval or a Paid tick changes the log, and the log's write brings the
+ * ledger into line before it returns. The page is live — it re-reads the
+ * moment either is written — and says so, beside the month picker, going grey
+ * when the stream drops. The ledger's own age is still on the Owed tab and in
+ * the line under the header, because an empty ledger and nothing owed still
+ * look alike.
  */
+/**
+ * The kinds this page is built from. A session log is one of them: marking a
+ * log paid changes the ledger in the same write, and an approval creates a
+ * session, so both are announced and both re-read this page.
+ */
+const PAY_KINDS = ['pay_sessions', 'pay_statements', 'pay_builders', 'codex'] as const;
+
 const TABS = ['Owed', 'Statements', 'Sessions', 'Statistics'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function PayTracker() {
   const [tab, setTab] = useState<Tab>('Owed');
-  const [tick, setTick] = useState(0);
-  const [held, setHeld] = useState<PayData | null>(null);
   /**
    * One month for the whole page (2026-09-22, Destiny's brief): Owed,
    * Statements, Sessions and Statistics all answer for the same month, so a
@@ -51,11 +59,10 @@ export default function PayTracker() {
    * being paid.
    */
   const [month, setMonth] = useState<string | null>(thisMonth());
-  const { toast, setToast } = useToast();
-  const { status, data: loaded, error } = useData(getPay, []);
-  const metrics = useData(() => getPayMetrics(month), [tick, month]);
+  const { status, data: loaded, error } = useData(getPay, [], { kinds: PAY_KINDS });
+  const metrics = useData(() => getPayMetrics(month), [month], { kinds: PAY_KINDS });
 
-  const all = held ?? loaded;
+  const all = loaded;
   const months = useMemo(
     () => (all ? monthsFrom([...all.sessions.map((s) => s.month), ...all.statements.map((s) => s.month)].map((m) => (m ? `${m}-01` : null))) : [thisMonth()]),
     [all],
@@ -69,12 +76,6 @@ export default function PayTracker() {
     [all, month],
   );
 
-  const reload = useCallback(async () => {
-    setTick((n) => n + 1);
-    setHeld(await getPay());
-  }, []);
-
-  const resync = useResync({ run: resyncPay, reload, setToast });
 
   if (status === 'loading' && !data) return <Loading />;
   if (status === 'error' && !data) return <LoadFailed error={error} />;
@@ -92,7 +93,7 @@ export default function PayTracker() {
         right={
           <div className="flex flex-wrap items-center justify-end gap-3">
             <MonthPicker months={months} value={month} onChange={setMonth} />
-            <ResyncButton busy={resync.busy} onClick={resync.start} />
+            <LiveIndicator />
           </div>
         }
         below={
@@ -142,7 +143,6 @@ export default function PayTracker() {
         <Statistics m={metrics.data} />
       )}
 
-      <Toast toast={toast} />
     </div>
   );
 }

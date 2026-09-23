@@ -25,6 +25,8 @@
 import { nowIso } from './db';
 import { query, withTransaction, type Queryable } from './pg';
 import { CODEX_TABLES, LOOP_TABLES, SLACK_TO_BUILDER, type AtRecord } from './sources';
+import * as events from './events';
+import * as paySync from './paySync';
 
 export class MirrorError extends Error {
   constructor(
@@ -454,7 +456,23 @@ export async function upsert(kind: MirrorKind, input: MirrorInput, source: 'airt
   const p = await prepare(kind, input);
   const at = nowIso();
 
+  /**
+   * The write, then what follows from it, in the same transaction
+   * (2026-09-23): a pay row is told what its session log says about Paid
+   * before it is saved, a session log that changed brings its pay row into
+   * line, and every change is announced to the open pages once it commits.
+   */
   const run = async (db: Queryable): Promise<MirrorResult> => {
+    if (kind === 'pay_sessions') p.fields = await paySync.applyLogPaid(db, p.fields);
+    const result = await write(db);
+    if (result.inserted || result.changed) {
+      events.changed(kind, result.id, db);
+      await afterWrite(kind, p.fields, db);
+    }
+    return result;
+  };
+
+  const write = async (db: Queryable): Promise<MirrorResult> => {
     type Row = { id: string; airtable_record_id: string | null; natural_id: string | null };
 
     let existing: Row | null = null;
@@ -541,6 +559,17 @@ export async function upsert(kind: MirrorKind, input: MirrorInput, source: 'airt
   };
 
   return on ? run(on) : withTransaction(run);
+}
+
+/**
+ * What a stored change sets off, shared by upsert and patchFields so the two
+ * cannot follow a write differently.
+ */
+async function afterWrite(kind: MirrorKind, fields: Record<string, unknown>, db: Queryable): Promise<void> {
+  if (kind === 'codex') await paySync.syncPayFromCodex({ fields }, db);
+  if (kind === 'pay_sessions') {
+    await paySync.closeSettledStatements(db, text(fields['Builder Slack ID']) ?? '', text(fields.Month) ?? '');
+  }
 }
 
 /** Turns an Airtable record into the shape upsert takes. `.fields`, never the top level. */
@@ -972,7 +1001,7 @@ export async function patchFields(kind: MirrorKind, id: string, patch: Record<st
   }
 
   return withTransaction(async (db) => {
-    const before = await db.query<{ id: string }>(`SELECT id FROM ${spec.table} WHERE id = $1::bigint FOR UPDATE`, [id]);
+    const before = await db.query<{ id: string; fields: Record<string, unknown> }>(`SELECT id, fields FROM ${spec.table} WHERE id = $1::bigint FOR UPDATE`, [id]);
     if (!before.rows[0]) {
       throw new MirrorError(`No ${spec.label} row has id ${id}. GET /api/engine/${kind} to find it — the id in the path is this table's own id, not the Airtable record id.`, 404);
     }
@@ -989,6 +1018,25 @@ export async function patchFields(kind: MirrorKind, id: string, patch: Record<st
      */
     const merged = `((t.fields || $2::jsonb) - $3::text[])`;
     const at = nowIso();
+
+    /**
+     * A pay row's Paid, Paid At and Paid By are the session log's to say
+     * (2026-09-23), so a patch to one is laid over the merged row and then
+     * corrected from the log before it is stored — the same rule the upsert
+     * follows, so a PATCH cannot undo a payment a POST could not.
+     */
+    if (kind === 'pay_sessions') {
+      const would: Record<string, unknown> = { ...(before.rows[0].fields ?? {}), ...set };
+      for (const k of drop) delete would[k];
+      const told = await paySync.applyLogPaid(db, would);
+      for (const k of ['Paid', 'Paid At', 'Paid By']) {
+        if (k in told && told[k] !== would[k]) {
+          set[k] = told[k];
+          const i = drop.indexOf(k);
+          if (i >= 0) drop.splice(i, 1);
+        }
+      }
+    }
 
     /**
      * Two statements rather than one, and deliberately: the promoted columns
@@ -1035,6 +1083,10 @@ export async function patchFields(kind: MirrorKind, id: string, patch: Record<st
       [id],
     );
     const f = out.rows[0];
+    if (row.changed) {
+      events.changed(kind, Number(f.id), db);
+      await afterWrite(kind, f.fields, db);
+    }
     return {
       kind,
       id: Number(f.id),

@@ -637,6 +637,50 @@ explicitly for this. Therefore:
   is when this database began recording — not the last restart. Every metric
   derived from it still cites that date, and one the rows cannot support is
   still null with a note.
+- **The pay ledger follows the session log at write time** (decision
+  2026-09-23, Destiny). `server/src/paySync.ts`, called from `mirror.upsert`
+  and `mirror.patchFields` after any stored change to a `codex` row, in the
+  same transaction. It replaces n8n's `Bays — Pay Ledger Sync` (every 30
+  minutes), whose `Build Ledger Rows` rules it ports exactly — a log is owed
+  once it has a `Codex Entry ID`; builder from `Builder User ID`; Pay Mode and
+  name from `pay_builders`, defaulting to Daily, then `Builder Name`, then
+  `Unknown builder`; Session Date and Month from `Timestamp`, else `Processed
+  At`, in UTC; Approved At from `Jason Reviewed At`, else `Processed At`; Paid
+  is an explicit "Yes". Three things differ on purpose: **Pay Mode is frozen at
+  first write**, **Paid At is when the log turned Yes** and is kept once set,
+  and **a Slack Card Link and every other field already on the row are kept**.
+  **The log is the source of truth for Paid**: `Bays — Pay Tracking` posts each
+  new approval with `Paid: false`, and that post can land after the log was
+  marked paid, so every pay_sessions write — POST or PATCH, from anyone — has
+  Paid, Paid At and Paid By replaced with what the log says before it is saved.
+  **Every copy of a session is written**: most sessions approved before the
+  cutover are held twice (the Airtable import's copy and n8n's), the page shows
+  n8n's, and updating one would leave the page reading the other. After any
+  pay change a **Sent** statement whose sessions (counted by Codex Entry ID)
+  are all paid closes itself to Payment Sent, exactly as the node `Close
+  Settled Statements` did. The sync runs behind a savepoint: a pay row that
+  cannot be written is logged to `engine_writes` and the log's own write still
+  lands, because an approval must never be refused over its pay copy.
+  `POST /api/engine/pay/reconcile` (`x-dashboard-key`) runs every approved log
+  through the same sync and every Sent statement through the same check,
+  answers `{checked, created, updated, unchanged, statements_closed, failed}`,
+  and is safe to repeat — the second run reports everything unchanged.
+  `npm run test:pay` pins all of it.
+- **Open pages refresh themselves** (decision 2026-09-23, Destiny). Every write
+  path announces `{kind, id, at}` on an in-process bus (`server/src/events.ts`)
+  **after its transaction commits** — `pg.afterCommit` — never before, because a
+  page told early would re-read the old row and hear nothing more; a rollback
+  announces nothing. `GET /api/events` streams them as Server-Sent Events behind
+  the page cookie, with a comment every 25 seconds, `Cache-Control: no-cache`
+  and `X-Accel-Buffering: no`. One process, so no broker. **It carries what
+  changed, never the row**: the page re-reads its own route, so the stream cannot
+  become a second read path. The client holds one EventSource for the app
+  (`src/app/live.tsx`), reconnecting with backoff; `useData(fn, deps, { kinds })`
+  re-reads quietly — no loading state — 750ms after the last matching change,
+  on any change when no kinds are given, and whenever the tab becomes visible
+  or the window takes focus. Down for over a minute, it polls every 30 seconds
+  until the stream returns. The store's memoised figures are invalidated by the
+  same bus, so an engine write cannot leave a cached figure behind.
 - **Notes are this dashboard's own.** A note typed on a loop was never an
   Airtable field; it lives in `record_notes`, keyed by record id, and moves with
   the row if Airtable later gives it an id.
@@ -1983,8 +2027,9 @@ row per approved session, owed or paid) and **Monthly Statements**
 (`tbl5iAdfhz91PZrUg`, one row per monthly builder per month). Mirrored through
 `POST /api/engine/pay` — **one route with a `kind` of "session" or "statement" in
 the body**, which is what n8n was given, rather than three kind-named routes;
-those exist too and the dispatch is the only thing that differs. **Resync from
-Airtable** is the button, and Airtable is the source of truth.
+those exist too and the dispatch is the only thing that differs. **The session
+logs are the source of truth for Paid** (2026-09-23): a pay row's Paid, Paid At
+and Paid By are whatever its log says, whoever posts it.
 
 Four rules run through every figure, and they are what the page is for:
 
@@ -2043,12 +2088,15 @@ session behind it is ticked — so if a payment goes out and the sessions are ne
 ticked, the statement stays open and reappears, which is a forgotten payment
 surfacing rather than vanishing.
 
-**The ledger's own age is on the page, and it is load-bearing.** The ledger is
-kept in step with the approved logs by a sync that runs every 30 minutes, and
-this dashboard reads the ledger when somebody presses Resync — two hops, both
-stated. **Nothing owed and the sync not having run look identical**, and on a pay
-page that is the difference between a quiet month and an unpaid builder, so every
-empty state here says which of the two it is rather than drawing a tidy nought.
+**The ledger is written with the session log, in the same request**
+(decision 2026-09-23, Destiny — see "The pay ledger follows the session log" in
+section 4). The n8n `Bays — Pay Ledger Sync` job that ran every 30 minutes has
+nothing left to do and can be retired; the page carries a **Live** indicator
+where the Resync button stood, grey when the update stream is down. **The
+ledger's own age is still on the page, and still load-bearing**: nothing owed
+and nothing ever written look identical, and on a pay page that is the
+difference between a quiet month and an unpaid builder, so every empty state
+here says which of the two it is rather than drawing a tidy nought.
 
 **Sessions whose `Builder Slack ID` matches nobody on the roster are surfaced,
 never dropped.** It should be nought; if it is not, somebody is building and the

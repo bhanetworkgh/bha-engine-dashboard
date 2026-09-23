@@ -1,8 +1,11 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useData } from '../../app/useData';
 import { getVfarmLeads, type VfarmLead, type VfarmLeadsData } from '../../data';
 import { ComingSoon, LoadFailed, Loading, PageHeader, Tabs } from '../../components/ui';
 import EarlyAccess from './EarlyAccess';
+
+/** The record kinds this page is built from: a change to one re-reads it (live since 2026-09-23). */
+const VFARM_KINDS = ['vfarm_leads'] as const;
 
 /**
  * vFarm: a placeholder with a real tab beside it.
@@ -32,8 +35,11 @@ type Tab = (typeof TABS)[number];
 export default function VFarm() {
   const [tab, setTab] = useState<Tab>('Overview');
   const [held, setHeld] = useState<VfarmLeadsData | null>(null);
-  const { status, data: loaded, error } = useData(getVfarmLeads, []);
+  const { status, data: loaded, error } = useData(getVfarmLeads, [], { kinds: VFARM_KINDS });
 
+  // A fresh read replaces an optimistic copy: the server has the edit by then,
+  // or has refused it, and either way its answer is the one to show.
+  useEffect(() => setHeld(null), [loaded]);
   const data = held ?? loaded;
 
   /**

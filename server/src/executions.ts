@@ -39,6 +39,7 @@
  */
 import { getMeta, nowIso, setMeta } from './db';
 import { query } from './pg';
+import * as events from './events';
 import { delta, movement } from './delta';
 import * as n8n from './n8n';
 import type {
@@ -202,6 +203,7 @@ async function put(rows: n8n.N8nExecution[], name: (id: string, fallback: string
     );
     for (const row of r.rows) (row.inserted ? inserted++ : updated++);
   }
+  if (inserted || updated) events.changed('executions');
   return { inserted, updated };
 }
 
@@ -263,6 +265,7 @@ export async function sync(full = false): Promise<SyncResult> {
       const e = await n8n.execution(row.execution_id);
       if (!e) {
         await query(`UPDATE engine_execution_runs SET status = 'unknown', updated_at = $2 WHERE execution_id = $1`, [Number(row.execution_id), at]);
+        events.changed('executions', Number(row.execution_id));
         continue;
       }
       if (!e.startedAt) continue;

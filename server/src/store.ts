@@ -38,6 +38,7 @@ import * as codex_ from './codex';
 import * as loops_ from './loops';
 import * as mirror from './mirror';
 import { getPool, withTransaction, type Queryable } from './pg';
+import * as events from './events';
 import type {
   BuildPattern,
   BuildPatternDetail,
@@ -617,6 +618,7 @@ export async function setNote(kind: RecordKind, id: string, note: string | null)
       [kind, id, text.slice(0, 2000), nowIso()],
     );
   }
+  events.changed(MIRROR_KIND[kind]);
   bumpVersion();
 }
 
@@ -1206,6 +1208,7 @@ export async function editLoop(id: string, patch: loops_.LoopPatch, actor = 'das
   }
   if (r.record_id && r.record_id !== mr.airtable_record_id) {
     await db().query('UPDATE engine_loops SET airtable_record_id = $1 WHERE id = $2', [r.record_id, mr.pk]);
+    events.changed('loops', Number(mr.pk));
     await rekey('loops', id, r.record_id);
     nowId = r.record_id;
     bumpVersion();
@@ -1489,6 +1492,7 @@ export async function deleteCodex(id: string, confirm: string, actor = 'dashboar
   // here to match it — which is visible in the log, and the alternative is a
   // row nobody can delete from either side.
   await db().query(`DELETE FROM ${MIRROR.codex.table} WHERE id = $1`, [mr.pk]);
+  events.changed('codex', Number(mr.pk));
   bumpVersion();
   // The next page load asks Airtable again rather than answering out of a pass
   // taken before this row existed on neither side.
@@ -1714,6 +1718,7 @@ export async function resyncCodex(actor = 'dashboard'): Promise<Resync> {
     if (kind === 'codex') await removeCodexRows(gone, 'removed in Airtable; found missing by a resync', actor, at);
     else if (gone.length) {
       await db().query(`DELETE FROM engine_layer0_holds WHERE id = ANY($1::bigint[])`, [gone.map((g) => g.pk)]);
+      events.changed('layer0');
       bumpVersion();
     }
 
@@ -1785,6 +1790,7 @@ async function removeCodexRows(gone: { pk: string; record: string }[], reason: s
         ],
       );
       await client.query(`DELETE FROM ${MIRROR.codex.table} WHERE id = $1`, [g.pk]);
+      events.changed('codex', Number(g.pk), client);
     }
   });
   bumpVersion();
@@ -1890,6 +1896,7 @@ async function removeMirrorRows(source: ResyncSource, recordKind: RecordKind, go
         [recordKind, g.record, row?.natural_id ?? null, null, source.table, reason, JSON.stringify(row?.fields ?? {}), actor, at],
       );
       await client.query(`DELETE FROM ${table} WHERE id = $1`, [g.pk]);
+      events.changed(source.kind, Number(g.pk), client);
     }
   });
   bumpVersion();
@@ -2478,6 +2485,10 @@ let storeVersion = 0;
 export function bumpVersion(): void {
   storeVersion++;
 }
+// Any write this process announces — an engine POST, a PATCH, a pay row the
+// sync wrote — makes every memoised figure stale, not only the writes that
+// happen to pass through this file.
+events.onChange(() => bumpVersion());
 
 /**
  * Closes that passed through this dashboard or were pushed by n8n. Read once

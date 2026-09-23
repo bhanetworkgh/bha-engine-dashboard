@@ -47,6 +47,9 @@ import RecordStatistics from '../components/RecordStatistics';
 import { JOB_STATUS_DEFS, RT_OUTCOME_DEFS } from './twinDefinitions';
 import { HandoffTile } from './NorthStar';
 
+/** The record kinds this page is built from: a change to one re-reads it (live since 2026-09-23). */
+const RT_KINDS = ['rt-asks', 'rt-jobs'] as const;
+
 /**
  * Research Twin, read from its own ledger and its own research queue
  * (2026-09-17).
@@ -885,7 +888,7 @@ const VIEWS = ['Asks', 'Jobs', 'Statistics'] as const;
 type View = (typeof VIEWS)[number];
 
 export default function ResearchTwin() {
-  const { status, data: loaded, error } = useData(getRtTelemetry, []);
+  const { status, data: loaded, error } = useData(getRtTelemetry, [], { kinds: RT_KINDS });
   const [view, setView] = useState<View>('Asks');
   const [askFilter, setAskFilter] = useState<AskFilter>('all');
   const [jobFilterSet, setJobFilter] = useState<JobFilter | null>(null);
@@ -897,8 +900,8 @@ export default function ResearchTwin() {
   const [asks, setAsks] = useState<RtAsk[]>([]);
   const [jobs, setJobs] = useState<RtJob[]>([]);
   const { toast, setToast } = useToast();
-  const metrics = useData(() => getRecordMetrics('rt', { lane: 'all' }, null, month), [month, tick]);
-  const jobMetrics = useData(() => getRecordMetrics('rt_jobs', { lane: 'all' }, null, month), [month, tick]);
+  const metrics = useData(() => getRecordMetrics('rt', { lane: 'all' }, null, month), [month, tick], { kinds: RT_KINDS });
+  const jobMetrics = useData(() => getRecordMetrics('rt_jobs', { lane: 'all' }, null, month), [month, tick], { kinds: RT_KINDS });
 
   useEffect(() => {
     if (loaded) {

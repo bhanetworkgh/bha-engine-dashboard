@@ -84,14 +84,40 @@ export async function query<R extends QueryResultRow = QueryResultRow>(text: str
 }
 
 /** Runs fn inside one transaction, on one client. Rolls back on any throw. */
+/**
+ * Work to run once a transaction has committed — and never if it rolls back
+ * (2026-09-23). The live pages are told about a write through this, because a
+ * page told before the commit would re-read the row as it was and then hear
+ * nothing more.
+ */
+const AFTER_COMMIT = new WeakMap<object, Array<() => void>>();
+
+/** Runs `fn` after `db`'s transaction commits, or now when `db` is not inside one this module opened. */
+export function afterCommit(db: Queryable | null | undefined, fn: () => void): void {
+  const queue = db ? AFTER_COMMIT.get(db) : undefined;
+  if (queue) queue.push(fn);
+  else fn();
+}
+
 export async function withTransaction<T>(fn: (db: Queryable) => Promise<T>): Promise<T> {
   const client: PoolClient = await getPool().connect();
+  const queue: Array<() => void> = [];
+  AFTER_COMMIT.set(client, queue);
   try {
     await client.query('BEGIN');
     const out = await fn(client);
     await client.query('COMMIT');
+    AFTER_COMMIT.delete(client);
+    for (const run of queue) {
+      try {
+        run();
+      } catch (err) {
+        console.error(`after-commit hook failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     return out;
   } catch (e) {
+    AFTER_COMMIT.delete(client);
     try {
       await client.query('ROLLBACK');
     } catch {

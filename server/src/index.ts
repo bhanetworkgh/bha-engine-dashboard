@@ -33,6 +33,8 @@ import { IMPORT_GROUPS, finalImport as runFinalImport, isImportGroup } from './f
 import * as codex from './codex';
 import * as loops from './loops';
 import * as mirror from './mirror';
+import * as events from './events';
+import * as paySync from './paySync';
 import * as executions from './executions';
 import * as health from './health';
 import * as repairs from './repairs';
@@ -387,6 +389,28 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * the same key and the same write log as every other engine write. An
      * upsert on buyer_intake_id. It posts nothing to Slack: the tracker does.
      */
+    /**
+     * The pay ledger brought into line with every approved session log
+     * (2026-09-23). The sync runs on every log write already; this is the
+     * backfill, and the thing to run if a write ever reports that its pay row
+     * did not land. Safe to repeat: a second run straight after the first
+     * reports every session unchanged.
+     */
+    if (p === '/api/engine/pay/reconcile') {
+      if (method !== 'POST') throw new HttpError(405, 'POST to bring the pay ledger into line with the session logs. It takes no body.');
+      const r = await paySync.reconcile();
+      await mirror.logWrite({
+        endpoint,
+        kind: 'pay_sessions',
+        method,
+        key_label: 'DASHBOARD_INBOUND_KEY',
+        outcome: r.created || r.updated || r.statements_closed ? 'updated' : 'unchanged',
+        detail: `reconcile: ${r.checked} checked, ${r.created} created, ${r.updated} updated, ${r.unchanged} unchanged, ${r.statements_closed} statement(s) closed${r.failed.length ? `, ${r.failed.length} failed` : ''}`,
+        ms: r.ms,
+      });
+      return send(res, 200, { ok: r.failed.length === 0, ...r });
+    }
+
     if (p === '/api/engine/vfarm-leads') {
       if (method !== 'POST') throw new HttpError(405, 'POST one lead. An upsert on buyer_intake_id, so the same submission twice updates one row.');
       const body = await readJson(req, 256 * 1024);
@@ -715,6 +739,35 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
   // Everything else needs the cookie. An internal call has no browser and no
   // cookie to carry; it is authenticated by whatever let it into the process.
   if (!internal && !readSession(req)) throw new HttpError(401, 'Sign in to continue.');
+
+  /**
+   * The live pages' change stream (2026-09-23): Server-Sent Events, one
+   * `{kind, id, at}` per stored change, behind the same cookie as every page
+   * route. It carries what changed, never the row — a page re-reads through
+   * its own route. A comment every 25 seconds keeps Render's router from
+   * closing an idle connection, and `X-Accel-Buffering: no` stops a proxy from
+   * holding events back until a buffer fills.
+   */
+  if (p === '/api/events' && method === 'GET' && !internal) {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write(`retry: 3000\n: connected ${new Date().toISOString()}\n\n`);
+    const off = events.onChange((e) => {
+      res.write(`event: change\ndata: ${JSON.stringify(e)}\n\n`);
+    });
+    const beat = setInterval(() => res.write(`: keep-alive ${new Date().toISOString()}\n\n`), 25_000);
+    const close = () => {
+      clearInterval(beat);
+      off();
+    };
+    req.on('close', close);
+    res.on('error', close);
+    return;
+  }
 
   if (method === 'GET') {
     switch (p) {
@@ -1305,6 +1358,9 @@ async function dispatchApi(pathWithQuery: string): Promise<{ status: number; bod
   const url = new URL(pathWithQuery, 'http://localhost');
   if (url.pathname !== '/api' && !url.pathname.startsWith('/api/')) {
     throw new HttpError(400, `"${pathWithQuery}" is not an /api route, so it cannot be read this way.`);
+  }
+  if (url.pathname === '/api/events') {
+    throw new HttpError(400, '/api/events is a stream that stays open, so it cannot be read as one answer. It carries only which kinds changed; read the page route instead.');
   }
   if (url.pathname.startsWith('/api/engine/') || url.pathname.startsWith('/api/inbound/')) {
     throw new HttpError(403, 'The engine write routes are not readable. Nothing in this process reads a page through them.');

@@ -22,6 +22,7 @@
  */
 import { nowIso } from './db';
 import { query, withTransaction } from './pg';
+import * as events from './events';
 import * as airtable from './airtable';
 import * as bharag from './bharag';
 import * as mirror from './mirror';
@@ -357,6 +358,7 @@ export async function resync(actor = 'dashboard'): Promise<Resync> {
     // Still open, and stamped now: this is when we last saw it in the answer.
     if (seen.length) {
       await query(`UPDATE engine_incidents SET open_now = true, last_seen_open = $1 WHERE natural_id = ANY($2::text[])`, [at, seen]);
+      events.changed('incidents');
     }
     /**
      * Held as open, but this lane's successful read did not return it. That is
@@ -371,6 +373,7 @@ export async function resync(actor = 'dashboard'): Promise<Resync> {
       [lane.key, seen],
     );
     closed += gone.rows.length;
+    if (gone.rows.length) events.changed('incidents');
 
     await setLaneRead(lane.key, true, null, at);
     tables.push({
@@ -439,6 +442,7 @@ export async function resync(actor = 'dashboard'): Promise<Resync> {
     if (goneRows.length) {
       await withTransaction(async (client) => {
         for (const row of goneRows) await client.query(`DELETE FROM ${table} WHERE id = $1`, [row.id]);
+        events.changed(src.kind, null, client);
       });
     }
 
@@ -525,6 +529,7 @@ export async function closeIncidents(ids: string[], actor: string): Promise<Inci
           : `UPDATE engine_incidents SET fields = fields || $2::jsonb, open_now = false, updated_at = $3 WHERE natural_id = $1`,
         [id, JSON.stringify(whole ? after : { resolution_status: status }), at],
       );
+      events.changed('incidents');
       await logClose(id, 'ok', status, null, 200, actor, lane);
       results.push({ id, outcome: 'closed', reason: null, http: 200 });
     } catch (e) {

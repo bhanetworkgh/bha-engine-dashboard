@@ -37,6 +37,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { query } from './pg';
+import * as events from './events';
 import { FORM_A_QUESTIONS } from '../../src/data/formA';
 
 /* ------------------------------------------------------------------ config */
@@ -348,6 +349,7 @@ export async function store(s: Submission, ipHash: string, userAgent: string | n
     ],
   );
   const row = r.rows[0];
+  events.changed('vfarm_leads', row.id);
   return { id: row.id, created_at: new Date(row.created_at).toISOString(), is_repeat_email: isRepeat };
 }
 
@@ -403,6 +405,7 @@ export async function notify(lead: Stored, s: Submission): Promise<void> {
       return;
     }
     await query('UPDATE engine_vfarm_leads SET notified_at = now() WHERE id = $1', [lead.id]);
+    events.changed('vfarm_leads', lead.id);
     console.log(`[early-access] notified for ${lead.id} in ${Date.now() - t0}ms`);
   } catch (e) {
     console.error(`[early-access] the notification for ${lead.id} could not be sent: ${e instanceof Error ? e.message : String(e)}. The lead is stored; notified_at stays null.`);
@@ -526,6 +529,7 @@ export async function patch(id: string, changes: { status?: string; notes?: stri
   values.push(id);
   const r = await query<{ id: string }>(`UPDATE engine_vfarm_leads SET ${sets.join(', ')} WHERE id = $${values.length} RETURNING id`, values);
   if (!r.rows.length) throw new SubmissionError(404, 'No lead with that id.');
+  events.changed('vfarm_leads', id);
 
   const all = await leads();
   const updated = all.leads.find((l) => l.id === id);
@@ -639,6 +643,7 @@ export async function storeFormA(body: Record<string, unknown>): Promise<FormAWr
     [name, email, org, stored.source_campaign, submittedAt, JSON.stringify(stored)],
   );
 
+  events.changed('vfarm_leads', r.rows[0].id);
   const known = new Set(FORM_A_QUESTIONS);
   return {
     id: r.rows[0].id,

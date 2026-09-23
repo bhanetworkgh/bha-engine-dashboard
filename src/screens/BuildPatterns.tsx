@@ -42,6 +42,9 @@ import {
 import RecordStatistics from '../components/RecordStatistics';
 import { REUSE_DEFS } from './recordDefinitions';
 
+/** The record kinds this page is built from: a change to one re-reads it (live since 2026-09-23). */
+const PATTERN_KINDS = ['patterns', 'pattern_candidates'] as const;
+
 /**
  * Build patterns.
  *
@@ -375,7 +378,7 @@ function viewFrom(param: string | null): View {
 }
 
 export default function BuildPatterns() {
-  const { status, data: loaded, error } = useData(getBuildPatterns, []);
+  const { status, data: loaded, error } = useData(getBuildPatterns, [], { kinds: PATTERN_KINDS });
   const [patterns, setPatterns] = useState<BuildPattern[]>([]);
   const [reuse, setReuse] = useState('all');
   /**
@@ -401,13 +404,13 @@ export default function BuildPatterns() {
    * their months. A failed read is shown on their tab as a failure, never as
    * an empty list.
    */
-  const candidates = useData(getPatternCandidates, []);
+  const candidates = useData(getPatternCandidates, [], { kinds: PATTERN_KINDS });
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<Set<string> | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const { toast, setToast } = useToast();
-  const metrics = useData((query) => getRecordMetrics('patterns', query, null, month), [month, tick]);
+  const metrics = useData((query) => getRecordMetrics('patterns', query, null, month), [month, tick], { kinds: PATTERN_KINDS });
   // Re-read after a resync: the months change when the rows do.
   const searchSeq = useRef(0);
 
