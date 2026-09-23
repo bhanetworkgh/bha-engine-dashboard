@@ -30,12 +30,12 @@ import type {
   Query,
   RtData,
   SeriesPoint,
-  TwinData,
 } from '../../src/data/types';
 import { MODEL_LABEL, askConfigured } from './ask';
 import * as health from './health';
 import { CODEX_CHOICES, CODEX_TABLES, loopTable, questionNeedsHuman, requestIsOpen } from './sources';
 import * as store from './store';
+import * as feeds from './feeds';
 import { query } from './pg';
 
 /** The builder's loops table id, for inbound payloads that name a builder rather than a table. */
@@ -80,12 +80,6 @@ export function daysToHalloween(now = new Date()): number {
   return Math.round((target.getTime() - start.getTime()) / 86_400_000);
 }
 
-function laneMatch(q: Query, lane: string | null): boolean {
-  return q.lane === 'all' || q.lane === lane;
-}
-function bySpineLane<T extends { spine: { lane: string | null } }>(rows: T[], q: Query): T[] {
-  return rows.filter((r) => laneMatch(q, r.spine.lane));
-}
 
 /**
  * The four Airtable-backed kinds carry their source's own lane vocabulary
@@ -126,9 +120,33 @@ function countByDay(days: string[], dates: string[]): SeriesPoint[] {
 export async function getOverview(_q: Query): Promise<OverviewData> {
   const loops = await store.loops();
   const openLoops = loops.filter((l) => l.status !== 'closed');
-  const owners = await store.loopsByOwner();
-  const totalOpen = openLoops.length;
+  /**
+   * One definition of open (2026-09-23): countOpenLoops(), which the Open
+   * loops page and the API use too. The owners are counted from the same rows,
+   * so they sum to the total; the oldest age per owner is read from the loops.
+   */
+  const openCount = await store.countOpenLoops();
+  const totalOpen = openCount.total;
+  const oldestOf = (owner: string) => Math.max(0, ...openLoops.filter((l) => l.owner === owner).map((l) => l.age_days));
+  const owners = openCount.by_builder.map((b) => ({ owner: b.builder_id, open: b.open, in_progress: b.in_progress, oldest_days: oldestOf(b.builder_id) }));
   const oldest = Math.max(...(openLoops.length ? openLoops.map((l) => l.age_days) : [0]));
+  const feedNow = Date.now();
+  const [broke24, moved24] = await Promise.all([feeds.broke(feedNow), feeds.moved(feedNow)]);
+
+  /**
+   * vFarm's tile is real from 2026-09-23: the Early Access leads are rows, so
+   * the tile counts them. The rack is still not instrumented, and the tile says
+   * leads, never anything about the rack.
+   */
+  const leadRow = (
+    await query<{ n: string; week: string; newest: string | null }>(
+      `SELECT count(*)::text AS n,
+              count(*) FILTER (WHERE created_at >= now() - interval '7 days')::text AS week,
+              max(created_at)::text AS newest
+         FROM engine_vfarm_leads`,
+    )
+  ).rows[0];
+  const leads = { n: Number(leadRow?.n ?? 0), week: Number(leadRow?.week ?? 0), newest: leadRow?.newest ?? null };
   const entries = await store.codexEntries();
   const thisWeek = isoWeekOf(REF_TODAY());
   const entriesThisWeek = entries.filter((e) => e.week === thisWeek).length;
@@ -160,7 +178,6 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
    * an answer that never reached anyone, and a job nothing but a person will
    * move. Both are read from the rows, and both are nought until they are not.
    */
-  const nsUndelivered = ns.filter((a) => a.delivered === 'Not delivered').length;
   const cappedJobs = jobs.filter((j) => j.capped).length;
 
   /** Engine Health, for its own tile. Read the same way its page reads it. */
@@ -197,18 +214,51 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
       { label: 'Entries this week', value: String(entriesThisWeek), health: 'ok' },
     ],
     tiles: [
-      {
-        key: 'north-star',
-        label: 'North Star',
-        to: '/north-star',
-        headline: String(ns.length),
-        sublabel: ns.length ? 'asks held' : 'no ask held yet',
-        // Delivery is the page's own failure metric, so it is the tile's too.
-        signal: ns.length === 0 ? 'The ledger opened on 17 Sep and nothing has arrived yet.' : nsUndelivered ? `${nsUndelivered} answer${nsUndelivered === 1 ? '' : 's'} never reached anyone.` : 'Every answer reached someone.',
-        health: nsUndelivered ? 'degraded' : 'ok',
-        trend: nsByDay,
-        share: { value: ns.filter((r) => r.outcome === 'Answered').length, total: ns.length, label: 'answered' },
-      },
+      /**
+       * North Star, as two figures rather than one sentence (2026-09-23).
+       *
+       * The tile used to say "Every answer reached someone." beside a ring
+       * reading "1 of 46 answered", which read as a contradiction because it
+       * was two different questions in one breath:
+       *
+       *   **Delivered** — `Delivered = "Delivered"`: the reply reached a
+       *   person in Slack. Recorded after the send, so it is the only figure
+       *   that says something arrived rather than that a run finished.
+       *   **Answered** — `Outcome = "Answered"`: the reply actually answered
+       *   the question, as opposed to Thin, Refused (not its lane) or Failed.
+       *
+       * Both are over every ask held. A reply can be delivered and still not
+       * be an answer, which is exactly the 46-and-1 case. The sentence under
+       * them speaks for whichever of the two is weaker, so the tile never
+       * reassures about the half that is fine while the other half is not.
+       */
+      (() => {
+        const delivered = ns.filter((r) => r.delivered === 'Delivered').length;
+        const answeredNs = ns.filter((r) => r.outcome === 'Answered').length;
+        const weaker = delivered <= answeredNs ? 'delivered' : 'answered';
+        const weakN = Math.min(delivered, answeredNs);
+        return {
+          key: 'north-star',
+          label: 'North Star',
+          to: '/north-star',
+          headline: String(ns.length),
+          sublabel: ns.length ? 'asks held' : 'no ask held yet',
+          signal:
+            ns.length === 0
+              ? 'The ledger opened on 17 Sep and nothing has arrived yet.'
+              : weakN === ns.length
+                ? `All ${ns.length} delivered and answered.`
+                : weaker === 'delivered'
+                  ? `${ns.length - delivered} of ${ns.length} replies never reached a person.`
+                  : `Only ${answeredNs} of ${ns.length} asks ${answeredNs === 1 ? "was" : "were"} answered.`,
+          health: (ns.length && weakN < ns.length ? 'degraded' : 'ok') as OverviewTile['health'],
+          trend: nsByDay,
+          figures: [
+            { label: 'Delivered (reached a person)', value: delivered, of: ns.length },
+            { label: 'Answered', value: answeredNs, of: ns.length },
+          ],
+        };
+      })(),
       {
         key: 'research-twin',
         label: 'Research Twin',
@@ -230,9 +280,21 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
       // their tiles carry no number. A headline figure for a page that says
       // "coming soon" would be a figure about nothing, which is the rule in
       // section 2 rather than a matter of taste.
-      { key: 'media-twin', label: 'Media Twin', to: '/media-twin', headline: '—', sublabel: 'not wired up', signal: 'Nothing Media Twin does writes here yet.', health: 'ok' },
-      { key: 'genie', label: 'Genie', to: '/genie', headline: '—', sublabel: 'not wired up', signal: 'Nothing Genie does writes here yet.', health: 'ok' },
-      { key: 'vfarm', label: 'vFarm', to: '/vfarm', headline: '—', sublabel: 'not wired up', signal: 'Nothing on the rack writes here yet.', health: 'ok' },
+      // Media Twin and Genie write nothing here yet, so their tiles carry no
+      // number and are drawn greyed — "Not connected yet", never a figure.
+      { key: 'media-twin', label: 'Media Twin', to: '/media-twin', headline: '—', sublabel: 'Not connected yet', signal: 'Nothing Media Twin does writes here yet.', health: 'ok', muted: true },
+      { key: 'genie', label: 'Genie', to: '/genie', headline: '—', sublabel: 'Not connected yet', signal: 'Nothing Genie does writes here yet.', health: 'ok', muted: true },
+      {
+        key: 'vfarm',
+        label: 'vFarm',
+        to: '/vfarm?tab=early-access',
+        headline: String(leads.n),
+        sublabel: leads.n === 1 ? 'Early Access lead' : 'Early Access leads',
+        signal: leads.n
+          ? `${leads.week} in the last 7 days; newest ${leads.newest ? new Date(leads.newest).toISOString().slice(0, 10) : 'undated'}.`
+          : 'No Early Access lead has arrived yet.',
+        health: 'ok',
+      },
       /**
        * Real from 2026-09-17: the incident ledger, its occurrence counts and
        * its retries are read now, so the tile carries the figure its page
@@ -286,38 +348,18 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
       entries_by_week: entriesByWeek,
       asks_by_outcome: { answered, thin, failed, refused, needs_human: needsHuman },
       twin_handoffs: { n: handoffs.n, of: handoffs.of, note: handoffs.note },
-      loops_by_owner: owners.map(({ owner, open, in_progress, oldest_days }) => ({ owner, open, in_progress, oldest_days })),
+      loops_by_owner: owners,
+      open_loops_total: totalOpen,
     },
     rates: {
       answered: { value: answered, total: asks.length },
       ingested: { value: ingested, total: entries.length },
     },
-    broke_24h: [
-      { id: 'B1', at: '11:42', title: 'Ask Cluster returning a wrapped 402', detail: 'BHARAG credit exhausted. No retry attempted — billing never auto-retries.', health: 'failing', spine: f.INCIDENTS[0].spine, source: f.INCIDENTS[0].source },
-      { id: 'B2', at: '09:15', title: 'Research Twin cannot resolve bharag2', detail: 'ENOTFOUND on two of three retries. Third pending.', health: 'degraded', spine: f.INCIDENTS[1].spine, source: f.INCIDENTS[1].source },
-      { id: 'B3', at: '13:48', title: 'pH above ceiling on rack-a/tier-3', detail: 'Held at 6.31 across three consecutive rollups.', health: 'degraded', spine: f.VFARM_ALERTS[0].spine, source: f.VFARM_ALERTS[0].source },
-      { id: 'B4', at: '09:06', title: 'Burn-in bench above temperature ceiling', detail: '23.1°C for 21 minutes against a 22.6°C ceiling.', health: 'degraded', spine: f.VFARM_ALERTS[1].spine, source: f.VFARM_ALERTS[1].source },
-      { id: 'B5', at: '08:14', title: 'Kaiqi digest disagreed with Kaiqi table', detail: 'Digest named three loops; the table returned none. Raised for reconciliation.', health: 'degraded', spine: f.INCIDENTS[2].spine, source: f.INCIDENTS[2].source },
-      { id: 'B6', at: '07:55', title: 'Commercial extractor hit its retry ceiling', detail: 'Three attempts, all failed. Classifier never derived a fix lane.', health: 'failing', spine: f.INCIDENTS[7].spine, source: f.INCIDENTS[7].source },
-      { id: 'B7', at: '06:20', title: 'Four Codex entries posted without ingest', detail: 'Reached Slack but not BHARAG, so no twin can cite them.', health: 'degraded', spine: f.INCIDENTS[4].spine, source: f.INCIDENTS[4].source },
-      { id: 'B8', at: '05:02', title: 'Founding-buyer card still blocked', detail: 'No authorised payment account. Unchanged for 31 days.', health: 'failing', spine: f.INCIDENTS[7].spine, source: f.INCIDENTS[7].source },
-      { id: 'B9', at: '02:41', title: 'Two loops named by the digest exist in no table', detail: 'Present in the Sept 7 digest, absent from all seven builder tables.', health: 'degraded', spine: f.INCIDENTS[2].spine, source: f.INCIDENTS[2].source },
-      { id: 'B10', at: '23:52', title: 'Ledger batch ingest rejected on schema', detail: 'incidents.v0 is strict; an added field fails the whole batch.', health: 'degraded', spine: f.INCIDENTS[2].spine, source: f.INCIDENTS[2].source },
-      { id: 'B11', at: '22:18', title: 'Research Twin quarantined an ask at three cycles', detail: 'Evidence stayed thin across three narrowing passes; handed to a human.', health: 'degraded', spine: f.RT_RECORDS[4].spine, source: f.RT_RECORDS[4].source },
-    ],
-    moved_24h: [
-      { id: 'M1', at: '14:02', title: 'North Star credential rotated', detail: 'INC-5A3C77 resolved after 26 hours of silent failure.', health: 'ok', spine: f.INCIDENTS[3].spine, source: f.INCIDENTS[3].source },
-      { id: 'M2', at: '11:20', title: 'Four blocking loops identified', detail: 'Bays narrowed 96 open loops to the 4 that block telemetry v1.', health: 'ok', spine: f.INCIDENTS[0].spine, source: f.INCIDENTS[0].source },
-      { id: 'M3', at: '10:07', title: 'Ledger corpora confirmed current', detail: 'vfarm.sensor and vfarm.alert both current, dead-letter queue at zero.', health: 'ok', spine: f.VFARM_ALERTS[2].spine, source: f.VFARM_ALERTS[2].source },
-      { id: 'M4', at: '08:17', title: 'Codex digest self-healed', detail: 'Empty render caught by assertion; second attempt posted.', health: 'ok', spine: f.INCIDENTS[4].spine, source: f.INCIDENTS[4].source },
-      { id: 'M5', at: '23:15', title: 'Three Codex entries ingested', detail: 'Destiny, Jegan and Kaiqi entries reached BHARAG rather than only posting.', health: 'ok', spine: f.INCIDENTS[4].spine, source: f.INCIDENTS[4].source },
-      { id: 'M6', at: '13:00', title: 'Per-builder loop digests delivered', detail: 'Seven builders, one digest each, prioritised by North Star.', health: 'ok', spine: f.INCIDENTS[0].spine, source: f.INCIDENTS[0].source },
-      { id: 'M7', at: '11:38', title: 'Ambient range question answered after going thin', detail: 'Two cycles. First transition recorded on the Research Twin gaps tab.', health: 'ok', spine: f.RT_TRANSITIONS[0].spine, source: f.RT_TRANSITIONS[0].source },
-      { id: 'M8', at: '10:30', title: 'pH by place confirmed present in the ledger', detail: 'Twenty-four hours of rollups readable across four places.', health: 'ok', spine: f.RT_RECORDS[0].spine, source: f.RT_RECORDS[0].source },
-      { id: 'M9', at: '09:20', title: 'Watched clients weekly clock completed', detail: 'Three client memos posted; contradiction state updated on Client 9.', health: 'ok', spine: f.INCIDENTS[6].spine, source: f.INCIDENTS[6].source },
-      { id: 'M10', at: '08:41', title: 'North Star answered both standing questions', detail: 'Top build lanes and where the Architect should look, both first cycle.', health: 'ok', spine: f.NS_RECORDS[1].spine, source: f.NS_RECORDS[1].source },
-      { id: 'M11', at: '21:10', title: 'Research Twin field rename mapped', detail: 'card_id to trace_id at the write node; queue writes green since.', health: 'ok', spine: f.INCIDENTS[5].spine, source: f.INCIDENTS[5].source },
-    ],
+    // Read from the tables (2026-09-23); the 22 phase 1 sample rows that
+    // stood here are gone. See feeds.ts.
+    broke_24h: broke24,
+    moved_24h: moved24,
+    feeds_window: { since: new Date(feedNow - 24 * 3_600_000).toISOString(), until: new Date(feedNow).toISOString() },
   };
 }
 
@@ -325,7 +367,10 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
 
 export function getAskBays(_q: Query): AskBaysData {
   return {
-    threads: f.CHAT_THREADS,
+    // No seeded threads (2026-09-23): the history panel held phase 1 sample
+    // conversations beside the real ones. It shows only the threads this
+    // browser has actually had.
+    threads: [],
     model_label: MODEL_LABEL,
     connected: askConfigured(),
     builders: f.BUILDERS.map((b) => ({ id: b.id, name: b.name })),
@@ -334,44 +379,13 @@ export function getAskBays(_q: Query): AskBaysData {
 
 /* -------------------------------------------- north star / research twin */
 
-function twin(name: string, records: TwinData['records'], runs: TwinData['runs'], gaps: TwinData['gaps'], transitions: TwinData['transitions'], q: Query): TwinData {
-  const r = bySpineLane(records, q);
-  const askerCounts = new Map<string, number>();
-  for (const x of r) askerCounts.set(x.asked_by, (askerCounts.get(x.asked_by) ?? 0) + 1);
-  return {
-    name,
-    summary: {
-      period: 'Last 8 days',
-      asks: r.length,
-      answered: r.filter((x) => x.outcome === 'answered').length,
-      thin: r.filter((x) => x.outcome === 'thin').length,
-      failed: r.filter((x) => x.outcome === 'failed').length,
-      median_time_to_answer: null,
-      median_unavailable_reason: 'Nothing records when an ask was answered, only that it was. Time to answer arrives with telemetry v1.',
-      top_askers: [...askerCounts.entries()].map(([builder_id, asks]) => ({ builder_id, asks })).sort((a, b) => b.asks - a.asks).slice(0, 5),
-      by_lane: LANES.map((lane) => ({
-        lane,
-        asks: r.filter((x) => x.spine.lane === lane).length,
-        thin: r.filter((x) => x.spine.lane === lane && x.outcome === 'thin').length,
-        failed: r.filter((x) => x.spine.lane === lane && x.outcome === 'failed').length,
-      })).filter((row) => row.asks > 0),
-    },
-    records: r,
-    runs: bySpineLane(runs, q),
-    gaps: bySpineLane(gaps, q),
-    transitions: bySpineLane(transitions, q),
-    notes: {
-      transitions: name === 'North Star' ? 'North Star does not record an ask going thin and later being answered. Nothing writes that transition today.' : undefined,
-    },
-  };
-}
-
-export function getNorthStar(q: Query): TwinData {
-  return twin('North Star', f.NS_RECORDS, f.NS_RUNS, f.NS_GAPS, [], q);
-}
-export function getResearchTwin(q: Query): TwinData {
-  return twin('Research Twin', f.RT_RECORDS, f.RT_RUNS, f.RT_GAPS, f.RT_TRANSITIONS, q);
-}
+/*
+ * getNorthStar and getResearchTwin, and the `twin()` they shared, are gone
+ * (2026-09-23): they served phase 1 fixture asks, runs and gaps at
+ * /api/north-star and /api/research-twin, and no page had read either since the
+ * twins moved to their own ledgers on 17 Sep. A route that answers with sample
+ * rows is one somebody eventually reads as real.
+ */
 
 /* ------------------------------------------------------------ open loops */
 
@@ -383,6 +397,7 @@ export async function getOpenLoops(_q: Query): Promise<OpenLoopsData> {
     // the sort.
     loops: (await store.loops()).sort((a, b) => (b.raised_at ?? '').localeCompare(a.raised_at ?? '') || a.age_days - b.age_days),
     by_owner: await store.loopsByOwner(),
+    open_count: await store.countOpenLoops(),
     freshness,
     status_history_note:
       freshness.source === 'none'

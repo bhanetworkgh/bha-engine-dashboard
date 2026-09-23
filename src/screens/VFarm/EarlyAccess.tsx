@@ -73,11 +73,11 @@ async function copy(text: string): Promise<boolean> {
   }
 }
 
-export default function EarlyAccess({ data, onChange }: { data: VfarmLeadsData; onChange: (leads: VfarmLead[]) => void }) {
+export default function EarlyAccess({ data, onChange, initialOpen = null }: { data: VfarmLeadsData; onChange: (leads: VfarmLead[]) => void; initialOpen?: string | null }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   /** The lead whose answers are open. Clicking a row opens it; the panel sits above the list. */
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(initialOpen);
   const { toast, setToast } = useToast();
 
   const leads = data.leads;

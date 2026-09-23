@@ -684,6 +684,16 @@ explicitly for this. Therefore:
   or the window takes focus. Down for over a minute, it polls every 30 seconds
   until the stream returns. The store's memoised figures are invalidated by the
   same bus, so an engine write cannot leave a cached figure behind.
+- **One definition of open loops** (decision 2026-09-23, Destiny):
+  `store.countOpenLoops()`. One row per `loop_id` — the most recently written,
+  so a copy left behind by a move neither counts twice nor keeps a closed loop
+  open — counted where `Status` is `Open` or `In Progress`. The loop tables have
+  no archived or deleted field; a deleted loop is a row that is gone. Home's pin
+  and tile, its Loops by builder (which sums to it), the Open loops page header
+  ("N open in all") and `GET /api/engine/loops` (as `open_loops`) all read it.
+  On 23 Sep it was 713 (638 Open + 75 In Progress, 713 distinct loop_ids); the
+  "311" that had been quoted was one builder's digest — Bays' "Your top 5 of
+  311" to Destiny on 21 Sep — not the team's total.
 - **Notes are this dashboard's own.** A note typed on a loop was never an
   Airtable field; it lives in `record_notes`, keyed by record id, and moves with
   the row if Airtable later gives it an id.
@@ -1263,11 +1273,28 @@ Pinned across the top: days to Halloween (the vFarm deadline), open loops,
 entries logged this week.
 
 **Nothing on this page counts a rack** (decision 2026-09-14, Destiny). The
-vFarm-status pin and everything behind it read phase 1 fixtures and the page
-behind them is a placeholder; a headline figure for a page that says "coming
-soon" is a figure about nothing. The vFarm tile stays as navigation, with a dash
-where the number was. The two 24-hour columns are still the phase 1 fixtures
-they have always been.
+vFarm-status pin and everything behind it read phase 1 fixtures. **The vFarm
+tile counts Early Access leads** (2026-09-23): how many, how many in the last 7
+days, and the newest one's date, linking to the leads — rows, not the rack.
+**Media Twin and Genie say "Not connected yet"**, greyed, with no number.
+
+**Every number on Home is read** (2026-09-23, Destiny). The two 24-hour columns
+were twenty-two phase 1 sample rows until that day ("pH above ceiling on
+rack-a/tier-3") and are now `server/src/feeds.ts`: **What broke** is incidents
+dated in the window by their own date, plus `error_counts` and `retry_attempts`
+rows changed in it, a retry or count about a listed incident folded into it,
+"Recovered" / "Needs a person" only where the row says so, each opening Engine
+health with that incident open (`?incident=`). **What moved** is Codex logs
+approved (`Jason Reviewed At`), loops closed (the status ledger, never a
+`mirror` event), build patterns created, pattern candidates flagged, commercial
+cards created and vFarm leads received, each opening its record (`?open=` on
+Build patterns and Commercial, `?tab=early-access&lead=` on vFarm). An empty
+column says "Nothing broke in the last 24 hours". **North Star's tile shows two
+labelled figures, Delivered (reached a person) and Answered, each N of M**, and
+its sentence speaks for the weaker — it used to say "Every answer reached
+someone" beside "1 of 46 answered". **Open loops is `countOpenLoops()`**, the
+one definition (section 4), and Loops by builder is counted from the same rows
+so it sums to it. Home re-reads on every kind it shows.
 
 **The Engine health tile counts incidents again** (2026-09-17), because that
 page is real now. It carries the figure its page leads with — open incidents —

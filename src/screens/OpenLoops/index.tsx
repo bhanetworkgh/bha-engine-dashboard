@@ -259,6 +259,20 @@ export default function OpenLoops() {
         subtitle="Every commitment BHA has made, across every system"
         right={
           <div className="flex flex-wrap items-center gap-2">
+            {/*
+              The one open-loop total (2026-09-23): countOpenLoops() on the
+              server, the same figure Home prints, over every month and every
+              builder. The month and builder counts below answer a narrower
+              question and say which.
+            */}
+            {data?.open_count && (
+              <span
+                className="text-[12.5px] text-dim"
+                title={`${data.open_count.open} Open + ${data.open_count.in_progress} In Progress, one per loop_id, every builder and every month — the same count Home shows.`}
+              >
+                <span className="tabular font-semibold text-ink">{data.open_count.total}</span> open in all
+              </span>
+            )}
             <button type="button" onClick={() => setShowNew((v) => !v)} className="btn btn-primary gap-1.5">
               <Icon.plus />
               New loop

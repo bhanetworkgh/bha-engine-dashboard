@@ -407,7 +407,8 @@ export default function BuildPatterns() {
   const candidates = useData(getPatternCandidates, [], { kinds: PATTERN_KINDS });
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<Set<string> | null>(null);
-  const [open, setOpen] = useState<string | null>(null);
+  // `?open=<id>` opens a pattern on arrival — Home's "What moved" links here (2026-09-23).
+  const [open, setOpen] = useState<string | null>(() => (view === 'Candidates' ? null : params.get('open')));
   const [tick, setTick] = useState(0);
   const { toast, setToast } = useToast();
   const metrics = useData((query) => getRecordMetrics('patterns', query, null, month), [month, tick], { kinds: PATTERN_KINDS });
@@ -505,6 +506,7 @@ export default function BuildPatterns() {
           q={q}
           onQ={setQ}
           patterns={patterns}
+          initialOpen={params.get('open')}
           onOpenPattern={(id) => {
             setView('Patterns');
             setOpen(id);
@@ -680,6 +682,7 @@ function CandidatesTab({
   q,
   onQ,
   patterns,
+  initialOpen = null,
   onOpenPattern,
 }: {
   state: { status: 'loading' | 'ready' | 'error'; data: PatternCandidatesData | null; error: string | null };
@@ -689,10 +692,12 @@ function CandidatesTab({
   q: string;
   onQ: (q: string) => void;
   patterns: BuildPattern[];
+  /** `?open=<id>` on arrival. */
+  initialOpen?: string | null;
   onOpenPattern: (id: string) => void;
 }) {
   const [status, setStatus] = useState('all');
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(initialOpen);
   const all = state.data?.candidates ?? [];
   const inMonth = useMemo(() => all.filter((c) => !month || c.date_flagged?.slice(0, 7) === month), [all, month]);
   const needle = q.trim().toLowerCase();

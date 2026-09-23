@@ -146,6 +146,14 @@ export interface OverviewTile {
   trend?: number[];
   /** Optional share of a whole, e.g. ingested / total. */
   share?: { value: number; total: number; label: string };
+  /**
+   * Plainly labelled figures drawn under the headline (2026-09-23), each "N of
+   * M" — North Star's Delivered and Answered, which the tile used to print as
+   * one sentence that contradicted its own share ring.
+   */
+  figures?: { label: string; value: number; of: number }[];
+  /** A section nothing writes to yet: drawn greyed, with no number. */
+  muted?: boolean;
 }
 
 export interface SeriesPoint {
@@ -166,8 +174,13 @@ export interface OverviewSeries {
   asks_by_outcome: { answered: number; thin: number; failed: number; refused: number; needs_human: number };
   /** How often the two twins consult each other, across both ledgers. */
   twin_handoffs: { n: number; of: number; note: string };
-  /** Open loops per owner, table totals. */
+  /**
+   * Open loops per owner, from countOpenLoops() — the same rows as the total,
+   * so these always sum to it.
+   */
   loops_by_owner: { owner: string; open: number; in_progress: number; oldest_days: number }[];
+  /** countOpenLoops().total, for the check that the owners sum to it. */
+  open_loops_total: number;
 }
 
 export interface OverviewRates {
@@ -175,21 +188,33 @@ export interface OverviewRates {
   ingested: { value: number; total: number };
 }
 
-export interface OverviewEvent {
+/**
+ * One row in Home's 24-hour columns (2026-09-23), read from a table — never a
+ * sample. `to` opens the record it is about.
+ */
+export interface FeedItem {
   id: string;
+  /** ISO. When the thing happened, by the row's own date where it has one. */
   at: string;
+  /** What kind of row this is, in words: "Incident", "Log approved", … */
+  what: string;
   title: string;
   detail: string;
+  /** Lane, subsystem, builder or workflow — whichever the row names. */
+  where: string | null;
+  /** Only where the row itself says so. */
+  status: 'Recovered' | 'Needs a person' | null;
   health: Health;
-  spine: Spine;
-  source: Source;
+  to: string | null;
 }
 
 export interface OverviewData {
   pins: OverviewPin[];
   tiles: OverviewTile[];
-  broke_24h: OverviewEvent[];
-  moved_24h: OverviewEvent[];
+  broke_24h: FeedItem[];
+  moved_24h: FeedItem[];
+  /** The window both columns cover, so the page can say "since 13:05 yesterday". */
+  feeds_window: { since: string; until: string };
   series: OverviewSeries;
   rates: OverviewRates;
 }
@@ -542,6 +567,8 @@ export interface AirtableRef {
 export interface OpenLoopsData {
   loops: Loop[];
   by_owner: OwnerTotals[];
+  /** countOpenLoops(): the one open-loop total, the same one Home prints. */
+  open_count: { total: number; open: number; in_progress: number; by_builder: { builder_id: string; open: number; in_progress: number }[] };
   freshness: Freshness;
   status_history_note: string;
 }

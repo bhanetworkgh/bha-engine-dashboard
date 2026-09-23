@@ -188,11 +188,13 @@ function columns(open: (i: Incident) => void, sel: Set<string>, toggle: (id: str
   ];
 }
 
-export default function LaneView({ data, lane, tick, onChanged }: { data: HealthData; lane: string | null; tick: number; onChanged: () => Promise<void> }) {
+export default function LaneView({ data, lane, tick, onChanged, initialOpen = null }: { data: HealthData; lane: string | null; tick: number; onChanged: () => Promise<void>; initialOpen?: string | null }) {
   const { status, data: m, error } = useData(() => getHealthMetrics(lane), [lane, tick], { kinds: HEALTH_KINDS });
-  const [filter, setFilter] = useState<Filter>('open');
+  // An incident linked from Home may be closed already; the filter widens to
+  // all so the row it opened is also in the list behind the panel.
+  const [filter, setFilter] = useState<Filter>(() => (initialOpen && data.incidents.some((i) => i.entity_id === initialOpen && !i.open_now) ? 'all' : 'open'));
   const [q, setQ] = useState('');
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(initialOpen);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);

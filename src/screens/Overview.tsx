@@ -1,9 +1,19 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useData } from '../app/useData';
-import { BUILDER_NAMES, getOverview, type OverviewData, type OverviewEvent, type OverviewTile } from '../data';
-import { Bars, Card, Icon, LoadFailed, Loading, Ring, SourceLink, type IconName } from '../components/ui';
-import { ageTone, healthText, laneLabel } from '../lib';
+import { BUILDER_NAMES, getOverview, type FeedItem, type OverviewData, type OverviewTile } from '../data';
+import { Bars, Card, Icon, LoadFailed, Loading, Pill, Ring, type IconName } from '../components/ui';
+import { ageTone, healthText } from '../lib';
+
+/**
+ * Every kind a Home panel is built from (2026-09-23): a write to any of them
+ * re-reads the page within the 750ms debounce, so an approval lands in "What
+ * moved" in an open tab without a reload.
+ */
+const HOME_KINDS = [
+  'incidents', 'error_counts', 'retry_attempts', 'digests', 'codex', 'layer0', 'loops', 'patterns', 'pattern_candidates',
+  'commercial', 'ns-asks', 'rt-asks', 'rt-jobs', 'vfarm_leads', 'repairs',
+] as const;
 
 /** One colour per system, so no two neighbours share a tint. */
 const TILE_META: Record<string, { icon: IconName; tint: string }> = {
@@ -131,13 +141,14 @@ function Hero({ data }: { data: OverviewData }) {
 function SystemTile({ t }: { t: OverviewTile }) {
   const meta = TILE_META[t.key] ?? { icon: 'overview' as IconName, tint: 'tile-graphite' };
   const I = Icon[meta.icon];
-  const none = t.headline === '—';
+  const none = t.headline === '—' || Boolean(t.muted);
   // Green is health, so a section with nothing wired up gets no colour at all rather than a green it has not earned.
   const dot = t.health === 'failing' ? 'bg-failing' : t.health === 'degraded' ? 'bg-degraded' : none ? 'bg-line-strong' : 'bg-ok';
   return (
     <Link
       to={t.to}
-      className="group flex h-full flex-col rounded-[14px] bg-raised px-3.5 pt-3 pb-3 text-left transition-colors hover:bg-hover active:scale-[0.99]"
+      className={`group flex h-full flex-col rounded-[14px] bg-raised px-3.5 pt-3 pb-3 text-left transition-colors hover:bg-hover active:scale-[0.99] ${t.muted ? 'opacity-60' : ''}`}
+      aria-label={t.muted ? `${t.label}: not connected yet` : undefined}
     >
       <span className="flex min-w-0 items-center gap-2">
         <span className={`tile ${meta.tint} h-7 w-7 shrink-0 rounded-[9px]`}>
@@ -147,6 +158,18 @@ function SystemTile({ t }: { t: OverviewTile }) {
       </span>
       <span className={`font-display tabular mt-3 text-[26px] leading-none ${none ? 'text-faint' : 'text-ink'}`}>{t.headline}</span>
       <span className="mt-1 truncate text-[12px] text-dim">{t.sublabel}</span>
+      {t.figures && (
+        <span className="mt-1.5 space-y-0.5">
+          {t.figures.map((f) => (
+            <span key={f.label} className="flex items-baseline justify-between gap-2 text-[11.5px]">
+              <span className="truncate text-dim">{f.label}</span>
+              <span className={`tabular shrink-0 ${f.value < f.of ? 'text-degraded' : 'text-ink'}`}>
+                {f.value} of {f.of}
+              </span>
+            </span>
+          ))}
+        </span>
+      )}
       <span className="mt-2 flex flex-1 items-start gap-1.5 border-t border-line pt-2 text-[12px] leading-snug text-dim">
         <span className={`mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} aria-hidden />
         <span className="line-clamp-2 min-h-[2.75em]" title={t.signal}>
@@ -157,22 +180,72 @@ function SystemTile({ t }: { t: OverviewTile }) {
   );
 }
 
-function EventRow({ e }: { e: OverviewEvent }) {
-  return (
-    <div className="rowlike -mx-2 flex items-start gap-3 rounded-[10px] px-2 py-2">
+/** "14:02", with "yesterday" in front when it was. Local time, like the clock in the top bar. */
+function feedTime(at: string): string {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return at;
+  const hm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString() ? hm : `yesterday ${hm}`;
+}
+
+/**
+ * One row of a 24-hour column (2026-09-23): a real row from a table, opening
+ * the record it is about. Recovered and Needs a person appear only where the
+ * row says so.
+ */
+function FeedRow({ e }: { e: FeedItem }) {
+  const body = (
+    <>
       <span className={`tile tile-sm ${e.health === 'failing' ? 'tile-red' : e.health === 'degraded' ? 'tile-graphite' : 'tile-blue'} mt-0.5`}>
         {e.health === 'ok' ? <Icon.check /> : <Icon.bolt />}
       </span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium">{e.title}</div>
-        <div className={`truncate text-[12px] ${e.health === 'ok' ? 'text-dim' : healthText(e.health)}`}>{e.detail}</div>
-        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-faint">
-          <span className="tabular">{e.at}</span>
-          {e.spine.lane && <span>{laneLabel(e.spine.lane)}</span>}
-          <SourceLink source={e.source} />
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-[13px] font-medium" title={e.title}>{e.title}</span>
+          {e.status && <Pill tone={e.status === 'Recovered' ? 'ok' : 'failing'}>{e.status}</Pill>}
+        </div>
+        <div className={`truncate text-[12px] ${e.health === 'ok' ? 'text-dim' : healthText(e.health)}`} title={e.detail}>{e.detail}</div>
+        <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[11px] text-faint">
+          <span className="tabular shrink-0" title={e.at}>{feedTime(e.at)}</span>
+          <span className="shrink-0">{e.what}</span>
+          {e.where && <span className="truncate">{BUILDER_NAMES[e.where] ?? e.where}</span>}
         </div>
       </div>
-    </div>
+    </>
+  );
+  return e.to ? (
+    <Link to={e.to} className="rowlike -mx-2 flex items-start gap-3 rounded-[10px] px-2 py-2">
+      {body}
+    </Link>
+  ) : (
+    <div className="rowlike -mx-2 flex items-start gap-3 rounded-[10px] px-2 py-2">{body}</div>
+  );
+}
+
+/** One of Home's two 24-hour columns. Empty is a sentence, never a sample. */
+function Feed({ title, items, empty, all }: { title: string; items: FeedItem[]; empty: string; all: string }) {
+  const [more, setMore] = useState(false);
+  const shown = more ? items : items.slice(0, 6);
+  return (
+    <Card className="frost p-5">
+      <CardTitle title={title} right={<Link to={all} className="link">View all</Link>} />
+      {items.length === 0 ? (
+        <p className="text-[13px] text-dim">{empty}</p>
+      ) : (
+        <>
+          <div className="divide-y divide-line">
+            {shown.map((e) => (
+              <FeedRow key={e.id} e={e} />
+            ))}
+          </div>
+          {items.length > 6 && (
+            <button type="button" className="link mt-2 text-[12.5px]" onClick={() => setMore((v) => !v)}>
+              {more ? 'Show fewer' : `Show all ${items.length}`}
+            </button>
+          )}
+        </>
+      )}
+    </Card>
   );
 }
 
@@ -193,7 +266,7 @@ function QuickAction({ to, icon, tint, title, sub }: { to: string; icon: IconNam
 }
 
 export default function Overview() {
-  const { status, data, error } = useData(getOverview);
+  const { status, data, error } = useData(getOverview, [], { kinds: HOME_KINDS });
   if (status === 'loading') return <Loading />;
   if (status === 'error') return <LoadFailed error={error} />;
 
@@ -361,32 +434,10 @@ export default function Overview() {
           )}
         </Card>
 
-        {/* Row 4 */}
+        {/* Row 4 — both columns read from the tables (2026-09-23); see server/src/feeds.ts. */}
         <div className="grid min-w-0 gap-4 md:grid-cols-2">
-          <Card className="frost p-5">
-            <CardTitle title="What broke in the last 24 hours" right={<Link to="/engine-health" className="link">View all</Link>} />
-            {data.broke_24h.length === 0 ? (
-              <p className="text-[13px] text-dim">Nothing broke in this window.</p>
-            ) : (
-              <div className="divide-y divide-line">
-                {data.broke_24h.slice(0, 6).map((e) => (
-                  <EventRow key={e.id} e={e} />
-                ))}
-              </div>
-            )}
-          </Card>
-          <Card className="frost p-5">
-            <CardTitle title="What moved in the last 24 hours" right={<Link to="/codex" className="link">View all</Link>} />
-            {data.moved_24h.length === 0 ? (
-              <p className="text-[13px] text-dim">Nothing moved in this window.</p>
-            ) : (
-              <div className="divide-y divide-line">
-                {data.moved_24h.slice(0, 6).map((e) => (
-                  <EventRow key={e.id} e={e} />
-                ))}
-              </div>
-            )}
-          </Card>
+          <Feed title="What broke in the last 24 hours" items={data.broke_24h} empty="Nothing broke in the last 24 hours." all="/engine-health" />
+          <Feed title="What moved in the last 24 hours" items={data.moved_24h} empty="Nothing moved in the last 24 hours." all="/codex" />
         </div>
         <div className="hidden xl:block" />
       </div>
