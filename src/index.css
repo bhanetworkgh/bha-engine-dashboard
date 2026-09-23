@@ -1278,3 +1278,56 @@
     font-size: 12px;
   }
 }
+
+/*
+ * The window scrolls, not a panel inside it (2026-09-23, Destiny).
+ *
+ * The shell used to be fixed at the viewport's height with each page
+ * scrolling inside its own panel. A full-page screenshot (a Chrome
+ * extension, DevTools' "Capture full size screenshot", print) measures and
+ * scrolls the window, which never moved, so it captured one screen and cut
+ * the rest. With `data-scroll="document"` on <html> — set by Layout on every
+ * page but Ask Bays — the heights stop being pinned: html, body and #root
+ * grow with the content, so every `min-h-0 flex-1 overflow-y-auto` page
+ * panel grows with it and never needs its own scrollbar. The sidebar and the
+ * frosted top bar stay put with `position: sticky`, and the colour wash is
+ * pinned to the viewport rather than stretched down a tall page.
+ *
+ * Outside every @layer on purpose: Tailwind's utilities (`md:static`,
+ * `absolute`) sit in a later layer and would beat these however specific
+ * they were, and did — the sidebar scrolled away with the page.
+ *
+ * Ask Bays keeps the old shell (`data-scroll="shell"`): a chat has to hold
+ * its input at the bottom of the window while the thread scrolls above it.
+ */
+html[data-scroll="document"],
+html[data-scroll="document"] body,
+html[data-scroll="document"] #root {
+  height: auto;
+  min-height: 100%;
+}
+html[data-scroll="document"] .shell {
+  height: auto;
+  /* vh is scaled by the zoom on <html>; dividing by it fills the window. */
+  min-height: calc(100vh / var(--zoom, 1));
+}
+html[data-scroll="document"] .shell-main {
+  overflow: visible;
+}
+@media (min-width: 768px) {
+  html[data-scroll="document"] .shell-nav {
+    position: sticky;
+    top: 0;
+    height: calc(100vh / var(--zoom, 1));
+    align-self: flex-start;
+  }
+}
+html[data-scroll="document"] .shell-bar {
+  position: sticky;
+  /* Still drawn over the top of the page, as it was when absolute: the
+     sticky box takes no room of its own. */
+  margin-bottom: -84px;
+}
+html[data-scroll="document"] .aurora::before {
+  position: fixed;
+}

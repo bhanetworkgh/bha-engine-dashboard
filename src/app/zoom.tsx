@@ -58,6 +58,10 @@ export function ZoomProvider({ children }: { children: ReactNode }) {
     // 100% is written as the empty string rather than "1", so the property
     // comes off entirely and a browser without `zoom` is left untouched.
     document.documentElement.style.zoom = zoom === '100' ? '' : String(Number(zoom) / 100);
+    // `vh` is scaled by the zoom too, so 100vh under 80% is 80% of the window.
+    // Anything that has to fill the window divides by this (see the
+    // document-scroll block at the end of index.css).
+    document.documentElement.style.setProperty('--zoom', String(Number(zoom) / 100));
   }, [zoom]);
 
   const value = useMemo<ZoomValue>(
