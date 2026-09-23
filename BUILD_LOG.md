@@ -9036,3 +9036,15 @@ Fix:        boot() runs paySync.reconcile() in the background after the
             and changes nothing when the ledger is already in step.
 Decision:   Every boot rather than once: a log written while the process was
             restarting never reached the hook, and this is what catches it.
+
+## 2026-09-23 13:05 — First production pay reconcile
+Intent:     Confirm 9cb4fa4 is live and read the first reconcile.
+Files:      BUILD_LOG.md only.
+Problem:    None.
+Fix:        —
+Decision:   Read off engine_writes (endpoint 'boot', 12:56:18Z): 79 checked,
+            0 created, 10 updated, 69 unchanged, 0 statements closed, 2,760ms.
+            All 10 updates were the Airtable-import copies (bound to a record
+            id) of unpaid sessions, given the fields n8n's copies already had;
+            none changed Paid. After it: 0 pay rows disagree with their log
+            about Paid; 147 rows for 79 sessions, as before.
