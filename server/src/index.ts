@@ -1509,6 +1509,29 @@ async function boot(): Promise<void> {
   // soft deletes included. See registry.seedRegistry.
   const seeded = await registry.seedRegistry();
 
+  /**
+   * The pay ledger brought into line once per boot (2026-09-23), in the
+   * background so it never delays serving. The sync runs on every log write;
+   * this catches anything written while the process was down, and it is the
+   * same idempotent pass as POST /api/engine/pay/reconcile. Its counts go to
+   * engine_writes like the route's, so the first run is on the record.
+   */
+  void paySync
+    .reconcile()
+    .then((r) => {
+      console.log(`  pay:      reconciled at boot — ${r.checked} checked, ${r.created} created, ${r.updated} updated, ${r.unchanged} unchanged, ${r.statements_closed} statement(s) closed${r.failed.length ? `, ${r.failed.length} FAILED` : ''} (${r.ms}ms)`);
+      return mirror.logWrite({
+        endpoint: 'boot',
+        kind: 'pay_sessions',
+        method: 'RECONCILE',
+        key_label: null,
+        outcome: r.created || r.updated || r.statements_closed ? 'updated' : 'unchanged',
+        detail: `reconcile: ${r.checked} checked, ${r.created} created, ${r.updated} updated, ${r.unchanged} unchanged, ${r.statements_closed} statement(s) closed${r.failed.length ? `, ${r.failed.length} failed: ${r.failed.map((f) => `${f.codex_entry_id} (${f.reason})`).join('; ').slice(0, 800)}` : ''}`,
+        ms: r.ms,
+      });
+    })
+    .catch((e: unknown) => console.error(`  pay:      boot reconcile failed: ${e instanceof Error ? e.message : String(e)}`));
+
   server.listen(PORT, () => {
     console.log(`BHA engine dashboard on http://localhost:${PORT}`);
     console.log(`  database: postgres ${db.server_version} at ${db.host}:${db.port}/${db.database}${db.internal ? ' (internal network, no TLS)' : ' (TLS)'}`);
