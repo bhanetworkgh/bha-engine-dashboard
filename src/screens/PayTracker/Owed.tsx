@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import type { OwedBuilder, PayData, PayMetrics } from '../../data';
+import { CodexEntryDialog } from '../CodexEntryDialog';
+import { getPaySessionCodex } from '../../data';
 import { CountUp, EmptyPanel, FigureCell, monthLabel, Pill, StatCaption, StatCell, StatLabel, StatStrip, relativeTime } from '../../components/ui';
 
 /**
@@ -38,7 +40,7 @@ export default function Owed({ data, m, held, showAll }: { data: PayData; m: Pay
   /** Why a mode group has nobody in it, in the order that decides it. */
   const emptyFor = (word: string) =>
     held === 0
-      ? 'No session is held at all — which on this page most likely means the ledger has not been read, not that nothing is owed. Press Resync from Airtable.'
+      ? 'No session is held at all — which on this page most likely means nothing has posted the ledger here yet, not that nothing is owed. Sessions arrive through POST /api/engine/pay.'
       : data.sessions.length === 0
         ? `No session counts toward ${period}, so nobody can be owed for it.`
         : `Every ${word} builder is paid up for ${period}.`;
@@ -197,6 +199,8 @@ function Group({
   setOpen: (v: string | null) => void;
   empty: string | null;
 }) {
+  /** The pay session whose Codex entry is open, by its Codex Entry ID. */
+  const [codexFor, setCodexFor] = useState<string | null>(null);
   if (rows.length === 0 && empty === null) return null;
   const total = rows.reduce((n, r) => n + r.sessions_owed, 0);
   const unknown = rows.reduce((n, r) => n + r.sessions_unconfirmed, 0);
@@ -309,19 +313,24 @@ function Group({
                             {s.paid === null && <span className="ml-2 text-faint">· paid not recorded</span>}
                           </span>
                           <span className="flex items-center gap-2">
-                            {s.codex_link && (
-                              <a href={s.codex_link} target="_blank" rel="noreferrer" className="link text-[11.5px]" onClick={(e) => e.stopPropagation()}>
-                                Codex
-                              </a>
+                            {s.codex_entry_id && (
+                              <button
+                                type="button"
+                                className="link text-[11.5px]"
+                                title="Opens this session's Codex entry here. The recording is linked inside it."
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCodexFor(s.codex_entry_id);
+                                }}
+                              >
+                                Open
+                              </button>
                             )}
                             {s.slack_card_link && (
                               <a href={s.slack_card_link} target="_blank" rel="noreferrer" className="link text-[11.5px]" onClick={(e) => e.stopPropagation()}>
                                 Slack card
                               </a>
                             )}
-                            <a href={s.airtable.url} target="_blank" rel="noreferrer" className="text-[11.5px] text-faint hover:text-accent-ink" onClick={(e) => e.stopPropagation()}>
-                              Airtable
-                            </a>
                           </span>
                         </div>
                       ))}
@@ -333,6 +342,8 @@ function Group({
           })}
         </div>
       )}
+      {/* Read-only: Pay Tracker has no write path, so no Approve, Send back or Delete here. */}
+      {codexFor && <CodexEntryDialog id={codexFor} load={getPaySessionCodex} readOnly onClose={() => setCodexFor(null)} />}
     </div>
   );
 }

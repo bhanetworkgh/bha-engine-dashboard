@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import type { PayData, PaySession } from '../../data';
+import { getPaySessionCodex } from '../../data';
+import { CodexEntryDialog } from '../CodexEntryDialog';
 import type { RecordColumn } from '../../components/ui';
-import { EmptyState, Pagination, Pill, RecordId, RecordTable, SearchBox, Segmented, SourceLink, usePaged } from '../../components/ui';
+import { EmptyState, Pagination, Pill, RecordId, RecordTable, SearchBox, Segmented, usePaged } from '../../components/ui';
 
 /**
  * Every session row, the full record.
@@ -17,7 +19,7 @@ const whenFull = (iso: string | null) => (iso ? iso.slice(0, 16).replace('T', ' 
 
 type Filter = 'all' | 'unpaid' | 'unknown' | 'paid' | 'Monthly' | 'Daily';
 
-function columns(): RecordColumn<PaySession>[] {
+function columns(openCodex: (id: string) => void): RecordColumn<PaySession>[] {
   return [
     { key: 'date', header: 'session date', className: 'tabular text-faint', cell: (s) => when(s.session_date) },
     { key: 'builder', header: 'builder', width: '18ch', clip: true, cell: (s) => s.builder },
@@ -45,7 +47,7 @@ function columns(): RecordColumn<PaySession>[] {
       className: 'card-meta',
       title: (s) =>
         s.paid === null
-          ? `No Paid value on this row, so it is not known whether it is paid.${s.held_via === 'resync' ? ' It came in on the Airtable resync, and Airtable leaves an unticked box out of the record — so it was most likely unticked then.' : ''}`
+          ? `No Paid value on this row, so it is not known whether it is paid.${s.held_via === 'resync' ? ' It came in on the 20 Sep import of the old pay ledger, which left an unticked box out of the record — so it was most likely unticked then.' : ''}`
           : undefined,
       cell: (s) => (s.paid === true ? <Pill tone="ok">paid</Pill> : s.paid === false ? <Pill tone="degraded">owed</Pill> : <Pill>not recorded</Pill>),
     },
@@ -68,17 +70,24 @@ function columns(): RecordColumn<PaySession>[] {
       className: 'card-actions',
       cell: (s) => (
         <span className="flex items-center justify-end gap-2 text-[11.5px]">
-          {s.codex_link && (
-            <a href={s.codex_link} target="_blank" rel="noreferrer" className="link" onClick={(e) => e.stopPropagation()}>
-              Codex
-            </a>
+          {s.codex_entry_id && (
+            <button
+              type="button"
+              className="link"
+              title="Opens this session's Codex entry here. The recording is linked inside it."
+              onClick={(e) => {
+                e.stopPropagation();
+                openCodex(s.codex_entry_id);
+              }}
+            >
+              Open
+            </button>
           )}
           {s.slack_card_link && (
             <a href={s.slack_card_link} target="_blank" rel="noreferrer" className="link" onClick={(e) => e.stopPropagation()}>
               Slack card
             </a>
           )}
-          <SourceLink source={s.source} />
         </span>
       ),
     },
@@ -89,6 +98,8 @@ export default function Sessions({ data }: { data: PayData }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [builder, setBuilder] = useState<string>('all');
   const [q, setQ] = useState('');
+  /** The pay session whose Codex entry is open, by its Codex Entry ID. */
+  const [codexFor, setCodexFor] = useState<string | null>(null);
   // The month is the page's, chosen once above the tabs; `data` arrives cut to it.
   const builders = useMemo(() => [...new Set(data.sessions.map((s) => s.builder))].sort(), [data.sessions]);
 
@@ -145,8 +156,8 @@ export default function Sessions({ data }: { data: PayData }) {
         </div>
         {data.duplicates.merged > 0 && (
           <p className="text-[12px] text-dim">
-            {data.duplicates.rows} rows are held for {data.duplicates.sessions} sessions: {data.duplicates.merged} sessions were held twice — once from the
-            Airtable resync of 20 Sep and once as the engine posted them — and are counted once here, the engine’s copy kept.
+            Across the whole ledger, not only this month: {data.duplicates.rows} rows are held for {data.duplicates.sessions} sessions: {data.duplicates.merged} sessions were held twice — once from the
+            20 Sep import of the old pay ledger and once as the engine posted them — and are counted once here, the engine’s copy kept.
             {data.duplicates.disagree ? ` ${data.duplicates.disagree} pair${data.duplicates.disagree === 1 ? ' disagrees' : 's disagree'} about Paid.` : ' Every pair agrees about Paid.'}
           </p>
         )}
@@ -171,10 +182,12 @@ export default function Sessions({ data }: { data: PayData }) {
         </EmptyState>
       ) : (
         <>
-          <RecordTable columns={columns()} rows={paged.rows} rowKey={(s) => s.id} label="Pay sessions" />
+          <RecordTable columns={columns(setCodexFor)} rows={paged.rows} rowKey={(s) => s.id} label="Pay sessions" />
           <Pagination paged={paged} unit="sessions" />
         </>
       )}
+      {/* Read-only: Pay Tracker has no write path, so no Approve, Send back or Delete here. */}
+      {codexFor && <CodexEntryDialog id={codexFor} load={getPaySessionCodex} readOnly onClose={() => setCodexFor(null)} />}
     </div>
   );
 }

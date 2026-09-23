@@ -224,9 +224,6 @@ function EvidencePanel({ s, onClose }: { s: PayStatement; onClose: () => void })
                 Open in Slack
               </a>
             )}
-            <a href={s.airtable.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
-              Open in Airtable
-            </a>
             <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
               Close
             </button>

@@ -241,7 +241,7 @@ async function freshnessOf(table: string, kind: string, label: string): Promise<
     rows: n,
     from_engine: Number(row?.from_engine ?? 0),
     tables: n ? [{ table, label, n }] : [],
-    note: n ? null : `Nothing of this kind is held yet. ${label} reaches this dashboard through Resync from Airtable above, and through POST /api/engine/pay.`,
+    note: n ? null : `Nothing of this kind is held yet. ${label} reaches this dashboard through POST /api/engine/pay.`,
   };
 }
 
@@ -550,7 +550,7 @@ export async function metrics(selected: string | null = null): Promise<PayMetric
       daily: daily(unconfirmed).length,
       from_resync: unconfirmed.filter((s) => s.held_via === 'resync').length,
       note: unconfirmed.length
-        ? `Sessions ${where} whose row carries no Paid at all, so this page does not know whether they are paid — and does not count them as owed. ${unconfirmed.filter((s) => s.held_via === 'resync').length} of the ${unconfirmed.length} came in on the Airtable resync, and Airtable leaves an unticked checkbox out of the record, so they were most likely unticked when copied; nothing has written them since. Bays — Pay Tracking's own readers treat a missing Paid as unpaid, so these will appear on the next monthly statement and in the Monday reminders.`
+        ? `Sessions ${where} whose row carries no Paid at all, so this page does not know whether they are paid — and does not count them as owed. ${unconfirmed.filter((s) => s.held_via === 'resync').length} of the ${unconfirmed.length} came in on the 20 Sep import of the old pay ledger, which left an unticked checkbox out of the record, so they were most likely unticked when copied; nothing has written them since. Bays — Pay Tracking's own readers treat a missing Paid as unpaid, so these will appear on the next monthly statement and in the Monday reminders.`
         : `Every session carries a Paid value, so nothing here is unknown.`,
     },
     builders_owed: {
