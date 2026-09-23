@@ -9156,3 +9156,22 @@ Problem:    The 14:40 entry says "52 buttons" moved onto <Button>; that was
 Fix:        Counted in the source after the commit (0b40d91): 55 <Button>, 7
             <ButtonAnchor>, 1 <ButtonLink>.
 Decision:   Recorded as its own entry rather than editing the earlier one.
+
+## 2026-09-23 14:50 — Open loops: 713 → 712, and a correction
+Intent:     Check the new open-loop count against production after deploy.
+Files:      CLAUDE.md; BUILD_LOG.md.
+Problem:    Production Home now reads 712. The 14:05 entry and CLAUDE.md said
+            "713 distinct loop_ids": that was counted as distinct ids *within
+            each status* (638 Open, 75 In Progress), not across them. Across
+            them there are 712. The one loop held twice is
+            LOOP-1789784029288-MN0M — row 908 in Destiny's table
+            (tblBJekl3ROpNZxQW, Open, last written 19 Sep 02:13Z) and row 926 in
+            Hardik's (tblaloC4JIRdBq5EM, In Progress, 20 Sep 18:33Z): a move
+            whose source copy was never removed.
+Fix:        countOpenLoops() already keeps one row per loop_id, the newest, so
+            it counts the loop once, as Hardik's In Progress. CLAUDE.md
+            corrected to say 712 and why.
+Decision:   The stale row is left where it is: this dashboard does not delete
+            an engine row it was not asked to touch. It still appears on the
+            Open loops list under Destiny and in any digest that reads
+            Destiny's table row by row.

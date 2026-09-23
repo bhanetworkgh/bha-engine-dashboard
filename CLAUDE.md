@@ -691,9 +691,13 @@ explicitly for this. Therefore:
   no archived or deleted field; a deleted loop is a row that is gone. Home's pin
   and tile, its Loops by builder (which sums to it), the Open loops page header
   ("N open in all") and `GET /api/engine/loops` (as `open_loops`) all read it.
-  On 23 Sep it was 713 (638 Open + 75 In Progress, 713 distinct loop_ids); the
-  "311" that had been quoted was one builder's digest — Bays' "Your top 5 of
-  311" to Destiny on 21 Sep — not the team's total.
+  On 23 Sep it was **712**: 713 rows are Open or In Progress (638 + 75), and one
+  loop is two of them — `LOOP-1789784029288-MN0M`, moved from Destiny's table
+  to Hardik's on 20 Sep, whose Open copy was left behind in Destiny's table
+  beside the In Progress copy in Hardik's. The old count read rows and counted
+  it twice; this keeps Hardik's, the newer. The "311" that had been quoted was
+  one builder's digest — Bays' "Your top 5 of 311" to Destiny on 21 Sep — not
+  the team's total.
 - **Notes are this dashboard's own.** A note typed on a loop was never an
   Airtable field; it lives in `record_notes`, keyed by record id, and moves with
   the row if Airtable later gives it an id.
