@@ -1183,7 +1183,14 @@ crash, when seven North Star runs read Slack at 08:00 at once.
 `Research Twin — Tools Router` (`zikfpO0wvqzPCQuz`) six ways; each route is a
 write tool here — `server/src/mcp/researchTwinTools.ts`, write connection only,
 every call on `engine_mcp_writes` (refused and dry-run ones included) — and the
-agent's six workflow tools are replaced by these names on its MCP allow-list.
+agent's workflow tools are replaced by these names on its MCP allow-list. Each
+description opens by naming the workflow tool it replaces
+(`Write_Research_Finding` …), so the agent's instructions, which use the old
+names, still point at the right tool without being rewritten.
+`create_client_report_doc` stays off the allow-list, and
+`Create_Client_Report_Doc` on the workflow, until
+`SLACK_RESEARCH_TWIN_BOT_TOKEN` is set on the service: switched before then, the
+weekly report would be built and never uploaded.
 **Ported as written**: every Code node is a function of its own
 (`gateFinding`, `reachBack`, `mergeCardFields`, `laneTransition`,
 `buildJobRows`, `mergeQuestion`, `questionDoc`, `resolveLane`, `buildReport`,
