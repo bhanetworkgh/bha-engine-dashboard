@@ -433,6 +433,8 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(`http:
     assert.deepEqual(range.rows.map((r) => r.natural_id), [ch]);
     const range2 = await call('find_records', { kind: 'channel_tracking', search: 'bays-tools-test', filters_lte: { date: '2026-09-21' }, filters_gte: { created_time: '2026-09-19' } });
     assert.deepEqual(range2.rows.map((r) => r.natural_id), [`${ch}B`]);
+    const asText = await call('find_records', { kind: 'channel_tracking', search: 'bays-tools-test', filters_gte: JSON.stringify({ date: '2026-09-21' }) });
+    assert.deepEqual(asText.rows.map((r) => r.natural_id), [ch], 'a JSON-string object is read as the object');
     const onId = await call('find_records', { kind: 'channel_tracking', filters_gte: { id: '5' } });
     assert.ok(onId.rpcError || onId.error || /refused on "id"/.test(JSON.stringify(onId)), 'gte on id is refused');
     step('find_records: channel_tracking with previous_doc_id; filters_gte / filters_lte; refused on id');

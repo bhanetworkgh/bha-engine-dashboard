@@ -119,7 +119,26 @@ function list(v: unknown): string[] {
   return (Array.isArray(v) ? v : [v]).map((x) => String(x));
 }
 
-export async function findRecords(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+/**
+ * An object argument that arrived as a JSON string. A client holding a tool
+ * list from before an argument existed sends it as text, and n8n's agent
+ * nodes do the same with a tool parameter typed as a string; refusing it would
+ * fail a request whose meaning is unambiguous. Anything that does not parse to
+ * an object is left as it came, and refused below with the usual message.
+ */
+function objectArg(v: unknown): unknown {
+  if (typeof v !== 'string') return v;
+  try {
+    const parsed = JSON.parse(v);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : v;
+  } catch {
+    return v;
+  }
+}
+
+export async function findRecords(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const args: Record<string, unknown> = { ...input };
+  for (const k of ['filters', 'filters_gte', 'filters_lte']) if (args[k] !== undefined) args[k] = objectArg(args[k]);
   const kind = typeof args.kind === 'string' ? args.kind.trim() : '';
   if (!READABLE_KINDS.includes(kind)) throw new McpError('bad_argument', `"kind" must be one of: ${READABLE_KINDS.join(', ')}.`);
   const mk = kind as mirror.MirrorKind;
