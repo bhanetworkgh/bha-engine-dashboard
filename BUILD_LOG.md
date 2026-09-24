@@ -10419,3 +10419,25 @@ Tested:     Local Postgres 16:
               buttons.
 Restore:    Before this, main was 69b86df, live as deploy
             dep-daqiuplckfvc738qglgg.
+
+## 2026-09-25 — Deployed 8733723
+Intent:     Put the candidate changes live and read them back.
+Files:      BUILD_LOG.md
+Problem:    None. Deploy dep-daqnvknf3r2c73aejid0 (commit 8733723) went live
+            at 19:54:38Z.
+Fix:        get_page_data /build-patterns on production returns `pipeline`:
+            - 56 candidates: 50 Proposed, 6 Registered, 0 handed off,
+              0 declined;
+            - time in Proposed: p50 4.8 days, p95 7.8, oldest 8.8
+              (recerPCh91egLO4DD);
+            - 0 draft runs, because no draft had ever been logged on
+              production;
+            - one earlier test deletion (CAND-1790255667593-UR4F) is named as
+              uncounted.
+Decision:   Not verified from this session: that the two new tools show on
+            the live connector. The session's tool list predates the deploy.
+            test:candidates proves both are registered on the write
+            connection. A tool refresh in Claude, and adding them to Bays'
+            MCP allow-list, brings them in. No production draft or register
+            was run from here: each would be a paid call, a real Slack post
+            and a real pattern.
