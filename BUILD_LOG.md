@@ -9377,3 +9377,28 @@ Decision:   One write path: the route bodies moved into engineWrite.ts and
             - the n8n POST and by-natural PATCH routes still answer as before.
             test:pay, test:lookup and test:recovery still pass. The MCP writes
             tab renders with no page errors.
+
+## 2026-09-24 04:50 — MCP write connection: deployed
+Intent:     Put the write connection live and run the done-means checks
+            against production.
+Files:      BUILD_LOG.md.
+Problem:    This session's cloud sandbox cannot reach the service. The network
+            policy answers `CONNECT tunnel failed, response 403` for
+            bha-engine-dashboard.onrender.com and dashboard.bhanetwork.org.
+            So checks 1–7 could not be run against production from here.
+Fix:        —
+Decision:   MCP_WRITE_TOKEN was generated (48 random url-safe characters) and
+            set on srv-dagj84ijnfac73ds5100, with Destiny's go-ahead, in Bays'
+            workspace, merged so nothing else changed. Deploy
+            dep-daqam3c9v7es73cfucog (6531fff) went live 04:46:46Z. The boot
+            line reads "/mcp/<MCP_WRITE_TOKEN> — the write connection …", and
+            migration 29 is applied (the seven new engine_mcp_writes columns
+            are present). Check 8 holds on production: the read connector lists
+            no write tool.
+            Checks 1–7 on production are still to run. They pass locally, end
+            to end (npm run test:mcp-write). They need the write URL added as a
+            connector, or this environment allowed to reach the Render host.
+            The three BHARAG workspace keys are not set. Their values live in
+            n8n credentials this session cannot read, so until they are set, a
+            Codex / pattern / commercial create answers ingested_to_bharag:
+            false.
