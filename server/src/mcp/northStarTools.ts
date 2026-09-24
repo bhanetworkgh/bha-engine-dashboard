@@ -45,6 +45,8 @@ const HISTORY_LIMIT = 50;
 const MAX_THREADS = 25;
 const REPLIES_LIMIT = 50;
 const SLACK_CHARS = 60_000;
+/** read_slack's default row count when neither since_hours nor slack_channel narrows it (2026-09-24). */
+const DEFAULT_MESSAGES = 40;
 const BOT_CLIP = 300;
 const PERSON_CLIP = 1_200;
 const BATCH = 10;
@@ -53,6 +55,88 @@ const SKIP = ['channel_join', 'channel_leave', 'channel_topic', 'channel_purpose
 const LINK_BASE = 'https://bayshorizonnetwork.slack.com/archives/';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/*
+ * The output budget (2026-09-24, Destiny). The first cut answered in 66–84 KB,
+ * and the n8n Agent's MCP client did not get a usable answer out of that: on
+ * one question it called get_priority_evidence six times and read_open_loops
+ * five in seventy seconds, and read_slack until Slack rate-limited the bot.
+ * Every answer is now held to `max_chars` of JSON — 20,000 by default, 40,000
+ * at most — by dropping list items from the end of the longest list, and a cut
+ * answer says so in `truncated` and in one sentence telling the caller not to
+ * ask the same thing again. `result_chars` is the size actually returned.
+ */
+export const MAX_CHARS_DEFAULT = 20_000;
+export const MAX_CHARS_CAP = 40_000;
+/** Above the fixed part of any answer (the notes, lanes_seen, the counts), so a budget can always be met. */
+const MAX_CHARS_FLOOR = 5_000;
+
+const MAX_CHARS_ARG = {
+  max_chars: { type: 'number', description: `Largest answer, in characters of JSON. Default ${MAX_CHARS_DEFAULT.toLocaleString('en-GB')}, at most ${MAX_CHARS_CAP.toLocaleString('en-GB')}.` },
+};
+
+function maxCharsOf(args: Record<string, unknown>): number {
+  const n = Number(args.max_chars);
+  if (args.max_chars === undefined || !Number.isFinite(n) || n <= 0) return MAX_CHARS_DEFAULT;
+  return Math.min(Math.max(Math.trunc(n), MAX_CHARS_FLOOR), MAX_CHARS_CAP);
+}
+
+const size = (v: unknown) => JSON.stringify(v).length;
+
+/**
+ * Holds `out` to `max` characters by popping from whichever named list is
+ * largest, then stamps truncated, the note and result_chars. `already` is a
+ * reason the answer was short before the budget (a row cap), so the note names
+ * it too.
+ */
+function fitToBudget(out: Record<string, unknown>, lists: string[], max: number, narrow: string, already: string | null): Record<string, unknown> {
+  let cut = false;
+  // Stamp, measure, and pop until it fits: the note and the size fields are
+  // part of the answer, so they are measured with it rather than added after.
+  for (;;) {
+    const reasons = [cut ? `capped at ${max.toLocaleString('en-GB')} chars` : null, already].filter(Boolean);
+    out.max_chars = max;
+    if (reasons.length) {
+      out.truncated = true;
+      out.note = `${reasons.join('; ')} — do not call again with the same arguments; narrow with ${narrow}.`;
+    }
+    out.result_chars = 0;
+    out.result_chars = size(out);
+    out.result_chars = size(out);
+    if (Number(out.result_chars) <= max) return out;
+    const biggest = lists.map((k) => out[k] as unknown[]).filter((l) => Array.isArray(l) && l.length).sort((a, b) => size(b) - size(a))[0];
+    if (!biggest) return out;
+    biggest.pop();
+    cut = true;
+  }
+}
+
+/**
+ * One Slack read, waiting out a 429 **once** (2026-09-24). Slack's Retry-After
+ * is honoured up to 30 seconds; longer, or a second 429, is thrown for the
+ * caller to turn into ok:false rate_limited — never partial data that looks
+ * complete.
+ */
+const RETRY_WAIT_CAP_S = 30;
+async function slackCall(tok: string, method: string, params: Record<string, string | number | boolean>): Promise<Record<string, unknown>> {
+  try {
+    return await slack.webApi(tok, method, params);
+  } catch (e) {
+    if (!(e instanceof slack.SlackRateLimited) || e.retryAfter > RETRY_WAIT_CAP_S) throw e;
+    await sleep(e.retryAfter * 1000);
+    return slack.webApi(tok, method, params);
+  }
+}
+
+function rateLimited(e: slack.SlackRateLimited): Record<string, unknown> {
+  return {
+    ok: false,
+    reason: 'rate_limited',
+    step: e.method,
+    retry_after: e.retryAfter,
+    message: `Slack rate-limited North Star's bot on ${e.method} (retry after ${e.retryAfter}s)${e.retryAfter > RETRY_WAIT_CAP_S ? `, longer than the ${RETRY_WAIT_CAP_S}s this waits` : ', again after one wait and retry'}. Nothing partial is returned — call again after ${e.retryAfter}s, not before.`,
+  };
+}
 
 /** The HTTP nodes' batching: ten at a time, 1.5 s between batches. */
 async function batched<T, R>(items: T[], fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -94,21 +178,52 @@ export interface ReadSlackArgs {
   since_hours?: unknown;
   keywords?: unknown;
   slack_channel?: unknown;
+  /** How many messages at most; the tool sets 40 when nothing narrows the read. */
+  max_messages?: number;
 }
 
 /**
  * The Read_Slack branch, end to end. Answers the digest, or `ok:false` with the
  * source's own plain-English reason where RS - Plan Reads threw.
  */
+/**
+ * The same read asked for again within a minute is answered from the last one
+ * (2026-09-24): an agent that re-asks is not a reason to read thirty channels
+ * twice and be rate-limited for it. Only ok answers are kept; the answer says
+ * it was served from the last read and how old it is.
+ */
+const SLACK_CACHE_MS = (() => {
+  // NORTH_STAR_SLACK_CACHE_SECONDS is optional (the tests set 0); 60 unless set.
+  const v = Number(process.env.NORTH_STAR_SLACK_CACHE_SECONDS ?? 60);
+  return Number.isFinite(v) && v >= 0 ? v * 1000 : 60_000;
+})();
+const slackCache = new Map<string, { at: number; out: Record<string, unknown> }>();
+
 export async function readSlack(args: ReadSlackArgs): Promise<Record<string, unknown>> {
+  const key = JSON.stringify([args.since_hours ?? null, args.keywords ?? null, args.slack_channel ?? null, args.max_messages ?? null]);
+  const hit = slackCache.get(key);
+  if (hit && Date.now() - hit.at < SLACK_CACHE_MS) return { ...structuredClone(hit.out), cached: true, cached_seconds_ago: Math.round((Date.now() - hit.at) / 1000) };
+  let out: Record<string, unknown>;
+  try {
+    out = await readSlackUncached(args);
+  } catch (e) {
+    if (e instanceof slack.SlackRateLimited) return rateLimited(e);
+    throw e;
+  }
+  if (out.ok) slackCache.set(key, { at: Date.now(), out: structuredClone(out) });
+  return out;
+}
+
+async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, unknown>> {
   const tok = slack.northStarToken();
   if (!tok) return { ok: false, reason: 'not_configured', message: `${slack.NS_TOKEN_VAR} is not set on this server, so North Star cannot read Slack as itself.` };
 
   /* RS - List Channels */
   let body: Record<string, unknown>;
   try {
-    body = await slack.webApi(tok, 'users.conversations', { types: 'public_channel,private_channel', exclude_archived: 'true', limit: '999' });
+    body = await slackCall(tok, 'users.conversations', { types: 'public_channel,private_channel', exclude_archived: 'true', limit: '999' });
   } catch (e) {
+    if (e instanceof slack.SlackRateLimited) throw e;
     return { ok: false, reason: 'slack_error', step: 'users.conversations', message: e instanceof Error ? e.message : String(e) };
   }
 
@@ -137,8 +252,9 @@ export async function readSlack(args: ReadSlackArgs): Promise<Record<string, unk
   /* RS - Channel History */
   let res: Record<string, unknown>[];
   try {
-    res = await batched(plans, (p) => slack.webApi(tok, 'conversations.history', { channel: p.channel_id, oldest: p.oldest, limit: HISTORY_LIMIT }));
+    res = await batched(plans, (p) => slackCall(tok, 'conversations.history', { channel: p.channel_id, oldest: p.oldest, limit: HISTORY_LIMIT }));
   } catch (e) {
+    if (e instanceof slack.SlackRateLimited) throw e;
     return { ok: false, reason: 'slack_error', step: 'conversations.history', message: e instanceof Error ? e.message : String(e) };
   }
 
@@ -166,8 +282,9 @@ export async function readSlack(args: ReadSlackArgs): Promise<Record<string, unk
   /* RS - Thread Replies (the source's api.test placeholder, when there are no threads, calls nothing here) */
   let reps: Record<string, unknown>[];
   try {
-    reps = await batched(titems, (t) => slack.webApi(tok, 'conversations.replies', { channel: t.channel_id, ts: t.ts, oldest: t.oldest, limit: REPLIES_LIMIT }));
+    reps = await batched(titems, (t) => slackCall(tok, 'conversations.replies', { channel: t.channel_id, ts: t.ts, oldest: t.oldest, limit: REPLIES_LIMIT }));
   } catch (e) {
+    if (e instanceof slack.SlackRateLimited) throw e;
     return { ok: false, reason: 'slack_error', step: 'conversations.replies', message: e instanceof Error ? e.message : String(e) };
   }
 
@@ -201,9 +318,13 @@ export async function readSlack(args: ReadSlackArgs): Promise<Record<string, unk
   }
   kept.sort((a, b) => parseFloat(b.ts) - parseFloat(a.ts));
 
+  // At most `max_messages` rows (the tool passes 40 unless since_hours or
+  // slack_channel narrowed the read), newest first, inside the source's 60,000.
+  const maxMessages = typeof args.max_messages === 'number' && args.max_messages > 0 ? args.max_messages : Infinity;
   const out: Record<string, unknown>[] = [];
   let chars = 0;
   for (const m of kept) {
+    if (out.length >= maxMessages) break;
     const row: Record<string, unknown> = { channel: '#' + m.channel, author: m.author, at: new Date(parseFloat(m.ts) * 1000).toISOString(), kind: m.kind, text: m.is_bot ? m.text.slice(0, BOT_CLIP) : m.text.slice(0, PERSON_CLIP), link: m.link };
     if (m.replies) row.replies = m.replies;
     chars += JSON.stringify(row).length;
@@ -231,21 +352,39 @@ export async function readSlack(args: ReadSlackArgs): Promise<Record<string, unk
 export const readSlackTool: ToolDefinition = {
   name: 'read_slack',
   description:
-    'North Star’s Slack read, as its own bot: every public and private channel it is in (never DMs or group DMs, archived excluded), threads included, newest first. since_hours defaults to 72 and is capped at 168. keywords keeps messages containing any of the words (over two characters). slack_channel narrows to one channel by name or id. Caps, as tuned on the 22 Sep out-of-memory crash: 50 messages a channel, the 25 newest threads with replies in the window expanded, 50 replies a thread, 60,000 characters out; bot posts cut to 300 characters, people’s to 1,200. Each item is {channel, author, at, kind (message | thread reply), text, link}. Also returns window_hours, channels_read, channels_failed, threads_expanded, threads_not_expanded, messages_matched, messages_returned, truncated, no_data. A missing scope or no channel is ok:false with the reason.',
+    'North Star’s Slack read, as its own bot: every public and private channel it is in (never DMs or group DMs, archived excluded), threads included, newest first. since_hours defaults to 72 and is capped at 168. keywords keeps messages containing any of the words (over two characters). slack_channel narrows to one channel by name or id. Caps, as tuned on the 22 Sep out-of-memory crash: 50 messages a channel, the 25 newest threads with replies in the window expanded, 50 replies a thread, 60,000 characters out; bot posts cut to 300 characters, people’s to 1,200. Each item is {channel, author, at, kind (message | thread reply), text, link}. By default the newest 40 messages across channels come back, unless since_hours or slack_channel narrows the read; the answer is held to max_chars (20,000 by default) and a truncated answer says so in note — do not call again with the same arguments. A Slack 429 is waited out once (up to 30s) and retried; still limited, it is ok:false rate_limited with retry_after, never partial data. The same read within a minute is served from the last one (cached: true). Also returns window_hours, channels_read, channels_failed, threads_expanded, threads_not_expanded, messages_matched, messages_returned, truncated, no_data. A missing scope or no channel is ok:false with the reason.',
   inputSchema: {
     type: 'object',
     properties: {
       since_hours: { type: 'number', description: 'How far back. Default 72, at most 168.' },
       keywords: { type: 'string', description: 'Optional. Any-word match, e.g. "LOOP-" or "vfarm, pilot".' },
       slack_channel: { type: 'string', description: 'Optional. One channel, by name (with or without #) or id.' },
+      ...MAX_CHARS_ARG,
     },
     additionalProperties: false,
   },
   annotations: { ...READS_WORLD, title: 'Read Slack as North Star' },
   handler: async (args, deps) => {
     const t0 = Date.now();
-    const out = await readSlack(args);
-    await logRead('read_slack', 'slack', deps, out.ok ? `${String(out.window_hours)}h ${out.keywords ? `"${String(out.keywords)}" ` : ''}→ ${String(out.messages_returned)} of ${String(out.messages_matched)} from ${String(out.channels_read)} channels` : `refused: ${String(out.reason)} — ${String(out.message)}`, t0);
+    const max = maxCharsOf(args);
+    const narrowed = args.since_hours !== undefined || (typeof args.slack_channel === 'string' && args.slack_channel.trim() !== '');
+    const read = await readSlack({ since_hours: args.since_hours, keywords: args.keywords, slack_channel: args.slack_channel, max_messages: narrowed ? undefined : DEFAULT_MESSAGES });
+    let out = read;
+    if (read.ok) {
+      const matched = Number(read.messages_matched);
+      const capped = !narrowed && matched > DEFAULT_MESSAGES ? `the newest ${DEFAULT_MESSAGES} of ${matched} messages (set since_hours or slack_channel for more)` : read.truncated ? `the source's 60,000-character read cap` : null;
+      out = fitToBudget({ ...read, truncated: Boolean(read.truncated) }, ['messages'], max, 'since_hours, slack_channel or keywords', capped);
+      out.messages_returned = (out.messages as unknown[]).length;
+    }
+    await logRead(
+      'read_slack',
+      'slack',
+      deps,
+      out.ok
+        ? `${String(out.window_hours)}h ${out.keywords ? `"${String(out.keywords)}" ` : ''}→ ${String(out.messages_returned)} of ${String(out.messages_matched)} from ${String(out.channels_read)} channels, ${String(out.result_chars)} chars${out.cached ? ' (cached)' : ''}`
+        : `refused: ${String(out.reason)} — ${String(out.message)}`,
+      t0,
+    );
     return out;
   },
 };
@@ -256,7 +395,9 @@ const ID_RE = /LOOP-\d+-[A-Z0-9]{4}/g;
 /** One page of the lookup; read_open_loops pages until it has every loop. */
 const LOOPS_PAGE = 1_000;
 const LOG_ROWS = 60;
-const LOOPS_CHARS = 70_000;
+/** The compact default (2026-09-24): every count over the whole set, then at most this many loops. */
+const LOOPS_RETURNED = 40;
+const WHAT_CLIP = 160;
 
 export async function readOpenLoops(args: { builder_id?: unknown }): Promise<Record<string, unknown>> {
   const builder = typeof args.builder_id === 'string' ? args.builder_id.trim() : '';
@@ -335,27 +476,26 @@ export async function readOpenLoops(args: { builder_id?: unknown }): Promise<Rec
     else if (idle !== null && idle <= 7) label = 'moving';
     else if (age !== null && age >= 7) label = 'stalled';
     else label = 'new';
+    // The newer of the two touches, in one small object: when, where, who, and
+    // for a work log what it did to the loop.
+    const touch = lg && (!s || lg.at >= s.at) ? { at: lg.at, via: 'work log', by: lg.by, how: lg.how } : s ? { at: s.at, via: 'slack', by: s.by } : null;
     return {
       loop_id: id,
-      what: String(f.What || '').slice(0, 240),
-      status: f.Status || '',
-      owner: PEOPLE[String(f['Assignee Slack User ID'] ?? '')] || f['Assignee Slack User ID'] || 'unassigned',
-      raised_by: raisedBy,
-      raised_by_jason: byJason,
-      age_days: age,
-      last_log_touch: lg,
-      last_slack_mention: s,
+      what: String(f.What || '').slice(0, WHAT_CLIP),
+      status: String(f.Status || ''),
       label,
+      age_days: age,
+      owner: PEOPLE[String(f['Assignee Slack User ID'] ?? '')] || f['Assignee Slack User ID'] || 'unassigned',
+      jason_raised: byJason,
+      last_touch: touch,
     };
   });
 
   const RANK: Record<string, number> = { stalled: 0, moving: 1, 'maybe done': 2, new: 3 };
-  out.sort((a, b) => Number(b.raised_by_jason) - Number(a.raised_by_jason) || RANK[a.label] - RANK[b.label] || (b.age_days || 0) - (a.age_days || 0));
-  const counts = out.reduce<Record<string, number>>((m, l) => { m[l.label] = (m[l.label] || 0) + 1; return m; }, {});
-
-  const kept: typeof out = [];
-  let chars = 0;
-  for (const l of out) { chars += JSON.stringify(l).length; if (chars > LOOPS_CHARS) break; kept.push(l); }
+  out.sort((a, b) => Number(b.jason_raised) - Number(a.jason_raised) || RANK[a.label] - RANK[b.label] || (b.age_days || 0) - (a.age_days || 0));
+  const tally = (get: (l: (typeof out)[number]) => string) => out.reduce<Record<string, number>>((m, l) => { const k = get(l) || '(none)'; m[k] = (m[k] || 0) + 1; return m; }, {});
+  const counts = tally((l) => l.label);
+  const kept = out.slice(0, LOOPS_RETURNED);
 
   return {
     ok: true,
@@ -364,13 +504,16 @@ export async function readOpenLoops(args: { builder_id?: unknown }): Promise<Rec
     no_data: out.length === 0,
     total_open_loops: out.length,
     counts,
+    counts_by_status: tally((l) => l.status),
+    counts_by_owner: tally((l) => String(l.owner)),
+    jason_raised: out.filter((l) => l.jason_raised).length,
     sorted_by: 'Jason-raised first, then stalled, moving, maybe done, new; oldest first within each',
     slack_checked: sl.mode === 'slack',
     slack_window_hours: (sl.window_hours as number) || null,
     // Not in the source, whose Slack failure stopped the whole run: here a
     // Slack read that fails leaves every label decided on work logs alone, and
     // says so, rather than taking the loops down with it.
-    ...(slackError ? { slack_error: slackError, note: 'Slack was not read, so no loop was labelled from a Slack mention — labels here come from work logs and age only.' } : {}),
+    ...(slackError ? { slack_error: slackError, slack_note: 'Slack was not read, so no loop was labelled from a Slack mention — labels here come from work logs and age only.' } : {}),
     loop_rows_read: lb.rows.length,
     work_logs_checked: cx.rows.length,
     returned: kept.length,
@@ -382,17 +525,23 @@ export async function readOpenLoops(args: { builder_id?: unknown }): Promise<Rec
 export const readOpenLoopsTool: ToolDefinition = {
   name: 'read_open_loops',
   description:
-    'Every loop not Closed, from the engine database (optionally one builder’s, by Slack user id), each labelled moving (a work log or Slack touched it in the last 7 days), stalled (7+ days old, untouched for a week), maybe done (a work log says it was closed but it is not Closed) or new (under a week old). Matching is on the exact loop id, LOOP-<digits>-<4 chars>, against the 60 newest Codex work logs and 7 days of Slack read as North Star. Sorted Jason-raised first, then stalled, moving, maybe done, new; oldest first within each. At most 70,000 characters. Returns total_open_loops, counts, sorted_by, slack_checked, work_logs_checked, returned, truncated, loops.',
+    'Every loop not Closed, from the engine database (optionally one builder’s, by Slack user id), each labelled moving (a work log or Slack touched it in the last 7 days), stalled (7+ days old, untouched for a week), maybe done (a work log says it was closed but it is not Closed) or new (under a week old). Matching is on the exact loop id, LOOP-<digits>-<4 chars>, against the 60 newest Codex work logs and 7 days of Slack read as North Star. Sorted Jason-raised first, then stalled, moving, maybe done, new; oldest first within each. Every count (by label, status and owner) covers the whole set; at most 40 loops come back, each {loop_id, what (≤160 chars), status, label, age_days, owner, jason_raised, last_touch}, and the answer is held to max_chars (20,000 by default). A truncated answer says so in note — do not call again with the same arguments; narrow with builder_id. Returns total_open_loops, counts, counts_by_status, counts_by_owner, sorted_by, slack_checked, work_logs_checked, loop_rows_read, returned, truncated, loops.',
   inputSchema: {
     type: 'object',
-    properties: { builder_id: { type: 'string', description: 'Optional. The builder’s Slack user id (Assignee Slack User ID), e.g. U0AEW3TBYH1.' } },
+    properties: {
+      builder_id: { type: 'string', description: 'Optional. The builder’s Slack user id (Assignee Slack User ID), e.g. U0AEW3TBYH1.' },
+      ...MAX_CHARS_ARG,
+    },
     additionalProperties: false,
   },
   annotations: { ...READS_WORLD, title: 'Open loops, labelled' },
   handler: async (args, deps) => {
     const t0 = Date.now();
-    const out = await readOpenLoops(args);
-    await logRead('read_open_loops', 'loops', deps, `${out.builder_id ? `builder ${String(out.builder_id)} ` : ''}→ ${String(out.returned)} of ${String(out.total_open_loops)} ${JSON.stringify(out.counts)} slack_checked=${String(out.slack_checked)}`, t0);
+    const read = await readOpenLoops(args);
+    const total = Number(read.total_open_loops);
+    const out = fitToBudget(read, ['loops'], maxCharsOf(args), 'builder_id', read.truncated ? `the first ${LOOPS_RETURNED} of ${total} loops in sort order; every count covers all ${total}` : null);
+    out.returned = (out.loops as unknown[]).length;
+    await logRead('read_open_loops', 'loops', deps, `${out.builder_id ? `builder ${String(out.builder_id)} ` : ''}→ ${String(out.returned)} of ${String(out.total_open_loops)} ${JSON.stringify(out.counts)} slack_checked=${String(out.slack_checked)}, ${String(out.result_chars)} chars`, t0);
     return out;
   },
 };
@@ -410,19 +559,18 @@ export async function getPriorityEvidence(args: { lane_id?: unknown }): Promise<
   /* PE - Format Evidence */
   const clip = (v: unknown, n: number) => { if (v === null || v === undefined) return ''; const s = typeof v === 'string' ? v : JSON.stringify(v); return s.length > n ? s.slice(0, n) + '...' : s; };
 
+  // Compact (2026-09-24): a work log is its summary, at most 400 characters,
+  // with who, when, which lanes and which loops; a job and a card are the
+  // fields North Star decides on. The source's longer shapes answered in 82 KB.
   const logs = cx.map((r) => { const f = r.fields || {}; return {
     codex_id: f['Codex Entry ID'] || f['Submission ID'] || '',
     builder: f['Builder Name'] || '',
     date: f['Processed At'] || f['Timestamp'] || r.created_time || '',
-    session: clip(f['Session Description'], 300),
-    summary: clip(f['Summary'], 700),
-    lanes_touched: clip(f['Lanes Touched'], 200),
-    lane_states_changed: clip(f['Lane States Changed'], 400),
-    loops_closed: clip(f['Loops Closed'], 400),
-    loops_advanced: clip(f['Loops Advanced'], 400),
-    loops_opened: clip(f['Loops Opened'], 400),
+    summary: clip(f['Summary'] || f['Session Description'], 400),
+    lanes_touched: clip(f['Lanes Touched'], 160),
+    loops_closed: clip(f['Loops Closed'], 160),
+    loops_advanced: clip(f['Loops Advanced'], 160),
     jason_status: f['Jason Status'] || '',
-    jason_notes: clip(f['Jason Notes'], 500),
   }; });
 
   // `r.lane_id` is read first as the source reads it; the lookup row carries no
@@ -431,18 +579,15 @@ export async function getPriorityEvidence(args: { lane_id?: unknown }): Promise<
     lane_id: row.lane_id || f['Lane'] || f['lane_id'] || '',
     job_id: f['Job ID'] || r.natural_id || '',
     status: f['Status'] || f['status'] || '',
-    question: clip(f['Question'] || f['question'], 400),
-    outcome: clip(f['Outcome'] || f['outcome'], 300),
-    summary: clip(f['Summary'] || f['Answer Summary'] || f['research_summary'], 600),
+    question: clip(f['Question'] || f['question'], 200),
+    outcome: clip(f['Outcome'] || f['outcome'], 150),
     updated_at: r.updated_at,
   }; });
 
   const cards = cc.map((r) => { const f = r.fields || {}; return {
-    lane_id: f.lane_id || '', card_id: f.card_id || '', title: f.opportunity_title || '',
-    readiness_state: f.readiness_state || '', lane_state: f.lane_state || '', blocked_reason: clip(f.lane_state_blocked_reason, 300),
-    next_action: clip(f.next_action, 300), missing_proof: clip(f.missing_proof, 300), confidence: f.confidence || '',
-    pilot_state: f.pilot_state || '', engine_movement_state: f.engine_movement_state || '',
-    missing_research_count: f.missing_research_count || null, created_at: f.created_at || '',
+    lane_id: f.lane_id || '', card_id: f.card_id || '', title: clip(f.opportunity_title, 120),
+    readiness_state: f.readiness_state || '', next_action: clip(f.next_action, 200),
+    missing_research_count: f.missing_research_count ?? null, confidence: f.confidence || '',
   }; });
 
   const forLane = (x: { lane_id: unknown }) => !lane || String(x.lane_id || '') === lane;
@@ -469,17 +614,21 @@ export async function getPriorityEvidence(args: { lane_id?: unknown }): Promise<
 export const getPriorityEvidenceTool: ToolDefinition = {
   name: 'get_priority_evidence',
   description:
-    'What North Star weighs after Slack, from the engine database: the newest Codex work logs (25 with no lane, 15 with one — never lane-filtered; read lanes_touched and lane_states_changed), Research Twin jobs (at most 60, of the newest 300) and commercial cards (at most 40, of the newest 300), the last two filtered to lane_id when one is given. Returns mode, lane_id, no_data, source_note, lanes_seen, recent_work_logs, research_jobs + research_jobs_total, commercial_cards + commercial_cards_total.',
+    'What North Star weighs after Slack, from the engine database: the newest Codex work logs (25 with no lane, 15 with one — never lane-filtered; read lanes_touched and lane_states_changed), Research Twin jobs (at most 60, of the newest 300) and commercial cards (at most 40, of the newest 300), the last two filtered to lane_id when one is given. Compact: a work log is its summary (≤400 chars) with builder, date, lanes and loops; a job is {job_id, lane_id, status, question, outcome}; a card is {card_id, lane_id, title, readiness_state, next_action, missing_research_count, confidence}. Held to max_chars (20,000 by default); a truncated answer says so in note — do not call again with the same arguments; narrow with lane_id. Returns mode, lane_id, no_data, source_note, lanes_seen, recent_work_logs, research_jobs + research_jobs_total, commercial_cards + commercial_cards_total.',
   inputSchema: {
     type: 'object',
-    properties: { lane_id: { type: 'string', description: 'Optional, e.g. LANE-VFARM-ZONE_MONITORING_SAAS. lanes_seen lists the ones held.' } },
+    properties: {
+      lane_id: { type: 'string', description: 'Optional, e.g. LANE-VFARM-ZONE_MONITORING_SAAS. lanes_seen lists the ones held.' },
+      ...MAX_CHARS_ARG,
+    },
     additionalProperties: false,
   },
   annotations: { ...READS_DB, title: 'North Star’s priority evidence' },
   handler: async (args, deps) => {
     const t0 = Date.now();
-    const out = await getPriorityEvidence(args);
-    await logRead('get_priority_evidence', 'priority_evidence', deps, `${out.lane_id ? `lane ${String(out.lane_id)} ` : ''}→ ${(out.recent_work_logs as unknown[]).length} logs, ${String(out.research_jobs_total)} jobs, ${String(out.commercial_cards_total)} cards`, t0);
+    const read = await getPriorityEvidence(args);
+    const out = fitToBudget(read, ['recent_work_logs', 'research_jobs', 'commercial_cards'], maxCharsOf(args), 'lane_id', null);
+    await logRead('get_priority_evidence', 'priority_evidence', deps, `${out.lane_id ? `lane ${String(out.lane_id)} ` : ''}→ ${(out.recent_work_logs as unknown[]).length} logs, ${(out.research_jobs as unknown[]).length} of ${String(out.research_jobs_total)} jobs, ${(out.commercial_cards as unknown[]).length} of ${String(out.commercial_cards_total)} cards, ${String(out.result_chars)} chars`, t0);
     return out;
   },
 };
