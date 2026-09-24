@@ -23,6 +23,7 @@ import * as recovery from '../recovery';
 import { WRITE_TOOLS } from './writeTools';
 import { DOC_WRITE_TOOLS, readSlackFile } from './docTools';
 import { getN8nWorkflow, listN8nWorkflows } from './n8nTools';
+import { NORTH_STAR_TOOLS } from './northStarTools';
 import { findRecords, READABLE_KINDS } from './findRecords';
 import * as mirror from '../mirror';
 import * as n8n from '../n8n';
@@ -787,6 +788,8 @@ export const TOOLS: ToolDefinition[] = [
   listN8nWorkflows,
   getN8nWorkflow,
   readSlackFile,
+  // 2026-09-24: North Star's three code tools, off its Tools Router.
+  ...NORTH_STAR_TOOLS,
   // The one that is not a read.
   resyncTool,
 ];

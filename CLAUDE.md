@@ -794,11 +794,12 @@ reasonable about.
   rest, and a payload past the size cap comes back as its **shape** rather than
   as a sample: a fragment read as the whole is the failure worth designing out.
 - Every call is logged with its name, its arguments and which connection
-  (`[mcp:read]` / `[mcp:write]`) it came in on. **Eighteen tools on the read
-  connection** (seventeen read, one act — `get_recovery_status` added
+  (`[mcp:read]` / `[mcp:write]`) it came in on. **Twenty-one tools on the read
+  connection** (twenty read, one act — `get_recovery_status` added
   2026-09-23, `find_records` 2026-09-24, `list_n8n_workflows`,
-  `get_n8n_workflow` and `read_slack_file` later the same day), **twenty-six
-  on the write connection** (those plus the five record write tools and the
+  `get_n8n_workflow` and `read_slack_file` later the same day, then North
+  Star's `read_slack`, `read_open_loops` and `get_priority_evidence`),
+  **twenty-nine on the write connection** (those plus the five record write tools and the
   three Drive tools, 2026-09-24), and **every one of them carries MCP annotations**
   (decision 2026-09-20, Destiny), because the spec's default for a tool that
   declares none is *potentially destructive* — twelve read-only tools that
@@ -1088,6 +1089,42 @@ agent did through n8n tools of its own are tools here:
   `npm run test:bays-tools` pins all of it against local stand-ins for n8n,
   Slack and Google.
 
+**North Star's three code tools, off its Tools Router** (decision 2026-09-24,
+Destiny). North Star is becoming an n8n Agent the way Bays did, and the three
+tools that were multi-step code in `North Star — Tools Router`
+(`G6Myypk64kpcaVhz`) are read tools here — `server/src/mcp/northStarTools.ts`,
+both connections, each call logged to `engine_writes` as `read`. **Ported as
+written, not improved**: the limits were tuned on the 22 Sep out-of-memory
+crash, when seven North Star runs read Slack at 08:00 at once.
+
+- **`read_slack`** (`RS -`): `users.conversations`, public and private only,
+  DMs, group DMs and archived never; `since_hours` 72 by default and at most
+  168; `keywords` any-word (over two characters); `slack_channel` by name or
+  id. 50 messages a channel, the 25 newest threads with replies in the window
+  expanded, 50 replies a thread, 60,000 characters out, bot posts cut to 300
+  and people's to 1,200, Slack called ten at a time with 1.5 s between
+  batches. Names from the source's roster; mentions and links cleaned as
+  `RS - Build Digest` does. `missing_scope` and "not a member of any channel"
+  are `ok:false` in the source's words. **Read as North Star's own bot,
+  `SLACK_NORTH_STAR_BOT_TOKEN`, never Bays'**.
+- **`read_open_loops`** (`ROL -`): loops through `mirror.lookup` (limit 1,000,
+  `Assignee Slack User ID` = `builder_id` when given), Closed dropped; exact
+  loop ids checked against the 60 newest Codex rows and `read_slack` with
+  `LOOP-` over 168 hours; moving / stalled / maybe done / new; Jason-raised
+  first, then that order, oldest first within each; 70,000 characters. **One
+  difference from the source, named on the answer**: there a Slack failure
+  stopped the run; here the loops are still answered, `slack_checked: false`
+  with `slack_error`, labelled from work logs and age alone — the source's own
+  `try` around the Slack read shows that was the intent. Rows come as the
+  lookup gives them, so a copy left behind by a move is two rows here as it
+  was in n8n.
+- **`get_priority_evidence`** (`PE -`): the newest 40 Codex rows, 300 rt-jobs
+  and 300 commercial cards, `PE - Format Evidence`'s shapes and clips; jobs and
+  cards filtered by `lane_id`, work logs never (25 without a lane, 15 with).
+- `npm run test:north-star` pins them against a Slack stand-in. The Tools
+  Router is marked retired in the registry once all three are proved live, and
+  `North Star — Agent Delivery` is added once its id is confirmed.
+
 **The recovery watcher re-runs what failed because a dependency was down**
 (decision 2026-09-23, Destiny — brief D2). `server/src/recovery.ts`. When
 OpenRouter runs out of credit, a Slack or Google login lapses or BHARAG stops
@@ -1372,7 +1409,10 @@ keys the write tools ingest a created Codex entry, pattern or commercial card
 with; unset, the row still saves and the answer says it is not in BHARAG.
 `SLACK_BAYS_BOT_TOKEN` — the Bays bot token (`xoxb-`, `files:read` and
 `chat:write`) for `read_slack_file` and the domain-guard DM (2026-09-24); no
-default. `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` and
+default. `SLACK_NORTH_STAR_BOT_TOKEN` — North Star's own bot token
+(`channels:read`, `groups:read`, `channels:history`, `groups:history`) for
+`read_slack` and `read_open_loops`; no default, and never interchangeable with
+the Bays one. `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` and
 `GOOGLE_OAUTH_REFRESH_TOKEN`, **or** `GOOGLE_SERVICE_ACCOUNT_JSON` — Drive and
 Docs for the three Drive tools and the pattern Doc (scopes `drive` and
 `documents`); unset, they answer `not_configured` and the boot line names the

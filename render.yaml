@@ -208,6 +208,12 @@ services:
       # chat:write. Unset, both answer not_configured.
       - key: SLACK_BAYS_BOT_TOKEN
         sync: false
+      # North Star's own bot token (xoxb-, the app behind n8n's "North Star"
+      # credential), for read_slack and read_open_loops (2026-09-24). Needs
+      # channels:read, groups:read, channels:history, groups:history. Never
+      # the Bays token: North Star reads with its own access.
+      - key: SLACK_NORTH_STAR_BOT_TOKEN
+        sync: false
       # Google, for share_doc, grant_drive_access, create_doc and the pattern
       # Doc on create_record (2026-09-24). EITHER the OAuth trio (acts as the
       # Google user who granted it, like n8n's "Admin Google Docs") OR a
