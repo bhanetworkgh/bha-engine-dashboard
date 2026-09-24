@@ -9626,3 +9626,22 @@ Decision:   Ported as written: every cap, clip, label rule, sort and message
             a Slack stand-in: batching timed at 1.5 s, the token asserted as
             North Star's, clips, cleaning, thread handling, labels and sort,
             the lane filter, the read log. The earlier suites still pass.
+
+## 2026-09-24 08:05 — North Star tools deployed; the 1,000-loop ceiling
+Intent:     Put the three North Star tools live and check them against
+            production.
+Files:      BUILD_LOG.md.
+Problem:    Deploy of 36fc9b0 went live at 08:03:27Z. The boot line reads
+            "SLACK_NORTH_STAR_BOT_TOKEN NOT set". This session's connector still
+            lists the tools it had when it connected, so the three new tools
+            were not callable from here.
+            Reading production for the same rows the tools read:
+            - engine_loops holds 1,004 rows. ROL - Fetch Loops (limit=1000,
+              newest first) therefore never sees the 4 oldest, in n8n today
+              and in the port.
+            - 723 of the 1,000 read are not Closed.
+            - rt-jobs: 10 rows; commercial: 30; lanes seen: 28.
+Fix:        —
+Decision:   The 1,000 ceiling is left as the source has it, per the brief
+            ("port as written"). It is raised with Destiny rather than changed
+            silently, because it will drop more loops as the table grows.
