@@ -9402,3 +9402,27 @@ Decision:   MCP_WRITE_TOKEN was generated (48 random url-safe characters) and
             n8n credentials this session cannot read, so until they are set, a
             Codex / pattern / commercial create answers ingested_to_bharag:
             false.
+
+## 2026-09-24 05:10 — The write tools on the existing MCP URL
+Intent:     Destiny: "i want these new tools, all of them to be at this one
+            instead of the one you just created, so that i can just refresh tool
+            list from claude chat and they show up". The one he means is the
+            connector already in Claude, dashboard.bhanetwork.org/mcp/<MCP_SECRET>.
+Files:      server/src/mcp/index.ts, server/src/index.ts (boot line),
+            CLAUDE.md, BUILD_LOG.md.
+Problem:    As first built, a write token equal to the read secret was refused
+            and that URL stayed read-only ("one URL cannot be both"). So setting
+            the two equal, which is the only way to put the tools on the
+            existing URL without a second connector, would have switched the
+            write tools off entirely.
+Fix:        A write token equal to the read secret now makes that one URL the
+            write connection. accessFor checks the write token first, so the
+            shared case answers as write. The boot line says "ONE URL" when it
+            is so. MCP_WRITE_TOKEN on Render is set to the existing secret, so
+            the separate URL minted at 04:46 stops working.
+Decision:   This reverses the separation the brief asked for, on Destiny's
+            instruction: the read-only connector no longer exists as a
+            read-only surface. Setting the two apart again restores it; no code
+            change is needed. Verified locally: with both set to one string,
+            tools/list on that URL returns 19 tools including all five write
+            tools, and npm run test:mcp-write (separate tokens) still passes.

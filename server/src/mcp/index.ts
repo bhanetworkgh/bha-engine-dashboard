@@ -52,7 +52,8 @@
  * all — not listed, and a call to one is "no such tool" — rather than listed
  * and refused, because a tool a client can see is a tool a model will try.
  * Both answer a miss with the same 404, and every call is logged with which
- * token it came in on.
+ * token it came in on. Set to one string, the two are one URL with write
+ * access (Destiny, 2026-09-24) — see MCP_WRITE_TOKEN below.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
@@ -69,14 +70,21 @@ export const MCP_SECRET_VAR = 'MCP_SECRET';
 
 /**
  * The write connection's path secret (2026-09-24). No default, on the rule the
- * read secret follows. Refused if it is the same string as the read secret:
- * one URL cannot be both, and treating it as either would be a guess about
- * which one somebody meant.
+ * read secret follows.
+ *
+ * **Set to the same string as `MCP_SECRET`, the one existing URL becomes the
+ * write connection** (decision 2026-09-24, Destiny). The connector already in
+ * Claude points at `/mcp/<MCP_SECRET>`, and a second URL meant adding a second
+ * connector; with the two equal, refreshing the tool list on the existing one
+ * brings the write tools in. Set to a different string, the two URLs are
+ * separate as first built: the read URL never lists a write tool. `accessFor`
+ * checks the write token first, so the shared case always answers as write.
  */
 const WRITE_RAW = process.env.MCP_WRITE_TOKEN?.trim() || null;
-export const MCP_WRITE_TOKEN = WRITE_RAW && WRITE_RAW !== MCP_SECRET ? WRITE_RAW : null;
+export const MCP_WRITE_TOKEN = WRITE_RAW;
 export const MCP_WRITE_TOKEN_VAR = 'MCP_WRITE_TOKEN';
-export const MCP_WRITE_TOKEN_CLASHES = Boolean(WRITE_RAW && WRITE_RAW === MCP_SECRET);
+/** True where the read secret and the write token are one string, so one URL carries both. */
+export const MCP_ONE_URL = Boolean(WRITE_RAW && WRITE_RAW === MCP_SECRET);
 
 export type McpAccess = 'read' | 'write';
 

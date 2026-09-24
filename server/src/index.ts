@@ -45,7 +45,7 @@ import * as bharag from './bharag';
 import { monthly } from './monthly';
 import { isStatKind, stats } from './stats';
 import { N8N_API_VAR, n8nBase, n8nConfigured } from './n8n';
-import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, MCP_SECRET_VAR, MCP_WRITE_TOKEN_VAR, MCP_WRITE_TOKEN_CLASHES } from './mcp';
+import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, MCP_SECRET_VAR, MCP_WRITE_TOKEN_VAR, MCP_ONE_URL } from './mcp';
 import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
@@ -1595,8 +1595,8 @@ async function boot(): Promise<void> {
         : `  mcp:      NOT configured — ${MCP_SECRET_VAR} is not set, so /mcp/* answers 404 to everything.`,
     );
     console.log(
-      MCP_WRITE_TOKEN_CLASHES
-        ? `  mcp:      write connection OFF — ${MCP_WRITE_TOKEN_VAR} is the same string as ${MCP_SECRET_VAR}; one URL cannot be both, so it is treated as read only.`
+      MCP_ONE_URL
+        ? `  mcp:      ONE URL — ${MCP_WRITE_TOKEN_VAR} equals ${MCP_SECRET_VAR}, so /mcp/<${MCP_SECRET_VAR}> is the write connection: every read tool plus create, update, archive and delete behind the Tools Router guards`
         : mcpWriteConfigured()
           ? `  mcp:      /mcp/<${MCP_WRITE_TOKEN_VAR}> — the write connection: every read tool plus create, update, archive and delete behind the Tools Router guards`
           : `  mcp:      write connection OFF — ${MCP_WRITE_TOKEN_VAR} is not set, so no MCP client can write.`,
