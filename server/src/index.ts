@@ -1615,6 +1615,16 @@ async function boot(): Promise<void> {
         : `  slack:    ${slack.NS_TOKEN_VAR} NOT set — read_slack answers not_configured and read_open_loops labels from work logs alone`,
     );
     console.log(
+      slack.researchTwinToken()
+        ? `  slack:    ${slack.RT_TOKEN_VAR} set — create_client_report_doc posts the weekly report as Research Twin`
+        : `  slack:    ${slack.RT_TOKEN_VAR} NOT set — create_client_report_doc builds the report and answers not_configured instead of uploading it`,
+    );
+    console.log(
+      bharag.ingestConfigured('research_twin')
+        ? `  bharag:   ${bharag.INGEST_KEY_VARS.research_twin} set — update_watched_client_question ingests each answer into Research Twin's workspace`
+        : `  bharag:   ${bharag.INGEST_KEY_VARS.research_twin} NOT set — update_watched_client_question writes the row and says ingested_to_bharag:false`,
+    );
+    console.log(
       google.googleMode()
         ? `  google:   ${google.googleMode() === 'oauth' ? 'OAuth refresh token' : 'service account'} — share_doc, grant_drive_access, create_doc and pattern Docs work`
         : `  google:   NOT configured — ${google.notConfiguredMessage()}`,

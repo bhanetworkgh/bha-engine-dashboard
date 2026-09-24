@@ -306,6 +306,13 @@ export const INGEST_KEY_VARS = {
   codex: 'BHARAG_CODEX_KEY',
   build_patterns: 'BHARAG_BUILD_PATTERNS_KEY',
   commercial: 'BHARAG_COMMERCIAL_KEY',
+  /**
+   * Research Twin's workspace (2026-09-24): `update_watched_client_question`
+   * ingests each answered question here, as `UWC - Ingest To BHARAG` did with
+   * n8n's "BHARAG - Research Twin" credential — the same key the Research Twin
+   * lane reads the incident ledger with.
+   */
+  research_twin: 'BHARAG_RESEARCH_TWIN_KEY',
 } as const;
 export type IngestWorkspace = keyof typeof INGEST_KEY_VARS;
 

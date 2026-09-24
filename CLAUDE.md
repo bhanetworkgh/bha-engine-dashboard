@@ -799,9 +799,9 @@ reasonable about.
   2026-09-23, `find_records` 2026-09-24, `list_n8n_workflows`,
   `get_n8n_workflow` and `read_slack_file` later the same day, then North
   Star's `read_slack`, `read_open_loops` and `get_priority_evidence`),
-  **thirty-one on the write connection** (those plus the five record write tools, the
-  three Drive tools and the two Slack writes `send_nudge` and `post_file`,
-  2026-09-24), and **every one of them carries MCP annotations**
+  **thirty-seven on the write connection** (those plus the five record write tools, the
+  three Drive tools, the two Slack writes `send_nudge` and `post_file`, and
+  Research Twin's six, 2026-09-24), and **every one of them carries MCP annotations**
   (decision 2026-09-20, Destiny), because the spec's default for a tool that
   declares none is *potentially destructive* — twelve read-only tools that
   said nothing about themselves were being offered to every client as though
@@ -1178,6 +1178,63 @@ crash, when seven North Star runs read Slack at 08:00 at once.
   Front Door — seed, and migration 32 only where the row was still
   `production`.
 
+**Research Twin's six write tools, off its Tools Router** (decision
+2026-09-24, Destiny). The Research Twin Agent (`dDtsExaaXhlFd2dv`) called
+`Research Twin — Tools Router` (`zikfpO0wvqzPCQuz`) six ways; each route is a
+write tool here — `server/src/mcp/researchTwinTools.ts`, write connection only,
+every call on `engine_mcp_writes` (refused and dry-run ones included) — and the
+agent's six workflow tools are replaced by these names on its MCP allow-list.
+**Ported as written**: every Code node is a function of its own
+(`gateFinding`, `reachBack`, `mergeCardFields`, `laneTransition`,
+`buildJobRows`, `mergeQuestion`, `questionDoc`, `resolveLane`, `buildReport`,
+`reportComment`), and a differential run of each against the n8n node's own
+code, clock frozen, came out identical on 77 cases before anything was wired.
+
+- **`write_research_finding`** (`WRF -`): the job by `queue_row_id` — a row id,
+  a `rec…` id or a Job ID, told apart by shape — or, without one, the newest
+  **open** job (Pending / In Progress) for `card_id`. No sources is refused.
+  Attempts + 1; a low answer is a stuck attempt and a low answer **on attempt
+  three or later** caps the job `Capped (needs human)` — the source counts
+  attempts, not stuck ones; medium or high Resolves it. Answer History and
+  Sources append. A clean Resolve with a card reaches back: the finding onto
+  the card's `research_gleanings`, `missing_research_count` down one, never
+  below nought.
+- **`write_commercial_card_fields`** (`WCF -`): append-only
+  `research_gleanings` / `experiment_results`, each entry `[ISO]`-stamped; the
+  count goes down only on `missing_research_resolved`; an empty checklist keeps
+  the card's own. **`compute_lane_state`** (`CLS -`): ssv_started →
+  pilot_running / pilot_live, metrics_met → productized / pilot_success,
+  ended_no_threshold → needs_revision / pilot_failed, anything else unchanged.
+  Both answer "No card found" and write nothing where `card_id` matches nothing.
+- **`queue_followup_research`** (`QFR -`): `items` as an array **or** a JSON
+  string, one Pending `rt-jobs` row per usable item, `JOB-<ms>-<4>`.
+- **`update_watched_client_question`** (`UWC -`): the row by `table_id` and the
+  question's exact text; the movement tag, `Contradicted From`, the history,
+  Research Stuck at `Run Count` 3 (the source reads the count and never
+  increments it — nor does this), the previous Plain Summary kept when none is
+  given. Then one BHARAG doc per answered question into Research Twin's
+  workspace with **`BHARAG_RESEARCH_TWIN_KEY`** — the lane key, which is what
+  n8n's "BHARAG - Research Twin" credential is. **A BHARAG failure degrades and
+  never rolls back**: the row is written and the answer says
+  `ingested_to_bharag: false`. In n8n that node stopped the whole call.
+- **`create_client_report_doc`** (`CCR -`): the lane from the watched-clients
+  index by the source's own name matching, **its questions table read from the
+  index's `Questions Table` through the source's three-name map** — not from
+  `Table ID`, exactly as the source does, so a lane whose `Questions Table` is
+  neither a `tbl…` id nor one of those three names is `client_not_found` with
+  `unresolved_table` named; the report built from the live rows; the Markdown
+  uploaded to **#watched-clients (`C0B9LKU7DQV`)** with the source's
+  `initial_comment`, as **Research Twin's own bot,
+  `SLACK_RESEARCH_TWIN_BOT_TOKEN`** — never Bays' or North Star's. The
+  permalink comes from files.info.
+- **All six**: a business refusal is `ok:false` with a plain reason, never a
+  throw (QFR threw on zero items); `dry_run`; answers held to **20,000
+  characters**, cut and marked. `npm run test:research-twin` pins them end to
+  end against Slack and BHARAG stand-ins.
+- **`rt-asks` is delete-only** (2026-09-24): `delete_record` takes it — the
+  same confirm, `record_deletions` copy and audit line — and no other write
+  tool does. It exists so a test delivery can be removed without a SQL console.
+
 **The recovery watcher re-runs what failed because a dependency was down**
 (decision 2026-09-23, Destiny — brief D2). `server/src/recovery.ts`. When
 OpenRouter runs out of credit, a Slack or Google login lapses or BHARAG stops
@@ -1465,7 +1522,11 @@ with; unset, the row still saves and the answer says it is not in BHARAG.
 default. `SLACK_NORTH_STAR_BOT_TOKEN` — North Star's own bot token
 (`channels:read`, `groups:read`, `channels:history`, `groups:history`) for
 `read_slack` and `read_open_loops`; no default, and never interchangeable with
-the Bays one. `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` and
+the Bays one. `SLACK_RESEARCH_TWIN_BOT_TOKEN` — Research Twin's own bot token
+(`files:write`, `chat:write`, in #watched-clients) for
+`create_client_report_doc` (2026-09-24); no default, and never interchangeable
+with the other two. `BHARAG_RESEARCH_TWIN_KEY` is also what
+`update_watched_client_question` ingests with. `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` and
 `GOOGLE_OAUTH_REFRESH_TOKEN`, **or** `GOOGLE_SERVICE_ACCOUNT_JSON` — Drive and
 Docs for the three Drive tools and the pattern Doc (scopes `drive` and
 `documents`); unset, they answer `not_configured` and the boot line names the

@@ -9808,3 +9808,63 @@ Fix:        —
 Decision:   Nothing was worked around. Destiny runs the two proof calls after
             a tool refresh. Each one leaves a line on engine_mcp_writes, and
             that line can be read back here.
+
+## 2026-09-24 10:55 — Research Twin's six write tools; rt-asks delete-only
+Intent:     Brief: move Research Twin (Agent) dDtsExaaXhlFd2dv off the six
+            workflow tools it calls on Research Twin — Tools Router
+            (zikfpO0wvqzPCQuz), onto the dashboard MCP. The tools are
+            write_research_finding, write_commercial_card_fields,
+            compute_lane_state, queue_followup_research,
+            update_watched_client_question and create_client_report_doc.
+            Also make rt-asks deletable.
+Files:      server/src/mcp/researchTwinTools.ts (new), server/src/mcp/tools.ts,
+            server/src/mcp/writeTools.ts (delete_record takes DELETABLE_KINDS),
+            server/src/writeGuards.ts (DELETE_ONLY: rt-asks), server/src/slack.ts
+            (botCall token override, SLACK_RESEARCH_TWIN_BOT_TOKEN),
+            server/src/bharag.ts (research_twin ingest workspace),
+            server/src/index.ts (two boot lines), render.yaml,
+            server/test/research-twin-tools.test.cjs (new), package.json
+            (test:research-twin), CLAUDE.md.
+Problem:    The router was read with n8n get_workflow_details: 65 nodes,
+            versionId f0c202ae…. Nothing in n8n was changed.
+            First test run: the seed was refused with "record_id":
+            "recRT536341q1" is not an Airtable record id (rec followed by 14
+            characters). That was a test-fixture mistake; the fixed id passes.
+            The source does things that look like bugs. Each is ported as
+            written and named here rather than fixed:
+            (1) WRF caps a job when the answer is low AND attempts >= 3. It
+            counts all attempts, not stuck ones: two good answers followed by
+            one low one still cap.
+            (2) UWC reads Run Count and never increments it. Neither does
+            this.
+            (3) CCR resolves the questions table from the index's
+            "Questions Table" through a hardcoded three-name map, not from
+            "Table ID". Any other lane whose "Questions Table" is a name
+            answers client_not_found, and unresolved_table is named.
+Fix:        —
+Decision:   Every Code node is its own exported function. Before wiring
+            anything, a harness ran each one against the n8n node's own jsCode
+            in a vm, with a frozen clock and $/$input shims. It covered WRF
+            gate and merge, WCF, CLS, QFR, UWC merge and doc, CCR resolve,
+            build and initial_comment. All 77 comparisons were identical.
+            Differences on purpose:
+            - A refusal is ok:false, not a throw.
+            - The BHARAG ingest degrades (ingested_to_bharag:false) instead of
+              stopping the call. The n8n node was onError:stopWorkflow.
+            - One answer per call; the n8n parallel branches are folded in.
+            - dry_run is supported.
+            - Answers are capped at 20,000 characters.
+            - The report permalink comes from files.info. n8n read it from
+              completeUploadExternal, which never carries one.
+            Credentials:
+            - Report upload: new SLACK_RESEARCH_TWIN_BOT_TOKEN. It is n8n's
+              "Research Twin" Slack credential, and no default is set.
+            - BHARAG ingest: the existing BHARAG_RESEARCH_TWIN_KEY, which is
+              what n8n's "BHARAG - Research Twin" credential names.
+            rt-asks is delete-only (DELETE_ONLY in writeGuards). create_record
+            and update_record still refuse it.
+            Verified locally:
+            - test:research-twin 10/10.
+            - bays-tools, mcp-write, north-star, lookup, pay, gate and
+              recovery all pass.
+            - The build is clean.

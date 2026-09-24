@@ -95,6 +95,15 @@ function kindOf(args: Record<string, unknown>): guards.WritableKind {
   return spec;
 }
 
+/** delete_record's kind: every writable kind, plus the delete-only ones. */
+function deletableKindOf(args: Record<string, unknown>): guards.WritableKind {
+  const k = s(args, 'kind');
+  if (!k) throw new McpError('bad_argument', `"kind" is required. One of: ${guards.DELETABLE_KINDS.join(', ')}.`);
+  const spec = guards.deletable(k);
+  if (!spec) throw new McpError('bad_argument', `"${k}" is not a kind delete_record can delete. One of: ${guards.DELETABLE_KINDS.join(', ')}.`);
+  return spec;
+}
+
 function fieldsOf(args: Record<string, unknown>): Record<string, unknown> {
   const f = args.fields;
   if (!f || typeof f !== 'object' || Array.isArray(f)) throw new McpError('bad_argument', '"fields" is required and must be an object, keyed by the field names exactly as the table stores them (list_writable_kinds names them).');
@@ -495,11 +504,11 @@ const archiveRecord: ToolDefinition = {
 const deleteRecord: ToolDefinition = {
   name: 'delete_record',
   description:
-    'Hard-delete one record. Refused unless "confirm" is exactly "DELETE <natural_id>" (or "DELETE <id>" for a row with no natural id), and refused outright for kinds that cannot be deleted (codex; pay and ledger kinds are not writable at all). The whole row is kept in record_deletions before it goes. Prefer archive_record where the kind has an archived state.',
+    'Hard-delete one record. Refused unless "confirm" is exactly "DELETE <natural_id>" (or "DELETE <id>" for a row with no natural id), and refused outright for kinds that cannot be deleted (codex; pay and ledger kinds are not writable at all). rt-asks is delete-only: removable here, never created or edited over MCP. The whole row is kept in record_deletions before it goes. Prefer archive_record where the kind has an archived state.',
   inputSchema: {
     type: 'object',
     properties: {
-      kind: { type: 'string', enum: guards.WRITABLE_KINDS },
+      kind: { type: 'string', enum: guards.DELETABLE_KINDS },
       id: { type: 'string' },
       natural_id: { type: 'string' },
       confirm: { type: 'string', description: 'Exactly "DELETE <natural_id>".' },
@@ -511,7 +520,7 @@ const deleteRecord: ToolDefinition = {
   },
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Hard-delete a record (confirmed by its id)' },
   handler: async (args, deps) => {
-    const spec = kindOf(args);
+    const spec = deletableKindOf(args);
     const reason = s(args, 'reason');
     if (!reason) throw new McpError('bad_argument', '"reason" is required: why this record is being deleted. It is kept with the row in record_deletions.');
     const dry = b(args, 'dry_run');

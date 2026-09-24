@@ -25,6 +25,7 @@ import { DOC_WRITE_TOOLS, readSlackFile } from './docTools';
 import { getN8nWorkflow, listN8nWorkflows } from './n8nTools';
 import { NORTH_STAR_TOOLS } from './northStarTools';
 import { SLACK_WRITE_TOOLS } from './slackTools';
+import { RESEARCH_TWIN_WRITE_TOOLS } from './researchTwinTools';
 import { findRecords, READABLE_KINDS } from './findRecords';
 import * as mirror from '../mirror';
 import * as n8n from '../n8n';
@@ -802,7 +803,7 @@ export const TOOLS: ToolDefinition[] = [
  * tool a client can see is a tool a model will try.
  */
 function toolsFor(access: 'read' | 'write'): ToolDefinition[] {
-  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS] : TOOLS;
+  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS] : TOOLS;
 }
 
 export function toolByName(name: string, access: 'read' | 'write' = 'read'): ToolDefinition | null {
