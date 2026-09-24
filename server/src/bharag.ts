@@ -288,3 +288,48 @@ export async function heal(body: HealRequest): Promise<{ status: number; body: s
     clearTimeout(timer);
   }
 }
+
+/* ----------------------------------------------------------- the ingest */
+
+/**
+ * Ingesting a record into its BHARAG workspace (2026-09-24, Destiny — the MCP
+ * write tools). The same call the n8n ingest nodes make: `POST /ingest` with
+ * `{ title, content, source_type, content_type, project_tags, metadata }`,
+ * one workspace key per workspace, the key in `x-api-key`.
+ *
+ * **One variable per workspace, each named for it, no defaults** — the rule the
+ * lane keys follow. A workspace with no key is not ingested into, and the
+ * caller says so: a row that saved and did not ingest is `saved: true,
+ * ingested_to_bharag: false`, never reported as full success.
+ */
+export const INGEST_KEY_VARS = {
+  codex: 'BHARAG_CODEX_KEY',
+  build_patterns: 'BHARAG_BUILD_PATTERNS_KEY',
+  commercial: 'BHARAG_COMMERCIAL_KEY',
+} as const;
+export type IngestWorkspace = keyof typeof INGEST_KEY_VARS;
+
+export function ingestConfigured(ws: IngestWorkspace): boolean {
+  return Boolean(process.env[INGEST_KEY_VARS[ws]]?.trim());
+}
+
+export interface IngestDocument {
+  title: string;
+  content: string;
+  source_type: string;
+  content_type: string;
+  project_tags: string[];
+  metadata: Record<string, unknown>;
+}
+
+export async function ingest(ws: IngestWorkspace, doc: IngestDocument): Promise<{ ok: boolean; status: number | null; detail: string }> {
+  const key = process.env[INGEST_KEY_VARS[ws]]?.trim();
+  if (!key) return { ok: false, status: null, detail: `${INGEST_KEY_VARS[ws]} is not set on this server, so nothing was sent to BHARAG.` };
+  try {
+    const r = await call<Record<string, unknown>>('/ingest', key, doc);
+    const id = r && typeof r === 'object' ? (r.document_id ?? r.id ?? (r.data as Record<string, unknown> | undefined)?.document_id ?? null) : null;
+    return { ok: true, status: 200, detail: id ? `ingested as ${String(id)}` : 'ingested' };
+  } catch (e) {
+    return { ok: false, status: e instanceof BharagError ? e.status || null : null, detail: e instanceof Error ? e.message : String(e) };
+  }
+}

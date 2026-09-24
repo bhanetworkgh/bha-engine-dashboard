@@ -45,8 +45,14 @@
  * so none of the three tells an unauthenticated caller that the endpoint is
  * there.
  *
- * **Read only.** There is no write tool, and no code path from a tool to a
- * write. See tools.ts.
+ * **Two tokens, two surfaces** (2026-09-24, Destiny). `/mcp/<MCP_SECRET>` is
+ * the read connection, exactly as it was. `/mcp/<MCP_WRITE_TOKEN>` is the
+ * write connection: every read tool **plus** the write tools in
+ * writeTools.ts. On a read connection the write tools are not registered at
+ * all — not listed, and a call to one is "no such tool" — rather than listed
+ * and refused, because a tool a client can see is a tool a model will try.
+ * Both answer a miss with the same 404, and every call is logged with which
+ * token it came in on.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
@@ -61,8 +67,25 @@ const SERVER_INFO = { name: 'bha-engine-dashboard', title: 'BHA Engine Dashboard
 export const MCP_SECRET = process.env.MCP_SECRET?.trim() || null;
 export const MCP_SECRET_VAR = 'MCP_SECRET';
 
+/**
+ * The write connection's path secret (2026-09-24). No default, on the rule the
+ * read secret follows. Refused if it is the same string as the read secret:
+ * one URL cannot be both, and treating it as either would be a guess about
+ * which one somebody meant.
+ */
+const WRITE_RAW = process.env.MCP_WRITE_TOKEN?.trim() || null;
+export const MCP_WRITE_TOKEN = WRITE_RAW && WRITE_RAW !== MCP_SECRET ? WRITE_RAW : null;
+export const MCP_WRITE_TOKEN_VAR = 'MCP_WRITE_TOKEN';
+export const MCP_WRITE_TOKEN_CLASHES = Boolean(WRITE_RAW && WRITE_RAW === MCP_SECRET);
+
+export type McpAccess = 'read' | 'write';
+
 export function mcpConfigured(): boolean {
   return Boolean(MCP_SECRET);
+}
+
+export function mcpWriteConfigured(): boolean {
+  return Boolean(MCP_WRITE_TOKEN);
 }
 
 /** The path the connector is pointed at, for the boot line. The secret is never printed. */
@@ -98,10 +121,10 @@ function failure(id: RpcRequest['id'], code: number, message: string, data?: unk
 /** Arguments are logged whole up to this, so a call can be reproduced from the log. */
 const MAX_LOGGED_ARGS = 400;
 
-function logCall(name: string, args: unknown, outcome: string, ms: number, bytes: number | null): void {
+function logCall(access: McpAccess, name: string, args: unknown, outcome: string, ms: number, bytes: number | null): void {
   const a = JSON.stringify(args ?? {});
   const shown = a.length > MAX_LOGGED_ARGS ? `${a.slice(0, MAX_LOGGED_ARGS)}…` : a;
-  console.log(`[mcp] ${name} ${shown} — ${outcome} in ${ms}ms${bytes === null ? '' : `, ${bytes} bytes`}`);
+  console.log(`[mcp:${access}] ${name} ${shown} — ${outcome} in ${ms}ms${bytes === null ? '' : `, ${bytes} bytes`}`);
 }
 
 /* -------------------------------------------------------------- the methods */
@@ -133,6 +156,12 @@ async function handleRpc(req: RpcRequest, deps: ToolDeps): Promise<Record<string
             'query_postgres answers anything about the held data directly, as one read-only SELECT — bind values as parameters. describe_schema gives the real column names, read from the database rather than from the repository. search_logs covers what this process has served since it booted, and says so rather than implying silence.',
             '',
             'Two things hold across every tool. Each one reports what it could not answer rather than guessing — an unconfigured source is "not configured" and never "healthy", a cut payload says it was cut, and a name that is ambiguous is refused with the candidates named. And every mutating tool previews before it acts: called without a token it changes nothing and hands back what it would do, plus a short-lived token that works once.',
+            ...(deps.access === 'write'
+              ? [
+                  '',
+                  'This is the WRITE connection. Beside the reads it carries list_writable_kinds, create_record, update_record, archive_record and delete_record. Start with list_writable_kinds: it names every writable kind, its required fields, its allowed values and which guards apply. Every write goes through the same server function n8n\u2019s POST and PATCH use, runs the same guards the Bays Tools Router runs, and is logged to engine_mcp_writes whether it lands, is refused or is a dry run. Pass dry_run: true to see exactly what would be written. A refusal — possible_duplicate, lane_owner_mismatch, not_permitted — writes nothing and says what to send to proceed.',
+                ]
+              : []),
           ].join('\n'),
       });
     }
@@ -146,21 +175,21 @@ async function handleRpc(req: RpcRequest, deps: ToolDeps): Promise<Record<string
       return result(req.id, {});
 
     case 'tools/list':
-      return result(req.id, { tools: toolCatalogue() });
+      return result(req.id, { tools: toolCatalogue(deps.access) });
 
     case 'tools/call': {
       const name = typeof params.name === 'string' ? params.name : '';
       const args = (params.arguments && typeof params.arguments === 'object' && !Array.isArray(params.arguments) ? params.arguments : {}) as Record<string, unknown>;
-      const tool = toolByName(name);
+      const tool = toolByName(name, deps.access);
       const t0 = Date.now();
       if (!tool) {
-        logCall(name || '(unnamed)', args, 'no such tool', Date.now() - t0, null);
-        return failure(req.id, INVALID_PARAMS, `There is no tool called "${name}". This server offers: ${toolCatalogue().map((t) => t.name).join(', ')}.`);
+        logCall(deps.access, name || '(unnamed)', args, 'no such tool', Date.now() - t0, null);
+        return failure(req.id, INVALID_PARAMS, `There is no tool called "${name}". This server offers: ${toolCatalogue(deps.access).map((t) => t.name).join(', ')}.`);
       }
       try {
         const value = await tool.handler(args, deps);
         const text = JSON.stringify(value, null, 2);
-        logCall(name, args, 'ok', Date.now() - t0, Buffer.byteLength(text));
+        logCall(deps.access, name, args, 'ok', Date.now() - t0, Buffer.byteLength(text));
         return result(req.id, { content: [{ type: 'text', text }], isError: false });
       } catch (e) {
         // A tool that cannot answer says why, as the tool's own result rather
@@ -169,7 +198,7 @@ async function handleRpc(req: RpcRequest, deps: ToolDeps): Promise<Record<string
         const explicit = e instanceof McpError;
         const message = e instanceof Error ? e.message : String(e);
         const code = explicit ? (e as McpError).code : 'unexpected_error';
-        logCall(name, args, `failed (${code})`, Date.now() - t0, null);
+        logCall(deps.access, name, args, `failed (${code})`, Date.now() - t0, null);
         if (!explicit) console.error('[mcp] unexpected error in', name, e);
         return result(req.id, {
           content: [
@@ -276,11 +305,18 @@ function notFound(res: ServerResponse): void {
   sendJson(res, 404, { ok: false, message: 'No such route.' });
 }
 
-function secretMatches(given: string): boolean {
-  if (!MCP_SECRET) return false;
+function same(given: string, secret: string | null): boolean {
+  if (!secret) return false;
   const a = Buffer.from(given);
-  const b = Buffer.from(MCP_SECRET);
+  const b = Buffer.from(secret);
   return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/** Which connection a path secret opens, or null for a miss. Both are compared in constant time. */
+function accessFor(given: string): McpAccess | null {
+  const write = same(given, MCP_WRITE_TOKEN);
+  const read = same(given, MCP_SECRET);
+  return write ? 'write' : read ? 'read' : null;
 }
 
 /* --------------------------------------------------------------- sessions */
@@ -392,7 +428,7 @@ function holdEventStream(req: IncomingMessage, res: ServerResponse): void {
  * so `OPTIONS`, `GET`, `POST` and `DELETE` are all equally silent to a caller
  * who does not have it.
  */
-export async function handleMcp(req: IncomingMessage, res: ServerResponse, url: URL, deps: ToolDeps): Promise<void> {
+export async function handleMcp(req: IncomingMessage, res: ServerResponse, url: URL, baseDeps: Omit<ToolDeps, 'access'>): Promise<void> {
   const parts = url.pathname.replace(/\/+$/, '').split('/').filter(Boolean);
   const method = req.method ?? 'GET';
 
@@ -402,15 +438,17 @@ export async function handleMcp(req: IncomingMessage, res: ServerResponse, url: 
   // reach the comparison at all, and saying "secret did not match" for those
   // sends whoever is debugging this to check the wrong thing.
   const wellFormed = parts.length === 2 && parts[0] === 'mcp';
-  if (!wellFormed || !secretMatches(decodeURIComponent(parts[1]))) {
+  const access = wellFormed ? accessFor(decodeURIComponent(parts[1])) : null;
+  if (!access) {
     const why = !wellFormed
       ? `the path is not /mcp/<secret> (${parts.length} segment(s))`
-      : MCP_SECRET
+      : MCP_SECRET || MCP_WRITE_TOKEN
         ? 'the secret did not match'
-        : `${MCP_SECRET_VAR} is not set on this service`;
+        : `neither ${MCP_SECRET_VAR} nor ${MCP_WRITE_TOKEN_VAR} is set on this service`;
     console.log(`[mcp] rejected ${method} ${url.pathname.split('/').slice(0, 2).join('/')}/… — ${why}; answered 404`);
     return notFound(res);
   }
+  const deps: ToolDeps = { ...baseDeps, access };
 
   const given = sessionHeader(req);
   if (given) rememberSession(given);

@@ -9303,3 +9303,77 @@ Decision:   Deploy dep-daq359jtqb8s73bpftbg (c12e1d7) went live 20:13; migration
             with BILLING_QUOTA or CONFIG_AUTH means editing an n8n workflow,
             which CLAUDE.md section 3 does not allow from here. That path is
             covered only by npm run test:recovery until a real failure takes it.
+
+## 2026-09-24 04:50 — MCP write tools: two tokens, one write path, the Tools Router's guards
+Intent:     Let Destiny (through Claude) and the Bays n8n Agent create, update,
+            archive and delete engine records over MCP. The same safety checks
+            the Bays Tools Router enforces must apply, and the writes must go
+            through the exact server functions n8n's POST and PATCH use.
+Files:      server/src/engineWrite.ts (new: postRecord, patchRecord,
+            resolveRow), server/src/index.ts (the three engine write routes now
+            call it; /api/engine-health/mcp-writes; boot line),
+            server/src/writeGuards.ts (new: the ported guards and the writable
+            kind registry), server/src/mcp/writeTools.ts (new: the five tools
+            and the audit), server/src/mcp/index.ts (MCP_WRITE_TOKEN, access per
+            connection), server/src/mcp/tools.ts (catalogue per access),
+            server/src/mirror.ts (readRow, deleteRow, columnsOf exported,
+            'deleted' outcome), server/src/bharag.ts (ingest + three workspace
+            keys), server/src/migrations.ts (29: engine_mcp_writes columns),
+            src/screens/EngineHealth/McpWrites.tsx (new) + index.tsx,
+            src/data/*, server/test/mcp-write.test.cjs + package.json
+            (test:mcp-write), render.yaml, CLAUDE.md.
+Problem:    Three things the brief could not be followed literally on, each
+            settled in the code rather than guessed:
+            (1) `engine_mcp_writes` already exists — the write gate made it on
+            20 Sep, and its `token` column holds the gate's one-use preview
+            token. So migration 29 extends that table instead of creating a
+            second one with the same name. The brief's read/write "token" is
+            the column `access`.
+            (2) "archive sets the archived/closed state the page already
+            understands": only loops have one (Status = Closed). Candidates are
+            Proposed / Approved / Registered and the Candidates tab draws
+            anything else as "Other status". So archive is refused by name for
+            every other kind rather than inventing a status.
+            (3) Candidates are not in the Tools Router at all. They are two
+            tool nodes on Bays — Conversational Agent (Flag_Pattern_Candidate,
+            which mints CAND- ids and writes Status Proposed), and those are
+            what was ported.
+            Two smaller points. The duplicate gate in n8n searches every row in
+            the assignee's table, closed ones included; the brief says "open
+            loops", so this searches Open and In Progress only. And
+            `test:gate` fails one check when re-run on a database it has
+            already run against: it counts every `test_set_lead_status` row in
+            the table, earlier runs included (3 applied after 3 runs). That is
+            the test's own isolation, not this change. On a fresh database it
+            passes all its checks, including against the new columns.
+Fix:        —
+Decision:   One write path: the route bodies moved into engineWrite.ts and
+            both the routes and the tools call it. On engine_writes an MCP
+            write reads endpoint mcp:<tool>, key MCP_WRITE_TOKEN.
+            On the read connection the write tools are not registered at all,
+            rather than listed and refused. A write token equal to the read
+            secret is ignored and the boot line says so.
+            The audit line is opened before the change and closed after it, so
+            a write that cannot be audited does not happen.
+            create_record never overwrites: a natural id already held is
+            refused and update_record is named.
+            Hard delete keeps the row in record_deletions first. It needs
+            "DELETE <natural_id>" exactly, and codex is refused outright.
+            A BHARAG ingest that does not land is reported as saved:true,
+            ingested_to_bharag:false with a note that it is not full success.
+            Verified locally, against the real server process over HTTP and a
+            local database, with a stand-in for BHARAG's /ingest. npm run
+            test:mcp-write passes all eight done-means checks, plus:
+            - a non-admin is refused on somebody else's loop;
+            - an unknown lane is refused on update;
+            - a dry run writes nothing;
+            - a wrong confirm is refused and a codex delete is refused;
+            - a pattern gets a BP-BHARAG- id, a joined checklist and an ingest
+              with the right key, tags and metadata;
+            - a commercial card with no key is saved:true,
+              ingested_to_bharag:false;
+            - a candidate goes to Proposed and a same-name repeat is refused;
+            - every call is audited with none left pending;
+            - the n8n POST and by-natural PATCH routes still answer as before.
+            test:pay, test:lookup and test:recovery still pass. The MCP writes
+            tab renders with no page errors.

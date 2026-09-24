@@ -16,7 +16,8 @@
     "test:gate": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/write-gate.test.cjs",
     "test:lookup": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/lookup-shape.test.cjs",
     "test:pay": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/pay-sync.test.cjs",
-    "test:recovery": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/recovery.test.cjs"
+    "test:recovery": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/recovery.test.cjs",
+    "test:mcp-write": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/mcp-write.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",

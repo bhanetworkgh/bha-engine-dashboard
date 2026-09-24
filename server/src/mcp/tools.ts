@@ -20,6 +20,7 @@ import { databaseIdentity, query as pgQuery, DATABASE_URL } from '../pg';
 import * as airtable from '../airtable';
 import * as bharag from '../bharag';
 import * as recovery from '../recovery';
+import { WRITE_TOOLS } from './writeTools';
 import * as n8n from '../n8n';
 import * as sources from '../sources';
 import { grepSource, McpError, REPO_ROOT, sourceAvailable, assertSource } from './source';
@@ -38,6 +39,12 @@ export interface ToolDeps {
   dispatch: (pathWithQuery: string) => Promise<{ status: number; body: unknown }>;
   /** The process start, for uptime. */
   startedAt: string;
+  /**
+   * Which connection the call came in on (2026-09-24): the read URL or the
+   * write URL. The write tools read it for the audit line, and the catalogue
+   * reads it to decide whether they exist at all.
+   */
+  access: 'read' | 'write';
 }
 
 /**
@@ -736,8 +743,18 @@ export const TOOLS: ToolDefinition[] = [
   resyncTool,
 ];
 
-export function toolByName(name: string): ToolDefinition | null {
-  return TOOLS.find((t) => t.name === name) ?? null;
+/**
+ * The tools a connection has. A read connection has the reads and `resync`; a
+ * write connection has those **plus** the write tools. On a read connection the
+ * write tools do not exist — not listed, not callable — which is the point: a
+ * tool a client can see is a tool a model will try.
+ */
+function toolsFor(access: 'read' | 'write'): ToolDefinition[] {
+  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS] : TOOLS;
+}
+
+export function toolByName(name: string, access: 'read' | 'write' = 'read'): ToolDefinition | null {
+  return toolsFor(access).find((t) => t.name === name) ?? null;
 }
 
 /**
@@ -747,8 +764,8 @@ export function toolByName(name: string): ToolDefinition | null {
  * "potentially destructive", so a client seeing this list unannotated would
  * offer to checkpoint before a `SELECT`.
  */
-export function toolCatalogue(): { name: string; description: string; inputSchema: Record<string, unknown>; annotations: ToolAnnotations }[] {
-  return TOOLS.map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, annotations }));
+export function toolCatalogue(access: 'read' | 'write' = 'read'): { name: string; description: string; inputSchema: Record<string, unknown>; annotations: ToolAnnotations }[] {
+  return toolsFor(access).map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, annotations }));
 }
 
 /** Kept honest in one place: the source tree is what every structure tool needs. */

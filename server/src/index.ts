@@ -23,7 +23,7 @@ import { ask, ASK_URL, ASK_URL_FROM_ENV, askConfigured, MODEL_LABEL } from './as
 import { authConfigured, login, logout, readSession, sessionInfo, sessionSecretConfigured } from './auth';
 import { databaseIdentity } from './db';
 import { migrate, MIGRATION_COUNT } from './migrations';
-import { assertDatabase, closePool, DATABASE_URL } from './pg';
+import { assertDatabase, closePool, DATABASE_URL, query } from './pg';
 import * as engine from './engine';
 import * as store from './store';
 import * as registry from './registry';
@@ -33,6 +33,7 @@ import { IMPORT_GROUPS, finalImport as runFinalImport, isImportGroup } from './f
 import * as codex from './codex';
 import * as loops from './loops';
 import * as mirror from './mirror';
+import * as engineWrite from './engineWrite';
 import * as events from './events';
 import * as paySync from './paySync';
 import * as executions from './executions';
@@ -44,7 +45,7 @@ import * as bharag from './bharag';
 import { monthly } from './monthly';
 import { isStatKind, stats } from './stats';
 import { N8N_API_VAR, n8nBase, n8nConfigured } from './n8n';
-import { handleMcp, mcpConfigured, mcpMountPath, MCP_SECRET_VAR } from './mcp';
+import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, MCP_SECRET_VAR, MCP_WRITE_TOKEN_VAR, MCP_WRITE_TOKEN_CLASHES } from './mcp';
 import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
@@ -613,14 +614,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
        */
       let rowId: string;
       const naturalKey = byNatural ? decodeURIComponent(byNatural[2]) : null;
+      const ctx: engineWrite.WriteCtx = { endpoint, method, key_label: 'DASHBOARD_INBOUND_KEY', t0 };
       if (naturalKey !== null) {
         try {
-          rowId = String(await mirror.resolveNatural(kind, naturalKey));
+          rowId = await engineWrite.resolveRow(kind, naturalKey, ctx);
         } catch (e) {
-          const message = e instanceof Error ? e.message : String(e);
-          const status = e instanceof mirror.MirrorError ? e.status : 500;
-          await mirror.logWrite({ endpoint, kind, method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: naturalKey, outcome: status >= 500 ? 'error' : 'rejected', detail: message, ms: Date.now() - t0 });
-          throw new HttpError(status, message);
+          throw new HttpError(e instanceof mirror.MirrorError ? e.status : 500, e instanceof Error ? e.message : String(e));
         }
       } else {
         rowId = decodeURIComponent(withId![2]);
@@ -632,29 +631,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         throw new HttpError(422, '"fields" is required and must be an object holding only the keys to change — { "fields": { "Status": "Closed" } }. Send null for a key to remove it; a key not sent is left exactly as it is.');
       }
       try {
-        const r = await mirror.patchFields(kind, rowId, patch as Record<string, unknown>, 'engine');
-        // Same as a POST: the row is stored, and this dates the status it was
-        // left in. It is the only place a status change is timestamped, and a
-        // patch that sets Status is exactly such a change.
-        await store.recordEngineWrite(kind, r.id);
-        await mirror.logWrite({
-          endpoint,
-          kind,
-          method,
-          key_label: 'DASHBOARD_INBOUND_KEY',
-          airtable_record_id: r.airtable_record_id,
-          natural_id: r.natural_id,
-          outcome: r.changed ? 'updated' : 'unchanged',
-          detail: `merged ${Object.keys(patch).join(', ')} into row ${r.id}${naturalKey === null ? '' : ` (by-natural ${naturalKey})`}`,
-          ms: Date.now() - t0,
-        });
-        // `r` already carries `changed`, decided by Postgres, beside the whole row.
-        return send(res, 200, { ok: true, ...r });
+        // The same function the MCP write tools call (engineWrite.ts): the
+        // merge, the status dating and the log line, in one place. `r`
+        // carries `changed`, decided by Postgres, beside the whole row.
+        return send(res, 200, await engineWrite.patchRecord(kind, rowId, patch as Record<string, unknown>, ctx, naturalKey));
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        const status = e instanceof mirror.MirrorError ? e.status : 500;
-        await mirror.logWrite({ endpoint, kind, method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: status >= 500 ? 'error' : 'rejected', detail: message, ms: Date.now() - t0 });
-        throw new HttpError(status, message);
+        throw new HttpError(e instanceof mirror.MirrorError ? e.status : 500, e instanceof Error ? e.message : String(e));
       }
     }
 
@@ -718,37 +700,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
 
     const body = await readJson(req, 256 * 1024);
     try {
-      const result = await mirror.upsert(kind, body as mirror.MirrorInput, 'engine');
-      // The row is stored; this dates the status it left the record in. It is
-      // the only place a status change is timestamped, so it happens on the
-      // write rather than being noticed later, and it never fails the write.
-      await store.recordEngineWrite(kind, result.id);
-      await mirror.logWrite({
-        endpoint,
-        kind,
-        method,
-        key_label: 'DASHBOARD_INBOUND_KEY',
-        airtable_record_id: result.airtable_record_id,
-        natural_id: result.natural_id,
-        outcome: result.inserted ? 'inserted' : result.changed ? 'updated' : 'unchanged',
-        detail: `matched on ${result.matched_on}`,
-        ms: Date.now() - t0,
-      });
-      return send(res, 200, {
-        ok: true,
-        id: result.id,
-        kind: result.kind,
-        airtable_record_id: result.airtable_record_id,
-        natural_id: result.natural_id,
-        // Said plainly so a caller can tell a real change from a repeat.
-        outcome: result.inserted ? 'inserted' : result.changed ? 'updated' : 'unchanged',
-        matched_on: result.matched_on,
-      });
+      // The same function the MCP write tools call (engineWrite.ts). The
+      // outcome is said plainly so a caller can tell a real change from a repeat.
+      return send(res, 200, await engineWrite.postRecord(kind, body as mirror.MirrorInput, { endpoint, method, key_label: 'DASHBOARD_INBOUND_KEY', t0 }));
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      const status = e instanceof mirror.MirrorError ? e.status : 500;
-      await mirror.logWrite({ endpoint, kind, method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: status >= 500 ? 'error' : 'rejected', detail: message, ms: Date.now() - t0 });
-      throw new HttpError(status, message);
+      throw new HttpError(e instanceof mirror.MirrorError ? e.status : 500, e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -855,6 +811,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** The recovery watcher: what waits on a dependency, the last probe, the last batch. */
       case '/api/engine-health/recovery':
         return send(res, 200, await recovery.data());
+      /**
+       * The MCP write tools' audit (2026-09-24): the last hundred calls to
+       * create, update, archive or delete a record over MCP, refusals and dry
+       * runs included. The gate's own rows (no kind) are left out.
+       */
+      case '/api/engine-health/mcp-writes': {
+        const r = await query<Record<string, unknown>>(
+          `SELECT id::int AS id, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at, access, tool, kind, record_id, natural_id, outcome, detail, dry_run, requester_user_id,
+                  guard_result->>'reason' AS reason
+             FROM engine_mcp_writes WHERE kind IS NOT NULL OR tool IN ('create_record','update_record','archive_record','delete_record')
+            ORDER BY id DESC LIMIT 100`,
+        );
+        return send(res, 200, { writes: r.rows, write_configured: mcpWriteConfigured() });
+      }
       /**
        * The repair record. Newest first, with the summary computed over the
        * same rows the list holds, so the strip above the table can never
@@ -1623,6 +1593,13 @@ async function boot(): Promise<void> {
       mcpConfigured()
         ? `  mcp:      ${mcpMountPath()} — read-only tools over streamable HTTP, ${MCP_SECRET_VAR} set`
         : `  mcp:      NOT configured — ${MCP_SECRET_VAR} is not set, so /mcp/* answers 404 to everything.`,
+    );
+    console.log(
+      MCP_WRITE_TOKEN_CLASHES
+        ? `  mcp:      write connection OFF — ${MCP_WRITE_TOKEN_VAR} is the same string as ${MCP_SECRET_VAR}; one URL cannot be both, so it is treated as read only.`
+        : mcpWriteConfigured()
+          ? `  mcp:      /mcp/<${MCP_WRITE_TOKEN_VAR}> — the write connection: every read tool plus create, update, archive and delete behind the Tools Router guards`
+          : `  mcp:      write connection OFF — ${MCP_WRITE_TOKEN_VAR} is not set, so no MCP client can write.`,
     );
     /**
      * The one public write route, said out loud at boot.

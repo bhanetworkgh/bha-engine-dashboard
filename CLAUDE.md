@@ -738,9 +738,11 @@ reasonable about.
   and streamable HTTP is JSON-RPC 2.0 over a POST. The transport answers with a
   single JSON object, or one SSE frame where the client's `Accept` asks for a
   stream, because clients differ about which they send.
-- **Every tool reads, and the one that acts only re-runs a button the page
-  already has.** There is no destructive tool, and no code route from a tool to
-  a write that was not already a page's own. `get_page_data` reads through an
+- **On the read connection every tool reads, and the one that acts only re-runs
+  a button the page already has.** There is no destructive tool there, and no
+  code route from a tool to a write that was not already a page's own. The
+  write tools live on a second connection — see "The MCP write connection"
+  below — and are not registered on this one at all. `get_page_data` reads through an
   in-process GET against this server's own `/api` router — the same function
   that answers the browser, which is what stops the tool drifting from the
   page — and that loopback is GET-only and refuses `/api/engine/*` and
@@ -791,8 +793,11 @@ reasonable about.
   acted on. Every capped answer says what the cap was and how to ask for the
   rest, and a payload past the size cap comes back as its **shape** rather than
   as a sample: a fragment read as the whole is the failure worth designing out.
-- Every call is logged with its name and arguments. **Fourteen tools**
-  (thirteen read, one act — `get_recovery_status` added 2026-09-23), and **every one of them carries MCP annotations**
+- Every call is logged with its name, its arguments and which connection
+  (`[mcp:read]` / `[mcp:write]`) it came in on. **Fourteen tools on the read
+  connection** (thirteen read, one act — `get_recovery_status` added
+  2026-09-23), **nineteen on the write connection** (those plus the five write
+  tools, 2026-09-24), and **every one of them carries MCP annotations**
   (decision 2026-09-20, Destiny), because the spec's default for a tool that
   declares none is *potentially destructive* — twelve read-only tools that
   said nothing about themselves were being offered to every client as though
@@ -918,6 +923,77 @@ tools/call  set_lead_status  { "id": "c6e2fae0-…", "status": "contacted", "tok
 The re-read is the point: `redeem` is handed an operation built from a **fresh**
 read, never from the preview. Passing the preview's own operation back in would
 compare a value with itself and prove nothing.
+
+**The MCP write connection: guarded writes, one write path** (decision
+2026-09-24, Destiny). The dashboard is the record for every engine table, and
+Destiny (through Claude) and the Bays n8n Agent both need to create, change and
+archive records directly, with the checks the Bays Tools Router enforces.
+
+- **Two tokens.** `/mcp/<MCP_SECRET>` is the read connection and is unchanged.
+  `/mcp/<MCP_WRITE_TOKEN>` is the write connection: every read tool **plus**
+  `list_writable_kinds`, `create_record`, `update_record`, `archive_record` and
+  `delete_record`. On the read connection those five are **not registered** —
+  not listed, and a call to one is "no such tool" — because a tool a client can
+  see is a tool a model will try. A miss on either is the same 404. A write
+  token equal to the read secret is refused at boot and the connection stays
+  read-only: one URL cannot be both.
+- **One write path, not two.** The bodies of `POST /api/engine/:kind`,
+  `PATCH /api/engine/:kind/:id` and `PATCH …/by-natural/:natural_id` moved into
+  `server/src/engineWrite.ts` (`postRecord`, `patchRecord`, `resolveRow`), and
+  the routes and the write tools **both** call them: the natural id,
+  `created_time`, `source = 'engine'`, the status ledger and the
+  `engine_writes` line happen identically whichever door a write came through.
+  On `engine_writes` an MCP write is endpoint `mcp:<tool>`, key
+  `MCP_WRITE_TOKEN`. There is no new write SQL except the one hard delete,
+  `mirror.deleteRow`, which keeps the whole row in `record_deletions` first,
+  like every other delete here.
+- **The guards are ported, not reinvented**, into `server/src/writeGuards.ts`,
+  from the Tools Router's own Code nodes (`LOL - Prepare Loop Fields`,
+  `LOL - Score Candidates`, `UOL - Merge Updates`,
+  `LBP - Normalise Pattern Fields`) and the Conversational Agent's
+  `Flag_Pattern_Candidate`. Loops: the locked lanes
+  (`RT, NS, VFARM_HARDWARE, KIOSK, CAD_API, MEDIA, GENIE, CST, BAYS,
+  UNASSIGNED`, anything else UNASSIGNED on create and refused on update); the
+  lane-owner map, a blank or Bays assignee falling to the lane owner and only an
+  ownerless lane to Destiny; the **lane-owner gate** (`lane_owner_mismatch`
+  unless `confirmed_assignee`); the **duplicate gate** against the assignee's
+  Open and In Progress loops — tokens over two characters less stopwords, the
+  higher of Jaccard and containment, 0.35, top three (`possible_duplicate`
+  unless `confirmed_new`); **update permission** (`requester_user_id`
+  required; `U0AEW3TBYH1` and `U0A9V97949F` change any loop, anyone else only
+  their own or an unassigned one); `LOOP-<ms>-<4>`. Patterns: `LBP`'s cleaning,
+  checklist join, Moderate default, `created_at`, `BP-<SYSTEM>-<ms>-<4>`.
+  Candidates: refused by name (case- and punctuation-blind) unless
+  `confirmed_new`, Status Proposed on create, `CAND-<ms>-<4>`. Every kind:
+  required fields, fixed vocabularies, control characters stripped, and
+  **`create_record` never overwrites** — a natural id already held is refused
+  and `update_record` named. A refusal writes nothing.
+- **Eight writable kinds**: loops, codex, patterns, pattern_candidates,
+  commercial, rt-jobs, lane_backlog, builder_profiles. `list_writable_kinds`
+  reads their columns and row counts from the database and the values each
+  select field actually holds, beside the rules. Incidents, pay, the twins'
+  ledgers and the registry are not writable over MCP.
+- **Archive is only where a page already draws an archived state** — loops,
+  `Status = Closed`. Candidates are Proposed / Approved / Registered and no
+  kind but loops has a closed state, so `archive_record` refuses the others by
+  name rather than inventing a status the pages would show as "Other".
+  **Hard delete** needs `confirm: "DELETE <natural_id>"` exactly, and is
+  refused for `codex` (the Codex page's typed-id delete is its only way out).
+- **`dry_run: true`** runs every guard and returns what would be written.
+- **BHARAG on create** for codex, patterns and commercial, in the n8n ingest
+  nodes' shape (`POST /ingest`, `{title, content, source_type, content_type,
+  project_tags, metadata}`), one key per workspace — `BHARAG_CODEX_KEY`,
+  `BHARAG_BUILD_PATTERNS_KEY`, `BHARAG_COMMERCIAL_KEY`, no defaults. The row
+  and the ingest are reported separately: `saved: true, ingested_to_bharag:
+  false` says the record is not in BHARAG and is never full success.
+- **Audit**: `engine_mcp_writes`, the write gate's table, extended by
+  migration 29 (`access`, `kind`, `record_id`, `natural_id`, `guard_result`,
+  `dry_run`, `requester_user_id`). `access` is the brief's "token" column —
+  `token` already held the gate's preview token. Every write-tool call lands
+  there, refused and dry-run ones included; the line is opened **before** the
+  change and closed after it, so a write whose audit cannot be recorded never
+  happens. The **MCP writes** tab on Engine health reads the last hundred.
+  `npm run test:mcp-write` pins all of it end to end.
 
 **The recovery watcher re-runs what failed because a dependency was down**
 (decision 2026-09-23, Destiny — brief D2). `server/src/recovery.ts`. When
@@ -1193,6 +1269,13 @@ watcher off whatever the Engine health toggle says; anything else, including
 unset, leaves it to the toggle, which is on by default. The watcher needs
 `DASHBOARD_INBOUND_KEY` (its two n8n webhooks check it), `N8N_API_KEY` (to read
 failed executions) and the BHARAG lane keys it already has — nothing new.
+`MCP_WRITE_TOKEN` — the write connection's path secret, `/mcp/<MCP_WRITE_TOKEN>`
+(2026-09-24). No default; unset, no MCP client can write, and the boot line
+says so. `sync: false` in the blueprint, like `MCP_SECRET`, because the same
+string goes into the connector URL. `BHARAG_CODEX_KEY`,
+`BHARAG_BUILD_PATTERNS_KEY` and `BHARAG_COMMERCIAL_KEY` — the BHARAG workspace
+keys the write tools ingest a created Codex entry, pattern or commercial card
+with; unset, the row still saves and the answer says it is not in BHARAG.
 `EARLY_ACCESS_NOTIFY_URL` — the n8n webhook that posts a lead from the
 superseded public route into `#vfarm-early-access`; Form A leads are announced
 by Hardik's tracker and never touch it. Unset, the hop is skipped, the boot line says
@@ -1799,9 +1882,13 @@ nine full sweeps of somebody else's API from one click is how a careful pass
 turns into a rate limit, and the workspace is over its cap already. It takes
 itself off the page once `AIRTABLE_RETIRED` is on.
 
-**Seven tabs**: All systems · Bays · North Star · Research Twin · Retries ·
+**Eight tabs**: All systems · Bays · North Star · Research Twin · Retries ·
 **Repairs** (added 2026-09-20, with the repair bridge) · **Recovery** (added
-2026-09-23, `?tab=recovery`). **The
+2026-09-23, `?tab=recovery`) · **MCP writes** (added 2026-09-24,
+`?tab=mcp-writes`: every call to an MCP write tool, refused and dry-run ones
+included, newest first, twenty to a page; a refusal is drawn plainly because it
+is a guard doing its job, and only a write the store refused after every guard
+passed is red). **The
 three lane tabs are one component with a different lane**, because the handlers
 are deliberately identical and a per-lane copy would drift the first time one of
 them changed. All systems is the same component with no lane. Retries and
