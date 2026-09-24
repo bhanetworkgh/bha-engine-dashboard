@@ -1107,8 +1107,10 @@ crash, when seven North Star runs read Slack at 08:00 at once.
   `RS - Build Digest` does. `missing_scope` and "not a member of any channel"
   are `ok:false` in the source's words. **Read as North Star's own bot,
   `SLACK_NORTH_STAR_BOT_TOKEN`, never Bays'**.
-- **`read_open_loops`** (`ROL -`): loops through `mirror.lookup` (limit 1,000,
-  `Assignee Slack User ID` = `builder_id` when given), Closed dropped; exact
+- **`read_open_loops`** (`ROL -`): **every** loop through `mirror.lookup`,
+  paged a thousand at a time (`Assignee Slack User ID` = `builder_id` when
+  given), Closed dropped — the source stopped at the newest 1,000, and on 24 Sep
+  that dropped four rows, two of them Open (decision 2026-09-24, Destiny); exact
   loop ids checked against the 60 newest Codex rows and `read_slack` with
   `LOOP-` over 168 hours; moving / stalled / maybe done / new; Jason-raised
   first, then that order, oldest first within each; 70,000 characters. **One
@@ -1122,8 +1124,9 @@ crash, when seven North Star runs read Slack at 08:00 at once.
   and 300 commercial cards, `PE - Format Evidence`'s shapes and clips; jobs and
   cards filtered by `lane_id`, work logs never (25 without a lane, 15 with).
 - `npm run test:north-star` pins them against a Slack stand-in. The Tools
-  Router is marked retired in the registry once all three are proved live, and
-  `North Star — Agent Delivery` is added once its id is confirmed.
+  Router's retirement is Destiny's, once the agent is repointed.
+  `North Star — Agent Delivery` (`cnOz6iomtnWVXjso`) is in the registry
+  (seed, confirmed 24 Sep), replay `never` like the other chat paths.
 
 **The recovery watcher re-runs what failed because a dependency was down**
 (decision 2026-09-23, Destiny — brief D2). `server/src/recovery.ts`. When

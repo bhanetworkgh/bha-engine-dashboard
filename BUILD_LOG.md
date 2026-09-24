@@ -9645,3 +9645,33 @@ Fix:        —
 Decision:   The 1,000 ceiling is left as the source has it, per the brief
             ("port as written"). It is raised with Destiny rather than changed
             silently, because it will drop more loops as the table grows.
+
+## 2026-09-24 08:50 — read_open_loops reads every loop; North Star — Agent Delivery registered
+Intent:     Destiny: raise the loop limit, so read_open_loops pages through
+            every loop rather than reading the newest 1,000. Add North Star —
+            Agent Delivery to the registry, now that its id is confirmed.
+Files:      server/src/mirror.ts (LookupQuery.offset),
+            server/src/mcp/northStarTools.ts, server/src/registrySeed.ts,
+            server/test/north-star-tools.test.cjs, CLAUDE.md.
+Problem:    Found: ROL - Fetch Loops read limit=1000, newest first. On 24 Sep
+            engine_loops held 1,004 rows, so four were never read, in n8n and
+            in the first port:
+            - LOOP-1787835756742-WG36, kaiqi, Closed;
+            - LOOP-1787829302058-FDSM, destiny, Closed;
+            - LOOP-1787828953631-CCTQ, jegan, Open;
+            - LOOP-1787828951562-TUQ7, jegan, Open.
+            So two open loops, both created 27 Aug 11:09, were invisible to
+            North Star.
+Fix:        mirror.lookup takes an optional offset. The order was already total
+            (created_time, then id), so pages cannot overlap or skip.
+            read_open_loops reads a thousand at a time until a page comes back
+            short or the matched count is reached. The answer now carries
+            loop_rows_read.
+            The test inserts 1,000 more Closed loops, so 1,007 rows must be
+            read, and asserts that they are.
+Decision:   North Star — Agent Delivery, cnOz6iomtnWVXjso, goes in through the
+            seed, which inserts a missing row on the next boot. Its purpose is
+            the workflow's own n8n description. Its replay is `never`, like
+            every other chat path.
+            The Tools Router is left alone: Destiny retires it once the agent
+            is repointed.

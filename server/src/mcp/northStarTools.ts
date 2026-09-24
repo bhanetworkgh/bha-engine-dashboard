@@ -253,15 +253,29 @@ export const readSlackTool: ToolDefinition = {
 /* =========================================================== read_open_loops */
 
 const ID_RE = /LOOP-\d+-[A-Z0-9]{4}/g;
-const LOOPS_LIMIT = 1_000;
+/** One page of the lookup; read_open_loops pages until it has every loop. */
+const LOOPS_PAGE = 1_000;
 const LOG_ROWS = 60;
 const LOOPS_CHARS = 70_000;
 
 export async function readOpenLoops(args: { builder_id?: unknown }): Promise<Record<string, unknown>> {
   const builder = typeof args.builder_id === 'string' ? args.builder_id.trim() : '';
 
-  /* ROL - Fetch Loops, ROL - Fetch Recent Codex */
-  const lb = await mirror.lookup('loops', { filters: builder ? [{ op: 'f', name: 'Assignee Slack User ID', value: builder }] : [], limit: LOOPS_LIMIT, order: 'created_desc' });
+  /*
+   * ROL - Fetch Loops read `limit=1000`, newest first, and nothing past it. On
+   * 24 Sep the table held 1,004 rows, so the four oldest were never seen — two
+   * of them still Open (Jegan's LOOP-1787828953631-CCTQ and
+   * LOOP-1787828951562-TUQ7). Every page is read now (decision 2026-09-24,
+   * Destiny), until a short page or the matched count says there are no more.
+   */
+  const filters: mirror.LookupFilter[] = builder ? [{ op: 'f', name: 'Assignee Slack User ID', value: builder }] : [];
+  const lb = { rows: [] as mirror.LookupRow[], count: 0 };
+  for (let offset = 0; ; offset += LOOPS_PAGE) {
+    const page = await mirror.lookup('loops', { filters, limit: LOOPS_PAGE, order: 'created_desc', offset });
+    lb.rows.push(...page.rows);
+    lb.count = page.count || lb.count;
+    if (page.rows.length < LOOPS_PAGE || lb.rows.length >= lb.count) break;
+  }
   const cx = await mirror.lookup('codex', { filters: [], limit: LOG_ROWS, order: 'created_desc' });
 
   /* ROL - Slack Mentions: this same tool's Slack read, "LOOP-", 168 hours. */
@@ -357,6 +371,7 @@ export async function readOpenLoops(args: { builder_id?: unknown }): Promise<Rec
     // Slack read that fails leaves every label decided on work logs alone, and
     // says so, rather than taking the loops down with it.
     ...(slackError ? { slack_error: slackError, note: 'Slack was not read, so no loop was labelled from a Slack mention — labels here come from work logs and age only.' } : {}),
+    loop_rows_read: lb.rows.length,
     work_logs_checked: cx.rows.length,
     returned: kept.length,
     truncated: kept.length < out.length,
