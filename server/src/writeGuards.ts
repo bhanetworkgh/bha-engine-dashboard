@@ -69,6 +69,9 @@ export const CODEX_STATUSES = [...CODEX_JASON_STATUS, 'Sent Back'] as const;
 
 const DUPLICATE_THRESHOLD = 0.35;
 const DUPLICATE_MAX = 3;
+/** At least this many shared meaningful words, unless the score alone is high (2026-09-24). */
+export const DUPLICATE_MIN_SHARED = 3;
+export const DUPLICATE_STRONG_SCORE = 0.6;
 
 /* --------------------------------------------------------------- helpers */
 
@@ -167,7 +170,7 @@ export const WRITABLE: Record<string, WritableKind> = {
       { name: 'lane_validation', applies_to: 'create and update', does: `lane_tag is normalised (upper case, spaces and hyphens to _) and must be one of ${LANES.join(', ')}. On create anything else becomes UNASSIGNED, never guessed; on update an unknown lane is refused.` },
       { name: 'assignee_default', applies_to: 'create', does: `A blank assignee, or Bays (${BAYS_ID}), falls to the lane owner; only a lane with no owner falls to Destiny. Bays is never an assignee.` },
       { name: 'lane_owner_gate', applies_to: 'create', does: 'An assignee who is not the lane owner is refused (lane_owner_mismatch) unless confirmed_assignee is true. Nothing is written.' },
-      { name: 'duplicate_gate', applies_to: 'create', does: `The new What is scored against the assignee’s open loops — tokens over 2 characters less stopwords, the higher of Jaccard and containment, threshold ${DUPLICATE_THRESHOLD}, top ${DUPLICATE_MAX}. Any survivor is refused (possible_duplicate) unless confirmed_new is true. Nothing is written.` },
+      { name: 'duplicate_gate', applies_to: 'create', does: `The new What is scored against the assignee’s open loops — tokens over 2 characters less stopwords, the higher of Jaccard and containment; a candidate counts when the score is at least ${DUPLICATE_THRESHOLD} and it shares at least ${DUPLICATE_MIN_SHARED} meaningful words or scores at least ${DUPLICATE_STRONG_SCORE}; top ${DUPLICATE_MAX}. Any survivor is refused (possible_duplicate) unless confirmed_new is true. Nothing is written.` },
       { name: 'update_permission', applies_to: 'create and update', does: `requester_user_id is required on update, archive and delete. ${ADMIN_IDS.join(' and ')} may change any loop; anyone else only a loop assigned to them, or an unassigned one.` },
       { name: 'loop_id_shape', applies_to: 'create', does: 'loop_id is minted LOOP-<ms>-<4> when absent, and a supplied one must have that shape.' },
     ],
@@ -332,7 +335,14 @@ async function alreadyHeld(kind: mirror.MirrorKind, natural: string): Promise<nu
 
 /* ----------------------------------------------------- the duplicate gate */
 
-const STOP = new Set(['the','and','for','that','this','with','from','into','not','are','was','were','has','have','had','can','should','need','needs','via','per','you','your','our','all','any','but','its','who','how','why','what','when','then','than','also','been','will','would','once','each','other','same','only','over','more','most','some','such','they','them','their','there','here','which','while','after','before','being','does','done','make','made','get','got']);
+/**
+ * `LOL - Score Candidates`' stopwords, plus nine added 2026-09-24 (Destiny):
+ * test, agent, bays, check, run, build, update, new, add. They are the words
+ * the engine's own asks are full of — "Dry-run connectivity test from Bays
+ * agent" was refused as a duplicate of three unrelated loops at 0.4 on exactly
+ * these — so they say nothing about whether two loops are the same work.
+ */
+const STOP = new Set(['the','and','for','that','this','with','from','into','not','are','was','were','has','have','had','can','should','need','needs','via','per','you','your','our','all','any','but','its','who','how','why','what','when','then','than','also','been','will','would','once','each','other','same','only','over','more','most','some','such','they','them','their','there','here','which','while','after','before','being','does','done','make','made','get','got','test','agent','bays','check','run','build','update','new','add']);
 
 export function tokens(s: string): Set<string> {
   return new Set(
@@ -352,7 +362,7 @@ export function tokens(s: string): Set<string> {
  * 1 Sep. The threshold starts strict: a false "looks like a duplicate" costs a
  * human interruption every time.
  */
-export function score(incoming: string, existing: string): number {
+export function compare(incoming: string, existing: string): { score: number; shared: number } {
   const a = tokens(incoming);
   const b = tokens(existing);
   let shared = 0;
@@ -362,7 +372,22 @@ export function score(incoming: string, existing: string): number {
   const union = new Set([...a, ...b]).size;
   const jaccard = union ? shared / union : 0;
   const containment = a.size ? shared / a.size : 0;
-  return Number(Math.max(jaccard, containment).toFixed(3));
+  return { score: Number(Math.max(jaccard, containment).toFixed(3)), shared };
+}
+
+export function score(incoming: string, existing: string): number {
+  return compare(incoming, existing).score;
+}
+
+
+/**
+ * Whether a candidate counts as a possible duplicate (2026-09-24, Destiny):
+ * score >= 0.35 **and** (at least 3 shared meaningful words **or** score >=
+ * 0.6). A short ask sharing two generic words with a long loop scored 0.4 on
+ * containment alone and was refused; two words in common is not the same work.
+ */
+export function isDuplicate(c: { score: number; shared: number }): boolean {
+  return c.score >= DUPLICATE_THRESHOLD && (c.shared >= DUPLICATE_MIN_SHARED || c.score >= DUPLICATE_STRONG_SCORE);
 }
 
 /**
@@ -370,20 +395,24 @@ export function score(incoming: string, existing: string): number {
  * never all seven tables. "Open" is Open or In Progress — a closed loop is not
  * one a new ask can duplicate.
  */
-async function duplicateCandidates(builderId: string, what: string): Promise<{ loop_id: string; what: string; status: string; lane_tag: string; score: number }[]> {
+async function duplicateCandidates(builderId: string, what: string): Promise<{ loop_id: string; what: string; status: string; lane_tag: string; score: number; shared_words: number }[]> {
   const r = await query<{ fields: Record<string, unknown> }>(
     `SELECT fields FROM ${mirror.KINDS.loops.table} WHERE builder_id = $1 AND fields->>'Status' IN ('Open', 'In Progress') AND fields ? 'loop_id'`,
     [builderId],
   );
   return r.rows
-    .map((row) => ({
-      loop_id: str(row.fields.loop_id),
-      what: str(row.fields.What),
-      status: str(row.fields.Status),
-      lane_tag: str(row.fields.lane_tag),
-      score: score(what, str(row.fields.What)),
-    }))
-    .filter((c) => c.score >= DUPLICATE_THRESHOLD)
+    .map((row) => {
+      const c = compare(what, str(row.fields.What));
+      return {
+        loop_id: str(row.fields.loop_id),
+        what: str(row.fields.What),
+        status: str(row.fields.Status),
+        lane_tag: str(row.fields.lane_tag),
+        score: c.score,
+        shared_words: c.shared,
+      };
+    })
+    .filter((c) => isDuplicate({ score: c.score, shared: c.shared_words }))
     .sort((x, y) => y.score - x.score)
     .slice(0, DUPLICATE_MAX);
 }
@@ -470,7 +499,7 @@ export async function planCreate(kind: string, rawFields: Record<string, unknown
             'possible_duplicate',
             `${candidates.length} open loop(s) on ${builder}’s table look like this one. Nothing was written. Ask whether it is one of these; to keep it separate, call again with confirmed_new: true.`,
             checks,
-            { candidates, threshold: DUPLICATE_THRESHOLD },
+            { candidates, rule: `score >= ${DUPLICATE_THRESHOLD} and (shared words >= ${DUPLICATE_MIN_SHARED} or score >= ${DUPLICATE_STRONG_SCORE})` },
           );
         }
         checks.push({ guard: 'duplicate_gate', result: 'pass' });

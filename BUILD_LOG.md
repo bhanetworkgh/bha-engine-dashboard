@@ -9426,3 +9426,63 @@ Decision:   This reverses the separation the brief asked for, on Destiny's
             change is needed. Verified locally: with both set to one string,
             tools/list on that URL returns 19 tools including all five write
             tools, and npm run test:mcp-write (separate tokens) still passes.
+
+## 2026-09-24 06:10 — find_records, and the duplicate gate stops matching on generic words
+Intent:     Brief: one read tool for every writable kind, replacing the six n8n
+            read tools the Bays agent uses. Also stop the loop duplicate gate
+            refusing asks that share only generic words with an existing loop.
+Files:      server/src/mcp/findRecords.ts (new), server/src/mcp/tools.ts
+            (registered with the read tools), server/src/writeGuards.ts,
+            server/test/mcp-write.test.cjs, CLAUDE.md, BUILD_LOG.md.
+Problem:    A dry run of "Dry-run connectivity test from Bays agent" was
+            refused as a duplicate of three unrelated loops at score 0.4. Two
+            generic words in a two-word ask give 1.0 containment, and 0.35 was
+            the only bar. The same rule runs in n8n's LOL - Score Candidates,
+            so the same false refusals happen there.
+            While testing the new rule, an assertion expected an exact copy of
+            the first test loop to be refused, and it was not:
+            `+ undefined - 'possible_duplicate'`. That loop had been archived
+            (Closed) earlier in the test, and closed loops are not candidates.
+            The rule was right and the test was wrong.
+Fix:        A candidate counts only where score >= 0.35 AND (shared meaningful
+            words >= 3 OR score >= 0.6). test, agent, bays, check, run, build,
+            update, new and add are added to the stopwords. Refusals now carry
+            the rule and each candidate's shared_words.
+            The test copies the still-open loop instead.
+Decision:   find_records is registered with the read tools, so the read URL
+            and the write URL both list it. In production they are one URL, so
+            either way a connected client sees it on refresh.
+            The search is RML - Format My Loops' own:
+            - its tokeniser, splitting on _ and - too;
+            - its stopwords;
+            - share of the search's words found, zero dropped, best first.
+            That deliberately differs from the duplicate gate's tokeniser, as
+            it does in n8n: a search asks "does this row mention it", the gate
+            asks "is this the same work".
+            Loops come back one row per loop_id, the rule countOpenLoops uses,
+            so BAYS open counts agree with the page. Live before this change:
+            30 BAYS loops open or in progress.
+            An unknown field or an out-of-vocabulary value is applied and
+            warned about, never silently dropped.
+            Reads are logged to engine_writes as `read`, beside n8n's lookups,
+            and not to engine_mcp_writes, which is the MCP writes tab's record
+            of changes and would be buried under reads.
+            Candidates search Candidate and Summary, not only the name. Only 2
+            of 51 candidate names mention self-healing, against 4 summaries.
+            Layer 0 today holds only `completed` rows, so the brief's
+            pending_builder_input check returns an empty, correct answer.
+            Verified locally: npm run test:mcp-write passes the earlier eight
+            checks, plus find_records and the duplicate-tuning checks:
+            - both connections list find_records;
+            - the BAYS count equals a DISTINCT ON count straight from the
+              table;
+            - the counts sum to the total;
+            - the right loop ranks first on a search;
+            - an unknown field and an out-of-vocabulary value are both warned
+              about;
+            - a commercial card is found by card_id;
+            - layer0 is readable;
+            - the read is logged;
+            - the brief's dry-run ask now passes;
+            - an exact copy of an open loop is still refused.
+            test:recovery, test:lookup and test:pay still pass.

@@ -794,10 +794,10 @@ reasonable about.
   rest, and a payload past the size cap comes back as its **shape** rather than
   as a sample: a fragment read as the whole is the failure worth designing out.
 - Every call is logged with its name, its arguments and which connection
-  (`[mcp:read]` / `[mcp:write]`) it came in on. **Fourteen tools on the read
-  connection** (thirteen read, one act — `get_recovery_status` added
-  2026-09-23), **nineteen on the write connection** (those plus the five write
-  tools, 2026-09-24), and **every one of them carries MCP annotations**
+  (`[mcp:read]` / `[mcp:write]`) it came in on. **Fifteen tools on the read
+  connection** (fourteen read, one act — `get_recovery_status` added
+  2026-09-23, `find_records` 2026-09-24), **twenty on the write connection**
+  (those plus the five write tools, 2026-09-24), and **every one of them carries MCP annotations**
   (decision 2026-09-20, Destiny), because the spec's default for a tool that
   declares none is *potentially destructive* — twelve read-only tools that
   said nothing about themselves were being offered to every client as though
@@ -810,7 +810,7 @@ reasonable about.
   cost two numbers rather than a whole payload), `query_postgres`,
   `describe_schema`, `get_health`.
   Whether the copy is current: `get_mirror_status`, `diff_source_vs_mirror`,
-  `search_logs`. Recovery: `get_recovery_status` — the same plan as
+  `search_logs`. Records: `find_records` (below). Recovery: `get_recovery_status` — the same plan as
   `GET /api/engine/recovery/plan` plus the last batch, calling nothing. And
   `resync`, the one tool that acts.
 
@@ -962,8 +962,14 @@ archive records directly, with the checks the Bays Tools Router enforces.
   ownerless lane to Destiny; the **lane-owner gate** (`lane_owner_mismatch`
   unless `confirmed_assignee`); the **duplicate gate** against the assignee's
   Open and In Progress loops — tokens over two characters less stopwords, the
-  higher of Jaccard and containment, 0.35, top three (`possible_duplicate`
-  unless `confirmed_new`); **update permission** (`requester_user_id`
+  higher of Jaccard and containment, top three (`possible_duplicate` unless
+  `confirmed_new`), a candidate counting only where **score ≥ 0.35 and (at
+  least 3 shared meaningful words or score ≥ 0.6)**, with `test, agent, bays,
+  check, run, build, update, new, add` added to the stopwords (2026-09-24,
+  Destiny: "Dry-run connectivity test from Bays agent" was refused as a
+  duplicate of three unrelated loops at 0.4 on generic words alone — the n8n
+  `LOL - Score Candidates` node still has the old rule and should be brought
+  in step); **update permission** (`requester_user_id`
   required; `U0AEW3TBYH1` and `U0A9V97949F` change any loop, anyone else only
   their own or an unassigned one); `LOOP-<ms>-<4>`. Patterns: `LBP`'s cleaning,
   checklist join, Moderate default, `created_at`, `BP-<SYSTEM>-<ms>-<4>`.
@@ -972,6 +978,27 @@ archive records directly, with the checks the Bays Tools Router enforces.
   required fields, fixed vocabularies, control characters stripped, and
   **`create_record` never overwrites** — a natural id already held is refused
   and `update_record` named. A refusal writes nothing.
+- **`find_records`, one structured read for every writable kind** plus
+  `layer0` (2026-09-24, Destiny), replacing the six n8n read tools the Bays
+  agent used. Read only and registered with the read tools, so **both**
+  connections list it and a connected client picks it up on refresh.
+  `filters` (exact, a value or a list, on a blob field or `id`, `natural_id`,
+  `builder_id`, `lane_id`, `table_id`), `search`, `status_not`, `order`
+  (`newest`, `oldest`, `status_age` — In Progress, Open, oldest first within
+  each, the router's order), `limit` (20, at most 100), `offset`. **The search
+  is `RML - Format My Loops`' own**: its tokeniser (splits on spaces,
+  underscores and hyphens) and stopwords, a row scoring the share of the
+  search's words its text contains, rows at nought dropped, best first. Loops
+  search `What`, `loop_id` and `lane_tag`; the other kinds their title field,
+  the field beside it that carries the substance, and their natural id.
+  **Loops are one row per `loop_id`**, the most recently written, as
+  `countOpenLoops()` counts. Counts by status, lane and builder are over the
+  whole filtered set. **An unknown field or a value outside a field's
+  vocabulary is applied and warned about**, never dropped. Each call is logged
+  to `engine_writes` as `read` (endpoint `mcp:find_records`), beside n8n's own
+  lookups — not to `engine_mcp_writes`, which is the record of changes.
+  `page_url` is under `PUBLIC_DASHBOARD_URL`, defaulting to
+  https://dashboard.bhanetwork.org.
 - **Eight writable kinds**: loops, codex, patterns, pattern_candidates,
   commercial, rt-jobs, lane_backlog, builder_profiles. `list_writable_kinds`
   reads their columns and row counts from the database and the values each

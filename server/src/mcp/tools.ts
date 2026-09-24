@@ -21,6 +21,8 @@ import * as airtable from '../airtable';
 import * as bharag from '../bharag';
 import * as recovery from '../recovery';
 import { WRITE_TOOLS } from './writeTools';
+import { findRecords, READABLE_KINDS } from './findRecords';
+import * as mirror from '../mirror';
 import * as n8n from '../n8n';
 import * as sources from '../sources';
 import { grepSource, McpError, REPO_ROOT, sourceAvailable, assertSource } from './source';
@@ -724,6 +726,43 @@ const getRecoveryStatus: ToolDefinition = {
   handler: async () => ({ ...(await recovery.plan()), last_batch: await recovery.lastBatch() }),
 };
 
+/* --------------------------------------------------------- find_records */
+
+const findRecordsTool: ToolDefinition = {
+  name: 'find_records',
+  description:
+    'One structured read for every writable kind — loops, codex, patterns, pattern_candidates, commercial, rt-jobs, lane_backlog, builder_profiles — plus layer0 (parked logs, read only). Filter on any field (exact, a value or a list; top-level columns builder_id, lane_id, table_id, natural_id, id too), search by words (the Bays router\u2019s own word match: every row gets a match_score 0–1, rows with no word matched are dropped, best first), exclude statuses with status_not ("Closed" is the usual "everything still open"), and order newest, oldest or status_age (In Progress, then Open, oldest first within each). Counts by status, lane and builder are over the whole filtered set, not the page. Loops come back one row per loop_id, the way the Open loops page counts them. An unknown field or a value outside a field\u2019s vocabulary is applied and warned about, never silently dropped. Use this instead of query_postgres for anything a kind\u2019s own fields can answer.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      kind: { type: 'string', enum: READABLE_KINDS },
+      filters: { type: 'object', description: 'Exact match, ANDed: { "lane_tag": "BAYS" }, { "Card ID": "CARD-…" }, { "Status": ["Open", "In Progress"] }. Field names exactly as the rows carry them.' },
+      search: { type: 'string', description: 'Words to look for, e.g. "golden CAD run event provenance". Loops search What, loop_id and lane_tag; other kinds their title field, its companion and their natural id.' },
+      status_not: { description: 'A status, or statuses, to leave out — e.g. "Closed".', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+      order: { type: 'string', enum: ['newest', 'oldest', 'status_age'], description: 'Default newest; with a search, best match first.' },
+      limit: { type: 'number', description: 'Rows to return. Default 20, at most 100.' },
+      offset: { type: 'number', description: 'Rows to skip, for the next page.' },
+    },
+    required: ['kind'],
+    additionalProperties: false,
+  },
+  annotations: { ...READS_DB, title: 'Find records of any writable kind' },
+  handler: async (args, deps) => {
+    const t0 = Date.now();
+    const out = await findRecords(args);
+    await mirror.logWrite({
+      endpoint: 'mcp:find_records',
+      kind: String(out.kind),
+      method: 'MCP',
+      key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET',
+      outcome: 'read',
+      detail: `${JSON.stringify({ filters: args.filters ?? null, search: args.search ?? null, status_not: args.status_not ?? null, order: args.order ?? null }).slice(0, 300)} → ${String(out.returned)} of ${String(out.total)}`,
+      ms: Date.now() - t0,
+    });
+    return out;
+  },
+};
+
 export const TOOLS: ToolDefinition[] = [
   // The reads, in the order the instructions suggest reaching for them.
   listPages,
@@ -739,6 +778,7 @@ export const TOOLS: ToolDefinition[] = [
   describeSchema,
   searchLogs,
   getRecoveryStatus,
+  findRecordsTool,
   // The one that is not a read.
   resyncTool,
 ];
