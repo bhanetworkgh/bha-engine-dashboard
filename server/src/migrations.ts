@@ -1773,6 +1773,23 @@ const MIGRATIONS: Migration[] = [
         WHERE id = 'ep-dashboard-ask-bays' AND coalesce(notes, '') NOT LIKE '%Agent Delivery%'`,
     ],
   },
+  {
+    id: 31,
+    name: 'registry: North Star — Tools Router retired; Agent Delivery names its MCP tools',
+    statements: [
+      /**
+       * 24 Sep 2026, Destiny. The North Star Agent was re-tested on the three
+       * dashboard MCP tools after 3954e59 — each called once, no loop — and
+       * published on them, and the Tools Router (G6Myypk64kpcaVhz) was
+       * unpublished. Each update fires only while the row still holds what the
+       * seed gave it, so an edit made on the page is kept.
+       */
+      `UPDATE registry_workflows SET status = 'retired', notes = concat_ws(' ', notes, $v$Unpublished in n8n on 24 Sep 2026 and retired by Destiny, once the North Star Agent behind North Star — Agent Delivery was re-tested on read_slack, read_open_loops and get_priority_evidence on the dashboard MCP, which replace its RS, ROL and PE branches.$v$), updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = 'G6Myypk64kpcaVhz' AND status = 'production'`,
+      `UPDATE registry_workflows SET notes = $v$Added 24 Sep 2026 (id confirmed by Destiny). The North Star Agent's tools are read_slack, read_open_loops and get_priority_evidence on the dashboard MCP (live 24 Sep, 3954e59: re-tested with each called once — 19,882 / 13,438 / 19,974 chars — and no loop); the Tools Router (G6Myypk64kpcaVhz) that held them is retired.$v$, updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = 'cnOz6iomtnWVXjso' AND notes = $v$Added 24 Sep 2026 (id confirmed by Destiny). Its tools are read_slack, read_open_loops and get_priority_evidence on the dashboard MCP, plus the Tools Router until that is retired.$v$`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
