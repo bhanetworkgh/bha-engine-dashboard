@@ -1790,6 +1790,21 @@ const MIGRATIONS: Migration[] = [
         WHERE id = 'cnOz6iomtnWVXjso' AND notes = $v$Added 24 Sep 2026 (id confirmed by Destiny). Its tools are read_slack, read_open_loops and get_priority_evidence on the dashboard MCP, plus the Tools Router until that is retired.$v$`,
     ],
   },
+  {
+    id: 32,
+    name: 'registry: North Star — Conversational Agent retired',
+    statements: [
+      /**
+       * 24 Sep 2026, Destiny. seK3we7pTurvZmqe is unpublished (active:false)
+       * and filed in RETIRED / NORTH STAR in n8n; North Star — Agent Delivery
+       * (cnOz6iomtnWVXjso) replaced it behind the Front Door. Retired the way
+       * migration 31 retired the Tools Router: only while the row is still
+       * production, so an edit made on the page is kept.
+       */
+      `UPDATE registry_workflows SET status = 'retired', notes = concat_ws(' ', notes, $v$Unpublished (active:false) and filed in RETIRED / NORTH STAR in n8n on 24 Sep 2026, and retired by Destiny. Replaced by North Star — Agent Delivery (cnOz6iomtnWVXjso) behind the Front Door.$v$), updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = 'seK3we7pTurvZmqe' AND status = 'production'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

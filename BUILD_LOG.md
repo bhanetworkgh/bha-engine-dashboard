@@ -9757,3 +9757,38 @@ Decision:   North Star — Conversational Agent (seK3we7pTurvZmqe) is not
             touched. Agent Delivery replaces it behind the Front Door, but
             nobody has said it is unpublished, and a retirement that has not
             happened in n8n is not one this registry should claim.
+
+## 2026-09-24 10:40 — send_nudge, post_file, North Star — Conversational Agent retired
+Intent:     Brief (g): close Bays' last migration gaps. Add send_nudge (one DM
+            per recipient, fan-out in code) and post_file (Markdown as a .md
+            file into any channel or DM), and retire seK3we7pTurvZmqe.
+Files:      server/src/mcp/slackTools.ts (new), server/src/slack.ts (botCall,
+            uploadBytes), server/src/mcp/tools.ts, server/src/registrySeed.ts,
+            server/src/migrations.ts (32), server/test/bays-tools.test.cjs,
+            CLAUDE.md.
+Problem:    The retired Bays — Tools Router (WjWzhVRq566A60fJ) is
+            active:false but not archived, so the SNG and PRF nodes were read
+            from it verbatim (versionId fa610975…). Nothing in n8n was changed.
+            test:gate failed locally with "one applied — 5 !== 1". Its rows
+            from five earlier runs were still in the local engine_mcp_writes.
+            Deleting the test_set_lead_status rows fixed it. The failure came
+            from local state; the code change did not cause it.
+Fix:        —
+Decision:   Ported as written. That covers SNG - Build Recipients' tokeniser
+            and regex (\b([UW][A-Z0-9]{6,})\b), the repeat-sent-once rule,
+            SNG - Format Result's result lines and summary wording, and
+            PRF's filename (<title>.md) and UTF-8 byte length.
+            Three deliberate differences:
+            (1) post_file opens the DM before the upload rather than after it.
+            A user the bot cannot DM then leaves no orphaned upload behind.
+            (2) The permalink comes from files.info.
+            files.completeUploadExternal answers {id, title} only. A files.info
+            failure is permalink_error and does not undo a posted file.
+            (3) The n8n empty-case reply told the agent to use User_Lookup.
+            That tool is not here, so the wording is "look each person up".
+            Audit kind is 'slack'. Partly sent is outcome applied, with the
+            failures named in detail. Nothing sent is failed, and a refusal
+            is refused.
+            Verified locally: test:bays-tools 22/22, against a Slack stand-in
+            that refuses with 200 ok:false. mcp-write, north-star, lookup, pay,
+            gate and recovery all pass, and the build is clean.

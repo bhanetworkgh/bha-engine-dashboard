@@ -799,8 +799,9 @@ reasonable about.
   2026-09-23, `find_records` 2026-09-24, `list_n8n_workflows`,
   `get_n8n_workflow` and `read_slack_file` later the same day, then North
   Star's `read_slack`, `read_open_loops` and `get_priority_evidence`),
-  **twenty-nine on the write connection** (those plus the five record write tools and the
-  three Drive tools, 2026-09-24), and **every one of them carries MCP annotations**
+  **thirty-one on the write connection** (those plus the five record write tools, the
+  three Drive tools and the two Slack writes `send_nudge` and `post_file`,
+  2026-09-24), and **every one of them carries MCP annotations**
   (decision 2026-09-20, Destiny), because the spec's default for a tool that
   declares none is *potentially destructive* — twelve read-only tools that
   said nothing about themselves were being offered to every client as though
@@ -1088,6 +1089,26 @@ agent did through n8n tools of its own are tools here:
   Google's `storageQuotaExceeded` is passed through verbatim.
   `npm run test:bays-tools` pins all of it against local stand-ins for n8n,
   Slack and Google.
+- **`send_nudge`** and **`post_file`** (2026-09-24, Destiny), write connection
+  only, `server/src/mcp/slackTools.ts`, as the Bays bot
+  (`SLACK_BAYS_BOT_TOKEN`), each call on `engine_mcp_writes` (kind `slack`),
+  refused and dry-run ones included. Ported from the retired Tools Router's
+  `SNG -` and `PRF -` branches. **`send_nudge` does the fan-out in code**: one
+  `chat.postMessage` per recipient (`unfurl_links: false`), because a nudge
+  "to Jegan, cc Kavin" once went out as one post and a DM has one recipient.
+  Recipients are an array, a JSON array or one string split on spaces, commas
+  and semicolons; each token's first `U…`/`W…` id is taken, a repeat is sent
+  once, and a token with none comes back as `not_a_slack_user_id`, never
+  dropped. `thread_link` is appended after a blank line unless the text holds
+  it. **Success is read from Slack's body**, which refuses with HTTP 200 and
+  `ok:false`. `{ok (all sent), sent_count, failed_count, results, summary}`;
+  empty text or no valid id is `ok:false` and sends nothing. **`post_file`**
+  uploads `<title>.md` (length the UTF-8 byte length) with
+  files.getUploadURLExternal → the bytes → files.completeUploadExternal; a
+  `U…` id is `conversations.open`ed **first** (the n8n branch opened it after
+  the upload, which left an orphaned upload for a user it could not DM). The
+  permalink comes from files.info. A failure is `ok:false` with `step` and
+  Slack's own `error`.
 
 **North Star's three code tools, off its Tools Router** (decision 2026-09-24,
 Destiny). North Star is becoming an n8n Agent the way Bays did, and the three
@@ -1151,7 +1172,11 @@ crash, when seven North Star runs read Slack at 08:00 at once.
   database, only where the row was still `production`).
   `North Star — Agent Delivery` (`cnOz6iomtnWVXjso`) is in the registry
   (seed, confirmed 24 Sep), replay `never` like the other chat paths, and its
-  note names the agent's three MCP tools.
+  note names the agent's three MCP tools. **`North Star — Conversational
+  Agent` (`seK3we7pTurvZmqe`) is retired** too (24 Sep, Destiny): unpublished
+  and filed in RETIRED / NORTH STAR, replaced by Agent Delivery behind the
+  Front Door — seed, and migration 32 only where the row was still
+  `production`.
 
 **The recovery watcher re-runs what failed because a dependency was down**
 (decision 2026-09-23, Destiny — brief D2). `server/src/recovery.ts`. When

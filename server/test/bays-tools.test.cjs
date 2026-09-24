@@ -74,7 +74,7 @@ const chromePdf = process.env.CHROME_PDF && fs.existsSync(process.env.CHROME_PDF
 
 /* ------------------------------------------------------------ stand-ins */
 
-const seen = { dms: [], google: [], slackAuth: [] };
+const seen = { dms: [], google: [], slackAuth: [], slack: [] };
 
 const LONG_PARAM = 'x'.repeat(2_000);
 const WORKFLOW = {
@@ -112,15 +112,59 @@ const LONG_TEXT = 'Line of text for the cap.\n'.repeat(1_400); // 36,400 chars
 const slack = http.createServer((req, res) => {
   seen.slackAuth.push(req.headers.authorization);
   const u = new URL(req.url, 'http://x');
+  const answer = (b) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(b));
+  };
+  const readBody = (fn) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => fn(Buffer.concat(chunks)));
+  };
   if (u.pathname === '/api/chat.postMessage') {
-    let body = '';
-    req.on('data', (c) => (body += c));
-    req.on('end', () => {
-      seen.dms.push(JSON.parse(body));
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, ts: '1790000000.000100' }));
+    return readBody((raw) => {
+      const b = JSON.parse(raw.toString('utf8'));
+      seen.dms.push(b);
+      // Slack refuses with HTTP 200 and ok:false — the tool must read the body.
+      if (b.channel === 'UNOSUCH01') return answer({ ok: false, error: 'channel_not_found' });
+      answer({ ok: true, ts: '1790000000.000100', channel: `D${b.channel.slice(1)}` });
     });
-    return;
+  }
+  if (u.pathname === '/api/conversations.open') {
+    return readBody((raw) => {
+      const users = new URLSearchParams(raw.toString('utf8')).get('users');
+      seen.slack.push({ method: 'conversations.open', users, type: req.headers['content-type'] });
+      if (users === 'UNODM0001') return answer({ ok: false, error: 'user_not_found' });
+      answer({ ok: true, channel: { id: `D${users.slice(1)}` } });
+    });
+  }
+  if (u.pathname === '/api/files.getUploadURLExternal') {
+    return readBody((raw) => {
+      const p = new URLSearchParams(raw.toString('utf8'));
+      seen.slack.push({ method: 'files.getUploadURLExternal', filename: p.get('filename'), length: Number(p.get('length')) });
+      answer({ ok: true, upload_url: 'https://files.slack.com/upload/v1/ABC123', file_id: 'F0UPLOAD1' });
+    });
+  }
+  if (u.pathname === '/upload/v1/ABC123') {
+    return readBody((raw) => {
+      seen.slack.push({ method: 'upload', bytes: raw, auth: req.headers.authorization || null, type: req.headers['content-type'] });
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end('OK - 1');
+    });
+  }
+  if (u.pathname === '/api/files.completeUploadExternal') {
+    return readBody((raw) => {
+      const b = JSON.parse(raw.toString('utf8'));
+      seen.slack.push({ method: 'files.completeUploadExternal', body: b });
+      if (b.channel_id === 'CNOTIN001') return answer({ ok: false, error: 'not_in_channel' });
+      answer({ ok: true, files: [{ id: b.files[0].id, title: b.files[0].title }] });
+    });
+  }
+  if (u.pathname === '/api/files.info') {
+    return readBody((raw) => {
+      const f = new URLSearchParams(raw.toString('utf8')).get('file');
+      answer({ ok: true, file: { id: f, permalink: `https://bha.slack.com/files/U0BAYS/${f}/report.md` } });
+    });
   }
   const files = {
     '/files-pri/T1/F1/report.pdf': ['application/pdf', handPdf(['Golden CAD run (provenance)', 'Second line, BAYS lane.'])],
@@ -227,7 +271,7 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(`http:
 
   try {
     const tools = (await post(`/mcp/${TOKEN}`, { jsonrpc: '2.0', id: 1, method: 'tools/list' })).body.result.tools.map((t) => t.name);
-    for (const t of ['list_n8n_workflows', 'get_n8n_workflow', 'read_slack_file', 'share_doc', 'grant_drive_access', 'create_doc', 'find_records', 'create_record']) assert.ok(tools.includes(t), `lists ${t}`);
+    for (const t of ['list_n8n_workflows', 'get_n8n_workflow', 'read_slack_file', 'share_doc', 'grant_drive_access', 'create_doc', 'find_records', 'create_record', 'send_nudge', 'post_file']) assert.ok(tools.includes(t), `lists ${t}`);
     step('tools listed');
 
     /* ---- n8n ---- */
@@ -439,15 +483,105 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(`http:
     assert.ok(onId.rpcError || onId.error || /refused on "id"/.test(JSON.stringify(onId)), 'gte on id is refused');
     step('find_records: channel_tracking with previous_doc_id; filters_gte / filters_lte; refused on id');
 
+    /* ---- send_nudge ---- */
+    {
+      const n0 = seen.dms.length;
+      const r = await call('send_nudge', { recipients: '<@U0AEW3TBYH1>, U0AEW3TBYH1 UNOSUCH01; kavin', text: 'Nudge: pollination thread.', thread_link: 'https://bha.slack.com/archives/C1/p1' });
+      assert.equal(r.ok, false, 'not all sent');
+      assert.equal(r.sent_count, 1);
+      assert.equal(r.failed_count, 2);
+      assert.deepEqual(r.results.map((x) => [x.recipient, x.user_id, x.ok, x.error]), [
+        ['<@U0AEW3TBYH1>', 'U0AEW3TBYH1', true, ''],
+        ['<@UNOSUCH01>', 'UNOSUCH01', false, 'channel_not_found'],
+        ['kavin', '', false, 'not_a_slack_user_id'],
+      ]);
+      assert.equal(r.results[0].ts, '1790000000.000100');
+      assert.match(r.summary, /Sent to <@U0AEW3TBYH1> \(ts 1790000000\.000100\)\. Couldn't send to <@UNOSUCH01>: channel_not_found; kavin: not_a_slack_user_id\./);
+      const posts = seen.dms.slice(n0);
+      assert.equal(posts.length, 2, 'one post per valid recipient; a repeated id is sent once');
+      assert.deepEqual(posts[0], { channel: 'U0AEW3TBYH1', text: 'Nudge: pollination thread.\n\nhttps://bha.slack.com/archives/C1/p1', unfurl_links: false });
+      assert.ok(typeof r.audit_id === 'number');
+      step('send_nudge: fan-out, a 200 ok:false read from the body, not_a_slack_user_id named, thread_link appended');
+
+      const withLink = await call('send_nudge', { recipients: ['U0AEW3TBYH1'], text: 'See https://x/y', thread_link: 'https://x/y' });
+      assert.equal(withLink.ok, true);
+      assert.equal(seen.dms.at(-1).text, 'See https://x/y', 'a link already in the text is not appended');
+      const n1 = seen.dms.length;
+      const none = await call('send_nudge', { recipients: 'jegan kavin', text: 'hello' });
+      assert.equal(none.ok, false);
+      assert.equal(none.reason, 'no_valid_recipients');
+      assert.deepEqual(none.results.map((x) => x.error), ['not_a_slack_user_id', 'not_a_slack_user_id']);
+      const empty = await call('send_nudge', { recipients: ['U0AEW3TBYH1'], text: '   ' });
+      assert.equal(empty.ok, false);
+      assert.equal(empty.reason, 'no_message_text');
+      const dry = await call('send_nudge', { recipients: '["U0AEW3TBYH1","nobody"]', text: 'x', dry_run: true });
+      assert.equal(dry.dry_run, true);
+      assert.deepEqual(dry.would_send_to, ['U0AEW3TBYH1']);
+      assert.deepEqual(dry.not_a_slack_user_id, ['nobody']);
+      assert.equal(seen.dms.length, n1, 'nothing sent on zero valid, empty text or dry run');
+      const audit = await query(`SELECT outcome, kind FROM engine_mcp_writes WHERE tool = 'send_nudge' AND id >= $1 ORDER BY id`, [r.audit_id]);
+      assert.deepEqual(audit.rows.map((x) => x.outcome), ['applied', 'applied', 'refused', 'refused', 'dry_run']);
+      assert.ok(audit.rows.every((x) => x.kind === 'slack'));
+      step('send_nudge: link not doubled; zero valid / empty text / dry run send nothing; every call audited');
+    }
+
+    /* ---- post_file ---- */
+    {
+      seen.slack.length = 0;
+      const md = '# Weekly report\n\nCafé — naïve “quotes”.\n';
+      const r = await call('post_file', { channel_id: 'U0AEW3TBYH1', title: 'Weekly report', content: md, initial_comment: 'Here it is', thread_ts: '1790000000.000200' });
+      assert.equal(r.ok, true, JSON.stringify(r));
+      assert.equal(r.file_id, 'F0UPLOAD1');
+      assert.equal(r.channel_id, 'D0AEW3TBYH1', 'a user id posts into their DM');
+      assert.equal(r.permalink, 'https://bha.slack.com/files/U0BAYS/F0UPLOAD1/report.md');
+      const methods = seen.slack.map((x) => x.method);
+      assert.deepEqual(methods, ['conversations.open', 'files.getUploadURLExternal', 'upload', 'files.completeUploadExternal']);
+      const g = seen.slack[1];
+      assert.equal(g.filename, 'Weekly report.md');
+      assert.equal(g.length, Buffer.byteLength(md, 'utf8'), 'length is the UTF-8 byte length');
+      assert.notEqual(g.length, md.length);
+      assert.equal(seen.slack[2].bytes.toString('utf8'), md);
+      assert.equal(seen.slack[2].auth, null, 'the upload url is signed; no token is sent to it');
+      assert.deepEqual(seen.slack[3].body, { files: [{ id: 'F0UPLOAD1', title: 'Weekly report' }], channel_id: 'D0AEW3TBYH1', initial_comment: 'Here it is', thread_ts: '1790000000.000200' });
+      step('post_file: U… opens the DM, byte length, bytes uploaded, completeUploadExternal, permalink');
+
+      seen.slack.length = 0;
+      const ch = await call('post_file', { channel_id: 'C0BAYSLOG', title: 'x', content: 'y' });
+      assert.equal(ch.ok, true);
+      assert.equal(ch.channel_id, 'C0BAYSLOG');
+      assert.ok(!seen.slack.some((x) => x.method === 'conversations.open'), 'a channel id is not opened');
+      assert.equal(seen.slack.find((x) => x.method === 'files.completeUploadExternal').body.initial_comment, undefined, 'an absent comment is not sent');
+
+      const notIn = await call('post_file', { channel_id: 'CNOTIN001', title: 'x', content: 'y' });
+      assert.equal(notIn.ok, false);
+      assert.equal(notIn.step, 'files.completeUploadExternal');
+      assert.equal(notIn.error, 'not_in_channel');
+      const noDm = await call('post_file', { channel_id: 'UNODM0001', title: 'x', content: 'y' });
+      assert.equal(noDm.ok, false);
+      assert.equal(noDm.step, 'conversations.open');
+      assert.equal(noDm.error, 'user_not_found');
+      seen.slack.length = 0;
+      const bad = await call('post_file', { channel_id: 'general', title: 'x', content: 'y' });
+      assert.equal(bad.reason, 'not_a_slack_channel_id');
+      const dry = await call('post_file', { channel_id: 'U0AEW3TBYH1', title: 'x', content: 'yé', dry_run: true });
+      assert.equal(dry.dry_run, true);
+      assert.equal(dry.would.length, 3);
+      assert.equal(dry.would.opens_dm_first, true);
+      assert.equal(seen.slack.length, 0, 'a refused or dry-run call reaches Slack for nothing');
+      const audit = await query(`SELECT outcome FROM engine_mcp_writes WHERE tool = 'post_file' AND id >= $1 ORDER BY id`, [r.audit_id]);
+      assert.deepEqual(audit.rows.map((x) => x.outcome), ['applied', 'applied', 'failed', 'failed', 'refused', 'dry_run']);
+      step('post_file: channel id, failures name the step and Slack\'s error, bad id refused, dry run, audited');
+    }
+
     /* ---- the registry ---- */
-    const reg = await query(`SELECT id, status, replay FROM registry_workflows WHERE id = ANY($1)`, [['rKRnxHhKSJUd4Q6M', 'WjWzhVRq566A60fJ', 'WZHZJ0PXEhswCvxD', 'GjNtBQQvVSJvsPNI', '5AFqtZQaeKFFiGqe']]);
+    const reg = await query(`SELECT id, status, replay FROM registry_workflows WHERE id = ANY($1)`, [['rKRnxHhKSJUd4Q6M', 'WjWzhVRq566A60fJ', 'WZHZJ0PXEhswCvxD', 'GjNtBQQvVSJvsPNI', 'seK3we7pTurvZmqe', '5AFqtZQaeKFFiGqe']]);
     const st = Object.fromEntries(reg.rows.map((r) => [r.id, r.status]));
-    for (const id of ['rKRnxHhKSJUd4Q6M', 'WjWzhVRq566A60fJ', 'WZHZJ0PXEhswCvxD', 'GjNtBQQvVSJvsPNI']) assert.equal(st[id], 'retired', id);
+    for (const id of ['rKRnxHhKSJUd4Q6M', 'WjWzhVRq566A60fJ', 'WZHZJ0PXEhswCvxD', 'GjNtBQQvVSJvsPNI', 'seK3we7pTurvZmqe']) assert.equal(st[id], 'retired', id);
     assert.equal(st['5AFqtZQaeKFFiGqe'], 'production');
     assert.equal(reg.rows.find((r) => r.id === '5AFqtZQaeKFFiGqe').replay, 'never');
     const ep = await query(`SELECT notes FROM registry_endpoints WHERE id = 'ep-dashboard-ask-bays'`);
     assert.match(ep.rows[0].notes, /Agent Delivery \(5AFqtZQaeKFFiGqe\)/);
-    step('registry: four retired, Agent Delivery added, endpoint note names it');
+    step('registry: five retired (North Star — Conversational Agent included), Agent Delivery added, endpoint note names it');
 
     await query(`DELETE FROM engine_channel_tracking WHERE natural_id IN ($1, $2)`, [ch, `${ch}B`]);
     console.log(passed.map((p) => `  ✓ ${p}`).join('\n'));

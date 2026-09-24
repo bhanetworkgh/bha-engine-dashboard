@@ -82,7 +82,8 @@ export const WORKFLOWS: SeedRow[] = [
     'Walks every watched client lane weekly and sends its standing questions to Research Twin to be re-answered.'),
   // North Star Twin / Agent
   W('seK3we7pTurvZmqe', 'North Star — Conversational Agent', 'North Star Twin', 'North Star Agent', 'Agent', 'Destiny Arupi', 'sub-workflow', 'Called by North Star — Front Door',
-    "BHA's prioritisation brain: gathers real evidence, reasons to a judgment, delivers the answer, and records how it got there."),
+    "BHA's prioritisation brain: gathers real evidence, reasons to a judgment, delivers the answer, and records how it got there.",
+    'retired', "Unpublished (active:false) and filed in RETIRED / NORTH STAR in n8n on 24 Sep 2026, and retired by Destiny. Replaced by North Star — Agent Delivery (cnOz6iomtnWVXjso) behind the Front Door."),
   W('6S4X6UYtDpETB6u6', 'North Star — Front Door', 'North Star Twin', 'North Star Agent', 'Routing', 'Destiny Arupi', 'webhook', 'POST /webhook/north-star',
     'The single public entry point for North Star. It receives, decides and routes — it never answers.'),
   W('G6Myypk64kpcaVhz', 'North Star — Tools Router', 'North Star Twin', 'North Star Agent', 'Routing', 'Destiny Arupi', 'sub-workflow', 'Called by North Star — Conversational Agent and North Star — Weekly Status',
