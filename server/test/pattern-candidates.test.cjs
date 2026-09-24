@@ -380,7 +380,7 @@ const act = (ref, action, body) => request('POST', `/api/pattern-candidates/${en
     assert.equal(d.status, 200, JSON.stringify(d.body));
     assert.equal(seen.model.auth, 'Bearer sk-or-test');
     assert.equal(seen.model.path, '/chat/completions');
-    assert.equal(seen.model.body.model, 'anthropic/claude-sonnet-4-5', "the Pattern Extractor's model");
+    assert.equal(seen.model.body.model, 'anthropic/claude-sonnet-5', "the model the agents and the Pattern Extractor use");
     assert.equal(seen.model.body.max_tokens, 3000);
     assert.deepEqual(seen.model.body.response_format, { type: 'json_object' });
     const [sys, usr] = seen.model.body.messages;

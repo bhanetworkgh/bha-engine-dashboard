@@ -53,6 +53,9 @@ Use them to ground your work rather than guessing:
 
 - **n8n** — read the actual workflows to understand what the engine does and
   what data exists. Do not modify any workflow. Read only.
+  The exceptions are the ones Destiny names himself, one change at a time, and
+  each is logged in BUILD_LOG with its restore point — e.g. 2026-09-24, the
+  extractors' model string in `Bays — Commercial & Pattern Extractors`.
 - **Slack** — search `#bha-coordination`, `#workflow-logs-destiny`,
   `#bha-pipeline-errors` for context on what the team is building and why.
 - **Google Drive** — where session narrations and reference docs live, and where
@@ -2597,8 +2600,12 @@ out: the extractor's card draws them but nothing stores them and no page reads
 them, and a field no screen shows is one nobody could review.
 **Draft full pattern** (`POST /api/pattern-candidates/:id/draft`,
 `server/src/patternDraft.ts`) drafts every one of those fields with **the
-Pattern Extractor's own model and prompt**: `anthropic/claude-sonnet-4-5`
-through OpenRouter, `max_tokens` 3000, `response_format: json_object`, and
+Pattern Extractor's own model and prompt**: `anthropic/claude-sonnet-5`
+(the model the Bays, North Star and Research Twin agents use; the draft and both
+extractors moved to it together on 2026-09-24, Destiny — `Pat Prep Build
+Patterns` and `Comm Prep Commercial Opps` in n8n, published as version
+`8e2db0fd`, restore point `5e529e3b`) through OpenRouter, `max_tokens` 3000,
+`response_format: json_object`, and
 `Pat Prep Build Patterns`' system prompt kept section for section. Only what a
 candidate needs is changed: the two sources are the candidate (name, lane,
 builder, Summary, Why This Architect) and the **Slack thread at its Source

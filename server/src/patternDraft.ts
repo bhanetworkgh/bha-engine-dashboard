@@ -7,7 +7,8 @@
  * the two things a candidate actually has — its Summary and the Slack thread at
  * its Source Link — with **the same model and the same prompt** the Pattern
  * Extractor uses (`Bays — Commercial & Pattern Extractors`, `Pat Prep Build
- * Patterns`): `anthropic/claude-sonnet-4-5` through OpenRouter, JSON out.
+ * Patterns`): `anthropic/claude-sonnet-5` through OpenRouter, JSON out (the
+ * extractor moved to it with the agents on 2026-09-24).
  *
  * **It saves nothing.** The draft goes back to the page, the person acting
  * reads and edits every field, and only Register writes — through
@@ -38,7 +39,7 @@ import { PEOPLE } from './mcp/northStarTools';
 export const OPENROUTER_KEY_VAR = 'OPENROUTER_API_KEY';
 const OPENROUTER_URL = (process.env.OPENROUTER_API_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
 /** `Pat Prep Build Patterns`' own model and token budget. */
-export const DRAFT_MODEL = 'anthropic/claude-sonnet-4-5';
+export const DRAFT_MODEL = 'anthropic/claude-sonnet-5';
 const MAX_TOKENS = 3000;
 const MODEL_TIMEOUT_MS = 90_000;
 const THREAD_LIMIT = 200;
