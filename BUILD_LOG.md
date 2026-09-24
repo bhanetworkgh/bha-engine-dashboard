@@ -10265,3 +10265,43 @@ Decision:   No throwaway was left on production. A production run needs one
             click by someone signed in; it posts a real card in the channel,
             which Bays cannot delete from here. That run and its cleanup are
             for Destiny to schedule, not reported as done.
+
+## 2026-09-24 14:10 — Draft and extractors move to anthropic/claude-sonnet-5
+Intent:     Destiny: put the dashboard's "Draft full pattern" and both n8n
+            extractors on the model the Bays, North Star and Research Twin
+            agents use.
+Files:      server/src/patternDraft.ts: DRAFT_MODEL 'anthropic/claude-sonnet-5'.
+              The boot line reads the constant, so it follows.
+            server/test/pattern-candidates.test.cjs: the assertion.
+            CLAUDE.md: the draft paragraph, and section 3 names the exception
+              to "n8n is read only".
+            n8n: Bays — Commercial & Pattern Extractors (ftonmTVMzpeTL7AS).
+Problem:    1. CLAUDE.md section 3 says n8n is read only. This change was asked
+               for by name by Destiny, who owns that rule, so it is made as the
+               one named exception and logged with its restore point.
+            2. The n8n MCP update takes a whole parameter value and has no
+               substring edit. Changing one string means sending each Code
+               node's full jsCode (17,235 and 17,776 characters).
+Fix:        - Restore point: 5e529e3b-5907-4b4c-8ac6-d2b1db81e440. It was
+              already a saved version and was both the draft and the active
+              version before any edit.
+            - The expected new code was built locally with one sed on the model
+              line (a one-line diff each), and sent with setNodeParameter
+              /jsCode, one node per save:
+              - 93c21acf-24db-4b33-89f7-cf84cf672320: Pat Prep Build Patterns;
+              - 8e2db0fd-f231-4680-b6b6-c79024bc949c: Comm Prep Commercial
+                Opps.
+            - Before publishing, the live draft was re-read and compared byte
+              for byte with the expected files:
+              - both jsCode bodies were identical to the expected files;
+              - every other key on the two nodes was unchanged;
+              - the other 36 nodes and the connections were unchanged.
+              n8n's own version diff also showed exactly one modified node per
+              save.
+            - Published 8e2db0fd. Re-read: active true, activeVersionId
+              8e2db0fd-f231-4680-b6b6-c79024bc949c.
+Decision:   One node per save, so each version in n8n's history holds exactly
+            one change and either can be undone alone. Nothing else in those
+            nodes was touched: max_tokens (3000 / 2600), response_format and
+            both prompts are as they were. test:candidates still holds 11 of 11
+            with the new model asserted.
