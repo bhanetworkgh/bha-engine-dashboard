@@ -9584,3 +9584,45 @@ Fix:        filters, filters_gte and filters_lte accept a JSON string that
             parses to an object. Anything else is still refused, with the same
             message.
 Decision:   Accepted rather than refused, because the meaning is unambiguous.
+
+## 2026-09-24 08:15 — North Star's three code tools onto the dashboard MCP
+Intent:     Brief: port read_slack, read_open_loops and get_priority_evidence
+            out of North Star — Tools Router (G6Myypk64kpcaVhz) so the Router
+            can retire, the way Bays moved this morning.
+Files:      server/src/mcp/northStarTools.ts (new), server/src/slack.ts
+            (NS_TOKEN_VAR, webApi), server/src/mcp/tools.ts, server/src/index.ts
+            (boot line), server/test/north-star-tools.test.cjs (new),
+            package.json (test:north-star), render.yaml, CLAUDE.md.
+Problem:    Read first: the Router has 26 nodes. The RS, ROL and PE branches
+            are 15 of them: 7 Code nodes and 8 HTTP nodes. The three Slack HTTP
+            nodes use slackApi "North Star". The five dashboard reads use
+            GET /api/engine/:kind with x-dashboard-key. ROL calls this same
+            workflow for Read_Slack with question "LOOP-" and since_hours 168.
+            No env var on this server holds the North Star bot token, and no
+            code reads one. The Bays token is not a substitute: North Star
+            reads with its own bot, which was added to every channel on
+            21 Sep.
+Fix:        —
+Decision:   Ported as written: every cap, clip, label rule, sort and message
+            text is copied from the Code nodes. The dashboard reads go through
+            mirror.lookup, the function behind the route n8n called, with the
+            same limits and orders. So an rt-jobs row still carries no lane_id
+            column, and the job's lane comes from its Lane field, as it did
+            through HTTP.
+            One deliberate difference. ROL - Slack Mentions has onError
+            stopWorkflow, so in n8n a Slack failure failed the whole loop
+            read. But ROL - Label Loops wraps that read in try/catch, so the
+            node was written to carry on without Slack. The port does that:
+            it returns the loops with slack_checked:false and slack_error, and
+            a note that the labels came from work logs and age only.
+            With no threads, the source calls api.test as a placeholder, only
+            to keep an n8n item flowing. The port calls nothing.
+            Registry: North Star — Agent Delivery is cnOz6iomtnWVXjso in n8n
+            (created 07:40, active). It is NOT added until Destiny confirms
+            the id, per the brief. The Tools Router is NOT retired yet:
+            read_slack cannot be proved live until SLACK_NORTH_STAR_BOT_TOKEN
+            is set.
+            Verified locally: npm run test:north-star passes 8 checks against
+            a Slack stand-in: batching timed at 1.5 s, the token asserted as
+            North Star's, clips, cleaning, thread handling, labels and sort,
+            the lane filter, the read log. The earlier suites still pass.

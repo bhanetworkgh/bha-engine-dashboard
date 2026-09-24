@@ -109,3 +109,45 @@ export async function dm(userId: string, text: string): Promise<{ ok: boolean; d
     clearTimeout(timer);
   }
 }
+
+/* ------------------------------------------------ North Star, as its own bot */
+
+/**
+ * North Star reads Slack as **its own bot**, never as Bays (2026-09-24): its bot
+ * was added to every channel on 21 Sep and reads with that access, and the two
+ * apps carry different scopes. `SLACK_NORTH_STAR_BOT_TOKEN` is the bot token of
+ * the app n8n's "North Star" credential holds — `channels:read`,
+ * `groups:read`, `channels:history`, `groups:history`. No default.
+ */
+export const NS_TOKEN_VAR = 'SLACK_NORTH_STAR_BOT_TOKEN';
+
+export function northStarToken(): string | null {
+  return process.env[NS_TOKEN_VAR]?.trim() || null;
+}
+
+/**
+ * One Slack Web API read. Answers Slack's own body, `ok:false` included, so
+ * the caller decides what a refusal means exactly as the n8n Code nodes did; a
+ * transport failure or a non-2xx (a 429 included) **throws**, as the n8n HTTP
+ * node did with `onError: stopWorkflow`.
+ */
+export async function webApi(tok: string, method: string, params: Record<string, string | number | boolean>): Promise<Record<string, unknown>> {
+  const q = new URLSearchParams(Object.entries(params).map(([k, v]): [string, string] => [k, String(v)]));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API}/${method}?${q.toString()}`, { headers: { Authorization: `Bearer ${tok}` }, signal: controller.signal });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`Slack ${method} answered ${res.status}${res.status === 429 ? ` (rate limited, retry after ${res.headers.get('retry-after') ?? '?'}s)` : ''}: ${text.slice(0, 200)}`);
+    try {
+      return JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new Error(`Slack ${method} answered ${res.status} with a body that was not JSON.`);
+    }
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') throw new Error(`Slack ${method} did not answer within ${TIMEOUT_MS / 1000} seconds.`);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}

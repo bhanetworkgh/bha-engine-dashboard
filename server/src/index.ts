@@ -1610,6 +1610,11 @@ async function boot(): Promise<void> {
         : `  slack:    ${slack.SLACK_TOKEN_VAR} NOT set — read_slack_file answers not_configured and a refused grant_drive_access cannot DM Destiny`,
     );
     console.log(
+      slack.northStarToken()
+        ? `  slack:    ${slack.NS_TOKEN_VAR} set — read_slack and read_open_loops read Slack as North Star`
+        : `  slack:    ${slack.NS_TOKEN_VAR} NOT set — read_slack answers not_configured and read_open_loops labels from work logs alone`,
+    );
+    console.log(
       google.googleMode()
         ? `  google:   ${google.googleMode() === 'oauth' ? 'OAuth refresh token' : 'service account'} — share_doc, grant_drive_access, create_doc and pattern Docs work`
         : `  google:   NOT configured — ${google.notConfiguredMessage()}`,
