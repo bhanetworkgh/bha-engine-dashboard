@@ -3092,6 +3092,72 @@ export interface PatternCandidate {
   /** The last architect change made from the Candidates tab. */
   reassigned_by: string | null;
   reassigned_at: string | null;
+  /**
+   * Pipeline figures for this one candidate (2026-09-25). `draft_runs` counts
+   * every draft that reached the model, from the page or over MCP — each one is
+   * a paid call — and `draft_failures` the ones that did not produce a draft.
+   * `days_in_proposed` is from Date Flagged to now while it is Proposed, and
+   * null once it is not.
+   */
+  draft_runs: number;
+  draft_failures: number;
+  days_in_proposed: number | null;
+}
+
+/** A percentage with its denominator, never on its own. */
+export interface CandidateRate {
+  n: number;
+  of: number;
+}
+
+/** A duration in days: p50 and p95 over `n` rows, never a mean. Null where n is 0. */
+export interface CandidateDays {
+  n: number;
+  p50: number | null;
+  p95: number | null;
+}
+
+/**
+ * How the candidate pipeline is moving (2026-09-25, Destiny), on the
+ * Candidates tab and in get_page_data. Registered candidates are deleted once
+ * they are patterns, so every figure counts the live rows **plus** the
+ * registrations kept in record_deletions — without them the register rate
+ * would fall every time somebody registered one.
+ */
+export interface CandidatePipeline {
+  as_of: string;
+  /** Live rows plus handed-off registrations: the denominator of both rates. */
+  candidates: number;
+  proposed: number;
+  approved: number;
+  registered: number;
+  /** Of `registered`, how many have been removed from the list (kept in record_deletions). */
+  handed_off: number;
+  declined: number;
+  /** Rows whose Status is none of the four, counted apart and named rather than dropped. */
+  other_status: number;
+  register_rate: CandidateRate;
+  decline_rate: CandidateRate;
+  /** Every Proposed candidate's time since Date Flagged. */
+  time_in_proposed: CandidateDays & { oldest: number | null; oldest_id: string | null; undated: number };
+  /** Date Flagged to Registered At or Declined At, over the candidates that carry both. */
+  time_to_decision: CandidateDays;
+  drafts: {
+    /** Every draft that reached the model — each a paid call. */
+    runs: number;
+    /** Drafts refused or failed (not configured, model error): not counted in runs. */
+    failed: number;
+    /** Candidates drafted at least once. */
+    candidates: number;
+    /** Candidates drafted at least once and still undecided. */
+    undecided: number;
+    /** When the first draft was logged — nothing before it can have been counted. */
+    since: string | null;
+  };
+  /** Of the candidates drafted at least once, how many were registered. */
+  draft_to_register: CandidateRate;
+  /** What the figures leave out, in words. */
+  notes: string[];
 }
 
 /** One Builder Profiles row: who can be named as acting, and who can be made an architect. */
@@ -3118,6 +3184,9 @@ export interface CandidateRegistered {
   announcement_link: string | null;
   announcement_error: string | null;
   candidate_updated: boolean;
+  /** The handoff (2026-09-25): the candidate row is removed once it is a pattern, kept in record_deletions. */
+  candidate_deleted: boolean;
+  candidate_delete_error?: string;
   candidate_error?: string;
   note?: string;
 }
@@ -3128,12 +3197,21 @@ export interface PatternDraft {
   fields: Record<string, string>;
   empty_fields: string[];
   model: string;
-  sources: { summary: boolean; thread: { read: boolean; messages: number; chars: number; channel: string | null; ts: string | null; note: string | null } };
+  sources: {
+    summary: boolean;
+    thread: { read: boolean; messages: number; chars: number; channel: string | null; ts: string | null; note: string | null };
+    /** The candidate's other fields that went in, by name (2026-09-25). */
+    other_fields: string[];
+    notes: boolean;
+    codex: { read: boolean; looked_for: string[]; found: string[]; chars: number; note: string | null };
+  };
   note: string;
 }
 
 export interface PatternCandidatesData {
   candidates: PatternCandidate[];
+  /** How the pipeline is moving (2026-09-25). */
+  pipeline: CandidatePipeline;
   /** Rows in the table, and when any of them last changed here. */
   held: number;
   updated_at: string | null;

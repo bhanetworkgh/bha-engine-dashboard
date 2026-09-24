@@ -10336,3 +10336,86 @@ Decision:   The name says THROWAWAY so it cannot be taken for the real canon
             - the Google Doc and the BHARAG document the Register makes are
               named in the cleanup entry, because delete_record does not remove
               them.
+
+## 2026-09-25 — Pattern candidates: MCP parity, pipeline figures, richer drafts, handoff on Register
+Intent:     Destiny's four-part brief, after running "Draft full pattern" by hand
+            and finding the flow only worked from the dashboard page.
+            1. Draft and Register as MCP tools on the existing dashboard
+               connection.
+            2. Figures showing how the candidate pipeline moves.
+            3. Draft from everything the candidate has, with the button beside
+               Register.
+            4. Delete the candidate once it is registered.
+Files:      server/src/mcp/candidateTools.ts (new):
+              - draft_pattern_candidate and register_pattern_candidate, write
+                connection only;
+              - both call candidateActions.draftFor / register with via 'write'.
+            server/src/mcp/tools.ts: CANDIDATE_WRITE_TOOLS on the write
+              connection (40 tools there now).
+            server/src/candidateActions.ts:
+              - a `via` option ('page' | 'write') threaded to the handlers, the
+                logs and the announcement audit;
+              - register with no pattern writes the form's seed;
+              - after the candidate is marked, delete_record removes it
+                (reason "Registered as <BP-…> by <name>…");
+              - draft logs key on the page id, and MCP drafts log to
+                mcp:draft_pattern_candidate;
+              - withPipeline() computes the figures.
+            server/src/patternDraft.ts:
+              - the candidate's other fields, notes and a linked Codex entry
+                (read from engine_codex_submissions) are sources in the prompt;
+              - SOURCE PRIORITY names up to four sources, and "(none)"
+                contributes nothing;
+              - the answer's `sources` names what went in.
+            server/src/patternAnnounce.ts: the audit access follows `via`.
+            server/src/engine.ts: getPatternCandidates returns `pipeline` and
+              per-candidate draft_runs, draft_failures and days_in_proposed.
+            server/src/index.ts: the draft route passes notes and
+              codex_entry_id.
+            src/data/types.ts, src/data/index.ts: CandidatePipeline and friends;
+              draftCandidate takes extras.
+            src/screens/PatternCandidates.tsx:
+              - the pipeline strip;
+              - "Draft full pattern, then register" beside Register, with a
+                caption that Bays can run the same from Slack;
+              - notes and Codex id inputs for the draft;
+              - time in proposed and draft runs on the panel;
+              - the register result held on screen after the row is deleted.
+            server/test/pattern-candidates.test.cjs: 11 → 13 steps.
+            CLAUDE.md: the rules.
+Problem:    1. get_page_data refused "/build-patterns?view=candidates":
+               no_such_page — "is not a route this app serves". The view is a
+               query string, not a route. The figures are read with path
+               "/build-patterns", which already reads /api/pattern-candidates.
+            2. Production held no draft log lines (engine_writes has nothing
+               under page:draft_pattern), so draft counts start from zero.
+               Nothing before this can be recovered, and the notes say when the
+               log begins.
+            3. The brief asks for an "average" time in Proposed. The house rule
+               (section 7, "No duration is ever a mean") wins, so it is a
+               median with p95 and the oldest.
+Fix:        See Files.
+Decision:   - The tools are on the write connection only. A draft saves nothing,
+              but it is a paid model call and the first half of a Register.
+              In production the two URLs are one, so a tool refresh brings both
+              in.
+            - The delete happens only after the mark lands, so the copy in
+              record_deletions carries the Pattern ID and the announcement link.
+            - A candidate that could not be marked is not deleted.
+            - A failed delete is reported (candidate_deleted: false) and not
+              retried.
+            - The six candidates already Registered on production (five from
+              23 Sep, and CAND-1790261849821-FTUC, which is Registered with no
+              Pattern ID) are left on the list. Nothing deletes retroactively
+              without being asked.
+            - Handoffs are counted from record_deletions by their reason, so a
+              test or mistaken delete is never read as a registration.
+Tested:     Local Postgres 16:
+            - test:candidates 13 of 13;
+            - gate, lookup, pay, mcp-write, bays-tools, north-star,
+              research-twin, airtable-sweep and recovery all pass;
+            - typecheck and build clean;
+            - the Candidates tab screenshotted with the strip and the new
+              buttons.
+Restore:    Before this, main was 69b86df, live as deploy
+            dep-daqiuplckfvc738qglgg.

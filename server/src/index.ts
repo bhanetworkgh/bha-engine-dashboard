@@ -1285,7 +1285,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       try {
         const out =
           candidateAction[2] === 'draft'
-            ? await candidateActions.draftFor(ref, { actor_user_id: actor })
+            ? await candidateActions.draftFor(ref, { actor_user_id: actor, notes: typeof body.notes === 'string' ? body.notes : null, codex_entry_id: typeof body.codex_entry_id === 'string' ? body.codex_entry_id : null })
             : candidateAction[2] === 'register'
             ? await candidateActions.register(ref, { actor_user_id: actor, pattern: body.pattern && typeof body.pattern === 'object' && !Array.isArray(body.pattern) ? (body.pattern as Record<string, unknown>) : {} })
             : candidateAction[2] === 'decline'

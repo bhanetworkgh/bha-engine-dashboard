@@ -59,6 +59,8 @@ export interface AnnounceInput {
   registered_by_user_id: string;
   candidate_id: string | null;
   doc_link: string | null;
+  /** Which door the Register came through, for the audit line: the page, or the MCP write connection (2026-09-25). */
+  via?: 'page' | 'write';
 }
 
 export function card(a: AnnounceInput): { text: string; blocks: Record<string, unknown>[] } {
@@ -101,7 +103,7 @@ export async function announce(a: AnnounceInput): Promise<AnnounceResult> {
   const { text, blocks } = card(a);
   let audit: number | null = null;
   try {
-    audit = await auditOpen({ tool: 'announce_pattern', args: { channel: PATTERNS_CHANNEL, pattern_id: a.pattern_id, candidate_id: a.candidate_id }, access: 'page', kind: 'slack', requester: a.registered_by_user_id, dry_run: false });
+    audit = await auditOpen({ tool: 'announce_pattern', args: { channel: PATTERNS_CHANNEL, pattern_id: a.pattern_id, candidate_id: a.candidate_id }, access: a.via ?? 'page', kind: 'slack', requester: a.registered_by_user_id, dry_run: false });
   } catch (e) {
     // The pattern is already saved; an audit line that cannot be opened stops the post, not the registration.
     const error = `The announcement was not posted because its audit line could not be written: ${e instanceof Error ? e.message : String(e)}`;

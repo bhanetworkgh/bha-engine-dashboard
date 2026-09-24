@@ -14,6 +14,17 @@
  *   the cookie — every action is refused without one.
  *   the audit — each write is on engine_mcp_writes with access 'page', and on
  *     engine_writes as endpoint page:<tool>.
+ *   the handoff (2026-09-25) — a registered candidate is deleted, its whole
+ *     row (Registered, Pattern ID) kept in record_deletions; a second register
+ *     is 404.
+ *   richer drafts — every other field on the candidate, the person's notes and
+ *     a linked Codex entry go into the same prompt.
+ *   MCP parity — draft_pattern_candidate and register_pattern_candidate on the
+ *     write connection run the page's own code: same who-may-act rule, same
+ *     model, same announcement and delete, logged as mcp:<tool>.
+ *   the pipeline — draft runs per candidate (page and MCP counted together),
+ *     time in Proposed, draft-to-register and decline rates, handed-off
+ *     registrations read back from record_deletions.
  *
  * Every row it makes is deleted at the end. Run with:  npm run test:candidates
  * (needs a LOCAL DATABASE_URL)
@@ -215,7 +226,7 @@ const act = (ref, action, body) => request('POST', `/api/pattern-candidates/${en
     const profiles = await request('GET', '/api/builder-profiles');
     assert.ok(profiles.body.profiles.some((p) => p.user_id === ARCH && p.name === `Arch ${T}`), 'the picker reads Builder Profiles');
 
-    const mk = async (label, source = 'https://bha.slack.com/archives/C0/p1') => {
+    const mk = async (label, source = 'https://bha.slack.com/archives/C0/p1', extra = {}) => {
       const c = await mcp('create_record', {
         kind: 'pattern_candidates',
         fields: {
@@ -229,6 +240,7 @@ const act = (ref, action, body) => request('POST', `/api/pattern-candidates/${en
           'Why This Architect': 'Did the work.',
           'Flagged By': 'test',
           'Source Link': source,
+          ...extra,
         },
       });
       assert.equal(c.ok, true, JSON.stringify(c));
@@ -320,14 +332,23 @@ const act = (ref, action, body) => request('POST', `/api/pattern-candidates/${en
     assert.equal(pat.fields.implementation_checklist, 'Step one | Step two', 'one step per line joined as patterns are');
     assert.equal(seen.ingest.at(-1).key, 'bp-key');
     assert.equal(seen.ingest.at(-1).body.metadata.pattern_id, reg.body.pattern_id);
-    const regRow = (await query(`SELECT fields FROM engine_pattern_candidates WHERE natural_id = $1`, [cReg])).rows[0].fields;
-    assert.deepEqual([regRow.Status, regRow['Pattern ID'], regRow['Registered By']], ['Registered', reg.body.pattern_id, `Arch ${T}`]);
+    assert.equal(reg.body.candidate_deleted, true, JSON.stringify(reg.body));
+    assert.equal((await query(`SELECT count(*)::int n FROM engine_pattern_candidates WHERE natural_id = $1`, [cReg])).rows[0].n, 0, 'the candidate row is gone from the list');
+    const kept = (await query(`SELECT fields, reason FROM record_deletions WHERE kind = 'pattern_candidates' AND natural_id = $1`, [cReg])).rows;
+    assert.equal(kept.length, 1, 'the whole row kept in record_deletions');
+    const regRow = kept[0].fields;
+    assert.match(kept[0].reason, new RegExp(`^Registered as ${reg.body.pattern_id} by Arch ${T}`));
+    assert.deepEqual([regRow.Status, regRow['Pattern ID'], regRow['Registered By']], ['Registered', reg.body.pattern_id, `Arch ${T}`], 'marked before it was deleted');
     assert.ok(regRow['Registered At']);
+    assert.equal(regRow.Summary, 'A throwaway candidate for the page-action test (register).', 'every other field kept in the copy');
+    assert.equal((await request('GET', '/api/pattern-candidates')).body.candidates.some((c) => c.id === cReg), false, 'the page no longer lists it');
+    const delAudit = (await query(`SELECT outcome, access FROM engine_mcp_writes WHERE tool = 'delete_record' AND natural_id = $1`, [cReg])).rows;
+    assert.deepEqual(delAudit, [{ outcome: 'deleted', access: 'page' }]);
     const twice = await act(cReg, 'register', { actor_user_id: ARCH, pattern: { pattern_name: 'again' } });
-    assert.equal(twice.status, 409);
-    assert.equal(twice.body.reason, 'already_registered');
-    assert.match(twice.body.message, new RegExp(reg.body.pattern_id));
-    step('register: BP- id, pattern saved, BHARAG ingested, Doc made, candidate Registered with the id');
+    assert.equal(twice.status, 404, 'a handed-off candidate cannot be registered twice');
+    assert.equal(twice.body.reason, 'not_found');
+    made.candidates = made.candidates.filter((x) => x !== cReg);
+    step('register: BP- id, pattern saved, BHARAG ingested, Doc made, candidate marked Registered then deleted (kept in record_deletions)');
 
     /* ---- the announcement ---- */
     const annPost = seen.slack.filter((x) => x.method === 'chat.postMessage').at(-1);
@@ -351,7 +372,17 @@ const act = (ref, action, body) => request('POST', `/api/pattern-candidates/${en
     step('announce: one Bays post in #bha-build-patterns — name, BP- id, problem, <@registrar>, builder, Doc, dashboard link');
 
     /* ---- draft full pattern ---- */
-    const cDraft = await mk('draft', 'https://bayshorizonnetwork.slack.com/archives/C0A90TS44T1/p1790000100000200?thread_ts=1790000000.000100&cid=C0A90TS44T1');
+    // A Codex entry the candidate names: read as a source of its own (2026-09-25).
+    const CODEX = `CODEX-20260925-test-stepper-dma-${T}`;
+    const SUB = `UTSUB_${T}`;
+    await query(
+      `INSERT INTO engine_codex_submissions (natural_id, builder_id, fields, source, first_seen_at, updated_at) VALUES ($1, 'kavin', $2::jsonb, 'engine', now()::text, now()::text)`,
+      [SUB, JSON.stringify({ 'Submission ID': SUB, 'Codex Entry ID': CODEX, 'Builder Name': 'Kavin', 'Session Type': 'build', Summary: 'Moved the Rover stepper to DMA pulses.', 'Orchestrator Layer2 Review': 'LAYER2: measured 3400 steps/s ceiling on the Python loop; pigpio wave chains fixed it.' })],
+    );
+    const cDraft = await mk('draft', 'https://bayshorizonnetwork.slack.com/archives/C0A90TS44T1/p1790000100000200?thread_ts=1790000000.000100&cid=C0A90TS44T1', {
+      Notes: 'Also applies to the kiosk motor.',
+      'Codex Entry ID': CODEX,
+    });
     modelAnswer = {
       pattern_name: 'DMA pulse generation for stepper accuracy',
       problem: 'A Python pulse loop tops out at 3400 steps per second against a 4000 step requirement.',
@@ -389,6 +420,14 @@ const act = (ref, action, body) => request('POST', `/api/pattern-candidates/${en
     assert.doesNotMatch(sys.content, /pattern_id:/, 'pattern_id is minted, not asked for');
     assert.match(usr.content, /A throwaway candidate for the page-action test \(draft\)\./, 'the Summary is a source');
     assert.match(usr.content, /Kavin: Rover stepper: the Python pulse loop tops out at 3400 steps\/s, @Destiny Arupi the spec is 4000\./, 'the thread is a source, names and mentions cleaned');
+    assert.match(usr.content, /OTHER FIELDS ON THE CANDIDATE:[\s\S]*Notes: Also applies to the kiosk motor\./, "the candidate's other fields are a source");
+    assert.match(usr.content, /Flagged By: test/, 'Flagged By too');
+    assert.doesNotMatch(usr.content, /Architect Slack ID|Builder Slack ID/, 'bookkeeping is not a source');
+    assert.match(usr.content, /CODEX ENTRY[\s\S]*LAYER2: measured 3400 steps\/s ceiling/, 'the Codex entry the candidate names is read');
+    assert.match(usr.content, /NOTES FROM THE PERSON DRAFTING:\n\(none\)/, 'no notes sent, and the prompt says so');
+    assert.match(sys.content, /A source marked "\(none\)" or "\(not read: \.\.\.\)" contributes nothing/, 'an absent source is not a fact');
+    assert.deepEqual(d.body.sources.codex.found, [CODEX]);
+    assert.ok(d.body.sources.other_fields.includes('Notes'));
     const replies = seen.slack.filter((x) => x.method === 'conversations.replies').at(-1);
     assert.deepEqual([replies.auth, replies.args.channel, replies.args.ts], ['Bearer xoxb-northstar', 'C0A90TS44T1', '1790000000.000100'], 'the thread root, read as North Star');
     assert.equal(d.body.sources.thread.read, true);
@@ -405,7 +444,7 @@ const act = (ref, action, body) => request('POST', `/api/pattern-candidates/${en
     const draftLog = (await query(`SELECT outcome, detail FROM engine_writes WHERE endpoint = 'page:draft_pattern' AND natural_id = $1`, [cDraft])).rows;
     assert.equal(draftLog.length, 1);
     assert.equal(draftLog[0].outcome, 'read');
-    assert.match(draftLog[0].detail, /thread 3 messages/);
+    assert.match(draftLog[0].detail, /thread 3 messages; codex CODEX-/);
 
     const unread = await mk('draft unread', 'https://bayshorizonnetwork.slack.com/archives/CNOTMEMBER/p1790000000000100');
     const d2 = await act(unread, 'draft', { actor_user_id: ARCH });
@@ -413,6 +452,7 @@ const act = (ref, action, body) => request('POST', `/api/pattern-candidates/${en
     assert.equal(d2.body.sources.thread.read, false);
     assert.match(d2.body.sources.thread.note, /not_in_channel — the North Star bot is not in that channel/);
     assert.match(d2.body.note, /the thread was not read/, 'a draft from the Summary alone says so');
+    assert.match(seen.model.body.messages[1].content, /CODEX ENTRY[^\n]*\n\(none linked\)/, 'no Codex entry named, and the prompt says so');
     assert.match(seen.model.body.messages[1].content, /\(not read: Slack refused conversations\.replies: not_in_channel/);
     step('draft: the extractor’s model and prompt, Summary + thread (as North Star), unsupported fields empty, nothing saved');
 
@@ -435,12 +475,108 @@ const act = (ref, action, body) => request('POST', `/api/pattern-candidates/${en
     assert.equal(pat2.learnings_gotchas, 'Edited by the architect before registering.', 'what was edited is what is stored');
     assert.equal(pat2.implementation_checklist, 'Measure the loop overhead per step | Switch pulse generation to pigpio DMA');
     assert.equal('integration_points' in pat2, false, 'an empty field is not written as an empty string');
-    const r2 = (await query(`SELECT fields FROM engine_pattern_candidates WHERE natural_id = $1`, [cDraft])).rows[0].fields;
+    assert.equal(reg2.body.candidate_deleted, true);
+    made.candidates = made.candidates.filter((x) => x !== cDraft);
+    const r2 = (await query(`SELECT fields FROM record_deletions WHERE kind = 'pattern_candidates' AND natural_id = $1`, [cDraft])).rows[0].fields;
     assert.deepEqual([r2.Status, r2['Pattern ID'], r2['Announcement Link']], ['Registered', reg2.body.pattern_id, undefined]);
     const failAudit = (await query(`SELECT outcome, detail FROM engine_mcp_writes WHERE tool = 'announce_pattern' AND natural_id = $1`, [reg2.body.pattern_id])).rows;
     assert.equal(failAudit[0].outcome, 'failed');
     assert.match(failAudit[0].detail, /not_in_channel/);
     step('register a draft: every field stored as edited; a refused post is reported and audited, the registration stands');
+
+    /* ---- MCP parity: the same draft and register, over the write connection ---- */
+    const writeList = (await request('POST', `/mcp/${TOKEN}`, { jsonrpc: '2.0', id: 1, method: 'tools/list' }, { cookie: '' })).body.result.tools;
+    for (const name of ['draft_pattern_candidate', 'register_pattern_candidate']) {
+      const t = writeList.find((x) => x.name === name);
+      assert.ok(t, `${name} is on the write connection`);
+      assert.ok(t.annotations && typeof t.annotations.readOnlyHint === 'boolean', `${name} carries annotations`);
+    }
+    const cMcp = await mk('mcp', 'https://bayshorizonnetwork.slack.com/archives/C0A90TS44T1/p1790000000000100');
+    const mOther = await mcp('draft_pattern_candidate', { candidate: cMcp, requester_user_id: OTHER });
+    assert.deepEqual([mOther.ok, mOther.status, mOther.reason], [false, 403, 'not_permitted'], 'the same who-may-act rule, as ok:false');
+    const mNobody = await mcp('register_pattern_candidate', { candidate: cMcp, requester_user_id: 'UNOPROFILE1' });
+    assert.equal(mNobody.reason, 'unknown_actor');
+    const md = await mcp('draft_pattern_candidate', { candidate: cMcp, requester_user_id: ARCH, notes: 'Bays heard in Slack: the kiosk motor needs it too.', codex_entry_id: SUB });
+    assert.equal(md.ok, true, JSON.stringify(md));
+    assert.equal(seen.model.body.model, 'anthropic/claude-sonnet-5', 'the same model');
+    assert.match(seen.model.body.messages[0].content, /You are the Bays Horizon Build-Pattern Extractor/, 'the same prompt');
+    assert.match(seen.model.body.messages[1].content, /NOTES FROM THE PERSON DRAFTING:\nBays heard in Slack: the kiosk motor needs it too\./, 'notes passed over MCP are a source');
+    assert.match(seen.model.body.messages[1].content, /LAYER2: measured/, 'a Codex entry named by Submission ID is read');
+    assert.equal(md.sources.notes, true);
+    const mdLog = (await query(`SELECT outcome, key_label FROM engine_writes WHERE endpoint = 'mcp:draft_pattern_candidate' AND natural_id = $1`, [cMcp])).rows;
+    assert.deepEqual(mdLog, [{ outcome: 'read', key_label: 'MCP_WRITE_TOKEN' }], 'logged as the MCP door');
+    assert.equal((await query(`SELECT count(*)::int n FROM engine_build_patterns WHERE fields->>'pattern_name' = $1`, [md.fields.pattern_name])).rows[0].n, 0, 'an MCP draft saves nothing');
+
+    // A second draft of the same candidate from the page: one count per candidate, both doors together.
+    await act(cMcp, 'draft', { actor_user_id: ARCH });
+    // OPENROUTER unset is not tested here (the server holds the key); a failed draft is counted apart.
+    const dry = await mcp('register_pattern_candidate', { candidate: cMcp, requester_user_id: ARCH, fields: { ...md.fields, pattern_name: `Throwaway mcp dry ${T}` }, dry_run: true });
+    assert.equal(dry.dry_run, true, JSON.stringify(dry));
+    assert.equal((await query(`SELECT count(*)::int n FROM engine_pattern_candidates WHERE natural_id = $1`, [cMcp])).rows[0].n, 1, 'a dry run deletes nothing');
+
+    const postsBefore = seen.slack.filter((x) => x.method === 'chat.postMessage').length;
+    const auditMark = (await query(`SELECT coalesce(max(id),0)::int m FROM engine_mcp_writes`)).rows[0].m;
+    const mr = await mcp('register_pattern_candidate', { candidate: cMcp, requester_user_id: DESTINY, fields: { ...md.fields, pattern_name: `Throwaway mcp ${T}`, implementation_checklist: ['One', 'Two'] } });
+    assert.equal(mr.ok, true, JSON.stringify(mr));
+    made.patterns.push(mr.pattern_id);
+    assert.match(mr.pattern_id, /^BP-VFARM-\d+-[A-Z0-9]{4}$/);
+    assert.deepEqual([mr.ingested_to_bharag, mr.doc_created, mr.announced, mr.candidate_updated, mr.candidate_deleted], [true, true, true, true, true], 'the same effect as the button');
+    assert.equal(seen.slack.filter((x) => x.method === 'chat.postMessage').length, postsBefore + 1, 'one announcement');
+    const mPat = (await query(`SELECT fields FROM engine_build_patterns WHERE natural_id = $1`, [mr.pattern_id])).rows[0].fields;
+    assert.equal(mPat.implementation_checklist, 'One | Two');
+    const mKept = (await query(`SELECT fields FROM record_deletions WHERE kind = 'pattern_candidates' AND natural_id = $1`, [cMcp])).rows[0].fields;
+    assert.deepEqual([mKept.Status, mKept['Pattern ID'], mKept['Registered By']], ['Registered', mr.pattern_id, 'Destiny Arupi']);
+    const mAudit = (await query(`SELECT tool, access FROM engine_mcp_writes WHERE natural_id = ANY($1) AND access = 'write' AND tool IN ('create_record','update_record','delete_record') AND id > $2 ORDER BY id`, [[cMcp, mr.pattern_id], auditMark])).rows.map((a) => a.tool);
+    assert.deepEqual(mAudit, ['create_record', 'update_record', 'delete_record'], 'audited at access write, through the same handlers');
+    const mAnn = (await query(`SELECT access FROM engine_mcp_writes WHERE tool = 'announce_pattern' AND natural_id = $1`, [mr.pattern_id])).rows;
+    assert.deepEqual(mAnn, [{ access: 'write' }]);
+    made.candidates = made.candidates.filter((x) => x !== cMcp);
+
+    // Register with no fields: the page form's seed — name, Summary, lane.
+    const cPlain = await mk('plain');
+    const mp = await mcp('register_pattern_candidate', { candidate: cPlain, requester_user_id: BUILDER });
+    assert.equal(mp.ok, true, JSON.stringify(mp));
+    made.patterns.push(mp.pattern_id);
+    const plain = (await query(`SELECT fields FROM engine_build_patterns WHERE natural_id = $1`, [mp.pattern_id])).rows[0].fields;
+    assert.deepEqual([plain.pattern_name, plain.problem, plain.bha_system, plain.reusability], [`Throwaway plain ${T}`, 'A throwaway candidate for the page-action test (plain).', 'BAYS', 'Moderate']);
+    made.candidates = made.candidates.filter((x) => x !== cPlain);
+    // The OpenRouter gate is the page's: unset, not_configured, naming the variable (checked in-process, where the key can be unset).
+    const drafter = require('../../server-dist/server/src/patternDraft.js');
+    const heldKey = process.env.OPENROUTER_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+    await assert.rejects(drafter.draft({ id: 1, natural_id: 'CAND-x', airtable_record_id: null, fields: {} }), (e) => e.reason === 'not_configured' && /OPENROUTER_API_KEY is not set/.test(e.message));
+    if (heldKey !== undefined) process.env.OPENROUTER_API_KEY = heldKey;
+    step('MCP: draft_pattern_candidate and register_pattern_candidate run the page’s own path — rule, model, notes, Codex, announcement, delete — logged as mcp:');
+
+    /* ---- the pipeline figures ---- */
+    const pg = (await request('GET', '/api/pattern-candidates')).body;
+    const p = pg.pipeline;
+    assert.ok(p, 'the page payload carries the pipeline');
+    const handed = (await query(`SELECT count(DISTINCT coalesce(natural_id, record_id))::int n FROM record_deletions WHERE kind = 'pattern_candidates' AND reason LIKE 'Registered as %'`)).rows[0].n;
+    assert.equal(p.handed_off, handed, 'handed-off registrations read back from record_deletions');
+    const liveRows = pg.candidates.length;
+    assert.equal(p.candidates, liveRows + p.handed_off);
+    assert.equal(p.register_rate.of, p.candidates);
+    assert.equal(p.register_rate.n, p.registered);
+    assert.equal(p.decline_rate.n, p.declined);
+    assert.ok(p.declined >= 1);
+    const runsLog = (await query(`SELECT count(*)::int n FROM engine_writes WHERE endpoint IN ('page:draft_pattern','mcp:draft_pattern_candidate') AND outcome = 'read'`)).rows[0].n;
+    assert.equal(p.drafts.runs, runsLog, 'every draft run counted, page and MCP');
+    assert.ok(p.draft_to_register.n >= 2, 'the drafted-then-registered candidates count, though their rows are gone');
+    const unreadRow = pg.candidates.find((c) => c.id === unread);
+    assert.equal(unreadRow.draft_runs, 1, 'a draft never registered still counts on its candidate');
+    assert.equal(typeof unreadRow.days_in_proposed, 'number');
+    assert.ok(p.time_in_proposed.n >= 1 && p.time_in_proposed.p50 !== null && p.time_in_proposed.oldest !== null);
+    assert.equal(pg.candidates.find((c) => c.id === cDec).days_in_proposed, null, 'a declined candidate is not in Proposed');
+    assert.ok(p.notes.some((n) => /never a mean/.test(n)));
+    // get_page_data reads the same figures, as a client would.
+    const gpd = await mcp('get_page_data', { path: '/build-patterns', fields: ['pipeline.drafts.runs', 'pipeline.handed_off', 'pipeline.draft_to_register'] });
+    const val = (k) => (gpd.fields || gpd.values || []).find((x) => x.path === k);
+    const got = JSON.stringify(gpd);
+    assert.ok(got.includes('/api/pattern-candidates'), got.slice(0, 800));
+    assert.equal(val('pipeline.drafts.runs')?.value, p.drafts.runs, got.slice(0, 800));
+    assert.equal(val('pipeline.handed_off')?.value, p.handed_off);
+    step('pipeline: draft runs per candidate (both doors), time in Proposed, rates with denominators, handoffs counted after deletion, readable over get_page_data');
 
     /* ---- the audit ---- */
     const audit = (await query(`SELECT tool, kind, outcome, requester_user_id FROM engine_mcp_writes WHERE access = 'page' AND id > $1 ORDER BY id`, [auditFrom])).rows;
@@ -475,6 +611,7 @@ const act = (ref, action, body) => request('POST', `/api/pattern-candidates/${en
     slackSrv.close();
     openrouter.close();
     bharag.close();
+    await query(`DELETE FROM engine_codex_submissions WHERE natural_id LIKE $1`, [`UTSUB_${T}`]).catch(() => {});
     await closePool();
     assert.equal(Number(left), 0, 'every throwaway row deleted');
   }

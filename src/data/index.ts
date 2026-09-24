@@ -169,7 +169,9 @@ export const getBuilderProfiles = () => api<{ profiles: BuilderProfile[] }>('/ap
 const candidatePath = (id: string, action: string) => `/api/pattern-candidates/${encodeURIComponent(id)}/${action}`;
 export const registerCandidate = (id: string, actor_user_id: string, pattern: Record<string, string>) =>
   api<CandidateRegistered>(candidatePath(id, 'register'), { method: 'POST', body: { actor_user_id, pattern }, timeoutMs: 120_000 });
-export const draftCandidate = (id: string, actor_user_id: string) => api<PatternDraft>(candidatePath(id, 'draft'), { method: 'POST', body: { actor_user_id }, timeoutMs: 120_000 });
+/** `extras`: notes the person adds and a Codex entry to read, sent into the same prompt as sources of their own (2026-09-25). */
+export const draftCandidate = (id: string, actor_user_id: string, extras: { notes?: string; codex_entry_id?: string } = {}) =>
+  api<PatternDraft>(candidatePath(id, 'draft'), { method: 'POST', body: { actor_user_id, ...extras }, timeoutMs: 120_000 });
 export const declineCandidate = (id: string, actor_user_id: string, reason: string) => api<{ ok: boolean }>(candidatePath(id, 'decline'), { method: 'POST', body: { actor_user_id, reason } });
 export const reassignCandidate = (id: string, actor_user_id: string, architect_user_id: string) =>
   api<{ ok: boolean; suggested_architect: string }>(candidatePath(id, 'reassign'), { method: 'POST', body: { actor_user_id, architect_user_id } });
