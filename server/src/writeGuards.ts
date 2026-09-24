@@ -63,7 +63,8 @@ export const DEFAULT_OWNER = 'U0AEW3TBYH1';
 export const ADMIN_IDS = ['U0AEW3TBYH1', 'U0A9V97949F'];
 
 export const LOOP_STATUSES = ['Open', 'In Progress', 'Closed'] as const;
-export const CANDIDATE_STATUSES = ['Proposed', 'Approved', 'Registered'] as const;
+/** Declined (2026-09-24): an architect's "this is not a pattern", from the Candidates tab, with a reason. */
+export const CANDIDATE_STATUSES = ['Proposed', 'Approved', 'Registered', 'Declined'] as const;
 /** `Sent Back` is held on a live row and is the pipeline's own, so it is allowed alongside the three the dashboard knows. */
 export const CODEX_STATUSES = [...CODEX_JASON_STATUS, 'Sent Back'] as const;
 

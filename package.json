@@ -21,6 +21,7 @@
     "test:bays-tools": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/bays-tools.test.cjs",
     "test:north-star": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/north-star-tools.test.cjs",
     "test:research-twin": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/research-twin-tools.test.cjs",
+    "test:candidates": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/pattern-candidates.test.cjs",
     "test:airtable-sweep": "npm run build:server --silent && node server/test/airtable-sweep.test.cjs"
   },
   "dependencies": {

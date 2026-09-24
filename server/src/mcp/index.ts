@@ -88,6 +88,11 @@ export const MCP_ONE_URL = Boolean(WRITE_RAW && WRITE_RAW === MCP_SECRET);
 
 export type McpAccess = 'read' | 'write';
 
+/** A page action never reaches this transport; were one to, it would see the read catalogue. */
+function mcpAccess(a: 'read' | 'write' | 'page'): McpAccess {
+  return a === 'page' ? 'read' : a;
+}
+
 export function mcpConfigured(): boolean {
   return Boolean(MCP_SECRET);
 }
@@ -183,21 +188,21 @@ async function handleRpc(req: RpcRequest, deps: ToolDeps): Promise<Record<string
       return result(req.id, {});
 
     case 'tools/list':
-      return result(req.id, { tools: toolCatalogue(deps.access) });
+      return result(req.id, { tools: toolCatalogue(mcpAccess(deps.access)) });
 
     case 'tools/call': {
       const name = typeof params.name === 'string' ? params.name : '';
       const args = (params.arguments && typeof params.arguments === 'object' && !Array.isArray(params.arguments) ? params.arguments : {}) as Record<string, unknown>;
-      const tool = toolByName(name, deps.access);
+      const tool = toolByName(name, mcpAccess(deps.access));
       const t0 = Date.now();
       if (!tool) {
-        logCall(deps.access, name || '(unnamed)', args, 'no such tool', Date.now() - t0, null);
-        return failure(req.id, INVALID_PARAMS, `There is no tool called "${name}". This server offers: ${toolCatalogue(deps.access).map((t) => t.name).join(', ')}.`);
+        logCall(mcpAccess(deps.access), name || '(unnamed)', args, 'no such tool', Date.now() - t0, null);
+        return failure(req.id, INVALID_PARAMS, `There is no tool called "${name}". This server offers: ${toolCatalogue(mcpAccess(deps.access)).map((t) => t.name).join(', ')}.`);
       }
       try {
         const value = await tool.handler(args, deps);
         const text = JSON.stringify(value, null, 2);
-        logCall(deps.access, name, args, 'ok', Date.now() - t0, Buffer.byteLength(text));
+        logCall(mcpAccess(deps.access), name, args, 'ok', Date.now() - t0, Buffer.byteLength(text));
         return result(req.id, { content: [{ type: 'text', text }], isError: false });
       } catch (e) {
         // A tool that cannot answer says why, as the tool's own result rather
@@ -206,7 +211,7 @@ async function handleRpc(req: RpcRequest, deps: ToolDeps): Promise<Record<string
         const explicit = e instanceof McpError;
         const message = e instanceof Error ? e.message : String(e);
         const code = explicit ? (e as McpError).code : 'unexpected_error';
-        logCall(deps.access, name, args, `failed (${code})`, Date.now() - t0, null);
+        logCall(mcpAccess(deps.access), name, args, `failed (${code})`, Date.now() - t0, null);
         if (!explicit) console.error('[mcp] unexpected error in', name, e);
         return result(req.id, {
           content: [

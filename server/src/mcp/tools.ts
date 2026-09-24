@@ -51,7 +51,12 @@ export interface ToolDeps {
    * write URL. The write tools read it for the audit line, and the catalogue
    * reads it to decide whether they exist at all.
    */
-  access: 'read' | 'write';
+  /**
+   * `page` (2026-09-24): a page action on the Build patterns Candidates tab,
+   * which calls the same write handlers as the MCP tools so the guards, the
+   * write path and the audit line cannot differ. It never selects a catalogue.
+   */
+  access: 'read' | 'write' | 'page';
 }
 
 /**

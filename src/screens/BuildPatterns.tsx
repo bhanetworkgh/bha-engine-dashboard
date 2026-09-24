@@ -2,11 +2,12 @@ import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useData } from '../app/useData';
-import { getBuildPatterns, getPatternCandidates, getPatternDetail, getRecordMetrics, resyncRecords, searchPatterns, type BuildPattern, type BuildPatternDetail, type PatternCandidate, type PatternCandidatesData, type PatternMetrics } from '../data';
+import { getBuildPatterns, getPatternCandidates, getPatternDetail, getRecordMetrics, resyncRecords, searchPatterns, type BuildPattern, type BuildPatternDetail, type PatternMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
-import { ButtonAnchor, Tabs, PageHeader, Pagination, Button, CountCell, Definition, HBar, thisMonth, Pill, LoadFailed, Loading, MetricCard, monthLabel, MonthPicker, monthsFrom, EmptyPanel, EmptyState, Toast, RecordId, RecordTable, relativeTime, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, StatCell, StatStrip, usePaged, useResync, useToast, TwoLine } from '../components/ui';
+import { Tabs, PageHeader, Pagination, Button, CountCell, Definition, HBar, thisMonth, LoadFailed, Loading, MetricCard, monthLabel, MonthPicker, monthsFrom, EmptyPanel, EmptyState, Toast, RecordId, RecordTable, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, StatCell, StatStrip, usePaged, useResync, useToast, TwoLine } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 import { REUSE_DEFS } from './recordDefinitions';
+import { CandidatesTab } from './PatternCandidates';
 
 /** The record kinds this page is built from: a change to one re-reads it (live since 2026-09-23). */
 const PATTERN_KINDS = ['patterns', 'pattern_candidates'] as const;
@@ -466,13 +467,10 @@ export default function BuildPatterns() {
       {view === 'Candidates' ? (
         <CandidatesTab
           state={candidates}
-          month={month}
           months={months}
-          onMonth={setMonth}
           q={q}
           onQ={setQ}
           patterns={patterns}
-          initialOpen={params.get('open')}
           onOpenPattern={(id) => {
             setView('Patterns');
             setOpen(id);
@@ -582,241 +580,3 @@ export default function BuildPatterns() {
   );
 }
 
-/* --------------------------------------------------------- candidates tab */
-
-/**
- * Pattern candidates (2026-09-23, Destiny): ideas Bays flags from real work
- * before an architect registers them as build patterns. Read only — a
- * candidate is registered through the Bays Tools Router's log_build_pattern,
- * never from here.
- *
- * It shares the page's search box and month picker, so one selection answers
- * both tabs; the month is the month a candidate was flagged.
- */
-const CANDIDATE_STATUSES = ['Proposed', 'Approved', 'Registered'] as const;
-
-/** What each status means, from the table's own vocabulary and the registration path. */
-const CANDIDATE_DEFS: Record<string, string> = {
-  Proposed: 'Flagged by Bays from real work; no architect has approved it yet.',
-  Approved: 'An architect has agreed it should become a pattern; not yet written up and registered.',
-  Registered: 'Written up as a build pattern through log_build_pattern. Pattern ID and Registered At are set only on these rows.',
-};
-
-function candidateTone(status: string | null): 'default' | 'accent' {
-  return status === 'Registered' ? 'accent' : 'default';
-}
-
-function candidateColumns(): RecordColumn<PatternCandidate>[] {
-  return [
-    {
-      key: 'candidate',
-      header: 'candidate',
-      card: 'title',
-      width: '46ch',
-      title: (c) => c.summary ?? c.candidate ?? c.id,
-      cell: (c) => <TwoLine title={c.candidate ?? c.id} description={c.summary} empty="No summary written on this candidate." />,
-    },
-    { key: 'lane', header: 'lane', card: 'meta', width: '12ch', clip: true, className: 'text-dim', cell: (c) => c.lane ?? <span className="text-faint">—</span> },
-    { key: 'builder', header: 'builder', card: 'meta', width: '14ch', clip: true, className: 'text-dim', cell: (c) => c.builder ?? <span className="text-faint">—</span> },
-    {
-      key: 'architect',
-      header: 'suggested architect',
-      card: 'meta',
-      width: '16ch',
-      clip: true,
-      className: 'text-dim',
-      title: (c) => c.why_this_architect ?? undefined,
-      cell: (c) => c.suggested_architect ?? <span className="text-faint">—</span>,
-    },
-    {
-      key: 'status',
-      header: 'status',
-      card: 'meta',
-      width: '12ch',
-      title: (c) => (c.status ? CANDIDATE_DEFS[c.status] ?? `"${c.status}" is not one of Proposed, Approved or Registered.` : 'No status on this row.'),
-      cell: (c) => (c.status ? <Pill tone={candidateTone(c.status)}>{c.status.toLowerCase()}</Pill> : <span className="text-faint">—</span>),
-    },
-    { key: 'flagged', header: 'flagged', card: 'meta', width: '11ch', className: 'tabular text-faint', cell: (c) => c.date_flagged ?? <span className="text-faint">undated</span> },
-  ];
-}
-
-function CandidatesTab({
-  state,
-  month,
-  months,
-  onMonth,
-  q,
-  onQ,
-  patterns,
-  initialOpen = null,
-  onOpenPattern,
-}: {
-  state: { status: 'loading' | 'ready' | 'error'; data: PatternCandidatesData | null; error: string | null };
-  month: string | null;
-  months: string[];
-  onMonth: (m: string | null) => void;
-  q: string;
-  onQ: (q: string) => void;
-  patterns: BuildPattern[];
-  /** `?open=<id>` on arrival. */
-  initialOpen?: string | null;
-  onOpenPattern: (id: string) => void;
-}) {
-  const [status, setStatus] = useState('all');
-  const [openId, setOpenId] = useState<string | null>(initialOpen);
-  const all = state.data?.candidates ?? [];
-  const inMonth = useMemo(() => all.filter((c) => !month || c.date_flagged?.slice(0, 7) === month), [all, month]);
-  const needle = q.trim().toLowerCase();
-  const searched = useMemo(
-    () =>
-      !needle
-        ? inMonth
-        : inMonth.filter((c) =>
-            [c.id, c.candidate, c.summary, c.lane, c.builder, c.suggested_architect, c.why_this_architect, c.flagged_by, c.pattern_id].some((v) => v?.toLowerCase().includes(needle)),
-          ),
-    [inMonth, needle],
-  );
-  const counts = (st: string) => searched.filter((c) => c.status === st).length;
-  const others = searched.filter((c) => !(CANDIDATE_STATUSES as readonly string[]).includes(c.status ?? '')).length;
-  const rows = status === 'all' ? searched : status === 'other' ? searched.filter((c) => !(CANDIDATE_STATUSES as readonly string[]).includes(c.status ?? '')) : searched.filter((c) => c.status === status);
-  const paged = usePaged(rows, `${status}|${needle}|${month ?? 'all'}`);
-  const open = openId ? all.find((c) => c.id === openId) ?? null : null;
-
-  if (state.status === 'loading') return <Loading />;
-  if (state.status === 'error' || !state.data) {
-    return (
-      <div className="card mx-6 mt-2 px-5 py-4 text-[12.5px] text-failing md:mx-8">
-        Could not read the pattern candidates: {state.error ?? 'no answer'}. This is a failed read, not an empty list.
-      </div>
-    );
-  }
-
-  return (
-    <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-      <div className="shrink-0 px-6 pb-3 text-[12px] text-faint md:px-8">
-        {state.data.held} {state.data.held === 1 ? 'candidate' : 'candidates'} held
-        {state.data.updated_at ? ` · newest change ${relativeTime(state.data.updated_at) ?? state.data.updated_at}` : ''} · registered through Bays, never from here
-      </div>
-      <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          {/* The status strip: each count is the filter. */}
-          <Segmented
-            ariaLabel="Filter by status"
-            value={status}
-            onChange={setStatus}
-            options={[
-              { value: 'all', label: 'All', count: searched.length, title: 'Every candidate in the month in view.' },
-              ...CANDIDATE_STATUSES.map((st) => ({ value: st, label: st, count: counts(st), title: CANDIDATE_DEFS[st] })),
-              ...(others ? [{ value: 'other', label: 'Other status', count: others, title: 'A status that is not Proposed, Approved or Registered, or none at all.' }] : []),
-            ]}
-          />
-          <div className="flex flex-1 items-center justify-end gap-3">
-            <MonthPicker months={months} value={month} onChange={onMonth} />
-            <SearchBox value={q} onChange={onQ} placeholder="Search candidate, summary, lane, people" />
-          </div>
-        </div>
-        {status !== 'all' && CANDIDATE_DEFS[status] && <Definition term={status}>{CANDIDATE_DEFS[status]}</Definition>}
-      </div>
-      {state.data.held === 0 ? (
-        <EmptyState>No pattern candidate is held. Bays writes them to engine_pattern_candidates as it flags them; none has arrived.</EmptyState>
-      ) : (
-        <>
-          <RecordTable
-            columns={candidateColumns()}
-            rows={paged.rows}
-            rowKey={(c) => c.id}
-            onOpen={(c) => setOpenId(c.id)}
-            lines={2}
-            label="Pattern candidates"
-            empty={needle ? 'No candidate matches that search in this month at this status.' : month ? 'No candidate was flagged in this month at this status.' : 'No candidate has this status.'}
-          />
-          <Pagination paged={paged} unit="candidates" />
-        </>
-      )}
-      {open && (
-        <CandidateView
-          c={open}
-          onClose={() => setOpenId(null)}
-          patternRecord={open.pattern_id ? patterns.find((p) => p.pattern_id === open.pattern_id)?.id ?? null : null}
-          onOpenPattern={(id) => {
-            setOpenId(null);
-            onOpenPattern(id);
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-/** The whole candidate, in the same dialog shape the pattern view uses. */
-function CandidateView({ c, onClose, patternRecord, onOpenPattern }: { c: PatternCandidate; onClose: () => void; patternRecord: string | null; onOpenPattern: (id: string) => void }) {
-  const rows: [string, string | null][] = [
-    ['Lane', c.lane],
-    ['Builder', c.builder],
-    ['Suggested architect', c.suggested_architect],
-    ['Flagged by', c.flagged_by],
-    ['Date flagged', c.date_flagged],
-  ];
-  return createPortal(
-    <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/30 p-4 md:p-10" onClick={onClose}>
-      <div className="card fade-up w-full max-w-[880px] px-6 py-5" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Pattern candidate">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="kicker tabular">{c.id}</div>
-            <h2 className="mt-1 text-[18px] leading-tight">{c.candidate ?? c.id}</h2>
-            <div className="mt-2">{c.status ? <Pill tone={candidateTone(c.status)}>{c.status.toLowerCase()}</Pill> : <span className="text-[12px] text-faint">no status</span>}</div>
-          </div>
-          <div className="flex items-center gap-2">
-            {c.source_link && (
-              <ButtonAnchor variant="ghost" size="sm" href={c.source_link} target="_blank" rel="noreferrer">
-                Open the Slack thread
-              </ButtonAnchor>
-            )}
-            <Button variant="ghost" size="sm" onClick={onClose}>
-              Close
-            </Button>
-          </div>
-        </div>
-        <div className="mt-4 space-y-4">
-          {c.status === 'Registered' && (
-            <div>
-              <div className="mb-1 text-[11px] text-faint">Registered as</div>
-              {c.pattern_id ? (
-                patternRecord ? (
-                  <button type="button" className="link tabular text-[13px]" onClick={() => onOpenPattern(patternRecord)}>
-                    {c.pattern_id}
-                  </button>
-                ) : (
-                  <span className="tabular text-[13px] text-ink">
-                    {c.pattern_id} <span className="text-faint">— no pattern with this id is held on the Patterns tab</span>
-                  </span>
-                )
-              ) : (
-                <span className="text-[13px] text-faint">Registered, but the row carries no Pattern ID.</span>
-              )}
-              {c.registered_at && <span className="tabular ml-3 text-[12px] text-faint">{c.registered_at.slice(0, 16).replace('T', ' ')}</span>}
-            </div>
-          )}
-          <div>
-            <div className="mb-1 text-[11px] text-faint">Summary</div>
-            <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink">{c.summary ?? <span className="text-faint">No summary written.</span>}</p>
-          </div>
-          <div>
-            <div className="mb-1 text-[11px] text-faint">Why this architect</div>
-            <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink">{c.why_this_architect ?? <span className="text-faint">Not written.</span>}</p>
-          </div>
-          <dl className="grid gap-x-4 gap-y-1 text-[12.5px] sm:grid-cols-[auto_minmax(0,1fr)]">
-            {rows.map(([k, v]) => (
-              <div key={k} className="contents">
-                <dt className="text-faint">{k}</dt>
-                <dd className={v ? 'text-dim' : 'text-faint'}>{v ?? '—'}</dd>
-              </div>
-            ))}
-          </dl>
-          {!c.source_link && <p className="text-[12px] text-faint">No Source Link on this row, so there is no thread to open.</p>}
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-}

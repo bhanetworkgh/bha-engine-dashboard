@@ -1010,7 +1010,8 @@ archive records directly, with the checks the Bays Tools Router enforces.
   select field actually holds, beside the rules. Incidents, pay, the twins'
   ledgers and the registry are not writable over MCP.
 - **Archive is only where a page already draws an archived state** — loops,
-  `Status = Closed`. Candidates are Proposed / Approved / Registered and no
+  `Status = Closed`. Candidates are Proposed / Approved / Registered / Declined
+  (Declined added 2026-09-24, set from the Build patterns page) and no
   kind but loops has a closed state, so `archive_record` refuses the others by
   name rather than inventing a status the pages would show as "Other".
   **Hard delete** needs `confirm: "DELETE <natural_id>"` exactly, and is
@@ -2503,13 +2504,79 @@ reads `engine_pattern_candidates` directly (a mirror kind with no store mapper),
 with the field names exactly as the rows carry them — `Candidate`, `Summary`,
 `Lane`, `Status`, `Builder`, `Suggested Architect`, `Why This Architect`,
 `Flagged By`, `Source Link`, `Date Flagged`, `Pattern ID`, `Registered At`.
-Newest Date Flagged first. Status counts are the filter; the page's own month
-picker and search box scope it too, the month being the month flagged. A row
-opens in the same dialog shape a pattern does, and a Registered row's Pattern
-ID opens that pattern through the Patterns tab's own `setOpen` — no second
-mechanism. **Read only**: a candidate is registered through the Bays Tools
-Router's `log_build_pattern`, never from here. A failed read says so on the tab
-rather than drawing an empty list.
+A row opens in the same dialog shape a pattern does, and a Registered row's
+Pattern ID opens that pattern through the Patterns tab's own `setOpen` — no
+second mechanism. A failed read says so on the tab rather than drawing an empty
+list. The tab is `src/screens/PatternCandidates.tsx`.
+
+**Filters at a glance, and every one in the address** (2026-09-24, Destiny).
+Builder, suggested architect and lane are pickers read off the rows' own
+`Builder`, `Suggested Architect` and `Lane`; status is the segmented strip.
+**Every option carries its count, counted over what the other filters leave**,
+so a number is always what picking it would show. All of it — `builder`,
+`architect`, `lane`, `status`, `month`, and `open` for the candidate in the
+panel — is in the URL, so "my candidates" is a bookmark
+(`?view=candidates&architect=Hardik%20Bhatt`), and **Mine as architect** sets
+it for the person acting. They combine with the search box. **The month
+defaults to all time here**, not the current month the Patterns tab opens on:
+an architect's backlog spans months, and a bookmark that silently opened on
+this one would hide most of it.
+**Proposed first, oldest first** — an explicit exception to section 5's "newest
+first": this is a queue of decisions owed, and the oldest undecided one is the
+one to reach first. Then Approved, Registered, Declined, oldest first within
+each.
+
+**A candidate is acted on from its panel** (2026-09-24, Destiny), which shows
+every field — Candidate, Summary, Builder, Lane, Suggested Architect, Why This
+Architect, Flagged By, Date Flagged, Source Link as a link to the Slack thread,
+Status — and who registered, declined or reassigned it where somebody did.
+`POST /api/pattern-candidates/:id/{register|decline|reassign}`, behind the
+cookie, `server/src/candidateActions.ts`:
+
+- **Register as a pattern** opens a form prefilled from the candidate —
+  `pattern_name` from Candidate, `problem`, `solution` and `context` seeded from
+  Summary, `bha_system` from Lane, Moderate reusability, an optional checklist
+  one step per line — and submits through **`create_record` kind `patterns`
+  itself**: the handler is called in-process, so the BP- id is minted, the row
+  saved, BHARAG ingested and the Google Doc made exactly as an MCP create does.
+  `drafted_by` is the person acting, and names the Doc. Only once the pattern is
+  saved does `update_record` set the candidate to `Registered` with `Pattern ID`,
+  `Registered At` and `Registered By`. The panel then shows the BP- id, the Doc
+  link, and BHARAG's answer; a Doc or ingest that failed is said in red, never
+  folded into success. A pattern that saved and a candidate that did not update
+  says so with the BP- id — it is not retried, because a second create would be
+  a second pattern.
+- **Decline** needs a reason (3 to 1,000 characters) and sets `Status =
+  Declined` with `Declined Reason`, `Declined By`, `Declined By Slack ID` and
+  `Declined At`. **Declined is a fourth status** in `CANDIDATE_STATUSES`
+  (`writeGuards.ts`) beside Proposed, Approved and Registered.
+- **Reassign architect** picks from Builder Profiles and sets `Suggested
+  Architect` and `Architect Slack ID` together, with `Reassigned By` and
+  `Reassigned At`; the old architect loses the right to act. Why This Architect
+  is left as written, and the panel says it was written for the first one.
+- A Registered or Declined candidate refuses all three with a 409; that is the
+  end of its life. These are **new field names** added to the blob, never a
+  rename of one the engine writes.
+
+**Who may act: the suggested architect (`Architect Slack ID`), the builder
+(`Builder Slack ID`), Jason or Destiny** — checked on the server before any
+write; anyone else is 403 and nothing, not even an audit line, is written.
+**The person acting is declared, not authenticated**: this dashboard has one
+shared login and no per-person identity, so the panel asks "Acting as" from
+Builder Profiles (`GET /api/builder-profiles`), remembers it in this browser
+(`bha.actingAs`), and says in words beside the picker that it is not checked.
+The check stops somebody acting on another person's candidate by mistake; it
+cannot stop a teammate who picks another name, and nothing here claims to.
+Per-person sign-in would be the fix and is a scope change, not built.
+
+**Every action goes through the MCP write tools' own handlers** with a third
+access, **`page`**, beside `read` and `write`: the guards, `engineWrite`, the
+`engine_writes` line (endpoint `page:<tool>`, key `session cookie`) and the
+`engine_mcp_writes` audit (access `page`, `requester_user_id` the person
+acting) are exactly an MCP call's. `page` is never an MCP connection — the
+transport narrows it to `read` for listing, and no URL grants it.
+`npm run test:candidates` pins all of it end to end against Google and BHARAG
+stand-ins, on throwaway profiles and candidates it deletes.
 
 **Build patterns has no status** (decision 2026-09-15, Destiny). `pattern_status`
 was deleted from the base and removed from every workflow that wrote it, so the
