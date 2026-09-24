@@ -9486,3 +9486,29 @@ Decision:   find_records is registered with the read tools, so the read URL
             - the brief's dry-run ask now passes;
             - an exact copy of an open loop is still refused.
             test:recovery, test:lookup and test:pay still pass.
+
+## 2026-09-24 06:07 — find_records and the tuned gate: live
+Intent:     Run the brief's done-means against production.
+Files:      BUILD_LOG.md.
+Problem:    This session's own connector lists the tools it was given when it
+            connected, and the server declares listChanged: false. So
+            find_records, deployed after that, is not callable from here until
+            the connector refreshes. That is the same refresh the brief
+            expects a client to do.
+Fix:        —
+Decision:   Deploy dep-daqbq5ou01pc73clpijg (2eefd32) went live 06:03:47Z.
+            #7 live: a dry-run create of "Dry-run connectivity test from Bays
+            agent" (BAYS, Destiny) passes every guard, the duplicate gate
+            included (audit_id 7).
+            #8 live: a dry-run exact copy of open loop LOOP-1790182250648-ZOLH
+            is refused possible_duplicate, score 1, 20 shared words, with the
+            rule stated (audit_id 8).
+            #1–#6 are not yet run live. What they should return, read from
+            production with the same one-row-per-loop_id rule:
+            - #1: 30 BAYS loops not Closed, In Progress 11 and Open 19.
+            - #2: LOOP-1789580654185-C26M is Closed. It will surface on a
+              search without status_not, and not with status_not: "Closed".
+            - #3: CARD-1790036548913-TTF6 is held, one card.
+            - #4: its research jobs number 2.
+            - #6: Layer 0 holds 0 pending_builder_input rows; every row is
+              `completed`. So the answer is total 0, which is correct.
