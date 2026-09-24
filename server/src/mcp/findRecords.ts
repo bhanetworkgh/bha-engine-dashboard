@@ -81,9 +81,13 @@ const SHAPE: Record<string, KindShape> = {
   'rt-jobs': { search: ['Question', 'Context'], status: 'Status', lane: 'Lane', date: 'Opened At', page: '/research-twin' },
   lane_backlog: { search: ['task'], status: 'status', lane: 'lane', date: null, page: null },
   builder_profiles: { search: ['name', 'role', 'lane'], status: null, lane: 'lane', date: null, page: null },
+  // Read only (2026-09-24): which capture doc each Slack channel writes into
+  // now, and the one before it — the Daily Doc Rotator and the digest read it.
+  channel_tracking: { search: ['channel_name', 'channel_id'], status: null, lane: null, date: 'date', page: null },
 };
 
-export const READABLE_KINDS = [...guards.WRITABLE_KINDS, 'layer0'];
+/** Every kind find_records reads. The last two are read only: nothing on MCP writes them. */
+export const READABLE_KINDS = [...guards.WRITABLE_KINDS, 'layer0', 'channel_tracking'];
 
 /** The public address the pages are served at, for links in replies. */
 function pageUrl(kind: string): string | null {
@@ -167,6 +171,39 @@ export async function findRecords(args: Record<string, unknown>): Promise<Record
     else {
       params.push(name);
       where.push(`fields->>$${params.length} = ANY(${p})`);
+    }
+  }
+
+  /*
+   * filters_gte / filters_lte (2026-09-24): the REST lookup's gte. and lte.,
+   * and the same rule — a **string** comparison, so ISO dates compare
+   * correctly as text, and refused on `id`, the one numeric thing here, rather
+   * than being quietly wrong on it. A column name addresses the column
+   * (created_time and updated_at included); anything else is a blob field.
+   */
+  const RANGE_COLUMNS = ['natural_id', 'builder_id', 'lane_id', 'table_id', 'created_time', 'updated_at'];
+  for (const [arg, op] of [['filters_gte', '>='], ['filters_lte', '<=']] as const) {
+    const raw = args[arg];
+    if (raw === undefined) continue;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new McpError('bad_argument', `"${arg}" must be an object: { "<field>": "<value>" }.`);
+    for (const [name, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (name === 'id') throw new McpError('bad_argument', `"${arg}" compares as text and is refused on "id", which is a number — filter on "id" exactly, or on created_time / a date field.`);
+      if (v === null || v === undefined || typeof v === 'object') throw new McpError('bad_argument', `"${arg}.${name}" must be one value, compared as text (e.g. "2026-09-23").`);
+      const value = String(v);
+      if (RANGE_COLUMNS.includes(name)) {
+        if (name !== 'created_time' && name !== 'updated_at' && !cols.has(name)) {
+          warnings.push(`"${name}" is not a column ${spec.table} has, so this ${arg} filter matches nothing.`);
+          where.push('false');
+          continue;
+        }
+        params.push(value);
+        where.push(`${name}::text ${op} $${params.length}`);
+      } else {
+        const seen = await query(`SELECT 1 FROM ${spec.table} WHERE fields ? $1 LIMIT 1`, [name]);
+        if (!seen.rowCount) warnings.push(`No ${kind} row carries a field called "${name}" (field names are case- and space-exact), so this ${arg} filter matches nothing.`);
+        params.push(name, value);
+        where.push(`fields->>$${params.length - 1} ${op} $${params.length}`);
+      }
     }
   }
 

@@ -45,6 +45,8 @@ import * as bharag from './bharag';
 import { monthly } from './monthly';
 import { isStatKind, stats } from './stats';
 import { N8N_API_VAR, n8nBase, n8nConfigured } from './n8n';
+import * as slack from './slack';
+import * as google from './google';
 import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, MCP_SECRET_VAR, MCP_WRITE_TOKEN_VAR, MCP_ONE_URL } from './mcp';
 import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
@@ -1600,6 +1602,17 @@ async function boot(): Promise<void> {
         : mcpWriteConfigured()
           ? `  mcp:      /mcp/<${MCP_WRITE_TOKEN_VAR}> — the write connection: every read tool plus create, update, archive and delete behind the Tools Router guards`
           : `  mcp:      write connection OFF — ${MCP_WRITE_TOKEN_VAR} is not set, so no MCP client can write.`,
+    );
+    // The Slack and Google credentials the file and Doc tools need (2026-09-24).
+    console.log(
+      slack.slackConfigured()
+        ? `  slack:    ${slack.SLACK_TOKEN_VAR} set — read_slack_file and the domain-guard DM work`
+        : `  slack:    ${slack.SLACK_TOKEN_VAR} NOT set — read_slack_file answers not_configured and a refused grant_drive_access cannot DM Destiny`,
+    );
+    console.log(
+      google.googleMode()
+        ? `  google:   ${google.googleMode() === 'oauth' ? 'OAuth refresh token' : 'service account'} — share_doc, grant_drive_access, create_doc and pattern Docs work`
+        : `  google:   NOT configured — ${google.notConfiguredMessage()}`,
     );
     /**
      * The one public write route, said out loud at boot.

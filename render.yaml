@@ -203,6 +203,25 @@ services:
         sync: false
       - key: BHARAG_COMMERCIAL_KEY
         sync: false
+      # The Bays bot token (xoxb-), for read_slack_file and the DM a refused
+      # grant_drive_access sends Destiny (2026-09-24). Needs files:read and
+      # chat:write. Unset, both answer not_configured.
+      - key: SLACK_BAYS_BOT_TOKEN
+        sync: false
+      # Google, for share_doc, grant_drive_access, create_doc and the pattern
+      # Doc on create_record (2026-09-24). EITHER the OAuth trio (acts as the
+      # Google user who granted it, like n8n's "Admin Google Docs") OR a
+      # service account key, whole, in GOOGLE_SERVICE_ACCOUNT_JSON. Scopes:
+      # drive and documents. Unset, those tools answer not_configured and a
+      # pattern still saves with doc_created: false.
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_OAUTH_REFRESH_TOKEN
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
       - key: RECOVERY_ENABLED
         value: ""
       # Whether this dashboard still depends on Airtable at all (22 Sep 2026).

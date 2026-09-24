@@ -794,10 +794,12 @@ reasonable about.
   rest, and a payload past the size cap comes back as its **shape** rather than
   as a sample: a fragment read as the whole is the failure worth designing out.
 - Every call is logged with its name, its arguments and which connection
-  (`[mcp:read]` / `[mcp:write]`) it came in on. **Fifteen tools on the read
-  connection** (fourteen read, one act — `get_recovery_status` added
-  2026-09-23, `find_records` 2026-09-24), **twenty on the write connection**
-  (those plus the five write tools, 2026-09-24), and **every one of them carries MCP annotations**
+  (`[mcp:read]` / `[mcp:write]`) it came in on. **Eighteen tools on the read
+  connection** (seventeen read, one act — `get_recovery_status` added
+  2026-09-23, `find_records` 2026-09-24, `list_n8n_workflows`,
+  `get_n8n_workflow` and `read_slack_file` later the same day), **twenty-six
+  on the write connection** (those plus the five record write tools and the
+  three Drive tools, 2026-09-24), and **every one of them carries MCP annotations**
   (decision 2026-09-20, Destiny), because the spec's default for a tool that
   declares none is *potentially destructive* — twelve read-only tools that
   said nothing about themselves were being offered to every client as though
@@ -1025,6 +1027,66 @@ archive records directly, with the checks the Bays Tools Router enforces.
   change and closed after it, so a write whose audit cannot be recorded never
   happens. The **MCP writes** tab on Engine health reads the last hundred.
   `npm run test:mcp-write` pins all of it end to end.
+
+**Bays moves onto the dashboard MCP, finished** (decision 2026-09-24, Destiny).
+Bays is the n8n Agent `Nw5igXu4WWrjUMWB` behind `Bays — Front Door` →
+`Bays — Agent Delivery` (`5AFqtZQaeKFFiGqe`); the Conversational Agent, Tools
+Router, Extra Tools and Dashboard Agent are unpublished and the registry says
+**retired** (seed, and migration 30 on a live database, only where a row was
+still `production`). Agent Delivery also serves
+`POST /webhook/dashboard-ask-bays` (header auth, credential "BHARAG - Codex") —
+the Ask Bays panel — and `ASK_BAYS_URL` did not change. The last things the
+agent did through n8n tools of its own are tools here:
+
+- **`list_n8n_workflows`** (`id, name, active` and nothing else) and
+  **`get_n8n_workflow`** — `id, name, active, updatedAt`; nodes without the
+  sticky notes as `{name, type, disabled, parameters}`, parameters JSON capped
+  at 1,500 characters; connections as `"From [main 0] -> To"`; the sticky
+  notes' text as `notes`, each capped at 3,000. Every cut is flagged and
+  carries its full length. An unknown id says "use list_n8n_workflows to find
+  the exact id". `N8N_API_KEY`, read only — `server/src/mcp/n8nTools.ts`
+  never reaches `replaceWorkflow`.
+- **`read_slack_file`** (`docTools.ts`, read only, both connections) — only
+  `https://files.slack.com/`, checked on the parsed URL (a look-alike host, a
+  `user@` prefix and plain http are all `not_a_slack_file_url`), downloaded
+  with `SLACK_BAYS_BOT_TOKEN` **without following redirects**, because an
+  unauthorised Slack file redirects to a sign-in page that answers 200.
+  Outcomes `extracted`, `no_text_layer`, `file_not_found`, `not_authorised`;
+  at most 30,000 characters with `truncated: true`. **A PDF is read by
+  `server/src/pdf.ts`, not pdf-parse**: rule 5 of section 2 makes `pg` the
+  ceiling, so it is Node's zlib and ~400 lines — objects, object streams, the
+  page tree, `Tj`/`TJ`/`'`/`"`, each font's `ToUnicode`. It does not decrypt,
+  OCR, or follow form XObjects, and says so in its outcome rather than
+  guessing; a CID font with no `ToUnicode` is skipped and counted, never
+  emitted as mojibake.
+- **`share_doc`**, **`grant_drive_access`** and **`create_doc`** — write
+  connection only, audited on `engine_mcp_writes` like the record tools.
+  **`grant_drive_access` refuses any address that is not exactly
+  `…@bhanetwork.org`** — in `isBhaEmail`, in code, never in a prompt;
+  `sub.bhanetwork.org`, `evil-bhanetwork.org` and two `@`s are all refused —
+  with `non_bhanetwork_email`, calls Google for nothing, and DMs Destiny
+  (`U0AEW3TBYH1`) the address and the file, dry run or not. **`create_doc`,
+  not a `digest_archive` option**, is how the daily digest archive is written
+  (folder `1lbNlyzOknDu2mjWaOIeyUrWj-3mmax-V`, `Bays — Daily Digests`): one
+  tool that makes a Doc in a folder is one a caller can reason about; an
+  option that changed what another tool does is not.
+- **A created pattern gets its Google Doc** — `Build Pattern --
+  <pattern_name> -- <drafted_by or 'Bays'>` in `1o_EkaqsC9C1opq1to5mAmt63eUPFn55b`,
+  the folder `LBP - Create Pattern Doc` wrote to, holding exactly the text
+  BHARAG receives. After the save and never able to undo it: `doc_created`,
+  `doc_id` and, on failure, `doc_error` beside `ingested_to_bharag`. A Doc
+  made whose text did not land is `doc_created: false` **with** its `doc_id`,
+  so an empty Doc is not lost.
+- **`find_records`** gains `filters_gte` / `filters_lte` — the REST lookup's
+  `gte.`/`lte.`, string comparisons, refused on `id` — and the read-only kind
+  **`channel_tracking`**, whose rows carry `doc_id` and `previous_doc_id`.
+- **Google has two credential shapes and no default** (`server/src/google.ts`):
+  the OAuth trio or a service account key. n8n's "Admin Google Docs" is OAuth
+  and cannot be read from here. A service account has no Drive storage of its
+  own and can only create a Doc in a shared drive or a folder shared with it;
+  Google's `storageQuotaExceeded` is passed through verbatim.
+  `npm run test:bays-tools` pins all of it against local stand-ins for n8n,
+  Slack and Google.
 
 **The recovery watcher re-runs what failed because a dependency was down**
 (decision 2026-09-23, Destiny — brief D2). `server/src/recovery.ts`. When
@@ -1308,6 +1370,15 @@ string goes into the connector URL. `BHARAG_CODEX_KEY`,
 `BHARAG_BUILD_PATTERNS_KEY` and `BHARAG_COMMERCIAL_KEY` — the BHARAG workspace
 keys the write tools ingest a created Codex entry, pattern or commercial card
 with; unset, the row still saves and the answer says it is not in BHARAG.
+`SLACK_BAYS_BOT_TOKEN` — the Bays bot token (`xoxb-`, `files:read` and
+`chat:write`) for `read_slack_file` and the domain-guard DM (2026-09-24); no
+default. `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` and
+`GOOGLE_OAUTH_REFRESH_TOKEN`, **or** `GOOGLE_SERVICE_ACCOUNT_JSON` — Drive and
+Docs for the three Drive tools and the pattern Doc (scopes `drive` and
+`documents`); unset, they answer `not_configured` and the boot line names the
+variables. `SLACK_API_URL`, `SLACK_FILES_ORIGIN` and `GOOGLE_API_URL` are
+optional and exist for the local stand-ins; the check that a file url is
+`https://files.slack.com/` never moves.
 `EARLY_ACCESS_NOTIFY_URL` — the n8n webhook that posts a lead from the
 superseded public route into `#vfarm-early-access`; Form A leads are announced
 by Hardik's tracker and never touch it. Unset, the hop is skipped, the boot line says

@@ -287,6 +287,7 @@ export interface N8nWorkflowFull {
   connections: Record<string, unknown>;
   settings?: unknown;
   active?: boolean;
+  updatedAt?: string | null;
 }
 
 export async function workflow(id: string): Promise<N8nWorkflowFull> {
@@ -299,6 +300,7 @@ export async function workflow(id: string): Promise<N8nWorkflowFull> {
     connections: w.connections && typeof w.connections === 'object' ? w.connections : {},
     settings: w.settings,
     active: w.active,
+    updatedAt: typeof w.updatedAt === 'string' ? w.updatedAt : null,
   };
 }
 

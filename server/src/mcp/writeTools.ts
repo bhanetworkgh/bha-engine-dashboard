@@ -28,6 +28,7 @@ import { query } from '../pg';
 import * as mirror from '../mirror';
 import * as engineWrite from '../engineWrite';
 import * as bharag from '../bharag';
+import * as google from '../google';
 import * as guards from '../writeGuards';
 import { McpError } from './source';
 import type { ToolDefinition, ToolDeps } from './tools';
@@ -43,7 +44,7 @@ interface AuditOpen {
   dry_run: boolean;
 }
 
-async function auditOpen(a: AuditOpen): Promise<number> {
+export async function auditOpen(a: AuditOpen): Promise<number> {
   const digest = createHash('sha256').update(JSON.stringify({ tool: a.tool, args: a.args })).digest('hex');
   const r = await query<{ id: string }>(
     `INSERT INTO engine_mcp_writes (tool, arguments, digest, access, kind, dry_run, requester_user_id, outcome, actor, target)
@@ -53,7 +54,7 @@ async function auditOpen(a: AuditOpen): Promise<number> {
   return Number(r.rows[0].id);
 }
 
-async function auditClose(
+export async function auditClose(
   id: number,
   c: { outcome: string; detail?: string | null; record_id?: string | number | null; natural_id?: string | null; before?: unknown; after?: unknown; guard_result?: unknown },
 ): Promise<void> {
@@ -206,6 +207,12 @@ function documentFor(kind: string, f: Record<string, unknown>, drafter: string):
   return null;
 }
 
+/**
+ * Where a build pattern's Google Doc goes: the folder n8n's
+ * `LBP - Create Pattern Doc` wrote into, verbatim (2026-09-24).
+ */
+export const PATTERN_DOC_FOLDER = '1o_EkaqsC9C1opq1to5mAmt63eUPFn55b';
+
 /* -------------------------------------------------------------- the tools */
 
 const WRITE_ANNOTATIONS = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } as const;
@@ -260,7 +267,7 @@ const listWritableKinds: ToolDefinition = {
 const createRecord: ToolDefinition = {
   name: 'create_record',
   description:
-    'Create one record. Runs every guard for the kind first — for loops the lane set, lane-owner gate and duplicate gate the Bays Tools Router runs — and writes nothing if one refuses, returning ok:false with the reason (possible_duplicate, lane_owner_mismatch, missing_required, invalid_value, already_exists) and what to send to proceed. Never overwrites: a natural id already held is refused. On success returns the stored row, its id and natural_id. For codex, patterns and commercial the new record is also ingested into its BHARAG workspace, reported separately as ingested_to_bharag.',
+    'Create one record. Runs every guard for the kind first — for loops the lane set, lane-owner gate and duplicate gate the Bays Tools Router runs — and writes nothing if one refuses, returning ok:false with the reason (possible_duplicate, lane_owner_mismatch, missing_required, invalid_value, already_exists) and what to send to proceed. Never overwrites: a natural id already held is refused. On success returns the stored row, its id and natural_id. For codex, patterns and commercial the new record is also ingested into its BHARAG workspace, reported separately as ingested_to_bharag. A pattern also gets its Google Doc (title "Build Pattern -- <pattern_name> -- <drafted_by>", the same text BHARAG receives, in the build patterns Drive folder), reported as doc_created and doc_id — a Doc that fails never undoes the record.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -270,6 +277,7 @@ const createRecord: ToolDefinition = {
       builder_id: { type: 'string', description: 'Codex only: whose log it is.' },
       confirmed_new: { type: 'boolean', description: 'The person has confirmed this is not one of the possible duplicates returned.' },
       confirmed_assignee: { type: 'boolean', description: 'The person has confirmed the assignee even though they do not own the lane.' },
+      drafted_by: { type: 'string', description: 'Patterns and commercial: who drafted it, for the document title ("Build Pattern -- <pattern_name> -- <drafted_by>"). Default "Bays".' },
       ...GUARD_ARGS,
     },
     required: ['kind', 'fields'],
@@ -294,9 +302,14 @@ const createRecord: ToolDefinition = {
       await auditClose(audit, { outcome: 'refused', detail: `${plan.reason}: ${plan.message}`, guard_result: plan });
       return refused(plan, { audit_id: audit });
     }
+    const drafter = s(args, 'drafted_by') ?? 'Bays';
     if (dry) {
       await auditClose(audit, { outcome: 'dry_run', natural_id: plan.natural_id, after: plan.input, guard_result: plan.checks });
-      return { ok: true, dry_run: true, written: false, kind: spec.kind, natural_id: plan.natural_id, would_write: plan.input, checks: plan.checks, audit_id: audit };
+      const wouldDoc =
+        spec.kind === 'patterns'
+          ? { would_create_doc: { folder_id: PATTERN_DOC_FOLDER, title: `Build Pattern -- ${String((plan.input.fields as Record<string, unknown> | undefined)?.pattern_name ?? '')} -- ${drafter}`, google_configured: google.googleConfigured() } }
+          : {};
+      return { ok: true, dry_run: true, written: false, kind: spec.kind, natural_id: plan.natural_id, would_write: plan.input, ...wouldDoc, checks: plan.checks, audit_id: audit };
     }
 
     let written: engineWrite.PostResult;
@@ -311,7 +324,7 @@ const createRecord: ToolDefinition = {
 
     let ingest: { attempted: boolean; ok: boolean; detail: string } | null = null;
     if (spec.ingest && row) {
-      const doc = documentFor(spec.kind, row.fields, requester ?? 'MCP');
+      const doc = documentFor(spec.kind, row.fields, drafter);
       if (!doc) ingest = { attempted: false, ok: false, detail: 'The row carries no text to ingest (no Orchestrator Layer2 Review or Summary), so nothing was sent.' };
       else {
         const r = await bharag.ingest(spec.ingest, doc);
@@ -319,9 +332,33 @@ const createRecord: ToolDefinition = {
       }
     }
 
+    // The pattern's Google Doc: after the save, and never able to undo it.
+    let gdoc: { doc_created: boolean; doc_id: string | null; doc_link?: string; doc_error?: string } | null = null;
+    if (spec.kind === 'patterns' && row) {
+      const doc = documentFor('patterns', row.fields, drafter)!;
+      if (!google.googleConfigured()) gdoc = { doc_created: false, doc_id: null, doc_error: google.notConfiguredMessage() };
+      else {
+        try {
+          const d = await google.createDoc(PATTERN_DOC_FOLDER, doc.title, doc.content);
+          gdoc = d.content_written
+            ? { doc_created: true, doc_id: d.doc_id, doc_link: d.link }
+            : { doc_created: false, doc_id: d.doc_id, doc_link: d.link, doc_error: `The Doc was created but its text was not written: ${d.error}` };
+        } catch (e) {
+          gdoc = { doc_created: false, doc_id: null, doc_error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+    }
+
+    const notes = [
+      ingest && !ingest.ok ? 'It is NOT in BHARAG yet — see bharag.detail.' : null,
+      gdoc && !gdoc.doc_created ? 'Its Google Doc was NOT made — see doc_error.' : null,
+    ].filter(Boolean);
     await auditClose(audit, {
       outcome: written.outcome,
-      detail: ingest ? `bharag: ${ingest.ok ? 'ingested' : 'not ingested'} — ${ingest.detail}` : null,
+      detail:
+        [ingest ? `bharag: ${ingest.ok ? 'ingested' : 'not ingested'} — ${ingest.detail}` : null, gdoc ? `doc: ${gdoc.doc_created ? `created ${gdoc.doc_id}` : `not created — ${gdoc.doc_error}`}` : null]
+          .filter(Boolean)
+          .join(' | ') || null,
       record_id: written.id,
       natural_id: written.natural_id,
       after: row,
@@ -331,6 +368,7 @@ const createRecord: ToolDefinition = {
       ok: true,
       saved: true,
       ...(ingest ? { ingested_to_bharag: ingest.ok, bharag: ingest } : {}),
+      ...(gdoc ?? {}),
       kind: spec.kind,
       id: written.id,
       natural_id: written.natural_id,
@@ -338,7 +376,7 @@ const createRecord: ToolDefinition = {
       row,
       checks: plan.checks,
       audit_id: audit,
-      ...(ingest && !ingest.ok ? { note: 'The record is saved. It is NOT in BHARAG yet — see bharag.detail. This is not full success.' } : {}),
+      ...(notes.length ? { note: `The record is saved. ${notes.join(' ')} This is not full success.` } : {}),
     };
   },
 };

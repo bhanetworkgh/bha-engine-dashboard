@@ -21,6 +21,8 @@ import * as airtable from '../airtable';
 import * as bharag from '../bharag';
 import * as recovery from '../recovery';
 import { WRITE_TOOLS } from './writeTools';
+import { DOC_WRITE_TOOLS, readSlackFile } from './docTools';
+import { getN8nWorkflow, listN8nWorkflows } from './n8nTools';
 import { findRecords, READABLE_KINDS } from './findRecords';
 import * as mirror from '../mirror';
 import * as n8n from '../n8n';
@@ -731,12 +733,14 @@ const getRecoveryStatus: ToolDefinition = {
 const findRecordsTool: ToolDefinition = {
   name: 'find_records',
   description:
-    'One structured read for every writable kind — loops, codex, patterns, pattern_candidates, commercial, rt-jobs, lane_backlog, builder_profiles — plus layer0 (parked logs, read only). Filter on any field (exact, a value or a list; top-level columns builder_id, lane_id, table_id, natural_id, id too), search by words (the Bays router\u2019s own word match: every row gets a match_score 0–1, rows with no word matched are dropped, best first), exclude statuses with status_not ("Closed" is the usual "everything still open"), and order newest, oldest or status_age (In Progress, then Open, oldest first within each). Counts by status, lane and builder are over the whole filtered set, not the page. Loops come back one row per loop_id, the way the Open loops page counts them. An unknown field or a value outside a field\u2019s vocabulary is applied and warned about, never silently dropped. Use this instead of query_postgres for anything a kind\u2019s own fields can answer.',
+    'One structured read for every writable kind — loops, codex, patterns, pattern_candidates, commercial, rt-jobs, lane_backlog, builder_profiles — plus two read-only kinds: layer0 (parked logs) and channel_tracking (which capture doc each Slack channel writes into now — doc_id — and the one before it — previous_doc_id). Filter on any field (exact, a value or a list; top-level columns builder_id, lane_id, table_id, natural_id, id too), search by words (the Bays router\u2019s own word match: every row gets a match_score 0–1, rows with no word matched are dropped, best first), exclude statuses with status_not ("Closed" is the usual "everything still open"), and order newest, oldest or status_age (In Progress, then Open, oldest first within each). Counts by status, lane and builder are over the whole filtered set, not the page. Loops come back one row per loop_id, the way the Open loops page counts them. An unknown field or a value outside a field\u2019s vocabulary is applied and warned about, never silently dropped. Use this instead of query_postgres for anything a kind\u2019s own fields can answer.',
   inputSchema: {
     type: 'object',
     properties: {
       kind: { type: 'string', enum: READABLE_KINDS },
       filters: { type: 'object', description: 'Exact match, ANDed: { "lane_tag": "BAYS" }, { "Card ID": "CARD-…" }, { "Status": ["Open", "In Progress"] }. Field names exactly as the rows carry them.' },
+      filters_gte: { type: 'object', description: 'At least, compared as text (ISO dates sort correctly): { "Date Raised": "2026-09-23" }, { "updated_at": "2026-09-23T00:00:00Z" }. The REST lookup\u2019s gte. — refused on id.' },
+      filters_lte: { type: 'object', description: 'At most, compared as text: { "date": "2026-09-23" }. The REST lookup\u2019s lte. — refused on id.' },
       search: { type: 'string', description: 'Words to look for, e.g. "golden CAD run event provenance". Loops search What, loop_id and lane_tag; other kinds their title field, its companion and their natural id.' },
       status_not: { description: 'A status, or statuses, to leave out — e.g. "Closed".', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
       order: { type: 'string', enum: ['newest', 'oldest', 'status_age'], description: 'Default newest; with a search, best match first.' },
@@ -756,7 +760,7 @@ const findRecordsTool: ToolDefinition = {
       method: 'MCP',
       key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET',
       outcome: 'read',
-      detail: `${JSON.stringify({ filters: args.filters ?? null, search: args.search ?? null, status_not: args.status_not ?? null, order: args.order ?? null }).slice(0, 300)} → ${String(out.returned)} of ${String(out.total)}`,
+      detail: `${JSON.stringify({ filters: args.filters ?? null, gte: args.filters_gte ?? null, lte: args.filters_lte ?? null, search: args.search ?? null, status_not: args.status_not ?? null, order: args.order ?? null }).slice(0, 300)} → ${String(out.returned)} of ${String(out.total)}`,
       ms: Date.now() - t0,
     });
     return out;
@@ -779,6 +783,10 @@ export const TOOLS: ToolDefinition[] = [
   searchLogs,
   getRecoveryStatus,
   findRecordsTool,
+  // 2026-09-24: what the Bays agent read through n8n tools of its own.
+  listN8nWorkflows,
+  getN8nWorkflow,
+  readSlackFile,
   // The one that is not a read.
   resyncTool,
 ];
@@ -790,7 +798,7 @@ export const TOOLS: ToolDefinition[] = [
  * tool a client can see is a tool a model will try.
  */
 function toolsFor(access: 'read' | 'write'): ToolDefinition[] {
-  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS] : TOOLS;
+  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS] : TOOLS;
 }
 
 export function toolByName(name: string, access: 'read' | 'write' = 'read'): ToolDefinition | null {
