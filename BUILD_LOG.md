@@ -9792,3 +9792,19 @@ Decision:   Ported as written. That covers SNG - Build Recipients' tokeniser
             Verified locally: test:bays-tools 22/22, against a Slack stand-in
             that refuses with 200 ok:false. mcp-write, north-star, lookup, pay,
             gate and recovery all pass, and the build is clean.
+
+## 2026-09-24 10:15 — brief (g) deployed; live proofs handed to Destiny
+Intent:     Deploy 282608e and prove it on production.
+Files:      BUILD_LOG.md.
+Problem:    Deploy dep-daqfeq8u01pc73cpjnkg went live at 10:12:37Z, and
+            migration 32 was applied at 10:12:33Z. On production,
+            seK3we7pTurvZmqe reads status "retired" with the new note. Checked
+            with query_postgres.
+            The live send_nudge and post_file calls could not be made from
+            this session. The sandbox gets curl 000 to dashboard.bhanetwork.org,
+            and this session's connector still holds the tool list from before
+            these tools existed.
+Fix:        —
+Decision:   Nothing was worked around. Destiny runs the two proof calls after
+            a tool refresh. Each one leaves a line on engine_mcp_writes, and
+            that line can be read back here.
