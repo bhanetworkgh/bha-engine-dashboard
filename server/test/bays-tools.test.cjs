@@ -581,7 +581,17 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(`http:
     assert.equal(reg.rows.find((r) => r.id === '5AFqtZQaeKFFiGqe').replay, 'never');
     const ep = await query(`SELECT notes FROM registry_endpoints WHERE id = 'ep-dashboard-ask-bays'`);
     assert.match(ep.rows[0].notes, /Agent Delivery \(5AFqtZQaeKFFiGqe\)/);
-    step('registry: five retired (North Star — Conversational Agent included), Agent Delivery added, endpoint note names it');
+    const rt = await query(`SELECT id, status, replay, notes FROM registry_workflows WHERE id = ANY($1)`, [['u2jfe2eRQYIEtuZQ', '4beRTMIlgJ0njPna', 'zikfpO0wvqzPCQuz', 'w4SdZjjpokMuWPkV', 'DYBjrMopNqFDUV6P']]);
+    const rs = Object.fromEntries(rt.rows.map((r) => [r.id, r]));
+    assert.equal(rs.u2jfe2eRQYIEtuZQ.status, 'retired');
+    assert.equal(rs['4beRTMIlgJ0njPna'].status, 'retired');
+    assert.equal(rs.zikfpO0wvqzPCQuz.status, 'production', 'the Tools Router is noted, not retired, until Monday');
+    assert.match(rs.zikfpO0wvqzPCQuz.notes, /No remaining callers since 24 Sep 2026/);
+    for (const id of ['w4SdZjjpokMuWPkV', 'DYBjrMopNqFDUV6P']) {
+      assert.equal(rs[id].status, 'production', id);
+      assert.equal(rs[id].replay, 'never', id);
+    }
+    step('registry: five retired (North Star — Conversational Agent included), Agent Delivery added, endpoint note names it; RT Conversational Agent and the RT test retired, RT Agent Delivery and Bays — Slack Request added');
 
     await query(`DELETE FROM engine_channel_tracking WHERE natural_id IN ($1, $2)`, [ch, `${ch}B`]);
     console.log(passed.map((p) => `  ✓ ${p}`).join('\n'));

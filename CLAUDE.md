@@ -794,12 +794,13 @@ reasonable about.
   rest, and a payload past the size cap comes back as its **shape** rather than
   as a sample: a fragment read as the whole is the failure worth designing out.
 - Every call is logged with its name, its arguments and which connection
-  (`[mcp:read]` / `[mcp:write]`) it came in on. **Twenty-one tools on the read
-  connection** (twenty read, one act — `get_recovery_status` added
+  (`[mcp:read]` / `[mcp:write]`) it came in on. **Twenty-two tools on the read
+  connection** (twenty-one read, one act — `get_recovery_status` added
   2026-09-23, `find_records` 2026-09-24, `list_n8n_workflows`,
   `get_n8n_workflow` and `read_slack_file` later the same day, then North
-  Star's `read_slack`, `read_open_loops` and `get_priority_evidence`),
-  **thirty-seven on the write connection** (those plus the five record write tools, the
+  Star's `read_slack`, `read_open_loops` and `get_priority_evidence`, then
+  `sweep_airtable_nodes`),
+  **thirty-eight on the write connection** (those plus the five record write tools, the
   three Drive tools, the two Slack writes `send_nudge` and `post_file`, and
   Research Twin's six, 2026-09-24), and **every one of them carries MCP annotations**
   (decision 2026-09-20, Destiny), because the spec's default for a tool that
@@ -1241,6 +1242,36 @@ code, clock frozen, came out identical on 77 cases before anything was wired.
 - **`rt-asks` is delete-only** (2026-09-24): `delete_record` takes it — the
   same confirm, `record_deletions` copy and audit line — and no other write
   tool does. It exists so a test delivery can be removed without a SQL console.
+
+**The hidden Airtable writer sweep** (2026-09-24, Destiny —
+LOOP-1790034076667-8HOF). After the cutover a workflow still writing to
+Airtable writes somewhere nobody reads, so every workflow's JSON — active and
+inactive, because an inactive one can be switched back on — is read and every
+node touching Airtable named: an Airtable node type (`airtable`,
+`airtableTool`, `airtableTrigger`), an Airtable credential, or `airtable` /
+`api.airtable.com` / a base id `app…` / a table id `tbl…` in its parameters,
+URLs, expressions or Code. `server/src/airtableSweep.ts` holds the rules and is
+pure; three doors feed it: the read tool **`sweep_airtable_nodes`** (both
+connections, the server's own `N8N_API_KEY`, GET only), `scripts/airtable-sweep.cjs`
+(the API with a key, or `--dir` over exported JSON), and `npm run
+test:airtable-sweep`. **A call and a reference are different findings**: a
+node calls Airtable only through an Airtable node, an Airtable credential or
+`api.airtable.com`; a dashboard URL carrying `table_id=tbl…`, a table map in a
+Code node or a comment about Airtable's row shape names an id and touches
+nothing, and is listed apart as `none`. Read or write is taken from the
+operation or the HTTP method, and **an operation that is not set, or is an
+expression, is `unknown` and counted with the writers**, never assumed a read.
+Owned tables come from `sources.ts`, never re-typed; the loop, Codex and
+watched-client bases count whole. Buckets: active writers (live workflow,
+enabled node), writers that would run if switched on, reads, references. The
+n8n public API cannot list credentials, so the tool names only those a node
+uses. **24 Sep result** (`docs/sweeps/airtable-2026-09-24.md`, 46 of 48
+workflows through the n8n connector, the other two not MCP-enabled): no active
+writer; one that would write if switched on — `BHA — Dashboard Loop Write-Back`
+(`GES8UIM3dJRbrLSx`, inactive), `Update Loop Status` (update) and
+`Find Loop Row` (search) on the Open Loops base with "Admin Airtable"
+(`IOwa36AoQylkenkh`), the one Airtable credential in n8n; 145 references, no
+calls; no Airtable tool on any of the three n8n Agents.
 
 **The recovery watcher re-runs what failed because a dependency was down**
 (decision 2026-09-23, Destiny — brief D2). `server/src/recovery.ts`. When
@@ -2640,7 +2671,19 @@ closed as won't fix, because a chat reply arriving hours late to a thread that
 has moved on is worse than none. Seeded `never` for Bays — Conversational Agent,
 Bays — Front Door, Bays — Dashboard Agent, North Star — Conversational Agent and
 North Star — Front Door (migration 28 on a live database, the seed on a new
-one); everything else `auto`.
+one), then the three Agent Deliveries and Bays — Slack Request as each was
+added; everything else `auto`.
+
+**24 Sep 2026 registry changes** (migration 33, seed): `Research Twin —
+Conversational Agent` (`u2jfe2eRQYIEtuZQ`) **retired** — unpublished, in
+RETIRED / RESEARCH TWIN, replaced by Research Twin (Agent) through
+`Research Twin — Agent Delivery` (`w4SdZjjpokMuWPkV`, added); `TEST —
+Self-healing, Research Twin lane` (`4beRTMIlgJ0njPna`) **retired**, archived;
+`Bays — Slack Request` (`DYBjrMopNqFDUV6P`, added) is the Bays agent's
+Slack_Request tool, replacing a URL-placeholder HTTP tool an n8n Agent cannot
+fill; `Research Twin — Tools Router` (`zikfpO0wvqzPCQuz`) keeps `production`
+with a note — no callers since 24 Sep, to be retired after Monday's Weekly
+Sweep and Watched Clients runs pass.
 
 **There is no credentials registry.** The `registry_credentials` table is not
 dropped, because nothing drops a table, but it is neither read nor served.

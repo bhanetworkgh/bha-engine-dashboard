@@ -20,7 +20,8 @@
     "test:mcp-write": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/mcp-write.test.cjs",
     "test:bays-tools": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/bays-tools.test.cjs",
     "test:north-star": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/north-star-tools.test.cjs",
-    "test:research-twin": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/research-twin-tools.test.cjs"
+    "test:research-twin": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/research-twin-tools.test.cjs",
+    "test:airtable-sweep": "npm run build:server --silent && node server/test/airtable-sweep.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",

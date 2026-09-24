@@ -9900,3 +9900,76 @@ Decision:   The agent's instructions name the old tools (Write_Research_Finding
             create_client_report_doc is not switched while its token is unset.
             Create_Client_Report_Doc stays on the workflow tool, which holds
             its own credential, so the weekly report keeps uploading.
+
+## 2026-09-24 12:20 — Registry (migration 33); the hidden Airtable writer sweep
+Intent:     Brief: retire Research Twin — Conversational Agent and the RT
+            self-healing test in the registry, and add Research Twin — Agent
+            Delivery and Bays — Slack Request. Note that the RT Tools Router
+            has no callers. Then sweep every n8n workflow for Airtable nodes
+            and report them without changing anything (closes
+            LOOP-1790034076667-8HOF).
+Files:      server/src/registrySeed.ts, server/src/migrations.ts (33),
+            server/src/airtableSweep.ts (new), server/src/n8n.ts (isArchived
+            passthrough), server/src/mcp/n8nTools.ts (sweep_airtable_nodes),
+            server/src/mcp/tools.ts, scripts/airtable-sweep.cjs (new),
+            server/test/airtable-sweep.test.cjs (new),
+            server/test/bays-tools.test.cjs, docs/sweeps/airtable-2026-09-24.md
+            (new), package.json, CLAUDE.md.
+Problem:    "Using N8N_API_KEY": the key exists only on the Render service.
+            This sandbox has none, and bayshorizonnetwork.app.n8n.cloud
+            answered curl with 000. So today's sweep read workflow JSON
+            exported read-only through the n8n connector. It got 46 of the 48
+            listed workflows. Two refused with "Workflow is not available in
+            MCP": N9kIvHF8Vohy8OeM "Add source_campaign Header (one-off)" and
+            qnNZlzWAF1GXuxX3 "Context Harvester Pipeline". Both are inactive.
+            The production tool reads them with the key.
+            4beRTMIlgJ0njPna is absent from the connector's listing,
+            consistent with it being archived.
+            First classifier cut, two mistakes of mine:
+            (1) A node naming only a loop table id read as not owned, because
+            ownership was per base.
+            (2) Reference-only nodes were labelled "read".
+            Fixed:
+            - Loop, Codex, Layer 0, Review Returns and the client tables are
+              owned by id too.
+            - A reference is access "none".
+            - A Code node naming an Airtable credential type
+              ('airtableTokenApi') counts as a call.
+            Many Code nodes are named "… (Airtable)", e.g. "Write to BHA
+            Submissions (Airtable)" and "Mark Log Paid (Airtable)". Their
+            matches are comments about reshaping rows to Airtable's
+            { id, createdTime, fields }. They call the dashboard, not
+            Airtable. api.airtable.com appears in one workflow only, in a
+            sticky note of GES8UIM3dJRbrLSx.
+Fix:        —
+Decision:   Result:
+            - Active writers: none.
+            - Would write if switched back on: one. BHA — Dashboard Loop
+              Write-Back (GES8UIM3dJRbrLSx, inactive), node "Update Loop
+              Status" (airtable, operation update). Its only read is "Find
+              Loop Row" (search). Both are on the Open Loops base
+              (appUVlBSGGPHw6DGh, table from an expression) with credential
+              "Admin Airtable" IOwa36AoQylkenkh (airtableTokenApi). That is
+              the one Airtable credential n8n lists (35 credentials in all).
+            - References only: 145.
+            - The three n8n Agents (Bays, Research Twin, North Star; published
+              and draft) have no Airtable tool. Bays' scheduled loop tasks name
+              the seven loop table ids as find_records filters: a read here.
+              They will not see a builder added through Builder Profiles,
+              whose table_id is null.
+            An operation that is unset or an expression is "unknown" and
+            counted with the writers, never assumed a read. The rules are
+            pure (classifyWorkflow), pinned by test:airtable-sweep (22
+            assertions).
+            New registry rows get replay never:
+            - Research Twin — Agent Delivery, like the other two Agent
+              Deliveries.
+            - Bays — Slack Request: a Slack request re-run hours later posts
+              into a conversation that has moved on.
+            The Tools Router keeps production with a note, as asked.
+            Research Twin (Agent)'s published version already has
+            create_client_report_doc on its MCP allow-list. That switch was
+            made on the n8n side after this session's draft.
+            Verified locally: bays-tools 22/22 (with the new registry checks),
+            research-twin 10/10, mcp-write and airtable-sweep pass, and the
+            build is clean.

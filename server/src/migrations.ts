@@ -1805,6 +1805,28 @@ const MIGRATIONS: Migration[] = [
         WHERE id = 'seK3we7pTurvZmqe' AND status = 'production'`,
     ],
   },
+  {
+    id: 33,
+    name: 'registry: Research Twin — Conversational Agent and the RT self-healing test retired; Tools Router noted',
+    statements: [
+      /**
+       * 24 Sep 2026, Destiny, the way migrations 31 and 32 retired North Star's.
+       * u2jfe2eRQYIEtuZQ is unpublished and filed in RETIRED / RESEARCH TWIN,
+       * replaced by Research Twin (Agent) through Research Twin — Agent
+       * Delivery; 4beRTMIlgJ0njPna is archived. The Tools Router keeps its
+       * status and gains a note: no callers left, retired after Monday's runs.
+       * Each update fires only while the row still holds what the seed gave
+       * it. The two new rows — Research Twin — Agent Delivery and Bays — Slack
+       * Request — arrive through the seed, replay never.
+       */
+      `UPDATE registry_workflows SET status = 'retired', notes = concat_ws(' ', notes, $v$Unpublished (active:false) and filed in RETIRED / RESEARCH TWIN in n8n on 24 Sep 2026, and retired by Destiny. Replaced by Research Twin (Agent) (dDtsExaaXhlFd2dv) through Research Twin — Agent Delivery (w4SdZjjpokMuWPkV).$v$), updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = 'u2jfe2eRQYIEtuZQ' AND status = 'production'`,
+      `UPDATE registry_workflows SET status = 'retired', notes = concat_ws(' ', notes, $v$Archived in n8n and retired on 24 Sep 2026 (Destiny): the Research Twin self-healing lane test is done.$v$), updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = '4beRTMIlgJ0njPna' AND status = 'experimental'`,
+      `UPDATE registry_workflows SET notes = $v$No remaining callers since 24 Sep 2026: all six of Research Twin's write tools are on the dashboard MCP. Still published; to be retired after Monday's Research Queue — Weekly Sweep and Watched Clients runs pass.$v$, updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = 'zikfpO0wvqzPCQuz' AND notes IS NULL`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

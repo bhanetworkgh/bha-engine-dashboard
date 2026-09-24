@@ -22,7 +22,7 @@ import * as bharag from '../bharag';
 import * as recovery from '../recovery';
 import { WRITE_TOOLS } from './writeTools';
 import { DOC_WRITE_TOOLS, readSlackFile } from './docTools';
-import { getN8nWorkflow, listN8nWorkflows } from './n8nTools';
+import { getN8nWorkflow, listN8nWorkflows, sweepAirtableNodes } from './n8nTools';
 import { NORTH_STAR_TOOLS } from './northStarTools';
 import { SLACK_WRITE_TOOLS } from './slackTools';
 import { RESEARCH_TWIN_WRITE_TOOLS } from './researchTwinTools';
@@ -789,6 +789,7 @@ export const TOOLS: ToolDefinition[] = [
   // 2026-09-24: what the Bays agent read through n8n tools of its own.
   listN8nWorkflows,
   getN8nWorkflow,
+  sweepAirtableNodes,
   readSlackFile,
   // 2026-09-24: North Star's three code tools, off its Tools Router.
   ...NORTH_STAR_TOOLS,

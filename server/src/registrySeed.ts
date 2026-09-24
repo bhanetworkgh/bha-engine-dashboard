@@ -61,16 +61,21 @@ const W = (
  * answer arriving hours late, to a person who has moved on, is worse than none.
  * Migration 28 sets the same five on a database that already holds them.
  */
-const NEVER_REPLAY = new Set(['Bays — Conversational Agent', 'Bays — Front Door', 'Bays — Dashboard Agent', 'Bays — Agent Delivery', 'North Star — Conversational Agent', 'North Star — Front Door', 'North Star — Agent Delivery']);
+const NEVER_REPLAY = new Set(['Bays — Conversational Agent', 'Bays — Front Door', 'Bays — Dashboard Agent', 'Bays — Agent Delivery', 'North Star — Conversational Agent', 'North Star — Front Door', 'North Star — Agent Delivery', 'Research Twin — Agent Delivery', 'Bays — Slack Request']);
 
 export const WORKFLOWS: SeedRow[] = [
   // Research Twin / Agent
   W('u2jfe2eRQYIEtuZQ', 'Research Twin — Conversational Agent', 'Research Twin', 'Research Twin Agent', 'Agent', 'Destiny Arupi', 'sub-workflow', 'Called by Research Twin — Front Door',
-    'The reasoning layer of Research Twin: builds the prompt, runs the agent, and hands the answer to a deterministic delivery tail.'),
+    'The reasoning layer of Research Twin: builds the prompt, runs the agent, and hands the answer to a deterministic delivery tail.',
+    'retired', "Unpublished (active:false) and filed in RETIRED / RESEARCH TWIN in n8n on 24 Sep 2026, and retired by Destiny. Replaced by Research Twin (Agent) (dDtsExaaXhlFd2dv) through Research Twin — Agent Delivery (w4SdZjjpokMuWPkV)."),
+  W('w4SdZjjpokMuWPkV', 'Research Twin — Agent Delivery', 'Research Twin', 'Research Twin Agent', 'Agent', 'Destiny Arupi', 'sub-workflow', 'Called by Research Twin — Front Door',
+    "Replaces Research Twin's Conversational Agent wrapper: asks Research Twin (Agent), delivers by signed callback or Slack, records the ask on the ledger and in BHARAG, raises on failure.",
+    'production', "Added 24 Sep 2026 (id confirmed by Destiny). Its agent is Research Twin (Agent) dDtsExaaXhlFd2dv, whose write tools are on the dashboard MCP (write_research_finding, write_commercial_card_fields, compute_lane_state, queue_followup_research, update_watched_client_question; create_client_report_doc once SLACK_RESEARCH_TWIN_BOT_TOKEN is set)."),
   W('K1iQ72ZTEzQKrxb9', 'Research Twin — Front Door', 'Research Twin', 'Research Twin Agent', 'Routing', 'Destiny Arupi', 'webhook', 'POST /webhook/research-twin',
     'The single public entry point for Research Twin. It receives, decides and routes — it never answers.'),
   W('zikfpO0wvqzPCQuz', 'Research Twin — Tools Router', 'Research Twin', 'Research Twin Agent', 'Routing', 'Destiny Arupi', 'sub-workflow', 'Called by Research Twin — Conversational Agent',
-    'Every tool the Research Twin agent can call lands here, so all write logic stays in one reviewable place.'),
+    'Every tool the Research Twin agent can call lands here, so all write logic stays in one reviewable place.',
+    'production', "No remaining callers since 24 Sep 2026: all six of Research Twin's write tools are on the dashboard MCP. Still published; to be retired after Monday's Research Queue — Weekly Sweep and Watched Clients runs pass."),
   // Research Twin / Subsystems
   W('4WxzlFKpU6v2Gl8o', 'Research Twin — Error Handler', 'Research Twin', 'Research Twin Subsystems', 'Observability', 'Destiny Arupi', 'error trigger', 'Error workflow on every Research Twin workflow; also callable from the Tools Router',
     'Catches every failure in the Research Twin stack, classifies it, files an incident, and decides whether a person needs telling now.'),
@@ -108,6 +113,9 @@ export const WORKFLOWS: SeedRow[] = [
     "Unpublished in n8n on 24 Sep 2026 when Bays moved to the n8n Agent (Nw5igXu4WWrjUMWB) behind Bays — Front Door → Bays — Agent Delivery; the agent's reads and writes go through this dashboard's MCP tools now. POST /webhook/dashboard-ask-bays is served by Bays — Agent Delivery now."),
   W('5AFqtZQaeKFFiGqe', 'Bays — Agent Delivery', 'Bays', 'Bays Agent', 'Agent', 'Destiny Arupi', 'sub-workflow', 'Called by Bays — Front Door on the agent route; also POST /webhook/dashboard-ask-bays (header auth, credential "BHARAG - Codex")',
     'Runs the Bays n8n Agent (Nw5igXu4WWrjUMWB) and delivers its answer — to Slack for the agent route, and back to this dashboard for the Ask Bays panel.'),
+  W('DYBjrMopNqFDUV6P', 'Bays — Slack Request', 'Bays', 'Bays Agent', 'Agent', 'Destiny Arupi', 'sub-workflow', 'Called by the Bays n8n Agent (Nw5igXu4WWrjUMWB) as its Slack_Request tool',
+    "The Bays agent's Slack_Request tool: builds one Slack Web API request from the agent's arguments, checks it, calls Slack and returns the result.",
+    'production', 'Added 24 Sep 2026 (id confirmed by Destiny). Replaces a URL-placeholder HTTP tool that n8n Agents cannot fill. Replay never: a Slack request re-run hours later posts into a conversation that has moved on.'),
   W('134ezjaO6gYqYjez', 'Bays — Front Door', 'Bays', 'Bays Agent', 'Routing', 'Destiny Arupi', 'webhook', 'POST /webhook/bays (raw body on)',
     'The single public entry point for Bays and the busiest door in the engine — seven routes. It never answers anything itself.'),
   W('WjWzhVRq566A60fJ', 'Bays — Tools Router', 'Bays', 'Bays Agent', 'Routing', 'Destiny Arupi', 'sub-workflow', 'Called as a sub-workflow (inputSource passthrough)',
@@ -167,7 +175,7 @@ export const WORKFLOWS: SeedRow[] = [
   W('xIVt2cO0VHDJ7jT6', 'TEST — Self-healing, North Star lane', 'Test', 'Sandbox (For Testing & One-Off Builds)', null, 'Destiny Arupi', 'webhook', 'POST /webhook/heal-test-ns-0921',
     'Deliberately broken test workflow for the North Star self-healing lane. Safe to delete after testing.', 'experimental', READ),
   W('4beRTMIlgJ0njPna', 'TEST — Self-healing, Research Twin lane', 'Test', 'Sandbox (For Testing & One-Off Builds)', null, 'Destiny Arupi', 'webhook', 'POST /webhook/heal-test-rt-0921',
-    'Deliberately broken test workflow for the Research Twin self-healing lane. Safe to delete after testing.', 'experimental', READ),
+    'Deliberately broken test workflow for the Research Twin self-healing lane. Safe to delete after testing.', 'retired', `${READ} Archived in n8n and retired on 24 Sep 2026 (Destiny): the Research Twin self-healing lane test is done.`),
   W('LR7M1POhHvJ0j7Vm', 'Bays — Pay Tracking', 'Bays', 'Pay', null, 'Destiny Arupi', 'schedule + sub-workflow', 'Called by Bays — Submit Actions on each approval; 1st of the month 09:00; Mondays 10:00',
     'Records every approved session, sends one statement per monthly builder on the 1st, and reminds daily builders to confirm sessions still showing unpaid.', 'production', READ),
   W('t79s1mXSHink3dAM', 'Bays — Pay Ledger Sync', 'Bays', 'Pay', null, 'Destiny Arupi', 'schedule', 'Every 30 minutes',
