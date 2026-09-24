@@ -253,7 +253,7 @@ async function call(token, name, args) {
     assert.equal((await query(`SELECT count(*)::int n FROM record_deletions WHERE natural_id = $1`, [created.natural_id])).rows[0].n, 1, 'kept in record_deletions');
 
     // 7. the audit
-    const audit = await query(`SELECT tool, outcome, access, dry_run FROM engine_mcp_writes WHERE at > now() - interval '5 minutes' ORDER BY id`);
+    const audit = await query(`SELECT tool, outcome, access, dry_run FROM engine_mcp_writes WHERE at >= to_timestamp($1 / 1000.0) AND tool <> 'test_set_lead_status' ORDER BY id`, [T]);
     const seen = audit.rows.map((r) => `${r.tool}:${r.outcome}`);
     for (const want of ['create_record:dry_run', 'create_record:inserted', 'create_record:refused', 'update_record:refused', 'update_record:updated', 'archive_record:archived', 'delete_record:refused', 'delete_record:deleted']) {
       assert.ok(seen.includes(want), `audit holds ${want}: ${seen.join(', ')}`);

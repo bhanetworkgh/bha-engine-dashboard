@@ -9973,3 +9973,102 @@ Decision:   Result:
             Verified locally: bays-tools 22/22 (with the new registry checks),
             research-twin 10/10, mcp-write and airtable-sweep pass, and the
             build is clean.
+
+## 2026-09-24 13:15 — Build patterns Candidates: filters in the URL, register / decline / reassign
+Intent:     Make the Candidates tab (/build-patterns?view=candidates; 52 held,
+            47 Proposed, 5 Registered) a working queue.
+            1. Filters at a glance: builder, suggested architect, lane and
+               status, each with counts, combined with the search, kept in the
+               URL so a builder can bookmark "my candidates". Proposed first,
+               oldest first.
+            2. Act from the detail panel: register as a pattern through
+               create_record's own path, decline with a reason, reassign the
+               architect from Builder Profiles. Every action through the write
+               guards and on engine_mcp_writes. Only the suggested architect,
+               the builder, Jason or Destiny may act.
+Files:      server/src/candidateActions.ts (new)
+            server/src/index.ts:
+            - POST /api/pattern-candidates/:id/(register|decline|reassign)
+            - GET /api/builder-profiles
+            server/src/mcp/tools.ts, mcp/writeTools.ts, mcp/index.ts: a third
+              access, 'page'.
+            server/src/writeGuards.ts: Declined added to CANDIDATE_STATUSES.
+            server/src/engine.ts: the candidate read model maps Registered By
+              and the Declined / Reassigned fields.
+            src/screens/PatternCandidates.tsx (new): the tab, the panel and the
+              three forms.
+            src/screens/BuildPatterns.tsx: the old read-only tab removed, the
+              new one wired in.
+            src/data/index.ts, src/data/types.ts
+            server/test/pattern-candidates.test.cjs (new), npm run
+              test:candidates
+            server/test/mcp-write.test.cjs: the audit window is anchored to the
+              test's own start.
+            CLAUDE.md
+Problem:    1. The dashboard has one shared login, so there is no "signed-in
+               person" to fill drafted_by or to check "who may act" against.
+            2. Widening ToolDeps.access to include 'page' broke the MCP
+               transport: TS2345 "Argument of type 'ToolAccess' is not
+               assignable to parameter of type 'McpAccess'" in mcp/index.ts.
+            3. The first test run failed "drafted_by is the person acting":
+               undefined. Build patterns has no drafted_by column.
+               create_record's drafted_by only names the Google Doc ("Build
+               Pattern -- <name> -- <drafted_by>").
+            4. The regression run failed test:mcp-write
+               ("assert.ok(audit.rows.every((r) => r.access === 'write'))").
+               Its audit query read "the last five minutes" and picked up the
+               page rows test:candidates had just written.
+            5. The panel's divider drew black. border-[var(--hairline)] names
+               a token that does not exist; the token is --line.
+Fix:        1. An "Acting as" picker from Builder Profiles, remembered in this
+               browser (bha.actingAs). The server checks the declared person
+               against Architect Slack ID / Builder Slack ID / ADMIN_IDS before
+               any write. The page says in words that it is declared, not
+               checked.
+            2. mcpAccess() narrows 'page' to 'read' for tools/list and
+               tools/call. No URL grants 'page'.
+            3. The test asserts the Doc title instead. The candidate carries
+               Registered By.
+            4. The mcp-write audit query is scoped to rows written since the
+               test's own start (and excludes the gate test's tool).
+            5. border-line.
+Decision:   - Page actions call the create_record / update_record handlers
+              in-process with access 'page', rather than a second write path.
+              So the BP- mint, guards, BHARAG ingest, Google Doc, engine_writes
+              line (endpoint page:<tool>, key "session cookie") and
+              engine_mcp_writes audit are an MCP call's, byte for byte.
+            - Register writes the pattern first and marks the candidate only
+              after it is saved. A candidate update that fails after a saved
+              pattern is reported with the BP- id and not retried: a second
+              create would be a second pattern.
+            - Registered and Declined candidates refuse every action (409).
+            - Month defaults to all time on this tab, not the current month:
+              a bookmark that opened on this month would hide most of an
+              architect's backlog.
+            - Sort is Proposed → Approved → Registered → Declined, oldest
+              first within each. This is an explicit exception to "newest
+              first": it is a queue of decisions owed.
+            - Facet counts are computed over what the other filters leave, so
+              each count is what picking it would show.
+            - The checklist field is one step per line and is sent as a list,
+              which the pattern guard joins with " | ".
+            - Reassign leaves Why This Architect as written. The panel says it
+              was written for the first architect.
+            - Not built: per-person sign-in. The acting-as picker stops
+              mistakes, not a teammate choosing another name. Real identity is
+              a scope change for Destiny to decide.
+Verified:   Locally:
+            - test:candidates, 8 steps: cookie required; who may act (403 for
+              others, 400 for no profile, nothing written); decline; reassign;
+              register (BP-BAYS-… id, BHARAG ingest with the patterns key, Doc
+              titled with the actor, candidate Registered with the id, second
+              register 409); the audit on both logs. Every throwaway profile,
+              candidate and pattern is deleted through delete_record.
+            - A Playwright run against the built page: architect filter in the
+              URL (2 of 3 rows), open → acting as → decline, register from the
+              prefilled form, the not-permitted sentence, all rows deleted
+              after.
+            - The regression suites, all passing: bays-tools 22, research-twin
+              10, north-star 10, mcp-write, lookup, gate, pay, recovery,
+              airtable-sweep.
+            - Build clean.

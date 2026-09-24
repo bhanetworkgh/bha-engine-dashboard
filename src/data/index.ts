@@ -14,6 +14,8 @@ import { api, ApiError } from './api';
 import type {
   AskBaysData,
   PatternCandidatesData,
+  BuilderProfile,
+  CandidateRegistered,
   IncidentCloseResult,
   AskReply,
   AuthSession,
@@ -156,6 +158,19 @@ export const getOpenLoops = (q: Query) => api<OpenLoopsData>(withLane('/api/open
 export const getCodexEntries = (q: Query) => api<CodexData>(withLane('/api/codex', q));
 export const getBuildPatterns = (q: Query) => api<BuildPatternsData>(withLane('/api/build-patterns', q));
 export const getPatternCandidates = () => api<PatternCandidatesData>('/api/pattern-candidates');
+/** Builder Profiles, for the Candidates tab's acting-as and reassign pickers (2026-09-24). */
+export const getBuilderProfiles = () => api<{ profiles: BuilderProfile[] }>('/api/builder-profiles');
+/**
+ * The three candidate actions (2026-09-24). The server checks the declared
+ * actor against the candidate and writes through the MCP write tools' own
+ * handlers; a refusal comes back as an ApiError carrying the server's reason.
+ */
+const candidatePath = (id: string, action: string) => `/api/pattern-candidates/${encodeURIComponent(id)}/${action}`;
+export const registerCandidate = (id: string, actor_user_id: string, pattern: Record<string, string>) =>
+  api<CandidateRegistered>(candidatePath(id, 'register'), { method: 'POST', body: { actor_user_id, pattern }, timeoutMs: 90_000 });
+export const declineCandidate = (id: string, actor_user_id: string, reason: string) => api<{ ok: boolean }>(candidatePath(id, 'decline'), { method: 'POST', body: { actor_user_id, reason } });
+export const reassignCandidate = (id: string, actor_user_id: string, architect_user_id: string) =>
+  api<{ ok: boolean; suggested_architect: string }>(candidatePath(id, 'reassign'), { method: 'POST', body: { actor_user_id, architect_user_id } });
 export const getCommercial = (q: Query) => api<CommercialData>(withLane('/api/commercial', q));
 
 /**

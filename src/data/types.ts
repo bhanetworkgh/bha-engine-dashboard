@@ -3081,6 +3081,38 @@ export interface PatternCandidate {
   /** Set only on Registered rows. */
   pattern_id: string | null;
   registered_at: string | null;
+  /** Who registered it from the Candidates tab (2026-09-24); absent when registered through Bays. */
+  registered_by: string | null;
+  /** Set only on Declined rows (2026-09-24): the reason is required, and who and when. */
+  declined_reason: string | null;
+  declined_by: string | null;
+  declined_at: string | null;
+  /** The last architect change made from the Candidates tab. */
+  reassigned_by: string | null;
+  reassigned_at: string | null;
+}
+
+/** One Builder Profiles row: who can be named as acting, and who can be made an architect. */
+export interface BuilderProfile {
+  user_id: string;
+  name: string;
+  lane: string | null;
+  role: string | null;
+}
+
+/** What POST /api/pattern-candidates/:id/register answers. */
+export interface CandidateRegistered {
+  ok: boolean;
+  pattern_id: string | null;
+  pattern_row_id: number | null;
+  doc_created: boolean | null;
+  doc_id: string | null;
+  doc_link: string | null;
+  doc_error: string | null;
+  ingested_to_bharag: boolean | null;
+  candidate_updated: boolean;
+  candidate_error?: string;
+  note?: string;
 }
 
 export interface PatternCandidatesData {

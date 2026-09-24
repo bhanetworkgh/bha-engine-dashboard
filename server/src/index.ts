@@ -50,6 +50,7 @@ import * as google from './google';
 import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, MCP_SECRET_VAR, MCP_WRITE_TOKEN_VAR, MCP_ONE_URL } from './mcp';
 import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
+import * as candidateActions from './candidateActions';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
 
 /**
@@ -782,6 +783,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** The Candidates tab on /build-patterns. Behind the cookie like every page route; read only. */
       case '/api/pattern-candidates':
         return send(res, 200, await engine.getPatternCandidates());
+      /** Who can act, and who can be made an architect: Builder Profiles, for the Candidates tab's two pickers. */
+      case '/api/builder-profiles':
+        return send(res, 200, { profiles: await candidateActions.profiles() });
       case '/api/commercial':
         return send(res, 200, await engine.getCommercial(q));
       case '/api/ns-telemetry':
@@ -1263,6 +1267,33 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * — and the answer names which one refused it. A guard that lives only in
      * the button is not a guard.
      */
+    /**
+     * Acting on a pattern candidate (2026-09-24, Destiny): register it as a
+     * pattern, decline it with a reason, or give it another architect. Behind
+     * the cookie like every page route; the acting person is declared in the
+     * body (the login is shared) and checked against the candidate before any
+     * write. Every write is the MCP write tools' own handler, so the guards and
+     * the engine_mcp_writes line are the same ones — see candidateActions.ts.
+     */
+    const candidateAction = p.match(/^\/api\/pattern-candidates\/([^/]+)\/(register|decline|reassign)$/);
+    if (candidateAction) {
+      if (req.method !== 'POST') throw new HttpError(405, 'POST only.');
+      const ref = decodeURIComponent(candidateAction[1]);
+      const body = await readJson(req);
+      const actor = typeof body.actor_user_id === 'string' ? body.actor_user_id.trim() : null;
+      try {
+        const out =
+          candidateAction[2] === 'register'
+            ? await candidateActions.register(ref, { actor_user_id: actor, pattern: body.pattern && typeof body.pattern === 'object' && !Array.isArray(body.pattern) ? (body.pattern as Record<string, unknown>) : {} })
+            : candidateAction[2] === 'decline'
+              ? await candidateActions.decline(ref, { actor_user_id: actor, reason: body.reason })
+              : await candidateActions.reassign(ref, { actor_user_id: actor, architect_user_id: body.architect_user_id });
+        return send(res, 200, out);
+      } catch (e) {
+        if (e instanceof candidateActions.CandidateError) return send(res, e.status, { ok: false, reason: e.reason, message: e.message });
+        throw e;
+      }
+    }
     const revert = p.match(/^\/api\/repairs\/([^/]+)\/revert$/);
     if (revert) {
       return send(res, 200, await repairs.revert(decodeURIComponent(revert[1]), sessionInfo(req).email));

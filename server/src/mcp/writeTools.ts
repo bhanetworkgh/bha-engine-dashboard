@@ -38,7 +38,7 @@ import type { ToolDefinition, ToolDeps } from './tools';
 interface AuditOpen {
   tool: string;
   args: Record<string, unknown>;
-  access: 'read' | 'write';
+  access: 'read' | 'write' | 'page';
   kind: string | null;
   requester: string | null;
   dry_run: boolean;
@@ -130,6 +130,7 @@ async function target(kind: mirror.MirrorKind, args: Record<string, unknown>, ct
 }
 
 function ctxFor(tool: string, deps: ToolDeps): engineWrite.WriteCtx {
+  if (deps.access === 'page') return { endpoint: `page:${tool}`, method: 'PAGE', key_label: 'session cookie', t0: Date.now(), note: `via the page (${tool})` };
   return { endpoint: `mcp:${tool}`, method: 'MCP', key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET', t0: Date.now(), note: `via MCP ${tool}` };
 }
 

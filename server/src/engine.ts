@@ -693,6 +693,12 @@ export async function getPatternCandidates(): Promise<PatternCandidatesData> {
       date_flagged: s(f, 'Date Flagged'),
       pattern_id: s(f, 'Pattern ID'),
       registered_at: s(f, 'Registered At'),
+      registered_by: s(f, 'Registered By'),
+      declined_reason: s(f, 'Declined Reason'),
+      declined_by: s(f, 'Declined By'),
+      declined_at: s(f, 'Declined At'),
+      reassigned_by: s(f, 'Reassigned By'),
+      reassigned_at: s(f, 'Reassigned At'),
     };
   });
   // Newest Date Flagged first; within a day, the newer CAND-<ms> id first. Undated last.
