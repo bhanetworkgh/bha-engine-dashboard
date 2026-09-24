@@ -10233,3 +10233,35 @@ Verified:   Locally:
               north-star 10, lookup, gate, pay, recovery, airtable-sweep. All
               pass.
             - Build clean.
+
+## 2026-09-24 14:00 — Announce and draft: deployed; OPENROUTER_API_KEY not set on the service
+Intent:     Deploy bf18ec4 and check what production can run.
+Files:      BUILD_LOG.md
+Problem:    1. The boot line on deploy dep-daqimqff3r2c739eq5n0 (live
+               13:54:29Z) says:
+               draft:    OPENROUTER_API_KEY NOT set — "Draft full pattern"
+                         answers not_configured; registering by hand still
+                         works
+               The variable does not exist on srv-dagj84ijnfac73ds5100. The
+               key lives in n8n's "OpenRouter" credential (obXfGhI1zrHGWcKo),
+               which cannot be read from here.
+            2. The page actions sit behind the session cookie. This sandbox
+               cannot reach dashboard.bhanetwork.org, and this session's MCP
+               connector lists its tools as of an earlier deploy. So Register
+               → Doc → BHARAG → channel post could not be pressed on
+               production from here.
+Fix:        1. Not worked around, per the standing rule: Destiny sets
+               OPENROUTER_API_KEY on the service. Until then the button says
+               so, and a hand-filled Register (with the announcement) works.
+            2. Proved end to end locally instead (test:candidates, 11 steps;
+               Playwright on the built page). The other boot lines the new
+               paths depend on are set:
+               - SLACK_BAYS_BOT_TOKEN (the announcement);
+               - SLACK_NORTH_STAR_BOT_TOKEN (the thread read);
+               - Google OAuth (the Doc).
+               Bays already posts the extractor's cards in #bha-build-patterns
+               (latest 24 Sep 11:49), so it is a member there.
+Decision:   No throwaway was left on production. A production run needs one
+            click by someone signed in; it posts a real card in the channel,
+            which Bays cannot delete from here. That run and its cleanup are
+            for Destiny to schedule, not reported as done.
