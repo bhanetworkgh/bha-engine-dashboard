@@ -9512,3 +9512,57 @@ Decision:   Deploy dep-daqbq5ou01pc73clpijg (2eefd32) went live 06:03:47Z.
             - #4: its research jobs number 2.
             - #6: Layer 0 holds 0 pending_builder_input rows; every row is
               `completed`. So the answer is total 0, which is correct.
+
+## 2026-09-24 07:30 — Bays onto the dashboard MCP: n8n, Slack file, Drive tools, pattern Doc, registry
+Intent:     Brief: "finish moving Bays onto the dashboard MCP". Add the tools
+            the new n8n Agent needs in place of its old n8n tools, give a
+            created pattern its Google Doc, give find_records range filters
+            and channel_tracking, and bring the registry in step.
+Files:      server/src/mcp/n8nTools.ts (new), server/src/mcp/docTools.ts
+            (new), server/src/pdf.ts (new), server/src/slack.ts (new),
+            server/src/google.ts (new), server/src/n8n.ts (updatedAt),
+            server/src/mcp/tools.ts, server/src/mcp/writeTools.ts,
+            server/src/mcp/findRecords.ts, server/src/mcp/index.ts,
+            server/src/index.ts (boot lines), server/src/registrySeed.ts,
+            server/src/migrations.ts (30), server/test/bays-tools.test.cjs
+            (new), package.json (test:bays-tools), render.yaml, CLAUDE.md.
+Problem:    Three things the brief could not be followed literally on.
+            (1) No Slack bot token and no Google credential exist on this
+            server. render.yaml, the code and the service's own boot lines
+            name neither. n8n's "Admin Google Docs" is an OAuth2 credential n8n
+            holds; this server cannot read it. Per the brief, the tools are
+            built and answer not_configured, naming the variables, until they
+            are set. No workaround was invented.
+            (2) "pdf-parse or equivalent": section 2 rule 5 makes pg the only
+            dependency. So server/src/pdf.ts is the equivalent: zlib only.
+            First run on a Chromium PDF read "Golden CAD run — pr ovenance" and
+            "BA YS". Chromium splits a line at every kerning pair with
+            `314.125 0 Td`, and the first cut added a space on every same-line
+            Td. A same-line move now adds nothing; a real gap is a space glyph.
+            It now reads the PDF exactly, including "Ümlaut café “quotes”".
+            (3) Bays — Extra Tools (WZHZJ0PXEhswCvxD) was never in the
+            registry. It is added as retired, with its purpose left blank and
+            the note saying it was not read back, rather than guessed.
+            While testing, get_n8n_workflow's unknown-id message said "Use
+            list_n8n_workflows…". The test pins the brief's lowercase phrase,
+            and the message now carries it verbatim.
+Fix:        —
+Decision:   create_doc was chosen over a digest_archive option: one tool that
+            makes a Doc in a folder, rather than an option that changes what
+            another tool does.
+            grant_drive_access: the domain rule is isBhaEmail, exactly
+            `^[^@\s]+@bhanetwork\.org$`. A refusal calls Google for nothing,
+            DMs U0AEW3TBYH1 with the email and file_id, and is audited. It
+            DMs on a dry run too, because somebody asked for it either way.
+            read_slack_file never follows a redirect: an unauthorised Slack
+            file redirects to a 200 sign-in page, and that page would be
+            returned as the file's text.
+            The pattern Doc is made after the save, in LBP's folder, with the
+            BHARAG text; drafted_by defaults to "Bays" as in LBP. A failure is
+            doc_created:false with doc_error, and doc_id if the empty Doc
+            exists; the record stays.
+            Agent Delivery gets replay 'never', like the other chat paths.
+            Verified locally: npm run test:bays-tools passes all 19 checks,
+            against local stand-ins for n8n, Slack and Google, and a real
+            Chromium PDF. test:mcp-write, test:lookup, test:pay and
+            test:recovery still pass, and npm run build is clean.

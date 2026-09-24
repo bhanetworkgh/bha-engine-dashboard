@@ -61,7 +61,7 @@ const W = (
  * answer arriving hours late, to a person who has moved on, is worse than none.
  * Migration 28 sets the same five on a database that already holds them.
  */
-const NEVER_REPLAY = new Set(['Bays — Conversational Agent', 'Bays — Front Door', 'Bays — Dashboard Agent', 'North Star — Conversational Agent', 'North Star — Front Door']);
+const NEVER_REPLAY = new Set(['Bays — Conversational Agent', 'Bays — Front Door', 'Bays — Dashboard Agent', 'Bays — Agent Delivery', 'North Star — Conversational Agent', 'North Star — Front Door']);
 
 export const WORKFLOWS: SeedRow[] = [
   // Research Twin / Agent
@@ -96,13 +96,21 @@ export const WORKFLOWS: SeedRow[] = [
     'Archived in n8n on 13 Sep 2026 and no longer readable through the API, so its pillar, trigger and purpose could not be read back. Its Get_Capacity_Status route was removed from North Star — Tools Router the same day; capacity is dashboard telemetry now.'),
   // Bays / Agent
   W('rKRnxHhKSJUd4Q6M', 'Bays — Conversational Agent', 'Bays', 'Bays Agent', 'Agent', 'Destiny Arupi', 'sub-workflow', 'Called by Bays — Front Door on the agent route',
-    'The Bays people actually talk to in Slack — 53 nodes, 38 of them tools, the widest tool surface in the engine.'),
+    'The Bays people actually talk to in Slack — 53 nodes, 38 of them tools, the widest tool surface in the engine.', 'retired',
+    "Unpublished in n8n on 24 Sep 2026 when Bays moved to the n8n Agent (Nw5igXu4WWrjUMWB) behind Bays — Front Door → Bays — Agent Delivery; the agent's reads and writes go through this dashboard's MCP tools now."),
   W('GjNtBQQvVSJvsPNI', 'Bays — Dashboard Agent', 'Bays', 'Bays Agent', 'Agent', 'Destiny Arupi', 'webhook', 'POST /webhook/dashboard-ask-bays (header auth)',
-    'The Ask Bays panel in this dashboard. Same identity as the Slack Bays, separate instance, so neither can break the other.'),
+    'The Ask Bays panel in this dashboard. Same identity as the Slack Bays, separate instance, so neither can break the other.', 'retired',
+    "Unpublished in n8n on 24 Sep 2026 when Bays moved to the n8n Agent (Nw5igXu4WWrjUMWB) behind Bays — Front Door → Bays — Agent Delivery; the agent's reads and writes go through this dashboard's MCP tools now. POST /webhook/dashboard-ask-bays is served by Bays — Agent Delivery now."),
+  W('5AFqtZQaeKFFiGqe', 'Bays — Agent Delivery', 'Bays', 'Bays Agent', 'Agent', 'Destiny Arupi', 'sub-workflow', 'Called by Bays — Front Door on the agent route; also POST /webhook/dashboard-ask-bays (header auth, credential "BHARAG - Codex")',
+    'Runs the Bays n8n Agent (Nw5igXu4WWrjUMWB) and delivers its answer — to Slack for the agent route, and back to this dashboard for the Ask Bays panel.'),
   W('134ezjaO6gYqYjez', 'Bays — Front Door', 'Bays', 'Bays Agent', 'Routing', 'Destiny Arupi', 'webhook', 'POST /webhook/bays (raw body on)',
     'The single public entry point for Bays and the busiest door in the engine — seven routes. It never answers anything itself.'),
   W('WjWzhVRq566A60fJ', 'Bays — Tools Router', 'Bays', 'Bays Agent', 'Routing', 'Destiny Arupi', 'sub-workflow', 'Called as a sub-workflow (inputSource passthrough)',
-    'The largest workflow in the engine — 107 nodes, 18 tool branches. Every Bays agent tool that does more than one thing lands here.'),
+    'The largest workflow in the engine — 107 nodes, 18 tool branches. Every Bays agent tool that does more than one thing lands here.', 'retired',
+    "Unpublished in n8n on 24 Sep 2026 when Bays moved to the n8n Agent (Nw5igXu4WWrjUMWB) behind Bays — Front Door → Bays — Agent Delivery; the agent's reads and writes go through this dashboard's MCP tools now."),
+  W('WZHZJ0PXEhswCvxD', 'Bays — Extra Tools', 'Bays', 'Bays Agent', 'Routing', 'Destiny Arupi', 'sub-workflow', null,
+    null, 'retired',
+    "Its purpose was not read back before it was retired, so it is left blank rather than guessed. Unpublished in n8n on 24 Sep 2026 when Bays moved to the n8n Agent (Nw5igXu4WWrjUMWB) behind Bays — Front Door → Bays — Agent Delivery; the agent's reads and writes go through this dashboard's MCP tools now."),
   // Bays / Subsystems
   W('ZBquodTosOOyYgUl', 'Bays — Callback Receiver', 'Bays', 'Bays Subsystems', 'Routing', 'Destiny Arupi', 'sub-workflow', 'Called by Bays — Front Door (inputSource passthrough)',
     'Receives signed answers coming back from the other subsystems, proves they are genuine, and delivers them into Slack.'),
@@ -345,7 +353,7 @@ export const ENDPOINTS: SeedRow[] = [
     'Bays — Submit Actions, once a Codex entry is approved', null),
   E('ep-dashboard-ask-bays', 'Dashboard Ask Bays', `${N8N}/webhook/dashboard-ask-bays`, 'POST', 'header auth (x-api-key)', 'n8n Cloud',
     "This dashboard's server, never the browser",
-    'Header auth is bound to the webhook node itself, so an unauthorised request is rejected before any code runs. That is possible here because there is exactly one caller; the Slack front doors cannot do it, since Slack sends no key.'),
+    'Served by Bays — Agent Delivery (5AFqtZQaeKFFiGqe) since 24 Sep 2026, credential "BHARAG - Codex"; Bays — Dashboard Agent, which served it until then, is retired. ASK_BAYS_URL is unchanged. Header auth is bound to the webhook node itself, so an unauthorised request is rejected before any code runs. That is possible here because there is exactly one caller; the Slack front doors cannot do it, since Slack sends no key.'),
   E('ep-bharag-ingest', 'BHARAG ingest', 'https://bharag2.duckdns.org/api/v1/ingest', 'POST', 'header auth', 'BHARAG cluster',
     'Bays — Daily Doc Rotator and the extractor lanes', null),
   E('ep-bharag-incidents', 'BHARAG incidents', 'https://bharag2.duckdns.org/api/v1/incidents', 'POST', 'header auth', 'BHARAG cluster',

@@ -1756,6 +1756,23 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_mcp_writes_kind ON engine_mcp_writes (kind, at DESC)`,
     ],
   },
+  {
+    id: 30,
+    name: 'registry: Bays moves to the n8n Agent — four workflows retired, Agent Delivery serves Ask Bays',
+    statements: [
+      /**
+       * 24 Sep 2026, Destiny. Bays is the n8n Agent Nw5igXu4WWrjUMWB behind
+       * Bays — Front Door → Bays — Agent Delivery (5AFqtZQaeKFFiGqe), which the
+       * seed adds on boot. The Conversational Agent, Tools Router, Extra Tools
+       * and Dashboard Agent are unpublished. Each update fires only while the
+       * row is still in production, so an edit made on the page is kept.
+       */
+      `UPDATE registry_workflows SET status = 'retired', notes = concat_ws(' ', notes, $v$Unpublished in n8n on 24 Sep 2026 when Bays moved to the n8n Agent (Nw5igXu4WWrjUMWB) behind Bays — Front Door → Bays — Agent Delivery.$v$), updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id IN ('rKRnxHhKSJUd4Q6M', 'WjWzhVRq566A60fJ', 'WZHZJ0PXEhswCvxD', 'GjNtBQQvVSJvsPNI') AND status = 'production'`,
+      `UPDATE registry_endpoints SET notes = concat_ws(' ', $v$Served by Bays — Agent Delivery (5AFqtZQaeKFFiGqe) since 24 Sep 2026, credential "BHARAG - Codex"; Bays — Dashboard Agent, which served it until then, is retired. ASK_BAYS_URL is unchanged.$v$, notes), updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        WHERE id = 'ep-dashboard-ask-bays' AND coalesce(notes, '') NOT LIKE '%Agent Delivery%'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
