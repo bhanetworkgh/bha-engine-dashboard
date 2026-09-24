@@ -594,7 +594,7 @@ export interface WriteLogEntry {
    * because a reader counting what the engine wrote must be able to leave the
    * reads out. Nothing on the page adds it to "writes accepted".
    */
-  outcome: 'inserted' | 'updated' | 'unchanged' | 'rejected' | 'unauthorised' | 'error' | 'read';
+  outcome: 'inserted' | 'updated' | 'unchanged' | 'rejected' | 'unauthorised' | 'error' | 'read' | 'deleted';
   detail?: string | null;
   ms?: number;
 }
@@ -654,7 +654,7 @@ export async function logWrite(e: WriteLogEntry): Promise<void> {
  */
 const COLUMNS = new Map<MirrorKind, Set<string>>();
 
-async function columnsOf(kind: MirrorKind): Promise<Set<string>> {
+export async function columnsOf(kind: MirrorKind): Promise<Set<string>> {
   const held = COLUMNS.get(kind);
   if (held) return held;
   const r = await query<{ column_name: string }>(
@@ -1220,4 +1220,42 @@ export async function digestHealth(windowDays = 7): Promise<DigestHealth> {
     missing: Number(row?.missing ?? 0),
     latest_sent_at: row?.latest ?? null,
   };
+}
+
+
+/* ------------------------------------------------ one row, read and removed */
+
+/**
+ * One row by this table's own id, in the shape the lookup returns, or null.
+ * For the MCP write tools' before-and-after (2026-09-24): the same columns
+ * GET /api/engine/:kind hands n8n, so the audit and the lookup agree.
+ */
+export async function readRow(kind: MirrorKind, id: string | number): Promise<LookupRow | null> {
+  const r = await lookup(kind, { filters: [{ op: 'f', name: 'id', value: String(id) }], limit: 1, order: 'created_desc' });
+  return r.rows[0] ?? null;
+}
+
+/**
+ * A hard delete of one row, asked for by name (2026-09-24, Destiny — the MCP
+ * `delete_record` tool, which confirms by the row's own id typed back).
+ *
+ * **The whole row goes to `record_deletions` first, in the same transaction**,
+ * the rule every other delete in this dashboard follows: once the row is gone
+ * that log is the only place it can still be read. The change is announced
+ * after commit like every other write, so an open page drops the row.
+ */
+export async function deleteRow(kind: MirrorKind, id: number, reason: string, actor: string): Promise<LookupRow | null> {
+  const spec = KINDS[kind];
+  const before = await readRow(kind, id);
+  if (!before) return null;
+  await withTransaction(async (client) => {
+    await client.query(
+      `INSERT INTO record_deletions (kind, record_id, natural_id, builder_id, table_id, reason, fields, actor, at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [kind, before.airtable_record_id ?? `row-${before.id}`, before.natural_id, before.builder_id, before.table_id, reason, JSON.stringify(before.fields ?? {}), actor, nowIso()],
+    );
+    await client.query(`DELETE FROM ${spec.table} WHERE id = $1`, [id]);
+    events.changed(kind, id, client);
+  });
+  return before;
 }

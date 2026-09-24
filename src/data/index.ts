@@ -55,6 +55,7 @@ import type {
   RegistryRowOf,
   RepairsData,
   RecoveryData,
+  McpWritesData,
   RecoveryRerunResult,
   RetryMetrics,
   RetryResult,
@@ -246,6 +247,9 @@ export const resyncPay = () => api<Resync>('/api/pay/resync', { method: 'POST', 
  */
 export const closeIncidents = (ids: string[]) =>
   api<IncidentCloseResult>('/api/engine-health/incidents/close', { method: 'POST', body: { ids, expected: ids.length }, timeoutMs: 180_000 });
+
+/** Every call to an MCP write tool, newest first (2026-09-24). */
+export const getMcpWrites = () => api<McpWritesData>('/api/engine-health/mcp-writes');
 
 /** The recovery watcher (2026-09-23): what waits on a dependency, the last probe and the last batch. */
 export const getRecovery = () => api<RecoveryData>('/api/engine-health/recovery');

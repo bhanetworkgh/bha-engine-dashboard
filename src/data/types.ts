@@ -1908,6 +1908,31 @@ export interface RecoveryRerunResult {
   message: string;
 }
 
+/* ------------------------------------------------------------ MCP writes */
+
+/** One call to an MCP write tool (2026-09-24), refused and dry-run ones included. */
+export interface McpWrite {
+  id: number;
+  at: string;
+  access: 'read' | 'write' | null;
+  tool: string;
+  kind: string | null;
+  record_id: string | null;
+  natural_id: string | null;
+  outcome: string;
+  detail: string | null;
+  dry_run: boolean;
+  requester_user_id: string | null;
+  /** The guard that refused, where one did. */
+  reason: string | null;
+}
+
+export interface McpWritesData {
+  writes: McpWrite[];
+  /** Whether MCP_WRITE_TOKEN is set on this server. */
+  write_configured: boolean;
+}
+
 /* -------------------------------------------------------------- pay ledger */
 
 /**

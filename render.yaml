@@ -189,6 +189,20 @@ services:
       # ON unless this is false / 0 / off / no — the Engine health toggle
       # decides otherwise, and this overrides the toggle. Declared empty so
       # the hard off switch is an edit to a line that exists.
+      # The MCP write connection (24 Sep 2026): /mcp/<MCP_WRITE_TOKEN> carries
+      # every read tool plus create/update/archive/delete behind the Tools
+      # Router guards. Unset, nothing can write over MCP. Not generated: the
+      # same string goes into the connector URL.
+      - key: MCP_WRITE_TOKEN
+        sync: false
+      # BHARAG workspace keys for the write tools' ingest on create. Unset, the
+      # row still saves and the answer says it is not in BHARAG.
+      - key: BHARAG_CODEX_KEY
+        sync: false
+      - key: BHARAG_BUILD_PATTERNS_KEY
+        sync: false
+      - key: BHARAG_COMMERCIAL_KEY
+        sync: false
       - key: RECOVERY_ENABLED
         value: ""
       # Whether this dashboard still depends on Airtable at all (22 Sep 2026).

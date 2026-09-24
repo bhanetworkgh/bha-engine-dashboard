@@ -1731,6 +1731,31 @@ const MIGRATIONS: Migration[] = [
         WHERE name IN ('Bays — Conversational Agent', 'Bays — Front Door', 'Bays — Dashboard Agent', 'North Star — Conversational Agent', 'North Star — Front Door')`,
     ],
   },
+  {
+    id: 29,
+    name: 'engine_mcp_writes: the MCP write tools\' audit columns',
+    statements: [
+      /**
+       * The MCP write tools (2026-09-24, Destiny) audit into the table the
+       * write gate already made on 20 Sep rather than a second one with the
+       * same name: one log of what MCP changed, whichever path changed it.
+       *
+       * `access` is the brief's "token" column — `read` or `write`, which MCP
+       * URL the call came in on. It cannot be called `token`: that column
+       * already holds the gate's one-use preview token and means something
+       * else. `digest` stays NOT NULL; the write tools fill it with a hash of
+       * the call, so two identical calls are visibly identical on the log.
+       */
+      `ALTER TABLE engine_mcp_writes ADD COLUMN IF NOT EXISTS access text`,
+      `ALTER TABLE engine_mcp_writes ADD COLUMN IF NOT EXISTS kind text`,
+      `ALTER TABLE engine_mcp_writes ADD COLUMN IF NOT EXISTS record_id text`,
+      `ALTER TABLE engine_mcp_writes ADD COLUMN IF NOT EXISTS natural_id text`,
+      `ALTER TABLE engine_mcp_writes ADD COLUMN IF NOT EXISTS guard_result jsonb`,
+      `ALTER TABLE engine_mcp_writes ADD COLUMN IF NOT EXISTS dry_run boolean NOT NULL DEFAULT false`,
+      `ALTER TABLE engine_mcp_writes ADD COLUMN IF NOT EXISTS requester_user_id text`,
+      `CREATE INDEX IF NOT EXISTS engine_mcp_writes_kind ON engine_mcp_writes (kind, at DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
