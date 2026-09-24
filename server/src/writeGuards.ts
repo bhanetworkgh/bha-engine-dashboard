@@ -262,6 +262,32 @@ export function writable(kind: string): WritableKind | null {
   return Object.prototype.hasOwnProperty.call(WRITABLE, kind) ? WRITABLE[kind] : null;
 }
 
+/**
+ * Kinds `delete_record` takes that no other write tool does (2026-09-24,
+ * Destiny). Research Twin's asks are written by the agent at the end of a run
+ * and are not created or edited over MCP, but a test delivery is a row nobody
+ * asked, and it has to be removable without a SQL console. Same confirm, same
+ * record_deletions copy, same audit line as every other delete.
+ */
+export const DELETE_ONLY: Record<string, WritableKind> = {
+  'rt-asks': {
+    kind: 'rt-asks',
+    required: [],
+    selects: {},
+    id_minted: null,
+    archive: null,
+    deletable: true,
+    ingest: null,
+    guards: [],
+  },
+};
+
+export const DELETABLE_KINDS = [...WRITABLE_KINDS, ...Object.keys(DELETE_ONLY)];
+
+export function deletable(kind: string): WritableKind | null {
+  return writable(kind) ?? (Object.prototype.hasOwnProperty.call(DELETE_ONLY, kind) ? DELETE_ONLY[kind] : null);
+}
+
 /* ------------------------------------------------------- the results */
 
 export interface Check {

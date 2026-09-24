@@ -122,8 +122,8 @@ export async function dm(userId: string, text: string): Promise<{ ok: boolean; d
  */
 export type SlackBody = { ok: boolean; error?: string; http_status: number; [k: string]: unknown };
 
-export async function botCall(method: string, body: Record<string, unknown>, as: 'json' | 'form' = 'json'): Promise<SlackBody> {
-  const t = token();
+export async function botCall(method: string, body: Record<string, unknown>, as: 'json' | 'form' = 'json', tokenOverride?: string | null): Promise<SlackBody> {
+  const t = tokenOverride === undefined ? token() : tokenOverride;
   if (!t) return { ok: false, error: 'not_configured', http_status: 0 };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -235,4 +235,18 @@ export async function webApi(tok: string, method: string, params: Record<string,
   } finally {
     clearTimeout(timer);
   }
+}
+
+/* --------------------------------------------- Research Twin, as its own bot */
+
+/**
+ * Research Twin posts its weekly watched-client report as **its own bot**
+ * (2026-09-24), the app n8n's "Research Twin" Slack credential holds — never
+ * Bays' or North Star's. `files:write` and `chat:write`, and a member of
+ * #watched-clients (C0B9LKU7DQV). No default.
+ */
+export const RT_TOKEN_VAR = 'SLACK_RESEARCH_TWIN_BOT_TOKEN';
+
+export function researchTwinToken(): string | null {
+  return process.env[RT_TOKEN_VAR]?.trim() || null;
 }
