@@ -226,6 +226,14 @@ async function call(name, args) {
     for (const f of rows) {
       await query(`INSERT INTO engine_loops (natural_id, builder_id, created_time, fields, source, first_seen_at, updated_at) VALUES ($1, 'destiny', $2, $3::jsonb, 'engine', $2, $2)`, [f.loop_id, f['Date Raised'], JSON.stringify(f)]);
     }
+    // 1,000 more, all Closed and older than the rest, so the loops read runs
+    // past one page of the lookup: 1,007 rows for this builder.
+    await query(
+      `INSERT INTO engine_loops (natural_id, builder_id, created_time, fields, source, first_seen_at, updated_at)
+       SELECT 'LOOP-' || $1 || '9' || g || '-PAGE', 'destiny', $2, jsonb_build_object('loop_id', 'LOOP-' || $1 || '9' || g || '-PAGE', 'Status', 'Closed', 'What', 'paging filler', 'Assignee Slack User ID', $3::text), 'engine', $2, $2
+         FROM generate_series(1, 1000) g`,
+      [String(T), iso(60), BUILDER],
+    );
     await query(
       `INSERT INTO engine_codex_submissions (natural_id, builder_id, created_time, fields, source, first_seen_at, updated_at) VALUES ($1, 'kavin', '2099-01-01T00:00:00.000Z', $2::jsonb, 'engine', '2099-01-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z')`,
       [`SUB-${T}`, JSON.stringify({ 'Submission ID': `SUB-${T}`, 'Builder Name': 'Kavin', 'Processed At': iso(1), 'Loops Closed': ids.done, 'Summary': `closed ${ids.done}` })],
@@ -233,6 +241,7 @@ async function call(name, args) {
     const rol = await call('read_open_loops', { builder_id: BUILDER });
     assert.equal(rol.ok, true, JSON.stringify(rol).slice(0, 500));
     assert.equal(rol.total_open_loops, 6, 'Closed dropped');
+    assert.equal(rol.loop_rows_read, 1_007, 'every page read, not the newest 1,000');
     assert.equal(rol.slack_checked, true);
     assert.equal(rol.slack_window_hours, 168);
     assert.ok(rol.work_logs_checked >= 1 && rol.work_logs_checked <= 60);

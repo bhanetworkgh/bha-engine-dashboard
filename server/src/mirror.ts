@@ -720,6 +720,12 @@ export interface LookupQuery {
   filters: LookupFilter[];
   limit: number;
   order: 'created_asc' | 'created_desc';
+  /**
+   * Rows to skip, for a caller that has to read past one page (2026-09-24:
+   * North Star's read_open_loops reads every loop). The order is total —
+   * created_time then id — so pages neither overlap nor skip.
+   */
+  offset?: number;
 }
 
 /** How a filter reads back in an error and on the write log. */
@@ -896,7 +902,7 @@ export async function lookup(kind: MirrorKind, q: LookupQuery): Promise<LookupRe
     `SELECT ${select} FROM ${spec.table}
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY created_time ${direction} NULLS LAST, id ${direction}
-      LIMIT ${limit}`,
+      LIMIT ${limit}${q.offset && q.offset > 0 ? ` OFFSET ${Math.trunc(q.offset)}` : ''}`,
     params,
   );
 

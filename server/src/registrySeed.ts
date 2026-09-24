@@ -61,7 +61,7 @@ const W = (
  * answer arriving hours late, to a person who has moved on, is worse than none.
  * Migration 28 sets the same five on a database that already holds them.
  */
-const NEVER_REPLAY = new Set(['Bays — Conversational Agent', 'Bays — Front Door', 'Bays — Dashboard Agent', 'Bays — Agent Delivery', 'North Star — Conversational Agent', 'North Star — Front Door']);
+const NEVER_REPLAY = new Set(['Bays — Conversational Agent', 'Bays — Front Door', 'Bays — Dashboard Agent', 'Bays — Agent Delivery', 'North Star — Conversational Agent', 'North Star — Front Door', 'North Star — Agent Delivery']);
 
 export const WORKFLOWS: SeedRow[] = [
   // Research Twin / Agent
@@ -88,6 +88,9 @@ export const WORKFLOWS: SeedRow[] = [
   W('G6Myypk64kpcaVhz', 'North Star — Tools Router', 'North Star Twin', 'North Star Agent', 'Routing', 'Destiny Arupi', 'sub-workflow', 'Called by North Star — Conversational Agent and North Star — Weekly Status',
     'Every tool the North Star agent can call lands here, so all read and write logic stays in one reviewable place.'),
   // North Star Twin / Subsystems
+  W('cnOz6iomtnWVXjso', 'North Star — Agent Delivery', 'North Star Twin', 'North Star Agent', 'Agent', 'Destiny Arupi', 'sub-workflow', 'Called by North Star — Front Door',
+    "Replaces North Star's Conversational Agent wrapper: asks North Star (Agent), delivers by signed callback or Slack, records the ask on the ledger and in BHARAG, raises on failure.",
+    'production', 'Added 24 Sep 2026 (id confirmed by Destiny). Its tools are read_slack, read_open_loops and get_priority_evidence on the dashboard MCP, plus the Tools Router until that is retired.'),
   W('9wuBBHVkKGhvS3MO', 'North Star — Error Handler', 'North Star Twin', 'North Star Subsystems', 'Observability', 'Destiny Arupi', 'error trigger', 'Error workflow on every North Star workflow; also callable directly',
     'Catches every failure in the North Star stack, classifies it, files an incident, and decides whether a person needs telling now.'),
   W('aPP4AMtcB4xmOSCW', 'North Star — Weekly Status', 'North Star Twin', 'North Star Subsystems', 'Monitoring', 'Destiny Arupi', 'schedule', 'Mondays 09:00',
