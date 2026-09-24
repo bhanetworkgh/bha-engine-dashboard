@@ -37,6 +37,7 @@ import { CODEX_CHOICES, CODEX_TABLES, loopTable, questionNeedsHuman, requestIsOp
 import * as store from './store';
 import * as feeds from './feeds';
 import { query } from './pg';
+import * as candidateActions from './candidateActions';
 
 /** The builder's loops table id, for inbound payloads that name a builder rather than a table. */
 export function loopTableFor(owner: string): string | null {
@@ -700,10 +701,14 @@ export async function getPatternCandidates(): Promise<PatternCandidatesData> {
       declined_at: s(f, 'Declined At'),
       reassigned_by: s(f, 'Reassigned By'),
       reassigned_at: s(f, 'Reassigned At'),
+      // Filled by candidateActions.withPipeline, which reads the draft log.
+      draft_runs: 0,
+      draft_failures: 0,
+      days_in_proposed: null,
     };
   });
   // Newest Date Flagged first; within a day, the newer CAND-<ms> id first. Undated last.
   candidates.sort((a, b) => (b.date_flagged ?? '').localeCompare(a.date_flagged ?? '') || b.id.localeCompare(a.id));
   const updated = r.rows.map((x) => x.updated_at).filter(Boolean).sort().pop() ?? null;
-  return { candidates, held: r.rows.length, updated_at: updated };
+  return candidateActions.withPipeline({ candidates, held: r.rows.length, updated_at: updated });
 }

@@ -11,13 +11,15 @@ import {
   registerCandidate,
   type BuildPattern,
   type BuilderProfile,
+  type CandidatePipeline,
+  type CandidateRate,
   type CandidateRegistered,
   type PatternCandidate,
   type PatternCandidatesData,
   type PatternDraft,
 } from '../data';
 import type { RecordColumn } from '../components/ui';
-import { Button, ButtonAnchor, Definition, EmptyState, Loading, MonthPicker, Pagination, Pill, RecordTable, relativeTime, SearchBox, Segmented, Toast, TwoLine, usePaged, useToast } from '../components/ui';
+import { Button, ButtonAnchor, Definition, EmptyState, InfoTip, Loading, MonthPicker, Pagination, Pill, RecordTable, relativeTime, SearchBox, Segmented, Stat, StatCell, StatStrip, Toast, TwoLine, usePaged, useToast } from '../components/ui';
 
 /**
  * Pattern candidates (2026-09-23, Destiny; actions 2026-09-24): ideas Bays
@@ -44,6 +46,17 @@ import { Button, ButtonAnchor, Definition, EmptyState, Loading, MonthPicker, Pag
  * through the MCP write tools' own handlers (`server/src/candidateActions.ts`).
  * The dashboard's login is shared, so the person acting is **declared** here
  * from Builder Profiles and remembered in this browser; the page says so.
+ *
+ * **The pipeline strip** (2026-09-25, Destiny) sits above the filters: time in
+ * Proposed, draft runs, draft-to-register and decline rates, each with its
+ * denominator — the same `pipeline` object get_page_data returns, so the page
+ * and Bays report one set of figures. It answers for every candidate, not the
+ * filtered view: it is about how the pipeline moves.
+ *
+ * **A registered candidate leaves the list** (2026-09-25). Register deletes the
+ * row once the pattern is saved (kept in record_deletions), so the result is
+ * held here, above the panel, and the panel keeps showing it after the list's
+ * re-read has dropped the row.
  */
 export const CANDIDATE_STATUSES = ['Proposed', 'Approved', 'Registered', 'Declined'] as const;
 
@@ -153,6 +166,58 @@ function FacetPicker({ label, allLabel, value, options, onChange }: { label: str
   );
 }
 
+function rate(r: CandidateRate): string {
+  return r.of ? `${r.n} of ${r.of}` : 'none yet';
+}
+function pct(r: CandidateRate): string | null {
+  return r.of ? `${Math.round((r.n / r.of) * 100)}%` : null;
+}
+function dayText(d: number | null): string {
+  return d === null ? '—' : d < 1 ? 'under a day' : `${Math.floor(d)} ${Math.floor(d) === 1 ? 'day' : 'days'}`;
+}
+
+/** How the pipeline is moving: every candidate, not the filtered view. */
+function PipelineStrip({ p }: { p: CandidatePipeline }) {
+  const tip = p.time_in_proposed;
+  return (
+    <>
+      <StatStrip cols={5}>
+        <StatCell>
+          <Stat label="Undecided" value={p.proposed + p.approved} hint={`${p.proposed} proposed${p.approved ? `, ${p.approved} approved` : ''} · of ${p.candidates} ever`} />
+        </StatCell>
+        <StatCell>
+          <Stat label="Time in proposed" value={tip.n ? dayText(tip.p50) : '—'} hint={tip.n ? `median · p95 ${dayText(tip.p95)} · oldest ${dayText(tip.oldest)}` : 'nothing is proposed'} />
+        </StatCell>
+        <StatCell>
+          <Stat label="Draft runs" value={p.drafts.runs} hint={`${p.drafts.candidates} candidate${p.drafts.candidates === 1 ? '' : 's'} · each a paid model call`} />
+        </StatCell>
+        <StatCell>
+          <Stat label="Drafted, then registered" value={rate(p.draft_to_register)} hint={pct(p.draft_to_register) ?? 'no candidate drafted yet'} />
+        </StatCell>
+        <StatCell>
+          <Stat label="Registered · declined" value={`${p.registered} · ${p.declined}`} hint={p.candidates ? `${pct(p.register_rate)} · ${pct(p.decline_rate)} of ${p.candidates}` : 'no candidate yet'} />
+        </StatCell>
+      </StatStrip>
+      <div className="-mt-2 mb-3 flex items-center gap-1.5 px-6 text-[11.5px] text-faint md:px-8">
+        <span>
+          Every candidate, whatever the filters.
+          {p.time_to_decision.n ? ` Flagged to decided: median ${dayText(p.time_to_decision.p50)}, p95 ${dayText(p.time_to_decision.p95)}, over ${p.time_to_decision.n}.` : ''}
+          {p.drafts.failed ? ` ${p.drafts.failed} draft${p.drafts.failed === 1 ? '' : 's'} failed and ${p.drafts.failed === 1 ? 'is' : 'are'} not in the runs.` : ''}
+        </span>
+        <InfoTip label="What these figures leave out">
+          <span className="block space-y-1">
+            {p.notes.map((n) => (
+              <span key={n} className="block">
+                {n}
+              </span>
+            ))}
+          </span>
+        </InfoTip>
+      </div>
+    </>
+  );
+}
+
 export function CandidatesTab({
   state,
   months,
@@ -223,7 +288,14 @@ export function CandidatesTab({
     [base, filters.builder, filters.architect, filters.lane, filters.status],
   );
   const paged = usePaged(rows, `${JSON.stringify(filters)}|${needle}|${month ?? 'all'}`);
-  const open = openId ? all.find((c) => c.id === openId) ?? null : null;
+  /*
+   * A Register deletes the candidate, and the list's re-read then drops it. The
+   * candidate as it was and what Register answered are held here so the panel
+   * can still say what happened.
+   */
+  const [handoff, setHandoff] = useState<{ c: PatternCandidate; r: CandidateRegistered } | null>(null);
+  const live = openId ? all.find((c) => c.id === openId) ?? null : null;
+  const open = live ?? (handoff && handoff.c.id === openId ? handoff.c : null);
   const me = profiles.data?.profiles.find((p) => p.user_id === acting) ?? null;
   const filtered = (Object.keys(filters) as Facet[]).some((f) => filters[f]) || Boolean(month);
 
@@ -243,6 +315,7 @@ export function CandidatesTab({
         {state.data.held} {state.data.held === 1 ? 'candidate' : 'candidates'} held
         {state.data.updated_at ? ` · newest change ${relativeTime(state.data.updated_at) ?? state.data.updated_at}` : ''} · the oldest undecided first
       </div>
+      {state.data.pipeline && <PipelineStrip p={state.data.pipeline} />}
       <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
         <div className="flex flex-wrap items-center justify-between gap-2">
           {/* The status strip: each count is the filter. */}
@@ -304,6 +377,8 @@ export function CandidatesTab({
       {open && (
         <CandidateView
           c={open}
+          registered={handoff && handoff.c.id === open.id ? handoff.r : null}
+          onRegistered={(r) => setHandoff({ c: open, r })}
           onClose={() => setParam('open', null)}
           patternRecord={open.pattern_id ? patterns.find((p) => p.pattern_id === open.pattern_id)?.id ?? null : null}
           onOpenPattern={(id) => {
@@ -322,7 +397,10 @@ export function CandidatesTab({
   );
 }
 
-type Mode = 'view' | 'register' | 'decline' | 'reassign';
+type Mode = 'view' | 'register' | 'draft' | 'decline' | 'reassign';
+
+/** Said beside the Draft button: the same flow is Bays' in Slack (2026-09-25). */
+const BAYS_CAN = 'Bays can run this same draft and register from Slack (draft_pattern_candidate, register_pattern_candidate).';
 
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return (
@@ -341,6 +419,8 @@ function errorText(e: unknown): string {
 /** The whole candidate, and what its architect can do with it. */
 function CandidateView({
   c,
+  registered,
+  onRegistered,
   onClose,
   patternRecord,
   onOpenPattern,
@@ -351,6 +431,8 @@ function CandidateView({
   onDone,
 }: {
   c: PatternCandidate;
+  registered: CandidateRegistered | null;
+  onRegistered: (r: CandidateRegistered) => void;
   onClose: () => void;
   patternRecord: string | null;
   onOpenPattern: (id: string) => void;
@@ -363,7 +445,6 @@ function CandidateView({
   const [mode, setMode] = useState<Mode>('view');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [registered, setRegistered] = useState<CandidateRegistered | null>(null);
   const me = profiles?.find((p) => p.user_id === acting) ?? null;
   const permitted = mayAct(c, acting);
   const open = isOpen(c);
@@ -399,6 +480,15 @@ function CandidateView({
     ['Suggested architect', c.suggested_architect ?? '—'],
     ['Flagged by', c.flagged_by ?? '—'],
     ['Date flagged', c.date_flagged ?? 'undated'],
+    ...(c.days_in_proposed !== null ? [['Time in proposed', dayText(c.days_in_proposed)] as [string, ReactNode]] : []),
+    [
+      'Draft runs',
+      c.draft_runs
+        ? `${c.draft_runs} — each a paid model call${c.draft_failures ? `; ${c.draft_failures} more failed` : ''}`
+        : c.draft_failures
+          ? `none reached the model; ${c.draft_failures} failed`
+          : 'not drafted yet',
+    ],
     [
       'Source link',
       c.source_link ? (
@@ -521,24 +611,34 @@ function CandidateView({
                   {me.name} cannot act on this one: only its suggested architect ({c.suggested_architect ?? 'not set'}), its builder ({c.builder ?? 'not set'}), Jason or Destiny can.
                 </p>
               ) : mode === 'view' ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button variant="primary" onClick={() => setMode('register')}>
-                    Register as a pattern
-                  </Button>
-                  <Button onClick={() => setMode('decline')}>Decline</Button>
-                  <Button onClick={() => setMode('reassign')}>Reassign architect</Button>
+                <div className="mt-3 space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="primary" onClick={() => setMode('register')}>
+                      Register as a pattern
+                    </Button>
+                    <Button onClick={() => setMode('draft')} title="Draft every pattern field, then review it in the Register form. Saves nothing.">
+                      Draft full pattern, then register
+                    </Button>
+                    <Button onClick={() => setMode('decline')}>Decline</Button>
+                    <Button onClick={() => setMode('reassign')}>Reassign architect</Button>
+                  </div>
+                  <p className="text-[11.5px] text-faint">
+                    The draft fills every field from what this candidate has, and saves nothing until you register. {BAYS_CAN}
+                    {c.draft_runs ? ` Drafted ${c.draft_runs} ${c.draft_runs === 1 ? 'time' : 'times'} so far.` : ''}
+                  </p>
                 </div>
-              ) : mode === 'register' ? (
+              ) : mode === 'register' || mode === 'draft' ? (
                 <RegisterForm
                   c={c}
                   actor={me.user_id}
                   busy={busy}
+                  draftFirst={mode === 'draft'}
                   onCancel={() => setMode('view')}
                   onSubmit={(pattern) =>
                     run(async () => {
                       const r = await registerCandidate(c.id, me.user_id, pattern);
-                      setRegistered(r);
-                      onDone(r.pattern_id ? `Registered as ${r.pattern_id}` : 'Registered');
+                      onRegistered(r);
+                      onDone(r.pattern_id ? `Registered as ${r.pattern_id}${r.candidate_deleted ? ' — the candidate has moved to the Patterns tab' : ''}` : 'Registered');
                     })
                   }
                 />
@@ -609,13 +709,29 @@ function seed(c: PatternCandidate): Record<string, string> {
   return f;
 }
 
-function RegisterForm({ c, actor, busy, onCancel, onSubmit }: { c: PatternCandidate; actor: string; busy: boolean; onCancel: () => void; onSubmit: (pattern: Record<string, string>) => void }) {
+function RegisterForm({
+  c,
+  actor,
+  busy,
+  draftFirst,
+  onCancel,
+  onSubmit,
+}: {
+  c: PatternCandidate;
+  actor: string;
+  busy: boolean;
+  draftFirst: boolean;
+  onCancel: () => void;
+  onSubmit: (pattern: Record<string, string>) => void;
+}) {
   const [initial] = useState(() => seed(c));
   const [f, setF] = useState<Record<string, string>>(initial);
   const [drafting, setDrafting] = useState(false);
   const [draft, setDraft] = useState<PatternDraft | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
   const [more, setMore] = useState(false);
+  const [notes, setNotes] = useState('');
+  const [codexId, setCodexId] = useState('');
   const set = (k: string) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }));
   const ready = f.pattern_name.trim().length > 0;
   const dirty = Object.keys(f).some((k) => f[k] !== initial[k]);
@@ -625,7 +741,7 @@ function RegisterForm({ c, actor, busy, onCancel, onSubmit }: { c: PatternCandid
     setDrafting(true);
     setDraftError(null);
     try {
-      const d = await draftCandidate(c.id, actor);
+      const d = await draftCandidate(c.id, actor, { ...(notes.trim() ? { notes: notes.trim() } : {}), ...(codexId.trim() ? { codex_entry_id: codexId.trim() } : {}) });
       setF((x) => {
         const next = { ...x };
         for (const [k, v] of Object.entries(d.fields)) if (k in next) next[k] = v;
@@ -642,6 +758,12 @@ function RegisterForm({ c, actor, busy, onCancel, onSubmit }: { c: PatternCandid
     }
   };
 
+  // "Draft full pattern, then register": the draft starts as the form opens.
+  useEffect(() => {
+    if (draftFirst) void runDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const area = (x: FieldSpec) => (
     <Field key={x.key} label={x.label} hint={x.hint}>
       <textarea className="input py-2 text-[12.5px] leading-relaxed" style={{ minHeight: `${Math.max(1, x.rows ?? 2) * 22 + 20}px` }} value={f[x.key]} onChange={set(x.key)} placeholder={draft && draft.empty_fields.includes(x.key) ? 'Left empty: the Summary and the thread do not support it.' : 'Optional'} />
@@ -656,26 +778,30 @@ function RegisterForm({ c, actor, busy, onCancel, onSubmit }: { c: PatternCandid
         if (ready && !busy && !drafting) onSubmit(f);
       }}
     >
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" onClick={runDraft} loading={drafting} disabled={busy}>
-          Draft full pattern
-        </Button>
-        <span className="text-[12px] text-faint">
-          Fills every field from the Summary and the Slack thread at the Source Link, with the Pattern Extractor’s model and prompt. A field the sources don’t support stays empty. Review and edit before you register.
-        </span>
-      </div>
+      <details className="text-[12px]">
+        <summary className="cursor-pointer text-faint">Give the draft more to work from (optional)</summary>
+        <div className="mt-2 grid gap-3 sm:grid-cols-[minmax(0,1fr)_28ch]">
+          <Field label="Notes for the draft" hint="Anything you know that the candidate row does not say. Sent as a source of its own; nothing is saved.">
+            <textarea className="input min-h-[60px] py-2 text-[12.5px]" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={4000} />
+          </Field>
+          <Field label="Codex entry" hint="A CODEX-… or Submission ID to read. One the candidate or thread names is read anyway.">
+            <input className="input" value={codexId} onChange={(e) => setCodexId(e.target.value)} placeholder="CODEX-…" />
+          </Field>
+        </div>
+      </details>
       {drafting && <p className="text-[12px] text-faint">Reading the thread and drafting — this takes up to a minute.</p>}
       {draftError && <p className="text-[12.5px] text-failing">No draft: {draftError}</p>}
       {draft && (
         <div className="space-y-0.5 text-[12px] text-dim">
           <p>{draft.note}</p>
           {!draft.sources.thread.read && draft.sources.thread.note && <p>Thread: {draft.sources.thread.note}</p>}
+          {draft.sources.codex.note && draft.sources.codex.looked_for.length > 0 && <p>Codex: {draft.sources.codex.note}</p>}
           {draft.sources.thread.read && draft.sources.thread.note && <p>{draft.sources.thread.note}</p>}
           {draft.empty_fields.length > 0 && <p className="text-faint">Left empty: {draft.empty_fields.map((k) => LABEL[k] ?? k).join(', ')}.</p>}
         </div>
       )}
       <p className="text-[12px] text-faint">
-        Registering mints the BP- id, writes the pattern, ingests it into BHARAG, makes its Google Doc and announces it in #bha-build-patterns as Bays, then marks this candidate Registered.
+        Registering mints the BP- id, writes the pattern, ingests it into BHARAG, makes its Google Doc and announces it in #bha-build-patterns as Bays, then marks this candidate Registered and removes it from this list — it lives on the Patterns tab from then on, and the candidate row is kept in record_deletions.
       </p>
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_14ch_14ch]">
         <Field label="Pattern name">
@@ -705,14 +831,21 @@ function RegisterForm({ c, actor, busy, onCancel, onSubmit }: { c: PatternCandid
         </button>
         {more && <div className="mt-3 space-y-3">{MORE.map(area)}</div>}
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button variant="primary" type="submit" loading={busy} disabled={!ready || drafting}>
           Register pattern
+        </Button>
+        <Button type="button" onClick={runDraft} loading={drafting} disabled={busy}>
+          {draft ? 'Draft again' : 'Draft full pattern'}
         </Button>
         <Button variant="ghost" onClick={onCancel} disabled={busy || drafting}>
           Cancel
         </Button>
       </div>
+      <p className="text-[11.5px] text-faint">
+        The draft reads the Summary and every other field on this candidate, the Slack thread at its Source Link, a Codex entry it names and your notes, with the Pattern Extractor’s model and prompt. A field those sources
+        don’t support stays empty. Each draft is a paid model call. {BAYS_CAN}
+      </p>
     </form>
   );
 }
@@ -818,6 +951,12 @@ function RegisteredNote({ r, onOpenPattern, patternRecord }: { r: CandidateRegis
         )}
       </p>
       {!r.candidate_updated && <p className="text-failing">{r.note ?? r.candidate_error}</p>}
+      {r.candidate_updated &&
+        (r.candidate_deleted ? (
+          <p className="text-dim">Candidate: removed from this list, now that it is a pattern; the row is kept in record_deletions.</p>
+        ) : (
+          <p className="text-failing">Candidate: marked Registered but not removed from this list{r.candidate_delete_error ? ` — ${r.candidate_delete_error}` : ''}.</p>
+        ))}
     </div>
   );
 }

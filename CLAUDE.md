@@ -803,9 +803,10 @@ reasonable about.
   `get_n8n_workflow` and `read_slack_file` later the same day, then North
   Star's `read_slack`, `read_open_loops` and `get_priority_evidence`, then
   `sweep_airtable_nodes`),
-  **thirty-eight on the write connection** (those plus the five record write tools, the
-  three Drive tools, the two Slack writes `send_nudge` and `post_file`, and
-  Research Twin's six, 2026-09-24), and **every one of them carries MCP annotations**
+  **forty on the write connection** (those plus the five record write tools, the
+  three Drive tools, the two Slack writes `send_nudge` and `post_file`,
+  Research Twin's six, 2026-09-24, and the two candidate tools
+  `draft_pattern_candidate` and `register_pattern_candidate`, 2026-09-25), and **every one of them carries MCP annotations**
   (decision 2026-09-20, Destiny), because the spec's default for a tool that
   declares none is *potentially destructive* — twelve read-only tools that
   said nothing about themselves were being offered to every client as though
@@ -2566,6 +2567,17 @@ cookie, `server/src/candidateActions.ts`:
 - A Registered or Declined candidate refuses all three with a 409; that is the
   end of its life. These are **new field names** added to the blob, never a
   rename of one the engine writes.
+- **Register ends by deleting the candidate** (decision 2026-09-25, Destiny).
+  Once it is a pattern it lives on the Patterns tab, so after the candidate is
+  marked Registered (Pattern ID, Registered At/By, announcement) its row is
+  removed through `delete_record`'s own handler, which keeps the whole row in
+  `record_deletions` first, with the reason `Registered as <BP-…> by <name>`.
+  Only once the mark landed: a candidate that could not be marked is not
+  deleted, and a delete that fails leaves a Registered candidate on the list
+  and says so (`candidate_deleted: false`). A second Register is a 404. The
+  panel holds the result on screen after the list's re-read drops the row.
+  Candidates registered before 25 Sep stay on the list as Registered; nothing
+  here deletes them retroactively.
 
 **Register announces the pattern in #bha-build-patterns** (2026-09-24, Destiny),
 `server/src/patternAnnounce.ts`. Once the pattern is saved, one
@@ -2632,6 +2644,47 @@ fields). `OPENROUTER_API_KEY`, no default: unset, the button answers
 `npm run test:candidates` pins the draft, the stored fields and the
 announcement against stand-ins for Slack, OpenRouter, Google and BHARAG, and
 deletes its channel post and rows.
+
+**Draft and Register over MCP** (decision 2026-09-25, Destiny), so Bays can run
+the flow from Slack: **`draft_pattern_candidate`** and
+**`register_pattern_candidate`**, `server/src/mcp/candidateTools.ts`, **write
+connection only** (a draft saves nothing but is a paid model call and the first
+half of a Register). Both call `candidateActions.draftFor` / `register` — the
+functions the page routes call — with `via: 'write'`, so the who-may-act rule,
+the OpenRouter gate, the model and prompt, create_record, the announcement and
+the delete are the page's; only the log labels differ (`mcp:<tool>`,
+`MCP_WRITE_TOKEN`, audit access `write`). The acting person is
+`requester_user_id`, declared as on the page. A refusal is `ok: false` with the
+page's own reason and status. Register without `fields` writes the page form's
+seed (name, Summary, lane, Moderate). The page's Draft button sits beside
+Register ("Draft full pattern, then register") and says Bays can run the same.
+
+**The draft reads everything the candidate has** (2026-09-25, Destiny): the
+Summary, **every other field on the row** except the bookkeeping ones (Slack
+ids, Status, the Registered/Declined/Reassigned stamps), **notes** the person
+drafting adds (page form or the tool's `notes`), and **a Codex entry** — a
+`Codex Entry ID`/`Submission ID` on the row, the caller's `codex_entry_id`, or a
+`CODEX-…` id named in the row, the notes or the thread, at most two, read from
+`engine_codex_submissions` (its Summary, Session Description and `Orchestrator
+Layer2 Review`, 12,000 characters each). An absent source is written into the
+prompt as "(none)" and the prompt says such a source contributes nothing. The
+answer's `sources` names what went in.
+
+**Pipeline figures** (decision 2026-09-25, Destiny): `pipeline` on
+`GET /api/pattern-candidates` (so `get_page_data` path `/build-patterns` reads
+it) and a five-cell strip above the Candidates filters, over every candidate
+whatever the filters. Undecided; **time in Proposed** (Date Flagged to now, p50,
+p95 and oldest — never a mean, the rule the twins' pages follow, so the brief's
+"average" is a median); **draft runs** (every draft that reached the model, from
+either door, from `engine_writes` endpoints `page:draft_pattern` and
+`mcp:draft_pattern_candidate`, keyed on the candidate's page id; failures
+counted apart); **drafted then registered**; **registered · declined**, each
+over all candidates. **Handed-off registrations are read back from
+`record_deletions`** by their `Registered as ` reason — without that the rate
+would fall every time somebody registered one — and every other deleted
+candidate (a test, a mistake) is counted nowhere and named in the notes. Each
+candidate also carries `draft_runs`, `draft_failures` and `days_in_proposed`,
+shown on its panel.
 
 **Who may act: the suggested architect (`Architect Slack ID`), the builder
 (`Builder Slack ID`), Jason or Destiny** — checked on the server before any

@@ -28,6 +28,13 @@
  * not in the channel, no Source Link) is named in the answer and the draft is
  * made from the Summary alone, never silently.
  *
+ * **Richer inputs** (2026-09-25, Destiny): beside the Summary and the thread,
+ * every other field the candidate row carries, notes the person drafting adds,
+ * and a Codex entry the row, the notes or the thread names (or the caller
+ * passes) go into the same prompt, each under its own heading. An absent source
+ * says "(none)" and the prompt says such a source contributes nothing. Both
+ * doors call this: the page's button and `draft_pattern_candidate` over MCP.
+ *
  * `OPENROUTER_API_KEY`, no default. Unset, the button answers not_configured
  * and names the variable. `OPENROUTER_API_URL` is optional, for the local
  * stand-in.
@@ -184,7 +191,7 @@ You must think like:
 - a BHA Engine steward who cares about digital twins, the vertical farm and cabinet twin, Log Engine and Builder Ops, Genie, BHARAG, RAG, observability, infra, and any other system that should be reusable beyond a single sprint
 
 SOURCE PRIORITY AND ANTI-HALLUCINATION:
-You receive two sources and only two: the candidate itself (its name, lane, builder and Summary) and the Slack thread it was flagged from. The Summary is the claim; the thread is where it came from and is where exact details live (error text, field names, commands, numbers). Every field you write must be grounded in something one of these two sources states. Never introduce a fact, metric, system, identifier, command, error text or test result that neither source contains. If the thread appears to describe something materially different from the Summary, trust the Summary and ignore the discrepancy rather than fabricating a synthesis. A field the sources do not support is an empty string (an empty array for implementation_checklist) -- an empty field is correct and expected; a plausible invented one is a defect. Where a field description below asks for a sentence the sources cannot back (a metric, a named outcome, how Slack Genie and BHARAG will route on the field, a Bitwarden rule), leave that part out rather than writing it.
+You receive at most four sources and nothing else: the candidate itself (its name, lane, builder, Summary and any other field it carries), notes the person drafting added, the Slack thread it was flagged from, and the Codex entry it came from where one is linked. The Summary is the claim; the thread and the Codex entry are where it came from and are where exact details live (error text, field names, commands, numbers). A source marked "(none)" or "(not read: ...)" contributes nothing. Every field you write must be grounded in something one of these two sources states. Never introduce a fact, metric, system, identifier, command, error text or test result that neither source contains. If the thread or the Codex entry appears to describe something materially different from the Summary, trust the Summary and ignore the discrepancy rather than fabricating a synthesis. A field the sources do not support is an empty string (an empty array for implementation_checklist) -- an empty field is correct and expected; a plausible invented one is a defect. Where a field description below asks for a sentence the sources cannot back (a metric, a named outcome, how Slack Genie and BHARAG will route on the field, a Bitwarden rule), leave that part out rather than writing it.
 
 1. What a BHA-grade build pattern looks like
 A good BHA build pattern usually:
@@ -226,7 +233,35 @@ Do not add extra fields. Do not return explanations outside the JSON.
 
 When in doubt, lean toward Moderate unless the pattern is obviously universal.`;
 
-export function userPrompt(c: { candidate: string; lane: string; builder: string; summary: string; why: string; thread: ThreadRead }): string {
+export interface CodexRead {
+  read: boolean;
+  /** The Codex Entry IDs (or Submission IDs) that were looked for, and the ones found. */
+  looked_for: string[];
+  found: string[];
+  chars: number;
+  text: string;
+  note: string | null;
+}
+
+export interface DraftExtras {
+  /** Free text the person drafting adds — anything the candidate row does not carry. */
+  notes?: string | null;
+  /** A Codex entry to read, by its Codex Entry ID or Submission ID, beside any the candidate names. */
+  codex_entry_id?: string | null;
+}
+
+export function userPrompt(c: {
+  candidate: string;
+  lane: string;
+  builder: string;
+  summary: string;
+  why: string;
+  thread: ThreadRead;
+  other?: [string, string][];
+  notes?: string;
+  codex?: CodexRead;
+}): string {
+  const other = (c.other ?? []).map(([k, v]) => `${k}: ${v}`).join('\n');
   return `CANDIDATE: ${c.candidate}
 LANE: ${c.lane || '(none)'}
 BUILDER: ${c.builder || '(unknown)'}
@@ -237,8 +272,98 @@ ${c.summary || '(no summary written)'}
 WHY THIS ARCHITECT:
 ${c.why || '(not written)'}
 
+OTHER FIELDS ON THE CANDIDATE:
+${other || '(none)'}
+
+NOTES FROM THE PERSON DRAFTING:
+${c.notes?.trim() || '(none)'}
+
 SLACK THREAD (the conversation the candidate was flagged from):
-${c.thread.read ? c.thread.text || '(the thread holds no text)' : `(not read: ${c.thread.note})`}`;
+${c.thread.read ? c.thread.text || '(the thread holds no text)' : `(not read: ${c.thread.note})`}
+
+CODEX ENTRY (the builder's logged session this came from):
+${c.codex?.read ? c.codex.text : c.codex?.looked_for.length ? `(not read: ${c.codex.note})` : '(none linked)'}`;
+}
+
+/*
+ * The richer inputs (2026-09-25, Destiny). A candidate may carry more than its
+ * Summary — Flagged By, Date Flagged, a Notes field somebody added, a Codex
+ * entry id — and every one of those is a real source. They go into the same
+ * prompt under their own names; a field the row does not carry is simply not
+ * there, never a placeholder the model could read as a fact.
+ */
+
+/** Fields already in the prompt under their own heading, or bookkeeping that says nothing about the pattern. */
+const NOT_A_SOURCE = new Set([
+  'Candidate', 'Summary', 'Lane', 'Builder', 'Why This Architect', 'Source Link',
+  'Status', 'Builder Slack ID', 'Architect Slack ID', 'Pattern ID',
+  'Registered At', 'Registered By', 'Announcement Link', 'Announcement TS',
+  'Declined Reason', 'Declined By', 'Declined By Slack ID', 'Declined At',
+  'Reassigned By', 'Reassigned At',
+]);
+const FIELD_CLIP = 4_000;
+const CODEX_CLIP = 12_000;
+const CODEX_MAX = 2;
+/** A Codex Entry ID as the engine mints them: CODEX-20260924-jeganathan-place-model-gpu-scale. */
+const CODEX_ID_RE = /\bCODEX-\d{8}-[A-Za-z0-9_-]+/g;
+const CODEX_FIELDS = ['Codex Entry ID', 'Codex Entry', 'Codex ID', 'Submission ID'];
+
+export function otherFields(f: Record<string, unknown>): [string, string][] {
+  const out: [string, string][] = [];
+  for (const [k, v] of Object.entries(f)) {
+    if (NOT_A_SOURCE.has(k) || v === null || v === undefined) continue;
+    const t = (typeof v === 'object' ? JSON.stringify(v) : String(v)).trim();
+    if (t) out.push([k, t.slice(0, FIELD_CLIP)]);
+  }
+  return out.sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+/** Every Codex entry the candidate, the notes or the thread names, the explicit one first. */
+export function codexIds(f: Record<string, unknown>, extras: DraftExtras, threadText: string): string[] {
+  const ids: string[] = [];
+  const add = (x: unknown) => {
+    const t = x === null || x === undefined ? '' : String(x).trim();
+    if (t && !ids.includes(t)) ids.push(t);
+  };
+  add(extras.codex_entry_id);
+  for (const k of CODEX_FIELDS) add(f[k]);
+  const text = [...Object.values(f).map((v) => (typeof v === 'string' ? v : '')), extras.notes ?? '', threadText].join('\n');
+  for (const m of text.match(CODEX_ID_RE) ?? []) add(m);
+  return ids.slice(0, CODEX_MAX);
+}
+
+export async function readCodex(ids: string[]): Promise<CodexRead> {
+  if (!ids.length) return { read: false, looked_for: [], found: [], chars: 0, text: '', note: 'No Codex entry is linked from the candidate, the notes or the thread.' };
+  const found: string[] = [];
+  const parts: string[] = [];
+  for (const id of ids) {
+    const byEntry = await mirror.lookup('codex', { filters: [{ op: 'f', name: 'Codex Entry ID', value: id }], limit: 1, order: 'created_desc' });
+    const row = byEntry.rows[0] ?? (await mirror.lookup('codex', { filters: [{ op: 'f', name: 'natural_id', value: id }], limit: 1, order: 'created_desc' })).rows[0];
+    if (!row) continue;
+    const g = (k: string) => (row.fields[k] === null || row.fields[k] === undefined ? '' : String(row.fields[k]).trim());
+    found.push(id);
+    parts.push(
+      [
+        `Codex Entry ID: ${g('Codex Entry ID') || '(none yet)'} · Submission ID: ${row.natural_id ?? '(none)'} · Builder: ${g('Builder Name') || '(unknown)'} · Session type: ${g('Session Type') || '(unknown)'}`,
+        g('Session Description') && `Session description: ${g('Session Description')}`,
+        g('Summary') && `Summary: ${g('Summary')}`,
+        g('Orchestrator Layer2 Review') && `Codex entry:\n${g('Orchestrator Layer2 Review')}`,
+      ]
+        .filter(Boolean)
+        .join('\n')
+        .slice(0, CODEX_CLIP),
+    );
+  }
+  const text = parts.join('\n\n---\n\n');
+  const missing = ids.filter((x) => !found.includes(x));
+  return {
+    read: found.length > 0,
+    looked_for: ids,
+    found,
+    chars: text.length,
+    text,
+    note: missing.length ? `No Codex entry is held for ${missing.join(', ')}.` : null,
+  };
 }
 
 /* ------------------------------------------------------------ the call */
@@ -288,24 +413,27 @@ export interface DraftResult {
   fields: Record<string, string>;
   empty_fields: string[];
   model: string;
-  sources: { summary: boolean; thread: Omit<ThreadRead, 'text'> };
+  sources: { summary: boolean; thread: Omit<ThreadRead, 'text'>; other_fields: string[]; notes: boolean; codex: Omit<CodexRead, 'text'> };
   usage: Record<string, unknown> | null;
   note: string;
 }
 
-export async function draft(row: mirror.LookupRow): Promise<DraftResult> {
+export async function draft(row: mirror.LookupRow, extras: DraftExtras = {}): Promise<DraftResult> {
   const key = process.env[OPENROUTER_KEY_VAR]?.trim();
   if (!key) throw new DraftError(503, 'not_configured', `${OPENROUTER_KEY_VAR} is not set on this server, so no draft can be made. Fill the form by hand, or set the variable on the service.`);
   const f = row.fields;
   const s = (k: string) => (f[k] === null || f[k] === undefined ? '' : String(f[k]).trim());
   const thread = await readThread(s('Source Link') || null);
+  const other = otherFields(f);
+  const notes = extras.notes === null || extras.notes === undefined ? '' : String(extras.notes).trim().slice(0, FIELD_CLIP);
+  const codex = await readCodex(codexIds(f, extras, thread.text));
   const body = {
     model: DRAFT_MODEL,
     max_tokens: MAX_TOKENS,
     response_format: { type: 'json_object' },
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userPrompt({ candidate: s('Candidate'), lane: s('Lane'), builder: s('Builder'), summary: s('Summary'), why: s('Why This Architect'), thread }) },
+      { role: 'user', content: userPrompt({ candidate: s('Candidate'), lane: s('Lane'), builder: s('Builder'), summary: s('Summary'), why: s('Why This Architect'), thread, other, notes, codex }) },
     ],
   };
   const controller = new AbortController();
@@ -346,13 +474,21 @@ export async function draft(row: mirror.LookupRow): Promise<DraftResult> {
   const fields = toFields(parsed);
   const empty = PATTERN_TEXT_FIELDS.filter((k) => !fields[k]);
   const { text: _t, ...threadMeta } = thread;
+  const { text: _c, ...codexMeta } = codex;
+  const used = [
+    'the Summary',
+    other.length ? `${other.length} other candidate field${other.length === 1 ? '' : 's'} (${other.map(([k]) => k).join(', ')})` : null,
+    notes ? 'your notes' : null,
+    thread.read ? `${thread.messages} message${thread.messages === 1 ? '' : 's'} of the Slack thread` : null,
+    codex.read ? `the Codex entry ${codex.found.join(', ')}` : null,
+  ].filter(Boolean) as string[];
   return {
     ok: true,
     fields,
     empty_fields: empty,
     model: DRAFT_MODEL,
-    sources: { summary: Boolean(s('Summary')), thread: threadMeta },
+    sources: { summary: Boolean(s('Summary')), thread: threadMeta, other_fields: other.map(([k]) => k), notes: Boolean(notes), codex: codexMeta },
     usage: (json.usage as Record<string, unknown> | undefined) ?? null,
-    note: `Drafted from the Summary${thread.read ? ` and ${thread.messages} message${thread.messages === 1 ? '' : 's'} of the Slack thread` : ' alone — the thread was not read'}. ${empty.length ? `${empty.length} field${empty.length === 1 ? '' : 's'} the sources did not support ${empty.length === 1 ? 'is' : 'are'} left empty. ` : ''}Nothing is saved until you press Register.`,
+    note: `Drafted from ${used.length > 1 ? `${used.slice(0, -1).join(', ')} and ${used.at(-1)}` : used[0]}${thread.read ? '' : ' — the thread was not read'}. ${empty.length ? `${empty.length} field${empty.length === 1 ? '' : 's'} the sources did not support ${empty.length === 1 ? 'is' : 'are'} left empty. ` : ''}Nothing is saved until you press Register.`,
   };
 }
