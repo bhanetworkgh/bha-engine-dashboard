@@ -1123,6 +1123,26 @@ crash, when seven North Star runs read Slack at 08:00 at once.
 - **`get_priority_evidence`** (`PE -`): the newest 40 Codex rows, 300 rt-jobs
   and 300 commercial cards, `PE - Format Evidence`'s shapes and clips; jobs and
   cards filtered by `lane_id`, work logs never (25 without a lane, 15 with).
+- **Every answer is budgeted** (decision 2026-09-24, Destiny). The first cut
+  answered in 66–84 KB and the n8n Agent looped on it — `get_priority_evidence`
+  six times and `read_open_loops` five in seventy seconds on one question, and
+  `read_slack` until Slack rate-limited the bot — because its MCP client got
+  nothing usable out of answers that size. So all three take **`max_chars`,
+  20,000 by default and 40,000 at most** (5,000 the floor, above any answer's
+  fixed part), popping from the longest list until the JSON fits, and stamp
+  `truncated`, `result_chars` and one `note`: "… — do not call again with the
+  same arguments; narrow with …". The default shapes are compact:
+  `read_open_loops` gives every count over the whole set (by label, status and
+  owner) and at most 40 loops as `{loop_id, what ≤160, status, label, age_days,
+  owner, jason_raised, last_touch}`; `get_priority_evidence` gives work logs as
+  400-character summaries and jobs and cards as their decision fields;
+  `read_slack` gives the newest 40 messages unless `since_hours` or
+  `slack_channel` narrows the read. **A Slack 429 is waited out once** (its
+  Retry-After, up to 30 s) and retried; still limited, it is `ok:false`,
+  `rate_limited`, `retry_after` — never partial data that looks complete. The
+  same Slack read within 60 seconds is served from the last one, marked
+  `cached` (`NORTH_STAR_SLACK_CACHE_SECONDS`, optional, 0 in the tests). Every
+  call's size is on its `engine_writes` line.
 - `npm run test:north-star` pins them against a Slack stand-in. The Tools
   Router's retirement is Destiny's, once the agent is repointed.
   `North Star — Agent Delivery` (`cnOz6iomtnWVXjso`) is in the registry

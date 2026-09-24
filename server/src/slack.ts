@@ -131,6 +131,17 @@ export function northStarToken(): string | null {
  * transport failure or a non-2xx (a 429 included) **throws**, as the n8n HTTP
  * node did with `onError: stopWorkflow`.
  */
+/** Slack said 429. Carries its Retry-After, in seconds, so a caller can wait exactly that long once. */
+export class SlackRateLimited extends Error {
+  constructor(
+    public method: string,
+    public retryAfter: number,
+  ) {
+    super(`Slack ${method} answered 429 (rate limited, retry after ${retryAfter}s).`);
+    this.name = 'SlackRateLimited';
+  }
+}
+
 export async function webApi(tok: string, method: string, params: Record<string, string | number | boolean>): Promise<Record<string, unknown>> {
   const q = new URLSearchParams(Object.entries(params).map(([k, v]): [string, string] => [k, String(v)]));
   const controller = new AbortController();
@@ -138,6 +149,7 @@ export async function webApi(tok: string, method: string, params: Record<string,
   try {
     const res = await fetch(`${API}/${method}?${q.toString()}`, { headers: { Authorization: `Bearer ${tok}` }, signal: controller.signal });
     const text = await res.text();
+    if (res.status === 429) throw new SlackRateLimited(method, Math.max(1, parseInt(res.headers.get('retry-after') ?? '', 10) || 30));
     if (!res.ok) throw new Error(`Slack ${method} answered ${res.status}${res.status === 429 ? ` (rate limited, retry after ${res.headers.get('retry-after') ?? '?'}s)` : ''}: ${text.slice(0, 200)}`);
     try {
       return JSON.parse(text) as Record<string, unknown>;
@@ -145,6 +157,7 @@ export async function webApi(tok: string, method: string, params: Record<string,
       throw new Error(`Slack ${method} answered ${res.status} with a body that was not JSON.`);
     }
   } catch (e) {
+    if (e instanceof SlackRateLimited) throw e;
     if (e instanceof Error && e.name === 'AbortError') throw new Error(`Slack ${method} did not answer within ${TIMEOUT_MS / 1000} seconds.`);
     throw e;
   } finally {

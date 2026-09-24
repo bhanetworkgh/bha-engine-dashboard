@@ -42,6 +42,9 @@ const TAG = String(T).slice(-6);
 const ids = { moving: `LOOP-${T}1-MOVE`, stalled: `LOOP-${T}2-STAL`, done: `LOOP-${T}3-DONE`, fresh: `LOOP-${T}4-NEWW`, jason: `LOOP-${T}5-JASN`, closed: `LOOP-${T}6-CLSD` };
 
 let scopeMissing = false;
+/** 'once': the first history call answers 429 (Retry-After 1), then Slack recovers. 'always': it never does. */
+let rateMode = null;
+let rateHits = 0;
 const auth = [];
 const calls = [];
 // Twelve member channels (two batches), plus the ones the filter must drop.
@@ -85,6 +88,11 @@ const slack = http.createServer((req, res) => {
   }
   if (m === 'conversations.history') {
     const ch = u.searchParams.get('channel');
+    if (rateMode === 'always' || (rateMode === 'once' && rateHits === 0)) {
+      rateHits++;
+      res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '1' });
+      return res.end(JSON.stringify({ ok: false, error: 'ratelimited' }));
+    }
     if (ch === 'CFAIL') return send({ ok: false, error: 'not_in_channel' });
     const oldest = parseFloat(u.searchParams.get('oldest'));
     return send({ ok: true, messages: (history[ch] || []).filter((x) => parseFloat(x.ts) >= oldest) });
@@ -125,6 +133,7 @@ async function call(name, args) {
     SLACK_API_URL: `http://127.0.0.1:${slack.address().port}/api`,
     SLACK_NORTH_STAR_BOT_TOKEN: 'xoxb-north-star',
     SLACK_BAYS_BOT_TOKEN: 'xoxb-bays-must-not-be-used',
+    NORTH_STAR_SLACK_CACHE_SECONDS: '0',
   };
   const server = spawn(process.execPath, ['--no-warnings=ExperimentalWarning', path.join(__dirname, '../../server-dist/server/src/index.js')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
@@ -251,12 +260,18 @@ async function call(name, args) {
     assert.equal(lab[ids.done], 'maybe done', 'a work log closed it');
     assert.equal(lab[ids.fresh], 'new');
     assert.deepEqual(rol.loops.map((l) => l.loop_id), [ids.jason, `LOOP-${T}7-OLDR`, ids.stalled, ids.moving, ids.done, ids.fresh]);
-    assert.equal(rol.loops[0].raised_by_jason, true);
+    assert.equal(rol.loops[0].jason_raised, true);
+    assert.deepEqual(Object.keys(rol.loops[0]).sort(), ['age_days', 'jason_raised', 'label', 'last_touch', 'loop_id', 'owner', 'status', 'what']);
+    assert.ok(rol.result_chars <= 20_000, `default budget: ${rol.result_chars}`);
+    assert.equal(rol.max_chars, 20_000);
+    assert.deepEqual(rol.counts_by_status, { Open: 5, 'In Progress': 1 });
     assert.equal(rol.loops[0].owner, BUILDER);
     assert.deepEqual(rol.counts, { stalled: 3, moving: 1, 'maybe done': 1, new: 1 });
     assert.equal(rol.sorted_by, 'Jason-raised first, then stalled, moving, maybe done, new; oldest first within each');
-    assert.equal(rol.loops.find((l) => l.loop_id === ids.moving).last_slack_mention.by, 'Jason Bays');
-    assert.equal(rol.loops.find((l) => l.loop_id === ids.done).last_log_touch.how, 'closed');
+    assert.deepEqual(rol.loops.find((l) => l.loop_id === ids.moving).last_touch.by, 'Jason Bays');
+    assert.equal(rol.loops.find((l) => l.loop_id === ids.moving).last_touch.via, 'slack');
+    assert.equal(rol.loops.find((l) => l.loop_id === ids.done).last_touch.how, 'closed');
+    assert.equal(rol.loops.find((l) => l.loop_id === ids.fresh).last_touch, null);
     step('read_open_loops: labels, order, counts');
 
     scopeMissing = true;
@@ -269,7 +284,9 @@ async function call(name, args) {
     step('read_open_loops: a Slack refusal leaves the loops answered, and says so');
 
     /* ---------------- get_priority_evidence ---------------- */
-    for (let i = 0; i < 3; i++) {
+    // 3 jobs the lane filter is checked on, then 40 more in another lane so
+    // the whole answer outgrows the smallest budget.
+    for (let i = 0; i < 43; i++) {
       await query(`INSERT INTO engine_rt_jobs (natural_id, lane_id, created_time, fields, source, first_seen_at, updated_at) VALUES ($1, $2, '2099-01-01T00:00:00.000Z', $3::jsonb, 'engine', $4, $4)`, [
         `JOB-${T}-${i}`, i < 2 ? LANE : 'LANE-OTHER', JSON.stringify({ 'Job ID': `JOB-${T}-${i}`, Lane: i < 2 ? LANE : 'LANE-OTHER', Status: 'Pending', Question: 'q'.repeat(500) }), new Date().toISOString(),
       ]);
@@ -287,19 +304,50 @@ async function call(name, args) {
     assert.equal(pe.lane_id, LANE);
     assert.ok(pe.recent_work_logs.length <= 15);
     assert.equal(pe.research_jobs_total, 2);
-    assert.equal(pe.research_jobs[0].question.length, 403, 'question clipped to 400 + "..."');
+    assert.equal(pe.research_jobs[0].question.length, 203, 'question clipped to 200 + "..."');
+    assert.deepEqual(Object.keys(pe.research_jobs[0]).sort(), ['job_id', 'lane_id', 'outcome', 'question', 'status', 'updated_at']);
     assert.equal(pe.commercial_cards_total, 1);
-    assert.equal(pe.commercial_cards[0].next_action.length, 303);
+    assert.equal(pe.commercial_cards[0].next_action.length, 203);
     assert.equal(pe.commercial_cards[0].missing_research_count, 2);
     assert.equal(pe.no_data, false);
     assert.match(pe.source_note, /not filtered by lane/);
     step('get_priority_evidence: clips, lane filter on jobs and cards, 25 / 15 logs');
 
+    /* ---------------- the budget ---------------- */
+    const small = await call('get_priority_evidence', { max_chars: 5_000 });
+    assert.equal(small.truncated, true);
+    assert.ok(small.result_chars <= 5_000, `held to 5,000: ${small.result_chars}`);
+    assert.equal(small.result_chars, JSON.stringify(small).length, 'result_chars is the size returned');
+    assert.match(small.note, /^capped at 5,000 chars — do not call again with the same arguments; narrow with lane_id\.$/);
+    assert.equal(small.research_jobs_total, all.research_jobs_total, 'totals are over the whole set, not the page');
+    const huge = await call('read_open_loops', { builder_id: BUILDER, max_chars: 999_999 });
+    assert.equal(huge.max_chars, 40_000, 'clamped to 40,000');
+    step('max_chars: held, stated, clamped, and the note says not to ask again');
+
+    /* ---------------- Slack 429 ---------------- */
+    rateMode = 'once';
+    rateHits = 0;
+    const t429 = Date.now();
+    const once = await call('read_slack', { since_hours: 48 });
+    assert.equal(once.ok, true, 'one 429 is waited out and retried');
+    assert.ok(Date.now() - t429 >= 1_000, 'it waited the Retry-After');
+    assert.equal(once.channels_read, 12);
+    rateMode = 'always';
+    const limited = await call('read_slack', { since_hours: 47 });
+    rateMode = null;
+    assert.equal(limited.ok, false);
+    assert.equal(limited.reason, 'rate_limited');
+    assert.equal(limited.retry_after, 1);
+    assert.ok(!('messages' in limited), 'never partial data');
+    step('read_slack: a 429 is waited once and retried; still limited is ok:false rate_limited');
+
     const reads = await query(`SELECT endpoint, count(*)::int AS n FROM engine_writes WHERE endpoint IN ('mcp:read_slack','mcp:read_open_loops','mcp:get_priority_evidence') AND outcome = 'read' AND at > $1 GROUP BY 1`, [new Date(T).toISOString()]);
     const n = Object.fromEntries(reads.rows.map((r) => [r.endpoint, r.n]));
-    assert.equal(n['mcp:read_slack'], 5);
-    assert.equal(n['mcp:read_open_loops'], 2);
-    assert.equal(n['mcp:get_priority_evidence'], 2);
+    assert.equal(n['mcp:read_slack'], 7);
+    assert.equal(n['mcp:read_open_loops'], 3);
+    assert.equal(n['mcp:get_priority_evidence'], 3);
+    const sized = await query(`SELECT detail FROM engine_writes WHERE endpoint = 'mcp:get_priority_evidence' AND at > $1`, [new Date(T).toISOString()]);
+    assert.ok(sized.rows.every((r) => / chars$/.test(r.detail)), 'every read logs its size');
     step('every call logged as a read');
 
     console.log(passed.map((p) => `  ✓ ${p}`).join('\n'));
