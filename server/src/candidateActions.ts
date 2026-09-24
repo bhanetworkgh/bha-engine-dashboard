@@ -29,6 +29,8 @@ import * as mirror from './mirror';
 import { ADMIN_IDS } from './writeGuards';
 import { toolByName, type ToolDeps } from './mcp/tools';
 import { McpError } from './mcp/source';
+import * as announcer from './patternAnnounce';
+import * as drafter from './patternDraft';
 
 export class CandidateError extends Error {
   constructor(
@@ -167,27 +169,89 @@ export async function register(ref: string, input: RegisterInput): Promise<Recor
   if (created.ok !== true) throw refusedFrom(created, 'The pattern was not created');
   if (input.dry_run === true) return { ok: true, dry_run: true, pattern: created, candidate: row.natural_id ?? ref };
   const patternId = str(created.natural_id);
+  const saved = (created.row ?? {}) as { fields?: Record<string, unknown> };
+  const pf = saved.fields ?? fields;
+  /*
+   * The announcement, after the save and never able to undo it (2026-09-24):
+   * a post that fails is reported beside the Doc and BHARAG and the pattern
+   * stands. It goes out before the candidate is marked so the candidate row
+   * can carry the link to its own announcement.
+   */
+  const posted = await announcer.announce({
+    pattern_id: patternId ?? '',
+    pattern_row_id: String(created.id ?? ''),
+    pattern_name: str(pf.pattern_name) ?? '',
+    problem: str(pf.problem) ?? '',
+    bha_system: str(pf.bha_system) ?? '',
+    reusability: str(pf.reusability) ?? '',
+    builder_name: str(row.fields.Builder),
+    registered_by_user_id: actor.user_id,
+    candidate_id: row.natural_id,
+    doc_link: typeof created.doc_link === 'string' ? created.doc_link : null,
+  });
   const now = new Date().toISOString();
   const marked = await call('update_record', {
     kind: 'pattern_candidates',
     id: String(row.id),
-    fields: { Status: 'Registered', 'Pattern ID': patternId, 'Registered At': now, 'Registered By': actor.name },
+    fields: {
+      Status: 'Registered',
+      'Pattern ID': patternId,
+      'Registered At': now,
+      'Registered By': actor.name,
+      ...(posted.announced ? { 'Announcement Link': posted.permalink ?? `ts ${posted.ts}`, 'Announcement TS': posted.ts } : {}),
+    },
     requester_user_id: actor.user_id,
   });
   return {
     ok: marked.ok === true,
     pattern_id: patternId,
     pattern_row_id: created.id,
+    pattern_url: `${announcer.dashboardBase()}/build-patterns?open=${encodeURIComponent(`row-${String(created.id)}`)}`,
     doc_created: created.doc_created ?? null,
     doc_id: created.doc_id ?? null,
     doc_link: created.doc_link ?? null,
     doc_error: created.doc_error ?? null,
     ingested_to_bharag: created.ingested_to_bharag ?? null,
     bharag: created.bharag ?? null,
+    announced: posted.announced,
+    announcement_link: posted.permalink,
+    announcement_ts: posted.ts,
+    announcement_channel: posted.channel,
+    announcement_error: posted.error,
     candidate_updated: marked.ok === true,
     ...(marked.ok === true ? {} : { candidate_error: String(marked.message ?? marked.reason ?? 'the candidate was not updated'), note: `The pattern ${patternId} is saved; the candidate still reads ${str(row.fields.Status) ?? 'no status'}. Do not register it again — mark it by hand.` }),
-    audit: { pattern: created.audit_id ?? null, candidate: marked.audit_id ?? null },
+    audit: { pattern: created.audit_id ?? null, candidate: marked.audit_id ?? null, announcement: posted.audit_id },
   };
+}
+
+/**
+ * "Draft full pattern" (2026-09-24): every field of a pattern from the
+ * candidate's Summary and its Slack thread, for the person acting to review.
+ * Saves nothing — see patternDraft.ts. The same who-may-act rule as Register,
+ * because it is the first half of a Register and it costs a model call.
+ * Logged to engine_writes as a read.
+ */
+export async function draftFor(ref: string, input: { actor_user_id: string | null }): Promise<Record<string, unknown>> {
+  const actor = await profile(input.actor_user_id);
+  const row = await candidate(ref);
+  assertMay(row, actor);
+  assertOpen(row, 'drafted');
+  const t0 = Date.now();
+  try {
+    const d = await drafter.draft(row);
+    const th = d.sources.thread;
+    await mirror.logWrite({
+      endpoint: 'page:draft_pattern', kind: 'patterns', method: 'PAGE', key_label: 'session cookie', natural_id: row.natural_id, outcome: 'read', ms: Date.now() - t0,
+      detail: `drafted for ${actor.name} with ${d.model}; thread ${th.read ? `${th.messages} messages` : `not read (${th.note})`}; ${d.empty_fields.length} empty: ${d.empty_fields.join(', ') || 'none'}`,
+    });
+    return d as unknown as Record<string, unknown>;
+  } catch (e) {
+    if (e instanceof drafter.DraftError) {
+      await mirror.logWrite({ endpoint: 'page:draft_pattern', kind: 'patterns', method: 'PAGE', key_label: 'session cookie', natural_id: row.natural_id, outcome: 'error', ms: Date.now() - t0, detail: `${e.reason}: ${e.message}` });
+      throw new CandidateError(e.status, e.reason, e.message);
+    }
+    throw e;
+  }
 }
 
 export async function decline(ref: string, input: { actor_user_id: string | null; reason: unknown; dry_run?: boolean }): Promise<Record<string, unknown>> {

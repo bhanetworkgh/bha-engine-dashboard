@@ -1572,6 +1572,12 @@ Docs for the three Drive tools and the pattern Doc (scopes `drive` and
 variables. `SLACK_API_URL`, `SLACK_FILES_ORIGIN` and `GOOGLE_API_URL` are
 optional and exist for the local stand-ins; the check that a file url is
 `https://files.slack.com/` never moves.
+`OPENROUTER_API_KEY` — the OpenRouter key "Draft full pattern" drafts with
+(2026-09-24), the same account n8n's "OpenRouter" credential holds; no default,
+and unset the button answers not_configured. `OPENROUTER_API_URL` is optional,
+for the local stand-in. The draft reads the candidate's thread with
+`SLACK_NORTH_STAR_BOT_TOKEN`, and the Register announcement posts with
+`SLACK_BAYS_BOT_TOKEN` — neither is new.
 `EARLY_ACCESS_NOTIFY_URL` — the n8n webhook that posts a lead from the
 superseded public route into `#vfarm-early-access`; Form A leads are announced
 by Hardik's tracker and never touch it. Unset, the hop is skipped, the boot line says
@@ -2534,9 +2540,9 @@ Status — and who registered, declined or reassigned it where somebody did.
 cookie, `server/src/candidateActions.ts`:
 
 - **Register as a pattern** opens a form prefilled from the candidate —
-  `pattern_name` from Candidate, `problem`, `solution` and `context` seeded from
-  Summary, `bha_system` from Lane, Moderate reusability, an optional checklist
-  one step per line — and submits through **`create_record` kind `patterns`
+  `pattern_name` from Candidate, `problem` from Summary, `bha_system` from Lane,
+  Moderate reusability, every other field optional and empty until drafted or
+  typed (below) — and submits through **`create_record` kind `patterns`
   itself**: the handler is called in-process, so the BP- id is minted, the row
   saved, BHARAG ingested and the Google Doc made exactly as an MCP create does.
   `drafted_by` is the person acting, and names the Doc. Only once the pattern is
@@ -2557,6 +2563,68 @@ cookie, `server/src/candidateActions.ts`:
 - A Registered or Declined candidate refuses all three with a 409; that is the
   end of its life. These are **new field names** added to the blob, never a
   rename of one the engine writes.
+
+**Register announces the pattern in #bha-build-patterns** (2026-09-24, Destiny),
+`server/src/patternAnnounce.ts`. Once the pattern is saved, one
+`chat.postMessage` as Bays (`SLACK_BAYS_BOT_TOKEN`) into `C0B0668PRNW` — the
+channel `Pat Post to Build Patterns` posts to — **in the extractor card's own
+look** (`Pat Parse Pattern Response`: the "🔧 BHA Build Pattern" header, "From
+*builder*", the bold name, the "Pattern ID | System | Reusability" line), cut
+to an announcement: the one-line problem (its first sentence, 300 characters
+at most), "Registered by `<@Slack id>` from candidate `CAND-…`", the Google Doc
+and the pattern on the dashboard (`/build-patterns?open=row-<id>`). The full
+pattern is one click away, so this card never meets the block limit the
+extractor's has to trim for. It goes out **before** the candidate is marked, so
+the candidate carries `Announcement Link` and `Announcement TS`, and the panel
+links it. **A post that fails never undoes the registration**: it is
+`announced: false` with `announcement_error` beside `doc_created` and
+`ingested_to_bharag`, drawn in red on the panel, printed to the server log, and
+audited on `engine_mcp_writes` as tool `announce_pattern`, kind `slack`,
+outcome `posted` or `failed` — like every other Slack write here. Success is
+read from Slack's body, which refuses with HTTP 200 and `ok:false`.
+
+**Register writes a full pattern, and "Draft full pattern" fills it**
+(2026-09-24, Destiny). The form carries every field the extractor stores and
+the pattern panel shows — name, BHA system, reusability, problem, solution,
+context; then, as optional sections, implementation checklist, learnings and
+gotchas, anti-pattern, integration points, readiness gates and next use case;
+and behind "Show the other pattern fields", test coverage, routing logic,
+commercial impact, research and production impact, naming note and roadmap
+context. Only problem is seeded from the Summary now — the old form put the
+same Summary into problem, solution and context, which was a stub, not a
+pattern. `implementation_shape`, `provider_shape` and `observability` are left
+out: the extractor's card draws them but nothing stores them and no page reads
+them, and a field no screen shows is one nobody could review.
+**Draft full pattern** (`POST /api/pattern-candidates/:id/draft`,
+`server/src/patternDraft.ts`) drafts every one of those fields with **the
+Pattern Extractor's own model and prompt**: `anthropic/claude-sonnet-4-5`
+through OpenRouter, `max_tokens` 3000, `response_format: json_object`, and
+`Pat Prep Build Patterns`' system prompt kept section for section. Only what a
+candidate needs is changed: the two sources are the candidate (name, lane,
+builder, Summary, Why This Architect) and the **Slack thread at its Source
+Link**, read through `conversations.replies` as North Star
+(`SLACK_NORTH_STAR_BOT_TOKEN`, the one bot here with `channels:history`, the
+same read `read_slack` makes) — the root where the link carries a `thread_ts`,
+names and mentions cleaned the way `RS - Build Digest` cleans them, 40,000
+characters at most. There is no `no_pattern` answer (the candidate was already
+judged a pattern), and `pattern_id` is not asked for (create_record mints it).
+**Nothing is invented**: the prompt says a field the sources do not support is
+an empty string, and that a part of a field description the sources cannot back
+— a metric, how Slack Genie will route on it, a Bitwarden rule — is left out
+rather than written. That rule and the person reviewing the draft are the only
+guards on grounding, and the answer names every field left empty, which the form
+shows in its placeholder and in one line. A thread that cannot be read (no
+Source Link, not a Slack link, no token, North Star not in the channel) is named
+on the answer and the draft is made from the Summary alone, saying so. **A draft
+saves nothing**: it fills the form, the person edits it, and only Register
+writes. It follows the same who-may-act rule as Register — it is the first half
+of one, and it costs a model call — and is logged to `engine_writes` as a
+`read` (endpoint `page:draft_pattern`, with the model, the thread and the empty
+fields). `OPENROUTER_API_KEY`, no default: unset, the button answers
+`not_configured` and names the variable, and registering by hand still works.
+`npm run test:candidates` pins the draft, the stored fields and the
+announcement against stand-ins for Slack, OpenRouter, Google and BHARAG, and
+deletes its channel post and rows.
 
 **Who may act: the suggested architect (`Architect Slack ID`), the builder
 (`Builder Slack ID`), Jason or Destiny** — checked on the server before any

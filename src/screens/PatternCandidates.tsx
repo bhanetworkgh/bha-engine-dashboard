@@ -5,6 +5,7 @@ import { useData } from '../app/useData';
 import {
   ApiError,
   declineCandidate,
+  draftCandidate,
   getBuilderProfiles,
   reassignCandidate,
   registerCandidate,
@@ -13,6 +14,7 @@ import {
   type CandidateRegistered,
   type PatternCandidate,
   type PatternCandidatesData,
+  type PatternDraft,
 } from '../data';
 import type { RecordColumn } from '../components/ui';
 import { Button, ButtonAnchor, Definition, EmptyState, Loading, MonthPicker, Pagination, Pill, RecordTable, relativeTime, SearchBox, Segmented, Toast, TwoLine, usePaged, useToast } from '../components/ui';
@@ -449,6 +451,11 @@ function CandidateView({
               )}
               {c.registered_at && <span className="tabular ml-3 text-[12px] text-faint">{c.registered_at.slice(0, 16).replace('T', ' ')}</span>}
               {c.registered_by && <span className="ml-3 text-[12px] text-faint">by {c.registered_by}</span>}
+              {c.announcement_link?.startsWith('https://') && (
+                <a className="link ml-3 text-[12px]" href={c.announcement_link} target="_blank" rel="noreferrer">
+                  announcement ↗
+                </a>
+              )}
             </div>
           )}
           {c.status === 'Declined' && (
@@ -524,6 +531,7 @@ function CandidateView({
               ) : mode === 'register' ? (
                 <RegisterForm
                   c={c}
+                  actor={me.user_id}
                   busy={busy}
                   onCancel={() => setMode('view')}
                   onSubmit={(pattern) =>
@@ -573,29 +581,101 @@ function CandidateView({
 
 const REUSE = ['Narrow', 'Moderate', 'Broad'] as const;
 
-function RegisterForm({ c, busy, onCancel, onSubmit }: { c: PatternCandidate; busy: boolean; onCancel: () => void; onSubmit: (pattern: Record<string, string>) => void }) {
-  const seed = c.summary ?? '';
-  const [f, setF] = useState<Record<string, string>>({
-    pattern_name: c.candidate ?? '',
-    bha_system: c.lane ?? '',
-    reusability: 'Moderate',
-    problem: seed,
-    solution: seed,
-    context: seed,
-    implementation_checklist: '',
-  });
+type FieldSpec = { key: string; label: string; rows?: number; hint?: string };
+/** Every field a build pattern carries, in the pattern panel's own order and labels. */
+const OPTIONAL: FieldSpec[] = [
+  { key: 'implementation_checklist', label: 'Implementation checklist', rows: 4, hint: "One step per line; stored joined with ' | ', as patterns are." },
+  { key: 'learnings_gotchas', label: 'Learnings and gotchas', rows: 3 },
+  { key: 'anti_pattern', label: 'Anti-pattern', rows: 2, hint: 'One sentence: "Anti-Pattern: …".' },
+  { key: 'integration_points', label: 'Integration points', rows: 3 },
+  { key: 'readiness_gates', label: 'Readiness gates', rows: 3 },
+  { key: 'next_use_case', label: 'Next use case', rows: 2 },
+];
+const MORE: FieldSpec[] = [
+  { key: 'test_coverage', label: 'Test coverage', rows: 3 },
+  { key: 'routing_logic', label: 'Routing logic', rows: 2 },
+  { key: 'commercial_impact', label: 'Commercial impact', rows: 2 },
+  { key: 'research_production_impact', label: 'Research and production impact', rows: 2 },
+  { key: 'naming_note', label: 'Naming note', rows: 1 },
+  { key: 'roadmap_context', label: 'Roadmap context', rows: 2 },
+];
+const LABEL: Record<string, string> = Object.fromEntries(
+  [['pattern_name', 'Pattern name'], ['bha_system', 'BHA system'], ['reusability', 'Reusability'], ['problem', 'Problem'], ['solution', 'Solution'], ['context', 'Context'], ...[...OPTIONAL, ...MORE].map((f) => [f.key, f.label])],
+);
+
+function seed(c: PatternCandidate): Record<string, string> {
+  const f: Record<string, string> = { pattern_name: c.candidate ?? '', bha_system: c.lane ?? '', reusability: 'Moderate', problem: c.summary ?? '', solution: '', context: '' };
+  for (const x of [...OPTIONAL, ...MORE]) f[x.key] = '';
+  return f;
+}
+
+function RegisterForm({ c, actor, busy, onCancel, onSubmit }: { c: PatternCandidate; actor: string; busy: boolean; onCancel: () => void; onSubmit: (pattern: Record<string, string>) => void }) {
+  const [initial] = useState(() => seed(c));
+  const [f, setF] = useState<Record<string, string>>(initial);
+  const [drafting, setDrafting] = useState(false);
+  const [draft, setDraft] = useState<PatternDraft | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [more, setMore] = useState(false);
   const set = (k: string) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }));
   const ready = f.pattern_name.trim().length > 0;
+  const dirty = Object.keys(f).some((k) => f[k] !== initial[k]);
+
+  const runDraft = async () => {
+    if (dirty && draft === null && !window.confirm('Replace what you have typed with the draft? Nothing is saved either way until you press Register.')) return;
+    setDrafting(true);
+    setDraftError(null);
+    try {
+      const d = await draftCandidate(c.id, actor);
+      setF((x) => {
+        const next = { ...x };
+        for (const [k, v] of Object.entries(d.fields)) if (k in next) next[k] = v;
+        if (!next.pattern_name.trim()) next.pattern_name = c.candidate ?? '';
+        if (!next.reusability) next.reusability = 'Moderate';
+        return next;
+      });
+      setDraft(d);
+      if (MORE.some((m) => d.fields[m.key])) setMore(true);
+    } catch (e) {
+      setDraftError(errorText(e));
+    } finally {
+      setDrafting(false);
+    }
+  };
+
+  const area = (x: FieldSpec) => (
+    <Field key={x.key} label={x.label} hint={x.hint}>
+      <textarea className="input py-2 text-[12.5px] leading-relaxed" style={{ minHeight: `${Math.max(1, x.rows ?? 2) * 22 + 20}px` }} value={f[x.key]} onChange={set(x.key)} placeholder={draft && draft.empty_fields.includes(x.key) ? 'Left empty: the Summary and the thread do not support it.' : 'Optional'} />
+    </Field>
+  );
+
   return (
     <form
       className="mt-3 space-y-3"
       onSubmit={(e) => {
         e.preventDefault();
-        if (ready && !busy) onSubmit(f);
+        if (ready && !busy && !drafting) onSubmit(f);
       }}
     >
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" onClick={runDraft} loading={drafting} disabled={busy}>
+          Draft full pattern
+        </Button>
+        <span className="text-[12px] text-faint">
+          Fills every field from the Summary and the Slack thread at the Source Link, with the Pattern Extractor’s model and prompt. A field the sources don’t support stays empty. Review and edit before you register.
+        </span>
+      </div>
+      {drafting && <p className="text-[12px] text-faint">Reading the thread and drafting — this takes up to a minute.</p>}
+      {draftError && <p className="text-[12.5px] text-failing">No draft: {draftError}</p>}
+      {draft && (
+        <div className="space-y-0.5 text-[12px] text-dim">
+          <p>{draft.note}</p>
+          {!draft.sources.thread.read && draft.sources.thread.note && <p>Thread: {draft.sources.thread.note}</p>}
+          {draft.sources.thread.read && draft.sources.thread.note && <p>{draft.sources.thread.note}</p>}
+          {draft.empty_fields.length > 0 && <p className="text-faint">Left empty: {draft.empty_fields.map((k) => LABEL[k] ?? k).join(', ')}.</p>}
+        </div>
+      )}
       <p className="text-[12px] text-faint">
-        Prefilled from the candidate — the summary seeds problem, solution and context; rewrite each before you register. Saving mints the BP- id, writes the pattern, ingests it into BHARAG and makes its Google Doc, then marks this candidate Registered.
+        Registering mints the BP- id, writes the pattern, ingests it into BHARAG, makes its Google Doc and announces it in #bha-build-patterns as Bays, then marks this candidate Registered.
       </p>
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_14ch_14ch]">
         <Field label="Pattern name">
@@ -612,19 +692,24 @@ function RegisterForm({ c, busy, onCancel, onSubmit }: { c: PatternCandidate; bu
           </select>
         </Field>
       </div>
-      {(['problem', 'solution', 'context'] as const).map((k) => (
-        <Field key={k} label={k[0].toUpperCase() + k.slice(1)}>
-          <textarea className="input min-h-[72px] py-2 text-[12.5px] leading-relaxed" value={f[k]} onChange={set(k)} />
-        </Field>
-      ))}
-      <Field label="Implementation checklist (optional)" hint="One step per line; stored joined with ' | ', as patterns are.">
-        <textarea className="input min-h-[56px] py-2 text-[12.5px]" value={f.implementation_checklist} onChange={set('implementation_checklist')} />
-      </Field>
+      {area({ key: 'problem', label: 'Problem', rows: 3, hint: draft ? undefined : 'Seeded from the Summary.' })}
+      {area({ key: 'solution', label: 'Solution', rows: 3 })}
+      {area({ key: 'context', label: 'Context', rows: 2 })}
+      <div className="border-t border-line pt-3">
+        <div className="mb-2 text-[11px] text-faint">Optional sections</div>
+        <div className="space-y-3">{OPTIONAL.map(area)}</div>
+      </div>
+      <div className="border-t border-line pt-3">
+        <button type="button" className="link text-[12px]" onClick={() => setMore((m) => !m)} aria-expanded={more}>
+          {more ? 'Hide' : 'Show'} the other pattern fields ({MORE.map((m) => m.label.toLowerCase()).join(', ')})
+        </button>
+        {more && <div className="mt-3 space-y-3">{MORE.map(area)}</div>}
+      </div>
       <div className="flex gap-2">
-        <Button variant="primary" type="submit" loading={busy} disabled={!ready}>
+        <Button variant="primary" type="submit" loading={busy} disabled={!ready || drafting}>
           Register pattern
         </Button>
-        <Button variant="ghost" onClick={onCancel} disabled={busy}>
+        <Button variant="ghost" onClick={onCancel} disabled={busy || drafting}>
           Cancel
         </Button>
       </div>
@@ -695,6 +780,11 @@ function RegisteredNote({ r, onOpenPattern, patternRecord }: { r: CandidateRegis
     <div className="space-y-1.5 text-[12.5px]">
       <p className="text-ink">
         Registered as <span className="tabular font-medium">{r.pattern_id ?? '(no id returned)'}</span>
+        {!patternRecord && r.pattern_url && (
+          <a className="link ml-2" href={r.pattern_url}>
+            open it
+          </a>
+        )}
         {patternRecord && (
           <button type="button" className="link ml-2" onClick={() => onOpenPattern(patternRecord)}>
             open it
@@ -713,6 +803,20 @@ function RegisteredNote({ r, onOpenPattern, patternRecord }: { r: CandidateRegis
         )}
       </p>
       <p className="text-dim">BHARAG: {r.ingested_to_bharag ? 'ingested' : <span className="text-failing">not ingested — the pattern is saved but not searchable there yet</span>}</p>
+      <p className="text-dim">
+        #bha-build-patterns:{' '}
+        {r.announced ? (
+          r.announcement_link ? (
+            <a className="link" href={r.announcement_link} target="_blank" rel="noreferrer">
+              announced as Bays ↗
+            </a>
+          ) : (
+            'announced as Bays'
+          )
+        ) : (
+          <span className="text-failing">not announced{r.announcement_error ? ` — ${r.announcement_error}` : ''}. The pattern is saved.</span>
+        )}
+      </p>
       {!r.candidate_updated && <p className="text-failing">{r.note ?? r.candidate_error}</p>}
     </div>
   );

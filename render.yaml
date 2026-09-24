@@ -221,6 +221,12 @@ services:
       # channel. Never the Bays or North Star token.
       - key: SLACK_RESEARCH_TWIN_BOT_TOKEN
         sync: false
+      # "Draft full pattern" on a pattern candidate (2026-09-24): the key n8n's
+      # "OpenRouter" credential holds, for anthropic/claude-sonnet-4-5 — the
+      # Pattern Extractor's model. No default; unset, the button says so and
+      # registering by hand still works.
+      - key: OPENROUTER_API_KEY
+        sync: false
       # Google, for share_doc, grant_drive_access, create_doc and the pattern
       # Doc on create_record (2026-09-24). EITHER the OAuth trio (acts as the
       # Google user who granted it, like n8n's "Admin Google Docs") OR a

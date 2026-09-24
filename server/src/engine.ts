@@ -694,6 +694,7 @@ export async function getPatternCandidates(): Promise<PatternCandidatesData> {
       pattern_id: s(f, 'Pattern ID'),
       registered_at: s(f, 'Registered At'),
       registered_by: s(f, 'Registered By'),
+      announcement_link: s(f, 'Announcement Link'),
       declined_reason: s(f, 'Declined Reason'),
       declined_by: s(f, 'Declined By'),
       declined_at: s(f, 'Declined At'),

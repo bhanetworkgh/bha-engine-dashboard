@@ -3083,6 +3083,8 @@ export interface PatternCandidate {
   registered_at: string | null;
   /** Who registered it from the Candidates tab (2026-09-24); absent when registered through Bays. */
   registered_by: string | null;
+  /** Its announcement in #bha-build-patterns, where the page posted one (2026-09-24). */
+  announcement_link: string | null;
   /** Set only on Declined rows (2026-09-24): the reason is required, and who and when. */
   declined_reason: string | null;
   declined_by: string | null;
@@ -3110,9 +3112,24 @@ export interface CandidateRegistered {
   doc_link: string | null;
   doc_error: string | null;
   ingested_to_bharag: boolean | null;
+  /** The pattern on the dashboard, and its announcement in #bha-build-patterns (2026-09-24). */
+  pattern_url: string | null;
+  announced: boolean;
+  announcement_link: string | null;
+  announcement_error: string | null;
   candidate_updated: boolean;
   candidate_error?: string;
   note?: string;
+}
+
+/** "Draft full pattern": every field drafted from the Summary and the Slack thread, saved nowhere. */
+export interface PatternDraft {
+  ok: true;
+  fields: Record<string, string>;
+  empty_fields: string[];
+  model: string;
+  sources: { summary: boolean; thread: { read: boolean; messages: number; chars: number; channel: string | null; ts: string | null; note: string | null } };
+  note: string;
 }
 
 export interface PatternCandidatesData {
