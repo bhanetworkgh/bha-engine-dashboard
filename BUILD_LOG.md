@@ -9868,3 +9868,35 @@ Decision:   Every Code node is its own exported function. Before wiring
             - bays-tools, mcp-write, north-star, lookup, pay, gate and
               recovery all pass.
             - The build is clean.
+
+## 2026-09-24 11:45 — RT tools live; row 9 deleted; agent draft switched (five of six)
+Intent:     Deploy 675934c, delete the Sept 24 delivery test ask, and put the
+            new tools on Research Twin (Agent)'s allow-list.
+Files:      server/src/mcp/researchTwinTools.ts (descriptions), CLAUDE.md,
+            BUILD_LOG.md.
+Problem:    Deploy dep-daqglo0u01pc73cr242g went live at about 11:35:41Z. Boot
+            lines:
+            "SLACK_RESEARCH_TWIN_BOT_TOKEN NOT set — create_client_report_doc
+            builds the report and answers not_configured instead of uploading
+            it"
+            "BHARAG_RESEARCH_TWIN_KEY set — update_watched_client_question
+            ingests each answer into Research Twin's workspace".
+            This session's connector still listed delete_record with the old
+            kind enum. A call with kind rt-asks went through anyway, because
+            the server decides. rt-asks row 9 (RT-1790247471804-8YPB) was
+            deleted and kept in record_deletions (engine_mcp_writes audit 30).
+            First edit to the descriptions: a single-quoted string held
+            "Research Twin's", and tsc answered TS1005 "',' expected" on
+            line 437. Changed to a typographic apostrophe.
+            The local Postgres was down between runs ("FATAL: could not
+            connect to Postgres ... ECONNREFUSED 127.0.0.1:55432"). It was
+            restarted.
+Fix:        —
+Decision:   The agent's instructions name the old tools (Write_Research_Finding
+            etc.) in 9,852 characters of prose. Rewriting them over
+            mutate_agent means re-sending the whole string by hand. Instead,
+            each MCP tool's own description now opens with the old name. The
+            agent patch is small and leaves the instructions untouched.
+            create_client_report_doc is not switched while its token is unset.
+            Create_Client_Report_Doc stays on the workflow tool, which holds
+            its own credential, so the weekly report keeps uploading.

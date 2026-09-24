@@ -214,7 +214,7 @@ export function reachBack(g: Record<string, unknown>, cardFields: Record<string,
 const writeResearchFinding: ToolDefinition = {
   name: 'write_research_finding',
   description:
-    "Record one research attempt on a Research Job (rt-jobs). Finds the job by queue_row_id (row id, rec… id or Job ID) or, without one, the newest OPEN job (Pending / In Progress) for card_id. Refused with no sources. Attempts +1; confidence low is a stuck attempt and the 3rd attempt stuck caps the job 'Capped (needs human)', otherwise medium/high Resolves it; appends Answer History and Sources. On a clean Resolve with a card_id, the finding is appended to that card's research_gleanings and its missing_research_count goes down by one. Returns {ok, card_id, job_id, status, attempts, requires_human, card_updated}.",
+    "Research Twin's Write_Research_Finding (the same tool, moved off its Tools Router). Record one research attempt on a Research Job (rt-jobs). Finds the job by queue_row_id (row id, rec… id or Job ID) or, without one, the newest OPEN job (Pending / In Progress) for card_id. Refused with no sources. Attempts +1; confidence low is a stuck attempt and the 3rd attempt stuck caps the job 'Capped (needs human)', otherwise medium/high Resolves it; appends Answer History and Sources. On a clean Resolve with a card_id, the finding is appended to that card's research_gleanings and its missing_research_count goes down by one. Returns {ok, card_id, job_id, status, attempts, requires_human, card_updated}.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -311,7 +311,7 @@ export function mergeCardFields(trig: Args, fields: Record<string, unknown>, now
 const writeCommercialCardFields: ToolDefinition = {
   name: 'write_commercial_card_fields',
   description:
-    "Append research onto a commercial card's running logs — research_gleanings and experiment_results, each entry stamped with an ISO timestamp, never overwritten. missing_research_count goes down by one only when missing_research_resolved is true. An empty commercial_ready_v1_checklist keeps the card's own. A card_id that matches nothing is ok:false 'No card found' and nothing is written. Not for lane/pilot state — use compute_lane_state.",
+    "Research Twin's Write_Commercial_Card_Fields (the same tool, moved off its Tools Router). Append research onto a commercial card's running logs — research_gleanings and experiment_results, each entry stamped with an ISO timestamp, never overwritten. missing_research_count goes down by one only when missing_research_resolved is true. An empty commercial_ready_v1_checklist keeps the card's own. A card_id that matches nothing is ok:false 'No card found' and nothing is written. Not for lane/pilot state — use compute_lane_state.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -368,7 +368,7 @@ export function laneTransition(trigger: unknown, fields: Record<string, unknown>
 const computeLaneState: ToolDefinition = {
   name: 'compute_lane_state',
   description:
-    "Deterministically transition a commercial card's lane_state and pilot_state from real pilot evidence — fixed logic, not reasoning: ssv_started → pilot_running / pilot_live; metrics_met → productized / pilot_success; ended_no_threshold → needs_revision / pilot_failed; none (or anything else) leaves both as they are. A card_id that matches nothing is ok:false 'No card found' and nothing is written. Only call with concrete, cited pilot evidence.",
+    "Research Twin's Compute_Lane_State (the same tool, moved off its Tools Router). Deterministically transition a commercial card's lane_state and pilot_state from real pilot evidence — fixed logic, not reasoning: ssv_started → pilot_running / pilot_live; metrics_met → productized / pilot_success; ended_no_threshold → needs_revision / pilot_failed; none (or anything else) leaves both as they are. A card_id that matches nothing is ok:false 'No card found' and nothing is written. Only call with concrete, cited pilot evidence.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -434,7 +434,7 @@ export function mintJobId(): string {
 const queueFollowupResearch: ToolDefinition = {
   name: 'queue_followup_research',
   description:
-    'Create one Pending research job (rt-jobs) per genuinely distinct open question a card’s research surfaced, Job ID minted JOB-<ms>-<4>. items: an array — or a JSON-encoded array — of { research_required, hypothesis_to_validate, context_snippet }; an item with neither hypothesis_to_validate nor question is skipped, and none usable is ok:false with nothing written. Returns {ok, card_id, rows_created, job_ids}.',
+    'Research Twin’s Queue_Followup_Research (the same tool, moved off its Tools Router). Create one Pending research job (rt-jobs) per genuinely distinct open question a card’s research surfaced, Job ID minted JOB-<ms>-<4>. items: an array — or a JSON-encoded array — of { research_required, hypothesis_to_validate, context_snippet }; an item with neither hypothesis_to_validate nor question is skipped, and none usable is ok:false with nothing written. Returns {ok, card_id, rows_created, job_ids}.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -598,7 +598,7 @@ export function questionDoc(d: Record<string, unknown>, now: Date): bharag.Inges
 const updateWatchedClientQuestion: ToolDefinition = {
   name: 'update_watched_client_question',
   description:
-    "Write a weekly researched answer onto one standing question in a Watched Clients lane (client_questions), matched by table_id and the question's exact text. Sets This Week Answer, Confidence, Movement Tag, Sources, Plain Summary (the prior one is kept when none is given), appends Answer History, records Contradicted From on a contradiction, and flags Research Stuck at Run Count 3. Then ingests one BHARAG doc for the answered question into the Research Twin workspace — a BHARAG failure leaves the row written and says ingested_to_bharag:false. Call once per question.",
+    "Research Twin's Update_Watched_Client_Question (the same tool, moved off its Tools Router). Write a weekly researched answer onto one standing question in a Watched Clients lane (client_questions), matched by table_id and the question's exact text. Sets This Week Answer, Confidence, Movement Tag, Sources, Plain Summary (the prior one is kept when none is given), appends Answer History, records Contradicted From on a contradiction, and flags Research Stuck at Run Count 3. Then ingests one BHARAG doc for the answered question into the Research Twin workspace — a BHARAG failure leaves the row written and says ingested_to_bharag:false. Call once per question.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -969,7 +969,7 @@ export function reportComment(B: Record<string, unknown>): string {
 const createClientReportDoc: ToolDefinition = {
   name: 'create_client_report_doc',
   description:
-    "Build the weekly deep-detail Markdown report for one watched client from its live question rows and upload it to #watched-clients (C0B9LKU7DQV) as a file, as the Research Twin bot. Pass ONLY client_name (the lane/client name as given in the prompt); the tool generates the body. Call once per lane, after every update_watched_client_question in the batch. An unknown client is ok:false client_not_found, naming the lanes it knows. Returns {ok, client_name, question_count, changed_count, open_gaps, file_title, file_id, permalink}; a refused upload is ok:false slack_upload_failed naming the step — never claim a file was delivered then.",
+    "Research Twin's Create_Client_Report_Doc (the same tool, moved off its Tools Router). Build the weekly deep-detail Markdown report for one watched client from its live question rows and upload it to #watched-clients (C0B9LKU7DQV) as a file, as the Research Twin bot. Pass ONLY client_name (the lane/client name as given in the prompt); the tool generates the body. Call once per lane, after every update_watched_client_question in the batch. An unknown client is ok:false client_not_found, naming the lanes it knows. Returns {ok, client_name, question_count, changed_count, open_gaps, file_title, file_id, permalink}; a refused upload is ok:false slack_upload_failed naming the step — never claim a file was delivered then.",
   inputSchema: {
     type: 'object',
     properties: {
