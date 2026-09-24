@@ -9,8 +9,9 @@
  * browser never sees it; like every other credential here it is only in the
  * server's environment.
  *
- * This is not a Slack integration. Nothing here reads channels, posts to one,
- * or listens for events — n8n does all of that. These are two calls.
+ * From 2026-09-24 it also carries `send_nudge` (one DM per recipient) and
+ * `post_file` (a Markdown file into a channel or DM), ported from the retired
+ * Bays Tools Router's SNG and PRF branches — see `mcp/slackTools.ts`.
  */
 export const SLACK_TOKEN_VAR = 'SLACK_BAYS_BOT_TOKEN';
 const TIMEOUT_MS = 20_000;
@@ -105,6 +106,77 @@ export async function dm(userId: string, text: string): Promise<{ ok: boolean; d
     return { ok: true, detail: `sent to ${userId}`, ts: body.ts };
   } catch (e) {
     return { ok: false, detail: `Could not reach Slack: ${e instanceof Error ? e.message : String(e)}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* -------------------------------------------- send_nudge and post_file (2026-09-24) */
+
+/**
+ * One Slack Web API write as the Bays bot. Answers Slack's own body — a
+ * refusal is **HTTP 200 with `ok:false`**, so success is read from the body and
+ * never from the status. A transport failure, a non-JSON body or a non-2xx is
+ * folded into the same shape (`ok:false`, `error`) so a caller has one thing to
+ * read; `http_status` says which it was.
+ */
+export type SlackBody = { ok: boolean; error?: string; http_status: number; [k: string]: unknown };
+
+export async function botCall(method: string, body: Record<string, unknown>, as: 'json' | 'form' = 'json'): Promise<SlackBody> {
+  const t = token();
+  if (!t) return { ok: false, error: 'not_configured', http_status: 0 };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const clean = Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+    const res = await fetch(`${API}/${method}`, {
+      method: 'POST',
+      headers:
+        as === 'json'
+          ? { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json; charset=utf-8' }
+          : { Authorization: `Bearer ${t}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: as === 'json' ? JSON.stringify(clean) : new URLSearchParams(Object.entries(clean).map(([k, v]): [string, string] => [k, String(v)])).toString(),
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    if (res.status === 429) return { ok: false, error: `rate_limited (retry after ${res.headers.get('retry-after') ?? '?'}s)`, http_status: 429 };
+    let parsed: Record<string, unknown> | null = null;
+    try {
+      parsed = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      /* below */
+    }
+    if (!parsed) return { ok: false, error: `http_${res.status}: ${text.slice(0, 200) || 'empty body'}`, http_status: res.status };
+    return { ...parsed, ok: parsed.ok === true, error: parsed.ok === true ? undefined : String(parsed.error ?? `http_${res.status}`), http_status: res.status };
+  } catch (e) {
+    const timedOut = e instanceof Error && e.name === 'AbortError';
+    return { ok: false, error: timedOut ? `timeout (${TIMEOUT_MS / 1000}s)` : `unreachable: ${e instanceof Error ? e.message : String(e)}`, http_status: 0 };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * POST the file's bytes to the upload URL files.getUploadURLExternal handed
+ * back. That URL carries its own signature, so no token is sent. It answers
+ * 200 with "OK" as plain text rather than JSON.
+ */
+export async function uploadBytes(uploadUrl: string, bytes: Buffer, contentType: string): Promise<{ ok: boolean; status: number; error?: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    let target = uploadUrl;
+    if (FILES_ORIGIN) {
+      const u = new URL(uploadUrl);
+      target = `${FILES_ORIGIN}${u.pathname}${u.search}`;
+    }
+    const res = await fetch(target, { method: 'POST', headers: { 'Content-Type': contentType }, body: bytes, signal: controller.signal });
+    const text = await res.text();
+    if (!res.ok) return { ok: false, status: res.status, error: `http_${res.status}: ${text.slice(0, 200)}` };
+    return { ok: true, status: res.status };
+  } catch (e) {
+    const timedOut = e instanceof Error && e.name === 'AbortError';
+    return { ok: false, status: 0, error: timedOut ? `timeout (${TIMEOUT_MS / 1000}s)` : `unreachable: ${e instanceof Error ? e.message : String(e)}` };
   } finally {
     clearTimeout(timer);
   }
