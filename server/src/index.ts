@@ -51,6 +51,7 @@ import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, MCP_SECRET_
 import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
 import * as candidateActions from './candidateActions';
+import * as patternDraft from './patternDraft';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
 
 /**
@@ -1275,7 +1276,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * write. Every write is the MCP write tools' own handler, so the guards and
      * the engine_mcp_writes line are the same ones — see candidateActions.ts.
      */
-    const candidateAction = p.match(/^\/api\/pattern-candidates\/([^/]+)\/(register|decline|reassign)$/);
+    const candidateAction = p.match(/^\/api\/pattern-candidates\/([^/]+)\/(register|decline|reassign|draft)$/);
     if (candidateAction) {
       if (req.method !== 'POST') throw new HttpError(405, 'POST only.');
       const ref = decodeURIComponent(candidateAction[1]);
@@ -1283,7 +1284,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       const actor = typeof body.actor_user_id === 'string' ? body.actor_user_id.trim() : null;
       try {
         const out =
-          candidateAction[2] === 'register'
+          candidateAction[2] === 'draft'
+            ? await candidateActions.draftFor(ref, { actor_user_id: actor })
+            : candidateAction[2] === 'register'
             ? await candidateActions.register(ref, { actor_user_id: actor, pattern: body.pattern && typeof body.pattern === 'object' && !Array.isArray(body.pattern) ? (body.pattern as Record<string, unknown>) : {} })
             : candidateAction[2] === 'decline'
               ? await candidateActions.decline(ref, { actor_user_id: actor, reason: body.reason })
@@ -1649,6 +1652,11 @@ async function boot(): Promise<void> {
       slack.researchTwinToken()
         ? `  slack:    ${slack.RT_TOKEN_VAR} set — create_client_report_doc posts the weekly report as Research Twin`
         : `  slack:    ${slack.RT_TOKEN_VAR} NOT set — create_client_report_doc builds the report and answers not_configured instead of uploading it`,
+    );
+    console.log(
+      patternDraft.draftConfigured()
+        ? `  draft:    ${patternDraft.OPENROUTER_KEY_VAR} set — "Draft full pattern" drafts a candidate with ${patternDraft.DRAFT_MODEL}`
+        : `  draft:    ${patternDraft.OPENROUTER_KEY_VAR} NOT set — "Draft full pattern" answers not_configured; registering by hand still works`,
     );
     console.log(
       bharag.ingestConfigured('research_twin')

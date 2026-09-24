@@ -10102,3 +10102,134 @@ Decision:   The three page actions were proved end to end locally, in
             test:candidates and in a Playwright run against the built page.
             Proving them on production needs one click by somebody signed in.
             That is not reported as done.
+
+## 2026-09-24 14:00 — Candidates: announce registered patterns in #bha-build-patterns, draft a full pattern
+Intent:     Follow-up on c1f2c21.
+            1. After a Register, post one message as Bays in
+               #bha-build-patterns (C0B0668PRNW). It carries the name, the BP-
+               id, a one-line problem, <@who registered it>, the builder, the
+               Google Doc and the dashboard link, in the look of the existing
+               cards. A failed post never undoes the registration.
+            2. Register should make a full pattern, not a stub:
+               - every Build Pattern field on the form;
+               - a "Draft full pattern" button that fills them from the Summary
+                 and the Slack thread, with the Pattern Extractor's model and
+                 prompt;
+               - nothing invented, nothing saved until Register.
+Files:      server/src/patternDraft.ts (new)
+            server/src/patternAnnounce.ts (new)
+            server/src/candidateActions.ts:
+            - register announces, then marks the candidate with Announcement
+              Link / Announcement TS
+            - draftFor
+            server/src/index.ts: POST /api/pattern-candidates/:id/draft; a boot
+              line for OPENROUTER_API_KEY.
+            server/src/engine.ts: the candidate read model maps
+              announcement_link.
+            src/screens/PatternCandidates.tsx:
+            - RegisterForm carries every field and Draft full pattern
+            - RegisteredNote has the channel line
+            - the panel links the announcement
+            src/data/index.ts, src/data/types.ts
+            server/test/pattern-candidates.test.cjs: Slack and OpenRouter
+              stand-ins, three new steps (11 in all).
+            render.yaml: OPENROUTER_API_KEY, sync: false.
+            CLAUDE.md
+Problem:    1. Read from n8n (read only), `Bays — Commercial & Pattern
+               Extractors` (ftonmTVMzpeTL7AS):
+               - Pat Extract Build Patterns posts to OpenRouter with model
+                 "anthropic/claude-sonnet-4-5", max_tokens 3000,
+                 response_format json_object.
+               - Pat Parse Pattern Response builds the Block Kit card that
+                 Pat Post to Build Patterns sends as the "Bays" credential.
+               - Pat Write Pattern to Sheet stores a fixed field set.
+               The server had no OpenRouter credential of its own.
+            2. The card draws implementation_shape, provider_shape and
+               observability. Nothing stores those three and no page reads
+               them.
+            3. First test run of the draft:
+               {"ok":false,"reason":"model_unreachable","message":"Could not
+               reach OpenRouter: Cannot convert argument to a ByteString because
+               the character at index 21 has a value of 8212 which is greater
+               than 255."}
+               The X-Title header held an em dash, which is not a legal header
+               byte. This would have failed on production on the first press.
+            4. My test used `const other` twice ("SyntaxError: Identifier
+               'other' has already been declared").
+Fix:        1. OPENROUTER_API_KEY (no default; unset, the button answers
+               not_configured and names it). Same model, token budget and
+               response format as the extractor. The system prompt is kept
+               section for section, with four changes:
+               - the source-priority block names the two sources a candidate
+                 has: its own fields and the Slack thread;
+               - there is no no_pattern answer;
+               - no pattern_id is asked for;
+               - a never-invent rule covers the parts of a field description
+                 the sources cannot back.
+            2. Those three are not drafted and not on the form. The draft and
+               the form carry exactly the extractor's stored fields.
+            3. ASCII hyphen.
+            4. Renamed to otherDraft.
+Decision:   - The thread is read with SLACK_NORTH_STAR_BOT_TOKEN through
+              slack.webApi's conversations.replies. It is the Slack read this
+              server already has, and the one bot with channels:history. Where
+              the link has a thread_ts, the root is read. An unreadable thread
+              is named on the answer, and the draft is made from the Summary
+              alone and says so.
+            - The draft saves nothing and follows the same who-may-act rule as
+              Register (it costs a model call). It is logged to engine_writes
+              as a read (endpoint page:draft_pattern) with the model, the
+              thread and the fields left empty.
+            - Only problem is seeded from the Summary now. Solution and
+              context start empty, because the same sentence three times is a
+              stub.
+            - Draft replaces the form, and asks first if the person has
+              already typed.
+            - Reusability from the model is normalised to Narrow / Moderate /
+              Broad, or left empty.
+            - The announcement is the extractor card's head (header, From
+              builder, name, the Pattern ID | System | Reusability line) plus
+              the one-line problem, "Registered by <@id> from candidate …",
+              and Google Doc | Full pattern on the dashboard. The dashboard
+              link is /build-patterns?open=row-<id>, which opens that pattern.
+              It is short enough never to need the extractor's trimming.
+            - The post goes out after the pattern is saved and before the
+              candidate is marked, so the candidate can carry Announcement Link
+              and Announcement TS. That is two new blob keys; nothing is
+              renamed.
+            - A refused post is announced:false with announcement_error, red
+              on the panel, logged, and audited on engine_mcp_writes (tool
+              announce_pattern, kind slack, outcome failed). It never rolls
+              anything back.
+            - No new MCP tool. The connector this session holds lists its
+              tools as of an earlier deploy, so a tool added only to test from
+              here would not be callable, and would be scope for its own sake.
+Verified:   Locally:
+            - test:candidates, 11 steps. The three new ones:
+              - announce: one post as Bays into C0B0668PRNW with the header,
+                From *builder*, the name, the BP- id, the problem,
+                Registered by <@architect>, the Doc link and
+                ?open=row-<id>; the candidate carries the permalink; audit
+                outcome posted.
+              - draft: model anthropic/claude-sonnet-4-5, max_tokens 3000,
+                json_object, the extractor's prompt with the never-invent
+                rule; the Summary and the thread root (read as North Star,
+                mentions cleaned) both reach the model; empty fields stay
+                empty; the model's pattern_id and observability are dropped;
+                nothing saved; a 403 for someone who may not act; an
+                unreadable thread (not_in_channel) drafts from the Summary and
+                says so.
+              - register a draft with the post refused: every edited field is
+                stored, empty ones are not written, announced:false with the
+                not_in_channel hint, the registration stands, audit outcome
+                failed.
+              Every throwaway row and channel post is deleted.
+            - A Playwright run against the built page: Register → Draft full
+              pattern fills the form and lists the nine fields left empty →
+              Register pattern → the panel shows the BP- id and "announced as
+              Bays ↗", and the candidate links its announcement. Rows deleted
+              after.
+            - Regression suites: mcp-write, bays-tools 22, research-twin 10,
+              north-star 10, lookup, gate, pay, recovery, airtable-sweep. All
+              pass.
+            - Build clean.
