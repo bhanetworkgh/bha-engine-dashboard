@@ -214,6 +214,37 @@ async function call(token, name, args) {
     const cand2 = await call(WRITE, 'create_record', { kind: 'pattern_candidates', fields: { Candidate: `test candidate ${T}!`, Summary: 's' } });
     assert.equal(cand2.reason, 'possible_duplicate');
 
+    // find_records: on both connections, filters, status_not, search, counts
+    assert.ok(readList.includes('find_records') && writeList.includes('find_records'), 'find_records is on both connections');
+    const fr = await call(READ, 'find_records', { kind: 'loops', filters: { lane_tag: 'BAYS' }, status_not: 'Closed' });
+    assert.ok(fr.rows.every((r) => r.fields.lane_tag === 'BAYS' && r.fields.Status !== 'Closed'));
+    assert.equal(fr.total, (await query(`SELECT count(*)::int n FROM (SELECT DISTINCT ON (coalesce(natural_id,'row:'||id)) fields FROM engine_loops ORDER BY coalesce(natural_id,'row:'||id), updated_at DESC, id DESC) x WHERE fields->>'lane_tag' = 'BAYS' AND fields->>'Status' IS DISTINCT FROM 'Closed'`)).rows[0].n);
+    assert.equal(Object.values(fr.counts.by_status).reduce((a, b) => a + b, 0), fr.total, 'counts are over the whole filtered set');
+    const hit = await call(READ, 'find_records', { kind: 'loops', search: 'recovery watcher summary self-healing' });
+    assert.equal(hit.rows[0].natural_id, created.natural_id, 'the matching loop is first');
+    assert.ok(hit.rows[0].match_score > 0.5);
+    const warn = await call(READ, 'find_records', { kind: 'loops', filters: { Stauts: 'Open', lane_tag: 'MARKETING' } });
+    assert.ok(warn.warnings.some((w) => w.includes('Stauts')), 'an unknown field is warned about');
+    assert.ok(warn.warnings.some((w) => w.includes('MARKETING')), 'a value outside the vocabulary is warned about');
+    const byCard = await call(WRITE, 'find_records', { kind: 'commercial', filters: { card_id: card.natural_id } });
+    assert.equal(byCard.total, 1);
+    const l0 = await call(READ, 'find_records', { kind: 'layer0', filters: { Status: 'pending_builder_input' } });
+    assert.equal(typeof l0.total, 'number');
+    const readLog = await query(`SELECT outcome FROM engine_writes WHERE endpoint = 'mcp:find_records' ORDER BY at DESC LIMIT 1`);
+    assert.equal(readLog.rows[0].outcome, 'read', 'a find is logged as a read');
+    ok('find_records', () => true);
+
+    // duplicate tuning: generic words no longer make a duplicate; an exact copy still does
+    const generic = await call(WRITE, 'create_record', { kind: 'loops', fields: { What: `Bays agent connectivity check for the router ${T}`, 'Raised By': 'Destiny Arupi', lane_tag: 'BAYS', 'Assignee Slack User ID': 'U0AEW3TBYH1' }, confirmed_new: true });
+    assert.equal(generic.ok, true, JSON.stringify(generic));
+    const dryTest = await call(WRITE, 'create_record', { kind: 'loops', dry_run: true, fields: { What: 'Dry-run connectivity test from Bays agent', 'Raised By': 'Bays', lane_tag: 'BAYS', 'Assignee Slack User ID': 'U0AEW3TBYH1' } });
+    assert.equal(dryTest.ok, true, `generic words must not refuse: ${JSON.stringify(dryTest.detail ?? dryTest)}`);
+    // (the first test loop is archived by now, and a closed loop is not a candidate — so copy the open one)
+    const copy = await call(WRITE, 'create_record', { kind: 'loops', dry_run: true, fields: { What: generic.row.fields.What, 'Raised By': 'Destiny Arupi', lane_tag: 'BAYS', 'Assignee Slack User ID': 'U0AEW3TBYH1' } });
+    assert.equal(copy.reason, 'possible_duplicate', `an exact copy of an open loop is still refused: ${JSON.stringify(copy)}`);
+    await call(WRITE, 'delete_record', { kind: 'loops', natural_id: generic.natural_id, confirm: `DELETE ${generic.natural_id}`, reason: 'test cleanup', requester_user_id: 'U0AEW3TBYH1' });
+    ok('duplicate tuning', () => true);
+
     // delete the test rows with the exact confirm
     for (const [kind, n] of [['patterns', pat.natural_id], ['commercial', card.natural_id], ['pattern_candidates', cand.natural_id], ['loops', created.natural_id]]) {
       const d = await call(WRITE, 'delete_record', { kind, natural_id: n, confirm: `DELETE ${n}`, reason: 'MCP write test cleanup', requester_user_id: 'U0AEW3TBYH1' });
