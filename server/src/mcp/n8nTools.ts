@@ -159,3 +159,72 @@ export const getN8nWorkflow: ToolDefinition = {
     }
   },
 };
+
+/* ------------------------------------------------ sweep_airtable_nodes */
+
+/**
+ * The hidden Airtable writer sweep (2026-09-24, LOOP-1790034076667-8HOF) as a
+ * tool, so it can be re-run with the server's own `N8N_API_KEY` — the only
+ * place that key lives. Read only: every workflow is read with `GET`, and
+ * nothing is changed. `airtableSweep.ts` holds the rules; this is only the
+ * door to them.
+ */
+export const sweepAirtableNodes: ToolDefinition = {
+  name: 'sweep_airtable_nodes',
+  description:
+    'Read EVERY n8n workflow (active and inactive) and name each node that touches Airtable: an Airtable node type, an Airtable credential, or "airtable" / api.airtable.com / a base id app… / a table id tbl… in its parameters, URLs, expressions or Code. Sorted into active_writers (live and would run), inactive_writers (would write if switched on), reads, and references (names an id without calling Airtable), each with read-or-write and how that was decided, and whether the table is one the dashboard now owns. Also every Airtable credential a node names. Read only; changes nothing.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      include_references: { type: 'boolean', description: 'Also list nodes that only name an Airtable id or the word. Default false: they are counted, not listed.' },
+      include_evidence: { type: 'boolean', description: 'Add up to three excerpts per node around what matched. Default false.' },
+    },
+    additionalProperties: false,
+  },
+  annotations: { ...READS_N8N, title: 'Sweep n8n for Airtable nodes' },
+  handler: async (args) => {
+    if (!n8n.n8nConfigured()) return notConfigured();
+    const sweep = await import('../airtableSweep');
+    try {
+      const r = await sweep.sweep(
+        async () => {
+          const l = await n8n.workflows(50);
+          if (l.truncated) throw new Error('The workflow listing hit its page ceiling; the sweep would be incomplete, so it was not run.');
+          return l.workflows.map((w) => ({ id: w.id, name: w.name, active: w.active }));
+        },
+        (id) => n8n.workflow(id),
+      );
+      const row = (f: import('../airtableSweep').Finding) => ({
+        workflow_id: f.workflow_id,
+        workflow: f.workflow_name,
+        active: f.active,
+        archived: f.archived,
+        node: f.node,
+        node_type: f.node_type,
+        node_disabled: f.node_disabled || undefined,
+        access: f.access,
+        how: f.access_basis,
+        tables: [...f.tables, ...f.table_names],
+        bases: f.bases,
+        owned_by_dashboard: f.owned.length || f.owned_base_only.length ? [...f.owned, ...f.owned_base_only] : false,
+        ...(args.include_evidence === true ? { evidence: f.evidence } : {}),
+      });
+      return {
+        ok: true,
+        swept_at: r.swept_at,
+        workflows: r.workflows,
+        workflows_active: r.workflows_active,
+        workflows_read_failed: r.workflows_read_failed,
+        counts: { active_writers: r.active_writers.length, inactive_writers: r.inactive_writers.length, reads: r.reads.length, references: r.references.length },
+        active_writers: r.active_writers.map(row),
+        inactive_writers: r.inactive_writers.map(row),
+        reads: r.reads.map(row),
+        ...(args.include_references === true ? { references: r.references.map(row) } : {}),
+        credentials_in_use: r.credentials_in_use,
+        note: 'Credentials listed are the ones nodes name; the n8n public API has no endpoint that lists every credential, so an Airtable credential no node uses does not appear here.',
+      };
+    } catch (e) {
+      return failure(e, 'sweep');
+    }
+  },
+};

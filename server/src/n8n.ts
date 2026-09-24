@@ -287,6 +287,8 @@ export interface N8nWorkflowFull {
   connections: Record<string, unknown>;
   settings?: unknown;
   active?: boolean;
+  /** Archived in n8n (2026-09-24, the Airtable sweep): it cannot run, but it can be restored. */
+  isArchived?: boolean;
   updatedAt?: string | null;
 }
 
@@ -300,6 +302,7 @@ export async function workflow(id: string): Promise<N8nWorkflowFull> {
     connections: w.connections && typeof w.connections === 'object' ? w.connections : {},
     settings: w.settings,
     active: w.active,
+    isArchived: w.isArchived === true,
     updatedAt: typeof w.updatedAt === 'string' ? w.updatedAt : null,
   };
 }
