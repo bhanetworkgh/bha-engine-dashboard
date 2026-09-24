@@ -10305,3 +10305,34 @@ Decision:   One node per save, so each version in n8n's history holds exactly
             nodes was touched: max_tokens (3000 / 2600), response_format and
             both prompts are as they were. test:candidates still holds 11 of 11
             with the new model asserted.
+
+## 2026-09-24 14:12 — Deployed; throwaway candidate staged for Destiny's production run
+Intent:     Put baea392 live and stage one throwaway candidate so Destiny can
+            press Draft full pattern and Register on production.
+Files:      BUILD_LOG.md
+Problem:    None. Deploy dep-daqitvbbc2fs73ft50fg was live at 14:09:46Z. Its
+            boot line reads:
+            draft:    OPENROUTER_API_KEY set — "Draft full pattern" drafts a
+                      candidate with anthropic/claude-sonnet-5
+Fix:        Staged CAND-1790258963459-QFFS (row 54, audit 43) through
+            create_record:
+            - "THROWAWAY production test — converter-steps migration (delete
+              me)";
+            - Builder and Suggested Architect both Destiny (U0AEW3TBYH1), so he
+              may act on it;
+            - Lane BAYS;
+            - Source Link: the real 21 Sep milestone thread
+              (C0A90TS44T1 / p1790035072784359).
+            That thread holds Destiny's own description of the converter-steps
+            pattern, so the draft has a real thread to read. It also tests
+            whether the North Star bot is in that channel: if not, the draft
+            says "not_in_channel" and drafts from the Summary alone.
+Decision:   The name says THROWAWAY so it cannot be taken for the real canon
+            candidate Jason confirmed in that thread. Cleanup waits for
+            Destiny's word:
+            - I delete the candidate and the BP- pattern through delete_record
+              (both kept in record_deletions);
+            - Destiny deletes the Slack post;
+            - the Google Doc and the BHARAG document the Register makes are
+              named in the cleanup entry, because delete_record does not remove
+              them.
