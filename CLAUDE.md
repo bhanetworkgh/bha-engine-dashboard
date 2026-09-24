@@ -934,9 +934,13 @@ archive records directly, with the checks the Bays Tools Router enforces.
   `list_writable_kinds`, `create_record`, `update_record`, `archive_record` and
   `delete_record`. On the read connection those five are **not registered** —
   not listed, and a call to one is "no such tool" — because a tool a client can
-  see is a tool a model will try. A miss on either is the same 404. A write
-  token equal to the read secret is refused at boot and the connection stays
-  read-only: one URL cannot be both.
+  see is a tool a model will try. A miss on either is the same 404.
+  **In production the two are one URL** (decision 2026-09-24, Destiny):
+  `MCP_WRITE_TOKEN` is set to the same string as `MCP_SECRET`, so the connector
+  already in Claude (`/mcp/<MCP_SECRET>`) *is* the write connection and a tool
+  refresh brings the write tools in, rather than a second connector. The boot
+  line says `ONE URL` when that is so. Set them apart again and the read URL
+  goes back to never listing a write tool.
 - **One write path, not two.** The bodies of `POST /api/engine/:kind`,
   `PATCH /api/engine/:kind/:id` and `PATCH …/by-natural/:natural_id` moved into
   `server/src/engineWrite.ts` (`postRecord`, `patchRecord`, `resolveRow`), and
@@ -1271,7 +1275,8 @@ unset, leaves it to the toggle, which is on by default. The watcher needs
 failed executions) and the BHARAG lane keys it already has — nothing new.
 `MCP_WRITE_TOKEN` — the write connection's path secret, `/mcp/<MCP_WRITE_TOKEN>`
 (2026-09-24). No default; unset, no MCP client can write, and the boot line
-says so. `sync: false` in the blueprint, like `MCP_SECRET`, because the same
+says so. Equal to `MCP_SECRET` — as it is in production — the one existing URL
+carries the write tools. `sync: false` in the blueprint, like `MCP_SECRET`, because the same
 string goes into the connector URL. `BHARAG_CODEX_KEY`,
 `BHARAG_BUILD_PATTERNS_KEY` and `BHARAG_COMMERCIAL_KEY` — the BHARAG workspace
 keys the write tools ingest a created Codex entry, pattern or commercial card
