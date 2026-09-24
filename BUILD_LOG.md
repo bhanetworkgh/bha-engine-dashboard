@@ -9729,3 +9729,31 @@ Decision:   The 60-second cache was not in the brief. It is added because
             - every read logs its size.
             test:bays-tools, test:mcp-write and test:lookup still pass, and
             the build is clean.
+
+## 2026-09-24 09:40 — North Star — Tools Router retired in the registry
+Intent:     Destiny re-tested the North Star Agent after 3954e59, and it now
+            works on the three MCP tools. Record in the registry that the
+            Router it replaced is retired.
+Files:      server/src/registrySeed.ts, server/src/migrations.ts (31),
+            CLAUDE.md, BUILD_LOG.md.
+Problem:    None. Destiny's re-test: each tool was called exactly once —
+            read_slack 19,882 characters, read_open_loops 13,438,
+            get_priority_evidence 19,974. The agent did not loop, and the
+            figures were correct. He published the agent on the three tools,
+            then unpublished North Star — Tools Router (G6Myypk64kpcaVhz) and
+            moved it to RETIRED in n8n.
+Fix:        In the seed, G6Myypk64kpcaVhz is 'retired', with a note saying
+            when, why and what replaced its RS, ROL and PE branches. North Star
+            — Agent Delivery's note now names the agent's three MCP tools and
+            the re-test.
+            Migration 31 does the same on the live database. Each update fires
+            only while the row still holds the seed's value (the Router still
+            `production`; Agent Delivery's note still the first one), so an
+            edit made on the page is kept.
+            Checked locally: before the migration, G6Myypk64kpcaVhz was
+            production and Agent Delivery had the old note; after it, retired
+            and the new note. test:north-star still passes its 10 checks.
+Decision:   North Star — Conversational Agent (seK3we7pTurvZmqe) is not
+            touched. Agent Delivery replaces it behind the Front Door, but
+            nobody has said it is unpublished, and a retirement that has not
+            happened in n8n is not one this registry should claim.
