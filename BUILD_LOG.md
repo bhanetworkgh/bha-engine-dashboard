@@ -9566,3 +9566,21 @@ Decision:   create_doc was chosen over a digest_archive option: one tool that
             against local stand-ins for n8n, Slack and Google, and a real
             Chromium PDF. test:mcp-write, test:lookup, test:pay and
             test:recovery still pass, and npm run build is clean.
+
+## 2026-09-24 07:25 — find_records reads a JSON-string filter object
+Intent:     Prove find_records' new arguments on production.
+Files:      server/src/mcp/findRecords.ts, server/test/bays-tools.test.cjs,
+            BUILD_LOG.md.
+Problem:    Deploy dep-daqct5dckfvc738jd28g went live at 07:18:25Z. The boot
+            lines read "SLACK_BAYS_BOT_TOKEN NOT set" and "google: NOT
+            configured"; migration 30 was applied and 2 registry rows were
+            seeded.
+            The first live call, from this session's connector, came back:
+            `"filters_gte" must be an object: { "<field>": "<value>" }.`
+            The connector still holds the tool list from before the argument
+            existed, so it sent the object as a JSON string. n8n agent tool
+            parameters typed as strings do the same.
+Fix:        filters, filters_gte and filters_lte accept a JSON string that
+            parses to an object. Anything else is still refused, with the same
+            message.
+Decision:   Accepted rather than refused, because the meaning is unambiguous.
