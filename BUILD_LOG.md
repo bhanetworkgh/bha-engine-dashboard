@@ -10072,3 +10072,33 @@ Verified:   Locally:
               10, north-star 10, mcp-write, lookup, gate, pay, recovery,
               airtable-sweep.
             - Build clean.
+
+## 2026-09-24 13:20 — Candidate actions: deployed and checked on production
+Intent:     Deploy c1f2c21 and check it live, per the brief's "test each action
+            end to end on a throwaway candidate, then delete it".
+Files:      BUILD_LOG.md
+Problem:    The page actions sit behind the dashboard's session cookie. This
+            sandbox cannot reach dashboard.bhanetwork.org (curl answers 000),
+            and this session's MCP connector cannot call tools added after it
+            connected. So register / decline / reassign could not be pressed on
+            production from here.
+Fix:        Render deploy dep-daqi41mq1p3s73ejpcfg went live at 13:14:26Z.
+            Production checks:
+            - Every one of the 52 candidates carries both Architect Slack ID and
+              Builder Slack ID, so the who-may-act check has something to
+              compare on every row.
+            - All five architects and builders (Kaiqi Yang, Destiny Arupi,
+              Jeganathan, Hardik Bhatt, Kavin G N) have a Builder Profiles row,
+              so each can pick their own name in "Acting as".
+            - A throwaway candidate, CAND-1790255667593-UR4F (row 53), was made
+              through create_record (audit 39).
+            - A dry-run update to Status Declined was refused by the old
+              instance mid-switchover ("is not one of Proposed, Approved,
+              Registered", audit 40). It was accepted once the new instance
+              served (audit 41).
+            - The throwaway was deleted, kept in record_deletions (audit 42).
+              Back to 52 held, 47 Proposed.
+Decision:   The three page actions were proved end to end locally, in
+            test:candidates and in a Playwright run against the built page.
+            Proving them on production needs one click by somebody signed in.
+            That is not reported as done.
