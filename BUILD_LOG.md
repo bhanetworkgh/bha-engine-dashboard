@@ -10507,3 +10507,25 @@ Decision:   Why the two counts differ is not known yet. Worth finding out: it
             is about a thousand runs, and the cause may be something n8n bills
             that this page does not see.
 Tested:     Server typecheck clean.
+
+## 2026-09-26 — Executions: production by default, paged workflow table
+Intent:     Destiny, after the quota card went live: count only production
+            executions on the page, show the by-workflow table twenty at a
+            time, and take the alert-problem line off the quota card.
+Files:      server/src/executions.ts, server/src/index.ts, src/data/index.ts,
+            src/data/types.ts, src/screens/Executions/index.tsx, BUILD_LOG.md
+Fix:        - `scope` on GET /api/executions and /api/executions/workflow/:id,
+              `production` by default: every figure, chart, tab count, failure
+              list, "recent" health, drill-down and download counts only the
+              modes n8n bills (quota.COUNTED_MODES). `all` is the old view.
+            - A Production / Include test & internal switch in the page header.
+              Kept, not removed: sub-workflows (Agent Delivery, Tools Routers,
+              Conversational Agents) are `integrated` runs, so their own
+              failures only appear under `all`.
+            - The "counted by n8n" column and the split in the Executions tile
+              are gone; the scope says it instead.
+            - The by-workflow table pages at 20 with Previous / Next.
+            - The quota card no longer prints the last alert problem. It is
+              still stored (meta `quota.last_error`) and logged to the console.
+Tested:     Server typecheck clean; the page checked against local type
+            stubs. Render build is the compile check.

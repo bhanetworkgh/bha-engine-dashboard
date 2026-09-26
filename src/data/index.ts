@@ -288,12 +288,12 @@ export const retryIncident = (incidentId: string) =>
  * re-reads at that key, so the figures, the workflow table, the comparison and
  * the exported report all describe the same span.
  */
-export const getExecutions = (grain: ExecutionGrain = 'week', period?: string) =>
-  api<ExecutionsData>(`/api/executions?grain=${grain}${period ? `&period=${encodeURIComponent(period)}` : ''}`);
+export const getExecutions = (grain: ExecutionGrain = 'week', period?: string, scope: 'production' | 'all' = 'production') =>
+  api<ExecutionsData>(`/api/executions?grain=${grain}${period ? `&period=${encodeURIComponent(period)}` : ''}&scope=${scope}`);
 
 /** One workflow opened up: its days inside the period, and its individual runs. */
-export const getExecutionWorkflow = (workflowId: string, grain: ExecutionGrain, period?: string) =>
-  api<ExecutionWorkflowDetail>(`/api/executions/workflow/${encodeURIComponent(workflowId)}?grain=${grain}${period ? `&period=${encodeURIComponent(period)}` : ''}`);
+export const getExecutionWorkflow = (workflowId: string, grain: ExecutionGrain, period?: string, scope: 'production' | 'all' = 'production') =>
+  api<ExecutionWorkflowDetail>(`/api/executions/workflow/${encodeURIComponent(workflowId)}?grain=${grain}${period ? `&period=${encodeURIComponent(period)}` : ''}&scope=${scope}`);
 
 /** Reads n8n's whole history again. Idempotent — every row is keyed on the execution id. */
 export const backfillExecutions = () => api<ExecutionBackfill>('/api/executions/backfill', { method: 'POST' });
