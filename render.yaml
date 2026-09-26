@@ -85,6 +85,21 @@ services:
       # hourly and the pages read that.
       - key: N8N_API_KEY
         sync: false
+      # The n8n Cloud plan's execution quota and its alerts (2026-09-26, Jason
+      # and Destiny). N8N_EXECUTION_QUOTA is the plan's monthly executions
+      # (50000); N8N_BILLING_CYCLE_START a day the monthly count restarted
+      # (YYYY-MM-DD or an ISO time), repeating monthly. No defaults: with either
+      # unset the Executions page says so and no alert is sent. Alerts post as
+      # Bays to QUOTA_ALERT_CHANNEL at 70/85/95/100% and are logged to BHARAG
+      # with BHARAG_BAYS_KEY. QUOTA_ALERT_MENTIONS is optional Slack user ids.
+      - key: N8N_EXECUTION_QUOTA
+        sync: false
+      - key: N8N_BILLING_CYCLE_START
+        sync: false
+      - key: QUOTA_ALERT_CHANNEL
+        sync: false
+      - key: QUOTA_ALERT_MENTIONS
+        sync: false
       # The BHARAG incident ledger, for Engine health (17 Sep 2026). Read only,
       # and the second external read path this server has after Airtable.
       #

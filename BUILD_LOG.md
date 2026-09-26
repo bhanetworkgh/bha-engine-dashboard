@@ -10441,3 +10441,54 @@ Decision:   Not verified from this session: that the two new tools show on
             MCP allow-list, brings them in. No production draft or register
             was run from here: each would be a paid call, a real Slack post
             and a real pattern.
+
+## 2026-09-26 — n8n execution quota: alerts and the production split
+Intent:     Jason, in #bha-coordination after the 10k plan ran out: alerts at
+            70%, 85% and 95% of the monthly execution quota, posted into Slack
+            and logged to BHARAG, so a cap is never found through silence at
+            the front door again. Destiny: split the Executions page's totals
+            into what n8n counts and what it does not, because the page read
+            18k while the plan had billed ~10k.
+Files:      server/src/quota.ts (new), server/src/executions.ts,
+            server/src/bharag.ts, src/data/types.ts,
+            src/screens/Executions/index.tsx, render.yaml, .env.example,
+            BUILD_LOG.md
+Problem:    On 26 Sep at 14:28Z n8n Cloud refused every production run for
+            the rest of the cycle (plan: 10,000). No execution is created for
+            a refused run, so nothing failed, nothing was logged and no error
+            workflow fired. The page mixed billed and free runs: of 18,388
+            rows held, 6,856 were sub-workflow (integrated), 306 error-workflow
+            and 210 manual runs, none of which n8n bills.
+Fix:        - quota.COUNTED_MODES = webhook, trigger, retry, chat: n8n's own
+              rule (production executions only; manual, sub-workflow and
+              error-workflow runs are free), read against the mode already on
+              every row.
+            - Every execution tally carries `production` and `not_counted`;
+              the Executions tile and the by-workflow table show both.
+            - quota.usage(): production runs since the current billing cycle
+              began, the last seven days' pace, the projection to the reset
+              and the day the quota runs out if that is before it. On the
+              page as a card above the tabs, with the alert lines drawn.
+            - quota.check(): after every execution poll, throttled to one real
+              check per five minutes and forced once at boot. Each crossed
+              line not yet announced this cycle is posted once, as Bays, to
+              QUOTA_ALERT_CHANNEL and ingested into Bays' BHARAG workspace
+              (new ingest workspace `bays`, BHARAG_BAYS_KEY). Several lines
+              crossed at once post one message naming the highest. A line is
+              marked sent only after Slack accepts it; a refused post is
+              retried on the next check and shown on the page.
+            - On the first run with everything configured it posts once that
+              the monitor is live, which proves Slack and BHARAG end to end
+              before the first real alert.
+Decision:   It is this database's count, not n8n's: n8n Cloud has no usage
+            API. It trails n8n by one poll and the page says so.
+            N8N_EXECUTION_QUOTA and N8N_BILLING_CYCLE_START have no defaults:
+            a guessed cycle would put every alert line in the wrong place.
+            100% is alerted as well as Jason's three, so the cap itself is
+            said out loud.
+Tested:     Server typecheck clean (tsc against @types/node, with a local pg
+            declaration). The registry refused npm installs from this session,
+            so no local build or Postgres test run; the Render build is the
+            compile check. Billing-cycle arithmetic checked for mid-month,
+            the reset instant and 31 Jan -> 28 Feb.
+Restore:    Before this, main was b5ad478.

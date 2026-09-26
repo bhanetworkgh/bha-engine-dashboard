@@ -42,6 +42,7 @@ import { query } from './pg';
 import * as events from './events';
 import { delta, movement } from './delta';
 import * as n8n from './n8n';
+import * as quota from './quota';
 import type {
   ExecutionComparison,
   ExecutionGrain,
@@ -381,11 +382,22 @@ export function startPolling(): void {
       const recover = !(await getMeta(GAP_BACKFILL));
       await runSync(Number(held.rows[0]?.n ?? 0) === 0 || recover);
       if (recover) await setMeta(GAP_BACKFILL, nowIso());
+      await quota.check(true);
     } catch (e) {
       console.error('executions first pass failed', e);
     }
   })();
-  timer = setInterval(() => void runSync().catch((e) => console.error('executions poll failed', e)), POLL_EVERY_MS);
+  // After each pass, see whether the plan's quota has crossed an alert line
+  // (2026-09-26). Its own throttle keeps that to one real check every few
+  // minutes; a failed check is logged and never stops the poll.
+  timer = setInterval(
+    () =>
+      void runSync()
+        .catch((e) => console.error('executions poll failed', e))
+        .then(() => quota.check())
+        .catch((e) => console.error('quota check failed', e)),
+    POLL_EVERY_MS,
+  );
   // Never hold the process open for this.
   timer.unref?.();
 }
@@ -502,14 +514,17 @@ interface Tally {
   unfinished: number;
   duration_ms: number;
   timed: number;
+  /** Runs n8n Cloud counts against the plan's monthly quota. See `quota.COUNTED_MODES`. */
+  production: number;
 }
 
 function blankTally(): Tally {
-  return { executions: 0, succeeded: 0, failed: 0, canceled: 0, unfinished: 0, duration_ms: 0, timed: 0 };
+  return { executions: 0, succeeded: 0, failed: 0, canceled: 0, unfinished: 0, duration_ms: 0, timed: 0, production: 0 };
 }
 
-function add(t: Tally, status: string, n: number, ms: number, timed: number): void {
+function add(t: Tally, status: string, n: number, ms: number, timed: number, production: number): void {
   t.executions += n;
+  t.production += production;
   if (n8n.FAILED.has(status)) t.failed += n;
   else if (SUCCEEDED.has(status)) t.succeeded += n;
   else if (CANCELED.has(status)) t.canceled += n;
@@ -537,6 +552,8 @@ function figures(t: Tally) {
     failure_rate: finished ? t.failed / finished : null,
     avg_ms: t.timed ? Math.round(t.duration_ms / t.timed) : null,
     timed: t.timed,
+    production: t.production,
+    not_counted: t.executions - t.production,
   };
 }
 
@@ -554,24 +571,27 @@ interface DayRow {
   n: number;
   duration_ms: number;
   timed: number;
+  /** Of `n`, the runs n8n Cloud bills against the quota. */
+  production: number;
 }
 
 /** Per day, per system, per status, from a day onwards. One query feeds every chart on the page. */
 async function dayRows(from: string): Promise<DayRow[]> {
-  const r = await query<{ day: string; system: string | null; status: string; n: string; duration_ms: string; timed: string }>(
+  const r = await query<{ day: string; system: string | null; status: string; n: string; duration_ms: string; timed: string; production: string }>(
     `SELECT e.day,
             w.system,
             e.status,
             count(*)::text                            AS n,
             COALESCE(sum(e.duration_ms), 0)::text     AS duration_ms,
-            count(e.duration_ms)::text                AS timed
+            count(e.duration_ms)::text                AS timed,
+            count(*) FILTER (WHERE e.mode = ANY($2))::text AS production
        FROM engine_execution_runs e
        LEFT JOIN registry_workflows w ON w.id = e.workflow_id AND w.deleted_at IS NULL
       WHERE e.day >= $1
       GROUP BY e.day, w.system, e.status`,
-    [from],
+    [from, [...quota.COUNTED_MODES]],
   );
-  return r.rows.map((x) => ({ day: x.day, system: x.system, status: x.status, n: Number(x.n), duration_ms: Number(x.duration_ms), timed: Number(x.timed) }));
+  return r.rows.map((x) => ({ day: x.day, system: x.system, status: x.status, n: Number(x.n), duration_ms: Number(x.duration_ms), timed: Number(x.timed), production: Number(x.production) }));
 }
 
 interface WorkflowRow {
@@ -584,6 +604,7 @@ interface WorkflowRow {
   n: number;
   duration_ms: number;
   timed: number;
+  production: number;
 }
 
 /** Per workflow, per status, inside one period. Only the period on screen is asked for. */
@@ -598,6 +619,7 @@ async function workflowRows(start: string, end: string): Promise<WorkflowRow[]> 
     n: string;
     duration_ms: string;
     timed: string;
+    production: string;
   }>(
     `SELECT e.workflow_id,
             max(e.workflow_name)                      AS workflow_name,
@@ -607,12 +629,13 @@ async function workflowRows(start: string, end: string): Promise<WorkflowRow[]> 
             e.status,
             count(*)::text                            AS n,
             COALESCE(sum(e.duration_ms), 0)::text     AS duration_ms,
-            count(e.duration_ms)::text                AS timed
+            count(e.duration_ms)::text                AS timed,
+            count(*) FILTER (WHERE e.mode = ANY($3))::text AS production
        FROM engine_execution_runs e
        LEFT JOIN registry_workflows w ON w.id = e.workflow_id AND w.deleted_at IS NULL
       WHERE e.day >= $1 AND e.day <= $2
       GROUP BY e.workflow_id, w.name, w.system, w.n8n_url, e.status`,
-    [start, end],
+    [start, end, [...quota.COUNTED_MODES]],
   );
   return r.rows.map((x) => ({
     workflow_id: x.workflow_id,
@@ -624,6 +647,7 @@ async function workflowRows(start: string, end: string): Promise<WorkflowRow[]> 
     n: Number(x.n),
     duration_ms: Number(x.duration_ms),
     timed: Number(x.timed),
+    production: Number(x.production),
   }));
 }
 
@@ -786,7 +810,7 @@ export async function read(grain: ExecutionGrain = 'week', wanted?: string): Pro
     for (const d of days) {
       if (d.day < from || d.day > to) continue;
       if (!mine(system)(d)) continue;
-      add(t, d.status, d.n, d.duration_ms, d.timed);
+      add(t, d.status, d.n, d.duration_ms, d.timed, d.production);
     }
     return t;
   };
@@ -875,7 +899,7 @@ export async function read(grain: ExecutionGrain = 'week', wanted?: string): Pro
     for (const w of wfRows) {
       if (!mine(system)(w)) continue;
       const entry = byWorkflow.get(w.workflow_id) ?? { row: w, tally: blankTally() };
-      add(entry.tally, w.status, w.n, w.duration_ms, w.timed);
+      add(entry.tally, w.status, w.n, w.duration_ms, w.timed, w.production);
       byWorkflow.set(w.workflow_id, entry);
     }
     const workflows: ExecutionWorkflow[] = [...byWorkflow.entries()]
@@ -976,6 +1000,7 @@ export async function read(grain: ExecutionGrain = 'week', wanted?: string): Pro
   return {
     grain,
     period: selected.key,
+    quota: await quota.usage(),
     systems: tabs.map((s) => buildSystem(s.system, s.label)),
     boundary: boundary(grain, h.oldest),
     source: {
@@ -1030,20 +1055,21 @@ export async function workflow(workflowId: string, grain: ExecutionGrain, wanted
   if (!idRow.rows[0]?.workflow_name && !mine.length) return null;
 
   const tally = blankTally();
-  for (const r of mine) add(tally, r.status, r.n, r.duration_ms, r.timed);
+  for (const r of mine) add(tally, r.status, r.n, r.duration_ms, r.timed, r.production);
   const failing = (await failedIds(selected.start, selected.end, 2000)).get(workflowId) ?? [];
 
-  const perDay = await query<{ day: string; status: string; n: string; duration_ms: string; timed: string }>(
-    `SELECT day, status, count(*)::text AS n, COALESCE(sum(duration_ms),0)::text AS duration_ms, count(duration_ms)::text AS timed
+  const perDay = await query<{ day: string; status: string; n: string; duration_ms: string; timed: string; production: string }>(
+    `SELECT day, status, count(*)::text AS n, COALESCE(sum(duration_ms),0)::text AS duration_ms, count(duration_ms)::text AS timed,
+            count(*) FILTER (WHERE mode = ANY($4))::text AS production
        FROM engine_execution_runs
       WHERE workflow_id = $1 AND day >= $2 AND day <= $3
       GROUP BY day, status ORDER BY day ASC`,
-    [workflowId, selected.start, selected.end],
+    [workflowId, selected.start, selected.end, [...quota.COUNTED_MODES]],
   );
   const byDay = new Map<string, Tally>();
   for (const r of perDay.rows) {
     const t = byDay.get(r.day) ?? blankTally();
-    add(t, r.status, Number(r.n), Number(r.duration_ms), Number(r.timed));
+    add(t, r.status, Number(r.n), Number(r.duration_ms), Number(r.timed), Number(r.production));
     byDay.set(r.day, t);
   }
 
