@@ -576,7 +576,7 @@ interface DayRow {
 }
 
 /** Per day, per system, per status, from a day onwards. One query feeds every chart on the page. */
-async function dayRows(from: string): Promise<DayRow[]> {
+async function dayRows(from: string, scope: ExecutionScope): Promise<DayRow[]> {
   const r = await query<{ day: string; system: string | null; status: string; n: string; duration_ms: string; timed: string; production: string }>(
     `SELECT e.day,
             w.system,
@@ -587,7 +587,7 @@ async function dayRows(from: string): Promise<DayRow[]> {
             count(*) FILTER (WHERE e.mode = ANY($2))::text AS production
        FROM engine_execution_runs e
        LEFT JOIN registry_workflows w ON w.id = e.workflow_id AND w.deleted_at IS NULL
-      WHERE e.day >= $1
+      WHERE e.day >= $1 AND ${scopeSql(scope, 'e')}
       GROUP BY e.day, w.system, e.status`,
     [from, [...quota.COUNTED_MODES]],
   );
@@ -608,7 +608,7 @@ interface WorkflowRow {
 }
 
 /** Per workflow, per status, inside one period. Only the period on screen is asked for. */
-async function workflowRows(start: string, end: string): Promise<WorkflowRow[]> {
+async function workflowRows(start: string, end: string, scope: ExecutionScope): Promise<WorkflowRow[]> {
   const r = await query<{
     workflow_id: string;
     workflow_name: string | null;
@@ -633,7 +633,7 @@ async function workflowRows(start: string, end: string): Promise<WorkflowRow[]> 
             count(*) FILTER (WHERE e.mode = ANY($3))::text AS production
        FROM engine_execution_runs e
        LEFT JOIN registry_workflows w ON w.id = e.workflow_id AND w.deleted_at IS NULL
-      WHERE e.day >= $1 AND e.day <= $2
+      WHERE e.day >= $1 AND e.day <= $2 AND ${scopeSql(scope, 'e')}
       GROUP BY e.workflow_id, w.name, w.system, w.n8n_url, e.status`,
     [start, end, [...quota.COUNTED_MODES]],
   );
@@ -652,11 +652,11 @@ async function workflowRows(start: string, end: string): Promise<WorkflowRow[]> 
 }
 
 /** The failing execution ids inside one period, newest first, so each opens in n8n. */
-async function failedIds(start: string, end: string, limit = 500): Promise<Map<string, string[]>> {
+async function failedIds(start: string, end: string, scope: ExecutionScope, limit = 500): Promise<Map<string, string[]>> {
   const r = await query<{ workflow_id: string; execution_id: string }>(
     `SELECT workflow_id, execution_id::text AS execution_id
        FROM engine_execution_runs
-      WHERE day >= $1 AND day <= $2 AND status IN ('error','crashed')
+      WHERE day >= $1 AND day <= $2 AND status IN ('error','crashed') AND ${scopeSql(scope)}
       ORDER BY execution_id DESC
       LIMIT $3`,
     [start, end, limit],
@@ -678,13 +678,13 @@ export const RECENT_RUNS = 10;
  * when it last failed, and how many have succeeded since — a fixed workflow
  * stops reading as a broken one without the month's figure being touched.
  */
-async function recentHealth(): Promise<Map<string, ExecutionWorkflow['recent']>> {
+async function recentHealth(scope: ExecutionScope): Promise<Map<string, ExecutionWorkflow['recent']>> {
   const r = await query<{ workflow_id: string; n: string; failed: string; last_failure_at: string | null; since_failure: string; last_run_at: string | null }>(
     `WITH finished AS (
        SELECT workflow_id, started_at, status IN ('error','crashed') AS bad,
               row_number() OVER (PARTITION BY workflow_id ORDER BY started_at DESC) AS rn
          FROM engine_execution_runs
-        WHERE status IN ('success','error','crashed')
+        WHERE status IN ('success','error','crashed') AND ${scopeSql(scope)}
      ), lastfail AS (
        SELECT workflow_id, max(started_at) AS at FROM finished WHERE bad GROUP BY workflow_id
      )
@@ -745,10 +745,31 @@ export function isGrain(v: string): v is ExecutionGrain {
   return v === 'week' || v === 'month' || v === 'year';
 }
 
+/**
+ * Which executions the page counts (2026-09-26, Destiny). `production` — the
+ * default — is only the runs n8n bills: webhooks, schedules and triggers, chat,
+ * automatic retries. `all` adds manual runs, sub-workflows and error-workflow
+ * runs. The page opens on production because that is the engine's real
+ * activity and the figure the plan quota is measured in; `all` stays one click
+ * away because a sub-workflow's failures only show there.
+ */
+export type ExecutionScope = 'production' | 'all';
+
+export function isScope(v: string): v is ExecutionScope {
+  return v === 'production' || v === 'all';
+}
+
+/** The SQL condition for a scope, on a table alias (or none). Built from constants, never from input. */
+function scopeSql(scope: ExecutionScope, alias = ''): string {
+  if (scope === 'all') return 'TRUE';
+  const col = alias ? `${alias}.mode` : 'mode';
+  return `${col} IN (${quota.COUNTED_MODES.map((m) => `'${m}'`).join(', ')})`;
+}
+
 /** How many periods the chart draws. Enough to see a trend, few enough to read. */
 const SHOWN = 18;
 
-export async function read(grain: ExecutionGrain = 'week', wanted?: string): Promise<ExecutionsData> {
+export async function read(grain: ExecutionGrain = 'week', wanted?: string, scope: ExecutionScope = 'production'): Promise<ExecutionsData> {
   const h = await held();
   const syncedAt = await getMeta(SYNC_AT);
   const warning = (await getMeta(SYNC_WARNING)) || null;
@@ -766,10 +787,10 @@ export async function read(grain: ExecutionGrain = 'week', wanted?: string): Pro
 
   // Only as far back as the chart and the comparison actually need.
   const windowStart = [periods[Math.max(0, periods.length - SHOWN)].start, previousStart].sort()[0];
-  const days = await dayRows(windowStart);
-  const wfRows = await workflowRows(selected.start, selected.end);
-  const failing = await failedIds(selected.start, selected.end);
-  const recent = await recentHealth();
+  const days = await dayRows(windowStart, scope);
+  const wfRows = await workflowRows(selected.start, selected.end, scope);
+  const failing = await failedIds(selected.start, selected.end, scope);
+  const recent = await recentHealth(scope);
 
   // Which tabs exist: the three known systems, then anything else the registry
   // has filed a running workflow under, then Archived where anything is
@@ -1000,6 +1021,7 @@ export async function read(grain: ExecutionGrain = 'week', wanted?: string): Pro
   return {
     grain,
     period: selected.key,
+    scope,
     quota: await quota.usage(),
     systems: tabs.map((s) => buildSystem(s.system, s.label)),
     boundary: boundary(grain, h.oldest),
@@ -1031,7 +1053,7 @@ export async function read(grain: ExecutionGrain = 'week', wanted?: string): Pro
  * This is the thing a counter could not answer at all, and the reason the rows
  * are stored. A failure is not a number here, it is an id that opens in n8n.
  */
-export async function workflow(workflowId: string, grain: ExecutionGrain, wanted?: string, limit = 500): Promise<ExecutionWorkflowDetail | null> {
+export async function workflow(workflowId: string, grain: ExecutionGrain, wanted?: string, limit = 500, scope: ExecutionScope = 'production'): Promise<ExecutionWorkflowDetail | null> {
   const h = await held();
   const today = nowIso().slice(0, 10);
   const first = h.oldest ?? today;
@@ -1040,7 +1062,7 @@ export async function workflow(workflowId: string, grain: ExecutionGrain, wanted
   const selected = periods.find((p) => p.key === wanted) ?? periods.find((p) => p.key === currentKey) ?? periods[periods.length - 1];
   const spansYears = new Set(periods.map((p) => p.start.slice(0, 4))).size > 1;
 
-  const rows = await workflowRows(selected.start, selected.end);
+  const rows = await workflowRows(selected.start, selected.end, scope);
   const mine = rows.filter((r) => r.workflow_id === workflowId);
 
   // A workflow with nothing in this period is still a workflow: its name and
@@ -1056,13 +1078,13 @@ export async function workflow(workflowId: string, grain: ExecutionGrain, wanted
 
   const tally = blankTally();
   for (const r of mine) add(tally, r.status, r.n, r.duration_ms, r.timed, r.production);
-  const failing = (await failedIds(selected.start, selected.end, 2000)).get(workflowId) ?? [];
+  const failing = (await failedIds(selected.start, selected.end, scope, 2000)).get(workflowId) ?? [];
 
   const perDay = await query<{ day: string; status: string; n: string; duration_ms: string; timed: string; production: string }>(
     `SELECT day, status, count(*)::text AS n, COALESCE(sum(duration_ms),0)::text AS duration_ms, count(duration_ms)::text AS timed,
             count(*) FILTER (WHERE mode = ANY($4))::text AS production
        FROM engine_execution_runs
-      WHERE workflow_id = $1 AND day >= $2 AND day <= $3
+      WHERE workflow_id = $1 AND day >= $2 AND day <= $3 AND ${scopeSql(scope)}
       GROUP BY day, status ORDER BY day ASC`,
     [workflowId, selected.start, selected.end, [...quota.COUNTED_MODES]],
   );
@@ -1076,7 +1098,7 @@ export async function workflow(workflowId: string, grain: ExecutionGrain, wanted
   const runRows = await query<{ execution_id: string; status: string; mode: string | null; started_at: string; stopped_at: string | null; duration_ms: string | null }>(
     `SELECT execution_id::text AS execution_id, status, mode, started_at, stopped_at, duration_ms::text AS duration_ms
        FROM engine_execution_runs
-      WHERE workflow_id = $1 AND day >= $2 AND day <= $3
+      WHERE workflow_id = $1 AND day >= $2 AND day <= $3 AND ${scopeSql(scope)}
       ORDER BY execution_id DESC LIMIT $4`,
     [workflowId, selected.start, selected.end, limit],
   );
@@ -1097,7 +1119,7 @@ export async function workflow(workflowId: string, grain: ExecutionGrain, wanted
       system: meta?.system ?? null,
       registered: Boolean(meta?.reg_name),
       n8n_url: meta?.n8n_url ?? null,
-      recent: (await recentHealth()).get(workflowId) ?? null,
+      recent: (await recentHealth(scope)).get(workflowId) ?? null,
       failed_ids: failing,
       ...figures(tally),
     },

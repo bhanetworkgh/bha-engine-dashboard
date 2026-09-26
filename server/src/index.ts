@@ -1100,7 +1100,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
   if (p === '/api/executions' && method === 'GET') {
     const grain = url.searchParams.get('grain') ?? 'week';
     if (!executions.isGrain(grain)) throw new HttpError(400, 'grain must be week, month or year.');
-    return send(res, 200, await executions.read(grain, url.searchParams.get('period') ?? undefined));
+    const scope = url.searchParams.get('scope') ?? 'production';
+    if (!executions.isScope(scope)) throw new HttpError(400, 'scope must be production or all.');
+    return send(res, 200, await executions.read(grain, url.searchParams.get('period') ?? undefined, scope));
   }
 
   /** One workflow opened up: its days inside the period, and its individual runs. */
@@ -1108,7 +1110,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
   if (execWorkflow && method === 'GET') {
     const grain = url.searchParams.get('grain') ?? 'week';
     if (!executions.isGrain(grain)) throw new HttpError(400, 'grain must be week, month or year.');
-    const detail = await executions.workflow(decodeURIComponent(execWorkflow[1]), grain, url.searchParams.get('period') ?? undefined);
+    const scope = url.searchParams.get('scope') ?? 'production';
+    if (!executions.isScope(scope)) throw new HttpError(400, 'scope must be production or all.');
+    const detail = await executions.workflow(decodeURIComponent(execWorkflow[1]), grain, url.searchParams.get('period') ?? undefined, 500, scope);
     if (!detail) throw new HttpError(404, 'No execution of that workflow has ever been read.');
     return send(res, 200, detail);
   }

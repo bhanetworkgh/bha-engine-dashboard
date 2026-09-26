@@ -2953,6 +2953,11 @@ export interface ExecutionsData {
   grain: ExecutionGrain;
   /** The period in view. Selecting one on the chart re-reads at that key. */
   period: string;
+  /**
+   * Which runs every figure counts: `production` (the default) is only what n8n
+   * bills; `all` adds manual, sub-workflow and error-workflow runs.
+   */
+  scope: 'production' | 'all';
   /** This billing cycle's usage of the n8n plan's execution quota. */
   quota: ExecutionQuota;
   systems: ExecutionSystem[];

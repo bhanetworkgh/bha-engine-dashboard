@@ -41,9 +41,8 @@ import { Tabs, PageHeader, yearOf, Button, CountUpText, Definition, InfoTip, Leg
  * invisible because a registry row is missing.
  */
 
-/** What "counted by n8n" means, said once for the table header. */
-const PRODUCTION_DEF =
-  'Runs n8n Cloud counts against the plan quota: started by a webhook, a schedule or trigger, a chat trigger, or an automatic retry. Manual runs from the editor, sub-workflows and error-workflow runs are free.';
+/** Rows in the by-workflow table before it pages. */
+const WORKFLOWS_PER_PAGE = 20;
 
 /** The page re-reads on the same interval the server polls on. */
 const REFRESH_MS = 45_000;
@@ -173,7 +172,7 @@ const n = (x: number) => x.toLocaleString('en-GB');
  * This is the capability the counter tables could not support at all, and the
  * reason every execution is stored as its own row.
  */
-function WorkflowPanel({ workflowId, grain, period, onClose }: { workflowId: string; grain: ExecutionGrain; period: string; onClose: () => void }) {
+function WorkflowPanel({ workflowId, grain, period, scope, onClose }: { workflowId: string; grain: ExecutionGrain; period: string; scope: 'production' | 'all'; onClose: () => void }) {
   const [detail, setDetail] = useState<ExecutionWorkflowDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [failedOnly, setFailedOnly] = useState(false);
@@ -181,13 +180,13 @@ function WorkflowPanel({ workflowId, grain, period, onClose }: { workflowId: str
   useEffect(() => {
     let live = true;
     setDetail(null);
-    getExecutionWorkflow(workflowId, grain, period)
+    getExecutionWorkflow(workflowId, grain, period, scope)
       .then((d) => live && setDetail(d))
       .catch((e: unknown) => live && setErr(e instanceof Error ? e.message : 'Could not load the workflow.'));
     return () => {
       live = false;
     };
-  }, [workflowId, grain, period]);
+  }, [workflowId, grain, period, scope]);
 
   const runs: ExecutionRun[] = (detail?.runs ?? []).filter((r) => !failedOnly || r.status === 'error' || r.status === 'crashed');
   const maxDay = Math.max(1, ...(detail?.days ?? []).map((d) => d.executions));
@@ -362,10 +361,6 @@ function WorkflowRow({ w, onOpen }: { w: ExecutionWorkflow; onOpen: () => void }
         {w.executions}
         <span className="text-faint md:hidden"> executions</span>
       </td>
-      <td className={`td card-meta tabular text-right ${w.production ? 'text-dim' : 'text-faint'}`} title={`${w.production} production runs n8n counts against the plan · ${w.not_counted} test and internal runs it does not`}>
-        {w.production}
-        <span className="text-faint md:hidden"> counted by n8n</span>
-      </td>
       <td className={`td card-meta tabular text-right ${w.failed ? 'text-failing' : 'text-faint'}`}>
         {w.failed}
         <span className="text-faint md:hidden"> failed</span>
@@ -401,8 +396,8 @@ function WorkflowRow({ w, onOpen }: { w: ExecutionWorkflow; onOpen: () => void }
  * periods, because a system with no execution in a month has no tab in it, and
  * an index would quietly hand you somebody else's report.
  */
-async function downloadPeriod(grain: ExecutionGrain, period: string, systemKey: string): Promise<string | null> {
-  const d = await getExecutions(grain, period);
+async function downloadPeriod(grain: ExecutionGrain, period: string, systemKey: string, scope: 'production' | 'all'): Promise<string | null> {
+  const d = await getExecutions(grain, period, scope);
   const s = d.systems.find((x) => x.system === systemKey);
   if (!s) return `${systemKey} ran nothing in ${period}, so there is no report for it.`;
   downloadCsv(reportName(s, d.period), buildReport(d, s));
@@ -417,7 +412,7 @@ async function downloadPeriod(grain: ExecutionGrain, period: string, systemKey: 
  * months, and offers them one at a time. Both follow the tab, so All systems
  * downloads every system and Bays downloads Bays.
  */
-function MonthDownload({ months, systemKey, systemLabel, onFail }: { months: string[]; systemKey: string; systemLabel: string; onFail: (m: string) => void }) {
+function MonthDownload({ months, systemKey, systemLabel, scope, onFail }: { months: string[]; systemKey: string; systemLabel: string; scope: 'production' | 'all'; onFail: (m: string) => void }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -439,7 +434,7 @@ function MonthDownload({ months, systemKey, systemLabel, onFail }: { months: str
   async function take(month: string) {
     setBusy(month);
     try {
-      const err = await downloadPeriod('month', month, systemKey);
+      const err = await downloadPeriod('month', month, systemKey, scope);
       if (err) onFail(err);
       else setOpen(false);
     } catch (e) {
@@ -547,7 +542,6 @@ function QuotaCard({ q }: { q: ExecutionQuota }) {
               Alerts at {q.thresholds.map((t) => `${t.at}%`).join(', ')} post to Slack{q.channel ? '' : ' (no channel set, so none can be sent)'} and are logged to BHARAG.
               {alerted.length ? ` Sent this cycle: ${alerted.map((t) => `${t.at}% on ${shortDay(t.alerted_at)}`).join(', ')}.` : ' None sent this cycle.'}
             </div>
-            {q.last_error && <div className="text-failing">Last alert problem: {q.last_error}</div>}
           </div>
         }
       >
@@ -591,6 +585,11 @@ function SystemView({
   onFail: (message: string) => void;
 }) {
   const [shape, setShape] = useState<'bars' | 'line'>('bars');
+  /** The by-workflow table shows twenty at a time (2026-09-26, Destiny). */
+  const [page, setPage] = useState(0);
+  const pages = Math.max(1, Math.ceil(system.workflows.length / WORKFLOWS_PER_PAGE));
+  const shownPage = Math.min(page, pages - 1);
+  const shown = system.workflows.slice(shownPage * WORKFLOWS_PER_PAGE, (shownPage + 1) * WORKFLOWS_PER_PAGE);
   const period = system.period;
   const c = system.comparison;
   const nothing = system.periods.every((p) => p.executions === 0);
@@ -655,12 +654,12 @@ function SystemView({
               {period.unfinished ? `${period.unfinished} of them are still running and are counted with the status they were read at.` : 'Every run n8n recorded in this month, whatever its outcome.'}
             </TileTitle>
           }
-          right="every run read from n8n"
+          right={data.scope === 'production' ? 'production runs n8n counts' : 'every run read from n8n'}
           align="top"
           note={
             nothing
               ? 'None held for this month'
-              : `${n(period.production)} production (counted by n8n) · ${n(period.not_counted)} test and internal (not counted)${period.unfinished ? ` · ${period.unfinished} still running` : ''}`
+              : `${data.scope === 'production' ? 'Production runs only' : 'Every run, including manual, sub-workflow and error-handler runs'} · ${period.unfinished ? `${n(period.finished)} finished, ${period.unfinished} still running` : `all ${n(period.finished)} finished`}`
           }
         >
           <Figure value="—" count={nothing ? null : period.executions} replayKey={`${system.system}|${period.key}`} delta={<Delta d={c.executions} />} />
@@ -769,6 +768,7 @@ function SystemView({
                 months={monthKeys.filter((k) => k.startsWith(`${year}-`))}
                 systemKey={system.system}
                 systemLabel={system.label}
+                scope={data.scope}
                 onFail={onFail}
               />
             </span>
@@ -811,19 +811,37 @@ function SystemView({
               <table className="table-cards w-full border-collapse text-[12.5px]" aria-label={`${system.label} workflows`}>
                 <thead>
                   <tr>
-                    {['workflow', `executions, ${period.label}`, 'counted by n8n', 'failed', `failure rate, ${period.label}`, 'average time', `recent (last ${10} runs)`, ''].map((h, i) => (
-                      <th key={i} title={i === 6 ? RECENT_DEF : i === 2 ? PRODUCTION_DEF : undefined} className={`border-b border-line bg-panel px-3 py-2 text-left text-[11.5px] font-medium whitespace-nowrap text-faint ${i > 0 && i < 7 ? 'text-right' : ''}`}>
+                    {['workflow', `executions, ${period.label}`, 'failed', `failure rate, ${period.label}`, 'average time', `recent (last ${10} runs)`, ''].map((h, i) => (
+                      <th key={i} title={i === 5 ? RECENT_DEF : undefined} className={`border-b border-line bg-panel px-3 py-2 text-left text-[11.5px] font-medium whitespace-nowrap text-faint ${i > 0 && i < 6 ? 'text-right' : ''}`}>
                         {h}
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {system.workflows.map((w) => (
+                  {shown.map((w) => (
                     <WorkflowRow key={w.workflow_id} w={w} onOpen={() => onOpenWorkflow(w.workflow_id)} />
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {pages > 1 && (
+            <div className="flex items-center justify-between gap-3 border-t border-line px-5 py-2.5 text-[11.5px] text-faint">
+              <span className="tabular">
+                {shownPage * WORKFLOWS_PER_PAGE + 1}–{Math.min((shownPage + 1) * WORKFLOWS_PER_PAGE, system.workflows.length)} of {system.workflows.length} workflows
+              </span>
+              <span className="flex items-center gap-2">
+                <Button disabled={shownPage === 0} onClick={() => setPage(shownPage - 1)}>
+                  Previous
+                </Button>
+                <span className="tabular">
+                  Page {shownPage + 1} of {pages}
+                </span>
+                <Button disabled={shownPage >= pages - 1} onClick={() => setPage(shownPage + 1)}>
+                  Next
+                </Button>
+              </span>
             </div>
           )}
         </div>
@@ -844,9 +862,16 @@ export default function Executions() {
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
+  /**
+   * Production runs only, by default (2026-09-26, Destiny): the runs n8n bills
+   * and the engine's real activity. "Include test & internal" adds manual,
+   * sub-workflow and error-handler runs — where a sub-workflow's own failures
+   * show.
+   */
+  const [scope, setScope] = useState<'production' | 'all'>('production');
   const { toast, setToast } = useToast();
 
-  const { status, data, error } = useData(() => getExecutions('month', period ?? undefined), [period, tick], { refreshMs: REFRESH_MS, kinds: ['executions'] });
+  const { status, data, error } = useData(() => getExecutions('month', period ?? undefined, scope), [period, tick, scope], { refreshMs: REFRESH_MS, kinds: ['executions'] });
 
   if (status === 'loading' || !data) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
 
@@ -887,9 +912,17 @@ export default function Executions() {
     <div className="relative flex h-full min-h-0 flex-col">
       <PageHeader
         title="Executions"
-        subtitle={`Every run of every workflow in the engine — read from n8n every ${data.source.poll_seconds} seconds, not live`}
+        subtitle={`${data.scope === 'production' ? 'Production runs — the ones n8n counts against the plan' : 'Every run of every workflow, including manual, sub-workflow and error-handler runs'} — read from n8n every ${data.source.poll_seconds} seconds, not live`}
         right={
           <div className="flex flex-wrap items-center gap-2">
+            <span className="seg" role="group" aria-label="Which runs to count">
+              <button type="button" aria-pressed={scope === 'production'} onClick={() => setScope('production')} title="Only the runs n8n bills: webhooks, schedules and triggers, chat, automatic retries">
+                Production
+              </button>
+              <button type="button" aria-pressed={scope === 'all'} onClick={() => setScope('all')} title="Adds manual runs, sub-workflows and error-handler runs — where a sub-workflow's own failures show">
+                Include test &amp; internal
+              </button>
+            </span>
             {/*
               The year sits at the top and the month is chosen inside the page
               (2026-09-16, Destiny). The chart under the figures is the whole
@@ -931,7 +964,7 @@ export default function Executions() {
  title={`${year} for ${system.label.toLowerCase()} — the figures, the per-workflow breakdown and every month held, with every caveat inside the file`}
  onClick={() => {
  setReport(String(year));
- void downloadPeriod('year', String(year), system.system)
+ void downloadPeriod('year', String(year), system.system, scope)
  .then((err) => err && setToast({ text: err, tone: 'failing' }))
  .catch((e: unknown) => setToast({ text: e instanceof Error ? e.message : 'The report could not be built.', tone: 'failing' }))
  .finally(() => setReport(null));
@@ -972,7 +1005,7 @@ export default function Executions() {
         </div>
       </div>
 
-      {open && <WorkflowPanel workflowId={open} grain="month" period={data.period} onClose={() => setOpen(null)} />}
+      {open && <WorkflowPanel workflowId={open} grain="month" period={data.period} scope={data.scope} onClose={() => setOpen(null)} />}
       <Toast toast={toast} />
     </div>
   );
