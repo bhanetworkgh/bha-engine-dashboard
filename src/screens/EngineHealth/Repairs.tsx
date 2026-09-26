@@ -37,7 +37,7 @@ type Filter = 'all' | 'repaired' | 'needs_human' | 'not_repaired' | 'reverted';
 /** One line per filter word, from repairs.ts and the bridge's vocabulary — see definitions.ts. */
 const FILTER_DEF: Record<Filter, string> = {
   all: 'Every result the repair bridge has reported, whatever came of it, including skipped attempts, which no other filter shows.',
-  repaired: REPAIR_OUTCOME_DEFS.repaired,
+  repaired: `${REPAIR_OUTCOME_DEFS.repaired} Includes fixes still awaiting proof: ${REPAIR_OUTCOME_DEFS.repaired_pending}`,
   needs_human: REPAIR_OUTCOME_DEFS.needs_human,
   not_repaired: `Two outcomes. Not repaired: ${REPAIR_OUTCOME_DEFS.not_repaired} Bridge error: ${REPAIR_OUTCOME_DEFS.error}`,
   reverted: REPAIR_STATE_DEFS.reverted,
@@ -81,6 +81,8 @@ function OutcomeWord({ repair }: { repair: Repair }) {
     // here", which is the truth.
     case 'repaired':
       return <Pill tone="accent">repaired</Pill>;
+    case 'repaired_pending':
+      return <Pill tone="accent">fixed, awaiting proof</Pill>;
     case 'needs_human':
       return <Pill tone="degraded">needs a person</Pill>;
     case 'not_repaired':
@@ -121,14 +123,14 @@ export default function Repairs() {
   const repairs = data?.repairs ?? [];
 
   const rows = useMemo(
-    () => repairs.filter((r) => (filter === 'all' ? true : filter === 'reverted' ? Boolean(r.reverted_at) : r.outcome === filter)).filter((r) => matches(r, q.trim())),
+    () => repairs.filter((r) => (filter === 'all' ? true : filter === 'reverted' ? Boolean(r.reverted_at) : filter === 'repaired' ? r.outcome === 'repaired' || r.outcome === 'repaired_pending' : r.outcome === filter)).filter((r) => matches(r, q.trim())),
     [repairs, filter, q],
   );
   const paged = usePaged(rows, `${filter}|${q.trim()}`);
 
   const counts = {
     all: repairs.length,
-    repaired: repairs.filter((r) => r.outcome === 'repaired').length,
+    repaired: repairs.filter((r) => r.outcome === 'repaired' || r.outcome === 'repaired_pending').length,
     needs_human: repairs.filter((r) => r.outcome === 'needs_human').length,
     not_repaired: repairs.filter((r) => r.outcome === 'not_repaired' || r.outcome === 'error').length,
     reverted: repairs.filter((r) => r.reverted_at).length,
