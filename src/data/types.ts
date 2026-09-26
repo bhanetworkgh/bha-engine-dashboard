@@ -2783,6 +2783,17 @@ export interface ExecutionTotals {
   avg_ms: number | null;
   /** How many runs carried both a start and an end, so the mean can be checked. */
   timed: number;
+  /**
+   * Of `executions`, the runs n8n Cloud counts against the plan's monthly
+   * quota: started by a webhook, a schedule or polling trigger, a chat trigger,
+   * or an automatic retry (2026-09-26, after the 10k plan ran out).
+   */
+  production: number;
+  /**
+   * The rest, which n8n does not bill: runs started by hand from the editor,
+   * sub-workflows called by another workflow, and error-workflow runs.
+   */
+  not_counted: number;
 }
 
 /** One workflow's executions inside the period in view. */
@@ -2893,10 +2904,57 @@ export interface ExecutionSystem extends ExecutionTotals {
   comparison: ExecutionComparison;
 }
 
+/** One alert line on the quota, and whether this billing cycle has crossed and announced it. */
+export interface QuotaThreshold {
+  /** Percent of the quota, e.g. 70. */
+  at: number;
+  crossed: boolean;
+  /** When the alert was posted for this cycle. Null if it has not been. */
+  alerted_at: string | null;
+  /** The Slack permalink of that alert, where Slack gave one. */
+  slack_link: string | null;
+  /** What BHARAG said to the copy of it: "ingested as …" or why it did not land. */
+  bharag: string | null;
+}
+
+/**
+ * The n8n Cloud plan's monthly execution quota, against this billing cycle's
+ * production runs (2026-09-26). Counted from the rows this database holds, so
+ * it can trail n8n's own usage figure by a poll and differ from it slightly.
+ */
+export interface ExecutionQuota {
+  /** False where the quota or the cycle start is not set on the server; every figure below is then null. */
+  configured: boolean;
+  note: string;
+  quota: number | null;
+  /** The day this billing cycle began, and the day the next one begins (UTC). */
+  cycle_start: string | null;
+  resets_on: string | null;
+  /** Production runs since the cycle began — the figure n8n bills. */
+  used: number | null;
+  /** Runs in the same span that n8n does not count: manual, sub-workflow, error handler. */
+  not_counted: number | null;
+  /** used ÷ quota, 0–1+. */
+  pct: number | null;
+  /** Production runs per day over the last seven days. */
+  per_day: number | null;
+  /** At that pace, where the cycle ends up, and the day the quota runs out if that falls before the reset. */
+  projected: number | null;
+  projected_pct: number | null;
+  runs_out_on: string | null;
+  thresholds: QuotaThreshold[];
+  /** Where alerts go, and whether they can be sent at all. */
+  channel: string | null;
+  /** The last thing that stopped an alert going out. Null when nothing has. */
+  last_error: string | null;
+}
+
 export interface ExecutionsData {
   grain: ExecutionGrain;
   /** The period in view. Selecting one on the chart re-reads at that key. */
   period: string;
+  /** This billing cycle's usage of the n8n plan's execution quota. */
+  quota: ExecutionQuota;
   systems: ExecutionSystem[];
   /** The first period held whole. What came before it is not here, and is drawn as absent rather than nought. */
   boundary: MonthlyBoundary | null;

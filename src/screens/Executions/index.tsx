@@ -12,6 +12,7 @@ import {
   type ExecutionWorkflow,
   type ExecutionWorkflowDetail,
   type ExecutionsData,
+  type ExecutionQuota,
 } from '../../data';
 import { buildReport, reportName } from '../../lib/executionReport';
 import { downloadCsv } from '../../lib/csv';
@@ -39,6 +40,10 @@ import { Tabs, PageHeader, yearOf, Button, CountUpText, Definition, InfoTip, Leg
  * own tab — never dropped, never filed under a guess. A workflow must not be
  * invisible because a registry row is missing.
  */
+
+/** What "counted by n8n" means, said once for the table header. */
+const PRODUCTION_DEF =
+  'Runs n8n Cloud counts against the plan quota: started by a webhook, a schedule or trigger, a chat trigger, or an automatic retry. Manual runs from the editor, sub-workflows and error-workflow runs are free.';
 
 /** The page re-reads on the same interval the server polls on. */
 const REFRESH_MS = 45_000;
@@ -357,6 +362,10 @@ function WorkflowRow({ w, onOpen }: { w: ExecutionWorkflow; onOpen: () => void }
         {w.executions}
         <span className="text-faint md:hidden"> executions</span>
       </td>
+      <td className={`td card-meta tabular text-right ${w.production ? 'text-dim' : 'text-faint'}`} title={`${w.production} production runs n8n counts against the plan · ${w.not_counted} test and internal runs it does not`}>
+        {w.production}
+        <span className="text-faint md:hidden"> counted by n8n</span>
+      </td>
       <td className={`td card-meta tabular text-right ${w.failed ? 'text-failing' : 'text-faint'}`}>
         {w.failed}
         <span className="text-faint md:hidden"> failed</span>
@@ -477,6 +486,91 @@ function MonthDownload({ months, systemKey, systemLabel, onFail }: { months: str
 
 /* ------------------------------------------------------------------ page */
 
+/** A day as "12 Oct", from an ISO time, in UTC like every date on this page. */
+function shortDay(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return `${d.getUTCDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]}`;
+}
+
+/**
+ * The n8n plan's execution quota for this billing cycle (2026-09-26, Jason and
+ * Destiny). Above the tabs because the quota is the whole instance's, not one
+ * system's. The 10k plan ran out eleven days into the month and n8n stopped
+ * every production run with no error anywhere; this card, and the Slack alerts
+ * at 70%, 85% and 95%, are how the next cap is seen coming.
+ *
+ * Only production runs count against it — webhooks, schedules and triggers,
+ * chat, automatic retries. Manual runs, sub-workflows and error-workflow runs
+ * are free, so they are shown beside it and not in it.
+ */
+function QuotaCard({ q }: { q: ExecutionQuota }) {
+  if (!q.configured || q.quota === null || q.used === null || q.pct === null) {
+    return (
+      <div className="mx-6 mb-4 md:mx-8">
+        <div className="card px-5 py-4 text-[12.5px] text-dim">
+          <span className="font-medium text-ink">n8n plan quota</span> — {q.note}
+        </div>
+      </div>
+    );
+  }
+  const pctNow = q.pct;
+  const tone = pctNow >= 0.95 ? 'bg-failing' : pctNow >= 0.7 ? 'bg-degraded' : 'bg-ok';
+  const textTone = pctNow >= 0.95 ? 'text-failing' : pctNow >= 0.7 ? 'text-degraded' : 'text-ink';
+  const width = `${Math.min(100, Math.round(pctNow * 1000) / 10)}%`;
+  const projectedWidth = q.projected_pct !== null ? `${Math.min(100, Math.round(q.projected_pct * 1000) / 10)}%` : null;
+  const alerted = q.thresholds.filter((t) => t.alerted_at);
+  return (
+    <div className="mx-6 mb-4 md:mx-8">
+      <MetricCard
+        title={
+          <TileTitle label="n8n plan quota, this billing cycle">
+            {q.note}
+          </TileTitle>
+        }
+        right={`resets ${shortDay(q.resets_on)}`}
+        align="top"
+        note={
+          <div className="space-y-1">
+            <div>
+              Counting since {shortDay(q.cycle_start)} · {n(q.not_counted ?? 0)} test and internal runs in the same span are not counted (manual, sub-workflow, error handler)
+            </div>
+            <div>
+              {q.per_day !== null ? `About ${n(q.per_day)} production runs a day over the last seven days` : 'No pace yet'}
+              {q.runs_out_on && q.used < q.quota
+                ? ` — at that pace the quota runs out around ${shortDay(q.runs_out_on)}, before the reset.`
+                : q.projected !== null
+                  ? ` — at that pace the cycle ends near ${n(q.projected)} (${pct(q.projected_pct)}).`
+                  : '.'}
+            </div>
+            <div>
+              Alerts at {q.thresholds.map((t) => `${t.at}%`).join(', ')} post to Slack{q.channel ? '' : ' (no channel set, so none can be sent)'} and are logged to BHARAG.
+              {alerted.length ? ` Sent this cycle: ${alerted.map((t) => `${t.at}% on ${shortDay(t.alerted_at)}`).join(', ')}.` : ' None sent this cycle.'}
+            </div>
+            {q.last_error && <div className="text-failing">Last alert problem: {q.last_error}</div>}
+          </div>
+        }
+      >
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span className={`tabular text-[28px] font-medium leading-none ${textTone}`}>{pct(pctNow)}</span>
+          <span className="tabular text-[13px] text-dim">
+            {n(q.used)} of {n(q.quota)} production runs
+          </span>
+        </div>
+        <div className="relative mt-3 h-2.5 w-full overflow-hidden rounded-full bg-line" role="meter" aria-valuemin={0} aria-valuemax={q.quota} aria-valuenow={q.used} aria-label="Production runs against the plan quota">
+          {projectedWidth && <span className="absolute inset-y-0 left-0 rounded-full bg-line-strong" style={{ width: projectedWidth }} title={`Projected by the reset: ${n(q.projected ?? 0)}`} />}
+          <span className={`absolute inset-y-0 left-0 rounded-full ${tone}`} style={{ width }} />
+          {q.thresholds
+            .filter((t) => t.at < 100)
+            .map((t) => (
+              <span key={t.at} className="absolute inset-y-0 w-px bg-ink/40" style={{ left: `${t.at}%` }} title={`${t.at}% alert line`} />
+            ))}
+        </div>
+      </MetricCard>
+    </div>
+  );
+}
+
 function SystemView({
   system,
   data,
@@ -563,7 +657,11 @@ function SystemView({
           }
           right="every run read from n8n"
           align="top"
-          note={nothing ? 'None held for this month' : period.unfinished ? `${n(period.finished)} finished · ${period.unfinished} without a final outcome` : `All ${n(period.finished)} finished`}
+          note={
+            nothing
+              ? 'None held for this month'
+              : `${n(period.production)} production (counted by n8n) · ${n(period.not_counted)} test and internal (not counted)${period.unfinished ? ` · ${period.unfinished} still running` : ''}`
+          }
         >
           <Figure value="—" count={nothing ? null : period.executions} replayKey={`${system.system}|${period.key}`} delta={<Delta d={c.executions} />} />
         </MetricCard>
@@ -713,8 +811,8 @@ function SystemView({
               <table className="table-cards w-full border-collapse text-[12.5px]" aria-label={`${system.label} workflows`}>
                 <thead>
                   <tr>
-                    {['workflow', `executions, ${period.label}`, 'failed', `failure rate, ${period.label}`, 'average time', `recent (last ${10} runs)`, ''].map((h, i) => (
-                      <th key={i} title={i === 5 ? RECENT_DEF : undefined} className={`border-b border-line bg-panel px-3 py-2 text-left text-[11.5px] font-medium whitespace-nowrap text-faint ${i > 0 && i < 6 ? 'text-right' : ''}`}>
+                    {['workflow', `executions, ${period.label}`, 'counted by n8n', 'failed', `failure rate, ${period.label}`, 'average time', `recent (last ${10} runs)`, ''].map((h, i) => (
+                      <th key={i} title={i === 6 ? RECENT_DEF : i === 2 ? PRODUCTION_DEF : undefined} className={`border-b border-line bg-panel px-3 py-2 text-left text-[11.5px] font-medium whitespace-nowrap text-faint ${i > 0 && i < 7 ? 'text-right' : ''}`}>
                         {h}
                       </th>
                     ))}
@@ -850,6 +948,7 @@ export default function Executions() {
       />
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+        <QuotaCard q={data.quota} />
         <SystemView
           key={`${system.system}-${data.period}`}
           system={system}

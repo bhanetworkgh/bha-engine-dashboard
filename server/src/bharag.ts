@@ -313,6 +313,11 @@ export const INGEST_KEY_VARS = {
    * lane reads the incident ledger with.
    */
   research_twin: 'BHARAG_RESEARCH_TWIN_KEY',
+  /**
+   * Bays' workspace (2026-09-26): the n8n execution-quota alerts are logged
+   * here, with the same key the Bays lane reads the incident ledger with.
+   */
+  bays: 'BHARAG_BAYS_KEY',
 } as const;
 export type IngestWorkspace = keyof typeof INGEST_KEY_VARS;
 
