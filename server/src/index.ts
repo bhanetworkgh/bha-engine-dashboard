@@ -1707,6 +1707,7 @@ async function boot(): Promise<void> {
     void catchUp();
     executions.startPolling();
     recovery.startWatching();
+    health.startLedgerPolling();
   });
 }
 

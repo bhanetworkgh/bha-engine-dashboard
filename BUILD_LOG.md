@@ -10553,3 +10553,8 @@ Fix:        - scope is `production` | `internal`; internal is only manual,
               to Bays' allow-list only.
             - BHARAG logging removed, with the `bays` ingest workspace.
 Tested:     Server typecheck clean; page checked against local type stubs.
+
+## 2026-09-26 — Self-heal "awaiting proof" outcome, and a live incident list
+
+- `repaired_pending` is now a known repair outcome. The repair bridge (commit ed9f36f) sends it when it has changed a workflow whose failed run was called by an agent or another workflow: the fix is proved by the next real run, and a second report under the same `repair_id` settles the row (the store is already an upsert). Before this the dashboard refused the record with a 422, so the repair was never saved. The row is revertible like a repair, shows as "fixed, awaiting proof", and counts under the Repaired filter.
+- The incident ledger is now read every 3 minutes (`health.startLedgerPolling`, ledger only, never Airtable). The list had only refreshed on a manual Resync and had been stale since 23 Sep, reading "0 open" while real incidents were being raised.

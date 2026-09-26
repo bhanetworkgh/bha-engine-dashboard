@@ -1642,7 +1642,7 @@ export interface RetryAttempt {
  * is not a repair, and a run that could not report its own result is
  * `needs_human` rather than assumed to have worked.
  */
-export type RepairOutcome = 'repaired' | 'not_repaired' | 'needs_human' | 'skipped' | 'error';
+export type RepairOutcome = 'repaired' | 'repaired_pending' | 'not_repaired' | 'needs_human' | 'skipped' | 'error';
 
 export interface Repair {
   id: number;

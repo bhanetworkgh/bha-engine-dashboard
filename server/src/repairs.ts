@@ -41,8 +41,16 @@ import * as events from './events';
 import * as mirror from './mirror';
 import { N8N_API_VAR, n8nConfigured, n8nHost, replaceWorkflow, workflow, N8nError } from './n8n';
 
-/** The five outcomes the bridge reports. Every one of them reports; silence is the one thing it may not do. */
-export const OUTCOMES = ['repaired', 'not_repaired', 'needs_human', 'skipped', 'error'] as const;
+/**
+ * The outcomes the bridge reports. Every one of them reports; silence is the one thing it may not do.
+ * 26 Sep -- `repaired_pending`: the bridge changed the workflow, but the failed run was called by an
+ * agent or another workflow, so the fix is proved by the next real run rather than a replay. The bridge
+ * sends a second report under the same repair_id (upsert below) that settles it as repaired,
+ * not_repaired or needs_human.
+ */
+export const OUTCOMES = ['repaired', 'repaired_pending', 'not_repaired', 'needs_human', 'skipped', 'error'] as const;
+/** Outcomes where the bridge changed the workflow, so a revert has something to put back. */
+const CHANGED: readonly string[] = ['repaired', 'repaired_pending'];
 export type Outcome = (typeof OUTCOMES)[number];
 
 export class RepairError extends Error {
@@ -276,7 +284,7 @@ function snapshotOf(payload: Record<string, unknown> | null): { name?: string; n
  * forty times, so it happens at the moment somebody asks to revert.
  */
 function revertBlock(r: Row): string | null {
-  if (r.outcome !== 'repaired') {
+  if (!CHANGED.includes(r.outcome)) {
     return `Only a repair is revertible, and this one is recorded as ${r.outcome.replace(/_/g, ' ')} — nothing was changed, so there is nothing to put back.`;
   }
   if (r.reverted_at) return `Already reverted${r.reverted_by ? ` by ${r.reverted_by}` : ''} at ${iso(r.reverted_at)}.`;
@@ -350,6 +358,7 @@ export interface RepairSummary {
 
 const OUTCOME_LABEL: Record<string, string> = {
   repaired: 'Repaired',
+  repaired_pending: 'Fixed, awaiting proof',
   not_repaired: 'Not repaired',
   needs_human: 'Needs a person',
   skipped: 'Skipped',
@@ -464,7 +473,7 @@ export async function revert(repairId: string, actor: string): Promise<RevertRes
 
   // The first four guards are the ones already computed for the row, so the
   // button and the endpoint cannot disagree about what is revertible.
-  if (row.outcome !== 'repaired') return { ok: false, repair_id: repairId, refused: 'not_a_repair', message: held.revert_blocked_reason ?? 'This is not a repair.', repair: held };
+  if (!CHANGED.includes(row.outcome)) return { ok: false, repair_id: repairId, refused: 'not_a_repair', message: held.revert_blocked_reason ?? 'This is not a repair.', repair: held };
   if (row.reverted_at) return { ok: false, repair_id: repairId, refused: 'already_reverted', message: held.revert_blocked_reason ?? 'Already reverted.', repair: held };
   if (!row.version_before || !row.workflow_id) {
     return { ok: false, repair_id: repairId, refused: 'no_restore_point', message: held.revert_blocked_reason ?? 'No restore point was recorded.', repair: held };

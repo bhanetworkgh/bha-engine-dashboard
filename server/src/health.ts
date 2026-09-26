@@ -304,7 +304,7 @@ function why(e: unknown): string {
  *   is never treated as a lane with no incidents: nothing under it is touched
  *   and the result names it.
  */
-export async function resync(actor = 'dashboard'): Promise<Resync> {
+export async function resync(actor = 'dashboard', opts: { ledgerOnly?: boolean } = {}): Promise<Resync> {
   const started = Date.now();
   const at = nowIso();
   const tables: ResyncTable[] = [];
@@ -400,7 +400,9 @@ export async function resync(actor = 'dashboard'): Promise<Resync> {
    * is deliberately no longer read is the warning section 4 says not to give.
    */
   const airtableRetired = airtable.retired();
-  for (const src of airtableRetired ? [] : [
+  // The timed ledger pass never touches Airtable, retired or not: a background
+  // read of a capped API is what took Bays down on 21 Sep.
+  for (const src of airtableRetired || opts.ledgerOnly ? [] : [
     { ...ERROR_COUNTS, kind: 'error_counts' as const },
     { ...RETRY_ATTEMPTS, kind: 'retry_attempts' as const },
   ]) {
@@ -468,6 +470,38 @@ export async function resync(actor = 'dashboard'): Promise<Resync> {
   console.log(`health resync by ${actor}: ${note} | ` + tables.map((t) => `${t.label} ${t.read ? `${t.rows} rows +${t.inserted}/~${t.updated}/-${t.deleted}` : `UNREAD (${t.reason})`}`).join(' · '));
 
   return { ran, at, ms: Date.now() - started, tables, inserted: sum('inserted'), updated: sum('updated'), unchanged: sum('unchanged'), deleted: sum('deleted'), refused: sum('refused'), overwritten: [], note };
+}
+
+/**
+ * The incident ledger, read on a timer (2026-09-26, Destiny).
+ *
+ * The list was only refreshed when somebody pressed Resync, so from 23 Sep it
+ * went stale and read "0 open" while real incidents were being raised. With
+ * Airtable retired, `resync()` reads only BHARAG, so running it every few
+ * minutes costs three small reads and no n8n executions. One pass at a time:
+ * a slow ledger never stacks passes on top of each other.
+ */
+const LEDGER_EVERY_MS = 3 * 60_000;
+let ledgerTimer: ReturnType<typeof setInterval> | null = null;
+let ledgerBusy = false;
+
+async function ledgerPass(): Promise<void> {
+  if (ledgerBusy) return;
+  ledgerBusy = true;
+  try {
+    await resync('ledger-poll', { ledgerOnly: true });
+  } catch (e) {
+    console.error('incident ledger poll failed', e);
+  } finally {
+    ledgerBusy = false;
+  }
+}
+
+export function startLedgerPolling(): void {
+  if (ledgerTimer) return;
+  setTimeout(() => void ledgerPass(), 20_000).unref?.();
+  ledgerTimer = setInterval(() => void ledgerPass(), LEDGER_EVERY_MS);
+  ledgerTimer.unref?.();
 }
 
 async function setLaneRead(lane: string, read: boolean, reason: string | null, at: string): Promise<void> {

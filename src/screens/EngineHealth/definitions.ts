@@ -58,6 +58,8 @@ export const RETRY_BLOCK_DEFS: Record<string, string> = {
 export const REPAIR_OUTCOME_DEFS: Record<string, string> = {
   repaired:
     'The repair bridge reported outcome "repaired": it changed the workflow. Only these rows can be reverted. This server stores the outcome as the bridge sent it and does not itself check that a version_after came back — the bridge is what enforces that.',
+  repaired_pending:
+    'The repair bridge changed the workflow, but the failed run was called by an agent or another workflow, so it is not replayed. The fix is proved by the next real run: the bridge watches for up to 24 hours and sends a second report that turns this row into repaired, not repaired or needs a person. Revertible like a repair. The incident stays open until then.',
   not_repaired: 'The repair bridge reported that it ran and made no change. The incident stays open for a person.',
   needs_human:
     'The repair bridge reported that a person has to act — including a run that could not report a parseable result. Its human_action sentence is shown on the row. The incident stays open.',
