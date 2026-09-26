@@ -9,7 +9,9 @@
  * execution, so nothing is logged and no error workflow fires. The only signal
  * was Bays not answering. Jason asked for alerts at 70%, 85% and 95% of the
  * quota, posted into Slack and logged to BHARAG, so the next cap is seen coming
- * instead of found through silence at the front door.
+ * instead of found through silence at the front door. (BHARAG logging was
+ * dropped the same day, Destiny: Bays reads the quota through the dashboard's
+ * MCP, `get_execution_quota`, and the twins are not meant to see executions.)
  *
  * **What n8n counts.** Only production executions: runs started by a webhook,
  * a schedule or polling trigger, a chat trigger, or an automatic retry.
@@ -41,7 +43,6 @@
 import { getMeta, nowIso, setMeta } from './db';
 import { query } from './pg';
 import * as slack from './slack';
-import * as bharag from './bharag';
 import type { ExecutionQuota, QuotaThreshold } from '../../src/data/types';
 
 export const QUOTA_VAR = 'N8N_EXECUTION_QUOTA';
@@ -81,7 +82,9 @@ const CHECK_EVERY_MS = 5 * 60 * 1000;
 const PACE_DAYS = 7;
 
 const LAST_ERROR = 'quota.last_error';
-const ANNOUNCED = 'quota.monitor_announced';
+/** v1 was a plain-text post; v2 is the Block Kit one, which replaces it. */
+const ANNOUNCED_V1 = 'quota.monitor_announced';
+const ANNOUNCED = 'quota.monitor_announced.v2';
 const alertKey = (cycleStart: string, at: number) => `quota.alert.${cycleStart}.${at}`;
 
 function dashboardUrl(): string {
@@ -148,7 +151,6 @@ function dayLabel(iso: string): string {
 interface AlertRecord {
   at: string;
   slack_link: string | null;
-  bharag: string | null;
 }
 
 async function alertRecord(cycleStart: string, at: number): Promise<AlertRecord | null> {
@@ -157,7 +159,7 @@ async function alertRecord(cycleStart: string, at: number): Promise<AlertRecord 
   try {
     return JSON.parse(raw) as AlertRecord;
   } catch {
-    return { at: raw, slack_link: null, bharag: null };
+    return { at: raw, slack_link: null };
   }
 }
 
@@ -180,7 +182,7 @@ export async function usage(): Promise<ExecutionQuota> {
     projected: null,
     projected_pct: null,
     runs_out_on: null,
-    thresholds: THRESHOLDS.map((at) => ({ at, crossed: false, alerted_at: null, slack_link: null, bharag: null })),
+    thresholds: THRESHOLDS.map((at) => ({ at, crossed: false, alerted_at: null, slack_link: null })),
     channel,
     last_error: lastError,
   };
@@ -227,7 +229,7 @@ export async function usage(): Promise<ExecutionQuota> {
   const thresholds: QuotaThreshold[] = [];
   for (const at of THRESHOLDS) {
     const rec = await alertRecord(start, at);
-    thresholds.push({ at, crossed: pct * 100 >= at, alerted_at: rec?.at ?? null, slack_link: rec?.slack_link ?? null, bharag: rec?.bharag ?? null });
+    thresholds.push({ at, crossed: pct * 100 >= at, alerted_at: rec?.at ?? null, slack_link: rec?.slack_link ?? null });
   }
 
   return {
@@ -262,38 +264,98 @@ function mentions(): string {
 
 const ICON: Record<number, string> = { 70: ':large_yellow_circle:', 85: ':large_orange_circle:', 95: ':red_circle:', 100: ':rotating_light:' };
 
-function paceLine(u: ExecutionQuota): string {
-  if (u.per_day === null || u.resets_on === null || u.quota === null) return '';
-  const pace = `At the last seven days' pace (about ${fmt(u.per_day)} a day)`;
-  return u.runs_out_on && (u.used ?? 0) < u.quota
-    ? `${pace} the quota runs out around *${dayLabel(u.runs_out_on)}*, before the reset on ${dayLabel(u.resets_on)}.`
-    : `${pace} this cycle ends near ${fmt(u.projected ?? 0)} (${Math.round((u.projected_pct ?? 0) * 100)}%) when it resets on ${dayLabel(u.resets_on)}.`;
+/** Ten cells, filled to the percentage: the bar reads at a glance in a notification-sized card. */
+function bar(pct: number): string {
+  const filled = Math.max(0, Math.min(10, Math.round(pct * 10)));
+  return '█'.repeat(filled) + '░'.repeat(10 - filled);
 }
 
-function alertText(u: ExecutionQuota, at: number): string {
-  const head =
-    at >= 100
-      ? `${ICON[100]} *n8n execution quota reached — ${fmt(u.used ?? 0)} of ${fmt(u.quota ?? 0)}.* n8n is now refusing every production run: Bays, Research Twin, North Star and every schedule have stopped, and nothing will say so in their own logs.`
-      : `${ICON[at] ?? ':warning:'} *n8n executions at ${Math.floor((u.pct ?? 0) * 100)}% of this month's quota* — ${fmt(u.used ?? 0)} of ${fmt(u.quota ?? 0)} used since ${dayLabel(u.cycle_start as string)}.`;
-  const tail =
-    at >= 100
-      ? 'It clears when the plan resets or is raised.'
-      : 'When it reaches 100%, n8n stops running Bays, Research Twin, North Star and every schedule, with no error anywhere.';
-  return [head, paceLine(u), tail, `Executions page: ${dashboardUrl()}/executions`, mentions()].filter(Boolean).join('\n');
+function pctText(n: number | null): string {
+  return n === null ? '—' : `${Math.round(n * 1000) / 10}%`;
 }
 
-function liveText(u: ExecutionQuota): string {
-  return [
-    `:bar_chart: *n8n execution-quota monitor is live.* This cycle so far: ${fmt(u.used ?? 0)} of ${fmt(u.quota ?? 0)} production runs (${Math.round((u.pct ?? 0) * 1000) / 10}%), counting since ${dayLabel(u.cycle_start as string)}; resets ${dayLabel(u.resets_on as string)}.`,
-    paceLine(u),
-    `Alerts post here at ${THRESHOLDS.filter((t) => t < 100).join('%, ')}% and at the cap, and each is logged to BHARAG. Executions page: ${dashboardUrl()}/executions`,
-  ]
-    .filter(Boolean)
-    .join('\n');
+type Block = Record<string, unknown>;
+
+/** The four figures every message carries, as a two-column field grid. */
+function figureFields(u: ExecutionQuota): Block {
+  const runsOut =
+    u.runs_out_on && (u.used ?? 0) < (u.quota ?? 0)
+      ? `*Runs out around ${dayLabel(u.runs_out_on)}* at this pace`
+      : u.projected !== null
+        ? `Not before the reset — heading for ${fmt(u.projected)} (${pctText(u.projected_pct)})`
+        : '—';
+  return {
+    type: 'section',
+    fields: [
+      { type: 'mrkdwn', text: `*Used*\n${fmt(u.used ?? 0)} of ${fmt(u.quota ?? 0)}` },
+      { type: 'mrkdwn', text: `*Cycle*\n${dayLabel(u.cycle_start as string)} → resets ${dayLabel(u.resets_on as string)}` },
+      { type: 'mrkdwn', text: `*Pace, last 7 days*\n~${fmt(u.per_day ?? 0)} production runs a day` },
+      { type: 'mrkdwn', text: `*Where it lands*\n${runsOut}` },
+    ],
+  };
 }
 
-async function post(channel: string, text: string): Promise<{ ok: true; link: string | null } | { ok: false; error: string }> {
-  const r = await slack.botCall('chat.postMessage', { channel, text, unfurl_links: false, unfurl_media: false });
+/**
+ * A link, not a button: a Block Kit button sends an interaction payload to the
+ * Bays app's request URL on every click, which is an n8n production run spent
+ * on opening a web page.
+ */
+function pageLink(): Block {
+  return { type: 'section', text: { type: 'mrkdwn', text: `:mag: <${dashboardUrl()}/executions|Open the Executions page>` } };
+}
+
+function footer(extra?: string): Block {
+  return {
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: [
+          'Only production runs count (webhooks, schedules and triggers, chat, automatic retries). Counted by the BHA Engine Dashboard from its copy of n8n executions, so it can trail n8n by one poll.',
+          extra,
+        ]
+          .filter(Boolean)
+          .join(' '),
+      },
+    ],
+  };
+}
+
+function alertMessage(u: ExecutionQuota, at: number): { text: string; blocks: Block[] } {
+  const reached = at >= 100;
+  const title = reached ? 'n8n execution quota reached' : `n8n executions at ${Math.floor((u.pct ?? 0) * 100)}% of this month’s quota`;
+  const why = reached
+    ? '*n8n is now refusing every production run.* Bays, Research Twin, North Star and every schedule have stopped, and none of them will log an error. It clears when the plan resets or is raised.'
+    : 'When usage reaches 100%, n8n stops running Bays, Research Twin, North Star and every schedule — with no error anywhere.';
+  const tag = mentions();
+  const blocks: Block[] = [
+    { type: 'header', text: { type: 'plain_text', text: `${ICON[at] ?? ':warning:'} ${title}`, emoji: true } },
+    { type: 'section', text: { type: 'mrkdwn', text: `\`${bar(u.pct ?? 0)}\`  *${pctText(u.pct)}* of ${fmt(u.quota ?? 0)} production runs` } },
+    figureFields(u),
+    { type: 'section', text: { type: 'mrkdwn', text: why } },
+    pageLink(),
+    footer(tag ? `cc ${tag}` : undefined),
+  ];
+  const text = `${title}: ${fmt(u.used ?? 0)} of ${fmt(u.quota ?? 0)} (${pctText(u.pct)}), resets ${dayLabel(u.resets_on as string)}.`;
+  return { text, blocks };
+}
+
+function liveMessage(u: ExecutionQuota): { text: string; blocks: Block[] } {
+  const lines = THRESHOLDS.filter((t) => t < 100).map((t) => `${t}%`).join(', ');
+  const blocks: Block[] = [
+    { type: 'header', text: { type: 'plain_text', text: ':bar_chart: n8n execution-quota monitor is live', emoji: true } },
+    { type: 'section', text: { type: 'mrkdwn', text: `\`${bar(u.pct ?? 0)}\`  *${pctText(u.pct)}* of ${fmt(u.quota ?? 0)} production runs this month` } },
+    figureFields(u),
+    { type: 'section', text: { type: 'mrkdwn', text: `Alerts post in this channel at *${lines}* and at the cap, once each per month.` } },
+    pageLink(),
+    footer(),
+  ];
+  const text = `n8n execution-quota monitor is live: ${fmt(u.used ?? 0)} of ${fmt(u.quota ?? 0)} (${pctText(u.pct)}) this month, resets ${dayLabel(u.resets_on as string)}.`;
+  return { text, blocks };
+}
+
+async function post(channel: string, msg: { text: string; blocks: Block[] }): Promise<{ ok: true; link: string | null } | { ok: false; error: string }> {
+  const r = await slack.botCall('chat.postMessage', { channel, text: msg.text, blocks: msg.blocks, unfurl_links: false, unfurl_media: false });
   if (!r.ok) return { ok: false, error: `Slack refused the alert: ${String(r.error ?? 'unknown error')}` };
   const ts = typeof r.ts === 'string' ? r.ts : null;
   if (!ts) return { ok: true, link: null };
@@ -301,32 +363,10 @@ async function post(channel: string, text: string): Promise<{ ok: true; link: st
   return { ok: true, link: p.ok && typeof p.permalink === 'string' ? p.permalink : null };
 }
 
-/** The same alert as a BHARAG document in Bays' workspace, so it is searchable next month. */
-async function log(u: ExecutionQuota, label: string, text: string, link: string | null): Promise<string> {
-  const doc: bharag.IngestDocument = {
-    title: `n8n execution quota — ${label} — cycle from ${(u.cycle_start ?? '').slice(0, 10)}`,
-    content: [
-      `N8N EXECUTION QUOTA — ${label.toUpperCase()}`,
-      `Recorded: ${nowIso()}`,
-      `Cycle: ${u.cycle_start} to ${u.resets_on}`,
-      `Used (production runs): ${u.used} of ${u.quota} (${Math.round((u.pct ?? 0) * 1000) / 10}%)`,
-      `Not counted (manual, sub-workflow, error handler): ${u.not_counted}`,
-      `Pace, last 7 days: ${u.per_day} a day; projected end of cycle ${u.projected} (${Math.round((u.projected_pct ?? 0) * 100)}%)`,
-      `Runs out on: ${u.runs_out_on ?? 'not before the reset at this pace'}`,
-      link ? `Slack: ${link}` : 'Slack: no permalink returned',
-      '',
-      'MESSAGE AS POSTED:',
-      text,
-      '',
-      'WHY THIS IS RECORDED: on 26 Sep 2026 the 10k plan ran out eleven days into the month and n8n silently stopped every production run. These records are how the engine sees a cap coming. Counted by the BHA Engine Dashboard from its copy of n8n executions, so it can trail n8n by one poll.',
-    ].join('\n'),
-    source_type: 'manual',
-    content_type: 'doc',
-    project_tags: ['engine', 'n8n-quota', 'monitoring'],
-    metadata: { kind: 'n8n_execution_quota', label, cycle_start: u.cycle_start, used: u.used, quota: u.quota, pct: u.pct, per_day: u.per_day, slack_link: link },
-  };
-  const r = await bharag.ingest('bays', doc);
-  return r.ok ? r.detail : `not logged: ${r.detail}`;
+/** The ts inside a Slack permalink (…/p1790440578589919 → 1790440578.589919). */
+function tsOf(link: string | null | undefined): string | null {
+  const m = link?.match(/\/p(\d{10})(\d{6})(?:\?|$)/);
+  return m ? `${m[1]}.${m[2]}` : null;
 }
 
 let lastCheck = 0;
@@ -363,30 +403,40 @@ async function run(): Promise<void> {
 
   if (pending.length) {
     const top = pending[pending.length - 1].at;
-    const text = alertText(u, top);
-    const posted = await post(channel, text);
+    const posted = await post(channel, alertMessage(u, top));
     if (!posted.ok) {
       await setMeta(LAST_ERROR, `${nowIso()} — ${posted.error}. It will be tried again on the next check.`);
       console.error('quota alert not posted:', posted.error);
       return;
     }
-    const logged = await log(u, top >= 100 ? 'quota reached' : `${top}% reached`, text, posted.link);
-    const record: AlertRecord = { at: nowIso(), slack_link: posted.link, bharag: logged };
+    const record: AlertRecord = { at: nowIso(), slack_link: posted.link };
     for (const t of pending) await setMeta(alertKey(u.cycle_start, t.at), JSON.stringify(record));
-    await setMeta(LAST_ERROR, logged.startsWith('not logged') ? `${nowIso()} — the ${top}% alert posted to Slack but BHARAG ${logged}` : '');
-    if (announce) await setMeta(ANNOUNCED, nowIso());
+    await setMeta(LAST_ERROR, '');
+    if (announce) await setMeta(ANNOUNCED, JSON.stringify(record));
     return;
   }
 
-  // First run with everything configured: say so once, which also proves the
-  // Slack and BHARAG paths end to end rather than on the first real alert.
-  const text = liveText(u);
-  const posted = await post(channel, text);
+  // The monitor's own announcement, once. It replaces the plain-text v1 post
+  // from earlier the same day, which Bays deletes (a bot can delete its own
+  // messages), so the channel keeps one announcement rather than two.
+  const posted = await post(channel, liveMessage(u));
   if (!posted.ok) {
     await setMeta(LAST_ERROR, `${nowIso()} — the monitor announcement was not posted: ${posted.error}`);
     return;
   }
-  const logged = await log(u, 'monitor live', text, posted.link);
-  await setMeta(ANNOUNCED, JSON.stringify({ at: nowIso(), slack_link: posted.link, bharag: logged }));
-  await setMeta(LAST_ERROR, logged.startsWith('not logged') ? `${nowIso()} — the monitor announcement posted to Slack but BHARAG ${logged}` : '');
+  await setMeta(ANNOUNCED, JSON.stringify({ at: nowIso(), slack_link: posted.link }));
+  await setMeta(LAST_ERROR, '');
+  const v1 = await getMeta(ANNOUNCED_V1);
+  if (v1) {
+    let oldTs: string | null = null;
+    try {
+      oldTs = tsOf((JSON.parse(v1) as { slack_link?: string }).slack_link);
+    } catch {
+      /* not JSON: nothing to delete */
+    }
+    if (oldTs) {
+      const d = await slack.botCall('chat.delete', { channel, ts: oldTs });
+      if (!d.ok) console.error('quota: could not delete the v1 announcement:', d.error);
+    }
+  }
 }

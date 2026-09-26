@@ -748,22 +748,23 @@ export function isGrain(v: string): v is ExecutionGrain {
 /**
  * Which executions the page counts (2026-09-26, Destiny). `production` — the
  * default — is only the runs n8n bills: webhooks, schedules and triggers, chat,
- * automatic retries. `all` adds manual runs, sub-workflows and error-workflow
- * runs. The page opens on production because that is the engine's real
- * activity and the figure the plan quota is measured in; `all` stays one click
- * away because a sub-workflow's failures only show there.
+ * automatic retries. `internal` is the rest and only the rest: manual runs from
+ * the editor, sub-workflows and error-workflow runs. Two separate views rather
+ * than one mixed total, because the two answer different questions — what the
+ * engine did for people, and how its insides behaved — and a sub-workflow's own
+ * failures only show on the second.
  */
-export type ExecutionScope = 'production' | 'all';
+export type ExecutionScope = 'production' | 'internal';
 
 export function isScope(v: string): v is ExecutionScope {
-  return v === 'production' || v === 'all';
+  return v === 'production' || v === 'internal';
 }
 
 /** The SQL condition for a scope, on a table alias (or none). Built from constants, never from input. */
 function scopeSql(scope: ExecutionScope, alias = ''): string {
-  if (scope === 'all') return 'TRUE';
   const col = alias ? `${alias}.mode` : 'mode';
-  return `${col} IN (${quota.COUNTED_MODES.map((m) => `'${m}'`).join(', ')})`;
+  const list = quota.COUNTED_MODES.map((m) => `'${m}'`).join(', ');
+  return scope === 'production' ? `${col} IN (${list})` : `(${col} IS NULL OR ${col} NOT IN (${list}))`;
 }
 
 /** How many periods the chart draws. Enough to see a trend, few enough to read. */

@@ -30,6 +30,7 @@ import { CANDIDATE_WRITE_TOOLS } from './candidateTools';
 import { findRecords, READABLE_KINDS } from './findRecords';
 import * as mirror from '../mirror';
 import * as n8n from '../n8n';
+import * as quota from '../quota';
 import * as sources from '../sources';
 import { grepSource, McpError, REPO_ROOT, sourceAvailable, assertSource } from './source';
 import { component, dataSources, pageByPath, pageData, pageFiles, pages, pageStructure } from './structure';
@@ -776,6 +777,20 @@ const findRecordsTool: ToolDefinition = {
   },
 };
 
+/**
+ * The n8n plan's execution quota, for Bays (2026-09-26, Destiny). Only Bays'
+ * allow-list carries it: executions are engine operations, outside Research
+ * Twin's and North Star's defined work.
+ */
+const getExecutionQuota: ToolDefinition = {
+  name: 'get_execution_quota',
+  description:
+    'How much of the n8n Cloud plan\u2019s monthly execution quota this month has used: production runs used out of the quota, the percentage, the cycle start and reset, the last seven days\u2019 pace, where the month is heading and the day the quota runs out if that falls before the reset, and which alert lines (70/85/95/100%) have been crossed and announced. Only production runs count (webhooks, schedules and triggers, chat, automatic retries); manual, sub-workflow and error-workflow runs are free and reported apart. Counted from this dashboard\u2019s copy of n8n executions, so it can trail n8n by one poll. When the quota is reached n8n silently stops every production run \u2014 Bays included.',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  annotations: { ...READS_DB, title: 'The n8n execution quota, this month' },
+  handler: async () => quota.usage(),
+};
+
 export const TOOLS: ToolDefinition[] = [
   // The reads, in the order the instructions suggest reaching for them.
   listPages,
@@ -785,6 +800,7 @@ export const TOOLS: ToolDefinition[] = [
   listDataSources,
   getPageData,
   getHealth,
+  getExecutionQuota,
   getMirrorStatus,
   diffSourceVsMirror,
   queryPostgres,

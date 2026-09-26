@@ -2913,8 +2913,6 @@ export interface QuotaThreshold {
   alerted_at: string | null;
   /** The Slack permalink of that alert, where Slack gave one. */
   slack_link: string | null;
-  /** What BHARAG said to the copy of it: "ingested as …" or why it did not land. */
-  bharag: string | null;
 }
 
 /**
@@ -2955,9 +2953,9 @@ export interface ExecutionsData {
   period: string;
   /**
    * Which runs every figure counts: `production` (the default) is only what n8n
-   * bills; `all` adds manual, sub-workflow and error-workflow runs.
+   * bills; `internal` is only the rest — manual, sub-workflow and error-workflow runs.
    */
-  scope: 'production' | 'all';
+  scope: 'production' | 'internal';
   /** This billing cycle's usage of the n8n plan's execution quota. */
   quota: ExecutionQuota;
   systems: ExecutionSystem[];

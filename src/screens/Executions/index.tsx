@@ -172,7 +172,7 @@ const n = (x: number) => x.toLocaleString('en-GB');
  * This is the capability the counter tables could not support at all, and the
  * reason every execution is stored as its own row.
  */
-function WorkflowPanel({ workflowId, grain, period, scope, onClose }: { workflowId: string; grain: ExecutionGrain; period: string; scope: 'production' | 'all'; onClose: () => void }) {
+function WorkflowPanel({ workflowId, grain, period, scope, onClose }: { workflowId: string; grain: ExecutionGrain; period: string; scope: 'production' | 'internal'; onClose: () => void }) {
   const [detail, setDetail] = useState<ExecutionWorkflowDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [failedOnly, setFailedOnly] = useState(false);
@@ -396,7 +396,7 @@ function WorkflowRow({ w, onOpen }: { w: ExecutionWorkflow; onOpen: () => void }
  * periods, because a system with no execution in a month has no tab in it, and
  * an index would quietly hand you somebody else's report.
  */
-async function downloadPeriod(grain: ExecutionGrain, period: string, systemKey: string, scope: 'production' | 'all'): Promise<string | null> {
+async function downloadPeriod(grain: ExecutionGrain, period: string, systemKey: string, scope: 'production' | 'internal'): Promise<string | null> {
   const d = await getExecutions(grain, period, scope);
   const s = d.systems.find((x) => x.system === systemKey);
   if (!s) return `${systemKey} ran nothing in ${period}, so there is no report for it.`;
@@ -412,7 +412,7 @@ async function downloadPeriod(grain: ExecutionGrain, period: string, systemKey: 
  * months, and offers them one at a time. Both follow the tab, so All systems
  * downloads every system and Bays downloads Bays.
  */
-function MonthDownload({ months, systemKey, systemLabel, scope, onFail }: { months: string[]; systemKey: string; systemLabel: string; scope: 'production' | 'all'; onFail: (m: string) => void }) {
+function MonthDownload({ months, systemKey, systemLabel, scope, onFail }: { months: string[]; systemKey: string; systemLabel: string; scope: 'production' | 'internal'; onFail: (m: string) => void }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -539,7 +539,7 @@ function QuotaCard({ q }: { q: ExecutionQuota }) {
                   : '.'}
             </div>
             <div>
-              Alerts at {q.thresholds.map((t) => `${t.at}%`).join(', ')} post to Slack{q.channel ? '' : ' (no channel set, so none can be sent)'} and are logged to BHARAG.
+              Alerts at {q.thresholds.map((t) => `${t.at}%`).join(', ')} post to #bha-engine-alerts{q.channel ? '' : ' (no channel set, so none can be sent)'}.
               {alerted.length ? ` Sent this cycle: ${alerted.map((t) => `${t.at}% on ${shortDay(t.alerted_at)}`).join(', ')}.` : ' None sent this cycle.'}
             </div>
           </div>
@@ -654,12 +654,12 @@ function SystemView({
               {period.unfinished ? `${period.unfinished} of them are still running and are counted with the status they were read at.` : 'Every run n8n recorded in this month, whatever its outcome.'}
             </TileTitle>
           }
-          right={data.scope === 'production' ? 'production runs n8n counts' : 'every run read from n8n'}
+          right={data.scope === 'production' ? 'production runs n8n counts' : 'runs n8n does not count'}
           align="top"
           note={
             nothing
               ? 'None held for this month'
-              : `${data.scope === 'production' ? 'Production runs only' : 'Every run, including manual, sub-workflow and error-handler runs'} · ${period.unfinished ? `${n(period.finished)} finished, ${period.unfinished} still running` : `all ${n(period.finished)} finished`}`
+              : `${data.scope === 'production' ? 'Production runs only' : 'Test and internal runs only: manual, sub-workflow, error handler'} · ${period.unfinished ? `${n(period.finished)} finished, ${period.unfinished} still running` : `all ${n(period.finished)} finished`}`
           }
         >
           <Figure value="—" count={nothing ? null : period.executions} replayKey={`${system.system}|${period.key}`} delta={<Delta d={c.executions} />} />
@@ -863,12 +863,12 @@ export default function Executions() {
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
   /**
-   * Production runs only, by default (2026-09-26, Destiny): the runs n8n bills
-   * and the engine's real activity. "Include test & internal" adds manual,
+   * Production runs by default (2026-09-26, Destiny): the runs n8n bills and
+   * the engine's real activity. "Test & internal" shows only the rest — manual,
    * sub-workflow and error-handler runs — where a sub-workflow's own failures
    * show.
    */
-  const [scope, setScope] = useState<'production' | 'all'>('production');
+  const [scope, setScope] = useState<'production' | 'internal'>('production');
   const { toast, setToast } = useToast();
 
   const { status, data, error } = useData(() => getExecutions('month', period ?? undefined, scope), [period, tick, scope], { refreshMs: REFRESH_MS, kinds: ['executions'] });
@@ -912,15 +912,15 @@ export default function Executions() {
     <div className="relative flex h-full min-h-0 flex-col">
       <PageHeader
         title="Executions"
-        subtitle={`${data.scope === 'production' ? 'Production runs — the ones n8n counts against the plan' : 'Every run of every workflow, including manual, sub-workflow and error-handler runs'} — read from n8n every ${data.source.poll_seconds} seconds, not live`}
+        subtitle={`${data.scope === 'production' ? 'Production runs — the ones n8n counts against the plan' : 'Test and internal runs — manual, sub-workflow and error-handler runs, which n8n does not count'} — read from n8n every ${data.source.poll_seconds} seconds, not live`}
         right={
           <div className="flex flex-wrap items-center gap-2">
             <span className="seg" role="group" aria-label="Which runs to count">
               <button type="button" aria-pressed={scope === 'production'} onClick={() => setScope('production')} title="Only the runs n8n bills: webhooks, schedules and triggers, chat, automatic retries">
                 Production
               </button>
-              <button type="button" aria-pressed={scope === 'all'} onClick={() => setScope('all')} title="Adds manual runs, sub-workflows and error-handler runs — where a sub-workflow's own failures show">
-                Include test &amp; internal
+              <button type="button" aria-pressed={scope === 'internal'} onClick={() => setScope('internal')} title="Only the runs n8n does not bill: manual runs, sub-workflows and error-handler runs — where a sub-workflow's own failures show">
+                Test &amp; internal
               </button>
             </span>
             {/*
