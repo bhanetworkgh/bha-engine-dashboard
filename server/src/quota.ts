@@ -48,6 +48,26 @@ export const QUOTA_VAR = 'N8N_EXECUTION_QUOTA';
 export const CYCLE_VAR = 'N8N_BILLING_CYCLE_START';
 export const CHANNEL_VAR = 'QUOTA_ALERT_CHANNEL';
 export const MENTIONS_VAR = 'QUOTA_ALERT_MENTIONS';
+/**
+ * Optional: n8n's own usage figure at a moment, as `COUNT@ISO-TIME`, read off
+ * the plan page (2026-09-26). This database's count and n8n's differ by about a
+ * thousand in the cycle that ran out — n8n's figure is the one that stops the
+ * engine, so where this is set, used = COUNT + the production runs held here
+ * since that moment. It applies only inside the cycle it was read in; a new
+ * cycle goes back to counting from zero here.
+ */
+export const CALIBRATION_VAR = 'N8N_USAGE_CALIBRATION';
+
+function calibrationSetting(): { count: number; at: string } | null {
+  const raw = process.env[CALIBRATION_VAR]?.trim();
+  if (!raw) return null;
+  const m = raw.match(/^([\d,_]+)@(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z?)$/);
+  if (!m) return null;
+  const at = new Date(m[2].endsWith('Z') ? m[2] : `${m[2]}Z`);
+  const count = Number(m[1].replace(/[,_]/g, ''));
+  if (Number.isNaN(at.getTime()) || !Number.isFinite(count)) return null;
+  return { count, at: at.toISOString() };
+}
 
 /** The execution modes n8n Cloud bills against the quota. Everything else is free. */
 export const COUNTED_MODES = ['webhook', 'trigger', 'retry', 'chat'] as const;
@@ -180,7 +200,18 @@ export async function usage(): Promise<ExecutionQuota> {
       WHERE started_at >= LEAST($1, $2)`,
     [start, since, [...COUNTED_MODES]],
   );
-  const used = Number(r.rows[0]?.used ?? 0);
+  let used = Number(r.rows[0]?.used ?? 0);
+  const cal = calibrationSetting();
+  let calibrated: string | null = null;
+  if (cal && cal.at >= start && cal.at < resets) {
+    const after = await query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM engine_execution_runs WHERE started_at >= $1 AND mode = ANY($2)`,
+      [cal.at, [...COUNTED_MODES]],
+    );
+    const ours = used;
+    used = cal.count + Number(after.rows[0]?.n ?? 0);
+    calibrated = `Calibrated to n8n's own figure of ${fmt(cal.count)} at ${cal.at.slice(0, 16).replace('T', ' ')} UTC, plus the production runs held here since then; this database alone counts ${fmt(ours)} for the cycle.`;
+  }
   const notCounted = Number(r.rows[0]?.other ?? 0);
   const perDay = Math.round((Number(r.rows[0]?.recent ?? 0) / PACE_DAYS) * 10) / 10;
   const daysLeft = Math.max(0, (new Date(resets).getTime() - Date.now()) / 86_400_000);
@@ -202,6 +233,7 @@ export async function usage(): Promise<ExecutionQuota> {
   return {
     configured: true,
     note:
+      (calibrated ? `${calibrated} ` : '') +
       `Counted from the executions this database copies from n8n, so it trails n8n by one poll and can differ slightly from the figure on n8n's plan page. ` +
       `Only production runs count: webhooks, schedules and polling triggers, chat triggers and automatic retries. Manual runs, sub-workflows and error-workflow runs are free.`,
     quota: q,
