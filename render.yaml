@@ -100,6 +100,10 @@ services:
         sync: false
       - key: QUOTA_ALERT_MENTIONS
         sync: false
+      # Optional: n8n's own usage figure at a moment, COUNT@ISO-TIME, read off
+      # the plan page, so the alerts follow the number that stops the engine.
+      - key: N8N_USAGE_CALIBRATION
+        sync: false
       # The BHARAG incident ledger, for Engine health (17 Sep 2026). Read only,
       # and the second external read path this server has after Airtable.
       #

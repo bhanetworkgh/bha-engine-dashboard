@@ -10492,3 +10492,18 @@ Tested:     Server typecheck clean (tsc against @types/node, with a local pg
             compile check. Billing-cycle arithmetic checked for mid-month,
             the reset instant and 31 Jan -> 28 Feb.
 Restore:    Before this, main was b5ad478.
+
+## 2026-09-26 — Quota calibrated to n8n's own figure
+Intent:     n8n's plan page read 11k+ used after the upgrade (the count
+            carried on; it did not reset), where this database counted 10,080
+            production runs for the cycle from 2026-09-14T19:00Z. n8n's figure
+            is the one that stops the engine, so the alerts must follow it.
+Files:      server/src/quota.ts, render.yaml, BUILD_LOG.md
+Fix:        N8N_USAGE_CALIBRATION=COUNT@ISO-TIME: used = COUNT + production
+            runs held here since that time. Only inside the cycle it was read
+            in. The quota card's note says it is calibrated and what this
+            database alone counts, so the gap stays visible.
+Decision:   Why the two counts differ is not known yet. Worth finding out: it
+            is about a thousand runs, and the cause may be something n8n bills
+            that this page does not see.
+Tested:     Server typecheck clean.
