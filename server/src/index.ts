@@ -1101,7 +1101,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     const grain = url.searchParams.get('grain') ?? 'week';
     if (!executions.isGrain(grain)) throw new HttpError(400, 'grain must be week, month or year.');
     const scope = url.searchParams.get('scope') ?? 'production';
-    if (!executions.isScope(scope)) throw new HttpError(400, 'scope must be production or all.');
+    if (!executions.isScope(scope)) throw new HttpError(400, 'scope must be production or internal.');
     return send(res, 200, await executions.read(grain, url.searchParams.get('period') ?? undefined, scope));
   }
 
@@ -1111,7 +1111,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     const grain = url.searchParams.get('grain') ?? 'week';
     if (!executions.isGrain(grain)) throw new HttpError(400, 'grain must be week, month or year.');
     const scope = url.searchParams.get('scope') ?? 'production';
-    if (!executions.isScope(scope)) throw new HttpError(400, 'scope must be production or all.');
+    if (!executions.isScope(scope)) throw new HttpError(400, 'scope must be production or internal.');
     const detail = await executions.workflow(decodeURIComponent(execWorkflow[1]), grain, url.searchParams.get('period') ?? undefined, 500, scope);
     if (!detail) throw new HttpError(404, 'No execution of that workflow has ever been read.');
     return send(res, 200, detail);

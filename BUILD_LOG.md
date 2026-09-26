@@ -10529,3 +10529,27 @@ Fix:        - `scope` on GET /api/executions and /api/executions/workflow/:id,
               still stored (meta `quota.last_error`) and logged to the console.
 Tested:     Server typecheck clean; the page checked against local type
             stubs. Render build is the compile check.
+
+## 2026-09-26 — Test & internal view, Block Kit alerts, quota tool for Bays, no BHARAG
+Intent:     Destiny: the second view should show only test and internal runs,
+            not everything; alerts in proper Block Kit; Research Twin and
+            North Star are not meant to see executions, so only Bays reads the
+            quota, through this server's MCP; BHARAG logging dropped.
+Files:      server/src/quota.ts, server/src/executions.ts, server/src/index.ts,
+            server/src/bharag.ts, server/src/mcp/tools.ts, src/data/index.ts,
+            src/data/types.ts, src/screens/Executions/index.tsx, BUILD_LOG.md
+Fix:        - scope is `production` | `internal`; internal is only manual,
+              sub-workflow and error-workflow runs. The header switch reads
+              Production / Test & internal.
+            - Alerts and the monitor announcement are Block Kit: header, a
+              ten-cell bar with the percentage, a four-field grid (used, cycle,
+              7-day pace, where it lands), what happens at the cap, a link to
+              the Executions page (a link, not a button: a button sends an
+              interaction to the Bays app, an n8n run per click), and a context
+              footer with who is tagged.
+            - The v2 announcement replaces the plain-text one posted at 16:36Z:
+              Bays deletes its own earlier message.
+            - New MCP read `get_execution_quota` (quota.usage()). To be added
+              to Bays' allow-list only.
+            - BHARAG logging removed, with the `bays` ingest workspace.
+Tested:     Server typecheck clean; page checked against local type stubs.
