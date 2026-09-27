@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom';
 import { Fragment, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
 import { getClients, resyncRecords, type ClientGroup, type ClientLaneRow, type ClientQuestion, type ClientRequest, type ClientsData } from '../data';
-import { ButtonAnchor, TableFrame, Tabs, PageHeader, Button, CountCell, Definition, Th, Pill, LoadFailed, Loading, MetricCard, EmptyPanel, EmptyState, Toast, relativeTime, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SourceLink, StatStrip, useResync, useToast } from '../components/ui';
+import { useReplayKey, ButtonAnchor, TableFrame, Tabs, PageHeader, Button, CountCell, Definition, Th, Pill, LoadFailed, Loading, MetricCard, EmptyPanel, EmptyState, Toast, relativeTime, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SourceLink, StatStrip, useResync, useToast } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 import {
   ACTIVE_DEF,
@@ -560,6 +560,8 @@ export default function Clients() {
   // nothing on screen saying so is worse than no filter at all.
   const [month, setMonth] = useState<string | null>(null);
   const [view, setView] = useState<View>('Clients');
+  /* Switching any of these re-runs the page's count-ups and bars (27 Sep 2026). */
+  useReplayKey(`${view}|${month}|${filter}`);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const { toast, setToast } = useToast();

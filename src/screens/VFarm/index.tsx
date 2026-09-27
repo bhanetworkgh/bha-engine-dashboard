@@ -2,7 +2,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useCallback, useEffect, useState } from 'react';
 import { useData } from '../../app/useData';
 import { getVfarmLeads, type VfarmLead, type VfarmLeadsData } from '../../data';
-import { ComingSoon, LoadFailed, Loading, PageHeader, Tabs } from '../../components/ui';
+import { useReplayKey, ComingSoon, LoadFailed, Loading, PageHeader, Tabs } from '../../components/ui';
 import EarlyAccess from './EarlyAccess';
 
 /** The record kinds this page is built from: a change to one re-reads it (live since 2026-09-23). */
@@ -38,6 +38,8 @@ export default function VFarm() {
   // "What moved" rows link here (2026-09-23).
   const [params] = useSearchParams();
   const [tab, setTab] = useState<Tab>(() => (params.get('tab') === 'early-access' ? 'Early Access' : 'Overview'));
+  /* Switching any of these re-runs the page's count-ups and bars (27 Sep 2026). */
+  useReplayKey(`${tab}`);
   const [held, setHeld] = useState<VfarmLeadsData | null>(null);
   const { status, data: loaded, error } = useData(getVfarmLeads, [], { kinds: VFARM_KINDS });
 

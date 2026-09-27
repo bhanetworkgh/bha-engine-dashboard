@@ -5,7 +5,39 @@
  * imports Charts, so the count-up living in Records is why a bar's own figure
  * snapped while the bar beside it grew.
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+
+/**
+ * The page's replay key (27 Sep 2026, Destiny). Every page with tabs, a month
+ * or a filter sets it through `useReplayKey`, so switching any of them re-runs
+ * every count-up and grows every bar again from zero, the way picking a
+ * builder on Open loops always has. One mechanism, so every page behaves the
+ * same without each figure being wired by hand.
+ */
+interface ReplayValue {
+  key: string;
+  setKey: (k: string) => void;
+}
+const ReplayCtx = createContext<ReplayValue>({ key: '', setKey: () => {} });
+
+export function ReplayProvider({ children }: { children: ReactNode }) {
+  const [key, setKey] = useState('');
+  return <ReplayCtx.Provider value={{ key, setKey }}>{children}</ReplayCtx.Provider>;
+}
+
+/** The page's current replay key, for animations to fold into their own. */
+export function usePageReplay(): string {
+  return (useContext(ReplayCtx) as ReplayValue).key;
+}
+
+/** Called by a page with whatever it is filtered by: tab, month, builder, lane. */
+export function useReplayKey(key: string): void {
+  const { setKey } = useContext(ReplayCtx) as ReplayValue;
+  useEffect(() => {
+    setKey(key);
+  }, [key, setKey]);
+  useEffect(() => () => setKey(''), [setKey]);
+}
 
 /** Whether the viewer asked for less motion. */
 function reducedMotion(): boolean {
@@ -22,7 +54,9 @@ function reducedMotion(): boolean {
  * change reads as movement), and from zero whenever `replayKey` changes —
  * the page passes the selected builder, so switching tabs re-runs it.
  */
-function useCountUp(value: number, duration: number, replayKey?: string | number): number {
+function useCountUp(value: number, duration: number, ownKey?: string | number): number {
+  const page = usePageReplay();
+  const replayKey = `${page}|${ownKey ?? ''}`;
   const [shown, setShown] = useState(reducedMotion() ? value : 0);
   const shownRef = useRef(reducedMotion() ? value : 0);
   const lastKey = useRef(replayKey);

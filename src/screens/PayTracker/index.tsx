@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useData } from '../../app/useData';
 import { getPay, getPayMetrics } from '../../data';
-import { LiveIndicator, LoadFailed, Loading, MonthPicker, monthLabel, monthsFrom, PageHeader, RowsLine, Tabs, thisMonth } from '../../components/ui';
+import { useReplayKey, LiveIndicator, LoadFailed, Loading, MonthPicker, monthLabel, monthsFrom, PageHeader, RowsLine, Tabs, thisMonth } from '../../components/ui';
 import Owed from './Owed';
 import Statements from './Statements';
 import Sessions from './Sessions';
@@ -59,6 +59,8 @@ export default function PayTracker() {
    * being paid.
    */
   const [month, setMonth] = useState<string | null>(thisMonth());
+  /* Switching any of these re-runs the page's count-ups and bars (27 Sep 2026). */
+  useReplayKey(`${tab}|${month}`);
   const { status, data: loaded, error } = useData(getPay, [], { kinds: PAY_KINDS });
   const metrics = useData(() => getPayMetrics(month), [month], { kinds: PAY_KINDS });
 

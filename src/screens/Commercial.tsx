@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
 import { getCommercial, getRecordMetrics, resyncRecords, setRecordStatus, type CommercialMetrics, type MetricSeries, type Opportunity, type ReadinessState } from '../data';
 import type { RecordColumn } from '../components/ui';
-import { Tabs, PageHeader, Pagination, Button, CountCell, Definition, HBar, thisMonth, Pill, LoadFailed, Loading, MetricCard, MetricCell, monthLabel, MonthPicker, monthsFrom, EmptyPanel, EmptyState, Toast, RecordId, RecordTable, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, SourceLink, Sparkline, StatCell, StatStrip, usePaged, useResync, useToast, TwoLine } from '../components/ui';
+import { useReplayKey, Tabs, PageHeader, Pagination, Button, CountCell, Definition, HBar, thisMonth, Pill, LoadFailed, Loading, MetricCard, MetricCell, monthLabel, MonthPicker, monthsFrom, EmptyPanel, EmptyState, Toast, RecordId, RecordTable, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, SourceLink, Sparkline, StatCell, StatStrip, usePaged, useResync, useToast, TwoLine } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 import { CLEAR_DEF, CONFIDENCE_DEFS, INCOMPLETE_DEF, MEDIA_DEFS, PIPELINE_DEFS, READINESS_DEFS } from './recordDefinitions';
 
@@ -543,6 +543,8 @@ export default function Commercial() {
    */
   const [month, setMonth] = useState<string | null>(thisMonth());
   const [view, setView] = useState<View>('Cards');
+  /* Switching any of these re-runs the page's count-ups and bars (27 Sep 2026). */
+  useReplayKey(`${view}|${month}`);
   // `?open=<id>` opens a card on arrival — Home's "What moved" links here (2026-09-23).
   const [params] = useSearchParams();
   const [open, setOpen] = useState<string | null>(() => params.get('open'));

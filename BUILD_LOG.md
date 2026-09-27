@@ -10622,3 +10622,18 @@ snapshot is a branch.)
   exhausted retries on incidents still open (1); the Retries tab lists every
   exhausted retry, including 4 on incidents the ledger has since closed (5).
   The page's own note already says so.
+
+---
+
+## 2026-09-27 18:00 · Numbers replay on every page's tabs and filters
+
+Destiny noticed picking a builder on Open loops re-runs every count-up and
+bar, but North Star, Research Twin and others did not. Now one shared key:
+`ReplayProvider` (in Layout) holds the page's replay key; `useCountUp` and
+the bar/meter `useGrow` fold it into their own key. Each filtered page calls
+`useReplayKey(...)` with what it is filtered by:
+North Star (view, month, filter), Research Twin (view, month), Open loops
+(view, month, owner), Build patterns (view, month, reuse), Commercial (view,
+month), Clients (view, month, filter), Pay Tracker (tab, month), Engine
+health (tab), Executions (tab, period, scope), vFarm (tab).
+Checked with a browser test: 100 → 6 at 150 ms after a switch → 100.

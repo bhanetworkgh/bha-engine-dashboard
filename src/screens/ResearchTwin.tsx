@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
 import { getRecordMetrics, getRtTelemetry, resyncRecords, type RtAsk, type RtJob, type RtJobMetrics, type RtMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
-import { ButtonAnchor, Tabs, PageHeader, Pagination, Button, CohortTable, CountUp, Definition, DistTile, DurationTrend, FigureCell, HBar, thisMonth, TileFigure, Pill, LoadFailed, Loading, MetricCard, MonthPicker, monthsFrom, EmptyState, Toast, OutcomeColumns, PercentCell, PercentileCell, RecordId, RecordTable, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, SourceLink, StatCell, StatStrip, usePaged, useResync, useToast } from '../components/ui';
+import { useReplayKey, ButtonAnchor, Tabs, PageHeader, Pagination, Button, CohortTable, CountUp, Definition, DistTile, DurationTrend, FigureCell, HBar, thisMonth, TileFigure, Pill, LoadFailed, Loading, MetricCard, MonthPicker, monthsFrom, EmptyState, Toast, OutcomeColumns, PercentCell, PercentileCell, RecordId, RecordTable, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, SourceLink, StatCell, StatStrip, usePaged, useResync, useToast } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 import { JOB_STATUS_DEFS, RT_OUTCOME_DEFS } from './twinDefinitions';
 import { HandoffTile } from './NorthStar';
@@ -857,6 +857,8 @@ export default function ResearchTwin() {
   const [openAsk, setOpenAsk] = useState<string | null>(null);
   const [openJob, setOpenJob] = useState<string | null>(null);
   const [month, setMonth] = useState<string | null>(thisMonth());
+  /* Switching any of these re-runs the page's count-ups and bars (27 Sep 2026). */
+  useReplayKey(`${view}|${month}`);
   const [tick, setTick] = useState(0);
   const [asks, setAsks] = useState<RtAsk[]>([]);
   const [jobs, setJobs] = useState<RtJob[]>([]);
