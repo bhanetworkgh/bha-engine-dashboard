@@ -648,7 +648,7 @@ export default function AskBays() {
               <Icon.search className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-faint" />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search chats" className="input h-8 pr-7 pl-8 text-[12px]" aria-label="Search chats" />
               {search && (
-                <button type="button" onClick={() => setSearch('')} className="absolute top-1/2 right-2 -translate-y-1/2 text-faint hover:text-ink" aria-label="Clear search">
+                <button type="button" onClick={() => setSearch('')} className="absolute top-1/2 right-2 -translate-y-1/2 text-faint hover:text-ink" aria-label="Clear search" title="Clear search">
                   <Icon.close width={12} height={12} />
                 </button>
               )}

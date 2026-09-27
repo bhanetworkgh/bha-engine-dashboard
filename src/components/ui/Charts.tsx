@@ -42,12 +42,15 @@ const STROKE: Record<Tone, string> = {
 /** A line over time, with a soft fill beneath it and a dot on the last point. */
 export function Sparkline({
   values,
+  labels,
   width = 160,
   height = 40,
   tone = 'ink',
   className = '',
 }: {
   values: number[];
+  /** One per value, shown with it on hover (27 Sep 2026). */
+  labels?: string[];
   width?: number;
   height?: number;
   tone?: Tone;
@@ -81,6 +84,18 @@ export function Sparkline({
       <path d={area} fill={`url(#${id})`} />
       <path d={line} fill="none" stroke={STROKE[tone]} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
       <circle cx={last[0]} cy={last[1]} r="2.4" fill={STROKE[tone]} />
+      {/* Hover any point for its value: an invisible column per point, each
+          with a native tooltip and a dot that appears while it is hovered. */}
+      {pts.map(([x, y], i) => {
+        const colW = w / Math.max(1, values.length - 1);
+        return (
+          <g key={i} className="spark-hit">
+            <rect x={x - colW / 2} y={0} width={colW} height={height} fill="transparent" />
+            <circle cx={x} cy={y} r="2.4" fill={STROKE[tone]} className="spark-dot" />
+            <title>{`${labels?.[i] ? `${labels[i]}: ` : ''}${values[i]}`}</title>
+          </g>
+        );
+      })}
     </svg>
   );
 }
@@ -208,7 +223,13 @@ export function Ring({
   const c = 2 * Math.PI * r;
   const pct = total > 0 ? value / total : 0;
   return (
-    <div className="relative shrink-0" style={{ width: size, height: size }} role="img" aria-label={`${Math.round(pct * 100)}% ${label ?? ''}`}>
+    <div
+      className="relative shrink-0"
+      style={{ width: size, height: size }}
+      role="img"
+      aria-label={`${Math.round(pct * 100)}% ${label ?? ''}`}
+      title={`${value} of ${total}${label ? ` ${label}` : ''} (${total > 0 ? Math.round(pct * 100) : 0}%)`}
+    >
       <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} className="-rotate-90">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--raised)" strokeWidth="6" />
         <circle
