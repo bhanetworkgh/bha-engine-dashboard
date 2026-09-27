@@ -315,7 +315,7 @@ export function SearchBox({ value, onChange, placeholder }: { value: string; onC
       <span className="sr-only">{placeholder}</span>
       <input type="search" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="input py-1.5 pr-8 text-[12.5px]" />
       {value && (
-        <button type="button" onClick={() => onChange('')} aria-label="Clear search" className="absolute top-1/2 right-2 -translate-y-1/2 text-faint hover:text-ink">
+        <button type="button" onClick={() => onChange('')} aria-label="Clear search" title="Clear search" className="absolute top-1/2 right-2 -translate-y-1/2 text-faint hover:text-ink">
           ×
         </button>
       )}

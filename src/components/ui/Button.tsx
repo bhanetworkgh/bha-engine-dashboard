@@ -48,6 +48,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       disabled={disabled}
       aria-busy={loading || undefined}
       onClick={loading ? (e) => e.preventDefault() : onClick}
+      /* An icon-only button says what it does on hover (27 Sep 2026): its
+         aria-label doubles as the tooltip unless a title is given. */
+      title={rest.title ?? rest['aria-label']}
       {...rest}
     >
       {loading ? <span className="btn-spinner" aria-hidden /> : icon}

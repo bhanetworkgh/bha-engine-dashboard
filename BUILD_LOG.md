@@ -10607,3 +10607,18 @@ Kept from c8b931d: robots.txt (Disallow: /), meta noindex, and the server
 security headers. The branch `pre-fieldlab` (a375102) stays as a snapshot.
 (The earlier entry says "tag": GitHub's proxy refused the tag push, so the
 snapshot is a branch.)
+
+---
+
+## 2026-09-27 17:50 · Hover values and tooltips (Original design)
+
+- `Button`: an icon-only button's aria-label doubles as its tooltip unless a
+  title is given (theme toggle, navigation, row actions). The two raw "Clear
+  search" buttons get a title too.
+- `Sparkline`: hover any point for its value (optional `labels` prop for the
+  point names); the point's dot shows while hovered.
+- `Ring`: hover shows "30 of 84 answered (36%)".
+- Checked the Engine health "1 vs 5" retry count: not a bug. Home counts
+  exhausted retries on incidents still open (1); the Retries tab lists every
+  exhausted retry, including 4 on incidents the ledger has since closed (5).
+  The page's own note already says so.

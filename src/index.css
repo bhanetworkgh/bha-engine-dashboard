@@ -1331,3 +1331,12 @@ html[data-scroll="document"] .shell-bar {
 html[data-scroll="document"] .aurora::before {
   position: fixed;
 }
+
+/* Sparkline hover (27 Sep 2026): the point's dot shows only while hovered. */
+.spark-hit .spark-dot {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.spark-hit:hover .spark-dot {
+  opacity: 1;
+}
