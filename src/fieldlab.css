@@ -1,0 +1,307 @@
+/* ---------------------------------------------------------------------------
+   Field Lab: the bhanetwork.org design system, as a second look for the
+   dashboard (27 Sep 2026, Destiny).
+
+   A safety net by construction. Every rule here is scoped to
+   <html data-look="fieldlab">, which only the Look switch in Settings sets.
+   With the switch on Original, nothing in this file applies and the
+   dashboard is exactly as it was. It changes colours, fonts, icons and
+   surfaces only: no layout, spacing, data or behaviour.
+
+   Light: paper and white, a forest sidebar, gold as the accent.
+   Dark ("Dark A"): black with a faint forest undertone, a deeper forest
+   sidebar, gold as the accent.
+   --------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("./fonts/instrument-serif-latin.woff") format("woff");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("./fonts/instrument-serif-italic-latin.woff") format("woff");
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist";
+  src: url("./fonts/geist-latin.woff") format("woff");
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("./fonts/geist-mono-latin.woff") format("woff");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+/* Light ------------------------------------------------------------------- */
+
+:root[data-look="fieldlab"] {
+  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-display: "Instrument Serif", Georgia, serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --bg: #f2efe6;
+  --panel: #ffffff;
+  --raised: #ebe7da;
+  --hover: #e4dfd1;
+  --line: rgba(19, 23, 15, 0.1);
+  --line-strong: rgba(19, 23, 15, 0.18);
+  --ink: #13170f;
+  --dim: #5a5f55;
+  --faint: #8d9186;
+
+  /* Gold is the accent: links, focus, the selected tab, the active thing. */
+  --accent: #7d5e0d;
+  --accent-soft: rgba(224, 184, 74, 0.24);
+  --accent-ink: #7d5e0d;
+  --accent-on: #0a0a0a;
+  --primary-edge: #9a7b2e;
+
+  --ok: #1f7a4d;
+  --ok-soft: #dcefe2;
+  --degraded: #a86400;
+  --degraded-soft: #f6e6c8;
+  --failing: #b3261e;
+  --failing-soft: #f7dcd8;
+  --danger: #b3261e;
+
+  /* Icon tiles: forest with a gold glyph, instead of a rainbow of tints. */
+  --on-tile: #e0b84a;
+  --tint-blue: #0f2419;
+  --tint-indigo: #0f2419;
+  --tint-teal: #0f2419;
+  --tint-green: #0f2419;
+  --tint-purple: #0f2419;
+  --tint-pink: #0f2419;
+  --tint-graphite: #0f2419;
+  --tint-mint: #0f2419;
+  --tint-cyan: #0f2419;
+  --tint-brown: #0f2419;
+  --tint-red: #0f2419;
+
+  /* Solid surfaces: no frosted glass, no colour wash. */
+  --sidebar: #0f2419;
+  --frost-card: #ffffff;
+  --frost-side: #0f2419;
+  --frost-bar: rgba(242, 239, 230, 0.72);
+  --gloss: transparent;
+  --glass-bg: rgba(237, 235, 227, 0.08);
+  --glass-edge: rgba(237, 235, 227, 0.12);
+  --shadow-glass: none;
+  --aurora-a: transparent;
+  --aurora-b: transparent;
+  --aurora-c: transparent;
+  --hero-a: #0f2419;
+  --hero-b: #0f2419;
+  --hero-c: #173325;
+
+  --shadow-card: 0 1px 2px rgba(19, 23, 15, 0.04), 0 8px 24px rgba(19, 23, 15, 0.05);
+  --shadow-pop: 0 16px 40px rgba(19, 23, 15, 0.14), 0 0 0 1px rgba(19, 23, 15, 0.06);
+}
+
+/* Dark A ------------------------------------------------------------------ */
+
+:root[data-look="fieldlab"][data-theme="dark"] {
+  --bg: #0a0d0b;
+  --panel: #121714;
+  --raised: #1a201c;
+  --hover: #212823;
+  --line: rgba(236, 236, 232, 0.08);
+  --line-strong: rgba(236, 236, 232, 0.14);
+  --ink: #ecece8;
+  --dim: #9ea69f;
+  --faint: #687069;
+
+  --accent: #e7c766;
+  --accent-soft: rgba(224, 184, 74, 0.16);
+  --accent-ink: #e7c766;
+  --accent-on: #0a0a0a;
+  --primary-edge: #e0b84a;
+
+  --ok: #5cc98c;
+  --ok-soft: #15261c;
+  --degraded: #e2a03f;
+  --degraded-soft: #302616;
+  --failing: #ff7a6e;
+  --failing-soft: #351c1a;
+  --danger: #ff7a6e;
+
+  --on-tile: #e0b84a;
+  --tint-blue: #1a201c;
+  --tint-indigo: #1a201c;
+  --tint-teal: #1a201c;
+  --tint-green: #1a201c;
+  --tint-purple: #1a201c;
+  --tint-pink: #1a201c;
+  --tint-graphite: #1a201c;
+  --tint-mint: #1a201c;
+  --tint-cyan: #1a201c;
+  --tint-brown: #1a201c;
+  --tint-red: #1a201c;
+
+  --sidebar: #0d120f;
+  --frost-card: #121714;
+  --frost-side: #0d120f;
+  --frost-bar: rgba(10, 13, 11, 0.72);
+  --hero-a: #121714;
+  --hero-b: #121714;
+  --hero-c: #1a201c;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(236, 236, 232, 0.05);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(236, 236, 232, 0.08);
+}
+
+/* Type -------------------------------------------------------------------- */
+
+:root[data-look="fieldlab"] body {
+  font-family: var(--font-sans);
+}
+:root[data-look="fieldlab"] .font-display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+:root[data-look="fieldlab"] h1.font-display {
+  font-size: 34px;
+}
+:root[data-look="fieldlab"] .kicker {
+  font-family: var(--font-mono);
+}
+
+/* Surfaces ---------------------------------------------------------------- */
+
+:root[data-look="fieldlab"] .aurora::before {
+  display: none;
+}
+:root[data-look="fieldlab"] .frost,
+:root[data-look="fieldlab"] .frost-side,
+:root[data-look="fieldlab"] .frost-bar {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+:root[data-look="fieldlab"] .frost {
+  box-shadow: var(--shadow-card);
+}
+:root[data-look="fieldlab"] .card {
+  box-shadow: var(--shadow-card);
+}
+
+/* The summary banner is a forest block, with its own light-on-dark text. */
+:root[data-look="fieldlab"] .hero {
+  background: #0f2419;
+  --ink: #edebe3;
+  --dim: #c9d1c8;
+  --faint: #a9b5aa;
+  --accent-ink: #e0b84a;
+  color: var(--ink);
+}
+:root[data-look="fieldlab"][data-theme="dark"] .hero {
+  background: #121714;
+  box-shadow: inset 0 0 0 1px rgba(236, 236, 232, 0.06);
+}
+
+/* The banner's button is the gold primary, readable on the forest. */
+:root[data-look="fieldlab"] .hero .btn {
+  background: #e0b84a;
+  color: #0a0a0a;
+  box-shadow: none;
+}
+:root[data-look="fieldlab"] .hero .btn:hover:not(:disabled) {
+  background: #eac765;
+}
+
+/* Icon tiles: forest (or near-black) with the glyph in gold. */
+:root[data-look="fieldlab"] .tile-soft {
+  color: #7d5e0d;
+  background: rgba(224, 184, 74, 0.24);
+}
+:root[data-look="fieldlab"][data-theme="dark"] .tile-soft {
+  color: #e7c766;
+  background: rgba(224, 184, 74, 0.14);
+}
+
+/* The sidebar: forest, with its own light text. Its local variables mean
+   every control inside it (menus, hover, the account row) reads correctly. */
+:root[data-look="fieldlab"] .shell-nav {
+  --ink: #edebe3;
+  --dim: #a9b5aa;
+  --faint: #8a988c;
+  --hover: rgba(237, 235, 227, 0.08);
+  --panel: #173325;
+  --raised: #173325;
+  --line: rgba(237, 235, 227, 0.1);
+  --line-strong: rgba(237, 235, 227, 0.18);
+  --accent-soft: rgba(224, 184, 74, 0.18);
+  --accent-ink: #e0b84a;
+  --shadow-card: none;
+  background: var(--sidebar);
+  color: var(--ink);
+  border-color: transparent;
+}
+:root[data-look="fieldlab"][data-theme="dark"] .shell-nav {
+  --panel: #18201b;
+  --raised: #18201b;
+  border-color: rgba(236, 236, 232, 0.06);
+}
+:root[data-look="fieldlab"] .shell-nav .nav-item {
+  position: relative;
+}
+:root[data-look="fieldlab"] .shell-nav .nav-item[aria-current="page"] {
+  background: var(--panel);
+  box-shadow: none;
+  color: #e0b84a;
+}
+:root[data-look="fieldlab"] .shell-nav .nav-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: #e0b84a;
+}
+:root[data-look="fieldlab"] .shell-nav .nav-item[aria-current="page"] svg {
+  color: #e0b84a;
+}
+
+/* Tabs and segmented controls: gold marks the selection. */
+:root[data-look="fieldlab"] .tab[aria-selected="true"]::after {
+  height: 3px;
+  background: #e0b84a;
+}
+:root[data-look="fieldlab"] .seg > button[aria-pressed="true"] {
+  background: #e0b84a;
+  color: #0a0a0a;
+  box-shadow: none;
+}
+
+/* Focus: gold in dark, dark gold in light. */
+:root[data-look="fieldlab"] :focus-visible {
+  outline-color: var(--accent);
+}
+
+/* Phosphor icons: regular weight, bold for the current page. */
+:root[data-look="fieldlab"] svg.ph .ph-bold {
+  display: none;
+}
+:root[data-look="fieldlab"] .nav-item[aria-current="page"] svg.ph .ph-regular {
+  display: none;
+}
+:root[data-look="fieldlab"] .nav-item[aria-current="page"] svg.ph .ph-bold {
+  display: inline;
+}
+
+/* A little motion: cards that are links lift toward the pointer. */
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  :root[data-look="fieldlab"] .card-hover:hover {
+    transform: translateY(-3px);
+  }
+}

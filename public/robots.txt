@@ -1,0 +1,3 @@
+# The BHA Engine Dashboard is a private tool. Nothing here is for search engines.
+User-agent: *
+Disallow: /

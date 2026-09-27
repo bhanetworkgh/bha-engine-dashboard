@@ -2,7 +2,9 @@
  * Line icons for the sidebar and a few controls. 1.5px strokes on a 16px grid,
  * all drawn here so nothing external is loaded.
  */
-import type { SVGProps } from 'react';
+import type { ReactElement, SVGProps } from 'react';
+import { useLook } from '../../app/look';
+import { PHOSPHOR } from './phosphor';
 
 const base: SVGProps<SVGSVGElement> = {
   width: 16,
@@ -16,7 +18,7 @@ const base: SVGProps<SVGSVGElement> = {
   'aria-hidden': true,
 };
 
-export const Icon = {
+const Classic = {
   overview: (p: SVGProps<SVGSVGElement>) => (
     <svg {...base} {...p}>
       <rect x="2" y="2" width="5" height="5" rx="1.2" />
@@ -217,4 +219,37 @@ export const Icon = {
   ),
 };
 
-export type IconName = keyof typeof Icon;
+export type IconName = keyof typeof Classic;
+
+/**
+ * Each icon follows the look: the hand-drawn set in Original, Phosphor in
+ * Field Lab (one family, so every icon matches). Same name, same props, same
+ * size, so no screen changes to switch.
+ */
+function make(name: IconName) {
+  const Drawn = Classic[name];
+  const ph = PHOSPHOR[name];
+  function LookIcon(p: SVGProps<SVGSVGElement>) {
+    const { look } = useLook();
+    if (look !== 'fieldlab' || !ph) return <Drawn {...p} />;
+    const { stroke: _s, strokeWidth: _w, strokeLinecap: _c, strokeLinejoin: _j, fill: _f, ...rest } = p;
+    return (
+      <svg
+        width={16}
+        height={16}
+        viewBox="0 0 256 256"
+        fill="currentColor"
+        aria-hidden
+        {...rest}
+        className={`ph ${rest.className ?? ''}`.trim()}
+        dangerouslySetInnerHTML={{ __html: `<g class="ph-regular">${ph.regular}</g><g class="ph-bold">${ph.bold}</g>` }}
+      />
+    );
+  }
+  LookIcon.displayName = `Icon.${name}`;
+  return LookIcon;
+}
+
+export const Icon = Object.fromEntries(
+  (Object.keys(Classic) as IconName[]).map((n) => [n, make(n)]),
+) as unknown as { [K in IconName]: (p: SVGProps<SVGSVGElement>) => ReactElement };
