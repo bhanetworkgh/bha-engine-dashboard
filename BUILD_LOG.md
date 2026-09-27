@@ -10594,3 +10594,16 @@ Checked: local build, screenshots of Home, Open loops and Engine health in
 Original, Field Lab light and Field Lab dark, no page errors, no new type
 errors against the previous baseline. Earlier "No such route" figure strips
 came from the local mock server, not the live dashboard.
+
+---
+
+## 2026-09-27 17:35 · Field Lab look removed; Original stays
+
+Destiny compared both looks live and kept the Original: it reads better for
+the dashboard, while Field Lab stays on bhanetwork.org. The look switch,
+`src/fieldlab.css`, the Phosphor set and the self-hosted fonts are removed,
+and Icons, Settings, main.tsx and index.css are back to a375102 exactly.
+Kept from c8b931d: robots.txt (Disallow: /), meta noindex, and the server
+security headers. The branch `pre-fieldlab` (a375102) stays as a snapshot.
+(The earlier entry says "tag": GitHub's proxy refused the tag push, so the
+snapshot is a branch.)
