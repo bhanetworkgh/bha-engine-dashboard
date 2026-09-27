@@ -8,6 +8,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
     <title>BHA engine</title>
+    <!-- A private tool: never listed by search engines (27 Sep 2026). -->
+    <meta name="robots" content="noindex, nofollow" />
     <!--
       The theme, before the first paint (2026-09-23). ThemeProvider stamps
       data-theme too, but only once React has run, so a dark-theme reader saw
@@ -23,6 +25,10 @@
           else if (v === 'system' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) t = 'dark';
         } catch (e) {}
         document.documentElement.dataset.theme = t;
+        // The look (Original or Field Lab), before the first paint (27 Sep).
+        var look = 'original';
+        try { if (localStorage.getItem('bha.look') === 'fieldlab') look = 'fieldlab'; } catch (e) {}
+        document.documentElement.dataset.look = look;
         // The window scrolls on every page but Ask Bays (see index.css), set
         // here too so the first paint is already in the right layout.
         document.documentElement.dataset.scroll = location.pathname.indexOf('/ask-bays') === 0 ? 'shell' : 'document';

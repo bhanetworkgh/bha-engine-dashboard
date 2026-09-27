@@ -1489,6 +1489,15 @@ const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
+  /*
+   * A private tool (27 Sep 2026): search engines stay out, no other site can
+   * frame it, HTTPS only, and no browser feature it does not use. The
+   * microphone stays allowed for this origin, for Ask Bays' voice input.
+   */
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  res.setHeader('Permissions-Policy', 'camera=(), geolocation=(), payment=(), microphone=(self)');
 
   /**
    * Every request, into the MCP server's in-memory ring, so `search_logs` can

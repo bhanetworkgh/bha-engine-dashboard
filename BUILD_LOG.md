@@ -10558,3 +10558,39 @@ Tested:     Server typecheck clean; page checked against local type stubs.
 
 - `repaired_pending` is now a known repair outcome. The repair bridge (commit ed9f36f) sends it when it has changed a workflow whose failed run was called by an agent or another workflow: the fix is proved by the next real run, and a second report under the same `repair_id` settles the row (the store is already an upsert). Before this the dashboard refused the record with a 422, so the repair was never saved. The row is revertible like a repair, shows as "fixed, awaiting proof", and counts under the Repaired filter.
 - The incident ledger is now read every 3 minutes (`health.startLedgerPolling`, ledger only, never Airtable). The list had only refreshed on a manual Resync and had been stale since 23 Sep, reading "0 open" while real incidents were being raised.
+
+---
+
+## 2026-09-27 17:30 · Field Lab look, behind a switch (safety net first)
+
+Intent:    Apply the bhanetwork.org design system (Field Lab) to the dashboard
+           without losing the original design. Destiny loves the original, so
+           it stays the default and one click away.
+
+Safety net:
+- Git tag `pre-fieldlab` on a375102, the last commit before this work.
+- Settings → Appearance → **Look**: Original (default) or Field Lab. Stored
+  per browser in localStorage `bha.look`, stamped on `<html data-look>` by
+  index.html before first paint. Render can also roll back to the previous
+  deploy in one click.
+
+Files:
+- `src/app/look.tsx` (new): LookProvider and useLook.
+- `src/fieldlab.css` (new): every rule scoped to `:root[data-look="fieldlab"]`,
+  so with Original selected nothing in it applies. Colours, fonts (Instrument
+  Serif, Geist, Geist Mono, self-hosted in `src/fonts/`), surfaces, tabs,
+  segmented controls, the sidebar and the summary banner. Light, plus dark
+  ("Dark A": black with a faint forest undertone, deeper forest sidebar).
+  No layout, spacing, data or behaviour changes.
+- `src/components/ui/phosphor.ts` (new): Phosphor icons (MIT), regular and
+  bold, vendored as path data (no package added). `Icons.tsx` serves Phosphor
+  in Field Lab and the hand-drawn set in Original; same names and props.
+- `src/screens/Settings.tsx`, `src/main.tsx`, `index.html`: the switch.
+- Private-tool basics: `public/robots.txt` (Disallow: /), meta robots noindex,
+  and server headers X-Robots-Tag, X-Frame-Options DENY, HSTS and a
+  Permissions-Policy that keeps the microphone for Ask Bays' voice input.
+
+Checked: local build, screenshots of Home, Open loops and Engine health in
+Original, Field Lab light and Field Lab dark, no page errors, no new type
+errors against the previous baseline. Earlier "No such route" figure strips
+came from the local mock server, not the live dashboard.
