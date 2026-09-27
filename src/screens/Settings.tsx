@@ -1,7 +1,6 @@
 import { useSession } from '../app/session';
 import { useData } from '../app/useData';
 import { useTheme, type ThemeChoice } from '../app/theme';
-import { useLook, type Look } from '../app/look';
 import { useZoom, ZOOMS, type ZoomChoice } from '../app/zoom';
 import { getServerStatus, TEAM_EMAIL } from '../data';
 import { PageHeader, Button, Card, Icon, Segmented } from '../components/ui';
@@ -20,7 +19,6 @@ export default function Settings() {
   const { session, signOut } = useSession();
   const { choice, setChoice } = useTheme();
   const { zoom, setZoom } = useZoom();
-  const { look, setLook } = useLook();
   const server = useData(() => getServerStatus());
   const expires = session?.expires_at ? new Date(session.expires_at).toLocaleString() : 'unknown';
   const s = server.data;
@@ -31,23 +29,6 @@ export default function Settings() {
       <div className="mx-6 grid max-w-[760px] gap-4 md:mx-8">
         <Card className="p-5">
           <h2 className="mb-3 text-[15px]">Appearance</h2>
-          {/*
-            The look (27 Sep 2026, Destiny): a safety net. Both designs ship;
-            this switch changes colours, fonts and icons only, never layout or
-            data. Original stays the default until Field Lab is approved.
-          */}
-          <div className="mb-4 flex items-center justify-between gap-4">
-            <span className="text-[13.5px]">Look</span>
-            <Segmented<Look>
-              value={look}
-              onChange={setLook}
-              options={[
-                { value: 'original', label: 'Original' },
-                { value: 'fieldlab', label: 'Field Lab' },
-              ]}
-              ariaLabel="Look"
-            />
-          </div>
           <div className="flex items-center justify-between gap-4">
             <span className="text-[13.5px]">Theme</span>
             <Segmented<ThemeChoice>
