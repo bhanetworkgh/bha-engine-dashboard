@@ -4,12 +4,13 @@
  * value it was not given. Every chart takes real numbers from the data module.
  */
 import { useEffect, useState } from 'react';
-import { CountUp, CountUpText } from './CountUp';
+import { CountUp, CountUpText, usePageReplay } from './CountUp';
 
 type Tone = 'ink' | 'accent' | 'degraded' | 'failing' | 'dim';
 
 /** True once, a frame after the signature changes, so a CSS transition can carry the bar to its size. */
-function useGrow(signature: string): boolean {
+function useGrow(own: string): boolean {
+  const signature = `${usePageReplay()}|${own}`;
   const [grown, setGrown] = useState(false);
   useEffect(() => {
     let reduce = false;

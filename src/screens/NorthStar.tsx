@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
 import { getNsTelemetry, getRecordMetrics, resyncRecords, type NsAsk, type NsMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
-import { ButtonAnchor, Tabs, PageHeader, Pagination, Button, CohortTable, CountUp, Definition, DistTile, DurationTrend, FigureCell, HBar, thisMonth, TileFigure, Pill, LoadFailed, Loading, MetricCard, MonthPicker, monthsFrom, EmptyPanel, EmptyState, Toast, OutcomeColumns, PercentCell, PercentileCell, RecordId, RecordTable, relativeTime, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, SourceLink, StatCaption, StatCell, StatLabel, StatStrip, usePaged, useResync, useToast } from '../components/ui';
+import { useReplayKey, ButtonAnchor, Tabs, PageHeader, Pagination, Button, CohortTable, CountUp, Definition, DistTile, DurationTrend, FigureCell, HBar, thisMonth, TileFigure, Pill, LoadFailed, Loading, MetricCard, MonthPicker, monthsFrom, EmptyPanel, EmptyState, Toast, OutcomeColumns, PercentCell, PercentileCell, RecordId, RecordTable, relativeTime, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, SourceLink, StatCaption, StatCell, StatLabel, StatStrip, usePaged, useResync, useToast } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 import { DELIVERY_DEFS, NS_OUTCOME_DEFS } from './twinDefinitions';
 
@@ -639,6 +639,8 @@ export default function NorthStar() {
   const [open, setOpen] = useState<string | null>(null);
   const [view, setView] = useState<View>('Asks');
   const [month, setMonth] = useState<string | null>(thisMonth());
+  /* Switching any of these re-runs the page's count-ups and bars (27 Sep 2026). */
+  useReplayKey(`${view}|${month}|${filter}`);
   const [tick, setTick] = useState(0);
   const [held, setHeld] = useState<NsAsk[]>([]);
   const { toast, setToast } = useToast();

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useSession } from '../app/session';
-import { Button, Icon, type IconName } from './ui';
+import { Button, Icon, ReplayProvider, type IconName } from './ui';
 import { ClockChip, ThemeChip } from './ClockChip';
 import { cx } from '../lib';
 
@@ -230,9 +230,11 @@ export default function Layout() {
           anywhere.
         */}
         <main className={cx('shell-main flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto md:overflow-hidden', !bare && '[&>div>*]:pt-[72px]')}>
+          <ReplayProvider>
           <div key={location.pathname.split('/')[1] ?? ''} className="page-in flex min-h-0 flex-1 flex-col">
             <Outlet />
           </div>
+          </ReplayProvider>
         </main>
       </div>
     </div>

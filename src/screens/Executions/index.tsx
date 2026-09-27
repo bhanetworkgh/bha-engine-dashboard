@@ -17,7 +17,7 @@ import {
 import { buildReport, reportName } from '../../lib/executionReport';
 import { downloadCsv } from '../../lib/csv';
 import { COVERAGE_DEFS, MODE_DEFS, MODE_OTHER, RECENT_DEF, STATUS_DEFS, STATUS_OTHER, tabDef } from './definitions';
-import { Tabs, PageHeader, yearOf, Button, CountUpText, Definition, InfoTip, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, monthLabel, MonthPicker, Toast, relativeTime, useToast } from '../../components/ui';
+import { useReplayKey, Tabs, PageHeader, yearOf, Button, CountUpText, Definition, InfoTip, Legend, LineChart, LoadFailed, Loading, MetricCard, MonthChart, monthLabel, MonthPicker, Toast, relativeTime, useToast } from '../../components/ui';
 
 /**
  * Executions — every run of every workflow in the engine, one row per run.
@@ -869,6 +869,8 @@ export default function Executions() {
    * show.
    */
   const [scope, setScope] = useState<'production' | 'internal'>('production');
+  /* Switching any of these re-runs the page's count-ups and bars (27 Sep 2026). */
+  useReplayKey(`${tab}|${period}|${scope}`);
   const { toast, setToast } = useToast();
 
   const { status, data, error } = useData(() => getExecutions('month', period ?? undefined, scope), [period, tick, scope], { refreshMs: REFRESH_MS, kinds: ['executions'] });

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../../app/useData';
 import { BUILDER_NAMES, createLoop, getOpenLoops, getRecordMetrics, removeLoopDuplicate, resyncRecords, saveLoop, type Loop, type LoopEdit, type LoopMetrics, type LoopStatus, type NewLoop, type OpenLoopsData } from '../../data';
-import { Tabs, PageHeader, Pagination, Button, Definition, thisMonth, Icon, LoadFailed, Loading, MonthPicker, monthsFrom, Toast, ResyncButton, RowsLine, SearchBox, Segmented, usePaged, useRecordLink, useResync, useToast } from '../../components/ui';
+import { useReplayKey, Tabs, PageHeader, Pagination, Button, Definition, thisMonth, Icon, LoadFailed, Loading, MonthPicker, monthsFrom, Toast, ResyncButton, RowsLine, SearchBox, Segmented, usePaged, useRecordLink, useResync, useToast } from '../../components/ui';
 import { LoopPanel } from './LoopPanel';
 import { Loops, type StatusFilter } from './Loops';
 import { LoopMetricsPanel, LoopStatusStrip } from './Metrics';
@@ -50,6 +50,8 @@ export default function OpenLoops() {
    */
   const [month, setMonth] = useState<string | null>(thisMonth());
   const [view, setView] = useState<View>('Loops');
+  /* Switching any of these re-runs the page's count-ups and bars (27 Sep 2026). */
+  useReplayKey(`${view}|${month}|${owner}`);
   const [showNew, setShowNew] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);

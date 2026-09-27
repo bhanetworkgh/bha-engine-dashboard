@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useData } from '../app/useData';
 import { getBuildPatterns, getPatternCandidates, getPatternDetail, getRecordMetrics, resyncRecords, searchPatterns, type BuildPattern, type BuildPatternDetail, type PatternMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
-import { Tabs, PageHeader, Pagination, Button, CountCell, Definition, HBar, thisMonth, LoadFailed, Loading, MetricCard, monthLabel, MonthPicker, monthsFrom, EmptyPanel, EmptyState, Toast, RecordId, RecordTable, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, StatCell, StatStrip, usePaged, useResync, useToast, TwoLine } from '../components/ui';
+import { useReplayKey, Tabs, PageHeader, Pagination, Button, CountCell, Definition, HBar, thisMonth, LoadFailed, Loading, MetricCard, monthLabel, MonthPicker, monthsFrom, EmptyPanel, EmptyState, Toast, RecordId, RecordTable, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, StatCell, StatStrip, usePaged, useResync, useToast, TwoLine } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 import { REUSE_DEFS } from './recordDefinitions';
 import { CandidatesTab } from './PatternCandidates';
@@ -360,6 +360,8 @@ export default function BuildPatterns() {
   const [month, setMonth] = useState<string | null>(thisMonth());
   const [params, setParams] = useSearchParams();
   const view = viewFrom(params.get('view'));
+  /* Switching any of these re-runs the page's count-ups and bars (27 Sep 2026). */
+  useReplayKey(`${view}|${month}|${reuse}`);
   const setView = (v: View) => {
     const next = new URLSearchParams(params);
     if (VIEW_PARAM[v]) next.set('view', VIEW_PARAM[v]!);
