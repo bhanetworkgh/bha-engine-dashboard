@@ -45,9 +45,9 @@ export const BHARAG_URL = (process.env.BHARAG_API_URL || 'https://bharag2.duckdn
  * Missing is missing, and the page says which.
  */
 export const LANE_KEY_VARS: Record<string, string> = {
-  bays: 'BHARAG_BAYS_KEY',
-  north_star: 'BHARAG_NORTH_STAR_KEY',
-  research_twin: 'BHARAG_RESEARCH_TWIN_KEY',
+  bays: 'BHARAG_BAYS_INCIDENTS',
+  north_star: 'BHARAG_NS_INCIDENTS',
+  research_twin: 'BHARAG_RT_INCIDENTS',
 };
 
 function keyFor(lane: string): string | null {
@@ -309,10 +309,16 @@ export const INGEST_KEY_VARS = {
   /**
    * Research Twin's workspace (2026-09-24): `update_watched_client_question`
    * ingests each answered question here, as `UWC - Ingest To BHARAG` did with
-   * n8n's "BHARAG - Research Twin" credential — the same key the Research Twin
-   * lane reads the incident ledger with.
+   * n8n's "BHARAG - Research Twin" credential.
+   *
+   * **This has always been a separate credential from the incidents-read
+   * one** (2026-09-28 correction): n8n has always kept "BHARAG - Research
+   * Twin" (ingest) and "BHARAG - RT Incidents" (`LANE_KEY_VARS.research_twin`)
+   * as two distinct, separately-scoped keys. An earlier version of this
+   * comment claimed they were the same key reused across purposes — they
+   * never were; that was this file's own mistake, not a BHARAG scope gap.
    */
-  research_twin: 'BHARAG_RESEARCH_TWIN_KEY',
+  research_twin: 'BHARAG_RESEARCH_TWIN',
 } as const;
 export type IngestWorkspace = keyof typeof INGEST_KEY_VARS;
 

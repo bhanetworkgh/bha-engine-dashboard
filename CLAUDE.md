@@ -1226,8 +1226,11 @@ code, clock frozen, came out identical on 77 cases before anything was wired.
   Research Stuck at `Run Count` 3 (the source reads the count and never
   increments it — nor does this), the previous Plain Summary kept when none is
   given. Then one BHARAG doc per answered question into Research Twin's
-  workspace with **`BHARAG_RESEARCH_TWIN_KEY`** — the lane key, which is what
-  n8n's "BHARAG - Research Twin" credential is. **A BHARAG failure degrades and
+  workspace with **`BHARAG_RESEARCH_TWIN`** — a dedicated ingest key, which is
+  what n8n's "BHARAG - Research Twin" credential is. **This is a separate
+  credential from `BHARAG_RT_INCIDENTS`** (2026-09-28 correction): n8n has
+  always kept ingest and incidents-read as two distinct keys for this lane,
+  never one shared between them. **A BHARAG failure degrades and
   never rolls back**: the row is written and the answer says
   `ingested_to_bharag: false`. In n8n that node stopped the whole call.
 - **`create_client_report_doc`** (`CCR -`): the lane from the watched-clients
@@ -1538,7 +1541,7 @@ row stays exactly as it was. Not the same credential as `ASK_BAYS_API_KEY`,
 which is a webhook header. Without it no execution is ever read, the Executions
 page says so rather than reading zero, and the Repairs tab says no repair can be
 put back from here.
-`BHARAG_BAYS_KEY`, `BHARAG_NORTH_STAR_KEY` and `BHARAG_RESEARCH_TWIN_KEY` — the
+`BHARAG_BAYS_INCIDENTS`, `BHARAG_NS_INCIDENTS` and `BHARAG_RT_INCIDENTS` — the
 incident ledger, one per lane, read only, no defaults. A lane with no key is
 never read and Engine health says so rather than showing it healthy; the boot
 line names every lane that is not keyed. `AIRTABLE_TOKEN` also needs read on
@@ -1568,7 +1571,8 @@ default. `SLACK_NORTH_STAR_BOT_TOKEN` — North Star's own bot token
 the Bays one. `SLACK_RESEARCH_TWIN_BOT_TOKEN` — Research Twin's own bot token
 (`files:write`, `chat:write`, in #watched-clients) for
 `create_client_report_doc` (2026-09-24); no default, and never interchangeable
-with the other two. `BHARAG_RESEARCH_TWIN_KEY` is also what
+with the other two. `BHARAG_RESEARCH_TWIN` — a dedicated ingest key, separate
+from `BHARAG_RT_INCIDENTS` above — is what
 `update_watched_client_question` ingests with. `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` and
 `GOOGLE_OAUTH_REFRESH_TOKEN`, **or** `GOOGLE_SERVICE_ACCOUNT_JSON` — Drive and
 Docs for the three Drive tools and the pattern Doc (scopes `drive` and
@@ -2156,7 +2160,7 @@ ever been read:
   **One call per lane, each with its own credential** — the three error handlers
   each hold their own BHARAG key and a key for one lane is refused for another,
   so this is three calls with three keys and cannot be collapsed into one.
-  `BHARAG_BAYS_KEY`, `BHARAG_NORTH_STAR_KEY`, `BHARAG_RESEARCH_TWIN_KEY`, no
+  `BHARAG_BAYS_INCIDENTS`, `BHARAG_NS_INCIDENTS`, `BHARAG_RT_INCIDENTS`, no
   defaults, on the same rule the Airtable base ids follow.
 - **`error_counts`** (`appINvgEoZjuYQI2O / tblnvhKOnuOoiB1RX`), one row per
   recurring fault signature, shared by all three lanes.
