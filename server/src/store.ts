@@ -712,7 +712,12 @@ async function mirrorRowById(kind: RecordKind, id: string, on?: Queryable): Prom
   const r = local
     ? await db(on).query<MirrorRow>(`${selectFor(kind)} WHERE id = $1`, [local[1]])
     : await db(on).query<MirrorRow>(`${selectFor(kind)} WHERE airtable_record_id = $1`, [id]);
-  return r.rows[0] ?? null;
+  if (r.rows[0] || local) return r.rows[0] ?? null;
+  // 2026-09-28 -- a record can also be opened by its own id (BP-…, CARD-…), so a Slack card
+  // posted before the row exists can still link to that record rather than to the list.
+  // natural_id is not unique by design; the most recently written row is the one shown.
+  const n = await db(on).query<MirrorRow>(`${selectFor(kind)} WHERE natural_id = $1 ORDER BY id DESC LIMIT 1`, [id]);
+  return n.rows[0] ?? null;
 }
 
 async function rowById(kind: RecordKind, id: string, on?: Queryable): Promise<Row | null> {
