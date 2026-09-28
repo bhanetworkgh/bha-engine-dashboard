@@ -1969,6 +1969,20 @@ const MIGRATIONS: Migration[] = [
        ON CONFLICT (lane_id) DO NOTHING`,
     ],
   },
+  {
+    id: 39,
+    name: 'engine_lane_profiles.linked_lanes: which research lanes a work lane draws on',
+    statements: [
+      /**
+       * 28 Sep 2026, Jason (#bha-north-star-twin): research gleanings must live
+       * with the lane. Research Twin's jobs carry commercial LANE-… ids and never
+       * a work-lane tag, so a work lane such as VFARM_HARDWARE reaches its
+       * research only through the commercial lanes it is linked to. Empty until
+       * somebody links them: a guessed link would attach the wrong findings.
+       */
+      `ALTER TABLE engine_lane_profiles ADD COLUMN IF NOT EXISTS linked_lanes text[] NOT NULL DEFAULT '{}'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

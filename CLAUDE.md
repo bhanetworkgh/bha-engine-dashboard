@@ -810,6 +810,21 @@ reasonable about.
   `engine_mcp_writes`. `npm run test:lane-ranking` pins the maths. Driving
   Research Twin, self-heal and autopay from the ranking is the next step, in
   that order, autopay only once Jason has agreed the rule.
+- **Lane health turns the ranking into a loop per lane** (2026-09-28, Jason in
+  the same thread). `server/src/laneHealth.ts`, read tool `lane_health` (both
+  connections, North Star's scope). Computed at read time, nothing written:
+  **research** — a resolved Research Twin job *is* a gleaning (asked, found,
+  confidence, limits, needs-depth), states not_started / in_queue / active /
+  answered / stale (older than 30 days), and a re-entry signal `first_pass` /
+  `deeper_pass` / `none`, proposed only for the top five lanes; **self-heal** —
+  open incidents, incidents in 14 days and recurring fault signatures, for
+  BAYS, NS and RT only (the lanes with workflows), "not instrumented" for the
+  rest; **logs** — Codex logs whose `Lanes Touched` names the lane, awaiting
+  evaluation or evaluated, autopaid null until the rule exists; **convergence**
+  — loops raised against closed (status ledger) in 14 days. Research jobs carry
+  commercial LANE-… ids, never work-lane tags, so a work lane reaches research
+  only through `engine_lane_profiles.linked_lanes` (migration 39), set with
+  `set_lane_profile`, empty until somebody links them.
 - **One token per agent, scoped on the server** (decision 2026-09-28, Destiny —
   Agent Upgrade Plan step 1.4). `READONLY_SECRETS_NORTH_STAR` (read, 10 tools),
   `MCP_AGENT_TOKEN_RESEARCH_TWIN` (write, 7) and `MCP_AGENT_TOKEN_BAYS` (write,

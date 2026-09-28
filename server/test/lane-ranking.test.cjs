@@ -57,3 +57,30 @@ assert.deepEqual(o1, o2);
 assert.deepEqual(r.rank(set, now).map((l) => l.rank), [1, 2, 3]);
 
 console.log('lane-ranking: all assertions passed');
+
+// ---- lane health: research state and the re-entry signal (laneHealth.ts) ----
+const h = require(path.join(process.env.LANE_RANKING_DIST || path.join(__dirname, '../../server-dist'), 'server/src/laneHealth.js'));
+const job = (o) => ({ lane_id: 'LANE-X', job_id: 'J', status: 'Resolved', question: 'q', verdict: 'v', finding: '', confidence: 'High', missing: null, resolved_at: '2026-09-20T00:00:00Z', ...o });
+// No linked research lane: nothing to research against.
+assert.equal(h.researchState([], [job()], 1, now).action, 'none');
+// Top-ranked, nothing on record: first pass.
+assert.equal(h.researchState(['LANE-X'], [], 1, now).action, 'first_pass');
+assert.equal(h.researchState(['LANE-X'], [], 1, now).state, 'not_started');
+// Ranked below the top five: waits.
+assert.equal(h.researchState(['LANE-X'], [], 6, now).action, 'none');
+// An open job: in queue, nothing new proposed.
+const q = h.researchState(['LANE-X'], [job({ status: 'Pending' })], 1, now);
+assert.equal(q.state, 'in_queue');
+assert.equal(q.action, 'none');
+// Answered with high confidence and no gaps: answered for now.
+const a = h.researchState(['LANE-X'], [job()], 1, now);
+assert.equal(a.state, 'answered');
+assert.equal(a.action, 'none');
+// Low confidence or named gaps: deeper pass.
+assert.equal(h.researchState(['LANE-X'], [job({ confidence: 'Low' })], 1, now).action, 'deeper_pass');
+assert.equal(h.researchState(['LANE-X'], [job({ missing: 'no pricing data' })], 1, now).action, 'deeper_pass');
+// Older than 30 days: stale, deeper pass.
+const s = h.researchState(['LANE-X'], [job({ resolved_at: '2026-08-01T00:00:00Z' })], 1, now);
+assert.equal(s.state, 'stale');
+assert.equal(s.action, 'deeper_pass');
+console.log('lane-health: all assertions passed');
