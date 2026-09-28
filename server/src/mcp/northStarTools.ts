@@ -23,6 +23,7 @@
  * to `engine_writes` as `read` like `find_records`.
  */
 import * as mirror from '../mirror';
+import * as pg from '../pg';
 import * as slack from '../slack';
 import type { ToolAnnotations, ToolDefinition, ToolDeps } from './tools';
 
@@ -548,8 +549,47 @@ export const readOpenLoopsTool: ToolDefinition = {
 
 /* ===================================================== get_priority_evidence */
 
+/**
+ * Every lane id a card or a research job carries, read across the whole of both
+ * tables rather than the newest 300 the evidence reads — a real lane whose rows
+ * are all older than that must not be refused as unknown.
+ */
+export async function knownLaneIds(): Promise<string[]> {
+  const { rows } = await pg.query<{ lane_id: string }>(
+    `select lane_id from engine_commercial_cards where lane_id is not null and lane_id <> ''
+     union select lane_id from engine_rt_jobs where lane_id is not null and lane_id <> ''
+     order by 1`,
+  );
+  return rows.map((r) => r.lane_id);
+}
+
 export async function getPriorityEvidence(args: { lane_id?: unknown }): Promise<Record<string, unknown>> {
   const lane = String(args.lane_id || '').trim();
+
+  // A lane id no card or job carries is refused, never answered (2026-09-28).
+  // It used to come back as an ordinary empty answer — "no cards, no jobs" —
+  // which reads exactly like a real, quiet lane. North Star's instructions say
+  // never to guess one; this is that rule held by the server as well, so a
+  // guess fails loudly and names the real ids instead of passing as evidence.
+  if (lane) {
+    const known = await knownLaneIds();
+    if (!known.includes(lane)) {
+      const lower = lane.toLowerCase();
+      const words = lower.replace(/^lane-/, '').split(/[-_\s]+/).filter((w) => w.length > 2);
+      const close = known.filter((k) => {
+        const kl = k.toLowerCase();
+        return kl === lower || words.some((w) => kl.includes(w));
+      });
+      return {
+        ok: false,
+        error: 'unknown_lane_id',
+        lane_id: lane,
+        message: `No commercial card or research job carries lane_id "${lane}". Lane ids are exact and case-sensitive; never construct one. Pick one from lanes_seen${close.length ? ' (close matches listed first)' : ''}, or call again with no lane_id for the whole board.`,
+        close_matches: close,
+        lanes_seen: known,
+      };
+    }
+  }
 
   /* PE - Fetch Codex, PE - Fetch RT Jobs, PE - Fetch Commercial */
   const cx = (await mirror.lookup('codex', { filters: [], limit: 40, order: 'created_desc' })).rows;
@@ -618,7 +658,7 @@ export const getPriorityEvidenceTool: ToolDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      lane_id: { type: 'string', description: 'Optional, e.g. LANE-VFARM-ZONE_MONITORING_SAAS. lanes_seen lists the ones held.' },
+      lane_id: { type: 'string', description: 'Optional, e.g. LANE-VFARM-ZONE_MONITORING_SAAS. Exact and case-sensitive; take it from lanes_seen. An id no card or job carries is refused with error unknown_lane_id, close_matches and the full lanes_seen — never an empty answer.' },
       ...MAX_CHARS_ARG,
     },
     additionalProperties: false,
@@ -627,6 +667,10 @@ export const getPriorityEvidenceTool: ToolDefinition = {
   handler: async (args, deps) => {
     const t0 = Date.now();
     const read = await getPriorityEvidence(args);
+    if (read.ok === false) {
+      await logRead('get_priority_evidence', 'priority_evidence', deps, `refused unknown lane ${String(read.lane_id)} (${(read.close_matches as unknown[]).length} close, ${(read.lanes_seen as unknown[]).length} known)`, t0);
+      return read;
+    }
     const out = fitToBudget(read, ['recent_work_logs', 'research_jobs', 'commercial_cards'], maxCharsOf(args), 'lane_id', null);
     await logRead('get_priority_evidence', 'priority_evidence', deps, `${out.lane_id ? `lane ${String(out.lane_id)} ` : ''}→ ${(out.recent_work_logs as unknown[]).length} logs, ${(out.research_jobs as unknown[]).length} of ${String(out.research_jobs_total)} jobs, ${(out.commercial_cards as unknown[]).length} of ${String(out.commercial_cards_total)} cards, ${String(out.result_chars)} chars`, t0);
     return out;

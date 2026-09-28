@@ -10672,3 +10672,10 @@ Checked: `grep` for the three old var names across the repo turns up nothing
 outside this log and the dated entries above it. Live verification (boot log
 + incident read + ingest test) pending the Render deploy this commit
 triggers.
+
+## 2026-09-28 13:15 — Unknown lane ids refused; MCP streams capped
+Intent:     D3 follow-up from the 27 Sep North Star test: a guessed lane id and a one-off 520 on a dashboard read.
+Files:      server/src/mcp/northStarTools.ts, server/src/mcp/index.ts, server/test/north-star-tools.test.cjs, CLAUDE.md
+Problem:    The 27 Sep logs show North Star did not guess: it read the whole board, then asked for LANE-VFARM-ZONE_MONITORING_SAAS, a real id, and got 1 card. The failed call left no trace here at all — it never reached this server. Two real gaps stood anyway: (1) get_priority_evidence answered an unknown lane_id with an ordinary empty result, indistinguishable from a quiet lane, so "never guess a lane id" was held only by North Star's prompt; (2) MCP GET streams accumulated — 94 → 137 open between 10:48 and 12:10 UTC on 28 Sep, with only a handful of closes, on a 0.5-CPU instance.
+Fix:        (1) An unknown lane_id is refused: ok false, error unknown_lane_id, close_matches, and lanes_seen read from the whole of engine_commercial_cards and engine_rt_jobs (not the newest 300, so an old real lane is never refused). Test added. (2) A stream is ended after 10 minutes, and past 40 open the oldest is ended first. The server pushes nothing down a stream, so ending one loses nothing; a client that wants one reopens it.
+Decision:   No typecheck was possible here (npm ci answers 403 from the sandbox registry); the Render build is the typecheck, and a failed build leaves the running deploy in place. The link between the stream pile-up and the 520 is not proven — the cap is worth having either way.
