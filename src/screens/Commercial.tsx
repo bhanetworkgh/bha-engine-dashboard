@@ -628,7 +628,8 @@ export default function Commercial() {
   }
 
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
-  const current = open ? cards.find((o) => o.id === open) : null;
+  // `?open=` takes the row id or the card's own CARD-… id, so a Slack card can link here (2026-09-28).
+  const current = open ? cards.find((o) => o.id === open) ?? cards.find((o) => o.card_id === open) ?? null : null;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
