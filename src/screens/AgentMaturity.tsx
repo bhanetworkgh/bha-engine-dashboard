@@ -121,7 +121,7 @@ export default function AgentMaturity() {
             )}
             <div className="flex justify-between gap-4 border-b border-line py-2">
               <span className="text-ink">Eval pass rate</span>
-              <span className="text-right text-dim">{d.evals.pass_rate === null ? d.evals.note : `${Math.round(d.evals.pass_rate * 100)}%`}</span>
+              <span className="text-right text-dim">{d.evals.pass_rate === null ? d.evals.note : <>{`${Math.round(d.evals.pass_rate * 100)}%`}<br /><span className="text-faint">{d.evals.note}</span></>}</span>
             </div>
             <div className="flex justify-between gap-4 py-2">
               <span className="text-ink">Injection tests</span>

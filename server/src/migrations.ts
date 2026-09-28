@@ -1902,6 +1902,30 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_bays_asks_natural ON engine_bays_asks (natural_id)`,
     ],
   },
+  {
+    id: 37,
+    name: 'engine_eval_runs: agent eval results, one row per case per repeat',
+    statements: [
+      /**
+       * 28 Sep 2026, Destiny — Agent Upgrade Plan steps 3.2–3.4. Written by
+       * the n8n eval runner; read by the scorecard's eval pass rate. Same
+       * mirror columns as every engine table so mirror.upsert writes it.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_eval_runs (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         lane_id             text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_eval_runs_natural ON engine_eval_runs (natural_id)`,
+      `CREATE INDEX IF NOT EXISTS engine_eval_runs_run ON engine_eval_runs ((fields->>'Run ID'))`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

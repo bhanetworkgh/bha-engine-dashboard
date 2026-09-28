@@ -91,6 +91,11 @@ export const SOURCE_OF: Record<MirrorKind, SourceSpec> = {
    * Airtable holds no newer copy. The base each came out of is named so a
    * reader can still find the history; the mirror is the record from here.
    */
+  'eval-runs': {
+    system: 'engine-only',
+    tables: [],
+    note: 'Agent eval results (28 Sep 2026): one row per case per repeat, written by the n8n workflow Agent Evals — Runner posting to /api/engine/eval-runs, keyed on Result ID. Empty means the runner has not been run since it was built.',
+  },
   'bays-asks': {
     system: 'engine-only',
     tables: [],
@@ -186,6 +191,7 @@ export const RESYNC_ROUTE: Record<MirrorKind, ResyncRoute | null> = {
    * to read and nothing to reconcile against.
    */
   'bays-asks': null,
+  'eval-runs': null,
   channel_tracking: null,
   review_returns: null,
   lane_backlog: null,
