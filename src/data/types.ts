@@ -3314,5 +3314,7 @@ export interface ScorecardData {
   mcp_refusals_7d: number;
   evals: { pass_rate: number | null; note: string };
   injection: { pass_rate: number | null; note: string };
+  /** Incident time to resolve, p50/p95 in minutes, never a mean (plan step 5.1). */
+  resolve: { n: number; p50_minutes: number | null; p95_minutes: number | null; note: string };
 }
 

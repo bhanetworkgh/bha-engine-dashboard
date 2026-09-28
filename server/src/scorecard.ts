@@ -64,6 +64,80 @@ async function evalSummary(): Promise<ScorecardData['evals']> {
   };
 }
 
+/**
+ * Prompt-injection tests (plan step 6.2): the `INJ-` cases plus the three
+ * injection cases that came first (NS-03, RT-03, BAYS-03, plan step 1.5), read
+ * from the latest eval run that carried any of them, pass^k like the rest.
+ */
+const INJECTION_CASES = "(fields->>'Case ID' LIKE 'INJ-%' OR fields->>'Case ID' IN ('NS-03', 'RT-03', 'BAYS-03'))";
+
+async function injectionSummary(): Promise<ScorecardData['injection']> {
+  const latest = await query<{ run: string | null }>(
+    `SELECT fields->>'Run ID' AS run FROM engine_eval_runs WHERE ${INJECTION_CASES} ORDER BY id DESC LIMIT 1`,
+  );
+  const run = latest.rows[0]?.run ?? null;
+  if (!run) return { pass_rate: null, note: 'No injection test has run yet. They are in the eval set; run Agent Evals — Runner.' };
+  const r = await query<{ cases: string; passed: string; failed: string | null }>(
+    `WITH per_case AS (
+       SELECT fields->>'Case ID' AS case_id, bool_and((fields->>'Passed') = 'true') AS ok
+         FROM engine_eval_runs WHERE fields->>'Run ID' = $1 AND ${INJECTION_CASES} GROUP BY 1
+     )
+     SELECT count(*)::text AS cases, count(*) FILTER (WHERE ok)::text AS passed,
+            string_agg(case_id, ', ' ORDER BY case_id) FILTER (WHERE NOT ok) AS failed
+       FROM per_case`,
+    [run],
+  );
+  const row = r.rows[0];
+  const cases = Number(row?.cases ?? 0);
+  const passed = Number(row?.passed ?? 0);
+  return {
+    pass_rate: cases ? passed / cases : null,
+    note: `${passed} of ${cases} injection cases passed in run ${run}${row?.failed ? `; failed: ${row.failed}` : ''}.`,
+  };
+}
+
+/**
+ * Time to resolve an incident (plan step 5.1, the part the data supports).
+ * BHARAG records no resolved_at and no resolver, so the close is dated by the
+ * last 3-minute ledger read that still saw the incident open: accurate to about
+ * three minutes, and only for incidents that closed after that poll began
+ * (2026-09-27 16:46 UTC). Five or more closing in the same minute is a bulk
+ * sweep, not a resolution, and is left out. Never a mean.
+ */
+const LEDGER_POLL_SINCE = '2026-09-27T16:46:00Z';
+
+async function resolveSummary(): Promise<ScorecardData['resolve']> {
+  const r = await query<{ n: string; p50: string | null; p95: string | null; by_sev: string | null }>(
+    `WITH closed AS (
+       SELECT fields->>'severity' AS severity,
+              extract(epoch FROM (last_seen_open::timestamptz - (fields->>'occurred_at')::timestamptz)) / 60 AS mins,
+              date_trunc('minute', last_seen_open::timestamptz) AS closed_min
+         FROM engine_incidents
+        WHERE NOT open_now AND last_seen_open >= $1 AND fields->>'occurred_at' IS NOT NULL
+     ), bulk AS (
+       SELECT closed_min FROM closed GROUP BY 1 HAVING count(*) >= 5
+     ), kept AS (
+       SELECT * FROM closed WHERE closed_min NOT IN (SELECT closed_min FROM bulk)
+     )
+     SELECT count(*)::text AS n,
+            round(percentile_cont(0.5) WITHIN GROUP (ORDER BY mins))::text AS p50,
+            round(percentile_cont(0.95) WITHIN GROUP (ORDER BY mins))::text AS p95,
+            (SELECT string_agg(severity || ' ' || c, ', ') FROM (SELECT coalesce(severity, 'unknown') AS severity, count(*) AS c FROM kept GROUP BY 1) s) AS by_sev
+       FROM kept`,
+    [LEDGER_POLL_SINCE],
+  );
+  const row = r.rows[0];
+  const n = Number(row?.n ?? 0);
+  return {
+    n,
+    p50_minutes: n && row?.p50 !== null ? Number(row?.p50) : null,
+    p95_minutes: n && row?.p95 !== null ? Number(row?.p95) : null,
+    note: n
+      ? `Over ${n} incident${n === 1 ? '' : 's'} closed since the 3-minute ledger poll began on 27 Sep (${row?.by_sev}). Dated by the last read that saw each open, so accurate to about 3 minutes; bulk closes (5+ in one minute) excluded. Who closed them is not recorded upstream.`
+      : 'No incident has closed since the 3-minute ledger poll began on 27 Sep, so there is nothing to time yet.',
+  };
+}
+
 export async function data(): Promise<ScorecardData> {
   const latest = await query<{ scored_on: string }>(`SELECT max(scored_on)::text AS scored_on FROM engine_agent_scorecard`);
   const scoredOn = latest.rows[0]?.scored_on ?? null;
@@ -122,6 +196,7 @@ export async function data(): Promise<ScorecardData> {
     quota: q,
     mcp_refusals_7d: Number(refusals.rows[0]?.n ?? 0),
     evals: await evalSummary(),
-    injection: { pass_rate: null, note: 'No injection tests recorded yet; they arrive with the red-team set in Phase 6.' },
+    injection: await injectionSummary(),
+    resolve: await resolveSummary(),
   };
 }
