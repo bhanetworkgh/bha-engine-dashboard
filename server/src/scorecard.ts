@@ -41,12 +41,35 @@ async function ledger(table: string, agent: string): Promise<AgentMetric> {
  * its repeats passed — pass^k — so a flaky answer cannot average its way to a
  * pass. Null with a note until a run exists.
  */
-async function evalSummary(): Promise<ScorecardData['evals']> {
-  const latest = await query<{ run: string | null }>(
-    `SELECT fields->>'Run ID' AS run FROM engine_eval_runs ORDER BY id DESC LIMIT 1`,
+/**
+ * Only a finished run is scored (28 Sep, found by the independent re-score: the
+ * figure read "1 of 1 passed" off a run two results in). From 28 Sep every result
+ * carries 'Run Size', the number of results its run will write, so a run is
+ * finished once it holds that many. The runs before that carry no size and count
+ * as finished once 30 minutes pass with no new result. `where` narrows which
+ * results a run must contain to be a candidate at all.
+ */
+async function latestCompleteRun(where = 'TRUE'): Promise<{ run: string | null; inProgress: string | null }> {
+  const r = await query<{ run: string; complete: boolean }>(
+    `WITH runs AS (
+       SELECT fields->>'Run ID' AS run, count(*) AS n, max((fields->>'Run Size')::int) AS size,
+              max(created_time) AS last, max(id) AS last_id,
+              bool_or(${where}) AS relevant
+         FROM engine_eval_runs GROUP BY 1
+     )
+     SELECT run, (CASE WHEN size IS NOT NULL THEN n >= size
+                       ELSE last::timestamptz < now() - interval '30 minutes' END) AS complete
+       FROM runs WHERE relevant ORDER BY last_id DESC LIMIT 5`,
   );
-  const run = latest.rows[0]?.run ?? null;
-  if (!run) return { pass_rate: null, note: 'No eval run recorded yet. Run the n8n workflow Agent Evals — Runner.' };
+  const done = r.rows.find((x) => x.complete)?.run ?? null;
+  const first = r.rows[0];
+  return { run: done, inProgress: first && !first.complete ? first.run : null };
+}
+
+async function evalSummary(): Promise<ScorecardData['evals']> {
+  const { run, inProgress } = await latestCompleteRun();
+  const pending = inProgress ? ` Run ${inProgress} is still in progress and is not counted yet.` : '';
+  if (!run) return { pass_rate: null, note: `No finished eval run yet. Run the n8n workflow Agent Evals — Runner.${pending}` };
   const r = await query<{ cases: string; passed: string; results: string; at: string | null }>(
     `WITH per_case AS (
        SELECT fields->>'Case ID' AS case_id, bool_and((fields->>'Passed') = 'true') AS ok, count(*) AS n, max(fields->>'Run At') AS at
@@ -60,7 +83,7 @@ async function evalSummary(): Promise<ScorecardData['evals']> {
   const passed = Number(row?.passed ?? 0);
   return {
     pass_rate: cases ? passed / cases : null,
-    note: `${passed} of ${cases} cases passed in run ${run}${row?.at ? ` (${row.at.slice(0, 16).replace('T', ' ')} UTC)` : ''}; a case passes only if all its repeats pass (${row?.results ?? 0} results).`,
+    note: `${passed} of ${cases} cases passed in run ${run}${row?.at ? ` (${row.at.slice(0, 16).replace('T', ' ')} UTC)` : ''}; a case passes only if all its repeats pass (${row?.results ?? 0} results).${pending}`,
   };
 }
 
@@ -72,11 +95,8 @@ async function evalSummary(): Promise<ScorecardData['evals']> {
 const INJECTION_CASES = "(fields->>'Case ID' LIKE 'INJ-%' OR fields->>'Case ID' IN ('NS-03', 'RT-03', 'BAYS-03'))";
 
 async function injectionSummary(): Promise<ScorecardData['injection']> {
-  const latest = await query<{ run: string | null }>(
-    `SELECT fields->>'Run ID' AS run FROM engine_eval_runs WHERE ${INJECTION_CASES} ORDER BY id DESC LIMIT 1`,
-  );
-  const run = latest.rows[0]?.run ?? null;
-  if (!run) return { pass_rate: null, note: 'No injection test has run yet. They are in the eval set; run Agent Evals — Runner.' };
+  const { run } = await latestCompleteRun(INJECTION_CASES);
+  if (!run) return { pass_rate: null, note: 'No finished run has carried the injection tests yet. They are in the eval set; run Agent Evals — Runner.' };
   const r = await query<{ cases: string; passed: string; failed: string | null }>(
     `WITH per_case AS (
        SELECT fields->>'Case ID' AS case_id, bool_and((fields->>'Passed') = 'true') AS ok
