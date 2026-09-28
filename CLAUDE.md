@@ -781,6 +781,18 @@ reasonable about.
   client cannot read the session id this server issued to it, and **`DELETE`
   answers 204**. All three are behind the same secret check, so none of them
   tells an unauthenticated caller the endpoint is there.
+- **Two engine-only ledgers for the agent scorecard** (2026-09-28, Destiny —
+  Agent Upgrade Plan steps 2.5 and 3.2–3.4). `bays-asks` (`engine_bays_asks`,
+  migration 36) is written by `Bays — Agent Delivery` after every reply, the
+  twins' shape, keyed on `Ask ID`; `eval-runs` (`engine_eval_runs`, migration
+  37) is written by the n8n workflow `Agent Evals — Runner` (folder Engine
+  Evals), one row per case per repeat, keyed on `Result ID`. Neither has an
+  Airtable copy, so nothing resyncs them. The scorecard reads Bays' delivered
+  and failed counts from the first and the latest run's pass rate from the
+  second, where **a case passes only if every repeat passed** (pass^k). The
+  golden cases live in the n8n Data Table `agent_eval_set`; the tools cannot
+  edit a row there, so **a case is revised by appending a row with the same
+  `case_id`, and the newest row wins**.
 - **One token per agent, scoped on the server** (decision 2026-09-28, Destiny —
   Agent Upgrade Plan step 1.4). `READONLY_SECRETS_NORTH_STAR` (read, 10 tools),
   `MCP_AGENT_TOKEN_RESEARCH_TWIN` (write, 7) and `MCP_AGENT_TOKEN_BAYS` (write,
