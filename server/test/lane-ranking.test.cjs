@@ -84,3 +84,13 @@ const s = h.researchState(['LANE-X'], [job({ resolved_at: '2026-08-01T00:00:00Z'
 assert.equal(s.state, 'stale');
 assert.equal(s.action, 'deeper_pass');
 console.log('lane-health: all assertions passed');
+
+// ---- convergence verdicts ----
+assert.equal(h.convergence('work', 0, 0, 0, 0).verdict, 'unknown');
+assert.equal(h.convergence('work', 9, 10, 5, 1).verdict, 'churning');
+assert.match(h.convergence('work', 9, 10, 5, 1).note, /recurred/);
+assert.equal(h.convergence('work', 9, 10, 5, 0).verdict, 'converging');
+assert.equal(h.convergence('work', 63, 10, 89, 0).verdict, 'churning');
+assert.equal(h.convergence('work', 12, 10, 8, 0).verdict, 'steady');
+assert.equal(h.convergence('commercial', null, null, 0, 0).verdict, 'unknown');
+console.log('lane-convergence: all assertions passed');

@@ -118,6 +118,23 @@ export function researchState(
   return { state, lanes_read: lanes, open_jobs: active + pending, gleanings: gleanings.slice(0, 5), action, reason };
 }
 
+/**
+ * Pure: whether a lane is converging. Recurring faults are churn whatever the
+ * loop counts say — a lane repairing the same thing twice is not settling — and
+ * the note always says which rule decided, so a verdict can be checked against
+ * its own counts. A lane with no loops at all is unknown, never converging.
+ */
+export function convergence(kind: string, opened: number | null, closed: number | null, openNow: number, recurring: number): { verdict: 'converging' | 'steady' | 'churning' | 'unknown'; note: string } {
+  const window = `in the last ${WINDOW_DAYS} days (a close is dated by this dashboard's own status ledger)`;
+  if (kind !== 'work') return { verdict: 'unknown', note: 'Commercial lanes carry no loops, so convergence is not measured for them yet.' };
+  if (opened === null || closed === null) return { verdict: 'unknown', note: 'The loop counts could not be read.' };
+  if (opened === 0 && closed === 0 && openNow === 0) return { verdict: 'unknown', note: 'No loop carries this lane, so there is nothing to converge on — not a health signal.' };
+  if (recurring > 0) return { verdict: 'churning', note: `${recurring} fault signature${recurring === 1 ? '' : 's'} recurred ${window}, which reads as churn whatever the loops say (${opened} raised, ${closed} closed).` };
+  if (opened > closed * 1.5 + 2) return { verdict: 'churning', note: `${opened} loops raised against ${closed} closed ${window}.` };
+  if (closed >= opened) return { verdict: 'converging', note: `${closed} loops closed against ${opened} raised ${window}.` };
+  return { verdict: 'steady', note: `${opened} loops raised against ${closed} closed ${window}: more in than out, but not by enough to call churn.` };
+}
+
 export interface LaneHealth {
   rank: number;
   lane_id: string;
@@ -208,14 +225,10 @@ export async function laneHealth(opts: { kind?: 'work' | 'commercial' | 'all'; l
     const lp = loopsBy.get(l.lane_id);
     const opened = lp ? Number(lp.opened) : l.kind === 'work' ? 0 : null;
     const closed = lp ? Number(lp.closed) : l.kind === 'work' ? 0 : null;
-    let verdict: LaneHealth['convergence']['verdict'] = 'unknown';
-    let cnote = `Loops raised against loops closed in the last ${WINDOW_DAYS} days; a close is dated by this dashboard's own status ledger.`;
-    if (l.kind !== 'work') cnote = 'Commercial lanes carry no loops, so convergence is not measured for them yet.';
-    else if (opened !== null && closed !== null) {
-      if (rec.length > 0 || opened > closed * 1.5 + 2) verdict = 'churning';
-      else if (closed >= opened) verdict = 'converging';
-      else verdict = 'steady';
-    }
+    const openNow = lp ? Number(lp.open_now) : 0;
+    const conv = convergence(l.kind, opened, closed, openNow, rec.length);
+    const verdict = conv.verdict;
+    const cnote = conv.note;
 
     out.push({
       rank: l.rank,
@@ -240,7 +253,7 @@ export async function laneHealth(opts: { kind?: 'work' | 'commercial' | 'all'; l
         autopaid: null,
         note: 'From Codex logs whose Lanes Touched names this lane. Autopaid is null until the autopay rule is agreed.',
       },
-      convergence: { opened_14d: opened, closed_14d: closed, open_now: lp ? Number(lp.open_now) : 0, verdict, note: cnote },
+      convergence: { opened_14d: opened, closed_14d: closed, open_now: openNow, verdict, note: cnote },
     });
   }
   return {
