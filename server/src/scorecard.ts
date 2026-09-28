@@ -95,7 +95,7 @@ export async function data(): Promise<ScorecardData> {
   const incidents = (
     await query<{ severity: string; open: string }>(
       `SELECT coalesce(fields->>'severity', 'unknown') AS severity, count(*)::text AS open
-         FROM engine_incidents WHERE fields->>'resolution_status' = 'open' GROUP BY 1 ORDER BY 2 DESC`,
+         FROM engine_incidents WHERE open_now GROUP BY 1 ORDER BY 2 DESC`,
     )
   ).rows.map((i) => ({ severity: i.severity, open: Number(i.open) }));
 

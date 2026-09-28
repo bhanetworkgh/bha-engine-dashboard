@@ -11,7 +11,7 @@ import { Card, CardHeader, LoadFailed, Loading, PageHeader, Stat, StatCell, Stat
  * metric with no instrumentation yet says which plan step brings it.
  */
 export default function AgentMaturity() {
-  const { status, data, error } = useData(() => getAgentScorecard(), [], { kinds: ['ns-asks', 'rt-asks', 'incidents'] });
+  const { status, data, error } = useData(() => getAgentScorecard(), [], { kinds: ['ns-asks', 'rt-asks', 'bays-asks', 'eval-runs', 'incidents'] });
   if (status === 'loading') return <Loading />;
   if (status === 'error') return <LoadFailed error={error} />;
   const d = data;
