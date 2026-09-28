@@ -99,14 +99,14 @@ const server = http.createServer((req, res) => {
   const base = `http://127.0.0.1:${server.address().port}`;
   Object.assign(process.env, {
     BHARAG_API_URL: `${base}/api/v1`,
-    BHARAG_BAYS_KEY: 'bays-key',
+    BHARAG_BAYS_INCIDENTS: 'bays-key',
     N8N_API_URL: `${base}/api/v1`,
     N8N_API_KEY: 'n8n-key',
     ENGINE_HEAL_URL: `${base}/webhook/engine-heal`,
     DASHBOARD_INBOUND_KEY: 'inbound-key',
   });
-  delete process.env.BHARAG_NORTH_STAR_KEY;
-  delete process.env.BHARAG_RESEARCH_TWIN_KEY;
+  delete process.env.BHARAG_NS_INCIDENTS;
+  delete process.env.BHARAG_RT_INCIDENTS;
   delete process.env.RECOVERY_ENABLED;
 
   const { migrate } = require('../../server-dist/server/src/migrations.js');

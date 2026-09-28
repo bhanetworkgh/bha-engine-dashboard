@@ -116,7 +116,7 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(`http:
     SLACK_API_URL: `${slackUrl}/api`,
     SLACK_FILES_ORIGIN: slackUrl,
     BHARAG_API_URL: bharagUrl,
-    BHARAG_RESEARCH_TWIN_KEY: 'rt-key',
+    BHARAG_RESEARCH_TWIN: 'rt-key',
   };
   const server = spawn(process.execPath, ['--no-warnings=ExperimentalWarning', path.join(__dirname, '../../server-dist/server/src/index.js')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';

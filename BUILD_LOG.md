@@ -10637,3 +10637,38 @@ North Star (view, month, filter), Research Twin (view, month), Open loops
 month), Clients (view, month, filter), Pay Tracker (tab, month), Engine
 health (tab), Executions (tab, period, scope), vFarm (tab).
 Checked with a browser test: 100 → 6 at 150 ms after a switch → 100.
+
+---
+
+## 2026-09-28 09:00 · BHARAG lane keys split from ingest keys, matching n8n
+
+`INC-RESEARCHTWIN.RESEARCHJOB-025` (first-ever `INSUFFICIENT_SCOPE` for this
+path, no history before it) traced to `server/src/bharag.ts` aliasing
+`BHARAG_RESEARCH_TWIN_KEY` across two purposes — incidents-read for the
+Research Twin lane, and `update_watched_client_question`'s ingest — as if
+they were one credential. Checked against n8n's own workflows (`Research
+Twin — Error Handler`, `Research Twin — Tools Router`) via MCP: n8n has
+always held these as two separate credentials, `BHARAG - RT Incidents` and
+`BHARAG - Research Twin`, never shared. The earlier code comment claiming
+they were the same key was this file's own mistake, not a BHARAG-console
+scope gap — no console change was needed.
+
+Destiny renamed the Render env vars to match n8n's naming convention before
+this landed:
+- `BHARAG_BAYS_KEY` → `BHARAG_BAYS_INCIDENTS`
+- `BHARAG_NORTH_STAR_KEY` → `BHARAG_NS_INCIDENTS`
+- `BHARAG_RESEARCH_TWIN_KEY` (incidents) → `BHARAG_RT_INCIDENTS`
+- new dedicated ingest key → `BHARAG_RESEARCH_TWIN`
+- `BHARAG_NORTH_STAR` provisioned on Render, not yet wired to any code path
+
+`server/src/bharag.ts`: `LANE_KEY_VARS` now points `bays`/`north_star`/
+`research_twin` at the three `*_INCIDENTS` vars; `INGEST_KEY_VARS.research_twin`
+now points at `BHARAG_RESEARCH_TWIN`; the stale doc comment above it corrected.
+`render.yaml`, `.env.example`, `CLAUDE.md` and the two BHARAG-touching test
+files (`recovery.test.cjs`, `research-twin-tools.test.cjs`) updated to the
+same names so nothing in the repo still names the retired vars.
+
+Checked: `grep` for the three old var names across the repo turns up nothing
+outside this log and the dated entries above it. Live verification (boot log
++ incident read + ingest test) pending the Render deploy this commit
+triggers.
