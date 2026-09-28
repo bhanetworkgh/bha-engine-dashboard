@@ -56,7 +56,7 @@ export default function EngineHealth() {
   // `?incident=<id>` opens an incident on All systems, `?tab=retries` lands on
   // Retries — Home's "What broke" links here (2026-09-23).
   const [params] = useSearchParams();
-  const [tab, setTab] = useState<Tab>(() => (params.get('tab') === 'retries' ? 'Retries' : params.get('tab') === 'recovery' ? 'Recovery' : params.get('tab') === 'mcp-writes' ? 'MCP writes' : 'All systems'));
+  const [tab, setTab] = useState<Tab>(() => (params.get('tab') === 'retries' ? 'Retries' : params.get('tab') === 'repairs' ? 'Repairs' : params.get('tab') === 'recovery' ? 'Recovery' : params.get('tab') === 'mcp-writes' ? 'MCP writes' : 'All systems'));
   /* Switching any of these re-runs the page's count-ups and bars (27 Sep 2026). */
   useReplayKey(`${tab}`);
   const [tick, setTick] = useState(0);
