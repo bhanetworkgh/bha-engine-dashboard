@@ -574,12 +574,18 @@ export async function getPriorityEvidence(args: { lane_id?: unknown }): Promise<
   if (lane) {
     const known = await knownLaneIds();
     if (!known.includes(lane)) {
+      // Ranked by how many of the guess's words each real id shares, past the
+      // `LANE-<SYSTEM>-` prefix every id carries — matching on that would name
+      // every lane in the system as "close". Five at most.
       const lower = lane.toLowerCase();
-      const words = lower.replace(/^lane-/, '').split(/[-_\s]+/).filter((w) => w.length > 2);
-      const close = known.filter((k) => {
-        const kl = k.toLowerCase();
-        return kl === lower || words.some((w) => kl.includes(w));
-      });
+      const wordsOf = (id: string) => id.toLowerCase().replace(/^lane-[a-z0-9]+-/, '').split(/[-_\s]+/).filter((w) => w.length > 2);
+      const guess = wordsOf(lane);
+      const close = known
+        .map((k) => ({ k, n: k.toLowerCase() === lower ? 99 : wordsOf(k).filter((w) => guess.includes(w)).length }))
+        .filter((x) => x.n > 0)
+        .sort((a, b) => b.n - a.n || a.k.localeCompare(b.k))
+        .slice(0, 5)
+        .map((x) => x.k);
       return {
         ok: false,
         error: 'unknown_lane_id',
