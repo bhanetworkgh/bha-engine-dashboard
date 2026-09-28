@@ -1766,6 +1766,7 @@ RECORDS
 
 REFERENCE
   System registry
+  Agent maturity         ← the 12-dimension agent scorecard (2026-09-28)
 ```
 
 **The sidebar shows every item at once and never scrolls** (decision

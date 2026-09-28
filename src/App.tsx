@@ -26,6 +26,7 @@ const Clients = lazy(() => import('./screens/Clients'));
 const VFarm = lazy(() => import('./screens/VFarm'));
 const MediaTwin = lazy(() => import('./screens/MediaTwin'));
 const Genie = lazy(() => import('./screens/Genie'));
+const AgentMaturity = lazy(() => import('./screens/AgentMaturity'));
 const CsTwin = lazy(() => import('./screens/CsTwin'));
 const EngineHealth = lazy(() => import('./screens/EngineHealth'));
 const PayTracker = lazy(() => import('./screens/PayTracker'));
@@ -65,6 +66,7 @@ export default function App() {
         <Route path="/cs-twin" element={<Suspense fallback={<Loading />}><CsTwin /></Suspense>} />
         <Route path="/vfarm" element={<Suspense fallback={<Loading />}><VFarm /></Suspense>} />
         <Route path="/engine-health" element={<Suspense fallback={<Loading />}><EngineHealth /></Suspense>} />
+        <Route path="/agent-maturity" element={<Suspense fallback={<Loading />}><AgentMaturity /></Suspense>} />
         <Route path="/pay" element={<Suspense fallback={<Loading />}><PayTracker /></Suspense>} />
         {/*
           A stable link per record (2026-09-22, Destiny), so Bays can stop

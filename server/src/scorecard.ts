@@ -1,0 +1,105 @@
+/**
+ * The agent maturity scorecard (2026-09-28, Destiny — Agent Upgrade Plan,
+ * Phase 0). One row per quality dimension per scoring, in
+ * `engine_agent_scorecard`, beside the live metrics that back the scores.
+ *
+ * Nothing on the page is typed in. A score is a row written by a re-score and
+ * carries the evidence it was given for; a metric is counted from the engine's
+ * own tables at read time. A metric whose instrumentation does not exist yet is
+ * `null` with a note saying which plan step brings it, never a nought.
+ */
+import { query } from './pg';
+import * as quota from './quota';
+import type { AgentMetric, ScoreRow, ScorecardData } from '../../src/data/types';
+
+const WINDOW_DAYS = 30;
+
+async function ledger(table: string, agent: string): Promise<AgentMetric> {
+  const r = await query<{ asks: string; delivered: string; thin: string; failed: string }>(
+    `SELECT count(*)::text AS asks,
+            count(*) FILTER (WHERE fields->>'Delivered' = 'Delivered')::text AS delivered,
+            count(*) FILTER (WHERE fields->>'Outcome' = 'Thin')::text AS thin,
+            count(*) FILTER (WHERE fields->>'Outcome' = 'Failed')::text AS failed
+       FROM ${table}
+      WHERE created_time >= to_char((now() - make_interval(days => $1)) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
+    [WINDOW_DAYS],
+  );
+  const row = r.rows[0];
+  return {
+    agent,
+    asks: Number(row?.asks ?? 0),
+    delivered: Number(row?.delivered ?? 0),
+    thin: Number(row?.thin ?? 0),
+    failed: Number(row?.failed ?? 0),
+    window_days: WINDOW_DAYS,
+    note: null,
+  };
+}
+
+export async function data(): Promise<ScorecardData> {
+  const latest = await query<{ scored_on: string }>(`SELECT max(scored_on)::text AS scored_on FROM engine_agent_scorecard`);
+  const scoredOn = latest.rows[0]?.scored_on ?? null;
+  const scores = scoredOn
+    ? (
+        await query<Omit<ScoreRow, 'score' | 'floor' | 'goal'> & { score: string; floor: string; goal: string }>(
+          `SELECT dimension, name, score::text, floor::text, goal::text, evidence, scored_on::text, source
+             FROM engine_agent_scorecard WHERE scored_on = $1 ORDER BY dimension`,
+          [scoredOn],
+        )
+      ).rows.map((s) => ({ ...s, score: Number(s.score), floor: Number(s.floor), goal: Number(s.goal) }))
+    : [];
+  const average = scores.length ? Math.round((scores.reduce((a, s) => a + s.score, 0) / scores.length) * 10) / 10 : null;
+  const weakestRow = scores.length ? scores.reduce((w, s) => (s.score < w.score ? s : w), scores[0]) : null;
+  const history = (
+    await query<{ scored_on: string; average: string }>(
+      `SELECT scored_on::text, round(avg(score), 1)::text AS average FROM engine_agent_scorecard GROUP BY scored_on ORDER BY scored_on`,
+    )
+  ).rows.map((h) => ({ scored_on: h.scored_on, average: Number(h.average) }));
+
+  const agents: AgentMetric[] = [
+    await ledger('engine_ns_asks', 'North Star'),
+    await ledger('engine_rt_asks', 'Research Twin'),
+    {
+      agent: 'Bays',
+      asks: null,
+      delivered: null,
+      thin: null,
+      failed: null,
+      window_days: WINDOW_DAYS,
+      note: 'Bays has no ask ledger yet; it arrives with plan step 11.',
+    },
+  ];
+
+  const incidents = (
+    await query<{ severity: string; open: string }>(
+      `SELECT coalesce(fields->>'severity', 'unknown') AS severity, count(*)::text AS open
+         FROM engine_incidents WHERE fields->>'resolution_status' = 'open' GROUP BY 1 ORDER BY 2 DESC`,
+    )
+  ).rows.map((i) => ({ severity: i.severity, open: Number(i.open) }));
+
+  let q: ScorecardData['quota'] = { used: null, quota: null, pct: null, note: null };
+  try {
+    const u = await quota.usage();
+    q = { used: u.used ?? null, quota: u.quota ?? null, pct: typeof u.pct === 'number' ? u.pct : null, note: null };
+  } catch (e) {
+    q.note = `Quota could not be read: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  const refusals = await query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM engine_mcp_writes WHERE at >= now() - interval '7 days' AND outcome IN ('refused', 'denied')`,
+  );
+
+  return {
+    scored_on: scoredOn,
+    average,
+    weakest: weakestRow ? { dimension: weakestRow.dimension, name: weakestRow.name, score: weakestRow.score } : null,
+    scores,
+    history,
+    agents,
+    incidents,
+    quota: q,
+    mcp_refusals_7d: Number(refusals.rows[0]?.n ?? 0),
+    evals: { pass_rate: null, note: 'No eval runs recorded yet; the eval runner arrives with plan step 18.' },
+    injection: { pass_rate: null, note: 'No injection tests recorded yet; they arrive with the red-team set in Phase 6.' },
+  };
+}

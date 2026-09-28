@@ -1827,6 +1827,44 @@ const MIGRATIONS: Migration[] = [
         WHERE id = 'zikfpO0wvqzPCQuz' AND notes IS NULL`,
     ],
   },
+  {
+    id: 34,
+    name: 'engine_agent_scorecard: the agent maturity scorecard, seeded with the 27 Sep baseline',
+    statements: [
+      /**
+       * 28 Sep 2026, Destiny — Agent Upgrade Plan Phase 0. One row per quality
+       * dimension per scoring. The 27 Sep formal score is the first scoring;
+       * every later one is a re-score written with its own evidence, never a
+       * number typed onto the page.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_agent_scorecard (
+         scored_on   date    NOT NULL,
+         dimension   integer NOT NULL,
+         name        text    NOT NULL,
+         score       numeric NOT NULL,
+         floor       numeric NOT NULL,
+         goal        numeric NOT NULL,
+         evidence    text    NOT NULL,
+         source      text    NOT NULL,
+         recorded_at timestamptz NOT NULL DEFAULT now(),
+         PRIMARY KEY (scored_on, dimension)
+       )`,
+      `INSERT INTO engine_agent_scorecard (scored_on, dimension, name, score, floor, goal, evidence, source) VALUES
+        ('2026-09-27', 1, $v$Governance and inventory$v$, 4, 8, 10, $v$Formal 12-dimension score, 27 Sep 2026 (claude/Agent_Maturity_Score_Sept_27.md in the BHA Agent project).$v$, 'baseline'),
+        ('2026-09-27', 2, $v$Agent identity and secrets$v$, 3, 8, 10, $v$Formal 12-dimension score, 27 Sep 2026 (claude/Agent_Maturity_Score_Sept_27.md in the BHA Agent project).$v$, 'baseline'),
+        ('2026-09-27', 3, $v$Tool privilege$v$, 5, 8, 10, $v$Formal 12-dimension score, 27 Sep 2026 (claude/Agent_Maturity_Score_Sept_27.md in the BHA Agent project).$v$, 'baseline'),
+        ('2026-09-27', 4, $v$Runtime controls and injection defense$v$, 3, 8, 10, $v$Formal 12-dimension score, 27 Sep 2026 (claude/Agent_Maturity_Score_Sept_27.md in the BHA Agent project).$v$, 'baseline'),
+        ('2026-09-27', 5, $v$Human oversight$v$, 4, 8, 10, $v$Formal 12-dimension score, 27 Sep 2026 (claude/Agent_Maturity_Score_Sept_27.md in the BHA Agent project).$v$, 'baseline'),
+        ('2026-09-27', 6, $v$Evaluation and testing$v$, 2, 8, 10, $v$Formal 12-dimension score, 27 Sep 2026 (claude/Agent_Maturity_Score_Sept_27.md in the BHA Agent project).$v$, 'baseline'),
+        ('2026-09-27', 7, $v$Observability$v$, 6, 8, 10, $v$Formal 12-dimension score, 27 Sep 2026 (claude/Agent_Maturity_Score_Sept_27.md in the BHA Agent project).$v$, 'baseline'),
+        ('2026-09-27', 8, $v$Incident response and recovery$v$, 6, 8, 10, $v$Formal 12-dimension score, 27 Sep 2026 (claude/Agent_Maturity_Score_Sept_27.md in the BHA Agent project).$v$, 'baseline'),
+        ('2026-09-27', 9, $v$Change and rollback$v$, 4, 8, 10, $v$Formal 12-dimension score, 27 Sep 2026 (claude/Agent_Maturity_Score_Sept_27.md in the BHA Agent project).$v$, 'baseline'),
+        ('2026-09-27', 10, $v$Reliability and handoffs$v$, 5, 8, 10, $v$Formal 12-dimension score, 27 Sep 2026 (claude/Agent_Maturity_Score_Sept_27.md in the BHA Agent project).$v$, 'baseline'),
+        ('2026-09-27', 11, $v$Cost and capacity$v$, 6, 8, 10, $v$Formal 12-dimension score, 27 Sep 2026 (claude/Agent_Maturity_Score_Sept_27.md in the BHA Agent project).$v$, 'baseline'),
+        ('2026-09-27', 12, $v$Data governance and retention$v$, 3, 7, 10, $v$Formal 12-dimension score, 27 Sep 2026 (claude/Agent_Maturity_Score_Sept_27.md in the BHA Agent project).$v$, 'baseline')
+       ON CONFLICT (scored_on, dimension) DO NOTHING`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

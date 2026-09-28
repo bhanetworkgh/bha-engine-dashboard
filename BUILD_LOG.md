@@ -10693,3 +10693,10 @@ Files:      server/src/mcp/index.ts, CLAUDE.md
 Problem:    Request logs 09:00–12:21 UTC: 81 GETs on /mcp, every one user agent "undici" from 4.165.103.121 (n8n), each held ~50 s and reopened; the one Claude connector call was "Claude-User". n8n's MCP client reopens a GET stream whenever one ends, so a cap only churned.
 Fix:        GET from user agent undici answers 405 (Allow: POST, DELETE, OPTIONS). The MCP client SDK treats a 405 on GET as the server offering no stream and does not retry it. Every other GET — Claude's connector included — still gets the held stream the 18 Sep decision requires.
 Decision:   Matched on user agent because it is the one thing on the GET that tells n8n from Claude; session ids outlive restarts and carry no client name here.
+
+## 2026-09-28 14:20 — Agent maturity scorecard (Upgrade Plan Phase 0)
+Intent:     Put the 12-dimension agent score on the dashboard, read from data, so every later step of the Agent Upgrade Plan is measured.
+Files:      server/src/scorecard.ts (new), server/src/migrations.ts (34), server/src/index.ts, src/data/index.ts, src/data/types.ts, src/screens/AgentMaturity.tsx (new), src/App.tsx, src/components/Layout.tsx, CLAUDE.md
+Problem:    The 27 Sep maturity score (average 4.3, weakest 2) lived only in a project doc; nothing on the dashboard measured it.
+Fix:        engine_agent_scorecard (one row per dimension per scoring), seeded with the 27 Sep baseline and its evidence. GET /api/agent-scorecard returns the latest scoring, its average and weakest dimension, the history of averages, and live metrics: delivered/thin/failed per agent over 30 days from the twins' ledgers, open incidents by severity, execution quota, MCP refusals in 7 days. Bays, evals and injection tests are null with the plan step that brings them. Page /agent-maturity under Reference.
+Decision:   Scores are rows written by a scoring, never typed onto the page. No typecheck here (sandbox npm 403); the Render build is the check.

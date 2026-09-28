@@ -62,7 +62,11 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
     // Not a system and not a record kind: the registry is the reference shelf —
     // what exists, who owns it, and what it costs.
     group: 'Reference',
-    items: [{ to: '/registry', label: 'System registry', icon: 'book' }],
+    items: [
+      { to: '/registry', label: 'System registry', icon: 'book' },
+      // The agent maturity scorecard (2026-09-28): 12 dimensions, scored, with the live metrics behind them.
+      { to: '/agent-maturity', label: 'Agent maturity', icon: 'shield' },
+    ],
   },
 ];
 

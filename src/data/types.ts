@@ -3277,3 +3277,42 @@ export interface PatternCandidatesData {
   held: number;
   updated_at: string | null;
 }
+
+/* ----------------------------------------------- agent maturity scorecard */
+
+/** One quality dimension's score from one scoring (2026-09-28, Agent Upgrade Plan Phase 0). */
+export interface ScoreRow {
+  dimension: number;
+  name: string;
+  score: number;
+  floor: number;
+  goal: number;
+  evidence: string;
+  scored_on: string;
+  source: string;
+}
+
+export interface AgentMetric {
+  agent: string;
+  asks: number | null;
+  delivered: number | null;
+  thin: number | null;
+  failed: number | null;
+  window_days: number;
+  note: string | null;
+}
+
+export interface ScorecardData {
+  scored_on: string | null;
+  average: number | null;
+  weakest: { dimension: number; name: string; score: number } | null;
+  scores: ScoreRow[];
+  history: { scored_on: string; average: number }[];
+  agents: AgentMetric[];
+  incidents: { severity: string; open: number }[];
+  quota: { used: number | null; quota: number | null; pct: number | null; note: string | null };
+  mcp_refusals_7d: number;
+  evals: { pass_rate: number | null; note: string };
+  injection: { pass_rate: number | null; note: string };
+}
+

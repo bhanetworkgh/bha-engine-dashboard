@@ -40,6 +40,7 @@ import * as executions from './executions';
 import * as health from './health';
 import * as repairs from './repairs';
 import * as recovery from './recovery';
+import * as scorecard from './scorecard';
 import * as pay from './pay';
 import * as bharag from './bharag';
 import { monthly } from './monthly';
@@ -801,6 +802,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
        */
       case '/api/twin-handoffs':
         return send(res, 200, await engine.getTwinHandoffs());
+      /** The agent maturity scorecard (2026-09-28): stored scores beside the live metrics behind them. */
+      case '/api/agent-scorecard':
+        return send(res, 200, await scorecard.data());
       /**
        * Engine Health. The rows it holds, and the figures over them — split the
        * same way every other page splits them, so the page can re-read the

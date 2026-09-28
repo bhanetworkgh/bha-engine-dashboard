@@ -13,6 +13,7 @@
 import { api, ApiError } from './api';
 import type {
   AskBaysData,
+  ScorecardData,
   PatternCandidatesData,
   BuilderProfile,
   CandidateRegistered,
@@ -194,6 +195,8 @@ export const getClients = () => api<ClientsData>('/api/clients');
  * pair, so it has one route rather than a copy computed on each page.
  */
 export const getTwinHandoffs = () => api<Handoffs>('/api/twin-handoffs');
+/** The agent maturity scorecard (2026-09-28). */
+export const getAgentScorecard = () => api<ScorecardData>('/api/agent-scorecard');
 
 /* -------------------------------------------------------- engine health */
 
