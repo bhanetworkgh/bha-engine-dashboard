@@ -157,6 +157,7 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       tools: new Set([
         'read_slack', 'read_open_loops', 'get_priority_evidence', 'find_records', 'get_page_data',
         'get_health', 'get_recovery_status', 'list_n8n_workflows', 'get_n8n_workflow', 'read_slack_file',
+        'rank_lanes',
       ]),
     },
     {

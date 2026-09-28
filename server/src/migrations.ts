@@ -1926,6 +1926,49 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_eval_runs_run ON engine_eval_runs ((fields->>'Run ID'))`,
     ],
   },
+  {
+    id: 38,
+    name: 'engine_lane_profiles: the tags North Star’s weighted ranking reads',
+    statements: [
+      /**
+       * 28 Sep 2026, Destiny and Jason (#bha-north-star-twin 1790611246.825499).
+       * North Star ranks lanes on six weighted factors and code does the maths
+       * (laneRanking.ts). Three factors can be computed from the records; the
+       * rest are tags a person sets, because nothing records them yet — which
+       * lane gates Oct 31, which blocks other people, which is engine leverage,
+       * and the owner's effort estimate. They live here, one row per lane, and
+       * a lane with no row still ranks: every missing tag scores 0 and is named.
+       * Real columns rather than a blob: this table is born here, not mirrored.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_lane_profiles (
+         lane_id            text PRIMARY KEY,
+         kind               text NOT NULL CHECK (kind IN ('work', 'commercial')),
+         gates_oct31        smallint CHECK (gates_oct31 BETWEEN 0 AND 5),
+         blocks_others      smallint CHECK (blocks_others BETWEEN 0 AND 5),
+         engine_leverage    smallint CHECK (engine_leverage BETWEEN 0 AND 5),
+         commercial_impact  smallint CHECK (commercial_impact BETWEEN 0 AND 5),
+         effort             text CHECK (effort IN ('small', 'medium', 'large')),
+         anchors            text[] NOT NULL DEFAULT '{}',
+         note               text,
+         updated_by         text,
+         updated_at         timestamptz NOT NULL DEFAULT now()
+       )`,
+      /**
+       * Seeded only with what Jason named in that thread — nothing else is
+       * guessed. Blocks-others, effort and work-lane commercial impact stay
+       * empty until someone sets them, and the ranking says so.
+       * MONITORING_TWIN is not a loop lane; it carries his "Monitoring Twin
+       * visibility" and "monitoring/dashboard paths" so they are ranked at all.
+       */
+      `INSERT INTO engine_lane_profiles (lane_id, kind, gates_oct31, engine_leverage, anchors, note, updated_by) VALUES
+        ('VFARM_HARDWARE', 'work', 5, 5, ARRAY['P1.0 burn-ins', 'first strawberry cycle', 'LOOP-1790341118240-66R6', 'VFARM_ARCHITECTURE_CONTRACT', 'P1.0 build path'], $n$Seeded 28 Sep from Jason's ranking thread (C0B5JHVAXCM 1790611710.499749). Review.$n$, 'seed'),
+        ('CST', 'work', 5, 5, ARRAY['CST health', 'CST fixes'], $n$Seeded 28 Sep from Jason's ranking thread (C0B5JHVAXCM 1790611710.499749). Review.$n$, 'seed'),
+        ('RT', 'work', NULL, 5, ARRAY['Research Twin auto-research wiring'], $n$Seeded 28 Sep from Jason's ranking thread (C0B5JHVAXCM 1790611710.499749). Review.$n$, 'seed'),
+        ('BAYS', 'work', NULL, 5, ARRAY['Logstream autopay rules'], $n$Seeded 28 Sep from Jason's ranking thread (C0B5JHVAXCM 1790611710.499749). Review.$n$, 'seed'),
+        ('MONITORING_TWIN', 'work', 5, 5, ARRAY['Monitoring Twin visibility', 'monitoring/dashboard paths'], $n$Seeded 28 Sep from Jason's ranking thread. Not a loop lane: no loop can carry this tag yet, so its days-since-moved reads as not recorded.$n$, 'seed')
+       ON CONFLICT (lane_id) DO NOTHING`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
