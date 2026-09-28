@@ -414,21 +414,6 @@ const KEEPALIVE_MS = 20_000;
 let openStreams = 0;
 
 /**
- * How long one stream is held, and how many at most (2026-09-28). Agents open a
- * stream on every run and almost never close it: on 28 Sep the count went from
- * 94 to 137 in under two hours and closes were a handful, all on a 0.5-CPU
- * instance, and the one North Star tool call that failed that week never
- * reached this server. This server pushes nothing down a stream, so ending one
- * loses nothing — a client that still wants it opens another, which the spec
- * allows. Past the cap the oldest is ended first, so a live client's new stream
- * is never the one refused.
- */
-const MAX_STREAM_MS = 10 * 60_000;
-const MAX_OPEN_STREAMS = 40;
-const streamEnders = new Map<number, () => void>();
-let streamSeq = 0;
-
-/**
  * Opens an event stream and holds it.
  *
  * It carries no messages, because this server has none to push. That is the
@@ -467,40 +452,19 @@ function holdEventStream(req: IncomingMessage, res: ServerResponse): void {
 
   openStreams += 1;
   const opened = Date.now();
-  const seq = ++streamSeq;
   console.log(`[mcp] GET stream opened — ${openStreams} open${sessionHeader(req) ? `, session ${sessionHeader(req)}` : ''}`);
 
   let closed = false;
-  let why = 'client';
   const close = (): void => {
     if (closed) return;
     closed = true;
     clearInterval(timer);
-    clearTimeout(lifetime);
-    streamEnders.delete(seq);
     openStreams -= 1;
-    console.log(`[mcp] GET stream closed (${why}) after ${Math.round((Date.now() - opened) / 1000)}s — ${openStreams} open`);
+    console.log(`[mcp] GET stream closed after ${Math.round((Date.now() - opened) / 1000)}s — ${openStreams} open`);
   };
-  const end = (reason: string): void => {
-    if (closed) return;
-    why = reason;
-    if (!res.writableEnded) res.end();
-    close();
-  };
-  const lifetime = setTimeout(() => end('max age'), MAX_STREAM_MS);
-  lifetime.unref();
-  streamEnders.set(seq, () => end('over cap'));
   req.on('close', close);
   req.on('aborted', close);
   res.on('close', close);
-
-  // Past the cap, end the oldest — never this one.
-  while (streamEnders.size > MAX_OPEN_STREAMS) {
-    const oldest = streamEnders.keys().next().value as number;
-    if (oldest === seq) break;
-    streamEnders.get(oldest)?.();
-    streamEnders.delete(oldest);
-  }
 }
 
 /* ------------------------------------------------------------ the handler */
