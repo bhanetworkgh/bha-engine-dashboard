@@ -1865,6 +1865,19 @@ const MIGRATIONS: Migration[] = [
        ON CONFLICT (scored_on, dimension) DO NOTHING`,
     ],
   },
+  {
+    id: 35,
+    name: 'engine_mcp_writes.agent: which agent token a write came in on',
+    statements: [
+      /**
+       * 28 Sep 2026, Destiny — Agent Upgrade Plan step 1.4. Each agent connects
+       * with its own token, and the token decides the name written here. Null
+       * means the shared MCP_SECRET / MCP_WRITE_TOKEN (Claude's connector), never
+       * a guess about who that was.
+       */
+      `ALTER TABLE engine_mcp_writes ADD COLUMN IF NOT EXISTS agent text`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

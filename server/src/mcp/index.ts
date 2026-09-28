@@ -75,6 +75,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { McpError } from './source';
 import { toolByName, toolCatalogue, sourceWarning, type ToolDeps } from './tools';
+import { callerStore, currentAgent } from './caller';
+import { auditOpen, auditClose } from './writeTools';
 
 /** The protocol revisions this server knows how to speak. Newest first. */
 const SUPPORTED_PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -111,11 +113,88 @@ export const MCP_ONE_URL = Boolean(WRITE_RAW && WRITE_RAW === MCP_SECRET);
  * distinct from `MCP_SECRET`/`MCP_WRITE_TOKEN`, checked before either so it
  * can never resolve to `write` even if `MCP_ONE_URL` is true.
  */
-const READONLY_SECRETS: ReadonlyArray<{ name: string; secret: string }> = [
-  { name: 'north_star', secret: process.env.READONLY_SECRETS_NORTH_STAR?.trim() || '' },
-].filter((e) => e.secret.length > 0);
-
 export type McpAccess = 'read' | 'write';
+
+/**
+ * One token per agent, each naming who holds it and what it may call
+ * (2026-09-28, Destiny — Agent Upgrade Plan step 1.4).
+ *
+ * Until this, Bays and Research Twin connected with the one shared write
+ * secret — the same string as Claude's connector — so every write in
+ * `engine_mcp_writes` read as the same anonymous caller, and the only limit on
+ * what each agent could call was its own n8n `toolFilter`: a client-side
+ * convention. Now:
+ *
+ *  - **The token decides the name.** It is written to `engine_mcp_writes.agent`
+ *    on every write (caller.ts), and nothing the caller sends can change it.
+ *  - **The token decides the tools, on the server.** `tools` mirrors the
+ *    agent's n8n allow-list; a tool outside it is not listed and a call to it
+ *    is refused and logged, whatever the client's filter says.
+ *  - **A read-only token can never resolve to write**, however `MCP_ONE_URL` is
+ *    set: agent tokens are checked before the shared secrets.
+ *
+ * A token is accepted two ways: as the path (`/mcp/<token>`, the same shape the
+ * agents use today, so a switch is one URL edit) or as
+ * `Authorization: Bearer <token>` on `/mcp/agent` (the plan's end state, once
+ * each agent has a bearer credential in n8n). Unset variables are skipped. The
+ * shared `MCP_SECRET` / `MCP_WRITE_TOKEN` keep working, as agent null, for
+ * Claude's connector.
+ */
+interface AgentKey {
+  agent: string;
+  env: string;
+  secret: string;
+  access: McpAccess;
+  tools: ReadonlySet<string> | null;
+}
+
+const AGENT_KEYS: ReadonlyArray<AgentKey> = (
+  [
+    {
+      agent: 'north_star',
+      env: 'READONLY_SECRETS_NORTH_STAR',
+      access: 'read',
+      tools: new Set([
+        'read_slack', 'read_open_loops', 'get_priority_evidence', 'find_records', 'get_page_data',
+        'get_health', 'get_recovery_status', 'list_n8n_workflows', 'get_n8n_workflow', 'read_slack_file',
+      ]),
+    },
+    {
+      agent: 'research_twin',
+      env: 'MCP_AGENT_TOKEN_RESEARCH_TWIN',
+      access: 'write',
+      tools: new Set([
+        'find_records', 'write_research_finding', 'write_commercial_card_fields', 'compute_lane_state',
+        'queue_followup_research', 'update_watched_client_question', 'create_client_report_doc',
+      ]),
+    },
+    {
+      agent: 'bays',
+      env: 'MCP_AGENT_TOKEN_BAYS',
+      access: 'write',
+      tools: new Set([
+        'list_writable_kinds', 'find_records', 'create_record', 'update_record', 'archive_record', 'delete_record',
+        'get_page_data', 'get_health', 'get_recovery_status', 'list_n8n_workflows', 'get_n8n_workflow',
+        'read_slack_file', 'share_doc', 'grant_drive_access', 'create_doc', 'send_nudge', 'post_file',
+        'create_client_report_doc', 'get_execution_quota',
+      ]),
+    },
+  ] as Array<Omit<AgentKey, 'secret'>>
+)
+  .map((k) => ({ ...k, secret: process.env[k.env]?.trim() || '' }))
+  .filter((k) => k.secret.length > 0);
+
+/** Names the agent-token variables that are set, for the boot line. Never the values. */
+export function agentTokensConfigured(): string[] {
+  return AGENT_KEYS.map((k) => `${k.agent} (${k.env}, ${k.access}, ${k.tools ? k.tools.size : 'all'} tools)`);
+}
+
+/** What a request resolved to: its access, and for an agent token, who and what. */
+interface Resolved {
+  access: McpAccess;
+  agent: string | null;
+  scope: ReadonlySet<string> | null;
+}
 
 /** A page action never reaches this transport; were one to, it would see the read catalogue. */
 function mcpAccess(a: 'read' | 'write' | 'page'): McpAccess {
@@ -166,7 +245,14 @@ const MAX_LOGGED_ARGS = 400;
 function logCall(access: McpAccess, name: string, args: unknown, outcome: string, ms: number, bytes: number | null): void {
   const a = JSON.stringify(args ?? {});
   const shown = a.length > MAX_LOGGED_ARGS ? `${a.slice(0, MAX_LOGGED_ARGS)}…` : a;
-  console.log(`[mcp:${access}] ${name} ${shown} — ${outcome} in ${ms}ms${bytes === null ? '' : `, ${bytes} bytes`}`);
+  const agent = currentAgent();
+  console.log(`[mcp:${access}${agent ? `:${agent}` : ''}] ${name} ${shown} — ${outcome} in ${ms}ms${bytes === null ? '' : `, ${bytes} bytes`}`);
+}
+
+/** The catalogue this caller may see: its access's tools, narrowed to its scope. */
+function catalogueFor(deps: ToolDeps): ReturnType<typeof toolCatalogue> {
+  const all = toolCatalogue(mcpAccess(deps.access));
+  return deps.scope ? all.filter((t) => deps.scope!.has(t.name)) : all;
 }
 
 /* -------------------------------------------------------------- the methods */
@@ -217,16 +303,33 @@ async function handleRpc(req: RpcRequest, deps: ToolDeps): Promise<Record<string
       return result(req.id, {});
 
     case 'tools/list':
-      return result(req.id, { tools: toolCatalogue(mcpAccess(deps.access)) });
+      return result(req.id, { tools: catalogueFor(deps) });
 
     case 'tools/call': {
       const name = typeof params.name === 'string' ? params.name : '';
       const args = (params.arguments && typeof params.arguments === 'object' && !Array.isArray(params.arguments) ? params.arguments : {}) as Record<string, unknown>;
       const tool = toolByName(name, mcpAccess(deps.access));
       const t0 = Date.now();
+      // Outside the agent's scope (28 Sep, plan step 1.4): refused on the
+      // server whatever the client's own filter shows, and recorded on
+      // engine_mcp_writes so a refusal is never silent.
+      if (tool && deps.scope && !deps.scope.has(name)) {
+        logCall(mcpAccess(deps.access), name, args, 'refused (out of scope)', Date.now() - t0, null);
+        try {
+          const id = await auditOpen({ tool: name, args, access: deps.access, kind: null, requester: null, dry_run: false });
+          await auditClose(id, { outcome: 'refused', detail: `out_of_scope: ${deps.agent ?? 'this token'} may not call ${name}` });
+        } catch (e) {
+          console.error('[mcp] could not record an out-of-scope refusal', e);
+        }
+        return failure(
+          req.id,
+          INVALID_PARAMS,
+          `"${name}" is not one of the tools this connection (${deps.agent ?? 'agent token'}) may call. It may call: ${[...deps.scope].sort().join(', ')}.`,
+        );
+      }
       if (!tool) {
         logCall(mcpAccess(deps.access), name || '(unnamed)', args, 'no such tool', Date.now() - t0, null);
-        return failure(req.id, INVALID_PARAMS, `There is no tool called "${name}". This server offers: ${toolCatalogue(mcpAccess(deps.access)).map((t) => t.name).join(', ')}.`);
+        return failure(req.id, INVALID_PARAMS, `There is no tool called "${name}". This server offers: ${catalogueFor(deps).map((t) => t.name).join(', ')}.`);
       }
       try {
         const value = await tool.handler(args, deps);
@@ -360,11 +463,24 @@ function same(given: string, secret: string | null): boolean {
  * answers `read` — never falls through to the write check, so it can never
  * resolve to `write` regardless of `MCP_ONE_URL`.
  */
-function accessFor(given: string): McpAccess | null {
-  if (READONLY_SECRETS.some((e) => same(given, e.secret))) return 'read';
+function accessFor(given: string): Resolved | null {
+  // Agent tokens first: an agent's token always resolves to that agent, with
+  // its own access and scope, however MCP_ONE_URL is configured.
+  for (const k of AGENT_KEYS) if (same(given, k.secret)) return { access: k.access, agent: k.agent, scope: k.tools };
   const write = same(given, MCP_WRITE_TOKEN);
   const read = same(given, MCP_SECRET);
-  return write ? 'write' : read ? 'read' : null;
+  return write ? { access: 'write', agent: null, scope: null } : read ? { access: 'read', agent: null, scope: null } : null;
+}
+
+/** `Authorization: Bearer <token>`, matched against agent tokens only. */
+function bearerAgent(req: IncomingMessage): Resolved | null {
+  const h = req.headers.authorization;
+  const v = Array.isArray(h) ? h[0] : h;
+  const m = typeof v === 'string' ? /^Bearer\s+(.+)$/i.exec(v.trim()) : null;
+  if (!m) return null;
+  const token = m[1].trim();
+  for (const k of AGENT_KEYS) if (same(token, k.secret)) return { access: k.access, agent: k.agent, scope: k.tools };
+  return null;
 }
 
 /* --------------------------------------------------------------- sessions */
@@ -486,8 +602,10 @@ export async function handleMcp(req: IncomingMessage, res: ServerResponse, url: 
   // reach the comparison at all, and saying "secret did not match" for those
   // sends whoever is debugging this to check the wrong thing.
   const wellFormed = parts.length === 2 && parts[0] === 'mcp';
-  const access = wellFormed ? accessFor(decodeURIComponent(parts[1])) : null;
-  if (!access) {
+  // `/mcp/agent` is the bearer door: the token is in the header, not the path.
+  const resolved = !wellFormed ? null : parts[1] === 'agent' ? bearerAgent(req) : accessFor(decodeURIComponent(parts[1]));
+  const access = resolved?.access ?? null;
+  if (!resolved || !access) {
     const why = !wellFormed
       ? `the path is not /mcp/<secret> (${parts.length} segment(s))`
       : MCP_SECRET || MCP_WRITE_TOKEN
@@ -496,7 +614,7 @@ export async function handleMcp(req: IncomingMessage, res: ServerResponse, url: 
     console.log(`[mcp] rejected ${method} ${url.pathname.split('/').slice(0, 2).join('/')}/… — ${why}; answered 404`);
     return notFound(res);
   }
-  const deps: ToolDeps = { ...baseDeps, access };
+  const deps: ToolDeps = { ...baseDeps, access, agent: resolved.agent, scope: resolved.scope };
 
   const given = sessionHeader(req);
   if (given) rememberSession(given);
@@ -593,7 +711,7 @@ export async function handleMcp(req: IncomingMessage, res: ServerResponse, url: 
   const answers: Record<string, unknown>[] = [];
   for (const one of batch) {
     try {
-      const answer = await handleRpc(one, deps);
+      const answer = await callerStore.run({ agent: resolved.agent }, () => handleRpc(one, deps));
       if (answer) answers.push(answer);
     } catch (e) {
       console.error('[mcp] the transport hit an error', e);

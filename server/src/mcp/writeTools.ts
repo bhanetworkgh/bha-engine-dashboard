@@ -31,6 +31,7 @@ import * as bharag from '../bharag';
 import * as google from '../google';
 import * as guards from '../writeGuards';
 import { McpError } from './source';
+import { currentAgent } from './caller';
 import type { ToolDefinition, ToolDeps } from './tools';
 
 /* ------------------------------------------------------------- the audit */
@@ -46,10 +47,24 @@ interface AuditOpen {
 
 export async function auditOpen(a: AuditOpen): Promise<number> {
   const digest = createHash('sha256').update(JSON.stringify({ tool: a.tool, args: a.args })).digest('hex');
+  // The agent comes from the token the request came in on (caller.ts), never
+  // from anything the caller says about itself (28 Sep, plan step 1.4).
+  const agent = currentAgent();
   const r = await query<{ id: string }>(
-    `INSERT INTO engine_mcp_writes (tool, arguments, digest, access, kind, dry_run, requester_user_id, outcome, actor, target)
-     VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, 'pending', $8, $9) RETURNING id`,
-    [a.tool, JSON.stringify(a.args), digest, a.access, a.kind, a.dry_run, a.requester, `mcp:${a.access}${a.requester ? `:${a.requester}` : ''}`, a.kind],
+    `INSERT INTO engine_mcp_writes (tool, arguments, digest, access, kind, dry_run, requester_user_id, outcome, actor, target, agent)
+     VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, 'pending', $8, $9, $10) RETURNING id`,
+    [
+      a.tool,
+      JSON.stringify(a.args),
+      digest,
+      a.access,
+      a.kind,
+      a.dry_run,
+      a.requester,
+      `mcp:${a.access}${agent ? `:${agent}` : ''}${a.requester ? `:${a.requester}` : ''}`,
+      a.kind,
+      agent,
+    ],
   );
   return Number(r.rows[0].id);
 }

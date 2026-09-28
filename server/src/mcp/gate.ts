@@ -23,6 +23,7 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { query } from '../pg';
 import { McpError } from './source';
+import { currentAgent } from './caller';
 
 /** Sixty seconds. Long enough to read a preview, short enough that a stale one cannot act. */
 const TOKEN_TTL_MS = 60_000;
@@ -216,8 +217,8 @@ export interface AuditRow {
  */
 export async function audit(row: AuditRow): Promise<number> {
   const r = await query<{ id: string }>(
-    `INSERT INTO engine_mcp_writes (tool, arguments, digest, token, idempotency_key, target, before, after, outcome, detail, actor)
-     VALUES ($1,$2::jsonb,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11)
+    `INSERT INTO engine_mcp_writes (tool, arguments, digest, token, idempotency_key, target, before, after, outcome, detail, actor, agent)
+     VALUES ($1,$2::jsonb,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12)
      RETURNING id`,
     [
       row.tool,
@@ -231,6 +232,7 @@ export async function audit(row: AuditRow): Promise<number> {
       row.outcome,
       row.detail ?? null,
       row.actor ?? 'mcp',
+      currentAgent(),
     ],
   );
   return Number(r.rows[0].id);
