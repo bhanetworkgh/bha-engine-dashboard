@@ -208,12 +208,23 @@ export async function laneHealth(opts: { kind?: 'work' | 'commercial' | 'all'; l
   ).rows;
   const loopsBy = new Map(loops.map((x) => [x.lane, x]));
 
+  // Rank within the lane's own kind: a work lane's place among work lanes is
+  // what rank_lanes says, and a combined pool made RT read 15th instead of 5th.
+  const seen = new Map<string, number>();
+  const kindRank = new Map<string, number>();
+  for (const l of r.lanes) {
+    const n = (seen.get(l.kind) ?? 0) + 1;
+    seen.set(l.kind, n);
+    kindRank.set(l.lane_id, n);
+  }
+
   const out: LaneHealth[] = [];
   for (const l of r.lanes) {
     if (opts.lane_id && l.lane_id !== opts.lane_id) continue;
+    const rank = kindRank.get(l.lane_id) ?? l.rank;
     const links = linked.get(l.lane_id) ?? [];
     const researchLanes = l.kind === 'commercial' ? [l.lane_id, ...links] : links;
-    const research = researchState(researchLanes, jobs, l.rank, now);
+    const research = researchState(researchLanes, jobs, rank, now);
 
     const instrumented = ['BAYS', 'NS', 'RT'].includes(l.lane_id);
     const inc = instrumented ? incidents.filter((i) => SOURCE_LANE[i.source] === l.lane_id) : [];
@@ -231,7 +242,7 @@ export async function laneHealth(opts: { kind?: 'work' | 'commercial' | 'all'; l
     const cnote = conv.note;
 
     out.push({
-      rank: l.rank,
+      rank,
       lane_id: l.lane_id,
       kind: l.kind,
       score: l.score,
