@@ -54,6 +54,22 @@
  * Both answer a miss with the same 404, and every call is logged with which
  * token it came in on. Set to one string, the two are one URL with write
  * access (Destiny, 2026-09-24) — see MCP_WRITE_TOKEN below.
+ *
+ * **A third kind of secret that can never resolve to write** (2026-09-28,
+ * Destiny — NS Guardrail Contract CANON-NS-GUARDRAILS section 7: "No writes"
+ * was live only on a shared connection with no server-side enforcement,
+ * because in production `MCP_ONE_URL` is true and `accessFor` checked the
+ * write token first, so North Star's own secret answered `write` at the
+ * transport regardless of what its n8n Agent's `toolFilter` chose to show
+ * the model. That made "no writes" a client-side convention, not a
+ * guarantee — the SOP's own rule is that a rule enforced only in a prompt or
+ * a filter will eventually be broken. An agent-scoped secret in
+ * `READONLY_SECRETS` (below) is checked before both `MCP_WRITE_TOKEN` and
+ * `MCP_SECRET` and always answers `read`, never `write`, however
+ * `MCP_ONE_URL` is configured — a caller holding one of these secrets cannot
+ * reach `create_record`/`update_record`/`archive_record`/`delete_record` or
+ * any other write tool no matter what it asks for, because the transport
+ * never registers them for that connection.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
@@ -85,6 +101,19 @@ export const MCP_WRITE_TOKEN = WRITE_RAW;
 export const MCP_WRITE_TOKEN_VAR = 'MCP_WRITE_TOKEN';
 /** True where the read secret and the write token are one string, so one URL carries both. */
 export const MCP_ONE_URL = Boolean(WRITE_RAW && WRITE_RAW === MCP_SECRET);
+
+/**
+ * Agent-scoped secrets that can only ever answer `read` (2026-09-28). Named
+ * `READONLY_SECRETS_<NAME>` so each one is a variable named for who holds it,
+ * the same rule the BHARAG lane keys follow — a shared secret here would be
+ * the same unauthenticated-shared-connection problem this exists to close.
+ * `READONLY_SECRETS_NORTH_STAR` is the first: North Star's own path,
+ * distinct from `MCP_SECRET`/`MCP_WRITE_TOKEN`, checked before either so it
+ * can never resolve to `write` even if `MCP_ONE_URL` is true.
+ */
+const READONLY_SECRETS: ReadonlyArray<{ name: string; secret: string }> = [
+  { name: 'north_star', secret: process.env.READONLY_SECRETS_NORTH_STAR?.trim() || '' },
+].filter((e) => e.secret.length > 0);
 
 export type McpAccess = 'read' | 'write';
 
@@ -325,8 +354,14 @@ function same(given: string, secret: string | null): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** Which connection a path secret opens, or null for a miss. Both are compared in constant time. */
+/**
+ * Which connection a path secret opens, or null for a miss. All comparisons
+ * are constant time. A `READONLY_SECRETS` entry is checked first and always
+ * answers `read` — never falls through to the write check, so it can never
+ * resolve to `write` regardless of `MCP_ONE_URL`.
+ */
 function accessFor(given: string): McpAccess | null {
+  if (READONLY_SECRETS.some((e) => same(given, e.secret))) return 'read';
   const write = same(given, MCP_WRITE_TOKEN);
   const read = same(given, MCP_SECRET);
   return write ? 'write' : read ? 'read' : null;
