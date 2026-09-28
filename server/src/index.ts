@@ -1650,6 +1650,15 @@ async function boot(): Promise<void> {
           ? `  mcp:      /mcp/<${MCP_WRITE_TOKEN_VAR}> — the write connection: every read tool plus create, update, archive and delete behind the Tools Router guards`
           : `  mcp:      write connection OFF — ${MCP_WRITE_TOKEN_VAR} is not set, so no MCP client can write.`,
     );
+    // Agent-scoped read-only secrets (2026-09-28) — checked before the write
+    // token, so a caller holding one can never reach a write tool even where
+    // MCP_ONE_URL is true. Named by name, on the same rule as every other
+    // credential line here.
+    console.log(
+      process.env.READONLY_SECRETS_NORTH_STAR?.trim()
+        ? `  mcp:      /mcp/<READONLY_SECRETS_NORTH_STAR> — North Star's own path, read tools only, enforced at the server regardless of MCP_ONE_URL`
+        : `  mcp:      READONLY_SECRETS_NORTH_STAR NOT set — North Star still connects on the shared secret above; "no writes" for it is a toolFilter, not a server guarantee.`,
+    );
     // The Slack and Google credentials the file and Doc tools need (2026-09-24).
     console.log(
       slack.slackConfigured()
