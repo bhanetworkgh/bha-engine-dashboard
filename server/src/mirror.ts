@@ -47,6 +47,7 @@ export type MirrorKind =
   | 'patterns'
   | 'commercial'
   | 'ns-asks'
+  | 'bays-asks'
   | 'rt-asks'
   | 'rt-jobs'
   | 'client_lanes'
@@ -105,6 +106,14 @@ export const KINDS: Record<MirrorKind, KindSpec> = {
    * both so neither spelling is assumed.
    */
   'ns-asks': { table: 'engine_ns_asks', label: 'North Star asks', naturalField: 'Ask ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
+  /**
+   * Bays' ask ledger (2026-09-28, Destiny — Agent Upgrade Plan step 2.5). The
+   * twins have recorded every ask since 17 Sep; Bays recorded none, so its
+   * delivery and failure rates could not be counted. Engine-only: no Airtable
+   * table ever held it, so nothing resyncs it and the final import skips it.
+   * `Bays — Agent Delivery` posts one row per answered turn, keyed on `Ask ID`.
+   */
+  'bays-asks': { table: 'engine_bays_asks', label: 'Bays asks', naturalField: 'Ask ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
   'rt-asks': { table: 'engine_rt_asks', label: 'Research Twin asks', naturalField: 'Ask ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
   'rt-jobs': { table: 'engine_rt_jobs', label: 'Research jobs', naturalField: 'Job ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
   client_lanes: { table: 'engine_client_lanes', label: 'Watched Clients index', naturalField: 'Lane ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },

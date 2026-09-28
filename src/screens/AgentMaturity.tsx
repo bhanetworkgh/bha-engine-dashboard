@@ -98,7 +98,8 @@ export default function AgentMaturity() {
                 ) : (
                   <div className="text-right text-[12.5px] text-dim tabular">
                     <div>Delivered {share(a.delivered, a.asks) ?? 'no asks'}</div>
-                    <div>Thin {share(a.thin, a.asks) ?? '—'} · Failed {share(a.failed, a.asks) ?? '—'}</div>
+                    <div>{a.thin === null ? '' : `Thin ${share(a.thin, a.asks) ?? '—'} · `}Failed {share(a.failed, a.asks) ?? '—'}</div>
+                    {a.note && <div className="text-faint">{a.note}</div>}
                   </div>
                 )}
               </div>

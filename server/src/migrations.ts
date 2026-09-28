@@ -1878,6 +1878,30 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE engine_mcp_writes ADD COLUMN IF NOT EXISTS agent text`,
     ],
   },
+  {
+    id: 36,
+    name: 'engine_bays_asks: Bays ask ledger, the same shape as the twins',
+    statements: [
+      /**
+       * 28 Sep 2026, Destiny — Agent Upgrade Plan step 2.5. One row per Bays
+       * turn, written by Bays — Agent Delivery after the reply is posted, so it
+       * can say whether the reply reached anyone. Same columns as
+       * engine_ns_asks and engine_rt_asks, so every ledger reads one way.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_bays_asks (
+         id                  bigserial PRIMARY KEY,
+         airtable_record_id  text UNIQUE,
+         natural_id          text,
+         lane_id             text,
+         created_time        text,
+         fields              jsonb NOT NULL DEFAULT '{}'::jsonb,
+         source              text NOT NULL,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_bays_asks_natural ON engine_bays_asks (natural_id)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
