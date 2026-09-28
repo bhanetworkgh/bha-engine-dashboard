@@ -793,6 +793,23 @@ reasonable about.
   golden cases live in the n8n Data Table `agent_eval_set`; the tools cannot
   edit a row there, so **a case is revised by appending a row with the same
   `case_id`, and the newest row wins**.
+- **North Star ranks lanes by fixed weights, in code** (decision 2026-09-28,
+  Destiny and Jason, #bha-north-star-twin 1790611246.825499).
+  `server/src/laneRanking.ts` holds the six weights and nothing else does:
+  gates Oct 31 25, blocks others 20, engine leverage 20, commercial impact 15,
+  days since it last moved 10 (stale ranks higher), effort 10 (less ranks
+  higher); each factor 0–5, score 0–100, ties on lane id, so one question gives
+  one order. Days since moved is computed (loops for a work lane, cards and
+  research jobs for a commercial LANE-… id); commercial impact is read from a
+  commercial lane's cards; the rest are tags in `engine_lane_profiles`
+  (migration 38), because nothing records launch dependencies or who waits on
+  whom yet. **A tag nobody set scores 0 and is named in `missing`** — never a
+  guess. Seeded only with what Jason named. `rank_lanes` (read, both
+  connections, in North Star's scope) returns the order with every factor;
+  `set_lane_profile` (write connection) sets tags, audited on
+  `engine_mcp_writes`. `npm run test:lane-ranking` pins the maths. Driving
+  Research Twin, self-heal and autopay from the ranking is the next step, in
+  that order, autopay only once Jason has agreed the rule.
 - **One token per agent, scoped on the server** (decision 2026-09-28, Destiny —
   Agent Upgrade Plan step 1.4). `READONLY_SECRETS_NORTH_STAR` (read, 10 tools),
   `MCP_AGENT_TOKEN_RESEARCH_TWIN` (write, 7) and `MCP_AGENT_TOKEN_BAYS` (write,

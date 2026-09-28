@@ -27,6 +27,7 @@ import { NORTH_STAR_TOOLS } from './northStarTools';
 import { SLACK_WRITE_TOOLS } from './slackTools';
 import { RESEARCH_TWIN_WRITE_TOOLS } from './researchTwinTools';
 import { CANDIDATE_WRITE_TOOLS } from './candidateTools';
+import { LANE_READ_TOOLS, LANE_WRITE_TOOLS } from './laneTools';
 import { findRecords, READABLE_KINDS } from './findRecords';
 import * as mirror from '../mirror';
 import * as n8n from '../n8n';
@@ -823,6 +824,8 @@ export const TOOLS: ToolDefinition[] = [
   readSlackFile,
   // 2026-09-24: North Star's three code tools, off its Tools Router.
   ...NORTH_STAR_TOOLS,
+  // 2026-09-28: the weighted lane ranking North Star reads (Jason, #bha-north-star-twin).
+  ...LANE_READ_TOOLS,
   // The one that is not a read.
   resyncTool,
 ];
@@ -834,7 +837,7 @@ export const TOOLS: ToolDefinition[] = [
  * tool a client can see is a tool a model will try.
  */
 function toolsFor(access: 'read' | 'write'): ToolDefinition[] {
-  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS] : TOOLS;
+  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS, ...LANE_WRITE_TOOLS] : TOOLS;
 }
 
 export function toolByName(name: string, access: 'read' | 'write' = 'read'): ToolDefinition | null {
