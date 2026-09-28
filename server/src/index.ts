@@ -48,7 +48,7 @@ import { isStatKind, stats } from './stats';
 import { N8N_API_VAR, n8nBase, n8nConfigured } from './n8n';
 import * as slack from './slack';
 import * as google from './google';
-import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, MCP_SECRET_VAR, MCP_WRITE_TOKEN_VAR, MCP_ONE_URL } from './mcp';
+import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, agentTokensConfigured, MCP_SECRET_VAR, MCP_WRITE_TOKEN_VAR, MCP_ONE_URL } from './mcp';
 import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
 import * as candidateActions from './candidateActions';
@@ -1658,11 +1658,16 @@ async function boot(): Promise<void> {
     // token, so a caller holding one can never reach a write tool even where
     // MCP_ONE_URL is true. Named by name, on the same rule as every other
     // credential line here.
-    console.log(
-      process.env.READONLY_SECRETS_NORTH_STAR?.trim()
-        ? `  mcp:      /mcp/<READONLY_SECRETS_NORTH_STAR> — North Star's own path, read tools only, enforced at the server regardless of MCP_ONE_URL`
-        : `  mcp:      READONLY_SECRETS_NORTH_STAR NOT set — North Star still connects on the shared secret above; "no writes" for it is a toolFilter, not a server guarantee.`,
-    );
+    // One token per agent (2026-09-28, plan step 1.4): each names its agent on
+    // engine_mcp_writes and is held to its own tool list on the server.
+    {
+      const agents = agentTokensConfigured();
+      console.log(
+        agents.length
+          ? `  mcp:      agent tokens — ${agents.join('; ')}. Path /mcp/<token> or Bearer on /mcp/agent.`
+          : `  mcp:      no agent tokens set (READONLY_SECRETS_NORTH_STAR, MCP_AGENT_TOKEN_RESEARCH_TWIN, MCP_AGENT_TOKEN_BAYS) — every agent connects on the shared secret and writes carry no agent name.`,
+      );
+    }
     // The Slack and Google credentials the file and Doc tools need (2026-09-24).
     console.log(
       slack.slackConfigured()

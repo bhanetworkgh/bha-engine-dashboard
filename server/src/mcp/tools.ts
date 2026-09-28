@@ -59,6 +59,14 @@ export interface ToolDeps {
    * write path and the audit line cannot differ. It never selects a catalogue.
    */
   access: 'read' | 'write' | 'page';
+  /**
+   * The tools this caller may see and call, or null for the whole catalogue of
+   * its access (2026-09-28, plan step 1.4). Set from the agent's own token by
+   * the transport, never from anything the caller sends.
+   */
+  scope?: ReadonlySet<string> | null;
+  /** The agent the token belongs to, or null for the shared secret. */
+  agent?: string | null;
 }
 
 /**

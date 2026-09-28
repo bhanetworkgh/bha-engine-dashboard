@@ -781,6 +781,17 @@ reasonable about.
   client cannot read the session id this server issued to it, and **`DELETE`
   answers 204**. All three are behind the same secret check, so none of them
   tells an unauthenticated caller the endpoint is there.
+- **One token per agent, scoped on the server** (decision 2026-09-28, Destiny —
+  Agent Upgrade Plan step 1.4). `READONLY_SECRETS_NORTH_STAR` (read, 10 tools),
+  `MCP_AGENT_TOKEN_RESEARCH_TWIN` (write, 7) and `MCP_AGENT_TOKEN_BAYS` (write,
+  19), each list in `AGENT_KEYS` in `server/src/mcp/index.ts` mirroring that
+  agent's n8n allow-list. **Add a tool to an agent in both places**, or the
+  server refuses it: a call outside the scope is not listed, is refused, and
+  is written to `engine_mcp_writes` as `refused` / `out_of_scope`. The token
+  decides `engine_mcp_writes.agent` (migration 35) — never anything the caller
+  sends. Accepted as the path (`/mcp/<token>`) or as `Authorization: Bearer` on
+  `/mcp/agent`; agent tokens are checked before the shared secrets, which keep
+  working for Claude's connector as agent null.
 - **A session id is issued on initialize and accepted forever after.** It comes
   back in `Mcp-Session-Id` and the client sends it on every later request.
   Nothing per-session is kept — every tool reads the same source tree and the
