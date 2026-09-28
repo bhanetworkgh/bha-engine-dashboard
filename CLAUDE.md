@@ -772,7 +772,11 @@ reasonable about.
   2026-09-28): the ~130 held open are long-lived n8n MCP client sessions, and
   each one reconnects about two minutes after its stream ends, so a cap of 40
   turned 130 quiet streams into a burst of ~90 reconnects every two minutes.
-  The count is a client-side fact; fix it there if it ever matters. **`OPTIONS` answers the CORS preflight with 204** and
+  The count is a client-side fact; fix it there if it ever matters. **So n8n's
+  agents get a 405 on GET instead** (2026-09-28): they are the only caller with
+  user agent `undici`, they reach every tool by POST, and the MCP client SDK
+  reads a 405 on GET as "no stream offered" and stops opening one. Claude's
+  connector (`Claude-User`) still gets the held stream. **`OPTIONS` answers the CORS preflight with 204** and
   `Access-Control-Expose-Headers: Mcp-Session-Id`, without which a browser
   client cannot read the session id this server issued to it, and **`DELETE`
   answers 204**. All three are behind the same secret check, so none of them

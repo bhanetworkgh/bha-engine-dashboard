@@ -10686,3 +10686,10 @@ Files:      server/src/mcp/index.ts (reverted to cdce41b's stream handling), CLA
 Problem:    After deploy e50f0a0 the log shows the same session ids reopening streams — 00c1d2a8…, 0ab6fd1b…, 6c5c865c…, e1c438a8…, 0e465c23…, all seen at 10:48 too — in bursts at 12:14:36 and 12:16:41, each open immediately ending the oldest: "GET stream closed (over cap) after 0s — 40 open". The ~130 streams are long-lived n8n MCP client sessions that reconnect about two minutes after a stream ends. Capping did not lower anything; it replaced 130 idle streams with ~90 reconnects every two minutes.
 Fix:        Stream cap and max age removed; holdEventStream is back to what cdce41b shipped. CLAUDE.md now says not to cap them and why.
 Decision:   The unknown-lane refusal stays — it is verified live (LANE-VFARM-ZONE-MONITORING refused with the two ZONE_MONITORING lanes first among five close matches; LANE-VFARM-ZONE_MONITORING_SAAS answered normally). The 27 Sep 520 is left unexplained: the failed call never reached this server, and nothing here proves a cause.
+
+## 2026-09-28 13:35 — n8n agents get 405 on the MCP GET stream
+Intent:     Stop n8n's agents holding ~130 empty event streams open, without the reconnect churn the 13:15 cap caused.
+Files:      server/src/mcp/index.ts, CLAUDE.md
+Problem:    Request logs 09:00–12:21 UTC: 81 GETs on /mcp, every one user agent "undici" from 4.165.103.121 (n8n), each held ~50 s and reopened; the one Claude connector call was "Claude-User". n8n's MCP client reopens a GET stream whenever one ends, so a cap only churned.
+Fix:        GET from user agent undici answers 405 (Allow: POST, DELETE, OPTIONS). The MCP client SDK treats a 405 on GET as the server offering no stream and does not retry it. Every other GET — Claude's connector included — still gets the held stream the 18 Sep decision requires.
+Decision:   Matched on user agent because it is the one thing on the GET that tells n8n from Claude; session ids outlive restarts and carry no client name here.
