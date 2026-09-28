@@ -2322,6 +2322,8 @@ const RECORD_KIND: Record<mirror.MirrorKind, RecordKind | null> = {
   'ns-asks': 'ns',
   /** Bays' ledger (28 Sep): engine-only, read by the scorecard; no record page yet. */
   'bays-asks': null,
+  /** Eval results (28 Sep): engine-only, read by the scorecard. */
+  'eval-runs': null,
   'rt-asks': 'rt',
   'rt-jobs': 'rt_jobs',
   client_lanes: 'clients',

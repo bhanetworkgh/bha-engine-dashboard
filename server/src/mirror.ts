@@ -48,6 +48,7 @@ export type MirrorKind =
   | 'commercial'
   | 'ns-asks'
   | 'bays-asks'
+  | 'eval-runs'
   | 'rt-asks'
   | 'rt-jobs'
   | 'client_lanes'
@@ -114,6 +115,13 @@ export const KINDS: Record<MirrorKind, KindSpec> = {
    * `Bays — Agent Delivery` posts one row per answered turn, keyed on `Ask ID`.
    */
   'bays-asks': { table: 'engine_bays_asks', label: 'Bays asks', naturalField: 'Ask ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
+  /**
+   * Agent eval results (2026-09-28, Destiny — Agent Upgrade Plan steps 3.2–3.4).
+   * One row per case per repeat, written by `Agent Evals — Runner` in n8n,
+   * keyed on `Result ID` (<run>:<case>:<repeat>) so a re-post of the same
+   * result updates rather than duplicates. `lane_id` is unused and stays null.
+   */
+  'eval-runs': { table: 'engine_eval_runs', label: 'Agent eval results', naturalField: 'Result ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },
   'rt-asks': { table: 'engine_rt_asks', label: 'Research Twin asks', naturalField: 'Ask ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
   'rt-jobs': { table: 'engine_rt_jobs', label: 'Research jobs', naturalField: 'Job ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: ['lane_id'] },
   client_lanes: { table: 'engine_client_lanes', label: 'Watched Clients index', naturalField: 'Lane ID', keyOnNatural: true, perBuilder: false, perLaneTable: false, promote: [] },

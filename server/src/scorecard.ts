@@ -36,6 +36,34 @@ async function ledger(table: string, agent: string): Promise<AgentMetric> {
   };
 }
 
+/**
+ * The latest eval run (plan steps 3.2–3.4). A case passes only if every one of
+ * its repeats passed — pass^k — so a flaky answer cannot average its way to a
+ * pass. Null with a note until a run exists.
+ */
+async function evalSummary(): Promise<ScorecardData['evals']> {
+  const latest = await query<{ run: string | null }>(
+    `SELECT fields->>'Run ID' AS run FROM engine_eval_runs ORDER BY id DESC LIMIT 1`,
+  );
+  const run = latest.rows[0]?.run ?? null;
+  if (!run) return { pass_rate: null, note: 'No eval run recorded yet. Run the n8n workflow Agent Evals — Runner.' };
+  const r = await query<{ cases: string; passed: string; results: string; at: string | null }>(
+    `WITH per_case AS (
+       SELECT fields->>'Case ID' AS case_id, bool_and((fields->>'Passed') = 'true') AS ok, count(*) AS n, max(fields->>'Run At') AS at
+         FROM engine_eval_runs WHERE fields->>'Run ID' = $1 GROUP BY 1
+     )
+     SELECT count(*)::text AS cases, count(*) FILTER (WHERE ok)::text AS passed, sum(n)::text AS results, max(at) AS at FROM per_case`,
+    [run],
+  );
+  const row = r.rows[0];
+  const cases = Number(row?.cases ?? 0);
+  const passed = Number(row?.passed ?? 0);
+  return {
+    pass_rate: cases ? passed / cases : null,
+    note: `${passed} of ${cases} cases passed in run ${run}${row?.at ? ` (${row.at.slice(0, 16).replace('T', ' ')} UTC)` : ''}; a case passes only if all its repeats pass (${row?.results ?? 0} results).`,
+  };
+}
+
 export async function data(): Promise<ScorecardData> {
   const latest = await query<{ scored_on: string }>(`SELECT max(scored_on)::text AS scored_on FROM engine_agent_scorecard`);
   const scoredOn = latest.rows[0]?.scored_on ?? null;
@@ -93,7 +121,7 @@ export async function data(): Promise<ScorecardData> {
     incidents,
     quota: q,
     mcp_refusals_7d: Number(refusals.rows[0]?.n ?? 0),
-    evals: { pass_rate: null, note: 'No eval runs recorded yet; the eval runner arrives with plan step 18.' },
+    evals: await evalSummary(),
     injection: { pass_rate: null, note: 'No injection tests recorded yet; they arrive with the red-team set in Phase 6.' },
   };
 }
