@@ -117,9 +117,13 @@ export interface StoreResult {
  *
  * An upsert, because the bridge posts once and n8n retries a failed HTTP node:
  * the same result arriving twice must update the row rather than add a second.
- * `reverted_at` and `reverted_by` are deliberately left out of the update — they
- * are this dashboard's own, and a late repost of the bridge's result must not
- * erase the fact that somebody has since put the workflow back.
+ * `reverted_at` and `reverted_by` are never overwritten once set — a late
+ * repost of the bridge's result must not erase the fact that somebody has since
+ * put the workflow back. The one way the bridge sets them is its own automatic
+ * revert (28 Sep 2026, Agent Upgrade Plan step 4.4): a change whose retry still
+ * failed is put back to the pre-repair snapshot before the result is posted,
+ * and the row says so with `reverted_by = 'bridge (auto)'`. That only fills an
+ * empty column (COALESCE), never replaces a revert somebody made here.
  *
  * The whole payload is stored beside the columns. The columns are the read
  * model; the blob is the record, and a field the bridge adds before this
@@ -130,14 +134,15 @@ export async function store(payload: Record<string, unknown>, db: Queryable = { 
   if (!repairId) throw new RepairError('"repair_id" is required: it is what makes a repeated report update one row rather than add a second.', 422);
   const outcome = outcomeOf(payload.outcome);
 
+  const autoReverted = payload.auto_reverted === true && instant(payload.reverted_at) !== null;
   const nodesChanged = Array.isArray(payload.nodes_changed) ? payload.nodes_changed.filter((n) => typeof n === 'string').slice(0, 200) : [];
 
   const r = await db.query<{ inserted: boolean }>(
     `INSERT INTO engine_repairs (
        repair_id, outcome, workflow_id, workflow_name, failed_node, error_class, error_message, execution_id,
        root_cause, change_summary, nodes_changed, human_action, version_before, version_after, duration_ms,
-       report_channel, payload, started_at, finished_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17::jsonb,$18,$19)
+       report_channel, payload, started_at, finished_at, reverted_at, reverted_by
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17::jsonb,$18,$19,$20,$21)
      ON CONFLICT (repair_id) DO UPDATE SET
        outcome = EXCLUDED.outcome,
        workflow_id = EXCLUDED.workflow_id,
@@ -156,7 +161,9 @@ export async function store(payload: Record<string, unknown>, db: Queryable = { 
        report_channel = EXCLUDED.report_channel,
        payload = EXCLUDED.payload,
        started_at = EXCLUDED.started_at,
-       finished_at = EXCLUDED.finished_at
+       finished_at = EXCLUDED.finished_at,
+       reverted_at = COALESCE(engine_repairs.reverted_at, EXCLUDED.reverted_at),
+       reverted_by = CASE WHEN engine_repairs.reverted_at IS NULL THEN EXCLUDED.reverted_by ELSE engine_repairs.reverted_by END
      RETURNING (xmax = 0) AS inserted`,
     [
       repairId,
@@ -178,6 +185,8 @@ export async function store(payload: Record<string, unknown>, db: Queryable = { 
       JSON.stringify(payload),
       instant(payload.started_at),
       instant(payload.finished_at),
+      autoReverted ? instant(payload.reverted_at) : null,
+      autoReverted ? 'bridge (auto)' : null,
     ],
   );
 
