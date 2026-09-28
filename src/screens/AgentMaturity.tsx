@@ -123,9 +123,13 @@ export default function AgentMaturity() {
               <span className="text-ink">Eval pass rate</span>
               <span className="text-right text-dim">{d.evals.pass_rate === null ? d.evals.note : <>{`${Math.round(d.evals.pass_rate * 100)}%`}<br /><span className="text-faint">{d.evals.note}</span></>}</span>
             </div>
-            <div className="flex justify-between gap-4 py-2">
+            <div className="flex justify-between gap-4 border-b border-line py-2">
               <span className="text-ink">Injection tests</span>
-              <span className="text-right text-dim">{d.injection.pass_rate === null ? d.injection.note : `${Math.round(d.injection.pass_rate * 100)}%`}</span>
+              <span className="text-right text-dim">{d.injection.pass_rate === null ? d.injection.note : <>{`${Math.round(d.injection.pass_rate * 100)}%`}<br /><span className="text-faint">{d.injection.note}</span></>}</span>
+            </div>
+            <div className="flex justify-between gap-4 py-2">
+              <span className="text-ink">Time to resolve an incident</span>
+              <span className="text-right text-dim">{d.resolve.p50_minutes === null ? d.resolve.note : <>{`p50 ${d.resolve.p50_minutes} min · p95 ${d.resolve.p95_minutes} min`}<br /><span className="text-faint">{d.resolve.note}</span></>}</span>
             </div>
           </div>
         </Card>
