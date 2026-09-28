@@ -2320,6 +2320,8 @@ const RECORD_KIND: Record<mirror.MirrorKind, RecordKind | null> = {
   patterns: 'patterns',
   commercial: 'commercial',
   'ns-asks': 'ns',
+  /** Bays' ledger (28 Sep): engine-only, read by the scorecard; no record page yet. */
+  'bays-asks': null,
   'rt-asks': 'rt',
   'rt-jobs': 'rt_jobs',
   client_lanes: 'clients',

@@ -59,15 +59,9 @@ export async function data(): Promise<ScorecardData> {
   const agents: AgentMetric[] = [
     await ledger('engine_ns_asks', 'North Star'),
     await ledger('engine_rt_asks', 'Research Twin'),
-    {
-      agent: 'Bays',
-      asks: null,
-      delivered: null,
-      thin: null,
-      failed: null,
-      window_days: WINDOW_DAYS,
-      note: 'Bays has no ask ledger yet; it arrives with plan step 11.',
-    },
+    // Bays' own ledger since 28 Sep (plan step 2.5). Bays does not grade its
+    // answers thin, so thin is null rather than a nought that would read as none.
+    { ...(await ledger('engine_bays_asks', 'Bays')), thin: null, note: 'Recording since 28 Sep 2026. Bays does not grade answers as thin.' },
   ];
 
   const incidents = (

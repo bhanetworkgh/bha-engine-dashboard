@@ -91,6 +91,11 @@ export const SOURCE_OF: Record<MirrorKind, SourceSpec> = {
    * Airtable holds no newer copy. The base each came out of is named so a
    * reader can still find the history; the mirror is the record from here.
    */
+  'bays-asks': {
+    system: 'engine-only',
+    tables: [],
+    note: "Bays' ask ledger (28 Sep 2026): one row per Bays turn, written by Bays — Agent Delivery posting to /api/engine/bays-asks after the reply is posted, keyed on Ask ID. It never lived in Airtable, so there is no source to compare against; an empty table means Agent Delivery has not written since it was built.",
+  },
   channel_tracking: {
     system: 'engine-only',
     tables: [{ base: 'apprzpppxE2yV0q84', table: 'tblboJRTsFSkHW0ra', label: 'Channel Tracking' }],
@@ -180,6 +185,7 @@ export const RESYNC_ROUTE: Record<MirrorKind, ResyncRoute | null> = {
    * so there is no second copy that could be newer. A resync would have nothing
    * to read and nothing to reconcile against.
    */
+  'bays-asks': null,
   channel_tracking: null,
   review_returns: null,
   lane_backlog: null,
