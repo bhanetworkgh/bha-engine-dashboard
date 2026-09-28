@@ -768,7 +768,10 @@ reasonable about.
   immediately, and sends another every 20 seconds — Render's router closes an
   idle connection, and a first byte is what tells a client an open stream from a
   hang. It carries no messages, which is the truth; it opens, which is what the
-  client needs. **`OPTIONS` answers the CORS preflight with 204** and
+  client needs. **A stream is held ten minutes at most, and forty at once**
+  (2026-09-28): agents open one per run and rarely close it — 94 to 137 open
+  in under two hours on 28 Sep — so past the cap the oldest is ended first,
+  and a client that still wants one reopens it. **`OPTIONS` answers the CORS preflight with 204** and
   `Access-Control-Expose-Headers: Mcp-Session-Id`, without which a browser
   client cannot read the session id this server issued to it, and **`DELETE`
   answers 204**. All three are behind the same secret check, so none of them
@@ -1150,6 +1153,10 @@ crash, when seven North Star runs read Slack at 08:00 at once.
 - **`get_priority_evidence`** (`PE -`): the newest 40 Codex rows, 300 rt-jobs
   and 300 commercial cards, `PE - Format Evidence`'s shapes and clips; jobs and
   cards filtered by `lane_id`, work logs never (25 without a lane, 15 with).
+  **A `lane_id` no card or job carries is refused** (2026-09-28) with
+  `unknown_lane_id`, `close_matches` and every real id — read from both whole
+  tables, not the newest 300 — never an empty answer that reads like a quiet
+  lane. North Star's "never guess a lane id" rule, held by the server too.
 - **Every answer is budgeted** (decision 2026-09-24, Destiny). The first cut
   answered in 66–84 KB and the n8n Agent looped on it — `get_priority_evidence`
   six times and `read_open_loops` five in seventy seconds on one question, and

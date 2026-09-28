@@ -313,6 +313,15 @@ async function call(name, args) {
     assert.match(pe.source_note, /not filtered by lane/);
     step('get_priority_evidence: clips, lane filter on jobs and cards, 25 / 15 logs');
 
+    // A lane id no card or job carries is refused, never an empty answer.
+    const guessed = await call('get_priority_evidence', { lane_id: LANE.toLowerCase() });
+    assert.equal(guessed.ok, false);
+    assert.equal(guessed.error, 'unknown_lane_id');
+    assert.ok(guessed.lanes_seen.includes(LANE), 'the full list of real ids comes back');
+    assert.ok(guessed.close_matches.includes(LANE), 'a wrong-case id names the real one as a close match');
+    assert.equal(guessed.research_jobs, undefined, 'no evidence rides along with a refusal');
+    step('get_priority_evidence: an unknown lane id is refused with the real ids');
+
     /* ---------------- the budget ---------------- */
     const small = await call('get_priority_evidence', { max_chars: 5_000 });
     assert.equal(small.truncated, true);
