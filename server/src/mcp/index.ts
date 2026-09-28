@@ -515,6 +515,17 @@ export async function handleMcp(req: IncomingMessage, res: ServerResponse, url: 
    * not.
    */
   if (method === 'GET') {
+    // n8n's agents (user agent `undici`, the one client that reaches this route
+    // with it) hold a GET stream per MCP client and reopen it whenever it ends —
+    // ~130 held at once on 28 Sep, all carrying nothing. They connect by POST
+    // and never need discovery, and the MCP client SDK treats a 405 on GET as
+    // "this server offers no stream" and stops asking. Claude's connector
+    // (`Claude-User`) still gets the held stream it needs to discover the server.
+    if (/^undici\b/i.test(String(req.headers['user-agent'] || ''))) {
+      res.writeHead(405, { Allow: 'POST, DELETE, OPTIONS', 'Content-Length': '0', ...cors(req, given) });
+      res.end();
+      return;
+    }
     holdEventStream(req, res);
     return;
   }
