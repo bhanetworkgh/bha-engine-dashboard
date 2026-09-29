@@ -262,6 +262,7 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(`http:
     assert.equal(qf.Sources, '[S1] Src - https://s.example || [S2] Two');
     assert.equal(qf['Movement Tag'], 'contradicted');
     assert.equal(qf['Research Stuck'], false);
+    assert.equal(qf['Run Count'], 0, 'a usable (medium) answer resets the attempt count (29 Sep)');
     assert.equal(seen.bharag.length, 1);
     assert.equal(seen.bharag[0].path, '/ingest');
     assert.equal(seen.bharag[0].key, 'rt-key');
@@ -280,6 +281,22 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(`http:
     assert.equal(nq.ok, false);
     assert.match(nq.error, /^No question row found matching that exact text in table /);
     step('update_watched_client_question: merge as UWC wrote it, BHARAG doc with the RT key, a BHARAG failure degrades and keeps the row');
+
+    /* ---- the 3-attempt cap counts misses, not runs (29 Sep) ---- */
+    const { mergeQuestion } = require(path.join(__dirname, '..', '..', 'server-dist', 'server', 'src', 'mcp', 'researchTwinTools.js'));
+    const at = (n, confidence) => mergeQuestion({ table_id: 't', question: 'q', answer: 'a', confidence }, { id: 1, fields: { 'Run Count': n } }, '2026-09-29T00:00:00.000Z');
+    for (const c of ['medium', 'high']) {
+      const m = at(3, c);
+      assert.equal(m.runCount, 0, `${c} at 3 resets`);
+      assert.equal(m.researchStuck, false, `${c} at 3 is not stuck`);
+      assert.equal(m.nextExperiments, '');
+    }
+    assert.equal(at(2, 'low').researchStuck, false, 'two misses is not yet capped');
+    assert.equal(at(2, 'low').runCount, 2, 'a miss keeps the count the clock set');
+    assert.equal(at(3, 'low').researchStuck, true, 'three misses in a row caps it');
+    assert.match(at(3, 'low').nextExperiments, /^Capped after 3 research attempts/);
+    assert.equal(at(3, undefined).researchStuck, true, 'no confidence is read as low');
+    step('update_watched_client_question: a usable answer resets Run Count; only three misses in a row cap a question');
 
     /* ---- create_client_report_doc ---- */
     const unknown = await call('create_client_report_doc', { client_name: 'Nobody Anywhere 999' });
