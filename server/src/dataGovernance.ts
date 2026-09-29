@@ -253,6 +253,8 @@ export interface GuardInput {
   run_id?: string | null;
   metadata?: Record<string, unknown> | null;
   via: 'dashboard' | 'n8n';
+  /** Decide and answer, but record nothing — so the guard can be proved live without a test row on the scorecard. */
+  dry_run?: boolean;
 }
 
 export interface GuardResult {
@@ -263,6 +265,7 @@ export interface GuardResult {
   content: string;
   metadata: Record<string, unknown>;
   redactions: Record<string, number>;
+  dry_run?: boolean;
 }
 
 /**
@@ -291,7 +294,7 @@ export async function guard(input: GuardInput): Promise<GuardResult> {
     guarded_at: new Date().toISOString(),
     ...(redacted ? { redactions } : {}),
   };
-  try {
+  if (!input.dry_run) try {
     await query(
       `INSERT INTO engine_bharag_guard (workspace, source, run_id, kind, answer_outcome, outcome, reason, redactions, title, via)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
@@ -301,7 +304,7 @@ export async function guard(input: GuardInput): Promise<GuardResult> {
     // The decision still stands; only its record failed, and that is said.
     console.error(`bharag-guard: could not record the decision: ${e instanceof Error ? e.message : String(e)}`);
   }
-  return { allow: !reason, outcome, reason, title: t.text, content: c.text, metadata, redactions };
+  return { allow: !reason, outcome, reason, title: t.text, content: c.text, metadata, redactions, ...(input.dry_run ? { dry_run: true } : {}) };
 }
 
 /** The scorecard's figures: seven days of guard decisions. */
