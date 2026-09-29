@@ -502,6 +502,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         run_id: b.run_id === undefined || b.run_id === null ? null : text(b.run_id),
         metadata: b.metadata && typeof b.metadata === 'object' && !Array.isArray(b.metadata) ? (b.metadata as Record<string, unknown>) : null,
         via: 'n8n',
+        dry_run: b.dry_run === true,
       });
       return send(res, 200, { ok: true, ...g });
     }
