@@ -2499,6 +2499,27 @@ each tab says what is missing and who wires it, and draws nothing.
 The contracts handed to the builders are `docs/contracts/genie-events.md`
 (Kaiqi) and `docs/contracts/vfarm.md` (Jegan and Kavin).
 
+**Data governance: retention and the BHARAG write guard** (2026-09-29,
+Destiny — Agent Upgrade Plan 5.4 and 5.5). `server/src/dataGovernance.ts`,
+migration 42. **Retention clears personal text and keeps the row**: after 180
+days a CST turn loses its message, reply, number and name, a Genie ask its
+question and answer, and a North Star, Research Twin or Bays ask its Question,
+Answer and Answer Summary; after 365 days an Early Access lead loses its name,
+email, organisation and form answers. Dates, counts and outcomes stay, so every
+past figure still adds up, and incidents and engine history are not touched.
+A weekly in-process job applies it (checked every six hours against
+`meta.retention.last_run`), and `POST /api/engine/retention/run` runs the same
+code on demand — `dry_run` rolls back, and only a dry run may pass `as_of` to
+pretend it is a later date. Changing a period is a change to `RETENTION` and a
+BUILD_LOG line, never a setting. **Every write-back into BHARAG goes through
+the guard**: an agent's Q&A (`kind: qa`) only when its outcome is Answered,
+secrets redacted by shape wherever they appear, a `source` tag required and
+stamped into the metadata with the run id. The dashboard's own ingests call it
+in-process (`bharag.ingest`); n8n's ingest nodes call
+`POST /api/engine/bharag-guard` and ingest the title, content and metadata it
+hands back, skipping the ingest when `allow` is false. Every decision is a row
+in `engine_bharag_guard`, counted on the Agent maturity page.
+
 **The Customer Service Twin joined the same day** (2026-09-29, Destiny), fourth
 route, same rules: `POST /api/engine/cst-events`, `cst.event.v1`, migration 41,
 `engine_cst_turns`, contract `docs/contracts/cst-events.md` (Ahad). One row

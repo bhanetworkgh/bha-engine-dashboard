@@ -33,6 +33,8 @@
  */
 
 /** The ledger's REST base. One host, configured once. */
+import { guard, type GuardKind } from './dataGovernance';
+
 export const BHARAG_URL = (process.env.BHARAG_API_URL || 'https://bharag2.duckdns.org/api/v1').replace(/\/+$/, '');
 
 /**
@@ -335,9 +337,32 @@ export interface IngestDocument {
   metadata: Record<string, unknown>;
 }
 
-export async function ingest(ws: IngestWorkspace, doc: IngestDocument): Promise<{ ok: boolean; status: number | null; detail: string }> {
+/**
+ * Every ingest from this server goes through the write guard first
+ * (2026-09-29, dataGovernance.ts): secrets redacted, a source tag stamped into
+ * the metadata, and the decision recorded. `source` defaults to naming this
+ * server and the workspace; a caller that knows its tool passes it.
+ */
+export async function ingest(
+  ws: IngestWorkspace,
+  doc: IngestDocument,
+  opts: { kind?: GuardKind; outcome?: string | null; source?: string; run_id?: string | null } = {},
+): Promise<{ ok: boolean; status: number | null; detail: string }> {
   const key = process.env[INGEST_KEY_VARS[ws]]?.trim();
   if (!key) return { ok: false, status: null, detail: `${INGEST_KEY_VARS[ws]} is not set on this server, so nothing was sent to BHARAG.` };
+  const g = await guard({
+    workspace: ws,
+    title: doc.title,
+    content: doc.content,
+    kind: opts.kind ?? 'record',
+    outcome: opts.outcome ?? null,
+    source: opts.source ?? `dashboard:${ws}`,
+    run_id: opts.run_id ?? null,
+    metadata: doc.metadata,
+    via: 'dashboard',
+  });
+  if (!g.allow) return { ok: false, status: null, detail: `refused by the BHARAG write guard: ${g.reason}` };
+  doc = { ...doc, title: g.title, content: g.content, metadata: g.metadata };
   try {
     const r = await call<Record<string, unknown>>('/ingest', key, doc);
     const id = r && typeof r === 'object' ? (r.document_id ?? r.id ?? (r.data as Record<string, unknown> | undefined)?.document_id ?? null) : null;

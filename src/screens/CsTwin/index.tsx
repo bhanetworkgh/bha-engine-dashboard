@@ -171,7 +171,7 @@ function TurnRow({ t, open, onToggle }: { t: CstTurn; open: boolean; onToggle: (
         <td className="td tabular text-dim">{who(t)}</td>
         <td className="td text-dim">{t.channel ?? '—'}</td>
         <td className="td td-clip" style={{ maxWidth: '44ch' }} title={t.message ?? undefined}>
-          {t.message ?? <span className="text-faint">{t.status === null ? 'turn not received' : 'not sent'}</span>}
+          {t.message ?? <span className="text-faint">{t.retention_cleared_at ? 'cleared after 180 days' : t.status === null ? 'turn not received' : 'not sent'}</span>}
         </td>
         <td className="td text-dim">{t.intent ?? '—'}</td>
         <td className="td">
@@ -187,7 +187,7 @@ function TurnRow({ t, open, onToggle }: { t: CstTurn; open: boolean; onToggle: (
           <td className="td" colSpan={8}>
             <div className="space-y-2 py-1 text-[12.5px]">
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-faint">
-                <span>{t.phone_e164 ?? 'no number sent'}</span>
+                <span>{t.phone_e164 ?? (t.retention_cleared_at ? `number cleared ${when(t.retention_cleared_at)} UTC` : 'no number sent')}</span>
                 {t.customer_ref && <span>customer {t.customer_ref}</span>}
                 {t.role && <span>role {t.role}</span>}
                 <span>{t.is_known === false ? 'not known to vFarm' : t.is_known ? 'known to vFarm' : 'known: not sent'}</span>

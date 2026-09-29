@@ -10,6 +10,7 @@
  */
 import { query } from './pg';
 import * as quota from './quota';
+import * as dataGovernance from './dataGovernance';
 import type { AgentMetric, ScoreRow, ScorecardData } from '../../src/data/types';
 
 const WINDOW_DAYS = 30;
@@ -218,5 +219,8 @@ export async function data(): Promise<ScorecardData> {
     evals: await evalSummary(),
     injection: await injectionSummary(),
     resolve: await resolveSummary(),
+    // Data governance (plan 5.4 and 5.5, 29 Sep): the guard's last seven days
+    // and the retention job's last run, both counted from their own records.
+    governance: { bharag: await dataGovernance.guardSummary(), retention: await dataGovernance.retentionStatus() },
   };
 }

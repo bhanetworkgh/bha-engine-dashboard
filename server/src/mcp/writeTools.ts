@@ -352,7 +352,7 @@ const createRecord: ToolDefinition = {
       const doc = documentFor(spec.kind, row.fields, drafter);
       if (!doc) ingest = { attempted: false, ok: false, detail: 'The row carries no text to ingest (no Orchestrator Layer2 Review or Summary), so nothing was sent.' };
       else {
-        const r = await bharag.ingest(spec.ingest, doc);
+        const r = await bharag.ingest(spec.ingest, doc, { kind: 'record', source: `mcp:create_record:${spec.kind}` });
         ingest = { attempted: true, ok: r.ok, detail: r.detail };
       }
     }

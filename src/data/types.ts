@@ -3316,6 +3316,15 @@ export interface ScorecardData {
   injection: { pass_rate: number | null; note: string };
   /** Incident time to resolve, p50/p95 in minutes, never a mean (plan step 5.1). */
   resolve: { n: number; p50_minutes: number | null; p95_minutes: number | null; note: string };
+  /** Data governance (plan 5.4 and 5.5, 29 Sep 2026). */
+  governance: {
+    bharag: { allowed: number; redacted: number; refused: number; refused_by_reason: { reason: string; n: number }[]; recording_since: string | null };
+    retention: {
+      policy: { store: string; days: number; clears: string; keeps: string }[];
+      not_covered: string[];
+      last_run: { at: string; cleared: number } | null;
+    };
+  };
 }
 
 
@@ -3341,6 +3350,8 @@ export interface GenieAsk {
   received_at: string;
   answer: string | null;
   error: string | null;
+  /** Set once retention cleared the question and answer (180 days). */
+  retention_cleared_at: string | null;
   /** Answered · Incomplete · Failed, or Genie's own status verbatim. */
   outcome: string;
 }
@@ -3463,6 +3474,8 @@ export interface CstTurn {
   delivery_error: string | null;
   delivery_attempts: number | null;
   delivery_at: string | null;
+  /** Set once retention cleared the message, reply and number (180 days). */
+  retention_cleared_at: string | null;
   /** Answered · Escalated · Refused · Needs verification · Unknown caller · Failed · Turn not received. */
   outcome: string;
 }

@@ -149,7 +149,7 @@ function AskRow({ a, open, onToggle }: { a: GenieAsk; open: boolean; onToggle: (
       <tr className="cursor-pointer" onClick={onToggle}>
         <td className="td tabular whitespace-nowrap text-faint">{when(a.occurred_at)}</td>
         <td className="td td-clip" style={{ maxWidth: '44ch' }} title={a.question ?? undefined}>
-          {a.question ?? <span className="text-faint">not sent</span>}
+          {a.question ?? <span className="text-faint">{a.retention_cleared_at ? 'cleared after 180 days' : 'not sent'}</span>}
         </td>
         <td className="td tabular text-dim">{a.builder_id ?? '—'}</td>
         <td className="td text-dim">{a.lane ?? '—'}</td>
