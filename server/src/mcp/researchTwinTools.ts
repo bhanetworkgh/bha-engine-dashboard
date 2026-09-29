@@ -475,8 +475,15 @@ const queueFollowupResearch: ToolDefinition = {
 /** UWC - Merge & Compute, as written. */
 export function mergeQuestion(trig: Args, record: { id: number; fields: Record<string, unknown> }, nowIso: string): Record<string, unknown> {
   const fields = record.fields || {};
-  const runCount = typeof fields['Run Count'] === 'number' ? (fields['Run Count'] as number) : 0;
-  const researchStuck = runCount >= 3;
+  const attempts = typeof fields['Run Count'] === 'number' ? (fields['Run Count'] as number) : 0;
+  // 29 Sep: Run Count is attempts WITHOUT a usable answer, not runs. The Weekly Clock bumps it
+  // before every run and nothing ever reset it, so every client hit the 3-attempt cap on its
+  // third Monday however good the answers were (all four lanes were Research Stuck on 29 Sep,
+  // so the next Monday would research nobody). A usable answer (medium or high confidence)
+  // now resets it to 0; only three low-confidence (or missing) answers in a row cap a question.
+  const usable = ['medium', 'high'].includes(str(trig.confidence));
+  const runCount = usable ? 0 : attempts;
+  const researchStuck = !usable && attempts >= 3;
   const prevAnswer = str(fields['This Week Answer']);
   const prevConfidence = fields['Confidence'] || null;
   const movementTag = ['same', 'refined', 'contradicted', 'new'].includes(str(trig.movement_tag)) ? str(trig.movement_tag) : 'new';
@@ -515,6 +522,7 @@ export function mergeQuestion(trig: Args, record: { id: number; fields: Record<s
     researchStuck,
     nextExperiments,
     runCount,
+    attempts,
   };
 }
 
@@ -523,6 +531,7 @@ const LANE_BY_TABLE: Record<string, string> = {
   tblKfIlEaRNs8qygF: 'Client 9 — Veganism',
   tbllZcuoktLbLRWU9: 'Client 2 — Rare-Earth Recycling',
   tbl42Pl5mcYRNLYQV: 'Client 12 — Surgical Robotics',
+  tbl9Js3hvclOMG3Rt: 'Client 2 — CRE vFarm + Kiosk Host', // 29 Sep: its docs were filed as "Unmapped lane"
   tblvs750H2Q2wcbu7: 'Digasphere — LinkedIn Intel',
   tblDe4GuFyZqrFLHo: 'HonestyGate — AI Trust',
   tblKcl3SRVeuHcClx: 'vFarm — Per-Device Monitoring',
@@ -553,7 +562,7 @@ export function questionDoc(d: Record<string, unknown>, now: Date): bharag.Inges
   lines.push('');
   lines.push('Confidence: ' + confidence);
   lines.push('Movement: ' + movement);
-  lines.push('Research passes so far: ' + runCount);
+  lines.push('Attempts in a row without a usable answer: ' + runCount);
   if (movement === 'contradicted' && d.contradictedFrom) {
     lines.push('');
     lines.push('This CONTRADICTS a previous answer. Prior position:');
@@ -598,7 +607,7 @@ export function questionDoc(d: Record<string, unknown>, now: Date): bharag.Inges
 const updateWatchedClientQuestion: ToolDefinition = {
   name: 'update_watched_client_question',
   description:
-    "Research Twin's Update_Watched_Client_Question (the same tool, moved off its Tools Router). Write a weekly researched answer onto one standing question in a Watched Clients lane (client_questions), matched by table_id and the question's exact text. Sets This Week Answer, Confidence, Movement Tag, Sources, Plain Summary (the prior one is kept when none is given), appends Answer History, records Contradicted From on a contradiction, and flags Research Stuck at Run Count 3. Then ingests one BHARAG doc for the answered question into the Research Twin workspace — a BHARAG failure leaves the row written and says ingested_to_bharag:false. Call once per question.",
+    "Research Twin's Update_Watched_Client_Question (the same tool, moved off its Tools Router). Write a weekly researched answer onto one standing question in a Watched Clients lane (client_questions), matched by table_id and the question's exact text. Sets This Week Answer, Confidence, Movement Tag, Sources, Plain Summary (the prior one is kept when none is given), appends Answer History, records Contradicted From on a contradiction, and keeps Run Count as attempts without a usable answer: a medium or high confidence answer resets it to 0 and clears Research Stuck; a low one keeps it, and at 3 flags Research Stuck. Then ingests one BHARAG doc for the answered question into the Research Twin workspace — a BHARAG failure leaves the row written and says ingested_to_bharag:false. Call once per question.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -634,6 +643,7 @@ const updateWatchedClientQuestion: ToolDefinition = {
         'Movement Tag': d.movementTag,
         'Next Experiments': d.nextExperiments,
         'Research Stuck': d.researchStuck,
+        'Run Count': d.runCount,
         Sources: d.sources,
         'This Week Answer': d.answer,
         'Plain Summary': d.plainSummary,
