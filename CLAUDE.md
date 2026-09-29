@@ -1806,7 +1806,7 @@ SYSTEMS
   Research Twin
   Media Twin             ← placeholder
   Genie                  ← placeholder
-  Customer Service Twin  ← placeholder (2026-09-22)
+  Customer Service Twin  ← real from 2026-09-29, pushed by CST
   vFarm                  ← Overview is a placeholder; Early Access is real
   Engine health
 
@@ -2498,6 +2498,21 @@ under `/api/engine` with the same `x-dashboard-key`, each logged on
 each tab says what is missing and who wires it, and draws nothing.
 The contracts handed to the builders are `docs/contracts/genie-events.md`
 (Kaiqi) and `docs/contracts/vfarm.md` (Jegan and Kavin).
+
+**The Customer Service Twin joined the same day** (2026-09-29, Destiny), fourth
+route, same rules: `POST /api/engine/cst-events`, `cst.event.v1`, migration 41,
+`engine_cst_turns`, contract `docs/contracts/cst-events.md` (Ahad). One row
+per customer turn keyed on CST's own `correlation_id` (`turn_id`); a
+`cst.turn` event and a `cst.delivery` event land on that row in either order,
+each touching only its own columns, and **a delivery never moves backwards**
+(Twilio's callbacks arrive out of order). **The whole record is kept** —
+message, reply and number (Destiny) — with the list showing the last four
+digits and the row the rest. **Delivered is the page's one coloured figure**,
+over turns that carry a delivery status (voice and web have none, and say so);
+refused, unknown caller and escalated are guards and hand-offs doing their job
+and stay neutral. A delivery whose turn has not arrived is shown as "turn not
+received" and left out of every figure. **Home's Genie and CST tiles count
+their pushed rows** and say "Not connected yet" only until the first one lands.
 
 ### Media Twin, Genie and vFarm
 **Three single centred "coming soon" pages, and nothing else** (decisions

@@ -444,6 +444,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         describe: (r) => `snapshot ${r.taken_at}: ${r.farms} farm(s), ${r.devices} device(s), ${r.open_alerts} open alert(s); ${r.devices_gone} device(s) gone, ${r.alerts_closed} alert(s) closed`,
         hint: 'POST one vfarm.snapshot.v1: every farm it covers, their devices and their open alerts.',
       },
+      '/api/engine/cst-events': {
+        kind: 'cst_turns',
+        store: async (b) => ({ ...(await systemFeeds.storeCst(b)) }),
+        describe: (r) => `${r.received} event(s) (${r.turns} turn, ${r.deliveries} delivery): ${r.inserted} new, ${r.updated} updated, ${r.unchanged} unchanged`,
+        hint: 'POST one cst.event.v1 (event_type cst.turn or cst.delivery), or { events: [...] } with at most 200. An upsert on turn_id.',
+      },
     };
     const feed = FEEDS[p];
     if (feed) {
@@ -457,7 +463,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           kind: feed.kind,
           method,
           key_label: 'DASHBOARD_INBOUND_KEY',
-          outcome: dry ? 'unchanged' : Number(r.inserted ?? 1) > 0 ? 'inserted' : 'updated',
+          outcome: dry ? 'unchanged' : Number(r.inserted ?? 1) > 0 ? 'inserted' : r.updated === 0 && Number(r.unchanged ?? 0) > 0 ? 'unchanged' : 'updated',
           detail: `${dry ? 'dry run, rolled back: ' : ''}${feed.describe(r)}`,
           ms: Date.now() - t0,
         });
@@ -901,6 +907,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await systemFeeds.genieData());
       case '/api/vfarm/live':
         return send(res, 200, await systemFeeds.vfarmData());
+      case '/api/cs-twin':
+        return send(res, 200, await systemFeeds.cstData());
       /** Pay Tracker: the ledger's rows, and the figures over them. */
       case '/api/pay':
         return send(res, 200, await pay.data());

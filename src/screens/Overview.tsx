@@ -12,7 +12,7 @@ import { ageTone, healthText } from '../lib';
  */
 const HOME_KINDS = [
   'incidents', 'error_counts', 'retry_attempts', 'digests', 'codex', 'layer0', 'loops', 'patterns', 'pattern_candidates',
-  'commercial', 'ns-asks', 'rt-asks', 'rt-jobs', 'vfarm_leads', 'repairs',
+  'commercial', 'ns-asks', 'rt-asks', 'rt-jobs', 'vfarm_leads', 'repairs', 'genie_events', 'cst_turns',
 ] as const;
 
 /** One colour per system, so no two neighbours share a tint. */
@@ -21,6 +21,7 @@ const TILE_META: Record<string, { icon: IconName; tint: string }> = {
   'research-twin': { icon: 'twin', tint: 'tile-purple' },
   'media-twin': { icon: 'tag', tint: 'tile-pink' },
   genie: { icon: 'sparkle', tint: 'tile-purple' },
+  'cs-twin': { icon: 'mic', tint: 'tile-blue' },
   vfarm: { icon: 'leaf', tint: 'tile-green' },
   'engine-health': { icon: 'pulse', tint: 'tile-red' },
   'open-loops': { icon: 'loop', tint: 'tile-teal' },

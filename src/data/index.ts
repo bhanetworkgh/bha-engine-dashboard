@@ -15,6 +15,7 @@ import type {
   AskBaysData,
   GenieData,
   VfarmLiveData,
+  CstData,
   ScorecardData,
   PatternCandidatesData,
   BuilderProfile,
@@ -562,6 +563,8 @@ export const getVfarmLeads = () => api<VfarmLeadsData>('/api/vfarm/leads');
 /** Genie's asks and vFarm's live state, as each system pushed them (2026-09-29). */
 export const getGenie = () => api<GenieData>('/api/genie');
 export const getVfarmLive = () => api<VfarmLiveData>('/api/vfarm/live');
+/** The Customer Service Twin's turns, as CST pushed them (2026-09-29). */
+export const getCsTwin = () => api<CstData>('/api/cs-twin');
 
 /**
  * A lead's status, or its notes, or both. Nothing else about a lead is

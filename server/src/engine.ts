@@ -148,6 +148,22 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
     )
   ).rows[0];
   const leads = { n: Number(leadRow?.n ?? 0), week: Number(leadRow?.week ?? 0), newest: leadRow?.newest ?? null };
+  /**
+   * Genie and the Customer Service Twin push their own rows from 2026-09-29, so
+   * their tiles count them. Before the first push each still says "Not
+   * connected yet" and draws no number, because until then that is the truth.
+   */
+  const pushed = (
+    await query<{ genie: number; genie_week: number; genie_failed: number; cst: number; cst_week: number; cst_lost: number; cst_escalated: number }>(
+      `SELECT (SELECT count(DISTINCT coalesce(request_id, event_id)) FROM engine_genie_events WHERE event_type NOT LIKE 'genie.subagent.%')::int AS genie,
+              (SELECT count(DISTINCT coalesce(request_id, event_id)) FROM engine_genie_events WHERE event_type NOT LIKE 'genie.subagent.%' AND occurred_at >= now() - interval '7 days')::int AS genie_week,
+              (SELECT count(DISTINCT coalesce(request_id, event_id)) FROM engine_genie_events WHERE event_type LIKE 'genie.%.failed')::int AS genie_failed,
+              (SELECT count(*) FROM engine_cst_turns WHERE status IS NOT NULL)::int AS cst,
+              (SELECT count(*) FROM engine_cst_turns WHERE status IS NOT NULL AND occurred_at >= now() - interval '7 days')::int AS cst_week,
+              (SELECT count(*) FROM engine_cst_turns WHERE status IS NOT NULL AND delivery_status IN ('failed','undelivered'))::int AS cst_lost,
+              (SELECT count(*) FROM engine_cst_turns WHERE status = 'ok' AND intent = 'escalate')::int AS cst_escalated`,
+    )
+  ).rows[0];
   const entries = await store.codexEntries();
   const thisWeek = isoWeekOf(REF_TODAY());
   const entriesThisWeek = entries.filter((e) => e.week === thisWeek).length;
@@ -284,7 +300,33 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
       // Media Twin and Genie write nothing here yet, so their tiles carry no
       // number and are drawn greyed — "Not connected yet", never a figure.
       { key: 'media-twin', label: 'Media Twin', to: '/media-twin', headline: '—', sublabel: 'Not connected yet', signal: 'Nothing Media Twin does writes here yet.', health: 'ok', muted: true },
-      { key: 'genie', label: 'Genie', to: '/genie', headline: '—', sublabel: 'Not connected yet', signal: 'Nothing Genie does writes here yet.', health: 'ok', muted: true },
+      pushed?.genie
+        ? {
+            key: 'genie',
+            label: 'Genie',
+            to: '/genie',
+            headline: String(pushed.genie),
+            sublabel: pushed.genie === 1 ? 'ask held' : 'asks held',
+            signal: pushed.genie_failed
+              ? `${pushed.genie_failed} of ${pushed.genie} asks failed.`
+              : `${pushed.genie_week} in the last 7 days, none failed.`,
+            health: (pushed.genie_failed ? 'degraded' : 'ok') as OverviewTile['health'],
+          }
+        : { key: 'genie', label: 'Genie', to: '/genie', headline: '—', sublabel: 'Not connected yet', signal: 'Genie has not posted an ask here yet.', health: 'ok', muted: true },
+      pushed?.cst
+        ? {
+            key: 'cs-twin',
+            label: 'Customer Service Twin',
+            to: '/cs-twin',
+            headline: String(pushed.cst),
+            sublabel: pushed.cst === 1 ? 'customer turn' : 'customer turns',
+            // The one failure the page colours: a reply that never reached the customer.
+            signal: pushed.cst_lost
+              ? `${pushed.cst_lost} ${pushed.cst_lost === 1 ? 'reply' : 'replies'} never reached the customer.`
+              : `${pushed.cst_week} in the last 7 days; ${pushed.cst_escalated} sent to a person.`,
+            health: (pushed.cst_lost ? 'degraded' : 'ok') as OverviewTile['health'],
+          }
+        : { key: 'cs-twin', label: 'Customer Service Twin', to: '/cs-twin', headline: '—', sublabel: 'Not connected yet', signal: 'CST has not posted a customer turn here yet.', health: 'ok', muted: true },
       {
         key: 'vfarm',
         label: 'vFarm',
