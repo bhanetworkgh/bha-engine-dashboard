@@ -2471,6 +2471,34 @@ email somebody it would need to know who had already been emailed, and that is a
 second system, not a tab. Nothing on it is a commitment: a row says a person
 filled in a form.
 
+### Genie and vFarm, pushed as it happens (2026-09-29, Destiny — D3 / HMJV)
+**Genie is a real page and vFarm's Overview is real, with Devices and Alerts
+beside Early Access.** Both systems **push**; nothing here polls them and there
+is no resync button. `server/src/systemFeeds.ts`, migration 40, three routes
+under `/api/engine` with the same `x-dashboard-key`, each logged on
+`engine_writes`:
+
+- `POST /api/engine/genie-events`: Genie's own service-callback envelope, sent
+  for every ask, plus `question`, `source`, `duration_ms` and `handoff`.
+  An upsert on `eventId`. The page shows one row per `requestId` (the latest
+  event). `satisfied` → Answered, `max_iterations_reached` → Incomplete,
+  `.failed`/`error` → Failed.
+- `POST /api/engine/vfarm-alerts`: vFarm's `vfarm.alert.v1` envelope exactly as
+  built, one row per `devices[].event_id`.
+- `POST /api/engine/vfarm-snapshot`: `vfarm.snapshot.v1` every three minutes
+  (farms, devices, open alerts, alert-pipeline health). **Absence is read only
+  inside the farms a snapshot lists**: a device it stops listing is marked
+  gone, and an open alert is marked cleared. An older snapshot than the newest
+  held is a 409.
+- `dry_run: true` on any of them runs every check and write and rolls back, so
+  a payload can be proved without a test row on a live page.
+
+**Reporting is `last_reading_at` in the last 15 minutes**, never vFarm's
+`devices.status`, which nothing in vFarm keeps current. Before the first push,
+each tab says what is missing and who wires it, and draws nothing.
+The contracts handed to the builders are `docs/contracts/genie-events.md`
+(Kaiqi) and `docs/contracts/vfarm.md` (Jegan and Kavin).
+
 ### Media Twin, Genie and vFarm
 **Three single centred "coming soon" pages, and nothing else** (decisions
 2026-09-14 and 2026-09-16, Destiny). **Media Twin and Genie are systems in the
