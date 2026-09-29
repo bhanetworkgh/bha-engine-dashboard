@@ -3318,3 +3318,116 @@ export interface ScorecardData {
   resolve: { n: number; p50_minutes: number | null; p95_minutes: number | null; note: string };
 }
 
+
+/* ------------------------------------------------------------------------
+ * Genie and vFarm, pushed as it happens (2026-09-29, Destiny — D3).
+ * The server's own shapes, from server/src/systemFeeds.ts.
+ * --------------------------------------------------------------------- */
+
+/** One Genie ask: the latest event held for its request id. */
+export interface GenieAsk {
+  event_id: string;
+  event_type: string;
+  request_id: string | null;
+  run_id: string | null;
+  builder_id: string | null;
+  lane: string | null;
+  status: string | null;
+  source: string | null;
+  question: string | null;
+  duration_ms: number | null;
+  handoff: string | null;
+  occurred_at: string;
+  received_at: string;
+  answer: string | null;
+  error: string | null;
+  /** Answered · Incomplete · Failed, or Genie's own status verbatim. */
+  outcome: string;
+}
+
+export interface GenieData {
+  asks: GenieAsk[];
+  meta: { events: number; subagent_events: number; first_event_at: string | null; last_event_at: string | null; last_received_at: string | null };
+  summary: {
+    asks: number;
+    last_7_days: number;
+    answered: Share;
+    failed: Share;
+    handed_off: Share;
+    /** Seconds. */
+    duration: Percentiles;
+    outcome_mix: Slice[];
+    outcome_per_week: OutcomeWeek[];
+    by_lane: Cohort[];
+    by_source: Cohort[];
+  };
+}
+
+export interface VfarmFarm {
+  farm_id: string;
+  code: string | null;
+  name: string | null;
+  status: string | null;
+  device_count: number | null;
+  online_count: number | null;
+  offline_count: number | null;
+  unhealthy_count: number | null;
+  snapshot_at: string;
+}
+
+export interface VfarmDevice {
+  device_id: string;
+  farm_id: string | null;
+  farm_name: string | null;
+  place: string | null;
+  device_type: string | null;
+  model: string | null;
+  status: string | null;
+  health_score: number | null;
+  /** Per property, as vFarm sent it: `{ value, unit?, status? }` or a bare number. */
+  latest: Record<string, unknown> | null;
+  last_seen_at: string | null;
+  last_reading_at: string | null;
+  gone_at: string | null;
+}
+
+export interface VfarmOpenAlert {
+  alert_id: string;
+  rule_id: string | null;
+  device_id: string | null;
+  farm_id: string | null;
+  farm_name: string | null;
+  place: string | null;
+  severity: string | null;
+  title: string | null;
+  detail: string | null;
+  last_value: number | null;
+  opened_at: string | null;
+}
+
+export interface VfarmAlertEvent {
+  event_id: string;
+  kind: string | null;
+  rule_id: string | null;
+  rule_name: string | null;
+  severity: string | null;
+  metric: string | null;
+  device_id: string | null;
+  value: number | null;
+  farm_id: string | null;
+  farm: string | null;
+  place_path: string | null;
+  fired_at: string;
+}
+
+export interface VfarmLiveData {
+  last_snapshot: { taken_at: string; received_at: string; farms: number; devices: number; open_alerts: number; pipeline: Record<string, unknown> | null } | null;
+  snapshots: number;
+  farms: VfarmFarm[];
+  devices: VfarmDevice[];
+  open_alerts: VfarmOpenAlert[];
+  recently_closed: Array<{ alert_id: string; device_id: string | null; farm_name: string | null; severity: string | null; title: string | null; opened_at: string | null; closed_at: string }>;
+  alert_events: VfarmAlertEvent[];
+  alerts_fired_24h: number;
+  alerts_fired_all: number;
+}

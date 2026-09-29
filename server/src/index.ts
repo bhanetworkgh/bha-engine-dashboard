@@ -51,6 +51,7 @@ import * as google from './google';
 import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, agentTokensConfigured, MCP_SECRET_VAR, MCP_WRITE_TOKEN_VAR, MCP_ONE_URL } from './mcp';
 import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
+import * as systemFeeds from './systemFeeds';
 import * as candidateActions from './candidateActions';
 import * as patternDraft from './patternDraft';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
@@ -416,6 +417,58 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         ms: r.ms,
       });
       return send(res, 200, { ok: r.failed.length === 0, ...r });
+    }
+
+    /**
+     * Genie and vFarm, pushed as it happens (2026-09-29, Destiny — D3). Each
+     * system posts in its own shape with the same key as every engine write;
+     * see systemFeeds.ts for the three contracts and docs/contracts/ for what
+     * each builder was handed.
+     */
+    const FEEDS: Record<string, { kind: string; store: (b: Record<string, unknown>) => Promise<Record<string, unknown>>; describe: (r: Record<string, unknown>) => string; hint: string }> = {
+      '/api/engine/genie-events': {
+        kind: 'genie_events',
+        store: async (b) => ({ ...(await systemFeeds.storeGenie(b)) }),
+        describe: (r) => `${r.received} event(s): ${r.inserted} new, ${r.updated} updated`,
+        hint: "POST one Genie event envelope, or { events: [...] } with at most 200. An upsert on eventId.",
+      },
+      '/api/engine/vfarm-alerts': {
+        kind: 'vfarm_alerts',
+        store: async (b) => ({ ...(await systemFeeds.storeVfarmAlert(b)) }),
+        describe: (r) => `${r.received} device fire(s): ${r.inserted} new, ${r.updated} updated`,
+        hint: 'POST one vfarm.alert.v1 envelope, exactly as vFarm sends it to any alert webhook. An upsert on each device entry\'s event_id.',
+      },
+      '/api/engine/vfarm-snapshot': {
+        kind: 'vfarm_state',
+        store: async (b) => ({ ...(await systemFeeds.storeVfarmSnapshot(b)) }),
+        describe: (r) => `snapshot ${r.taken_at}: ${r.farms} farm(s), ${r.devices} device(s), ${r.open_alerts} open alert(s); ${r.devices_gone} device(s) gone, ${r.alerts_closed} alert(s) closed`,
+        hint: 'POST one vfarm.snapshot.v1: every farm it covers, their devices and their open alerts.',
+      },
+    };
+    const feed = FEEDS[p];
+    if (feed) {
+      if (method !== 'POST') throw new HttpError(405, feed.hint);
+      const body = await readJson(req, 4 * 1024 * 1024);
+      try {
+        const r = await feed.store(body);
+        const dry = r.dry_run === true;
+        await mirror.logWrite({
+          endpoint,
+          kind: feed.kind,
+          method,
+          key_label: 'DASHBOARD_INBOUND_KEY',
+          outcome: dry ? 'unchanged' : Number(r.inserted ?? 1) > 0 ? 'inserted' : 'updated',
+          detail: `${dry ? 'dry run, rolled back: ' : ''}${feed.describe(r)}`,
+          ms: Date.now() - t0,
+        });
+        return send(res, !dry && Number(r.inserted ?? 1) > 0 ? 201 : 200, { ok: true, ...r });
+      } catch (e) {
+        if (e instanceof systemFeeds.FeedError) {
+          await mirror.logWrite({ endpoint, kind: feed.kind, method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          throw new HttpError(e.status, e.message);
+        }
+        throw e;
+      }
     }
 
     if (p === '/api/engine/vfarm-leads') {
@@ -843,6 +896,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
        */
       case '/api/repairs':
         return send(res, 200, await repairs.list());
+      /** Genie's asks and vFarm's state, as each system pushed them (2026-09-29). */
+      case '/api/genie':
+        return send(res, 200, await systemFeeds.genieData());
+      case '/api/vfarm/live':
+        return send(res, 200, await systemFeeds.vfarmData());
       /** Pay Tracker: the ledger's rows, and the figures over them. */
       case '/api/pay':
         return send(res, 200, await pay.data());

@@ -1,12 +1,15 @@
 import { useSearchParams } from 'react-router-dom';
 import { useCallback, useEffect, useState } from 'react';
 import { useData } from '../../app/useData';
-import { getVfarmLeads, type VfarmLead, type VfarmLeadsData } from '../../data';
-import { useReplayKey, ComingSoon, LoadFailed, Loading, PageHeader, Tabs } from '../../components/ui';
+import { getVfarmLeads, getVfarmLive, type VfarmLead, type VfarmLeadsData } from '../../data';
+import { useReplayKey, LoadFailed, Loading, PageHeader, Tabs } from '../../components/ui';
 import EarlyAccess from './EarlyAccess';
+import { Alerts, Devices, Overview, reporting } from './Live';
 
 /** The record kinds this page is built from: a change to one re-reads it (live since 2026-09-23). */
 const VFARM_KINDS = ['vfarm_leads'] as const;
+/** vFarm's own pushes (2026-09-29): its snapshot and its alert fires. */
+const LIVE_KINDS = ['vfarm_state', 'vfarm_alerts'] as const;
 
 /**
  * vFarm: a placeholder with a real tab beside it.
@@ -30,18 +33,29 @@ const VFARM_KINDS = ['vfarm_leads'] as const;
  * if the server refuses, and re-reading the whole list after each keystroke
  * would make that impossible to feel.
  */
-const TABS = ['Overview', 'Early Access'] as const;
+/*
+ * 29 Sep 2026 (Destiny, D3): Overview is real now, and Devices and Alerts join
+ * it — all three from what vFarm itself pushes (see Live.tsx). Until the first
+ * snapshot each says so and names who wires it; nothing is drawn in its place.
+ */
+const TABS = ['Overview', 'Devices', 'Alerts', 'Early Access'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function VFarm() {
   // `?tab=early-access&lead=<id>` lands on a lead — Home's vFarm tile and its
   // "What moved" rows link here (2026-09-23).
   const [params] = useSearchParams();
-  const [tab, setTab] = useState<Tab>(() => (params.get('tab') === 'early-access' ? 'Early Access' : 'Overview'));
+  const [tab, setTab] = useState<Tab>(() => {
+    const t = params.get('tab');
+    return t === 'early-access' ? 'Early Access' : t === 'devices' ? 'Devices' : t === 'alerts' ? 'Alerts' : 'Overview';
+  });
   /* Switching any of these re-runs the page's count-ups and bars (27 Sep 2026). */
   useReplayKey(`${tab}`);
   const [held, setHeld] = useState<VfarmLeadsData | null>(null);
   const { status, data: loaded, error } = useData(getVfarmLeads, [], { kinds: VFARM_KINDS });
+  const live = useData(getVfarmLive, [], { kinds: LIVE_KINDS });
+  const liveData = live.data;
+  const quiet = liveData ? liveData.devices.filter((d) => !d.gone_at && !reporting(d)).length : 0;
 
   // A fresh read replaces an optimistic copy: the server has the edit by then,
   // or has refused it, and either way its answer is the one to show.
@@ -79,18 +93,29 @@ export default function VFarm() {
             onChange={setTab}
             // The lead count, where there is one. Overview carries none: it has
             // nothing to count, which is what it says.
-            counts={{ 'Early Access': data?.summary.total ? { n: data.summary.total } : undefined }}
+            counts={{
+              'Early Access': data?.summary.total ? { n: data.summary.total } : undefined,
+              Devices: liveData?.devices.length ? { n: liveData.devices.length, tone: quiet ? 'degraded' : 'default' } : undefined,
+              Alerts: liveData?.open_alerts.length ? { n: liveData.open_alerts.length, tone: 'degraded' } : undefined,
+            }}
           />
         }
       />
 
-      {tab === 'Overview' ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center px-6 pb-8 md:px-8">
-          <ComingSoon title="vFarm is not wired to the engine yet" min={200}>
-            Nothing on the rack writes to this dashboard today. When burn-in cycles, anomalies, growth cycles and measurements start
-            arriving, they will be shown here as they are recorded rather than reconstructed.
-          </ComingSoon>
-        </div>
+      {tab !== 'Early Access' ? (
+        live.status === 'loading' && !liveData ? (
+          <Loading />
+        ) : live.status === 'error' && !liveData ? (
+          <LoadFailed error={live.error} />
+        ) : !liveData ? (
+          <Loading />
+        ) : tab === 'Overview' ? (
+          <Overview data={liveData} />
+        ) : tab === 'Devices' ? (
+          <Devices data={liveData} />
+        ) : (
+          <Alerts data={liveData} />
+        )
       ) : status === 'loading' && !data ? (
         <Loading />
       ) : status === 'error' && !data ? (

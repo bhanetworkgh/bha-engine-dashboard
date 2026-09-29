@@ -1983,6 +1983,114 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE engine_lane_profiles ADD COLUMN IF NOT EXISTS linked_lanes text[] NOT NULL DEFAULT '{}'`,
     ],
   },
+  {
+    id: 40,
+    name: 'Genie events and vFarm alerts and state, pushed by the two systems themselves',
+    statements: [
+      /**
+       * 29 Sep 2026, Destiny (D3 / HMJV). Genie and vFarm post to this server as
+       * things happen; nothing here polls them. Their payloads arrive in their
+       * own shapes — Genie's service-callback envelope, vFarm's
+       * `vfarm.alert.v1` webhook and a `vfarm.snapshot.v1` state push — so these
+       * are real columns for what the pages read plus the payload whole, like
+       * `engine_repairs`, not Airtable-shaped mirror rows. See systemFeeds.ts.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_genie_events (
+         event_id       text PRIMARY KEY,
+         event_type     text NOT NULL,
+         request_id     text,
+         run_id         text,
+         session_id     text,
+         builder_id     text,
+         correlation_id text,
+         thread_id      text,
+         lane           text,
+         status         text,
+         source         text,
+         question       text,
+         duration_ms    integer,
+         handoff        text,
+         occurred_at    timestamptz NOT NULL,
+         received_at    timestamptz NOT NULL DEFAULT now(),
+         payload        jsonb NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_genie_events_occurred ON engine_genie_events (occurred_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_genie_events_request ON engine_genie_events (request_id)`,
+      `CREATE TABLE IF NOT EXISTS engine_vfarm_alert_events (
+         event_id    text PRIMARY KEY,
+         kind        text,
+         rule_id     text,
+         rule_name   text,
+         severity    text,
+         metric      text,
+         device_id   text,
+         value       double precision,
+         farm_id     text,
+         farm        text,
+         place_path  text,
+         fired_at    timestamptz NOT NULL,
+         received_at timestamptz NOT NULL DEFAULT now(),
+         payload     jsonb NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_vfarm_alert_events_fired ON engine_vfarm_alert_events (fired_at DESC)`,
+      `CREATE TABLE IF NOT EXISTS engine_vfarm_farms (
+         farm_id         text PRIMARY KEY,
+         code            text,
+         name            text,
+         status          text,
+         device_count    integer,
+         online_count    integer,
+         offline_count   integer,
+         unhealthy_count integer,
+         fields          jsonb NOT NULL,
+         snapshot_at     timestamptz NOT NULL,
+         updated_at      timestamptz NOT NULL DEFAULT now()
+       )`,
+      `CREATE TABLE IF NOT EXISTS engine_vfarm_devices (
+         device_id       text PRIMARY KEY,
+         farm_id         text,
+         place           text,
+         device_type     text,
+         model           text,
+         status          text,
+         health_score    double precision,
+         last_seen_at    timestamptz,
+         last_reading_at timestamptz,
+         latest          jsonb,
+         fields          jsonb NOT NULL,
+         snapshot_at     timestamptz NOT NULL,
+         gone_at         timestamptz,
+         updated_at      timestamptz NOT NULL DEFAULT now()
+       )`,
+      `CREATE TABLE IF NOT EXISTS engine_vfarm_open_alerts (
+         alert_id      text PRIMARY KEY,
+         rule_id       text,
+         device_id     text,
+         farm_id       text,
+         farm_name     text,
+         place         text,
+         severity      text,
+         title         text,
+         detail        text,
+         last_value    double precision,
+         opened_at     timestamptz,
+         fields        jsonb NOT NULL,
+         first_seen_at timestamptz NOT NULL DEFAULT now(),
+         last_seen_at  timestamptz NOT NULL,
+         closed_at     timestamptz
+       )`,
+      `CREATE TABLE IF NOT EXISTS engine_vfarm_snapshots (
+         id          bigserial PRIMARY KEY,
+         taken_at    timestamptz NOT NULL,
+         received_at timestamptz NOT NULL DEFAULT now(),
+         farms       integer NOT NULL,
+         devices     integer NOT NULL,
+         open_alerts integer NOT NULL,
+         pipeline    jsonb
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_vfarm_snapshots_taken ON engine_vfarm_snapshots (taken_at DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

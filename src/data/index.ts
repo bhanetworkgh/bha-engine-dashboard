@@ -13,6 +13,8 @@
 import { api, ApiError } from './api';
 import type {
   AskBaysData,
+  GenieData,
+  VfarmLiveData,
   ScorecardData,
   PatternCandidatesData,
   BuilderProfile,
@@ -557,6 +559,9 @@ export function restoreRegistryRow<K extends RegistryKind>(kind: K, id: string):
  * never read one back; see server/src/earlyAccess.ts.
  */
 export const getVfarmLeads = () => api<VfarmLeadsData>('/api/vfarm/leads');
+/** Genie's asks and vFarm's live state, as each system pushed them (2026-09-29). */
+export const getGenie = () => api<GenieData>('/api/genie');
+export const getVfarmLive = () => api<VfarmLiveData>('/api/vfarm/live');
 
 /**
  * A lead's status, or its notes, or both. Nothing else about a lead is
