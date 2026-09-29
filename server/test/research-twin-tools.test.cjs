@@ -305,6 +305,28 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(`http:
     assert.match(done.initial_comment, /^\*Weekly Monitoring Report\*\n\*Zeta Testlane \d+\*\n\n─{19}\n\n•  \*1\* questions tracked this week/);
     step('create_client_report_doc: built from live rows, uploaded as the RT bot to C0B9LKU7DQV with the initial_comment; unknown client named');
 
+    /* ---- every Questions Table name a live lane carries resolves (29 Sep, INC-...-026) ---- */
+    const { resolveLane, QUESTIONS_TABLE_IDS } = require(path.join(__dirname, '..', '..', 'server-dist', 'server', 'src', 'mcp', 'researchTwinTools.js'));
+    const liveNames = {
+      'Client 2 — CRE vFarm + Kiosk Host': ['Client2_VFarmKiosk_Questions', 'tbl9Js3hvclOMG3Rt'],
+      'Client 9 — Veganism/Plant-Based Trend': ['Client9_Veganism_Questions', 'tblKfIlEaRNs8qygF'],
+      'Client 12 — Surgical Robotics / Med-Tech': ['Client12_SurgicalRobotics_Questions', 'tbl42Pl5mcYRNLYQV'],
+      'Client 2 — Rare-Earth Recycling': ['Client2_RareEarths_Questions', 'tbllZcuoktLbLRWU9'],
+    };
+    for (const [client, [tableName, tableId]] of Object.entries(liveNames)) {
+      assert.equal(QUESTIONS_TABLE_IDS[tableName], tableId, `${tableName} maps to ${tableId}`);
+      const lane = resolveLane(client, [{ fields: { 'Lane / Client': client, 'Lane ID': client, 'Questions Table': tableName } }]);
+      assert.equal(lane.found, true, `${client} resolves`);
+      assert.equal(lane.questions_table, tableId);
+    }
+    const laneRows = await query(`SELECT fields FROM engine_client_lanes`);
+    for (const r of laneRows.rows) {
+      const raw = String((r.fields || {})['Questions Table'] || '').trim();
+      if (!raw) continue;
+      assert.ok(/^tbl[A-Za-z0-9]{14}$/.test(raw) || QUESTIONS_TABLE_IDS[raw], `lane "${r.fields['Lane / Client']}" names Questions Table "${raw}", which has no table id`);
+    }
+    step('create_client_report_doc: every live client lane (incl. CRE vFarm + Kiosk Host) resolves to its questions table');
+
     /* ---- delete rt-asks ---- */
     const askId = `RT-TEST-${S}`;
     const sa = await seed('rt-asks', { fields: { 'Ask ID': askId, Question: 'delivery test' } });

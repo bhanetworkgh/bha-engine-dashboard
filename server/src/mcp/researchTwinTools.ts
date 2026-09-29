@@ -663,6 +663,21 @@ const updateWatchedClientQuestion: ToolDefinition = {
 
 type Lane = Record<string, unknown>;
 
+/**
+ * A lane's `Questions Table` holds either a table id or the table's old name.
+ * Every name a live lane row carries must be here, or that client's weekly
+ * report is refused as client_not_found (29 Sep: Client 2 — CRE vFarm + Kiosk
+ * Host was never added, so its 28 Sep report failed — INC-RESEARCHTWIN.RESEARCHJOB-026).
+ * The ids are the table_id its rows carry in engine_client_questions.
+ * research-twin-tools.test.cjs checks this against every lane row it can read.
+ */
+export const QUESTIONS_TABLE_IDS: Record<string, string> = {
+  Client9_Veganism_Questions: 'tblKfIlEaRNs8qygF',
+  Client2_RareEarths_Questions: 'tbllZcuoktLbLRWU9',
+  Client12_SurgicalRobotics_Questions: 'tbl42Pl5mcYRNLYQV',
+  Client2_VFarmKiosk_Questions: 'tbl9Js3hvclOMG3Rt',
+};
+
 /** CCR - Resolve Questions Table, as written. */
 export function resolveLane(clientName: unknown, laneRows: Array<{ fields: Record<string, unknown> }>): Lane {
   const wanted = str(clientName);
@@ -679,13 +694,8 @@ export function resolveLane(clientName: unknown, laneRows: Array<{ fields: Recor
   const available = rows.map((r) => r.fields['Lane / Client']).filter(Boolean);
   if (!hit) return { found: false, client_name: wanted, available };
   const f = hit.fields;
-  const TABLE_IDS: Record<string, string> = {
-    Client9_Veganism_Questions: 'tblKfIlEaRNs8qygF',
-    Client2_RareEarths_Questions: 'tbllZcuoktLbLRWU9',
-    Client12_SurgicalRobotics_Questions: 'tbl42Pl5mcYRNLYQV',
-  };
   const raw = str(f['Questions Table']).trim();
-  const tableId = /^tbl[A-Za-z0-9]{14}$/.test(raw) ? raw : TABLE_IDS[raw];
+  const tableId = /^tbl[A-Za-z0-9]{14}$/.test(raw) ? raw : QUESTIONS_TABLE_IDS[raw];
   if (!tableId) return { found: false, client_name: str(f['Lane / Client']) || wanted, unresolved_table: raw, available };
   return {
     found: true,
