@@ -23,6 +23,8 @@
  *   POST /api/engine/genie-events     one envelope, or { events: [...] } (≤200)
  *   POST /api/engine/vfarm-alerts     one vfarm.alert.v1 envelope
  *   POST /api/engine/vfarm-snapshot   one vfarm.snapshot.v1
+ *   POST /api/engine/cst-events       one cst.event.v1, or { events: [...] } (≤200)
+ *                                     — the Customer Service Twin, added the same day
  */
 import { query, withTransaction } from './pg';
 import * as events from './events';
@@ -540,5 +542,297 @@ export async function vfarmData() {
     alert_events: fired.rows,
     alerts_fired_24h: counts.rows[0]?.fired_24h ?? 0,
     alerts_fired_all: counts.rows[0]?.fired_all ?? 0,
+  };
+}
+
+/* ------------------------------------------------- Customer Service Twin */
+
+/**
+ * The Customer Service Twin, pushed as it happens (2026-09-29, Destiny).
+ * `POST /api/engine/cst-events`, one `cst.event.v1` event or `{ events: [...] }`
+ * (≤200). Two event types, both keyed on CST's own `turn_id` — the
+ * `correlation_id` its MessageEnvelope already carries:
+ *
+ *   cst.turn      one customer message and CST's reply, after processEnvelope
+ *   cst.delivery  what became of that reply (queued, sent, delivered,
+ *                 undelivered, failed), from CST's outbound queue and Twilio's
+ *                 delivery callback
+ *
+ * **They land on one row and each touches only its own columns**, so they can
+ * arrive in either order. A delivery never moves backwards: Twilio's callbacks
+ * arrive out of order, and a late "sent" must not undo a "delivered".
+ * The dashboard keeps the whole record — the message, the reply and the
+ * customer's number (Destiny, 2026-09-29) — because the page is the record.
+ */
+export const CST_CHANNELS = ['sms', 'voice', 'web', 'whatsapp', 'email'];
+export const CST_STATUSES = ['ok', 'refused', 'step_up_required', 'onboarding', 'error'];
+export const CST_DELIVERY = ['queued', 'sending', 'sent', 'delivered', 'undelivered', 'failed'];
+const DELIVERY_RANK: Record<string, number> = { queued: 1, sending: 1, sent: 2, delivered: 3, undelivered: 3, failed: 3 };
+
+export interface CstStoreResult {
+  received: number;
+  turns: number;
+  deliveries: number;
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  turn_ids: string[];
+}
+
+type CstEvent =
+  | { type: 'turn'; turn_id: string; row: Record<string, unknown>; payload: Obj }
+  | { type: 'delivery'; turn_id: string; status: string; error: string | null; attempts: number | null; at: string; payload: Obj };
+
+function cstEvent(e: unknown, at: string): CstEvent {
+  if (!isObj(e)) throw new FeedError(422, `${at} is not a JSON object.`);
+  const schema = str(e.schema);
+  if (schema && schema !== 'cst.event.v1') throw new FeedError(422, `${at}: schema "${schema}" is not cst.event.v1.`);
+  const type = str(pick(e, 'event_type', 'eventType'));
+  const turnId = str(pick(e, 'turn_id', 'turnId', 'correlation_id'));
+  if (!turnId) throw new FeedError(422, `${at}: turn_id is required — the envelope's correlation_id. It is what puts a turn and its delivery on one row, and a retry on the same row.`);
+  if (type === 'cst.delivery') {
+    const status = str(e.status)?.toLowerCase() ?? null;
+    if (!status || !CST_DELIVERY.includes(status)) throw new FeedError(422, `${at}: a cst.delivery needs status, one of ${CST_DELIVERY.join(', ')}; got "${String(e.status)}".`);
+    const rawAt = pick(e, 'occurred_at', 'at');
+    const when = iso(rawAt);
+    if (rawAt !== undefined && !when) throw new FeedError(422, `${at}: occurred_at "${String(rawAt)}" is not an ISO 8601 time.`);
+    const attempts = num(e.attempts);
+    return { type: 'delivery', turn_id: turnId, status, error: str(e.error), attempts: attempts === null ? null : Math.round(attempts), at: when ?? new Date().toISOString(), payload: e };
+  }
+  if (type !== 'cst.turn') throw new FeedError(422, `${at}: event_type must be cst.turn or cst.delivery; got "${String(type)}".`);
+  const channel = str(e.channel)?.toLowerCase() ?? null;
+  if (!channel || !CST_CHANNELS.includes(channel)) throw new FeedError(422, `${at}: channel is required, one of ${CST_CHANNELS.join(', ')}; got "${String(e.channel)}".`);
+  const status = str(e.status)?.toLowerCase() ?? null;
+  if (!status || !CST_STATUSES.includes(status)) throw new FeedError(422, `${at}: status is required, one of ${CST_STATUSES.join(', ')}; got "${String(e.status)}". An unknown caller's onboarding reply is "onboarding".`);
+  const rawOccurred = pick(e, 'occurred_at', 'occurredAt');
+  const occurred = iso(rawOccurred);
+  if (rawOccurred !== undefined && !occurred) throw new FeedError(422, `${at}: occurred_at "${String(rawOccurred)}" is not an ISO 8601 time.`);
+  const c = isObj(e.customer) ? e.customer : {};
+  const known = c.is_known;
+  const duration = num(e.duration_ms);
+  return {
+    type: 'turn',
+    turn_id: turnId,
+    payload: e,
+    row: {
+      conversation_id: str(e.conversation_id),
+      tenant_id: str(e.tenant_id),
+      project_id: str(e.project_id),
+      channel,
+      customer_ref: str(c.customer_ref),
+      person_id: str(c.person_id),
+      phone_e164: str(c.phone_e164),
+      customer_name: str(c.name),
+      role: str(c.role),
+      is_known: typeof known === 'boolean' ? known : null,
+      message: str(e.message),
+      reply: str(e.reply),
+      intent: str(e.intent),
+      status,
+      reason: str(e.reason),
+      incident_id: str(e.incident_id),
+      duration_ms: duration === null ? null : Math.max(0, Math.round(duration)),
+      occurred_at: occurred ?? new Date().toISOString(),
+    },
+  };
+}
+
+const TURN_COLS = [
+  'conversation_id', 'tenant_id', 'project_id', 'channel', 'customer_ref', 'person_id', 'phone_e164', 'customer_name', 'role', 'is_known',
+  'message', 'reply', 'intent', 'status', 'reason', 'incident_id', 'duration_ms', 'occurred_at',
+];
+
+export async function storeCst(body: Obj): Promise<CstStoreResult & { dry_run: boolean }> {
+  const batch = Array.isArray(body.events);
+  const list = batch ? (body.events as unknown[]) : [body];
+  if (list.length === 0) throw new FeedError(422, 'events is empty — nothing to store.');
+  if (list.length > 200) throw new FeedError(413, `${list.length} events in one call; send at most 200.`);
+  // Every event is checked before any is written, so one bad event in a batch writes nothing.
+  const evs = list.map((e, i) => cstEvent(e, batch ? `events[${i}]` : 'The event'));
+  return tx(body.dry_run === true, async (db) => {
+    let inserted = 0;
+    let updated = 0;
+    let unchanged = 0;
+    for (const ev of evs) {
+      if (ev.type === 'turn') {
+        const vals = TURN_COLS.map((k) => ev.row[k]);
+        const set = TURN_COLS.map((k) => `${k} = EXCLUDED.${k}`).join(', ');
+        const changedCheck = TURN_COLS.map((k) => `engine_cst_turns.${k} IS DISTINCT FROM EXCLUDED.${k}`).join(' OR ');
+        const r = await db.query<{ inserted: boolean }>(
+          `INSERT INTO engine_cst_turns (turn_id, ${TURN_COLS.join(', ')}, turn_payload)
+           VALUES ($1, ${TURN_COLS.map((_, i) => `$${i + 2}`).join(', ')}, $${TURN_COLS.length + 2})
+           ON CONFLICT (turn_id) DO UPDATE SET ${set}, turn_payload = EXCLUDED.turn_payload, received_at = now()
+             WHERE ${changedCheck} OR engine_cst_turns.turn_payload IS NULL
+           RETURNING (xmax = 0) AS inserted`,
+          [ev.turn_id, ...vals, JSON.stringify(ev.payload)],
+        );
+        if (!r.rows.length) unchanged++;
+        else if (r.rows[0].inserted) inserted++;
+        else updated++;
+      } else {
+        const rank = DELIVERY_RANK[ev.status] ?? 0;
+        const r = await db.query<{ inserted: boolean }>(
+          `INSERT INTO engine_cst_turns (turn_id, delivery_status, delivery_error, delivery_attempts, delivery_at, delivery_payload)
+           VALUES ($1,$2,$3,$4,$5,$6)
+           ON CONFLICT (turn_id) DO UPDATE SET delivery_status = EXCLUDED.delivery_status, delivery_error = EXCLUDED.delivery_error,
+             delivery_attempts = coalesce(EXCLUDED.delivery_attempts, engine_cst_turns.delivery_attempts),
+             delivery_at = EXCLUDED.delivery_at, delivery_payload = EXCLUDED.delivery_payload
+             WHERE (CASE engine_cst_turns.delivery_status WHEN 'queued' THEN 1 WHEN 'sending' THEN 1 WHEN 'sent' THEN 2
+                      WHEN 'delivered' THEN 3 WHEN 'undelivered' THEN 3 WHEN 'failed' THEN 3 ELSE 0 END) <= $7
+               AND (engine_cst_turns.delivery_status IS DISTINCT FROM EXCLUDED.delivery_status
+                    OR engine_cst_turns.delivery_error IS DISTINCT FROM EXCLUDED.delivery_error
+                    OR engine_cst_turns.delivery_attempts IS DISTINCT FROM EXCLUDED.delivery_attempts)
+           RETURNING (xmax = 0) AS inserted`,
+          [ev.turn_id, ev.status, ev.error, ev.attempts, ev.at, JSON.stringify(ev.payload), rank],
+        );
+        if (!r.rows.length) unchanged++;
+        else if (r.rows[0].inserted) inserted++;
+        else updated++;
+      }
+    }
+    if (inserted || updated) events.changed('cst_turns', null, db);
+    return {
+      received: evs.length,
+      turns: evs.filter((e) => e.type === 'turn').length,
+      deliveries: evs.filter((e) => e.type === 'delivery').length,
+      inserted,
+      updated,
+      unchanged,
+      turn_ids: evs.map((e) => e.turn_id),
+    };
+  });
+}
+
+/**
+ * A turn's outcome, from the words CST itself sends. `ok` is Answered, or
+ * Escalated where the intent was escalate (a person was asked for and an
+ * incident filed — the reply is CST's acknowledgement, not the answer);
+ * `refused` is Refused (a guard did its job); `step_up_required` is Needs
+ * verification; `onboarding` is Unknown caller (a number vFarm does not know,
+ * served the onboarding reply and nothing else); `error` is Failed.
+ */
+export function cstOutcome(status: string | null, intent: string | null): string {
+  if (status === null) return 'Turn not received';
+  if (status === 'ok') return intent === 'escalate' ? 'Escalated' : 'Answered';
+  if (status === 'refused') return 'Refused';
+  if (status === 'step_up_required') return 'Needs verification';
+  if (status === 'onboarding') return 'Unknown caller';
+  if (status === 'error') return 'Failed';
+  return status;
+}
+
+interface CstRow {
+  turn_id: string;
+  conversation_id: string | null;
+  tenant_id: string | null;
+  project_id: string | null;
+  channel: string | null;
+  customer_ref: string | null;
+  person_id: string | null;
+  phone_e164: string | null;
+  customer_name: string | null;
+  role: string | null;
+  is_known: boolean | null;
+  message: string | null;
+  reply: string | null;
+  intent: string | null;
+  status: string | null;
+  reason: string | null;
+  incident_id: string | null;
+  duration_ms: number | null;
+  occurred_at: string | null;
+  received_at: string;
+  delivery_status: string | null;
+  delivery_error: string | null;
+  delivery_attempts: number | null;
+  delivery_at: string | null;
+}
+
+export async function cstData() {
+  const t = (c: string) => `to_char(${c} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS ${c.replace(/.*\./, '')}`;
+  const r = await query<CstRow>(
+    `SELECT turn_id, conversation_id, tenant_id, project_id, channel, customer_ref, person_id, phone_e164, customer_name, role, is_known,
+            message, reply, intent, status, reason, incident_id, duration_ms, ${t('occurred_at')}, ${t('received_at')},
+            delivery_status, delivery_error, delivery_attempts, ${t('delivery_at')}
+       FROM engine_cst_turns
+      ORDER BY coalesce(occurred_at, received_at) DESC`,
+  );
+  const turns = r.rows.map((x) => ({ ...x, outcome: cstOutcome(x.status, x.intent) }));
+  const real = turns.filter((x) => x.status !== null);
+  const n = real.length;
+  const now = Date.now();
+  const at = (x: CstRow) => Date.parse(x.occurred_at ?? x.received_at);
+  const count = (o: string) => real.filter((x) => x.outcome === o).length;
+  const withDelivery = real.filter((x) => x.delivery_status);
+  const deliveredN = withDelivery.filter((x) => x.delivery_status === 'delivered').length;
+  const lostN = withDelivery.filter((x) => x.delivery_status === 'failed' || x.delivery_status === 'undelivered').length;
+  const durations = real.filter((x) => x.duration_ms !== null).map((x) => (x.duration_ms as number) / 1000);
+  const conversations = new Set(real.map((x) => x.conversation_id ?? `turn:${x.turn_id}`)).size;
+  const customers = new Set(real.map((x) => x.phone_e164 ?? x.customer_ref ?? `turn:${x.turn_id}`)).size;
+
+  const weeks: Array<{ week: string; label: string; total: number; counts: Record<string, number> }> = [];
+  for (let i = 7; i >= 0; i--) {
+    const w = weekOf(new Date(now - i * 7 * 86_400_000).toISOString());
+    weeks.push({ week: w, label: new Date(`${w}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }), total: 0, counts: {} });
+  }
+  for (const x of real) {
+    const w = weeks.find((k) => k.week === weekOf(new Date(at(x)).toISOString()));
+    if (!w) continue;
+    w.total++;
+    w.counts[x.outcome] = (w.counts[x.outcome] ?? 0) + 1;
+  }
+  const cohort = (key: (x: (typeof real)[number]) => string | null, blank: string) =>
+    tally(real.map(key), blank).map((s) => {
+      const mine = real.filter((x) => (key(x) ?? blank) === s.key);
+      const md = mine.filter((x) => x.delivery_status);
+      return {
+        key: s.key,
+        label: s.label,
+        turns: mine.length,
+        answered: mine.filter((x) => x.outcome === 'Answered').length,
+        escalated: mine.filter((x) => x.outcome === 'Escalated').length,
+        with_delivery: md.length,
+        lost: md.filter((x) => x.delivery_status === 'failed' || x.delivery_status === 'undelivered').length,
+      };
+    });
+  const m = await query<{ first: string | null; last_received: string | null; orphans: number }>(
+    `SELECT to_char(min(coalesce(occurred_at, received_at)) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS first,
+            to_char(max(greatest(received_at, coalesce(delivery_at, received_at))) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_received,
+            count(*) FILTER (WHERE status IS NULL)::int AS orphans
+       FROM engine_cst_turns`,
+  );
+  return {
+    turns,
+    meta: {
+      rows: turns.length,
+      first_at: m.rows[0]?.first ?? null,
+      last_received_at: m.rows[0]?.last_received ?? null,
+      deliveries_without_turn: m.rows[0]?.orphans ?? 0,
+    },
+    summary: {
+      turns: n,
+      conversations,
+      customers,
+      last_7_days: real.filter((x) => now - at(x) < 7 * 86_400_000).length,
+      answered: share(count('Answered'), n, 'Turns CST answered itself: status ok, from vFarm status or BHARAG knowledge.'),
+      escalated: share(count('Escalated'), n, 'Turns where the customer asked for a person: CST filed an incident and acknowledged.'),
+      refused: share(count('Refused') + count('Needs verification'), n, 'Turns a guard stopped: no farm access, a control or role change asked for, or step-up verification needed. A guard doing its job, not a fault.'),
+      unknown: share(count('Unknown caller'), n, 'Turns from a number vFarm does not know. They get the onboarding reply and no farm data.'),
+      failed: share(count('Failed'), n, 'Turns where CST errored before it could reply.'),
+      delivered: share(
+        deliveredN,
+        withDelivery.length,
+        withDelivery.length === n
+          ? `Over all ${n} turns.`
+          : `Over the ${withDelivery.length} of ${n} turns CST has sent a delivery status for. Voice and web replies have no Twilio delivery, and a turn still waiting on one is left out rather than counted either way.`,
+      ),
+      lost: share(lostN, withDelivery.length, 'Replies Twilio reports as failed or undelivered: the customer never got an answer.'),
+      duration: percentiles(durations, n, durations.length === n ? `Over all ${n} turns.` : `Over the ${durations.length} of ${n} turns that sent duration_ms. A turn without it is left out, never counted as instant.`),
+      outcome_mix: tally(real.map((x) => x.outcome), 'No status'),
+      outcome_per_week: weeks,
+      by_intent: cohort((x) => x.intent, '(not sent)'),
+      by_channel: cohort((x) => x.channel, '(not sent)'),
+      by_project: cohort((x) => x.project_id, '(not sent)'),
+    },
   };
 }

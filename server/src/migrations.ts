@@ -2091,6 +2091,52 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_vfarm_snapshots_taken ON engine_vfarm_snapshots (taken_at DESC)`,
     ],
   },
+  {
+    id: 41,
+    name: 'Customer Service Twin turns, pushed by CST itself',
+    statements: [
+      /**
+       * 29 Sep 2026, Destiny. One row per customer turn — one message in (SMS,
+       * voice or web) and CST's reply to it — keyed on CST's own turn id, the
+       * `correlation_id` its envelope already carries. The reply's delivery
+       * lands on the same row from a second event, so the two can arrive in
+       * either order: each write touches only its own columns. `occurred_at` is
+       * nullable only because a delivery can arrive before its turn; such a row
+       * is shown as "turn not received", never dropped. Destiny's call: the
+       * dashboard keeps the whole record, message text and number included.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_cst_turns (
+         turn_id             text PRIMARY KEY,
+         conversation_id     text,
+         tenant_id           text,
+         project_id          text,
+         channel             text,
+         customer_ref        text,
+         person_id           text,
+         phone_e164          text,
+         customer_name       text,
+         role                text,
+         is_known            boolean,
+         message             text,
+         reply               text,
+         intent              text,
+         status              text,
+         reason              text,
+         incident_id         text,
+         duration_ms         integer,
+         occurred_at         timestamptz,
+         received_at         timestamptz NOT NULL DEFAULT now(),
+         turn_payload        jsonb,
+         delivery_status     text,
+         delivery_error      text,
+         delivery_attempts   integer,
+         delivery_at         timestamptz,
+         delivery_payload    jsonb
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_cst_turns_occurred ON engine_cst_turns (occurred_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_cst_turns_conversation ON engine_cst_turns (conversation_id)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

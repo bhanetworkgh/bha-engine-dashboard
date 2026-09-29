@@ -3431,3 +3431,73 @@ export interface VfarmLiveData {
   alerts_fired_24h: number;
   alerts_fired_all: number;
 }
+
+/* ------------------------------------------------------------------------
+ * Customer Service Twin, pushed as it happens (2026-09-29, Destiny).
+ * The server's own shapes, from server/src/systemFeeds.ts (cstData).
+ * --------------------------------------------------------------------- */
+
+/** One customer turn: a message in and CST's reply, with the reply's delivery. */
+export interface CstTurn {
+  turn_id: string;
+  conversation_id: string | null;
+  tenant_id: string | null;
+  project_id: string | null;
+  channel: string | null;
+  customer_ref: string | null;
+  person_id: string | null;
+  phone_e164: string | null;
+  customer_name: string | null;
+  role: string | null;
+  is_known: boolean | null;
+  message: string | null;
+  reply: string | null;
+  intent: string | null;
+  status: string | null;
+  reason: string | null;
+  incident_id: string | null;
+  duration_ms: number | null;
+  occurred_at: string | null;
+  received_at: string;
+  delivery_status: string | null;
+  delivery_error: string | null;
+  delivery_attempts: number | null;
+  delivery_at: string | null;
+  /** Answered · Escalated · Refused · Needs verification · Unknown caller · Failed · Turn not received. */
+  outcome: string;
+}
+
+export interface CstCohort {
+  key: string;
+  label: string;
+  turns: number;
+  answered: number;
+  escalated: number;
+  with_delivery: number;
+  lost: number;
+}
+
+export interface CstData {
+  turns: CstTurn[];
+  meta: { rows: number; first_at: string | null; last_received_at: string | null; deliveries_without_turn: number };
+  summary: {
+    turns: number;
+    conversations: number;
+    customers: number;
+    last_7_days: number;
+    answered: Share;
+    escalated: Share;
+    refused: Share;
+    unknown: Share;
+    failed: Share;
+    delivered: Share;
+    lost: Share;
+    /** Seconds. */
+    duration: Percentiles;
+    outcome_mix: Slice[];
+    outcome_per_week: OutcomeWeek[];
+    by_intent: CstCohort[];
+    by_channel: CstCohort[];
+    by_project: CstCohort[];
+  };
+}
