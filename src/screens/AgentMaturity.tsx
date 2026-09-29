@@ -127,9 +127,38 @@ export default function AgentMaturity() {
               <span className="text-ink">Injection tests</span>
               <span className="text-right text-dim">{d.injection.pass_rate === null ? d.injection.note : <>{`${Math.round(d.injection.pass_rate * 100)}%`}<br /><span className="text-faint">{d.injection.note}</span></>}</span>
             </div>
-            <div className="flex justify-between gap-4 py-2">
+            <div className="flex justify-between gap-4 border-b border-line py-2">
               <span className="text-ink">Time to resolve an incident</span>
               <span className="text-right text-dim">{d.resolve.p50_minutes === null ? d.resolve.note : <>{`p50 ${d.resolve.p50_minutes} min · p95 ${d.resolve.p95_minutes} min`}<br /><span className="text-faint">{d.resolve.note}</span></>}</span>
+            </div>
+            <div className="flex justify-between gap-4 border-b border-line py-2">
+              <span className="text-ink">BHARAG write-backs, 7 days</span>
+              <span className="text-right text-dim">
+                {d.governance.bharag.recording_since === null ? (
+                  'Nothing has written to BHARAG through the guard yet.'
+                ) : (
+                  <>
+                    {`${d.governance.bharag.allowed} allowed · ${d.governance.bharag.redacted} with secrets redacted · ${d.governance.bharag.refused} refused`}
+                    <br />
+                    <span className="text-faint">
+                      {d.governance.bharag.refused_by_reason.length
+                        ? `Refused: ${d.governance.bharag.refused_by_reason.map((r) => `${r.reason} ${r.n}`).join(', ')}. `
+                        : ''}
+                      Guarded since {d.governance.bharag.recording_since.slice(0, 16)} UTC.
+                    </span>
+                  </>
+                )}
+              </span>
+            </div>
+            <div className="flex justify-between gap-4 py-2">
+              <span className="text-ink">Personal data retention</span>
+              <span className="text-right text-dim">
+                {d.governance.retention.last_run
+                  ? `Last run ${d.governance.retention.last_run.at.slice(0, 16).replace('T', ' ')} UTC, ${d.governance.retention.last_run.cleared} row${d.governance.retention.last_run.cleared === 1 ? '' : 's'} cleared`
+                  : 'The weekly job has not run yet.'}
+                <br />
+                <span className="text-faint">{d.governance.retention.policy.map((r) => `${r.store} ${r.days} days`).join(' · ')}</span>
+              </span>
             </div>
           </div>
         </Card>

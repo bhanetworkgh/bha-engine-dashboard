@@ -52,6 +52,7 @@ import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, agentTokens
 import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
 import * as systemFeeds from './systemFeeds';
+import * as dataGovernance from './dataGovernance';
 import * as candidateActions from './candidateActions';
 import * as patternDraft from './patternDraft';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
@@ -474,6 +475,44 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           throw new HttpError(e.status, e.message);
         }
         throw e;
+      }
+    }
+
+    /**
+     * Data governance (2026-09-29, Destiny — plan steps 5.4 and 5.5). The write
+     * guard answers every n8n ingest node before it writes to BHARAG: 200 with
+     * `allow` either way, because a refusal is a decision, not a failure; the
+     * decision itself is a row in engine_bharag_guard. The retention run is the
+     * weekly job's own code path, on demand, with a dry run that can pretend to
+     * be a later date so the clearing can be proved before any row is old enough.
+     */
+    if (p === '/api/engine/bharag-guard') {
+      if (method !== 'POST') throw new HttpError(405, 'POST { workspace, title, content, kind, outcome, source, run_id, metadata }. The answer says allow or not, and carries the title, content and metadata to ingest.');
+      const b = await readJson(req, 8 * 1024 * 1024);
+      const text = (v: unknown) => (typeof v === 'string' ? v : v === undefined || v === null ? '' : String(v));
+      const kind = text(b.kind) as dataGovernance.GuardKind;
+      if (!dataGovernance.GUARD_KINDS.includes(kind)) throw new HttpError(422, `kind must be one of ${dataGovernance.GUARD_KINDS.join(', ')}; got "${text(b.kind)}".`);
+      const g = await dataGovernance.guard({
+        workspace: text(b.workspace),
+        title: text(b.title),
+        content: text(b.content),
+        kind,
+        outcome: b.outcome === undefined || b.outcome === null ? null : text(b.outcome),
+        source: text(b.source),
+        run_id: b.run_id === undefined || b.run_id === null ? null : text(b.run_id),
+        metadata: b.metadata && typeof b.metadata === 'object' && !Array.isArray(b.metadata) ? (b.metadata as Record<string, unknown>) : null,
+        via: 'n8n',
+      });
+      return send(res, 200, { ok: true, ...g });
+    }
+    if (p === '/api/engine/retention/run') {
+      if (method !== 'POST') throw new HttpError(405, 'POST { dry_run, as_of }. as_of is accepted only with dry_run: true.');
+      const b = await readJson(req, 16 * 1024);
+      try {
+        const r = await dataGovernance.runAndRecord({ dry_run: b.dry_run === true, as_of: typeof b.as_of === 'string' ? b.as_of : undefined }, 'DASHBOARD_INBOUND_KEY');
+        return send(res, 200, { ok: true, ...r });
+      } catch (e) {
+        throw new HttpError(422, e instanceof Error ? e.message : String(e));
       }
     }
 
@@ -1800,6 +1839,7 @@ async function boot(): Promise<void> {
     void catchUp();
     executions.startPolling();
     recovery.startWatching();
+    dataGovernance.startRetention();
     health.startLedgerPolling();
   });
 }

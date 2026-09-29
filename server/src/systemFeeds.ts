@@ -424,6 +424,7 @@ interface GenieRow {
   received_at: string;
   answer: string | null;
   error: string | null;
+  retention_cleared_at: string | null;
 }
 
 export async function genieData() {
@@ -433,7 +434,8 @@ export async function genieData() {
             to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS occurred_at,
             to_char(received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at,
             left(payload->'response'->>'finalOutput', 600) AS answer,
-            left(coalesce(payload->'error'->>'message', payload->'response'->>'judgeSummary'), 400) AS error
+            left(coalesce(payload->'error'->>'message', payload->'response'->>'judgeSummary'), 400) AS error,
+            to_char(retention_cleared_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS retention_cleared_at
        FROM engine_genie_events
       WHERE event_type NOT LIKE 'genie.subagent.%'
       ORDER BY coalesce(request_id, event_id), occurred_at DESC`,
@@ -746,6 +748,7 @@ interface CstRow {
   delivery_error: string | null;
   delivery_attempts: number | null;
   delivery_at: string | null;
+  retention_cleared_at: string | null;
 }
 
 export async function cstData() {
@@ -753,7 +756,7 @@ export async function cstData() {
   const r = await query<CstRow>(
     `SELECT turn_id, conversation_id, tenant_id, project_id, channel, customer_ref, person_id, phone_e164, customer_name, role, is_known,
             message, reply, intent, status, reason, incident_id, duration_ms, ${t('occurred_at')}, ${t('received_at')},
-            delivery_status, delivery_error, delivery_attempts, ${t('delivery_at')}
+            delivery_status, delivery_error, delivery_attempts, ${t('delivery_at')}, ${t('retention_cleared_at')}
        FROM engine_cst_turns
       ORDER BY coalesce(occurred_at, received_at) DESC`,
   );

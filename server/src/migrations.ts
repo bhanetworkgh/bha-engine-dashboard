@@ -2137,6 +2137,38 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_cst_turns_conversation ON engine_cst_turns (conversation_id)`,
     ],
   },
+  {
+    id: 42,
+    name: 'data governance: when personal text was cleared, and every BHARAG write-back decision',
+    statements: [
+      /**
+       * 29 Sep 2026, Destiny (Agent Upgrade Plan 5.4 and 5.5). Retention clears
+       * personal text and keeps the row; this column says when, so a blank
+       * message reads "cleared" rather than "never sent". Mirror tables mark it
+       * inside `fields` instead ('Retention Cleared At'), because their columns
+       * belong to the mirror. See dataGovernance.ts.
+       */
+      `ALTER TABLE engine_cst_turns ADD COLUMN IF NOT EXISTS retention_cleared_at timestamptz`,
+      `ALTER TABLE engine_genie_events ADD COLUMN IF NOT EXISTS retention_cleared_at timestamptz`,
+      `ALTER TABLE engine_vfarm_leads ADD COLUMN IF NOT EXISTS retention_cleared_at timestamptz`,
+      /** One row per write-back decision, from the dashboard's own ingests and from n8n's. */
+      `CREATE TABLE IF NOT EXISTS engine_bharag_guard (
+         id             bigserial PRIMARY KEY,
+         at             timestamptz NOT NULL DEFAULT now(),
+         workspace      text,
+         source         text,
+         run_id         text,
+         kind           text NOT NULL,
+         answer_outcome text,
+         outcome        text NOT NULL CHECK (outcome IN ('allowed', 'redacted', 'refused')),
+         reason         text,
+         redactions     jsonb,
+         title          text,
+         via            text NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_bharag_guard_at ON engine_bharag_guard (at DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

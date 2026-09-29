@@ -659,7 +659,7 @@ const updateWatchedClientQuestion: ToolDefinition = {
         result.ingested_to_bharag = false;
         result.bharag_detail = 'No question or answer text, so nothing was worth ingesting.';
       } else {
-        const ing = await bharag.ingest('research_twin', doc);
+        const ing = await bharag.ingest('research_twin', doc, { kind: 'record', source: 'mcp:update_watched_client_question' });
         result.ingested_to_bharag = ing.ok;
         result.degraded = !ing.ok;
         result.bharag_title = doc.title;
