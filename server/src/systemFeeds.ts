@@ -916,7 +916,8 @@ function doctrineRow(e: unknown, at: string) {
     claims = e.claims.map((c, i) => {
       if (!isObj(c)) throw new FeedError(422, `${at}: claims[${i}] is not an object.`);
       const label = str(c.label);
-      const maturity = str(c.maturity)?.toUpperCase() ?? null;
+      // Checked as sent, not upper-cased first: "maybe" is not a maturity state, and folding it to MAYBE would store one.
+      const maturity = str(c.maturity);
       if (!label) throw new FeedError(422, `${at}: claims[${i}].label is required.`);
       if (!maturity || !/^[A-Z][A-Z_]*$/.test(maturity)) throw new FeedError(422, `${at}: claims[${i}].maturity is required, in UPPER_SNAKE form, e.g. ${DOCTRINE_MATURITIES.join(', ')}.`);
       return {
