@@ -3526,3 +3526,55 @@ export interface CstData {
     by_project: CstCohort[];
   };
 }
+
+/* ------------------------------------------------------------------------
+ * Media Twin doctrine (2026-09-30, Destiny — HMJV's third section).
+ * Hardik's doctrine and contract changes, as posted. From systemFeeds.ts.
+ * --------------------------------------------------------------------- */
+
+export interface DoctrineClaim {
+  claim_id: string | null;
+  label: string;
+  /** PROVEN_NOW · PROVEN_BUT_GATED · CONTRACT_DEFINED_NOT_RUNTIME_PROVEN · IN_BUILD · NEEDS_EVIDENCE · NOT_SAFE_TO_CLAIM, or the sender's own. */
+  maturity: string;
+  allowed_wording: string | null;
+  prohibited_wording: string | null;
+}
+
+export interface DoctrineChange {
+  change_id: string;
+  doctrine_id: string;
+  doctrine_name: string | null;
+  version: string;
+  previous_version: string | null;
+  /** created · amended · superseded · retired */
+  change_type: string;
+  summary: string;
+  contract_ids: string[];
+  default_patterns: string[];
+  claims: DoctrineClaim[];
+  approved_by: string | null;
+  approved_at: string | null;
+  changed_at: string;
+  loop_id: string | null;
+  doc_url: string | null;
+  posted_by: string | null;
+  received_at: string;
+}
+
+export interface DoctrineData {
+  /** One per doctrine: its newest change, which is the version in force. */
+  doctrines: Array<DoctrineChange & { changes: number; retired: boolean }>;
+  /** Every change, newest first. */
+  changes: DoctrineChange[];
+  meta: { changes: number; first_change_at: string | null; last_change_at: string | null; last_received_at: string | null };
+  summary: {
+    doctrines_in_force: number;
+    retired: number;
+    changes_last_30_days: number;
+    claims_in_force: number;
+    claims_by_maturity: Array<{ key: string; label: string; n: number }>;
+    contracts_bound: string[];
+    default_patterns: string[];
+  };
+}

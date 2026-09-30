@@ -1804,7 +1804,7 @@ Ask Bays
 SYSTEMS
   North Star
   Research Twin
-  Media Twin             ← placeholder
+  Media Twin             ← Doctrine tab real from 2026-09-30, pushed by Hardik
   Genie                  ← placeholder
   Customer Service Twin  ← real from 2026-09-29, pushed by CST
   vFarm                  ← Overview is a placeholder; Early Access is real
@@ -2534,6 +2534,24 @@ refused, unknown caller and escalated are guards and hand-offs doing their job
 and stay neutral. A delivery whose turn has not arrived is shown as "turn not
 received" and left out of every figure. **Home's Genie and CST tiles count
 their pushed rows** and say "Not connected yet" only until the first one lands.
+
+**Media Twin's first tab is Doctrine** (2026-09-30, Destiny — HMJV's third
+section, the one Hardik owns). `POST /api/engine/media-doctrine`, same key,
+migration 43, `engine_media_doctrine`, contract
+`docs/contracts/media-doctrine.md`. One `media.doctrine.v1` record per change
+to a doctrine or contract Hardik owns (B93H, TSNR, OWLG, …): doctrine id,
+version, previous version, change type (created / amended / superseded /
+retired), summary, contract ids, default patterns, the claim-level maturity
+states it sets, who approved it. Keyed on `change_id`, and `(doctrine_id,
+version)` is unique. **No silent edits, enforced**: a repeat with identical
+content is unchanged, a repeat with different content or a second record for a
+version already held is a 409 — a correction is a new version that supersedes
+it, OWLG's own rule. The page shows the version in force per doctrine (its
+newest change) and every change, newest first; maturity states are drawn
+neutral, because NOT_SAFE_TO_CLAIM is a rule doing its job, not a fault. Home's
+Media Twin tile counts doctrines tracked once the first record lands. Media
+Twin's own output (posts, clips, the weekly platform report) is not on the page
+and it says so.
 
 ### Media Twin, Genie and vFarm
 **Three single centred "coming soon" pages, and nothing else** (decisions

@@ -154,14 +154,17 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
    * connected yet" and draws no number, because until then that is the truth.
    */
   const pushed = (
-    await query<{ genie: number; genie_week: number; genie_failed: number; cst: number; cst_week: number; cst_lost: number; cst_escalated: number }>(
+    await query<{ genie: number; genie_week: number; genie_failed: number; cst: number; cst_week: number; cst_lost: number; cst_escalated: number; doctrines: number; doctrine_changes: number; doctrine_last: string | null }>(
       `SELECT (SELECT count(DISTINCT coalesce(request_id, event_id)) FROM engine_genie_events WHERE event_type NOT LIKE 'genie.subagent.%')::int AS genie,
               (SELECT count(DISTINCT coalesce(request_id, event_id)) FROM engine_genie_events WHERE event_type NOT LIKE 'genie.subagent.%' AND occurred_at >= now() - interval '7 days')::int AS genie_week,
               (SELECT count(DISTINCT coalesce(request_id, event_id)) FROM engine_genie_events WHERE event_type LIKE 'genie.%.failed')::int AS genie_failed,
               (SELECT count(*) FROM engine_cst_turns WHERE status IS NOT NULL)::int AS cst,
               (SELECT count(*) FROM engine_cst_turns WHERE status IS NOT NULL AND occurred_at >= now() - interval '7 days')::int AS cst_week,
               (SELECT count(*) FROM engine_cst_turns WHERE status IS NOT NULL AND delivery_status IN ('failed','undelivered'))::int AS cst_lost,
-              (SELECT count(*) FROM engine_cst_turns WHERE status = 'ok' AND intent = 'escalate')::int AS cst_escalated`,
+              (SELECT count(*) FROM engine_cst_turns WHERE status = 'ok' AND intent = 'escalate')::int AS cst_escalated,
+              (SELECT count(DISTINCT doctrine_id) FROM engine_media_doctrine)::int AS doctrines,
+              (SELECT count(*) FROM engine_media_doctrine)::int AS doctrine_changes,
+              (SELECT to_char(max(changed_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD') FROM engine_media_doctrine) AS doctrine_last`,
     )
   ).rows[0];
   const entries = await store.codexEntries();
@@ -299,7 +302,19 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
       // section 2 rather than a matter of taste.
       // Media Twin and Genie write nothing here yet, so their tiles carry no
       // number and are drawn greyed — "Not connected yet", never a figure.
-      { key: 'media-twin', label: 'Media Twin', to: '/media-twin', headline: '—', sublabel: 'Not connected yet', signal: 'Nothing Media Twin does writes here yet.', health: 'ok', muted: true },
+      // Media Twin counts Hardik's doctrine records from 2026-09-30; before the
+      // first one it still says "Not connected yet".
+      pushed?.doctrines
+        ? {
+            key: 'media-twin',
+            label: 'Media Twin',
+            to: '/media-twin',
+            headline: String(pushed.doctrines),
+            sublabel: pushed.doctrines === 1 ? 'doctrine tracked' : 'doctrines tracked',
+            signal: `${pushed.doctrine_changes} change${pushed.doctrine_changes === 1 ? '' : 's'} recorded, the latest on ${pushed.doctrine_last}.`,
+            health: 'ok' as OverviewTile['health'],
+          }
+        : { key: 'media-twin', label: 'Media Twin', to: '/media-twin', headline: '—', sublabel: 'Not connected yet', signal: 'Nothing Media Twin does writes here yet.', health: 'ok', muted: true },
       pushed?.genie
         ? {
             key: 'genie',

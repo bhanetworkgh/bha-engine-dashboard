@@ -12,7 +12,7 @@ import { ageTone, healthText } from '../lib';
  */
 const HOME_KINDS = [
   'incidents', 'error_counts', 'retry_attempts', 'digests', 'codex', 'layer0', 'loops', 'patterns', 'pattern_candidates',
-  'commercial', 'ns-asks', 'rt-asks', 'rt-jobs', 'vfarm_leads', 'repairs', 'genie_events', 'cst_turns',
+  'commercial', 'ns-asks', 'rt-asks', 'rt-jobs', 'vfarm_leads', 'repairs', 'genie_events', 'cst_turns', 'media_doctrine',
 ] as const;
 
 /** One colour per system, so no two neighbours share a tint. */

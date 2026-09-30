@@ -2169,6 +2169,43 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_bharag_guard_at ON engine_bharag_guard (at DESC)`,
     ],
   },
+  {
+    id: 43,
+    name: "Media Twin doctrine: Hardik's doctrine and contract changes, pushed as they are made",
+    statements: [
+      /**
+       * 30 Sep 2026, Destiny (HMJV, third section). One row per change to a
+       * doctrine or contract Hardik owns (B93H, TSNR, OWLG, ...), keyed on the
+       * sender's own change_id. A version is a version: (doctrine_id, version)
+       * is unique, so the same version cannot be restated with different
+       * content — a correction is a new version that supersedes it, never a
+       * silent edit, which is OWLG's own rule. `claims` holds the claim-level
+       * maturity states the change sets, as sent. See systemFeeds.ts.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_media_doctrine (
+         change_id         text PRIMARY KEY,
+         doctrine_id       text NOT NULL,
+         doctrine_name     text,
+         version           text NOT NULL,
+         previous_version  text,
+         change_type       text NOT NULL,
+         summary           text NOT NULL,
+         contract_ids      jsonb NOT NULL DEFAULT '[]'::jsonb,
+         default_patterns  jsonb NOT NULL DEFAULT '[]'::jsonb,
+         claims            jsonb NOT NULL DEFAULT '[]'::jsonb,
+         approved_by       text,
+         approved_at       timestamptz,
+         changed_at        timestamptz NOT NULL,
+         loop_id           text,
+         doc_url           text,
+         posted_by         text,
+         received_at       timestamptz NOT NULL DEFAULT now(),
+         payload           jsonb NOT NULL
+       )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_media_doctrine_version ON engine_media_doctrine (doctrine_id, version)`,
+      `CREATE INDEX IF NOT EXISTS engine_media_doctrine_changed ON engine_media_doctrine (changed_at DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
