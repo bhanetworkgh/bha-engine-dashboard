@@ -366,6 +366,30 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * finishes and n8n retries a failed HTTP node, so the same result arriving
      * twice must update one row rather than add a second.
      */
+    /**
+     * The bridge reads a workflow's earlier repairs before it diagnoses (30 Sep 2026),
+     * and posts back the verdict on a prepared fix once it has been applied.
+     */
+    if ((p === '/api/engine/repair' || p === '/api/engine/repairs') && method === 'GET') {
+      const url = new URL(req.url ?? p, 'http://x');
+      const wf = url.searchParams.get('workflow_id');
+      if (!wf) throw new HttpError(422, 'workflow_id is required.');
+      return send(res, 200, { ok: true, repairs: await repairs.recentFor(wf, Number(url.searchParams.get('limit') ?? 6)) });
+    }
+    const preparedOutcome = p.match(/^\/api\/engine\/repairs\/([^/]+)\/prepared-outcome$/);
+    if (preparedOutcome) {
+      if (method !== 'POST') throw new HttpError(405, 'POST only.');
+      const body = await readJson(req);
+      try {
+        const repair = await repairs.preparedOutcome(decodeURIComponent(preparedOutcome[1]), body);
+        await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: decodeURIComponent(preparedOutcome[1]), outcome: repair ? 'updated' : 'rejected', detail: `prepared fix ${String(body.state)}`, ms: Date.now() - t0 });
+        if (!repair) throw new HttpError(404, 'No such repair.');
+        return send(res, 200, { ok: true, repair });
+      } catch (e) {
+        if (e instanceof repairs.RepairError) throw new HttpError(e.status, e.message);
+        throw e;
+      }
+    }
     if (p === '/api/engine/repair' || p === '/api/engine/repairs') {
       if (method !== 'POST') throw new HttpError(405, 'POST. An upsert on repair_id, so the same result twice updates rather than duplicating.');
       const body = await readJson(req, 1024 * 1024);
@@ -1410,6 +1434,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         if (e instanceof candidateActions.CandidateError) return send(res, e.status, { ok: false, reason: e.reason, message: e.message });
         throw e;
       }
+    }
+    /** Apply or Discard a fix the bridge prepared but did not publish (30 Sep 2026). */
+    const prepared = p.match(/^\/api\/repairs\/([^/]+)\/(apply|discard)$/);
+    if (prepared) {
+      if (req.method !== 'POST') throw new HttpError(405, 'POST only.');
+      return send(res, 200, await repairs.actOnPrepared(decodeURIComponent(prepared[1]), prepared[2] as 'apply' | 'discard', sessionInfo(req).email));
     }
     const revert = p.match(/^\/api\/repairs\/([^/]+)\/revert$/);
     if (revert) {
