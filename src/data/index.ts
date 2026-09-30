@@ -14,6 +14,7 @@ import { api, ApiError } from './api';
 import type {
   AskBaysData,
   GenieData,
+  DoctrineData,
   VfarmLiveData,
   CstData,
   ScorecardData,
@@ -574,6 +575,8 @@ export const getGenie = () => api<GenieData>('/api/genie');
 export const getVfarmLive = () => api<VfarmLiveData>('/api/vfarm/live');
 /** The Customer Service Twin's turns, as CST pushed them (2026-09-29). */
 export const getCsTwin = () => api<CstData>('/api/cs-twin');
+/** Hardik's doctrine and contract changes, for the Media Twin page (2026-09-30). */
+export const getMediaDoctrine = () => api<DoctrineData>('/api/media-doctrine');
 
 /**
  * A lead's status, or its notes, or both. Nothing else about a lead is

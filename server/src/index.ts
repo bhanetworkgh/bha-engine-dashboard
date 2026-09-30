@@ -475,6 +475,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         describe: (r) => `${r.received} event(s) (${r.turns} turn, ${r.deliveries} delivery): ${r.inserted} new, ${r.updated} updated, ${r.unchanged} unchanged`,
         hint: 'POST one cst.event.v1 (event_type cst.turn or cst.delivery), or { events: [...] } with at most 200. An upsert on turn_id.',
       },
+      /** Hardik's doctrine and contract changes, for the Media Twin page (2026-09-30, HMJV's third section). */
+      '/api/engine/media-doctrine': {
+        kind: 'media_doctrine',
+        store: async (b) => ({ ...(await systemFeeds.storeDoctrine(b)) }),
+        describe: (r) => `${r.received} doctrine change(s): ${r.inserted} new, ${r.unchanged} already held`,
+        hint: 'POST one media.doctrine.v1 change, or { changes: [...] } with at most 100. Keyed on change_id; a version is never restated with different content.',
+      },
     };
     const feed = FEEDS[p];
     if (feed) {
@@ -973,6 +980,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await systemFeeds.vfarmData());
       case '/api/cs-twin':
         return send(res, 200, await systemFeeds.cstData());
+      /** Hardik's doctrine and contract changes, as posted (2026-09-30). */
+      case '/api/media-doctrine':
+        return send(res, 200, await systemFeeds.doctrineData());
       /** Pay Tracker: the ledger's rows, and the figures over them. */
       case '/api/pay':
         return send(res, 200, await pay.data());

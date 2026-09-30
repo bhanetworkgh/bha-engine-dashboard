@@ -839,3 +839,217 @@ export async function cstData() {
     },
   };
 }
+
+/* --------------------------------------------------------- Media doctrine */
+
+/**
+ * Media Twin doctrine (2026-09-30, Destiny — HMJV's third section). Hardik owns
+ * the rules for what vFarm's public surfaces may claim — B93H (buyer capability
+ * list), TSNR (commercial vocabulary), OWLG (mechanical → media handoff) and any
+ * that follow. Every time one of them changes, Hardik posts one
+ * `media.doctrine.v1` record: which doctrine, its new version, what changed,
+ * the contracts it binds, the default patterns it applies, and the claim-level
+ * maturity states it sets. The agents and this page then read the version in
+ * force rather than a copy someone remembered.
+ *
+ * **No silent edits.** A change_id posted again with identical content is
+ * unchanged; with different content it is refused, and so is a second change_id
+ * for a (doctrine_id, version) already held. A correction is a new version that
+ * supersedes the old one — OWLG's own rule, enforced here rather than trusted.
+ */
+export const DOCTRINE_CHANGE_TYPES = ['created', 'amended', 'superseded', 'retired'];
+/** The maturity states B93H and OWLG already use. Anything else in the same UPPER_SNAKE shape is kept under its own name. */
+export const DOCTRINE_MATURITIES = [
+  'PROVEN_NOW',
+  'PROVEN_BUT_GATED',
+  'CONTRACT_DEFINED_NOT_RUNTIME_PROVEN',
+  'IN_BUILD',
+  'NEEDS_EVIDENCE',
+  'NOT_SAFE_TO_CLAIM',
+];
+
+export interface DoctrineStoreResult {
+  received: number;
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  change_ids: string[];
+}
+
+const strList = (v: unknown, at: string, field: string): string[] => {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) throw new FeedError(422, `${at}: ${field} must be a list of strings.`);
+  return v.map((x, i) => {
+    const s = str(x);
+    if (!s) throw new FeedError(422, `${at}: ${field}[${i}] is empty or not a string.`);
+    return s;
+  });
+};
+
+function doctrineRow(e: unknown, at: string) {
+  if (!isObj(e)) throw new FeedError(422, `${at} is not a JSON object.`);
+  const schema = str(e.schema);
+  if (schema && schema !== 'media.doctrine.v1') throw new FeedError(422, `${at}: schema "${schema}" is not media.doctrine.v1.`);
+  const need = (k: string, why: string) => {
+    const v = str(e[k]);
+    if (!v) throw new FeedError(422, `${at}: ${k} is required — ${why}`);
+    return v;
+  };
+  const change_id = need('change_id', 'it is what makes a retry update one row instead of adding a second.');
+  const doctrine_id = need('doctrine_id', 'the short id of the doctrine or contract, e.g. B93H.').toUpperCase();
+  const version = need('version', 'the version this change puts in force, e.g. v0.1.');
+  const change_type = need('change_type', `one of ${DOCTRINE_CHANGE_TYPES.join(', ')}.`).toLowerCase();
+  if (!DOCTRINE_CHANGE_TYPES.includes(change_type)) throw new FeedError(422, `${at}: change_type "${change_type}" is not one of ${DOCTRINE_CHANGE_TYPES.join(', ')}.`);
+  const summary = need('summary', 'what changed, in plain words.');
+  const rawChanged = e.changed_at;
+  const changed_at = iso(rawChanged);
+  if (!changed_at) throw new FeedError(422, `${at}: changed_at is required as an ISO 8601 time${rawChanged !== undefined ? ` (got "${String(rawChanged)}")` : ''}.`);
+  const rawApproved = e.approved_at;
+  const approved_at = iso(rawApproved);
+  if (rawApproved !== undefined && rawApproved !== null && !approved_at) throw new FeedError(422, `${at}: approved_at "${String(rawApproved)}" is not an ISO 8601 time.`);
+  const previous_version = str(e.previous_version);
+  if (change_type !== 'created' && !previous_version) throw new FeedError(422, `${at}: previous_version is required for a change of type ${change_type} — it is what makes the supersession visible.`);
+  if (previous_version && previous_version === version) throw new FeedError(422, `${at}: previous_version and version are both "${version}". A change must put a new version in force.`);
+  let claims: Obj[] = [];
+  if (e.claims !== undefined && e.claims !== null) {
+    if (!Array.isArray(e.claims)) throw new FeedError(422, `${at}: claims must be a list.`);
+    claims = e.claims.map((c, i) => {
+      if (!isObj(c)) throw new FeedError(422, `${at}: claims[${i}] is not an object.`);
+      const label = str(c.label);
+      const maturity = str(c.maturity)?.toUpperCase() ?? null;
+      if (!label) throw new FeedError(422, `${at}: claims[${i}].label is required.`);
+      if (!maturity || !/^[A-Z][A-Z_]*$/.test(maturity)) throw new FeedError(422, `${at}: claims[${i}].maturity is required, in UPPER_SNAKE form, e.g. ${DOCTRINE_MATURITIES.join(', ')}.`);
+      return {
+        claim_id: str(c.claim_id),
+        label,
+        maturity,
+        allowed_wording: str(c.allowed_wording),
+        prohibited_wording: str(c.prohibited_wording),
+      };
+    });
+  }
+  return {
+    change_id,
+    doctrine_id,
+    doctrine_name: str(e.doctrine_name),
+    version,
+    previous_version,
+    change_type,
+    summary,
+    contract_ids: strList(e.contract_ids, at, 'contract_ids'),
+    default_patterns: strList(e.default_patterns, at, 'default_patterns'),
+    claims,
+    approved_by: str(e.approved_by),
+    approved_at,
+    changed_at,
+    loop_id: str(e.loop_id),
+    doc_url: str(e.doc_url),
+    posted_by: str(e.posted_by),
+    payload: { ...e, dry_run: undefined },
+  };
+}
+
+export async function storeDoctrine(body: Obj): Promise<DoctrineStoreResult & { dry_run: boolean }> {
+  const list = Array.isArray(body.changes) ? body.changes : [body];
+  if (list.length === 0) throw new FeedError(422, 'changes is empty — nothing to store.');
+  if (list.length > 100) throw new FeedError(413, `${list.length} changes in one call; send at most 100.`);
+  const rows = list.map((e, i) => doctrineRow(e, Array.isArray(body.changes) ? `changes[${i}]` : 'The change'));
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const k = `${r.doctrine_id} ${r.version}`;
+    if (seen.has(k)) throw new FeedError(422, `${r.doctrine_id} ${r.version} appears twice in one call.`);
+    seen.add(k);
+  }
+  return tx(body.dry_run === true, async (db) => {
+    let inserted = 0;
+    let unchanged = 0;
+    for (const r of rows) {
+      const held = await db.query<{ change_id: string; same: boolean }>(
+        `SELECT change_id,
+                (doctrine_id, version, coalesce(previous_version,''), change_type, summary, contract_ids, default_patterns, claims, changed_at)
+                  IS NOT DISTINCT FROM ($2, $3, coalesce($4,''), $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::timestamptz) AS same
+           FROM engine_media_doctrine WHERE change_id = $1 OR (doctrine_id = $2 AND version = $3)`,
+        [r.change_id, r.doctrine_id, r.version, r.previous_version, r.change_type, r.summary, JSON.stringify(r.contract_ids), JSON.stringify(r.default_patterns), JSON.stringify(r.claims), r.changed_at],
+      );
+      const other = held.rows.find((h) => h.change_id !== r.change_id);
+      if (other) throw new FeedError(409, `${r.doctrine_id} ${r.version} is already held as change ${other.change_id}. A version is not restated — post the correction as a new version that supersedes it.`);
+      const mine = held.rows.find((h) => h.change_id === r.change_id);
+      if (mine && !mine.same) throw new FeedError(409, `Change ${r.change_id} is already held with different content. Doctrine is never edited in place — post a new change_id with a new version and previous_version "${r.version}".`);
+      if (mine) {
+        unchanged++;
+        continue;
+      }
+      await db.query(
+        `INSERT INTO engine_media_doctrine (change_id, doctrine_id, doctrine_name, version, previous_version, change_type, summary, contract_ids, default_patterns, claims, approved_by, approved_at, changed_at, loop_id, doc_url, posted_by, payload)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12,$13,$14,$15,$16,$17::jsonb)`,
+        [r.change_id, r.doctrine_id, r.doctrine_name, r.version, r.previous_version, r.change_type, r.summary, JSON.stringify(r.contract_ids), JSON.stringify(r.default_patterns), JSON.stringify(r.claims), r.approved_by, r.approved_at, r.changed_at, r.loop_id, r.doc_url, r.posted_by, JSON.stringify(r.payload)],
+      );
+      inserted++;
+    }
+    if (inserted) events.changed('media_doctrine', null, db);
+    return { received: rows.length, inserted, updated: 0, unchanged, change_ids: rows.map((r) => r.change_id) };
+  });
+}
+
+interface DoctrineRow {
+  change_id: string;
+  doctrine_id: string;
+  doctrine_name: string | null;
+  version: string;
+  previous_version: string | null;
+  change_type: string;
+  summary: string;
+  contract_ids: string[];
+  default_patterns: string[];
+  claims: Array<{ claim_id: string | null; label: string; maturity: string; allowed_wording: string | null; prohibited_wording: string | null }>;
+  approved_by: string | null;
+  approved_at: string | null;
+  changed_at: string;
+  loop_id: string | null;
+  doc_url: string | null;
+  posted_by: string | null;
+  received_at: string;
+}
+
+export async function doctrineData() {
+  const r = await query<DoctrineRow>(
+    `SELECT change_id, doctrine_id, doctrine_name, version, previous_version, change_type, summary, contract_ids, default_patterns, claims,
+            approved_by, loop_id, doc_url, posted_by,
+            to_char(approved_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS approved_at,
+            to_char(changed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS changed_at,
+            to_char(received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at
+       FROM engine_media_doctrine
+      ORDER BY changed_at DESC, received_at DESC`,
+  );
+  const changes = r.rows;
+  // The version in force per doctrine is its newest change; a retired one is kept and said to be retired.
+  const current = new Map<string, DoctrineRow>();
+  for (const c of changes) if (!current.has(c.doctrine_id)) current.set(c.doctrine_id, c);
+  const doctrines = [...current.values()].map((c) => ({
+    ...c,
+    changes: changes.filter((x) => x.doctrine_id === c.doctrine_id).length,
+    retired: c.change_type === 'retired',
+  }));
+  const inForce = doctrines.filter((d) => !d.retired);
+  const claims = inForce.flatMap((d) => d.claims.map((c) => c.maturity));
+  const now = Date.now();
+  return {
+    doctrines,
+    changes,
+    meta: {
+      changes: changes.length,
+      first_change_at: changes.length ? changes[changes.length - 1].changed_at : null,
+      last_change_at: changes[0]?.changed_at ?? null,
+      last_received_at: changes.reduce<string | null>((m, c) => (!m || c.received_at > m ? c.received_at : m), null),
+    },
+    summary: {
+      doctrines_in_force: inForce.length,
+      retired: doctrines.length - inForce.length,
+      changes_last_30_days: changes.filter((c) => now - Date.parse(c.changed_at) < 30 * 86_400_000).length,
+      claims_in_force: claims.length,
+      claims_by_maturity: tally(claims, '(none)'),
+      contracts_bound: [...new Set(inForce.flatMap((d) => d.contract_ids))].sort(),
+      default_patterns: [...new Set(inForce.flatMap((d) => d.default_patterns))].sort(),
+    },
+  };
+}
