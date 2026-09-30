@@ -67,6 +67,7 @@ import type {
   RetryMetrics,
   RetryResult,
   RevertResult,
+  PreparedActionResult,
   RtData,
   FinalImport,
   ServerStatus,
@@ -245,6 +246,14 @@ export const getRepairs = () => api<RepairsData>('/api/repairs');
  * also brings back the failure the repair addressed.
  */
 export const revertRepair = (repairId: string) => api<RevertResult>(`/api/repairs/${encodeURIComponent(repairId)}/revert`, { method: 'POST', timeoutMs: 90_000 });
+
+/**
+ * Apply or Discard a fix the bridge prepared as a draft (30 Sep 2026). The bridge
+ * re-checks the draft and the live version before it publishes anything, and the
+ * answer is what it did, never what was asked.
+ */
+export const actOnPreparedFix = (repairId: string, action: 'apply' | 'discard') =>
+  api<PreparedActionResult>(`/api/repairs/${encodeURIComponent(repairId)}/${action}`, { method: 'POST', timeoutMs: 120_000 });
 
 /* ------------------------------------------------------------ pay tracker */
 

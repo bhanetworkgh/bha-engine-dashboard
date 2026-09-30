@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useData } from '../../app/useData';
-import { getRepairs, revertRepair, type Repair, type RepairsData, type RepairSummary } from '../../data';
+import { actOnPreparedFix, getRepairs, revertRepair, type Repair, type RepairsData, type RepairSummary } from '../../data';
 import type { RecordColumn } from '../../components/ui';
 import { ButtonAnchor, Pagination, Button, Definition, FigureCell, Pill, LoadFailed, Loading, EmptyState, RecordId, RecordTable, SearchBox, Segmented, StatStrip, usePaged } from '../../components/ui';
 import { Fact, when } from './parts';
@@ -171,6 +171,32 @@ export default function Repairs() {
     })();
   };
 
+  /**
+   * Apply or Discard a prepared fix (30 Sep 2026). Same shape as the revert: the
+   * row is replaced with what the server hands back, never assumed.
+   */
+  const actOnPrepared = (r: Repair, action: 'apply' | 'discard') => {
+    if (busy) return;
+    setBusy(r.repair_id);
+    setSaid(null);
+    void (async () => {
+      try {
+        const res = await actOnPreparedFix(r.repair_id, action);
+        setSaid({ id: r.repair_id, ok: res.ok, message: res.message });
+        if (res.repair && data) {
+          const updated = res.repair;
+          setHeld({ ...data, repairs: data.repairs.map((x) => (x.repair_id === updated.repair_id ? updated : x)) });
+        } else {
+          setTick((n) => n + 1);
+        }
+      } catch (e) {
+        setSaid({ id: r.repair_id, ok: false, message: e instanceof Error ? e.message : `The ${action} could not be sent.` });
+      } finally {
+        setBusy(null);
+      }
+    })();
+  };
+
   if (status === 'loading' && !data) return <Loading />;
   if (status === 'error' && !data) return <LoadFailed error={error} />;
   if (!data) return <Loading />;
@@ -261,8 +287,24 @@ export default function Repairs() {
               Cancel
             </Button>
           </div>
+        ) : r.prepared_fix && r.prepared_state === 'pending' ? (
+          <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy !== null}
+              title={`Publishes the ${r.prepared_fix.kind === 'agent' ? 'agent draft' : 'workflow draft'} the healer prepared and tested. The healer checks nothing has changed first, and puts the old version back if the next real ${r.prepared_fix.kind === 'agent' ? 'eval run' : 'run'} fails the same way.`}
+              onClick={() => actOnPrepared(r, 'apply')}
+            >
+              {busy === r.repair_id ? 'Working…' : 'Apply'}
+            </Button>
+            <Button variant="ghost" size="sm" disabled={busy !== null} title="Throws the prepared draft away so it can never be published by accident." onClick={() => actOnPrepared(r, 'discard')}>
+              Discard
+            </Button>
+          </div>
         ) : (
           <div className="flex items-center justify-end gap-2">
+            {r.prepared_fix && r.prepared_state ? <span className="text-[11.5px] text-dim" title={r.prepared_note ?? undefined}>fix {r.prepared_state}</span> : null}
             <Button
  variant="ghost" size="sm"
  disabled={!r.can_revert || busy !== null}

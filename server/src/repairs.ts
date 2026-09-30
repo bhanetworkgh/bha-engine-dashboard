@@ -228,6 +228,25 @@ export interface Repair {
   can_revert: boolean;
   /** Why not, in a sentence, where `can_revert` is false and the row is otherwise a repair. */
   revert_blocked_reason: string | null;
+  /**
+   * A fix the bridge prepared but did not publish (30 Sep 2026): a protected
+   * front door or agent delivery, or an agent's own settings, edited as a draft
+   * and tested, waiting for a person's Apply. Null on every other row.
+   */
+  prepared_fix: PreparedFix | null;
+  /** pending (Apply or Discard can be pressed), applied, held, reverted, discarded or unproven. */
+  prepared_state: string | null;
+  prepared_note: string | null;
+}
+
+export interface PreparedFix {
+  kind: 'workflow' | 'agent';
+  workflow_id?: string;
+  agent_id?: string;
+  draft_version: string;
+  restore_version: string;
+  tests?: string[];
+  summary?: string;
 }
 
 interface Row {
@@ -333,6 +352,7 @@ function toRepair(r: Row): Repair {
     execution_url: r.workflow_id && r.execution_id ? `${n8nHost()}/workflow/${r.workflow_id}/executions/${r.execution_id}` : null,
     can_revert: blocked === null,
     revert_blocked_reason: blocked,
+    ...preparedOf(r.payload),
   };
 }
 
@@ -590,4 +610,115 @@ export async function revert(repairId: string, actor: string): Promise<RevertRes
     message: `${row.workflow_name ?? row.workflow_id} is back to the version it was on before this repair${after ? `, as n8n version ${after}` : ''}. The failure this repair addressed is no longer fixed.`,
     repair: stamped,
   };
+}
+
+/* ---------------------------------------------------- prepared fixes (30 Sep 2026) */
+
+function preparedOf(payload: Record<string, unknown> | null): { prepared_fix: PreparedFix | null; prepared_state: string | null; prepared_note: string | null } {
+  const f = payload?.prepared_fix;
+  if (!f || typeof f !== 'object' || Array.isArray(f)) return { prepared_fix: null, prepared_state: null, prepared_note: null };
+  const fix = f as Record<string, unknown>;
+  if ((fix.kind !== 'workflow' && fix.kind !== 'agent') || typeof fix.draft_version !== 'string' || typeof fix.restore_version !== 'string') {
+    return { prepared_fix: null, prepared_state: null, prepared_note: null };
+  }
+  return {
+    prepared_fix: fix as unknown as PreparedFix,
+    prepared_state: typeof payload?.prepared_state === 'string' ? (payload.prepared_state as string) : 'pending',
+    prepared_note: typeof payload?.prepared_note === 'string' ? (payload.prepared_note as string) : null,
+  };
+}
+
+/** The last few repairs of one workflow, for the bridge to read before it diagnoses (30 Sep 2026). */
+export async function recentFor(workflowId: string, limit = 6): Promise<Repair[]> {
+  const n = Math.max(1, Math.min(20, Number.isFinite(limit) ? Math.floor(limit) : 6));
+  const r = await query<Row>(`${SELECT} WHERE workflow_id = $1 ORDER BY created_at DESC LIMIT ${n}`, [workflowId]);
+  return r.rows.map(toRepair);
+}
+
+export interface PreparedActionResult {
+  ok: boolean;
+  repair_id: string;
+  message: string;
+  repair: Repair | null;
+}
+
+function bridgeUrl(): string {
+  return (process.env.REPAIR_BRIDGE_URL || 'https://heal.bhanetwork.org').replace(/\/+$/, '');
+}
+
+async function stampPrepared(repairId: string, fields: Record<string, unknown>, outcome: string | null = null, revertedBy: string | null = null): Promise<Repair | null> {
+  return withTransaction(async (db) => {
+    await db.query(
+      `UPDATE engine_repairs
+          SET payload = payload || $2::jsonb,
+              outcome = COALESCE($3, outcome),
+              reverted_at = CASE WHEN $4::text IS NOT NULL AND reverted_at IS NULL THEN now() ELSE reverted_at END,
+              reverted_by = CASE WHEN $4::text IS NOT NULL AND reverted_at IS NULL THEN $4 ELSE reverted_by END
+        WHERE repair_id = $1`,
+      [repairId, JSON.stringify(fields), outcome, revertedBy],
+    );
+    events.changed('repairs', repairId, db);
+    const again = await db.query<Row>(`${SELECT} WHERE repair_id = $1`, [repairId]);
+    return again.rows[0] ? toRepair(again.rows[0]) : null;
+  });
+}
+
+/**
+ * Apply or Discard a prepared fix. The dashboard never touches n8n for this: the
+ * bridge holds the n8n MCP key, re-checks that the draft is still the one it
+ * tested and the live version is still the one it recorded, and only then
+ * publishes (or throws the draft away). This row is stamped with what the bridge
+ * says happened, never with what was asked for.
+ */
+export async function actOnPrepared(repairId: string, action: 'apply' | 'discard', actor: string): Promise<PreparedActionResult> {
+  const r = await query<Row>(`${SELECT} WHERE repair_id = $1`, [repairId]);
+  const row = r.rows[0];
+  if (!row) return { ok: false, repair_id: repairId, message: `No repair is held with the id ${repairId}.`, repair: null };
+  const held = toRepair(row);
+  if (!held.prepared_fix) return { ok: false, repair_id: repairId, message: 'This repair has no prepared fix, so there is nothing to apply or discard.', repair: held };
+  if (held.prepared_state !== 'pending') return { ok: false, repair_id: repairId, message: `This prepared fix is already ${held.prepared_state}.`, repair: held };
+  const key = process.env.DASHBOARD_INBOUND_KEY;
+  if (!key) return { ok: false, repair_id: repairId, message: 'DASHBOARD_INBOUND_KEY is not set on this server, so the bridge cannot be asked.', repair: held };
+
+  let answer: { ok?: boolean; state?: string; message?: string } = {};
+  try {
+    const res = await fetch(`${bridgeUrl()}/prepared/${encodeURIComponent(repairId)}/${action}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-dashboard-key': key },
+      body: JSON.stringify({ prepared_fix: held.prepared_fix, workflow_id: row.workflow_id, workflow_name: row.workflow_name, failed_node: row.failed_node, execution_id: row.execution_id, actor }),
+      signal: AbortSignal.timeout(90_000),
+    });
+    answer = (await res.json().catch(() => ({}))) as typeof answer;
+    if (!res.ok && answer.ok === undefined) answer = { ok: false, message: `The bridge answered ${res.status}.` };
+  } catch (e) {
+    return { ok: false, repair_id: repairId, message: `The bridge could not be reached, so nothing was changed: ${e instanceof Error ? e.message : String(e)}`, repair: held };
+  }
+
+  await mirror.logWrite({
+    endpoint: `${bridgeUrl()}/prepared/${repairId}/${action}`,
+    kind: 'repairs',
+    method: 'POST',
+    key_label: 'DASHBOARD_INBOUND_KEY',
+    natural_id: repairId,
+    outcome: answer.ok ? 'updated' : 'error',
+    detail: `${action} by ${actor}: ${answer.message ?? '(no message)'}`.slice(0, 500),
+  });
+
+  if (!answer.ok) return { ok: false, repair_id: repairId, message: answer.message ?? 'The bridge refused, and nothing was changed.', repair: held };
+  const state = answer.state ?? (action === 'apply' ? 'applied' : 'discarded');
+  const stamped = await stampPrepared(repairId, { prepared_state: state, prepared_note: answer.message ?? null, prepared_state_at: new Date().toISOString(), prepared_state_by: actor });
+  return { ok: true, repair_id: repairId, message: answer.message ?? `Prepared fix ${state}.`, repair: stamped };
+}
+
+/**
+ * The bridge's verdict on an applied fix, once a real run (or, for an agent, the
+ * eval run) has settled it: held means the fix stands and the row becomes a
+ * repair; reverted means the bridge put the old version back.
+ */
+export async function preparedOutcome(repairId: string, body: Record<string, unknown>): Promise<Repair | null> {
+  const state = typeof body.state === 'string' ? body.state : '';
+  if (!['held', 'reverted', 'unproven'].includes(state)) throw new RepairError('state must be held, reverted or unproven.', 422);
+  const note = typeof body.message === 'string' ? body.message.slice(0, 2000) : null;
+  const outcome = state === 'held' ? 'repaired' : state === 'reverted' ? 'not_repaired' : null;
+  return stampPrepared(repairId, { prepared_state: state, prepared_note: note, prepared_settled_at: new Date().toISOString(), ...(body.evidence && typeof body.evidence === 'object' ? { prepared_evidence: body.evidence } : {}) }, outcome, state === 'reverted' ? 'bridge (auto)' : null);
 }

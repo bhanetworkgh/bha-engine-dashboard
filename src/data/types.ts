@@ -1674,6 +1674,18 @@ export interface Repair {
   /** Decided on the server, so the button and the endpoint cannot disagree. */
   can_revert: boolean;
   revert_blocked_reason: string | null;
+  /** A fix the bridge prepared as a draft and tested, waiting for Apply (30 Sep 2026). */
+  prepared_fix: { kind: 'workflow' | 'agent'; workflow_id?: string; agent_id?: string; draft_version: string; restore_version: string; tests?: string[]; summary?: string } | null;
+  /** pending, applied, held, reverted, discarded or unproven. */
+  prepared_state: string | null;
+  prepared_note: string | null;
+}
+
+export interface PreparedActionResult {
+  ok: boolean;
+  repair_id: string;
+  message: string;
+  repair: Repair | null;
 }
 
 export interface RepairSummary {
