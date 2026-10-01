@@ -1012,6 +1012,100 @@ interface DoctrineRow {
   received_at: string;
 }
 
+/**
+ * The doctrine, read by software (2026-10-01, Destiny — T0NO's read door).
+ *
+ * Media Twin, /vfarm and Genie/North Star must all read the same claims, from
+ * here, rather than each keep its own idea of what may be said (Jason: no
+ * sidecar, no second truth store). This is that read. The key-protected
+ * `GET /api/engine/media-doctrine` and the `read_media_doctrine` MCP tool both
+ * call it, so the two can never answer differently, and both go through
+ * doctrineData() — the same function the Media Twin page renders from.
+ *
+ * It returns what is held and nothing more: the version in force of each
+ * doctrine, flattened to one row per claim. It does not compute T0NO's seven
+ * fields. Those it does not hold are named in `not_held`, so a reader treats
+ * them as unknown and fails closed instead of assuming a default.
+ *
+ * A filter that matches nothing says so, and names what is in force, rather
+ * than coming back as an empty list that reads like "no rules".
+ */
+export const DOCTRINE_READ_SCHEMA = 'media.doctrine.read.v1';
+
+/** T0NO's mandatory core (Jason, 2026-10-01) that the doctrine table does not carry yet. */
+export const T0NO_FIELDS_NOT_HELD = ['claim_state', 'config_hash', 'cad_provenance', 'evidence_publication_status', 'fail_closed', 'allowed_use'] as const;
+
+export interface DoctrineReadFilter {
+  doctrine_id?: string | null;
+  claim_id?: string | null;
+  maturity?: string | null;
+}
+
+export async function doctrineClaims(f: DoctrineReadFilter = {}) {
+  const clean = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  const want = { doctrine_id: clean(f.doctrine_id), claim_id: clean(f.claim_id), maturity: clean(f.maturity) };
+  const same = (a: string | null | undefined, b: string) => (a ?? '').toLowerCase() === b.toLowerCase();
+
+  const d = await doctrineData();
+  const inForce = d.doctrines.filter((x) => !x.retired);
+  const all = inForce.flatMap((doc) =>
+    doc.claims.map((c) => ({
+      doctrine_id: doc.doctrine_id,
+      doctrine_version: doc.version,
+      change_id: doc.change_id,
+      claim_id: c.claim_id ?? null,
+      label: c.label,
+      maturity: c.maturity,
+      allowed_wording: c.allowed_wording ?? null,
+      prohibited_wording: c.prohibited_wording ?? null,
+    })),
+  );
+  const claims = all.filter(
+    (c) =>
+      (!want.doctrine_id || same(c.doctrine_id, want.doctrine_id)) &&
+      (!want.claim_id || same(c.claim_id, want.claim_id)) &&
+      (!want.maturity || same(c.maturity, want.maturity)),
+  );
+
+  const warnings: string[] = [];
+  const ids = inForce.map((x) => x.doctrine_id);
+  if (!d.doctrines.length) warnings.push('No doctrine has been posted yet. Treat every claim as not safe to make.');
+  if (want.doctrine_id && !ids.some((x) => same(x, want.doctrine_id)))
+    warnings.push(`No doctrine "${want.doctrine_id}" is in force. In force: ${ids.join(', ') || 'none'}.`);
+  if (want.claim_id && !all.some((c) => same(c.claim_id, want.claim_id)))
+    warnings.push(`No claim "${want.claim_id}" is held in any doctrine in force, so it has no approved wording. Treat it as not safe to make.`);
+  if (want.maturity && !all.some((c) => same(c.maturity, want.maturity)))
+    warnings.push(`No claim in force has maturity "${want.maturity}". Held: ${[...new Set(all.map((c) => c.maturity))].sort().join(', ') || 'none'}.`);
+
+  return {
+    schema: DOCTRINE_READ_SCHEMA,
+    read_at: new Date().toISOString(),
+    source: 'engine_media_doctrine: the newest change of each doctrine in force, as Hardik posted it through media.doctrine.v1',
+    filters: { doctrine_id: want.doctrine_id || null, claim_id: want.claim_id || null, maturity: want.maturity || null },
+    doctrines: inForce.map((x) => ({
+      doctrine_id: x.doctrine_id,
+      doctrine_name: x.doctrine_name,
+      version: x.version,
+      change_id: x.change_id,
+      changed_at: x.changed_at,
+      approved_by: x.approved_by,
+      approved_at: x.approved_at,
+      loop_id: x.loop_id,
+      doc_url: x.doc_url,
+      contract_ids: x.contract_ids,
+      claims: x.claims.length,
+    })),
+    retired: d.doctrines.filter((x) => x.retired).map((x) => x.doctrine_id),
+    claims,
+    counts: { doctrines_in_force: inForce.length, claims_in_force: all.length, claims_returned: claims.length, by_maturity: tally(claims.map((c) => c.maturity), '(none)') },
+    not_held: {
+      fields: [...T0NO_FIELDS_NOT_HELD],
+      note: 'T0NO’s core fields this table does not carry yet. A reader must treat them as unknown and fail closed, never assume a default.',
+    },
+    warnings,
+  };
+}
+
 export async function doctrineData() {
   const r = await query<DoctrineRow>(
     `SELECT change_id, doctrine_id, doctrine_name, version, previous_version, change_type, summary, contract_ids, default_patterns, claims,

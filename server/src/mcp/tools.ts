@@ -20,6 +20,7 @@ import { databaseIdentity, query as pgQuery, DATABASE_URL } from '../pg';
 import * as airtable from '../airtable';
 import * as bharag from '../bharag';
 import * as recovery from '../recovery';
+import * as systemFeeds from '../systemFeeds';
 import { WRITE_TOOLS } from './writeTools';
 import { DOC_WRITE_TOOLS, readSlackFile } from './docTools';
 import { getN8nWorkflow, listN8nWorkflows, sweepAirtableNodes } from './n8nTools';
@@ -800,6 +801,42 @@ const getExecutionQuota: ToolDefinition = {
   handler: async () => quota.usage(),
 };
 
+/**
+ * The vFarm doctrine, for agents (2026-10-01, Destiny — T0NO). The same read
+ * as the key-protected GET /api/engine/media-doctrine: one function, so an
+ * agent and the website can never be told different rules.
+ */
+const readMediaDoctrine: ToolDefinition = {
+  name: 'read_media_doctrine',
+  description:
+    'What BHA may and may not say about vFarm: every claim in the doctrines in force (B93H buyer capabilities, OWLG mechanical/media handoff, TSNR commercial state), each with its maturity (PROVEN_NOW, PROVEN_BUT_GATED, CONTRACT_DEFINED_NOT_RUNTIME_PROVEN, IN_BUILD, NOT_SAFE_TO_CLAIM, …), its allowed wording and its prohibited wording, plus the doctrine version and change it came from. Filter by doctrine_id, claim_id or maturity (case does not matter). A claim that is not held has no approved wording: treat it as not safe to make, and say NEEDS_EVIDENCE rather than infer. `not_held` names T0NO’s core fields this record does not carry yet; treat those as unknown. A filter that matches nothing comes back with a warning naming what is in force, never as a silent empty list.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      doctrine_id: { type: 'string', description: 'One doctrine, e.g. "B93H", "OWLG", "TSNR".' },
+      claim_id: { type: 'string', description: 'One claim, e.g. "6.1", "FORM-A", "8.2".' },
+      maturity: { type: 'string', description: 'Only claims at this maturity, e.g. "NOT_SAFE_TO_CLAIM".' },
+    },
+    additionalProperties: false,
+  },
+  annotations: { ...READS_DB, title: 'What may be said about vFarm, per the doctrine in force' },
+  handler: async (args, deps) => {
+    const t0 = Date.now();
+    const s = (v: unknown) => (typeof v === 'string' ? v : null);
+    const out = await systemFeeds.doctrineClaims({ doctrine_id: s(args.doctrine_id), claim_id: s(args.claim_id), maturity: s(args.maturity) });
+    await mirror.logWrite({
+      endpoint: 'mcp:read_media_doctrine',
+      kind: 'media_doctrine',
+      method: 'MCP',
+      key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET',
+      outcome: 'read',
+      detail: `${JSON.stringify(out.filters).slice(0, 200)} → ${out.counts.claims_returned} of ${out.counts.claims_in_force} claim(s)`,
+      ms: Date.now() - t0,
+    });
+    return out;
+  },
+};
+
 export const TOOLS: ToolDefinition[] = [
   // The reads, in the order the instructions suggest reaching for them.
   listPages,
@@ -817,6 +854,8 @@ export const TOOLS: ToolDefinition[] = [
   searchLogs,
   getRecoveryStatus,
   findRecordsTool,
+  // 2026-10-01: the vFarm doctrine, the same read as GET /api/engine/media-doctrine (T0NO).
+  readMediaDoctrine,
   // 2026-09-24: what the Bays agent read through n8n tools of its own.
   listN8nWorkflows,
   getN8nWorkflow,

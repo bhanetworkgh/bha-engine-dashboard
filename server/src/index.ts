@@ -483,9 +483,33 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         hint: 'POST one media.doctrine.v1 change, or { changes: [...] } with at most 100. Keyed on change_id; a version is never restated with different content.',
       },
     };
+    /**
+     * The doctrine, read back (2026-10-01, Destiny — T0NO). The one feed that
+     * also answers GET: Media Twin, /vfarm and Genie read the claims Hardik
+     * posts from here, with the same key, instead of keeping their own copy.
+     * Filters: ?doctrine_id=B93H, ?claim_id=6.1, ?maturity=IN_BUILD. The same
+     * function backs the read_media_doctrine MCP tool.
+     */
+    if (p === '/api/engine/media-doctrine' && method === 'GET') {
+      const r = await systemFeeds.doctrineClaims({
+        doctrine_id: url.searchParams.get('doctrine_id'),
+        claim_id: url.searchParams.get('claim_id'),
+        maturity: url.searchParams.get('maturity'),
+      });
+      await mirror.logWrite({
+        endpoint,
+        kind: 'media_doctrine',
+        method,
+        key_label: 'DASHBOARD_INBOUND_KEY',
+        outcome: 'read',
+        detail: `${JSON.stringify(r.filters).slice(0, 200)} → ${r.counts.claims_returned} of ${r.counts.claims_in_force} claim(s)${r.warnings.length ? `, ${r.warnings.length} warning(s)` : ''}`,
+        ms: Date.now() - t0,
+      });
+      return send(res, 200, { ok: true, ...r });
+    }
     const feed = FEEDS[p];
     if (feed) {
-      if (method !== 'POST') throw new HttpError(405, feed.hint);
+      if (method !== 'POST') throw new HttpError(405, p === '/api/engine/media-doctrine' ? `${feed.hint} GET reads the claims in force.` : feed.hint);
       const body = await readJson(req, 4 * 1024 * 1024);
       try {
         const r = await feed.store(body);

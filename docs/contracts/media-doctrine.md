@@ -93,6 +93,22 @@ To correct something, post a **new version** with `previous_version` set to the 
 - `422` naming the field when a record is not valid; nothing in the batch is stored.
 - `401` without the key. Every call, accepted or refused, is logged on the dashboard's engine-writes log.
 
+## Reading it back (added 1 Oct, for T0NO)
+
+Media Twin, `/vfarm` and Genie read the claims from here, not from a copy of their own.
+
+- **Code:** `GET https://dashboard.bhanetwork.org/api/engine/media-doctrine` with the same `x-dashboard-key` header. Optional filters: `?doctrine_id=B93H`, `?claim_id=6.1`, `?maturity=NOT_SAFE_TO_CLAIM` (case does not matter).
+- **Agents:** the `read_media_doctrine` MCP tool. Same function, same answer.
+
+The answer (`media.doctrine.read.v1`) carries the version in force of each doctrine and one row per claim: `doctrine_id`, `doctrine_version`, `change_id`, `claim_id`, `label`, `maturity`, `allowed_wording`, `prohibited_wording`.
+
+What it does **not** carry yet is named in `not_held`: T0NO's `claim_state`, `config_hash`, `cad_provenance`, `evidence_publication_status`, `fail_closed` and `allowed_use`. Treat those as unknown and fail closed. A claim that is not held at all has no approved wording, so it is not safe to make. A filter that matches nothing comes back with a line in `warnings`, never as a silent empty list.
+
+```bash
+curl -s https://dashboard.bhanetwork.org/api/engine/media-doctrine?doctrine_id=B93H \
+  -H "x-dashboard-key: $DASHBOARD_INBOUND_KEY"
+```
+
 ## Already there
 
 The current versions are recorded from the loop records as the first entries: **B93H v0.1**, **TSNR v0** and **OWLG v0.1**, each as ratified by Jason on 27–29 Sep. Your first post should amend one of them, so check the page for the version in force before you post.
