@@ -11040,3 +11040,10 @@ Changes:    n8n, tracker fhQNvRFdh1H6Li0E. `Build Confirmation Email` now builds
 Tested:     Rendered locally at 640px and 375px before touching n8n. Pinned 23629: HTML built, Gmail pinned, confirmation recorded.
 Live:       Website intake 23632 → tracker 23633 (trigger): Gmail message 1a0f84cfb83ce2e3 to destiny+html@bhanetwork.org, event VFEVENT-CONFIRM-FORMA-RU0W2P, dashboard 201 VFBUYER-FORMA-RU0W2P. Second internal test lead VFLEAD-1790872182772-E44T0C ("BHA internal test - ignore").
 Not done:   No plain-text alternative part; the Gmail node sends HTML only.
+
+## 2026-10-01 18:40 — Monitoring Twin: same profile re-posted read as a change
+Intent:     Run the simulator's full test (n8n `Engine — Monitoring Twin Simulator`, 0vlsESf2w9DNrDvX) end to end.
+Files:      server/src/monitoringTwin.ts
+Problem:    Execution 23804 → setup webhook run 23805 failed at Post Tomato Profile: 409 "tomato-dwarf-determinate v1 is already held with different content". The content was identical; Postgres jsonb stores object keys in its own order, so `JSON.stringify(held) === JSON.stringify(posted)` could never match a profile read back.
+Fix:        `canonical()` — JSON with object keys sorted — on both sides of the comparison. Arrays keep their order (stage order matters).
+Decision:   Compare content, not key order. A genuinely different v1 is still a 409.

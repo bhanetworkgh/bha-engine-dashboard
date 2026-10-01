@@ -64,6 +64,10 @@ const num = (v: unknown): number | null => {
   if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
   return null;
 };
+/** JSON with object keys sorted, so a jsonb read back from Postgres (which
+ *  reorders keys) compares equal to the same content as it was posted. */
+export const canonical = (v: unknown): string =>
+  JSON.stringify(v, (_k, val) => (isObj(val) ? Object.fromEntries(Object.keys(val).sort().map((k) => [k, val[k]])) : val));
 
 export interface Range {
   min: number | null;
@@ -128,7 +132,7 @@ export async function storeProfile(body: Obj) {
   return withTransaction(async (db) => {
     const held = await db.query<{ content: unknown; reason: string }>(`SELECT content, reason FROM engine_monitoring_profiles WHERE profile_id = $1 AND version = $2`, [profileId, version]);
     if (held.rows[0]) {
-      if (JSON.stringify(held.rows[0].content) === JSON.stringify(content)) return { stored: 'unchanged' as const, profile_id: profileId, version, dry_run: dry };
+      if (canonical(held.rows[0].content) === canonical(content)) return { stored: 'unchanged' as const, profile_id: profileId, version, dry_run: dry };
       throw new TwinError(409, `${profileId} v${version} is already held with different content. Post v${version + 1} with previous_version ${version} and the reason for the change.`);
     }
     const newest = await db.query<{ v: number | null }>(`SELECT max(version)::int AS v FROM engine_monitoring_profiles WHERE profile_id = $1`, [profileId]);
