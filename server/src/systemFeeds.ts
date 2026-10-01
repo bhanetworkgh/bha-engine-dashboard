@@ -235,6 +235,8 @@ export interface SnapshotStoreResult {
   open_alerts: number;
   devices_gone: number;
   alerts_closed: number;
+  /** Every farm in it was a simulated one (the Monitoring Twin's test rack). */
+  synthetic: boolean;
 }
 
 /**
@@ -267,6 +269,13 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
     return { id, f };
   });
   const farmIds = farms.map((x) => x.id);
+  // A simulated farm (2026-10-01, the Monitoring Twin's test rack) takes this exact
+  // path but is labelled: `synthetic: true` on the farm. A snapshot is all
+  // simulated or all real, never both, so a test can never be mistaken for, or
+  // mixed into, vFarm's own state.
+  const simulated = farms.filter((x) => x.f.synthetic === true).length;
+  if (simulated && simulated !== farms.length) throw new FeedError(422, 'A snapshot is all simulated farms (synthetic: true) or all real ones, never a mix.');
+  const synthetic = simulated > 0;
   const devs = devices.map((d, i) => {
     if (!isObj(d)) throw new FeedError(422, `devices[${i}] is not an object.`);
     const id = str(d.id);
@@ -287,7 +296,7 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
 
   return tx(body.dry_run === true, async (db) => {
     // An older snapshot than the newest held changes nothing: posts can arrive out of order on a retry.
-    const newest = await db.query<{ t: string | null }>(`SELECT (extract(epoch FROM max(taken_at)) * 1000)::bigint::text AS t FROM engine_vfarm_snapshots`);
+    const newest = await db.query<{ t: string | null }>(`SELECT (extract(epoch FROM max(taken_at)) * 1000)::bigint::text AS t FROM engine_vfarm_snapshots WHERE synthetic = $1`, [synthetic]);
     const newestMs = newest.rows[0]?.t ? Number(newest.rows[0].t) : null;
     if (newestMs !== null && newestMs > Date.parse(takenAt)) {
       throw new FeedError(409, `A newer snapshot (${new Date(newestMs).toISOString()}) is already held; this one (${takenAt}) was not applied.`);
@@ -343,18 +352,19 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
     // An open alert of a listed farm that the snapshot no longer lists has cleared. One whose farm_id is blank is judged with the rest of the snapshot.
     const closed = await db.query(
       `UPDATE engine_vfarm_open_alerts SET closed_at = $3
-        WHERE closed_at IS NULL AND (farm_id = ANY($1::text[]) OR farm_id IS NULL) AND NOT (alert_id = ANY($2::text[]))`,
-      [farmIds, opens.map((x) => x.id), takenAt],
+        WHERE closed_at IS NULL AND (farm_id = ANY($1::text[]) OR (farm_id IS NULL AND NOT $4::boolean)) AND NOT (alert_id = ANY($2::text[]))`,
+      [farmIds, opens.map((x) => x.id), takenAt, synthetic],
     );
-    await db.query(`INSERT INTO engine_vfarm_snapshots (taken_at, farms, devices, open_alerts, pipeline) VALUES ($1,$2,$3,$4,$5)`, [
+    await db.query(`INSERT INTO engine_vfarm_snapshots (taken_at, farms, devices, open_alerts, pipeline, synthetic) VALUES ($1,$2,$3,$4,$5,$6)`, [
       takenAt,
       farms.length,
       devs.length,
       opens.length,
       isObj(body.alert_pipeline) ? JSON.stringify(body.alert_pipeline) : null,
+      synthetic,
     ]);
     events.changed('vfarm_state', null, db);
-    return { taken_at: takenAt, farms: farms.length, devices: devs.length, open_alerts: opens.length, devices_gone: gone.rowCount ?? 0, alerts_closed: closed.rowCount ?? 0 };
+    return { taken_at: takenAt, farms: farms.length, devices: devs.length, open_alerts: opens.length, devices_gone: gone.rowCount ?? 0, alerts_closed: closed.rowCount ?? 0, synthetic };
   });
 }
 
@@ -502,37 +512,43 @@ export async function genieData() {
   };
 }
 
+/** Simulated farms (the Monitoring Twin's test rack) are never shown as vFarm's own; they are counted and named on the Monitoring Twin page instead. */
+const REAL_FARM = `NOT coalesce((fields->>'synthetic')::boolean, false)`;
+const SIM_FARM_IDS = `(SELECT farm_id FROM engine_vfarm_farms WHERE coalesce((fields->>'synthetic')::boolean, false))`;
+
 export async function vfarmData() {
   const [farms, devices, open, closed, fired, snaps] = await Promise.all([
     query(`SELECT farm_id, code, name, status, device_count, online_count, offline_count, unhealthy_count,
                   to_char(snapshot_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS snapshot_at
-             FROM engine_vfarm_farms ORDER BY name NULLS LAST, farm_id`),
+             FROM engine_vfarm_farms WHERE ${REAL_FARM} ORDER BY name NULLS LAST, farm_id`),
     query(`SELECT d.device_id, d.farm_id, f.name AS farm_name, d.place, d.device_type, d.model, d.status, d.health_score, d.latest,
                   to_char(d.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_seen_at,
                   to_char(d.last_reading_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_reading_at,
                   to_char(d.gone_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS gone_at
              FROM engine_vfarm_devices d LEFT JOIN engine_vfarm_farms f ON f.farm_id = d.farm_id
+            WHERE d.farm_id NOT IN ${SIM_FARM_IDS}
             ORDER BY d.gone_at NULLS FIRST, d.last_reading_at DESC NULLS LAST, d.device_id`),
     query(`SELECT alert_id, rule_id, device_id, farm_id, farm_name, place, severity, title, detail, last_value,
                   to_char(opened_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS opened_at
-             FROM engine_vfarm_open_alerts WHERE closed_at IS NULL ORDER BY opened_at DESC NULLS LAST`),
+             FROM engine_vfarm_open_alerts WHERE closed_at IS NULL AND coalesce(farm_id, '') NOT IN ${SIM_FARM_IDS} ORDER BY opened_at DESC NULLS LAST`),
     query(`SELECT alert_id, device_id, farm_name, severity, title,
                   to_char(opened_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS opened_at,
                   to_char(closed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS closed_at
-             FROM engine_vfarm_open_alerts WHERE closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT 100`),
+             FROM engine_vfarm_open_alerts WHERE closed_at IS NOT NULL AND coalesce(farm_id, '') NOT IN ${SIM_FARM_IDS} ORDER BY closed_at DESC LIMIT 100`),
     query(`SELECT event_id, kind, rule_id, rule_name, severity, metric, device_id, value, farm_id, farm, place_path,
                   to_char(fired_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS fired_at
              FROM engine_vfarm_alert_events ORDER BY fired_at DESC LIMIT 200`),
     query<{ taken_at: string; received_at: string; farms: number; devices: number; open_alerts: number; pipeline: unknown }>(
       `SELECT to_char(taken_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS taken_at,
               to_char(received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at, farms, devices, open_alerts, pipeline
-         FROM engine_vfarm_snapshots ORDER BY taken_at DESC LIMIT 1`,
+         FROM engine_vfarm_snapshots WHERE NOT synthetic ORDER BY taken_at DESC LIMIT 1`,
     ),
   ]);
-  const counts = await query<{ fired_24h: number; fired_all: number; snapshots: number }>(
+  const counts = await query<{ fired_24h: number; fired_all: number; snapshots: number; simulated_farms: number }>(
     `SELECT (SELECT count(*) FROM engine_vfarm_alert_events WHERE fired_at > now() - interval '24 hours')::int AS fired_24h,
             (SELECT count(*) FROM engine_vfarm_alert_events)::int AS fired_all,
-            (SELECT count(*) FROM engine_vfarm_snapshots)::int AS snapshots`,
+            (SELECT count(*) FROM engine_vfarm_snapshots WHERE NOT synthetic)::int AS snapshots,
+            (SELECT count(*) FROM engine_vfarm_farms WHERE NOT ${REAL_FARM})::int AS simulated_farms`,
   );
   return {
     last_snapshot: snaps.rows[0] ?? null,
@@ -544,6 +560,7 @@ export async function vfarmData() {
     alert_events: fired.rows,
     alerts_fired_24h: counts.rows[0]?.fired_24h ?? 0,
     alerts_fired_all: counts.rows[0]?.fired_all ?? 0,
+    simulated_farms_hidden: counts.rows[0]?.simulated_farms ?? 0,
   };
 }
 

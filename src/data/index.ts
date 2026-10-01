@@ -16,6 +16,7 @@ import type {
   GenieData,
   DoctrineData,
   VfarmLiveData,
+  MonitoringTwinData,
   CstData,
   ScorecardData,
   PatternCandidatesData,
@@ -573,6 +574,7 @@ export const getVfarmLeads = () => api<VfarmLeadsData>('/api/vfarm/leads');
 /** Genie's asks and vFarm's live state, as each system pushed them (2026-09-29). */
 export const getGenie = () => api<GenieData>('/api/genie');
 export const getVfarmLive = () => api<VfarmLiveData>('/api/vfarm/live');
+export const getMonitoringTwin = () => api<MonitoringTwinData>('/api/monitoring-twin');
 /** The Customer Service Twin's turns, as CST pushed them (2026-09-29). */
 export const getCsTwin = () => api<CstData>('/api/cs-twin');
 /** Hardik's doctrine and contract changes, for the Media Twin page (2026-09-30). */

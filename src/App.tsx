@@ -24,6 +24,7 @@ const NorthStar = lazy(() => import('./screens/NorthStar'));
 const ResearchTwin = lazy(() => import('./screens/ResearchTwin'));
 const Clients = lazy(() => import('./screens/Clients'));
 const VFarm = lazy(() => import('./screens/VFarm'));
+const MonitoringTwin = lazy(() => import('./screens/MonitoringTwin'));
 const MediaTwin = lazy(() => import('./screens/MediaTwin'));
 const Genie = lazy(() => import('./screens/Genie'));
 const AgentMaturity = lazy(() => import('./screens/AgentMaturity'));
@@ -65,6 +66,7 @@ export default function App() {
         <Route path="/genie" element={<Suspense fallback={<Loading />}><Genie /></Suspense>} />
         <Route path="/cs-twin" element={<Suspense fallback={<Loading />}><CsTwin /></Suspense>} />
         <Route path="/vfarm" element={<Suspense fallback={<Loading />}><VFarm /></Suspense>} />
+        <Route path="/monitoring-twin" element={<Suspense fallback={<Loading />}><MonitoringTwin /></Suspense>} />
         <Route path="/engine-health" element={<Suspense fallback={<Loading />}><EngineHealth /></Suspense>} />
         <Route path="/agent-maturity" element={<Suspense fallback={<Loading />}><AgentMaturity /></Suspense>} />
         <Route path="/pay" element={<Suspense fallback={<Loading />}><PayTracker /></Suspense>} />

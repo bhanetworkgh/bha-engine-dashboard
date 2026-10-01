@@ -53,6 +53,7 @@ import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
 import * as systemFeeds from './systemFeeds';
 import * as dataGovernance from './dataGovernance';
+import * as monitoringTwin from './monitoringTwin';
 import * as candidateActions from './candidateActions';
 import * as patternDraft from './patternDraft';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
@@ -465,7 +466,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       },
       '/api/engine/vfarm-snapshot': {
         kind: 'vfarm_state',
-        store: async (b) => ({ ...(await systemFeeds.storeVfarmSnapshot(b)) }),
+        // The Monitoring Twin judges every snapshot as it lands (2026-10-01), so a
+        // sensor going OFFLINE is an incident within a second of vFarm saying so.
+        store: async (b) => {
+          const r = await systemFeeds.storeVfarmSnapshot(b);
+          return { ...r, monitoring_twin: r.dry_run ? null : await monitoringTwin.afterSnapshot() };
+        },
         describe: (r) => `snapshot ${r.taken_at}: ${r.farms} farm(s), ${r.devices} device(s), ${r.open_alerts} open alert(s); ${r.devices_gone} device(s) gone, ${r.alerts_closed} alert(s) closed`,
         hint: 'POST one vfarm.snapshot.v1: every farm it covers, their devices and their open alerts.',
       },
@@ -506,6 +512,38 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         ms: Date.now() - t0,
       });
       return send(res, 200, { ok: true, ...r });
+    }
+    /**
+     * The Monitoring Twin (2026-10-01, Destiny — tomato-first memo, UN9D). One
+     * read for everything that shows the twin's judgement (this page, North
+     * Star, Genie, later the kiosk and app), the versioned crop profiles, which
+     * cycle a farm is running, and a check on demand. Same key, same log.
+     */
+    if (p === '/api/engine/monitoring-twin' && method === 'GET') {
+      const r = await monitoringTwin.monitoringData();
+      await mirror.logWrite({ endpoint, kind: 'monitoring_twin', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `${r.farms.length} farm(s), ${r.counts.open_incidents} open incident(s)`, ms: Date.now() - t0 });
+      return send(res, 200, { ok: true, ...r });
+    }
+    const TWIN_WRITES: Record<string, (b: Record<string, unknown>) => Promise<Record<string, unknown>>> = {
+      '/api/engine/monitoring-profile': (b) => monitoringTwin.storeProfile(b),
+      '/api/engine/monitoring-cycle': (b) => monitoringTwin.storeCycle(b),
+      '/api/engine/monitoring-twin/evaluate': () => monitoringTwin.evaluate('manual'),
+    };
+    if (TWIN_WRITES[p]) {
+      if (method !== 'POST') throw new HttpError(405, p === '/api/engine/monitoring-profile' ? 'POST one crop profile version: { profile_id, version, previous_version, crop, reason, stages: [...] }.' : p === '/api/engine/monitoring-cycle' ? 'POST { farm_id, profile_id, profile_version?, transplanted_at, time_scale?, synthetic? }.' : 'POST, with no body, to judge every farm now.');
+      const body = p.endsWith('/evaluate') ? {} : await readJson(req, 1024 * 1024);
+      try {
+        const r = await TWIN_WRITES[p](body);
+        const inserted = (r as { stored?: string }).stored === 'inserted';
+        await mirror.logWrite({ endpoint, kind: 'monitoring_twin', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: inserted ? 'inserted' : 'updated', detail: JSON.stringify(r).slice(0, 300), ms: Date.now() - t0 });
+        return send(res, inserted ? 201 : 200, { ok: true, ...r });
+      } catch (e) {
+        if (e instanceof monitoringTwin.TwinError) {
+          await mirror.logWrite({ endpoint, kind: 'monitoring_twin', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          throw new HttpError(e.status, e.message);
+        }
+        throw e;
+      }
     }
     const feed = FEEDS[p];
     if (feed) {
@@ -1007,6 +1045,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** Hardik's doctrine and contract changes, as posted (2026-09-30). */
       case '/api/media-doctrine':
         return send(res, 200, await systemFeeds.doctrineData());
+      /** The Monitoring Twin's judgement of every farm vFarm sends (2026-10-01). */
+      case '/api/monitoring-twin':
+        return send(res, 200, await monitoringTwin.monitoringData());
       /** Pay Tracker: the ledger's rows, and the figures over them. */
       case '/api/pay':
         return send(res, 200, await pay.data());
@@ -1905,6 +1946,7 @@ async function boot(): Promise<void> {
     executions.startPolling();
     recovery.startWatching();
     dataGovernance.startRetention();
+    monitoringTwin.startWatching();
     health.startLedgerPolling();
   });
 }
