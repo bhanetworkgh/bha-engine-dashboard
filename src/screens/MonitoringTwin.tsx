@@ -136,7 +136,7 @@ function FarmCard({ f }: { f: MonitoringFarm }) {
           last snapshot {when(f.feed.last_snapshot_at)} UTC ({relativeTime(f.feed.last_snapshot_at) ?? '—'}){f.feed.silent ? (f.synthetic ? ' · the test is not running' : ' · the feed has stopped') : ''}
         </span>
       </div>
-      <StatStrip cols={5}>
+      <StatStrip cols={5} flush>
         <FigureCell label="Devices live" value={live} caption={`of ${judged} listed`} note="A reading at most 90 s old when vFarm last looked." />
         <FigureCell label="Offline" value={offline} tone={offline ? 'degraded' : undefined} caption="no reading for over 15 min" note="Each one is an INC-VFARM.SENSOR incident until it reads again." />
         <FigureCell label="Uptime" value={f.uptime.pct} unit="%" missing="Not enough observed time" caption={`over ${ago(f.uptime.observed_s)} observed`} note={f.uptime.note} />

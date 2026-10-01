@@ -87,7 +87,7 @@ function Doctrine({ data }: { data: DoctrineData }) {
         {data.meta.changes} change{data.meta.changes === 1 ? '' : 's'} held since {day(data.meta.first_change_at)} · last received{' '}
         {relativeTime(data.meta.last_received_at) ?? '—'}
       </p>
-      <StatStrip cols={4}>
+      <StatStrip cols={4} flush>
         <FigureCell
           label="Doctrines in force"
           value={s.doctrines_in_force}

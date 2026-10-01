@@ -99,9 +99,15 @@ const COLS: Record<number, string> = {
 };
 
 /** A row of stats inside one card, separated by hairlines. Two columns on a phone. */
-export function StatStrip({ children, cols, className = '' }: { children: ReactNode; cols: number; className?: string }) {
+/**
+ * `flush` (1 Oct 2026): for a strip placed inside a block that already carries
+ * the page's side padding (the gap-4 column the system pages use). Without it
+ * the strip's own mx-6/md:mx-8 is added a second time and it sits inset from
+ * the cards around it.
+ */
+export function StatStrip({ children, cols, className = '', flush = false }: { children: ReactNode; cols: number; className?: string; flush?: boolean }) {
   return (
-    <div className={`card mx-6 mb-4 grid grid-cols-2 md:mx-8 ${COLS[cols] ?? 'md:grid-cols-4'} ${className}`}>
+    <div className={`card grid grid-cols-2 ${flush ? '' : 'mx-6 mb-4 md:mx-8'} ${COLS[cols] ?? 'md:grid-cols-4'} ${className}`}>
       {children}
     </div>
   );

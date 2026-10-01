@@ -124,7 +124,7 @@ function Turns({ data }: { data: CstData }) {
   return (
     <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-6 pb-6 md:px-8">
       <Freshness data={data} />
-      <StatStrip cols={5}>
+      <StatStrip cols={5} flush>
         <FigureCell
           label="Turns"
           value={s.turns}
@@ -264,7 +264,7 @@ function Statistics({ data }: { data: CstData }) {
   return (
     <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-6 pb-6 md:px-8">
       <Freshness data={data} />
-      <StatStrip cols={4}>
+      <StatStrip cols={4} flush>
         <PercentCell label="Refused or held for verification" share={s.refused} caption="a guard doing its job" />
         <PercentCell label="Unknown caller" share={s.unknown} caption="onboarding reply, no farm data" />
         <PercentCell label="Failed" share={s.failed} bad={(x) => x.n > 0} caption="CST errored before replying" />
