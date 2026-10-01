@@ -11055,3 +11055,10 @@ Problem:    (1) Run 23757: Run Scenario fired all five scenarios at once. (2) Se
 Fix:        Setup falls back to the profile's first stage at crop day 0; Run Scenario batch size 1, 5 s apart (each run takes ~2 s). Published 034d2c3c.
 Result:     Run 23869, Check Results 5/5: setup all LIVE + camera NOT_WIRED; sensor_stale CO2 STALE (180 s); sensor_offline soil OFFLINE (1200 s), INC-VFARM.SENSOR-1790876411092-RSWC opened; humidity_high 92 % vs 60–80 vegetative, INC-VFARM.ENVIRONMENT-1790876415791-0YP9 opened and the sensor incident closed "cleared on the next snapshot"; recover all LIVE, environment incident closed. /monitoring-twin shows SIM-TOMATO-01 labelled simulated; /vfarm shows no farms and simulated_farms_hidden 1.
 Decision:   The simulated farm's uptime (96 %) includes the seconds soil was OFFLINE in the test runs — that is the figure working, not a fault. Its clock runs 1440× (a real minute is a crop day), so the cycle passes day 112 about two hours after setup; re-run setup to start a fresh cycle.
+
+## 2026-10-01 19:15 — close_incidents MCP tool
+Intent:     Let Claude close ledger incidents the way the Engine health page does, so the three Monitoring Twin test incidents (INC-BAYS.AGENT-038, 039, 041) don't need a page click.
+Files:      server/src/mcp/incidentTools.ts (new), server/src/mcp/tools.ts, CLAUDE.md
+Problem:    The only close path was POST /api/engine-health/incidents/close, behind the page cookie; no MCP tool reached it.
+Fix:        `close_incidents` on the write connection, calling health.closeIncidents (the button's own function): BHARAG ledger first per lane key, marked closed here only once accepted, refusals per id with BHARAG's reason. confirm "CLOSE <n>" required (the page's count check); without it or with dry_run it previews. reason required. Audited on engine_mcp_writes, kind incidents.
+Decision:   Same function as the page, not a second close path. Not added to any agent token's scope; Claude's connector only.

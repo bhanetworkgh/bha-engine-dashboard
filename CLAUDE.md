@@ -1099,6 +1099,16 @@ archive records directly, with the checks the Bays Tools Router enforces.
   happens. The **MCP writes** tab on Engine health reads the last hundred.
   `npm run test:mcp-write` pins all of it end to end.
 
+**`close_incidents`, the Engine health close over MCP** (decision 2026-10-01,
+Destiny). `server/src/mcp/incidentTools.ts`, write connection only, calling
+`health.closeIncidents` — the function the page's close button calls — so the
+ledger-first order, the lane keys, the per-incident refusal with BHARAG's
+reason and the `record_writes` line are the page's. The page's count guard
+is kept as `confirm: "CLOSE <n>"`; without it, or with `dry_run`, nothing
+changes and the answer previews each id. A `reason` is required and travels
+in the actor. Audited on `engine_mcp_writes` (kind `incidents`). Not in any
+agent's scope.
+
 **Bays moves onto the dashboard MCP, finished** (decision 2026-09-24, Destiny).
 Bays is the n8n Agent `Nw5igXu4WWrjUMWB` behind `Bays — Front Door` →
 `Bays — Agent Delivery` (`5AFqtZQaeKFFiGqe`); the Conversational Agent, Tools
