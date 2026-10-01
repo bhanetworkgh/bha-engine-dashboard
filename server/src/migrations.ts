@@ -2279,6 +2279,33 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE engine_vfarm_snapshots ADD COLUMN IF NOT EXISTS synthetic boolean NOT NULL DEFAULT false`,
     ],
   },
+  {
+    id: 45,
+    name: 'engine_agent_scorecard: the 28 Sep independent re-score',
+    statements: [
+      /**
+       * 1 Oct 2026, Destiny: the Agent maturity page still showed the 27 Sep
+       * baseline (4.3). The independent re-score of 28 Sep (4.8) was written to
+       * the project but never stored here, so the page had nothing newer to
+       * read. These rows are that re-score as written, dimension for
+       * dimension, with its evidence — not a new judgement.
+       */
+      `INSERT INTO engine_agent_scorecard (scored_on, dimension, name, score, floor, goal, evidence, source) VALUES
+        ('2026-09-28', 1, $v$Governance and inventory$v$, 4, 8, 10, $v$Independent re-score, 28 Sep 2026 (claude/Agent_Maturity_Rescore_Sept_28.md in the BHA Agent project): 3 credentials still in personal projects; Admin Airtable still in BHA Engine.$v$, 'rescore'),
+        ('2026-09-28', 2, $v$Agent identity and secrets$v$, 4, 8, 10, $v$Independent re-score, 28 Sep 2026 (claude/Agent_Maturity_Rescore_Sept_28.md in the BHA Agent project): engine_mcp_writes rows carry agent bays / research_twin; BHARAG still allowUnauthorizedCerts.$v$, 'rescore'),
+        ('2026-09-28', 3, $v$Tool privilege$v$, 6, 8, 10, $v$Independent re-score, 28 Sep 2026 (claude/Agent_Maturity_Rescore_Sept_28.md in the BHA Agent project): "out_of_scope: research_twin may not call create_record", refused by the server.$v$, 'rescore'),
+        ('2026-09-28', 4, $v$Runtime controls and injection defense$v$, 4, 8, 10, $v$Independent re-score, 28 Sep 2026 (claude/Agent_Maturity_Rescore_Sept_28.md in the BHA Agent project): Untrusted-content rule in all three agents; no x-slack-signature check at any door.$v$, 'rescore'),
+        ('2026-09-28', 5, $v$Human oversight$v$, 5, 8, 10, $v$Independent re-score, 28 Sep 2026 (claude/Agent_Maturity_Rescore_Sept_28.md in the BHA Agent project): Bays approval set: delete_record, share_doc, grant_drive_access.$v$, 'rescore'),
+        ('2026-09-28', 6, $v$Evaluation and testing$v$, 4, 8, 10, $v$Independent re-score, 28 Sep 2026 (claude/Agent_Maturity_Rescore_Sept_28.md in the BHA Agent project): Last complete run 16 of 18 pass^k; both failures core North Star cases.$v$, 'rescore'),
+        ('2026-09-28', 7, $v$Observability$v$, 6, 8, 10, $v$Independent re-score, 28 Sep 2026 (claude/Agent_Maturity_Rescore_Sept_28.md in the BHA Agent project): Bays ask ledger: 13 rows, first today.$v$, 'rescore'),
+        ('2026-09-28', 8, $v$Incident response and recovery$v$, 6, 8, 10, $v$Independent re-score, 28 Sep 2026 (claude/Agent_Maturity_Rescore_Sept_28.md in the BHA Agent project): Time to resolve over n=2; 66 of 68 closed incidents still say resolution_status open.$v$, 'rescore'),
+        ('2026-09-28', 9, $v$Change and rollback$v$, 4, 8, 10, $v$Independent re-score, 28 Sep 2026 (claude/Agent_Maturity_Rescore_Sept_28.md in the BHA Agent project): 0 of 33 repairs reverted; one author per version.$v$, 'rescore'),
+        ('2026-09-28', 10, $v$Reliability and handoffs$v$, 6, 8, 10, $v$Independent re-score, 28 Sep 2026 (claude/Agent_Maturity_Rescore_Sept_28.md in the BHA Agent project): Handoff Contract Gate on all three doors.$v$, 'rescore'),
+        ('2026-09-28', 11, $v$Cost and capacity$v$, 6, 8, 10, $v$Independent re-score, 28 Sep 2026 (claude/Agent_Maturity_Rescore_Sept_28.md in the BHA Agent project): Quota 24.5%; no per-agent spend.$v$, 'rescore'),
+        ('2026-09-28', 12, $v$Data governance and retention$v$, 3, 7, 10, $v$Independent re-score, 28 Sep 2026 (claude/Agent_Maturity_Rescore_Sept_28.md in the BHA Agent project): No retention rule; BHARAG write-back unvalidated.$v$, 'rescore')
+       ON CONFLICT (scored_on, dimension) DO NOTHING`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

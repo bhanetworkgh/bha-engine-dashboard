@@ -19,7 +19,10 @@ export function Tabs<T extends string>({
   return (
     // Scrolls inside itself rather than clipping: five tabs do not fit across a
     // phone, and a tab whose label is cut in half is a tab nobody can read.
-    <div role="tablist" className="scroll-thin flex items-center gap-5 overflow-x-auto border-b border-line">
+    // The hairline is an inset shadow and the active underline sits inside the
+    // bar (1 Oct 2026): drawn 1px below it, the underline overflowed and gave
+    // the bar a vertical scrollbar of its own on Windows.
+    <div role="tablist" className="scroll-thin flex items-center gap-5 overflow-x-auto overflow-y-hidden shadow-[inset_0_-1px_0_var(--line)]">
       {tabs.map((t) => {
         const c = counts?.[t];
         return (

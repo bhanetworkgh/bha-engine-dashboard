@@ -109,7 +109,7 @@ function Asks({ data }: { data: GenieData }) {
   return (
     <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-6 pb-6 md:px-8">
       <Freshness data={data} />
-      <StatStrip cols={5}>
+      <StatStrip cols={5} flush>
         <FigureCell label="Asks" value={s.asks} caption={`${s.last_7_days} in the last 7 days`} note="One per request id: the latest event Genie sent for it." />
         <PercentCell label="Answered" share={s.answered} caption="Genie's own judge accepted the answer" />
         <PercentCell label="Failed" share={s.failed} bad={(x) => x.n > 0} caption="ended in genie.*.failed or status error" />

@@ -85,7 +85,7 @@ export function Overview({ data }: { data: VfarmLiveData }) {
   return (
     <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-6 pb-6 md:px-8">
       <SnapshotLine data={data} />
-      <StatStrip cols={5}>
+      <StatStrip cols={5} flush>
         <FigureCell label="Farms" value={data.farms.length} caption="as the last snapshot listed them" note="Every farm vFarm's snapshot covers." />
         <FigureCell
           label="Devices reporting"
