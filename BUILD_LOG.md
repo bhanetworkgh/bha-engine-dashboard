@@ -11047,3 +11047,11 @@ Files:      server/src/monitoringTwin.ts
 Problem:    Execution 23804 → setup webhook run 23805 failed at Post Tomato Profile: 409 "tomato-dwarf-determinate v1 is already held with different content". The content was identical; Postgres jsonb stores object keys in its own order, so `JSON.stringify(held) === JSON.stringify(posted)` could never match a profile read back.
 Fix:        `canonical()` — JSON with object keys sorted — on both sides of the comparison. Arrays keep their order (stage order matters).
 Decision:   Compare content, not key order. A genuinely different v1 is still a 409.
+
+## 2026-10-01 18:45 — Monitoring Twin: simulator full test 5 of 5
+Intent:     Prove the twin end to end on simulated tomato data before any seedling goes in (Jason, tomato-first memo).
+Files:      none (n8n `Engine — Monitoring Twin Simulator`, 0vlsESf2w9DNrDvX)
+Problem:    (1) Run 23757: Run Scenario fired all five scenarios at once. (2) Setup could not find the cycle, because the twin lists a farm only after its first snapshot. (3) Run 23852: batching waits 1.5 s between sends, not for the previous run to end, so sensor_stale (23854) read the twin before setup's snapshot landed: "SIM-TOMATO-01 has no crop cycle yet".
+Fix:        Setup falls back to the profile's first stage at crop day 0; Run Scenario batch size 1, 5 s apart (each run takes ~2 s). Published 034d2c3c.
+Result:     Run 23869, Check Results 5/5: setup all LIVE + camera NOT_WIRED; sensor_stale CO2 STALE (180 s); sensor_offline soil OFFLINE (1200 s), INC-VFARM.SENSOR-1790876411092-RSWC opened; humidity_high 92 % vs 60–80 vegetative, INC-VFARM.ENVIRONMENT-1790876415791-0YP9 opened and the sensor incident closed "cleared on the next snapshot"; recover all LIVE, environment incident closed. /monitoring-twin shows SIM-TOMATO-01 labelled simulated; /vfarm shows no farms and simulated_farms_hidden 1.
+Decision:   The simulated farm's uptime (96 %) includes the seconds soil was OFFLINE in the test runs — that is the figure working, not a fault. Its clock runs 1440× (a real minute is a crop day), so the cycle passes day 112 about two hours after setup; re-run setup to start a fresh cycle.
