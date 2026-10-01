@@ -10996,3 +10996,11 @@ Files:      server/src/systemFeeds.ts (doctrineClaims, DOCTRINE_READ_SCHEMA, T0N
 Decision:   One function behind both doors, itself built on doctrineData(), which the page renders from, so the website, an agent and the page cannot be told different rules. It returns what is held and nothing more: the version in force per doctrine, one row per claim. It does not invent T0NO's seven fields; the six it does not hold are listed in not_held so a reader fails closed. A filter that matches nothing returns a warning naming what is in force, not an empty list that reads as "no rules". Every read is logged as outcome read (engine writes log / MCP log).
             Not added to the North Star or Bays token scopes: that changes what those agents can call, so it goes through the agent checklist (evals) as its own step. The tool is on the shared MCP connections now.
 Checked:    npm registry refused this session (403), so no local build or test run. Server typecheck with the global tsc: 416 errors before and after, all pre-existing missing-package errors, none new. Live proof after deploy is in the next entry.
+
+## 2026-10-01 14:40 — Doctrine read door proved live
+Checked:    9d209fb live (get_health: commit 9d209fb, booted 13:29:40 UTC). One-off probe 5HFiymHVnJCpo2Kt in the BHA Engine project (archived after), execution 23461:
+            GET /api/engine/media-doctrine → 200, media.doctrine.read.v1, 3 doctrines in force (TSNR v0, B93H v0.1, OWLG v0.1), 14 claims, not_held lists the six T0NO fields. Claim 6.1 came back IN_BUILD with its prohibited wording.
+            ?doctrine_id=b93h&maturity=in_build (lower case on purpose) → 200, B93H 3.2, 5.2 and 6.1, no warnings.
+            ?claim_id=NO-SUCH-CLAIM → 200, 0 claims, with the warning "No claim … is held … Treat it as not safe to make."
+            No key → 401 "The x-dashboard-key header is missing or wrong."
+Not yet:    read_media_doctrine is in the deployed catalogue but my own connector had not re-listed tools when this was written, so the MCP path is proved through the shared function, not by a call. First real call to it is the proof. Not in North Star's or Bays' token scope yet (agent checklist step).
