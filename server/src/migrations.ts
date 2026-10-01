@@ -2306,6 +2306,31 @@ const MIGRATIONS: Migration[] = [
        ON CONFLICT (scored_on, dimension) DO NOTHING`,
     ],
   },
+  {
+    id: 46,
+    name: 'engine_agent_scorecard: the 1 Oct independent re-score',
+    statements: [
+      /**
+       * 1 Oct 2026, Destiny: an independent agent that had not seen the work
+       * re-scored the engine from live evidence only (read-only), on the same
+       * rubric. Stored as it reported, dimension for dimension, with its evidence.
+       */
+      `INSERT INTO engine_agent_scorecard (scored_on, dimension, name, score, floor, goal, evidence, source) VALUES
+        ('2026-10-01', 1, $v$Governance and inventory$v$, 4, 8, 10, $v$Independent re-score, 1 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_1.md in the BHA Agent project): Admin Airtable credential is gone and AIRTABLE_TOKEN reads configured:false, but 3 credentials remain in personal projects (Hardik x2, Kaiqi x1) and no autonomy-tier inventory exists.$v$, 'rescore'),
+        ('2026-10-01', 2, $v$Agent identity and secrets$v$, 4, 8, 10, $v$Independent re-score, 1 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_1.md in the BHA Agent project): allowUnauthorizedCerts:true is still set on 5 Bays BHARAG tools, RT Search_Research_Twin_Workspace and NS Query_North_Star_Cluster, though each agent now has its own scoped dashboard token and Slack signing secret.$v$, 'rescore'),
+        ('2026-10-01', 3, $v$Tool privilege$v$, 6, 8, 10, $v$Independent re-score, 1 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_1.md in the BHA Agent project): The server refuses out-of-scope agent calls (9 refused by agent token in 4 days), but the Bays agent still holds 33 node tools including Slack_Request for any Slack API method.$v$, 'rescore'),
+        ('2026-10-01', 4, $v$Runtime controls and injection defense$v$, 5, 8, 10, $v$Independent re-score, 1 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_1.md in the BHA Agent project): A Slack Signature Gate with MODE='enforce' runs on all three front doors and RT has a Card Key Gate, but a forged event without type:event_callback or a signature header skips the gate.$v$, 'rescore'),
+        ('2026-10-01', 5, $v$Human oversight$v$, 5, 8, 10, $v$Independent re-score, 1 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_1.md in the BHA Agent project): Bays approval covers only delete_record, share_doc and grant_drive_access; button payloads are now signature-checked but outbound Slack posts are not gated.$v$, 'rescore'),
+        ('2026-10-01', 6, $v$Evaluation and testing$v$, 5, 8, 10, $v$Independent re-score, 1 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_1.md in the BHA Agent project): EVAL-202610011437 passed 26 of 27 cases with repeats and 10 of 11 injection cases, but NS-03 failed the last two runs and agents were published before the complete run.$v$, 'rescore'),
+        ('2026-10-01', 7, $v$Observability$v$, 6, 8, 10, $v$Independent re-score, 1 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_1.md in the BHA Agent project): All three agents now keep per-ask ledgers (Bays 308 rows since 28 Sep) but no quality alert exists in server code.$v$, 'rescore'),
+        ('2026-10-01', 8, $v$Incident response and recovery$v$, 6, 8, 10, $v$Independent re-score, 1 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_1.md in the BHA Agent project): Time to resolve is measured at p50 3 min over n=14, but 0 of 80 incidents carry resolved_at or resolved_by and 75 closed incidents still say resolution_status open.$v$, 'rescore'),
+        ('2026-10-01', 9, $v$Change and rollback$v$, 5, 8, 10, $v$Independent re-score, 1 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_1.md in the BHA Agent project): The repair bridge automatically reverted 9 failed repairs on production workflow Bays — Builder Chasers on 29-30 Sep, but no eval run is required before publish.$v$, 'rescore'),
+        ('2026-10-01', 10, $v$Reliability and handoffs$v$, 6, 8, 10, $v$Independent re-score, 1 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_1.md in the BHA Agent project): 98.7% of 7,694 runs succeeded in 7 days with the handoff contract enforced at all doors, but Research Twin Agent Delivery is still at 73.7%.$v$, 'rescore'),
+        ('2026-10-01', 11, $v$Cost and capacity$v$, 6, 8, 10, $v$Independent re-score, 1 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_1.md in the BHA Agent project): Quota is tracked at 1.3% with 70/85/95/100 alerts, but the OpenRouter floor is still USD 1 (last probed 27 Sep) and there is no per-agent spend.$v$, 'rescore'),
+        ('2026-10-01', 12, $v$Data governance and retention$v$, 5, 7, 10, $v$Independent re-score, 1 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_1.md in the BHA Agent project): Retention periods for 6 stores are written and enforced by a weekly scheduler in dataGovernance.ts (last run 29 Sep, 0 cleared), and a BHARAG write guard has logged 96 allowed writes with no refusal yet.$v$, 'rescore')
+       ON CONFLICT (scored_on, dimension) DO NOTHING`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
