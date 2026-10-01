@@ -3578,3 +3578,103 @@ export interface DoctrineData {
     default_patterns: string[];
   };
 }
+
+/* ---------------------------------------------------- Monitoring Twin (2026-10-01) */
+
+export type MonitoringState = 'LIVE' | 'STALE' | 'OFFLINE' | 'NOT_WIRED' | 'NO_FEED' | 'GONE';
+export interface MonitoringRange {
+  min: number | null;
+  max: number | null;
+  unit?: string | null;
+  source?: string | null;
+  note?: string | null;
+}
+export interface MonitoringStage {
+  stage: string;
+  label: string | null;
+  from_day: number;
+  to_day: number;
+  targets: Record<string, MonitoringRange>;
+}
+export interface MonitoringCheck {
+  metric: string;
+  value: number;
+  min: number | null;
+  max: number | null;
+  unit: string | null;
+  ok: boolean;
+}
+export interface MonitoringIncident {
+  incident_id: string;
+  farm_id: string;
+  device_id: string | null;
+  kind: string;
+  metric: string | null;
+  severity: string;
+  detail: string;
+  first_value: number | null;
+  last_value: number | null;
+  range_min: number | null;
+  range_max: number | null;
+  stage: string | null;
+  synthetic: boolean;
+  opened_at: string;
+  closed_at: string | null;
+  close_reason: string | null;
+}
+export interface MonitoringDevice {
+  device_id: string;
+  place: string | null;
+  device_type: string | null;
+  model: string | null;
+  latest: Record<string, unknown> | null;
+  last_reading_at: string | null;
+  state: MonitoringState | null;
+  since: string | null;
+  age_s: number | null;
+  checks: MonitoringCheck[];
+  evaluated_at: string | null;
+}
+export interface MonitoringFarm {
+  farm_id: string;
+  name: string;
+  synthetic: boolean;
+  feed: { last_snapshot_at: string; age_s: number; silent: boolean };
+  cycle: {
+    profile_id: string;
+    profile_version: number;
+    crop: string;
+    transplanted_at: string;
+    time_scale: number;
+    note: string | null;
+    crop_day: number | null;
+    stage: MonitoringStage | null;
+    before_start: boolean;
+    after_end: boolean;
+  } | null;
+  uptime: { window_h: number; observed_s: number; offline_s: number; pct: number | null; note: string };
+  state_counts: Record<string, number>;
+  devices: MonitoringDevice[];
+  open_incidents: MonitoringIncident[];
+  recent_incidents: MonitoringIncident[];
+  last_evaluated_at: string | null;
+}
+export interface MonitoringProfileVersion {
+  version: number;
+  previous_version: number | null;
+  reason: string;
+  changed_by: string | null;
+  created_at: string;
+  stages: MonitoringStage[];
+  sources: unknown[];
+}
+export interface MonitoringTwinData {
+  schema: string;
+  as_of: string;
+  thresholds: { stale_s: number; offline_s: number; feed_silent_s: number };
+  states: Record<string, string>;
+  farms: MonitoringFarm[];
+  profiles: Array<{ profile_id: string; crop: string; current_version: number; versions: MonitoringProfileVersion[] }>;
+  counts: { farms: number; simulated_farms: number; open_incidents: number };
+  not_yet: string[];
+}

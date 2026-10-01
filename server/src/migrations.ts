@@ -2206,6 +2206,79 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_media_doctrine_changed ON engine_media_doctrine (changed_at DESC)`,
     ],
   },
+  {
+    id: 44,
+    name: 'Monitoring Twin: crop profiles, cycles, device states and incidents; simulated vFarm snapshots',
+    statements: [
+      /**
+       * 1 Oct 2026, Destiny (Jason's tomato-first memo; UN9D's runtime half).
+       * See monitoringTwin.ts. Profiles are versioned and never edited in place:
+       * (profile_id, version) is unique and a change is the next version with
+       * its reason. One open incident per fault, enforced by a partial unique
+       * index, so a fault that persists is one incident, not one a minute.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_monitoring_profiles (
+         profile_id       text NOT NULL,
+         version          integer NOT NULL,
+         previous_version integer,
+         crop             text NOT NULL,
+         reason           text NOT NULL,
+         changed_by       text,
+         content          jsonb NOT NULL,
+         created_at       timestamptz NOT NULL DEFAULT now(),
+         PRIMARY KEY (profile_id, version)
+       )`,
+      `CREATE TABLE IF NOT EXISTS engine_monitoring_cycles (
+         farm_id         text PRIMARY KEY,
+         profile_id      text NOT NULL,
+         profile_version integer NOT NULL,
+         transplanted_at timestamptz NOT NULL,
+         time_scale      numeric NOT NULL DEFAULT 1,
+         synthetic       boolean NOT NULL DEFAULT false,
+         note            text,
+         updated_at      timestamptz NOT NULL DEFAULT now()
+       )`,
+      `CREATE TABLE IF NOT EXISTS engine_monitoring_watch (
+         farm_id           text PRIMARY KEY,
+         first_watched_at  timestamptz NOT NULL DEFAULT now(),
+         last_evaluated_at timestamptz NOT NULL DEFAULT now()
+       )`,
+      `CREATE TABLE IF NOT EXISTS engine_monitoring_device_state (
+         device_id    text PRIMARY KEY,
+         farm_id      text NOT NULL,
+         state        text NOT NULL,
+         since        timestamptz NOT NULL DEFAULT now(),
+         age_s        integer,
+         checks       jsonb NOT NULL DEFAULT '[]'::jsonb,
+         evaluated_at timestamptz NOT NULL DEFAULT now()
+       )`,
+      `CREATE TABLE IF NOT EXISTS engine_monitoring_incidents (
+         incident_id  text PRIMARY KEY,
+         farm_id      text NOT NULL,
+         device_id    text,
+         kind         text NOT NULL,
+         metric       text,
+         severity     text NOT NULL,
+         detail       text NOT NULL,
+         first_value  double precision,
+         last_value   double precision,
+         range_min    double precision,
+         range_max    double precision,
+         stage        text,
+         synthetic    boolean NOT NULL DEFAULT false,
+         opened_at    timestamptz NOT NULL DEFAULT now(),
+         last_seen_at timestamptz NOT NULL DEFAULT now(),
+         closed_at    timestamptz,
+         close_reason text
+       )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_monitoring_incidents_one_open
+         ON engine_monitoring_incidents (farm_id, coalesce(device_id, ''), kind, coalesce(metric, '')) WHERE closed_at IS NULL`,
+      `CREATE INDEX IF NOT EXISTS engine_monitoring_incidents_opened ON engine_monitoring_incidents (opened_at DESC)`,
+      // A simulated snapshot is ordered only against other simulated ones, so a
+      // test can never make vFarm's real snapshot arrive "older than the newest".
+      `ALTER TABLE engine_vfarm_snapshots ADD COLUMN IF NOT EXISTS synthetic boolean NOT NULL DEFAULT false`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

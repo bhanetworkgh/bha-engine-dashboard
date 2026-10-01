@@ -21,6 +21,7 @@ import * as airtable from '../airtable';
 import * as bharag from '../bharag';
 import * as recovery from '../recovery';
 import * as systemFeeds from '../systemFeeds';
+import * as monitoringTwin from '../monitoringTwin';
 import { WRITE_TOOLS } from './writeTools';
 import { DOC_WRITE_TOOLS, readSlackFile } from './docTools';
 import { getN8nWorkflow, listN8nWorkflows, sweepAirtableNodes } from './n8nTools';
@@ -837,6 +838,34 @@ const readMediaDoctrine: ToolDefinition = {
   },
 };
 
+const readMonitoringTwin: ToolDefinition = {
+  name: 'read_monitoring_twin',
+  description:
+    'The Monitoring Twin’s judgement of every vFarm farm, the same answer the Monitoring Twin page and GET /api/engine/monitoring-twin give: for each farm, whether its feed is arriving, the crop cycle and stage it is in with that stage’s target ranges (a versioned crop profile), uptime over the last 24 h (share of observed time with no device OFFLINE), every device’s state (LIVE ≤90 s, STALE ≤900 s, OFFLINE, NOT_WIRED, NO_FEED, GONE) with its readings checked against the stage targets, and the open and recent INC-VFARM incidents. Simulated farms are marked synthetic: never describe them as the real rack. A device that is not LIVE has no current reading to quote.',
+  inputSchema: {
+    type: 'object',
+    properties: { farm_id: { type: 'string', description: 'Only this farm.' } },
+    additionalProperties: false,
+  },
+  annotations: { ...READS_DB, title: 'What the Monitoring Twin sees on every vFarm farm' },
+  handler: async (args, deps) => {
+    const t0 = Date.now();
+    const out = await monitoringTwin.monitoringData();
+    const id = typeof args.farm_id === 'string' && args.farm_id.trim() ? args.farm_id.trim() : null;
+    const farms = id ? out.farms.filter((f) => f.farm_id === id) : out.farms;
+    await mirror.logWrite({
+      endpoint: 'mcp:read_monitoring_twin',
+      kind: 'monitoring_twin',
+      method: 'MCP',
+      key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET',
+      outcome: 'read',
+      detail: `${farms.length} farm(s)${id ? ` (farm_id ${id})` : ''}`,
+      ms: Date.now() - t0,
+    });
+    return { ...out, farms, warnings: id && farms.length === 0 ? [`No farm "${id}" is held. Farms: ${out.farms.map((f) => f.farm_id).join(', ') || 'none yet'}.`] : [] };
+  },
+};
+
 export const TOOLS: ToolDefinition[] = [
   // The reads, in the order the instructions suggest reaching for them.
   listPages,
@@ -856,6 +885,8 @@ export const TOOLS: ToolDefinition[] = [
   findRecordsTool,
   // 2026-10-01: the vFarm doctrine, the same read as GET /api/engine/media-doctrine (T0NO).
   readMediaDoctrine,
+  // 2026-10-01: the Monitoring Twin's judgement of every vFarm farm.
+  readMonitoringTwin,
   // 2026-09-24: what the Bays agent read through n8n tools of its own.
   listN8nWorkflows,
   getN8nWorkflow,

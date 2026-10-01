@@ -26,6 +26,8 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
       // A placeholder too (2026-09-22, Destiny), for the same reason.
       { to: '/cs-twin', label: 'Customer Service Twin', icon: 'mic' },
       { to: '/vfarm', label: 'vFarm', icon: 'leaf' },
+      // The layer on top of vFarm's feed that judges it (2026-10-01, Destiny).
+      { to: '/monitoring-twin', label: 'Monitoring Twin', icon: 'shield' },
       // No red count beside this one any more (2026-09-14, Destiny). The page
       // is a placeholder and the badge was counting phase 1 fixtures, so it was
       // a red number about nothing. The execution roll-up it carried came off
