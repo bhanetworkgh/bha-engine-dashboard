@@ -11004,3 +11004,7 @@ Checked:    9d209fb live (get_health: commit 9d209fb, booted 13:29:40 UTC). One-
             ?claim_id=NO-SUCH-CLAIM → 200, 0 claims, with the warning "No claim … is held … Treat it as not safe to make."
             No key → 401 "The x-dashboard-key header is missing or wrong."
 Not yet:    read_media_doctrine is in the deployed catalogue but my own connector had not re-listed tools when this was written, so the MCP path is proved through the shared function, not by a call. First real call to it is the proof. Not in North Star's or Bays' token scope yet (agent checklist step).
+
+## 2026-10-01 15:25 — read_media_doctrine proved by a real call; North Star and Bays get it
+Checked:    read_media_doctrine called from Claude's dashboard connector after it re-listed tools: maturity "not_safe_to_claim" (lower case) → TSNR 8.2 and B93H 5.2a with their allowed and prohibited wording, the same rows the GET returned in 23461; doctrine_id "XYZ" → 0 claims and the warning "No doctrine "XYZ" is in force. In force: TSNR, B93H, OWLG."
+Files:      server/src/mcp/index.ts — read_media_doctrine added to the north_star and bays token scopes. The agents themselves are changed in n8n through the agent checklist (allow-list, skill line, test, publish, evals); see the next entry.
