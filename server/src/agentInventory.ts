@@ -33,8 +33,10 @@ export const STALE_AFTER_DAYS = 7;
 
 /** A node or workflow tool whose name carries one of these is classed as a write. */
 export const WRITE_NAME_VERBS = [
-  'create', 'write', 'edit', 'ingest', 'post', 'send', 'log_', 'update', 'delete', 'archive', 'register', 'queue', 'compute', 'request', 'ask_', 'canvas', 'nudge', 'publish', 'upload', 'mark',
+  'create', 'write', 'edit', 'ingest', 'post', 'send', 'log', 'update', 'delete', 'archive', 'register', 'queue', 'compute', 'request', 'ask', 'nudge', 'publish', 'upload', 'mark',
 ];
+/** A tool whose name opens with one of these reads, whatever follows. */
+export const READ_FIRST_WORDS = ['search', 'read', 'get', 'list', 'find', 'query', 'lookup'];
 
 export interface InventoryTool {
   name: string;
@@ -105,9 +107,18 @@ function hostOf(url: unknown): string | null {
   }
 }
 
-function nameWrites(name: string): boolean {
-  const n = name.toLowerCase();
-  return WRITE_NAME_VERBS.some((v) => n.includes(v));
+/**
+ * Whole words, not substrings (2 Oct): `includes` made Search_Channel_Archives
+ * a write on "archive". A name that opens with a read word is a read. A tool
+ * whose URL ends in /ask is a query endpoint (BHARAG's), so Ask_BHA_Cluster
+ * reads; Ask_Research_Twin posts to another agent's webhook, which starts a
+ * run that answers in Slack, and stays a write.
+ */
+function nameWrites(name: string, url?: string | null): boolean {
+  const words = name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  if (words.length && READ_FIRST_WORDS.includes(words[0])) return false;
+  if (url && /\/ask\/?$/.test(url.split('?')[0])) return false;
+  return words.some((w) => WRITE_NAME_VERBS.includes(w));
 }
 
 /**
@@ -132,7 +143,7 @@ export function derive(result: Dict, opts: { owner?: string | null; recordedBy?:
       const cd = dict(c);
       credentials.push({ id: str(cd.id), name: str(cd.name), type: ctype });
     }
-    const writes = nameWrites(tname);
+    const writes = nameWrites(tname, str(dict(node.nodeParameters).url));
     tools.push({
       name: tname,
       type: type === 'workflow' || type === 'custom' || type === 'node' ? type : 'node',
@@ -343,7 +354,7 @@ export async function view(): Promise<InventoryView> {
     tiers: TIERS,
     stale_after_days: STALE_AFTER_DAYS,
     note: rows.length
-      ? `Each row is what n8n's get_agent returned, recorded through record_agent_inventory; the tier is derived from that config in code. A row older than ${STALE_AFTER_DAYS} days is marked stale. MCP tools are classed as writes from this server's own registry; node tools by a verb in their name (${WRITE_NAME_VERBS.join(', ')}).`
+      ? `Each row is what n8n's get_agent returned, recorded through record_agent_inventory; the tier is derived from that config in code. A row older than ${STALE_AFTER_DAYS} days is marked stale. MCP tools are classed as writes from this server's own registry; node tools by a whole word in their name (${WRITE_NAME_VERBS.join(', ')}), unless the name opens with a read word or the tool's URL ends in /ask.`
       : 'No agent has been recorded yet. Record one with the MCP tool record_agent_inventory, handing it the n8n get_agent result.',
   };
 }

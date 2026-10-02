@@ -920,9 +920,11 @@ function toolsFor(access: 'read' | 'write'): ToolDefinition[] {
  */
 export function mcpWriteToolNames(): string[] {
   const reads = new Set(TOOLS.map((t) => t.name));
+  // A write-connection tool that declares itself read-only (list_writable_kinds)
+  // is not a write: the tool's own annotation is the registry's statement.
   return toolsFor('write')
-    .map((t) => t.name)
-    .filter((n) => !reads.has(n));
+    .filter((t) => !reads.has(t.name) && t.annotations?.readOnlyHint !== true)
+    .map((t) => t.name);
 }
 
 export function toolByName(name: string, access: 'read' | 'write' = 'read'): ToolDefinition | null {
