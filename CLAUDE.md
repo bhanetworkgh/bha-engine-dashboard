@@ -1099,6 +1099,48 @@ archive records directly, with the checks the Bays Tools Router enforces.
   happens. The **MCP writes** tab on Engine health reads the last hundred.
   `npm run test:mcp-write` pins all of it end to end.
 
+**Every incident close is dated and signed** (decision 2026-10-02, Destiny —
+Agent Upgrade Plan step 5.1). `engine_incidents.resolved_at` and `resolved_by`
+(migration 48) are this dashboard's own record of the close; the blob stays the
+ledger's copy and is never rewritten. The page or MCP close writes now and the
+actor; the recovery watcher writes now and `recovery…`; a lane's successful
+read that stops returning an incident writes the last read that saw it open
+and "the ledger (closed upstream by the healer or a person)". The backfill
+dated the rows closed before then by that last read with the resolver "not
+recorded". `mapIncident` shows the ledger's `resolution_status` while an
+incident is open and "closed (no longer open in the ledger)" once it is not —
+the stale "open" the 1 Oct re-score found. The scorecard's time-to-resolve
+reads `resolved_at` and says who closed them.
+
+**The agent inventory, read from n8n and never typed** (decision 2026-10-02,
+Destiny — Agent Upgrade Plan step 5.2). `engine_agent_inventory` (migration
+49), one row per n8n Agent, written only by the write tool
+`record_agent_inventory` (`server/src/mcp/inventoryTools.ts`, no agent's
+scope), which is handed the n8n MCP's `get_agent` result whole — the n8n
+public API has no agents endpoint, so that is the only read. `agentInventory.
+derive` keeps model, every tool and whether it writes, MCP servers with where
+the dashboard token travels (bearer header or URL path), skills, scheduled
+tasks, sub-agents, memory and the credential ids referenced, drops the
+instruction text (its length and sha256 are kept), and **derives the autonomy
+tier in code**: T0 read only, T1 writes all behind approval, T2 writes on
+request, T3 scheduled and writes. An MCP tool is a write if this server lists
+it on the write connection and not the read one (`tools.mcpWriteToolNames`);
+a node or workflow tool by a verb in its name, and the row says which rule
+decided. The Agent maturity page shows the table and marks a row stale after
+seven days; the owner is declared by the recorder. Unchanged when the config
+hash, tools, MCP scope and tasks all match.
+
+**Agent identity, 2 Oct**: the seven BHARAG HTTP tools on the three agents no
+longer skip certificate checks (the dashboard had been verifying
+bharag2.duckdns.org's certificate all along), and each agent's dashboard token
+travels as `Authorization: Bearer` to `/mcp/agent` from an n8n Bearer Auth
+credential (`BHA Dashboard — North Star / Research Twin / Bays`), never in the
+URL. **The Slack Signature Gate on all three front doors treats any body with
+an `event` object or `event_id` as Slack-shaped**, whatever `type` says — the
+parser routes on `body.event.type`, so a forged mention with no `type` walked
+past the gate until 2 Oct (production proof: execution 24613 → refused 401 →
+INC-BAYS.AGENT-042; real traffic five seconds later passed).
+
 **`close_incidents`, the Engine health close over MCP** (decision 2026-10-01,
 Destiny). `server/src/mcp/incidentTools.ts`, write connection only, calling
 `health.closeIncidents` — the function the page's close button calls — so the
