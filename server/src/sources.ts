@@ -1144,14 +1144,29 @@ function hoursBetween(from: string | null, to: string | null): number | null {
  * handler about an incident the handler classified. Which of the two answered is
  * carried on the record, so a card can say.
  */
-export function mapIncident(rec: AtRecord, ctx?: { open_now?: boolean; last_seen_open?: string | null; first_seen_at?: string | null }): Incident {
+export function mapIncident(
+  rec: AtRecord,
+  ctx?: { open_now?: boolean; last_seen_open?: string | null; first_seen_at?: string | null; resolved_at?: string | null; resolved_by?: string | null },
+): Incident {
   const f = rec.fields;
   const payload = (f.payload && typeof f.payload === 'object' && !Array.isArray(f.payload) ? f.payload : {}) as Record<string, unknown>;
   const policy = (payload.retry_policy && typeof payload.retry_policy === 'object' ? payload.retry_policy : {}) as Record<string, unknown>;
   const cls = errorClass(payload.error_class);
   const ownRetryable = typeof policy.retryable === 'boolean' ? policy.retryable : null;
   const lane = str(f.source) ?? str(payload.lane) ?? null;
-  const resolved = iso(payload.resolved_at) ?? iso(f.resolved_at);
+  // The ledger's own resolved_at where it carries one; otherwise this
+  // dashboard's record of the close (engine_incidents.resolved_at, 2 Oct).
+  const resolved = iso(payload.resolved_at) ?? iso(f.resolved_at) ?? (ctx?.resolved_at ? iso(ctx.resolved_at) : null);
+  const ledgerStatus = str(f.resolution_status);
+  /**
+   * The ledger's copy of `resolution_status` is read only while an incident is
+   * open; once a successful read stops returning it, the row is marked closed
+   * (`open_now` false) and the blob keeps its last value — "open". Shown as the
+   * ledger's word while open, and as closed, with where that comes from, once
+   * it is not. The blob is never rewritten (2 Oct, plan step 5.1).
+   */
+  const open = ctx?.open_now ?? true;
+  const resolutionStatus = open || (ledgerStatus && ledgerStatus !== 'open' && ledgerStatus !== 'retrying') ? ledgerStatus : 'closed (no longer open in the ledger)';
   /**
    * **The incident's own date wins.** `ctx.first_seen_at` is when *this
    * database* inserted the row, which is a fact about the resync rather than
@@ -1178,7 +1193,7 @@ export function mapIncident(rec: AtRecord, ctx?: { open_now?: boolean; last_seen
     severity: str(f.severity) ?? classSeverity(cls),
     severity_from: str(f.severity) ? 'the incident' : 'the error class',
     summary: str(f.summary),
-    resolution_status: str(f.resolution_status),
+    resolution_status: resolutionStatus,
     workflow: str(payload.workflow_or_scenario),
     failed_node: str(payload.failed_node_or_component),
     error_class: cls,
@@ -1192,7 +1207,7 @@ export function mapIncident(rec: AtRecord, ctx?: { open_now?: boolean; last_seen
     retry_interval: str(policy.retry_interval),
     self_healing_strategy: str(payload.self_healing_strategy),
     resolved_at: resolved,
-    resolved_by: str(payload.resolved_by),
+    resolved_by: str(payload.resolved_by) ?? ctx?.resolved_by ?? null,
     // Set where a handler overrode its own first answer. The page counts these
     // to show whether the classes added on 17 Sep are catching real cases.
     reclassified_from: str(payload.reclassified_from) ? errorClass(payload.reclassified_from) : null,

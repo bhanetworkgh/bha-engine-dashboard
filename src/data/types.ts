@@ -3337,6 +3337,56 @@ export interface ScorecardData {
       last_run: { at: string; cleared: number } | null;
     };
   };
+  /** The agent inventory (plan 5.2, 2 Oct 2026): one row per n8n Agent, read from its live config. */
+  inventory: AgentInventoryView;
+}
+
+export interface AgentInventoryTool {
+  name: string;
+  type: 'node' | 'workflow' | 'custom' | 'mcp';
+  via: string | null;
+  writes: boolean;
+  writes_rule: 'server registry' | 'name verb' | 'none matched';
+  approval: boolean;
+}
+
+export interface AgentInventoryRow {
+  agent_id: string;
+  name: string;
+  published: boolean | null;
+  active_version_id: string | null;
+  config_hash: string | null;
+  model: string | null;
+  reasoning: string | null;
+  max_iterations: number | null;
+  memory_enabled: boolean | null;
+  tools: AgentInventoryTool[];
+  mcp_servers: { name: string; host: string | null; authentication: string; token_in: 'header' | 'url path' | 'none' | 'other'; tools: string[]; approval: string[] }[];
+  skills: { id: string; name: string | null; description: string | null; allowed_tools: string[] }[];
+  tasks: { id: string; name: string | null; cron: string | null; timezone: string | null; enabled: boolean }[];
+  sub_agents: { agent_id: string; use_when: string | null }[];
+  credentials: { id: string | null; name: string | null; type: string }[];
+  autonomy_tier: string;
+  tier_reason: string;
+  owner: string | null;
+  read_from: string;
+  read_at: string;
+  recorded_by: string | null;
+  first_seen_at: string;
+  updated_at: string;
+  write_tools: number;
+  unapproved_write_tools: number;
+  scheduled_tasks: number;
+  tokens_in_url: number;
+  stale: boolean;
+  last_eval: { run: string; passed: number; cases: number } | null;
+}
+
+export interface AgentInventoryView {
+  agents: AgentInventoryRow[];
+  tiers: { tier: string; meaning: string }[];
+  stale_after_days: number;
+  note: string;
 }
 
 

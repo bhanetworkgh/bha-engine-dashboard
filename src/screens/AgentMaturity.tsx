@@ -1,7 +1,7 @@
 import { useData } from '../app/useData';
 import { getAgentScorecard } from '../data';
 import type { AgentMetric } from '../data/types';
-import { Card, CardHeader, LoadFailed, Loading, PageHeader, Stat, StatCell, StatStrip, TableFrame, Th } from '../components/ui';
+import { Card, CardHeader, LoadFailed, Loading, PageHeader, Pill, Stat, StatCell, StatStrip, TableFrame, Th } from '../components/ui';
 
 /**
  * Agent maturity (2026-09-28, Destiny — Agent Upgrade Plan, Phase 0). The
@@ -50,6 +50,85 @@ export default function AgentMaturity() {
           <Stat label="MCP writes refused, 7 days" value={d.mcp_refusals_7d} hint="Guards doing their job" />
         </StatCell>
       </StatStrip>
+
+      {/* The agent inventory (plan 5.2, 2 Oct 2026): every row is what n8n's get_agent
+          returned, recorded through record_agent_inventory; the tier is derived from it in
+          code. A row older than the stale window says so rather than reading as current. */}
+      <TableFrame grow={false} label="Agent inventory">
+        <thead>
+          <tr>
+            <Th>Agent</Th>
+            <Th>Autonomy tier</Th>
+            <Th>Model</Th>
+            <Th>Tools</Th>
+            <Th>Dashboard token</Th>
+            <Th>Scheduled</Th>
+            <Th>Last eval</Th>
+            <Th>Read</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {d.inventory.agents.length === 0 ? (
+            <tr>
+              <td colSpan={8} className="px-3 py-6 text-center text-dim">
+                {d.inventory.note}
+              </td>
+            </tr>
+          ) : (
+            d.inventory.agents.map((a) => (
+              <tr key={a.agent_id} className="border-b border-line align-top">
+                <td className="px-3 py-2 text-ink">
+                  <div>{a.name}</div>
+                  <div className="text-[12px] text-faint">
+                    {a.owner ? `Owner ${a.owner} · ` : ''}
+                    {a.published === false ? 'draft only' : `v${(a.active_version_id ?? '').slice(0, 8)}`}
+                    {a.memory_enabled ? ' · memory on' : ''}
+                  </div>
+                </td>
+                <td className="px-3 py-2">
+                  <Pill tone={a.autonomy_tier.startsWith('T3') ? 'accent' : 'default'}>{a.autonomy_tier}</Pill>
+                  <div className="mt-1 text-[12px] text-faint">{a.tier_reason}</div>
+                </td>
+                <td className="px-3 py-2 text-dim">
+                  {a.model ?? '—'}
+                  {a.reasoning ? <div className="text-[12px] text-faint">reasoning {a.reasoning}{a.max_iterations ? ` · ${a.max_iterations} iterations` : ''}</div> : null}
+                </td>
+                <td className="px-3 py-2 tabular text-dim">
+                  {a.tools.length} · {a.write_tools} write
+                  {a.unapproved_write_tools > 0 ? <div className="text-[12px] text-faint">{a.unapproved_write_tools} without approval</div> : <div className="text-[12px] text-faint">all writes approved</div>}
+                </td>
+                <td className="px-3 py-2">
+                  {a.mcp_servers.length === 0 ? (
+                    <span className="text-faint">none</span>
+                  ) : a.tokens_in_url > 0 ? (
+                    <Pill tone="degraded">in the URL</Pill>
+                  ) : (
+                    <span className="text-dim">{a.mcp_servers.map((m) => m.token_in).join(', ')}</span>
+                  )}
+                  <div className="text-[12px] text-faint">{a.mcp_servers.map((m) => `${m.tools.length} tools, ${m.approval.length} approved`).join('; ')}</div>
+                </td>
+                <td className="px-3 py-2 tabular text-dim">
+                  {a.scheduled_tasks}
+                  {a.tasks.filter((t) => t.enabled).length ? <div className="text-[12px] text-faint">{a.tasks.filter((t) => t.enabled).map((t) => t.name ?? t.id).join(' · ')}</div> : null}
+                </td>
+                <td className="px-3 py-2 tabular text-dim">
+                  {a.last_eval ? `${a.last_eval.passed} of ${a.last_eval.cases}` : <span className="text-faint">no finished run</span>}
+                </td>
+                <td className="px-3 py-2 text-dim">
+                  {a.read_at.slice(0, 16).replace('T', ' ')}
+                  {a.stale ? <div><Pill tone="degraded">stale, over {d.inventory.stale_after_days} days</Pill></div> : null}
+                  <div className="text-[12px] text-faint">{a.read_from}</div>
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </TableFrame>
+      {d.inventory.agents.length > 0 && (
+        <p className="mx-6 -mt-2 mb-4 text-[12px] text-faint md:mx-8">
+          {d.inventory.tiers.map((t) => `${t.tier}: ${t.meaning}`).join(' ')} {d.inventory.note}
+        </p>
+      )}
 
       <TableFrame grow={false} label="Dimension scores">
         <thead>

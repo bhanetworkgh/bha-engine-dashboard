@@ -139,6 +139,8 @@ interface HeldRow {
   updated_at: string;
   open_now?: boolean;
   last_seen_open?: string | null;
+  resolved_at?: string | null;
+  resolved_by?: string | null;
 }
 
 function asRecord(r: HeldRow): AtRecord {
@@ -155,11 +157,17 @@ function asRecord(r: HeldRow): AtRecord {
  */
 export async function incidents(): Promise<Incident[]> {
   const r = await query<HeldRow>(
-    `SELECT id::text AS pk, airtable_record_id, natural_id, created_time, fields, first_seen_at, updated_at, open_now, last_seen_open
+    `SELECT id::text AS pk, airtable_record_id, natural_id, created_time, fields, first_seen_at, updated_at, open_now, last_seen_open, resolved_at, resolved_by
        FROM engine_incidents`,
   );
   const mapped = r.rows.map((row) =>
-    mapIncident(asRecord(row), { open_now: row.open_now ?? true, last_seen_open: row.last_seen_open ?? null, first_seen_at: row.first_seen_at }),
+    mapIncident(asRecord(row), {
+      open_now: row.open_now ?? true,
+      last_seen_open: row.last_seen_open ?? null,
+      first_seen_at: row.first_seen_at,
+      resolved_at: row.resolved_at ?? null,
+      resolved_by: row.resolved_by ?? null,
+    }),
   );
 
   // Only numeric ids: `engine_execution_runs.execution_id` is a bigint, so a
@@ -366,11 +374,16 @@ export async function resync(actor = 'dashboard', opts: { ledgerOnly?: boolean }
      * — so it is marked and never deleted. Its `resolution_status` and
      * `resolved_at` are left exactly as the ledger last gave them.
      */
+    // Dated by the last read that still saw it open — the closest fact this
+    // database holds to when it closed — and signed "the ledger", because the
+    // ledger closed it (the healer or a person, upstream), not this code (2 Oct).
     const gone = await query<{ n: string }>(
-      `UPDATE engine_incidents SET open_now = false
+      `UPDATE engine_incidents SET open_now = false,
+              resolved_at = COALESCE(resolved_at, last_seen_open, $3),
+              resolved_by = COALESCE(resolved_by, 'the ledger (closed upstream by the healer or a person)')
         WHERE lane_id = $1 AND open_now = true AND NOT (natural_id = ANY($2::text[]))
         RETURNING 1 AS n`,
-      [lane.key, seen],
+      [lane.key, seen, at],
     );
     closed += gone.rows.length;
     if (gone.rows.length) events.changed('incidents');
@@ -559,9 +572,9 @@ export async function closeIncidents(ids: string[], actor: string): Promise<Inci
       const whole = after && typeof after === 'object' && after.entity_id === id;
       await query(
         whole
-          ? `UPDATE engine_incidents SET fields = $2::jsonb, open_now = false, updated_at = $3 WHERE natural_id = $1`
-          : `UPDATE engine_incidents SET fields = fields || $2::jsonb, open_now = false, updated_at = $3 WHERE natural_id = $1`,
-        [id, JSON.stringify(whole ? after : { resolution_status: status }), at],
+          ? `UPDATE engine_incidents SET fields = $2::jsonb, open_now = false, updated_at = $3, resolved_at = $3, resolved_by = $4 WHERE natural_id = $1`
+          : `UPDATE engine_incidents SET fields = fields || $2::jsonb, open_now = false, updated_at = $3, resolved_at = $3, resolved_by = $4 WHERE natural_id = $1`,
+        [id, JSON.stringify(whole ? after : { resolution_status: status }), at, actor],
       );
       events.changed('incidents');
       await logClose(id, 'ok', status, null, 200, actor, lane);

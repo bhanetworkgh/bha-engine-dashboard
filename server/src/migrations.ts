@@ -2345,6 +2345,74 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE engine_lane_profiles ADD COLUMN IF NOT EXISTS blocked_by text[] NOT NULL DEFAULT '{}'`,
     ],
   },
+  {
+    id: 48,
+    name: 'engine_incidents.resolved_at / resolved_by: every close is dated and signed',
+    statements: [
+      /**
+       * 2 Oct 2026, Destiny — Agent Upgrade Plan step 5.1, after the 1 Oct
+       * re-score: 0 of 80 incidents carried resolved_at or resolved_by, and 75
+       * closed ones still said "open", because `open_now` went false while the
+       * ledger's own `resolution_status` in the blob was never re-read. The
+       * blob stays the ledger's copy, untouched. These two columns are this
+       * dashboard's own record of the close: when, and by whom — a person
+       * through the page or MCP, the recovery watcher, or "the ledger" where a
+       * successful read simply stopped returning it (closed upstream by the
+       * healer or a person, dated by the last read that still saw it open).
+       * The backfill dates the 75 by that last read and says the resolver was
+       * not recorded, rather than inventing one.
+       */
+      `ALTER TABLE engine_incidents ADD COLUMN IF NOT EXISTS resolved_at text`,
+      `ALTER TABLE engine_incidents ADD COLUMN IF NOT EXISTS resolved_by text`,
+      `UPDATE engine_incidents
+          SET resolved_at = COALESCE(fields->'payload'->>'resolved_at', fields->>'resolved_at', last_seen_open, updated_at),
+              resolved_by = COALESCE(fields->'payload'->>'resolved_by', 'not recorded (closed before 2 Oct 2026)')
+        WHERE open_now = false AND resolved_at IS NULL`,
+    ],
+  },
+  {
+    id: 49,
+    name: 'engine_agent_inventory: one row per n8n Agent, read from its live config',
+    statements: [
+      /**
+       * 2 Oct 2026, Destiny — Agent Upgrade Plan step 5.2 (governance). The
+       * 1 Oct re-score scored governance 4 of 10 for having no inventory of the
+       * agents with autonomy tiers. One row per agent, keyed on its n8n id,
+       * holding what `get_agent` returned — model, tools and which can write,
+       * MCP scope and approvals, skills, scheduled tasks, sub-agents, memory,
+       * the credential ids it references — plus the autonomy tier this server
+       * derives from that config in code, never typed. `read_at` and
+       * `config_hash` say how fresh the row is; the page marks a row stale
+       * after seven days rather than presenting it as current.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_agent_inventory (
+         agent_id            text PRIMARY KEY,
+         name                text NOT NULL,
+         published           boolean,
+         active_version_id   text,
+         config_hash         text,
+         model               text,
+         reasoning           text,
+         max_iterations      integer,
+         memory              jsonb,
+         tools               jsonb NOT NULL DEFAULT '[]'::jsonb,
+         mcp_servers         jsonb NOT NULL DEFAULT '[]'::jsonb,
+         skills              jsonb NOT NULL DEFAULT '[]'::jsonb,
+         tasks               jsonb NOT NULL DEFAULT '[]'::jsonb,
+         sub_agents          jsonb NOT NULL DEFAULT '[]'::jsonb,
+         credentials         jsonb NOT NULL DEFAULT '[]'::jsonb,
+         autonomy_tier       text NOT NULL,
+         tier_reason         text NOT NULL,
+         owner               text,
+         read_from           text NOT NULL,
+         read_at             text NOT NULL,
+         recorded_by         text,
+         raw                 jsonb NOT NULL DEFAULT '{}'::jsonb,
+         first_seen_at       text NOT NULL,
+         updated_at          text NOT NULL
+       )`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

@@ -11,6 +11,7 @@
 import { query } from './pg';
 import * as quota from './quota';
 import * as dataGovernance from './dataGovernance';
+import * as agentInventory from './agentInventory';
 import type { AgentMetric, ScoreRow, ScorecardData } from '../../src/data/types';
 
 const WINDOW_DAYS = 30;
@@ -127,14 +128,24 @@ async function injectionSummary(): Promise<ScorecardData['injection']> {
  */
 const LEDGER_POLL_SINCE = '2026-09-27T16:46:00Z';
 
+/**
+ * From 2 Oct (plan step 5.1) every close path writes `resolved_at` and
+ * `resolved_by` on the row: the page or MCP close (a person), the recovery
+ * watcher, or "the ledger" where a successful read stopped returning it —
+ * dated by the last read that saw it open, so accurate to about 3 minutes.
+ * The figure uses `resolved_at` and names who closed them.
+ */
 async function resolveSummary(): Promise<ScorecardData['resolve']> {
-  const r = await query<{ n: string; p50: string | null; p95: string | null; by_sev: string | null }>(
+  const r = await query<{ n: string; p50: string | null; p95: string | null; by_sev: string | null; by_who: string | null }>(
     `WITH closed AS (
        SELECT fields->>'severity' AS severity,
-              extract(epoch FROM (last_seen_open::timestamptz - (fields->>'occurred_at')::timestamptz)) / 60 AS mins,
-              date_trunc('minute', last_seen_open::timestamptz) AS closed_min
+              CASE WHEN resolved_by LIKE 'the ledger%' OR resolved_by LIKE 'not recorded%' THEN 'the ledger (upstream)'
+                   WHEN resolved_by LIKE 'recovery%' THEN 'the recovery watcher'
+                   ELSE 'a person' END AS who,
+              extract(epoch FROM (COALESCE(resolved_at, last_seen_open)::timestamptz - (fields->>'occurred_at')::timestamptz)) / 60 AS mins,
+              date_trunc('minute', COALESCE(resolved_at, last_seen_open)::timestamptz) AS closed_min
          FROM engine_incidents
-        WHERE NOT open_now AND last_seen_open >= $1 AND fields->>'occurred_at' IS NOT NULL
+        WHERE NOT open_now AND COALESCE(resolved_at, last_seen_open) >= $1 AND fields->>'occurred_at' IS NOT NULL
      ), bulk AS (
        SELECT closed_min FROM closed GROUP BY 1 HAVING count(*) >= 5
      ), kept AS (
@@ -143,7 +154,8 @@ async function resolveSummary(): Promise<ScorecardData['resolve']> {
      SELECT count(*)::text AS n,
             round(percentile_cont(0.5) WITHIN GROUP (ORDER BY mins))::text AS p50,
             round(percentile_cont(0.95) WITHIN GROUP (ORDER BY mins))::text AS p95,
-            (SELECT string_agg(severity || ' ' || c, ', ') FROM (SELECT coalesce(severity, 'unknown') AS severity, count(*) AS c FROM kept GROUP BY 1) s) AS by_sev
+            (SELECT string_agg(severity || ' ' || c, ', ') FROM (SELECT coalesce(severity, 'unknown') AS severity, count(*) AS c FROM kept GROUP BY 1) s) AS by_sev,
+            (SELECT string_agg(who || ' ' || c, ', ') FROM (SELECT who, count(*) AS c FROM kept GROUP BY 1 ORDER BY 2 DESC) w) AS by_who
        FROM kept`,
     [LEDGER_POLL_SINCE],
   );
@@ -154,7 +166,7 @@ async function resolveSummary(): Promise<ScorecardData['resolve']> {
     p50_minutes: n && row?.p50 !== null ? Number(row?.p50) : null,
     p95_minutes: n && row?.p95 !== null ? Number(row?.p95) : null,
     note: n
-      ? `Over ${n} incident${n === 1 ? '' : 's'} closed since the 3-minute ledger poll began on 27 Sep (${row?.by_sev}). Dated by the last read that saw each open, so accurate to about 3 minutes; bulk closes (5+ in one minute) excluded. Who closed them is not recorded upstream.`
+      ? `Over ${n} incident${n === 1 ? '' : 's'} closed since the 3-minute ledger poll began on 27 Sep (${row?.by_sev}). Closed by: ${row?.by_who}. Dated by resolved_at — for an upstream close, the last read that saw it open, accurate to about 3 minutes; bulk closes (5+ in one minute) excluded.`
       : 'No incident has closed since the 3-minute ledger poll began on 27 Sep, so there is nothing to time yet.',
   };
 }
@@ -222,5 +234,7 @@ export async function data(): Promise<ScorecardData> {
     // Data governance (plan 5.4 and 5.5, 29 Sep): the guard's last seven days
     // and the retention job's last run, both counted from their own records.
     governance: { bharag: await dataGovernance.guardSummary(), retention: await dataGovernance.retentionStatus() },
+    // The agent inventory (plan 5.2, 2 Oct): what n8n says each agent is, and the tier derived from it.
+    inventory: await agentInventory.view(),
   };
 }

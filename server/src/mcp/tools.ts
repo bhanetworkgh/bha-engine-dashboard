@@ -31,6 +31,7 @@ import { RESEARCH_TWIN_WRITE_TOOLS } from './researchTwinTools';
 import { CANDIDATE_WRITE_TOOLS } from './candidateTools';
 import { LANE_READ_TOOLS, LANE_WRITE_TOOLS } from './laneTools';
 import { INCIDENT_WRITE_TOOLS } from './incidentTools';
+import { INVENTORY_WRITE_TOOLS } from './inventoryTools';
 import { findRecords, READABLE_KINDS } from './findRecords';
 import * as mirror from '../mirror';
 import * as n8n from '../n8n';
@@ -908,7 +909,20 @@ export const TOOLS: ToolDefinition[] = [
  * tool a client can see is a tool a model will try.
  */
 function toolsFor(access: 'read' | 'write'): ToolDefinition[] {
-  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS, ...LANE_WRITE_TOOLS, ...INCIDENT_WRITE_TOOLS] : TOOLS;
+  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS, ...LANE_WRITE_TOOLS, ...INCIDENT_WRITE_TOOLS, ...INVENTORY_WRITE_TOOLS] : TOOLS;
+}
+
+/**
+ * The names of the tools only the write connection has (2 Oct 2026): the
+ * agent inventory classes an MCP tool as a write by this list, so the
+ * classification is this server's own registry rather than a second copy.
+ * `resync` is on the read connection and is not a write by this measure.
+ */
+export function mcpWriteToolNames(): string[] {
+  const reads = new Set(TOOLS.map((t) => t.name));
+  return toolsFor('write')
+    .map((t) => t.name)
+    .filter((n) => !reads.has(n));
 }
 
 export function toolByName(name: string, access: 'read' | 'write' = 'read'): ToolDefinition | null {
