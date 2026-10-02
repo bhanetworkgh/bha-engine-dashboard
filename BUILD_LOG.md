@@ -11104,3 +11104,10 @@ Files:      server/src/agentInventory.ts, server/src/mcp/tools.ts
 Problem:    The name rule matched substrings, so Search_Channel_Archives was a write on "archive"; Ask_BHA_Cluster (a BHARAG query) was a write on "ask_"; and list_writable_kinds was a write because it is only on the write connection. Bays read "31 can write".
 Fix:        Names are split into words and matched whole; a name opening with search/read/get/list/find/query/lookup is a read; a tool whose URL ends in /ask is a read; mcpWriteToolNames leaves out a write-connection tool annotated readOnlyHint.
 Decision:   Asking another agent (Ask_Research_Twin, Ask_North_Star, Ask_Genie) stays a write: it starts a run in that agent which answers in Slack. So North Star stays T2 on that one tool.
+
+## 2026-10-02 19:55 — Approvals are a hard stop in workflow runs; North Star pronoun skill; inventory recorded
+Intent:     Close what was left on the agent upgrade step: record the inventory, settle the oversight question, clear the one failing eval case.
+Files:      none in this repo (n8n agent 8NQRXadH0OrKe5XV; rows in engine_agent_inventory)
+Problem:    Probe execution 24683 (Bays — Agent Delivery, Ask Bays path, share_doc dry_run) answered verbatim: "Agent execution suspended waiting for tool approval. Suspend/resume is not supported in workflow execution context." NS-12 failed one repeat in three in EVAL-202610021616 and EVAL-202610021632 on not_contains /\\b(she|her|hers|herself)\\b/.
+Fix:        North Star skill "Pronouns for people" (skill_iKYYiN5yczXznIiD), published as 49a9b575 (restore point 365d1561). EVAL-202610021812: 33 of 33 rows, 27 of 27 cases. Inventory rows recorded for Bays (T3), North Star (T2) and Research Twin (T2), audit 957-959 and 961.
+Decision:   No approval is added to Slack_Request or post_file: an approval-gated tool cannot run at all from Slack, the panel or a scheduled task. delete_record, share_doc and grant_drive_access are therefore unreachable for Bays in those runs today. Oversight for Bays belongs in server-side guards.
