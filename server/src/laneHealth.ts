@@ -143,10 +143,51 @@ export interface LaneHealth {
   factors: RankedLane['factors'];
   missing: RankedLane['missing'];
   linked_lanes: string[];
+  blockers: Blockers;
   research: ResearchState;
   self_heal: { instrumented: boolean; open_incidents: number | null; incidents_14d: number | null; recurring: Array<{ signature: string; workflow: string; count: number }>; note: string | null };
   logs: { touched_14d: number; awaiting_evaluation: number; evaluated: number; autopaid: null; note: string };
   convergence: { opened_14d: number | null; closed_14d: number | null; open_now: number; verdict: 'converging' | 'steady' | 'churning' | 'unknown'; note: string };
+}
+
+export interface Blocker {
+  loop_id: string;
+  status: string;
+  owner: string | null;
+  lane: string | null;
+  what: string;
+}
+
+/**
+ * 2 Oct 2026, Jason (UN9D thread): a lane names the loops it is waiting on
+ * (engine_lane_profiles.blocked_by, set by a person). Each is read live: an open
+ * one is a blocker, a closed one is listed as cleared, and an id no loop carries
+ * is named as not found rather than dropped — a blocker that silently vanished
+ * would read as a lane that is no longer blocked.
+ */
+export interface Blockers {
+  waiting_on: Blocker[];
+  cleared: Blocker[];
+  not_found: string[];
+  note: string;
+}
+
+export function blockersFor(ids: string[], loops: Map<string, Blocker>): Blockers {
+  const waiting_on: Blocker[] = [];
+  const cleared: Blocker[] = [];
+  const not_found: string[] = [];
+  for (const id of ids) {
+    const b = loops.get(id);
+    if (!b) not_found.push(id);
+    else if (/^closed$/i.test(b.status)) cleared.push(b);
+    else waiting_on.push(b);
+  }
+  const note = !ids.length
+    ? 'No blockers are named for this lane. That is not the same as unblocked: nobody has listed any (set_lane_profile blocked_by).'
+    : waiting_on.length
+      ? `Waiting on ${waiting_on.map((b) => `${b.loop_id} (${b.owner ?? 'no owner'}, ${b.status})`).join(', ')}.`
+      : 'Every named blocker is closed.';
+  return { waiting_on, cleared, not_found, note: not_found.length ? `${note} Not found: ${not_found.join(', ')}.` : note };
 }
 
 export async function laneHealth(opts: { kind?: 'work' | 'commercial' | 'all'; lane_id?: string; now?: Date } = {}): Promise<{ lanes: LaneHealth[]; notes: string[] }> {
@@ -154,8 +195,22 @@ export async function laneHealth(opts: { kind?: 'work' | 'commercial' | 'all'; l
   const r = await ranking(opts.kind ?? 'work', now);
   const since = new Date(now.getTime() - WINDOW_DAYS * 86_400_000).toISOString();
 
-  const linked = new Map(
-    (await query<{ lane_id: string; linked_lanes: string[] | null }>(`SELECT lane_id, linked_lanes FROM engine_lane_profiles`)).rows.map((p) => [p.lane_id, p.linked_lanes ?? []]),
+  const profiles = (await query<{ lane_id: string; linked_lanes: string[] | null; blocked_by: string[] | null }>(`SELECT lane_id, linked_lanes, blocked_by FROM engine_lane_profiles`)).rows;
+  const linked = new Map(profiles.map((p) => [p.lane_id, p.linked_lanes ?? []]));
+  const blockedBy = new Map(profiles.map((p) => [p.lane_id, p.blocked_by ?? []]));
+  const blockerIds = Array.from(new Set(profiles.flatMap((p) => p.blocked_by ?? [])));
+  const blockerLoops = new Map<string, Blocker>(
+    blockerIds.length
+      ? (
+          await query<{ loop_id: string; status: string; owner: string | null; lane: string | null; what: string }>(
+            `SELECT DISTINCT ON (fields->>'loop_id') fields->>'loop_id' AS loop_id, coalesce(fields->>'Status', '') AS status,
+                    builder_id AS owner, fields->>'lane_tag' AS lane, left(coalesce(fields->>'What', ''), 160) AS what
+               FROM engine_loops WHERE fields->>'loop_id' = ANY($1::text[])
+              ORDER BY fields->>'loop_id', updated_at DESC`,
+            [blockerIds],
+          )
+        ).rows.map((b) => [b.loop_id, b])
+      : [],
   );
   const jobs = (
     await query<{ lane_id: string; job_id: string; status: string; question: string; verdict: string; finding: string; confidence: string | null; missing: string | null; resolved_at: string | null }>(
@@ -249,6 +304,7 @@ export async function laneHealth(opts: { kind?: 'work' | 'commercial' | 'all'; l
       factors: l.factors,
       missing: l.missing,
       linked_lanes: links,
+      blockers: blockersFor(blockedBy.get(l.lane_id) ?? [], blockerLoops),
       research,
       self_heal: {
         instrumented,
@@ -273,6 +329,7 @@ export async function laneHealth(opts: { kind?: 'work' | 'commercial' | 'all'; l
       `A resolved Research Twin job is a gleaning; findings older than ${STALE_AFTER_DAYS} days are stale. Research is proposed only for the top ${RESEARCH_TOP_N} lanes.`,
       'Work lanes reach research only through linked_lanes (set with set_lane_profile), because research jobs carry commercial LANE-… ids, never work-lane tags.',
       'Self-heal is instrumented only for BAYS, NS and RT, the three lanes with workflows and incident sources of their own.',
+      'blockers lists the loops a person named as blocking the lane (set_lane_profile blocked_by), each with its live status: waiting_on is still open, cleared is closed.',
     ],
   };
 }

@@ -2331,6 +2331,20 @@ const MIGRATIONS: Migration[] = [
        ON CONFLICT (scored_on, dimension) DO NOTHING`,
     ],
   },
+  {
+    id: 47,
+    name: 'engine_lane_profiles.blocked_by: the loops a lane is waiting on',
+    statements: [
+      /**
+       * 2 Oct 2026, Jason (#bha-coordination, UN9D thread): VFARM_HARDWARE's
+       * health should name GWTH and QFCU as its blockers, so North Star and
+       * Research Twin see the same truth. Loop ids only, set by a person with
+       * set_lane_profile; lane_health reads each one's live status, so a closed
+       * blocker stops counting without anyone editing the list.
+       */
+      `ALTER TABLE engine_lane_profiles ADD COLUMN IF NOT EXISTS blocked_by text[] NOT NULL DEFAULT '{}'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
