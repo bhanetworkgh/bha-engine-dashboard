@@ -71,7 +71,7 @@ function score05(v: unknown, name: string): number | null | undefined {
 export const setLaneProfile: ToolDefinition = {
   name: 'set_lane_profile',
   description:
-    'Set or clear one lane’s ranking tags — the inputs rank_lanes cannot compute. gates_oct31, blocks_others, engine_leverage, commercial_impact: whole numbers 0–5, or null to clear. effort: small, medium or large (the owner’s estimate), or null. linked_lanes: the commercial LANE-… ids whose research belongs to this lane. anchors: the named items this lane carries (loop ids, contracts), replacing the list. note: why. Only the fields sent change. A lane id is a loop lane (VFARM_HARDWARE, CST, …) or a commercial LANE-… id; kind is inferred (LANE-… is commercial) unless given. Audited on engine_mcp_writes; dry_run shows the change without saving. Returns before, after and the lane’s new rank.',
+    'Set or clear one lane’s ranking tags — the inputs rank_lanes cannot compute. gates_oct31, blocks_others, engine_leverage, commercial_impact: whole numbers 0–5, or null to clear. effort: small, medium or large (the owner’s estimate), or null. linked_lanes: the commercial LANE-… ids whose research belongs to this lane. blocked_by: the loop ids (LOOP-…) this lane is waiting on, replacing the list. anchors: the named items this lane carries (loop ids, contracts), replacing the list. note: why. Only the fields sent change. A lane id is a loop lane (VFARM_HARDWARE, CST, …) or a commercial LANE-… id; kind is inferred (LANE-… is commercial) unless given. Audited on engine_mcp_writes; dry_run shows the change without saving. Returns before, after and the lane’s new rank.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -84,6 +84,7 @@ export const setLaneProfile: ToolDefinition = {
       effort: { type: ['string', 'null'], enum: ['small', 'medium', 'large', null] },
       anchors: { type: 'array', items: { type: 'string' } },
       linked_lanes: { type: 'array', items: { type: 'string' }, description: 'Commercial LANE-… ids whose research (Research Twin jobs) belongs to this lane, replacing the list.' },
+      blocked_by: { type: 'array', items: { type: 'string' }, description: 'Loop ids (LOOP-…) this lane is waiting on, replacing the list; [] clears it. Each must be a loop the engine holds. lane_health shows each with its live status.' },
       note: { type: 'string' },
       requester_user_id: { type: 'string', description: 'Slack id of the person asking, for the audit line.' },
       dry_run: { type: 'boolean' },
@@ -119,11 +120,24 @@ export const setLaneProfile: ToolDefinition = {
         if (bad.length) throw new Error(`linked_lanes takes commercial LANE-… ids only; not one: ${bad.join(', ')}`);
         set.linked_lanes = Array.from(new Set(links)).slice(0, 20);
       }
+      if (Array.isArray(args.blocked_by)) {
+        const ids = Array.from(new Set(args.blocked_by.map((a) => String(a).trim()).filter(Boolean)));
+        const bad = ids.filter((x) => !/^LOOP-\d+-[A-Z0-9]{4}$/.test(x));
+        if (bad.length) throw new Error(`blocked_by takes loop ids (LOOP-<digits>-<4 chars>) only; not one: ${bad.join(', ')}`);
+        if (ids.length) {
+          const held = new Set(
+            (await query<{ loop_id: string }>(`SELECT DISTINCT fields->>'loop_id' AS loop_id FROM engine_loops WHERE fields->>'loop_id' = ANY($1::text[])`, [ids])).rows.map((r) => r.loop_id),
+          );
+          const unknown = ids.filter((x) => !held.has(x));
+          if (unknown.length) throw new Error(`blocked_by names a loop no table holds: ${unknown.join(', ')}`);
+        }
+        set.blocked_by = ids.slice(0, 20);
+      }
       if (typeof args.note === 'string') set.note = args.note.trim().slice(0, 500) || null;
       const kind = args.kind === 'work' || args.kind === 'commercial' ? args.kind : (before?.kind as string) ?? (laneId.startsWith('LANE-') ? 'commercial' : 'work');
       if (Object.keys(set).length === 0 && before) {
         await auditClose(audit, { outcome: 'refused', detail: 'nothing to change', natural_id: laneId });
-        return { ok: false, reason: 'nothing_to_change', message: 'Send at least one tag, effort, anchors or note.', before, audit_id: audit };
+        return { ok: false, reason: 'nothing_to_change', message: 'Send at least one tag, effort, anchors, linked_lanes, blocked_by or note.', before, audit_id: audit };
       }
       const after = { ...(before ?? { lane_id: laneId, anchors: [] }), ...set, kind };
       if (dry) {
@@ -156,7 +170,7 @@ export const setLaneProfile: ToolDefinition = {
 export const laneHealthTool: ToolDefinition = {
   name: 'lane_health',
   description:
-    'Each ranked lane’s health, as the loop Jason asked for (28 Sep): rank, score and six factors; research state (not_started, in_queue, active, answered, stale) with its gleanings — resolved Research Twin jobs as {job_id, asked, found, confidence, limits, needs_depth, resolved_at, stale} — and a re-entry signal action (first_pass, deeper_pass, none) with its reason; self-heal state (open incidents, incidents in 14 days, recurring fault signatures) for the lanes that have workflows (BAYS, NS, RT), and "not instrumented" for the rest; Codex logs touching the lane in 14 days, awaiting evaluation or evaluated (autopaid is null until the rule exists); and convergence — loops opened against closed in 14 days — as converging, steady or churning. Computed from rows the engine already keeps; nothing is written. kind work (default), commercial or all; lane_id for one lane.',
+    'Each ranked lane’s health, as the loop Jason asked for (28 Sep): rank, score and six factors; research state (not_started, in_queue, active, answered, stale) with its gleanings — resolved Research Twin jobs as {job_id, asked, found, confidence, limits, needs_depth, resolved_at, stale} — and a re-entry signal action (first_pass, deeper_pass, none) with its reason; self-heal state (open incidents, incidents in 14 days, recurring fault signatures) for the lanes that have workflows (BAYS, NS, RT), and "not instrumented" for the rest; Codex logs touching the lane in 14 days, awaiting evaluation or evaluated (autopaid is null until the rule exists); convergence — loops opened against closed in 14 days — as converging, steady or churning; and blockers — the loops a person named as blocking the lane, each with its live status (waiting_on, cleared, not_found). Computed from rows the engine already keeps; nothing is written. kind work (default), commercial or all; lane_id for one lane.',
   inputSchema: {
     type: 'object',
     properties: {
