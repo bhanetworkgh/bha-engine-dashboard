@@ -511,10 +511,11 @@ async function closeLedger(row: HeldRow, ledgerStatus: string | null, state: bha
     await logLedger(row, 'failed', ledgerStatus ?? 'open', why, http, state, resolvedBy);
     return { ok: false, state: ledgerStatus ?? 'open', reason: why };
   }
-  await query(`UPDATE engine_incidents SET fields = fields || $2::jsonb, open_now = false, updated_at = $3 WHERE natural_id = $1`, [
+  await query(`UPDATE engine_incidents SET fields = fields || $2::jsonb, open_now = false, updated_at = $3, resolved_at = $3, resolved_by = $4 WHERE natural_id = $1`, [
     row.incident_id,
     JSON.stringify({ resolution_status: landed }),
     at,
+    resolvedBy,
   ]);
   events.changed('incidents');
   await logLedger(row, 'ok', landed, reason, http, landed, resolvedBy);
