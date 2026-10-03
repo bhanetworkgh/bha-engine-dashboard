@@ -55,6 +55,7 @@ import * as systemFeeds from './systemFeeds';
 import * as dataGovernance from './dataGovernance';
 import * as monitoringTwin from './monitoringTwin';
 import * as qualityAlert from './qualityAlert';
+import * as engineEvents from './engineEvents';
 import * as candidateActions from './candidateActions';
 import * as patternDraft from './patternDraft';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
@@ -610,6 +611,26 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       const r = await qualityAlert.check(b.dry_run !== false);
       await mirror.logWrite({ endpoint, kind: 'quality_alert', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `${r.would_post.length} due, ${r.posted.length} posted, ${r.failed.length} failed`, ms: Date.now() - t0 });
       return send(res, 200, { ok: true, ...r });
+    }
+    /**
+     * One engine event (2026-10-03, MG0X): POST the engine.event.v1 shape.
+     * Append-only; a dedupe_key already held answers 200 recorded:false.
+     */
+    if (p === '/api/engine/events') {
+      if (method !== 'POST') throw new HttpError(405, 'POST { event_type, subject_id, at?, lane?, actor?, source_ref?, detail?, dedupe_key? }.');
+      const b = (await readJson(req, 32 * 1024)) as Record<string, unknown>;
+      const subject = typeof b.subject_id === 'string' ? b.subject_id.trim().slice(0, 300) : undefined;
+      try {
+        const r = await engineEvents.record(b as unknown as engineEvents.EngineEvent);
+        await mirror.logWrite({ endpoint, kind: 'engine_events', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: subject, outcome: r.recorded ? 'inserted' : 'unchanged', detail: `${String(b.event_type)}${r.recorded ? '' : ' (dedupe_key already held)'}`, ms: Date.now() - t0 });
+        return send(res, r.recorded ? 201 : 200, { ok: true, shape: engineEvents.EVENT_SHAPE, ...r });
+      } catch (e) {
+        if (e instanceof engineEvents.EventError) {
+          await mirror.logWrite({ endpoint, kind: 'engine_events', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: subject || undefined, outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          throw new HttpError(422, e.message);
+        }
+        throw e;
+      }
     }
     if (p === '/api/engine/retention/run') {
       if (method !== 'POST') throw new HttpError(405, 'POST { dry_run, as_of }. as_of is accepted only with dry_run: true.');
@@ -1993,6 +2014,7 @@ async function boot(): Promise<void> {
     dataGovernance.startRetention();
     monitoringTwin.startWatching();
     qualityAlert.startWatching();
+    engineEvents.startSweeping();
     health.startLedgerPolling();
   });
 }

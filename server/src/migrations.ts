@@ -2484,6 +2484,34 @@ const MIGRATIONS: Migration[] = [
        ON CONFLICT (scored_on, dimension) DO NOTHING`,
     ],
   },
+  {
+    id: 53,
+    name: 'engine_events: the engine\'s own structured events, append-only',
+    statements: [
+      /**
+       * 3 Oct 2026, Destiny — LOOP-1791015066302-MG0X. engine.event.v1:
+       * { event_type, at, subject_id, lane, actor, source_ref, detail }. For
+       * digest dispatches (posted by n8n) and lane blockers clearing (written
+       * here). `dedupe_key` is unique so a retried post or a repeated sweep is
+       * one event; a NULL key is never a conflict, so an event without one is
+       * always stored.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_events (
+         id          bigserial PRIMARY KEY,
+         event_type  text NOT NULL,
+         at          timestamptz NOT NULL DEFAULT now(),
+         subject_id  text NOT NULL,
+         lane        text,
+         actor       text,
+         source_ref  text,
+         detail      jsonb NOT NULL DEFAULT '{}'::jsonb,
+         dedupe_key  text UNIQUE,
+         recorded_at timestamptz NOT NULL DEFAULT now()
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_events_type_at ON engine_events (event_type, at DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_events_subject ON engine_events (subject_id)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
