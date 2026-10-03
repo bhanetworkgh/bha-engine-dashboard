@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { editVfarmLead, VFARM_LEAD_STATUSES, type VfarmLead, type VfarmLeadStatus, type VfarmLeadsData } from '../../data';
+import { editVfarmLead, moveVfarmLeadStage, VFARM_LEAD_STATUSES, type VfarmLead, type VfarmLeadStatus, type VfarmLeadsData } from '../../data';
 import type { RecordColumn } from '../../components/ui';
 import { Pagination, Button, Pill, Toast, RecordTable, SearchBox, Segmented, Stat, StatCell, StatStrip, usePaged, useToast } from '../../components/ui';
 import { EditableCell } from '../Registry/Editable';
@@ -27,6 +27,7 @@ const when = (iso: string) => iso.slice(0, 10);
 const whenFull = (iso: string | null) => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : null);
 
 type Filter = 'all' | VfarmLeadStatus;
+type StageTab = '1' | '2';
 
 /**
  * The attribution fields, in the order the lead envelope lists them.
@@ -63,6 +64,15 @@ async function copy(text: string): Promise<boolean> {
 
 export default function EarlyAccess({ data, onChange, initialOpen = null }: { data: VfarmLeadsData; onChange: (leads: VfarmLead[]) => void; initialOpen?: string | null }) {
   const [filter, setFilter] = useState<Filter>('all');
+  /**
+   * Stage 1 (Form A, interest only) and Stage 2 (serious buyer, follow-up
+   * path) are separate segments (2026-10-03, VFIG). A lead moved to Stage 2
+   * leaves the Stage 1 list but keeps everything it told us at Stage 1.
+   */
+  const [stage, setStage] = useState<StageTab>(() => {
+    const l = initialOpen ? data.leads.find((x) => x.id === initialOpen) : null;
+    return l && l.stage === 2 ? '2' : '1';
+  });
   const [q, setQ] = useState('');
   /** The lead whose answers are open. Clicking a row opens it; the panel sits above the list. */
   const [openId, setOpenId] = useState<string | null>(initialOpen);
@@ -93,6 +103,7 @@ export default function EarlyAccess({ data, onChange, initialOpen = null }: { da
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return leads.filter((l) => {
+      if (String(l.stage ?? 1) !== stage) return false;
       if (filter !== 'all' && l.status !== filter) return false;
       if (!needle) return true;
       return (
@@ -101,16 +112,33 @@ export default function EarlyAccess({ data, onChange, initialOpen = null }: { da
         (l.organization_name ?? '').toLowerCase().includes(needle)
       );
     });
-  }, [leads, filter, q]);
+  }, [leads, filter, q, stage]);
 
-  const paged = usePaged(shown, `${filter}:${q}`);
+  const paged = usePaged(shown, `${stage}:${filter}:${q}`);
   const openLead = openId ? leads.find((l) => l.id === openId) ?? null : null;
 
   const counts = data.summary.by_status;
+  // Status counts follow the stage on screen, so a number is always what picking it would show.
+  const inStage = leads.filter((l) => String(l.stage ?? 1) === stage);
   const options: { value: Filter; label: string; count?: number }[] = [
-    { value: 'all', label: 'All', count: data.summary.total },
-    ...VFARM_LEAD_STATUSES.map((s) => ({ value: s as Filter, label: s, count: counts[s] ?? 0 })),
+    { value: 'all', label: 'All', count: inStage.length },
+    ...VFARM_LEAD_STATUSES.map((s) => ({ value: s as Filter, label: s, count: inStage.filter((l) => l.status === s).length })),
   ];
+  const stageCount = (n: StageTab) => leads.filter((l) => String(l.stage ?? 1) === n).length;
+  const stageOptions: { value: StageTab; label: string; count?: number }[] = [
+    { value: '1', label: 'Stage 1 · interest', count: stageCount('1') },
+    { value: '2', label: 'Stage 2 · serious buyer', count: stageCount('2') },
+  ];
+
+  async function move(lead: VfarmLead, to: 1 | 2, reason: string | null): Promise<void> {
+    try {
+      const updated = await moveVfarmLeadStage(lead.id, to, reason);
+      onChange(leads.map((l) => (l.id === lead.id ? updated : l)));
+      setToast({ text: `${lead.full_name} moved to Stage ${to}. Their Stage ${lead.stage} answers are kept on the row.`, tone: 'ok' });
+    } catch (e) {
+      setToast({ text: e instanceof Error ? e.message : 'That move did not save.', tone: 'failing' });
+    }
+  }
 
   const columns: RecordColumn<VfarmLead>[] = [
     {
@@ -313,6 +341,9 @@ export default function EarlyAccess({ data, onChange, initialOpen = null }: { da
         </StatCell>
       </StatStrip>
 
+      <div className="flex shrink-0 flex-wrap items-center gap-3 px-6 pb-2 md:px-8">
+        <Segmented options={stageOptions} value={stage} onChange={setStage} ariaLabel="Stage" />
+      </div>
       <div className="flex shrink-0 flex-wrap items-center gap-3 px-6 pb-3 md:px-8">
         <Segmented options={options} value={filter} onChange={setFilter} ariaLabel="Filter by status" />
         <SearchBox value={q} onChange={setQ} placeholder="Search name, email or organisation" />
@@ -333,15 +364,15 @@ export default function EarlyAccess({ data, onChange, initialOpen = null }: { da
  >
           Copy all emails
         </Button>
-        {shown.length !== leads.length && (
+        {shown.length !== inStage.length && (
           <span className="text-[12px] text-faint">
-            {shown.length} of {leads.length}
+            {shown.length} of {inStage.length}
           </span>
         )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 md:px-8">
-        {openLead && <LeadAnswers lead={openLead} onClose={() => setOpenId(null)} />}
+        {openLead && <LeadAnswers lead={openLead} onClose={() => setOpenId(null)} onMove={move} />}
         <RecordTable
           columns={columns}
           rows={paged.rows}
@@ -349,7 +380,11 @@ export default function EarlyAccess({ data, onChange, initialOpen = null }: { da
           onOpen={(l) => setOpenId(l.id === openId ? null : l.id)}
           label="vFarm Early Access leads"
           empty={
-            leads.length === 0
+            leads.length > 0 && inStage.length === 0
+              ? stage === '2'
+                ? 'No lead is in Stage 2 yet. A lead moves here when it enters the serious-buyer follow-up path — from its panel on Stage 1, or from n8n when that path is live.'
+                : 'Every lead held has moved to Stage 2.'
+              : leads.length === 0
               ? 'No Early Access lead is held. Every lead arrives through Form A, and Hardik’s n8n tracker posts each one here as it comes in; until one does, this is empty because nothing has arrived, not because nothing is being recorded.'
               : 'No lead matches that filter.'
           }
@@ -376,7 +411,10 @@ function answerText(v: unknown): string {
  * Form A's questions is shown under its own heading rather than dropped: a
  * renamed question should be visible, not lost.
  */
-function LeadAnswers({ lead, onClose }: { lead: VfarmLead; onClose: () => void }) {
+function LeadAnswers({ lead, onClose, onMove }: { lead: VfarmLead; onClose: () => void; onMove: (lead: VfarmLead, to: 1 | 2, reason: string | null) => Promise<void> }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const to: 1 | 2 = lead.stage === 2 ? 1 : 2;
   const f = lead.form_a;
   const extra = f ? Object.keys(f.answers).filter((k) => !FORM_A_QUESTIONS.includes(k)) : [];
   const ids: [string, string | null][] = f
@@ -402,6 +440,43 @@ function LeadAnswers({ lead, onClose }: { lead: VfarmLead; onClose: () => void }
           Close
         </Button>
       </div>
+
+      <section className="mb-4 rounded-[10px] border border-line px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+          <span className="text-dim">
+            Stage {lead.stage ?? 1} · {lead.stage === 2 ? 'serious buyer, in the follow-up path' : 'Form A, interest only'}
+          </span>
+          <input
+            className="input h-8 min-w-[16ch] flex-1 text-[12.5px]"
+            placeholder={to === 2 ? 'Why they are moving to Stage 2 (optional)' : 'Why they are going back to Stage 1 (optional)'}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+          <Button
+            size="sm"
+            loading={busy}
+            onClick={async () => {
+              setBusy(true);
+              await onMove(lead, to, reason.trim() || null);
+              setBusy(false);
+              setReason('');
+            }}
+          >
+            {to === 2 ? 'Move to Stage 2' : 'Back to Stage 1'}
+          </Button>
+        </div>
+        {lead.stage_history?.length > 0 && (
+          <ul className="mt-2 space-y-0.5 text-[11.5px] text-faint">
+            {lead.stage_history.map((m, i) => (
+              <li key={i}>
+                {m.at.slice(0, 16).replace('T', ' ')} UTC — Stage {m.from} → {m.to} by {m.by}
+                {m.via === 'engine' ? ' (from n8n)' : ''}
+                {m.reason ? ` · ${m.reason}` : ''}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       {!f ? (
         <p className="text-[12.5px] text-dim">

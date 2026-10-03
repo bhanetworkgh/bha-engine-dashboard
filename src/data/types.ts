@@ -3114,6 +3114,11 @@ export interface VfarmLead {
   } | null;
   /** This address was already on an earlier row. Computed at read time, never stored. */
   is_repeat_email: boolean;
+  /** 1 = Form A, interest only; 2 = serious buyer in the follow-up path (2026-10-03, VFIG). */
+  stage: number;
+  stage_changed_at: string | null;
+  /** Every move between stages, oldest first, never rewritten. */
+  stage_history: { from: number; to: number; at: string; by: string; reason: string | null; via: 'page' | 'engine' }[];
 }
 
 export interface VfarmLeadsData {
@@ -3123,6 +3128,7 @@ export interface VfarmLeadsData {
     last_7_days: number;
     last_30_days: number;
     by_status: Record<string, number>;
+    by_stage: Record<string, number>;
   };
 }
 

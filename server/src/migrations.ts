@@ -2436,6 +2436,29 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_monitoring_incidents_ledger ON engine_monitoring_incidents (ledger_state) WHERE ledger_state IN ('pending', 'open')`,
     ],
   },
+  {
+    id: 51,
+    name: 'engine_vfarm_leads: Stage 1 / Stage 2, with every move kept',
+    statements: [
+      /**
+       * 3 Oct 2026, Destiny — LOOP-1790429563108-VFIG (Jason, 26 Sep): Stage 1
+       * (Form A, interest only) and Stage 2 (serious buyer, the
+       * VFARM_BUYER_INTAKE.v1 follow-up) are separate segments. A lead moves
+       * to Stage 2 when it enters the follow-up path; its Stage 1 answers stay
+       * on the row and every move is appended to `stage_history`, never
+       * overwritten, so BHA can reach back if priorities change.
+       */
+      `ALTER TABLE engine_vfarm_leads
+         ADD COLUMN IF NOT EXISTS stage            smallint NOT NULL DEFAULT 1,
+         ADD COLUMN IF NOT EXISTS stage_changed_at timestamptz,
+         ADD COLUMN IF NOT EXISTS stage_history    jsonb NOT NULL DEFAULT '[]'::jsonb`,
+      `DO $$ BEGIN
+         IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'engine_vfarm_leads_stage_check') THEN
+           ALTER TABLE engine_vfarm_leads ADD CONSTRAINT engine_vfarm_leads_stage_check CHECK (stage IN (1, 2));
+         END IF;
+       END $$`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

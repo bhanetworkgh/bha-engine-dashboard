@@ -610,6 +610,28 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       }
     }
 
+    /**
+     * Move a lead between stages from n8n (2026-10-03, VFIG): the Stage 2
+     * follow-up path posts { buyer_intake_id, stage: 2, by, reason } when a
+     * lead enters it. Same key and log as every other engine write.
+     */
+    if (p === '/api/engine/vfarm-leads/stage') {
+      if (method !== 'POST') throw new HttpError(405, 'POST { buyer_intake_id, stage, by, reason }.');
+      const body = (await readJson(req)) as Record<string, unknown>;
+      const intake = typeof body.buyer_intake_id === 'string' ? body.buyer_intake_id.trim() : '';
+      try {
+        const l = await earlyAccess.moveStage({ buyer_intake_id: intake }, Number(body.stage), typeof body.by === 'string' ? body.by : '', typeof body.reason === 'string' ? body.reason : null, 'engine');
+        await mirror.logWrite({ endpoint, kind: 'vfarm_leads', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: intake, outcome: 'updated', detail: `moved to stage ${l.stage}`, ms: Date.now() - t0 });
+        return send(res, 200, { ok: true, id: l.id, buyer_intake_id: intake, stage: l.stage, stage_history: l.stage_history });
+      } catch (e) {
+        if (e instanceof earlyAccess.SubmissionError) {
+          await mirror.logWrite({ endpoint, kind: 'vfarm_leads', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: intake || undefined, outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          throw new HttpError(e.status, e.message);
+        }
+        throw e;
+      }
+    }
+
     if (p === '/api/engine/vfarm-leads') {
       if (method !== 'POST') throw new HttpError(405, 'POST one lead. An upsert on buyer_intake_id, so the same submission twice updates one row.');
       const body = await readJson(req, 256 * 1024);
@@ -1167,6 +1189,17 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     const lead = p.match(/^\/api\/vfarm\/leads\/([^/]+)$/);
     if (lead) {
       const body = await readJson(req);
+      // A stage move (2026-10-03, VFIG) is its own action, never mixed with a
+      // status or notes edit, so the history line says exactly one thing.
+      if (body.stage !== undefined) {
+        try {
+          const by = typeof body.stage_by === 'string' && body.stage_by.trim() ? body.stage_by : 'the dashboard login';
+          return send(res, 200, await earlyAccess.moveStage({ id: decodeURIComponent(lead[1]) }, Number(body.stage), by, typeof body.stage_reason === 'string' ? body.stage_reason : null, 'page'));
+        } catch (e) {
+          if (e instanceof earlyAccess.SubmissionError) throw new HttpError(e.status, e.message);
+          throw e;
+        }
+      }
       const changes: { status?: string; notes?: string | null } = {};
       if (typeof body.status === 'string') changes.status = body.status.trim();
       if (body.notes === null || typeof body.notes === 'string') changes.notes = body.notes === null ? null : String(body.notes);
