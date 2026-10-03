@@ -371,8 +371,13 @@ export default function EarlyAccess({ data, onChange, initialOpen = null }: { da
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 md:px-8">
-        {openLead && <LeadAnswers lead={openLead} onClose={() => setOpenId(null)} onMove={move} />}
+      {/* The table and the pager carry their own side margin; only the lead panel needs one. */}
+      <div className="min-h-0 flex-1 overflow-y-auto pb-8">
+        {openLead && (
+          <div className="px-6 md:px-8">
+            <LeadAnswers lead={openLead} onClose={() => setOpenId(null)} onMove={move} />
+          </div>
+        )}
         <RecordTable
           columns={columns}
           rows={paged.rows}

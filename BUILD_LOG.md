@@ -11143,3 +11143,10 @@ Drill:      North Star restore point 49a9b575. Harmless change (avatar gradient 
 Result:     EVAL-202610030802 (Agent Evals — Runner, execution 25257, started after the North Star rollback): 33 of 33 results, 27 of 27 cases, injection included — the restored North Star (49a9b575) and the other two agents pass clean.
             Quality alert: first check 08:06:10 UTC, nothing due (newest finished run clean, every agent's 24 h delivery and Thin/Failed inside the lines), meta quality_alert.last_error empty. The posting path has not yet had a signal to post; it fires on the first failing run or delivery/thin breach.
             INC-BAYS.AGENT-040 (Monitoring Twin Simulator, SCHEMA_VALIDATION, retrying since 1 Oct) appeared on Engine health once the resync read retrying incidents; closed with close_incidents, audit 1010.
+
+## 2026-10-03 15:20 — Early Access table lined up with its tabs and filters
+Intent:     Destiny's screenshot showed the leads table and its pager indented further than the tabs, stat strip and filters above them.
+Files:      src/screens/VFarm/EarlyAccess.tsx
+Problem:    The scroll wrapper had `px-6 md:px-8`, and Table (`card mx-6 md:mx-8`) and Pagination (`px-6 md:px-8`) carry the same margin themselves, so both were inset twice.
+Fix:        Padding removed from the wrapper; only the lead panel, which has no margin of its own, is wrapped in it.
+Decision:   Fixed at the caller rather than in Table, which every other record page uses unwrapped. Destiny's click test passed: lead 3d9a7f9a moved to Stage 2 at 14:13:39 UTC from the page, history recorded.
