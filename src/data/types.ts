@@ -3671,6 +3671,12 @@ export interface MonitoringIncident {
   opened_at: string;
   closed_at: string | null;
   close_reason: string | null;
+  /** The BHARAG ledger copy (2026-10-03): pending, open, closed or not_sent. */
+  ledger_id: string | null;
+  ledger_state: string;
+  ledger_error: string | null;
+  ledger_attempts: number;
+  ledger_synced_at: string | null;
 }
 export interface MonitoringDevice {
   device_id: string;
@@ -3725,6 +3731,7 @@ export interface MonitoringTwinData {
   states: Record<string, string>;
   farms: MonitoringFarm[];
   profiles: Array<{ profile_id: string; crop: string; current_version: number; versions: MonitoringProfileVersion[] }>;
+  ledger: { lane: string; subsystem: string; configured: boolean; note: string };
   counts: { farms: number; simulated_farms: number; open_incidents: number };
   not_yet: string[];
 }

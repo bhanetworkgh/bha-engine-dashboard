@@ -2413,6 +2413,29 @@ const MIGRATIONS: Migration[] = [
        )`,
     ],
   },
+  {
+    id: 50,
+    name: 'engine_monitoring_incidents: the BHARAG ledger copy of each incident',
+    statements: [
+      /**
+       * 3 Oct 2026, Destiny — UN9D close-out (Jason, 1 Oct): Monitoring Twin
+       * incidents must be durable engine records in BHARAG, not only rows here.
+       * Each incident now carries the ledger's own id once BHARAG accepts it,
+       * where it stands there, and the last refusal word for word. New rows
+       * start `pending`; the four simulator incidents from 1 Oct closed before
+       * this wiring existed and are marked `not_sent` so they are never sent
+       * late as if they were new.
+       */
+      `ALTER TABLE engine_monitoring_incidents
+         ADD COLUMN IF NOT EXISTS ledger_id        text,
+         ADD COLUMN IF NOT EXISTS ledger_state     text NOT NULL DEFAULT 'pending',
+         ADD COLUMN IF NOT EXISTS ledger_error     text,
+         ADD COLUMN IF NOT EXISTS ledger_attempts  integer NOT NULL DEFAULT 0,
+         ADD COLUMN IF NOT EXISTS ledger_synced_at timestamptz`,
+      `UPDATE engine_monitoring_incidents SET ledger_state = 'not_sent', ledger_error = 'closed on 1 Oct 2026, before incidents were written to BHARAG' WHERE closed_at IS NOT NULL AND ledger_id IS NULL`,
+      `CREATE INDEX IF NOT EXISTS engine_monitoring_incidents_ledger ON engine_monitoring_incidents (ledger_state) WHERE ledger_state IN ('pending', 'open')`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

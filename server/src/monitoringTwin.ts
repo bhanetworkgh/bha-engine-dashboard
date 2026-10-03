@@ -36,12 +36,17 @@
  * labelled everywhere, hidden from the vFarm page, and never raise a FEED
  * incident — a test farm going quiet when the test stops is expected.
  *
- * Not done here, and said so on the page: these incidents live in this database;
- * they are not yet written to BHARAG's incident ledger, which this server only
- * reads.
+ * **Every incident is also a BHARAG ledger record** (2026-10-03, Destiny —
+ * Jason's UN9D close-out ask of 1 Oct: "incidents are durable Engine records,
+ * not just dashboard UI state"). `syncLedger` below opens each one in the
+ * ledger after the judging transaction commits, and closes it there when it
+ * clears here. The row keeps the ledger's id, where it stands there, and the
+ * last refusal word for word; a send that fails is retried on the next pass
+ * and is never folded into success.
  */
 import { query, withTransaction, type Queryable } from './pg';
 import * as events from './events';
+import * as bharag from './bharag';
 
 export class TwinError extends Error {
   constructor(
@@ -356,10 +361,151 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
   });
 }
 
+/* ------------------------------------------------- the BHARAG ledger copy */
+
+/**
+ * The lane whose key writes these incidents. The Monitoring Twin is Destiny's
+ * engine runtime (UN9D: RUNTIME_WIRING_PENDING_DESTINY), so they go in on the
+ * Bays (engine) lane, the same key the Bays error handler opens with, under a
+ * subsystem of their own so they never read as an agent failure. The dashboard
+ * holds no vFarm key, and a guessed one would be a 401.
+ */
+export const LEDGER_LANE = 'bays';
+export const LEDGER_SUBSYSTEM = 'MONITORING';
+const LEDGER_CLASS: Record<string, string> = { offline: 'SENSOR_OFFLINE', out_of_range: 'ENVIRONMENT_OUT_OF_RANGE', feed_silent: 'FEED_SILENT' };
+const LEDGER_SEVERITY: Record<string, string> = { warning: 'warning', critical: 'critical' };
+
+type LedgerRow = {
+  incident_id: string;
+  farm_id: string;
+  device_id: string | null;
+  kind: string;
+  metric: string | null;
+  severity: string;
+  detail: string;
+  stage: string | null;
+  synthetic: boolean;
+  closed_at: string | null;
+  close_reason: string | null;
+  ledger_id: string | null;
+  ledger_state: string;
+};
+
+/**
+ * The body the ledger is sent. `payload` carries **only** the keys the error
+ * handlers send (`Compute Incident Payload`), because the ledger's payload
+ * schema refuses any other: farm, device, metric, stage and our own incident id
+ * travel in `failed_node_or_component`, `error_message` and `execution_id`
+ * rather than as new keys.
+ */
+export function ledgerBody(r: LedgerRow) {
+  const where = r.device_id ? `${r.farm_id} / ${r.device_id}` : r.farm_id;
+  const what = r.kind === 'offline' ? 'sensor offline' : r.kind === 'out_of_range' ? `${r.metric ?? 'reading'} out of range` : 'vFarm feed silent';
+  const sim = r.synthetic ? '[SIMULATED] ' : '';
+  return {
+    type: 'INC' as const,
+    subsystem: LEDGER_SUBSYSTEM,
+    source: LEDGER_LANE,
+    severity: LEDGER_SEVERITY[r.severity] ?? 'warning',
+    summary: `${sim}Monitoring Twin / ${where}: ${what}`.slice(0, 200),
+    payload: {
+      lane: LEDGER_LANE,
+      workflow_or_scenario: r.synthetic ? 'Monitoring Twin (simulated farm)' : 'Monitoring Twin',
+      failed_node_or_component: where + (r.metric ? ` · ${r.metric}` : ''),
+      error_class: LEDGER_CLASS[r.kind] ?? 'MONITORING',
+      error_message: `${sim}${r.detail}${r.stage ? ` Stage: ${r.stage}.` : ''} Dashboard incident ${r.incident_id}.`,
+      error_message_original_bytes: null,
+      execution_id: r.incident_id,
+      impact_tags: r.synthetic ? ['vfarm', 'monitoring', 'simulated'] : ['vfarm', 'monitoring'],
+      retry_policy: { retryable: false, max_retries: 0, retry_interval: '5m', retries_attempted: 0 },
+      self_healing_strategy: 'Raised by the Monitoring Twin on the BHA Engine Dashboard. It closes itself in the ledger when the fault clears on the next snapshot or minute check; nothing here is retried.',
+      research_needed: false,
+      research_id: null,
+      commercial_hint: null,
+      resolved_at: null,
+      resolved_by: null,
+    },
+  };
+}
+
+let syncing = false;
+
+/**
+ * Send every incident the ledger does not yet have, and close there every one
+ * that has cleared here. Runs outside the judging transaction, after it
+ * commits, so a slow or refusing ledger never holds the lock or fails a
+ * snapshot. Never throws. A send that fails keeps `pending` (or `open`) with
+ * BHARAG's reason in `ledger_error` and is tried again on the next pass;
+ * `ledger_attempts` counts every try.
+ */
+export async function syncLedger(): Promise<{ opened: number; closed: number; failed: number; skipped: string | null }> {
+  if (syncing) return { opened: 0, closed: 0, failed: 0, skipped: 'a sync is already running' };
+  if (!bharag.laneConfigured(LEDGER_LANE)) return { opened: 0, closed: 0, failed: 0, skipped: `${bharag.LANE_KEY_VARS[LEDGER_LANE]} is not set` };
+  syncing = true;
+  let opened = 0;
+  let closed = 0;
+  let failed = 0;
+  try {
+    const rows = await query<LedgerRow>(
+      `SELECT incident_id, farm_id, device_id, kind, metric, severity, detail, stage, synthetic,
+              to_char(closed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS closed_at, close_reason, ledger_id, ledger_state
+         FROM engine_monitoring_incidents
+        WHERE ledger_state = 'pending' OR (ledger_state = 'open' AND closed_at IS NOT NULL)
+        ORDER BY opened_at
+        LIMIT 50`,
+    );
+    for (const r of rows.rows) {
+      let ledgerId = r.ledger_id;
+      let state = r.ledger_state;
+      try {
+        if (state === 'pending') {
+          const res = await bharag.openIncident(LEDGER_LANE, ledgerBody(r));
+          ledgerId = res.id;
+          state = 'open';
+          opened++;
+          await query(
+            `UPDATE engine_monitoring_incidents SET ledger_id = $2, ledger_state = 'open', ledger_error = NULL, ledger_attempts = ledger_attempts + 1, ledger_synced_at = now() WHERE incident_id = $1`,
+            [r.incident_id, ledgerId],
+          );
+        }
+        if (state === 'open' && r.closed_at && ledgerId) {
+          // The ledger's lifecycle reaches self_healed only through retrying,
+          // the path Self Healer Reports and the recovery watcher take.
+          try {
+            await bharag.markRetrying(LEDGER_LANE, ledgerId);
+          } catch (e) {
+            if (!(e instanceof bharag.BharagError) || !/retrying|transition/i.test(e.message)) throw e;
+          }
+          await bharag.closeIncident(LEDGER_LANE, ledgerId, 'monitoring-twin', r.closed_at, 'self_healed');
+          closed++;
+          await query(
+            `UPDATE engine_monitoring_incidents SET ledger_state = 'closed', ledger_error = NULL, ledger_attempts = ledger_attempts + 1, ledger_synced_at = now() WHERE incident_id = $1`,
+            [r.incident_id],
+          );
+        }
+      } catch (e) {
+        failed++;
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[monitoring-twin] BHARAG ${state === 'pending' ? 'open' : 'close'} of ${r.incident_id} failed: ${msg}`);
+        await query(`UPDATE engine_monitoring_incidents SET ledger_error = $2, ledger_attempts = ledger_attempts + 1, ledger_synced_at = now() WHERE incident_id = $1`, [r.incident_id, msg.slice(0, 500)]);
+      }
+    }
+    if (opened || closed || failed) events.changed('monitoring_twin');
+    return { opened, closed, failed, skipped: null };
+  } catch (e) {
+    console.error(`[monitoring-twin] BHARAG sync failed: ${(e as Error).message}`);
+    return { opened, closed, failed: failed + 1, skipped: null };
+  } finally {
+    syncing = false;
+  }
+}
+
 /** After a snapshot lands. Never throws: a judgement that fails must not fail vFarm's post. */
 export async function afterSnapshot() {
   try {
-    return await evaluate('snapshot');
+    const judged = await evaluate('snapshot');
+    const ledger = await syncLedger();
+    return { ...judged, ledger };
   } catch (e) {
     console.error(`[monitoring-twin] evaluation after a snapshot failed: ${(e as Error).message}`);
     return null;
@@ -372,6 +518,7 @@ export function startWatching() {
     if (running) return;
     running = true;
     evaluate('tick')
+      .then(() => syncLedger())
       .catch((e) => console.error(`[monitoring-twin] minute check failed: ${(e as Error).message}`))
       .finally(() => {
         running = false;
@@ -421,9 +568,10 @@ export async function monitoringData(db: Queryable = { query }) {
     db.query<{ profile_id: string; version: number; previous_version: number | null; crop: string; reason: string; changed_by: string | null; created_at: string; content: { stages: Stage[]; sources?: unknown[] } }>(
       `SELECT profile_id, version, previous_version, crop, reason, changed_by, ${ISO('created_at')} AS created_at, content FROM engine_monitoring_profiles ORDER BY profile_id, version DESC`,
     ),
-    db.query<{ incident_id: string; farm_id: string; device_id: string | null; kind: string; metric: string | null; severity: string; detail: string; first_value: number | null; last_value: number | null; range_min: number | null; range_max: number | null; stage: string | null; synthetic: boolean; opened_at: string; closed_at: string | null; close_reason: string | null; opened_ms: string; closed_ms: string | null }>(
+    db.query<{ incident_id: string; farm_id: string; device_id: string | null; kind: string; metric: string | null; severity: string; detail: string; first_value: number | null; last_value: number | null; range_min: number | null; range_max: number | null; stage: string | null; synthetic: boolean; opened_at: string; closed_at: string | null; close_reason: string | null; ledger_id: string | null; ledger_state: string; ledger_error: string | null; ledger_attempts: number; ledger_synced_at: string | null; opened_ms: string; closed_ms: string | null }>(
       `SELECT incident_id, farm_id, device_id, kind, metric, severity, detail, first_value, last_value, range_min, range_max, stage, synthetic,
               ${ISO('opened_at')} AS opened_at, ${ISO('closed_at')} AS closed_at, close_reason,
+              ledger_id, ledger_state, ledger_error, ledger_attempts, ${ISO('ledger_synced_at')} AS ledger_synced_at,
               (extract(epoch FROM opened_at) * 1000)::bigint::text AS opened_ms, (extract(epoch FROM closed_at) * 1000)::bigint::text AS closed_ms
          FROM engine_monitoring_incidents
         WHERE closed_at IS NULL OR closed_at > now() - interval '7 days'
@@ -517,13 +665,18 @@ export async function monitoringData(db: Queryable = { query }) {
       current_version: versions[0].version,
       versions: versions.map((v) => ({ version: v.version, previous_version: v.previous_version, reason: v.reason, changed_by: v.changed_by, created_at: v.created_at, stages: v.content.stages, sources: v.content.sources ?? [] })),
     })),
+    ledger: {
+      lane: LEDGER_LANE,
+      subsystem: LEDGER_SUBSYSTEM,
+      configured: bharag.laneConfigured(LEDGER_LANE),
+      note: `Every incident is also opened in the BHARAG incident ledger on the ${LEDGER_LANE} (engine) lane, subsystem ${LEDGER_SUBSYSTEM}, and closed there as self_healed when it clears here. Simulated farms' incidents go too, marked [SIMULATED]. Incidents closed before 3 Oct 2026 were never sent and say so.`,
+    },
     counts: {
       farms: farmsOut.filter((f) => !f.synthetic).length,
       simulated_farms: farmsOut.filter((f) => f.synthetic).length,
       open_incidents: farmsOut.reduce((n, f) => n + f.open_incidents.length, 0),
     },
     not_yet: [
-      'Incidents are held here; they are not yet written to the BHARAG incident ledger, which this server only reads.',
       'Thresholds for launch (uptime X%, incident envelope Y, yield N) are Jegan’s to propose from the first real snapshots (IMFX); nothing here is gated on them yet.',
     ],
   };

@@ -182,6 +182,29 @@ export async function closeIncident(lane: string, entityId: string, resolvedBy: 
   });
 }
 
+/**
+ * Open one incident in the ledger (2026-10-03, Destiny — the Monitoring Twin's
+ * incidents, UN9D). The same call the three error handlers' `Open Incident`
+ * node makes: `POST /incidents` with the lane's key and exactly
+ * `{ type, subsystem, source, severity, summary, payload }`. The ledger mints
+ * the id and refuses a caller-supplied one; `payload` is `additionalProperties:
+ * false`, so it carries only the keys the handlers send (see the caller).
+ * Returns the ledger's id, read from `incident.id` or `incident.entity_id`;
+ * throws with BHARAG's code on a refusal, including `INCIDENT_ALREADY_OPEN`.
+ */
+export async function openIncident(
+  lane: string,
+  body: { type: 'INC'; subsystem: string; source: string; severity: string; summary: string; payload: Record<string, unknown> },
+): Promise<{ id: string; raw: unknown }> {
+  const key = keyFor(lane);
+  if (!key) throw new BharagError(`${LANE_KEY_VARS[lane] ?? `a key for ${lane}`} is not set on this server, so no incident can be opened from here.`, 503);
+  const res = await call<Record<string, unknown>>(`/incidents`, key, body);
+  const inc = (res && typeof res === 'object' && res.incident && typeof res.incident === 'object' ? res.incident : res) as Record<string, unknown>;
+  const id = (typeof inc.id === 'string' && inc.id) || (typeof inc.entity_id === 'string' && inc.entity_id) || null;
+  if (!id) throw new BharagError('BHARAG accepted the incident but its answer carried no id, so it cannot be closed from here later.', 0);
+  return { id, raw: res };
+}
+
 /** The ledger's terminal states, from BHARAG's `core/incidents/lifecycle.ts`. */
 export type LedgerTerminal = 'manually_resolved' | 'self_healed' | 'wont_fix';
 

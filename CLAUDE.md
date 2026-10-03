@@ -722,8 +722,10 @@ BHARAG's `GET /api/v1/incidents` is read only, adds no dependency past Node
 itself, and needs **one credential per lane** — the three error handlers each
 hold their own and a key for one lane is refused for another, so it is three
 calls with three keys and cannot be collapsed. `server/src/bharag.ts` is the
-only code that holds them. Nothing here writes to the ledger: the handlers
-create incidents and the healer closes them.
+only code that holds them. The handlers create incidents and the healer closes
+them; **the one exception is the Monitoring Twin** (2026-10-03, Destiny — UN9D),
+whose incidents are opened on the Bays lane, subsystem `MONITORING`, and closed
+there `self_healed` when they clear (`monitoringTwin.syncLedger`).
 
 **An MCP server is mounted on this same service** (decision 2026-09-18,
 Destiny), at `/mcp/:secret` over streamable HTTP, so an external Claude client
