@@ -328,7 +328,12 @@ export async function resync(actor = 'dashboard', opts: { ledgerOnly?: boolean }
     }
     let rows: bharag.LedgerIncident[];
     try {
-      rows = await bharag.openIncidents(lane.key);
+      // Open and retrying both (2026-10-03, Destiny). Read with status=open
+      // alone, an incident the error handler had matched as a repeat (now
+      // `retrying`) never reached this page and could not be closed from it —
+      // INC-BAYS.AGENT-040 sat live in the ledger, seen only by the recovery
+      // watcher. Strict: a retrying read that fails leaves the lane unread.
+      rows = await bharag.liveIncidents(lane.key, true);
     } catch (e) {
       const reason = why(e);
       console.error(`health resync: ${lane.label} incidents could not be read — ${reason}`);

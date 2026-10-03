@@ -450,7 +450,23 @@ export interface Lead {
   form_a: FormAStored | null;
   /** True where this address was already on an earlier row. Computed, never stored. */
   is_repeat_email: boolean;
+  /** 1 = Form A, interest only; 2 = serious buyer, in the follow-up path (2026-10-03). */
+  stage: number;
+  stage_changed_at: string | null;
+  /** Every move, oldest first, never rewritten. */
+  stage_history: StageMove[];
 }
+
+export interface StageMove {
+  from: number;
+  to: number;
+  at: string;
+  by: string;
+  reason: string | null;
+  via: 'page' | 'engine';
+}
+
+export const LEAD_STAGES = [1, 2] as const;
 
 export interface LeadsData {
   leads: Lead[];
@@ -459,6 +475,7 @@ export interface LeadsData {
     last_7_days: number;
     last_30_days: number;
     by_status: Record<string, number>;
+    by_stage: Record<string, number>;
   };
 }
 
@@ -470,12 +487,12 @@ export interface LeadsData {
  * up somewhere it should not be.
  */
 export async function leads(): Promise<LeadsData> {
-  const r = await query<Lead & { created_at: Date; notified_at: Date | null; submitted_at: Date | null; seq: string }>(
+  const r = await query<Omit<Lead, 'stage_changed_at'> & { created_at: Date; notified_at: Date | null; submitted_at: Date | null; stage_changed_at: Date | null; seq: string }>(
     `SELECT id, full_name, email, organization_name, source_surface, source_page, source_campaign,
             page_contract_version, mechanics_contract_version, claim_state, status, notes,
             notified_at, submitted_at, created_at, user_agent,
             utm_source, utm_medium, utm_campaign, asset_id, source_channel,
-            landing_variant, contract_version, form_a,
+            landing_variant, contract_version, form_a, stage, stage_changed_at, stage_history,
             row_number() OVER (PARTITION BY email ORDER BY created_at, id) AS seq
        FROM engine_vfarm_leads
       ORDER BY created_at DESC, id DESC`,
@@ -487,6 +504,8 @@ export async function leads(): Promise<LeadsData> {
     created_at: iso(row.created_at) as string,
     notified_at: iso(row.notified_at),
     submitted_at: iso(row.submitted_at),
+    stage_changed_at: iso(row.stage_changed_at),
+    stage_history: Array.isArray(row.stage_history) ? row.stage_history : [],
     // Row one of an address is the first time it was seen; anything after is a repeat.
     is_repeat_email: Number(row.seq) > 1,
   }));
@@ -496,8 +515,49 @@ export async function leads(): Promise<LeadsData> {
   const by_status: Record<string, number> = {};
   for (const s of LEAD_STATUSES) by_status[s] = 0;
   for (const l of rows) by_status[l.status] = (by_status[l.status] ?? 0) + 1;
+  const by_stage: Record<string, number> = { '1': 0, '2': 0 };
+  for (const l of rows) by_stage[String(l.stage)] = (by_stage[String(l.stage)] ?? 0) + 1;
 
-  return { leads: rows, summary: { total: rows.length, last_7_days: since(7), last_30_days: since(30), by_status } };
+  return { leads: rows, summary: { total: rows.length, last_7_days: since(7), last_30_days: since(30), by_status, by_stage } };
+}
+
+/**
+ * Move a lead between Stage 1 and Stage 2 (2026-10-03, Destiny — VFIG).
+ * Nothing on the row is rewritten but `stage`: its Form A answers stay, and
+ * the move is appended to `stage_history` with who, when, why and through
+ * which door. A move to the stage it is already in is refused rather than
+ * logged as a move that did not happen. Found by the row id, or by Form A's
+ * `buyer_intake_id`, which is what the Stage 2 path will hold.
+ */
+export async function moveStage(
+  key: { id?: string; buyer_intake_id?: string },
+  to: number,
+  by: string,
+  reason: string | null,
+  via: 'page' | 'engine',
+): Promise<Lead> {
+  if (!(LEAD_STAGES as readonly number[]).includes(to)) throw new SubmissionError(422, `"${to}" is not a stage. A lead is in stage 1 (Form A, interest only) or stage 2 (serious buyer, follow-up path).`);
+  const who = by.trim().slice(0, 120);
+  if (!who) throw new SubmissionError(422, 'Say who is moving the lead (by).');
+  const why = reason && reason.trim() ? reason.trim().slice(0, 1000) : null;
+  const where = key.id ? `id = $1` : `form_a->>'buyer_intake_id' = $1`;
+  const val = key.id ?? key.buyer_intake_id;
+  if (!val) throw new SubmissionError(422, 'Name the lead by id or buyer_intake_id.');
+  const cur = await query<{ id: string; stage: number }>(`SELECT id, stage FROM engine_vfarm_leads WHERE ${where}`, [val]);
+  if (!cur.rows.length) throw new SubmissionError(404, `No lead with that ${key.id ? 'id' : 'buyer_intake_id'}.`);
+  if (cur.rows.length > 1) throw new SubmissionError(409, `More than one lead carries that buyer_intake_id: ${cur.rows.map((r) => r.id).join(', ')}.`);
+  const row = cur.rows[0];
+  if (row.stage === to) throw new SubmissionError(409, `That lead is already in stage ${to}.`);
+  const move: StageMove = { from: row.stage, to, at: new Date().toISOString(), by: who, reason: why, via };
+  await query(
+    `UPDATE engine_vfarm_leads SET stage = $2, stage_changed_at = now(), stage_history = stage_history || $3::jsonb WHERE id = $1`,
+    [row.id, to, JSON.stringify([move])],
+  );
+  events.changed('vfarm_leads', row.id);
+  const all = await leads();
+  const updated = all.leads.find((l) => l.id === row.id);
+  if (!updated) throw new SubmissionError(404, 'No lead with that id.');
+  return updated;
 }
 
 /**

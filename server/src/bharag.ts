@@ -227,7 +227,7 @@ export async function markRetrying(lane: string, entityId: string): Promise<Ledg
  * Reports reads both. The `retrying` read is allowed to fail on its own (an
  * older ledger may not filter on it); the `open` read is not.
  */
-export async function liveIncidents(lane: string): Promise<LedgerIncident[]> {
+export async function liveIncidents(lane: string, strict = false): Promise<LedgerIncident[]> {
   const open = await openIncidents(lane);
   const key = keyFor(lane)!;
   let retrying: LedgerIncident[] = [];
@@ -240,7 +240,10 @@ export async function liveIncidents(lane: string): Promise<LedgerIncident[]> {
         ? (['items', 'incidents', 'results', 'data'].map((k) => (body as Record<string, unknown>)[k]).find(Array.isArray) as unknown[] | undefined) ?? []
         : [];
     retrying = (list as LedgerIncident[]).filter((i) => i.resolution_status === 'retrying');
-  } catch {
+  } catch (e) {
+    // The Engine health resync passes strict (2026-10-03): there an unread
+    // `retrying` list would mark every retrying incident closed.
+    if (strict) throw e;
     retrying = [];
   }
   const seen = new Set(open.map((i) => i.entity_id));

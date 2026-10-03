@@ -587,3 +587,8 @@ export const getMediaDoctrine = () => api<DoctrineData>('/api/media-doctrine');
 export function editVfarmLead(id: string, changes: { status?: VfarmLeadStatus; notes?: string | null }): Promise<VfarmLead> {
   return api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}`, { method: 'PATCH', body: changes });
 }
+
+/** Move a lead between Stage 1 and Stage 2 (2026-10-03, VFIG). The move is appended to its history. */
+export function moveVfarmLeadStage(id: string, stage: 1 | 2, reason: string | null): Promise<VfarmLead> {
+  return api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}`, { method: 'PATCH', body: { stage, stage_reason: reason } });
+}
