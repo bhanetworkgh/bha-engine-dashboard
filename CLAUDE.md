@@ -1402,6 +1402,24 @@ writer; one that would write if switched on — `BHA — Dashboard Loop Write-Ba
 (`IOwa36AoQylkenkh`), the one Airtable credential in n8n; 145 references, no
 calls; no Airtable tool on any of the three n8n Agents.
 
+**`engine_events`, the engine's own structured events** (2026-10-03, Destiny —
+LOOP-1791015066302-MG0X, spec SOP-ENGINE-GUARDS-EVENTS-001). Migration 53, one
+append-only table in the shape `engine.event.v1`: `{ event_type, at,
+subject_id, lane, actor, source_ref, detail }`, written only by
+`server/src/engineEvents.ts`. `POST /api/engine/events` (`x-dashboard-key`,
+logged on `engine_writes`) takes one event; a `dedupe_key` already held answers
+200 `recorded: false`, so n8n's retry of a failed HTTP node is one event.
+Two event families today. **`digest_dispatch_succeeded` / `_failed`** are
+posted by n8n's `Bays — Slack Send` from Slack's own answer, for a top-level
+post into #bha-engine-digests or #bha-weekly-checkin whose title names the
+Workspace Digest, Codex Digest or Weekly Report — never by the agent, because
+an event a model has to remember to write is one it will forget on the day the
+dispatch fails. **`lane_blocker_cleared`** is written here, by a sweep every
+five minutes (and beside each `lane_health` call, never awaited), once per lane
+and loop, dated by the loop's own last write. **Lane health itself stays a
+read.** It does not say a digest task never ran: no event for a day is the
+signal, and nothing alerts on it yet.
+
 **The recovery watcher re-runs what failed because a dependency was down**
 (decision 2026-09-23, Destiny — brief D2). `server/src/recovery.ts`. When
 OpenRouter runs out of credit, a Slack or Google login lapses or BHARAG stops

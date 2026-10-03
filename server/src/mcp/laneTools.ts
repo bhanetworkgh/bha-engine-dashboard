@@ -10,6 +10,7 @@
  *
  * North Star reads this order and never computes its own.
  */
+import { sweepClearedBlockers } from '../engineEvents';
 import { query } from '../pg';
 import * as mirror from '../mirror';
 import { DEFINITIONS, WEIGHTS, ranking } from '../laneRanking';
@@ -187,6 +188,8 @@ export const laneHealthTool: ToolDefinition = {
     const laneId = typeof args.lane_id === 'string' && args.lane_id.trim() ? args.lane_id.trim() : undefined;
     const limit = Math.max(1, Math.min(60, Number(args.limit) || 10));
     const h = await laneHealth({ kind: laneId ? 'all' : kind, lane_id: laneId });
+    // The read stays a read: the cleared-blocker event is written beside it, never awaited.
+    void sweepClearedBlockers().catch((e) => console.error(`[engine-events] blocker sweep failed: ${(e as Error).message}`));
     const lanes = h.lanes.slice(0, limit);
     await mirror.logWrite({
       endpoint: 'mcp:lane_health',
