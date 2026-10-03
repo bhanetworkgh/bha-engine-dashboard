@@ -74,9 +74,11 @@ export default function VFarm() {
     (leads: VfarmLead[]) => {
       const by_status: Record<string, number> = { new: 0, contacted: 0, qualified: 0, archived: 0 };
       for (const l of leads) by_status[l.status] = (by_status[l.status] ?? 0) + 1;
+      const by_stage: Record<string, number> = { '1': 0, '2': 0 };
+      for (const l of leads) by_stage[String(l.stage ?? 1)] = (by_stage[String(l.stage ?? 1)] ?? 0) + 1;
       const now = Date.now();
       const since = (days: number) => leads.filter((l) => now - Date.parse(l.created_at) < days * 86_400_000).length;
-      setHeld({ leads, summary: { total: leads.length, last_7_days: since(7), last_30_days: since(30), by_status } });
+      setHeld({ leads, summary: { total: leads.length, last_7_days: since(7), last_30_days: since(30), by_status, by_stage } });
     },
     [],
   );
