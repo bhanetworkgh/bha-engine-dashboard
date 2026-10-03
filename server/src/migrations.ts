@@ -2459,6 +2459,31 @@ const MIGRATIONS: Migration[] = [
        END $$`,
     ],
   },
+  {
+    id: 52,
+    name: 'engine_agent_scorecard: the 3 Oct independent re-score',
+    statements: [
+      /**
+       * 3 Oct 2026, Destiny: an independent agent that had not seen the work
+       * re-scored the engine from live evidence only (read-only), on the same
+       * rubric. Stored as it reported, dimension for dimension, with its evidence.
+       */
+      `INSERT INTO engine_agent_scorecard (scored_on, dimension, name, score, floor, goal, evidence, source) VALUES
+        ('2026-10-03', 1, $v$Governance and inventory$v$, 5, 8, 10, $v$Independent re-score, 3 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_3.md in the BHA Agent project): engine_agent_inventory holds 3 rows read from live config on 2 Oct, with tiers (Bays T3, North Star T2, Research Twin T2) and owner; 3 credentials still sit in personal projects (Hardik x2, Kaiqi x1).$v$, 'rescore'),
+        ('2026-10-03', 2, $v$Agent identity and secrets$v$, 5, 8, 10, $v$Independent re-score, 3 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_3.md in the BHA Agent project): No allowUnauthorizedCerts on any of the 7 BHARAG tools and each agent sends its own bearer credential to /mcp/agent; the BHARAG Cluster and OpenRouter keys are still shared by all three and nothing rotates.$v$, 'rescore'),
+        ('2026-10-03', 3, $v$Tool privilege$v$, 6, 8, 10, $v$Independent re-score, 3 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_3.md in the BHA Agent project): The server refused 34 calls in 7 days, including 6 Bays creates (possible_duplicate) and 1 update (not_permitted) since 30 Sep; Bays still holds 33 non-MCP tools and 25 write tools without approval, Slack_Request included.$v$, 'rescore'),
+        ('2026-10-03', 4, $v$Runtime controls and injection defense$v$, 6, 8, 10, $v$Independent re-score, 3 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_3.md in the BHA Agent project): A forged app_mention with no signature was refused 401 at Bays Front Door (execution 24613, INC-BAYS.AGENT-042, 2 Oct) and injection evals passed 11 of 11 in EVAL-202610030802; only the Bays door has a logged refusal.$v$, 'rescore'),
+        ('2026-10-03', 5, $v$Human oversight$v$, 5, 8, 10, $v$Independent re-score, 3 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_3.md in the BHA Agent project): Approval is still only on delete_record, share_doc and grant_drive_access; Slack_Send_Message, Slack_Request, send_nudge and post_file are ungated, and Bays runs 12 scheduled tasks with 25 unapproved write tools.$v$, 'rescore'),
+        ('2026-10-03', 6, $v$Evaluation and testing$v$, 6, 8, 10, $v$Independent re-score, 3 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_3.md in the BHA Agent project): Two full passes in a row, EVAL-202610021812 and EVAL-202610030802, each 33 of 33 results; the runner is manual and North Star was published on 2 Oct before its run began, so nothing gates a publish.$v$, 'rescore'),
+        ('2026-10-03', 7, $v$Observability$v$, 7, 8, 10, $v$Independent re-score, 3 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_3.md in the BHA Agent project): A quality alert checks every 15 minutes over eval, delivery and thin rates (last check 3 Oct 14:20 UTC, no error) and the Bays ask ledger holds 406 rows; the alert has never posted for real.$v$, 'rescore'),
+        ('2026-10-03', 8, $v$Incident response and recovery$v$, 7, 8, 10, $v$Independent re-score, 3 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_3.md in the BHA Agent project): 82 of 82 incidents carry resolved_at and resolved_by, with time to resolve p50 3 min and p95 269 min over n=16; 77 of the 82 are backfilled as not recorded and the window is under a week.$v$, 'rescore'),
+        ('2026-10-03', 9, $v$Change and rollback$v$, 6, 8, 10, $v$Independent re-score, 3 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_3.md in the BHA Agent project): North Star's version history shows 95d3b6de published 3 Oct 08:02:05 and 49a9b575 active again, then a clean eval run, beside 9 bridge auto-reverts; still one author and no eval gate before publish.$v$, 'rescore'),
+        ('2026-10-03', 10, $v$Reliability and handoffs$v$, 6, 8, 10, $v$Independent re-score, 3 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_3.md in the BHA Agent project): 98.7% of 7,047 runs succeeded in 7 days; Research Twin Agent Delivery is at 68.2% (n=22), Builder Chasers 84.6% (n=123) and the Monitoring Twin Simulator 53.3% (n=30); no durable resume.$v$, 'rescore'),
+        ('2026-10-03', 11, $v$Cost and capacity$v$, 6, 8, 10, $v$Independent re-score, 3 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_3.md in the BHA Agent project): Engine — OpenRouter Credit Alert has run 20 times on its 3-hour schedule and the quota is at 1,607 of 50,000 (3.2%); no per-agent spend and no real credit alert posted yet.$v$, 'rescore'),
+        ('2026-10-03', 12, $v$Data governance and retention$v$, 5, 7, 10, $v$Independent re-score, 3 Oct 2026 (claude/Agent_Maturity_Rescore_Oct_3.md in the BHA Agent project): The BHARAG guard logged 182 allowed, 0 refused and 0 redacted; retention last ran 29 Sep and cleared 0 rows; no Research Twin guard rows, 1 North Star row against 68 asks, and n8n agent memory is not covered.$v$, 'rescore')
+       ON CONFLICT (scored_on, dimension) DO NOTHING`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
