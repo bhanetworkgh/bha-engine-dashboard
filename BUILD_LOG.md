@@ -11150,3 +11150,10 @@ Files:      src/screens/VFarm/EarlyAccess.tsx
 Problem:    The scroll wrapper had `px-6 md:px-8`, and Table (`card mx-6 md:mx-8`) and Pagination (`px-6 md:px-8`) carry the same margin themselves, so both were inset twice.
 Fix:        Padding removed from the wrapper; only the lead panel, which has no margin of its own, is wrapped in it.
 Decision:   Fixed at the caller rather than in Table, which every other record page uses unwrapped. Destiny's click test passed: lead 3d9a7f9a moved to Stage 2 at 14:13:39 UTC from the page, history recorded.
+
+## 2026-10-03 15:35 — Agent maturity: the 3 Oct independent re-score (migration 52)
+Intent:     Destiny noticed the Agent maturity page still showed the 1 Oct scoring. The scores only change when a re-score is recorded, and nothing from 2 or 3 Oct had been scored.
+Files:      server/src/migrations.ts
+Problem:    None in code. The page was right about what was stored.
+Fix:        A separate agent that had not seen the work re-scored from live evidence, read-only, on the same rubric: 5.8 (1 Oct 5.3). Seven dimensions up one point (1, 2, 4, 6, 7, 8, 9), none down; the floor is 5, shared by governance, identity, oversight and data governance. Stored as reported, dimension for dimension. Report: claude/Agent_Maturity_Rescore_Oct_3.md in the BHA Agent project.
+Decision:   Stored as the assessor reported it, including where it marked a thing unverified. Its note that Monitoring Twin incidents were not reaching BHARAG was read from this log before the subsystem was registered; both went through at 14:07 UTC (INC-BAYS.MONITORING-001 and -002). Left for the next re-score to read, not edited into this one.
