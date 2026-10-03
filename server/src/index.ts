@@ -54,6 +54,7 @@ import * as earlyAccess from './earlyAccess';
 import * as systemFeeds from './systemFeeds';
 import * as dataGovernance from './dataGovernance';
 import * as monitoringTwin from './monitoringTwin';
+import * as qualityAlert from './qualityAlert';
 import * as candidateActions from './candidateActions';
 import * as patternDraft from './patternDraft';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
@@ -598,6 +599,17 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         dry_run: b.dry_run === true,
       });
       return send(res, 200, { ok: true, ...g });
+    }
+    /**
+     * The quality alert on demand (2026-10-03): what it would post now, or a
+     * real check with { dry_run: false }. Same key and log as every engine write.
+     */
+    if (p === '/api/engine/quality-alert/check') {
+      if (method !== 'POST') throw new HttpError(405, 'POST { dry_run }. dry_run defaults to true.');
+      const b = await readJson(req, 4 * 1024);
+      const r = await qualityAlert.check(b.dry_run !== false);
+      await mirror.logWrite({ endpoint, kind: 'quality_alert', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `${r.would_post.length} due, ${r.posted.length} posted, ${r.failed.length} failed`, ms: Date.now() - t0 });
+      return send(res, 200, { ok: true, ...r });
     }
     if (p === '/api/engine/retention/run') {
       if (method !== 'POST') throw new HttpError(405, 'POST { dry_run, as_of }. as_of is accepted only with dry_run: true.');
@@ -1980,6 +1992,7 @@ async function boot(): Promise<void> {
     recovery.startWatching();
     dataGovernance.startRetention();
     monitoringTwin.startWatching();
+    qualityAlert.startWatching();
     health.startLedgerPolling();
   });
 }
