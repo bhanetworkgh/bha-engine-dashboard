@@ -222,6 +222,7 @@ function IncidentTable({ rows, title, showFarm }: { rows: MonitoringIncident[]; 
               <Th>stage</Th>
               <Th>opened (UTC)</Th>
               <Th>closed</Th>
+              <Th>BHARAG ledger</Th>
             </tr>
           </thead>
           <tbody>
@@ -239,12 +240,28 @@ function IncidentTable({ rows, title, showFarm }: { rows: MonitoringIncident[]; 
                 <td className="td text-dim">{i.stage ?? '—'}</td>
                 <td className="td tabular whitespace-nowrap text-dim">{when(i.opened_at)}</td>
                 <td className="td whitespace-nowrap text-dim">{i.closed_at ? `${when(i.closed_at)} · ${i.close_reason ?? ''}` : <Pill tone="degraded">open</Pill>}</td>
+                <td className="td whitespace-nowrap text-dim" title={i.ledger_error ?? undefined}>
+                  <LedgerCell i={i} />
+                </td>
               </tr>
             ))}
           </tbody>
         </TableFrame>
       )}
     </Card>
+  );
+}
+
+/** Where the incident stands in BHARAG. A send that failed says so in red, with BHARAG's reason on hover. */
+function LedgerCell({ i }: { i: MonitoringIncident }) {
+  if (i.ledger_state === 'not_sent') return <span>not sent (before 3 Oct)</span>;
+  if (i.ledger_state === 'pending')
+    return i.ledger_error ? <span className="text-failing">not accepted yet · {i.ledger_error}</span> : <span>sending…</span>;
+  return (
+    <span>
+      {i.ledger_id ? <RecordId>{i.ledger_id}</RecordId> : '—'} · {i.ledger_state}
+      {i.ledger_error && <span className="ml-1 text-failing">· {i.ledger_error}</span>}
+    </span>
   );
 }
 
@@ -255,6 +272,7 @@ function Incidents({ data }: { data: MonitoringTwinData }) {
     <>
       <IncidentTable rows={open} title="Open" showFarm />
       <IncidentTable rows={closed} title="Closed in the last 7 days" showFarm />
+      <p className="px-1 text-[12px] text-faint">{data.ledger?.note}</p>
     </>
   );
 }
