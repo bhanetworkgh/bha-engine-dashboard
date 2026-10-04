@@ -11264,3 +11264,10 @@ Found, not fixed: Read-only checks of the four workflows the re-score called unr
             Slack_Send_Message and Post_Loop_Digest have no guard on the destination. Slack_Request is a deny-list: it cannot post, but reactions, pins, bookmarks and similar pass.
             Three credentials are still in personal projects: Hardik's "Google Sheets account 2" and "BHA Slack API", Kaiqi's "Gmail account".
             DASHBOARD_INBOUND_KEY is in plaintext in execution data of several workflows (the simulator, the eval runner's Summarise Run). Rotation is still to do.
+
+## 2026-10-04 22:10 — The inventory counts the dashboard's own approval gate
+Intent:     After today's re-record the inventory said Bays had 0 tools behind approval, on the day three of them were put behind a person. n8n's config no longer carries an approval setting for share_doc, grant_drive_access and delete_record; the gate is in approvals.ts, which the tier derivation could not see.
+Files:      server/src/agentInventory.ts (server_gated on an MCP server; GATED_TOOLS counted as approval where the server is this dashboard's /mcp/agent on a bearer token; rederiveStored), server/src/index.ts (re-derive once at boot), CLAUDE.md
+Fix:        The three gated tools are added to the server's `approval` list and named in `server_gated`, only for a call path the gate really covers. rederiveStored() derives tools, MCP scope and tier again from each row's stored `raw` config and writes those four columns only; read_at, the hash and the version are untouched, because nothing was re-read from n8n.
+Decision:   Re-deriving from the stored config rather than re-reading n8n: the agents did not change, the derivation did, and passing a 130,000-character config back through MCP to learn nothing new is the slow and error-prone way to say so. Bays stays T3: it still has write tools with no approval and scheduled tasks.
+Tests:      Type-checked. derive() tried by hand on a sample config: the gated tools count on /mcp/agent with bearerAuth and do not count on any other path.

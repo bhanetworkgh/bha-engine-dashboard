@@ -57,6 +57,7 @@ import * as monitoringTwin from './monitoringTwin';
 import * as qualityAlert from './qualityAlert';
 import * as engineEvents from './engineEvents';
 import * as approvals from './approvals';
+import * as agentInventory from './agentInventory';
 import * as candidateActions from './candidateActions';
 import * as patternDraft from './patternDraft';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
@@ -2081,6 +2082,7 @@ async function boot(): Promise<void> {
     qualityAlert.startWatching();
     engineEvents.startSweeping();
     approvals.startSweeping();
+    void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();
   });
 }

@@ -28,6 +28,7 @@ import { createHash } from 'node:crypto';
 import { nowIso } from './db';
 import { query } from './pg';
 import { mcpWriteToolNames } from './mcp/tools';
+import { GATED_TOOLS } from './approvals';
 
 export const STALE_AFTER_DAYS = 7;
 
@@ -57,6 +58,15 @@ export interface InventoryMcpServer {
   token_in: 'header' | 'url path' | 'none' | 'other';
   tools: string[];
   approval: string[];
+  /**
+   * Of `approval`, the tools held by **this server's** approval card rather
+   * than by n8n's own approval setting (4 Oct 2026). n8n's setting cannot run
+   * for an agent called from a workflow, so share_doc, grant_drive_access and
+   * delete_record are gated in `approvals.ts` for any call on an agent token.
+   * The n8n config says nothing about that gate, so without this the inventory
+   * read "0 behind approval" for tools that cannot run without a person.
+   */
+  server_gated?: string[];
 }
 
 export interface InventoryTask {
@@ -159,9 +169,15 @@ export function derive(result: Dict, opts: { owner?: string | null; recordedBy?:
     const filter = dict(m.toolFilter);
     const approval = dict(m.approval);
     const allowed = str(filter.mode) === 'allow' ? strs(filter.tools) : [];
-    const approved = str(approval.mode) === 'global' ? allowed : strs(approval.tools);
+    const n8nApproved = str(approval.mode) === 'global' ? allowed : strs(approval.tools);
     const auth = str(m.authentication) ?? 'none';
     const url = str(m.url) ?? '';
+    // The server-side gate holds only for a call on an agent token, which is
+    // this dashboard's /mcp/agent with a bearer header. Any other host or
+    // path is not this server's gate and is not counted.
+    const onAgentToken = /^https:\/\/(dashboard\.bhanetwork\.org|bha-engine-dashboard\.onrender\.com)\/mcp\/agent\/?$/.test(url) && auth === 'bearerAuth';
+    const serverGated = onAgentToken ? allowed.filter((tn) => GATED_TOOLS.includes(tn) && !n8nApproved.includes(tn)) : [];
+    const approved = [...n8nApproved, ...serverGated];
     const mname = str(m.name) ?? 'mcp';
     if (str(m.credential)) credentials.push({ id: str(m.credential), name: `${mname} (${auth})`, type: auth });
     mcpServers.push({
@@ -171,6 +187,7 @@ export function derive(result: Dict, opts: { owner?: string | null; recordedBy?:
       token_in: auth === 'bearerAuth' || auth === 'headerAuth' || auth === 'multipleHeadersAuth' ? 'header' : /\/mcp\/[0-9a-f]{20,}/i.test(url) ? 'url path' : auth === 'none' ? 'none' : 'other',
       tools: allowed,
       approval: approved,
+      server_gated: serverGated,
     });
     for (const tn of allowed) {
       tools.push({ name: tn, type: 'mcp', via: mname, writes: writeNames.has(tn), writes_rule: 'server registry', approval: approved.includes(tn) });
@@ -276,6 +293,40 @@ export async function record(result: Dict, opts: { owner?: string | null; record
     ],
   );
   return { row: r.rows[0], outcome: !prev ? 'inserted' : same ? 'unchanged' : 'updated' };
+}
+
+/**
+ * Derive the tools, MCP scope and tier again from the config each row already
+ * holds (4 Oct 2026). For when the **derivation** changes and n8n has not:
+ * the server-side approval gate made three tools approval-gated without a
+ * byte of any agent's config changing, and re-reading a 130,000-character
+ * config through MCP to learn nothing new is the wrong way to say so.
+ * Nothing is re-read from n8n, so `read_at`, the hash and the version are left
+ * exactly as they are. Never throws.
+ */
+export async function rederiveStored(): Promise<{ rows: number; changed: number }> {
+  let changed = 0;
+  let rows = 0;
+  try {
+    const held = await query<{ agent_id: string; raw: Dict | null; owner: string | null; recorded_by: string | null; read_at: string; tools: unknown; mcp_servers: unknown; autonomy_tier: string; tier_reason: string | null }>(
+      `SELECT agent_id, raw, owner, recorded_by, read_at, tools, mcp_servers, autonomy_tier, tier_reason FROM engine_agent_inventory`,
+    );
+    rows = held.rows.length;
+    for (const r of held.rows) {
+      if (!r.raw || typeof r.raw !== 'object') continue;
+      const d = derive(r.raw, { owner: r.owner, recordedBy: r.recorded_by, readAt: r.read_at });
+      if (d.agent_id !== r.agent_id) continue;
+      const same = JSON.stringify(r.tools) === JSON.stringify(d.tools) && JSON.stringify(r.mcp_servers) === JSON.stringify(d.mcp_servers) && r.autonomy_tier === d.autonomy_tier && r.tier_reason === d.tier_reason;
+      if (same) continue;
+      await query(`UPDATE engine_agent_inventory SET tools = $2::jsonb, mcp_servers = $3::jsonb, autonomy_tier = $4, tier_reason = $5, updated_at = $6 WHERE agent_id = $1`, [
+        r.agent_id, JSON.stringify(d.tools), JSON.stringify(d.mcp_servers), d.autonomy_tier, d.tier_reason, nowIso(),
+      ]);
+      changed++;
+    }
+  } catch (e) {
+    console.error(`[agent-inventory] re-derive from stored config failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return { rows, changed };
 }
 
 export interface InventoryView {
