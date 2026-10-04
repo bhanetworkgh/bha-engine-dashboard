@@ -2556,6 +2556,39 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_approvals_status ON engine_approvals (status, created_at DESC)`,
     ],
   },
+  {
+    id: 55,
+    name: 'engine_monitoring_recurrences: a repeating incident becomes one Research Twin job',
+    statements: [
+      /**
+       * 4 Oct 2026, Destiny. The rule from the 3 Oct Twin alignment note: the
+       * same incident class 3 or more times in 7 days on the same device or
+       * farm is a pattern and opens one Research Twin job, never one per
+       * incident. One row per pattern per window: what recurred, how often,
+       * which incidents, and the job it opened (or why it did not: a
+       * simulated farm, or a write that failed and is being retried).
+       */
+      `CREATE TABLE IF NOT EXISTS engine_monitoring_recurrences (
+         id           bigserial PRIMARY KEY,
+         pattern_key  text NOT NULL,
+         farm_id      text NOT NULL,
+         device_id    text,
+         kind         text NOT NULL,
+         metric       text,
+         synthetic    boolean NOT NULL DEFAULT false,
+         incidents    integer NOT NULL,
+         incident_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+         first_at     timestamptz NOT NULL,
+         last_at      timestamptz NOT NULL,
+         detected_at  timestamptz NOT NULL DEFAULT now(),
+         job_state    text NOT NULL CHECK (job_state IN ('pending', 'opened', 'not_opened_simulated', 'failed')),
+         job_id       text,
+         job_error    text,
+         job_attempts integer NOT NULL DEFAULT 0
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_monitoring_recurrences_key ON engine_monitoring_recurrences (pattern_key, detected_at DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
