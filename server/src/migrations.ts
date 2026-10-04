@@ -2610,6 +2610,24 @@ const MIGRATIONS: Migration[] = [
         WHERE pattern_key NOT LIKE 'MONITORING|%'`,
     ],
   },
+  {
+    id: 57,
+    name: 'engine_monitoring_recurrences: remove the rows the old instance wrote during the migration 56 deploy',
+    statements: [
+      /**
+       * 4 Oct 2026. While migration 56's deploy was going live, the instance
+       * still running the old code swept once more (19:14:57 UTC), did not
+       * find its old-format keys because 56 had just re-keyed them, and
+       * recorded both simulated patterns a second time under the old key
+       * (farm|device|kind|metric: three bars, where the Canon key has two).
+       * They are duplicates of rows that exist, on a simulated farm, with no
+       * job. Removed so the read shows each pattern once. Their two
+       * `monitoring_recurrence_detected` events stay: that table is
+       * append-only.
+       */
+      `DELETE FROM engine_monitoring_recurrences WHERE pattern_key ~ '^[^|]*[|][^|]*[|][^|]*[|][^|]*$'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
