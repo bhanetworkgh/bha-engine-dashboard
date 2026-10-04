@@ -48,6 +48,7 @@ import { query, withTransaction, type Queryable } from './pg';
 import * as events from './events';
 import * as bharag from './bharag';
 import * as recurrence from './monitoringRecurrence';
+import * as mirror from './mirror';
 
 export class TwinError extends Error {
   constructor(
@@ -429,6 +430,43 @@ export function ledgerBody(r: LedgerRow) {
   };
 }
 
+/**
+ * Engine health's copy of a monitoring incident (2026-10-04, Destiny — the
+ * downstream reader for UN9D path 2). Engine health reads the ledger every
+ * three minutes and only what is live at that moment, so an incident that
+ * opened and cleared between two reads never reached it: on the 4 Oct dry run
+ * a 15-second incident was in the ledger and on no page but this twin's. So
+ * the row is written into `engine_incidents` here, at the moment the ledger
+ * takes it, through the same `mirror.upsert` the ledger poll uses, and marked
+ * closed here when the ledger closes it. Same ledger id on both pages.
+ * Never throws: a copy that fails is logged, and the poll still catches any
+ * incident open long enough to be read.
+ */
+async function copyToHealth(r: LedgerRow, ledgerId: string, raw: unknown): Promise<void> {
+  try {
+    const res = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+    const inc = (res.incident && typeof res.incident === 'object' ? res.incident : res) as Record<string, unknown>;
+    const fields = { ...ledgerBody(r), resolution_status: 'open', created_at: new Date().toISOString(), ...inc, entity_id: ledgerId };
+    await mirror.upsert('incidents', { fields, lane_id: LEDGER_LANE }, 'engine');
+    await query(`UPDATE engine_incidents SET open_now = true, last_seen_open = $2 WHERE natural_id = $1`, [ledgerId, new Date().toISOString()]);
+    events.changed('incidents');
+  } catch (e) {
+    console.error(`[monitoring-twin] Engine health copy of ${ledgerId} (${r.incident_id}) was not written: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+async function closeOnHealth(r: LedgerRow, ledgerId: string): Promise<void> {
+  try {
+    await query(
+      `UPDATE engine_incidents SET open_now = false, resolved_at = COALESCE(resolved_at, $2), resolved_by = COALESCE(resolved_by, $3) WHERE natural_id = $1`,
+      [ledgerId, r.closed_at, `monitoring-twin (${r.close_reason ?? 'the fault cleared'})`],
+    );
+    events.changed('incidents');
+  } catch (e) {
+    console.error(`[monitoring-twin] Engine health copy of ${ledgerId} (${r.incident_id}) was not marked closed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 let syncing = false;
 
 /**
@@ -468,6 +506,7 @@ export async function syncLedger(): Promise<{ opened: number; closed: number; fa
             `UPDATE engine_monitoring_incidents SET ledger_id = $2, ledger_state = 'open', ledger_error = NULL, ledger_attempts = ledger_attempts + 1, ledger_synced_at = now() WHERE incident_id = $1`,
             [r.incident_id, ledgerId],
           );
+          await copyToHealth(r, ledgerId, res.raw);
         }
         if (state === 'open' && r.closed_at && ledgerId) {
           // The ledger's lifecycle reaches self_healed only through retrying,
@@ -483,6 +522,7 @@ export async function syncLedger(): Promise<{ opened: number; closed: number; fa
             `UPDATE engine_monitoring_incidents SET ledger_state = 'closed', ledger_error = NULL, ledger_attempts = ledger_attempts + 1, ledger_synced_at = now() WHERE incident_id = $1`,
             [r.incident_id],
           );
+          await closeOnHealth(r, ledgerId);
         }
       } catch (e) {
         failed++;
@@ -559,8 +599,8 @@ export async function monitoringData(db: Queryable = { query }) {
     db.query<{ farm_id: string; name: string | null; code: string | null; snapshot_at: string; synthetic: boolean }>(
       `SELECT farm_id, name, code, ${ISO('snapshot_at')} AS snapshot_at, coalesce((fields->>'synthetic')::boolean, false) AS synthetic FROM engine_vfarm_farms ORDER BY synthetic, name NULLS LAST`,
     ),
-    db.query<{ device_id: string; farm_id: string; place: string | null; device_type: string | null; model: string | null; latest: unknown; last_reading_at: string | null; state: string | null; since: string | null; age_s: number | null; checks: Check[] | null; evaluated_at: string | null }>(
-      `SELECT d.device_id, d.farm_id, d.place, d.device_type, d.model, d.latest, ${ISO('d.last_reading_at')} AS last_reading_at,
+    db.query<{ device_id: string; farm_id: string; place: string | null; device_type: string | null; model: string | null; latest: unknown; last_reading_at: string | null; last_seen_at: string | null; state: string | null; since: string | null; age_s: number | null; checks: Check[] | null; evaluated_at: string | null }>(
+      `SELECT d.device_id, d.farm_id, d.place, d.device_type, d.model, d.latest, ${ISO('d.last_reading_at')} AS last_reading_at, ${ISO('d.last_seen_at')} AS last_seen_at,
               s.state, ${ISO('s.since')} AS since, s.age_s, s.checks, ${ISO('s.evaluated_at')} AS evaluated_at
          FROM engine_vfarm_devices d LEFT JOIN engine_monitoring_device_state s ON s.device_id = d.device_id
         ORDER BY d.farm_id, d.device_id`,
@@ -637,14 +677,15 @@ export async function monitoringData(db: Queryable = { query }) {
         model: d.model,
         latest: d.latest,
         last_reading_at: d.last_reading_at,
+        last_seen_at: d.last_seen_at,
         state: d.state,
         since: d.since,
         age_s: d.age_s,
         checks: d.checks ?? [],
         evaluated_at: d.evaluated_at,
       })),
-      open_incidents: inc.filter((i) => !i.closed_at).map(({ opened_ms, closed_ms, ...i }) => i),
-      recent_incidents: inc.filter((i) => i.closed_at).slice(0, 50).map(({ opened_ms, closed_ms, ...i }) => i),
+      open_incidents: inc.filter((i) => !i.closed_at).map(({ opened_ms, closed_ms, ...i }) => ({ ...i, canonical_id: i.ledger_id })),
+      recent_incidents: inc.filter((i) => i.closed_at).slice(0, 50).map(({ opened_ms, closed_ms, ...i }) => ({ ...i, canonical_id: i.ledger_id })),
       last_evaluated_at: w?.last_evaluated_at ?? null,
     };
   });
@@ -674,6 +715,8 @@ export async function monitoringData(db: Queryable = { query }) {
       subsystem: LEDGER_SUBSYSTEM,
       configured: bharag.laneConfigured(LEDGER_LANE),
       note: `Every incident is also opened in the BHARAG incident ledger on the ${LEDGER_LANE} (engine) lane, subsystem ${LEDGER_SUBSYSTEM}, and closed there as self_healed when it clears here. Simulated farms' incidents go too, marked [SIMULATED]. Incidents closed before 3 Oct 2026 were never sent and say so.`,
+      identity: 'One incident, one canonical id: the ledger id (INC-BAYS.MONITORING-nnn), given here as canonical_id and ledger_id, and the id Engine health shows. incident_id (INC-VFARM…) is this twin\'s own reference for the same incident; the ledger carries it as execution_id. canonical_id is null only until the ledger has taken the incident.',
+      downstream: 'Engine health holds every incident the ledger took, written at the moment it was opened and marked closed when it clears, under the same ledger id.',
     },
     recurrence: await recurrence.recent(),
     counts: {

@@ -162,6 +162,7 @@ function FarmCard({ f }: { f: MonitoringFarm }) {
                 <Th>type</Th>
                 <Th>state</Th>
                 <Th>reading age</Th>
+                <Th>last report</Th>
                 <Th>readings against target</Th>
               </tr>
             </thead>
@@ -180,6 +181,9 @@ function FarmCard({ f }: { f: MonitoringFarm }) {
                     {d.since && <span className="ml-1.5 text-[11px] text-faint">since {relativeTime(d.since) ?? '—'}</span>}
                   </td>
                   <td className="td tabular text-dim">{ago(d.age_s)}</td>
+                  <td className="td tabular text-dim" title={d.last_seen_at ?? undefined}>
+                    {d.last_seen_at ? (relativeTime(d.last_seen_at) ?? d.last_seen_at) : <span className="text-faint">not sent</span>}
+                  </td>
                   <td className="td text-[12px]">
                     {d.checks.length === 0 ? (
                       <span className="text-faint">{d.state === 'LIVE' || d.state === 'STALE' ? (targets ? 'no reading with a target' : 'no stage targets') : 'not judged'}</span>

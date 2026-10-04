@@ -2589,6 +2589,27 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_monitoring_recurrences_key ON engine_monitoring_recurrences (pattern_key, detected_at DESC)`,
     ],
   },
+  {
+    id: 56,
+    name: 'engine_monitoring_recurrences: a pattern is subsystem + place + incident class (Canon v1)',
+    statements: [
+      /**
+       * 4 Oct 2026, Destiny. Jason's Canon decision of the same day groups a
+       * pattern by subsystem + place (the farm) + incident class, not by
+       * device, so the row gains the subsystem and every device the pattern
+       * touched. Rows already held are re-keyed to the new shape so the next
+       * pass updates them rather than detecting the same pattern twice.
+       * `device_id` stays, and holds the device only where the pattern sits on
+       * exactly one.
+       */
+      `ALTER TABLE engine_monitoring_recurrences ADD COLUMN IF NOT EXISTS subsystem text NOT NULL DEFAULT 'MONITORING'`,
+      `ALTER TABLE engine_monitoring_recurrences ADD COLUMN IF NOT EXISTS device_ids jsonb NOT NULL DEFAULT '[]'::jsonb`,
+      `UPDATE engine_monitoring_recurrences
+          SET device_ids = CASE WHEN device_id IS NULL THEN '[]'::jsonb ELSE jsonb_build_array(device_id) END,
+              pattern_key = subsystem || '|' || farm_id || '|' || kind || CASE WHEN metric IS NULL THEN '' ELSE ':' || metric END
+        WHERE pattern_key NOT LIKE 'MONITORING|%'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
