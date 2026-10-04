@@ -47,6 +47,7 @@
 import { query, withTransaction, type Queryable } from './pg';
 import * as events from './events';
 import * as bharag from './bharag';
+import * as recurrence from './monitoringRecurrence';
 
 export class TwinError extends Error {
   constructor(
@@ -505,7 +506,9 @@ export async function afterSnapshot() {
   try {
     const judged = await evaluate('snapshot');
     const ledger = await syncLedger();
-    return { ...judged, ledger };
+    // After the ledger, so a job's context can carry each incident's ledger id.
+    const recurring = await recurrence.sweep();
+    return { ...judged, ledger, recurring };
   } catch (e) {
     console.error(`[monitoring-twin] evaluation after a snapshot failed: ${(e as Error).message}`);
     return null;
@@ -519,6 +522,7 @@ export function startWatching() {
     running = true;
     evaluate('tick')
       .then(() => syncLedger())
+      .then(() => recurrence.sweep())
       .catch((e) => console.error(`[monitoring-twin] minute check failed: ${(e as Error).message}`))
       .finally(() => {
         running = false;
@@ -671,6 +675,7 @@ export async function monitoringData(db: Queryable = { query }) {
       configured: bharag.laneConfigured(LEDGER_LANE),
       note: `Every incident is also opened in the BHARAG incident ledger on the ${LEDGER_LANE} (engine) lane, subsystem ${LEDGER_SUBSYSTEM}, and closed there as self_healed when it clears here. Simulated farms' incidents go too, marked [SIMULATED]. Incidents closed before 3 Oct 2026 were never sent and say so.`,
     },
+    recurrence: await recurrence.recent(),
     counts: {
       farms: farmsOut.filter((f) => !f.synthetic).length,
       simulated_farms: farmsOut.filter((f) => f.synthetic).length,

@@ -1143,6 +1143,24 @@ parser routes on `body.event.type`, so a forged mention with no `type` walked
 past the gate until 2 Oct (production proof: execution 24613 → refused 401 →
 INC-BAYS.AGENT-042; real traffic five seconds later passed).
 
+**A monitoring incident that keeps coming back opens one Research Twin job**
+(2026-10-04, Destiny). `server/src/monitoringRecurrence.ts`, migration 55,
+`engine_monitoring_recurrences`. The rule from the 3 Oct Twin alignment note:
+the same incident class (the twin's own fault key: farm, device, kind, metric)
+**3 or more times in 7 days** is a pattern, and gets **one job for the
+pattern, never one per incident**. The sweep runs after every judging pass and
+ledger sync. A pattern is recorded once per 7 days; further incidents only
+raise its count. The job is a Pending `rt-jobs` row, `Opened By: Monitoring
+Twin`, written through `engineWrite.postRecord`, with every incident and its
+ledger id in the context. **A simulated farm's pattern is recorded and opens
+no job** (`not_opened_simulated`). A job that cannot be written is `failed`
+with the reason and retried every pass. Each detection is one
+`monitoring_recurrence_detected` row in `engine_events`. The Monitoring Twin
+read (`recurrence`) shows the rule and the last 30 days of patterns. **Not
+built**: a job when a reading is out of a range whose source is unconfirmed
+(pH, EC, CO2 in tomato profile v1) — the profile has no confirmed flag to
+decide it from. `npm run test:monitoring-recurrence` pins it.
+
 **A person approves before an agent shares, grants or deletes** (decision
 2026-10-04, Destiny — LOOP-1790969736142-8185). `server/src/approvals.ts`,
 migration 54, `engine_approvals`. n8n's own tool approval suspends the agent,
