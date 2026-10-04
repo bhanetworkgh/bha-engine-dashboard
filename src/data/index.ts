@@ -65,6 +65,7 @@ import type {
   RepairsData,
   RecoveryData,
   McpWritesData,
+  ApprovalsData,
   RecoveryRerunResult,
   RetryMetrics,
   RetryResult,
@@ -286,6 +287,9 @@ export const closeIncidents = (ids: string[]) =>
 
 /** Every call to an MCP write tool, newest first (2026-09-24). */
 export const getMcpWrites = () => api<McpWritesData>('/api/engine-health/mcp-writes');
+
+/** Every request an agent made that waited for a person, newest first (2026-10-04). */
+export const getApprovals = () => api<ApprovalsData>('/api/engine-health/approvals');
 
 /** The recovery watcher (2026-09-23): what waits on a dependency, the last probe and the last batch. */
 export const getRecovery = () => api<RecoveryData>('/api/engine-health/recovery');
