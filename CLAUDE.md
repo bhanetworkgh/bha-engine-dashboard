@@ -1130,7 +1130,13 @@ it on the write connection and not the read one (`tools.mcpWriteToolNames`);
 a node or workflow tool by a verb in its name, and the row says which rule
 decided. The Agent maturity page shows the table and marks a row stale after
 seven days; the owner is declared by the recorder. Unchanged when the config
-hash, tools, MCP scope and tasks all match.
+hash, tools, MCP scope and tasks all match. **A tool held by this server's
+approval card counts as behind approval** (2026-10-04): n8n's config says
+nothing about the gate in `approvals.ts`, so for an MCP server that is this
+dashboard's `/mcp/agent` on a bearer token the three `GATED_TOOLS` are added to
+`approval` and named in `server_gated`. `rederiveStored()` runs at boot and
+derives tools, MCP scope and tier again from the `raw` config each row already
+holds, changing nothing else — for when the derivation changes and n8n has not.
 
 **Agent identity, 2 Oct**: the seven BHARAG HTTP tools on the three agents no
 longer skip certificate checks (the dashboard had been verifying
