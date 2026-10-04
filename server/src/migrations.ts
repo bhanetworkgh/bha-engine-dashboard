@@ -2512,6 +2512,50 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_events_subject ON engine_events (subject_id)`,
     ],
   },
+  {
+    id: 54,
+    name: 'engine_approvals: a person decides before an agent shares, grants or deletes',
+    statements: [
+      /**
+       * 4 Oct 2026, Destiny — LOOP-1790969736142-8185. n8n's own tool approval
+       * suspends the agent, and an agent run inside a workflow cannot be
+       * suspended, so share_doc, grant_drive_access and delete_record failed
+       * with nobody asked (execution 24683). The gate is held here instead:
+       * one row per request, the card it was asked on, who decided and when,
+       * and what the action answered once it ran. `attempts` keeps every click
+       * by somebody who is not an approver. One live request per identical
+       * call: the partial unique index is what stops a retry stacking cards.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_approvals (
+         id                bigserial PRIMARY KEY,
+         approval_id       text NOT NULL UNIQUE,
+         tool              text NOT NULL,
+         arguments         jsonb NOT NULL,
+         args_digest       text NOT NULL,
+         summary           text NOT NULL,
+         target            text,
+         agent             text,
+         requester_user_id text,
+         origin_channel    text,
+         origin_thread_ts  text,
+         card_channel      text,
+         card_ts           text,
+         card_thread_ts    text,
+         card_error        text,
+         status            text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied', 'expired', 'card_failed')),
+         decided_by        text,
+         decided_at        timestamptz,
+         executed_at       timestamptz,
+         result_ok         boolean,
+         result            jsonb,
+         attempts          jsonb NOT NULL DEFAULT '[]'::jsonb,
+         created_at        timestamptz NOT NULL DEFAULT now(),
+         expires_at        timestamptz NOT NULL
+       )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_approvals_one_pending ON engine_approvals (args_digest) WHERE status = 'pending'`,
+      `CREATE INDEX IF NOT EXISTS engine_approvals_status ON engine_approvals (status, created_at DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

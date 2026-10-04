@@ -17,10 +17,17 @@
  * The three that change Drive are write tools: only on the write connection,
  * every call — refused and dry-run ones included — on `engine_mcp_writes`,
  * opened before the call and closed after it, like the record tools.
+ *
+ * From 2026-10-04 (8185) `share_doc` and `grant_drive_access` do not act when
+ * an **agent** calls them: every check below still runs first, and then a
+ * person is asked in Slack (`../approvals.ts`). The agent is answered
+ * `awaiting_approval`; the real call happens only when Destiny or Jason
+ * approves, through this same handler.
  */
 import * as google from '../google';
 import * as slack from '../slack';
 import * as mirror from '../mirror';
+import * as approvals from '../approvals';
 import { extractPdfText } from '../pdf';
 import { auditClose, auditOpen } from './writeTools';
 import type { ToolDefinition, ToolDeps } from './tools';
@@ -145,14 +152,31 @@ async function audited(
 
 const DRY = { dry_run: { type: 'boolean', description: 'Check the call and say what would happen, without calling Google.' } };
 const REQUESTER = { requester_user_id: { type: 'string', description: 'Slack id of the person asking, for the audit line.' } };
+/** Where the ask came from, so the approval card can be posted in the same thread. */
+export const ORIGIN = {
+  channel_id: { type: 'string', description: 'The Slack channel the ask came from (channel_id in the [Slack context] block). The approval card is posted there; leave it out when the ask did not come from Slack.' },
+  thread_ts: { type: 'string', description: 'The Slack thread the ask came from (thread_ts in the [Slack context] block), so the approval card lands in that thread.' },
+};
+const APPROVAL_NOTE =
+  ' Called by an agent, this does not act: a person is asked in Slack and the answer is ok:false, reason awaiting_approval, with the card link. Only Destiny or Jason can approve; the result is posted on the card. That answer is not a failure — say it is waiting and do not call again.';
+
+/** A Drive file's name for the approval card, or nothing when it cannot be read. */
+async function fileLabel(id: string): Promise<string> {
+  try {
+    const m = await google.fileMeta(id);
+    return `"${m.name}" (${m.webViewLink ?? google.docLink(id)})`;
+  } catch {
+    return google.docLink(id);
+  }
+}
 
 export const shareDoc: ToolDefinition = {
   name: 'share_doc',
   description:
-    'Make a Google Doc (or any Drive file) readable by anyone with the link: Drive permission {role: reader, type: anyone}, supportsAllDrives. Returns {ok, document_id, permission_id, link}. Audited on engine_mcp_writes.',
+    `Make a Google Doc (or any Drive file) readable by anyone with the link: Drive permission {role: reader, type: anyone}, supportsAllDrives. Returns {ok, document_id, permission_id, link}. Audited on engine_mcp_writes.${APPROVAL_NOTE}`,
   inputSchema: {
     type: 'object',
-    properties: { document_id: { type: 'string', description: 'The Drive file id — the part of a Docs link after /d/.' }, ...DRY, ...REQUESTER },
+    properties: { document_id: { type: 'string', description: 'The Drive file id — the part of a Docs link after /d/.' }, ...DRY, ...REQUESTER, ...ORIGIN },
     required: ['document_id'],
     additionalProperties: false,
   },
@@ -165,6 +189,10 @@ export const shareDoc: ToolDefinition = {
         return { outcome: 'dry_run', detail: null, target: id, answer: { ok: true, dry_run: true, would: { document_id: id, permission: { role: 'reader', type: 'anyone' } }, google_configured: google.googleConfigured() } };
       }
       if (!google.googleConfigured()) return { outcome: 'refused', detail: 'not configured', target: id, answer: { ok: false, reason: 'not_configured', message: google.notConfiguredMessage() } };
+      if (approvals.needsApproval()) {
+        const asked = approvals.pendingAnswer(await approvals.request({ tool: 'share_doc', args, target: id, summary: `make the file ${await fileLabel(id)} readable by anyone who has the link` }));
+        return { ...asked, target: id };
+      }
       const p = await google.shareAnyone(id);
       let link = google.docLink(id);
       try {
@@ -178,7 +206,7 @@ export const shareDoc: ToolDefinition = {
 
 export const grantDriveAccess: ToolDefinition = {
   name: 'grant_drive_access',
-  description: `Give one person access to a Drive file: role reader (default), commenter or writer. **Only addresses ending @${ALLOWED_DOMAIN}** — enforced by the server, not the prompt. Anything else is refused ok:false, reason non_bhanetwork_email, nothing is shared, and Destiny is sent a Slack DM naming the address and the file. Audited on engine_mcp_writes.`,
+  description: `Give one person access to a Drive file: role reader (default), commenter or writer. **Only addresses ending @${ALLOWED_DOMAIN}** — enforced by the server, not the prompt. Anything else is refused ok:false, reason non_bhanetwork_email, nothing is shared, and Destiny is sent a Slack DM naming the address and the file. Audited on engine_mcp_writes.${APPROVAL_NOTE}`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -187,6 +215,7 @@ export const grantDriveAccess: ToolDefinition = {
       role: { type: 'string', enum: [...ROLES], description: 'Default reader.' },
       ...DRY,
       ...REQUESTER,
+      ...ORIGIN,
     },
     required: ['file_id', 'email'],
     additionalProperties: false,
@@ -226,6 +255,10 @@ export const grantDriveAccess: ToolDefinition = {
         return { outcome: 'dry_run', detail: null, target: fileId, answer: { ok: true, dry_run: true, would: { file_id: fileId, permission: { role, type: 'user', emailAddress: email } }, google_configured: google.googleConfigured() } };
       }
       if (!google.googleConfigured()) return { outcome: 'refused', detail: 'not configured', target: fileId, answer: { ok: false, reason: 'not_configured', message: google.notConfiguredMessage() } };
+      if (approvals.needsApproval()) {
+        const asked = approvals.pendingAnswer(await approvals.request({ tool: 'grant_drive_access', args: { ...args, email, role }, target: fileId, summary: `give ${email} ${role} access to the file ${await fileLabel(fileId)}` }));
+        return { ...asked, target: fileId };
+      }
       const p = await google.grantUser(fileId, email, role);
       return { outcome: 'applied', detail: `${email} ${role} ${p.permission_id}`, target: fileId, answer: { ok: true, file_id: fileId, email, role, permission_id: p.permission_id } };
     }),

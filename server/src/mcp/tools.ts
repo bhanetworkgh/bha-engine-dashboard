@@ -22,6 +22,8 @@ import * as bharag from '../bharag';
 import * as recovery from '../recovery';
 import * as systemFeeds from '../systemFeeds';
 import * as monitoringTwin from '../monitoringTwin';
+import * as approvals from '../approvals';
+import { currentAgent } from './caller';
 import { WRITE_TOOLS } from './writeTools';
 import { DOC_WRITE_TOOLS, readSlackFile } from './docTools';
 import { getN8nWorkflow, listN8nWorkflows, sweepAirtableNodes } from './n8nTools';
@@ -930,6 +932,19 @@ export function mcpWriteToolNames(): string[] {
 export function toolByName(name: string, access: 'read' | 'write' = 'read'): ToolDefinition | null {
   return toolsFor(access).find((t) => t.name === name) ?? null;
 }
+
+/**
+ * How an approved request is run (2026-10-04, 8185): the gated tool's own
+ * handler, on the write connection, so the checks, the action and the audit
+ * line are exactly an MCP call's. Only the three gated tools can be run this
+ * way, whatever a stored row says.
+ */
+approvals.setExecutor(async (tool, args) => {
+  if (!approvals.GATED_TOOLS.includes(tool)) return { ok: false, reason: 'not_a_gated_tool', message: `${tool} is not an action that runs on approval.` };
+  const t = toolByName(tool, 'write');
+  if (!t) return { ok: false, reason: 'no_such_tool', message: `${tool} is not registered on the write connection.` };
+  return (await t.handler(args, { access: 'write', startedAt: new Date().toISOString(), dispatch: async () => ({ status: 404, body: null }), agent: currentAgent() })) as Record<string, unknown>;
+});
 
 /**
  * The catalogue as `tools/list` returns it: no handlers, just the contract.

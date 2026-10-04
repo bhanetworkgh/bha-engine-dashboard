@@ -23,6 +23,7 @@
     "test:research-twin": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/research-twin-tools.test.cjs",
     "test:candidates": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/pattern-candidates.test.cjs",
     "test:airtable-sweep": "npm run build:server --silent && node server/test/airtable-sweep.test.cjs",
+    "test:approvals": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/approvals.test.cjs",
     "test:lane-ranking": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/lane-ranking.test.cjs"
   },
   "dependencies": {

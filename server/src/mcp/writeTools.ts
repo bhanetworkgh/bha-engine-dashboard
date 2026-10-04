@@ -30,6 +30,7 @@ import * as engineWrite from '../engineWrite';
 import * as bharag from '../bharag';
 import * as google from '../google';
 import * as guards from '../writeGuards';
+import * as approvals from '../approvals';
 import { McpError } from './source';
 import { currentAgent } from './caller';
 import type { ToolDefinition, ToolDeps } from './tools';
@@ -50,6 +51,9 @@ export async function auditOpen(a: AuditOpen): Promise<number> {
   // The agent comes from the token the request came in on (caller.ts), never
   // from anything the caller says about itself (28 Sep, plan step 1.4).
   const agent = currentAgent();
+  // A call a person approved carries who approved it and under which request
+  // (2026-10-04, 8185), so the audit line names the human decision.
+  const approved = approvals.currentApproval();
   const r = await query<{ id: string }>(
     `INSERT INTO engine_mcp_writes (tool, arguments, digest, access, kind, dry_run, requester_user_id, outcome, actor, target, agent)
      VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, 'pending', $8, $9, $10) RETURNING id`,
@@ -61,7 +65,7 @@ export async function auditOpen(a: AuditOpen): Promise<number> {
       a.kind,
       a.dry_run,
       a.requester,
-      `mcp:${a.access}${agent ? `:${agent}` : ''}${a.requester ? `:${a.requester}` : ''}`,
+      `mcp:${a.access}${agent ? `:${agent}` : ''}${a.requester ? `:${a.requester}` : ''}${approved ? ` approved-by:${approved.approver} ${approved.approval_id}` : ''}`,
       a.kind,
       agent,
     ],
@@ -108,6 +112,16 @@ function kindOf(args: Record<string, unknown>): guards.WritableKind {
   const spec = guards.writable(k);
   if (!spec) throw new McpError('bad_argument', `"${k}" is not a kind the write tools can write. One of: ${guards.WRITABLE_KINDS.join(', ')}. list_writable_kinds says what each takes.`);
   return spec;
+}
+
+/** A row's own name for a person to read: the first of the fields the kinds title themselves with. */
+function titleOf(row: mirror.LookupRow): string {
+  const f = (row.fields ?? {}) as Record<string, unknown>;
+  for (const k of ['What', 'Candidate', 'pattern_name', 'opportunity_title', 'Question', 'task', 'name', 'Session Description']) {
+    const v = f[k];
+    if (typeof v === 'string' && v.trim()) return v.trim().replace(/\s+/g, ' ').slice(0, 140);
+  }
+  return '';
 }
 
 /** delete_record's kind: every writable kind, plus the delete-only ones. */
@@ -520,7 +534,7 @@ const archiveRecord: ToolDefinition = {
 const deleteRecord: ToolDefinition = {
   name: 'delete_record',
   description:
-    'Hard-delete one record. Refused unless "confirm" is exactly "DELETE <natural_id>" (or "DELETE <id>" for a row with no natural id), and refused outright for kinds that cannot be deleted (codex; pay and ledger kinds are not writable at all). rt-asks is delete-only: removable here, never created or edited over MCP. The whole row is kept in record_deletions before it goes. Prefer archive_record where the kind has an archived state.',
+    'Hard-delete one record. Refused unless "confirm" is exactly "DELETE <natural_id>" (or "DELETE <id>" for a row with no natural id), and refused outright for kinds that cannot be deleted (codex; pay and ledger kinds are not writable at all). rt-asks is delete-only: removable here, never created or edited over MCP. The whole row is kept in record_deletions before it goes. Prefer archive_record where the kind has an archived state. Called by an agent, this does not delete: once every check passes a person is asked in Slack and the answer is ok:false, reason awaiting_approval, with the card link. Only Destiny or Jason can approve; the result is posted on the card. That answer is not a failure — say it is waiting and do not call again.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -529,6 +543,8 @@ const deleteRecord: ToolDefinition = {
       natural_id: { type: 'string' },
       confirm: { type: 'string', description: 'Exactly "DELETE <natural_id>".' },
       reason: { type: 'string', description: 'Why. Required; kept on the deletion log and the audit line.' },
+      channel_id: { type: 'string', description: 'The Slack channel the ask came from (channel_id in the [Slack context] block). The approval card is posted there; leave it out when the ask did not come from Slack.' },
+      thread_ts: { type: 'string', description: 'The Slack thread the ask came from, so the approval card lands in that thread.' },
       ...GUARD_ARGS,
     },
     required: ['kind', 'confirm', 'reason'],
@@ -575,7 +591,18 @@ const deleteRecord: ToolDefinition = {
       await auditClose(audit, { outcome: 'dry_run', detail: reason, record_id: row.id, natural_id: row.natural_id, before: row, guard_result: checks });
       return { ok: true, dry_run: true, written: false, would_delete: row, checks, audit_id: audit };
     }
-    const gone = await mirror.deleteRow(spec.kind, row.id, reason, `mcp:${deps.access}${requester ? `:${requester}` : ''}`);
+    if (approvals.needsApproval()) {
+      // Every check above has passed; an agent still does not delete on its own (2026-10-04, 8185).
+      const label = String(row.natural_id ?? row.id);
+      const title = titleOf(row);
+      const asked = approvals.pendingAnswer(
+        await approvals.request({ tool: 'delete_record', args, target: `${spec.kind} ${label}`, summary: `permanently delete the ${spec.kind} record ${label}${title ? ` ("${title}")` : ''}. Reason given: ${reason}` }),
+      );
+      await auditClose(audit, { outcome: asked.outcome, detail: asked.detail, record_id: row.id, natural_id: row.natural_id, before: row, guard_result: checks });
+      return { ...asked.answer, written: false, kind: spec.kind, id: row.id, natural_id: row.natural_id, checks, audit_id: audit };
+    }
+    const approved = approvals.currentApproval();
+    const gone = await mirror.deleteRow(spec.kind, row.id, reason, `mcp:${deps.access}${requester ? `:${requester}` : ''}${approved ? ` approved-by:${approved.approver} ${approved.approval_id}` : ''}`);
     await mirror.logWrite({ endpoint: ctx.endpoint, kind: spec.kind, method: ctx.method, key_label: ctx.key_label, airtable_record_id: row.airtable_record_id, natural_id: row.natural_id, outcome: 'deleted', detail: `row ${row.id} deleted via MCP: ${reason}` });
     await auditClose(audit, { outcome: gone ? 'deleted' : 'not_found', detail: reason, record_id: row.id, natural_id: row.natural_id, before: row, after: null, guard_result: checks });
     return { ok: Boolean(gone), deleted: Boolean(gone), kind: spec.kind, id: row.id, natural_id: row.natural_id, kept_in: 'record_deletions', audit_id: audit };

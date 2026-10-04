@@ -56,6 +56,7 @@ import * as dataGovernance from './dataGovernance';
 import * as monitoringTwin from './monitoringTwin';
 import * as qualityAlert from './qualityAlert';
 import * as engineEvents from './engineEvents';
+import * as approvals from './approvals';
 import * as candidateActions from './candidateActions';
 import * as patternDraft from './patternDraft';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
@@ -631,6 +632,38 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         }
         throw e;
       }
+    }
+    /**
+     * One click on an approval card (2026-10-04, 8185). n8n's Bays — Front Door
+     * checks Slack's signature and sends the click here; the Slack id it
+     * carries is the only thing that says who decided, so this route is only
+     * as trustworthy as that check. A business answer (not an approver,
+     * already decided) is a 200 with ok:false; `raise: true` means something
+     * the person was told would happen did not, and n8n raises it.
+     */
+    if (p === '/api/engine/approvals/decide') {
+      if (method !== 'POST') throw new HttpError(405, 'POST { approval_id, decision: "approve" | "deny", user_id, channel_id? }.');
+      const b = (await readJson(req, 16 * 1024)) as Record<string, unknown>;
+      const approvalId = typeof b.approval_id === 'string' ? b.approval_id.trim() : '';
+      const said = typeof b.decision === 'string' ? b.decision.trim().toLowerCase() : '';
+      const decision = said === 'approve' || said === approvals.ACTION_APPROVE ? 'approve' : said === 'deny' || said === approvals.ACTION_DENY ? 'deny' : null;
+      const userId = typeof b.user_id === 'string' ? b.user_id.trim() : '';
+      if (!approvalId || !decision || !/^[UW][A-Z0-9]{6,}$/.test(userId)) {
+        await mirror.logWrite({ endpoint, kind: 'approvals', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: approvalId || undefined, outcome: 'rejected', detail: 'approval_id, decision (approve or deny) and a Slack user_id are all required', ms: Date.now() - t0 });
+        throw new HttpError(422, 'approval_id, decision ("approve" or "deny") and user_id (a Slack user id) are all required.');
+      }
+      const r = await approvals.decide({ approval_id: approvalId, decision, user_id: userId, channel_id: typeof b.channel_id === 'string' ? b.channel_id.trim() : null });
+      await mirror.logWrite({
+        endpoint,
+        kind: 'approvals',
+        method,
+        key_label: 'DASHBOARD_INBOUND_KEY',
+        natural_id: approvalId,
+        outcome: r.status === 404 ? 'rejected' : r.body.ok === true ? 'updated' : r.body.raise === true ? 'error' : 'unchanged',
+        detail: `${decision} by ${userId}: ${String(r.body.reason ?? (r.body.done === true ? 'done' : r.body.decision ?? ''))}${typeof r.body.message === 'string' ? ` — ${r.body.message.slice(0, 200)}` : ''}`,
+        ms: Date.now() - t0,
+      });
+      return send(res, r.status, r.body);
     }
     if (p === '/api/engine/retention/run') {
       if (method !== 'POST') throw new HttpError(405, 'POST { dry_run, as_of }. as_of is accepted only with dry_run: true.');
@@ -2015,6 +2048,7 @@ async function boot(): Promise<void> {
     monitoringTwin.startWatching();
     qualityAlert.startWatching();
     engineEvents.startSweeping();
+    approvals.startSweeping();
     health.startLedgerPolling();
   });
 }
