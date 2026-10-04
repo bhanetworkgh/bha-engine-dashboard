@@ -11194,3 +11194,9 @@ Fix:        engine_monitoring_recurrences, one row per pattern per 7 days. A rea
 Decision:   Simulated farms never open a job: the rule has to be provable on the simulator without sending Research Twin to research a staged fault. The second half of the rule (a job when a reading is out of a range whose source is not yet confirmed) is not built and the read says so: the profile has no confirmed flag, and deciding it from the source text would be a rule nobody could check. The threshold itself is still Destiny's working rule, in his note to Jason for approval.
 Tests:      npm run test:monitoring-recurrence, 5 checks, locally against Postgres 16 with the psql-backed pg stand-in. No real farm exists yet, so no real job has been opened.
 
+## 2026-10-04 20:10 — Approvals tab on Engine health
+Intent:     The approval gate's record should be readable by a person, not only by a query: who asked, what for, who decided and when. Agent Upgrade Plan, human oversight (the 3 Oct re-score's lowest group).
+Files:      server/src/index.ts (GET /api/engine-health/approvals), src/data/types.ts, src/data/index.ts, src/screens/EngineHealth/Approvals.tsx (new), src/screens/EngineHealth/index.tsx (a ninth tab, ?tab=approvals), CLAUDE.md
+Fix:        The last hundred rows of engine_approvals, newest first: asked, agent, what it wanted to do, the summary in words, state, decided by, decided, and the request id linking to its Slack card. The stored arguments are not sent to the page.
+Decision:   Colour only where somebody is needed: waiting, a card Slack refused, an approved action that failed. Denied and expired are plain. Approved is the accent, not green, the rule Repairs and Recovery follow. The page was not type-checked here (no React types in this sandbox); Render's build is the check.
+

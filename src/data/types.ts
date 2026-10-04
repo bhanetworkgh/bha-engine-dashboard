@@ -1945,6 +1945,36 @@ export interface McpWritesData {
   write_configured: boolean;
 }
 
+/** One request an agent made that had to wait for a person (2026-10-04, 8185). */
+export interface Approval {
+  approval_id: string;
+  tool: string;
+  /** What was asked, in words. */
+  summary: string;
+  agent: string | null;
+  requester_user_id: string | null;
+  status: 'pending' | 'approved' | 'denied' | 'expired' | 'card_failed';
+  decided_by: string | null;
+  decided_at: string | null;
+  executed_at: string | null;
+  /** Whether the approved action then worked. Null until it has run. */
+  result_ok: boolean | null;
+  result_message: string | null;
+  card_channel: string | null;
+  card_ts: string | null;
+  card_error: string | null;
+  created_at: string;
+  expires_at: string;
+}
+
+export interface ApprovalsData {
+  approvals: Approval[];
+  /** The Slack ids of the only people whose click decides. */
+  approvers: string[];
+  ttl_hours: number;
+  gated_tools: string[];
+}
+
 /* -------------------------------------------------------------- pay ledger */
 
 /**

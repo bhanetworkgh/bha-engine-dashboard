@@ -1196,6 +1196,11 @@ gated** — the shared connector and the page are already a person acting.
   then fails says so on the card and answers `raise: true`, which n8n turns
   into an incident. `approval_requested`, `approval_decided` and
   `approval_expired` are written to `engine_events`.
+- **The Approvals tab on Engine health** (`?tab=approvals`,
+  `GET /api/engine-health/approvals`) lists the last hundred requests: what was
+  asked in words, the agent, the state, who decided and when, and the card.
+  Waiting, "nobody was asked" and "approved, then failed" are the only
+  coloured states; approved is the accent, never green.
 - `npm run test:approvals` pins all of it in process against Slack and Google
   stand-ins.
 

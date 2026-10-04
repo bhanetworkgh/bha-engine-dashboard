@@ -1117,6 +1117,38 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, { writes: r.rows, write_configured: mcpWriteConfigured() });
       }
       /**
+       * The approval gate's record (2026-10-04, 8185): every time an agent
+       * asked to share a doc, grant Drive access or delete a record, who
+       * decided and what came of it. The arguments are left out: the summary
+       * says what was asked, in words.
+       */
+      case '/api/engine-health/approvals': {
+        const rows = await approvals.list(100);
+        return send(res, 200, {
+          approvers: approvals.APPROVERS,
+          ttl_hours: approvals.TTL_HOURS,
+          gated_tools: approvals.GATED_TOOLS,
+          approvals: rows.map((a) => ({
+            approval_id: a.approval_id,
+            tool: a.tool,
+            summary: a.summary,
+            agent: a.agent,
+            requester_user_id: a.requester_user_id,
+            status: a.status,
+            decided_by: a.decided_by,
+            decided_at: a.decided_at,
+            executed_at: a.executed_at,
+            result_ok: a.result_ok,
+            result_message: a.result && typeof a.result.message === 'string' ? a.result.message : null,
+            card_channel: a.card_channel,
+            card_ts: a.card_ts,
+            card_error: a.card_error,
+            created_at: a.created_at,
+            expires_at: a.expires_at,
+          })),
+        });
+      }
+      /**
        * The repair record. Newest first, with the summary computed over the
        * same rows the list holds, so the strip above the table can never
        * disagree with the table under it.
