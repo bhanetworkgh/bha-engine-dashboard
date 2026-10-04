@@ -1143,6 +1143,44 @@ parser routes on `body.event.type`, so a forged mention with no `type` walked
 past the gate until 2 Oct (production proof: execution 24613 → refused 401 →
 INC-BAYS.AGENT-042; real traffic five seconds later passed).
 
+**A person approves before an agent shares, grants or deletes** (decision
+2026-10-04, Destiny — LOOP-1790969736142-8185). `server/src/approvals.ts`,
+migration 54, `engine_approvals`. n8n's own tool approval suspends the agent,
+and an agent run inside a workflow cannot be suspended, so `share_doc`,
+`grant_drive_access` and `delete_record` died with nobody asked (execution
+24683). The gate is held here instead, and **only a call on an agent token is
+gated** — the shared connector and the page are already a person acting.
+
+- The tool's own checks run first, so a refusal (an outside address, a wrong
+  `confirm`, `not_permitted`) is still immediate and posts no card. Then
+  nothing is done: a row is stored, an **Approve / Deny card** is posted as
+  Bays, and the agent is answered `ok: false, reason: awaiting_approval` with
+  the card link. That is an answer, not a failure.
+- **Where the card goes**: the thread the ask came from (`channel_id`,
+  `thread_ts`, which the three tools now take) when it is a channel; a DM only
+  when the asker is an approver; otherwise `QUOTA_ALERT_CHANNEL`
+  (#bha-engine-alerts). A repeat of a call still pending answers the same
+  request and posts no second card (a partial unique index on the digest).
+- **Only Destiny (`U0AEW3TBYH1`) or Jason (`U0A9V97949F`) can decide**,
+  checked here on the Slack id. The click reaches n8n's `Bays — Front Door`,
+  which checks Slack's signature, and arrives at
+  `POST /api/engine/approvals/decide` (`x-dashboard-key`). A click by anyone
+  else changes nothing, is kept in `attempts`, and they are told. The claim is
+  one `UPDATE … WHERE status = 'pending'`, so two clicks cannot both win.
+- **Approve runs the tool's own handler**, in process, as the agent that
+  asked, with the arguments stored at request time; its `engine_mcp_writes`
+  line carries `approved-by:<Slack id> <APR-…>`. Deny, or 24 hours with no
+  answer (a five-minute sweep), does nothing. Each outcome rewrites the card
+  without its buttons and is posted back where it was asked when the card had
+  to live elsewhere.
+- **No silent failures**: a card Slack refuses is `approval_card_not_posted`
+  and the row is `card_failed`, never left pending; an approved action that
+  then fails says so on the card and answers `raise: true`, which n8n turns
+  into an incident. `approval_requested`, `approval_decided` and
+  `approval_expired` are written to `engine_events`.
+- `npm run test:approvals` pins all of it in process against Slack and Google
+  stand-ins.
+
 **`close_incidents`, the Engine health close over MCP** (decision 2026-10-01,
 Destiny). `server/src/mcp/incidentTools.ts`, write connection only, calling
 `health.closeIncidents` — the function the page's close button calls — so the
