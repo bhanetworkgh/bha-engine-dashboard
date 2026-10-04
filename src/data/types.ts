@@ -3721,6 +3721,8 @@ export interface MonitoringDevice {
   model: string | null;
   latest: Record<string, unknown> | null;
   last_reading_at: string | null;
+  /** When vFarm last heard from the device at all (its own last_seen_at). */
+  last_seen_at: string | null;
   state: MonitoringState | null;
   since: string | null;
   age_s: number | null;

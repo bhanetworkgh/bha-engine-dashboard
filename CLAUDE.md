@@ -1145,10 +1145,17 @@ INC-BAYS.AGENT-042; real traffic five seconds later passed).
 
 **A monitoring incident that keeps coming back opens one Research Twin job**
 (2026-10-04, Destiny). `server/src/monitoringRecurrence.ts`, migration 55,
-`engine_monitoring_recurrences`. The rule from the 3 Oct Twin alignment note:
-the same incident class (the twin's own fault key: farm, device, kind, metric)
-**3 or more times in 7 days** is a pattern, and gets **one job for the
-pattern, never one per incident**. The sweep runs after every judging pass and
+`engine_monitoring_recurrences`. The rule is Canon v1 as Jason approved it on
+4 Oct: group by **subsystem + place + incident class**, **ignore incidents the
+healer or the recovery watcher already closed**, and **3 or more in 7 days**
+is a pattern that gets **one job for the pattern, never one per incident**
+(migration 56 re-keyed the rows). Subsystem is the device's own `subsystem`
+where the snapshot carries one, else `MONITORING`; place is the farm (vFarm
+sends no cabinet id), with the devices kept on the row; class is the kind of
+fault plus, for a reading out of range, its metric. "Closed by the healer or
+the recovery watcher" is a `retry_attempts` row at `Recovered` or an
+`engine_recovery` row at `recovered` / `already_done` for the ledger id — an
+incident that cleared on its own still counts. The sweep runs after every judging pass and
 ledger sync. A pattern is recorded once per 7 days; further incidents only
 raise its count. The job is a Pending `rt-jobs` row, `Opened By: Monitoring
 Twin`, written through `engineWrite.postRecord`, with every incident and its
@@ -1160,6 +1167,17 @@ read (`recurrence`) shows the rule and the last 30 days of patterns. **Not
 built**: a job when a reading is out of a range whose source is unconfirmed
 (pH, EC, CO2 in tomato profile v1) — the profile has no confirmed flag to
 decide it from. `npm run test:monitoring-recurrence` pins it.
+
+**Engine health holds every monitoring incident the ledger took** (2026-10-04,
+Destiny — the downstream reader for UN9D path 2). The three-minute ledger poll
+reads only what is live at that moment, so an incident that opened and cleared
+between two reads never reached Engine health. `monitoringTwin.syncLedger`
+now writes the incident into `engine_incidents` through `mirror.upsert` when
+the ledger takes it and marks it closed, `resolved_by` `monitoring-twin (…)`,
+when it clears. **The ledger id is the canonical id**: the read gives it as
+`canonical_id` beside the twin's own `incident_id`, and it is the id Engine
+health shows. The read also carries each device's `last_seen_at` (the page's
+"last report" column). The same test file pins `feed_silent` on a real farm.
 
 **A person approves before an agent shares, grants or deletes** (decision
 2026-10-04, Destiny — LOOP-1790969736142-8185). `server/src/approvals.ts`,
