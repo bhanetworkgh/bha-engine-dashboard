@@ -11228,3 +11228,9 @@ Problem:    The test doc could not be trashed through the Drive connector ("The 
 Still open: DASHBOARD_INBOUND_KEY is readable in n8n execution data wherever an HTTP node sends it from $vars (see the 20:30 entry). Header Auth credential by hand, then rotate.
             Denied, expired and a click by a non-approver are proven by test:approvals and pinned runs only, not by a production click.
             The agent inventory row for Bays predates this publish and needs re-recording.
+
+## 2026-10-04 21:05 — Approval Decision reads the dashboard key from a credential
+Intent:     Stop DASHBOARD_INBOUND_KEY showing in n8n execution data for the new workflow (the Problem in the 20:30 entry).
+Files:      none in this repo. `Bays — Approval Decision` (WvjY5Gxy5FaHREC9): Send Decision To Dashboard now uses Header Auth credential "BHA Dashboard — Inbound Key" (YD5u4fMYXRvYGyrs, created by Destiny by hand) in place of the x-dashboard-key header from $vars. Published 32f1c52f-0f29-46c7-8dfe-8328cd0a246e. Restore point a69e2382-d2fd-4669-bd77-a172941610af.
+Tests:      Draft run 25829, trigger pinned and the HTTP call real, with a made-up approval id: the dashboard answered 404 (unknown approval), not 401, so the credential's key is accepted. No production click has gone through this version yet.
+Still open: the key itself has not been rotated, and every other workflow that sends it still reads $vars.
