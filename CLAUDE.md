@@ -1457,6 +1457,9 @@ code, clock frozen, came out identical on 77 cases before anything was wired.
 - **`rt-asks` is delete-only** (2026-09-24): `delete_record` takes it — the
   same confirm, `record_deletions` copy and audit line — and no other write
   tool does. It exists so a test delivery can be removed without a SQL console.
+  **`ns-asks` and `bays-asks` are delete-only too** (2026-10-05, Destiny), for
+  the same reason: the test rows written while proving the helper, scheduled
+  and panel paths.
 
 **The hidden Airtable writer sweep** (2026-09-24, Destiny —
 LOOP-1790034076667-8HOF). After the cutover a workflow still writing to

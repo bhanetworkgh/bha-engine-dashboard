@@ -270,17 +270,17 @@ export function writable(kind: string): WritableKind | null {
  * asked, and it has to be removable without a SQL console. Same confirm, same
  * record_deletions copy, same audit line as every other delete.
  */
+const deleteOnly = (kind: string): WritableKind => ({ kind, required: [], selects: {}, id_minted: null, archive: null, deletable: true, ingest: null, guards: [] });
+
+/**
+ * ns-asks and bays-asks joined on 2026-10-05 (Destiny): both ledgers are
+ * written by n8n at the end of a run, and the three test rows written while
+ * proving the helper, scheduled and panel paths had no way out.
+ */
 export const DELETE_ONLY: Record<string, WritableKind> = {
-  'rt-asks': {
-    kind: 'rt-asks',
-    required: [],
-    selects: {},
-    id_minted: null,
-    archive: null,
-    deletable: true,
-    ingest: null,
-    guards: [],
-  },
+  'rt-asks': deleteOnly('rt-asks'),
+  'ns-asks': deleteOnly('ns-asks'),
+  'bays-asks': deleteOnly('bays-asks'),
 };
 
 export const DELETABLE_KINDS = [...WRITABLE_KINDS, ...Object.keys(DELETE_ONLY)];

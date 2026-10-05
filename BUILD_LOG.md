@@ -11366,3 +11366,10 @@ Files:      none
 Problem:    EVAL-202610051834 (execution 26603): 31 of 32 cases, 62 results. RT-01 failed on repeat 2 of 3: "cites (3 markers, not in Sources: [S3])". Research Twin cited [S3] and listed only two sources. All 12 Bays cases passed.
 Fix:        None applied. Research Twin was not changed today; the failure is one flaky repeat of a Research Twin citation case, not a regression from the Bays change, so Bays stays published. Compared with EVAL-202610051537 (32 of 32).
 Decision:   No rollback: the rule is to roll back only when a previously passing case fails because of the agent that changed. RT-01's citation slip is worth watching; a second failure makes it a Research Twin instruction fix.
+
+## 2026-10-05 20:35 — delete_record takes ns-asks and bays-asks
+Intent:     Remove the three TEST rows left from proving the helper, scheduled and panel paths (NS-1791214470982-BMQC, BAYS-SCHED-1791214513871-4L8B, BAYS-PANEL-1791214569846-WCQW).
+Files:      server/src/writeGuards.ts, server/src/mcp/writeTools.ts, CLAUDE.md
+Problem:    delete_record refused both kinds: "is not a kind delete_record can delete".
+Fix:        Both added to DELETE_ONLY beside rt-asks. Same confirm, same record_deletions copy, same audit line. No other write tool takes them.
+Decision:   Extended the existing delete tool rather than adding a new one (Destiny: "to the current ones").
