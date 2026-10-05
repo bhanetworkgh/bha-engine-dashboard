@@ -2698,6 +2698,16 @@ undelivered reply** and is left out of that figure. Statistics is stat kind
 `bays` (asks, failed rate, tool-issue rate, not-delivered rate, response p50).
 Ask Bays stays the chat; this is the record.
 
+**Agent maturity has an Evals tab** (2026-10-05, Destiny), `?tab=evals`, and an
+open run is `&run=<Run ID>`. `GET /api/eval-runs` (`server/src/evalRuns.ts`)
+lists every run in `engine_eval_runs`, newest first: cases passed, the split by
+agent, the failed case ids, and whether the run has finished. With `?run=` it
+answers one run case by case, failed cases first, each repeat with its checks
+and its answer (cut at 4,000 characters, and saying so). The rules are the
+scorecard's: a case passes only if every repeat passed, and a run still writing
+is marked in progress and is never the "latest finished run". A read and
+nothing else; nothing here starts a run.
+
 **Data governance: retention and the BHARAG write guard** (2026-09-29,
 Destiny — Agent Upgrade Plan 5.4 and 5.5). `server/src/dataGovernance.ts`,
 migration 42. **Retention clears personal text and keeps the row**: after 180
