@@ -534,7 +534,7 @@ const archiveRecord: ToolDefinition = {
 const deleteRecord: ToolDefinition = {
   name: 'delete_record',
   description:
-    'Hard-delete one record. Refused unless "confirm" is exactly "DELETE <natural_id>" (or "DELETE <id>" for a row with no natural id), and refused outright for kinds that cannot be deleted (codex; pay and ledger kinds are not writable at all). rt-asks is delete-only: removable here, never created or edited over MCP. The whole row is kept in record_deletions before it goes. Prefer archive_record where the kind has an archived state. Called by an agent, this does not delete: once every check passes a person is asked in Slack and the answer is ok:false, reason awaiting_approval, with the card link. Only Destiny or Jason can approve; the result is posted on the card. That answer is not a failure — say it is waiting and do not call again.',
+    'Hard-delete one record. Refused unless "confirm" is exactly "DELETE <natural_id>" (or "DELETE <id>" for a row with no natural id), and refused outright for kinds that cannot be deleted (codex; pay and ledger kinds are not writable at all). rt-asks, ns-asks and bays-asks are delete-only: removable here (a test row), never created or edited over MCP. The whole row is kept in record_deletions before it goes. Prefer archive_record where the kind has an archived state. Called by an agent, this does not delete: once every check passes a person is asked in Slack and the answer is ok:false, reason awaiting_approval, with the card link. Only Destiny or Jason can approve; the result is posted on the card. That answer is not a failure — say it is waiting and do not call again.',
   inputSchema: {
     type: 'object',
     properties: {
