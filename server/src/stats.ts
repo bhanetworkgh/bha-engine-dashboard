@@ -33,6 +33,7 @@
 import { getMeta, nowIso } from './db';
 import * as store from './store';
 import { genieData } from './systemFeeds';
+import { baysData, baysFailed, baysUndelivered, type BaysAskRow } from './baysAsks';
 import { delta, movement } from './delta';
 import type {
   BuildPattern,
@@ -1225,9 +1226,82 @@ function genieSpec(): KindSpec<GenieAsk> {
   };
 }
 
+/**
+ * Bays, month against month (2026-10-05, Destiny). One row per ledger row:
+ * a Slack turn, a scheduled task run or a panel question, dated by `Asked At`.
+ * The ledger starts on 28 Sep 2026, so September is three days.
+ */
+function baysSpec(): KindSpec<BaysAskRow> {
+  const none = 'Bays wrote no row this month.';
+  return {
+    kind: 'bays',
+    createdOf: (r) => r.asked_at,
+    metrics: [
+      {
+        key: 'asks',
+        label: 'Asks',
+        field: 'Asked At',
+        unit: 'count',
+        better: null,
+        word: 'asks',
+        figure: (c) => count(c.length, 'Every row Bays wrote this month: Slack turns, scheduled task runs (from 5 Oct 2026) and Ask Bays panel questions (from 5 Oct 2026).'),
+      },
+      {
+        key: 'failed_rate',
+        label: 'Failed rate',
+        field: 'Outcome',
+        unit: 'percent',
+        better: 'down',
+        word: 'failed rate',
+        figure: (c) => rate(c.filter(baysFailed).length, c.length, c.length ? `Rows whose Outcome is Failed, over all ${plural(c.length, 'row')} this month.` : none),
+      },
+      {
+        key: 'tool_issue_rate',
+        label: 'Answered with tool issues',
+        field: 'Outcome',
+        unit: 'percent',
+        better: 'down',
+        word: 'tool-issue rate',
+        figure: (c) =>
+          rate(c.filter((r) => r.outcome === 'Answered with tool issues').length, c.length, c.length ? `Rows where Bays answered but a tool call failed on the way, over all ${plural(c.length, 'row')} this month.` : none),
+      },
+      {
+        key: 'undelivered_rate',
+        label: 'Not delivered',
+        field: 'Delivered',
+        unit: 'percent',
+        better: 'down',
+        word: 'not-delivered rate',
+        figure: (c) =>
+          rate(
+            c.filter(baysUndelivered).length,
+            c.length,
+            c.length ? `Rows whose Delivered is anything but Delivered, over all ${plural(c.length, 'row')} this month. A scheduled run that had nothing to post is left out: that is not a missed delivery.` : none,
+          ),
+      },
+      {
+        key: 'response_p50',
+        label: 'Response time (p50)',
+        field: 'Response Seconds',
+        unit: 'duration',
+        better: 'down',
+        word: 'median response time',
+        figure: (c) => {
+          const timed = c.filter((r) => r.response_seconds !== null);
+          return {
+            value: p(timed.map((r) => r.response_seconds! * 1000), 50),
+            n: timed.length,
+            note: timed.length ? `The median, over the ${timed.length} of ${plural(c.length, 'row')} that carry Response Seconds. Never a mean.` : c.length ? 'No row this month carries Response Seconds, so there is no figure, not a figure of nought.' : none,
+          };
+        },
+      },
+    ],
+  };
+}
+
 /* -------------------------------------------------------------- dispatch */
 
-export const STAT_KINDS: StatKind[] = ['codex', 'loops', 'patterns', 'commercial', 'clients', 'northstar', 'researchtwin', 'researchjobs', 'genie'];
+export const STAT_KINDS: StatKind[] = ['codex', 'loops', 'patterns', 'commercial', 'clients', 'northstar', 'researchtwin', 'researchjobs', 'genie', 'bays'];
 
 export function isStatKind(v: string): v is StatKind {
   return (STAT_KINDS as string[]).includes(v);
@@ -1258,6 +1332,8 @@ export async function stats(kind: StatKind, month?: string | null): Promise<Reco
       return statsOf(researchJobsSpec(), await store.rtJobs(), month);
     case 'genie':
       return statsOf(genieSpec(), (await genieData()).asks as GenieAsk[], month);
+    case 'bays':
+      return statsOf(baysSpec(), (await baysData()).asks, month);
     default:
       throw new store.StoreError(`${kind as string} has no statistics.`, 404);
   }

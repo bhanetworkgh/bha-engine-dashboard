@@ -16,6 +16,9 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
   {
     group: 'Systems',
     items: [
+      // Bays' own ledger (2026-10-05, Destiny): Slack turns, scheduled task
+      // runs and panel questions. Ask Bays above is the chat; this is the record.
+      { to: '/bays', label: 'Bays', icon: 'bolt' },
       { to: '/north-star', label: 'North Star', icon: 'star' },
       { to: '/research-twin', label: 'Research Twin', icon: 'twin' },
       // Media Twin and Genie are systems in the engine and belong in this group
