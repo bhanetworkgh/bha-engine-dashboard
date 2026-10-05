@@ -53,6 +53,7 @@ import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
 import * as systemFeeds from './systemFeeds';
 import * as baysAsks from './baysAsks';
+import * as evalRuns from './evalRuns';
 import * as dataGovernance from './dataGovernance';
 import * as monitoringTwin from './monitoringTwin';
 import * as qualityAlert from './qualityAlert';
@@ -1085,6 +1086,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       case '/api/twin-handoffs':
         return send(res, 200, await engine.getTwinHandoffs());
       /** The agent maturity scorecard (2026-09-28): stored scores beside the live metrics behind them. */
+      /** Every eval run held, and one run case by case with ?run= (2026-10-05). */
+      case '/api/eval-runs': {
+        const id = url.searchParams.get('run');
+        return send(res, 200, id ? await evalRuns.run(id) : await evalRuns.runs());
+      }
       case '/api/agent-scorecard':
         return send(res, 200, await scorecard.data());
       /**

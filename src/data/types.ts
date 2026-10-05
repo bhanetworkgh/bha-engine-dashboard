@@ -3354,6 +3354,47 @@ export interface AgentMetric {
   note: string | null;
 }
 
+/** One eval run (server/src/evalRuns.ts). A case passes only if every repeat passed. */
+export interface EvalRun {
+  run_id: string;
+  started_at: string | null;
+  finished_at: string | null;
+  execution: string | null;
+  results: number;
+  run_size: number | null;
+  complete: boolean;
+  cases: number;
+  passed: number;
+  failed_cases: string[];
+  by_agent: Array<{ agent: string; cases: number; passed: number }>;
+}
+export interface EvalRunsData {
+  runs: EvalRun[];
+  results: number;
+  first_run_at: string | null;
+}
+export interface EvalRunDetail {
+  run_id: string;
+  found: boolean;
+  cases: Array<{
+    case_id: string;
+    agent: string | null;
+    question: string | null;
+    passed: boolean;
+    repeats: Array<{
+      result_id: string | null;
+      repeat: number | null;
+      passed: boolean;
+      answer: string | null;
+      answer_chars: number | null;
+      failed_checks: string | null;
+      checks: Array<{ name: string; ok: boolean; detail: string }>;
+      run_at: string | null;
+      execution: string | null;
+    }>;
+  }>;
+}
+
 export interface ScorecardData {
   scored_on: string | null;
   average: number | null;

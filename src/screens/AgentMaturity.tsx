@@ -1,7 +1,10 @@
+import { useState, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useData } from '../app/useData';
+import EvalHistory from './EvalHistory';
 import { getAgentScorecard } from '../data';
 import type { AgentMetric } from '../data/types';
-import { Card, CardHeader, LoadFailed, Loading, PageHeader, Pill, Stat, StatCell, StatStrip, TableFrame, Th } from '../components/ui';
+import { Card, CardHeader, LoadFailed, Loading, PageHeader, Pill, Stat, StatCell, StatStrip, TableFrame, Tabs, Th } from '../components/ui';
 
 /**
  * Agent maturity (2026-09-28, Destiny — Agent Upgrade Plan, Phase 0). The
@@ -10,7 +13,39 @@ import { Card, CardHeader, LoadFailed, Loading, PageHeader, Pill, Stat, StatCell
  * from a scoring; every metric is counted from the engine's own tables. A
  * metric with no instrumentation yet says which plan step brings it.
  */
+const TABS = ['Scorecard', 'Evals'] as const;
+type Tab = (typeof TABS)[number];
+
+/**
+ * Two tabs from 2026-10-05 (Destiny): the scorecard, and **Evals**, every eval
+ * run held rather than only the latest one's pass rate. The tab is in the
+ * address (`?tab=evals`) so a run can be linked to.
+ */
 export default function AgentMaturity() {
+  const [params, setParams] = useSearchParams();
+  const [tab, setTabState] = useState<Tab>(params.get('tab') === 'evals' ? 'Evals' : 'Scorecard');
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    const next = new URLSearchParams(params);
+    if (t === 'Evals') next.set('tab', 'evals');
+    else {
+      next.delete('tab');
+      next.delete('run');
+    }
+    setParams(next, { replace: true });
+  };
+  const tabs = <Tabs tabs={TABS} value={tab} onChange={setTab} />;
+  if (tab === 'Evals')
+    return (
+      <div className="flex flex-col pb-8">
+        <PageHeader title="Agent maturity" subtitle="Every eval run held, newest first. A case passes only if every repeat passed." below={tabs} />
+        <EvalHistory />
+      </div>
+    );
+  return <Scorecard tabs={tabs} />;
+}
+
+function Scorecard({ tabs }: { tabs: ReactNode }) {
   const { status, data, error } = useData(() => getAgentScorecard(), [], { kinds: ['ns-asks', 'rt-asks', 'bays-asks', 'eval-runs', 'incidents'] });
   if (status === 'loading') return <Loading />;
   if (status === 'error') return <LoadFailed error={error} />;
@@ -24,6 +59,7 @@ export default function AgentMaturity() {
       <PageHeader
         title="Agent maturity"
         subtitle={d.scored_on ? `Bays, North Star and Research Twin, scored on 12 dimensions. Latest scoring ${d.scored_on}.` : 'No scoring recorded yet.'}
+        below={tabs}
       />
 
       <StatStrip cols={4}>

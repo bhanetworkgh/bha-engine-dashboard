@@ -11317,3 +11317,10 @@ Files:      server/src/baysAsks.ts (new), server/src/index.ts (GET /api/bays), s
 Problem:    None in the build. `npm ci` is still refused from this workspace, so the type-check was the global tsc with the missing-module noise filtered; the only lines left on the new page are the same four the Genie page shows, which built on Render.
 Fix:        n/a
 Decision:   A read and nothing else; rows are written by n8n. Answers are cut at 6,000 characters for the list (484 rows held today) and the panel says when one was cut. "Nothing posted" on a scheduled run is not counted as an undelivered reply. Bays goes first in the Systems group; the sidebar gains one row.
+
+## 2026-10-05 18:20 — Evals tab on Agent maturity
+Intent:     Show the eval history. The ledger held 21 runs and 704 results, and the dashboard showed only the latest run's pass rate.
+Files:      server/src/evalRuns.ts (new), server/src/index.ts (GET /api/eval-runs, ?run=), src/screens/EvalHistory.tsx (new), src/screens/AgentMaturity.tsx (Scorecard and Evals tabs), src/data/index.ts, src/data/types.ts, CLAUDE.md
+Problem:    None in the build. Type-check as for the Bays page (global tsc, missing-module noise filtered).
+Fix:        n/a
+Decision:   Same pass rule and same finished-run rule as scorecard.ts, restated in SQL here rather than imported, because the scorecard asks about one run and this asks about all of them. The tab and the open run are in the address so a run can be linked.

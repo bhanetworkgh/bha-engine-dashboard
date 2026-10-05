@@ -14,6 +14,8 @@ import { api, ApiError } from './api';
 import type {
   AskBaysData,
   BaysData,
+  EvalRunDetail,
+  EvalRunsData,
   GenieData,
   DoctrineData,
   VfarmLiveData,
@@ -204,6 +206,9 @@ export const getClients = () => api<ClientsData>('/api/clients');
  */
 export const getTwinHandoffs = () => api<Handoffs>('/api/twin-handoffs');
 /** The agent maturity scorecard (2026-09-28). */
+/** The eval history: every run held, and one run case by case (2026-10-05). */
+export const getEvalRuns = () => api<EvalRunsData>('/api/eval-runs');
+export const getEvalRun = (runId: string) => api<EvalRunDetail>(`/api/eval-runs?run=${encodeURIComponent(runId)}`);
 export const getAgentScorecard = () => api<ScorecardData>('/api/agent-scorecard');
 
 /* -------------------------------------------------------- engine health */
