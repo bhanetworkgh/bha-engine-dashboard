@@ -11310,3 +11310,10 @@ Problem:    `npm ci` is refused in this session (403 on a registry package, an e
 Fix:        The global tsc was run before and after the change with the missing-module errors filtered: the server's error set is unchanged, and the client's differs only in implicit-any noise that comes from React's types being absent. Render's build is the real check.
 Decision:   The Genie strip follows the month, not all time: a strip answering all time beside a list answering one month is the reconciliation bug Open loops had. The three cohort cards stay all-time and say so, because a lane's rates over one ask say nothing.
 Not done:   No page lists bays-asks, so the new scheduled and panel rows are in the ledger and on no screen.
+
+## 2026-10-05 17:45 — Bays page
+Intent:     Give Bays' ask ledger a page. Since this afternoon it holds scheduled task runs and Ask Bays panel questions beside Slack turns, and only the scorecard and the quality alert read it, so nobody could open a row.
+Files:      server/src/baysAsks.ts (new), server/src/index.ts (GET /api/bays), server/src/stats.ts (stat kind `bays`), src/screens/Bays/index.tsx (new), src/App.tsx, src/components/Layout.tsx, src/data/index.ts, src/data/types.ts, CLAUDE.md
+Problem:    None in the build. `npm ci` is still refused from this workspace, so the type-check was the global tsc with the missing-module noise filtered; the only lines left on the new page are the same four the Genie page shows, which built on Render.
+Fix:        n/a
+Decision:   A read and nothing else; rows are written by n8n. Answers are cut at 6,000 characters for the list (484 rows held today) and the panel says when one was cut. "Nothing posted" on a scheduled run is not counted as an undelivered reply. Bays goes first in the Systems group; the sidebar gains one row.

@@ -13,6 +13,7 @@
 import { api, ApiError } from './api';
 import type {
   AskBaysData,
+  BaysData,
   GenieData,
   DoctrineData,
   VfarmLiveData,
@@ -577,6 +578,8 @@ export function restoreRegistryRow<K extends RegistryKind>(kind: K, id: string):
 export const getVfarmLeads = () => api<VfarmLeadsData>('/api/vfarm/leads');
 /** Genie's asks and vFarm's live state, as each system pushed them (2026-09-29). */
 export const getGenie = () => api<GenieData>('/api/genie');
+/** Bays' ask ledger: Slack turns, scheduled task runs and panel questions (2026-10-05). */
+export const getBays = () => api<BaysData>('/api/bays');
 export const getVfarmLive = () => api<VfarmLiveData>('/api/vfarm/live');
 export const getMonitoringTwin = () => api<MonitoringTwinData>('/api/monitoring-twin');
 /** The Customer Service Twin's turns, as CST pushed them (2026-09-29). */

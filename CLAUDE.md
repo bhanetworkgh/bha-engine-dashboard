@@ -1959,6 +1959,7 @@ Home (the Overview)
 Ask Bays
 
 SYSTEMS
+  Bays                   ← the ask ledger: Slack, scheduled runs, panel (2026-10-05)
   North Star
   Research Twin
   Media Twin             ← Doctrine tab real from 2026-09-30, pushed by Hardik
@@ -2686,8 +2687,16 @@ morning. The n8n workflow `North Star — Recorded Helper Ask`
 `bays-asks`**: `scheduled` (one row per scheduled task run, written by
 `Bays — Record Scheduled Run`, `lIQmC333fz2TAcXX`, with `Task Name` and `Task
 Outcome`) and `dashboard_panel` (the Ask Bays panel, from `Bays — Agent
-Delivery`). **No page lists `bays-asks` yet** — the scorecard and the quality
-alert read it — so those rows are in the ledger and not on a screen.
+Delivery`). **Bays has its own page from the same day** (2026-10-05, Destiny): `/bays`,
+first in the Systems group, Asks and Statistics in the shape the twins and Genie
+have. `GET /api/bays` (`server/src/baysAsks.ts`) reads `engine_bays_asks` and
+changes nothing; the answer is cut at 6,000 characters for the page and
+`answer_chars` says when it was. The picker that matters is **From** (Slack,
+Scheduled task, Ask Bays panel). Filters: All, Answered, Tool issues, Failed,
+Not delivered. **A scheduled run whose Delivered is "Nothing posted" is not an
+undelivered reply** and is left out of that figure. Statistics is stat kind
+`bays` (asks, failed rate, tool-issue rate, not-delivered rate, response p50).
+Ask Bays stays the chat; this is the record.
 
 **Data governance: retention and the BHARAG write guard** (2026-09-29,
 Destiny — Agent Upgrade Plan 5.4 and 5.5). `server/src/dataGovernance.ts`,

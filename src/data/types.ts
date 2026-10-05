@@ -703,7 +703,7 @@ export interface CodexEntryDetail extends CodexEntry {
  * The record kinds that have a statistics tab. Six pages, one engine — see
  * `server/src/stats.ts`.
  */
-export type StatKind = 'codex' | 'loops' | 'patterns' | 'commercial' | 'clients' | 'northstar' | 'researchtwin' | 'researchjobs' | 'genie';
+export type StatKind = 'codex' | 'loops' | 'patterns' | 'commercial' | 'clients' | 'northstar' | 'researchtwin' | 'researchjobs' | 'genie' | 'bays';
 
 /**
  * One figure on a statistics tab, with the same figure a month ago.
@@ -3474,6 +3474,40 @@ export interface GenieData {
     by_lane: Cohort[];
     by_source: Cohort[];
   };
+}
+
+/** One row of Bays' ask ledger (server/src/baysAsks.ts), field for field. */
+export interface BaysAsk {
+  id: string;
+  ask_id: string | null;
+  asked_at: string | null;
+  asked_by_system: string | null;
+  asked_by_person: string | null;
+  /** slack_direct · scheduled · dashboard_panel */
+  source: string | null;
+  question: string | null;
+  /** Cut at `meta.answer_cap` characters; `answer_chars` is the full length. */
+  answer: string | null;
+  answer_chars: number | null;
+  outcome: string | null;
+  tool_issues: string | null;
+  delivered: string | null;
+  delivered_as: string | null;
+  delivery_target: string | null;
+  slack_link: string | null;
+  error: string | null;
+  response_seconds: number | null;
+  lane: string | null;
+  run_id: string | null;
+  task_name: string | null;
+  task_outcome: string | null;
+  retention_cleared_at: string | null;
+}
+
+export interface BaysData {
+  asks: BaysAsk[];
+  meta: { rows: number; undated: number; first_ask_at: string | null; last_ask_at: string | null; answer_cap: number };
+  summary: { asks: number; failed: Share; outcome_per_week: OutcomeWeek[]; by_source: Cohort[] };
 }
 
 export interface VfarmFarm {
