@@ -270,7 +270,7 @@ export function writable(kind: string): WritableKind | null {
  * asked, and it has to be removable without a SQL console. Same confirm, same
  * record_deletions copy, same audit line as every other delete.
  */
-const deleteOnly = (kind: string): WritableKind => ({ kind, required: [], selects: {}, id_minted: null, archive: null, deletable: true, ingest: null, guards: [] });
+const deleteOnly = (kind: mirror.MirrorKind): WritableKind => ({ kind, required: [], selects: {}, id_minted: null, archive: null, deletable: true, ingest: null, guards: [] });
 
 /**
  * ns-asks and bays-asks joined on 2026-10-05 (Destiny): both ledgers are

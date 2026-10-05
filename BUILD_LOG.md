@@ -11373,3 +11373,10 @@ Files:      server/src/writeGuards.ts, server/src/mcp/writeTools.ts, CLAUDE.md
 Problem:    delete_record refused both kinds: "is not a kind delete_record can delete".
 Fix:        Both added to DELETE_ONLY beside rt-asks. Same confirm, same record_deletions copy, same audit line. No other write tool takes them.
 Decision:   Extended the existing delete tool rather than adding a new one (Destiny: "to the current ones").
+
+## 2026-10-05 20:45 — Build fix for the delete-only kinds
+Intent:     Deploy dep-db1vk0e7bikc73ddf1g0 (578cf7f) ended build_failed.
+Files:      server/src/writeGuards.ts
+Problem:    The new deleteOnly helper took `kind: string`, and WritableKind.kind is mirror.MirrorKind. The filtered local type-check did not surface it.
+Fix:        The helper takes mirror.MirrorKind.
+Decision:   The live service stayed on 9e53d59 throughout; a failed build deploys nothing.
