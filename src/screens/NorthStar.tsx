@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
 import { getNsTelemetry, getRecordMetrics, resyncRecords, type NsAsk, type NsMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
-import { useReplayKey, ButtonAnchor, Tabs, PageHeader, Pagination, Button, CohortTable, CountUp, Definition, DistTile, DurationTrend, FigureCell, HBar, thisMonth, TileFigure, Pill, LoadFailed, Loading, MetricCard, MonthPicker, monthsFrom, EmptyPanel, EmptyState, Toast, OutcomeColumns, PercentCell, PercentileCell, RecordId, RecordTable, relativeTime, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, SourceLink, StatCaption, StatCell, StatLabel, StatStrip, usePaged, useResync, useToast } from '../components/ui';
+import { useReplayKey, ButtonAnchor, Tabs, PageHeader, Pagination, Button, CohortTable, CountUp, Definition, DistTile, DurationTrend, FigureCell, HBar, thisMonth, TileFigure, Pill, LoadFailed, Loading, MetricCard, MonthPicker, monthsFrom, EmptyPanel, EmptyState, FacetPicker, facetOptions, Toast, OutcomeColumns, PercentCell, PercentileCell, RecordId, RecordTable, relativeTime, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, SourceLink, StatCaption, StatCell, StatLabel, StatStrip, usePaged, useResync, useToast } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 import { DELIVERY_DEFS, NS_OUTCOME_DEFS } from './twinDefinitions';
 
@@ -27,6 +27,9 @@ const NS_KINDS = ['ns-asks', 'digests'] as const;
  * delivery is recorded after the answer is sent, so it is the only figure that
  * says something reached a person rather than that a run finished.
  */
+
+/** What the who-asked picker calls a row with no `Asked By System`. */
+const NOT_NAMED = '(not named)';
 
 type Filter = 'all' | 'Answered' | 'Thin' | 'Refused (not its lane)' | 'Failed' | 'not-delivered';
 
@@ -71,7 +74,7 @@ function when(iso: string | null): string {
 function matches(r: NsAsk, q: string): boolean {
   if (!q) return true;
   const n = q.toLowerCase();
-  return [r.ask_id, r.lane, r.question, r.answer, r.answer_summary, r.asked_by_system, r.asked_by_person, r.question_type, r.run_id, ...r.tools.map((t) => t.tool)].some(
+  return [r.ask_id, r.lane, r.question, r.answer, r.answer_summary, r.asked_by_system, r.asked_by_person, r.asked_for, r.question_type, r.run_id, ...r.tools.map((t) => t.tool)].some(
     (v) => v && v.toLowerCase().includes(n),
   );
 }
@@ -464,6 +467,8 @@ function AskView({ r, onClose }: { r: NsAsk; onClose: () => void }) {
                 {r.asked_by_system ?? 'no system named'}
                 {r.asked_by_person ? ` · ${r.asked_by_person}` : ''}
               </span>
+              {/* A helper call never went through the front door; say so, and what it was for. */}
+              {r.asked_via === 'bays_helper' && <span>helper call{r.asked_for ? ` for ${r.asked_for}` : ''}</span>}
               {r.response_seconds !== null && <span className="tabular">{r.response_seconds}s</span>}
               {r.citation_coverage !== null && <span>coverage {r.citation_coverage}</span>}
             </div>
@@ -636,6 +641,8 @@ export default function NorthStar() {
   const { status, data: loaded, error } = useData(getNsTelemetry, [], { kinds: NS_KINDS });
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
+  /* Who asked (5 Oct 2026): the row's own `Asked By System`. Bays' helper calls are recorded from that day, so they can be read apart from Slack. */
+  const [asker, setAsker] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [view, setView] = useState<View>('Asks');
   const [month, setMonth] = useState<string | null>(thisMonth());
@@ -662,24 +669,28 @@ export default function NorthStar() {
   const asks = held;
   const months = useMemo(() => monthsFrom(asks.map((r) => r.asked_at)), [asks]);
   const inMonth = useMemo(() => asks.filter((r) => !month || r.asked_at?.slice(0, 7) === month), [asks, month]);
-  const rows = useMemo(
+  // Everything but who asked, so each option in that picker counts what picking it would show.
+  const beforeAsker = useMemo(
     () =>
       inMonth
         .filter((r) => (filter === 'all' ? true : filter === 'not-delivered' ? r.delivered === 'Not delivered' : r.outcome === filter))
         .filter((r) => matches(r, q.trim())),
     [inMonth, filter, q],
   );
-  const paged = usePaged(rows, `${filter}|${q.trim()}|${month ?? 'all'}`);
+  const askerOptions = useMemo(() => facetOptions(beforeAsker, (r) => r.asked_by_system, NOT_NAMED), [beforeAsker]);
+  const rows = useMemo(() => beforeAsker.filter((r) => !asker || (r.asked_by_system || NOT_NAMED) === asker), [beforeAsker, asker]);
+  const forCounts = useMemo(() => inMonth.filter((r) => !asker || (r.asked_by_system || NOT_NAMED) === asker), [inMonth, asker]);
+  const paged = usePaged(rows, `${filter}|${asker ?? 'all'}|${q.trim()}|${month ?? 'all'}`);
 
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
   const current = open ? asks.find((r) => r.id === open) : null;
   const counts = {
-    all: inMonth.length,
-    Answered: inMonth.filter((r) => r.outcome === 'Answered').length,
-    Thin: inMonth.filter((r) => r.outcome === 'Thin').length,
-    'Refused (not its lane)': inMonth.filter((r) => r.outcome === 'Refused (not its lane)').length,
-    Failed: inMonth.filter((r) => r.outcome === 'Failed').length,
-    'not-delivered': inMonth.filter((r) => r.delivered === 'Not delivered').length,
+    all: forCounts.length,
+    Answered: forCounts.filter((r) => r.outcome === 'Answered').length,
+    Thin: forCounts.filter((r) => r.outcome === 'Thin').length,
+    'Refused (not its lane)': forCounts.filter((r) => r.outcome === 'Refused (not its lane)').length,
+    Failed: forCounts.filter((r) => r.outcome === 'Failed').length,
+    'not-delivered': forCounts.filter((r) => r.delivered === 'Not delivered').length,
   };
 
   return (
@@ -749,7 +760,8 @@ export default function NorthStar() {
                   { value: 'not-delivered', label: 'Not delivered', count: counts['not-delivered'], title: FILTER_DEF['not-delivered'] },
                 ]}
               />
-              <div className="flex flex-1 items-center justify-end gap-3">
+              <div className="flex flex-1 flex-wrap items-center justify-end gap-3">
+                <FacetPicker label="Asked by" allLabel="Everyone" value={asker} options={askerOptions} onChange={setAsker} />
                 <MonthPicker months={months} value={month} onChange={setMonth} />
                 <SearchBox value={q} onChange={setQ} placeholder="Search questions, answers and callers" />
               </div>

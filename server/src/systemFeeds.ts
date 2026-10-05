@@ -443,8 +443,8 @@ export async function genieData() {
             event_id, event_type, request_id, run_id, builder_id, lane, status, source, question, duration_ms, handoff,
             to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS occurred_at,
             to_char(received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at,
-            left(payload->'response'->>'finalOutput', 600) AS answer,
-            left(coalesce(payload->'error'->>'message', payload->'response'->>'judgeSummary'), 400) AS error,
+            left(payload->'response'->>'finalOutput', 20000) AS answer,
+            left(coalesce(payload->'error'->>'message', payload->'response'->>'judgeSummary'), 2000) AS error,
             to_char(retention_cleared_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS retention_cleared_at
        FROM engine_genie_events
       WHERE event_type NOT LIKE 'genie.subagent.%'

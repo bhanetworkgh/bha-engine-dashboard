@@ -703,7 +703,7 @@ export interface CodexEntryDetail extends CodexEntry {
  * The record kinds that have a statistics tab. Six pages, one engine — see
  * `server/src/stats.ts`.
  */
-export type StatKind = 'codex' | 'loops' | 'patterns' | 'commercial' | 'clients' | 'northstar' | 'researchtwin' | 'researchjobs';
+export type StatKind = 'codex' | 'loops' | 'patterns' | 'commercial' | 'clients' | 'northstar' | 'researchtwin' | 'researchjobs' | 'genie';
 
 /**
  * One figure on a statistics tab, with the same figure a month ago.
@@ -1244,6 +1244,10 @@ export interface NsAsk {
   asked_by_system: string | null;
   /** A Slack user id, or a `SYSTEM-…` string where no person was behind it. */
   asked_by_person: string | null;
+  /** The ask's own `Source` (e.g. `bays_helper`), where the row carries one. Rows before 5 Oct 2026 do not. */
+  asked_via: string | null;
+  /** What a helper call was for, in the caller's words (`Asked For`). */
+  asked_for: string | null;
   question: string | null;
   question_type: string | null;
   /** Often empty. Empty is a fact about the routing, not an error. */
