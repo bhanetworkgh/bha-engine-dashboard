@@ -11345,3 +11345,10 @@ Files:      server/src/mcp/reminderTools.ts (new: schedule_reminder, list_remind
 Problem:    None in the build. No local test run: npm ci is still refused from this workspace, so the tools are proved live after the deploy.
 Fix:        n/a
 Decision:   Slack holds the message (chat.scheduleMessage) rather than a timer here, so a restart or an outage on the day cannot lose it; the cost is that the text is fixed when scheduled. The yes/no is enforced by the server (confirmed: true), not by the agent's prompt. Anyone may schedule; only the requester, Destiny or Jason may cancel. A passed reminder reads "handed to Slack" because nothing here can read the channel back.
+
+## 2026-10-05 20:05 — Bays reminder skill: tested and published
+Intent:     Give the Bays agent the three reminder tools and prove them end to end.
+Files:      n8n only. Bays (Agent) Nw5igXu4WWrjUMWB: schedule_reminder, list_reminders, cancel_reminder added to the BHA Dashboard MCP allow-list; new skill "Scheduled reminders" (skill_EH5mQCChBMWPAjqp).
+Problem:    None. (This session's own connector did not list the three new tools after a refresh, so they were proved through Bays itself, which is the real path.)
+Fix:        n/a
+Decision:   Restore point 4045eac2-8a33-4663-bcf1-96a30470c393; published 1599edd6-81fa-45e7-b284-fa63ed26bc2f. Draft test through call_agent: preview (nothing scheduled, audit "preview"), confirm (REM-1791225220057-GH68, Slack id Q0C7QES1MK2, 12 Jan 2027 09:00 Lagos, in the Media Twin thread), list, cancel (row "cancelled", Slack will not post it). Dashboard commit 5656d3c, migration 59 applied. Eval run started after publish; its id goes in the next entry.
