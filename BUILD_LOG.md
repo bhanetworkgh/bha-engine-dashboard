@@ -11359,3 +11359,10 @@ Files:      server/src/laneHealth.ts (genie maps to lane GENIE; self_heal.open n
 Problem:    lane_health, the tool North Star reads failures through, was instrumented for BAYS, NS and RT only, and answered counts with no incident detail.
 Fix:        GENIE added to the instrumented lanes; every instrumented lane now lists up to ten open incidents (id, severity, subsystem, summary) beside the whole count.
 Decision:   Done on the dashboard, where North Star already reads, rather than giving North Star a BHARAG key of its own: one key, one reader, and North Star sees exactly what Engine health shows.
+
+## 2026-10-05 21:05 — Evals after the Bays reminder publish: 31 of 32, no rollback
+Intent:     Checklist step 6 for Bays version 1599edd6-81fa-45e7-b284-fa63ed26bc2f.
+Files:      none
+Problem:    EVAL-202610051834 (execution 26603): 31 of 32 cases, 62 results. RT-01 failed on repeat 2 of 3: "cites (3 markers, not in Sources: [S3])". Research Twin cited [S3] and listed only two sources. All 12 Bays cases passed.
+Fix:        None applied. Research Twin was not changed today; the failure is one flaky repeat of a Research Twin citation case, not a regression from the Bays change, so Bays stays published. Compared with EVAL-202610051537 (32 of 32).
+Decision:   No rollback: the rule is to roll back only when a previously passing case fails because of the agent that changed. RT-01's citation slip is worth watching; a second failure makes it a Research Twin instruction fix.
