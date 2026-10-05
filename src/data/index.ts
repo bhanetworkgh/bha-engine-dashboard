@@ -14,6 +14,7 @@ import { api, ApiError } from './api';
 import type {
   AskBaysData,
   BaysData,
+  BaysRemindersData,
   EvalRunDetail,
   EvalRunsData,
   GenieData,
@@ -585,6 +586,7 @@ export const getVfarmLeads = () => api<VfarmLeadsData>('/api/vfarm/leads');
 export const getGenie = () => api<GenieData>('/api/genie');
 /** Bays' ask ledger: Slack turns, scheduled task runs and panel questions (2026-10-05). */
 export const getBays = () => api<BaysData>('/api/bays');
+export const getBaysReminders = () => api<BaysRemindersData>('/api/bays/reminders');
 export const getVfarmLive = () => api<VfarmLiveData>('/api/vfarm/live');
 export const getMonitoringTwin = () => api<MonitoringTwinData>('/api/monitoring-twin');
 /** The Customer Service Twin's turns, as CST pushed them (2026-09-29). */

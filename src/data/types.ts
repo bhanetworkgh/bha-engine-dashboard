@@ -3354,6 +3354,28 @@ export interface AgentMetric {
   note: string | null;
 }
 
+/** A reminder post scheduled through Bays (server/src/mcp/reminderTools.ts). */
+export interface BaysReminder {
+  reminder_id: string;
+  /** waiting · handed_to_slack (its time has passed; not read back) · cancelled */
+  state: 'waiting' | 'handed_to_slack' | 'cancelled';
+  channel_id: string;
+  thread_ts: string | null;
+  post_at: string;
+  when: string;
+  text: string;
+  requested_by: string | null;
+  scheduled_through: string;
+  created_at: string;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+}
+export interface BaysRemindersData {
+  reminders: BaysReminder[];
+  waiting: number;
+  note: string;
+}
+
 /** One eval run (server/src/evalRuns.ts). A case passes only if every repeat passed. */
 export interface EvalRun {
   run_id: string;

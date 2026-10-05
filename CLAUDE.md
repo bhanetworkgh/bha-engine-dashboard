@@ -2702,6 +2702,24 @@ undelivered reply** and is left out of that figure. Statistics is stat kind
 `bays` (asks, failed rate, tool-issue rate, not-delivered rate, response p50).
 Ask Bays stays the chat; this is the record.
 
+**Bays schedules reminder posts** (2026-10-05, Destiny).
+`server/src/mcp/reminderTools.ts`, migration 59, `engine_scheduled_posts`; three
+tools on the write connection and in Bays' scope: `schedule_reminder`,
+`list_reminders`, `cancel_reminder`. **Slack holds the message**
+(`chat.scheduleMessage` as the Bays bot, `SLACK_BAYS_BOT_TOKEN`) and posts it,
+so it goes out whether or not this engine is up on the day; the text is fixed
+when scheduled. **The confirmation is held on the server**: without
+`confirmed: true` nothing is scheduled and the answer is the exact text, place
+and time for Bays to show the person. `post_at` must carry its own zone (a bare
+time is refused, because UTC here and Lagos to the person are an hour apart),
+at least 2 minutes and at most 120 days ahead; channels only (C…/G…). A row
+this dashboard cannot record is taken back out of Slack, and where that fails
+too the answer says so with `raise: true`. Cancel is for the requester, Destiny
+or Jason. **A reminder whose time has passed is "handed to Slack", never
+"posted"**: the Bays bot cannot read a channel back. The Bays page's third tab,
+Reminders (`GET /api/bays/reminders`), lists them; every call is on
+`engine_mcp_writes` (kind `slack`).
+
 **Agent maturity has an Evals tab** (2026-10-05, Destiny), `?tab=evals`, and an
 open run is `&run=<Run ID>`. `GET /api/eval-runs` (`server/src/evalRuns.ts`)
 lists every run in `engine_eval_runs`, newest first: cases passed, the split by

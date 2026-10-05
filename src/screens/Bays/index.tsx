@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useData } from '../../app/useData';
-import { getBays, type BaysAsk, type BaysData, type Percentiles, type Share } from '../../data';
+import { getBays, getBaysReminders, type BaysAsk, type BaysData, type BaysReminder, type Percentiles, type Share } from '../../data';
 import type { RecordColumn } from '../../components/ui';
 import {
   Button,
@@ -51,7 +51,7 @@ import RecordStatistics from '../../components/RecordStatistics';
  * Read only. The rows are written by n8n; nothing here changes one.
  */
 
-const TABS = ['Asks', 'Statistics'] as const;
+const TABS = ['Asks', 'Statistics', 'Reminders'] as const;
 type Tab = (typeof TABS)[number];
 
 type Filter = 'all' | 'Answered' | 'issues' | 'Failed' | 'undelivered';
@@ -393,6 +393,59 @@ function BaysTiles({ data }: { data: BaysData }) {
   );
 }
 
+/* ---------------------------------------------------------------- reminders */
+
+/**
+ * Reminder posts scheduled through Bays (2026-10-05, Destiny). Slack holds each
+ * message and posts it as Bays, so a reminder whose time has passed reads
+ * "handed to Slack": this dashboard cannot read the channel back, and saying
+ * "posted" would be a claim nothing here checked. Read only; a reminder is
+ * scheduled or cancelled by asking Bays.
+ */
+function ReminderState({ r }: { r: BaysReminder }) {
+  if (r.state === 'waiting') return <Pill tone="accent">waiting</Pill>;
+  if (r.state === 'cancelled') return <Pill>cancelled</Pill>;
+  return <Pill>handed to Slack</Pill>;
+}
+
+function Reminders() {
+  const { status, data, error } = useData(getBaysReminders, []);
+  const paged = usePaged(data?.reminders ?? [], 'reminders');
+  if (status === 'loading' && !data) return <Loading />;
+  if (status === 'error' && !data) return <LoadFailed error={error} />;
+  if (!data) return <Loading />;
+  return (
+    <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+      <div className="shrink-0 space-y-2 px-6 pb-4 md:px-8">
+        <p className="text-[12px] text-dim">
+          {data.waiting} waiting to go out · {data.reminders.length} held in all
+        </p>
+        <p className="text-[12px] text-faint">{data.note} To schedule or cancel one, ask Bays in Slack.</p>
+      </div>
+      {data.reminders.length === 0 ? (
+        <EmptyState>No reminder has been scheduled through Bays yet. Ask Bays in Slack to post one on a date, and it appears here once you confirm it.</EmptyState>
+      ) : (
+        <>
+          <RecordTable<BaysReminder>
+            label="Scheduled reminders"
+            rowKey={(r) => r.reminder_id}
+            rows={paged.rows}
+            columns={[
+              { key: 'when', header: 'posts', className: 'tabular text-dim', cell: (r) => r.when },
+              { key: 'state', header: 'state', card: 'meta', className: 'card-meta', cell: (r) => <ReminderState r={r} /> },
+              { key: 'text', header: 'message', card: 'title', width: '60ch', clip: true, title: (r) => r.text, cell: (r) => r.text },
+              { key: 'where', header: 'where', className: 'tabular text-dim', cell: (r) => (r.thread_ts ? `${r.channel_id} (thread)` : r.channel_id) },
+              { key: 'by', header: 'asked by', className: 'tabular text-dim', cell: (r) => r.requested_by ?? <span className="text-faint">not named</span> },
+              { key: 'id', header: 'id', className: 'tabular text-faint', cell: (r) => r.reminder_id },
+            ]}
+          />
+          <Pagination paged={paged} unit="reminders" />
+        </>
+      )}
+    </div>
+  );
+}
+
 /* --------------------------------------------------------------------- page */
 
 export default function Bays() {
@@ -410,7 +463,9 @@ export default function Bays() {
         subtitle="Every Slack turn, scheduled task run and panel question Bays recorded"
         below={<Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Asks: data?.summary.asks ? { n: data.summary.asks } : undefined }} />}
       />
-      {status === 'loading' && !data ? (
+      {tab === 'Reminders' ? (
+        <Reminders />
+      ) : status === 'loading' && !data ? (
         <Loading />
       ) : status === 'error' && !data ? (
         <LoadFailed error={error} />

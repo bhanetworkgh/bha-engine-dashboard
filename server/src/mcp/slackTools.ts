@@ -37,7 +37,7 @@ function notConfigured(): Record<string, unknown> {
   return { ok: false, reason: 'not_configured', message: `${slack.SLACK_TOKEN_VAR} is not set on this server, so nothing can be sent to Slack.` };
 }
 
-async function audited(
+export async function audited(
   tool: string,
   args: Record<string, unknown>,
   deps: ToolDeps,

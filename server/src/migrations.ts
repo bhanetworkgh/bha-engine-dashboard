@@ -2653,6 +2653,34 @@ const MIGRATIONS: Migration[] = [
        ON CONFLICT (scored_on, dimension) DO NOTHING`,
     ],
   },
+  {
+    id: 59,
+    name: 'engine_scheduled_posts: reminder posts Slack holds and sends as Bays',
+    statements: [
+      /**
+       * 5 Oct 2026, Destiny. One row per reminder scheduled through the
+       * schedule_reminder tool. Slack holds the message (slack_scheduled_id is
+       * its handle) and posts it; this row is the record of who asked for what,
+       * where and when, and is what list_reminders and the Bays page read.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_scheduled_posts (
+        id BIGSERIAL PRIMARY KEY,
+        reminder_id TEXT NOT NULL UNIQUE,
+        channel_id TEXT NOT NULL,
+        thread_ts TEXT,
+        text TEXT NOT NULL,
+        post_at TIMESTAMPTZ NOT NULL,
+        slack_scheduled_id TEXT,
+        status TEXT NOT NULL DEFAULT 'scheduled',
+        requested_by TEXT,
+        agent TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        cancelled_at TIMESTAMPTZ,
+        cancelled_by TEXT
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_scheduled_posts_post_at ON engine_scheduled_posts (post_at)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

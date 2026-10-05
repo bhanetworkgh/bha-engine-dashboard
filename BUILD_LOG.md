@@ -11338,3 +11338,10 @@ Files:      server/src/sources.ts (HEALTH_LANES), server/src/bharag.ts (LANE_KEY
 Problem:    None in the build.
 Fix:        n/a
 Decision:   A lane like the other three rather than a special case: same read, same "not keyed is not healthy" rule. The key is set on Render by Destiny as BHARAG_GENIE_INCIDENTS; it is never in this repo or this chat.
+
+## 2026-10-05 19:50 — Bays can schedule reminder posts
+Intent:     A new Bays capability (Destiny): "post a reminder in #bha-coordination on 15 October asking about X", sent as Bays on the day.
+Files:      server/src/mcp/reminderTools.ts (new: schedule_reminder, list_reminders, cancel_reminder), server/src/mcp/slackTools.ts (audited exported), server/src/mcp/tools.ts, server/src/mcp/index.ts (Bays scope), server/src/migrations.ts (59, engine_scheduled_posts), server/src/index.ts (GET /api/bays/reminders), src/screens/Bays/index.tsx (Reminders tab), src/data/index.ts, src/data/types.ts, CLAUDE.md
+Problem:    None in the build. No local test run: npm ci is still refused from this workspace, so the tools are proved live after the deploy.
+Fix:        n/a
+Decision:   Slack holds the message (chat.scheduleMessage) rather than a timer here, so a restart or an outage on the day cannot lose it; the cost is that the text is fixed when scheduled. The yes/no is enforced by the server (confirmed: true), not by the agent's prompt. Anyone may schedule; only the requester, Destiny or Jason may cancel. A passed reminder reads "handed to Slack" because nothing here can read the channel back.

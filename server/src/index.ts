@@ -54,6 +54,7 @@ import * as earlyAccess from './earlyAccess';
 import * as systemFeeds from './systemFeeds';
 import * as baysAsks from './baysAsks';
 import * as evalRuns from './evalRuns';
+import * as reminderTools from './mcp/reminderTools';
 import * as dataGovernance from './dataGovernance';
 import * as monitoringTwin from './monitoringTwin';
 import * as qualityAlert from './qualityAlert';
@@ -1169,6 +1170,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** Bays' own ledger: Slack turns, scheduled task runs and panel questions (2026-10-05). */
       case '/api/bays':
         return send(res, 200, await baysAsks.baysData());
+      /** Reminder posts scheduled through Bays (2026-10-05). A read. */
+      case '/api/bays/reminders':
+        return send(res, 200, await reminderTools.reminders());
       case '/api/vfarm/live':
         return send(res, 200, await systemFeeds.vfarmData());
       case '/api/cs-twin':

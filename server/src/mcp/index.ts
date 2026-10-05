@@ -180,6 +180,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'get_page_data', 'get_health', 'get_recovery_status', 'list_n8n_workflows', 'get_n8n_workflow',
         'read_slack_file', 'share_doc', 'grant_drive_access', 'create_doc', 'send_nudge', 'post_file',
         'create_client_report_doc', 'get_execution_quota',
+        // 2026-10-05: reminder posts Slack holds and sends as Bays.
+        'schedule_reminder', 'list_reminders', 'cancel_reminder',
         // 2026-10-01: what may be said about vFarm (T0NO).
         'read_media_doctrine',
       ]),
