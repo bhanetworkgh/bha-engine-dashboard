@@ -124,6 +124,9 @@ services:
         sync: false
       - key: BHARAG_RT_INCIDENTS
         sync: false
+      # Genie's incidents (source=genie), the Genie corpus card workspace (2026-10-05).
+      - key: BHARAG_GENIE_INCIDENTS
+        sync: false
       # Ingest only (2026-09-24), a separate credential from BHARAG_RT_INCIDENTS
       # above -- n8n has always kept these as two distinct keys, never shared.
       - key: BHARAG_RESEARCH_TWIN

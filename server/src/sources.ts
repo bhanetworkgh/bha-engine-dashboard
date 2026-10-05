@@ -1032,11 +1032,14 @@ export function mapRtJob(rec: AtRecord, now = new Date().toISOString()): RtJob {
 export const ERROR_COUNTS = { base: 'appINvgEoZjuYQI2O', table: 'tblnvhKOnuOoiB1RX', label: 'error_counts' };
 export const RETRY_ATTEMPTS = { base: 'appINvgEoZjuYQI2O', table: 'tblu9fFmCkAaeJd8Y', label: 'retry_attempts' };
 
-/** The three lanes, each with its own BHARAG credential. Not collapsible into one call. */
+/** The lanes, each with its own BHARAG credential. Not collapsible into one call. */
 export const HEALTH_LANES: { key: string; source: string; label: string }[] = [
   { key: 'bays', source: 'bays', label: 'Bays' },
   { key: 'north_star', source: 'north_star', label: 'North Star' },
   { key: 'research_twin', source: 'research_twin', label: 'Research Twin' },
+  // Genie publishes its own incidents under source=genie, in the Genie corpus
+  // card workspace, with a key of its own (2026-10-05, Destiny, LOOP-…-3LXR).
+  { key: 'genie', source: 'genie', label: 'Genie' },
 ];
 
 export function laneLabelOf(lane: string | null): string {

@@ -2073,8 +2073,8 @@ async function boot(): Promise<void> {
     }
     const laneKeys = bharag.configuredLanes();
     console.log(
-      laneKeys.length === 3
-        ? `  incidents: ${bharag.BHARAG_URL} — all three lanes keyed`
+      laneKeys.length === Object.keys(bharag.LANE_KEY_VARS).length
+        ? `  incidents: ${bharag.BHARAG_URL} — all ${laneKeys.length} lanes keyed`
         : laneKeys.length
           ? `  incidents: ${bharag.BHARAG_URL} — ${laneKeys.join(', ')} keyed; NOT keyed: ${Object.entries(bharag.LANE_KEY_VARS).filter(([k]) => !laneKeys.includes(k)).map(([, v]) => v).join(', ')}. An unkeyed lane is never read and Engine health says so rather than showing it healthy.`
           : `  incidents: NOT configured — none of ${Object.values(bharag.LANE_KEY_VARS).join(', ')} is set, so no incident is ever read and Engine health says so rather than reading zero.`,
