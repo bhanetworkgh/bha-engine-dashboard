@@ -29,6 +29,7 @@ import { DOC_WRITE_TOOLS, readSlackFile } from './docTools';
 import { getN8nWorkflow, listN8nWorkflows, sweepAirtableNodes } from './n8nTools';
 import { NORTH_STAR_TOOLS } from './northStarTools';
 import { SLACK_WRITE_TOOLS } from './slackTools';
+import { REMINDER_WRITE_TOOLS } from './reminderTools';
 import { RESEARCH_TWIN_WRITE_TOOLS } from './researchTwinTools';
 import { CANDIDATE_WRITE_TOOLS } from './candidateTools';
 import { LANE_READ_TOOLS, LANE_WRITE_TOOLS } from './laneTools';
@@ -911,7 +912,7 @@ export const TOOLS: ToolDefinition[] = [
  * tool a client can see is a tool a model will try.
  */
 function toolsFor(access: 'read' | 'write'): ToolDefinition[] {
-  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS, ...LANE_WRITE_TOOLS, ...INCIDENT_WRITE_TOOLS, ...INVENTORY_WRITE_TOOLS] : TOOLS;
+  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...REMINDER_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS, ...LANE_WRITE_TOOLS, ...INCIDENT_WRITE_TOOLS, ...INVENTORY_WRITE_TOOLS] : TOOLS;
 }
 
 /**
