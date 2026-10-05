@@ -43,7 +43,7 @@ import { HEALTH_KINDS } from './kinds';
  * repaired, or waiting on a person, and those two tabs are where the last two
  * of those are read.
  */
-const TABS = ['All systems', 'Bays', 'North Star', 'Research Twin', 'Retries', 'Repairs', 'Recovery', 'MCP writes', 'Approvals'] as const;
+const TABS = ['All systems', 'Bays', 'North Star', 'Research Twin', 'Genie', 'Retries', 'Repairs', 'Recovery', 'MCP writes', 'Approvals'] as const;
 type Tab = (typeof TABS)[number];
 
 /** Which lane each tab reads. All systems and Retries read every lane. */
@@ -51,6 +51,7 @@ const LANE_OF: Partial<Record<Tab, string>> = {
   Bays: 'bays',
   'North Star': 'north_star',
   'Research Twin': 'research_twin',
+  Genie: 'genie',
 };
 
 export default function EngineHealth() {

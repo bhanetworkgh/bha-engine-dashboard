@@ -1766,7 +1766,11 @@ which is a webhook header. Without it no execution is ever read, the Executions
 page says so rather than reading zero, and the Repairs tab says no repair can be
 put back from here.
 `BHARAG_BAYS_INCIDENTS`, `BHARAG_NS_INCIDENTS` and `BHARAG_RT_INCIDENTS` — the
-incident ledger, one per lane, read only, no defaults. A lane with no key is
+incident ledger, one per lane, read only, no defaults. **`BHARAG_GENIE_INCIDENTS`
+is the fourth** (2026-10-05, Destiny — LOOP-1791193551334-3LXR): Genie publishes
+its incidents under `source=genie` in the Genie corpus card workspace, so it is
+a fourth entry in `HEALTH_LANES` and `LANE_KEY_VARS` and a Genie tab on Engine
+health, read exactly as the other three are. A lane with no key is
 never read and Engine health says so rather than showing it healthy; the boot
 line names every lane that is not keyed. `AIRTABLE_TOKEN` also needs read on
 `appINvgEoZjuYQI2O` (engine_events) for that page's two Airtable tables.

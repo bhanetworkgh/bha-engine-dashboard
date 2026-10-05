@@ -11331,3 +11331,10 @@ Files:      server/src/evalRuns.ts, src/data/types.ts, src/screens/EvalHistory.t
 Problem:    "in progress" on a run four days old is a false statement.
 Fix:        `stalled`: a sized run short of its size with no result for 30 minutes reads "did not finish". Still never counted as a finished run.
 Decision:   Named rather than hidden: a run that died part-way is a fact about the runner worth seeing.
+
+## 2026-10-05 18:45 — Genie is a fourth incident lane
+Intent:     Read Genie's incidents (source=genie) on Engine health, now that the key is minted (LOOP-1791193551334-3LXR).
+Files:      server/src/sources.ts (HEALTH_LANES), server/src/bharag.ts (LANE_KEY_VARS), server/src/index.ts (boot line counts the lanes it has), src/screens/EngineHealth/index.tsx (Genie tab), render.yaml, .env.example, CLAUDE.md
+Problem:    None in the build.
+Fix:        n/a
+Decision:   A lane like the other three rather than a special case: same read, same "not keyed is not healthy" rule. The key is set on Render by Destiny as BHARAG_GENIE_INCIDENTS; it is never in this repo or this chat.
