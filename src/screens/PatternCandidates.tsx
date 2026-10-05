@@ -19,7 +19,7 @@ import {
   type PatternDraft,
 } from '../data';
 import type { RecordColumn } from '../components/ui';
-import { Button, ButtonAnchor, Definition, EmptyState, InfoTip, Loading, MonthPicker, Pagination, Pill, RecordTable, relativeTime, SearchBox, Segmented, Stat, StatCell, StatStrip, Toast, TwoLine, usePaged, useToast } from '../components/ui';
+import { Button, ButtonAnchor, Definition, EmptyState, FacetPicker, InfoTip, Loading, MonthPicker, Pagination, Pill, RecordTable, relativeTime, SearchBox, Segmented, Stat, StatCell, StatStrip, Toast, TwoLine, usePaged, useToast } from '../components/ui';
 
 /**
  * Pattern candidates (2026-09-23, Destiny; actions 2026-09-24): ideas Bays
@@ -143,28 +143,6 @@ const FACET_OF: Record<Facet, (c: PatternCandidate) => string | null> = {
   status: (c) => c.status,
 };
 const NONE = '(none)';
-
-/** One facet as a compact picker: "All builders (52)", then each value with its count. */
-function FacetPicker({ label, allLabel, value, options, onChange }: { label: string; allLabel: string; value: string | null; options: [string, number][]; onChange: (v: string | null) => void }) {
-  const total = options.reduce((n, [, c]) => n + c, 0);
-  const missing = value && !options.some(([v]) => v === value);
-  return (
-    <label className="flex items-center gap-2 text-[11.5px] text-faint">
-      <span>{label}</span>
-      <select className="input h-[30px] w-auto max-w-[190px] py-0 text-[12px]" value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} aria-label={label}>
-        <option value="">
-          {allLabel} ({total})
-        </option>
-        {options.map(([v, n]) => (
-          <option key={v} value={v}>
-            {v} ({n})
-          </option>
-        ))}
-        {missing && <option value={value!}>{value} (0)</option>}
-      </select>
-    </label>
-  );
-}
 
 function rate(r: CandidateRate): string {
   return r.of ? `${r.n} of ${r.of}` : 'none yet';

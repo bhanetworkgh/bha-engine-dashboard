@@ -28,3 +28,4 @@ export * from './Figures';
 export * from './InfoTip';
 export * from './Live';
 export * from './Button';
+export * from './FacetPicker';

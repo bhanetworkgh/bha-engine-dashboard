@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../app/useData';
 import { getRecordMetrics, getRtTelemetry, resyncRecords, type RtAsk, type RtJob, type RtJobMetrics, type RtMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
-import { useReplayKey, ButtonAnchor, Tabs, PageHeader, Pagination, Button, CohortTable, CountUp, Definition, DistTile, DurationTrend, FigureCell, HBar, thisMonth, TileFigure, Pill, LoadFailed, Loading, MetricCard, MonthPicker, monthsFrom, EmptyState, Toast, OutcomeColumns, PercentCell, PercentileCell, RecordId, RecordTable, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, SourceLink, StatCell, StatStrip, usePaged, useResync, useToast } from '../components/ui';
+import { useReplayKey, ButtonAnchor, Tabs, PageHeader, Pagination, Button, CohortTable, CountUp, Definition, DistTile, DurationTrend, FigureCell, HBar, thisMonth, TileFigure, Pill, LoadFailed, Loading, MetricCard, MonthPicker, monthsFrom, EmptyState, FacetPicker, facetOptions, Toast, OutcomeColumns, PercentCell, PercentileCell, RecordId, RecordTable, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, SourceLink, StatCell, StatStrip, usePaged, useResync, useToast } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 import { JOB_STATUS_DEFS, RT_OUTCOME_DEFS } from './twinDefinitions';
 import { HandoffTile } from './NorthStar';
@@ -29,6 +29,9 @@ const RT_KINDS = ['rt-asks', 'rt-jobs'] as const;
  * and every figure had to collapse on `card_id` first. `Attempts` is a number
  * on the job now. None of that one-row-per-attempt language is carried across.
  */
+
+/** What the who-asked picker calls a row with no `Asked By System`. */
+const NOT_NAMED = '(not named)';
 
 type AskFilter = 'all' | 'Answered' | 'Thin' | 'Needs human' | 'Refused (not its lane)' | 'Failed' | 'external' | 'internal';
 type JobFilter = 'all' | 'capped' | 'open' | 'Pending' | 'In Progress' | 'Resolved';
@@ -852,6 +855,8 @@ export default function ResearchTwin() {
   const { status, data: loaded, error } = useData(getRtTelemetry, [], { kinds: RT_KINDS });
   const [view, setView] = useState<View>('Asks');
   const [askFilter, setAskFilter] = useState<AskFilter>('all');
+  /* Who asked (5 Oct 2026): the row's own `Asked By System`, so Slack, Bays, North Star and the schedules can be read apart. */
+  const [asker, setAsker] = useState<string | null>(null);
   const [jobFilterSet, setJobFilter] = useState<JobFilter | null>(null);
   const [q, setQ] = useState('');
   const [openAsk, setOpenAsk] = useState<string | null>(null);
@@ -893,7 +898,8 @@ export default function ResearchTwin() {
   const asksInMonth = useMemo(() => asks.filter((r) => !month || r.asked_at?.slice(0, 7) === month), [asks, month]);
   const jobsInMonth = useMemo(() => jobs.filter((j) => !month || j.opened_at?.slice(0, 7) === month), [jobs, month]);
 
-  const askRows = useMemo(
+  // Everything but who asked, so each option in that picker counts what picking it would show.
+  const asksBeforeAsker = useMemo(
     () =>
       asksInMonth
         .filter((r) =>
@@ -902,6 +908,9 @@ export default function ResearchTwin() {
         .filter((r) => askMatches(r, q.trim())),
     [asksInMonth, askFilter, q],
   );
+  const askerOptions = useMemo(() => facetOptions(asksBeforeAsker, (r) => r.asked_by_system, NOT_NAMED), [asksBeforeAsker]);
+  const askRows = useMemo(() => asksBeforeAsker.filter((r) => !asker || (r.asked_by_system || NOT_NAMED) === asker), [asksBeforeAsker, asker]);
+  const asksForCounts = useMemo(() => asksInMonth.filter((r) => !asker || (r.asked_by_system || NOT_NAMED) === asker), [asksInMonth, asker]);
   // Capped leads when anything is capped; otherwise the whole queue, so a tab
   // holding three pending jobs does not open on an empty filter.
   const jobFilter: JobFilter = jobFilterSet ?? (jobs.some((j) => j.capped) ? 'capped' : 'all');
@@ -913,7 +922,7 @@ export default function ResearchTwin() {
     [jobsInMonth, jobFilter, q],
   );
 
-  const pagedAsks = usePaged(askRows, `asks|${askFilter}|${q.trim()}|${month ?? 'all'}`);
+  const pagedAsks = usePaged(askRows, `asks|${askFilter}|${asker ?? 'all'}|${q.trim()}|${month ?? 'all'}`);
   const pagedJobs = usePaged(jobRows, `jobs|${jobFilter}|${q.trim()}|${month ?? 'all'}`);
 
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
@@ -921,14 +930,14 @@ export default function ResearchTwin() {
   const currentJob = openJob ? jobs.find((j) => j.id === openJob) : null;
 
   const askCounts = {
-    all: asksInMonth.length,
-    Answered: asksInMonth.filter((r) => r.outcome === 'Answered').length,
-    Thin: asksInMonth.filter((r) => r.outcome === 'Thin').length,
-    'Needs human': asksInMonth.filter((r) => r.outcome === 'Needs human').length,
-    'Refused (not its lane)': asksInMonth.filter((r) => r.outcome === 'Refused (not its lane)').length,
-    Failed: asksInMonth.filter((r) => r.outcome === 'Failed').length,
-    external: asksInMonth.filter((r) => r.used_web_search).length,
-    internal: asksInMonth.filter((r) => !r.used_web_search).length,
+    all: asksForCounts.length,
+    Answered: asksForCounts.filter((r) => r.outcome === 'Answered').length,
+    Thin: asksForCounts.filter((r) => r.outcome === 'Thin').length,
+    'Needs human': asksForCounts.filter((r) => r.outcome === 'Needs human').length,
+    'Refused (not its lane)': asksForCounts.filter((r) => r.outcome === 'Refused (not its lane)').length,
+    Failed: asksForCounts.filter((r) => r.outcome === 'Failed').length,
+    external: asksForCounts.filter((r) => r.used_web_search).length,
+    internal: asksForCounts.filter((r) => !r.used_web_search).length,
   };
   const jobCounts = {
     all: jobsInMonth.length,
@@ -1067,7 +1076,8 @@ export default function ResearchTwin() {
                   title: ASK_FILTER_DEF[f].def,
                 }))}
               />
-              <div className="flex flex-1 items-center justify-end gap-3">
+              <div className="flex flex-1 flex-wrap items-center justify-end gap-3">
+                <FacetPicker label="Asked by" allLabel="Everyone" value={asker} options={askerOptions} onChange={setAsker} />
                 <MonthPicker months={months} value={month} onChange={setMonth} />
                 <SearchBox value={q} onChange={setQ} placeholder="Search requests, answers and sources" />
               </div>

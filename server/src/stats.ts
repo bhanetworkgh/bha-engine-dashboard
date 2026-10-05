@@ -32,11 +32,13 @@
  */
 import { getMeta, nowIso } from './db';
 import * as store from './store';
+import { genieData } from './systemFeeds';
 import { delta, movement } from './delta';
 import type {
   BuildPattern,
   ClientQuestion,
   CodexEntry,
+  GenieAsk,
   Loop,
   NsAsk,
   Opportunity,
@@ -1130,9 +1132,102 @@ function researchJobsSpec(): KindSpec<RtJob> {
   };
 }
 
+/**
+ * Genie, month against month (2026-10-05, Destiny).
+ *
+ * One row per ask: the latest event Genie sent for its request id, dated by the
+ * event's own `occurred_at`. The same rules as the twins: a rate carries its
+ * base, the duration is a p50 over the asks that sent one, and an ask with no
+ * `duration_ms` is left out of the timing rather than counted as instant.
+ *
+ * Genie's first event landed on 5 Oct 2026, so October is the first month held
+ * and it starts part-way through. Nothing here smooths that.
+ */
+function genieSpec(): KindSpec<GenieAsk> {
+  return {
+    kind: 'genie',
+    createdOf: (r) => r.occurred_at,
+    metrics: [
+      {
+        key: 'asks',
+        label: 'Asks',
+        field: 'occurredAt',
+        unit: 'count',
+        better: null,
+        word: 'asks',
+        figure: (c) => count(c.length, 'Every ask Genie reported this month, one per request id. Genie pushes these; nothing here polls it, so a month with none is a month Genie sent none.'),
+      },
+      {
+        key: 'answered_rate',
+        label: 'Answered rate',
+        field: 'status',
+        unit: 'percent',
+        better: 'up',
+        word: 'answered rate',
+        figure: (c) =>
+          rate(
+            c.filter((r) => r.outcome === 'Answered').length,
+            c.length,
+            c.length
+              ? `Asks whose last event says satisfied, over all ${plural(c.length, 'ask')} this month. Genie's own judge decides that; this dashboard only counts it. An ask that stopped at its iteration limit is Incomplete, not Answered and not Failed.`
+              : 'Genie reported no ask this month, so there is no rate, not a rate of nought.',
+          ),
+      },
+      {
+        key: 'failed_rate',
+        label: 'Failed rate',
+        field: 'eventType',
+        unit: 'percent',
+        better: 'down',
+        word: 'failed rate',
+        figure: (c) =>
+          rate(
+            c.filter((r) => r.outcome === 'Failed').length,
+            c.length,
+            c.length ? `Asks whose last event is genie.*.failed or carries status error, over all ${plural(c.length, 'ask')} this month.` : 'Genie reported no ask this month.',
+          ),
+      },
+      {
+        key: 'handoff_rate',
+        label: 'Handed to a twin',
+        field: 'handoff',
+        unit: 'percent',
+        // Sending a question on is Genie doing its job, so neither direction is news.
+        better: null,
+        figure: (c) =>
+          rate(
+            c.filter((r) => r.handoff).length,
+            c.length,
+            c.length ? `Asks Genie sent on to Research Twin or North Star, where the event names the hand-off, over all ${plural(c.length, 'ask')} this month. Not coloured: handing on is not a fault.` : 'Genie reported no ask this month.',
+          ),
+      },
+      {
+        key: 'duration_p50',
+        label: 'Time to answer (p50)',
+        field: 'duration_ms',
+        unit: 'duration',
+        better: 'down',
+        word: 'median time to answer',
+        figure: (c) => {
+          const timed = c.filter((r) => r.duration_ms !== null);
+          return {
+            value: p(timed.map((r) => r.duration_ms as number), 50),
+            n: timed.length,
+            note: timed.length
+              ? `The median, over the ${timed.length} of ${plural(c.length, 'ask')} that sent a duration. Never a mean. An ask that sent none is left out, not counted as instant.`
+              : c.length
+                ? `None of this month's ${plural(c.length, 'ask')} sent a duration, so there is no figure, not a figure of nought.`
+                : 'Genie reported no ask this month.',
+          };
+        },
+      },
+    ],
+  };
+}
+
 /* -------------------------------------------------------------- dispatch */
 
-export const STAT_KINDS: StatKind[] = ['codex', 'loops', 'patterns', 'commercial', 'clients', 'northstar', 'researchtwin', 'researchjobs'];
+export const STAT_KINDS: StatKind[] = ['codex', 'loops', 'patterns', 'commercial', 'clients', 'northstar', 'researchtwin', 'researchjobs', 'genie'];
 
 export function isStatKind(v: string): v is StatKind {
   return (STAT_KINDS as string[]).includes(v);
@@ -1161,6 +1256,8 @@ export async function stats(kind: StatKind, month?: string | null): Promise<Reco
       return statsOf(researchTwinSpec(), await store.rtAsks(), month);
     case 'researchjobs':
       return statsOf(researchJobsSpec(), await store.rtJobs(), month);
+    case 'genie':
+      return statsOf(genieSpec(), (await genieData()).asks as GenieAsk[], month);
     default:
       throw new store.StoreError(`${kind as string} has no statistics.`, 404);
   }

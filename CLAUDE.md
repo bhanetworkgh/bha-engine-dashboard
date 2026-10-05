@@ -2656,6 +2656,39 @@ each tab says what is missing and who wires it, and draws nothing.
 The contracts handed to the builders are `docs/contracts/genie-events.md`
 (Kaiqi) and `docs/contracts/vfarm.md` (Jegan and Kavin).
 
+**Genie's page is level with the twins', and all three filter by who asked**
+(2026-10-05, Destiny). The first real Genie ask landed that day and the page
+read thin beside North Star and Research Twin. **An ask opens in a panel**, the
+one a North Star ask opens in, never as a row unfolding inside the table. The
+Asks tab shows **one month at a time** with an outcome filter (All · Answered ·
+Incomplete · Failed · Handed to a twin), a **From** picker over the event's
+`source` and a search; **the strip is computed from the month's rows on the
+page**, with the server's own arithmetic, so it and the list are about the same
+asks. Statistics is the shared `RecordStatistics` tab — every month held, the
+month against the one before, and the CSV export — on a new stat kind
+**`genie`** in `server/src/stats.ts` (asks, answered rate, failed rate, handed
+to a twin, time to answer p50; dated by `occurred_at`). The three cards the page
+brings (outcome by week, by lane, by source) are **over every ask held** and
+their footnotes say so. `/api/genie` now sends the answer whole (20,000
+characters, was 600) because the panel shows it.
+**North Star and Research Twin carry an "Asked by" picker** over the row's own
+`Asked By System`, each option counted over what the other filters leave; the
+outcome counts follow the picker. It is `FacetPicker`, moved from the Candidates
+tab into `components/ui` so the four pages share one control.
+**Bays' helper calls to North Star are rows from 5 Oct**: Bays used to call
+North Star as an n8n sub-agent, which skipped the Front Door and Agent Delivery,
+so nothing after 29 Sep was recorded while North Star ranked loops every
+morning. The n8n workflow `North Star — Recorded Helper Ask`
+(`SZGkCtLkQbqO0yW8`, Bays' tool `Rank_With_North_Star`) writes each one to
+`ns-asks` with `Asked By System: Bays`, `Source: bays_helper` and `Asked For`
+(what the call was for); the page reads the last two as `asked_via` and
+`asked_for` and says "helper call for …" on the ask. **Two new sources on
+`bays-asks`**: `scheduled` (one row per scheduled task run, written by
+`Bays — Record Scheduled Run`, `lIQmC333fz2TAcXX`, with `Task Name` and `Task
+Outcome`) and `dashboard_panel` (the Ask Bays panel, from `Bays — Agent
+Delivery`). **No page lists `bays-asks` yet** — the scorecard and the quality
+alert read it — so those rows are in the ledger and not on a screen.
+
 **Data governance: retention and the BHARAG write guard** (2026-09-29,
 Destiny — Agent Upgrade Plan 5.4 and 5.5). `server/src/dataGovernance.ts`,
 migration 42. **Retention clears personal text and keeps the row**: after 180

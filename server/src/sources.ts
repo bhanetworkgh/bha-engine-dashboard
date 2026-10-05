@@ -891,6 +891,8 @@ export function mapNsAsk(rec: AtRecord): NsAsk {
     week: at ? isoWeek(at) : null,
     asked_by_system: str(f['Asked By System']),
     asked_by_person: str(f['Asked By Person']),
+    asked_via: str(f.Source),
+    asked_for: str(f['Asked For']),
     question: str(f.Question),
     question_type: str(f['Question Type']),
     lane: str(f.Lane),
