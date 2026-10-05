@@ -820,8 +820,9 @@ reasonable about.
   answered / stale (older than 30 days), and a re-entry signal `first_pass` /
   `deeper_pass` / `none`, proposed only for the top five lanes; **self-heal** —
   open incidents, incidents in 14 days and recurring fault signatures, for
-  BAYS, NS and RT only (the lanes with workflows), "not instrumented" for the
-  rest; **logs** — Codex logs whose `Lanes Touched` names the lane, awaiting
+  BAYS, NS, RT and **GENIE** (5 Oct 2026, with its incident key; LOOP-…-3LXR),
+  each with its open incidents named (`open`, at most ten, newest first: id,
+  severity, subsystem, summary), "not instrumented" for the rest; **logs** — Codex logs whose `Lanes Touched` names the lane, awaiting
   evaluation or evaluated, autopaid null until the rule exists; **convergence**
   — loops raised against closed (status ledger) in 14 days. Research jobs carry
   commercial LANE-… ids, never work-lane tags, so a work lane reaches research

@@ -11352,3 +11352,10 @@ Files:      n8n only. Bays (Agent) Nw5igXu4WWrjUMWB: schedule_reminder, list_rem
 Problem:    None. (This session's own connector did not list the three new tools after a refresh, so they were proved through Bays itself, which is the real path.)
 Fix:        n/a
 Decision:   Restore point 4045eac2-8a33-4663-bcf1-96a30470c393; published 1599edd6-81fa-45e7-b284-fa63ed26bc2f. Draft test through call_agent: preview (nothing scheduled, audit "preview"), confirm (REM-1791225220057-GH68, Slack id Q0C7QES1MK2, 12 Jan 2027 09:00 Lagos, in the Media Twin thread), list, cancel (row "cancelled", Slack will not post it). Dashboard commit 5656d3c, migration 59 applied. Eval run started after publish; its id goes in the next entry.
+
+## 2026-10-05 20:55 — North Star can read Genie's incidents
+Intent:     Close the last gate on LOOP-1791193551334-3LXR: North Star reading source=genie incident context.
+Files:      server/src/laneHealth.ts (genie maps to lane GENIE; self_heal.open names the open incidents), CLAUDE.md
+Problem:    lane_health, the tool North Star reads failures through, was instrumented for BAYS, NS and RT only, and answered counts with no incident detail.
+Fix:        GENIE added to the instrumented lanes; every instrumented lane now lists up to ten open incidents (id, severity, subsystem, summary) beside the whole count.
+Decision:   Done on the dashboard, where North Star already reads, rather than giving North Star a BHARAG key of its own: one key, one reader, and North Star sees exactly what Engine health shows.

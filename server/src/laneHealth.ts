@@ -13,7 +13,8 @@
  *              active (In Progress), answered, stale. The re-entry signal is
  *              `action`: first_pass, deeper_pass or none, with the reason.
  *   self_heal  incidents and recurring fault signatures, for the lanes that have
- *              workflows of their own (BAYS, NS, RT). Every other lane says it is
+ *              an incident source of their own (BAYS, NS, RT, and GENIE from 5 Oct 2026),
+ *              with the open incidents named. Every other lane says it is
  *              not instrumented rather than reading as healthy.
  *   logs       Codex work logs whose Lanes Touched names the lane, in the last
  *              14 days: awaiting evaluation or evaluated. Autopaid is null —
@@ -34,7 +35,11 @@ export const WINDOW_DAYS = 14;
 export const RESEARCH_TOP_N = 5;
 
 /** Which work lane an incident source and a workflow name belong to. */
-const SOURCE_LANE: Record<string, string> = { bays: 'BAYS', north_star: 'NS', research_twin: 'RT' };
+/** Genie joined on 5 Oct 2026, when its incident key was minted (LOOP-1791193551334-3LXR). */
+const SOURCE_LANE: Record<string, string> = { bays: 'BAYS', north_star: 'NS', research_twin: 'RT', genie: 'GENIE' };
+const INSTRUMENTED = new Set(Object.values(SOURCE_LANE));
+/** How many open incidents a lane names in full; the count beside them is always the whole number. */
+const OPEN_LIST_MAX = 10;
 function laneOfWorkflow(name: string): string | null {
   if (/^Bays\b/i.test(name)) return 'BAYS';
   if (/^North Star\b/i.test(name)) return 'NS';
@@ -145,7 +150,7 @@ export interface LaneHealth {
   linked_lanes: string[];
   blockers: Blockers;
   research: ResearchState;
-  self_heal: { instrumented: boolean; open_incidents: number | null; incidents_14d: number | null; recurring: Array<{ signature: string; workflow: string; count: number }>; note: string | null };
+  self_heal: { instrumented: boolean; open_incidents: number | null; incidents_14d: number | null; open: Array<{ incident_id: string; severity: string | null; subsystem: string | null; summary: string }>; recurring: Array<{ signature: string; workflow: string; count: number }>; note: string | null };
   logs: { touched_14d: number; awaiting_evaluation: number; evaluated: number; autopaid: null; note: string };
   convergence: { opened_14d: number | null; closed_14d: number | null; open_now: number; verdict: 'converging' | 'steady' | 'churning' | 'unknown'; note: string };
 }
@@ -229,6 +234,14 @@ export async function laneHealth(opts: { kind?: 'work' | 'commercial' | 'all'; l
       [since],
     )
   ).rows;
+  // The open incidents themselves, so a reader gets what broke and not only how many.
+  const openRows = (
+    await query<{ source: string; incident_id: string; severity: string | null; subsystem: string | null; summary: string }>(
+      `SELECT fields->>'source' AS source, natural_id AS incident_id, fields->>'severity' AS severity, fields->>'subsystem' AS subsystem,
+              left(coalesce(fields->>'summary', ''), 240) AS summary
+         FROM engine_incidents WHERE open_now ORDER BY id DESC`,
+    )
+  ).rows;
   const recurring = (
     await query<{ signature: string; workflow: string; count: number }>(
       `SELECT coalesce(fields->>'signature', '') AS signature, coalesce(fields->>'workflow', '') AS workflow, coalesce((fields->>'error_count')::int, 0) AS count
@@ -281,7 +294,7 @@ export async function laneHealth(opts: { kind?: 'work' | 'commercial' | 'all'; l
     const researchLanes = l.kind === 'commercial' ? [l.lane_id, ...links] : links;
     const research = researchState(researchLanes, jobs, rank, now);
 
-    const instrumented = ['BAYS', 'NS', 'RT'].includes(l.lane_id);
+    const instrumented = INSTRUMENTED.has(l.lane_id);
     const inc = instrumented ? incidents.filter((i) => SOURCE_LANE[i.source] === l.lane_id) : [];
     const rec = instrumented ? recurring.filter((e) => laneOfWorkflow(e.workflow) === l.lane_id) : [];
 
@@ -310,6 +323,9 @@ export async function laneHealth(opts: { kind?: 'work' | 'commercial' | 'all'; l
         instrumented,
         open_incidents: instrumented ? inc.reduce((a, i) => a + Number(i.open), 0) : null,
         incidents_14d: instrumented ? inc.reduce((a, i) => a + Number(i.recent), 0) : null,
+        open: instrumented
+          ? openRows.filter((o) => SOURCE_LANE[o.source] === l.lane_id).slice(0, OPEN_LIST_MAX).map(({ incident_id, severity, subsystem, summary }) => ({ incident_id, severity, subsystem, summary }))
+          : [],
         recurring: rec.slice(0, 5),
         note: instrumented ? null : 'No workflow or incident source belongs to this lane yet, so self-heal state is not instrumented — not healthy, not measured.',
       },
@@ -328,7 +344,7 @@ export async function laneHealth(opts: { kind?: 'work' | 'commercial' | 'all'; l
     notes: [
       `A resolved Research Twin job is a gleaning; findings older than ${STALE_AFTER_DAYS} days are stale. Research is proposed only for the top ${RESEARCH_TOP_N} lanes.`,
       'Work lanes reach research only through linked_lanes (set with set_lane_profile), because research jobs carry commercial LANE-… ids, never work-lane tags.',
-      'Self-heal is instrumented only for BAYS, NS and RT, the three lanes with workflows and incident sources of their own.',
+      `Self-heal is instrumented for BAYS, NS, RT and GENIE, the lanes with an incident source of their own (Genie from 5 Oct 2026). open lists at most ${OPEN_LIST_MAX} open incidents per lane, newest first; open_incidents is the whole count. Genie has no n8n workflows, so its recurring list is always empty.`,
       'blockers lists the loops a person named as blocking the lane (set_lane_profile blocked_by), each with its live status: waiting_on is still open, cleared is closed.',
     ],
   };
