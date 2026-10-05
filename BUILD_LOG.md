@@ -11324,3 +11324,10 @@ Files:      server/src/evalRuns.ts (new), server/src/index.ts (GET /api/eval-run
 Problem:    None in the build. Type-check as for the Bays page (global tsc, missing-module noise filtered).
 Fix:        n/a
 Decision:   Same pass rule and same finished-run rule as scorecard.ts, restated in SQL here rather than imported, because the scorecard asks about one run and this asks about all of them. The tab and the open run are in the address so a run can be linked.
+
+## 2026-10-05 18:35 — Evals tab: a run that stopped part-way says so
+Intent:     Reading the live runs back, EVAL-202610011423 holds 5 of 33 results from 1 Oct and would have read "in progress" for ever.
+Files:      server/src/evalRuns.ts, src/data/types.ts, src/screens/EvalHistory.tsx
+Problem:    "in progress" on a run four days old is a false statement.
+Fix:        `stalled`: a sized run short of its size with no result for 30 minutes reads "did not finish". Still never counted as a finished run.
+Decision:   Named rather than hidden: a run that died part-way is a fact about the runner worth seeing.

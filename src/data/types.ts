@@ -3363,6 +3363,7 @@ export interface EvalRun {
   results: number;
   run_size: number | null;
   complete: boolean;
+  stalled: boolean;
   cases: number;
   passed: number;
   failed_cases: string[];

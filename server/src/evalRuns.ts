@@ -21,6 +21,8 @@ export interface EvalRunRow {
   results: number;
   run_size: number | null;
   complete: boolean;
+  /** Not finished and no result for 30 minutes: the run stopped part-way. */
+  stalled: boolean;
   cases: number;
   passed: number;
   failed_cases: string[];
@@ -30,7 +32,7 @@ export interface EvalRunRow {
 export async function runs(): Promise<{ runs: EvalRunRow[]; results: number; first_run_at: string | null }> {
   const r = await query<{
     run_id: string; started_at: string | null; finished_at: string | null; execution: string | null; results: number; run_size: number | null;
-    complete: boolean; cases: number; passed: number; failed_cases: string[] | null; by_agent: EvalRunRow['by_agent'] | null;
+    complete: boolean; stalled: boolean; cases: number; passed: number; failed_cases: string[] | null; by_agent: EvalRunRow['by_agent'] | null;
   }>(
     `WITH per_case AS (
        SELECT fields->>'Run ID' AS run_id, fields->>'Case ID' AS case_id, coalesce(fields->>'Agent', '(not named)') AS agent,
@@ -51,6 +53,7 @@ export async function runs(): Promise<{ runs: EvalRunRow[]; results: number; fir
      )
      SELECT r.run_id, r.started_at, r.finished_at, r.execution, r.results, r.run_size,
             (CASE WHEN r.run_size IS NOT NULL THEN r.results >= r.run_size ELSE r.last < now() - interval '30 minutes' END) AS complete,
+            (r.run_size IS NOT NULL AND r.results < r.run_size AND r.last < now() - interval '30 minutes') AS stalled,
             c.cases, c.passed, c.failed_cases, a.by_agent
        FROM runs r JOIN cases c USING (run_id) JOIN per_agent a USING (run_id)
       ORDER BY r.last_id DESC`,

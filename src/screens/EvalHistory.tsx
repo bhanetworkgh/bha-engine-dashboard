@@ -32,7 +32,7 @@ function RunView({ runId, summary, onClose }: { runId: string; summary: EvalRun 
             {summary && (
               <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-faint">
                 <span className="tabular">{when(summary.started_at)} UTC</span>
-                {!summary.complete && <Pill tone="degraded">in progress</Pill>}
+                {!summary.complete && <Pill tone="degraded">{summary.stalled ? 'did not finish' : 'in progress'}</Pill>}
                 <span>{summary.results} results</span>
                 {summary.by_agent.map((a) => (
                   <span key={a.agent}>
@@ -195,7 +195,7 @@ export default function EvalHistory() {
               }}
             >
               <td className="tabular px-3 py-2 text-ink">
-                {r.run_id} {!r.complete && <Pill tone="degraded">in progress</Pill>}
+                {r.run_id} {!r.complete && <Pill tone="degraded">{r.stalled ? 'did not finish' : 'in progress'}</Pill>}
               </td>
               <td className="tabular px-3 py-2 text-dim">{when(r.started_at)}</td>
               <td className={`tabular px-3 py-2 ${r.complete && r.passed < r.cases ? 'text-failing' : 'text-ink'}`}>
