@@ -11408,3 +11408,10 @@ Files:      n8n only. 85 HTTP nodes in 23 live workflows moved to the credential
 Problem:    The morning count (99 nodes, 25 workflows) covered live workflows only and missed the simulator's and the evals' reads; the read-only sweep (one-off L81iwQwl3GyETiO1) found 151 sending nodes in 34 workflows, 100 of them live.
 Fix:        As above. Each workflow's restore point is in its version description. Final sweep (execution 27793): no live workflow reads the variable.
 Decision:   Ten retired or switched-off workflows (51 nodes) were left on the variable and will be refused if switched back on after the variable is deleted. Proof: a credential-shaped call accepted by the dashboard; Dependency Probe 200 with the key and 403 without; 155 dashboard writes and reads since the swap began with none refused. Not proved live: Agent Evals read-back (next run Monday 05:00), Recovery Summary and Simulator webhooks (same change as the probe, not called). Still to do, outside this entry: delete the variable in n8n; rotate the key itself, which also means Genie, CST, vFarm and the repair bridge changing theirs; give the keyless webhooks (/engine-heal, /repair-result, /commercial-pattern-extractors) a key.
+
+## 2026-10-06 19:40 — The healer webhook is sent the inbound key
+Intent:     /webhook/engine-heal (Retry now, and the recovery watcher's re-runs) had no key check; anyone holding the URL could ask the healer to retry.
+Files:      server/src/bharag.ts
+Problem:    heal() posted with no x-dashboard-key, so the n8n webhook could not be given a check without refusing the dashboard.
+Fix:        heal() sends x-dashboard-key from DASHBOARD_INBOUND_KEY, the header the recovery watcher's two webhooks already receive. The n8n webhook is switched to header auth only after this deploy is live.
+Decision:   No new variable. If the key is unset the header is left off, as before, and the webhook will refuse it once it checks.

@@ -298,6 +298,11 @@ export interface HealRequest {
  * worked** — the outcome is decided by the retried execution and recorded in
  * `retry_attempts`, which reaches this dashboard on the next resync.
  */
+/** The key the healer's webhook checks: the same inbound key n8n sends this server. */
+function healKey(): string {
+  return (process.env.DASHBOARD_INBOUND_KEY || '').trim();
+}
+
 export async function heal(body: HealRequest): Promise<{ status: number; body: string }> {
   if (!HEAL_URL) throw new BharagError(`${HEAL_VAR} is not set on this server, so there is nothing to ask for a retry.`, 503);
   const controller = new AbortController();
@@ -305,7 +310,9 @@ export async function heal(body: HealRequest): Promise<{ status: number; body: s
   try {
     const res = await fetch(HEAL_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      // 6 Oct 2026: the healer's webhook checks x-dashboard-key, like the recovery
+      // watcher's two webhooks. It was open to anyone holding the URL until then.
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(healKey() ? { 'x-dashboard-key': healKey() } : {}) },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
