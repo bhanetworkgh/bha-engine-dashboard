@@ -75,6 +75,13 @@ export interface ToolDeps {
   scope?: ReadonlySet<string> | null;
   /** The agent the token belongs to, or null for the shared secret. */
   agent?: string | null;
+  /**
+   * Set only by this server's own code, never by the transport and never from
+   * anything a caller sends (2026-10-06, LOOP-1791233664168-BCYK).
+   * `register_path` is candidateActions.register marking its own candidate:
+   * the one caller update_record lets set a candidate to Registered.
+   */
+  internal?: 'register_path';
 }
 
 /**

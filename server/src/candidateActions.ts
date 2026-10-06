@@ -138,20 +138,21 @@ function uniq(xs: (string | null)[]): string[] {
 /** Which door an action came through: the page (`page`) or the MCP write connection (`write`). */
 export type Via = 'page' | 'write';
 
-function deps(via: Via): ToolDeps {
+function deps(via: Via, internal?: ToolDeps['internal']): ToolDeps {
   return {
     access: via,
+    ...(internal ? { internal } : {}),
     startedAt: new Date().toISOString(),
     // The write handlers never dispatch a page read; the loopback belongs to get_page_data.
     dispatch: async () => ({ status: 404, body: null }),
   };
 }
 
-async function call(tool: 'create_record' | 'update_record' | 'delete_record', args: Record<string, unknown>, via: Via = 'page'): Promise<Record<string, unknown>> {
+async function call(tool: 'create_record' | 'update_record' | 'delete_record', args: Record<string, unknown>, via: Via = 'page', internal?: ToolDeps['internal']): Promise<Record<string, unknown>> {
   const t = toolByName(tool, 'write');
   if (!t) throw new Error(`${tool} is not registered`);
   try {
-    return (await t.handler(args, deps(via))) as Record<string, unknown>;
+    return (await t.handler(args, deps(via, internal))) as Record<string, unknown>;
   } catch (e) {
     if (e instanceof McpError) throw new CandidateError(e.code === 'not_found' ? 404 : e.code === 'ambiguous' ? 409 : 400, e.code, e.message);
     throw e;
@@ -238,7 +239,8 @@ export async function register(ref: string, input: RegisterInput): Promise<Recor
       ...(posted.announced ? { 'Announcement Link': posted.permalink ?? `ts ${posted.ts}`, 'Announcement TS': posted.ts } : {}),
     },
     requester_user_id: actor.user_id,
-  }, via);
+    // The one caller update_record lets set Registered (2026-10-06, BCYK): the pattern is saved and announced by here.
+  }, via, 'register_path');
   /*
    * The handoff (2026-09-25): the candidate is now a pattern, so its row goes.
    * Only once it has been marked, so the copy record_deletions keeps carries

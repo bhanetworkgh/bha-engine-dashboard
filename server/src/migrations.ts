@@ -2681,6 +2681,32 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_scheduled_posts_post_at ON engine_scheduled_posts (post_at)`,
     ],
   },
+  {
+    id: 60,
+    name: 'engine_build_patterns: doc_id and doc_link backfilled from the create audit line',
+    statements: [
+      /**
+       * 6 Oct 2026, Destiny. create_record has made every dashboard-created
+       * pattern's Google Doc since 24 Sep and reported the id in its answer and
+       * on its engine_mcp_writes line ("doc: created <id>"), but never on the
+       * row, so nothing reading the pattern could find its Doc. From today the
+       * handler writes doc_id and doc_link onto the row; this copies the id
+       * across for the patterns created before then (17 on the day it was
+       * written). The newest audit line for a pattern wins; a row that already
+       * carries doc_id is left alone; a pattern whose Doc was made inside n8n
+       * by the extractor has no such line and is not touched.
+       */
+      `UPDATE engine_build_patterns p
+          SET fields = p.fields || jsonb_build_object('doc_id', w.doc_id, 'doc_link', 'https://docs.google.com/document/d/' || w.doc_id || '/edit')
+         FROM (
+           SELECT DISTINCT ON (natural_id) natural_id, substring(detail from 'doc: created ([A-Za-z0-9_-]+)') AS doc_id
+             FROM engine_mcp_writes
+            WHERE tool = 'create_record' AND kind = 'patterns' AND dry_run IS NOT TRUE AND detail ~ 'doc: created [A-Za-z0-9_-]+'
+            ORDER BY natural_id, id DESC
+         ) w
+        WHERE w.natural_id = p.natural_id AND w.doc_id IS NOT NULL AND NOT (p.fields ? 'doc_id')`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

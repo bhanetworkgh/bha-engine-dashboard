@@ -11380,3 +11380,10 @@ Files:      server/src/writeGuards.ts
 Problem:    The new deleteOnly helper took `kind: string`, and WritableKind.kind is mirror.MirrorKind. The filtered local type-check did not surface it.
 Fix:        The helper takes mirror.MirrorKind.
 Decision:   The live service stayed on 9e53d59 throughout; a failed build deploys nothing.
+
+## 2026-10-06 16:40 — Register path only, and patterns keep their Doc link
+Intent:     Close LOOP-1791233664168-BCYK (a candidate could be marked Registered by a plain update, skipping the pattern, BHARAG, the Doc and the announcement) and keep each pattern's Google Doc link on its row (Destiny, after BP-APPROVAL-1791227916261-20QV's link had to be dug out of the audit log).
+Files:      server/src/writeGuards.ts, server/src/mcp/writeTools.ts, server/src/mcp/tools.ts, server/src/candidateActions.ts, server/src/sources.ts, server/src/migrations.ts (60), src/data/types.ts, src/screens/BuildPatterns.tsx, server/test/pattern-candidates.test.cjs, CLAUDE.md
+Problem:    update_record accepted Status: Registered on pattern_candidates. The Doc id was only ever written to the audit detail line, never to the pattern.
+Fix:        planUpdate refuses that change with use_register_path unless the call comes from the register path (ToolDeps.internal, set only by server code). create_record patches doc_id and doc_link onto the pattern after the Doc is made and reports doc_link_saved. Migration 60 backfills rows from engine_mcp_writes (17 on the live data when checked). The panel shows a Google Doc link.
+Decision:   New field names only; nothing renamed. A failed link save does not fail the registration: it is reported as doc_link_error. No local test run (npm ci is still refused here); proved live after the deploy. Extractor-written patterns still do not report their Doc id: that is an n8n change, held until the replay of lost runs finishes.

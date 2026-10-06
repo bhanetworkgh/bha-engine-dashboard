@@ -633,13 +633,15 @@ export function mapPattern(rec: AtRecord): BuildPatternDetail {
     anti_pattern: str(f.anti_pattern),
     naming_note: str(f.naming_note),
     roadmap_context: str(f.roadmap_context),
+    // 2026-10-06: kept on the row by create_record. Null on an extractor-made pattern, whose Doc is made inside n8n.
+    doc_link: str(f.doc_link) ?? (str(f.doc_id) ? `https://docs.google.com/document/d/${str(f.doc_id)}/edit` : null),
   };
 }
 
 /** The list shape: everything but the long text. */
 export function patternSummary(p: BuildPatternDetail): BuildPattern {
-  const { problem, solution, context, next_use_case, commercial_impact, research_production_impact, learnings_gotchas, readiness_gates, implementation_checklist, integration_points, test_coverage, routing_logic, anti_pattern, naming_note, roadmap_context, ...rest } = p;
-  void [problem, solution, context, next_use_case, commercial_impact, research_production_impact, learnings_gotchas, readiness_gates, implementation_checklist, integration_points, test_coverage, routing_logic, anti_pattern, naming_note, roadmap_context];
+  const { problem, solution, context, next_use_case, commercial_impact, research_production_impact, learnings_gotchas, readiness_gates, implementation_checklist, integration_points, test_coverage, routing_logic, anti_pattern, naming_note, roadmap_context, doc_link, ...rest } = p;
+  void [problem, solution, context, next_use_case, commercial_impact, research_production_impact, learnings_gotchas, readiness_gates, implementation_checklist, integration_points, test_coverage, routing_logic, anti_pattern, naming_note, roadmap_context, doc_link];
   return rest;
 }
 

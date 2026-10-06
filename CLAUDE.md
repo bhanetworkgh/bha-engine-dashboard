@@ -1079,6 +1079,17 @@ archive records directly, with the checks the Bays Tools Router enforces.
   reads their columns and row counts from the database and the values each
   select field actually holds, beside the rules. Incidents, pay, the twins'
   ledgers and the registry are not writable over MCP.
+- **A candidate becomes Registered on the register path only** (2026-10-06,
+  LOOP-1791233664168-BCYK). `update_record` refuses `Status: Registered` on
+  `pattern_candidates` with `use_register_path`; only
+  `register_pattern_candidate` and the page's Register button set it, because
+  they also save the pattern, ingest it, make the Doc and announce it. Guard
+  `register_path_only`.
+- **A pattern keeps its Google Doc** (2026-10-06). When `create_record` makes
+  the Doc for a pattern it writes `doc_id` and `doc_link` back onto the row
+  (new fields, nothing renamed); the Build patterns panel shows the link.
+  Migration 60 backfilled older rows from `engine_mcp_writes`. Patterns the
+  n8n extractor writes do not report a Doc id yet.
 - **Archive is only where a page already draws an archived state** — loops,
   `Status = Closed`. Candidates are Proposed / Approved / Registered / Declined
   (Declined added 2026-09-24, set from the Build patterns page) and no
