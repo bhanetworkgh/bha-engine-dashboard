@@ -11415,3 +11415,10 @@ Files:      server/src/bharag.ts
 Problem:    heal() posted with no x-dashboard-key, so the n8n webhook could not be given a check without refusing the dashboard.
 Fix:        heal() sends x-dashboard-key from DASHBOARD_INBOUND_KEY, the header the recovery watcher's two webhooks already receive. The n8n webhook is switched to header auth only after this deploy is live.
 Decision:   No new variable. If the key is unset the header is left off, as before, and the webhook will refuse it once it checks.
+
+## 2026-10-06 20:00 — The three keyless webhooks now check the inbound key
+Intent:     /engine-heal, /repair-result and /commercial-pattern-extractors accepted a call from anyone holding the URL. The last one starts a paid model call and writes a record.
+Files:      Dashboard: server/src/bharag.ts (commit 486a0bf, heal() sends x-dashboard-key). bha-repair-bridge: src/report.js (commit dfef315, the report webhook post sends it). n8n: BHA — Self Healer (webhook "Retry Now (Dashboard Button)" on header auth; "Report Retry Outcome" and "Report Needs A Person" send the key), BHA — Self Healer Reports (webhook "Repair Result Received" on header auth), Bays — Commercial & Pattern Extractors ("Extractors Webhook" on header auth), Bays — Submit Actions ("Call Commercial & Pattern Extractors (Webhook)" sends the key), and the replay one-off's sender.
+Problem:    None in the build. The bridge's full test run did not finish inside this workspace's two-minute limit, so its suite is not confirmed green on this commit; the change is one header on one call.
+Fix:        Callers first, then the check: each caller was live and sending the key before its webhook began refusing calls without one.
+Decision:   All three use the existing credential "BHA Dashboard — Inbound Key"; no new secret. Proved: a call with no key gets 403 on all six keyed webhooks (n8n execution 27804). Not proved yet, each waits for its next real use: Retry now from the dashboard, a repair report from the bridge, a log handed to the extractors by Submit Actions.
