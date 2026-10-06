@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useData } from '../app/useData';
 import { getBuildPatterns, getPatternCandidates, getPatternDetail, getRecordMetrics, resyncRecords, searchPatterns, type BuildPattern, type BuildPatternDetail, type PatternMetrics } from '../data';
 import type { RecordColumn } from '../components/ui';
-import { useReplayKey, Tabs, PageHeader, Pagination, Button, CountCell, Definition, HBar, thisMonth, LoadFailed, Loading, MetricCard, monthLabel, MonthPicker, monthsFrom, EmptyPanel, EmptyState, Toast, RecordId, RecordTable, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, StatCell, StatStrip, usePaged, useResync, useToast, TwoLine } from '../components/ui';
+import { useReplayKey, Tabs, PageHeader, Pagination, Button, ButtonAnchor, CountCell, Definition, HBar, thisMonth, LoadFailed, Loading, MetricCard, monthLabel, MonthPicker, monthsFrom, EmptyPanel, EmptyState, Toast, RecordId, RecordTable, ResyncButton, RowAction, RowActions, RowsLine, SearchBox, Segmented, SeriesBlock, StatCell, StatStrip, usePaged, useResync, useToast, TwoLine } from '../components/ui';
 import RecordStatistics from '../components/RecordStatistics';
 import { REUSE_DEFS } from './recordDefinitions';
 import { CandidatesTab } from './PatternCandidates';
@@ -214,6 +214,11 @@ function PatternView({ id, onClose }: { id: string; onClose: () => void }) {
                 )}
               </div>
               <div className="flex items-center gap-2">
+                {detail.doc_link && (
+                  <ButtonAnchor size="sm" href={detail.doc_link} target="_blank" rel="noreferrer">
+                    Google Doc
+                  </ButtonAnchor>
+                )}
                 <Button variant="ghost" size="sm" onClick={onClose}>
                   Close
                 </Button>

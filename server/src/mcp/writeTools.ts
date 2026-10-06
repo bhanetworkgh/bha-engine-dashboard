@@ -306,7 +306,7 @@ const listWritableKinds: ToolDefinition = {
 const createRecord: ToolDefinition = {
   name: 'create_record',
   description:
-    'Create one record. Runs every guard for the kind first — for loops the lane set, lane-owner gate and duplicate gate the Bays Tools Router runs — and writes nothing if one refuses, returning ok:false with the reason (possible_duplicate, lane_owner_mismatch, missing_required, invalid_value, already_exists) and what to send to proceed. Never overwrites: a natural id already held is refused. On success returns the stored row, its id and natural_id. For codex, patterns and commercial the new record is also ingested into its BHARAG workspace, reported separately as ingested_to_bharag. A pattern also gets its Google Doc (title "Build Pattern -- <pattern_name> -- <drafted_by>", the same text BHARAG receives, in the build patterns Drive folder), reported as doc_created and doc_id — a Doc that fails never undoes the record.',
+    'Create one record. Runs every guard for the kind first — for loops the lane set, lane-owner gate and duplicate gate the Bays Tools Router runs — and writes nothing if one refuses, returning ok:false with the reason (possible_duplicate, lane_owner_mismatch, missing_required, invalid_value, already_exists) and what to send to proceed. Never overwrites: a natural id already held is refused. On success returns the stored row, its id and natural_id. For codex, patterns and commercial the new record is also ingested into its BHARAG workspace, reported separately as ingested_to_bharag. A pattern also gets its Google Doc (title "Build Pattern -- <pattern_name> -- <drafted_by>", the same text BHARAG receives, in the build patterns Drive folder), reported as doc_created and doc_id — a Doc that fails never undoes the record. The Doc’s id and link are then kept on the pattern row as doc_id and doc_link (doc_link_saved), so find_records can hand the link back later.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -359,7 +359,7 @@ const createRecord: ToolDefinition = {
       await auditClose(audit, { outcome: 'rejected', detail: message, natural_id: plan.natural_id, guard_result: plan.checks });
       return { ok: false, written: false, reason: 'rejected_by_store', message, checks: plan.checks, audit_id: audit };
     }
-    const row = await mirror.readRow(spec.kind, written.id);
+    let row = await mirror.readRow(spec.kind, written.id);
 
     let ingest: { attempted: boolean; ok: boolean; detail: string } | null = null;
     if (spec.ingest && row) {
@@ -388,14 +388,41 @@ const createRecord: ToolDefinition = {
       }
     }
 
+    /*
+     * The Doc's id and link go onto the pattern row (2026-10-06, Destiny). Until
+     * then they were in this answer and the audit line and nowhere a reader of
+     * the pattern could find them: on 6 Oct Bays could not announce a pattern
+     * with its Doc because the row did not carry the link. Two new field names
+     * in the blob, never a rename. Written even where the Doc's text did not
+     * land, so an empty Doc is findable. A patch that fails never undoes the
+     * record or the Doc, and is said.
+     */
+    let docLinkSaved: boolean | null = null;
+    let docLinkError: string | null = null;
+    if (gdoc?.doc_id && row) {
+      try {
+        await engineWrite.patchRecord('patterns', String(written.id), { doc_id: gdoc.doc_id, doc_link: gdoc.doc_link ?? google.docLink(gdoc.doc_id) }, ctxFor('create_record', deps));
+        row = (await mirror.readRow('patterns', written.id)) ?? row;
+        docLinkSaved = true;
+      } catch (e) {
+        docLinkSaved = false;
+        docLinkError = e instanceof Error ? e.message : String(e);
+      }
+    }
+
     const notes = [
       ingest && !ingest.ok ? 'It is NOT in BHARAG yet — see bharag.detail.' : null,
       gdoc && !gdoc.doc_created ? 'Its Google Doc was NOT made — see doc_error.' : null,
+      docLinkSaved === false ? `Its Google Doc was made but the link was NOT saved on the pattern row — ${docLinkError}. The link is ${gdoc?.doc_link ?? gdoc?.doc_id}.` : null,
     ].filter(Boolean);
     await auditClose(audit, {
       outcome: written.outcome,
       detail:
-        [ingest ? `bharag: ${ingest.ok ? 'ingested' : 'not ingested'} — ${ingest.detail}` : null, gdoc ? `doc: ${gdoc.doc_created ? `created ${gdoc.doc_id}` : `not created — ${gdoc.doc_error}`}` : null]
+        [
+          ingest ? `bharag: ${ingest.ok ? 'ingested' : 'not ingested'} — ${ingest.detail}` : null,
+          gdoc ? `doc: ${gdoc.doc_created ? `created ${gdoc.doc_id}` : `not created — ${gdoc.doc_error}`}` : null,
+          docLinkSaved === null ? null : `doc link: ${docLinkSaved ? 'saved on the row' : `not saved on the row — ${docLinkError}`}`,
+        ]
           .filter(Boolean)
           .join(' | ') || null,
       record_id: written.id,
@@ -408,6 +435,7 @@ const createRecord: ToolDefinition = {
       saved: true,
       ...(ingest ? { ingested_to_bharag: ingest.ok, bharag: ingest } : {}),
       ...(gdoc ?? {}),
+      ...(docLinkSaved === null ? {} : { doc_link_saved: docLinkSaved, ...(docLinkError ? { doc_link_error: docLinkError } : {}) }),
       kind: spec.kind,
       id: written.id,
       natural_id: written.natural_id,
@@ -423,7 +451,7 @@ const createRecord: ToolDefinition = {
 const updateRecord: ToolDefinition = {
   name: 'update_record',
   description:
-    'Change part of one record: only the fields sent change, and a field sent as null is removed. Name the row by id or natural_id. The same merge PATCH /api/engine/:kind/:id does. Loops need requester_user_id and follow the Tools Router’s permission rule (an admin, the assignee, or an unassigned loop); a lane must be one of the locked set. Returns the row before and after.',
+    'Change part of one record: only the fields sent change, and a field sent as null is removed. Name the row by id or natural_id. The same merge PATCH /api/engine/:kind/:id does. Loops need requester_user_id and follow the Tools Router’s permission rule (an admin, the assignee, or an unassigned loop); a lane must be one of the locked set. A pattern candidate cannot be set to Registered here (refused as use_register_path): register_pattern_candidate is the only way, because it also saves, announces and hands off the pattern. Returns the row before and after.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -451,7 +479,7 @@ const updateRecord: ToolDefinition = {
       await auditClose(audit, { outcome: 'refused', detail: e instanceof Error ? e.message : String(e), natural_id: s(args, 'natural_id') });
       throw e;
     }
-    const plan = await guards.planUpdate(spec.kind, row, fields, requester);
+    const plan = await guards.planUpdate(spec.kind, row, fields, requester, { registerPath: deps.internal === 'register_path' });
     if (!plan.ok) {
       await auditClose(audit, { outcome: 'refused', detail: `${plan.reason}: ${plan.message}`, record_id: row.id, natural_id: row.natural_id, before: row, guard_result: plan });
       return refused(plan, { id: row.id, natural_id: row.natural_id, audit_id: audit });

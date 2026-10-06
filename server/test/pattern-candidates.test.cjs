@@ -304,6 +304,20 @@ const act = (ref, action, body) => request('POST', `/api/pattern-candidates/${en
     assert.equal(oldArch.status, 403, 'the previous architect no longer may act');
     step('reassign: from Builder Profiles only, both fields change, the old architect loses the right');
 
+    /* ---- Registered is the register path's to set (2026-10-06, BCYK) ---- */
+    const byHand = await mcp('update_record', { kind: 'pattern_candidates', natural_id: cReg, fields: { Status: 'Registered', 'Pattern ID': 'BP-NOT-REAL' }, requester_user_id: ARCH });
+    assert.equal(byHand.ok, false, JSON.stringify(byHand));
+    assert.equal(byHand.reason, 'use_register_path');
+    assert.match(byHand.message, /register_pattern_candidate/);
+    assert.ok(byHand.checks.some((c) => c.guard === 'register_path_only' && c.result === 'fail'));
+    const untouched = (await query(`SELECT fields FROM engine_pattern_candidates WHERE natural_id = $1`, [cReg])).rows[0].fields;
+    assert.deepEqual([untouched.Status, untouched['Pattern ID'] ?? null], ['Proposed', null], 'a refused edit writes nothing');
+    const byHandAudit = (await query(`SELECT outcome FROM engine_mcp_writes WHERE tool = 'update_record' AND natural_id = $1 ORDER BY id DESC LIMIT 1`, [cReg])).rows[0];
+    assert.equal(byHandAudit.outcome, 'refused', 'the refusal is on the audit');
+    const otherEdit = await mcp('update_record', { kind: 'pattern_candidates', natural_id: cReg, fields: { 'Why This Architect': 'Did the work.' }, requester_user_id: ARCH });
+    assert.equal(otherEdit.ok, true, 'any other edit of a candidate still lands');
+    step('update_record cannot set a candidate to Registered');
+
     /* ---- register ---- */
     const reg = await act(cReg, 'register', {
       actor_user_id: ARCH,
@@ -327,6 +341,10 @@ const act = (ref, action, body) => request('POST', `/api/pattern-candidates/${en
     const pat = (await query(`SELECT fields, source FROM engine_build_patterns WHERE natural_id = $1`, [reg.body.pattern_id])).rows[0];
     assert.equal(pat.source, 'engine');
     assert.equal(pat.fields.pattern_name, `Throwaway register ${T}`);
+    assert.equal(pat.fields.doc_link, reg.body.doc_link, 'the Doc link is kept on the pattern row');
+    assert.equal(pat.fields.doc_id, reg.body.doc_id, 'and its id');
+    const patPage = await request('GET', `/api/build-patterns/${encodeURIComponent(`row-${reg.body.pattern_row_id}`)}`);
+    if (patPage.status === 200) assert.equal(patPage.body.doc_link, reg.body.doc_link, 'the pattern panel reads the same link');
     const docCreate = seen.google.filter((g) => g.path === '/drive/v3/files' && g.method === 'POST').at(-1);
     assert.equal(docCreate.body.name, `Build Pattern -- Throwaway register ${T} -- Arch ${T}`, 'drafted_by is the person acting, on the Doc');
     assert.equal(pat.fields.implementation_checklist, 'Step one | Step two', 'one step per line joined as patterns are');

@@ -992,6 +992,8 @@ export interface BuildPatternDetail extends BuildPattern {
   anti_pattern: string | null;
   naming_note: string | null;
   roadmap_context: string | null;
+  /** The pattern's Google Doc, where the row carries it (2026-10-06). Null on a pattern whose Doc was made inside n8n. */
+  doc_link: string | null;
 }
 
 /**

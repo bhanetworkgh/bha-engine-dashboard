@@ -198,6 +198,7 @@ export const WRITABLE: Record<string, WritableKind> = {
     guards: [
       ...EVERY,
       { name: 'pattern_normalise', applies_to: 'create', does: 'LBP - Normalise Pattern Fields: every field cleaned, implementation_checklist joined with " | " when a list, reusability defaulting to Moderate, created_at stamped now, pattern_id minted when absent.' },
+      { name: 'doc_link_kept', applies_to: 'create', does: 'Once the pattern’s Google Doc is made, its id and link are written onto the row as doc_id and doc_link, so the link can be read back from the pattern.' },
     ],
   },
   pattern_candidates: {
@@ -213,6 +214,7 @@ export const WRITABLE: Record<string, WritableKind> = {
       ...EVERY,
       { name: 'candidate_duplicate_by_name', applies_to: 'create', does: 'A candidate whose name, compared case- and punctuation-blind, is already held is refused (possible_duplicate) unless confirmed_new is true.' },
       { name: 'candidate_starts_proposed', applies_to: 'create', does: 'Status is Proposed on create whatever is sent, and Date Flagged defaults to today — as Flag_Pattern_Candidate writes it.' },
+      { name: 'register_path_only', applies_to: 'update', does: 'Status cannot be set to Registered by update_record (use_register_path). Only register_pattern_candidate, or Register on the Build patterns page, sets it — after the pattern is saved and announced.' },
     ],
   },
   commercial: {
@@ -299,7 +301,7 @@ export interface Check {
 
 export interface Refusal {
   ok: false;
-  reason: 'missing_required' | 'invalid_value' | 'lane_owner_mismatch' | 'possible_duplicate' | 'not_permitted' | 'already_exists' | 'not_found' | 'not_writable' | 'bad_request';
+  reason: 'missing_required' | 'invalid_value' | 'lane_owner_mismatch' | 'possible_duplicate' | 'not_permitted' | 'already_exists' | 'not_found' | 'not_writable' | 'bad_request' | 'use_register_path';
   message: string;
   detail?: Record<string, unknown>;
   checks: Check[];
@@ -669,7 +671,7 @@ export function loopPermission(row: mirror.LookupRow, requester: string | null |
   return null;
 }
 
-export async function planUpdate(kind: string, row: mirror.LookupRow, rawFields: Record<string, unknown>, requester: string | null | undefined): Promise<UpdatePlan | Refusal> {
+export async function planUpdate(kind: string, row: mirror.LookupRow, rawFields: Record<string, unknown>, requester: string | null | undefined, opts: { registerPath?: boolean } = {}): Promise<UpdatePlan | Refusal> {
   const spec = writable(kind);
   const checks: Check[] = [];
   if (!spec) return refuse('not_writable', `"${kind}" is not a kind the MCP write tools can write. One of: ${WRITABLE_KINDS.join(', ')}.`, checks);
@@ -707,6 +709,24 @@ export async function planUpdate(kind: string, row: mirror.LookupRow, rawFields:
     }
   }
   if (spec.kind === 'pattern_candidates' && 'Lane' in fields && str(fields.Lane)) fields.Lane = str(fields.Lane).toUpperCase().replace(/[\s-]+/g, '_');
+  /*
+   * Registered is the register path's to set (2026-10-06, BCYK). On 5 Oct a
+   * pattern was saved with create_record and its candidate then edited to
+   * Registered by hand (audit lines 1131 and 1133): the candidate read
+   * Registered while the announcement, the Pattern ID stamp and the handoff
+   * had never run. An edit that leaves the status as it already is passes.
+   */
+  if (spec.kind === 'pattern_candidates' && 'Status' in fields && str(fields.Status).toLowerCase() === 'registered' && str(row.fields.Status).toLowerCase() !== 'registered') {
+    if (!opts.registerPath) {
+      checks.push({ guard: 'register_path_only', result: 'fail' });
+      return refuse(
+        'use_register_path',
+        'A candidate is set to Registered only by registering it: register_pattern_candidate (or Register on the Build patterns page), which saves the pattern, announces it in #bha-build-patterns, stamps the Pattern ID and hands the candidate off. update_record cannot set it, because the candidate would read Registered with none of that done. Nothing was written. If the pattern already exists, say so to Destiny rather than marking the candidate by hand.',
+        checks,
+      );
+    }
+    checks.push({ guard: 'register_path_only', result: 'pass' });
+  }
 
   const bad = checkSelects(spec, fields, checks);
   if (bad) return bad;
