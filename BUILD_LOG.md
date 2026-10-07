@@ -11515,3 +11515,10 @@ Files:      server/src/health.ts
 Problem:    A past-cap press through retry_incident answered "Retry 4 of 3 was handed to the healer."
 Fix:        Past the cap it now reads "Retry 4, past the cap of 3 because a person asked with a reason, was handed to the healer."
 Decision:   Extractor hand-off proof pinned from n8n history rather than the check-in time: the extractors webhook began checking the key at 18:32:07 UTC on 6 Oct (version 30cdc5a1), Submit Actions began sending it at 18:31:46 (bb201ee9), and hand-offs 27991, 27992, 28015 and 28016 (21:31 and 21:38 UTC) were accepted and succeeded.
+
+## 2026-10-07 15:50 — Client report: caveat count in the table, Purpose & Future Translation section
+Intent:     Close Jason's two 8 Sep asks on the Research Twin client report (LOOP-1788870070271-SR9G, LOOP-1788870072972-TYL9).
+Files:      server/src/mcp/researchTwinTools.ts, server/test/client-report.test.cjs, package.json, CLAUDE.md
+Problem:    The report already split flagged questions, prose caveats and young-lane gaps in its body and Slack comment, but the At a glance table showed only the flagged count. There was no Purpose / Current maturity / Future translation section, and the nearest lane field, Commercial Hook, is internal framing ("First live proof point for onboarding a cold lane").
+Fix:        Table row "Answers naming a caveat". New section under At a glance reading two new lane fields, Client Purpose and Future Translation; Current maturity computed from the report's counts; "Not yet written for this lane." where a field is empty.
+Decision:   Destiny, 7 Oct. New field names on the index row, nothing renamed. Commercial Hook never reaches a client report. First deliberate departure from the ported n8n buildReport.

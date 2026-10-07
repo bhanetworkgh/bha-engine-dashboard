@@ -1493,7 +1493,16 @@ code, clock frozen, came out identical on 77 cases before anything was wired.
   uploaded to **#watched-clients (`C0B9LKU7DQV`)** with the source's
   `initial_comment`, as **Research Twin's own bot,
   `SLACK_RESEARCH_TWIN_BOT_TOKEN`** — never Bays' or North Star's. The
-  permalink comes from files.info.
+  permalink comes from files.info. **Two template changes on 2026-10-07**
+  (Jason's asks of 8 Sep, LOOP-…-SR9G and LOOP-…-TYL9), the first departures
+  from the ported `buildReport`: the At a glance table carries **Answers naming
+  a caveat** beside the flagged count, so formal gaps and limits named in prose
+  are counted apart everywhere; and a **Purpose & Future Translation** section
+  sits under it — Purpose and Future translation from the lane's own `Client
+  Purpose` and `Future Translation` (new index fields, written by a person,
+  never `Commercial Hook`, which is internal framing), Current maturity computed
+  from the report's own counts, and an unwritten field saying so.
+  `npm run test:client-report` pins both with no database.
 - **All six**: a business refusal is `ok:false` with a plain reason, never a
   throw (QFR threw on zero items); `dry_run`; answers held to **20,000
   characters**, cut and marked. `npm run test:research-twin` pins them end to
