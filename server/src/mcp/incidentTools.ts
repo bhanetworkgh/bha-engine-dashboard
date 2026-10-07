@@ -86,4 +86,64 @@ export const closeIncidentsTool: ToolDefinition = {
   },
 };
 
-export const INCIDENT_WRITE_TOOLS: ToolDefinition[] = [closeIncidentsTool];
+/**
+ * Retry now over MCP (7 Oct 2026, Destiny — LOOP-1791322278282-DC07).
+ *
+ *   retry_incident — write connection only. The Retries tab's own Retry now
+ *                    (health.retryNow, the function the button calls): the
+ *                    same cap of three, the same refusal without an execution
+ *                    id, the same POST to the healer webhook with the server's
+ *                    key. It hands the retry to the healer; whether the run
+ *                    recovered is written to retry_attempts by the healer.
+ */
+export const retryIncidentTool: ToolDefinition = {
+  name: 'retry_incident',
+  description:
+    'Retry now for one incident — the Engine health Retries tab\'s own button, through the same function. incident_id: the id as the Retries tab lists it (e.g. INC-BAYS.AGENT-038). reason: why it is being retried (required, kept on the audit line). Refused, changing nothing, when no retry row is held for the incident, when it has used all three attempts, or when the row carries no execution id. dry_run true calls nothing and answers what the row holds and whether a retry would be sent. On success the retry has been handed to the healer, not proven: the healer writes the result (Recovered or Exhausted) to retry_attempts, so read that row afterwards. Audited on engine_mcp_writes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      incident_id: { type: 'string', description: 'The incident id, e.g. "INC-BAYS.AGENT-038".' },
+      reason: { type: 'string', description: 'Why it is being retried.' },
+      requester_user_id: { type: 'string', description: 'Slack id of the person asking, for the audit line.' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['incident_id', 'reason'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Retry an incident now' },
+  handler: async (args, deps) => {
+    const id = typeof args.incident_id === 'string' ? args.incident_id.trim() : '';
+    const reason = typeof args.reason === 'string' ? args.reason.trim().slice(0, 500) : '';
+    const requester = typeof args.requester_user_id === 'string' ? args.requester_user_id.trim() || null : null;
+    const dry = args.dry_run === true;
+    const audit = await auditOpen({ tool: 'retry_incident', args, access: deps.access, kind: 'incidents', requester, dry_run: dry });
+
+    if (!id || reason.length < 3) {
+      const message = !id ? 'Send incident_id.' : 'Send a reason (at least 3 characters).';
+      await auditClose(audit, { outcome: 'refused', detail: message });
+      return { ok: false, reason: 'bad_argument', message, audit_id: audit };
+    }
+
+    try {
+      if (dry) {
+        const held = (await health.retries()).find((r) => r.incident_id === id);
+        const would = !held ? 'refuse' : (held.attempts ?? 0) >= 3 ? 'refuse' : !held.execution_id ? 'refuse' : 'retry';
+        const why = !held ? 'no retry row is held for this incident' : (held.attempts ?? 0) >= 3 ? 'all three attempts are used' : !held.execution_id ? 'the row carries no execution id' : null;
+        const row = held ? { status: held.status, attempts: held.attempts ?? 0, execution_id: held.execution_id, workflow: held.workflow, failed_node: held.failed_node, lane: held.lane } : null;
+        await auditClose(audit, { outcome: 'dry_run', detail: `would ${would}${why ? `: ${why}` : ''}`, natural_id: id, after: row });
+        return { ok: true, dry_run: true, incident_id: id, would, why, row, note: 'dry_run: nothing was sent to the healer.', audit_id: audit };
+      }
+      const actor = `mcp:${deps.access}${requester ? ` (${requester})` : ''} — ${reason}`;
+      const r = await health.retryNow(id, actor);
+      await auditClose(audit, { outcome: r.ok ? 'applied' : 'refused', detail: r.message.slice(0, 500), natural_id: id, after: r });
+      return { ...r, audit_id: audit };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      await auditClose(audit, { outcome: 'failed', detail: message });
+      return { ok: false, reason: 'error', message, audit_id: audit };
+    }
+  },
+};
+
+export const INCIDENT_WRITE_TOOLS: ToolDefinition[] = [closeIncidentsTool, retryIncidentTool];
