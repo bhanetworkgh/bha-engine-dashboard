@@ -47,8 +47,9 @@ export const OPENROUTER_KEY_VAR = 'OPENROUTER_API_KEY';
 const OPENROUTER_URL = (process.env.OPENROUTER_API_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
 /** `Pat Prep Build Patterns`' own model and token budget. */
 export const DRAFT_MODEL = 'anthropic/claude-sonnet-5';
-const MAX_TOKENS = 3000;
-const MODEL_TIMEOUT_MS = 90_000;
+/** 3,000 cut a full draft off before its JSON closed (7 Oct 2026: 502 parse_error on a real candidate), the fault the extractors had the day before. */
+const MAX_TOKENS = 8000;
+const MODEL_TIMEOUT_MS = 150_000;
 const THREAD_LIMIT = 200;
 const MESSAGE_CLIP = 2_000;
 const THREAD_CHARS = 40_000;
@@ -464,7 +465,12 @@ export async function draft(row: mirror.LookupRow, extras: DraftExtras = {}): Pr
     const err = (json?.error as { message?: string } | undefined)?.message ?? text.slice(0, 300);
     throw new DraftError(502, res.status === 402 ? 'model_billing' : 'model_error', `OpenRouter answered ${res.status}: ${err}. Nothing was drafted.`);
   }
-  const content = (json.choices as { message?: { content?: string } }[] | undefined)?.[0]?.message?.content ?? '';
+  const choice = (json.choices as { message?: { content?: string }; finish_reason?: string }[] | undefined)?.[0];
+  const content = choice?.message?.content ?? '';
+  // An answer that ran out of room is named as that, never as "not JSON".
+  if (choice?.finish_reason === 'length') {
+    throw new DraftError(502, 'answer_cut_off', `The model's answer was cut off at ${MAX_TOKENS} tokens before it finished (${content.length} characters written). Nothing was drafted. Try again, or with shorter notes; if it repeats, the budget in patternDraft.ts needs raising.`);
+  }
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(stripFences(content)) as Record<string, unknown>;

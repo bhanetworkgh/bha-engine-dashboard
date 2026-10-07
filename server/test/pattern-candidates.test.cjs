@@ -430,7 +430,7 @@ const act = (ref, action, body) => request('POST', `/api/pattern-candidates/${en
     assert.equal(seen.model.auth, 'Bearer sk-or-test');
     assert.equal(seen.model.path, '/chat/completions');
     assert.equal(seen.model.body.model, 'anthropic/claude-sonnet-5', "the model the agents and the Pattern Extractor use");
-    assert.equal(seen.model.body.max_tokens, 3000);
+    assert.equal(seen.model.body.max_tokens, 8000);
     assert.deepEqual(seen.model.body.response_format, { type: 'json_object' });
     const [sys, usr] = seen.model.body.messages;
     assert.match(sys.content, /You are the Bays Horizon Build-Pattern Extractor/, "the extractor's prompt");
