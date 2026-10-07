@@ -11459,3 +11459,10 @@ Files:      server/src/mcp/audioTools.ts
 Problem:    Three live clips from Destiny, all transcribed by the speech model (Slack reported its own transcript as "none" on a clip recorded in Slack). "Bays" was heard as "bees" (execution 28477) and "Babe" (28488). The third, an uploaded m4a with no text in a DM, was acted on correctly: 25 open loops.
 Fix:        The transcription prompt now names the assistant and lists BHA's own words and the builders' names, to be used only where spoken.
 Decision:   A glossary in the prompt rather than a find-and-replace on the transcript: a replace would turn a real "babe" or "base" into "Bays". Bays agent published as ab644b7e (restore point ed960737): transcribe_slack_audio on its MCP allow-list and a "Voice notes and audio recordings" section in the "Builds, health and files" skill. Evals not yet run against this version.
+
+## 2026-10-07 12:40 — transcribe_slack_audio: second model, Slack transcript removed
+Intent:     Destiny: the OpenRouter model is the default; add a second model so one being down does not stop a voice note.
+Files:      server/src/mcp/audioTools.ts, CLAUDE.md
+Problem:    Slack's clip transcript is made only when somebody clicks "Generate transcript" (Slack help article 4406266961043), so files.info said "none" on every test clip.
+Fix:        Slack transcript branch removed. google/gemini-2.5-flash first, mistralai/voxtral-small-24b-2507 second, a different provider; a 402 or a missing key is not retried on the second.
+Decision:   Voxtral over a second Gemini: a fallback on the same provider fails with it. Not yet proved on a live clip.
