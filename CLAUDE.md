@@ -3035,7 +3035,9 @@ Pattern Extractor's own model and prompt**: `anthropic/claude-sonnet-5`
 (the model the Bays, North Star and Research Twin agents use; the draft and both
 extractors moved to it together on 2026-09-24, Destiny — `Pat Prep Build
 Patterns` and `Comm Prep Commercial Opps` in n8n, published as version
-`8e2db0fd`, restore point `5e529e3b`) through OpenRouter, `max_tokens` 3000,
+`8e2db0fd`, restore point `5e529e3b`) through OpenRouter, `max_tokens` 8000 (3000 until 2026-10-07, when a real
+draft was cut off before its JSON closed; a cut-off answer is now
+`answer_cut_off`, never `parse_error`),
 `response_format: json_object`, and
 `Pat Prep Build Patterns`' system prompt kept section for section. Only what a
 candidate needs is changed: the two sources are the candidate (name, lane,

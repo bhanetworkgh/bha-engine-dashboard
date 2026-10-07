@@ -11487,3 +11487,10 @@ Files:      server/test/audio-tools.test.cjs (new), package.json (test:audio), C
 Problem:    The other suites need Postgres and the package install is blocked in the build sandbox, so none could be run here.
 Fix:        This one needs neither: mirror.logWrite is replaced by a recorder through require.cache before the tool loads, and fetch by a stand-in for Slack and OpenRouter. Built with the machine's tsc into a scratch folder (AUDIO_TOOLS_DIST) and run: 11 steps, all passed.
 Decision:   Pins the refusals, the base64 input_audio shape, the BHA names in the prompt, the fallback, all_models_failed, a 402 not retried, no_speech, the per-file cache and the read line. Evals on Bays version ab644b7e: EVAL-202610071121, 31 of 32; the one miss is NS-03, where North Star refused the injected instruction in words the check's pattern does not match.
+
+## 2026-10-07 13:20 — Pattern draft: the cut-off answer
+Intent:     Fix the fault worked around this morning, when draft_pattern_candidate failed and the pattern was registered by hand.
+Files:      server/src/patternDraft.ts, server/test/pattern-candidates.test.cjs, CLAUDE.md
+Problem:    502 parse_error: the model's answer stopped at the 3,000-token budget before the JSON closed.
+Fix:        Budget 8,000 tokens, timeout 150 s. An answer whose finish_reason is "length" is answer_cut_off with the budget named, so the next one is not read as a JSON fault.
+Decision:   Raise the budget and name the fault; no automatic retry, because a retry at the same budget cuts off at the same place and costs a second model call.
