@@ -11508,3 +11508,10 @@ Files:      server/src/health.ts, server/src/mcp/incidentTools.ts, CLAUDE.md
 Problem:    The healer writes a retry row only when it finishes (Recovered, or Exhausted at 3). The cap blocked every Exhausted row, so the only pressable rows were Recovered ones, and BHA — Self Healer routes any hand-asked retry to "retry" with no check: RUN-27061 would have re-asked Bays and posted again, RUN-22852 would have re-written a submission.
 Fix:        retryNow refuses status Recovered (page and tool). New opts.pastCap, passed only by retry_incident, lets a person retry an exhausted row with a written reason; the page's button keeps the cap.
 Decision:   Destiny, 7 Oct: close the gap. Three automatic attempts, then a person may ask again through the tool and say why.
+
+## 2026-10-07 15:40 — Retry message past the cap; DC07 hand-off time pinned
+Intent:     Tidy the two loose ends from closing LOOP-1791322278282-DC07.
+Files:      server/src/health.ts
+Problem:    A past-cap press through retry_incident answered "Retry 4 of 3 was handed to the healer."
+Fix:        Past the cap it now reads "Retry 4, past the cap of 3 because a person asked with a reason, was handed to the healer."
+Decision:   Extractor hand-off proof pinned from n8n history rather than the check-in time: the extractors webhook began checking the key at 18:32:07 UTC on 6 Oct (version 30cdc5a1), Submit Actions began sending it at 18:31:46 (bb201ee9), and hand-offs 27991, 27992, 28015 and 28016 (21:31 and 21:38 UTC) were accepted and succeeded.
