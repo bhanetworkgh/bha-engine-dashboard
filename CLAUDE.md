@@ -1336,7 +1336,7 @@ only, registered with the read tools and in Bays' scope. A Slack file `url`
 (https://files.slack.com/ only, the `read_slack_file` rule) or `file_id`.
 **A speech model through OpenRouter** (`OPENROUTER_API_KEY`, the pattern
 draft's key; `input_audio` to chat completions): `google/gemini-2.5-flash`
-(`OPENROUTER_AUDIO_MODEL`), then `mistralai/voxtral-small-24b-2507`
+(`OPENROUTER_AUDIO_MODEL`), then `google/gemini-3.1-flash-lite`
 (`OPENROUTER_AUDIO_FALLBACK_MODEL`) if the first fails — `fallback_used: true`,
 `all_models_failed` if both do; a 402 is the account's and is not retried.
 Slack's own clip transcript is not used: Slack only makes one when somebody

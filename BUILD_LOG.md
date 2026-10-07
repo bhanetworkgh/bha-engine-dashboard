@@ -11466,3 +11466,10 @@ Files:      server/src/mcp/audioTools.ts, CLAUDE.md
 Problem:    Slack's clip transcript is made only when somebody clicks "Generate transcript" (Slack help article 4406266961043), so files.info said "none" on every test clip.
 Fix:        Slack transcript branch removed. google/gemini-2.5-flash first, mistralai/voxtral-small-24b-2507 second, a different provider; a 402 or a missing key is not retried on the second.
 Decision:   Voxtral over a second Gemini: a fallback on the same provider fails with it. Not yet proved on a live clip.
+
+## 2026-10-07 12:50 — transcribe_slack_audio: fallback proved, and it is a second Gemini
+Intent:     Prove the second model on a real clip.
+Files:      server/src/mcp/audioTools.ts, CLAUDE.md; Render env OPENROUTER_AUDIO_MODEL and OPENROUTER_AUDIO_FALLBACK_MODEL
+Problem:    Forced the first model to fail (OPENROUTER_AUDIO_MODEL=bha/force-fallback-test) and ran Destiny's two m4a clips through the Bays agent's preview. mistralai/voxtral-small-24b-2507: "OpenRouter answered 400: Provider returned error" on both. openai/gpt-audio-mini as first model: the same 400.
+Fix:        Fallback is google/gemini-3.1-flash-lite. With gpt-audio-mini failing first it transcribed F0C7C2T1738 as "Bays, how many open loops do I have?" (fallback_used: true) — the clip gemini-2.5-flash had heard as "Babe ..." before the name glossary.
+Decision:   Same provider for both models, so a Google outage on OpenRouter stops transcription; only Gemini models accepted Slack's m4a. Env set back to gemini-2.5-flash first, gemini-3.1-flash-lite second.
