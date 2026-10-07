@@ -1346,7 +1346,8 @@ has one, else the file as uploaded; 20 MB at most to the model, 30,000
 characters back. One model call per file per process (`cached: true` after).
 Every failure is `ok: false` with a reason (`not_audio`, `unsupported_format`,
 `audio_too_large`, `no_speech`, `model_error`, …), never an empty transcript.
-One `read` line per call on `engine_writes`. **Not pinned by a test yet.**
+One `read` line per call on `engine_writes`. `npm run test:audio` pins it with no database and no network (the write
+log and `fetch` are stood in).
 
 **North Star's three code tools, off its Tools Router** (decision 2026-09-24,
 Destiny). North Star is becoming an n8n Agent the way Bays did, and the three
