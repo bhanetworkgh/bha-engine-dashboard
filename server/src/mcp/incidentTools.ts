@@ -99,7 +99,7 @@ export const closeIncidentsTool: ToolDefinition = {
 export const retryIncidentTool: ToolDefinition = {
   name: 'retry_incident',
   description:
-    'Retry now for one incident — the Engine health Retries tab\'s own button, through the same function. incident_id: the id as the Retries tab lists it (e.g. INC-BAYS.AGENT-038). reason: why it is being retried (required, kept on the audit line). Refused, changing nothing, when no retry row is held for the incident, when it has used all three attempts, or when the row carries no execution id. dry_run true calls nothing and answers what the row holds and whether a retry would be sent. On success the retry has been handed to the healer, not proven: the healer writes the result (Recovered or Exhausted) to retry_attempts, so read that row afterwards. Audited on engine_mcp_writes.',
+    'Retry now for one incident — the Engine health Retries tab\'s own button, through the same function. incident_id: the id as the Retries tab lists it (e.g. INC-BAYS.AGENT-038). reason: why it is being retried (required, kept on the audit line). Refused, changing nothing, when no retry row is held for the incident, when the run already recovered (a retry would repeat work already done), or when the row carries no execution id. A row that has used all three automatic attempts is refused on the page but allowed here, because a reason is given. dry_run true calls nothing and answers what the row holds and whether a retry would be sent. On success the retry has been handed to the healer, not proven: the healer writes the result (Recovered or Exhausted) to retry_attempts, so read that row afterwards. Audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -128,14 +128,15 @@ export const retryIncidentTool: ToolDefinition = {
     try {
       if (dry) {
         const held = (await health.retries()).find((r) => r.incident_id === id);
-        const would = !held ? 'refuse' : (held.attempts ?? 0) >= 3 ? 'refuse' : !held.execution_id ? 'refuse' : 'retry';
-        const why = !held ? 'no retry row is held for this incident' : (held.attempts ?? 0) >= 3 ? 'all three attempts are used' : !held.execution_id ? 'the row carries no execution id' : null;
+        const recovered = String(held?.status ?? '').toLowerCase() === 'recovered';
+        const would = !held || recovered || !held.execution_id ? 'refuse' : 'retry';
+        const why = !held ? 'no retry row is held for this incident' : recovered ? 'the run already recovered' : !held.execution_id ? 'the row carries no execution id' : (held.attempts ?? 0) >= 3 ? 'past the cap of three, allowed here because a reason is given' : null;
         const row = held ? { status: held.status, attempts: held.attempts ?? 0, execution_id: held.execution_id, workflow: held.workflow, failed_node: held.failed_node, lane: held.lane } : null;
         await auditClose(audit, { outcome: 'dry_run', detail: `would ${would}${why ? `: ${why}` : ''}`, natural_id: id, after: row });
         return { ok: true, dry_run: true, incident_id: id, would, why, row, note: 'dry_run: nothing was sent to the healer.', audit_id: audit };
       }
       const actor = `mcp:${deps.access}${requester ? ` (${requester})` : ''} — ${reason}`;
-      const r = await health.retryNow(id, actor);
+      const r = await health.retryNow(id, actor, { pastCap: true });
       await auditClose(audit, { outcome: r.ok ? 'applied' : 'refused', detail: r.message.slice(0, 500), natural_id: id, after: r });
       return { ...r, audit_id: audit };
     } catch (e) {
