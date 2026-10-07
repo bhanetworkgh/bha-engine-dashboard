@@ -11437,3 +11437,18 @@ Problem:    POST /api/v1/cluster/ask on the new host answers 500 INTERNAL_ERROR 
 Fix:        As above. Each workflow's restore point is in its version description.
 Decision:   Not changed: the advice text in Build AI Payload (Bays — Error Handler, Research Twin — Error Handler) still says "check bharag2.duckdns.org" — wording only, no call, and the node is a 12 to 15 KB classifier that is not worth rewriting whole for two phrases; three archived workflows (3Pzm0DlJZSNu6DU4, oCaZefuKS4A7NaiK, r4jLI8SNy3U4aOtJ), which n8n will not edit. Proved: Bays searched the Build Patterns shelf on the new host and returned BP-TWINS-1790276259164-WPMF; Bays — Guarded BHARAG Ingest stored a document on the new host twice (executions 28379 and 28384); get_health shows all four ledgers answering. BP-BHARAGTW-1791363987198-0OOH, registered at 09:06Z while BHARAG was unreachable, now has its BHARAG copy (document 29e6abf2-128a-47b3-b187-32d4e7872756; an earlier copy with the old wording, ebc898fc, was deleted by one-off z7EdK87jQZKjBtcG, execution 28383), and its record and Google Doc name the new host. No production run failed between 08:30Z and 09:21Z, so nothing was lost while the old host was down. Not proved by a real production run yet: the three error handlers, Self Healer Reports, the extractors, the Daily Doc Rotator, Commands & Cancel, Submit Actions and the two Agent Delivery ingests.
 
+
+
+## 2026-10-07 12:05 — Speech to text for Bays: transcribe_slack_audio
+Intent:     Give Bays a way to take a Slack voice note or audio file as text (LOOP-1791315402447-834A, Jason's ask of 6 Oct).
+Files:      server/src/mcp/audioTools.ts (new), server/src/mcp/tools.ts (registered with the read tools), server/src/mcp/index.ts (Bays' scope), CLAUDE.md.
+Problem:    npm ci fails in the build sandbox (registry.npmjs.org ENOTFOUND), so the test suites could not be run locally. Typechecked with the machine's global tsc and Node types: no error in the changed files.
+Fix:        None for the sandbox; Render's build is the real build, and the tool is proved by a live voice note.
+Decision:   Slack's own transcript first, a model only as the fallback, so a clip recorded in Slack costs nothing. OpenRouter rather than a new speech service, because rule 5 makes a new external service a scope change and the key is already here. Read tool, because it saves nothing; one model call per file per process holds the cost. No test added yet, and CLAUDE.md says so.
+
+## 2026-10-07 12:06 — Earlier today, not yet logged
+Intent:     Close the record on the BHARAG address move.
+Files:      none (n8n and the ledger).
+Problem:    The 10:40 entry said the error handlers' advice text still named bharag2.duckdns.org.
+Fix:        Replaced in "Build AI Payload" on the Research Twin and Bays error handlers (byte-for-byte diff, only the host changed), published; nine switched-off workflows repointed as drafts; three archived ones cannot be edited. INC-RESEARCHTWIN.RESEARCHJOB-028 closed. /cluster/ask answers 200 on rag.bhanetwork.org since Jegan and Kavin's fix (probe execution 28451).
+Decision:   None.

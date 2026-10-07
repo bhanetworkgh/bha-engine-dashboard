@@ -26,6 +26,7 @@ import * as approvals from '../approvals';
 import { currentAgent } from './caller';
 import { WRITE_TOOLS } from './writeTools';
 import { DOC_WRITE_TOOLS, readSlackFile } from './docTools';
+import { transcribeSlackAudio } from './audioTools';
 import { getN8nWorkflow, listN8nWorkflows, sweepAirtableNodes } from './n8nTools';
 import { NORTH_STAR_TOOLS } from './northStarTools';
 import { SLACK_WRITE_TOOLS } from './slackTools';
@@ -904,6 +905,8 @@ export const TOOLS: ToolDefinition[] = [
   getN8nWorkflow,
   sweepAirtableNodes,
   readSlackFile,
+  // 2026-10-07: speech to text for a Slack voice note or audio file (834A).
+  transcribeSlackAudio,
   // 2026-09-24: North Star's three code tools, off its Tools Router.
   ...NORTH_STAR_TOOLS,
   // 2026-09-28: the weighted lane ranking North Star reads (Jason, #bha-north-star-twin).
