@@ -25,6 +25,7 @@
     "test:airtable-sweep": "npm run build:server --silent && node server/test/airtable-sweep.test.cjs",
     "test:approvals": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/approvals.test.cjs",
     "test:monitoring-recurrence": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/monitoring-recurrence.test.cjs",
+    "test:audio": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/audio-tools.test.cjs",
     "test:lane-ranking": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/lane-ranking.test.cjs"
   },
   "dependencies": {

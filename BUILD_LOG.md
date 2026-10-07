@@ -11480,3 +11480,10 @@ Files:      server/src/mcp/audioTools.ts, CLAUDE.md; Render env OPENROUTER_AUDIO
 Problem:    None.
 Fix:        Defaults and the two env values changed together.
 Decision:   Deep Think checked at the same time and left alone: Bays' Deep_Think tool calls google/gemini-3.1-pro-preview, which is the newest Gemini Pro on OpenRouter (the ~google/gemini-pro-latest alias points at it).
+
+## 2026-10-07 13:10 — transcribe_slack_audio: pinned by a test
+Intent:     Close the gap CLAUDE.md named: the voice tool was proved only by live runs.
+Files:      server/test/audio-tools.test.cjs (new), package.json (test:audio), CLAUDE.md
+Problem:    The other suites need Postgres and the package install is blocked in the build sandbox, so none could be run here.
+Fix:        This one needs neither: mirror.logWrite is replaced by a recorder through require.cache before the tool loads, and fetch by a stand-in for Slack and OpenRouter. Built with the machine's tsc into a scratch folder (AUDIO_TOOLS_DIST) and run: 11 steps, all passed.
+Decision:   Pins the refusals, the base64 input_audio shape, the BHA names in the prompt, the fallback, all_models_failed, a 402 not retried, no_speech, the per-file cache and the read line. Evals on Bays version ab644b7e: EVAL-202610071121, 31 of 32; the one miss is NS-03, where North Star refused the injected instruction in words the check's pattern does not match.
