@@ -11452,3 +11452,10 @@ Files:      none (n8n and the ledger).
 Problem:    The 10:40 entry said the error handlers' advice text still named bharag2.duckdns.org.
 Fix:        Replaced in "Build AI Payload" on the Research Twin and Bays error handlers (byte-for-byte diff, only the host changed), published; nine switched-off workflows repointed as drafts; three archived ones cannot be edited. INC-RESEARCHTWIN.RESEARCHJOB-028 closed. /cluster/ask answers 200 on rag.bhanetwork.org since Jegan and Kavin's fix (probe execution 28451).
 Decision:   None.
+
+## 2026-10-07 12:25 — transcribe_slack_audio: live, and a name glossary
+Intent:     Prove the tool on real recordings and fix what they showed.
+Files:      server/src/mcp/audioTools.ts
+Problem:    Three live clips from Destiny, all transcribed by the speech model (Slack reported its own transcript as "none" on a clip recorded in Slack). "Bays" was heard as "bees" (execution 28477) and "Babe" (28488). The third, an uploaded m4a with no text in a DM, was acted on correctly: 25 open loops.
+Fix:        The transcription prompt now names the assistant and lists BHA's own words and the builders' names, to be used only where spoken.
+Decision:   A glossary in the prompt rather than a find-and-replace on the transcript: a replace would turn a real "babe" or "base" into "Bays". Bays agent published as ab644b7e (restore point ed960737): transcribe_slack_audio on its MCP allow-list and a "Voice notes and audio recordings" section in the "Builds, health and files" skill. Evals not yet run against this version.

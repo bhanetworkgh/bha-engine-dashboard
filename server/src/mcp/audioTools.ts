@@ -48,7 +48,7 @@ const FORMAT_BY_MIME: Record<string, string> = {
 };
 
 const PROMPT =
-  'Transcribe this audio recording word for word, in the language it is spoken in. Output only the words spoken: no summary, no commentary, no timestamps, no speaker labels unless more than one person clearly speaks (then start each turn "Speaker 1:", "Speaker 2:"). If there is no intelligible speech, output exactly: [no speech]';
+  'Transcribe this audio recording word for word, in the language it is spoken in. Output only the words spoken: no summary, no commentary, no timestamps, no speaker labels unless more than one person clearly speaks (then start each turn "Speaker 1:", "Speaker 2:"). If there is no intelligible speech, output exactly: [no speech] The speaker works at Bays Horizon Advisory (BHA) and is usually talking to an assistant called Bays (said like "bays"; never write it as "babe", "bees" or "base" when it is the name being addressed). Words that may come up, to be spelled this way only when they are what was said: Bays, BHA, BHARAG, vFarm, Genie, Codex, North Star, Research Twin, Media Twin, n8n, Slack, open loops, Jason, Destiny, Jegan, Hardik, Kaiqi, Ahad, Kavin. Do not insert any of these where they were not spoken.';
 
 type Fail = { ok: false; reason: string; message: string; [k: string]: unknown };
 
