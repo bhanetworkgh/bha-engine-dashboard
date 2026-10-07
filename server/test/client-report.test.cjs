@@ -28,9 +28,9 @@ const step = (s) => console.log(`  ok  ${s}`);
 
 const ans = (notYet) => `What the evidence supports\nTwo plants are running.\n\nWhat it does not yet support\n${notYet}\n\nSources\n[S1] Example - https://example.org/a`;
 const rows = [
-  { fields: { Question: 'Who is recycling at scale?', 'This Week Answer': ans('No audited throughput figures exist.'), 'Plain Summary': 'Two plants run.', Confidence: 'Medium', 'Movement Tag': 'refined', 'Run Count': 4 } },
-  { fields: { Question: 'Is policy moving?', 'This Week Answer': ans('No material gaps this cycle.'), 'Plain Summary': 'Yes.', Confidence: 'High', 'Movement Tag': 'same', 'Run Count': 4 } },
-  { fields: { Question: 'What is the price trend?', 'This Week Answer': ans('Spot prices are not public.'), 'Plain Summary': 'Unclear.', Confidence: 'Low', 'Movement Tag': 'new', 'Run Count': 3, 'Missing Research': true, 'Next Experiments': 'Find a price index' } },
+  { fields: { Question: 'Who is recycling at scale?', 'This Week Answer': ans('No audited throughput figures exist.'), 'Plain Summary': 'Two plants run.', Confidence: 'Medium', 'Movement Tag': 'refined', 'Run Count': 0, 'Answer History': 'Seed text.\n\n[2026-09-14T08:00:00.000Z] a\n\n[2026-09-21T08:00:00.000Z] b\n\n[2026-09-21T09:00:00.000Z] b again\n\n[2026-09-28T08:00:00.000Z] c\n\n[2026-10-05T08:00:00.000Z] d' } },
+  { fields: { Question: 'Is policy moving?', 'This Week Answer': ans('No material gaps this cycle.'), 'Plain Summary': 'Yes.', Confidence: 'High', 'Movement Tag': 'same', 'Run Count': 0, 'Answer History': '\n\n[2026-10-05T08:00:00.000Z] only' } },
+  { fields: { Question: 'What is the price trend?', 'This Week Answer': ans('Spot prices are not public.'), 'Plain Summary': 'Unclear.', Confidence: 'Low', 'Movement Tag': 'new', 'Run Count': 3, 'Answer History': '', 'Missing Research': true, 'Next Experiments': 'Find a price index' } },
 ];
 const lane = { client_name: 'Client 2 — Rare Earth Recycling', lane_id: 'CLIENT2_RARE_EARTH_RECYCLING', trend_shape: 'Early build-out.', commercial_hook: 'INTERNAL: first live proof point for the weekly loop.', purpose: 'Track whether rare-earth recycling is becoming investable.', future_translation: 'A watchlist of recyclers to size a position against.' };
 
@@ -52,10 +52,13 @@ assert.ok(md.indexOf('## At a glance') < md.indexOf('## Purpose & Future Transla
 step('Purpose and Future translation come from the lane, never Commercial Hook');
 
 assert.match(md, /\*\*Current maturity\*\*\n\nThis is an established lane with a trend on record\. 3 questions tracked, with at most 4 research passes on any one of them\. 1 flagged as thin or stuck; 2 answers name a caveat\./);
-step('Current maturity is computed from the same counts');
+assert.match(md, /\*\*Research passes:\*\* 4/, 'passes are days in the answer history, not Run Count');
+assert.match(md, /\*\*Research passes:\*\* 0/);
+step('Current maturity is computed from the same counts; passes come from the answer history');
 
 const bare = buildReport({ client_name: 'New lane', commercial_hook: 'INTERNAL' }, {}, [rows[1]], '2026-10-07').report_content;
 assert.equal((bare.match(/_Not yet written for this lane\._/g) || []).length, 2);
+assert.match(bare, /at most 1 research pass on any one of them/);
 assert.match(bare, /This is a young lane: the trend is not yet established\./);
 assert.match(bare, /0 flagged as thin or stuck; 0 answers name a caveat\./);
 assert.doesNotMatch(bare, /INTERNAL/);
