@@ -26,7 +26,8 @@
     "test:approvals": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/approvals.test.cjs",
     "test:monitoring-recurrence": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/monitoring-recurrence.test.cjs",
     "test:audio": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/audio-tools.test.cjs",
-    "test:lane-ranking": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/lane-ranking.test.cjs"
+    "test:lane-ranking": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/lane-ranking.test.cjs",
+    "test:client-report": "npm run build:server --silent && node server/test/client-report.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",

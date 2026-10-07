@@ -718,6 +718,8 @@ export function resolveLane(clientName: unknown, laneRows: Array<{ fields: Recor
     infra_fix_required: f['Infra Fix Required'] === true,
     trend_shape: str(f['Trend Shape Call']),
     commercial_hook: str(f['Commercial Hook']),
+    purpose: str(f['Client Purpose']),
+    future_translation: str(f['Future Translation']),
     last_run_at: str(f['Last Run At']),
   };
 }
@@ -865,6 +867,7 @@ export function buildReport(lane: Lane, trig: Args, questionRows: Array<{ fields
   out.push('| Moved this cycle | ' + changed.length + ' |');
   out.push('| Holding steady | ' + steady.length + ' |');
   out.push('| Flagged as thin or stuck | ' + flagged.length + ' |');
+  out.push('| Answers naming a caveat | ' + caveats.length + ' |');
   out.push('| Lane maturity | ' + (youngLane ? 'Young — trend not yet established' : 'Established') + ' |');
   if (lane.quarantined) {
     out.push('');
@@ -874,6 +877,36 @@ export function buildReport(lane: Lane, trig: Args, questionRows: Array<{ fields
     out.push('');
     out.push('> **Note:** an infrastructure fix is flagged as required on this lane.');
   }
+  out.push('');
+  out.push('---');
+  out.push('');
+  /**
+   * Purpose & Future Translation (7 Oct 2026, LOOP-1788870072972-TYL9, Jason's
+   * ask of 8 Sep). Purpose and Future translation are written by a person on
+   * the lane's index row (`Client Purpose`, `Future Translation`); they are
+   * never taken from `Commercial Hook`, which is BHA's internal framing.
+   * Current maturity is computed from the same counts the rest of the report
+   * prints, so it cannot disagree with them. An unwritten field says so.
+   */
+  const purposeText = str(lane.purpose).trim();
+  const futureText = str(lane.future_translation).trim();
+  const maturityBits: string[] = [];
+  maturityBits.push(youngLane ? 'This is a young lane: the trend is not yet established.' : 'This is an established lane with a trend on record.');
+  maturityBits.push(q.length ? q.length + ' question' + (q.length === 1 ? '' : 's') + ' tracked, with at most ' + maxRuns + ' research pass' + (maxRuns === 1 ? '' : 'es') + ' on any one of them.' : 'No questions are tracked yet.');
+  maturityBits.push(flagged.length + ' flagged as thin or stuck; ' + caveats.length + ' answer' + (caveats.length === 1 ? ' names' : 's name') + ' a caveat.');
+  out.push('## Purpose & Future Translation');
+  out.push('');
+  out.push('**Purpose**');
+  out.push('');
+  out.push(purposeText || '_Not yet written for this lane._');
+  out.push('');
+  out.push('**Current maturity**');
+  out.push('');
+  out.push(maturityBits.join(' '));
+  out.push('');
+  out.push('**Future translation**');
+  out.push('');
+  out.push(futureText || '_Not yet written for this lane._');
   out.push('');
   out.push('---');
   out.push('');
