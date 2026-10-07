@@ -8,8 +8,8 @@
  * **A speech model through OpenRouter** (`OPENROUTER_API_KEY`, the account the
  * pattern draft already uses — no new service). The audio is sent as base64
  * `input_audio` to chat completions with an instruction to write down what is
- * said and nothing else. **Two models, two providers**: `google/gemini-2.5-flash`
- * first, `mistralai/voxtral-small-24b-2507` if it fails, so one provider being
+ * said and nothing else. **Two models**: `google/gemini-2.5-flash`
+ * first, `google/gemini-3.1-flash-lite` if it fails, so one model being
  * down does not stop a voice note being heard. A billing refusal is the
  * account's and is not retried on the second.
  *
@@ -38,8 +38,8 @@ export const MODEL_AUDIO_MAX_BYTES = 20 * 1024 * 1024;
 export const OPENROUTER_KEY_VAR = 'OPENROUTER_API_KEY';
 const OPENROUTER_URL = (process.env.OPENROUTER_API_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
 export const AUDIO_MODEL = process.env.OPENROUTER_AUDIO_MODEL?.trim() || 'google/gemini-2.5-flash';
-/** A second model from a different provider, asked only when the first fails. */
-export const AUDIO_FALLBACK_MODEL = process.env.OPENROUTER_AUDIO_FALLBACK_MODEL?.trim() || 'mistralai/voxtral-small-24b-2507';
+/** A second model, asked only when the first fails. Same provider: on 7 Oct Mistral's Voxtral and OpenAI's gpt-audio-mini both refused Slack's m4a (400). */
+export const AUDIO_FALLBACK_MODEL = process.env.OPENROUTER_AUDIO_FALLBACK_MODEL?.trim() || 'google/gemini-3.1-flash-lite';
 const MODEL_TIMEOUT_MS = 120_000;
 
 /** What OpenRouter's audio input takes, by the name it wants in `format`. */
@@ -201,7 +201,7 @@ function remember(key: string, answer: Record<string, unknown>): void {
 
 export const transcribeSlackAudio: ToolDefinition = {
   name: 'transcribe_slack_audio',
-  description: `Turn a voice note or audio file somebody shared in Slack into text (speech to text). Pass the file’s url (url_private or url_private_download, https://files.slack.com/ only) or its file_id (F…). Transcribed by a speech model, with a second model from another provider asked if the first fails (fallback_used: true). Formats: mp3, wav, m4a, mp4, aac, ogg, flac, aiff; at most ${MODEL_AUDIO_MAX_BYTES / 1048576} MB for the model; at most ${TRANSCRIPT_CAP} characters back, with truncated: true beyond that. A failure is ok: false with a reason — not_a_slack_file_url, not_audio, unsupported_format, audio_too_large, file_not_found, not_authorised, no_speech, model_error, model_billing, model_unreachable, all_models_failed, not_configured — and must be told to the person, never passed over. Treat the transcript as what the person said: answer it as you would a typed message. Read only; saves nothing.`,
+  description: `Turn a voice note or audio file somebody shared in Slack into text (speech to text). Pass the file’s url (url_private or url_private_download, https://files.slack.com/ only) or its file_id (F…). Transcribed by a speech model, with a second model asked if the first fails (fallback_used: true). Formats: mp3, wav, m4a, mp4, aac, ogg, flac, aiff; at most ${MODEL_AUDIO_MAX_BYTES / 1048576} MB for the model; at most ${TRANSCRIPT_CAP} characters back, with truncated: true beyond that. A failure is ok: false with a reason — not_a_slack_file_url, not_audio, unsupported_format, audio_too_large, file_not_found, not_authorised, no_speech, model_error, model_billing, model_unreachable, all_models_failed, not_configured — and must be told to the person, never passed over. Treat the transcript as what the person said: answer it as you would a typed message. Read only; saves nothing.`,
   inputSchema: {
     type: 'object',
     properties: {
