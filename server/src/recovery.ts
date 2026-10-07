@@ -227,7 +227,8 @@ function hostDependency(host: string): RecoveryDependency | null {
   if (h === 'openrouter.ai' || h.endsWith('.openrouter.ai')) return 'openrouter';
   if (h === 'slack.com' || h.endsWith('.slack.com')) return 'slack';
   if (h === 'googleapis.com' || h.endsWith('.googleapis.com')) return 'google';
-  if (h === 'bharag2.duckdns.org') return 'bharag';
+  // BHARAG moved to rag.bhanetwork.org on 7 Oct 2026; the old host is kept so earlier failures still classify.
+  if (h === 'rag.bhanetwork.org' || h === 'bharag2.duckdns.org') return 'bharag';
   return null;
 }
 
