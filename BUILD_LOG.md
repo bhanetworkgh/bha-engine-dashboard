@@ -11473,3 +11473,10 @@ Files:      server/src/mcp/audioTools.ts, CLAUDE.md; Render env OPENROUTER_AUDIO
 Problem:    Forced the first model to fail (OPENROUTER_AUDIO_MODEL=bha/force-fallback-test) and ran Destiny's two m4a clips through the Bays agent's preview. mistralai/voxtral-small-24b-2507: "OpenRouter answered 400: Provider returned error" on both. openai/gpt-audio-mini as first model: the same 400.
 Fix:        Fallback is google/gemini-3.1-flash-lite. With gpt-audio-mini failing first it transcribed F0C7C2T1738 as "Bays, how many open loops do I have?" (fallback_used: true) — the clip gemini-2.5-flash had heard as "Babe ..." before the name glossary.
 Decision:   Same provider for both models, so a Google outage on OpenRouter stops transcription; only Gemini models accepted Slack's m4a. Env set back to gemini-2.5-flash first, gemini-3.1-flash-lite second.
+
+## 2026-10-07 13:00 — transcribe_slack_audio: gemini-3.8-flash first, gemini-3.5-flash-lite second
+Intent:     Destiny: the stronger model is the primary, and the fallback a lite model that is not an old one.
+Files:      server/src/mcp/audioTools.ts, CLAUDE.md; Render env OPENROUTER_AUDIO_MODEL, OPENROUTER_AUDIO_FALLBACK_MODEL
+Problem:    None.
+Fix:        Defaults and the two env values changed together.
+Decision:   Deep Think checked at the same time and left alone: Bays' Deep_Think tool calls google/gemini-3.1-pro-preview, which is the newest Gemini Pro on OpenRouter (the ~google/gemini-pro-latest alias points at it).

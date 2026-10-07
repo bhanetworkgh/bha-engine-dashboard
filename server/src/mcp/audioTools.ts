@@ -8,8 +8,8 @@
  * **A speech model through OpenRouter** (`OPENROUTER_API_KEY`, the account the
  * pattern draft already uses — no new service). The audio is sent as base64
  * `input_audio` to chat completions with an instruction to write down what is
- * said and nothing else. **Two models**: `google/gemini-2.5-flash`
- * first, `google/gemini-3.1-flash-lite` if it fails, so one model being
+ * said and nothing else. **Two models**: `google/gemini-3.8-flash`
+ * first, `google/gemini-3.5-flash-lite` if it fails, so one model being
  * down does not stop a voice note being heard. A billing refusal is the
  * account's and is not retried on the second.
  *
@@ -37,9 +37,9 @@ export const TRANSCRIPT_CAP = 30_000;
 export const MODEL_AUDIO_MAX_BYTES = 20 * 1024 * 1024;
 export const OPENROUTER_KEY_VAR = 'OPENROUTER_API_KEY';
 const OPENROUTER_URL = (process.env.OPENROUTER_API_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
-export const AUDIO_MODEL = process.env.OPENROUTER_AUDIO_MODEL?.trim() || 'google/gemini-2.5-flash';
+export const AUDIO_MODEL = process.env.OPENROUTER_AUDIO_MODEL?.trim() || 'google/gemini-3.8-flash';
 /** A second model, asked only when the first fails. Same provider: on 7 Oct Mistral's Voxtral and OpenAI's gpt-audio-mini both refused Slack's m4a (400). */
-export const AUDIO_FALLBACK_MODEL = process.env.OPENROUTER_AUDIO_FALLBACK_MODEL?.trim() || 'google/gemini-3.1-flash-lite';
+export const AUDIO_FALLBACK_MODEL = process.env.OPENROUTER_AUDIO_FALLBACK_MODEL?.trim() || 'google/gemini-3.5-flash-lite';
 const MODEL_TIMEOUT_MS = 120_000;
 
 /** What OpenRouter's audio input takes, by the name it wants in `format`. */
