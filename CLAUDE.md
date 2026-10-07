@@ -1330,6 +1330,21 @@ agent did through n8n tools of its own are tools here:
   permalink comes from files.info. A failure is `ok:false` with `step` and
   Slack's own `error`.
 
+**Bays hears a voice note** (2026-10-07, Destiny — LOOP-1791315402447-834A, Jason's
+ask of 6 Oct). `transcribe_slack_audio`, `server/src/mcp/audioTools.ts`, read
+only, registered with the read tools and in Bays' scope. A Slack file `url`
+(https://files.slack.com/ only, the `read_slack_file` rule) or `file_id`.
+**Slack's own transcript first** (`files.info` → `transcription.status =
+complete` → the `vtt` file, cue text only), then **a speech model through
+OpenRouter** (`OPENROUTER_API_KEY`, the pattern draft's key; `input_audio` to
+chat completions; `google/gemini-2.5-flash`, or `OPENROUTER_AUDIO_MODEL`), and
+the answer's `source` says which. Slack's `aac` copy of a clip is sent where it
+has one, else the file as uploaded; 20 MB at most to the model, 30,000
+characters back. One model call per file per process (`cached: true` after).
+Every failure is `ok: false` with a reason (`not_audio`, `unsupported_format`,
+`audio_too_large`, `no_speech`, `model_error`, …), never an empty transcript.
+One `read` line per call on `engine_writes`. **Not pinned by a test yet.**
+
 **North Star's three code tools, off its Tools Router** (decision 2026-09-24,
 Destiny). North Star is becoming an n8n Agent the way Bays did, and the three
 tools that were multi-step code in `North Star — Tools Router`
