@@ -1250,6 +1250,15 @@ changes and the answer previews each id. A `reason` is required and travels
 in the actor. Audited on `engine_mcp_writes` (kind `incidents`). Not in any
 agent's scope.
 
+**`retry_incident`, Retry now over MCP** (decision 2026-10-07, Destiny —
+LOOP-1791322278282-DC07). Same file, write connection only, calling
+`health.retryNow` — the function the Retries tab's button calls — so the cap of
+three, the refusal without an execution id and the POST to the healer with the
+server's key are the page's. A `reason` is required and travels in the actor;
+`dry_run` sends nothing and says what the row holds. Success means the retry
+was handed to the healer, never that it worked: the healer writes the result
+to `retry_attempts`. Audited on `engine_mcp_writes`. Not in any agent's scope.
+
 **Bays moves onto the dashboard MCP, finished** (decision 2026-09-24, Destiny).
 Bays is the n8n Agent `Nw5igXu4WWrjUMWB` behind `Bays — Front Door` →
 `Bays — Agent Delivery` (`5AFqtZQaeKFFiGqe`); the Conversational Agent, Tools

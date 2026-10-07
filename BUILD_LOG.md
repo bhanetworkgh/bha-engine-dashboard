@@ -11494,3 +11494,10 @@ Files:      server/src/patternDraft.ts, server/test/pattern-candidates.test.cjs,
 Problem:    502 parse_error: the model's answer stopped at the 3,000-token budget before the JSON closed.
 Fix:        Budget 8,000 tokens, timeout 150 s. An answer whose finish_reason is "length" is answer_cut_off with the budget named, so the next one is not read as a JSON fault.
 Decision:   Raise the budget and name the fault; no automatic retry, because a retry at the same budget cuts off at the same place and costs a second model call.
+
+## 2026-10-07 14:10 — retry_incident: Retry now over MCP
+Intent:     Let an MCP client press Retry now, so the last of the four dashboard-key checks on LOOP-1791322278282-DC07 (the key on Retry now) can be proven without a click on the page.
+Files:      server/src/mcp/incidentTools.ts, CLAUDE.md
+Problem:    Retry now was reachable only at POST /api/engine-health/retry/:id behind the session cookie.
+Fix:        New write tool retry_incident beside close_incidents, calling health.retryNow unchanged. reason required, dry_run sends nothing, audited on engine_mcp_writes.
+Decision:   Write connection only and in no agent's scope. The tool reports "handed to the healer", not success; the healer's own retry_attempts row is the result.
