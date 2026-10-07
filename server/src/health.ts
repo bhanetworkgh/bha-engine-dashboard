@@ -621,12 +621,26 @@ async function logClose(id: string, state: 'ok' | 'failed', status: string, reas
  * is a courtesy and the circuit breaker is not: three attempts and a person
  * should look at why before it is asked again.
  */
-export async function retryNow(incidentId: string, actor: string): Promise<RetryResult> {
+export async function retryNow(incidentId: string, actor: string, opts: { pastCap?: boolean } = {}): Promise<RetryResult> {
   const held = (await retries()).find((r) => r.incident_id === incidentId);
   if (!held) {
     return { ok: false, incident_id: incidentId, message: `No retry row is held for ${incidentId}. The healer writes one when it first touches an incident; if this is new, the next resync will bring it.` };
   }
-  if ((held.attempts ?? 0) >= RETRY_CAP) {
+  /**
+   * 7 Oct 2026 — a run that already recovered is never retried. The healer
+   * retries whatever a person asks for, from the failed step, so a press on a
+   * recovered row would do the work a second time: answer the Slack question
+   * again, write the log again.
+   */
+  if (String(held.status ?? '').toLowerCase() === 'recovered') {
+    return { ok: false, incident_id: incidentId, message: 'This run already recovered, so there is nothing to retry. Retrying it would repeat work that has been done.' };
+  }
+  /**
+   * The cap stops the schedule and the page's button. `pastCap` is the MCP
+   * tool's, which requires a written reason: three automatic attempts, then a
+   * person may ask again and say why.
+   */
+  if ((held.attempts ?? 0) >= RETRY_CAP && !opts.pastCap) {
     return { ok: false, incident_id: incidentId, message: held.blocked_reason ?? `This incident has used all ${RETRY_CAP} attempts.` };
   }
   if (!held.execution_id) {

@@ -1258,6 +1258,11 @@ server's key are the page's. A `reason` is required and travels in the actor;
 `dry_run` sends nothing and says what the row holds. Success means the retry
 was handed to the healer, never that it worked: the healer writes the result
 to `retry_attempts`. Audited on `engine_mcp_writes`. Not in any agent's scope.
+**A recovered run is never retried** (same day): `health.retryNow` refuses a
+row whose status is Recovered, on the page and here, because the healer
+retries whatever a person asks for from the failed step and would repeat work
+already done. **The cap of three holds for the schedule and the page's button;
+the tool may go past it**, because it carries a written reason.
 
 **Bays moves onto the dashboard MCP, finished** (decision 2026-09-24, Destiny).
 Bays is the n8n Agent `Nw5igXu4WWrjUMWB` behind `Bays — Front Door` →

@@ -11501,3 +11501,10 @@ Files:      server/src/mcp/incidentTools.ts, CLAUDE.md
 Problem:    Retry now was reachable only at POST /api/engine-health/retry/:id behind the session cookie.
 Fix:        New write tool retry_incident beside close_incidents, calling health.retryNow unchanged. reason required, dry_run sends nothing, audited on engine_mcp_writes.
 Decision:   Write connection only and in no agent's scope. The tool reports "handed to the healer", not success; the healer's own retry_attempts row is the result.
+
+## 2026-10-07 15:25 — Retry now refuses a recovered run; the tool may go past the cap
+Intent:     Close the gap found while proving DC07: Retry now could only ever be pressed on a run that had already recovered.
+Files:      server/src/health.ts, server/src/mcp/incidentTools.ts, CLAUDE.md
+Problem:    The healer writes a retry row only when it finishes (Recovered, or Exhausted at 3). The cap blocked every Exhausted row, so the only pressable rows were Recovered ones, and BHA — Self Healer routes any hand-asked retry to "retry" with no check: RUN-27061 would have re-asked Bays and posted again, RUN-22852 would have re-written a submission.
+Fix:        retryNow refuses status Recovered (page and tool). New opts.pastCap, passed only by retry_incident, lets a person retry an exhausted row with a written reason; the page's button keeps the cap.
+Decision:   Destiny, 7 Oct: close the gap. Three automatic attempts, then a person may ask again through the tool and say why.
