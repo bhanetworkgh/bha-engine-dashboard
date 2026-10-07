@@ -2707,6 +2707,27 @@ const MIGRATIONS: Migration[] = [
         WHERE w.natural_id = p.natural_id AND w.doc_id IS NOT NULL AND NOT (p.fields ? 'doc_id')`,
     ],
   },
+  {
+    id: 61,
+    name: 'the registry carries BHARAG at rag.bhanetwork.org',
+    statements: [
+      /**
+       * 7 Oct 2026. Jegan moved BHARAG2 from bharag2.duckdns.org to
+       * rag.bhanetwork.org (#bha-coordination, 1791363777.901259); the old
+       * host stopped answering the same morning. Same shape as migrations 12
+       * and 13: the seed inserts ON CONFLICT DO NOTHING, so only a migration
+       * reaches rows that already exist. Each statement rewrites the host
+       * only where the row still carries the old one, so an edit made in the
+       * interface survives.
+       */
+      `UPDATE registry_services
+          SET url = replace(url, 'https://bharag2.duckdns.org', 'https://rag.bhanetwork.org'), updated_at = now()
+        WHERE url LIKE 'https://bharag2.duckdns.org%'`,
+      `UPDATE registry_endpoints
+          SET url = replace(url, 'https://bharag2.duckdns.org', 'https://rag.bhanetwork.org'), updated_at = now()
+        WHERE url LIKE 'https://bharag2.duckdns.org%'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

@@ -35,7 +35,7 @@
 /** The ledger's REST base. One host, configured once. */
 import { guard, type GuardKind } from './dataGovernance';
 
-export const BHARAG_URL = (process.env.BHARAG_API_URL || 'https://bharag2.duckdns.org/api/v1').replace(/\/+$/, '');
+export const BHARAG_URL = (process.env.BHARAG_API_URL || 'https://rag.bhanetwork.org/api/v1').replace(/\/+$/, '');
 
 /**
  * One environment variable per lane, each named for its lane, on the same rule
