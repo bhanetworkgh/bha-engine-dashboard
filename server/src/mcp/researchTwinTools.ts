@@ -770,7 +770,14 @@ export function buildReport(lane: Lane, trig: Args, questionRows: Array<{ fields
       stuck: f['Research Stuck'] === true,
       next: str(f['Next Experiments']),
       contradicted_from: str(f['Contradicted From']),
-      runs: typeof f['Run Count'] === 'number' ? (f['Run Count'] as number) : 0,
+      /**
+       * 7 Oct 2026: research passes are counted from the answer history, one
+       * per day that carries a dated entry. `Run Count` is not a pass count:
+       * since 29 Sep it is attempts WITHOUT a usable answer and goes back to 0
+       * on every good one, so a lane researched weekly for two months read
+       * "0 research passes".
+       */
+      runs: new Set((str(f['Answer History']).match(/(?:^|\n)\[(\d{4}-\d{2}-\d{2})T[^\]]*\]/g) || []).map((m) => m.replace(/^\n?\[/, '').slice(0, 10))).size,
     };
   });
 

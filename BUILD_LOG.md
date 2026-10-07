@@ -11522,3 +11522,10 @@ Files:      server/src/mcp/researchTwinTools.ts, server/test/client-report.test.
 Problem:    The report already split flagged questions, prose caveats and young-lane gaps in its body and Slack comment, but the At a glance table showed only the flagged count. There was no Purpose / Current maturity / Future translation section, and the nearest lane field, Commercial Hook, is internal framing ("First live proof point for onboarding a cold lane").
 Fix:        Table row "Answers naming a caveat". New section under At a glance reading two new lane fields, Client Purpose and Future Translation; Current maturity computed from the report's counts; "Not yet written for this lane." where a field is empty.
 Decision:   Destiny, 7 Oct. New field names on the index row, nothing renamed. Commercial Hook never reaches a client report. First deliberate departure from the ported n8n buildReport.
+
+## 2026-10-07 17:15 — Client report counts research passes from the answer history
+Intent:     Fix the two older faults the live dry run of the Client 2 rare-earth report showed.
+Files:      server/src/mcp/researchTwinTools.ts, server/test/client-report.test.cjs
+Problem:    The report printed "at most 0 research passes per question" on a lane researched weekly since August. It read Run Count as passes; since 29 Sep Run Count is attempts without a usable answer and returns to 0 on every good one. All 13 question rows hold 0. The lane's Trend Shape Call also still held its seed text ("both standing questions seeded but never researched. First real test case of a lane going from zero to a running weekly loop."), which prints in a client-facing report.
+Fix:        Passes are the number of distinct days carrying a dated entry in Answer History. Trend Shape Call on CLIENT2_RARE_EARTH_RECYCLING rewritten from the lane's own current answers (n8n one-off).
+Decision:   Destiny, 7 Oct: fix both. Run Count is left exactly as it is; only the report stopped reading it as a pass count.
