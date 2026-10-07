@@ -678,7 +678,7 @@ export async function retryNow(incidentId: string, actor: string, opts: { pastCa
        * decided by the retried execution and written to `retry_attempts`, and
        * reaches this page on the next resync.
        */
-      message: `Retry ${(held.attempts ?? 0) + 1} of ${RETRY_CAP} was handed to the healer. Whether it worked is decided by the retried run, not by this call — resync to see what it recorded.`,
+      message: `${(held.attempts ?? 0) >= RETRY_CAP ? `Retry ${(held.attempts ?? 0) + 1}, past the cap of ${RETRY_CAP} because a person asked with a reason,` : `Retry ${(held.attempts ?? 0) + 1} of ${RETRY_CAP}`} was handed to the healer. Whether it worked is decided by the retried run, not by this call — resync to see what it recorded.`,
     };
   } catch (e) {
     return { ok: false, incident_id: incidentId, message: why(e) };
