@@ -1004,6 +1004,19 @@ export function buildReport(lane: Lane, trig: Args, questionRows: Array<{ fields
 
 /** CCR - Complete Upload's initial_comment, as written. */
 export function reportComment(B: Record<string, unknown>): string {
+  /*
+   * 8 Oct 2026 (LOOP-1791393311294-IUXL): a caller that passes its own
+   * report_content gets no counts, because they are computed only when the
+   * report is generated here. The comment printed "undefined questions
+   * tracked". For supplied text it now says the counts are not known.
+   */
+  if (B.generated === false || typeof B.question_count !== 'number') {
+    return (
+      '*Weekly Monitoring Report*\n*' +
+      str(B.client_name) +
+      '*\n\n───────────────────\n\n•  This report text was supplied by the caller, so its question counts are not known here\n\nThe full report is attached below.'
+    );
+  }
   const cav = (B.caveat_count as number) || 0;
   return (
     '*Weekly Monitoring Report*\n*' +

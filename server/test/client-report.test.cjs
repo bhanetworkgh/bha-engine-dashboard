@@ -23,7 +23,7 @@ Module._load = function (request, ...rest) {
 };
 const mirrorPath = require.resolve(path.join(DIST, 'server/src/mirror.js'));
 require.cache[mirrorPath] = { id: mirrorPath, filename: mirrorPath, loaded: true, exports: {} };
-const { buildReport } = require(path.join(DIST, 'server/src/mcp/researchTwinTools.js'));
+const { buildReport, reportComment } = require(path.join(DIST, 'server/src/mcp/researchTwinTools.js'));
 const step = (s) => console.log(`  ok  ${s}`);
 
 const ans = (notYet) => `What the evidence supports\nTwo plants are running.\n\nWhat it does not yet support\n${notYet}\n\nSources\n[S1] Example - https://example.org/a`;
@@ -63,5 +63,19 @@ assert.match(bare, /This is a young lane: the trend is not yet established\./);
 assert.match(bare, /0 flagged as thin or stuck; 0 answers name a caveat\./);
 assert.doesNotMatch(bare, /INTERNAL/);
 step('an unwritten Purpose or Future translation says so');
+
+// 8 Oct 2026 (LOOP-1791393311294-IUXL): the Slack comment for a caller-supplied report_content.
+const supplied = reportComment({ client_name: 'Supplied lane', report_content: '# my own text', generated: false });
+assert.doesNotMatch(supplied, /undefined|NaN|null/, 'no undefined counts in the comment');
+assert.match(supplied, /\*Supplied lane\*/);
+assert.match(supplied, /supplied by the caller, so its question counts are not known here/);
+assert.doesNotMatch(supplied, /questions tracked this week/);
+const noFlag = reportComment({ client_name: 'Supplied lane', report_content: '# my own text' });
+assert.doesNotMatch(noFlag, /undefined/, 'a body with no counts never prints undefined, whatever flag it carries');
+const built = buildReport({ client_name: 'Acme Farms' }, {}, rows, '2026-10-07');
+const generated = reportComment({ client_name: 'Acme Farms', ...built });
+assert.match(generated, /\*3\* questions tracked this week/);
+assert.doesNotMatch(generated, /undefined|not known here/);
+step('the Slack comment says counts are not known for supplied text, and still prints them for a generated report');
 
 console.log('client-report: all passed');
