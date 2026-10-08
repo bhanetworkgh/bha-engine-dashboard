@@ -22,6 +22,9 @@
  *   MCP parity — draft_pattern_candidate and register_pattern_candidate on the
  *     write connection run the page's own code: same who-may-act rule, same
  *     model, same announcement and delete, logged as mcp:<tool>.
+ *   the register path only (2026-10-08) — create_record refuses a pattern an
+ *     open candidate names; existing_pattern_id links a candidate to a pattern
+ *     already saved without creating, ingesting or documenting a second one.
  *   the pipeline — draft runs per candidate (page and MCP counted together),
  *     time in Proposed, draft-to-register and decline rates, handed-off
  *     registrations read back from record_deletions.
@@ -565,6 +568,60 @@ const act = (ref, action, body) => request('POST', `/api/pattern-candidates/${en
     await assert.rejects(drafter.draft({ id: 1, natural_id: 'CAND-x', airtable_record_id: null, fields: {} }), (e) => e.reason === 'not_configured' && /OPENROUTER_API_KEY is not set/.test(e.message));
     if (heldKey !== undefined) process.env.OPENROUTER_API_KEY = heldKey;
     step('MCP: draft_pattern_candidate and register_pattern_candidate run the page’s own path — rule, model, notes, Codex, announcement, delete — logged as mcp:');
+
+    /* ---- the register path is the only door for a candidate's pattern (2026-10-08) ---- */
+    // On 8 Oct Bays saved BP-GENIE-1791419670135-5KR7 with create_record while its candidate was still Proposed.
+    const patternsNamed = async (name) => (await query(`SELECT count(*)::int n FROM engine_build_patterns WHERE lower(fields->>'pattern_name') = lower($1)`, [name])).rows[0].n;
+    const cDoor = await mk('door');
+    const side = await mcp('create_record', { kind: 'patterns', fields: { pattern_name: `throwaway  DOOR -- ${T}!`, problem: 'through the side door' } });
+    assert.deepEqual([side.ok, side.reason], [false, 'use_register_path'], JSON.stringify(side));
+    assert.ok(side.detail.candidates.some((c) => c.natural_id === cDoor), 'the refusal names the open candidate');
+    assert.match(side.message, /register_pattern_candidate/, 'and the path to use');
+    const sideDry = await mcp('create_record', { kind: 'patterns', dry_run: true, fields: { pattern_name: `Throwaway door ${T}`, problem: 'dry' } });
+    assert.equal(sideDry.reason, 'use_register_path', 'a dry run is refused the same way');
+    assert.equal(await patternsNamed(`Throwaway door ${T}`), 0, 'nothing was written');
+    const unrelated = await mcp('create_record', { kind: 'patterns', dry_run: true, fields: { pattern_name: `Throwaway nobody flagged ${T}`, problem: 'no candidate has this name' } });
+    assert.equal(unrelated.ok, true, 'a pattern no open candidate names is not held up: ' + JSON.stringify(unrelated));
+    const sideAudit = (await query(`SELECT outcome FROM engine_mcp_writes WHERE tool = 'create_record' AND kind = 'patterns' AND guard_result::text LIKE '%candidate_register_path%' AND guard_result::text LIKE '%use_register_path%' ORDER BY id DESC LIMIT 1`)).rows;
+    assert.deepEqual(sideAudit, [{ outcome: 'refused' }], 'the refusal is audited');
+    // Register is the one caller let through while the candidate is open.
+    const doorReg = await mcp('register_pattern_candidate', { candidate: cDoor, requester_user_id: ARCH });
+    assert.equal(doorReg.ok, true, JSON.stringify(doorReg));
+    made.patterns.push(doorReg.pattern_id);
+    made.candidates = made.candidates.filter((x) => x !== cDoor);
+    assert.equal(await patternsNamed(`Throwaway door ${T}`), 1);
+    step('create_record cannot save an open candidate’s pattern (use_register_path, case- and punctuation-blind, dry run too); Register still can');
+
+    /* ---- existing_pattern_id: link a candidate to a pattern already saved, creating nothing ---- */
+    const saved = await mcp('create_record', { kind: 'patterns', fields: { pattern_name: `Throwaway link ${T}`, problem: 'Saved before its candidate was registered.', bha_system: 'BAYS' } });
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    made.patterns.push(saved.natural_id);
+    const [cLink, cElse] = [await mk('link'), await mk('elsewhere')];
+    const wrong = await mcp('register_pattern_candidate', { candidate: cElse, requester_user_id: DESTINY, existing_pattern_id: saved.natural_id });
+    assert.deepEqual([wrong.ok, wrong.reason], [false, 'name_mismatch'], JSON.stringify(wrong));
+    const none = await mcp('register_pattern_candidate', { candidate: cLink, requester_user_id: DESTINY, existing_pattern_id: 'BP-NONE-1-AAAA' });
+    assert.deepEqual([none.ok, none.reason], [false, 'not_found'], JSON.stringify(none));
+    const stranger = await mcp('register_pattern_candidate', { candidate: cLink, requester_user_id: OTHER, existing_pattern_id: saved.natural_id });
+    assert.equal(stranger.reason, 'not_permitted', 'the who-may-act rule still holds');
+    const linkPosts = seen.slack.filter((x) => x.method === 'chat.postMessage').length;
+    const linkDry = await mcp('register_pattern_candidate', { candidate: cLink, requester_user_id: DESTINY, existing_pattern_id: saved.natural_id, dry_run: true });
+    assert.deepEqual([linkDry.ok, linkDry.dry_run, linkDry.pattern_existing], [true, true, true], JSON.stringify(linkDry));
+    assert.equal(seen.slack.filter((x) => x.method === 'chat.postMessage').length, linkPosts, 'a dry run announces nothing');
+    assert.equal((await query(`SELECT fields->>'Status' s FROM engine_pattern_candidates WHERE natural_id = $1`, [cLink])).rows[0].s, 'Proposed', 'and marks nothing');
+    const ingestsBefore = seen.ingest.length;
+    const docsBefore = docSeq;
+    const linked = await mcp('register_pattern_candidate', { candidate: cLink, requester_user_id: DESTINY, existing_pattern_id: saved.natural_id, fields: { pattern_name: 'ignored when linking' } });
+    assert.equal(linked.ok, true, JSON.stringify(linked));
+    assert.deepEqual([linked.pattern_id, linked.pattern_existing, linked.announced, linked.candidate_updated, linked.candidate_deleted], [saved.natural_id, true, true, true, true]);
+    assert.equal(await patternsNamed(`Throwaway link ${T}`), 1, 'no second pattern');
+    assert.equal(await patternsNamed('ignored when linking'), 0, 'fields are ignored');
+    assert.deepEqual([seen.ingest.length, docSeq], [ingestsBefore, docsBefore], 'no second BHARAG ingest and no second Doc');
+    assert.equal(seen.slack.filter((x) => x.method === 'chat.postMessage').length, linkPosts + 1, 'one announcement');
+    const linkKept = (await query(`SELECT fields FROM record_deletions WHERE kind = 'pattern_candidates' AND natural_id = $1`, [cLink])).rows[0].fields;
+    assert.deepEqual([linkKept.Status, linkKept['Pattern ID'], linkKept['Registered By']], ['Registered', saved.natural_id, 'Destiny Arupi']);
+    assert.ok(linkKept['Announcement Link'], 'the handed-off candidate carries its announcement');
+    made.candidates = made.candidates.filter((x) => x !== cLink);
+    step('existing_pattern_id: name must match, nothing created, ingested or documented twice; announced, linked and handed off');
 
     /* ---- the pipeline figures ---- */
     const pg = (await request('GET', '/api/pattern-candidates')).body;
