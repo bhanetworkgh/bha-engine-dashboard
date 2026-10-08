@@ -11536,3 +11536,29 @@ Files:      none in this repo. n8n Agent Bays (Nw5igXu4WWrjUMWB).
 Problem:    Read_Codex and Read_Channel_Tracking answered "Authorization failed - please check your credentials". engine_writes shows the calls as `unauthorised`, "missing or wrong x-dashboard-key", at 13:00:13/16/21 and 14:00:13/20 on 7 Oct and once at 22:55 on 6 Oct. Both tools, and Log_Deep_Think, sent the key as `={{ $vars.DASHBOARD_INBOUND_KEY }}`; they were the agent's own tool nodes, missed when the key moved off the variable onto a stored credential on 6 Oct (85 nodes, 23 workflows). Reproduced on the live agent with call_agent before changing anything.
 Fix:        One config.patch on the draft: the three tools drop the header parameter and use genericCredentialType / httpHeaderAuth with credential "BHA Dashboard — Inbound Key" (YD5u4fMYXRvYGyrs). validate_agent valid. Draft test: Read_Channel_Tracking 37 rows, Read_Codex 7 rows for 2026-10-06. Published as 8bae4e4f-68cf-402e-b61a-b892193620a7; restore point ab644b7e-0a1f-4d7b-8c8c-2ac39fcdeca3. Change note posted by Destiny under the self-healing report. Both digests re-run by hand through call_agent and posted to #bha-engine-digests (ledger rows BAYS-SCHED-1791391865094-ZB9S and BAYS-SCHED-1791391939617-AORD, both completed, no tool issues). Incident closed (audit 1309). Evals started: n8n execution 28956.
 Decision:   Log_Deep_Think was not exercised, because a test writes a real row; it carries the same change and proves itself on its next real use. The tool URLs still point at bha-engine-dashboard.onrender.com, left as they are: one change at a time.
+
+## 2026-10-08 07:30 — A refused engine call now says who made it
+
+Intent:     Two keyless GETs to /api/engine/media-doctrine at 02:40 UTC on 8 Oct
+            were refused correctly, but `engine_writes` only said "missing or
+            wrong x-dashboard-key", so the caller could not be traced from the
+            dashboard. Destiny asked for the dashboard to keep that record.
+Files:      server/src/index.ts
+Problem:    The refusal line carried no caller. Render's request log had it:
+            host dashboard.bhanetwork.org, one address, first
+            "Mozilla/5.0 (Macintosh …) Chrome/154" at 02:40:46 then
+            "curl/8.5.0" at 02:40:54. A person opening the URL, not a workflow
+            (no n8n execution ran in that minute).
+Fix:        On a refused call only, the detail now reads
+            "missing or wrong x-dashboard-key · no key sent|wrong key sent ·
+            from <address> · <user agent, 160 chars>". The address is
+            earlyAccess.clientIp (x-forwarded-for's first entry, as Render sets
+            it). Accepted calls are unchanged and store nothing about a caller.
+Decision:   The detail keeps its old opening words so anything matching on
+            them still matches. "no key sent" is told apart from "wrong key
+            sent" because they are different faults: the first is a person or
+            a probe, the second is a workflow or tool holding a stale key,
+            which is what INC-BAYS.AGENT-046 was. `npm ci` is blocked in the
+            workspace again ("This is an error with npm itself"), so the edit
+            was checked with the machine's own tsc and Render's build is the
+            build.

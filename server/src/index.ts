@@ -349,7 +349,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       throw new HttpError(503, 'DASHBOARD_INBOUND_KEY is not set on the server, so engine writes are off.');
     }
     if (!inboundOk(req)) {
-      await mirror.logWrite({ endpoint, kind: '-', method, key_label: null, outcome: 'unauthorised', detail: 'missing or wrong x-dashboard-key' });
+      // Who called (2026-10-08, Destiny). A refused call used to say only that
+      // it was refused, so two keyless GETs on 8 Oct could not be traced from
+      // here and had to be read out of Render's request log. The address and
+      // user agent are kept on refused calls only: an accepted call is named
+      // by its key, and nothing else about a caller is stored.
+      const sentKey = req.headers['x-dashboard-key'];
+      const ua = String(req.headers['user-agent'] ?? 'no user agent').replace(/[\u0000-\u001f]/g, ' ').slice(0, 160);
+      const who = `${sentKey ? 'wrong key sent' : 'no key sent'} · from ${earlyAccess.clientIp(req)} · ${ua}`;
+      await mirror.logWrite({ endpoint, kind: '-', method, key_label: null, outcome: 'unauthorised', detail: `missing or wrong x-dashboard-key · ${who}` });
       throw new HttpError(401, 'The x-dashboard-key header is missing or wrong.');
     }
 
