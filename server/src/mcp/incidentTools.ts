@@ -18,6 +18,7 @@
  */
 import { query } from '../pg';
 import * as health from '../health';
+import * as repairs from '../repairs';
 import { auditClose, auditOpen } from './writeTools';
 import type { ToolDefinition } from './tools';
 
@@ -147,4 +148,66 @@ export const retryIncidentTool: ToolDefinition = {
   },
 };
 
-export const INCIDENT_WRITE_TOOLS: ToolDefinition[] = [closeIncidentsTool, retryIncidentTool];
+
+/**
+ *   act_on_prepared_fix — write connection only (2026-10-08, Destiny, for
+ *                    LOOP-1790805930203-SNI2). The Repairs tab's own Apply and
+ *                    Discard (repairs.actOnPrepared, the function the buttons
+ *                    call): the same refusals, the same POST to the repair
+ *                    bridge with the server's key, the row stamped with what
+ *                    the bridge says happened. Apply publishes a fix to a
+ *                    protected workflow or agent, so a reason is required.
+ */
+export const actOnPreparedFixTool: ToolDefinition = {
+  name: 'act_on_prepared_fix',
+  description:
+    'Apply or Discard a fix the repair bridge prepared but did not publish — the Engine health Repairs tab\'s own two buttons, through the same function. repair_id: the id as the Repairs tab lists it (e.g. REP-cnOz6iomtnWVXjso-29967). action: "apply" publishes exactly the tested draft through the bridge, which then watches real runs and puts the old version back if one fails the same way; "discard" throws the draft away. reason: why (required, kept on the audit line). Refused, changing nothing, when no such repair is held, when it has no prepared fix, when the fix is no longer pending, or when the bridge refuses (the live version or the draft moved since the test). dry_run true calls nothing and answers what the row holds and whether the action would be sent. On apply, success means the bridge published; whether the fix held is posted back later by the bridge and shows as prepared_state held, reverted or unproven. Audited on engine_mcp_writes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      repair_id: { type: 'string', description: 'The repair id, e.g. "REP-cnOz6iomtnWVXjso-29967".' },
+      action: { type: 'string', enum: ['apply', 'discard'] },
+      reason: { type: 'string', description: 'Why it is being applied or discarded.' },
+      requester_user_id: { type: 'string', description: 'Slack id of the person asking, for the audit line.' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['repair_id', 'action', 'reason'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Apply or discard a prepared fix' },
+  handler: async (args, deps) => {
+    const id = typeof args.repair_id === 'string' ? args.repair_id.trim() : '';
+    const action = args.action === 'apply' || args.action === 'discard' ? args.action : null;
+    const reason = typeof args.reason === 'string' ? args.reason.trim().slice(0, 500) : '';
+    const requester = typeof args.requester_user_id === 'string' ? args.requester_user_id.trim() || null : null;
+    const dry = args.dry_run === true;
+    const audit = await auditOpen({ tool: 'act_on_prepared_fix', args, access: deps.access, kind: 'repairs', requester, dry_run: dry });
+
+    if (!id || !action || reason.length < 3) {
+      const message = !id ? 'Send repair_id.' : !action ? 'Send action: "apply" or "discard".' : 'Send a reason (at least 3 characters).';
+      await auditClose(audit, { outcome: 'refused', detail: message });
+      return { ok: false, reason: 'bad_argument', message, audit_id: audit };
+    }
+
+    try {
+      if (dry) {
+        const held = (await repairs.list()).repairs.find((r) => r.repair_id === id) ?? null;
+        const why = !held ? 'no repair is held with this id' : !held.prepared_fix ? 'the repair has no prepared fix' : held.prepared_state !== 'pending' ? `the prepared fix is already ${held.prepared_state}` : null;
+        const row = held ? { workflow_name: held.workflow_name, failed_node: held.failed_node, prepared_state: held.prepared_state, prepared_fix: held.prepared_fix } : null;
+        await auditClose(audit, { outcome: 'dry_run', detail: `would ${why ? 'refuse: ' + why : action}`, natural_id: id, after: row });
+        return { ok: true, dry_run: true, repair_id: id, would: why ? 'refuse' : action, why, row, note: 'dry_run: nothing was sent to the bridge.', audit_id: audit };
+      }
+      const actor = `mcp:${deps.access}${requester ? ` (${requester})` : ''} — ${reason}`;
+      const r = await repairs.actOnPrepared(id, action, actor);
+      const after = { ok: r.ok, message: r.message, prepared_state: r.repair?.prepared_state ?? null, prepared_fix: r.repair?.prepared_fix ?? null };
+      await auditClose(audit, { outcome: r.ok ? 'applied' : 'refused', detail: r.message.slice(0, 500), natural_id: id, after });
+      return { ok: r.ok, repair_id: id, action, message: r.message, prepared_state: after.prepared_state, audit_id: audit };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      await auditClose(audit, { outcome: 'failed', detail: message });
+      return { ok: false, reason: 'error', message, audit_id: audit };
+    }
+  },
+};
+
+export const INCIDENT_WRITE_TOOLS: ToolDefinition[] = [closeIncidentsTool, retryIncidentTool, actOnPreparedFixTool];
