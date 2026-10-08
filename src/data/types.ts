@@ -3877,3 +3877,46 @@ export interface MonitoringTwinData {
   counts: { farms: number; simulated_farms: number; open_incidents: number };
   not_yet: string[];
 }
+
+/** The ask trace (2026-10-08, UDC7): one origin id's hops across the three agents' ledgers. */
+export interface AskTraceOrigin {
+  origin: string;
+  hops: number;
+  first_at: string | null;
+  last_at: string | null;
+  agents: string[];
+  call_chain: string[];
+  question: string | null;
+}
+export interface AskTraceList {
+  since: string;
+  origins: AskTraceOrigin[];
+  summary: { origins: number; multi_hop: number; cap: number };
+  note: string;
+}
+export interface AskTraceHop {
+  agent: string;
+  agent_label: string;
+  page: string;
+  row_id: string;
+  ask_id: string | null;
+  asked_at: string | null;
+  asked_by_system: string | null;
+  call_chain: string[];
+  hop: number;
+  question: string | null;
+  answer: string | null;
+  answer_chars: number;
+  outcome: string | null;
+  delivered: string | null;
+  response_seconds: number | null;
+  slack_link: string | null;
+  run_id: string | null;
+  error: string | null;
+}
+export interface AskTraceDetail {
+  origin: string;
+  found: boolean;
+  hops: AskTraceHop[];
+  note: string;
+}

@@ -5,6 +5,7 @@ import { getBays, getBaysReminders, type BaysAsk, type BaysData, type BaysRemind
 import type { RecordColumn } from '../../components/ui';
 import {
   Button,
+  ButtonLink,
   Definition,
   EmptyState,
   FacetPicker,
@@ -461,6 +462,7 @@ export default function Bays() {
       <PageHeader
         title="Bays"
         subtitle="Every Slack turn, scheduled task run and panel question Bays recorded"
+        right={<ButtonLink to="/trace" size="sm">Ask trace</ButtonLink>}
         below={<Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Asks: data?.summary.asks ? { n: data.summary.asks } : undefined }} />}
       />
       {tab === 'Reminders' ? (
