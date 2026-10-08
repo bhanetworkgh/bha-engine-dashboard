@@ -11562,3 +11562,10 @@ Decision:   The detail keeps its old opening words so anything matching on
             workspace again ("This is an error with npm itself"), so the edit
             was checked with the machine's own tsc and Render's build is the
             build.
+
+## 2026-10-08 10:15 — A candidate's pattern can only be saved through Register, and Bays can register
+Intent:     Close the gap behind BP-GENIE-1791419670135-5KR7: Bays saved a candidate's pattern with create_record while CAND-1791388033258-H2E5 stayed Proposed, unannounced and unlinked.
+Files:      server/src/writeGuards.ts, server/src/mcp/writeTools.ts, server/src/candidateActions.ts, server/src/mcp/candidateTools.ts, server/src/mcp/index.ts, CLAUDE.md
+Problem:    Bays' tool issue line, verbatim: "BHA_Dashboard_update_record -- refused setting pattern_candidates CAND-1791388033258-H2E5 Status to "Registered" with reason use_register_path; register_pattern_candidate is not available in my toolset". draft_pattern_candidate and register_pattern_candidate went onto the write connection on 25 Sep and were left off Bays' list in AGENT_KEYS when tokens were scoped on 28 Sep.
+Fix:        (1) Both tools added to Bays' scope. (2) New create guard candidate_register_path: create_record kind patterns is refused (use_register_path) when a Proposed or Approved candidate has the same name, case- and punctuation-blind; candidateActions.register passes internal 'register_path' and is the one caller let through. (3) register takes existing_pattern_id: no create, the saved pattern is read, announced, linked and the candidate handed off; refused unless the names match.
+Decision:   The already-saved pattern is linked, not deleted and re-created: its BP- id, BHARAG document and Google Doc were already given to Kaiqi and Jason, and a second create would be a second pattern. npm ci is blocked in this workspace, so Render's build is the build; type-checked with global tsc.

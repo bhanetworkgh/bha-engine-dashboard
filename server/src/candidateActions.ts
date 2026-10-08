@@ -168,6 +168,27 @@ export interface RegisterInput {
   pattern: Record<string, unknown>;
   dry_run?: boolean;
   via?: Via;
+  /**
+   * 2026-10-08: register against a pattern that is ALREADY saved (a BP- id), for a
+   * candidate whose pattern was written through create_record by mistake. Nothing
+   * is created: the pattern is read, announced, linked and the candidate handed
+   * off exactly as a normal register does. Refused unless the names match.
+   */
+  existing_pattern_id?: string | null;
+}
+
+const nameKey = (x: string | null): string => (x ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+/** The saved pattern a candidate is being linked to, in the shape create_record answers with. */
+async function existingPattern(patternId: string, row: mirror.LookupRow): Promise<Record<string, unknown>> {
+  const r = await mirror.lookup('patterns', { filters: [{ op: 'f', name: 'natural_id', value: patternId }], limit: 2, order: 'created_desc' });
+  if (!r.rows.length) throw new CandidateError(404, 'not_found', `No build pattern ${patternId} is held. Nothing was changed.`);
+  if (r.rows.length > 1) throw new CandidateError(409, 'ambiguous', `${patternId} names ${r.rows.length} pattern rows (${r.rows.map((x) => x.id).join(', ')}); nothing was changed.`);
+  const p = r.rows[0];
+  if (nameKey(str(p.fields.pattern_name)) !== nameKey(str(row.fields.Candidate))) {
+    throw new CandidateError(409, 'name_mismatch', `${patternId} is "${str(p.fields.pattern_name) ?? ''}", which is not this candidate ("${str(row.fields.Candidate) ?? ''}"). Nothing was changed.`);
+  }
+  return { ok: true, existing: true, id: p.id, natural_id: p.natural_id, row: { fields: p.fields }, doc_created: null, doc_id: str(p.fields.doc_id), doc_link: str(p.fields.doc_link), doc_error: null, ingested_to_bharag: null, bharag: null, audit_id: null };
 }
 
 /** The page's candidate id: CAND-…, else the Airtable record id, else `row-<id>`. The draft log and the figures key on it. */
@@ -195,19 +216,27 @@ export async function register(ref: string, input: RegisterInput): Promise<Recor
   const row = await candidate(ref);
   assertMay(row, actor);
   assertOpen(row, 'registered');
-  const sent = input.pattern && Object.keys(input.pattern).length ? input.pattern : seedPattern(row.fields);
-  const fields = Object.fromEntries(Object.entries(sent).filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== ''));
-  // The page's checklist is one step per line; the pattern guard joins a list with " | ".
-  if (typeof fields.implementation_checklist === 'string' && /\n/.test(fields.implementation_checklist)) {
-    fields.implementation_checklist = fields.implementation_checklist.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  const existingId = str(input.existing_pattern_id);
+  let created: Record<string, unknown>;
+  if (existingId) {
+    created = await existingPattern(existingId, row);
+    if (input.dry_run === true) return { ok: true, dry_run: true, pattern_existing: true, pattern_id: existingId, candidate: pageId(row), note: `Nothing was written. A real call would announce ${existingId}, mark the candidate Registered against it and then delete the candidate (kept in record_deletions). No pattern is created.` };
+  } else {
+    const sent = input.pattern && Object.keys(input.pattern).length ? input.pattern : seedPattern(row.fields);
+    const fields = Object.fromEntries(Object.entries(sent).filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== ''));
+    // The page's checklist is one step per line; the pattern guard joins a list with " | ".
+    if (typeof fields.implementation_checklist === 'string' && /\n/.test(fields.implementation_checklist)) {
+      fields.implementation_checklist = fields.implementation_checklist.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+    }
+    if (!str(fields.pattern_name)) throw new CandidateError(400, 'missing_required', 'pattern_name is required.');
+    // 'register_path': the one create the candidate_register_path guard lets through while this candidate is open.
+    created = await call('create_record', { kind: 'patterns', fields, drafted_by: actor.name, requester_user_id: actor.user_id, dry_run: input.dry_run === true }, via, 'register_path');
+    if (created.ok !== true) throw refusedFrom(created, 'The pattern was not created');
+    if (input.dry_run === true) return { ok: true, dry_run: true, pattern: created, candidate: pageId(row), note: 'Nothing was written. A real register would also announce the pattern, mark the candidate Registered and then delete it (kept in record_deletions).' };
   }
-  if (!str(fields.pattern_name)) throw new CandidateError(400, 'missing_required', 'pattern_name is required.');
-  const created = await call('create_record', { kind: 'patterns', fields, drafted_by: actor.name, requester_user_id: actor.user_id, dry_run: input.dry_run === true }, via);
-  if (created.ok !== true) throw refusedFrom(created, 'The pattern was not created');
-  if (input.dry_run === true) return { ok: true, dry_run: true, pattern: created, candidate: pageId(row), note: 'Nothing was written. A real register would also announce the pattern, mark the candidate Registered and then delete it (kept in record_deletions).' };
   const patternId = str(created.natural_id);
   const saved = (created.row ?? {}) as { fields?: Record<string, unknown> };
-  const pf = saved.fields ?? fields;
+  const pf = saved.fields ?? {};
   /*
    * The announcement, after the save and never able to undo it (2026-09-24):
    * a post that fails is reported beside the Doc and BHARAG and the pattern
@@ -261,6 +290,7 @@ export async function register(ref: string, input: RegisterInput): Promise<Recor
   return {
     ok: marked.ok === true,
     pattern_id: patternId,
+    ...(existingId ? { pattern_existing: true } : {}),
     pattern_row_id: created.id,
     pattern_url: `${announcer.dashboardBase()}/build-patterns?open=${encodeURIComponent(`row-${String(created.id)}`)}`,
     doc_created: created.doc_created ?? null,

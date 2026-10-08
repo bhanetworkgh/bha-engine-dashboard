@@ -1085,6 +1085,14 @@ archive records directly, with the checks the Bays Tools Router enforces.
   `register_pattern_candidate` and the page's Register button set it, because
   they also save the pattern, ingest it, make the Doc and announce it. Guard
   `register_path_only`.
+- **A candidate's pattern is saved on the register path only** (2026-10-08).
+  `create_record` kind `patterns` is refused with `use_register_path` when a
+  Proposed or Approved candidate has the same name (case- and punctuation-blind),
+  guard `candidate_register_path`; `candidateActions.register` is the one caller
+  let through. `register_pattern_candidate` takes `existing_pattern_id` for a
+  pattern already saved by mistake: nothing is created, the saved pattern is
+  announced, linked and the candidate handed off, refused unless the names
+  match. Both candidate tools are in Bays' scope from the same day.
 - **A pattern keeps its Google Doc** (2026-10-06). When `create_record` makes
   the Doc for a pattern it writes `doc_id` and `doc_link` back onto the row
   (new fields, nothing renamed); the Build patterns panel shows the link.
