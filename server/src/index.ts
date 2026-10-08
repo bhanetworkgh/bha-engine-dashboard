@@ -53,6 +53,7 @@ import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
 import * as systemFeeds from './systemFeeds';
 import * as baysAsks from './baysAsks';
+import * as askTrace from './askTrace';
 import * as evalRuns from './evalRuns';
 import * as reminderTools from './mcp/reminderTools';
 import * as dataGovernance from './dataGovernance';
@@ -1178,6 +1179,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** Bays' own ledger: Slack turns, scheduled task runs and panel questions (2026-10-05). */
       case '/api/bays':
         return send(res, 200, await baysAsks.baysData());
+      /** One ask's hops across Bays, North Star and Research Twin, by origin id (2026-10-08, UDC7). A read. */
+      case '/api/ask-trace': {
+        const origin = (url.searchParams.get('origin') || '').trim();
+        return send(res, 200, origin ? await askTrace.trace(origin) : await askTrace.origins());
+      }
       /** Reminder posts scheduled through Bays (2026-10-05). A read. */
       case '/api/bays/reminders':
         return send(res, 200, await reminderTools.reminders());

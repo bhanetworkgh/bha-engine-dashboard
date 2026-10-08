@@ -15,6 +15,8 @@ import type {
   AskBaysData,
   BaysData,
   BaysRemindersData,
+  AskTraceDetail,
+  AskTraceList,
   EvalRunDetail,
   EvalRunsData,
   GenieData,
@@ -208,6 +210,8 @@ export const getClients = () => api<ClientsData>('/api/clients');
 export const getTwinHandoffs = () => api<Handoffs>('/api/twin-handoffs');
 /** The agent maturity scorecard (2026-09-28). */
 /** The eval history: every run held, and one run case by case (2026-10-05). */
+export const getAskTraces = () => api<AskTraceList>('/api/ask-trace');
+export const getAskTrace = (origin: string) => api<AskTraceDetail>(`/api/ask-trace?origin=${encodeURIComponent(origin)}`);
 export const getEvalRuns = () => api<EvalRunsData>('/api/eval-runs');
 export const getEvalRun = (runId: string) => api<EvalRunDetail>(`/api/eval-runs?run=${encodeURIComponent(runId)}`);
 export const getAgentScorecard = () => api<ScorecardData>('/api/agent-scorecard');
