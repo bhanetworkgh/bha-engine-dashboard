@@ -11590,3 +11590,10 @@ Files:      none in this repo (n8n Agent Bays Nw5igXu4WWrjUMWB, instructions sec
 Problem:    Bays' reply, verbatim: "flagging this for <@U0BD5EA1F71> to confirm directly ... This needs his own reply in-thread." Its instructions never named U0BD5EA1F71 as its own ID.
 Fix:        One bullet in "Who you're talking to" rewritten: U0BD5EA1F71 is Bays itself; an ask that tags it is done by Bays, in the same run; never flagged to, asked of, waited on or nudged. Saved draft checked byte for byte against the intended text (12,974 characters). Restore point c8e7f7e3, published 4c6db06e. Eval run EVAL-202610081105 (execution 29810): 62 of 62 rows passed.
 Decision:   Fixed in the instructions, not in the Front Door: the tag reaches Bays correctly, it only lacked the fact.
+
+## 2026-10-08 12:10 — create_client_report_doc: no "undefined questions tracked" for supplied text
+Intent:     Close LOOP-1791393311294-IUXL.
+Files:      server/src/mcp/researchTwinTools.ts, server/test/client-report.test.cjs
+Problem:    With a caller's own report_content the Slack comment read "*undefined* questions tracked this week", because the counts are only computed when the report is generated here.
+Fix:        reportComment returns a short comment for supplied text (generated false, or no numeric question_count): the client name, "This report text was supplied by the caller, so its question counts are not known here", and that the report is attached. A generated report's comment is unchanged. One step added to test:client-report (5 hold); test:research-twin 12 of 12 against a local database.
+Decision:   The guard also keys on a missing count, not only on the generated flag, so no body without counts can print "undefined".
