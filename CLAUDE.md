@@ -1258,6 +1258,17 @@ changes and the answer previews each id. A `reason` is required and travels
 in the actor. Audited on `engine_mcp_writes` (kind `incidents`). Not in any
 agent's scope.
 
+**`act_on_prepared_fix`, Apply and Discard over MCP** (decision 2026-10-08,
+Destiny — LOOP-1790805930203-SNI2). Same file, write connection only, calling
+`repairs.actOnPrepared` — the function the Repairs tab's two buttons call — so
+the refusals (no such repair, no prepared fix, no longer pending), the POST to
+the bridge with the server's key and the stamp of what the bridge said are the
+page's. A `reason` is required and travels in the actor; `dry_run` sends
+nothing. Apply means the bridge published; held, reverted or unproven arrives
+later from the bridge. Audited on `engine_mcp_writes` (kind `repairs`). Not in
+any agent's scope: a person, through the connector, decides to publish to a
+protected workflow.
+
 **`retry_incident`, Retry now over MCP** (decision 2026-10-07, Destiny —
 LOOP-1791322278282-DC07). Same file, write connection only, calling
 `health.retryNow` — the function the Retries tab's button calls — so the cap of
