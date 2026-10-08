@@ -336,6 +336,7 @@ const createRecord: ToolDefinition = {
       confirmed_new: b(args, 'confirmed_new'),
       confirmed_assignee: b(args, 'confirmed_assignee'),
       requester_user_id: requester,
+      registerPath: deps.internal === 'register_path',
     });
     if (!plan.ok) {
       await auditClose(audit, { outcome: 'refused', detail: `${plan.reason}: ${plan.message}`, guard_result: plan });

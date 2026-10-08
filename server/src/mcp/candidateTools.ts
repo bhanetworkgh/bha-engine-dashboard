@@ -93,6 +93,7 @@ export const registerPatternCandidate: ToolDefinition = {
         description:
           'The pattern: pattern_name, problem, solution, context, bha_system, reusability (Narrow | Moderate | Broad), implementation_checklist (a list, or one step per line), learnings_gotchas, anti_pattern, integration_points, readiness_gates, next_use_case, test_coverage, routing_logic, commercial_impact, research_production_impact, naming_note, roadmap_context. Empty values are not written.',
       },
+      existing_pattern_id: { type: 'string', description: 'Only for a candidate whose pattern is ALREADY saved (it was written with create_record by mistake): that pattern’s BP- id. No pattern is created and `fields` is ignored; the saved pattern is announced, linked to the candidate and the candidate handed off. Refused unless the pattern’s name is the candidate’s.' },
       dry_run: { type: 'boolean', description: 'Run the guards and return what would be written, without writing, announcing or deleting.' },
     },
     required: ['candidate', 'requester_user_id'],
@@ -106,6 +107,7 @@ export const registerPatternCandidate: ToolDefinition = {
         actor_user_id: actor(args),
         pattern: f && typeof f === 'object' && !Array.isArray(f) ? (f as Record<string, unknown>) : {},
         dry_run: args.dry_run === true || args.dry_run === 'true',
+        existing_pattern_id: typeof args.existing_pattern_id === 'string' ? args.existing_pattern_id : null,
         via: 'write',
       });
     } catch (e) {

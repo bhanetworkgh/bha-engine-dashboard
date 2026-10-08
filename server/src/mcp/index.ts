@@ -186,6 +186,10 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'schedule_reminder', 'list_reminders', 'cancel_reminder',
         // 2026-10-01: what may be said about vFarm (T0NO).
         'read_media_doctrine',
+        // 2026-10-08: the candidate flow from Slack. Granted to the write connection on 25 Sep and
+        // left off this list when tokens were scoped on 28 Sep, so Bays saved a candidate's pattern
+        // with create_record instead (BP-GENIE-1791419670135-5KR7).
+        'draft_pattern_candidate', 'register_pattern_candidate',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>

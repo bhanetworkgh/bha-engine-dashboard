@@ -197,6 +197,7 @@ export const WRITABLE: Record<string, WritableKind> = {
     ingest: 'build_patterns',
     guards: [
       ...EVERY,
+      { name: 'candidate_register_path', applies_to: 'create', does: 'A pattern whose name, compared case- and punctuation-blind, is that of a Proposed or Approved pattern candidate is refused (use_register_path): register_pattern_candidate is the path, because it also announces the pattern, links the two and hands the candidate off.' },
       { name: 'pattern_normalise', applies_to: 'create', does: 'LBP - Normalise Pattern Fields: every field cleaned, implementation_checklist joined with " | " when a list, reusability defaulting to Moderate, created_at stamped now, pattern_id minted when absent.' },
       { name: 'doc_link_kept', applies_to: 'create', does: 'Once the pattern’s Google Doc is made, its id and link are written onto the row as doc_id and doc_link, so the link can be read back from the pattern.' },
     ],
@@ -326,6 +327,8 @@ export interface CreateOptions {
   confirmed_new?: boolean;
   confirmed_assignee?: boolean;
   requester_user_id?: string | null;
+  /** True only when `candidateActions.register` is the caller: the one create allowed while its own candidate is still open. */
+  registerPath?: boolean;
 }
 
 function refuse(reason: Refusal['reason'], message: string, checks: Check[], detail?: Record<string, unknown>): Refusal {
@@ -540,6 +543,30 @@ export async function planCreate(kind: string, rawFields: Record<string, unknown
       /** `LBP - Normalise Pattern Fields`. */
       const missing = checkRequired(spec, fields, checks);
       if (missing) return missing;
+      /*
+       * 2026-10-08: a pattern whose name is an open candidate's is that candidate
+       * being registered, and Register is the only path that also announces it,
+       * links the two and hands the candidate off. On 8 Oct Bays saved
+       * BP-GENIE-1791419670135-5KR7 here while CAND-1791388033258-H2E5 was still
+       * Proposed, and the candidate was left unannounced and unlinked.
+       */
+      if (!opts.registerPath) {
+        const nameKey = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        const open = await query<{ natural_id: string | null; name: string | null; status: string | null }>(
+          `SELECT natural_id, fields->>'Candidate' AS name, fields->>'Status' AS status FROM ${mirror.KINDS.pattern_candidates.table} WHERE COALESCE(fields->>'Status', 'Proposed') IN ('Proposed', 'Approved')`,
+        );
+        const same = open.rows.filter((r) => r.name && nameKey(r.name) === nameKey(str(fields.pattern_name)));
+        if (same.length) {
+          checks.push({ guard: 'candidate_register_path', result: 'fail' });
+          return refuse(
+            'use_register_path',
+            `"${str(fields.pattern_name)}" is an open pattern candidate (${same.map((x) => `${x.natural_id} ${x.status ?? 'Proposed'}`).join(', ')}). Register it with register_pattern_candidate (or Register on the Build patterns page), which saves the pattern, announces it in #bha-build-patterns, links the two and hands the candidate off. create_record would leave the candidate open and unannounced. Nothing was written.`,
+            checks,
+            { candidates: same },
+          );
+        }
+        checks.push({ guard: 'candidate_register_path', result: 'pass' });
+      }
       if (Array.isArray(fields.implementation_checklist)) fields.implementation_checklist = (fields.implementation_checklist as unknown[]).map(str).filter(Boolean).join(' | ');
       if (!str(fields.reusability)) fields.reusability = 'Moderate';
       fields.created_at = str(fields.created_at) || new Date().toISOString();
