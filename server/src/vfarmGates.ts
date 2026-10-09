@@ -343,6 +343,11 @@ export interface WriteResult {
   checks_updated: string[];
   events: string[];
   alerts: AlertResult[];
+  /**
+   * Dry run only: the alerts a real write of this call would post, with their text. A dry run
+   * posts nothing, so `alerts` is always empty on one; this is where it says what would go out.
+   */
+  alerts_would_send?: { about: string; channel: string | null; text: string }[];
   /** True when a Slack alert that should have gone out did not. */
   raise?: boolean;
   message: string;
@@ -468,6 +473,23 @@ async function plan(db: Queryable, input: WriteInput, now: string): Promise<Plan
       continue;
     }
     fields[name] = type === 'leads' ? await resolveLeads(db, cleanField(name, type, v) as string[]) : cleanField(name, type, v);
+  }
+
+  // Stage 1 is passed only when all four checks are passed (Jason, 9 Oct 2026). Held here, at the
+  // write boundary, so no door can skip it: the tool, the engine route, the card and the sweep
+  // all come through this function. It reads the record as it would be after this write, so a
+  // check failed in the same call, or one failed on a record already passed, is refused too.
+  if (kind === 'stage1' && status === 'passed') {
+    const stateOf = (c: CheckName) => (isObj(fields[c]) && typeof (fields[c] as Record<string, unknown>).status === 'string' ? String((fields[c] as Record<string, unknown>).status) : 'pending');
+    const notPassed = CHECKS.filter((c) => stateOf(c) !== 'passed');
+    if (notPassed.length) {
+      const list = notPassed.map((c) => `${CHECK_LABEL[c]} is ${stateOf(c)}`).join('; ');
+      throw new GateRefused(
+        'checks_not_passed',
+        `Stage 1 cannot be passed: ${notPassed.length} of ${CHECKS.length} checks ${notPassed.length === 1 ? 'is' : 'are'} not passed (${list}). Stage 1 is passed only when all four checks are passed. ${before?.status === 'passed' ? 'This record is already passed, so to record a check that is no longer passed, set status back to in_progress or failed in the same write.' : 'Correct and re-check them first.'}`,
+        { checks_not_passed: Object.fromEntries(notPassed.map((c) => [c, stateOf(c)])), checks_required: [...CHECKS] },
+      );
+    }
   }
 
   if (typeof sent.monitoring_farm_id === 'string' && sent.monitoring_farm_id.trim() && fields.monitoring_farm_id !== before?.fields.monitoring_farm_id) {
@@ -665,7 +687,7 @@ export async function writeGate(input: WriteInput): Promise<WriteResult> {
   const alerts = written ? await sendAlerts(p) : [];
   const failed = alerts.filter((a) => !a.ok);
   const what = dry
-    ? `Dry run: nothing was written. This would ${p.created ? `create a ${LABEL[p.row.kind]}` : p.changed ? `update ${p.row.object_id}` : `change nothing on ${p.row.object_id}`}.`
+    ? `Dry run: nothing was written, no event was sent and no alert was posted. This would ${p.created ? `create a ${LABEL[p.row.kind]}` : p.changed ? `update ${p.row.object_id}` : `change nothing on ${p.row.object_id}`}${p.changed ? ` and post ${alertTexts(p).length} Slack alert${alertTexts(p).length === 1 ? '' : 's'} (listed in alerts_would_send)` : ''}.`
     : !p.changed
       ? `${p.row.object_id} already holds exactly this, so nothing was written and no event was sent.`
       : `${p.created ? 'Created' : 'Updated'} ${p.row.object_id}${p.statusChange ? ` (${p.statusChange.from ?? 'new'} → ${p.statusChange.to})` : ''}; ${p.events.length} event${p.events.length === 1 ? '' : 's'} written.`;
@@ -680,6 +702,7 @@ export async function writeGate(input: WriteInput): Promise<WriteResult> {
     checks_updated: p.checksUpdated,
     events: p.events.map((e) => e.event_type),
     alerts,
+    ...(dry ? { alerts_would_send: p.changed ? alertTexts(p).map((m) => ({ about: m.about, channel: alertChannel(), text: m.text })) : [] } : {}),
     ...(failed.length ? { raise: true } : {}),
     message: failed.length ? `${what} BUT ${failed.length} Slack alert${failed.length === 1 ? ' was' : 's were'} not delivered (${failed.map((f) => f.error).join('; ')}). The record and its events are saved; tell Destiny the alert did not go out.` : what,
   };
