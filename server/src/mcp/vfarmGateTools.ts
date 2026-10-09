@@ -11,6 +11,7 @@
  * Every write call is on engine_mcp_writes, kind vfarm_gates, refused ones included.
  */
 import * as gates from '../vfarmGates';
+import * as gateAuto from '../vfarmGateAuto';
 import { auditClose, auditOpen } from './writeTools';
 import type { ToolDefinition } from './tools';
 
@@ -20,14 +21,14 @@ const bare = (v: string) => v.replace(/^<@?([A-Z0-9]+)(\|[^>]*)?>$/, '$1');
 export const getVfarmGates: ToolDefinition = {
   name: 'get_vfarm_gates',
   description:
-    'Read the vFarm stage gates and the 5-rack pilot offer: every VFARM_STAGE1_LAB_VALIDATION_v1, VFARM_STAGE2_PILOT_CHECKLIST_v1 and VFARM_5RACK_PILOT_OFFER_v1 record with its status, its four checks (who checked, when, manual or sensor), the Early Access leads tied to each offer, and the latest VFARM_* events. Use it to answer "where does Stage 1 stand", "can Stage 2 start", "is the offer tied to a pilot". Rows with fixture: true are test records, never real state: say so or leave them out. Three checks (root-zone moisture, airflow velocity, early disease detection) are recorded by a person, not a sensor; never describe them as automated detection. Returns {stage1, stage2, offers, fixtures, checks, gates, events, note}.',
+    'Read the vFarm stage gates and the 5-rack pilot offer: every VFARM_STAGE1_LAB_VALIDATION_v1, VFARM_STAGE2_PILOT_CHECKLIST_v1 and VFARM_5RACK_PILOT_OFFER_v1 record with its status, its four checks (who checked, when, manual or sensor), the Early Access leads tied to each offer, and the latest VFARM_* events. Use it to answer "where does Stage 1 stand", "can Stage 2 start", "is the offer tied to a pilot". Rows with fixture: true are test records, never real state: say so or leave them out. Three checks (root-zone moisture, airflow velocity, early disease detection) are recorded by a person, not a sensor; never describe them as automated detection. Also the scoreboard: `pipeline` (the three steps from the newest real record of each), `boards` (per record: checks passed of four, days to target, days in status, who was asked, uptime and incidents against the Stage 2 budgets) and `prompts_waiting` (cards sent and not yet answered). Sensor-fed checks and the growth stage fill themselves from the Monitoring Twin when the record names its farm (monitoring_farm_id); the owner is sent Passed/Failed cards for the rest and Jason a card when all four have passed, so do not chase people for those. Returns {stage1, stage2, offers, pipeline, boards, prompts_waiting, automation, fixtures, checks, gates, events, note}.',
   inputSchema: {
     type: 'object',
     properties: { events: { type: 'number', description: 'How many of the latest events to include. Default 20, at most 500.' } },
     additionalProperties: false,
   },
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Read the vFarm stage gates and pilot offer' },
-  handler: async (args) => ({ ok: true, ...(await gates.gates({ events: typeof args.events === 'number' ? args.events : 20 })) }),
+  handler: async (args) => ({ ok: true, ...(await gateAuto.scoreboard({ events: typeof args.events === 'number' ? args.events : 20 })) }),
 };
 
 export const writeVfarmGate: ToolDefinition = {

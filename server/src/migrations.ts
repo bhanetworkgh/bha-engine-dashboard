@@ -2762,6 +2762,41 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_vfarm_gates_kind ON engine_vfarm_gates (kind, created_at)`,
     ],
   },
+  {
+    id: 63,
+    name: 'engine_vfarm_gate_prompts: the cards Bays sends so nobody has to remember a gate',
+    statements: [
+      /**
+       * 9 Oct 2026, Destiny (7S0O, second pass). One row per card the gate
+       * sweep sends: kind 'check' asks a record's owner whether a check no
+       * sensor covers passed or failed; kind 'status' asks whether a Stage 1
+       * whose four checks have all passed should be marked passed. The answer
+       * is a button, and the click writes through vfarmGates.writeGate like
+       * every other change. `may_answer` is who is allowed to click.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_vfarm_gate_prompts (
+        id BIGSERIAL PRIMARY KEY,
+        prompt_id TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL CHECK (kind IN ('check', 'status')),
+        object_id TEXT NOT NULL,
+        check_name TEXT,
+        asked_user TEXT NOT NULL,
+        may_answer TEXT[] NOT NULL DEFAULT '{}',
+        channel TEXT,
+        ts TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'answered', 'expired', 'card_failed', 'superseded')),
+        answer TEXT,
+        answered_by TEXT,
+        answered_at TIMESTAMPTZ,
+        result JSONB,
+        error TEXT,
+        is_fixture BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at TIMESTAMPTZ NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_vfarm_gate_prompts_object ON engine_vfarm_gate_prompts (object_id, kind, check_name, created_at DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

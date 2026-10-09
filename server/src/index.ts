@@ -61,6 +61,7 @@ import * as monitoringTwin from './monitoringTwin';
 import * as qualityAlert from './qualityAlert';
 import * as engineEvents from './engineEvents';
 import * as vfarmGates from './vfarmGates';
+import * as vfarmGateAuto from './vfarmGateAuto';
 import * as approvals from './approvals';
 import * as agentInventory from './agentInventory';
 import * as candidateActions from './candidateActions';
@@ -655,7 +656,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * 409 with ok:false and its reason; nothing is written.
      */
     if (p === '/api/engine/vfarm-gates') {
-      if (method === 'GET') return send(res, 200, { ok: true, ...(await vfarmGates.gates()) });
+      if (method === 'GET') return send(res, 200, { ok: true, ...(await vfarmGateAuto.scoreboard()) });
       if (method !== 'POST') throw new HttpError(405, 'GET, or POST { kind, object_id?, fields, by, fixture?, dry_run? }.');
       const b = (await readJson(req, 128 * 1024)) as Record<string, unknown>;
       const oid = typeof b.object_id === 'string' && b.object_id.trim() ? b.object_id.trim() : undefined;
@@ -698,7 +699,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         await mirror.logWrite({ endpoint, kind: 'approvals', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: approvalId || undefined, outcome: 'rejected', detail: 'approval_id, decision (approve or deny) and a Slack user_id are all required', ms: Date.now() - t0 });
         throw new HttpError(422, 'approval_id, decision ("approve" or "deny") and user_id (a Slack user id) are all required.');
       }
-      const r = await approvals.decide({ approval_id: approvalId, decision, user_id: userId, channel_id: typeof b.channel_id === 'string' ? b.channel_id.trim() : null });
+      // A vFarm gate card (2026-10-09, 7S0O) uses the same two buttons; its id starts VFP-.
+      const r = vfarmGateAuto.isPromptId(approvalId)
+        ? await vfarmGateAuto.decide({ prompt_id: approvalId, decision, user_id: userId })
+        : await approvals.decide({ approval_id: approvalId, decision, user_id: userId, channel_id: typeof b.channel_id === 'string' ? b.channel_id.trim() : null });
       await mirror.logWrite({
         endpoint,
         kind: 'approvals',
@@ -1224,7 +1228,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await systemFeeds.vfarmData());
       /** The stage gates and the 5-rack offer, for the Gates tab (2026-10-09, 7S0O). A read. */
       case '/api/vfarm/gates':
-        return send(res, 200, await vfarmGates.gates());
+        return send(res, 200, await vfarmGateAuto.scoreboard());
       case '/api/cs-twin':
         return send(res, 200, await systemFeeds.cstData());
       /** Hardik's doctrine and contract changes, as posted (2026-09-30). */
@@ -2146,6 +2150,7 @@ async function boot(): Promise<void> {
     qualityAlert.startWatching();
     engineEvents.startSweeping();
     approvals.startSweeping();
+    vfarmGateAuto.startSweeping();
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();
   });

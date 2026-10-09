@@ -80,7 +80,7 @@ export const MANUAL_ONLY: readonly CheckName[] = CHECKS.filter((c) => !SENSOR_BA
 export const CHECK_STATUSES = ['pending', 'passed', 'failed'] as const;
 const CHECK_FIELDS = ['status', 'thresholds', 'notes', 'value', 'source', 'checked_by', 'checked_at', 'evidence_ref'];
 
-type FieldType = 'text' | 'number' | 'date' | 'json' | 'tag' | 'check' | 'leads';
+type FieldType = 'text' | 'number' | 'date' | 'json' | 'tag' | 'check' | 'leads' | 'farm';
 /** The contract's own field names, per object. status, the refs, id and the two timestamps are columns. */
 const FIELDS: Record<GateKind, Record<string, FieldType>> = {
   stage1: {
@@ -101,6 +101,8 @@ const FIELDS: Record<GateKind, Record<string, FieldType>> = {
     // Added by Jason on 8 Oct (thread 1791497202.119269), for the twins.
     crop_profile: 'tag',
     growth_stage: 'tag',
+    // 9 Oct: the farm the Monitoring Twin watches for this record, so sensor checks and the growth stage fill themselves.
+    monitoring_farm_id: 'farm',
   },
   stage2: {
     loop_ref: 'text',
@@ -118,6 +120,7 @@ const FIELDS: Record<GateKind, Record<string, FieldType>> = {
     owner_slack_id: 'text',
     target_date: 'date',
     growth_stage: 'tag',
+    monitoring_farm_id: 'farm',
   },
   offer: {
     loop_ref: 'text',
@@ -156,7 +159,7 @@ export class GateRefused extends Error {
   }
 }
 
-interface Row {
+export interface Row {
   object_id: string;
   kind: GateKind;
   status: string;
@@ -198,7 +201,7 @@ const newId = (kind: GateKind, fixture: boolean, now = Date.now()) =>
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
-function cleanCheck(name: CheckName, raw: unknown, before: Record<string, unknown> | null, by: string, now: string): Record<string, unknown> {
+function cleanCheck(name: CheckName, raw: unknown, before: Record<string, unknown> | null, by: string, now: string, sensorOk: boolean): Record<string, unknown> {
   if (!isObj(raw)) throw new GateRefused('bad_check', `${name} must be an object: { status, thresholds, notes, value, source, checked_by, checked_at, evidence_ref }.`);
   const unknown = Object.keys(raw).filter((k) => !CHECK_FIELDS.includes(k));
   if (unknown.length) throw new GateRefused('unknown_field', `${name} does not have ${unknown.map((k) => `"${k}"`).join(', ')}. A check carries: ${CHECK_FIELDS.join(', ')}.`, { unknown_fields: unknown.map((k) => `${name}.${k}`) });
@@ -212,7 +215,7 @@ function cleanCheck(name: CheckName, raw: unknown, before: Record<string, unknow
   next.status = status;
   const source = next.source === undefined ? 'manual' : String(next.source);
   if (source !== 'manual' && source !== 'sensor') throw new GateRefused('bad_check_source', `${name}.source is "manual" (a person checked it) or "sensor".`);
-  if (source === 'sensor' && !SENSOR_BACKED.includes(name)) {
+  if (source === 'sensor' && !SENSOR_BACKED.includes(name) && !sensorOk) {
     throw new GateRefused('no_sensor_yet', `${name} has no sensor behind it yet, so it cannot be recorded as a sensor reading. Record it as source "manual" with who checked and when.`, { manual_only_checks: MANUAL_ONLY });
   }
   next.source = source;
@@ -237,6 +240,10 @@ function cleanField(name: string, type: FieldType, v: unknown): unknown {
     case 'text': {
       if (typeof v !== 'string' || !v.trim()) throw bad('text');
       return v.trim().slice(0, 4000);
+    }
+    case 'farm': {
+      if (typeof v !== 'string' || !v.trim()) throw bad('a vFarm farm id, as the Monitoring Twin lists it');
+      return v.trim().slice(0, 200);
     }
     case 'tag': {
       if (typeof v !== 'string' || !/^[a-z][a-z0-9_]{1,63}$/.test(v.trim())) throw bad('a lower-case tag such as "tomatoes" or "tomato_flower" (letters, digits and underscores)');
@@ -308,6 +315,13 @@ export interface WriteInput {
   /** What carried the write: "mcp", "engine", "test". */
   via?: string;
   dry_run?: boolean;
+  /**
+   * Internal only, never taken from a caller: the checks a real sensor verdict
+   * stands behind on this write. The Monitoring Twin sync passes
+   * root_zone_moisture_check when, and only when, the crop profile holds a
+   * soil-moisture range and a live probe was judged against it.
+   */
+  sensor_proof?: CheckName[];
 }
 
 export interface AlertResult {
@@ -441,7 +455,7 @@ async function plan(db: Queryable, input: WriteInput, now: string): Promise<Plan
       const c = name as CheckName;
       const prev = isObj(fields[c]) ? (fields[c] as Record<string, unknown>) : null;
       if (v === null) throw new GateRefused('bad_check', `${c} cannot be cleared: a check that was recorded stays on the record. Set its status back to "pending" instead.`);
-      const next = cleanCheck(c, v, prev, by, now);
+      const next = cleanCheck(c, v, prev, by, now, (input.sensor_proof ?? []).includes(c));
       if (!same(prev, next)) {
         fields[c] = next;
         checksUpdated.push(c);
@@ -454,6 +468,12 @@ async function plan(db: Queryable, input: WriteInput, now: string): Promise<Plan
       continue;
     }
     fields[name] = type === 'leads' ? await resolveLeads(db, cleanField(name, type, v) as string[]) : cleanField(name, type, v);
+  }
+
+  if (typeof sent.monitoring_farm_id === 'string' && sent.monitoring_farm_id.trim() && fields.monitoring_farm_id !== before?.fields.monitoring_farm_id) {
+    const farm = await db.query<{ synthetic: boolean }>(`SELECT coalesce((fields->>'synthetic')::boolean, false) AS synthetic FROM engine_vfarm_farms WHERE farm_id = $1`, [fields.monitoring_farm_id]);
+    if (!farm.rows[0]) throw new GateRefused('unknown_farm', `vFarm has never sent a farm with the id "${String(fields.monitoring_farm_id)}", so there is nothing for the Monitoring Twin to read. Use a farm id from the Monitoring Twin page.`);
+    if (farm.rows[0].synthetic && !fixture) throw new GateRefused('simulated_farm', `${String(fields.monitoring_farm_id)} is a simulated farm. A real ${LABEL[kind]} cannot take its checks from simulated readings.`);
   }
 
   const statusChange = !before || before.status !== status ? { from: before ? before.status : null, to: status } : null;
@@ -678,6 +698,11 @@ export interface GatesData {
   alert_channel_configured: boolean;
   events: { id: number; event_type: string; at: string; subject_id: string; actor: string | null; detail: Record<string, unknown> }[];
   note: string;
+}
+
+/** Every record as stored, oldest first: for the sweep and the scoreboard. */
+export async function rows(): Promise<Row[]> {
+  return (await query<Row>(`SELECT ${COLS} FROM engine_vfarm_gates ORDER BY created_at, id`)).rows;
 }
 
 /** Everything the Gates tab and get_vfarm_gates show. Fixtures are included and labelled, never mixed in unmarked. */
