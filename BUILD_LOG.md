@@ -11731,3 +11731,10 @@ Files:      none
 Problem:    INC-NS.AGENT-065 and -066 were still open: one event on 8 Oct at 12:57 UTC, North Star — Agent Delivery / Prepare Turn, "Cannot read properties of undefined (reading 'tag') [line 15]" (execution 29967), and the Front Door's call to it failing with it (29964).
 Fix:        Closed through close_incidents, CLOSE 2, audit 1522. Engine health reads no open incident.
 Decision:   Closed as the 8 Oct protected-repair drill (SNI2): the workflow was updated a minute later and North Star answered on 9 Oct (execution 31185, NS-1791553227597-BIC6). Deliverable 3, clearing the open loops, was not done as a sweep: 24 open or in progress on Destiny's table at close.
+
+## 2026-10-09 17:55 — move_loop: the Open loops builder change over MCP
+Intent:     Six loops sat on Destiny's table while naming Jason or Jegan as the person responsible. Moving one needed a person on the page: update_record changes fields, and the builder is which table a row sits on, not a field.
+Files:      server/src/mcp/loopTools.ts (new), server/src/mcp/tools.ts, server/src/store.ts (two small exports), server/test/move-loop.test.cjs (new), package.json, CLAUDE.md
+Problem:    none in the build. The local Postgres had stopped again ("connect ECONNREFUSED 127.0.0.1:54329"); restarted.
+Fix:        move_loop calls store.editLoop, the page's own save, with { builder }. Guards: requester required; Destiny, Jason, the table's owner or the assignee; refused when not held, already there, an unknown builder, or held twice under one loop_id. dry_run. Audited on engine_mcp_writes. test:move-loop 6 of 6; mcp-write still passes.
+Decision:   Write connection only, in no agent's scope. Only the seven builders with a loop table are destinations.
