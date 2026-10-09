@@ -35,6 +35,7 @@ import * as monitoringTwin from './monitoringTwin';
 import * as slack from './slack';
 import * as engineEvents from './engineEvents';
 import * as events from './events';
+import * as timers from './timers';
 
 const DESTINY = 'U0AEW3TBYH1';
 const JASON = 'U0A9V97949F';
@@ -437,7 +438,7 @@ export function startSweeping(): void {
       .catch((e) => console.error(`[vfarm-gates] sweep failed: ${(e as Error).message}`));
   };
   setTimeout(tick, 75_000).unref();
-  setInterval(tick, SWEEP_MS).unref();
+  setInterval(() => (timers.beat('vfarm gate sweep'), tick()), SWEEP_MS).unref();
 }
 
 /* ------------------------------------------------------------- scoreboard */

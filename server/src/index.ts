@@ -53,6 +53,7 @@ import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
 import * as systemFeeds from './systemFeeds';
 import * as baysAsks from './baysAsks';
+import * as scheduledRuns from './scheduledRuns';
 import * as askTrace from './askTrace';
 import * as evalRuns from './evalRuns';
 import * as reminderTools from './mcp/reminderTools';
@@ -1224,6 +1225,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** Reminder posts scheduled through Bays (2026-10-05). A read. */
       case '/api/bays/reminders':
         return send(res, 200, await reminderTools.reminders());
+      /** Every scheduler's runs on one page (2026-10-09, K9B7). A read. */
+      case '/api/scheduled-runs':
+        return send(res, 200, await scheduledRuns.scheduledRuns());
       case '/api/vfarm/live':
         return send(res, 200, await systemFeeds.vfarmData());
       /** The stage gates and the 5-rack offer, for the Gates tab (2026-10-09, 7S0O). A read. */

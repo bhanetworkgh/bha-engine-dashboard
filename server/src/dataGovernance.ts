@@ -23,6 +23,7 @@
 import { query, withTransaction } from './pg';
 import { getMeta, setMeta } from './db';
 import * as mirror from './mirror';
+import * as timers from './timers';
 
 /* ------------------------------------------------------------ retention */
 
@@ -190,7 +191,7 @@ export function startRetention(): void {
     }
   };
   setTimeout(() => void tick(), 5 * 60_000).unref();
-  setInterval(() => void tick(), 6 * 3_600_000).unref();
+  setInterval(() => (timers.beat('retention'), void tick()), 6 * 3_600_000).unref();
 }
 
 export async function retentionStatus() {

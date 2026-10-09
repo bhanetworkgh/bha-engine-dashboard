@@ -38,6 +38,7 @@ const Codex = lazy(() => import('./screens/Codex'));
 const BuildPatterns = lazy(() => import('./screens/BuildPatterns'));
 const Commercial = lazy(() => import('./screens/Commercial'));
 const Executions = lazy(() => import('./screens/Executions'));
+const ScheduledRuns = lazy(() => import('./screens/ScheduledRuns'));
 const Registry = lazy(() => import('./screens/Registry'));
 const Settings = lazy(() => import('./screens/Settings'));
 
@@ -114,6 +115,7 @@ export default function App() {
         <Route path="/commercial" element={<Suspense fallback={<Loading />}><Commercial /></Suspense>} />
         <Route path="/clients" element={<Suspense fallback={<Loading />}><Clients /></Suspense>} />
         <Route path="/executions" element={<Suspense fallback={<Loading />}><Executions /></Suspense>} />
+        <Route path="/scheduled-runs" element={<Suspense fallback={<Loading />}><ScheduledRuns /></Suspense>} />
         <Route path="/registry" element={<Suspense fallback={<Loading />}><Registry /></Suspense>} />
         <Route path="/settings" element={<Suspense fallback={<Loading />}><Settings /></Suspense>} />
         <Route path="*" element={<Navigate to="/" replace />} />

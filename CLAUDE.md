@@ -2070,6 +2070,7 @@ RECORDS
   Commercial
   Clients
   Executions             ← every run of every workflow, tabbed by system
+  Scheduled runs         ← every scheduler's runs: agent tasks, timed workflows, reminders, timers
   Pay Tracker            ← who is owed, for what work, and what has been paid
 
 REFERENCE
@@ -2468,6 +2469,43 @@ green on a page where almost everything succeeds is decoration.
 
 See section 4 for how the rows are stored and polled, for why nothing here
 claims what n8n retains, and for the two rules that keep a comparison honest.
+
+### Scheduled runs
+**Built 2026-10-09, Destiny — LOOP-1791498530857-K9B7.** On 8 Oct Jegan's
+open-loops reminder did not happen and nothing could say whether the timer never
+fired or the task died. Jason asked for a minimal run log: time, task, success
+or failure, error. `/scheduled-runs`, under Records, is every scheduler the
+engine has on one page, last 7 days, four tabs. `GET /api/scheduled-runs`,
+`server/src/scheduledRuns.ts`. **A read and nothing else.**
+
+- **Agent tasks.** Bays' twelve scheduled tasks run inside the n8n Agent, whose
+  timer keeps no history. From 9 Oct each task calls `Record_Scheduled_Run`
+  **first** with outcome `started` (one `bays-asks` row, `Task Outcome:
+  started`) and its last-step call **closes that same row** (`Finished At`,
+  `Response Seconds`, the outcome). **The page draws one row per time a task was
+  due**, from the schedule in `engine_agent_inventory` (never typed here), so a
+  miss is a row: no row for a due time is **never started** (the timer did not
+  fire, or the agent stopped before its first step; the log cannot split those
+  two, and both are the platform, not the task); a row left at started is
+  **started, not finished**; a closed row carries its outcome. A due time
+  before `RUN_LOG_SINCE` says **no record**, because only a finish line was
+  written then. A run no due time accounts for (a re-run, a hand run) is listed
+  as off schedule, never dropped. A due time under 45 minutes old is not yet a
+  miss.
+- **Workflows.** n8n runs with mode `trigger`, from `engine_execution_runs`.
+- **Reminders.** `engine_scheduled_posts`; a past one is "handed to Slack".
+- **Background timers.** This process's nine timers (`server/src/timers.ts`,
+  `timers.beat(name)` at the top of each tick): last tick and ticks since the
+  process started, in memory. One line per timer, never a row per tick.
+- **Colour** only on never started, started and not finished, and failed.
+  Finished is the normal state and carries none.
+- `Bays — Scheduled Run Watch` reads the same rows: a row at `started` is not a
+  finished run, and its alert says which missed tasks never started and which
+  started and did not finish.
+- **Adding or re-timing an agent task**: record the agent inventory again
+  (`record_agent_inventory`), or the page stays on the old schedule, and it says
+  when the schedule was last read. Claude's own scheduled checks are not held
+  here and the page says so. `npm run test:scheduled-runs` pins the states.
 
 ### Engine health
 **Built 2026-09-17, Destiny**, where a "coming soon" page stood. It answers one

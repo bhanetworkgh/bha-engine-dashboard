@@ -49,6 +49,7 @@ import * as events from './events';
 import * as bharag from './bharag';
 import * as recurrence from './monitoringRecurrence';
 import * as mirror from './mirror';
+import * as timers from './timers';
 
 export class TwinError extends Error {
   constructor(
@@ -558,6 +559,7 @@ export async function afterSnapshot() {
 /** Once a minute, so a farm whose snapshots stop is noticed without waiting for one. */
 export function startWatching() {
   setInterval(() => {
+    timers.beat('monitoring twin');
     if (running) return;
     running = true;
     evaluate('tick')

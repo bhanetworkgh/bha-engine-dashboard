@@ -40,6 +40,7 @@ import * as slack from './slack';
 import * as quota from './quota';
 import * as engineEvents from './engineEvents';
 import { callerStore, currentAgent } from './mcp/caller';
+import * as timers from './timers';
 
 /** Destiny and Jason. The only two people whose click decides anything. */
 export const APPROVERS: ReadonlyArray<string> = ['U0AEW3TBYH1', 'U0A9V97949F'];
@@ -458,7 +459,7 @@ export function startSweeping(): void {
   const tick = () => {
     sweepExpired().catch((e) => console.error(`approvals: sweep failed: ${e instanceof Error ? e.message : String(e)}`));
   };
-  timer = setInterval(tick, SWEEP_MS);
+  timer = setInterval(() => (timers.beat('approvals sweep'), tick()), SWEEP_MS);
   timer.unref();
   setTimeout(tick, 90_000).unref();
 }
