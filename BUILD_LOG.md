@@ -11679,3 +11679,10 @@ Files:      docs/design/logstream-v0.md
 Problem:    The 14:50 entry called Research Twin — Agent Delivery a recurring fault. By day, its failures are 24 Sep (4, build day), 26 Sep (1), 28 Sep (5), 29 Sep (1) and 7 Oct (4, the BHARAG address move, closed with cause). None since 7 Oct.
 Fix:        Note reworded: three separate bad days, not a standing fault. The 28 Sep cause was not traced.
 Decision:   The rate rule and its floor stand as recommended.
+
+## 2026-10-09 15:10 — North Star source-marker fix: first real run
+Intent:     Live proof for the Read Answer change published as 650cfd0e.
+Files:      none
+Problem:    none
+Fix:        Destiny asked North Star in Slack at 13:40 UTC. Execution 31185 wrote NS-1791553227597-BIC6: Outcome Answered, four tools cited (Rank_Lanes, Read_Slack, lane_health, Get_Priority_Evidence), coverage 0.77, Delivered. No escaped marker in the stored answer.
+Decision:   Not checked whether the agent wrote backslashes on this run, so this proves the changed step works in production and scores a sourced answer correctly; the escaped case itself is proven by pinned test 31155.
