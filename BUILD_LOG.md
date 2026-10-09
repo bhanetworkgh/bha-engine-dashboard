@@ -11738,3 +11738,10 @@ Files:      server/src/mcp/loopTools.ts (new), server/src/mcp/tools.ts, server/s
 Problem:    none in the build. The local Postgres had stopped again ("connect ECONNREFUSED 127.0.0.1:54329"); restarted.
 Fix:        move_loop calls store.editLoop, the page's own save, with { builder }. Guards: requester required; Destiny, Jason, the table's owner or the assignee; refused when not held, already there, an unknown builder, or held twice under one loop_id. dry_run. Audited on engine_mcp_writes. test:move-loop 6 of 6; mcp-write still passes.
 Decision:   Write connection only, in no agent's scope. Only the seven builders with a loop table are destinations.
+
+## 2026-10-09 18:10 — Six loops moved off Destiny's table; first scheduled run shows no start line
+Intent:     Use move_loop on the six loops that named Jason or Jegan as responsible, and read the first scheduled run after the run-log change.
+Files:      none
+Problem:    The first task to fire on its own after Bays was published at about 15:32 UTC, "Log review nudge -- Jason" at 16:00 UTC, wrote BAYS-SCHED-1791561633991-3CF6 as completed with no Started At. Bays did not make the first call the tool description asks for.
+Fix:        Moves, audits 1523 to 1528: 4QA2, LZIZ, L2KO and TU4O to Jason; 66R6 and TD1Z to Jegan. Each loop id unchanged, assignee as before. Destiny's table: 24 to 18 open or in progress. The tool only appeared on the connection after Destiny refreshed the connector on his side.
+Decision:   The start line in the tool description alone is not enough, as the 16:35 entry said it might not be. The step has to go into each of the 12 task texts and the watch's stored task texts. Not done yet; raised to Destiny.
