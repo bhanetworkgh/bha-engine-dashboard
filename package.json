@@ -28,7 +28,7 @@
     "test:audio": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/audio-tools.test.cjs",
     "test:lane-ranking": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/lane-ranking.test.cjs",
     "test:client-report": "npm run build:server --silent && node server/test/client-report.test.cjs",
-    "test:vfarm-gates": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/vfarm-gates.test.cjs"
+    "test:vfarm-gates": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/vfarm-gates.test.cjs && node --no-warnings=ExperimentalWarning server/test/vfarm-gate-auto.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",

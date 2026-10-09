@@ -116,6 +116,42 @@ tab names the offer. Nothing ties a lead automatically, and no offer is created
 for a home or single-rack sign-up: Form A has no question that says "5 racks",
 so a person or Bays decides.
 
+## How the records stay current without being told
+
+`server/src/vfarmGateAuto.ts`, one sweep every two minutes.
+
+- **Sensor checks.** A Stage 1 or Stage 2 record may carry
+  `monitoring_farm_id`, the farm id vFarm sends in its snapshot (a logged
+  addition to the field lists). The sweep then takes `canopy_climate_check`
+  from the Monitoring Twin's verdict on that farm's live temperature and
+  humidity readings against the crop stage's targets, and writes it as
+  `source: "sensor"`, `checked_by: "Monitoring Twin"`, with the readings as
+  `value`, the ranges as `thresholds` and the devices in `evidence_ref`.
+  `root_zone_moisture_check` is taken the same way only when the crop profile
+  holds a soil-moisture range; tomato profile v1 does not (Jegan is to give
+  it), so today it is still a person's. A feed that has gone silent, or a
+  device that is not LIVE, changes nothing. It writes on a change of verdict
+  only, so one event per change.
+- **Growth stage.** Set from the twin's crop day: `<crop>_veg`, `_flower`,
+  `_fruit`, `_harvest`.
+- **Checks no sensor covers.** While a Stage 1 is `in_progress`, its
+  `owner_slack_id` gets one Slack card per pending check with **Passed** and
+  **Failed**. A click records the check as `manual` with the clicker's Slack
+  id. The owner, Destiny or Jason may answer. Unanswered after 24 hours the
+  card expires; it is sent again after 48 hours, three times at most, and the
+  third is also said in the alerts channel. No owner on the record means
+  nobody is asked.
+- **Status.** When all four checks are `passed` and Stage 1 is not yet passed,
+  Jason gets one card: **Mark passed** or **Not yet**. Not yet changes nothing
+  and the question is not repeated until a check changes. A fixture's card
+  goes to whoever created the fixture, never to Jason.
+- **Not silent.** A card Slack refuses is `card_failed` on
+  `engine_vfarm_gate_prompts` with a `VFARM_GATE_ALERT_FAILED` event, and is
+  tried again on the next sweep.
+
+A simulated farm can only be named by a fixture (`simulated_farm`), so
+simulated readings can never pass a real gate.
+
 ## Writing and reading
 
 - MCP: `get_vfarm_gates` (read), `write_vfarm_gate` (write),
@@ -131,6 +167,10 @@ labelled on the page, in alerts and in events, a real record cannot point at
 one, and `delete_vfarm_gate_fixtures` removes fixtures and nothing else. Their
 events stay, with `detail.fixture: true`; filter on that for analytics.
 
-`npm run test:vfarm-gates` (local database only) is the repeatable procedure:
-14 steps covering both hard gates, the failed-check alert, the manual-only
-checks, the lead tie, a refused Slack post and the clean-up.
+`npm run test:vfarm-gates` (local database only) is the repeatable procedure,
+two files. The first, 14 steps: both hard gates, the failed-check alert, the
+manual-only checks, the lead tie, a refused Slack post and the clean-up. The
+second, 10 steps on a simulated farm: the sensor-fed check passing, failing and
+holding on a silent feed, the Passed/Failed cards, who may click, the status
+proposal, expiry and the three-ask cap, a refused card, and the scoreboard's
+numbers.

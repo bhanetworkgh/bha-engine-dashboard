@@ -2738,6 +2738,22 @@ price from this dashboard on Jason's behalf, and an empty section says nobody
 has written one. A fixture is labelled on every row it appears in, and
 `delete_vfarm_gate_fixtures` is the only delete there is.
 
+**The gates keep themselves current** (second pass, same day):
+`server/src/vfarmGateAuto.ts`, a sweep every two minutes. A record that names
+its farm (`monitoring_farm_id`) takes canopy climate, and root-zone moisture
+once the crop profile holds a soil-moisture range, from the Monitoring Twin's
+live verdict, and its growth stage from the crop day; a silent feed changes
+nothing. While a Stage 1 is in progress its owner is sent one card per check no
+sensor covers, with Passed and Failed buttons (asked again after 48 hours,
+three times at most). When all four checks have passed, Jason is sent a card
+proposing Stage 1 as passed: **a status is proposed, never set**. The cards
+(`engine_vfarm_gate_prompts`, migration 63) reuse the approval card's two
+action ids, so n8n's Front Door forwards a click unchanged, and
+`/api/engine/approvals/decide` hands an id starting `VFP-` to
+`vfarmGateAuto.decide`. Every write still goes through `writeGate`. The tab's
+read is `vfarmGateAuto.scoreboard()`: the three-step strip from the newest real
+record of each kind (a fixture never stands there) and each record's numbers.
+
 **The contract's field lists are fixed.** A change is a new Architect Answer
 from Jason, then an edit to `FIELDS` in `vfarmGates.ts` and to the contract
 doc, logged here.

@@ -3211,6 +3211,33 @@ export interface VfarmGatesData {
   alert_channel_configured: boolean;
   events: { id: number; event_type: string; at: string; subject_id: string; actor: string | null; detail: Record<string, unknown> }[];
   note: string;
+  /** The three steps, from the newest real record of each kind. A fixture never stands here. */
+  pipeline: { key: string; label: string; record_id: string | null; status: string | null; locked: boolean; locked_reason: string | null }[];
+  /** The numbers for each record, keyed by its id. */
+  boards: Record<string, VfarmGateBoard>;
+  prompts_waiting: { prompt_id: string; kind: string; object_id: string; check: string | null; asked_user: string; asked_at: string; fixture: boolean }[];
+  automation: { sensor_checks: string; status: string; twin_error: string | null };
+}
+
+/** What the server worked out about one gate record (2026-10-09, 7S0O second pass). */
+export interface VfarmGateBoard {
+  days_in_status: number | null;
+  days_to_target: number | null;
+  farm: { farm_id: string; name: string | null; simulated: boolean; feed_silent: boolean; last_snapshot_at: string | null } | null;
+  checks_total?: number;
+  checks_passed?: number;
+  checks_failed?: number;
+  checks_pending?: number;
+  checks?: Record<string, { fed_by: string; asked_user: string | null; asked_at: string | null }>;
+  status_proposed_to?: string | null;
+  status_proposed_at?: string | null;
+  locked?: boolean;
+  stage1_status?: string | null;
+  uptime_pct?: number | null;
+  uptime_target_pct?: number | null;
+  incidents_7d?: number | null;
+  alert_budget_per_week?: number | null;
+  leads_tied?: number;
 }
 
 export interface VfarmLeadsData {
