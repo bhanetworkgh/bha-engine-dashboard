@@ -174,3 +174,27 @@ second, 10 steps on a simulated farm: the sensor-fed check passing, failing and
 holding on a silent feed, the Passed/Failed cards, who may click, the status
 proposal, expiry and the three-ask cap, a refused card, and the scoreboard's
 numbers.
+
+## Confirmed by Jason, 9 October 2026
+
+- **Check results** are `pending`, `passed`, `failed`. Locked for all four checks.
+- **Stage 1 passed needs all four checks passed.** Any write that would leave a
+  Stage 1 record `passed` with a check `pending` or `failed` is refused with
+  `checks_not_passed`, naming each check and its state. This is held in
+  `writeGate`, so it applies to the MCP tool, the engine route, the Slack card
+  and the sweep alike. To record a check that has stopped passing on a record
+  already passed, set `status` back to `in_progress` or `failed` in the same write.
+- **`monitoring_farm_id`** stays in the locked field list.
+
+## Alerts: real write against dry run
+
+| | Real write | Dry run |
+|---|---|---|
+| Record and events | written | not written |
+| Status change alert | posted, listed in `alerts` | not posted; listed in `alerts_would_send` |
+| Failed check alert | posted, listed in `alerts` | not posted; listed in `alerts_would_send` |
+| A refusal | nothing written, nothing posted | the same refusal |
+| An alert Slack refuses | `raise: true`, `VFARM_GATE_ALERT_FAILED` event | not applicable |
+
+A failed check alerts once, when the check moves to `failed`. Writing `failed`
+again on a check already failed posts nothing.

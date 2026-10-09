@@ -197,6 +197,22 @@ const slack = http.createServer((req, res) => {
   /* 7 */
   {
     await write('stage1', { airflow_velocity_check: { status: 'passed', value: '0.4 m/s' } }, { object_id: S1 });
+    // Jason, 9 Oct: Stage 1 is passed only when all four checks are passed, at the write boundary.
+    const n0 = (await query(`SELECT count(*)::int AS n FROM engine_events WHERE subject_id = $1`, [S1])).rows[0].n;
+    const p0 = posts.length;
+    const no = await refused(() => write('stage1', { status: 'passed' }, { object_id: S1 }), 'checks_not_passed');
+    assert.deepEqual(no.extra.checks_not_passed, { root_zone_moisture_check: 'pending', early_disease_detection_check: 'pending' });
+    assert.match(no.message, /only when all four checks are passed/);
+    // a check failed in the same call as status passed is refused as well, and nothing of it is kept
+    const no2 = await refused(() => write('stage1', { status: 'passed', root_zone_moisture_check: { status: 'failed' }, early_disease_detection_check: { status: 'passed' } }, { object_id: S1 }), 'checks_not_passed');
+    assert.deepEqual(no2.extra.checks_not_passed, { root_zone_moisture_check: 'failed' });
+    // so is a new record created as passed, and a dry run of the same
+    await refused(() => write('stage1', { status: 'passed', canopy_climate_check: { status: 'passed' } }), 'checks_not_passed');
+    await refused(() => write('stage1', { status: 'passed' }, { object_id: S1, dry_run: true }), 'checks_not_passed');
+    assert.equal((await query(`SELECT status FROM engine_vfarm_gates WHERE object_id = $1`, [S1])).rows[0].status, 'in_progress');
+    assert.equal((await query(`SELECT count(*)::int AS n FROM engine_events WHERE subject_id = $1`, [S1])).rows[0].n, n0, 'a refused write leaves no event');
+    assert.equal(posts.length, p0, 'a refused write posts no alert');
+    await write('stage1', { root_zone_moisture_check: { status: 'passed' }, early_disease_detection_check: { status: 'passed' } }, { object_id: S1 });
     const p = posts.length;
     const a = await write('stage1', { status: 'passed' }, { object_id: S1 });
     assert.deepEqual(a.status_change, { from: 'in_progress', to: 'passed' });
@@ -273,8 +289,11 @@ const slack = http.createServer((req, res) => {
 
   /* 11 — a refused Slack post is not silent */
   {
+    // a check that stops passing on a record already passed is refused unless the status moves with it
+    const slip = await refused(() => write('stage1', { root_zone_moisture_check: { status: 'failed', notes: 'fixture' } }, { object_id: S1 }), 'checks_not_passed');
+    assert.match(slip.message, /set status back to in_progress or failed in the same write/);
     refuse = true;
-    const r = await write('stage1', { root_zone_moisture_check: { status: 'failed', notes: 'fixture' } }, { object_id: S1 });
+    const r = await write('stage1', { status: 'failed', root_zone_moisture_check: { status: 'failed', notes: 'fixture' } }, { object_id: S1 });
     refuse = false;
     assert.equal(r.written, true);
     assert.equal(r.raise, true);
@@ -282,7 +301,7 @@ const slack = http.createServer((req, res) => {
     assert.equal(r.alerts[0].error, 'not_in_channel');
     assert.match(r.message, /not delivered/);
     const e = await eventsOf(S1, 'VFARM_GATE_ALERT_FAILED');
-    assert.equal(e.length, 1);
+    assert.equal(e.length, 2, 'the status alert and the failed-check alert were both refused, and both are recorded');
     assert.equal(e[0].detail.error, 'not_in_channel');
     ok('a Slack alert that is refused says raise: true and leaves a VFARM_GATE_ALERT_FAILED event');
   }
@@ -291,14 +310,20 @@ const slack = http.createServer((req, res) => {
   {
     const p = posts.length;
     const n = (await query(`SELECT count(*)::int AS n FROM engine_events WHERE event_type LIKE 'VFARM%'`)).rows[0].n;
-    const again = await write('stage1', { status: 'passed', root_zone_moisture_check: { status: 'failed', notes: 'fixture' } }, { object_id: S1 });
+    const again = await write('stage1', { status: 'failed', root_zone_moisture_check: { status: 'failed', notes: 'fixture' } }, { object_id: S1 });
     assert.equal(again.written, false);
     assert.equal(again.changed, false);
-    const dry = await write('stage1', { status: 'failed' }, { object_id: S1, dry_run: true });
+    // a dry run posts nothing and says what a real write would post
+    const dryFail = await write('stage1', { status: 'in_progress', early_disease_detection_check: { status: 'failed', notes: 'fixture' } }, { object_id: S1, dry_run: true });
+    assert.deepEqual(dryFail.alerts, []);
+    assert.deepEqual(dryFail.alerts_would_send.map((x) => x.about), [`status:${S1}`, `check:${S1}:early_disease_detection_check`]);
+    assert.match(dryFail.alerts_would_send[1].text, /check failed: Early disease detection/);
+    assert.match(dryFail.message, /no alert was posted.*post 2 Slack alerts/);
+    const dry = await write('stage1', { status: 'in_progress' }, { object_id: S1, dry_run: true });
     assert.equal(dry.written, false);
     assert.equal(dry.dry_run, true);
-    assert.deepEqual(dry.status_change, { from: 'passed', to: 'failed' });
-    assert.equal((await rowOf(S1)).status, 'passed');
+    assert.deepEqual(dry.status_change, { from: 'failed', to: 'in_progress' });
+    assert.equal((await rowOf(S1)).status, 'failed');
     assert.equal(posts.length, p);
     assert.equal((await query(`SELECT count(*)::int AS n FROM engine_events WHERE event_type LIKE 'VFARM%'`)).rows[0].n, n);
     ok('the same write twice changes nothing and sends nothing; a dry run writes nothing');

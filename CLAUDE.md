@@ -2728,6 +2728,15 @@ takes the transaction's client for this. The event names are Jason's, in upper
 case (`VFARM_STAGE1_STATE_CHANGED`, `VFARM_STAGE2_STATE_CHANGED`,
 `VFARM_CHECK_UPDATED`, `VFARM_OFFER_STATE_CHANGED`); do not rename them.
 
+**Stage 1 is passed only when all four checks are passed** (Jason, 9 Oct 2026).
+`writeGate` refuses `status: passed` on a Stage 1 while any check is `pending`
+or `failed` (`checks_not_passed`), reading the record as it would be after the
+write. So a check failed in the same call is refused, and so is a check that
+stops passing on a record already passed unless the status moves back in the
+same write. `pending`, `passed`, `failed` is the locked check vocabulary.
+**A dry run posts no alert**: `alerts` is empty and `alerts_would_send` lists
+what a real write would post. A refused write posts nothing and writes nothing.
+
 **Three checks are recorded by a person, and nothing may say otherwise.**
 Root-zone moisture, airflow velocity and early disease detection have no sensor
 yet; `source: "sensor"` is refused on them. Moving a check into `SENSOR_BACKED`
