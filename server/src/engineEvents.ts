@@ -16,6 +16,7 @@
  * and the blocker sweep sees the same closed loop every time it runs.
  */
 import { query, type Queryable } from './pg';
+import * as timers from './timers';
 
 export const EVENT_SHAPE = 'engine.event.v1';
 /**
@@ -130,5 +131,5 @@ export function startSweeping(): void {
       });
   };
   setTimeout(tick, 90_000).unref();
-  setInterval(tick, SWEEP_MS).unref();
+  setInterval(() => (timers.beat('lane blocker sweep'), tick()), SWEEP_MS).unref();
 }

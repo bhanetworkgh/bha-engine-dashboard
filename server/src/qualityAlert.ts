@@ -22,6 +22,7 @@ import { query } from './pg';
 import { getMeta, nowIso, setMeta } from './db';
 import * as slack from './slack';
 import * as quota from './quota';
+import * as timers from './timers';
 
 const CHECK_MS = 15 * 60_000;
 const DELIVERY_FLOOR = 0.9;
@@ -161,5 +162,5 @@ export function startWatching(): void {
       });
   };
   setTimeout(tick, 120_000).unref();
-  setInterval(tick, CHECK_MS).unref();
+  setInterval(() => (timers.beat('quality alert'), tick()), CHECK_MS).unref();
 }

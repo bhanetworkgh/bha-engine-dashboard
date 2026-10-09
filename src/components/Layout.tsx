@@ -52,6 +52,9 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
       // executions: a run is a record, it is the same record whichever system
       // produced it, and one page with a tab per system beats three pages.
       { to: '/executions', label: 'Executions', icon: 'pulse' },
+      // Every scheduler's runs on one page (2026-10-09, K9B7): agent tasks, timed
+      // workflows, reminder posts and this dashboard's own timers.
+      { to: '/scheduled-runs', label: 'Scheduled runs', icon: 'calendar' },
       // Who is owed money, for what work, and what has been paid (2026-09-17).
       // Pay was a tick on a Slack card until today, so the only way to answer
       // "what do I owe Hardik for September" was to scroll back through weeks

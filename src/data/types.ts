@@ -4003,3 +4003,50 @@ export interface AskTraceDetail {
   hops: AskTraceHop[];
   note: string;
 }
+
+/** The Scheduled runs page (server/src/scheduledRuns.ts, 2026-10-09). */
+export type AgentRunState = 'finished' | 'failed' | 'started_not_finished' | 'never_started' | 'no_record' | 'due_soon' | 'unscheduled';
+export interface ScheduledAgentRun {
+  key: string;
+  agent: string;
+  task: string;
+  due_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  state: AgentRunState;
+  outcome: string | null;
+  seconds: number | null;
+  summary: string | null;
+  error: string | null;
+  tool_issues: string | null;
+  slack_link: string | null;
+  ask_id: string | null;
+  finish_only: boolean;
+}
+export interface ScheduledWorkflowRun {
+  execution_id: string;
+  workflow_id: string;
+  workflow: string;
+  status: string;
+  started_at: string;
+  stopped_at: string | null;
+  seconds: number | null;
+}
+export interface ScheduledRunsData {
+  window: { days: number; from: string; to: string };
+  run_log_since: string;
+  agent: {
+    tasks: Array<{ agent: string; task: string; cron: string; timezone: string }>;
+    schedule_read_at: string | null;
+    runs: ScheduledAgentRun[];
+    summary: { due: number; finished: number; failed: number; started_not_finished: number; never_started: number; no_record: number; unscheduled: number };
+  };
+  workflows: {
+    runs: ScheduledWorkflowRun[];
+    by_workflow: Array<{ workflow: string; runs: number; failed: number; last_run_at: string; last_status: string }>;
+    summary: { workflows: number; runs: number; failed: number };
+  };
+  reminders: Array<{ reminder_id: string; channel_id: string; text: string; post_at: string; state: string; requested_by: string | null }>;
+  timers: { since: string; list: Array<{ name: string; what: string; every: string; last_tick_at: string | null; ticks: number }> };
+  notes: string[];
+}

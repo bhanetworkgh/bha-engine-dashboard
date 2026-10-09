@@ -15,6 +15,7 @@ import type {
   AskBaysData,
   BaysData,
   BaysRemindersData,
+  ScheduledRunsData,
   AskTraceDetail,
   AskTraceList,
   EvalRunDetail,
@@ -592,6 +593,8 @@ export const getGenie = () => api<GenieData>('/api/genie');
 /** Bays' ask ledger: Slack turns, scheduled task runs and panel questions (2026-10-05). */
 export const getBays = () => api<BaysData>('/api/bays');
 export const getBaysReminders = () => api<BaysRemindersData>('/api/bays/reminders');
+/** Every scheduler's runs on one page (2026-10-09, K9B7). */
+export const getScheduledRuns = () => api<ScheduledRunsData>('/api/scheduled-runs');
 export const getVfarmLive = () => api<VfarmLiveData>('/api/vfarm/live');
 /** The stage gates and the 5-rack pilot offer (2026-10-09, 7S0O). */
 export const getVfarmGates = () => api<VfarmGatesData>('/api/vfarm/gates');
