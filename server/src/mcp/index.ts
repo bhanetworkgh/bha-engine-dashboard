@@ -160,6 +160,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'rank_lanes', 'lane_health',
         // 2026-10-01: what may be said about vFarm (T0NO).
         'read_media_doctrine',
+        // 2026-10-09: where the vFarm stage gates and the pilot offer stand (7S0O). A read.
+        'get_vfarm_gates',
       ]),
     },
     {
@@ -190,6 +192,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // left off this list when tokens were scoped on 28 Sep, so Bays saved a candidate's pattern
         // with create_record instead (BP-GENIE-1791419670135-5KR7).
         'draft_pattern_candidate', 'register_pattern_candidate',
+        // 2026-10-09: the vFarm stage gates and 5-rack offer (7S0O). Bays reads them and writes what
+        // Jason gives it; deleting fixtures stays with a person on the connector.
+        'get_vfarm_gates', 'write_vfarm_gate',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>

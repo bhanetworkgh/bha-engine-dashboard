@@ -2709,6 +2709,39 @@ email somebody it would need to know who had already been emailed, and that is a
 second system, not a tab. Nothing on it is a commitment: a row says a person
 filled in a form.
 
+### vFarm — Gates (2026-10-09, Destiny — LOOP-1791479575963-7S0O)
+
+The Stage 1 lab validation, the Stage 2 pilot checklist and the 5-rack pilot
+offer: Jason's three v1 contracts (Codex 6120a262), held in `engine_vfarm_gates`
+(migration 62) under the contract's own field names. The full account is
+`docs/contracts/vfarm-gates.md`; the rules that must not be broken are these.
+
+**One function writes them: `vfarmGates.writeGate`.** The MCP tool
+(`write_vfarm_gate`), the engine route (`/api/engine/vfarm-gates`) and the test
+all call it. Never add a second writer, and never write the table directly: the
+two hard gates live there. Stage 2 stays `planned` until its Stage 1 is
+`passed`; an offer cannot be `offered` or `signed` without a Stage 2 row tied
+by `stage2_ref`.
+
+**Every change is a row and an event in one transaction.** `engineEvents.record`
+takes the transaction's client for this. The event names are Jason's, in upper
+case (`VFARM_STAGE1_STATE_CHANGED`, `VFARM_STAGE2_STATE_CHANGED`,
+`VFARM_CHECK_UPDATED`, `VFARM_OFFER_STATE_CHANGED`); do not rename them.
+
+**Three checks are recorded by a person, and nothing may say otherwise.**
+Root-zone moisture, airflow velocity and early disease detection have no sensor
+yet; `source: "sensor"` is refused on them. Moving a check into `SENSOR_BACKED`
+is the whole change when a sensor lands.
+
+**The tab reads; it does not write.** Nobody fills in a gate, a threshold or a
+price from this dashboard on Jason's behalf, and an empty section says nobody
+has written one. A fixture is labelled on every row it appears in, and
+`delete_vfarm_gate_fixtures` is the only delete there is.
+
+**The contract's field lists are fixed.** A change is a new Architect Answer
+from Jason, then an edit to `FIELDS` in `vfarmGates.ts` and to the contract
+doc, logged here.
+
 ### Genie and vFarm, pushed as it happens (2026-09-29, Destiny — D3 / HMJV)
 **Genie is a real page and vFarm's Overview is real, with Devices and Alerts
 beside Early Access.** Both systems **push**; nothing here polls them and there

@@ -15,10 +15,15 @@
  * repeat a no-op rather than a second event: n8n retries a failed HTTP node,
  * and the blocker sweep sees the same closed loop every time it runs.
  */
-import { query } from './pg';
+import { query, type Queryable } from './pg';
 
 export const EVENT_SHAPE = 'engine.event.v1';
-const TYPE = /^[a-z][a-z0-9_]{2,63}$/;
+/**
+ * Lower case for the events this dashboard named itself; upper case is allowed
+ * from 9 Oct 2026 because Jason named the vFarm gate events that way
+ * (`VFARM_STAGE1_STATE_CHANGED`, …) and a consumer should find the name he wrote.
+ */
+const TYPE = /^[A-Za-z][A-Za-z0-9_]{2,63}$/;
 
 export interface EngineEvent {
   event_type: string;
@@ -39,10 +44,14 @@ const str = (v: unknown, max: number): string | null => {
   return t ? t.slice(0, max) : null;
 };
 
-/** Stores one event. `recorded: false` means its dedupe_key was already held. */
-export async function record(e: EngineEvent): Promise<{ recorded: boolean; id: number | null }> {
+/**
+ * Stores one event. `recorded: false` means its dedupe_key was already held.
+ * Pass `db` to write it inside a transaction, so the event and the change it
+ * describes land together or not at all.
+ */
+export async function record(e: EngineEvent, db?: Queryable): Promise<{ recorded: boolean; id: number | null }> {
   const type = str(e.event_type, 64);
-  if (!type || !TYPE.test(type)) throw new EventError('event_type is required: lower case letters, digits and underscores, 3 to 64 characters.');
+  if (!type || !TYPE.test(type)) throw new EventError('event_type is required: letters, digits and underscores, 3 to 64 characters, starting with a letter.');
   const subject = str(e.subject_id, 300);
   if (!subject) throw new EventError('subject_id is required: the id of the thing the event is about.');
   let at: string | null = null;
@@ -52,7 +61,8 @@ export async function record(e: EngineEvent): Promise<{ recorded: boolean; id: n
     at = d.toISOString();
   }
   if (e.detail != null && (typeof e.detail !== 'object' || Array.isArray(e.detail))) throw new EventError('detail must be an object.');
-  const r = await query<{ id: string }>(
+  const run = db ? (text: string, values: unknown[]) => db.query<{ id: string }>(text, values) : (text: string, values: unknown[]) => query<{ id: string }>(text, values);
+  const r = await run(
     `INSERT INTO engine_events (event_type, at, subject_id, lane, actor, source_ref, detail, dedupe_key)
      VALUES ($1, coalesce($2::timestamptz, now()), $3, $4, $5, $6, $7::jsonb, $8)
      ON CONFLICT (dedupe_key) DO NOTHING

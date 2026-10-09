@@ -2728,6 +2728,40 @@ const MIGRATIONS: Migration[] = [
         WHERE url LIKE 'https://bharag2.duckdns.org%'`,
     ],
   },
+  {
+    id: 62,
+    name: 'engine_vfarm_gates: the vFarm Stage 1, Stage 2 and 5-rack offer records',
+    statements: [
+      /**
+       * 9 Oct 2026, Destiny (LOOP-1791479575963-7S0O). One table for the three
+       * v1 objects Jason locked on 8 Oct (Codex 6120a262): kind 'stage1' is
+       * VFARM_STAGE1_LAB_VALIDATION_v1, 'stage2' is
+       * VFARM_STAGE2_PILOT_CHECKLIST_v1, 'offer' is VFARM_5RACK_PILOT_OFFER_v1.
+       * status and the two refs are columns because the hard gates read them;
+       * every other contract field is in `fields`, under the contract's own
+       * name. is_fixture marks a test row: it is labelled wherever it is shown,
+       * a real row may not point at one, and only fixtures can be deleted.
+       * The order (Stage 1 passed before Stage 2 starts; a Stage 2 row before
+       * an offer is offered or signed) is enforced in vfarmGates.ts, the one
+       * function every writer goes through.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_vfarm_gates (
+        id BIGSERIAL PRIMARY KEY,
+        object_id TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL CHECK (kind IN ('stage1', 'stage2', 'offer')),
+        status TEXT NOT NULL,
+        stage1_ref TEXT,
+        stage2_ref TEXT,
+        fields JSONB NOT NULL DEFAULT '{}'::jsonb,
+        is_fixture BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        created_by TEXT,
+        updated_by TEXT
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_vfarm_gates_kind ON engine_vfarm_gates (kind, created_at)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

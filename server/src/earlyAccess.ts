@@ -38,6 +38,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { query } from './pg';
 import * as events from './events';
+import { offersByLead } from './vfarmGates';
 import { FORM_A_QUESTIONS } from '../../src/data/formA';
 
 /* ------------------------------------------------------------------ config */
@@ -455,6 +456,8 @@ export interface Lead {
   stage_changed_at: string | null;
   /** Every move, oldest first, never rewritten. */
   stage_history: StageMove[];
+  /** The 5-rack pilot offers this lead is tied to (2026-10-09, 7S0O). Internal: never sent to the person who signed up. */
+  pilot_offers: { id: string; status: string }[];
 }
 
 export interface StageMove {
@@ -487,7 +490,7 @@ export interface LeadsData {
  * up somewhere it should not be.
  */
 export async function leads(): Promise<LeadsData> {
-  const r = await query<Omit<Lead, 'stage_changed_at'> & { created_at: Date; notified_at: Date | null; submitted_at: Date | null; stage_changed_at: Date | null; seq: string }>(
+  const r = await query<Omit<Lead, 'stage_changed_at' | 'pilot_offers'> & { created_at: Date; notified_at: Date | null; submitted_at: Date | null; stage_changed_at: Date | null; seq: string }>(
     `SELECT id, full_name, email, organization_name, source_surface, source_page, source_campaign,
             page_contract_version, mechanics_contract_version, claim_state, status, notes,
             notified_at, submitted_at, created_at, user_agent,
@@ -499,8 +502,10 @@ export async function leads(): Promise<LeadsData> {
   );
 
   const iso = (d: Date | string | null): string | null => (d ? new Date(d).toISOString() : null);
+  const tied = await offersByLead();
   const rows: Lead[] = r.rows.map((row) => ({
     ...row,
+    pilot_offers: tied.get(String(row.id)) ?? [],
     created_at: iso(row.created_at) as string,
     notified_at: iso(row.notified_at),
     submitted_at: iso(row.submitted_at),

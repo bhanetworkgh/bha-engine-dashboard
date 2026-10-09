@@ -60,6 +60,7 @@ import * as dataGovernance from './dataGovernance';
 import * as monitoringTwin from './monitoringTwin';
 import * as qualityAlert from './qualityAlert';
 import * as engineEvents from './engineEvents';
+import * as vfarmGates from './vfarmGates';
 import * as approvals from './approvals';
 import * as agentInventory from './agentInventory';
 import * as candidateActions from './candidateActions';
@@ -647,6 +648,38 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       }
     }
     /**
+     * The vFarm stage gates and 5-rack offer (2026-10-09, 7S0O). GET reads
+     * every record; POST { kind, object_id?, fields, by, fixture?, dry_run? }
+     * creates or updates one through vfarmGates.writeGate, the same function
+     * the MCP tool calls, so the order is enforced here too. A refusal is a
+     * 409 with ok:false and its reason; nothing is written.
+     */
+    if (p === '/api/engine/vfarm-gates') {
+      if (method === 'GET') return send(res, 200, { ok: true, ...(await vfarmGates.gates()) });
+      if (method !== 'POST') throw new HttpError(405, 'GET, or POST { kind, object_id?, fields, by, fixture?, dry_run? }.');
+      const b = (await readJson(req, 128 * 1024)) as Record<string, unknown>;
+      const oid = typeof b.object_id === 'string' && b.object_id.trim() ? b.object_id.trim() : undefined;
+      try {
+        const r = await vfarmGates.writeGate({
+          kind: typeof b.kind === 'string' ? b.kind : '',
+          object_id: oid ?? null,
+          fields: (b.fields ?? {}) as Record<string, unknown>,
+          fixture: typeof b.fixture === 'boolean' ? b.fixture : undefined,
+          by: typeof b.by === 'string' ? b.by : '',
+          via: 'engine',
+          dry_run: b.dry_run === true,
+        });
+        await mirror.logWrite({ endpoint, kind: 'vfarm_gates', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: r.record.id, outcome: r.dry_run ? 'read' : !r.written ? 'unchanged' : r.created ? 'inserted' : 'updated', detail: r.message.slice(0, 500), ms: Date.now() - t0 });
+        return send(res, r.written && r.created ? 201 : 200, r);
+      } catch (e) {
+        if (e instanceof vfarmGates.GateRefused) {
+          await mirror.logWrite({ endpoint, kind: 'vfarm_gates', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: oid, outcome: 'rejected', detail: `${e.reason}: ${e.message}`.slice(0, 500), ms: Date.now() - t0 });
+          return send(res, 409, { ok: false, written: false, reason: e.reason, message: `${e.message} Nothing was written.`, ...e.extra });
+        }
+        throw e;
+      }
+    }
+    /**
      * One click on an approval card (2026-10-04, 8185). n8n's Bays — Front Door
      * checks Slack's signature and sends the click here; the Slack id it
      * carries is the only thing that says who decided, so this route is only
@@ -1189,6 +1222,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await reminderTools.reminders());
       case '/api/vfarm/live':
         return send(res, 200, await systemFeeds.vfarmData());
+      /** The stage gates and the 5-rack offer, for the Gates tab (2026-10-09, 7S0O). A read. */
+      case '/api/vfarm/gates':
+        return send(res, 200, await vfarmGates.gates());
       case '/api/cs-twin':
         return send(res, 200, await systemFeeds.cstData());
       /** Hardik's doctrine and contract changes, as posted (2026-09-30). */
