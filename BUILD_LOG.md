@@ -11672,3 +11672,10 @@ Files:      docs/design/logstream-v0.md
 Problem:    none
 Fix:        Read engine_execution_runs (30,478 non-manual runs, 7 Sep to 9 Oct) as failed over all runs per workflow per week, workflows with 5 or more runs (117 workflow-weeks). A plain 20% rule fired 18 times; 12 were the week of 21 Sep (Airtable cap). Outside it: Research Twin — Agent Delivery in three weeks (5/19, 4/14, 4/19), the simulator, Research Twin — Conversational Agent (2/9), Bays — Approval Decision (1/5).
 Decision:   Recommend 20% with at least 10 runs and 3 failures, tests left out, and five or more workflows crossing in one week treated as one event. The rate half found a fault the count half missed: Research Twin — Agent Delivery failing about a fifth of its runs three weeks running. Not investigated in this pass.
+
+## 2026-10-09 15:00 — Correction to the 14:50 entry
+Intent:     Check the "failing a fifth of its runs three weeks running" reading before it stands.
+Files:      docs/design/logstream-v0.md
+Problem:    The 14:50 entry called Research Twin — Agent Delivery a recurring fault. By day, its failures are 24 Sep (4, build day), 26 Sep (1), 28 Sep (5), 29 Sep (1) and 7 Oct (4, the BHARAG address move, closed with cause). None since 7 Oct.
+Fix:        Note reworded: three separate bad days, not a standing fault. The 28 Sep cause was not traced.
+Decision:   The rate rule and its floor stand as recommended.
