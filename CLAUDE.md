@@ -1283,6 +1283,21 @@ retries whatever a person asks for from the failed step and would repeat work
 already done. **The cap of three holds for the schedule and the page's button;
 the tool may go past it**, because it carries a written reason.
 
+**`move_loop`, the Open loops builder change over MCP** (decision 2026-10-09,
+Destiny). `server/src/mcp/loopTools.ts`, write connection only, calling
+`store.editLoop` — the function the page's save calls — so the move is the
+page's: the builder is the table a row sits in, `loop_id` travels unchanged, the
+assignee is set from the destination, and the events, note and write log follow
+the row. Built because `update_record` changes fields and the builder is not
+one, so a loop on the wrong table could only be moved by a person on the page
+(Bays re-created one under a new id). A `requester_user_id` is required:
+Destiny or Jason move any loop, anyone else only one on their own table or
+assigned to them. Refused, with nothing moved: not held, already there, an
+unknown builder, or **held twice under one `loop_id`** (both rows named, never
+picked between). `dry_run` says what would move. Audited on
+`engine_mcp_writes` (kind `loops`). Not in any agent's scope. Only the seven
+builders with a loop table are destinations. `npm run test:move-loop` pins it.
+
 **Bays moves onto the dashboard MCP, finished** (decision 2026-09-24, Destiny).
 Bays is the n8n Agent `Nw5igXu4WWrjUMWB` behind `Bays — Front Door` →
 `Bays — Agent Delivery` (`5AFqtZQaeKFFiGqe`); the Conversational Agent, Tools
