@@ -3155,6 +3155,62 @@ export interface VfarmLead {
   stage_changed_at: string | null;
   /** Every move between stages, oldest first, never rewritten. */
   stage_history: { from: number; to: number; at: string; by: string; reason: string | null; via: 'page' | 'engine' }[];
+  /** The 5-rack pilot offers this lead is tied to (2026-10-09, 7S0O). Internal only. Absent on an optimistic copy. */
+  pilot_offers?: { id: string; status: string }[];
+}
+
+/* ------------------------------------------------------------ vFarm gates */
+
+/** One check on a Stage 1 record: a verdict with who, when and how (2026-10-09, 7S0O). */
+export interface VfarmGateCheck {
+  status?: string;
+  thresholds?: unknown;
+  notes?: string;
+  value?: unknown;
+  source?: string;
+  checked_by?: string;
+  checked_at?: string;
+  evidence_ref?: string;
+}
+
+/**
+ * One Stage 1, Stage 2 or offer record, as the v1 contract words it. Beyond
+ * the fields named here the record carries whatever else the contract holds,
+ * under the contract's own names.
+ */
+export interface VfarmGateRecord {
+  id: string;
+  contract: string;
+  kind: 'stage1' | 'stage2' | 'offer';
+  /** A test record. Labelled wherever it is shown. */
+  fixture: boolean;
+  status: string;
+  stage1_ref?: string | null;
+  stage2_ref?: string | null;
+  loop_ref?: string;
+  owner_slack_id?: string;
+  target_date?: string;
+  crop_profile?: string;
+  growth_stage?: string;
+  rack_count?: number;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+  linked_leads?: { id: string; full_name: string; organization_name: string | null; stage: number; status: string }[];
+  [field: string]: unknown;
+}
+
+export interface VfarmGatesData {
+  stage1: VfarmGateRecord[];
+  stage2: VfarmGateRecord[];
+  offers: VfarmGateRecord[];
+  fixtures: number;
+  checks: { name: string; label: string; recorded_by: string }[];
+  gates: string[];
+  alert_channel_configured: boolean;
+  events: { id: number; event_type: string; at: string; subject_id: string; actor: string | null; detail: Record<string, unknown> }[];
+  note: string;
 }
 
 export interface VfarmLeadsData {

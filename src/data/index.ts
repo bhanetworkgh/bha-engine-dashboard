@@ -84,6 +84,7 @@ import type {
   VfarmLead,
   VfarmLeadStatus,
   VfarmLeadsData,
+  VfarmGatesData,
 } from './types';
 
 export * from './types';
@@ -592,6 +593,8 @@ export const getGenie = () => api<GenieData>('/api/genie');
 export const getBays = () => api<BaysData>('/api/bays');
 export const getBaysReminders = () => api<BaysRemindersData>('/api/bays/reminders');
 export const getVfarmLive = () => api<VfarmLiveData>('/api/vfarm/live');
+/** The stage gates and the 5-rack pilot offer (2026-10-09, 7S0O). */
+export const getVfarmGates = () => api<VfarmGatesData>('/api/vfarm/gates');
 export const getMonitoringTwin = () => api<MonitoringTwinData>('/api/monitoring-twin');
 /** The Customer Service Twin's turns, as CST pushed them (2026-09-29). */
 export const getCsTwin = () => api<CstData>('/api/cs-twin');
