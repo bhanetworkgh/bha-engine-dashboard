@@ -1924,6 +1924,21 @@ checks it against `AUTH_PASSWORD_HASH` and sets a twelve-hour cookie. Five
 failures from one address lock it for thirty seconds. No user management, no
 roles, no signup.
 
+**Logstream v0 thresholds, locked and not built** (decision 2026-10-09, Jason —
+#bha-north-star-twin). `docs/design/logstream-v0.md` section 10 is the contract.
+Counted **per fault signature (workflow + failed step), never per lane**: 3 of
+the same fault in 7 days opens one Research Twin job, 5 in 7 escalates to a
+person; test, simulator and "refused ask" incidents are excluded. Separately,
+20% or more of a workflow's runs failing in 7 days, with at least 10 runs and 3
+failures, is a workflow-level trigger; 5 or more workflows crossing in the same
+7 days is one shared-cause outage. `time_to_recovery` is trusted only for
+incidents closed on or after 2 Oct 2026. **GNER stays a candidate and no runtime
+decision may depend on it; empty reads are consciously not recorded in v0.**
+**Do not build the Logstream table, writer or trigger** without Jason's
+go-ahead. Pay is a recommendation: `person_confirmed` and `autopay_enabled`
+both default false. These are v0 numbers; a re-tune is due about 9 Nov 2026.
+The Monitoring Twin's own 3-in-7 rule (above) is separate and is built.
+
 ## 5. Design
 
 **Feel:** a modern consumer dashboard in the manner of Apple's account pages.

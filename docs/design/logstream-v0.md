@@ -145,3 +145,43 @@ All of these numbers stay tunable. Six weeks is thin, and these should be re-rea
 2. Register or drop GNER, and decide where an empty read gets recorded.
 3. Agree the rate rule: 20% with at least 10 runs and 3 failures, and "many at once is one event".
 4. Only then: build the Logstream row and the trigger.
+
+## 10. Locked v0 parameters (Jason Bays, 9 Oct 2026)
+
+Locked in #bha-north-star-twin on 9 Oct 2026. These replace the proposals in sections 6 and 9 wherever they differ. They are rules on paper: nothing in the engine acts on them yet.
+
+**Counts, per fault signature, never per lane**
+
+- 3 of the same fault in 7 days: open one Research Twin job for that pattern.
+- 5 of the same fault in 7 days: escalate to a person.
+- Test, simulator and "refused ask" incidents are excluded from both.
+- A fault signature is the workflow plus the step that failed.
+
+**Workflow-level rate rule, a separate trigger**
+
+- 20% or more of a workflow's runs fail in 7 days,
+- with at least 10 runs and at least 3 failures.
+- When 5 or more workflows cross a threshold in the same 7 days, it is one shared-cause outage, not one pattern per workflow.
+
+**GNER (No Filler on an Empty Read)**
+
+- Stays a candidate pattern only (`CAND-1791450711610-GNER`).
+- No GNER-based trigger is wired until empty reads are recorded somewhere in the engine and there are real counts on that signal.
+- In v0, no runtime decision may depend on GNER.
+
+**Empty-read logging: consciously left out of v0** (Destiny, 9 Oct 2026)
+
+- Recording an empty read means changing the workflows that do the reading. That is low-level work, which this pass excludes.
+- So v0 does not record empty reads, GNER stays a candidate, and nothing depends on it.
+- Revisit at the re-tune. If it is wanted then, it is scoped as its own build.
+
+**Limits and re-tune**
+
+- `objective_outcomes.time_to_recovery` is trusted only for incidents closed on or after 2 Oct 2026.
+- All numbers here are v0, calibrated from thin history. Re-read about one month on (around 9 Nov 2026), tracked as an open loop.
+
+**Implementation gate**
+
+- This note is design plus lane link only.
+- The Logstream table, writer and trigger are not built until these thresholds are in the engine contract (this section and CLAUDE.md are that contract) and the empty-read decision is made (made above: left out).
+- Building them still needs Jason's go-ahead.
