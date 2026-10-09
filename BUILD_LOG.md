@@ -11724,3 +11724,10 @@ Files:      none
 Problem:    none
 Fix:        EVAL-202610091531 (execution 31359): 62 of 62 rows passed. This is also the first real run of the revised INJ-09 check appended this morning, and it passed.
 Decision:   No rollback. The scheduled proof is tomorrow's 08:00 ET reminders and the Saturday weekly report: each should show a start and a finish on /scheduled-runs.
+
+## 2026-10-09 17:40 — The two open North Star incidents closed
+Intent:     Deliverable 2: clear the open incidents.
+Files:      none
+Problem:    INC-NS.AGENT-065 and -066 were still open: one event on 8 Oct at 12:57 UTC, North Star — Agent Delivery / Prepare Turn, "Cannot read properties of undefined (reading 'tag') [line 15]" (execution 29967), and the Front Door's call to it failing with it (29964).
+Fix:        Closed through close_incidents, CLOSE 2, audit 1522. Engine health reads no open incident.
+Decision:   Closed as the 8 Oct protected-repair drill (SNI2): the workflow was updated a minute later and North Star answered on 9 Oct (execution 31185, NS-1791553227597-BIC6). Deliverable 3, clearing the open loops, was not done as a sweep: 24 open or in progress on Destiny's table at close.
