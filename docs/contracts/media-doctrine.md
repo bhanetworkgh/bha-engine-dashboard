@@ -45,7 +45,7 @@ If Jason or Bays appends a standing rule to one of your loops (B93H, OWLG and so
 | `changed_at` | yes | ISO 8601: when the change was made or ratified. |
 | `contract_ids` | recommended | Every contract the version binds, e.g. `VFARM_BUYER_INTAKE.v1`, `VFARM_MECHANICAL_MEDIA_HANDOFF`. |
 | `default_patterns` | recommended | The build patterns or standing rules applied by default, e.g. `BP-…` ids or `P1.0 mechanical ceiling`. |
-| `claims` | recommended | The claim-level states the version sets: `{ claim_id, label, maturity, allowed_wording, prohibited_wording }`. `maturity` uses your own vocabulary: `PROVEN_NOW`, `PROVEN_BUT_GATED`, `CONTRACT_DEFINED_NOT_RUNTIME_PROVEN`, `IN_BUILD`, `NEEDS_EVIDENCE`, `NOT_SAFE_TO_CLAIM`. Any other UPPER_SNAKE state is kept under its own name. |
+| `claims` | recommended | The claim-level states the version sets. Legacy `maturity` is normalized to `maturity_state` on read. T0NO fields are `claim_state`, `config_hash`, `cad_provenance: { cad_revision, provenance_ref }`, `evidence_publication_status`, `fail_closed: { needs_evidence, reason }`, and `allowed_use: { media_twin, vfarm, genie_ns }`. Missing evidence remains null/explicit and fails closed; never send placeholder hashes or CAD revisions. |
 | `approved_by`, `approved_at` | recommended | Who ratified it (usually Jason) and when. |
 | `loop_id`, `doc_url` | recommended | The loop and the document behind the change. |
 | `posted_by` | recommended | Who sent the record. |
@@ -100,9 +100,7 @@ Media Twin, `/vfarm` and Genie read the claims from here, not from a copy of the
 - **Code:** `GET https://dashboard.bhanetwork.org/api/engine/media-doctrine` with the same `x-dashboard-key` header. Optional filters: `?doctrine_id=B93H`, `?claim_id=6.1`, `?maturity=NOT_SAFE_TO_CLAIM` (case does not matter).
 - **Agents:** the `read_media_doctrine` MCP tool. Same function, same answer.
 
-The answer (`media.doctrine.read.v1`) carries the version in force of each doctrine and one row per claim: `doctrine_id`, `doctrine_version`, `change_id`, `claim_id`, `label`, `maturity`, `allowed_wording`, `prohibited_wording`.
-
-What it does **not** carry yet is named in `not_held`: T0NO's `claim_state`, `config_hash`, `cad_provenance`, `evidence_publication_status`, `fail_closed` and `allowed_use`. Treat those as unknown and fail closed. A claim that is not held at all has no approved wording, so it is not safe to make. A filter that matches nothing comes back with a line in `warnings`, never as a silent empty list.
+The answer (`media.doctrine.read.v1`) carries the version in force of each doctrine and one row per claim. Every row exposes T0NO's locked core: `maturity_state`, `claim_state`, `config_hash`, `cad_provenance`, `evidence_publication_status`, `fail_closed`, and `allowed_use`, alongside its claim identity and wording. Missing upstream values are explicit (`UNKNOWN`, null, or `NEEDS_EVIDENCE`) and make `fail_closed.needs_evidence` true with the missing evidence classes named in `reason`. A claim that is not held has no approved wording. A filter that matches nothing returns a line in `warnings`, never a silent empty list.
 
 ```bash
 curl -s https://dashboard.bhanetwork.org/api/engine/media-doctrine?doctrine_id=B93H \

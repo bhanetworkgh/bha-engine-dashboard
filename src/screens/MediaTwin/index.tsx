@@ -79,6 +79,8 @@ export default function MediaTwin() {
 
 function Doctrine({ data }: { data: DoctrineData }) {
   const s = data.summary;
+  const gate = data.resolved;
+  const held = gate.claims.filter((c) => !c.allowed_use.media_twin || c.fail_closed.needs_evidence);
   const [open, setOpen] = useState<string | null>(null);
   const paged = usePaged(data.changes, 'all');
   return (
@@ -87,6 +89,21 @@ function Doctrine({ data }: { data: DoctrineData }) {
         {data.meta.changes} change{data.meta.changes === 1 ? '' : 's'} held since {day(data.meta.first_change_at)} · last received{' '}
         {relativeTime(data.meta.last_received_at) ?? '—'}
       </p>
+      <Card className="pb-3">
+        <CardHeader title="Publication gate" right={<span className="tabular text-[11.5px] text-faint">canonical T0NO resolver · {gate.schema}</span>} />
+        <div className="px-4 pb-3 text-[12px] text-dim">
+          {gate.claims.length === 0 ? (
+            <p>NEEDS_EVIDENCE · no doctrine claim is in force. Do not render or publish.</p>
+          ) : held.length ? (
+            <p>
+              HOLD · {held.length} of {gate.claims.length} claim{gate.claims.length === 1 ? '' : 's'} fail publication.{' '}
+              {held.slice(0, 3).map((c) => `${c.label}: ${c.fail_closed.reason ?? c.evidence_publication_status}`).join(' · ')}
+            </p>
+          ) : (
+            <p>ALLOWED · all {gate.claims.length} resolved claim{gate.claims.length === 1 ? '' : 's'} permit Media Twin use.</p>
+          )}
+        </div>
+      </Card>
       <StatStrip cols={4} flush>
         <FigureCell
           label="Doctrines in force"

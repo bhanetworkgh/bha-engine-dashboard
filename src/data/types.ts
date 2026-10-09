@@ -3731,6 +3731,32 @@ export interface DoctrineClaim {
   prohibited_wording: string | null;
 }
 
+export interface T0noClaim {
+  doctrine_id: string;
+  doctrine_version: string;
+  change_id: string;
+  claim_id: string | null;
+  label: string;
+  maturity_state: string;
+  claim_state: string;
+  config_hash: string | null;
+  cad_provenance: { cad_revision: string | null; provenance_ref: string | null };
+  evidence_publication_status: string;
+  fail_closed: { needs_evidence: boolean; reason: string | null };
+  allowed_use: { media_twin: boolean; vfarm: boolean; genie_ns: boolean };
+  allowed_wording: string | null;
+  prohibited_wording: string | null;
+}
+
+export interface T0noDoctrineRead {
+  schema: string;
+  read_at: string;
+  claims: T0noClaim[];
+  warnings: string[];
+  t0no_core_fields: string[];
+  counts: { doctrines_in_force: number; claims_in_force: number; claims_returned: number; by_maturity: Array<{ key: string; label: string; n: number }> };
+}
+
 export interface DoctrineChange {
   change_id: string;
   doctrine_id: string;
@@ -3767,6 +3793,8 @@ export interface DoctrineData {
     contracts_bound: string[];
     default_patterns: string[];
   };
+  /** The canonical T0NO resolver result. Media Twin never derives a gate locally. */
+  resolved: T0noDoctrineRead;
 }
 
 /* ---------------------------------------------------- Monitoring Twin (2026-10-01) */

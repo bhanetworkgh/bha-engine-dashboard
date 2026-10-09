@@ -178,6 +178,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
   if (p === '/api/health' && method === 'GET') {
     return send(res, 200, { ok: true, started_at: STARTED_AT });
   }
+  if (p === '/api/public/vfarm-doctrine' && method === 'GET') {
+    const origin = earlyAccess.originOf(req);
+    const cors = earlyAccess.corsHeaders(origin);
+    if (origin && !earlyAccess.originAllowed(origin)) return send(res, 403, { ok: false, message: 'Origin not allowed.' });
+    return send(res, 200, systemFeeds.vfarmDoctrineState(await systemFeeds.doctrineClaims()), { 'Cache-Control': 'no-store', ...cors });
+  }
 
   /**
    * The vFarm Early Access form (2026-09-20, on Destiny's instruction).
@@ -1192,8 +1198,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       case '/api/cs-twin':
         return send(res, 200, await systemFeeds.cstData());
       /** Hardik's doctrine and contract changes, as posted (2026-09-30). */
-      case '/api/media-doctrine':
-        return send(res, 200, await systemFeeds.doctrineData());
+      case '/api/media-doctrine': {
+        // Media Twin renders the history and consumes the exact same resolved
+        // T0NO gate as HTTP/MCP readers.  The history remains presentation;
+        // publication authority comes only from doctrineClaims().
+        const [data, resolved] = await Promise.all([systemFeeds.doctrineData(), systemFeeds.doctrineClaims()]);
+        return send(res, 200, { ...data, resolved });
+      }
       /** The Monitoring Twin's judgement of every farm vFarm sends (2026-10-01). */
       case '/api/monitoring-twin':
         return send(res, 200, await monitoringTwin.monitoringData());

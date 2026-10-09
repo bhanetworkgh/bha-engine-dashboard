@@ -823,7 +823,7 @@ const getExecutionQuota: ToolDefinition = {
 const readMediaDoctrine: ToolDefinition = {
   name: 'read_media_doctrine',
   description:
-    'What BHA may and may not say about vFarm: every claim in the doctrines in force (B93H buyer capabilities, OWLG mechanical/media handoff, TSNR commercial state), each with its maturity (PROVEN_NOW, PROVEN_BUT_GATED, CONTRACT_DEFINED_NOT_RUNTIME_PROVEN, IN_BUILD, NOT_SAFE_TO_CLAIM, …), its allowed wording and its prohibited wording, plus the doctrine version and change it came from. Filter by doctrine_id, claim_id or maturity (case does not matter). A claim that is not held has no approved wording: treat it as not safe to make, and say NEEDS_EVIDENCE rather than infer. `not_held` names T0NO’s core fields this record does not carry yet; treat those as unknown. A filter that matches nothing comes back with a warning naming what is in force, never as a silent empty list.',
+    'What BHA may and may not say about vFarm: every claim in the doctrines in force (B93H buyer capabilities, OWLG mechanical/media handoff, TSNR commercial state), resolved to T0NO’s seven fields: maturity_state, claim_state, config_hash, cad_provenance, evidence_publication_status, fail_closed and allowed_use. Filter by doctrine_id, claim_id or maturity (case does not matter). Missing evidence is explicit in fail_closed.reason and never inferred. A claim that is not held has no approved wording. A filter that matches nothing returns a warning naming what is in force, never a silent empty list.',
   inputSchema: {
     type: 'object',
     properties: {
