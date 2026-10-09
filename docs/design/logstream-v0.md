@@ -103,9 +103,14 @@ Bays had 7, 10, 1, 2, 14, 18 and 7 incidents in successive weeks. North Star had
 2. **Research Twin's 5-in-7 stays as the default for "this needs a person now".** On six weeks of history it would have fired 3 times. All three were real.
 3. **Recommend 3-in-7 per signature as the point where research opens.** It would have fired 7 times in six weeks, 5 of them real. It also matches the rule Jason already approved for the Monitoring Twin on 4 Oct (3 or more in 7 days, one job per pattern), so the engine has one number, not two.
 4. **Leave out** test and simulator incidents, and "refused ask" incidents, which are guards working. Without that, 2 of the 7 firings are false.
-5. **The 20% half of the trigger is not tuned in this pass.** It needs a failure rate, which needs run counts per workflow. We hold those only from 12 Sep. It stays at Research Twin's default until someone computes it.
+5. **The 20% half, tuned from run counts** (added later on 9 Oct). Read from the 30,478 production runs held, 7 Sep to 9 Oct, as failed runs over all runs, per workflow per week, for workflows with at least 5 runs that week (117 workflow-weeks).
+   - A plain 20% rule fired in **18** of the 117. **12 of those 18 are one week**, 21 Sep, when the Airtable cap broke everything at once. That is one outage, not twelve patterns.
+   - Outside that week it fired 6 times: Research Twin — Agent Delivery in **three separate weeks** (5 of 19, 4 of 14, 4 of 19), the simulator once (test), Research Twin's old agent once (2 of 9) and Bays — Approval Decision once (1 of 5).
+   - So 20% is the right height, but it needs a floor. **Recommended: 20% or more of a workflow's runs fail in 7 days, with at least 10 runs and at least 3 failures.** With that floor and tests left out, the only firing outside the outage week is Research Twin — Agent Delivery, three weeks running. That is a real recurring fault, and the per-signature count in point 3 missed it (its busiest week was 2).
+   - **The two halves catch different things, so keep both.** The count catches one step breaking repeatedly. The rate catches a workflow that keeps failing a fifth of the time in different places.
+   - **A week where many workflows cross at once is one event.** When five or more workflows cross in the same 7 days, raise one incident for the shared cause and open no per-workflow research.
 
-All three numbers stay tunable. Six weeks is thin, and these should be re-read after another month.
+All of these numbers stay tunable. Six weeks is thin, and these should be re-read after another month.
 
 ### 6d. How often each of the four patterns actually fired
 
@@ -126,6 +131,8 @@ All three numbers stay tunable. Six weeks is thin, and these should be re-read a
 - **Six weeks, four lanes.** Enough to see that per-lane counting is wrong. Not enough to fix numbers for good.
 - **Research Twin's own listed limits stand** (see its answer).
 
+- **Research Twin — Agent Delivery fails about a fifth of the time, three weeks running.** Found by the rate rule. It is a live fault to look at now, whatever happens to this design.
+
 ## 8. What is deliberately not built
 
 - No Logstream table, no writer, no page.
@@ -134,7 +141,7 @@ All three numbers stay tunable. Six weeks is thin, and these should be re-read a
 
 ## 9. Open items for a next pass, if Jason wants one
 
-1. Agree the two numbers: 3-in-7 per signature opens research; 5-in-7 per signature calls a person.
+1. Agree the two count numbers: 3-in-7 per signature opens research; 5-in-7 per signature calls a person.
 2. Register or drop GNER, and decide where an empty read gets recorded.
-3. Compute the failure-rate half of the trigger from the run counts held since 12 Sep.
+3. Agree the rate rule: 20% with at least 10 runs and 3 failures, and "many at once is one event".
 4. Only then: build the Logstream row and the trigger.
