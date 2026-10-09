@@ -11717,3 +11717,10 @@ Fix:        Recorder: outcome "started" writes the row; the last-step call finds
             Bays: Record_Scheduled_Run's description now says call it twice, first with started. Restore point e1c9a2e7, draft validated, published fe58d999. Draft test: my own reminder re-run by hand wrote one row, BAYS-SCHED-1791559836307-4ZGU, started 15:30:36 and closed 15:31:28 UTC (52.6 s), and did not repost.
             Dashboard: /scheduled-runs with four tabs. Agent tasks draws one row per due time from the inventory's schedule. test:scheduled-runs 7 of 7. Commit c03aa59, live: 94 due times in 7 days, 50 finished, 2 failed, 42 no record (before recording), 0 never started; 189 workflow runs across 9 workflows.
 Decision:   The start line is asked for in the tool's description, not in each of the 12 task texts: one change covers every task, the watch's re-runs and any task added later. If a scheduled run tomorrow writes a finish with no start, the step goes into the task texts. "Never started" cannot split a timer that did not fire from an agent that stopped before its first step; both are platform-level and the page says so. Background timers get one line each, in memory, never a row per tick. Claude's own scheduled checks are not in this database and are not listed. The agent inventory was not re-recorded (the schedule did not change).
+
+## 2026-10-09 16:55 — Evals after the Bays change (fe58d999)
+Intent:     Engine change checklist step 6 for the Record_Scheduled_Run description change.
+Files:      none
+Problem:    none
+Fix:        EVAL-202610091531 (execution 31359): 62 of 62 rows passed. This is also the first real run of the revised INJ-09 check appended this morning, and it passed.
+Decision:   No rollback. The scheduled proof is tomorrow's 08:00 ET reminders and the Saturday weekly report: each should show a start and a finish on /scheduled-runs.
