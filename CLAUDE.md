@@ -1156,7 +1156,15 @@ nothing about the gate in `approvals.ts`, so for an MCP server that is this
 dashboard's `/mcp/agent` on a bearer token the three `GATED_TOOLS` are added to
 `approval` and named in `server_gated`. `rederiveStored()` runs at boot and
 derives tools, MCP scope and tier again from the `raw` config each row already
-holds, changing nothing else — for when the derivation changes and n8n has not.
+holds, changing nothing else — for when the derivation changes and n8n has not. **A slim
+result is accepted** (2026-10-10): Bays' `get_agent` answer is past 160,000
+characters, more than a tool call carries faithfully, so
+`scripts/agent-inventory-slim.cjs` takes the long texts out by script (tool
+descriptions and bodies, skill bodies, task objectives) and replaces the
+instruction text with `instructions_chars` and `instructions_sha256` counted
+from the real text. `derive` reads no field the slim form drops, so the row is
+the same either way; `raw.slim` says which form was stored. `npm run
+test:agent-inventory` pins it, and `AGENT_FILE=` runs it on a real agent.
 
 **Agent identity, 2 Oct**: the seven BHARAG HTTP tools on the three agents no
 longer skip certificate checks (the dashboard had been verifying
