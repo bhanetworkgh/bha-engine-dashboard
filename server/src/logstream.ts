@@ -320,7 +320,7 @@ function jobText(c: Crossing): { question: string; context: string } {
     const pct = Math.round(((c.failures ?? 0) / Math.max(1, c.runs ?? 1)) * 100);
     return {
       question: `The workflow "${c.workflow}" failed ${c.failures} of its ${c.runs} production runs in the last ${RULE.window_days} days (${pct}%). What is the most likely cause of a workflow failing this often, and what should change?`,
-      context: `Opened by Logstream v0 (rules locked by Jason Bays, 9 Oct 2026): 20% or more of a workflow's production runs failing in 7 days, with at least ${RULE.rate_min_runs} runs and ${RULE.rate_min_failures} failures, opens one research job for the workflow. Workflow id ${c.key}. The failures may be in different steps; the question is why the workflow as a whole keeps failing.`,
+      context: `Opened by Logstream v0 (rules locked by Jason Bays, 9 Oct 2026): 20% or more of a workflow's production runs failing in 7 days, with at least ${RULE.rate_min_runs} runs and ${RULE.rate_min_failures} failures, opens one research job for the workflow. Workflow id ${c.key}. The failures may be in different steps; the question is why the workflow as a whole keeps failing.\nBefore writing the finding, read this workflow's faults: call read_logstream (BHA_Dashboard_read_logstream) with workflow "${c.workflow ?? ''}". Cite it as a source by its tool name.`,
     };
   }
   return {
@@ -330,6 +330,7 @@ function jobText(c: Crossing): { question: string; context: string } {
       `Lane: ${c.lane_id ?? 'not recorded'}. First ${c.first_at}, latest ${c.last_at}.`,
       `Incidents: ${c.incident_ids.join(', ')}.`,
       'The question is why it keeps happening, not any single incident.',
+      `Before writing the finding, read this fault's own history: call read_logstream (BHA_Dashboard_read_logstream) with signature "${signatureOf(c.workflow, c.node)}". It lists every incident of this fault with when it happened, how it closed and how long recovery took. Cite it as a source by its tool name.`,
     ].join('\n'),
   };
 }
@@ -504,6 +505,7 @@ export function guidancePrompt(t: { trigger_id: string; kind: string; workflow: 
     `Logstream guidance request ${t.trigger_id}. Research Twin has finished the research job ${t.job_id} that Logstream opened on a repeating engine fault: ${what}. Work lane: ${t.lane_id ?? 'not recorded'}.${linked.length ? ` Linked commercial lane: ${linked.join(', ')}.` : ' No commercial lane is linked to this work lane.'}`,
     `Research Twin's finding (confidence ${t.confidence ?? 'not stated'}):`,
     t.finding.slice(0, 3500),
+    `First read the record: call read_logstream (BHA_Dashboard_read_logstream)${t.kind === 'workflow_rate' ? ` with workflow "${t.workflow ?? ''}"` : ` with signature "${signatureOf(t.workflow, t.failed_node)}"`} for this fault's incidents and how each closed, and once with no arguments for what else has crossed a threshold. Cite it in Sources as read_logstream.`,
     'Turn this into guidance, as a recommendation only. You set no tag, edit no card and open no job. Answer in this order, briefly:',
     '1. Lane: whether any ranking tag on the work lane should change because of this (engine_leverage, blocks_others), the value you recommend and why. Read the lane with your own tools first. If nothing should change, say so.',
     '2. Commercial card: one sentence a person could put on the linked lane\'s card, or "none" if no lane is linked or the finding has no commercial bearing.',
