@@ -365,6 +365,7 @@ const hook = http.createServer((req, res) => {
     assert.equal(one.ok, true);
     assert.ok(one.total_incidents >= 1 && one.incidents.every((i) => i.signature === sig && Array.isArray(i.states) && i.states.includes('observed')));
     assert.equal(JSON.stringify(one).includes('autopay'), false);
+    assert.ok(Array.isArray(one.crossings) && one.crossings.some((c) => c.job_id), 'the fault view names the research job opened for it');
     const none = await readLogstream.handler({ signature: `no such fault ${T}` }, { access: 'read' });
     assert.equal(none.ok, false);
     assert.equal(none.reason, 'no_such_fault');
