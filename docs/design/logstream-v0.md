@@ -3,7 +3,7 @@
 **Date:** Friday 9 October 2026
 **Owner:** Destiny Arupi (Engine Steward)
 **Approved direction:** Jason Bays, #bha-north-star-twin, 9 Oct ("proceed as proposed")
-**Status:** Design note and lane link only. Nothing here is built. No pay is automated.
+**Status:** Built as v0 on 10 Oct 2026 (table, writer, trigger; `server/src/logstream.ts`), on Jason's go-ahead of 9 Oct. A read and analysis spine only: no pay is automated, and nothing is closed, retried or deleted by it. Sections 1 to 9 are the design as written on 9 Oct; section 11 says what was built.
 **Merged from:** Research Twin answer `RT-1791466173818-JZMP` and North Star answer `NS-1791466174257-Q6NI`.
 
 ---
@@ -185,3 +185,15 @@ Locked in #bha-north-star-twin on 9 Oct 2026. These replace the proposals in sec
 - This note is design plus lane link only.
 - The Logstream table, writer and trigger are not built until these thresholds are in the engine contract (this section and CLAUDE.md are that contract) and the empty-read decision is made (made above: left out).
 - Building them still needs Jason's go-ahead.
+
+
+## 11. What was built (10 Oct 2026)
+
+Jason gave the go-ahead on 9 Oct: table, writer and trigger against the locked thresholds, with no autopay, no pay wiring and no destructive automated action.
+
+- **Table.** `engine_logstream`, append-only, one row per state an incident reaches: observed, closed, research opened. The fields are section 5's. `person_confirmed` and `autopay_enabled` are false on every row and nothing sets or reads them.
+- **Writer.** Reads the incidents the dashboard already holds. No workflow was changed.
+- **Trigger.** Section 10's numbers, every five minutes, over the last 7 days. 3 of the same fault opens one Research Twin job. 5 posts one alert in the engine alerts channel. The workflow rate rule opens one job. 5 or more workflows crossing is one outage alert and no per-workflow research.
+- **Left out of counting:** workflows named TEST, anything simulated, and the step "Raise Refused Ask".
+
+Not built, and still to decide: a page, North Star's guidance step (step 6 of section 4), a person's review of a row, and which build pattern applied to an incident (`pattern_ids_applied` is empty, because nothing in the engine records that).

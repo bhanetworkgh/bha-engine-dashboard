@@ -2797,6 +2797,72 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_vfarm_gate_prompts_object ON engine_vfarm_gate_prompts (object_id, kind, check_name, created_at DESC)`,
     ],
   },
+  {
+    id: 64,
+    name: 'engine_logstream and engine_logstream_triggers: Logstream v0, the read and analysis spine',
+    statements: [
+      /**
+       * 10 Oct 2026, Destiny (Jason's go-ahead of 9 Oct). One append-only row
+       * per state an incident reaches (observed, closed, research_opened), in
+       * the field list of docs/design/logstream-v0.md section 5. person_confirmed
+       * and autopay_enabled default false and nothing sets or reads them: pay
+       * is not wired. The second table is one row per threshold crossing.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_logstream (
+        id BIGSERIAL PRIMARY KEY,
+        logstream_row_id TEXT NOT NULL UNIQUE,
+        incident_id TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('observed', 'closed', 'research_opened')),
+        written_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        lane_id TEXT,
+        linked_lanes JSONB NOT NULL DEFAULT '[]'::jsonb,
+        signature TEXT NOT NULL,
+        workflow TEXT,
+        failed_node TEXT,
+        error_class TEXT,
+        excluded_reason TEXT,
+        occurred_at TIMESTAMPTZ NOT NULL,
+        pattern_ids_applied JSONB NOT NULL DEFAULT '[]'::jsonb,
+        pattern_adherence JSONB NOT NULL DEFAULT '{}'::jsonb,
+        objective_outcomes JSONB NOT NULL DEFAULT '{}'::jsonb,
+        research_trigger JSONB NOT NULL DEFAULT '{}'::jsonb,
+        commercial_relevance JSONB NOT NULL DEFAULT '{}'::jsonb,
+        audit JSONB NOT NULL DEFAULT '{}'::jsonb,
+        evaluated_by TEXT,
+        evaluated_at TIMESTAMPTZ,
+        person_confirmed BOOLEAN NOT NULL DEFAULT false,
+        autopay_enabled BOOLEAN NOT NULL DEFAULT false
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_logstream_incident_state ON engine_logstream (incident_id, state)`,
+      `CREATE INDEX IF NOT EXISTS engine_logstream_signature ON engine_logstream (signature, occurred_at DESC)`,
+      `CREATE TABLE IF NOT EXISTS engine_logstream_triggers (
+        id BIGSERIAL PRIMARY KEY,
+        trigger_id TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL CHECK (kind IN ('signature_research', 'signature_escalation', 'workflow_rate', 'shared_outage')),
+        key TEXT NOT NULL,
+        workflow TEXT,
+        failed_node TEXT,
+        lane_id TEXT,
+        n INTEGER NOT NULL,
+        runs INTEGER,
+        failures INTEGER,
+        incident_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        workflows JSONB NOT NULL DEFAULT '[]'::jsonb,
+        first_at TIMESTAMPTZ,
+        last_at TIMESTAMPTZ,
+        detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        action TEXT NOT NULL CHECK (action IN ('research_job', 'alert_person')),
+        action_state TEXT NOT NULL CHECK (action_state IN ('pending', 'job_opened', 'alerted', 'suppressed_shared_outage', 'failed')),
+        job_id TEXT,
+        alert_channel TEXT,
+        alert_ts TEXT,
+        error TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        acted_at TIMESTAMPTZ
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_logstream_triggers_key ON engine_logstream_triggers (kind, key, detected_at DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
