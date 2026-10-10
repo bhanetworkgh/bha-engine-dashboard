@@ -21,6 +21,7 @@ import * as airtable from '../airtable';
 import * as bharag from '../bharag';
 import * as recovery from '../recovery';
 import * as systemFeeds from '../systemFeeds';
+import * as publicationDecision from '../publicationDecision';
 import * as monitoringTwin from '../monitoringTwin';
 import * as approvals from '../approvals';
 import { currentAgent } from './caller';
@@ -851,6 +852,45 @@ const readMediaDoctrine: ToolDefinition = {
   },
 };
 
+/** The persisted VRFK decision for one exact doctrine claim and surface. */
+const readPublicationDecision: ToolDefinition = {
+  name: 'read_publication_decision',
+  description:
+    'Read the latest persisted VFAM.claim_publication_decision for one exact current doctrine claim and surface. The event is re-checked against current T0NO doctrine: missing, stale or contradictory decisions return needs_evidence and never authorize publication.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      doctrine_id: { type: 'string' },
+      claim_id: { type: 'string' },
+      surface: { type: 'string', enum: [...publicationDecision.SURFACES] },
+    },
+    required: ['doctrine_id', 'claim_id', 'surface'],
+    additionalProperties: false,
+  },
+  annotations: { ...READS_DB, title: 'Read a publication decision trace' },
+  handler: async (args, deps) => {
+    const t0 = Date.now();
+    const doctrineId = typeof args.doctrine_id === 'string' ? args.doctrine_id : '';
+    const claimId = typeof args.claim_id === 'string' ? args.claim_id : '';
+    const surface = args.surface as publicationDecision.PublicationSurface;
+    if (!publicationDecision.SURFACES.includes(surface)) throw new McpError('bad_argument', `surface must be one of ${publicationDecision.SURFACES.join(', ')}.`);
+    const doctrine = await systemFeeds.doctrineClaims({ doctrine_id: doctrineId, claim_id: claimId });
+    if (doctrine.claims.length !== 1) throw new McpError('not_found', `Exactly one current doctrine claim must match ${doctrineId}:${claimId}; found ${doctrine.claims.length}.`);
+    const out = await publicationDecision.readDecisions(doctrine.claims as publicationDecision.ResolvedClaim[], surface);
+    await mirror.logWrite({
+      endpoint: 'mcp:read_publication_decision',
+      kind: 'engine_events',
+      method: 'MCP',
+      key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET',
+      natural_id: `${doctrineId}:${claimId}:${surface}`,
+      outcome: 'read',
+      detail: `${out.decisions[0]?.decision ?? 'needs_evidence'} · ${out.decisions[0]?.reason ?? 'no decision'}`,
+      ms: Date.now() - t0,
+    });
+    return out;
+  },
+};
+
 const readMonitoringTwin: ToolDefinition = {
   name: 'read_monitoring_twin',
   description:
@@ -898,6 +938,7 @@ export const TOOLS: ToolDefinition[] = [
   findRecordsTool,
   // 2026-10-01: the vFarm doctrine, the same read as GET /api/engine/media-doctrine (T0NO).
   readMediaDoctrine,
+  readPublicationDecision,
   // 2026-10-01: the Monitoring Twin's judgement of every vFarm farm.
   readMonitoringTwin,
   // 2026-09-24: what the Bays agent read through n8n tools of its own.
