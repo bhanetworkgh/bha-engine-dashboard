@@ -876,7 +876,11 @@ reasonable about.
   (decision 2026-09-20, Destiny), because the spec's default for a tool that
   declares none is *potentially destructive* — twelve read-only tools that
   said nothing about themselves were being offered to every client as though
-  any of them might delete something.
+  any of them might delete something. The figures above were last counted with
+  the candidate tools (2026-09-25); read tools added since are described in their
+  own sections rather than recounted here, among them `read_media_doctrine`
+  (T0NO), `read_publication_decision` (VRFK) and `read_doctrine_gap_summary`
+  (SE8L).
 
   Structure and source: `list_pages`, `get_page_structure` (the one that
   matters — it is what lets somebody reason about a page they cannot see),
@@ -1859,6 +1863,10 @@ watcher off whatever the Engine health toggle says; anything else, including
 unset, leaves it to the toggle, which is on by default. The watcher needs
 `DASHBOARD_INBOUND_KEY` (its two n8n webhooks check it), `N8N_API_KEY` (to read
 failed executions) and the BHARAG lane keys it already has — nothing new.
+`DOCTRINE_GAP_WATCH_ENABLED` — SE8L's doctrine-gap watcher runs only when this is
+exactly `true`; unset or anything else, it is off and the boot line says so. It is
+not in render.yaml, and turning it on waits on the owner decision about SE8L's
+incident authority (section 7, Media Twin).
 `MCP_WRITE_TOKEN` — the write connection's path secret, `/mcp/<MCP_WRITE_TOKEN>`
 (2026-09-24). No default; unset, no MCP client can write, and the boot line
 says so. Equal to `MCP_SECRET` — as it is in production — the one existing URL
@@ -2859,6 +2867,60 @@ neutral, because NOT_SAFE_TO_CLAIM is a rule doing its job, not a fault. Home's
 Media Twin tile counts doctrines tracked once the first record lands. Media
 Twin's own output (posts, clips, the weekly platform report) is not on the page
 and it says so.
+
+**T0NO, the doctrine read resolved to seven fields** (2026-10-09). `t0noPrimitive`
+(`server/src/systemFeeds.ts`) turns each claim in force into `maturity_state`,
+`claim_state`, `config_hash`, `cad_provenance`, `evidence_publication_status`,
+`fail_closed` and `allowed_use`. **It checks presence, not values**: a claim
+missing any of claim_state, config_hash, both CAD fields, the evidence status or
+allowed_use, or whose sender set `needs_evidence`, is closed — media_twin and vfarm
+false, the missing classes named in `reason`. A missing value is explicit
+(`UNKNOWN`, null, `NEEDS_EVIDENCE`), never absent: a claim stored before T0NO
+reads `config_hash: null` (fixed 2026-10-10; it had been dropped from the JSON).
+Placeholders (`NOT_HELD`, `UNKNOWN`, `TBD`, `PENDING_CANONICAL_VALUE`) in a hash
+or CAD field are refused on write. `genie_ns` defaults to true: Genie and North
+Star may report an unresolved claim, never promote it. **Which maturity and
+evidence values should block publication is an open owner decision**, not a rule
+this code settles. **`GET /api/public/vfarm-doctrine` is a second public
+route**, read only, no key, origin-checked like Early Access; it returns approved
+wording only when every claim allows vfarm, otherwise `EARLY_ACCESS_SAFE_FALLBACK`
+/ `interest_only_live` with `paid_subscription_url: null`. It reads T0NO only,
+not VRFK — whether it should is also an open owner decision. `npm run test:t0no`.
+
+**VRFK, the publication decision record** (2026-10-09). One
+`vfam_claim_publication_decision` row in `engine_events` per decision, per
+doctrine claim and surface (`media_twin`, `vfarm`, `genie_ns`).
+`POST`/`GET /api/engine/publication-decision` (`x-dashboard-key`) and the read
+tool `read_publication_decision`. The server computes the decision from T0NO —
+needs_evidence, then hold (surface not allowed, or `NOT_SAFE_TO_CLAIM`), then
+allowed — and a POST naming a different one is a 409. A read re-checks the newest
+row against the doctrine in force: a missing, stale or contradicting row reads
+`needs_evidence`. `decision_id` is the retry key; **a reused one writes nothing
+and answers with the stored row**, with `duplicate: true` and the fields the retry
+differed on (2026-10-10; it had echoed the request). Whether a different-content
+retry should be a 409 instead is an open owner decision. Media Twin requires a
+T0NO-clear claim and an applicable decision. **The claim-key expression in
+`readDecisions` brackets each `->>`**: unbracketed, Postgres reads
+`text ->> 'claim_id'` and refuses the query — proved on PostgreSQL 17.5 on
+2026-10-10. That is why `npm run test:vrfk-db` exists: it runs the SQL against a
+local database whose name ends in `_test` and refuses anything else, because it
+deletes the rows it writes; `npm run test:vrfk` checks the logic.
+
+**SE8L, doctrine gap observability** (2026-10-09). `server/src/doctrineGap.ts`
+classifies each claim and surface into one of eleven conditions, writes
+`doctrine_gap_observed` to `engine_events` and maps it to guidance.
+`GET /api/engine/doctrine-gaps` and `read_doctrine_gap_summary` read the last N
+hours, **at most 2,000 observations, with `counts.truncated` and a note when the
+window held more**. The watcher sweeps every five minutes only when
+`DOCTRINE_GAP_WATCH_ENABLED=true`, **off by default and not switched on**. When
+on, it opens and closes `DOCTRINE` incidents on BHARAG's bays lane — which would
+be a second exception to "the handlers create incidents and the healer closes
+them", and **that authority is pending owner approval**. A failed incident sync
+is logged and never retried. Its thresholds are marked `PROPOSED` in code and are
+**not Canon**. `npm run test:se8l`.
+The three read tools are in the North Star, Research Twin and Bays scopes in
+`AGENT_KEYS` (Research Twin gained `read_media_doctrine` with them); the n8n
+allow-lists must carry them too.
 
 ### Media Twin, Genie and vFarm
 **Three single centred "coming soon" pages, and nothing else** (decisions
