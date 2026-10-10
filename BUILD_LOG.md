@@ -11887,3 +11887,10 @@ Fix:        North Star — Recorded Helper Ask: the ledger write adds Prompt Tok
 Decision:   Deferred, not passed: the token fields on North Star — Agent Delivery (9e737698) and Research Twin — Agent Delivery (62fd5cd4) wait on the first real ask through each; the Slack destination guard has not held a real call; no agent has read Logstream or the events on its own token. Research Twin's citation line was published before the eval run that checked it, the same order the re-score marks down. The run passed, and the order was still wrong.
             Not done: the change note in #bha-coordination for the Slack destination guard. It is a sharing-class change and went live at 40b9ac7 without one. Raised to Destiny at close.
             The three credentials in personal projects are out of scope for every re-score, by Destiny's ruling of 10 Oct: they are under BHA network emails and outside the engine project. Every re-score brief says so.
+
+## 2026-10-10 21:26 — the change note for the Slack destination guard
+Intent:     close the item the last entry left open (Lagos time).
+Files:      none.
+Problem:    The destination guard on send_nudge and post_file (40b9ac7) went live without its change note in #bha-coordination.
+Fix:        Change note written for #bha-coordination and posted by Destiny: what changed, who is affected (nobody in daily use: all seven recipients of the last 14 days' nudges have a Builder Profile), what is not covered (channel posts), status (live, tested in process, not yet held a real call), and the roll back (one revert).
+Decision:   The note went up after the change, and it says so. Next time the note goes first. Channel posts get their own note before that change ships.
