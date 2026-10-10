@@ -133,4 +133,41 @@ assert.match(scopes, /agent: 'north_star'[ -￿]{0,1100}read_doctrine_gap_summar
 assert.match(scopes, /agent: 'research_twin'[ -￿]{0,700}read_doctrine_gap_summary/);
 ok('Engine events, BHARAG lifecycle, HTTP and scoped MCP consumers share one module');
 
-console.log(`\n${passed} SE8L checks passed.`);
+assert.equal(gap.SUMMARY_LIMIT, 2000);
+assert.deepEqual(gap.capRows([1, 2, 3], 3), { rows: [1, 2, 3], truncated: false });
+assert.deepEqual(gap.capRows([1, 2, 3, 4], 3), { rows: [1, 2, 3], truncated: true });
+assert.match(source, /LIMIT \$3`, \[OBSERVED_EVENT, String\(safeHours\), SUMMARY_LIMIT \+ 1\]/);
+ok('summary reads one past the cap and reports truncated instead of cutting silently');
+
+// observe() with the store and BHARAG stood in: no database, no network.
+(async () => {
+  const events = require(path.join(DIST, 'server/src/engineEvents.js'));
+  const pg = require(path.join(DIST, 'server/src/pg.js'));
+  const bharag = require(path.join(DIST, 'server/src/bharag.js'));
+  const real = { record: events.record, query: pg.query, liveIncidents: bharag.liveIncidents, openIncident: bharag.openIncident, error: console.error };
+  const logged = [];
+  const recorded = [];
+  let opened = 0;
+  try {
+    events.record = async (e) => { recorded.push(e.event_type); return { recorded: true, id: recorded.length }; };
+    pg.query = async () => ({ rows: [], rowCount: 0 });
+    bharag.liveIncidents = async () => { throw new Error('BHARAG answered 503'); };
+    bharag.openIncident = async () => { opened++; return { id: 'never' }; };
+    console.error = (line) => logged.push(String(line));
+    const r = await gap.observe({ surface: 'genie_ns', resolver_error: { status: 401, message: 'unauthorized' }, active_consumer: true });
+    assert.equal(r.policy.incident, true);
+    assert.equal(r.incident.action, 'none');
+    assert.equal(r.incident.error, 'BHARAG answered 503');
+    assert.equal(opened, 0);
+    assert.deepEqual(recorded, ['doctrine_gap_observed']);
+    assert.equal(logged.length, 1);
+    assert.match(logged[0], /^\[doctrine-gap\] incident sync failed for doctrine:genie_ns:MEDIA_DOCTRINE:RESOLVER \(unauthorized_read, IMMEDIATE_CRITICAL_GAP\): BHARAG answered 503$/);
+    ok('a failed incident sync is logged once and returned, with no retry, no extra event and no incident opened');
+  } finally {
+    Object.assign(events, { record: real.record });
+    Object.assign(pg, { query: real.query });
+    Object.assign(bharag, { liveIncidents: real.liveIncidents, openIncident: real.openIncident });
+    console.error = real.error;
+  }
+  console.log(`\n${passed} SE8L checks passed.`);
+})().catch((e) => { console.error(e); process.exit(1); });

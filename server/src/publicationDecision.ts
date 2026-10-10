@@ -167,11 +167,26 @@ export function prepareDecision(body: Record<string, unknown>, claim: ResolvedCl
   };
 }
 
+/** JSON with object keys sorted at every level: jsonb hands keys back in its own order. */
+const canonicalJson = (v: unknown): string =>
+  v === undefined || v === null ? 'null'
+    : Array.isArray(v) ? `[${v.map(canonicalJson).join(',')}]`
+      : typeof v === 'object' ? `{${Object.keys(v as Record<string, unknown>).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson((v as Record<string, unknown>)[k])}`).join(',')}}`
+        : JSON.stringify(v);
+
 export async function storeDecision(body: Record<string, unknown>, claim: ResolvedClaim) {
   const prepared = prepareDecision(body, claim);
   if (body.dry_run === true) return { dry_run: true, recorded: false, id: null, decision: prepared.detail };
   const saved = await record(prepared.event);
-  return { dry_run: false, ...saved, decision: prepared.detail };
+  if (saved.recorded) return { dry_run: false, ...saved, duplicate: false, differs_from_request: [] as string[], decision: prepared.detail };
+  // The decision_id was already held, so nothing was written: answer with the row that is
+  // stored, never the one just prepared, and name every field the retry tried to change.
+  const held = await query<{ id: string; detail: StoredDecisionDetail }>(`SELECT id, detail FROM engine_events WHERE dedupe_key = $1`, [prepared.event.dedupe_key]);
+  const stored = held.rows[0];
+  if (!stored) throw new PublicationDecisionError(500, `decision_id "${prepared.detail.decision_id}" was refused as a duplicate but no stored row carries it.`);
+  const keys = [...new Set([...Object.keys(stored.detail), ...Object.keys(prepared.detail)])] as Array<keyof StoredDecisionDetail>;
+  const differs_from_request = keys.filter((k) => canonicalJson(stored.detail[k]) !== canonicalJson(prepared.detail[k])).sort();
+  return { dry_run: false, recorded: false, id: Number(stored.id), duplicate: true, differs_from_request, decision: stored.detail };
 }
 
 export function resolveDecision(claim: ResolvedClaim, surface: PublicationSurface, row: DecisionEventRow | null): DecisionRead {
@@ -212,7 +227,7 @@ export async function readDecisions(claims: ResolvedClaim[], surface: Publicatio
         `SELECT DISTINCT ON (detail->>'doctrine_id', detail->>'claim_id') id, at, actor, source_ref, recorded_at, detail
            FROM engine_events
           WHERE event_type = $1 AND detail->>'event_name' = $2 AND detail->>'surface' = $3
-            AND (detail->>'doctrine_id' || ':' || detail->>'claim_id') = ANY($4::text[])
+            AND ((detail->>'doctrine_id') || ':' || (detail->>'claim_id')) = ANY($4::text[])
           ORDER BY detail->>'doctrine_id', detail->>'claim_id', at DESC, id DESC`,
         [EVENT_TYPE, EVENT_NAME, surface, wanted.map((c) => `${c.doctrine_id}:${c.claim_id}`)],
       )).rows

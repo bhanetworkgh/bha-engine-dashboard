@@ -1150,7 +1150,8 @@ function t0noPrimitive(c: StoredDoctrineClaim): T0noPrimitive {
   return {
     maturity_state: c.maturity,
     claim_state: c.claim_state ?? 'UNKNOWN',
-    config_hash: c.config_hash,
+    // A claim stored before T0NO has no config_hash key at all; undefined would drop it from the JSON.
+    config_hash: c.config_hash ?? null,
     cad_provenance: c.cad_provenance ?? { cad_revision: null, provenance_ref: null },
     evidence_publication_status: c.evidence_publication_status ?? 'NEEDS_EVIDENCE',
     fail_closed: { needs_evidence: needsEvidence, reason },
