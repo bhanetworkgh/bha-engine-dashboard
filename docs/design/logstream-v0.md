@@ -203,3 +203,48 @@ Added later the same day:
 - **A page.** Logstream, under Records on the dashboard.
 
 Still not built: a person's review of a row (`evaluated_by`, `person_confirmed`).
+
+## 12. The schema, and how Research Twin and North Star read it (10 Oct 2026)
+
+Jason, 9 Oct: "Document the schema and how RT and NS will read from it for incident routing and guidance."
+
+### The two tables
+
+**`engine_logstream`**: one row per state an incident reaches. Rows are only ever added.
+
+| Field | What it holds |
+| --- | --- |
+| `logstream_row_id` | The row's own id. |
+| `incident_id` | The incident in the ledger this row is about. |
+| `state` | `observed`, `closed`, `research_opened` or `patterns_evaluated`. One row per incident per state. |
+| `signature`, `workflow`, `failed_node` | The fault: the workflow plus the step that failed. |
+| `lane_id`, `linked_lanes` | The lane it was raised on, and the commercial lanes tied to it. |
+| `error_class` | The handler's own class for the failure. |
+| `excluded_reason` | Why a row is counted in nothing (a test, the simulator, a guard's refusal), or empty. |
+| `occurred_at`, `written_at` | When it happened, and when this row was written. |
+| `objective_outcomes` | On a closed row: who closed it, when, time to recovery, and whether that time can be trusted (closes on or after 2 Oct 2026). |
+| `research_trigger` | On an observed row: how many of the same fault there were in 7 and 30 days at that moment. |
+| `pattern_ids_applied`, `pattern_adherence` | On a patterns row: which patterns were judged and the result. Two patterns only. |
+| `commercial_relevance` | The linked commercial card, where the lane has one. |
+| `evaluated_by`, `evaluated_at`, `person_confirmed`, `autopay_enabled` | Empty and false. Nothing sets them and nothing reads them. |
+
+**`engine_logstream_triggers`**: one row per threshold crossed, once per 7 days.
+
+| Field | What it holds |
+| --- | --- |
+| `trigger_id`, `kind`, `key` | Which rule crossed (3 in 7, 5 in 7, the failure rate, a shared outage) and for which fault or workflow. |
+| `n`, `runs`, `failures`, `incident_ids`, `workflows` | The count behind it. |
+| `action`, `action_state` | What was done: a research job opened, an alert posted, suppressed during an outage, withdrawn, or failed with the reason. |
+| `job_id`, `alert_channel`, `alert_ts` | Where the action landed. |
+| `guidance_state`, `guidance_at` | Whether North Star was asked once research resolved. |
+
+### How the twins read it
+
+One read tool, `read_logstream`, on the dashboard. Both twins have it. It reads and does nothing else, and it never returns the pay fields.
+
+- **Research Twin, for routing a fault to research.** Logstream opens the job (it is pushed to the research queue with the incidents in its context). When Research Twin works that job it calls `read_logstream` with the fault's signature and gets every incident of that fault: when each happened, how each closed and how long recovery took. That is the cause history it was asked to analyse. It writes its finding on the job as it does for any job.
+- **North Star, for guidance.** When the job resolves, Logstream asks North Star once, through North Star's own front door, for a recommendation. North Star calls `read_logstream` with no arguments to see what has crossed a threshold, what was done about each crossing and which faults are close to the line, and with a signature when it wants one fault's history. It recommends. It sets no tag and edits no card.
+
+### Empty reads
+
+From 10 Oct the Daily Doc Rotator writes one `empty_read_check` event every night: how many channel docs it read and how many came back with no content. A clean night is written too. `read_logstream` shows the running count. Nothing decides on it: GNER stays a candidate, and whether it becomes a recorded pattern is for the re-tune around 9 Nov, with these counts in hand.

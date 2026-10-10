@@ -162,6 +162,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'read_media_doctrine',
         // 2026-10-09: where the vFarm stage gates and the pilot offer stand (7S0O). A read.
         'get_vfarm_gates',
+        // 2026-10-10: recurring faults and what was done about them, for guidance on a Logstream job.
+        'read_logstream',
       ]),
     },
     {
@@ -171,6 +173,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       tools: new Set([
         'find_records', 'write_research_finding', 'write_commercial_card_fields', 'compute_lane_state',
         'queue_followup_research', 'update_watched_client_question', 'create_client_report_doc',
+        // 2026-10-10: a fault's own history, read before writing the finding on a Logstream job.
+        'read_logstream',
       ]),
     },
     {

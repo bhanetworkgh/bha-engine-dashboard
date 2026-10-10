@@ -20,7 +20,8 @@
  *   - five workflows crossing is one outage alert and no new research;
  *   - a closed incident gets one patterns_evaluated row, judged only from the record;
  *   - North Star is asked for guidance once, only when the research job resolves;
- *   - person_confirmed and autopay_enabled are false on every row.
+ *   - person_confirmed and autopay_enabled are false on every row;
+ *   - empty reads are counted per run, and read_logstream gives the twins the overview and one fault's history.
  *
  * Run with:  npm run test:logstream   (needs a LOCAL DATABASE_URL)
  */
@@ -335,6 +336,42 @@ const hook = http.createServer((req, res) => {
 
   await query(`DELETE FROM engine_incidents WHERE natural_id LIKE $1`, [`INC-LSTEST-${T}-%`]);
   await query(`DELETE FROM engine_execution_runs WHERE workflow_id LIKE $1`, [`lstest-${T}-%`]);
+  // read_logstream: the twins' read. The overview, one fault's history, an unknown fault, and the empty-read count.
+  {
+    const { readLogstream } = req('mcp/logstreamTools.js');
+    const { record } = req('engineEvents.js');
+    await query(`DELETE FROM engine_events WHERE event_type = 'empty_read_check' AND subject_id LIKE 'lstest:%'`);
+    const before = await logstream.emptyReads();
+    await record({ event_type: 'empty_read_check', subject_id: `lstest:${T}:a`, detail: { reader: 'test', reads: 37, empty: 0, empty_subjects: [] }, dedupe_key: `lstest:${T}:a` });
+    await record({ event_type: 'empty_read_check', subject_id: `lstest:${T}:b`, detail: { reader: 'test', reads: 37, empty: 2, empty_subjects: ['x', 'y'] }, dedupe_key: `lstest:${T}:b` });
+    await record({ event_type: 'empty_read_check', subject_id: `lstest:${T}:b`, detail: { reader: 'test', reads: 37, empty: 2 }, dedupe_key: `lstest:${T}:b` });
+    const after = await logstream.emptyReads();
+    assert.equal(after.runs - before.runs, 2);
+    assert.equal(after.reads - before.reads, 74);
+    assert.equal(after.empty - before.empty, 2);
+    assert.equal(after.runs_with_empty - before.runs_with_empty, 1);
+    ok('empty reads are counted per run, a clean run included, and a repeated event is one run');
+
+    const over = await readLogstream.handler({}, { access: 'read' });
+    assert.equal(over.ok, true);
+    assert.ok(Array.isArray(over.rule) && over.rule.length >= 4);
+    assert.ok(over.crossings.some((c) => String(c.key).includes(String(T))));
+    assert.ok(over.faults.some((f) => String(f.signature).includes(String(T))));
+    assert.equal(over.empty_reads.runs, after.runs);
+    assert.ok(over.result_chars <= 20000 || over.truncated === true);
+    assert.equal('rows' in over, false);
+    const sig = over.faults.find((f) => String(f.signature).includes(String(T)) && !f.excluded_reason).signature;
+    const one = await readLogstream.handler({ signature: sig }, { access: 'read' });
+    assert.equal(one.ok, true);
+    assert.ok(one.total_incidents >= 1 && one.incidents.every((i) => i.signature === sig && Array.isArray(i.states) && i.states.includes('observed')));
+    assert.equal(JSON.stringify(one).includes('autopay'), false);
+    const none = await readLogstream.handler({ signature: `no such fault ${T}` }, { access: 'read' });
+    assert.equal(none.ok, false);
+    assert.equal(none.reason, 'no_such_fault');
+    await query(`DELETE FROM engine_events WHERE event_type = 'empty_read_check' AND subject_id LIKE 'lstest:%'`);
+    ok('read_logstream gives the overview, one fault\'s history, and a plain refusal for a fault it does not hold');
+  }
+
   await query(`DELETE FROM engine_logstream WHERE incident_id LIKE $1`, [`INC-LSTEST-${T}-%`]);
   await query(`DELETE FROM engine_logstream_triggers WHERE key LIKE $1 OR key LIKE $2 OR kind = 'shared_outage'`, [`%${T}%`, `lstest-${T}-%`]);
   await query(`DELETE FROM engine_rt_jobs WHERE fields->>'Opened By' = 'Logstream' AND fields->>'Question' LIKE $1`, [`%${T}%`]);

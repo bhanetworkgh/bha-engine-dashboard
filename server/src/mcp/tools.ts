@@ -34,6 +34,7 @@ import { REMINDER_WRITE_TOOLS } from './reminderTools';
 import { RESEARCH_TWIN_WRITE_TOOLS } from './researchTwinTools';
 import { CANDIDATE_WRITE_TOOLS } from './candidateTools';
 import { LANE_READ_TOOLS, LANE_WRITE_TOOLS } from './laneTools';
+import { LOGSTREAM_READ_TOOLS } from './logstreamTools';
 import { INCIDENT_WRITE_TOOLS } from './incidentTools';
 import { LOOP_WRITE_TOOLS } from './loopTools';
 import { INVENTORY_WRITE_TOOLS } from './inventoryTools';
@@ -913,6 +914,7 @@ export const TOOLS: ToolDefinition[] = [
   ...NORTH_STAR_TOOLS,
   // 2026-09-28: the weighted lane ranking North Star reads (Jason, #bha-north-star-twin).
   ...LANE_READ_TOOLS,
+  ...LOGSTREAM_READ_TOOLS,
   // 2026-10-09: the vFarm stage gates and 5-rack offer (7S0O).
   ...VFARM_GATE_READ_TOOLS,
   // The one that is not a read.
