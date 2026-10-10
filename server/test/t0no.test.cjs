@@ -95,8 +95,8 @@ ok('HTTP and MCP use the same canonical doctrineClaims resolver');
 
 const mediaSource = fs.readFileSync(path.join(root, 'src/screens/MediaTwin/index.tsx'), 'utf8');
 assert.match(mediaSource, /data\.resolved/);
-assert.match(mediaSource, /allowed_use\.media_twin/);
-assert.match(mediaSource, /fail_closed\.needs_evidence/);
-ok('Media Twin consumes the canonical resolved gate and renders publication hold');
+assert.match(mediaSource, /data\.publication_decisions/);
+assert.match(mediaSource, /d\.decision !== 'allowed' \|\| !d\.applicable/);
+ok('Media Twin consumes canonical doctrine plus the persisted publication decision and renders hold');
 
 console.log(`\n${passed} T0NO checks passed.`);

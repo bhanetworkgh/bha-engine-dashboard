@@ -107,6 +107,32 @@ curl -s https://dashboard.bhanetwork.org/api/engine/media-doctrine?doctrine_id=B
   -H "x-dashboard-key: $DASHBOARD_INBOUND_KEY"
 ```
 
+## Publication-decision trace (VRFK)
+
+T0NO says what the current evidence allows; it is not itself proof that a
+surface made a publication decision.  `VFAM.claim_publication_decision` is the
+append-only trace for that second step.  It uses the existing `engine.event.v1`
+store (`engine_events`), with adapter event type
+`vfam_claim_publication_decision` and the exact domain event name retained in
+`detail.event_name`.
+
+- **Write/read:** `POST` / `GET /api/engine/publication-decision`.
+- **Agent read:** `read_publication_decision`.
+- **Scope:** one `doctrine_id` + `claim_id` + `surface` (`media_twin`, `vfarm`
+  or `genie_ns`).
+- **Decision:** `allowed`, `hold` or `needs_evidence`.
+- **Retry identity:** `decision_id`, stored as the event `dedupe_key`.
+- **Evidence binding:** the event carries the doctrine version/change and an
+  exact seven-field T0NO snapshot. A caller cannot submit a decision that
+  contradicts the current resolver.
+- **Fail closed:** a missing event, changed doctrine version, contradictory
+  decision or unresolved evidence reads as `needs_evidence`; an old event is
+  never treated as current authority.
+
+Media Twin requires both a clear T0NO claim and a current applicable decision.
+No decision means hold. This trace never edits doctrine, claim state, config
+identity or evidence.
+
 ## Already there
 
 The current versions are recorded from the loop records as the first entries: **B93H v0.1**, **TSNR v0** and **OWLG v0.1**, each as ratified by Jason on 27–29 Sep. Your first post should amend one of them, so check the page for the version in force before you post.

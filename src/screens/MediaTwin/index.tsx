@@ -80,7 +80,8 @@ export default function MediaTwin() {
 function Doctrine({ data }: { data: DoctrineData }) {
   const s = data.summary;
   const gate = data.resolved;
-  const held = gate.claims.filter((c) => !c.allowed_use.media_twin || c.fail_closed.needs_evidence);
+  const trace = data.publication_decisions;
+  const held = trace.decisions.filter((d) => d.decision !== 'allowed' || !d.applicable);
   const [open, setOpen] = useState<string | null>(null);
   const paged = usePaged(data.changes, 'all');
   return (
@@ -96,11 +97,11 @@ function Doctrine({ data }: { data: DoctrineData }) {
             <p>NEEDS_EVIDENCE · no doctrine claim is in force. Do not render or publish.</p>
           ) : held.length ? (
             <p>
-              HOLD · {held.length} of {gate.claims.length} claim{gate.claims.length === 1 ? '' : 's'} fail publication.{' '}
-              {held.slice(0, 3).map((c) => `${c.label}: ${c.fail_closed.reason ?? c.evidence_publication_status}`).join(' · ')}
+              HOLD · {held.length} of {trace.counts.claims} claim{trace.counts.claims === 1 ? '' : 's'} lack a current applicable publication decision.{' '}
+              {held.slice(0, 3).map((d) => `${d.doctrine_id}:${d.claim_id}: ${d.reason}`).join(' · ')}
             </p>
           ) : (
-            <p>ALLOWED · all {gate.claims.length} resolved claim{gate.claims.length === 1 ? '' : 's'} permit Media Twin use.</p>
+            <p>ALLOWED · all {trace.counts.claims} resolved claim{trace.counts.claims === 1 ? '' : 's'} carry a current VFAM.claim_publication_decision for Media Twin.</p>
           )}
         </div>
       </Card>
