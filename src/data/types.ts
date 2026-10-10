@@ -4068,7 +4068,7 @@ export interface LogstreamTrigger {
   last_at: string | null;
   detected_at: string;
   action: 'research_job' | 'alert_person';
-  action_state: 'pending' | 'job_opened' | 'alerted' | 'suppressed_shared_outage' | 'failed';
+  action_state: 'pending' | 'job_opened' | 'alerted' | 'suppressed_shared_outage' | 'failed' | 'withdrawn';
   job_id: string | null;
   job_status: string | null;
   alert_channel: string | null;

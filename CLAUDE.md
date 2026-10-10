@@ -1979,6 +1979,10 @@ autopay, no pay wiring, no destructive automated action).
   first seen while it holds are `suppressed_shared_outage`. Each crossing is one
   row in `engine_logstream_triggers`, once per 7 days, and one
   `logstream_threshold_crossed` event.
+- **The rate rule leaves a guard's refusals out too** (10 Oct): a run whose
+  incident is excluded (matched on the incident's `execution_id`) is dropped
+  from both the runs and the failures. A refused ask throws on purpose, so
+  without this a door that refuses three asks reads as a failing workflow.
 - **Counted in nothing**: a workflow named `TEST …`, anything simulated (the
   name, or the `simulated` impact tag), and the step `Raise Refused Ask`. The
   rows are still written, with `excluded_reason`.
