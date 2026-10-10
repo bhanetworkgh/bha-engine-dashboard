@@ -61,6 +61,7 @@ import * as monitoringTwin from './monitoringTwin';
 import * as qualityAlert from './qualityAlert';
 import * as engineEvents from './engineEvents';
 import * as publicationDecision from './publicationDecision';
+import * as doctrineGap from './doctrineGap';
 import * as approvals from './approvals';
 import * as agentInventory from './agentInventory';
 import * as candidateActions from './candidateActions';
@@ -534,6 +535,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         detail: `${JSON.stringify(r.filters).slice(0, 200)} → ${r.counts.claims_returned} of ${r.counts.claims_in_force} claim(s)${r.warnings.length ? `, ${r.warnings.length} warning(s)` : ''}`,
         ms: Date.now() - t0,
       });
+      return send(res, 200, { ok: true, ...r });
+    }
+    /** SE8L: the shared RT/NS/Monitoring read over engine.event.v1 observations. */
+    if (p === '/api/engine/doctrine-gaps' && method === 'GET') {
+      const hours = Number(url.searchParams.get('hours') ?? 24);
+      const r = await doctrineGap.summary(Number.isFinite(hours) ? hours : 24);
+      await mirror.logWrite({ endpoint, kind: 'engine_events', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `${r.counts.observations} doctrine-gap observation(s), ${r.counts.groups} group(s)`, ms: Date.now() - t0 });
       return send(res, 200, { ok: true, ...r });
     }
     /**
@@ -2154,6 +2162,7 @@ async function boot(): Promise<void> {
     monitoringTwin.startWatching();
     qualityAlert.startWatching();
     engineEvents.startSweeping();
+    doctrineGap.startWatching();
     approvals.startSweeping();
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();

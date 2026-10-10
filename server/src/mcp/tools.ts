@@ -22,6 +22,7 @@ import * as bharag from '../bharag';
 import * as recovery from '../recovery';
 import * as systemFeeds from '../systemFeeds';
 import * as publicationDecision from '../publicationDecision';
+import * as doctrineGap from '../doctrineGap';
 import * as monitoringTwin from '../monitoringTwin';
 import * as approvals from '../approvals';
 import { currentAgent } from './caller';
@@ -891,6 +892,25 @@ const readPublicationDecision: ToolDefinition = {
   },
 };
 
+/** Shared, read-only doctrine-gap aggregation for RT, North Star and Monitoring. */
+const readDoctrineGapSummary: ToolDefinition = {
+  name: 'read_doctrine_gap_summary',
+  description: 'Read canonical doctrine-gap observations from engine.event.v1, grouped by T0NO claim and surface. This is analysis/guidance only: it never changes doctrine, publication decisions, cards or loops.',
+  inputSchema: {
+    type: 'object',
+    properties: { hours: { type: 'number', description: 'Lookback in hours; default 24, capped at 720.' } },
+    additionalProperties: false,
+  },
+  annotations: { ...READS_DB, title: 'Doctrine evidence gaps and recurrence' },
+  handler: async (args, deps) => {
+    const t0 = Date.now();
+    const hours = typeof args.hours === 'number' ? args.hours : 24;
+    const out = await doctrineGap.summary(hours);
+    await mirror.logWrite({ endpoint: 'mcp:read_doctrine_gap_summary', kind: 'engine_events', method: 'MCP', key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET', outcome: 'read', detail: `${out.counts.observations} observation(s), ${out.counts.groups} group(s)`, ms: Date.now() - t0 });
+    return out;
+  },
+};
+
 const readMonitoringTwin: ToolDefinition = {
   name: 'read_monitoring_twin',
   description:
@@ -939,6 +959,7 @@ export const TOOLS: ToolDefinition[] = [
   // 2026-10-01: the vFarm doctrine, the same read as GET /api/engine/media-doctrine (T0NO).
   readMediaDoctrine,
   readPublicationDecision,
+  readDoctrineGapSummary,
   // 2026-10-01: the Monitoring Twin's judgement of every vFarm farm.
   readMonitoringTwin,
   // 2026-09-24: what the Bays agent read through n8n tools of its own.
