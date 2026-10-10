@@ -1,15 +1,18 @@
 import { useSearchParams } from 'react-router-dom';
 import { useCallback, useEffect, useState } from 'react';
 import { useData } from '../../app/useData';
-import { getVfarmLeads, getVfarmLive, type VfarmLead, type VfarmLeadsData } from '../../data';
+import { getVfarmGates, getVfarmLeads, getVfarmLive, type VfarmLead, type VfarmLeadsData } from '../../data';
 import { useReplayKey, LoadFailed, Loading, PageHeader, Tabs } from '../../components/ui';
 import EarlyAccess from './EarlyAccess';
 import { Alerts, Devices, Overview, reporting } from './Live';
+import { Gates } from './Gates';
 
 /** The record kinds this page is built from: a change to one re-reads it (live since 2026-09-23). */
 const VFARM_KINDS = ['vfarm_leads'] as const;
 /** vFarm's own pushes (2026-09-29): its snapshot and its alert fires. */
 const LIVE_KINDS = ['vfarm_state', 'vfarm_alerts'] as const;
+/** The stage gates and the pilot offer (2026-10-09, 7S0O). */
+const GATE_KINDS = ['vfarm_gates'] as const;
 
 /**
  * vFarm: a placeholder with a real tab beside it.
@@ -38,7 +41,8 @@ const LIVE_KINDS = ['vfarm_state', 'vfarm_alerts'] as const;
  * it — all three from what vFarm itself pushes (see Live.tsx). Until the first
  * snapshot each says so and names who wires it; nothing is drawn in its place.
  */
-const TABS = ['Overview', 'Devices', 'Alerts', 'Early Access'] as const;
+/* 9 Oct 2026 (7S0O): Gates shows the Stage 1, Stage 2 and 5-rack offer records. It reads; the engine writes. */
+const TABS = ['Overview', 'Devices', 'Alerts', 'Gates', 'Early Access'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function VFarm() {
@@ -47,7 +51,7 @@ export default function VFarm() {
   const [params] = useSearchParams();
   const [tab, setTab] = useState<Tab>(() => {
     const t = params.get('tab');
-    return t === 'early-access' ? 'Early Access' : t === 'devices' ? 'Devices' : t === 'alerts' ? 'Alerts' : 'Overview';
+    return t === 'early-access' ? 'Early Access' : t === 'devices' ? 'Devices' : t === 'alerts' ? 'Alerts' : t === 'gates' ? 'Gates' : 'Overview';
   });
   /* Switching any of these re-runs the page's count-ups and bars (27 Sep 2026). */
   useReplayKey(`${tab}`);
@@ -55,6 +59,7 @@ export default function VFarm() {
   const { status, data: loaded, error } = useData(getVfarmLeads, [], { kinds: VFARM_KINDS });
   const live = useData(getVfarmLive, [], { kinds: LIVE_KINDS });
   const liveData = live.data;
+  const gates = useData(getVfarmGates, [], { kinds: GATE_KINDS });
   const quiet = liveData ? liveData.devices.filter((d) => !d.gone_at && !reporting(d)).length : 0;
 
   // A fresh read replaces an optimistic copy: the server has the edit by then,
@@ -104,7 +109,15 @@ export default function VFarm() {
         }
       />
 
-      {tab !== 'Early Access' ? (
+      {tab === 'Gates' ? (
+        gates.status === 'error' && !gates.data ? (
+          <LoadFailed error={gates.error} />
+        ) : !gates.data ? (
+          <Loading />
+        ) : (
+          <Gates data={gates.data} />
+        )
+      ) : tab !== 'Early Access' ? (
         live.status === 'loading' && !liveData ? (
           <Loading />
         ) : live.status === 'error' && !liveData ? (

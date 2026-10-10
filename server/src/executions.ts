@@ -55,6 +55,7 @@ import type {
   MonthCoverage,
   MonthlyBoundary,
 } from '../../src/data/types';
+import * as timers from './timers';
 
 /** When the last poll finished, for the line every page prints. */
 const SYNC_AT = 'executions.synced_at';
@@ -392,7 +393,7 @@ export function startPolling(): void {
   // minutes; a failed check is logged and never stops the poll.
   timer = setInterval(
     () =>
-      void runSync()
+      void (timers.beat('executions poll'), runSync())
         .catch((e) => console.error('executions poll failed', e))
         .then(() => quota.check())
         .catch((e) => console.error('quota check failed', e)),

@@ -6,8 +6,8 @@ import { when } from './parts';
 /**
  * Approvals (2026-10-04, Destiny — LOOP-1790969736142-8185).
  *
- * Every time an agent asked to share a doc, give Drive access or delete a
- * record. An agent does none of those on its own: the request is held here, a
+ * Every time an agent asked to share a doc, close a doc's public link, give
+ * Drive access or delete a record. An agent does none of those on its own: the request is held here, a
  * card is posted in Slack, and only an approver's click decides.
  *
  * Colour marks only what needs somebody: a request still waiting, a card
@@ -19,6 +19,7 @@ import { when } from './parts';
 
 const TOOL_WORDS: Record<string, string> = {
   share_doc: 'share a doc',
+  unshare_doc: 'close a public link',
   grant_drive_access: 'give Drive access',
   delete_record: 'delete a record',
 };

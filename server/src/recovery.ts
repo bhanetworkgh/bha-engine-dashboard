@@ -52,6 +52,7 @@ import type {
   RecoverySkip,
   RecoveryStatus,
 } from '../../src/data/types';
+import * as timers from './timers';
 
 /* ---------------------------------------------------------------- config */
 
@@ -826,7 +827,7 @@ export function runTick(): Promise<TickResult> {
 
 export function startWatching(): void {
   if (timer) return;
-  timer = setInterval(() => void runTick(), TICK_MS);
+  timer = setInterval(() => (timers.beat('recovery watcher'), void runTick()), TICK_MS);
   timer.unref?.();
   // A first look shortly after boot, so a deploy mid-outage does not wait five minutes.
   const first = setTimeout(() => void runTick(), 60_000);

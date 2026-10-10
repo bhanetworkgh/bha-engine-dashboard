@@ -450,6 +450,8 @@ function LeadAnswers({ lead, onClose, onMove }: { lead: VfarmLead; onClose: () =
         <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
           <span className="text-dim">
             Stage {lead.stage ?? 1} · {lead.stage === 2 ? 'serious buyer, in the follow-up path' : 'Form A, interest only'}
+            {/* Internal only (2026-10-09, 7S0O): the person who signed up is never shown this. */}
+            {lead.pilot_offers && lead.pilot_offers.length > 0 ? ` · tied to pilot offer ${lead.pilot_offers.map((o) => `${o.id} (${o.status})`).join(', ')}` : ''}
           </span>
           <input
             className="input h-8 min-w-[16ch] flex-1 text-[12.5px]"
