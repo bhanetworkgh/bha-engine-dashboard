@@ -37,6 +37,7 @@ import { LANE_READ_TOOLS, LANE_WRITE_TOOLS } from './laneTools';
 import { LOGSTREAM_READ_TOOLS } from './logstreamTools';
 import { SPEND_READ_TOOLS } from './spendTools';
 import { INCIDENT_WRITE_TOOLS } from './incidentTools';
+import { SIGNAL_WRITE_TOOLS } from './signalTools';
 import { LOOP_WRITE_TOOLS } from './loopTools';
 import { INVENTORY_WRITE_TOOLS } from './inventoryTools';
 import { VFARM_GATE_READ_TOOLS, VFARM_GATE_WRITE_TOOLS } from './vfarmGateTools';
@@ -931,7 +932,7 @@ export const TOOLS: ToolDefinition[] = [
  * tool a client can see is a tool a model will try.
  */
 function toolsFor(access: 'read' | 'write'): ToolDefinition[] {
-  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...REMINDER_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS, ...LANE_WRITE_TOOLS, ...INCIDENT_WRITE_TOOLS, ...INVENTORY_WRITE_TOOLS, ...VFARM_GATE_WRITE_TOOLS, ...LOOP_WRITE_TOOLS] : TOOLS;
+  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...REMINDER_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS, ...LANE_WRITE_TOOLS, ...INCIDENT_WRITE_TOOLS, ...INVENTORY_WRITE_TOOLS, ...VFARM_GATE_WRITE_TOOLS, ...LOOP_WRITE_TOOLS, ...SIGNAL_WRITE_TOOLS] : TOOLS;
 }
 
 /**

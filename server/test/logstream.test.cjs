@@ -135,6 +135,8 @@ const hook = http.createServer((req, res) => {
   process.env.SLACK_API_URL = `http://127.0.0.1:${port}`;
   process.env.SLACK_BAYS_BOT_TOKEN = 'xoxb-test';
   process.env.QUOTA_ALERT_CHANNEL = 'C0ALERTS001';
+  // Research jobs go through the research-signal guard, which reads the model credit first.
+  const creditStandIn = await require('./_credit.cjs').startCredit();
   const req = (m) => require(path.join(DIST, 'server/src', m));
   const logstream = req('logstream.js');
   replay(logstream);
@@ -142,6 +144,8 @@ const hook = http.createServer((req, res) => {
   const { migrate } = req('migrations.js');
   const { query } = req('pg.js');
   await migrate();
+  // The guard's daily budget is counted from this table; a local run starts it clean.
+  await query(`DELETE FROM engine_research_signals`);
   const T = Date.now();
   const WF = `LS Test Flow ${T}`;
   // A clean window: nothing else in this database may cross a threshold while the test runs.

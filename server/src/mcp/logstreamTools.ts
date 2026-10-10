@@ -23,6 +23,7 @@
 import { query } from '../pg';
 import * as mirror from '../mirror';
 import * as logstream from '../logstream';
+import * as researchSignals from '../researchSignals';
 import type { ToolDefinition } from './tools';
 
 const DEFAULT_CHARS = 20_000;
@@ -45,6 +46,15 @@ function fit(out: Dict, keys: string[], maxChars: number): Dict {
   return cut
     ? { ...out, truncated: true, result_chars: chars, note: `Cut to fit ${maxChars} characters. Do not call again with the same arguments; narrow with signature or workflow, or raise max_chars (at most ${MAX_CHARS}).` }
     : { ...out, truncated: false, result_chars: chars };
+}
+
+/** The research-signal guard in brief: today's budget, the credit read, and what is waiting. */
+async function signalsBrief(): Promise<Dict> {
+  const r = await researchSignals.read({ limit: 60 });
+  const all = list(r.signals);
+  const waiting = all.filter((s) => ['held_budget', 'held_credit', 'failed'].includes(String(s.state)));
+  const brief = (s: Dict) => ({ trigger: s.trigger_code, source: s.source, lane: s.lane, card_id: s.card_id, question: String(s.question ?? '').slice(0, 200), state: s.state, reason: s.reason, job_id: s.job_id, job_status: s.job_status, detected_at: s.detected_at });
+  return { rule: (r.rule as Dict).words, not_built: (r.rule as Dict).not_built, today: r.today, credit: r.credit, by_state: r.by_state, waiting: waiting.slice(0, 20).map(brief), waiting_total: waiting.length, newest: all.filter((s) => !waiting.includes(s)).slice(0, 10).map(brief) };
 }
 
 export const readLogstream: ToolDefinition = {
@@ -129,6 +139,7 @@ export const readLogstream: ToolDefinition = {
         faults,
         pattern_adherence: page.adherence,
         empty_reads: await logstream.emptyReads(),
+        research_signals: await signalsBrief(),
         notes: page.notes,
         page_url: `${(process.env.PUBLIC_DASHBOARD_URL || 'https://dashboard.bhanetwork.org').replace(/\/$/, '')}/logstream`,
       },

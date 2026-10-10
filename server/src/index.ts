@@ -61,6 +61,7 @@ import * as dataGovernance from './dataGovernance';
 import * as monitoringTwin from './monitoringTwin';
 import * as qualityAlert from './qualityAlert';
 import * as logstream from './logstream';
+import * as researchSignals from './researchSignals';
 import * as creditOut from './creditOut';
 import * as engineEvents from './engineEvents';
 import * as vfarmGates from './vfarmGates';
@@ -781,6 +782,19 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * read from what is held and calling nothing. Above the kind routes,
      * because `recovery/plan` would otherwise read as kind + row id.
      */
+    /**
+     * Research signals (2026-10-11, Q9CR): what is waiting on the daily budget
+     * or on credit, for Monday's research digest. GET, read only. `all=1`
+     * returns the newest signals in every state.
+     */
+    if (p === '/api/engine/research-signals') {
+      if (method !== 'GET') throw new HttpError(405, 'GET the signals. The pass runs on its own clock, or through the MCP tool run_research_signals.');
+      const all = new URL(req.url ?? '', 'http://x').searchParams.get('all') === '1';
+      const r = await researchSignals.read({ held_only: !all, limit: 200 });
+      await mirror.logWrite({ endpoint, kind: 'research_signals', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `${all ? 'all' : 'waiting'}: ${(r.signals as unknown[]).length} signal(s)`, ms: Date.now() - t0 });
+      return send(res, 200, { ok: true, ...r });
+    }
+
     if (p === '/api/engine/recovery/plan') {
       if (method !== 'GET') throw new HttpError(405, 'GET the plan. It calls nothing; the watcher itself runs on its own clock.');
       const plan = await recovery.plan();
@@ -2160,6 +2174,7 @@ async function boot(): Promise<void> {
     approvals.startSweeping();
     vfarmGateAuto.startSweeping();
     logstream.startSweeping();
+    researchSignals.startSweeping();
     creditOut.startWatching();
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();

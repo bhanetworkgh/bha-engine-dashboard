@@ -62,12 +62,12 @@
  * at `failed` with the reason and is tried again on every pass.
  */
 import { query, withTransaction } from './pg';
-import * as engineWrite from './engineWrite';
 import * as engineEvents from './engineEvents';
 import * as slack from './slack';
 import * as quota from './quota';
 import * as timers from './timers';
 import * as n8n from './n8n';
+import * as researchSignals from './researchSignals';
 
 export const RULE = {
   window_days: 7,
@@ -427,7 +427,7 @@ export async function sweep(): Promise<{ rows_written: number; crossings: number
       });
     }
 
-    const due = await query<TriggerRow>(`SELECT id::text, trigger_id, kind, key, action_state, attempts FROM engine_logstream_triggers WHERE action_state IN ('pending', 'failed') AND detected_at > now() - ($1 || ' days')::interval ORDER BY id`, [String(RULE.window_days)]);
+    const due = await query<TriggerRow>(`SELECT id::text, trigger_id, kind, key, action_state, attempts FROM engine_logstream_triggers WHERE action_state IN ('pending', 'failed', 'held') AND detected_at > now() - ($1 || ' days')::interval ORDER BY id`, [String(RULE.window_days)]);
     const links = due.rows.length ? await linkedLanes() : new Map<string, string[]>();
     for (const row of due.rows) {
       const c = byKey.get(`${row.kind}|${row.key}`);
@@ -435,16 +435,28 @@ export async function sweep(): Promise<{ rows_written: number; crossings: number
       try {
         if (row.kind === 'signature_research' || row.kind === 'workflow_rate') {
           const { question, context } = jobText(c);
-          const now = new Date().toISOString();
-          const jobId = mint('JOB');
           const lane = c.lane_id ? (links.get(WORK_LANE[c.lane_id] ?? c.lane_id) ?? [])[0] ?? '' : '';
-          const res = await engineWrite.postRecord(
-            'rt-jobs',
-            { created_time: now, fields: { 'Job ID': jobId, Question: question, Context: context.slice(0, 6000), 'Card ID': '', Lane: lane, Status: 'Pending', Attempts: 0, 'Opened By': 'Logstream', 'Opened At': now } },
-            { endpoint: 'logstream:trigger', method: 'INTERNAL', key_label: 'server', t0: Date.now(), note: `${row.trigger_id}: ${row.kind} ${row.key}` },
-          );
-          const job = res.natural_id ?? jobId;
-          await query(`UPDATE engine_logstream_triggers SET action_state = 'job_opened', job_id = $2, error = NULL, attempts = attempts + 1, acted_at = now() WHERE id = $1`, [row.id, job]);
+          // One job per signal and the daily budget (11 Oct 2026): the guard every automatic research
+          // job goes through. A fault that already has an open job adds to it; over the budget, or with
+          // the credit low, the crossing waits as `held` and is tried again on every pass.
+          const g = await researchSignals.open({
+            trigger: 'T4',
+            key: row.kind === 'workflow_rate' ? `workflow_rate:${c.key}` : `fault:${c.key}`,
+            source: 'Logstream',
+            ref: row.trigger_id,
+            lane: lane || null,
+            question,
+            context,
+            rearm_days: researchSignals.RULE.rearm_fault_days,
+            detail: { trigger_id: row.trigger_id, kind: row.kind, n: c.n, runs: c.runs, failures: c.failures },
+          });
+          if (g.state === 'failed') throw new Error(g.reason ?? 'the research job was not opened');
+          if (g.state === 'held_budget' || g.state === 'held_credit' || g.state === 'not_reopened') {
+            await query(`UPDATE engine_logstream_triggers SET action_state = $2, error = $3, attempts = attempts + 1 WHERE id = $1`, [row.id, g.state === 'not_reopened' && !g.wait ? 'not_reopened' : 'held', (g.reason ?? '').slice(0, 500)]);
+            continue;
+          }
+          const job = g.job_id as string;
+          await query(`UPDATE engine_logstream_triggers SET action_state = 'job_opened', job_id = $2, error = $3, attempts = attempts + 1, acted_at = now() WHERE id = $1`, [row.id, job, g.state === 'added_to_job' ? g.reason : null]);
           // The pattern's incidents each get a row saying research was opened for them. Append-only.
           for (const incidentId of c.incident_ids) {
             await query(
@@ -532,7 +544,14 @@ export async function requestGuidance(): Promise<{ asked: number; failed: number
   );
   if (!due.rows.length) return out;
   const links = await linkedLanes();
+  // One job can sit under two crossings (a fault still holding a week later adds to the open job).
+  // North Star is asked once per job, so a crossing whose job was already asked about is marked as asked.
+  const askedJobs = new Set((await query<{ job_id: string }>(`SELECT DISTINCT job_id FROM engine_logstream_triggers WHERE guidance_state = 'asked' AND job_id IS NOT NULL`)).rows.map((x) => x.job_id));
   for (const t of due.rows) {
+    if (askedJobs.has(t.job_id)) {
+      await query(`UPDATE engine_logstream_triggers SET guidance_state = 'asked', guidance_error = 'asked once for this job, under an earlier crossing', guidance_at = now() WHERE id = $1`, [t.id]);
+      continue;
+    }
     if (t.status !== 'Resolved' || !t.finding) {
       await query(`UPDATE engine_logstream_triggers SET guidance_state = 'no_finding', guidance_error = $2, guidance_at = now() WHERE id = $1`, [t.id, t.status === 'Resolved' ? 'the job is Resolved and carries no finding text' : 'the research job was capped and needs a person; there is no finding to turn into guidance']);
       out.no_finding++;
@@ -566,6 +585,7 @@ export async function requestGuidance(): Promise<{ asked: number; failed: number
       }
       if (status < 200 || status >= 300 || body.ok !== true) throw new Error(`n8n answered ${status} at ${GUIDANCE_PATH}: ${body.error ?? (text.slice(0, 200) || 'no body')}`);
       await query(`UPDATE engine_logstream_triggers SET guidance_state = 'asked', guidance_error = NULL, guidance_at = now() WHERE id = $1`, [t.id]);
+      askedJobs.add(t.job_id);
       await engineEvents.record({ event_type: 'logstream_guidance_requested', subject_id: t.trigger_id, lane: t.lane_id, actor: 'Logstream', detail: { job_id: t.job_id, channel: GUIDANCE_CHANNEL, confidence: t.confidence }, dedupe_key: `logstream_guidance:${t.trigger_id}` });
       out.asked++;
     } catch (e) {
@@ -668,6 +688,7 @@ export async function read(): Promise<Record<string, unknown>> {
     rows_cap: 300,
     adherence: adherence.rows,
     patterns: PATTERNS,
+    research_signals: await researchSignals.read({ limit: 200 }),
     notes: [
       'A read and analysis record. Nothing here pays anybody: person_confirmed and autopay_enabled are false on every row, and nothing sets or reads them.',
       'All Logstream can do is open a research job, post an alert, and ask North Star for guidance once research resolves. It never closes, retries, edits or deletes.',
