@@ -1272,6 +1272,24 @@ one rule for every sharing change has no exception to remember. Unlike
 file. Audited on `engine_mcp_writes` (kind `google_drive`). `npm run
 test:approvals` pins it (checks 13 to 15).
 
+**Outbound Slack has a destination guard** (2026-10-10, Destiny — agent maturity
+re-score). `send_nudge` and `post_file` (`server/src/mcp/slackTools.ts`) send at
+once to a person with a Builder Profile or to an approver, which is every DM
+Bays sends day to day. A DM to anyone else, **on an agent token only**, waits on
+the same Approve / Deny card `share_doc` uses (`unknownRecipients`,
+`approvals.DESTINATION_GATED_TOOLS`); a channel target is not held. Decided in
+code, never in the prompt. A dry run says `would_wait_for_approval`. `npm run
+test:approvals` pins it (check 16). `Bays — Slack Send`, the workflow tool the
+digests post with, is not behind it.
+
+**Tokens and tool calls are on every ask** (2026-10-10). The three Agent
+Delivery workflows write `Prompt Tokens`, `Completion Tokens`, `Total Tokens`,
+`Tool Call Count` and `Tool Calls` (tool names in order, ` > ` between them) on
+each ask row, read from the agent node's own output and null when it gave none.
+`get_agent_spend` (`server/src/mcp/spendTools.ts`, read, both connections) adds
+them up per agent: tokens, never money, because no price is stored. A scheduled
+task run and a failed run carry none and are counted apart, never as nought.
+
 **`close_incidents`, the Engine health close over MCP** (decision 2026-10-01,
 Destiny). `server/src/mcp/incidentTools.ts`, write connection only, calling
 `health.closeIncidents` — the function the page's close button calls — so the

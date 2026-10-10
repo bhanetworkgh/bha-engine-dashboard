@@ -422,6 +422,42 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.addr
     ok('an agent’s unshare_doc waits for a card, and Approve closes the link once');
   }
 
+  /* 16 — the Slack destination guard: a DM to a known builder goes out, one to anyone else waits for a person */
+  {
+    const known = `UKNOWN${String(T).slice(-6)}`;
+    const stranger = `USTRAN${String(T).slice(-6)}`;
+    await query(`INSERT INTO engine_builder_profiles (natural_id, fields, source, first_seen_at, updated_at) VALUES ($1, $2::jsonb, 'engine', now(), now())`, [known, JSON.stringify({ user_id: known, name: 'Guard Test Builder' })]);
+    let p = seen.posts.length;
+    const direct = await asAgent('send_nudge', { recipients: [known, JASON], text: 'Guard test: known people.' });
+    assert.equal(direct.ok, true, JSON.stringify(direct));
+    assert.deepEqual(seen.posts.slice(p).map((x) => x.channel), [known, JASON], 'known people are sent to at once, with no card');
+    p = seen.posts.length;
+    const dry = await asAgent('send_nudge', { recipients: [stranger], text: 'Guard test.', dry_run: true });
+    assert.deepEqual(dry.not_in_builder_profiles, [stranger]);
+    assert.equal(dry.would_wait_for_approval, true);
+    assert.equal(seen.posts.length, p, 'a dry run posts nothing');
+    const held = await asAgent('send_nudge', { recipients: [known, stranger], text: `Guard test ${T}: a stranger.` });
+    assert.equal(held.ok, false);
+    assert.equal(held.reason, 'awaiting_approval', JSON.stringify(held));
+    assert.equal(seen.posts.length, p + 1, 'only the card is posted');
+    assert.ok(!seen.posts.slice(p).some((x) => x.channel === stranger || x.channel === known), 'nobody is sent the DM before a person approves');
+    assert.ok(seen.posts[p].blocks[0].text.text.includes(`<@${stranger}>`));
+    const done = await approvals.decide({ approval_id: held.approval_id, decision: 'approve', user_id: DESTINY });
+    assert.equal(done.body.ok, true, JSON.stringify(done.body));
+    assert.deepEqual(seen.posts.filter((x) => [known, stranger].includes(x.channel) && x.text && x.text.includes(`Guard test ${T}`)).map((x) => x.channel), [known, stranger], 'Approve sends it once to each');
+    p = seen.posts.length;
+    const person = await asPerson('send_nudge', { recipients: [stranger], text: 'Guard test: a person asking.' });
+    assert.equal(person.ok, true);
+    assert.equal(seen.posts.length, p + 1, 'a person on the connector is not gated');
+    p = seen.posts.length;
+    const file = await asAgent('post_file', { channel_id: stranger, title: `Guard ${T}`, content: 'x' });
+    assert.equal(file.reason, 'awaiting_approval', JSON.stringify(file));
+    await approvals.decide({ approval_id: file.approval_id, decision: 'deny', user_id: JASON });
+    await query(`DELETE FROM engine_builder_profiles WHERE natural_id = $1`, [known]);
+    await query(`DELETE FROM engine_approvals WHERE target LIKE $1`, [`%${stranger}%`]);
+    ok('send_nudge and post_file: a known builder is sent to at once, anyone else waits for Approve, and a person is never gated');
+  }
+
   /* 12 — unknown id */
   {
     const r = await approvals.decide({ approval_id: 'APR-0-NONE', decision: 'approve', user_id: DESTINY });

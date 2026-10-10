@@ -35,6 +35,7 @@ import { RESEARCH_TWIN_WRITE_TOOLS } from './researchTwinTools';
 import { CANDIDATE_WRITE_TOOLS } from './candidateTools';
 import { LANE_READ_TOOLS, LANE_WRITE_TOOLS } from './laneTools';
 import { LOGSTREAM_READ_TOOLS } from './logstreamTools';
+import { SPEND_READ_TOOLS } from './spendTools';
 import { INCIDENT_WRITE_TOOLS } from './incidentTools';
 import { LOOP_WRITE_TOOLS } from './loopTools';
 import { INVENTORY_WRITE_TOOLS } from './inventoryTools';
@@ -915,6 +916,8 @@ export const TOOLS: ToolDefinition[] = [
   // 2026-09-28: the weighted lane ranking North Star reads (Jason, #bha-north-star-twin).
   ...LANE_READ_TOOLS,
   ...LOGSTREAM_READ_TOOLS,
+  // 2026-10-10: tokens and tool calls per agent, from the ask ledgers.
+  ...SPEND_READ_TOOLS,
   // 2026-10-09: the vFarm stage gates and 5-rack offer (7S0O).
   ...VFARM_GATE_READ_TOOLS,
   // The one that is not a read.
@@ -957,7 +960,7 @@ export function toolByName(name: string, access: 'read' | 'write' = 'read'): Too
  * way, whatever a stored row says.
  */
 approvals.setExecutor(async (tool, args) => {
-  if (!approvals.GATED_TOOLS.includes(tool)) return { ok: false, reason: 'not_a_gated_tool', message: `${tool} is not an action that runs on approval.` };
+  if (!approvals.GATED_TOOLS.includes(tool) && !approvals.DESTINATION_GATED_TOOLS.includes(tool)) return { ok: false, reason: 'not_a_gated_tool', message: `${tool} is not an action that runs on approval.` };
   const t = toolByName(tool, 'write');
   if (!t) return { ok: false, reason: 'no_such_tool', message: `${tool} is not registered on the write connection.` };
   return (await t.handler(args, { access: 'write', startedAt: new Date().toISOString(), dispatch: async () => ({ status: 404, body: null }), agent: currentAgent() })) as Record<string, unknown>;
