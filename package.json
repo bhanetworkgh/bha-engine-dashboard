@@ -29,6 +29,7 @@
     "test:lane-ranking": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/lane-ranking.test.cjs",
     "test:client-report": "npm run build:server --silent && node server/test/client-report.test.cjs",
     "test:move-loop": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/move-loop.test.cjs",
+    "test:credit-out": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/credit-out.test.cjs",
     "test:logstream": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/logstream.test.cjs",
     "test:scheduled-runs": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/scheduled-runs.test.cjs",
     "test:vfarm-gates": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/vfarm-gates.test.cjs && node --no-warnings=ExperimentalWarning server/test/vfarm-gate-auto.test.cjs"

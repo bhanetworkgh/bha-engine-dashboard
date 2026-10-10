@@ -2021,6 +2021,26 @@ autopay, no pay wiring, no destructive automated action).
   test:logstream` pins the rule against history and the writer and trigger
   against a local database.
 
+**The credit-out alert** (2026-10-10, Destiny). `server/src/creditOut.ts`, a
+check every minute, no table of its own (its state is `meta`
+`credit_out.state`). On 10 Oct the OpenRouter credit ran out between two of
+n8n's balance checks and 49 eval cases and a real ask failed with nobody told.
+The n8n check (`Engine — OpenRouter Credit Alert`, **hourly** from the same
+day, was every 3 hours) says credit is getting low; this says a run has
+already failed on it. It counts, over what this database was handed in the
+last 15 minutes: an incident classed `BILLING_QUOTA` or carrying a credit
+refusal, a **Failed** ask to Bays, North Star or Research Twin whose `Error`
+is one, and an eval result whose `Checks` carry one. The first found posts
+**one** alert in the engine alerts channel as Bays, tagging
+`QUOTA_ALERT_MENTIONS`, and writes one `openrouter_credit_out` event. **One
+alert per episode**: more failures post nothing, and the episode ends after 60
+minutes with none. An alert Slack refuses is kept as failed with the reason
+and tried again every minute. It reads and posts; it retries, closes and
+changes nothing. An Answered ask that only talks about credits is not a
+failure. `Agent Evals — Runner` reads the balance before a run and does not
+start under $15 (an estimate), and stops at the first answer that fails on
+credit rather than scoring it. `npm run test:credit-out` pins the watcher.
+
 ## 5. Design
 
 **Feel:** a modern consumer dashboard in the manner of Apple's account pages.
@@ -2577,7 +2597,7 @@ engine has on one page, last 7 days, four tabs. `GET /api/scheduled-runs`,
   miss.
 - **Workflows.** n8n runs with mode `trigger`, from `engine_execution_runs`.
 - **Reminders.** `engine_scheduled_posts`; a past one is "handed to Slack".
-- **Background timers.** This process's nine timers (`server/src/timers.ts`,
+- **Background timers.** This process's ten timers (`server/src/timers.ts`,
   `timers.beat(name)` at the top of each tick): last tick and ticks since the
   process started, in memory. One line per timer, never a row per tick.
 - **Colour** only on never started, started and not finished, and failed.

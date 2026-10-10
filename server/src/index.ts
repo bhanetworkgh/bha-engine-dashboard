@@ -61,6 +61,7 @@ import * as dataGovernance from './dataGovernance';
 import * as monitoringTwin from './monitoringTwin';
 import * as qualityAlert from './qualityAlert';
 import * as logstream from './logstream';
+import * as creditOut from './creditOut';
 import * as engineEvents from './engineEvents';
 import * as vfarmGates from './vfarmGates';
 import * as vfarmGateAuto from './vfarmGateAuto';
@@ -2159,6 +2160,7 @@ async function boot(): Promise<void> {
     approvals.startSweeping();
     vfarmGateAuto.startSweeping();
     logstream.startSweeping();
+    creditOut.startWatching();
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();
   });
