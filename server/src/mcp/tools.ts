@@ -36,8 +36,13 @@ import { REMINDER_WRITE_TOOLS } from './reminderTools';
 import { RESEARCH_TWIN_WRITE_TOOLS } from './researchTwinTools';
 import { CANDIDATE_WRITE_TOOLS } from './candidateTools';
 import { LANE_READ_TOOLS, LANE_WRITE_TOOLS } from './laneTools';
+import { LOGSTREAM_READ_TOOLS } from './logstreamTools';
+import { SPEND_READ_TOOLS } from './spendTools';
 import { INCIDENT_WRITE_TOOLS } from './incidentTools';
+import { SIGNAL_WRITE_TOOLS } from './signalTools';
+import { LOOP_WRITE_TOOLS } from './loopTools';
 import { INVENTORY_WRITE_TOOLS } from './inventoryTools';
+import { VFARM_GATE_READ_TOOLS, VFARM_GATE_WRITE_TOOLS } from './vfarmGateTools';
 import { findRecords, READABLE_KINDS } from './findRecords';
 import * as mirror from '../mirror';
 import * as n8n from '../n8n';
@@ -973,6 +978,11 @@ export const TOOLS: ToolDefinition[] = [
   ...NORTH_STAR_TOOLS,
   // 2026-09-28: the weighted lane ranking North Star reads (Jason, #bha-north-star-twin).
   ...LANE_READ_TOOLS,
+  ...LOGSTREAM_READ_TOOLS,
+  // 2026-10-10: tokens and tool calls per agent, from the ask ledgers.
+  ...SPEND_READ_TOOLS,
+  // 2026-10-09: the vFarm stage gates and 5-rack offer (7S0O).
+  ...VFARM_GATE_READ_TOOLS,
   // The one that is not a read.
   resyncTool,
 ];
@@ -984,7 +994,7 @@ export const TOOLS: ToolDefinition[] = [
  * tool a client can see is a tool a model will try.
  */
 function toolsFor(access: 'read' | 'write'): ToolDefinition[] {
-  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...REMINDER_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS, ...LANE_WRITE_TOOLS, ...INCIDENT_WRITE_TOOLS, ...INVENTORY_WRITE_TOOLS] : TOOLS;
+  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...REMINDER_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS, ...LANE_WRITE_TOOLS, ...INCIDENT_WRITE_TOOLS, ...INVENTORY_WRITE_TOOLS, ...VFARM_GATE_WRITE_TOOLS, ...LOOP_WRITE_TOOLS, ...SIGNAL_WRITE_TOOLS] : TOOLS;
 }
 
 /**
@@ -1009,11 +1019,11 @@ export function toolByName(name: string, access: 'read' | 'write' = 'read'): Too
 /**
  * How an approved request is run (2026-10-04, 8185): the gated tool's own
  * handler, on the write connection, so the checks, the action and the audit
- * line are exactly an MCP call's. Only the three gated tools can be run this
+ * line are exactly an MCP call's. Only the gated tools can be run this
  * way, whatever a stored row says.
  */
 approvals.setExecutor(async (tool, args) => {
-  if (!approvals.GATED_TOOLS.includes(tool)) return { ok: false, reason: 'not_a_gated_tool', message: `${tool} is not an action that runs on approval.` };
+  if (!approvals.GATED_TOOLS.includes(tool) && !approvals.DESTINATION_GATED_TOOLS.includes(tool)) return { ok: false, reason: 'not_a_gated_tool', message: `${tool} is not an action that runs on approval.` };
   const t = toolByName(tool, 'write');
   if (!t) return { ok: false, reason: 'no_such_tool', message: `${tool} is not registered on the write connection.` };
   return (await t.handler(args, { access: 'write', startedAt: new Date().toISOString(), dispatch: async () => ({ status: 404, body: null }), agent: currentAgent() })) as Record<string, unknown>;

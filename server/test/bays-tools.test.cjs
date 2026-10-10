@@ -271,7 +271,7 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(`http:
 
   try {
     const tools = (await post(`/mcp/${TOKEN}`, { jsonrpc: '2.0', id: 1, method: 'tools/list' })).body.result.tools.map((t) => t.name);
-    for (const t of ['list_n8n_workflows', 'get_n8n_workflow', 'read_slack_file', 'share_doc', 'grant_drive_access', 'create_doc', 'find_records', 'create_record', 'send_nudge', 'post_file']) assert.ok(tools.includes(t), `lists ${t}`);
+    for (const t of ['list_n8n_workflows', 'get_n8n_workflow', 'read_slack_file', 'share_doc', 'unshare_doc', 'grant_drive_access', 'create_doc', 'find_records', 'create_record', 'send_nudge', 'post_file']) assert.ok(tools.includes(t), `lists ${t}`);
     step('tools listed');
 
     /* ---- n8n ---- */

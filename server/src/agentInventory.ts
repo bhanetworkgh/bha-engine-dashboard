@@ -224,14 +224,27 @@ export function derive(result: Dict, opts: { owner?: string | null; recordedBy?:
   const tierReason = `${tools.length} tools, ${writers.length} can write (${writers.filter((w) => w.writes_rule === 'server registry').length} by this server's registry, ${writers.filter((w) => w.writes_rule === 'name verb').length} by name), ${unapproved.length} of those without approval; ${scheduled.length} scheduled task${scheduled.length === 1 ? '' : 's'} enabled; ${subAgents.length} sub-agent${subAgents.length === 1 ? '' : 's'}.`;
 
   // What is kept of the raw result: everything but the long texts.
+  // 10 Oct 2026 -- a slim result. Bays' get_agent answer is past 160,000
+  // characters, more than a tool call can carry faithfully, so the caller may
+  // send the result with the long texts already taken out by script: no
+  // `instructions`, and in its place `instructions_chars` and
+  // `instructions_sha256`, counted from the real text. Nothing above reads a
+  // field the slim form leaves out, so the derived row is the same either way
+  // (pinned in test:agent-inventory); `raw.slim` says which form was stored.
+  const digest = {
+    chars: typeof config.instructions_chars === 'number' && Number.isFinite(config.instructions_chars) ? config.instructions_chars : null,
+    sha256: typeof config.instructions_sha256 === 'string' && /^[0-9a-f]{64}$/.test(config.instructions_sha256) ? config.instructions_sha256 : null,
+  };
   const rawConfig: Dict = { ...config };
   delete rawConfig.instructions;
+  delete rawConfig.instructions_chars;
+  delete rawConfig.instructions_sha256;
   const rawSkills: Dict = {};
   for (const [id, b] of Object.entries(skillBodies)) {
     const bd = dict(b);
     rawSkills[id] = { name: bd.name, description: bd.description, allowedTools: bd.allowedTools };
   }
-  const raw: Dict = { agent, configHash: result.configHash ?? null, config: rawConfig, skills: rawSkills, tasks: result.tasks ?? [], instructions_chars: typeof config.instructions === 'string' ? config.instructions.length : null, instructions_sha256: typeof config.instructions === 'string' ? createHash('sha256').update(config.instructions).digest('hex') : null };
+  const raw: Dict = { agent, configHash: result.configHash ?? null, config: rawConfig, skills: rawSkills, tasks: result.tasks ?? [], instructions_chars: typeof config.instructions === 'string' ? config.instructions.length : digest.chars, instructions_sha256: typeof config.instructions === 'string' ? createHash('sha256').update(config.instructions).digest('hex') : digest.sha256, slim: typeof config.instructions !== 'string' && digest.sha256 !== null };
 
   return {
     agent_id: agentId,

@@ -254,7 +254,7 @@ export async function usage(): Promise<ExecutionQuota> {
   };
 }
 
-function mentions(): string {
+export function mentions(): string {
   const ids = (process.env[MENTIONS_VAR] ?? '')
     .split(/[\s,]+/)
     .map((s) => s.trim())

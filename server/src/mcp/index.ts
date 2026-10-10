@@ -160,6 +160,12 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'rank_lanes', 'lane_health',
         // 2026-10-01: what may be said about vFarm (T0NO).
         'read_media_doctrine', 'read_publication_decision', 'read_doctrine_gap_summary',
+        // 2026-10-09: where the vFarm stage gates and the pilot offer stand (7S0O). A read.
+        'get_vfarm_gates',
+        // 2026-10-10: recurring faults and what was done about them, for guidance on a Logstream job.
+        'read_logstream',
+        // 2026-10-10: the engine's own events (engine.event.v1), Jason's go-time notice.
+        'read_engine_events',
       ]),
     },
     {
@@ -169,6 +175,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       tools: new Set([
         'find_records', 'read_media_doctrine', 'read_publication_decision', 'read_doctrine_gap_summary', 'write_research_finding', 'write_commercial_card_fields', 'compute_lane_state',
         'queue_followup_research', 'update_watched_client_question', 'create_client_report_doc',
+        // 2026-10-10: a fault's own history, read before writing the finding on a Logstream job.
+        'read_logstream',
+        'read_engine_events',
       ]),
     },
     {
@@ -190,6 +199,13 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // left off this list when tokens were scoped on 28 Sep, so Bays saved a candidate's pattern
         // with create_record instead (BP-GENIE-1791419670135-5KR7).
         'draft_pattern_candidate', 'register_pattern_candidate',
+        // 2026-10-09: the vFarm stage gates and 5-rack offer (7S0O). Bays reads them and writes what
+        // Jason gives it; deleting fixtures stays with a person on the connector.
+        'get_vfarm_gates', 'write_vfarm_gate',
+        // 2026-10-10: the way back from share_doc. Behind the same approval card.
+        'unshare_doc',
+        // 2026-10-10: Jason's go-time notice: every agent reads Logstream and engine.event.v1.
+        'read_logstream', 'read_engine_events',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>
@@ -300,7 +316,7 @@ async function handleRpc(req: RpcRequest, deps: ToolDeps): Promise<Record<string
             ...(deps.access === 'write'
               ? [
                   '',
-                  'This is the WRITE connection. Beside the reads it carries list_writable_kinds, create_record, update_record, archive_record and delete_record. Start with list_writable_kinds: it names every writable kind, its required fields, its allowed values and which guards apply. Every write goes through the same server function n8n\u2019s POST and PATCH use, runs the same guards the Bays Tools Router runs, and is logged to engine_mcp_writes whether it lands, is refused or is a dry run. Pass dry_run: true to see exactly what would be written. A refusal — possible_duplicate, lane_owner_mismatch, not_permitted — writes nothing and says what to send to proceed. Three Drive tools sit beside them: share_doc (anyone with the link can read), grant_drive_access (one @bhanetwork.org address only — anything else is refused and Destiny is told) and create_doc (a Google Doc in a folder, for the daily digest archive).',
+                  'This is the WRITE connection. Beside the reads it carries list_writable_kinds, create_record, update_record, archive_record and delete_record. Start with list_writable_kinds: it names every writable kind, its required fields, its allowed values and which guards apply. Every write goes through the same server function n8n\u2019s POST and PATCH use, runs the same guards the Bays Tools Router runs, and is logged to engine_mcp_writes whether it lands, is refused or is a dry run. Pass dry_run: true to see exactly what would be written. A refusal — possible_duplicate, lane_owner_mismatch, not_permitted — writes nothing and says what to send to proceed. Four Drive tools sit beside them: share_doc (anyone with the link can read), unshare_doc (turns that public link off again and touches nothing else), grant_drive_access (one @bhanetwork.org address only — anything else is refused and Destiny is told) and create_doc (a Google Doc in a folder, for the daily digest archive).',
                 ]
               : []),
           ].join('\n'),

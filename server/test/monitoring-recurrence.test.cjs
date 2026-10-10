@@ -25,10 +25,14 @@ const DIST = process.env.SERVER_DIST || path.join(__dirname, '../../server-dist'
 const req = (m) => require(path.join(DIST, 'server/src', m));
 
 (async () => {
+  // Research jobs go through the research-signal guard, which reads the model credit first.
+  await require('./_credit.cjs').startCredit();
   const { migrate } = req('migrations.js');
   const { query } = req('pg.js');
   const rec = req('monitoringRecurrence.js');
   await migrate();
+  // The guard's daily budget is counted from this table; a local run starts it clean.
+  await query(`DELETE FROM engine_research_signals`);
 
   const T = Date.now();
   const FARM = `TEST-FARM-${T}`;

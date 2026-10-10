@@ -1,7 +1,9 @@
 /**
  * Google Drive and Docs, for the MCP tools that write documents
  * (2026-09-24, Destiny): `share_doc`, `grant_drive_access`, `create_doc` and
- * the build-pattern Doc a `create_record {kind: "patterns"}` makes.
+ * the build-pattern Doc a `create_record {kind: "patterns"}` makes. From
+ * 2026-10-10 also `unshare_doc`, which reads a file's permissions and removes
+ * the public one.
  *
  * **No Google credential existed on this server before this file.** n8n's
  * "Admin Google Docs" is an OAuth2 credential n8n holds and this server cannot
@@ -223,6 +225,35 @@ export async function fileMeta(fileId: string): Promise<{ id: string; name: stri
   const r = await authed('read the file (drive files.get)', `${DRIVE}/files/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=id,name,mimeType,webViewLink`);
   const b = r.body as { id: string; name: string; mimeType: string; webViewLink?: string };
   return { id: b.id, name: b.name, mimeType: b.mimeType, webViewLink: b.webViewLink ?? null };
+}
+
+export interface DrivePermission {
+  id: string;
+  /** user, group, domain or anyone. */
+  type: string;
+  role: string;
+  emailAddress: string | null;
+  domain: string | null;
+}
+
+/** Everyone a file is shared with, read from Drive (2026-10-10, for unshare_doc). Every page. */
+export async function listPermissions(fileId: string): Promise<DrivePermission[]> {
+  const out: DrivePermission[] = [];
+  let pageToken: string | null = null;
+  for (let page = 0; page < 20; page++) {
+    const qs = `supportsAllDrives=true&pageSize=100&fields=${encodeURIComponent('nextPageToken,permissions(id,type,role,emailAddress,domain)')}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`;
+    const r = await authed('read who the file is shared with (drive permissions.list)', `${DRIVE}/files/${encodeURIComponent(fileId)}/permissions?${qs}`);
+    const b = (r.body ?? {}) as { nextPageToken?: string; permissions?: { id?: string; type?: string; role?: string; emailAddress?: string; domain?: string }[] };
+    for (const p of b.permissions ?? []) out.push({ id: String(p.id ?? ''), type: String(p.type ?? ''), role: String(p.role ?? ''), emailAddress: p.emailAddress ?? null, domain: p.domain ?? null });
+    pageToken = b.nextPageToken ?? null;
+    if (!pageToken) return out;
+  }
+  throw new GoogleError('Drive kept answering with another page of permissions after 20 pages; the list was not read whole, so nothing was decided from it.', 'read who the file is shared with (drive permissions.list)', 0);
+}
+
+/** One permission removed. Drive answers 204 with no body. */
+export async function deletePermission(fileId: string, permissionId: string): Promise<void> {
+  await authed('remove the permission (drive permissions.delete)', `${DRIVE}/files/${encodeURIComponent(fileId)}/permissions/${encodeURIComponent(permissionId)}?supportsAllDrives=true`, { method: 'DELETE' });
 }
 
 /** For tests: forget the cached token. */

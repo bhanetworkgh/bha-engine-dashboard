@@ -2728,6 +2728,241 @@ const MIGRATIONS: Migration[] = [
         WHERE url LIKE 'https://bharag2.duckdns.org%'`,
     ],
   },
+  {
+    id: 62,
+    name: 'engine_vfarm_gates: the vFarm Stage 1, Stage 2 and 5-rack offer records',
+    statements: [
+      /**
+       * 9 Oct 2026, Destiny (LOOP-1791479575963-7S0O). One table for the three
+       * v1 objects Jason locked on 8 Oct (Codex 6120a262): kind 'stage1' is
+       * VFARM_STAGE1_LAB_VALIDATION_v1, 'stage2' is
+       * VFARM_STAGE2_PILOT_CHECKLIST_v1, 'offer' is VFARM_5RACK_PILOT_OFFER_v1.
+       * status and the two refs are columns because the hard gates read them;
+       * every other contract field is in `fields`, under the contract's own
+       * name. is_fixture marks a test row: it is labelled wherever it is shown,
+       * a real row may not point at one, and only fixtures can be deleted.
+       * The order (Stage 1 passed before Stage 2 starts; a Stage 2 row before
+       * an offer is offered or signed) is enforced in vfarmGates.ts, the one
+       * function every writer goes through.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_vfarm_gates (
+        id BIGSERIAL PRIMARY KEY,
+        object_id TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL CHECK (kind IN ('stage1', 'stage2', 'offer')),
+        status TEXT NOT NULL,
+        stage1_ref TEXT,
+        stage2_ref TEXT,
+        fields JSONB NOT NULL DEFAULT '{}'::jsonb,
+        is_fixture BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        created_by TEXT,
+        updated_by TEXT
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_vfarm_gates_kind ON engine_vfarm_gates (kind, created_at)`,
+    ],
+  },
+  {
+    id: 63,
+    name: 'engine_vfarm_gate_prompts: the cards Bays sends so nobody has to remember a gate',
+    statements: [
+      /**
+       * 9 Oct 2026, Destiny (7S0O, second pass). One row per card the gate
+       * sweep sends: kind 'check' asks a record's owner whether a check no
+       * sensor covers passed or failed; kind 'status' asks whether a Stage 1
+       * whose four checks have all passed should be marked passed. The answer
+       * is a button, and the click writes through vfarmGates.writeGate like
+       * every other change. `may_answer` is who is allowed to click.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_vfarm_gate_prompts (
+        id BIGSERIAL PRIMARY KEY,
+        prompt_id TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL CHECK (kind IN ('check', 'status')),
+        object_id TEXT NOT NULL,
+        check_name TEXT,
+        asked_user TEXT NOT NULL,
+        may_answer TEXT[] NOT NULL DEFAULT '{}',
+        channel TEXT,
+        ts TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'answered', 'expired', 'card_failed', 'superseded')),
+        answer TEXT,
+        answered_by TEXT,
+        answered_at TIMESTAMPTZ,
+        result JSONB,
+        error TEXT,
+        is_fixture BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at TIMESTAMPTZ NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_vfarm_gate_prompts_object ON engine_vfarm_gate_prompts (object_id, kind, check_name, created_at DESC)`,
+    ],
+  },
+  {
+    id: 64,
+    name: 'engine_logstream and engine_logstream_triggers: Logstream v0, the read and analysis spine',
+    statements: [
+      /**
+       * 10 Oct 2026, Destiny (Jason's go-ahead of 9 Oct). One append-only row
+       * per state an incident reaches (observed, closed, research_opened), in
+       * the field list of docs/design/logstream-v0.md section 5. person_confirmed
+       * and autopay_enabled default false and nothing sets or reads them: pay
+       * is not wired. The second table is one row per threshold crossing.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_logstream (
+        id BIGSERIAL PRIMARY KEY,
+        logstream_row_id TEXT NOT NULL UNIQUE,
+        incident_id TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('observed', 'closed', 'research_opened')),
+        written_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        lane_id TEXT,
+        linked_lanes JSONB NOT NULL DEFAULT '[]'::jsonb,
+        signature TEXT NOT NULL,
+        workflow TEXT,
+        failed_node TEXT,
+        error_class TEXT,
+        excluded_reason TEXT,
+        occurred_at TIMESTAMPTZ NOT NULL,
+        pattern_ids_applied JSONB NOT NULL DEFAULT '[]'::jsonb,
+        pattern_adherence JSONB NOT NULL DEFAULT '{}'::jsonb,
+        objective_outcomes JSONB NOT NULL DEFAULT '{}'::jsonb,
+        research_trigger JSONB NOT NULL DEFAULT '{}'::jsonb,
+        commercial_relevance JSONB NOT NULL DEFAULT '{}'::jsonb,
+        audit JSONB NOT NULL DEFAULT '{}'::jsonb,
+        evaluated_by TEXT,
+        evaluated_at TIMESTAMPTZ,
+        person_confirmed BOOLEAN NOT NULL DEFAULT false,
+        autopay_enabled BOOLEAN NOT NULL DEFAULT false
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_logstream_incident_state ON engine_logstream (incident_id, state)`,
+      `CREATE INDEX IF NOT EXISTS engine_logstream_signature ON engine_logstream (signature, occurred_at DESC)`,
+      `CREATE TABLE IF NOT EXISTS engine_logstream_triggers (
+        id BIGSERIAL PRIMARY KEY,
+        trigger_id TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL CHECK (kind IN ('signature_research', 'signature_escalation', 'workflow_rate', 'shared_outage')),
+        key TEXT NOT NULL,
+        workflow TEXT,
+        failed_node TEXT,
+        lane_id TEXT,
+        n INTEGER NOT NULL,
+        runs INTEGER,
+        failures INTEGER,
+        incident_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        workflows JSONB NOT NULL DEFAULT '[]'::jsonb,
+        first_at TIMESTAMPTZ,
+        last_at TIMESTAMPTZ,
+        detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        action TEXT NOT NULL CHECK (action IN ('research_job', 'alert_person')),
+        action_state TEXT NOT NULL CHECK (action_state IN ('pending', 'job_opened', 'alerted', 'suppressed_shared_outage', 'failed')),
+        job_id TEXT,
+        alert_channel TEXT,
+        alert_ts TEXT,
+        error TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        acted_at TIMESTAMPTZ
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_logstream_triggers_key ON engine_logstream_triggers (kind, key, detected_at DESC)`,
+    ],
+  },
+  {
+    id: 65,
+    name: 'engine_logstream: the patterns_evaluated state; triggers: the guidance step',
+    statements: [
+      /** 10 Oct 2026, second pass: one row per closed incident saying which pattern applied, and whether North Star was asked once research resolved. */
+      `ALTER TABLE engine_logstream DROP CONSTRAINT IF EXISTS engine_logstream_state_check`,
+      `ALTER TABLE engine_logstream ADD CONSTRAINT engine_logstream_state_check CHECK (state IN ('observed', 'closed', 'research_opened', 'patterns_evaluated'))`,
+      `ALTER TABLE engine_logstream_triggers ADD COLUMN IF NOT EXISTS guidance_state TEXT CHECK (guidance_state IN ('asked', 'failed', 'no_finding'))`,
+      `ALTER TABLE engine_logstream_triggers ADD COLUMN IF NOT EXISTS guidance_error TEXT`,
+      `ALTER TABLE engine_logstream_triggers ADD COLUMN IF NOT EXISTS guidance_at TIMESTAMPTZ`,
+    ],
+  },
+  {
+    id: 66,
+    name: 'engine_logstream_triggers: a withdrawn state, and the one crossing a refused test ask caused',
+    statements: [
+      /**
+       * 10 Oct 2026. LST-1791636805191-N642 opened a research job on North
+       * Star — Front Door at 3 failures of 13 runs. Two of the three were the
+       * door refusing an ask, which is a guard working, and one of those was a
+       * test ask sent while proving the guidance path. The rate rule now leaves
+       * such runs out; this crossing is marked withdrawn, with the reason, and
+       * its row is kept.
+       */
+      `ALTER TABLE engine_logstream_triggers DROP CONSTRAINT IF EXISTS engine_logstream_triggers_action_state_check`,
+      `ALTER TABLE engine_logstream_triggers ADD CONSTRAINT engine_logstream_triggers_action_state_check CHECK (action_state IN ('pending', 'job_opened', 'alerted', 'suppressed_shared_outage', 'failed', 'withdrawn'))`,
+      `UPDATE engine_logstream_triggers SET action_state = 'withdrawn', error = 'Withdrawn 10 Oct 2026: two of the three failures were the Front Door refusing an ask (a guard working), one of them a test ask. The rate rule now leaves refused-ask, test and simulator runs out. The research job it opened was removed.' WHERE trigger_id = 'LST-1791636805191-N642'`,
+    ],
+  },
+  {
+    id: 67,
+    name: 'engine_agent_scorecard: the 10 Oct evening independent re-score',
+    statements: [
+      /**
+       * 10 Oct 2026, Destiny: an independent agent that had not seen the work
+       * re-scored the engine read-only on the same rubric, in the evening,
+       * after the day's changes. 6.1, from 6.0 that afternoon and 6.0 on 4 Oct.
+       * Stored as it reported, dimension for dimension. The three credentials
+       * in personal projects are out of scope by the owner's ruling.
+       */
+      `INSERT INTO engine_agent_scorecard (scored_on, dimension, name, score, floor, goal, evidence, source) VALUES
+        ('2026-10-10', 1, $v$Governance and inventory$v$, 6, 8, 10, $v$Independent re-score, 10 Oct 2026 evening (claude/Agent_Maturity_Rescore_Oct_10_Evening.md in the BHA Agent project): Three inventory rows read at 19:33 to 19:34 UTC, after the last publish, each matching n8n's active version; registry_services holds 12 vendor rows. The inventory is recorded by hand and will drift on the next publish.$v$, 'rescore'),
+        ('2026-10-10', 2, $v$Agent identity and secrets$v$, 5, 8, 10, $v$Independent re-score, 10 Oct 2026 evening (claude/Agent_Maturity_Rescore_Oct_10_Evening.md in the BHA Agent project): Each agent sends its own bearer credential to /mcp/agent; the BHARAG Cluster and OpenRouter credentials are still shared by all three and no rotation was seen.$v$, 'rescore'),
+        ('2026-10-10', 3, $v$Tool privilege$v$, 6, 8, 10, $v$Independent re-score, 10 Oct 2026 evening (claude/Agent_Maturity_Rescore_Oct_10_Evening.md in the BHA Agent project): 23 create_record refusals in 7 days; four gated tools and two destination-gated; the DM guard has never fired live, channel posts are ungated and Bays holds 66 tools, 29 of them writes with no approval.$v$, 'rescore'),
+        ('2026-10-10', 4, $v$Runtime controls and injection defense$v$, 7, 8, 10, $v$Independent re-score, 10 Oct 2026 evening (claude/Agent_Maturity_Rescore_Oct_10_Evening.md in the BHA Agent project): All 14 injection cases pass, the twins' now at three repeats, on one run; no independent red-team pass.$v$, 'rescore'),
+        ('2026-10-10', 5, $v$Human oversight$v$, 6, 8, 10, $v$Independent re-score, 10 Oct 2026 evening (claude/Agent_Maturity_Rescore_Oct_10_Evening.md in the BHA Agent project): 12 approvals on record, unchanged since 12:18 UTC; the DM guard is built and tested in process only; no refused non-approver click on record.$v$, 'rescore'),
+        ('2026-10-10', 6, $v$Evaluation and testing$v$, 6, 8, 10, $v$Independent re-score, 10 Oct 2026 evening (claude/Agent_Maturity_Rescore_Oct_10_Evening.md in the BHA Agent project): EVAL-202610101933: 96 of 96 results over 32 cases, pass^3 on all three agents; one run, no publish gate, and a version went live with a failing eval the same day.$v$, 'rescore'),
+        ('2026-10-10', 7, $v$Observability$v$, 7, 8, 10, $v$Independent re-score, 10 Oct 2026 evening (claude/Agent_Maturity_Rescore_Oct_10_Evening.md in the BHA Agent project): Token and tool-call fields are on 2 ask rows (none for Research Twin); 12 scheduled tasks wrote start lines; no agent has read Logstream on its own token.$v$, 'rescore'),
+        ('2026-10-10', 8, $v$Incident response and recovery$v$, 7, 8, 10, $v$Independent re-score, 10 Oct 2026 evening (claude/Agent_Maturity_Rescore_Oct_10_Evening.md in the BHA Agent project): 109 incidents, 108 dated; 28 closes since 2 Oct, all signed; INC-GENIE.CONTEXT-002 still open.$v$, 'rescore'),
+        ('2026-10-10', 9, $v$Change and rollback$v$, 6, 8, 10, $v$Independent re-score, 10 Oct 2026 evening (claude/Agent_Maturity_Rescore_Oct_10_Evening.md in the BHA Agent project): Restore points on all three agents and one rollback drill on Research Twin that left no readable record; one author throughout and no eval gate.$v$, 'rescore'),
+        ('2026-10-10', 10, $v$Reliability and handoffs$v$, 6, 8, 10, $v$Independent re-score, 10 Oct 2026 evening (claude/Agent_Maturity_Rescore_Oct_10_Evening.md in the BHA Agent project): Bays Front Door 2,832 of 2,835 and Research Twin Front Door 1,633 of 1,635 in 7 days; Research Twin Agent Delivery 17 of 21 and Scheduled Run Watch 7 of 14.$v$, 'rescore'),
+        ('2026-10-10', 11, $v$Cost and capacity$v$, 5, 8, 10, $v$Independent re-score, 10 Oct 2026 evening (claude/Agent_Maturity_Rescore_Oct_10_Evening.md in the BHA Agent project): Quota at 13.1% of 50,000 and the credit check runs hourly; no credit alert has ever posted and the spend tool has two rows to add up.$v$, 'rescore'),
+        ('2026-10-10', 12, $v$Data governance and retention$v$, 6, 7, 10, $v$Independent re-score, 10 Oct 2026 evening (claude/Agent_Maturity_Rescore_Oct_10_Evening.md in the BHA Agent project): BHARAG guard: North Star 9 allowed and 3 refused, Research Twin 15 and 3; retention last ran 6 Oct and cleared 0 rows; 0 redactions.$v$, 'rescore')
+       ON CONFLICT (scored_on, dimension) DO NOTHING`,
+    ],
+  },
+  {
+    id: 68,
+    name: 'engine_research_signals: one job per signal, the daily budget, and held states on the two older openers',
+    statements: [
+      /**
+       * 11 Oct 2026, Destiny (LOOP-1788310653393-Q9CR; the guards and triggers
+       * BP-CONTRACT-005 marks NOT YET WIRED). One row per signal key: what
+       * asked for research, the job it got, and why it is waiting when it is.
+       * Logstream's and the Monitoring Twin's openers go through the same
+       * guard, so each gains a held state and a "not reopened" one.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_research_signals (
+        id BIGSERIAL PRIMARY KEY,
+        signal_id TEXT NOT NULL UNIQUE,
+        signal_key TEXT NOT NULL UNIQUE,
+        trigger_code TEXT NOT NULL CHECK (trigger_code IN ('T4', 'T5', 'T6', 'T8', 'MONITORING')),
+        source TEXT NOT NULL,
+        priority INTEGER NOT NULL DEFAULT 1,
+        lane TEXT,
+        card_id TEXT,
+        question TEXT NOT NULL,
+        context TEXT NOT NULL DEFAULT '',
+        refs JSONB NOT NULL DEFAULT '[]'::jsonb,
+        occurrences INTEGER NOT NULL DEFAULT 1,
+        rearm_days INTEGER,
+        state TEXT NOT NULL CHECK (state IN ('opening', 'job_opened', 'held_budget', 'held_credit', 'not_reopened', 'failed')),
+        reason TEXT,
+        job_id TEXT,
+        previous_jobs JSONB NOT NULL DEFAULT '[]'::jsonb,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        fixture BOOLEAN NOT NULL DEFAULT false,
+        detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+        detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        opened_at TIMESTAMPTZ
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_research_signals_opened ON engine_research_signals (opened_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_research_signals_state ON engine_research_signals (state, priority, detected_at)`,
+      `ALTER TABLE engine_logstream_triggers DROP CONSTRAINT IF EXISTS engine_logstream_triggers_action_state_check`,
+      `ALTER TABLE engine_logstream_triggers ADD CONSTRAINT engine_logstream_triggers_action_state_check CHECK (action_state IN ('pending', 'job_opened', 'alerted', 'suppressed_shared_outage', 'failed', 'withdrawn', 'held', 'not_reopened'))`,
+      `ALTER TABLE engine_monitoring_recurrences DROP CONSTRAINT IF EXISTS engine_monitoring_recurrences_job_state_check`,
+      `ALTER TABLE engine_monitoring_recurrences ADD CONSTRAINT engine_monitoring_recurrences_job_state_check CHECK (job_state IN ('pending', 'opened', 'not_opened_simulated', 'failed', 'held', 'not_reopened'))`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

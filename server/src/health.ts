@@ -64,6 +64,7 @@ import type {
   Slice,
   WorkflowFaults,
 } from '../../src/data/types';
+import * as timers from './timers';
 
 /* ------------------------------------------------------------------ dates */
 
@@ -518,7 +519,7 @@ async function ledgerPass(): Promise<void> {
 export function startLedgerPolling(): void {
   if (ledgerTimer) return;
   setTimeout(() => void ledgerPass(), 20_000).unref?.();
-  ledgerTimer = setInterval(() => void ledgerPass(), LEDGER_EVERY_MS);
+  ledgerTimer = setInterval(() => (timers.beat('incident ledger poll'), void ledgerPass()), LEDGER_EVERY_MS);
   ledgerTimer.unref?.();
 }
 

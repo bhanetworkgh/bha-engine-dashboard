@@ -48,7 +48,7 @@
  * would be a rule nobody can check.
  */
 import { query, withTransaction } from './pg';
-import * as engineWrite from './engineWrite';
+import * as researchSignals from './researchSignals';
 import * as engineEvents from './engineEvents';
 
 export const RULE = { min_incidents: 3, window_days: 7 } as const;
@@ -201,20 +201,20 @@ export async function sweep(): Promise<{ patterns: number; detected: number; job
     }
 
     // The job: for every real pattern still waiting on one, this pass or an earlier one.
-    const due = await query<RecurrenceRow>(`SELECT id::text, pattern_key, job_attempts FROM engine_monitoring_recurrences WHERE job_state IN ('pending', 'failed') AND synthetic = false AND detected_at > now() - ($1 || ' days')::interval ORDER BY id`, [String(RULE.window_days)]);
+    const due = await query<RecurrenceRow>(`SELECT id::text, pattern_key, job_attempts FROM engine_monitoring_recurrences WHERE job_state IN ('pending', 'failed', 'held') AND synthetic = false AND detected_at > now() - ($1 || ' days')::interval ORDER BY id`, [String(RULE.window_days)]);
     for (const row of due.rows) {
       const p = byKey.get(row.pattern_key);
       if (!p) continue; // the pattern no longer holds; the row stays as it is and says so by its state
       try {
         const { question, context } = jobText(p);
-        const now = new Date().toISOString();
-        const jobId = `JOB-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-        const res = await engineWrite.postRecord(
-          'rt-jobs',
-          { created_time: now, fields: { 'Job ID': jobId, Question: question, Context: context, 'Card ID': '', Lane: '', Status: 'Pending', Attempts: 0, 'Opened By': 'Monitoring Twin', 'Opened At': now } },
-          { endpoint: 'monitoring-twin:recurrence', method: 'INTERNAL', key_label: 'server', t0: Date.now(), note: `recurrence ${row.id}: ${row.pattern_key}` },
-        );
-        await query(`UPDATE engine_monitoring_recurrences SET job_state = 'opened', job_id = $2, job_error = NULL, job_attempts = job_attempts + 1 WHERE id = $1`, [row.id, res.natural_id ?? jobId]);
+        // One job per signal and the daily budget (11 Oct 2026): the same guard Logstream's trigger uses.
+        const g = await researchSignals.open({ trigger: 'MONITORING', key: `monitoring:${row.pattern_key}`, source: 'Monitoring Twin', ref: `recurrence:${row.id}`, question, context, rearm_days: researchSignals.RULE.rearm_fault_days, detail: { recurrence_id: row.id, pattern_key: row.pattern_key } });
+        if (g.state === 'failed') throw new Error(g.reason ?? 'the research job was not opened');
+        if (g.state === 'held_budget' || g.state === 'held_credit' || g.state === 'not_reopened') {
+          await query(`UPDATE engine_monitoring_recurrences SET job_state = $2, job_error = $3, job_attempts = job_attempts + 1 WHERE id = $1`, [row.id, g.state === 'not_reopened' && !g.wait ? 'not_reopened' : 'held', (g.reason ?? '').slice(0, 500)]);
+          continue;
+        }
+        await query(`UPDATE engine_monitoring_recurrences SET job_state = 'opened', job_id = $2, job_error = $3, job_attempts = job_attempts + 1 WHERE id = $1`, [row.id, g.job_id, g.state === 'added_to_job' ? g.reason : null]);
         out.jobs_opened++;
       } catch (e) {
         out.failed++;
