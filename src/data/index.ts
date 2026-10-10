@@ -16,6 +16,7 @@ import type {
   BaysData,
   BaysRemindersData,
   ScheduledRunsData,
+  LogstreamData,
   AskTraceDetail,
   AskTraceList,
   EvalRunDetail,
@@ -595,6 +596,8 @@ export const getBays = () => api<BaysData>('/api/bays');
 export const getBaysReminders = () => api<BaysRemindersData>('/api/bays/reminders');
 /** Every scheduler's runs on one page (2026-10-09, K9B7). */
 export const getScheduledRuns = () => api<ScheduledRunsData>('/api/scheduled-runs');
+/** Logstream v0: repeating faults, what crossed a threshold and what was done (2026-10-10). */
+export const getLogstream = () => api<LogstreamData>('/api/logstream');
 export const getVfarmLive = () => api<VfarmLiveData>('/api/vfarm/live');
 /** The stage gates and the 5-rack pilot offer (2026-10-09, 7S0O). */
 export const getVfarmGates = () => api<VfarmGatesData>('/api/vfarm/gates');

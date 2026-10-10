@@ -55,6 +55,8 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
       // Every scheduler's runs on one page (2026-10-09, K9B7): agent tasks, timed
       // workflows, reminder posts and this dashboard's own timers.
       { to: '/scheduled-runs', label: 'Scheduled runs', icon: 'calendar' },
+      // Repeating engine faults, what crossed a threshold and what was done about it (2026-10-10).
+      { to: '/logstream', label: 'Logstream', icon: 'loop' },
       // Who is owed money, for what work, and what has been paid (2026-09-17).
       // Pay was a tick on a Slack card until today, so the only way to answer
       // "what do I owe Hardik for September" was to scroll back through weeks

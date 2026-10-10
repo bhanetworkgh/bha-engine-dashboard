@@ -1989,8 +1989,30 @@ autopay, no pay wiring, no destructive automated action).
 - **GNER stays a candidate; no runtime decision depends on it; empty reads are
   not recorded.** These are v0 numbers: the re-tune is due about 9 Nov 2026
   (LOOP-1791558515351-4DR6).
-- **Not built**: a page, an MCP tool, North Star's guidance step, and any
-  evaluation of a row by a person. Read the tables with `query_postgres`.
+- **Which pattern applied** (second pass, 10 Oct): once an incident is closed
+  it gets one `patterns_evaluated` row. **Only two patterns are judged, from
+  records the engine already keeps**: S757, the closure protocol, for a close on
+  or after 7 Oct 2026 — `followed` where a `close_incidents` audit line carries
+  a written reason, `not_followed` where the ledger, the healer or the recovery
+  watcher closed it; and BW9S, the guarded retry, `followed` where
+  `retry_incident` left an audit line. Anything the record does not settle is
+  `not_applicable`, never a guess. GRM8 is a pattern-draft outcome and raises no
+  incident, so it never applies; GNER is not evaluated.
+- **The guidance step**: when the job a trigger opened is `Resolved`, the sweep
+  posts the finding once to n8n's `Logstream — Guidance Ask`
+  (`SW9da2D0pDqBk0dq`, `POST /webhook/logstream-guidance`, `x-dashboard-key`),
+  which asks North Star through its own Front Door, source `logstream`, to post
+  a recommendation in #bha-north-star-twin. **A recommendation only**: North
+  Star sets no tag and edits no card, and no agent was changed for this (the ask
+  carries its own instructions). `guidance_state` on the trigger is `asked`,
+  `failed` (with the reason, retried every pass) or `no_finding` (a capped job).
+  `LOGSTREAM_GUIDANCE_PATH` and `LOGSTREAM_GUIDANCE_CHANNEL` are optional.
+- **The page**: `/logstream`, under Records, `GET /api/logstream`
+  (`logstream.read()`), four tabs: Crossings, Faults, Rows, Patterns. A read and
+  nothing else. Colour marks an action that did not land and a fault at the
+  level that calls a person; a research job opened is the accent, not green.
+- **Not built**: an MCP tool of its own, and a person's review of a row
+  (`evaluated_by`, `person_confirmed` stay empty).
 - The Monitoring Twin's own 3-in-7 rule (above) is separate. `npm run
   test:logstream` pins the rule against history and the writer and trigger
   against a local database.
@@ -2127,6 +2149,7 @@ RECORDS
   Clients
   Executions             ← every run of every workflow, tabbed by system
   Scheduled runs         ← every scheduler's runs: agent tasks, timed workflows, reminders, timers
+  Logstream              ← faults that keep coming back, what crossed a threshold, what was done
   Pay Tracker            ← who is owed, for what work, and what has been paid
 
 REFERENCE
