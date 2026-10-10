@@ -164,6 +164,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'get_vfarm_gates',
         // 2026-10-10: recurring faults and what was done about them, for guidance on a Logstream job.
         'read_logstream',
+        // 2026-10-10: the engine's own events (engine.event.v1), Jason's go-time notice.
+        'read_engine_events',
       ]),
     },
     {
@@ -175,6 +177,7 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'queue_followup_research', 'update_watched_client_question', 'create_client_report_doc',
         // 2026-10-10: a fault's own history, read before writing the finding on a Logstream job.
         'read_logstream',
+        'read_engine_events',
       ]),
     },
     {
@@ -201,6 +204,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'get_vfarm_gates', 'write_vfarm_gate',
         // 2026-10-10: the way back from share_doc. Behind the same approval card.
         'unshare_doc',
+        // 2026-10-10: Jason's go-time notice: every agent reads Logstream and engine.event.v1.
+        'read_logstream', 'read_engine_events',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>

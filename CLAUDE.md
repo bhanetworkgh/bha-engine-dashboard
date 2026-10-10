@@ -2034,6 +2034,17 @@ autopay, no pay wiring, no destructive automated action).
   never returns the pay fields. Research Twin reads a fault's history before
   writing the finding on a job Logstream opened; North Star reads it for
   guidance. One `read` line per call on `engine_writes`.
+- **Every agent reads Logstream and the engine's events** (fourth pass, 10 Oct
+  — Jason's go-time notice: "finish the agent/twin consumption paths (Bays, NS,
+  RT, Slack Genie) off engine.event.v1 and Logstream"). `read_logstream` is in
+  Bays' scope too. `read_engine_events`, same file, read only, both
+  connections, in all three agents' scope: counts by event type over a window
+  (7 days by default, 30 at most) and the newest events (50, at most 200),
+  narrowed by `event_type`, `subject_id`, `lane`. A detail past 600 characters
+  is cut and marked; the answer is budgeted like `read_logstream`'s; an empty
+  window says none was recorded, not that nothing happened. One `read` line per
+  call on `engine_writes`. **Genie is not wired**: it is Kaiqi's service and
+  reads neither yet.
 - **Empty reads are counted, and nothing decides on them** (same day).
   `Bays — Daily Doc Rotator` posts one `empty_read_check` event per run to
   `/api/engine/events` (reads, empty, which channels; a clean run too, so a
