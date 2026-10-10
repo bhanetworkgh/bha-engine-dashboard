@@ -2076,6 +2076,70 @@ autopay, no pay wiring, no destructive automated action).
   test:logstream` pins the rule against history and the writer and trigger
   against a local database.
 
+**Research signals: one job per signal, a daily budget, and triggers T4, T5, T6
+and T8** (2026-10-11, Destiny — LOOP-1788310653393-Q9CR; the contract is
+BP-CONTRACT-005-CLOSED_LOOP_V1, whose "NOT YET WIRED" guards and triggers this
+builds, except T7). `server/src/researchSignals.ts`, migration 68,
+`engine_research_signals`, one row per signal key.
+
+- **`researchSignals.open()` is the one way an automatic research job is
+  opened.** Logstream's trigger and the Monitoring Twin's recurrence rule call
+  it too; never write an `rt-jobs` row for an automatic trigger any other way.
+  Research Twin's own `queue_followup_research` is not behind it: that is the
+  agent following up inside a run, not a trigger.
+- **One job per signal.** The key is the fault signature (`fault:<workflow ::
+  step>`, Logstream's own, so its trigger and T4 cannot open two jobs), a card
+  and its state, a lane and its gap, or a red flag name. A signal whose job is
+  still open adds one dated line to that job's Context. A capped or removed job
+  is never reopened. A resolved one reopens only where the signal re-arms (a
+  fault after 7 days, a red flag after 14), and "not yet" is told apart from
+  "never" (`wait: true`), so a caller with its own row keeps waiting. Before
+  opening, an open job already carrying the `Signal Key` is adopted, which is
+  how a job whose own record was lost is never opened twice.
+- **Five new automatic jobs a day (UTC), across the engine.** Over that the
+  signal is `held_budget` and tried again every pass. **Backlog takes at most
+  three of the five** (a card that has had missing research for weeks), so a
+  new fault always has room; live signals are taken before backlog.
+- **Nothing opens while the model credit is under $15 or cannot be read**
+  (`held_credit`). The balance is `GET /credits` on OpenRouter with
+  `OPENROUTER_API_KEY`, held for ten minutes. $15 is the eval runner's floor.
+- **The triggers** (`detect()`, every five minutes):
+  **T4** an incident whose handler set `research_needed`, or the same workflow
+  and step ending `needs_human` at the repair bridge twice in 7 days (test,
+  simulator and refused-ask left out, as Logstream leaves them out);
+  **T5** a North Star answer with Architect Attention true or lane health
+  Needs Intervention / Critical that ends its gaps with a line `Research Twin
+  question: <question>`, and not one where North Star already asked Research
+  Twin in that run (`Linked Twin Ask`). **North Star writes that line; code
+  never decides what an outside-world question is**;
+  **T6** a card at `needs_revision` or `pilot_failed`, and, once each, a card
+  with `missing_research_count` above nought and no research job ever (the
+  job carries the card id, so a finding still reaches back to the card);
+  **T8** the same `Red Flag Name` on 3 or more logs in 14 days. That field is
+  written by `Bays — Submit Actions` from 11 Oct 2026; older logs do not
+  carry it, so the count starts then. Its answer can only become a pattern
+  candidate, never a pay decision.
+- **A waiting signal is tried again from what was stored** (a question does
+  not stop being one because a week passed). A waiting card or red flag that
+  stops holding is let go and says so, only on a pass where every source was
+  read. A source that could not be read is one `research_signals_source_unread`
+  event a day and is named on the page.
+- **Not built**: T7 (vFarm anomalies; Jegan's contract), and T6's "high-intent
+  front-door lead" (nobody has defined one).
+- **Reads**: the Research signals tab on `/logstream` (`research_signals` on
+  `GET /api/logstream`), `read_logstream`'s overview (`research_signals`),
+  and `GET /api/engine/research-signals` (`x-dashboard-key`; waiting only, or
+  `?all=1`), which Monday's `Research Queue — Weekly Digest` reads.
+- **`run_research_signals`** (write connection, no agent's scope): the pass on
+  demand. `dry_run` defaults to true and lists what each signal would get.
+  `fixture` puts one marked test signal through the real guard; its job carries
+  `Fixture: true` and is removed with `delete_record`. A waiting fixture is
+  never opened by the clock.
+- New fields on an automatic job: `Opened By Trigger` and `Signal Key`. Logstream
+  crossings and Monitoring recurrences gain the states `held` and
+  `not_reopened`. `npm run test:research-signals` pins all of it; every test
+  that opens a research job starts `server/test/_credit.cjs` first.
+
 **The credit-out alert** (2026-10-10, Destiny). `server/src/creditOut.ts`, a
 check every minute, no table of its own (its state is `meta`
 `credit_out.state`). On 10 Oct the OpenRouter credit ran out between two of
@@ -2228,7 +2292,7 @@ RECORDS
   Clients
   Executions             ← every run of every workflow, tabbed by system
   Scheduled runs         ← every scheduler's runs: agent tasks, timed workflows, reminders, timers
-  Logstream              ← faults that keep coming back, what crossed a threshold, what was done
+  Logstream              ← faults that keep coming back, what crossed a threshold, what asked for research
   Pay Tracker            ← who is owed, for what work, and what has been paid
 
 REFERENCE

@@ -25,6 +25,8 @@ const KNOWN: Array<{ name: string; what: string; every: string }> = [
   { name: 'lane blocker sweep', what: 'Writes an event when a loop blocking a lane is closed', every: '5 minutes' },
   { name: 'quality alert', what: 'Checks the agents\' answer quality against its alert line', every: '15 minutes' },
   { name: 'credit-out watch', what: 'Posts one alert the minute a run fails because the model credit is out', every: '1 minute' },
+  { name: 'logstream sweep', what: 'Writes Logstream rows and acts on faults that crossed a threshold', every: '5 minutes' },
+  { name: 'research signals', what: 'Finds signals that ask for research and opens one job each, within the daily budget', every: '5 minutes' },
   { name: 'retention', what: 'Clears personal text past its retention period (acts once a week)', every: '6 hours' },
 ];
 

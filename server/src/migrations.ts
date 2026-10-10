@@ -2919,6 +2919,50 @@ const MIGRATIONS: Migration[] = [
        ON CONFLICT (scored_on, dimension) DO NOTHING`,
     ],
   },
+  {
+    id: 68,
+    name: 'engine_research_signals: one job per signal, the daily budget, and held states on the two older openers',
+    statements: [
+      /**
+       * 11 Oct 2026, Destiny (LOOP-1788310653393-Q9CR; the guards and triggers
+       * BP-CONTRACT-005 marks NOT YET WIRED). One row per signal key: what
+       * asked for research, the job it got, and why it is waiting when it is.
+       * Logstream's and the Monitoring Twin's openers go through the same
+       * guard, so each gains a held state and a "not reopened" one.
+       */
+      `CREATE TABLE IF NOT EXISTS engine_research_signals (
+        id BIGSERIAL PRIMARY KEY,
+        signal_id TEXT NOT NULL UNIQUE,
+        signal_key TEXT NOT NULL UNIQUE,
+        trigger_code TEXT NOT NULL CHECK (trigger_code IN ('T4', 'T5', 'T6', 'T8', 'MONITORING')),
+        source TEXT NOT NULL,
+        priority INTEGER NOT NULL DEFAULT 1,
+        lane TEXT,
+        card_id TEXT,
+        question TEXT NOT NULL,
+        context TEXT NOT NULL DEFAULT '',
+        refs JSONB NOT NULL DEFAULT '[]'::jsonb,
+        occurrences INTEGER NOT NULL DEFAULT 1,
+        rearm_days INTEGER,
+        state TEXT NOT NULL CHECK (state IN ('opening', 'job_opened', 'held_budget', 'held_credit', 'not_reopened', 'failed')),
+        reason TEXT,
+        job_id TEXT,
+        previous_jobs JSONB NOT NULL DEFAULT '[]'::jsonb,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        fixture BOOLEAN NOT NULL DEFAULT false,
+        detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+        detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        opened_at TIMESTAMPTZ
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_research_signals_opened ON engine_research_signals (opened_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_research_signals_state ON engine_research_signals (state, priority, detected_at)`,
+      `ALTER TABLE engine_logstream_triggers DROP CONSTRAINT IF EXISTS engine_logstream_triggers_action_state_check`,
+      `ALTER TABLE engine_logstream_triggers ADD CONSTRAINT engine_logstream_triggers_action_state_check CHECK (action_state IN ('pending', 'job_opened', 'alerted', 'suppressed_shared_outage', 'failed', 'withdrawn', 'held', 'not_reopened'))`,
+      `ALTER TABLE engine_monitoring_recurrences DROP CONSTRAINT IF EXISTS engine_monitoring_recurrences_job_state_check`,
+      `ALTER TABLE engine_monitoring_recurrences ADD CONSTRAINT engine_monitoring_recurrences_job_state_check CHECK (job_state IN ('pending', 'opened', 'not_opened_simulated', 'failed', 'held', 'not_reopened'))`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

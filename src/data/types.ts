@@ -4068,7 +4068,7 @@ export interface LogstreamTrigger {
   last_at: string | null;
   detected_at: string;
   action: 'research_job' | 'alert_person';
-  action_state: 'pending' | 'job_opened' | 'alerted' | 'suppressed_shared_outage' | 'failed' | 'withdrawn';
+  action_state: 'pending' | 'job_opened' | 'alerted' | 'suppressed_shared_outage' | 'failed' | 'withdrawn' | 'held' | 'not_reopened';
   job_id: string | null;
   job_status: string | null;
   alert_channel: string | null;
@@ -4106,7 +4106,39 @@ export interface LogstreamRow {
   person_confirmed: boolean;
   autopay_enabled: boolean;
 }
+/** One signal that asked for research (server/src/researchSignals.ts, 2026-10-11). */
+export interface ResearchSignal {
+  signal_id: string;
+  signal_key: string;
+  trigger_code: 'T4' | 'T5' | 'T6' | 'T8' | 'MONITORING';
+  source: string;
+  priority: number;
+  lane: string | null;
+  card_id: string | null;
+  question: string;
+  state: 'opening' | 'job_opened' | 'held_budget' | 'held_credit' | 'not_reopened' | 'failed';
+  reason: string | null;
+  job_id: string | null;
+  job_status: string | null;
+  previous_jobs: string[];
+  occurrences: number;
+  fixture: boolean;
+  detected_at: string;
+  last_seen_at: string;
+  opened_at: string | null;
+}
+export interface ResearchSignalsData {
+  rule: { daily_budget: number; backlog_daily_cap: number; credit_floor_usd: number; words: string[]; not_built: string[]; contract: string };
+  today: { utc_day: string; opened: number; backlog_opened: number; budget: number; left: number };
+  credit: { read: boolean; remaining_usd?: number; error?: string; floor_usd: number; read_at: string | null };
+  by_state: Record<string, number>;
+  signals: ResearchSignal[];
+  signals_cap: number;
+  last_pass: { at: string | null; errors?: string[] };
+}
 export interface LogstreamData {
+  /** Absent when an older server answers during a deploy. */
+  research_signals?: ResearchSignalsData;
   rule: { window_days: number; research_at: number; escalate_at: number; words: string[]; locked_by: string };
   summary: { incidents: number; counted: number; excluded: number; closed: number; last_7d: number; person_confirmed: number; autopay_enabled: number; first_at: string | null; last_written_at: string | null };
   holding_now: { kind: string; key: string; n: number; runs: number | null; failures: number | null }[];

@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useData } from '../app/useData';
 import { getLogstream } from '../data';
-import type { LogstreamData, LogstreamRow, LogstreamSignature, LogstreamTrigger } from '../data/types';
+import type { LogstreamData, LogstreamRow, LogstreamSignature, LogstreamTrigger, ResearchSignal } from '../data/types';
 import { EmptyState, LoadFailed, Loading, PageHeader, Pagination, Pill, Stat, StatCell, StatStrip, TableFrame, Tabs, Th, usePaged } from '../components/ui';
 
 /**
@@ -16,9 +16,9 @@ import { EmptyState, LoadFailed, Loading, PageHeader, Pagination, Pill, Stat, St
  * that calls a person. A research job opened is the rule doing its job and is the accent, not green.
  */
 
-const TABS = ['Crossings', 'Faults', 'Rows', 'Patterns'] as const;
+const TABS = ['Crossings', 'Faults', 'Rows', 'Patterns', 'Research signals'] as const;
 type Tab = (typeof TABS)[number];
-const SLUG: Record<Tab, string> = { Crossings: 'crossings', Faults: 'faults', Rows: 'rows', Patterns: 'patterns' };
+const SLUG: Record<Tab, string> = { Crossings: 'crossings', Faults: 'faults', Rows: 'rows', Patterns: 'patterns', 'Research signals': 'signals' };
 
 const when = (iso: string | null) => (iso ? iso.slice(0, 16).replace('T', ' ') : '—');
 
@@ -41,6 +41,10 @@ function ActionPill({ t }: { t: LogstreamTrigger }) {
       return <Pill tone="failing">did not land</Pill>;
     case 'withdrawn':
       return <Pill>withdrawn</Pill>;
+    case 'held':
+      return <Pill tone="degraded">waiting: budget or credit</Pill>;
+    case 'not_reopened':
+      return <Pill>not reopened</Pill>;
     default:
       return <Pill tone="degraded">waiting</Pill>;
   }
@@ -82,7 +86,7 @@ function Crossings({ data }: { data: LogstreamData }) {
               <td className="tabular px-3 py-2 text-dim">{t.kind === 'workflow_rate' ? `${t.failures} of ${t.runs} runs` : t.n}</td>
               <td className="px-3 py-2">
                 <ActionPill t={t} />
-                <div className="mt-1 text-[11.5px] text-faint">{t.action_state === 'withdrawn' ? (t.error ?? '') : (t.job_id ?? (t.alert_ts ? 'posted in the engine alerts channel' : (t.error ?? '')))}</div>
+                <div className="mt-1 text-[11.5px] text-faint">{t.action_state === 'withdrawn' || t.action_state === 'held' || t.action_state === 'not_reopened' ? (t.error ?? '') : (t.job_id ?? (t.alert_ts ? 'posted in the engine alerts channel' : (t.error ?? '')))}</div>
               </td>
               <td className="px-3 py-2 text-[12px] text-dim">{guidanceWords(t)}</td>
             </tr>
@@ -249,6 +253,99 @@ function Patterns({ data, short }: { data: LogstreamData; short: (id: string) =>
   );
 }
 
+/**
+ * Research signals (2026-10-11, Destiny. Q9CR). Everything that asked for a research job and what
+ * the guard did with it: one job per signal, five new automatic jobs a day, nothing while the model
+ * credit is low. Waiting is the only coloured state besides a job that did not land: a signal that
+ * got its job is the rule doing its job, and one not reopened is a rule too.
+ */
+const TRIGGER: Record<ResearchSignal['trigger_code'], string> = {
+  T4: 'Engine fault',
+  T5: 'Lane health',
+  T6: 'Commercial card',
+  T8: 'Repeated red flag',
+  MONITORING: 'Monitoring Twin',
+};
+
+function SignalPill({ s }: { s: ResearchSignal }) {
+  switch (s.state) {
+    case 'job_opened':
+      return <Pill tone="accent">research job opened</Pill>;
+    case 'held_budget':
+      return <Pill tone="degraded">waiting: daily budget</Pill>;
+    case 'held_credit':
+      return <Pill tone="degraded">waiting: model credit</Pill>;
+    case 'failed':
+      return <Pill tone="failing">did not land</Pill>;
+    case 'not_reopened':
+      return <Pill>not reopened</Pill>;
+    default:
+      return <Pill tone="degraded">opening</Pill>;
+  }
+}
+
+function Signals({ data }: { data: LogstreamData }) {
+  const rs = data.research_signals;
+  const paged = usePaged<ResearchSignal>(rs?.signals ?? [], 'signals');
+  if (!rs) return <EmptyState>The server has not sent the research signals yet. Reload in a minute.</EmptyState>;
+  const credit = rs.credit.read ? `$${(rs.credit.remaining_usd ?? 0).toFixed(2)} of model credit, read ${when(rs.credit.read_at)} UTC` : `model credit not read: ${rs.credit.error ?? 'no reason recorded'}`;
+  return (
+    <>
+      <p className="px-6 pb-3 text-[12px] text-dim md:px-8">
+        {rs.today.opened} of {rs.today.budget} automatic research jobs opened today (UTC {rs.today.utc_day}), {rs.today.backlog_opened} of {rs.rule.backlog_daily_cap} from the backlog. {credit}; nothing opens under ${rs.rule.credit_floor_usd}.
+      </p>
+      {rs.signals.length === 0 ? (
+        <EmptyState>Nothing has asked for a research job since the guard started on 11 Oct 2026.</EmptyState>
+      ) : (
+        <>
+          <TableFrame grow={false} label="Research signals">
+            <thead>
+              <tr>
+                <Th>Seen (UTC)</Th>
+                <Th>What asked</Th>
+                <Th>Question</Th>
+                <Th>What was done</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {paged.rows.map((s) => (
+                <tr key={s.signal_id} className="border-b border-line align-top">
+                  <td className="tabular px-3 py-2 text-dim">{when(s.detected_at)}</td>
+                  <td className="px-3 py-2 text-ink">
+                    {TRIGGER[s.trigger_code]}
+                    {s.fixture ? ' (fixture)' : ''}
+                    <div className="text-[11.5px] text-faint">
+                      {s.source}
+                      {s.card_id ? ` · ${s.card_id}` : ''}
+                      {s.lane ? ` · ${s.lane}` : ''}
+                      {s.occurrences > 1 ? ` · seen ${s.occurrences} times` : ''}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-[12px] text-dim">{s.question}</td>
+                  <td className="px-3 py-2">
+                    <SignalPill s={s} />
+                    <div className="mt-1 text-[11.5px] text-faint">{s.state === 'job_opened' ? `${s.job_id ?? ''}${s.job_status ? ` · ${s.job_status}` : ''}` : (s.reason ?? '')}</div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </TableFrame>
+          <Pagination paged={paged} unit="rows" />
+        </>
+      )}
+      {(rs.last_pass.errors ?? []).length > 0 ? <p className="px-6 pt-3 text-[12px] text-failing md:px-8">The last pass could not read every source: {(rs.last_pass.errors ?? []).join('; ')}</p> : null}
+      <div className="mt-4 space-y-1 px-6 text-[11.5px] leading-relaxed text-faint md:px-8">
+        {rs.rule.words.map((w) => (
+          <p key={w}>{w}</p>
+        ))}
+        {rs.rule.not_built.map((w) => (
+          <p key={w}>Not built: {w}</p>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export default function Logstream() {
   const [params, setParams] = useSearchParams();
   const tab = (TABS.find((t) => SLUG[t] === params.get('tab')) ?? 'Crossings') as Tab;
@@ -259,6 +356,7 @@ export default function Logstream() {
     if (data) for (const [k, v] of Object.entries(data.patterns)) names[v] = k === 'S757' ? 'Closure protocol (S757)' : k === 'BW9S' ? 'Guarded retry (BW9S)' : k === 'GRM8' ? 'Cut-off answer signal (GRM8)' : k;
     return (id: string) => names[id] ?? id;
   }, [data]);
+  const signalsWaiting = data ? (data.research_signals?.signals ?? []).filter((s) => s.state === 'failed').length : 0;
   const notLanded = data ? data.triggers.filter((t) => t.action_state === 'failed' || t.guidance_state === 'failed').length : 0;
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -270,7 +368,7 @@ export default function Logstream() {
             tabs={TABS}
             value={tab}
             onChange={setTab}
-            counts={data ? { Crossings: { n: data.triggers.length, tone: notLanded ? 'failing' : 'default' }, Faults: { n: data.signatures.filter((s) => !s.excluded_reason).length }, Rows: { n: data.rows.length } } : undefined}
+            counts={data ? { Crossings: { n: data.triggers.length, tone: notLanded ? 'failing' : 'default' }, Faults: { n: data.signatures.filter((s) => !s.excluded_reason).length }, Rows: { n: data.rows.length }, 'Research signals': { n: (data.research_signals?.signals ?? []).length, tone: signalsWaiting ? 'failing' : 'default' } } : undefined}
           />
         }
       />
@@ -296,7 +394,7 @@ export default function Logstream() {
               <Stat label="Actions that did not land" value={notLanded} hint="A job, an alert or a guidance request that failed and is being retried" tone={notLanded ? 'failing' : 'default'} />
             </StatCell>
           </StatStrip>
-          {tab === 'Crossings' ? <Crossings data={data} /> : tab === 'Faults' ? <Faults data={data} /> : tab === 'Rows' ? <Rows data={data} short={short} /> : <Patterns data={data} short={short} />}
+          {tab === 'Crossings' ? <Crossings data={data} /> : tab === 'Faults' ? <Faults data={data} /> : tab === 'Rows' ? <Rows data={data} short={short} /> : tab === 'Patterns' ? <Patterns data={data} short={short} /> : <Signals data={data} />}
           <div className="mt-4 space-y-1 px-6 text-[11.5px] leading-relaxed text-faint md:px-8">
             {data.rule.words.map((w) => (
               <p key={w}>{w}</p>
