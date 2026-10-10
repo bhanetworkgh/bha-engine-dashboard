@@ -11840,3 +11840,12 @@ Files:      server/src/mcp/logstreamTools.ts, server/src/mcp/index.ts, server/te
 Problem:    none.
 Fix:        New read tool read_engine_events (both connections): counts by type over a window and the newest matching events, filters event_type / subject_id / lane / since_hours, detail cut at 600 characters and marked, answer budgeted to 20,000 characters. read_logstream and read_engine_events added to Bays' scope; read_engine_events added to North Star's and Research Twin's. test:logstream is 19 checks.
 Decision:   One generic read of the events table, not one tool per event family: the shape is the same for every event and a new event type should need no code. Genie is not wired here: it is Kaiqi's service, so that is a loop for his lane.
+
+## 2026-10-10 19:00 — the three agents read Logstream and the engine's events
+Intent:     finish Jason's go-time mandate for the engine on the agents themselves (Lagos time).
+Files:      none in the repo (n8n agents, dashboard records).
+Problem:    none.
+Fix:        Allow-list only, no instruction change. Bays: read_logstream and read_engine_events added, restore 10c623be, published 30197da1-5693-41f2-816f-0f60959d84a8. North Star: read_engine_events, restore 8cda5cf7, published 28c4509c-84e2-4dde-a411-6089602c5c71. Research Twin: read_engine_events, restore a559a95e, published 37857864-e194-4118-bdf0-b81bd7ce1edc. Each draft validated and tested with a question that needed the new tool: Bays read the digest events and what is over a threshold now; North Star read the week's vFarm gate events and said every one is a fixture; Research Twin read the three threshold crossings. Dashboard deploy 6e8bc47 was live before the tests.
+            Pattern candidate CAND-1791653519472-I45C flagged for the Logstream spine (audit 1585). Loop LOOP-1791653985161-QRTH opened for Kaiqi: Genie is the fourth consumer Jason named and is not wired (audit 1587).
+            Evals: EVAL-202610101739 started (execution 32223). At 13 results in, one failure: RT-04, a citation marker [S4] not in its Sources list. That is a web-research answer and no tool it used changed; result of the full run to be added below.
+Decision:   The tool descriptions say when to use each tool, so no agent's instructions were touched. That keeps the change small and the evals comparable with this afternoon's 62 of 62.
