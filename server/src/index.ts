@@ -1227,6 +1227,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       case '/api/bays/reminders':
         return send(res, 200, await reminderTools.reminders());
       /** Every scheduler's runs on one page (2026-10-09, K9B7). A read. */
+      case '/api/logstream':
+        return send(res, 200, await logstream.read());
       case '/api/scheduled-runs':
         return send(res, 200, await scheduledRuns.scheduledRuns());
       case '/api/vfarm/live':

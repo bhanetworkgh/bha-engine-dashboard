@@ -2863,6 +2863,18 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_logstream_triggers_key ON engine_logstream_triggers (kind, key, detected_at DESC)`,
     ],
   },
+  {
+    id: 65,
+    name: 'engine_logstream: the patterns_evaluated state; triggers: the guidance step',
+    statements: [
+      /** 10 Oct 2026, second pass: one row per closed incident saying which pattern applied, and whether North Star was asked once research resolved. */
+      `ALTER TABLE engine_logstream DROP CONSTRAINT IF EXISTS engine_logstream_state_check`,
+      `ALTER TABLE engine_logstream ADD CONSTRAINT engine_logstream_state_check CHECK (state IN ('observed', 'closed', 'research_opened', 'patterns_evaluated'))`,
+      `ALTER TABLE engine_logstream_triggers ADD COLUMN IF NOT EXISTS guidance_state TEXT CHECK (guidance_state IN ('asked', 'failed', 'no_finding'))`,
+      `ALTER TABLE engine_logstream_triggers ADD COLUMN IF NOT EXISTS guidance_error TEXT`,
+      `ALTER TABLE engine_logstream_triggers ADD COLUMN IF NOT EXISTS guidance_at TIMESTAMPTZ`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

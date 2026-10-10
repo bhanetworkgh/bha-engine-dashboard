@@ -18,6 +18,8 @@
  *   - an alert Slack refuses is failed with the reason, and lands on the next pass;
  *   - the rate rule needs 10 runs and 3 failures;
  *   - five workflows crossing is one outage alert and no new research;
+ *   - a closed incident gets one patterns_evaluated row, judged only from the record;
+ *   - North Star is asked for guidance once, only when the research job resolves;
  *   - person_confirmed and autopay_enabled are false on every row.
  *
  * Run with:  npm run test:logstream   (needs a LOCAL DATABASE_URL)
@@ -111,8 +113,24 @@ const slack = http.createServer((req, res) => {
   });
 });
 
+const asks = [];
+let hookAnswer = { code: 200, body: { ok: true } };
+const hook = http.createServer((req, res) => {
+  let b = '';
+  req.on('data', (c) => (b += c));
+  req.on('end', () => {
+    asks.push({ path: req.url, headers: req.headers, body: JSON.parse(b || '{}') });
+    res.writeHead(hookAnswer.code, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(hookAnswer.body));
+  });
+});
+
 (async () => {
   const port = await new Promise((r) => slack.listen(0, '127.0.0.1', () => r(slack.address().port)));
+  const hookPort = await new Promise((r) => hook.listen(0, '127.0.0.1', () => r(hook.address().port)));
+  process.env.N8N_BASE_URL = `http://127.0.0.1:${hookPort}`;
+  delete process.env.N8N_API_URL;
+  process.env.DASHBOARD_INBOUND_KEY = 'inbound-test';
   process.env.SLACK_API_URL = `http://127.0.0.1:${port}`;
   process.env.SLACK_BAYS_BOT_TOKEN = 'xoxb-test';
   process.env.QUOTA_ALERT_CHANNEL = 'C0ALERTS001';
@@ -147,7 +165,7 @@ const slack = http.createServer((req, res) => {
   const a2 = await incident(WF, 'Step A', { minsAgo: 200, open: false });
   let w = await logstream.sweep();
   const rows = (await query(`SELECT incident_id, state, signature, objective_outcomes, research_trigger, person_confirmed, autopay_enabled, excluded_reason FROM engine_logstream WHERE incident_id IN ($1, $2) ORDER BY id`, [a1, a2])).rows;
-  assert.deepEqual(rows.map((r) => `${r.incident_id === a1 ? 'a1' : 'a2'}:${r.state}`).sort(), ['a1:observed', 'a2:closed', 'a2:observed']);
+  assert.deepEqual(rows.map((r) => `${r.incident_id === a1 ? 'a1' : 'a2'}:${r.state}`).sort(), ['a1:observed', 'a2:closed', 'a2:observed', 'a2:patterns_evaluated']);
   assert.equal(rows.find((r) => r.incident_id === a2 && r.state === 'observed').objective_outcomes.incident_frequency_7d, 2);
   const closed = rows.find((r) => r.state === 'closed');
   assert.ok(closed.objective_outcomes.time_to_recovery_seconds > 0);
@@ -242,6 +260,64 @@ const slack = http.createServer((req, res) => {
   assert.equal((await jobs()).length, before, 'no per-workflow research during an outage');
   ok('trigger: five workflows crossing is one outage alert and no new research');
 
+  /* which pattern applied */
+  const P = logstream.PATTERNS;
+  const ev = (o) => logstream.evaluatePatterns({ excluded: null, resolved_at: '2026-10-09T10:00:00Z', resolved_by: null, close_reasoned: false, guarded_retries: 0, ...o });
+  assert.equal(ev({ close_reasoned: true }).adherence[P.S757].result, 'followed');
+  assert.equal(ev({ resolved_by: 'the ledger (closed upstream by the healer or a person)' }).adherence[P.S757].result, 'not_followed');
+  assert.equal(ev({ resolved_by: 'admin@bhanetwork.org' }).adherence[P.S757].result, 'not_applicable', 'a close the record says too little about is not judged');
+  assert.equal(ev({ close_reasoned: true, resolved_at: '2026-10-05T10:00:00Z' }).adherence[P.S757].result, 'not_applicable', 'before the protocol existed');
+  assert.equal(ev({ close_reasoned: true, excluded: 'test' }).adherence[P.S757].result, 'not_applicable');
+  assert.deepEqual(ev({ guarded_retries: 2, close_reasoned: true }).applied.sort(), [P.BW9S, P.S757].sort());
+  assert.equal(ev({}).adherence[P.GRM8].result, 'not_applicable');
+  const c1 = await incident(`${WF} close`, 'Step C', { open: false });
+  const c2 = await incident(`${WF} close`, 'Step D', { open: false });
+  await query(`UPDATE engine_incidents SET resolved_by = 'the ledger (closed upstream by the healer or a person)' WHERE natural_id = $1`, [c2]);
+  await query(`INSERT INTO engine_mcp_writes (tool, arguments, digest, access, kind, dry_run, outcome, actor, target) VALUES ('close_incidents', $1::jsonb, 'x', 'write', 'incidents', false, 'applied', 'test', 'incidents')`, [JSON.stringify({ ids: [c1], reason: 'fixed, with evidence' })]);
+  await query(`INSERT INTO engine_mcp_writes (tool, arguments, digest, access, kind, dry_run, outcome, actor, target) VALUES ('retry_incident', $1::jsonb, 'x', 'write', 'incidents', false, 'applied', 'test', 'incidents')`, [JSON.stringify({ incident_id: c1, reason: 'one guarded retry' })]);
+  await logstream.sweep();
+  const tagged = (await query(`SELECT incident_id, pattern_ids_applied, pattern_adherence FROM engine_logstream WHERE state = 'patterns_evaluated' AND incident_id IN ($1, $2)`, [c1, c2])).rows;
+  const of = (id) => tagged.find((r) => r.incident_id === id);
+  assert.deepEqual(of(c1).pattern_ids_applied.sort(), [P.BW9S, P.S757].sort());
+  assert.equal(of(c1).pattern_adherence[P.S757].result, 'followed');
+  assert.equal(of(c2).pattern_adherence[P.S757].result, 'not_followed');
+  assert.deepEqual(of(c2).pattern_ids_applied, [P.S757]);
+  ok('patterns: the closure protocol and the guarded retry are read from the record; anything unclear is not applicable');
+
+  /* the guidance step */
+  const job = (await jobs()).find((x) => x.fields.Question.includes('Step A'));
+  await logstream.requestGuidance();
+  assert.equal(asks.length, 0, 'North Star is not asked while the job is still pending');
+  await query(`UPDATE engine_rt_jobs SET fields = fields || $2::jsonb WHERE natural_id = $1`, [job.natural_id, JSON.stringify({ Status: 'Resolved', Finding: 'The step times out when the upstream is cold.', Confidence: 'medium' })]);
+  hookAnswer = { code: 500, body: { ok: false, error: 'north star said no' } };
+  let g = await logstream.requestGuidance();
+  assert.equal(g.failed, 1);
+  let gt = (await query(`SELECT guidance_state, guidance_error FROM engine_logstream_triggers WHERE job_id = $1`, [job.natural_id])).rows[0];
+  assert.equal(gt.guidance_state, 'failed');
+  assert.ok(gt.guidance_error.includes('north star said no'));
+  hookAnswer = { code: 200, body: { ok: true } };
+  g = await logstream.requestGuidance();
+  assert.equal(g.asked, 1);
+  assert.equal(asks.length, 2);
+  assert.equal(asks[1].headers['x-dashboard-key'], 'inbound-test');
+  assert.ok(asks[1].body.prompt.includes('The step times out') && asks[1].body.prompt.includes(job.natural_id) && asks[1].body.prompt.includes('recommendation only'));
+  assert.equal(asks[1].body.channel_id, 'C0B5JHVAXCM');
+  await logstream.requestGuidance();
+  assert.equal(asks.length, 2, 'asked once');
+  const rateJob = (await jobs()).find((x) => x.fields.Question.includes('rate one'));
+  await query(`UPDATE engine_rt_jobs SET fields = fields || $2::jsonb WHERE natural_id = $1`, [rateJob.natural_id, JSON.stringify({ Status: 'Capped (needs human)' })]);
+  g = await logstream.requestGuidance();
+  assert.equal(g.no_finding, 1);
+  assert.equal(asks.length, 2, 'a capped job has nothing to turn into guidance');
+  ok('guidance: North Star is asked once when research resolves; a refusal is failed and retried; a capped job is not sent');
+
+  /* the page's read */
+  const page = await logstream.read();
+  assert.ok(page.summary.incidents >= 5 && page.triggers.length >= 3 && page.signatures.length >= 1 && page.rows.length >= 1);
+  assert.equal(page.summary.person_confirmed, 0);
+  assert.ok(page.adherence.some((a) => a.pattern === P.S757 && a.result === 'followed'));
+  ok('read: the page gets the summary, crossings, faults, rows and adherence');
+
   const flags = (await query(`SELECT count(*)::int AS n FROM engine_logstream WHERE person_confirmed OR autopay_enabled`)).rows[0].n;
   assert.equal(flags, 0);
   ok('pay: person_confirmed and autopay_enabled are false on every row');
@@ -251,8 +327,10 @@ const slack = http.createServer((req, res) => {
   await query(`DELETE FROM engine_logstream WHERE incident_id LIKE $1`, [`INC-LSTEST-${T}-%`]);
   await query(`DELETE FROM engine_logstream_triggers WHERE key LIKE $1 OR key LIKE $2 OR kind = 'shared_outage'`, [`%${T}%`, `lstest-${T}-%`]);
   await query(`DELETE FROM engine_rt_jobs WHERE fields->>'Opened By' = 'Logstream' AND fields->>'Question' LIKE $1`, [`%${T}%`]);
+  await query(`DELETE FROM engine_mcp_writes WHERE arguments::text LIKE $1`, [`%INC-LSTEST-${T}-%`]);
   console.log(`\n${passed} checks passed.`);
   slack.close();
+  hook.close();
   process.exit(0);
 })().catch((e) => {
   console.error('\nFAILED:', e);

@@ -196,4 +196,10 @@ Jason gave the go-ahead on 9 Oct: table, writer and trigger against the locked t
 - **Trigger.** Section 10's numbers, every five minutes, over the last 7 days. 3 of the same fault opens one Research Twin job. 5 posts one alert in the engine alerts channel. The workflow rate rule opens one job. 5 or more workflows crossing is one outage alert and no per-workflow research.
 - **Left out of counting:** workflows named TEST, anything simulated, and the step "Raise Refused Ask".
 
-Not built, and still to decide: a page, North Star's guidance step (step 6 of section 4), a person's review of a row, and which build pattern applied to an incident (`pattern_ids_applied` is empty, because nothing in the engine records that).
+Added later the same day:
+
+- **Which pattern applied.** Each closed incident gets one more row saying which pattern applied and whether it was followed. Only two can be read from records the engine keeps: the closure protocol (S757), for a close on or after 7 Oct 2026, and the guarded retry (BW9S). The cut-off answer signal (GRM8) is a pattern-draft outcome and raises no incident, so it never applies to a row. GNER is not evaluated.
+- **Guidance (step 6 of section 4).** When the research job resolves, North Star is asked once, through its own Front Door, to post a recommendation in #bha-north-star-twin: whether a lane tag should change, one line for the linked card, and whether more research is worth it. It recommends and does nothing else.
+- **A page.** Logstream, under Records on the dashboard.
+
+Still not built: a person's review of a row (`evaluated_by`, `person_confirmed`).

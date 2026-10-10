@@ -33,9 +33,27 @@
  * What it can do is open a research job and post a Slack message. It never
  * closes, retries, edits or deletes anything, and never touches pay.
  *
+ * Second pass, the same day (Destiny: "finish everything"):
+ *
+ *   **Which pattern applied.** Once an incident is closed it gets one
+ *   `patterns_evaluated` row. Two of the four patterns can be read from
+ *   records the engine already keeps, and only those two are: S757 (the
+ *   closure protocol) from how the incident was closed, and BW9S (the guarded
+ *   retry) from the audit line `retry_incident` writes. GRM8 is a pattern-draft
+ *   outcome and raises no incident, so it never applies to a row here. GNER is
+ *   a candidate and is not evaluated at all.
+ *
+ *   **The guidance step.** When the Research Twin job a trigger opened is
+ *   Resolved, North Star is asked once, through n8n, to turn the finding into
+ *   a recommendation and post it in its channel. A recommendation, never an
+ *   action: North Star sets no tag and edits no card.
+ *
+ *   **The read.** `read()` is what the Logstream page draws.
+ *
  * Honest limits, all carried on the rows themselves:
- *   - `pattern_ids_applied` is empty: nothing in the engine tags an incident
- *     with a build pattern yet, and this does not guess one.
+ *   - S757 is judged only for a close on or after 7 Oct 2026, when the
+ *     protocol was first used, and only where the record says how it was
+ *     closed. Anything else is `not_applicable`, never a guess.
  *   - `time_to_recovery` is only marked trusted for a close on or after
  *     2 Oct 2026, when closes started being dated and signed.
  *   - No runtime decision depends on GNER; empty reads are not recorded.
@@ -49,6 +67,7 @@ import * as engineEvents from './engineEvents';
 import * as slack from './slack';
 import * as quota from './quota';
 import * as timers from './timers';
+import * as n8n from './n8n';
 
 export const RULE = {
   window_days: 7,
@@ -59,7 +78,33 @@ export const RULE = {
   rate_min_failures: 3,
   outage_workflows: 5,
   recovery_trusted_from: '2026-10-02T00:00:00.000Z',
+  /** The closure protocol was first used on 7 Oct 2026; a close before then is not judged against it. */
+  s757_from: '2026-10-07T00:00:00.000Z',
 } as const;
+export const PATTERNS = { S757: 'BP-BAYS-1791460374050-S757', BW9S: 'BP-BAYS-1791460380502-BW9S', GRM8: 'BP-BAYS-1791460387306-GRM8' } as const;
+const GUIDANCE_PATH = process.env.LOGSTREAM_GUIDANCE_PATH?.trim() || '/webhook/logstream-guidance';
+/** Where North Star posts its guidance: #bha-north-star-twin. */
+const GUIDANCE_CHANNEL = process.env.LOGSTREAM_GUIDANCE_CHANNEL?.trim() || 'C0B5JHVAXCM';
+
+export type Adherence = 'followed' | 'not_followed' | 'not_applicable';
+
+/**
+ * Which registered pattern applied to a closed incident, read from what the
+ * record says and nothing else. Pure, so it can be tested.
+ */
+export function evaluatePatterns(i: { excluded: Excluded; resolved_at: string | null; resolved_by: string | null; close_reasoned: boolean; guarded_retries: number }): { applied: string[]; adherence: Record<string, { result: Adherence; why: string }> } {
+  const adherence: Record<string, { result: Adherence; why: string }> = {};
+  const na = (why: string) => ({ result: 'not_applicable' as Adherence, why });
+  const by = (i.resolved_by ?? '').toLowerCase();
+  if (i.excluded) adherence[PATTERNS.S757] = na(`a ${i.excluded.replace('_', ' ')} incident is counted in nothing`);
+  else if (!i.resolved_at || new Date(i.resolved_at).toISOString() < RULE.s757_from) adherence[PATTERNS.S757] = na('closed before the protocol was first used on 7 Oct 2026');
+  else if (i.close_reasoned) adherence[PATTERNS.S757] = { result: 'followed', why: 'closed by a person with a written reason and an audit line' };
+  else if (/ledger|healer|recovery/.test(by)) adherence[PATTERNS.S757] = { result: 'not_followed', why: `closed without an evidence line: ${i.resolved_by}` };
+  else adherence[PATTERNS.S757] = na(`the record does not say enough about how it was closed (${i.resolved_by ?? 'no closer recorded'})`);
+  adherence[PATTERNS.BW9S] = i.guarded_retries > 0 ? { result: 'followed', why: `${i.guarded_retries} retry through retry_incident, each with a written reason and an audit line` } : na('no manual retry through retry_incident is recorded');
+  adherence[PATTERNS.GRM8] = na('a cut-off answer is a pattern-draft outcome and raises no incident');
+  return { applied: Object.keys(adherence).filter((k) => adherence[k].result !== 'not_applicable'), adherence };
+}
 const LOCK = 8134207619;
 const SWEEP_MS = 5 * 60_000;
 const ISO = `'YYYY-MM-DD"T"HH24:MI:SS"Z"'`;
@@ -167,6 +212,9 @@ interface Source {
   retry_status: string | null;
   has_observed: boolean;
   has_closed: boolean;
+  has_evaluated: boolean;
+  close_reasoned: boolean;
+  guarded_retries: number;
 }
 
 /**
@@ -174,8 +222,8 @@ interface Source {
  * longer open. Append-only: a row is never edited, and the unique index on
  * (incident, state) is what makes a repeat pass write nothing.
  */
-export async function writeRows(): Promise<{ observed: number; closed: number }> {
-  const out = { observed: 0, closed: 0 };
+export async function writeRows(): Promise<{ observed: number; closed: number; patterns_evaluated: number }> {
+  const out = { observed: 0, closed: 0, patterns_evaluated: 0 };
   const src = await query<Source>(
     `WITH inc AS (
        SELECT natural_id AS incident_id, lane_id, fields->'payload'->>'workflow_or_scenario' AS workflow, fields->'payload'->>'failed_node_or_component' AS node,
@@ -189,10 +237,14 @@ export async function writeRows(): Promise<{ observed: number; closed: number }>
             (SELECT max(nullif(ra.fields->>'attempts', '')::numeric)::int FROM engine_retry_attempts ra WHERE ra.natural_id = i.incident_id) AS retry_count,
             (SELECT max(ra.fields->>'status') FROM engine_retry_attempts ra WHERE ra.natural_id = i.incident_id AND ra.fields->>'status' IN ('Exhausted')) AS retry_status,
             EXISTS (SELECT 1 FROM engine_logstream l WHERE l.incident_id = i.incident_id AND l.state = 'observed') AS has_observed,
-            EXISTS (SELECT 1 FROM engine_logstream l WHERE l.incident_id = i.incident_id AND l.state = 'closed') AS has_closed
+            EXISTS (SELECT 1 FROM engine_logstream l WHERE l.incident_id = i.incident_id AND l.state = 'closed') AS has_closed,
+            EXISTS (SELECT 1 FROM engine_logstream l WHERE l.incident_id = i.incident_id AND l.state = 'patterns_evaluated') AS has_evaluated,
+            EXISTS (SELECT 1 FROM engine_mcp_writes m WHERE m.tool = 'close_incidents' AND m.outcome = 'applied' AND jsonb_typeof(m.arguments->'ids') = 'array' AND m.arguments->'ids' ? i.incident_id AND length(coalesce(m.arguments->>'reason', '')) > 0) AS close_reasoned,
+            (SELECT count(*)::int FROM engine_mcp_writes m WHERE m.tool = 'retry_incident' AND m.outcome IN ('applied', 'refused') AND m.arguments->>'incident_id' = i.incident_id AND length(coalesce(m.arguments->>'reason', '')) > 0) AS guarded_retries
        FROM inc i
       WHERE NOT EXISTS (SELECT 1 FROM engine_logstream l WHERE l.incident_id = i.incident_id AND l.state = 'observed')
          OR (i.open_now = false AND NOT EXISTS (SELECT 1 FROM engine_logstream l WHERE l.incident_id = i.incident_id AND l.state = 'closed'))
+         OR (i.open_now = false AND NOT EXISTS (SELECT 1 FROM engine_logstream l WHERE l.incident_id = i.incident_id AND l.state = 'patterns_evaluated'))
       ORDER BY i.at`,
   );
   if (!src.rows.length) return out;
@@ -201,11 +253,13 @@ export async function writeRows(): Promise<{ observed: number; closed: number }>
     const excluded = excludedReason(s);
     const lane = s.lane_id ? (WORK_LANE[s.lane_id] ?? s.lane_id) : null;
     const linked = lane ? (links.get(lane) ?? []) : [];
-    const states: ('observed' | 'closed')[] = [];
+    const states: ('observed' | 'closed' | 'patterns_evaluated')[] = [];
     if (!s.has_observed) states.push('observed');
     if (!s.open_now && !s.has_closed) states.push('closed');
+    if (!s.open_now && !s.has_evaluated) states.push('patterns_evaluated');
+    const pat = evaluatePatterns({ excluded, resolved_at: s.resolved_at, resolved_by: s.resolved_by, close_reasoned: s.close_reasoned, guarded_retries: s.guarded_retries });
     for (const state of states) {
-      const closedAt = state === 'closed' && s.resolved_at ? new Date(s.resolved_at) : null;
+      const closedAt = state !== 'observed' && s.resolved_at ? new Date(s.resolved_at) : null;
       const seconds = closedAt && !Number.isNaN(closedAt.getTime()) ? Math.max(0, Math.round((closedAt.getTime() - new Date(s.occurred_at).getTime()) / 1000)) : null;
       const outcomes = {
         incident_frequency_7d: s.f7,
@@ -215,12 +269,12 @@ export async function writeRows(): Promise<{ observed: number; closed: number }>
         retry_count: s.retry_count ?? 0,
         retries_within_cap: (s.retry_count ?? 0) <= 3,
         escalation_occurred: s.retry_status === 'Exhausted',
-        closed_by: state === 'closed' ? s.resolved_by : null,
+        closed_by: state !== 'observed' ? s.resolved_by : null,
       };
       const r = await query(
         `INSERT INTO engine_logstream (logstream_row_id, incident_id, state, lane_id, linked_lanes, signature, workflow, failed_node, error_class, excluded_reason, occurred_at,
-                                       objective_outcomes, research_trigger, commercial_relevance, audit)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb)
+                                       objective_outcomes, research_trigger, commercial_relevance, audit, pattern_ids_applied, pattern_adherence)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb)
          ON CONFLICT (incident_id, state) DO NOTHING`,
         [
           mint('LS'),
@@ -238,6 +292,8 @@ export async function writeRows(): Promise<{ observed: number; closed: number }>
           JSON.stringify({ threshold_crossed: !excluded && s.f7 >= RULE.research_at, rt_job_id: null, cause_distribution: null }),
           JSON.stringify({ linked_card_ids: [], relevance_note: null, pay_band_recommendation: null }),
           JSON.stringify({ written_by: 'logstream writer (dashboard)', approval_gate_status: 'not_reviewed' }),
+          JSON.stringify(state === 'patterns_evaluated' ? pat.applied : []),
+          JSON.stringify(state === 'patterns_evaluated' ? pat.adherence : {}),
         ],
       );
       if (r.rowCount) out[state]++;
@@ -318,13 +374,13 @@ async function windowRuns(): Promise<WorkflowRuns[]> {
 let sweeping = false;
 
 /** One pass: write the rows, find what crosses, record each crossing once, act on what is waiting. Never throws. */
-export async function sweep(): Promise<{ rows_written: number; crossings: number; detected: number; jobs_opened: number; alerts_posted: number; failed: number }> {
-  const out = { rows_written: 0, crossings: 0, detected: 0, jobs_opened: 0, alerts_posted: 0, failed: 0 };
+export async function sweep(): Promise<{ rows_written: number; crossings: number; detected: number; jobs_opened: number; alerts_posted: number; guidance_asked: number; failed: number }> {
+  const out = { rows_written: 0, crossings: 0, detected: 0, jobs_opened: 0, alerts_posted: 0, guidance_asked: 0, failed: 0 };
   if (sweeping) return out;
   sweeping = true;
   try {
     const w = await writeRows();
-    out.rows_written = w.observed + w.closed;
+    out.rows_written = w.observed + w.closed + w.patterns_evaluated;
     const found = evaluate(await windowIncidents(), await windowRuns());
     out.crossings = found.length;
     const outage = found.some((c) => c.kind === 'shared_outage');
@@ -398,6 +454,9 @@ export async function sweep(): Promise<{ rows_written: number; crossings: number
         await query(`UPDATE engine_logstream_triggers SET action_state = 'failed', error = $2, attempts = attempts + 1 WHERE id = $1`, [row.id, msg.slice(0, 500)]);
       }
     }
+    const g = await requestGuidance();
+    out.guidance_asked = g.asked;
+    out.failed += g.failed;
     return out;
   } catch (e) {
     console.error(`[logstream] sweep failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -405,6 +464,174 @@ export async function sweep(): Promise<{ rows_written: number; crossings: number
   } finally {
     sweeping = false;
   }
+}
+
+/* ---------------------------------------------------------- the guidance */
+
+interface GuidanceDue {
+  id: string;
+  trigger_id: string;
+  kind: string;
+  key: string;
+  workflow: string | null;
+  failed_node: string | null;
+  lane_id: string | null;
+  n: number;
+  job_id: string;
+  status: string | null;
+  finding: string | null;
+  confidence: string | null;
+}
+
+/** What North Star is asked, in full. Pure, so it can be tested. */
+export function guidancePrompt(t: { trigger_id: string; kind: string; workflow: string | null; failed_node: string | null; lane_id: string | null; n: number; job_id: string; finding: string; confidence: string | null }, linked: string[]): string {
+  const what = t.kind === 'workflow_rate' ? `the workflow "${t.workflow}" failing a fifth or more of its runs` : `the step "${t.failed_node}" in "${t.workflow}" failing ${t.n} times in ${RULE.window_days} days`;
+  return [
+    `Logstream guidance request ${t.trigger_id}. Research Twin has finished the research job ${t.job_id} that Logstream opened on a repeating engine fault: ${what}. Work lane: ${t.lane_id ?? 'not recorded'}.${linked.length ? ` Linked commercial lane: ${linked.join(', ')}.` : ' No commercial lane is linked to this work lane.'}`,
+    `Research Twin's finding (confidence ${t.confidence ?? 'not stated'}):`,
+    t.finding.slice(0, 3500),
+    'Turn this into guidance, as a recommendation only. You set no tag, edit no card and open no job. Answer in this order, briefly:',
+    '1. Lane: whether any ranking tag on the work lane should change because of this (engine_leverage, blocks_others), the value you recommend and why. Read the lane with your own tools first. If nothing should change, say so.',
+    '2. Commercial card: one sentence a person could put on the linked lane\'s card, or "none" if no lane is linked or the finding has no commercial bearing.',
+    '3. Research: whether another pass is warranted, and what it should ask.',
+    `Name the job ${t.job_id} and the request ${t.trigger_id} in your answer. If the finding is too thin to support guidance, say that instead of guessing.`,
+  ].join('\n\n');
+}
+
+/**
+ * For every trigger whose research job has resolved and North Star has not
+ * been asked: ask once. A capped job has no finding to act on and is marked
+ * so. A request that does not land is `failed` with the reason and retried.
+ */
+export async function requestGuidance(): Promise<{ asked: number; failed: number; no_finding: number }> {
+  const out = { asked: 0, failed: 0, no_finding: 0 };
+  const due = await query<GuidanceDue>(
+    `SELECT t.id::text, t.trigger_id, t.kind, t.key, t.workflow, t.failed_node, t.lane_id, t.n, t.job_id,
+            j.fields->>'Status' AS status, coalesce(nullif(j.fields->>'Finding', ''), nullif(j.fields->>'Answer', ''), nullif(j.fields->>'Latest Answer', '')) AS finding, j.fields->>'Confidence' AS confidence
+       FROM engine_logstream_triggers t
+       JOIN LATERAL (SELECT fields FROM engine_rt_jobs r WHERE r.natural_id = t.job_id ORDER BY r.id DESC LIMIT 1) j ON true
+      WHERE t.action_state = 'job_opened' AND t.job_id IS NOT NULL AND (t.guidance_state IS NULL OR t.guidance_state = 'failed')
+        AND j.fields->>'Status' IN ('Resolved', 'Capped (needs human)')
+      ORDER BY t.id`,
+  );
+  if (!due.rows.length) return out;
+  const links = await linkedLanes();
+  for (const t of due.rows) {
+    if (t.status !== 'Resolved' || !t.finding) {
+      await query(`UPDATE engine_logstream_triggers SET guidance_state = 'no_finding', guidance_error = $2, guidance_at = now() WHERE id = $1`, [t.id, t.status === 'Resolved' ? 'the job is Resolved and carries no finding text' : 'the research job was capped and needs a person; there is no finding to turn into guidance']);
+      out.no_finding++;
+      continue;
+    }
+    try {
+      const key = process.env.DASHBOARD_INBOUND_KEY?.trim();
+      if (!key) throw new Error('DASHBOARD_INBOUND_KEY is not set on this server, and the guidance webhook is authenticated by it.');
+      const linked = t.lane_id ? (links.get(t.lane_id) ?? []) : [];
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20_000);
+      let status = 0;
+      let text = '';
+      try {
+        const res = await fetch(`${n8n.n8nHost()}${GUIDANCE_PATH}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-dashboard-key': key },
+          body: JSON.stringify({ trigger_id: t.trigger_id, job_id: t.job_id, lane_id: t.lane_id ?? '', channel_id: GUIDANCE_CHANNEL, prompt: guidancePrompt({ ...t, finding: t.finding }, linked) }),
+          signal: controller.signal,
+        });
+        status = res.status;
+        text = await res.text();
+      } finally {
+        clearTimeout(timer);
+      }
+      let body: { ok?: boolean; error?: string } = {};
+      try {
+        body = JSON.parse(text) as { ok?: boolean; error?: string };
+      } catch {
+        /* not JSON: the status and the text say what happened */
+      }
+      if (status < 200 || status >= 300 || body.ok !== true) throw new Error(`n8n answered ${status} at ${GUIDANCE_PATH}: ${body.error ?? (text.slice(0, 200) || 'no body')}`);
+      await query(`UPDATE engine_logstream_triggers SET guidance_state = 'asked', guidance_error = NULL, guidance_at = now() WHERE id = $1`, [t.id]);
+      await engineEvents.record({ event_type: 'logstream_guidance_requested', subject_id: t.trigger_id, lane: t.lane_id, actor: 'Logstream', detail: { job_id: t.job_id, channel: GUIDANCE_CHANNEL, confidence: t.confidence }, dedupe_key: `logstream_guidance:${t.trigger_id}` });
+      out.asked++;
+    } catch (e) {
+      out.failed++;
+      const msg = e instanceof Error ? (e.name === 'AbortError' ? `n8n did not answer ${GUIDANCE_PATH} within 20 seconds` : e.message) : String(e);
+      console.error(`[logstream] ${t.trigger_id}: North Star was not asked for guidance: ${msg}`);
+      await query(`UPDATE engine_logstream_triggers SET guidance_state = 'failed', guidance_error = $2, guidance_at = now() WHERE id = $1`, [t.id, msg.slice(0, 500)]);
+    }
+  }
+  return out;
+}
+
+/* --------------------------------------------------------------- the read */
+
+const TS = (col: string) => `to_char(${col} AT TIME ZONE 'UTC', ${ISO})`;
+
+/** What the Logstream page draws. A read and nothing else. */
+export async function read(): Promise<Record<string, unknown>> {
+  const [summary, triggers, signatures, rows, adherence, watch] = await Promise.all([
+    query<Record<string, string>>(
+      `SELECT count(*) FILTER (WHERE state = 'observed')::int AS incidents,
+              count(*) FILTER (WHERE state = 'observed' AND excluded_reason IS NULL)::int AS counted,
+              count(*) FILTER (WHERE state = 'observed' AND excluded_reason IS NOT NULL)::int AS excluded,
+              count(*) FILTER (WHERE state = 'closed')::int AS closed,
+              count(*) FILTER (WHERE state = 'observed' AND occurred_at > now() - interval '7 days' AND excluded_reason IS NULL)::int AS last_7d,
+              count(*) FILTER (WHERE person_confirmed)::int AS person_confirmed,
+              count(*) FILTER (WHERE autopay_enabled)::int AS autopay_enabled,
+              ${TS('min(occurred_at)')} AS first_at, ${TS('max(written_at)')} AS last_written_at
+         FROM engine_logstream`,
+    ),
+    query(
+      `SELECT trigger_id, kind, key, workflow, failed_node, lane_id, n, runs, failures, incident_ids, workflows, ${TS('first_at')} AS first_at, ${TS('last_at')} AS last_at, ${TS('detected_at')} AS detected_at,
+              action, action_state, job_id, alert_channel, alert_ts, error, attempts, guidance_state, guidance_error, ${TS('guidance_at')} AS guidance_at,
+              (SELECT r.fields->>'Status' FROM engine_rt_jobs r WHERE r.natural_id = t.job_id ORDER BY r.id DESC LIMIT 1) AS job_status
+         FROM engine_logstream_triggers t ORDER BY id DESC LIMIT 100`,
+    ),
+    query(
+      `SELECT signature, max(workflow) AS workflow, max(failed_node) AS failed_node, max(lane_id) AS lane_id, max(excluded_reason) AS excluded_reason,
+              count(*)::int AS total, count(*) FILTER (WHERE occurred_at > now() - interval '7 days')::int AS last_7d,
+              count(*) FILTER (WHERE occurred_at > now() - interval '30 days')::int AS last_30d, ${TS('max(occurred_at)')} AS last_at
+         FROM engine_logstream WHERE state = 'observed' GROUP BY signature ORDER BY last_7d DESC, total DESC, max(occurred_at) DESC LIMIT 200`,
+    ),
+    query(
+      `SELECT logstream_row_id, incident_id, state, lane_id, signature, excluded_reason, ${TS('occurred_at')} AS occurred_at, ${TS('written_at')} AS written_at,
+              objective_outcomes, research_trigger, pattern_ids_applied, pattern_adherence, person_confirmed, autopay_enabled
+         FROM engine_logstream ORDER BY id DESC LIMIT 300`,
+    ),
+    query<{ pattern: string; result: string; n: number }>(
+      `SELECT a.key AS pattern, a.value->>'result' AS result, count(*)::int AS n
+         FROM engine_logstream l, jsonb_each(l.pattern_adherence) a WHERE l.state = 'patterns_evaluated' GROUP BY 1, 2 ORDER BY 1, 2`,
+    ),
+    Promise.all([windowIncidents(), windowRuns()]),
+  ]);
+  const now = evaluate(watch[0], watch[1]);
+  return {
+    rule: {
+      ...RULE,
+      words: [
+        `Counted per fault (the workflow plus the step that failed), never per lane, over the last ${RULE.window_days} days.`,
+        `${RULE.research_at} of the same fault opens one Research Twin job for the pattern. ${RULE.escalate_at} tells a person in the engine alerts channel.`,
+        `A workflow with ${Math.round(RULE.rate * 100)}% or more of its production runs failing, at least ${RULE.rate_min_runs} runs and ${RULE.rate_min_failures} failures, opens one job.`,
+        `${RULE.outage_workflows} or more workflows crossing at once is one shared-cause outage: one alert, and no per-workflow research.`,
+        'Test, simulator and refused-ask incidents are written down and counted in nothing.',
+      ],
+      locked_by: 'Jason Bays, 9 Oct 2026. Re-tune due about 9 Nov 2026 (LOOP-1791558515351-4DR6).',
+    },
+    summary: summary.rows[0],
+    holding_now: now.map((c) => ({ kind: c.kind, key: c.key, n: c.n, runs: c.runs, failures: c.failures })),
+    triggers: triggers.rows,
+    signatures: signatures.rows,
+    rows: rows.rows,
+    rows_cap: 300,
+    adherence: adherence.rows,
+    patterns: PATTERNS,
+    notes: [
+      'A read and analysis record. Nothing here pays anybody: person_confirmed and autopay_enabled are false on every row, and nothing sets or reads them.',
+      'All Logstream can do is open a research job, post an alert, and ask North Star for guidance once research resolves. It never closes, retries, edits or deletes.',
+      'Which pattern applied is judged for two patterns only, from records the engine already keeps: the closure protocol (S757), for a close on or after 7 Oct 2026, and the guarded retry (BW9S). The cut-off answer signal (GRM8) raises no incident, and the empty-read pattern (GNER) is a candidate nothing depends on.',
+      'Time to recovery is trusted only for an incident closed on or after 2 Oct 2026, when closes started being dated and signed.',
+      'The newest 300 rows and 100 crossings are shown. The table holds them all.',
+    ],
+  };
 }
 
 let timer: NodeJS.Timeout | null = null;

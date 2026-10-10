@@ -4050,3 +4050,71 @@ export interface ScheduledRunsData {
   timers: { since: string; list: Array<{ name: string; what: string; every: string; last_tick_at: string | null; ticks: number }> };
   notes: string[];
 }
+
+/** The Logstream page (server/src/logstream.ts, 2026-10-10). */
+export interface LogstreamTrigger {
+  trigger_id: string;
+  kind: 'signature_research' | 'signature_escalation' | 'workflow_rate' | 'shared_outage';
+  key: string;
+  workflow: string | null;
+  failed_node: string | null;
+  lane_id: string | null;
+  n: number;
+  runs: number | null;
+  failures: number | null;
+  incident_ids: string[];
+  workflows: string[];
+  first_at: string | null;
+  last_at: string | null;
+  detected_at: string;
+  action: 'research_job' | 'alert_person';
+  action_state: 'pending' | 'job_opened' | 'alerted' | 'suppressed_shared_outage' | 'failed';
+  job_id: string | null;
+  job_status: string | null;
+  alert_channel: string | null;
+  alert_ts: string | null;
+  error: string | null;
+  attempts: number;
+  guidance_state: 'asked' | 'failed' | 'no_finding' | null;
+  guidance_error: string | null;
+  guidance_at: string | null;
+}
+export interface LogstreamSignature {
+  signature: string;
+  workflow: string | null;
+  failed_node: string | null;
+  lane_id: string | null;
+  excluded_reason: string | null;
+  total: number;
+  last_7d: number;
+  last_30d: number;
+  last_at: string;
+}
+export interface LogstreamRow {
+  logstream_row_id: string;
+  incident_id: string;
+  state: 'observed' | 'closed' | 'research_opened' | 'patterns_evaluated';
+  lane_id: string | null;
+  signature: string;
+  excluded_reason: string | null;
+  occurred_at: string;
+  written_at: string;
+  objective_outcomes: { incident_frequency_7d?: number; time_to_recovery_seconds?: number | null; time_to_recovery_trusted?: boolean; closed_by?: string | null };
+  research_trigger: { threshold_crossed?: boolean; rt_job_id?: string | null };
+  pattern_ids_applied: string[];
+  pattern_adherence: Record<string, { result: 'followed' | 'not_followed' | 'not_applicable'; why: string }>;
+  person_confirmed: boolean;
+  autopay_enabled: boolean;
+}
+export interface LogstreamData {
+  rule: { window_days: number; research_at: number; escalate_at: number; words: string[]; locked_by: string };
+  summary: { incidents: number; counted: number; excluded: number; closed: number; last_7d: number; person_confirmed: number; autopay_enabled: number; first_at: string | null; last_written_at: string | null };
+  holding_now: { kind: string; key: string; n: number; runs: number | null; failures: number | null }[];
+  triggers: LogstreamTrigger[];
+  signatures: LogstreamSignature[];
+  rows: LogstreamRow[];
+  rows_cap: number;
+  adherence: { pattern: string; result: string; n: number }[];
+  patterns: Record<string, string>;
+  notes: string[];
+}
