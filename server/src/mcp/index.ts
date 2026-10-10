@@ -195,6 +195,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-09: the vFarm stage gates and 5-rack offer (7S0O). Bays reads them and writes what
         // Jason gives it; deleting fixtures stays with a person on the connector.
         'get_vfarm_gates', 'write_vfarm_gate',
+        // 2026-10-10: the way back from share_doc. Behind the same approval card.
+        'unshare_doc',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>
@@ -305,7 +307,7 @@ async function handleRpc(req: RpcRequest, deps: ToolDeps): Promise<Record<string
             ...(deps.access === 'write'
               ? [
                   '',
-                  'This is the WRITE connection. Beside the reads it carries list_writable_kinds, create_record, update_record, archive_record and delete_record. Start with list_writable_kinds: it names every writable kind, its required fields, its allowed values and which guards apply. Every write goes through the same server function n8n\u2019s POST and PATCH use, runs the same guards the Bays Tools Router runs, and is logged to engine_mcp_writes whether it lands, is refused or is a dry run. Pass dry_run: true to see exactly what would be written. A refusal — possible_duplicate, lane_owner_mismatch, not_permitted — writes nothing and says what to send to proceed. Three Drive tools sit beside them: share_doc (anyone with the link can read), grant_drive_access (one @bhanetwork.org address only — anything else is refused and Destiny is told) and create_doc (a Google Doc in a folder, for the daily digest archive).',
+                  'This is the WRITE connection. Beside the reads it carries list_writable_kinds, create_record, update_record, archive_record and delete_record. Start with list_writable_kinds: it names every writable kind, its required fields, its allowed values and which guards apply. Every write goes through the same server function n8n\u2019s POST and PATCH use, runs the same guards the Bays Tools Router runs, and is logged to engine_mcp_writes whether it lands, is refused or is a dry run. Pass dry_run: true to see exactly what would be written. A refusal — possible_duplicate, lane_owner_mismatch, not_permitted — writes nothing and says what to send to proceed. Four Drive tools sit beside them: share_doc (anyone with the link can read), unshare_doc (turns that public link off again and touches nothing else), grant_drive_access (one @bhanetwork.org address only — anything else is refused and Destiny is told) and create_doc (a Google Doc in a folder, for the daily digest archive).',
                 ]
               : []),
           ].join('\n'),

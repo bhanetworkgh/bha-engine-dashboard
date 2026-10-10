@@ -1,6 +1,8 @@
 /**
- * Human approval for the three actions an agent must not take on its own
- * (2026-10-04, Destiny — LOOP-1790969736142-8185).
+ * Human approval for the actions an agent must not take on its own
+ * (2026-10-04, Destiny — LOOP-1790969736142-8185). Three at first; a fourth,
+ * `unshare_doc`, from 2026-10-10: it only closes a public link, but one rule
+ * for every sharing change is easier to hold than a rule with an exception.
  *
  * `share_doc`, `grant_drive_access` and `delete_record` were gated by n8n's own
  * tool approval, which works by suspending the agent and waiting. Bays runs
@@ -44,7 +46,7 @@ import * as timers from './timers';
 
 /** Destiny and Jason. The only two people whose click decides anything. */
 export const APPROVERS: ReadonlyArray<string> = ['U0AEW3TBYH1', 'U0A9V97949F'];
-export const GATED_TOOLS: ReadonlyArray<string> = ['share_doc', 'grant_drive_access', 'delete_record'];
+export const GATED_TOOLS: ReadonlyArray<string> = ['share_doc', 'unshare_doc', 'grant_drive_access', 'delete_record'];
 export const TTL_HOURS = 24;
 export const ACTION_APPROVE = 'engine_approval_approve';
 export const ACTION_DENY = 'engine_approval_deny';
@@ -369,6 +371,7 @@ function resultLine(result: Record<string, unknown>): string {
   const link = typeof result.link === 'string' ? ` ${result.link}` : '';
   if (result.ok === true) {
     if (result.deleted === true) return `Deleted \`${String(result.natural_id ?? result.id)}\` (${String(result.kind)}). The whole row is kept in record_deletions.`;
+    if (result.public_link_removed === true) return `The public link is off: "anyone with the link" can no longer open it. Everyone it is shared with by name or through the domain keeps their access.${link}`;
     if (typeof result.permission_id === 'string' && typeof result.email === 'string') return `${String(result.email)} now has ${String(result.role)} access.`;
     if (typeof result.permission_id === 'string') return `Anyone with the link can now read it.${link}`;
     return 'Done.';
