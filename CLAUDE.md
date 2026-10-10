@@ -1955,20 +1955,45 @@ checks it against `AUTH_PASSWORD_HASH` and sets a twelve-hour cookie. Five
 failures from one address lock it for thirty seconds. No user management, no
 roles, no signup.
 
-**Logstream v0 thresholds, locked and not built** (decision 2026-10-09, Jason —
-#bha-north-star-twin). `docs/design/logstream-v0.md` section 10 is the contract.
-Counted **per fault signature (workflow + failed step), never per lane**: 3 of
-the same fault in 7 days opens one Research Twin job, 5 in 7 escalates to a
-person; test, simulator and "refused ask" incidents are excluded. Separately,
-20% or more of a workflow's runs failing in 7 days, with at least 10 runs and 3
-failures, is a workflow-level trigger; 5 or more workflows crossing in the same
-7 days is one shared-cause outage. `time_to_recovery` is trusted only for
-incidents closed on or after 2 Oct 2026. **GNER stays a candidate and no runtime
-decision may depend on it; empty reads are consciously not recorded in v0.**
-**Do not build the Logstream table, writer or trigger** without Jason's
-go-ahead. Pay is a recommendation: `person_confirmed` and `autopay_enabled`
-both default false. These are v0 numbers; a re-tune is due about 9 Nov 2026.
-The Monitoring Twin's own 3-in-7 rule (above) is separate and is built.
+**Logstream v0: table, writer and trigger, built** (2026-10-10, Destiny —
+Jason's go-ahead of 9 Oct, #bha-north-star-twin: "a read/analysis spine", no
+autopay, no pay wiring, no destructive automated action).
+`server/src/logstream.ts`, migration 64. `docs/design/logstream-v0.md` section
+10 is the contract and its numbers are `RULE` in that file and nowhere else.
+
+- **`engine_logstream`** is append-only: one row per state an incident reaches
+  (`observed`, `closed`, `research_opened`), unique on (incident, state), in the
+  design note's field list. `person_confirmed` and `autopay_enabled` default
+  false, **nothing sets them and nothing reads them**. `pattern_ids_applied` is
+  empty: nothing tags an incident with a build pattern yet, and this does not
+  guess. `time_to_recovery_trusted` is true only for a close on or after
+  2 Oct 2026.
+- **The writer reads `engine_incidents`**, which the ledger poll already fills.
+  No workflow is changed and no reporting node is added.
+- **The trigger**, every five minutes, over the last 7 days, **per fault
+  signature (workflow + the step that failed), never per lane**: 3 opens **one**
+  Research Twin job for the pattern (`Opened By: Logstream`); 5 posts one alert
+  in the engine alerts channel as Bays; a workflow with 20% or more of its
+  production runs failing, at least 10 runs and 3 failures, opens one job; 5 or
+  more workflows crossing is one `shared_outage` alert, and research triggers
+  first seen while it holds are `suppressed_shared_outage`. Each crossing is one
+  row in `engine_logstream_triggers`, once per 7 days, and one
+  `logstream_threshold_crossed` event.
+- **Counted in nothing**: a workflow named `TEST …`, anything simulated (the
+  name, or the `simulated` impact tag), and the step `Raise Refused Ask`. The
+  rows are still written, with `excluded_reason`.
+- **All it can do is open a research job and post a Slack message.** It never
+  closes, retries, edits or deletes, and never touches pay. A job or alert that
+  does not land keeps its trigger at `failed` with the reason and is tried again
+  on every pass.
+- **GNER stays a candidate; no runtime decision depends on it; empty reads are
+  not recorded.** These are v0 numbers: the re-tune is due about 9 Nov 2026
+  (LOOP-1791558515351-4DR6).
+- **Not built**: a page, an MCP tool, North Star's guidance step, and any
+  evaluation of a row by a person. Read the tables with `query_postgres`.
+- The Monitoring Twin's own 3-in-7 rule (above) is separate. `npm run
+  test:logstream` pins the rule against history and the writer and trigger
+  against a local database.
 
 ## 5. Design
 
