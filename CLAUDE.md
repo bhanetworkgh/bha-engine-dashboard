@@ -2023,8 +2023,26 @@ autopay, no pay wiring, no destructive automated action).
   (`logstream.read()`), four tabs: Crossings, Faults, Rows, Patterns. A read and
   nothing else. Colour marks an action that did not land and a fault at the
   level that calls a person; a research job opened is the accent, not green.
-- **Not built**: an MCP tool of its own, and a person's review of a row
-  (`evaluated_by`, `person_confirmed` stay empty).
+- **How the twins read it** (third pass, 10 Oct — Jason: "document the schema
+  and how RT and NS will read from it"): `read_logstream`,
+  `server/src/mcp/logstreamTools.ts`, read only, both connections, in North
+  Star's and Research Twin's scope. No arguments: the rule in words, the
+  summary, what holds now, the last 30 days of crossings with what was done,
+  the faults nearest the line, adherence and the empty-read count. `signature`
+  or `workflow`: that fault's incidents, each with how it closed. Budgeted to
+  20,000 characters (40,000 at most), cut from the longest list and marked. It
+  never returns the pay fields. Research Twin reads a fault's history before
+  writing the finding on a job Logstream opened; North Star reads it for
+  guidance. One `read` line per call on `engine_writes`.
+- **Empty reads are counted, and nothing decides on them** (same day).
+  `Bays — Daily Doc Rotator` posts one `empty_read_check` event per run to
+  `/api/engine/events` (reads, empty, which channels; a clean run too, so a
+  night with no event is never read as a night with none).
+  `logstream.emptyReads()` sums them. This is the count Jason's 9 Oct rule asks
+  for before GNER can graduate; the decision is for the re-tune. `evaluate()`
+  does not read it.
+- **Not built**: a person's review of a row (`evaluated_by`,
+  `person_confirmed` stay empty).
 - The Monitoring Twin's own 3-in-7 rule (above) is separate. `npm run
   test:logstream` pins the rule against history and the writer and trigger
   against a local database.

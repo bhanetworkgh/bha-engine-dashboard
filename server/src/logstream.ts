@@ -581,6 +581,34 @@ export async function requestGuidance(): Promise<{ asked: number; failed: number
 const TS = (col: string) => `to_char(${col} AT TIME ZONE 'UTC', ${ISO})`;
 
 /** What the Logstream page draws. A read and nothing else. */
+/**
+ * Empty reads on record (10 Oct 2026). `Bays — Daily Doc Rotator` writes one
+ * `empty_read_check` event per run: how many channel docs it read and how many
+ * came back with no content. This only counts them, for the 9 Nov re-tune,
+ * where Jason decides whether "No Filler on an Empty Read" (GNER) becomes a
+ * real pattern. Nothing in Logstream, and nothing else, decides on this.
+ */
+export async function emptyReads(): Promise<Record<string, unknown>> {
+  const r = await query<{ runs: number; reads: number; empty: number; runs_with_empty: number; first_at: string | null; last_at: string | null }>(
+    `SELECT count(*)::int AS runs,
+            coalesce(sum(nullif(detail->>'reads', '')::numeric), 0)::int AS reads,
+            coalesce(sum(nullif(detail->>'empty', '')::numeric), 0)::int AS empty,
+            count(*) FILTER (WHERE coalesce(nullif(detail->>'empty', '')::numeric, 0) > 0)::int AS runs_with_empty,
+            ${TS('min(at)')} AS first_at, ${TS('max(at)')} AS last_at
+       FROM engine_events WHERE event_type = 'empty_read_check'`,
+  );
+  const recent = await query<{ at: string; reader: string | null; reads: number | null; empty: number | null; empty_subjects: unknown; source_ref: string | null }>(
+    `SELECT ${TS('at')} AS at, detail->>'reader' AS reader, nullif(detail->>'reads', '')::int AS reads, nullif(detail->>'empty', '')::int AS empty,
+            detail->'empty_subjects' AS empty_subjects, source_ref
+       FROM engine_events WHERE event_type = 'empty_read_check' ORDER BY at DESC LIMIT 14`,
+  );
+  return {
+    ...r.rows[0],
+    recent: recent.rows,
+    note: 'Record only. One event per run of the reader, a clean run included, so a night with no event is a night that was not recorded, never a night with no empty reads. GNER (CAND-1791450711610-GNER) stays a candidate and no runtime decision depends on these counts; the decision is for the re-tune due about 9 Nov 2026 (LOOP-1791558515351-4DR6).',
+  };
+}
+
 export async function read(): Promise<Record<string, unknown>> {
   const [summary, triggers, signatures, rows, adherence, watch] = await Promise.all([
     query<Record<string, string>>(
