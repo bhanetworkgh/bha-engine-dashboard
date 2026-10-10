@@ -50,7 +50,7 @@ function fit(out: Dict, keys: string[], maxChars: number): Dict {
 export const readLogstream: ToolDefinition = {
   name: 'read_logstream',
   description:
-    'Logstream: the engine’s own record of faults that keep coming back. A fault is a signature: the workflow plus the step that failed, never a lane. Without arguments it returns the locked rule in words; summary counts; holding_now (what is over a threshold this minute); crossings (each threshold crossed in the last 30 days, with what was done: the Research Twin job it opened and that job’s status, the alert it posted, whether North Star was asked for guidance, or why it was withdrawn or suppressed); faults (signatures with their 7-day and 30-day counts, the ones nearest the line first); pattern adherence (S757 closure protocol and BW9S guarded retry only); and empty_reads (a count only, for the 9 Nov re-tune). With signature (exact, "Workflow :: step") or workflow, it returns that fault’s incidents: incident id, when, state, how it closed and time to recovery where trusted. Research Twin: use it on a job whose Opened By is Logstream, to read the fault’s history before writing the finding. North Star: use it for guidance on a resolved Logstream job, and for "what keeps breaking". Read only. It never shows pay: nothing in Logstream pays anybody. Excluded rows (tests, the simulator, a guard’s refusals) are named as excluded and are counted in nothing.',
+    'Logstream: the engine’s own record of faults that keep coming back. A fault is a signature: the workflow plus the step that failed, never a lane. Without arguments it returns the locked rule in words; summary counts; holding_now (what is over a threshold this minute); crossings (each threshold crossed in the last 30 days, with what was done: the Research Twin job it opened and that job’s status, the alert it posted, whether North Star was asked for guidance, or why it was withdrawn or suppressed); faults (signatures with their 7-day and 30-day counts, the ones nearest the line first); pattern adherence (S757 closure protocol and BW9S guarded retry only); and empty_reads (a count only, for the 9 Nov re-tune). With signature (exact, "Workflow :: step") or workflow, it returns that fault’s crossings (the research job opened for it and its status, the alert posted) and its incidents: incident id, when, state, how it closed and time to recovery where trusted. Research Twin: use it on a job whose Opened By is Logstream, to read the fault’s history before writing the finding. North Star: use it for guidance on a resolved Logstream job, and for "what keeps breaking". Read only. It never shows pay: nothing in Logstream pays anybody. Excluded rows (tests, the simulator, a guard’s refusals) are named as excluded and are counted in nothing.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -94,7 +94,18 @@ export const readLogstream: ToolDefinition = {
         byIncident.set(id, cur);
       }
       const incidents = [...byIncident.values()];
-      const out = fit({ ok: true, asked_for: signature ? { signature } : { workflow }, total_incidents: incidents.length, counted: incidents.filter((i) => !i.excluded_reason).length, incidents, notes: ['Time to recovery is trusted only for an incident closed on or after 2 Oct 2026; each closed row says which.', 'An excluded incident is written down and counted in nothing.'] }, ['incidents'], maxChars);
+      // What was done about this fault: without it a reader sees five closed incidents and
+      // concludes no research was ever opened (the draft test of 10 Oct read it exactly so).
+      const crossed = await query<Dict>(
+        `SELECT t.trigger_id, t.kind, t.n, t.runs, t.failures, to_char(t.detected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS detected_at,
+                t.action, t.action_state, t.job_id, t.alert_ts, t.error, t.guidance_state,
+                (SELECT r.fields->>'Status' FROM engine_rt_jobs r WHERE r.natural_id = t.job_id ORDER BY r.id DESC LIMIT 1) AS job_status
+           FROM engine_logstream_triggers t
+          WHERE ($1::text IS NOT NULL AND t.key = $1) OR ($2::text IS NOT NULL AND t.workflow = $2)
+          ORDER BY t.id DESC LIMIT 20`,
+        [signature, workflow],
+      );
+      const out = fit({ ok: true, asked_for: signature ? { signature } : { workflow }, total_incidents: incidents.length, counted: incidents.filter((i) => !i.excluded_reason).length, crossings: crossed.rows, incidents, notes: ['crossings is what was done about this fault: the research job it opened (job_id, job_status), the alert it posted, or why nothing was opened. An empty crossings list means it has never crossed a threshold.', 'Time to recovery is trusted only for an incident closed on or after 2 Oct 2026; each closed row says which.', 'An excluded incident is written down and counted in nothing.'] }, ['incidents'], maxChars);
       await log(`${signature ?? workflow} → ${incidents.length} incidents, ${out.result_chars} chars`);
       return out;
     }
