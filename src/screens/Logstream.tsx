@@ -39,6 +39,8 @@ function ActionPill({ t }: { t: LogstreamTrigger }) {
       return <Pill>no research: part of an outage</Pill>;
     case 'failed':
       return <Pill tone="failing">did not land</Pill>;
+    case 'withdrawn':
+      return <Pill>withdrawn</Pill>;
     default:
       return <Pill tone="degraded">waiting</Pill>;
   }
@@ -80,7 +82,7 @@ function Crossings({ data }: { data: LogstreamData }) {
               <td className="tabular px-3 py-2 text-dim">{t.kind === 'workflow_rate' ? `${t.failures} of ${t.runs} runs` : t.n}</td>
               <td className="px-3 py-2">
                 <ActionPill t={t} />
-                <div className="mt-1 text-[11.5px] text-faint">{t.job_id ?? (t.alert_ts ? 'posted in the engine alerts channel' : (t.error ?? ''))}</div>
+                <div className="mt-1 text-[11.5px] text-faint">{t.action_state === 'withdrawn' ? (t.error ?? '') : (t.job_id ?? (t.alert_ts ? 'posted in the engine alerts channel' : (t.error ?? '')))}</div>
               </td>
               <td className="px-3 py-2 text-[12px] text-dim">{guidanceWords(t)}</td>
             </tr>

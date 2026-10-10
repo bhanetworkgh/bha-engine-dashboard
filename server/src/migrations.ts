@@ -2875,6 +2875,23 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE engine_logstream_triggers ADD COLUMN IF NOT EXISTS guidance_at TIMESTAMPTZ`,
     ],
   },
+  {
+    id: 66,
+    name: 'engine_logstream_triggers: a withdrawn state, and the one crossing a refused test ask caused',
+    statements: [
+      /**
+       * 10 Oct 2026. LST-1791636805191-N642 opened a research job on North
+       * Star — Front Door at 3 failures of 13 runs. Two of the three were the
+       * door refusing an ask, which is a guard working, and one of those was a
+       * test ask sent while proving the guidance path. The rate rule now leaves
+       * such runs out; this crossing is marked withdrawn, with the reason, and
+       * its row is kept.
+       */
+      `ALTER TABLE engine_logstream_triggers DROP CONSTRAINT IF EXISTS engine_logstream_triggers_action_state_check`,
+      `ALTER TABLE engine_logstream_triggers ADD CONSTRAINT engine_logstream_triggers_action_state_check CHECK (action_state IN ('pending', 'job_opened', 'alerted', 'suppressed_shared_outage', 'failed', 'withdrawn'))`,
+      `UPDATE engine_logstream_triggers SET action_state = 'withdrawn', error = 'Withdrawn 10 Oct 2026: two of the three failures were the Front Door refusing an ask (a guard working), one of them a test ask. The rate rule now leaves refused-ask, test and simulator runs out. The research job it opened was removed.' WHERE trigger_id = 'LST-1791636805191-N642'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

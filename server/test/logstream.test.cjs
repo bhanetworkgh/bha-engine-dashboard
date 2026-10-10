@@ -245,6 +245,17 @@ const hook = http.createServer((req, res) => {
   assert.equal((await jobs()).length, 2);
   ok('trigger: a workflow failing 4 of 12 opens one job; 6 of 6 is under the floor of 10 runs');
 
+  /* a run that failed because a guard refused something is not a failure of the workflow */
+  await run(`lstest-${T}-g1`, `${WF} guarded door`, 12, 4);
+  const guardRuns = (await query(`SELECT execution_id::text AS id FROM engine_execution_runs WHERE workflow_id = $1 AND status = 'error' ORDER BY execution_id LIMIT 2`, [`lstest-${T}-g1`])).rows;
+  for (const g of guardRuns) {
+    const id = await incident(`${WF} guarded door`, 'Raise Refused Ask');
+    await query(`UPDATE engine_incidents SET fields = jsonb_set(fields, '{payload,execution_id}', to_jsonb($2::text)) WHERE natural_id = $1`, [id, g.id]);
+  }
+  await logstream.sweep();
+  assert.equal((await triggers(`lstest-${T}-g1`)).length, 0, '4 of 12 with two refusals is 2 of 10');
+  ok('trigger: runs that failed on a refused ask are left out of the rate rule');
+
   /* five workflows at once is one outage */
   const before = (await jobs()).length;
   for (let n = 3; n <= 5; n++) await run(`lstest-${T}-o${n}`, `${WF} outage ${n}`, 10, 5);

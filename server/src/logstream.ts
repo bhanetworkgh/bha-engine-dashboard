@@ -131,6 +131,8 @@ export interface Incident {
   node: string | null;
   tags?: string[] | null;
   occurred_at: string;
+  /** The n8n run the incident was raised from, where the handler recorded one. */
+  execution_id?: string | null;
 }
 export interface WorkflowRuns {
   workflow_id: string;
@@ -352,7 +354,8 @@ async function windowIncidents(): Promise<Incident[]> {
   const r = await query<Incident>(
     `SELECT natural_id AS incident_id, lane_id, fields->'payload'->>'workflow_or_scenario' AS workflow, fields->'payload'->>'failed_node_or_component' AS node,
             CASE WHEN jsonb_typeof(fields->'payload'->'impact_tags') = 'array' THEN ARRAY(SELECT jsonb_array_elements_text(fields->'payload'->'impact_tags')) END AS tags,
-            to_char(coalesce(nullif(fields->>'occurred_at', ''), first_seen_at)::timestamptz AT TIME ZONE 'UTC', ${ISO}) AS occurred_at
+            to_char(coalesce(nullif(fields->>'occurred_at', ''), first_seen_at)::timestamptz AT TIME ZONE 'UTC', ${ISO}) AS occurred_at,
+            fields->'payload'->>'execution_id' AS execution_id
        FROM engine_incidents
       WHERE natural_id IS NOT NULL AND coalesce(nullif(fields->>'occurred_at', ''), first_seen_at)::timestamptz > now() - ($1 || ' days')::interval`,
     [String(RULE.window_days)],
@@ -360,13 +363,23 @@ async function windowIncidents(): Promise<Incident[]> {
   return r.rows;
 }
 
-async function windowRuns(): Promise<WorkflowRuns[]> {
+/**
+ * Production runs per workflow in the window. A run that failed because a guard
+ * refused something (a refused ask throws on purpose, so the refusal is raised)
+ * or that belongs to a test or simulator incident is left out of both the runs
+ * and the failures: Jason's exclusions hold for the rate rule as they do for
+ * the counts. Found on 10 Oct, when a refused test ask tipped North Star's
+ * Front Door over 20% and a research job was opened on a guard doing its job.
+ */
+async function windowRuns(incidents: Incident[]): Promise<WorkflowRuns[]> {
+  const skip = incidents.filter((i) => excludedReason(i) && i.execution_id && /^\d+$/.test(i.execution_id)).map((i) => i.execution_id as string);
   const r = await query<{ workflow_id: string; workflow: string | null; runs: string; failures: string }>(
     `SELECT workflow_id, max(workflow_name) AS workflow, count(*)::text AS runs, count(*) FILTER (WHERE status IN ('error', 'crashed'))::text AS failures
        FROM engine_execution_runs
       WHERE mode = ANY($1) AND status IN ('success', 'error', 'crashed') AND started_at::timestamptz > now() - ($2 || ' days')::interval
+        AND NOT (execution_id::text = ANY($3))
       GROUP BY workflow_id`,
-    [[...quota.COUNTED_MODES], String(RULE.window_days)],
+    [[...quota.COUNTED_MODES], String(RULE.window_days), skip],
   );
   return r.rows.map((x) => ({ workflow_id: x.workflow_id, workflow: x.workflow ?? x.workflow_id, runs: Number(x.runs), failures: Number(x.failures) }));
 }
@@ -381,7 +394,8 @@ export async function sweep(): Promise<{ rows_written: number; crossings: number
   try {
     const w = await writeRows();
     out.rows_written = w.observed + w.closed + w.patterns_evaluated;
-    const found = evaluate(await windowIncidents(), await windowRuns());
+    const inWindow = await windowIncidents();
+    const found = evaluate(inWindow, await windowRuns(inWindow));
     out.crossings = found.length;
     const outage = found.some((c) => c.kind === 'shared_outage');
     const byKey = new Map(found.map((c) => [`${c.kind}|${c.key}`, c]));
@@ -601,7 +615,7 @@ export async function read(): Promise<Record<string, unknown>> {
       `SELECT a.key AS pattern, a.value->>'result' AS result, count(*)::int AS n
          FROM engine_logstream l, jsonb_each(l.pattern_adherence) a WHERE l.state = 'patterns_evaluated' GROUP BY 1, 2 ORDER BY 1, 2`,
     ),
-    Promise.all([windowIncidents(), windowRuns()]),
+    windowIncidents().then(async (i) => [i, await windowRuns(i)] as const),
   ]);
   const now = evaluate(watch[0], watch[1]);
   return {
