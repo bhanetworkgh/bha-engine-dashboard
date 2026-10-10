@@ -53,13 +53,19 @@ import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
 import * as systemFeeds from './systemFeeds';
 import * as baysAsks from './baysAsks';
+import * as scheduledRuns from './scheduledRuns';
 import * as askTrace from './askTrace';
 import * as evalRuns from './evalRuns';
 import * as reminderTools from './mcp/reminderTools';
 import * as dataGovernance from './dataGovernance';
 import * as monitoringTwin from './monitoringTwin';
 import * as qualityAlert from './qualityAlert';
+import * as logstream from './logstream';
+import * as researchSignals from './researchSignals';
+import * as creditOut from './creditOut';
 import * as engineEvents from './engineEvents';
+import * as vfarmGates from './vfarmGates';
+import * as vfarmGateAuto from './vfarmGateAuto';
 import * as publicationDecision from './publicationDecision';
 import * as doctrineGap from './doctrineGap';
 import * as approvals from './approvals';
@@ -694,6 +700,38 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       }
     }
     /**
+     * The vFarm stage gates and 5-rack offer (2026-10-09, 7S0O). GET reads
+     * every record; POST { kind, object_id?, fields, by, fixture?, dry_run? }
+     * creates or updates one through vfarmGates.writeGate, the same function
+     * the MCP tool calls, so the order is enforced here too. A refusal is a
+     * 409 with ok:false and its reason; nothing is written.
+     */
+    if (p === '/api/engine/vfarm-gates') {
+      if (method === 'GET') return send(res, 200, { ok: true, ...(await vfarmGateAuto.scoreboard()) });
+      if (method !== 'POST') throw new HttpError(405, 'GET, or POST { kind, object_id?, fields, by, fixture?, dry_run? }.');
+      const b = (await readJson(req, 128 * 1024)) as Record<string, unknown>;
+      const oid = typeof b.object_id === 'string' && b.object_id.trim() ? b.object_id.trim() : undefined;
+      try {
+        const r = await vfarmGates.writeGate({
+          kind: typeof b.kind === 'string' ? b.kind : '',
+          object_id: oid ?? null,
+          fields: (b.fields ?? {}) as Record<string, unknown>,
+          fixture: typeof b.fixture === 'boolean' ? b.fixture : undefined,
+          by: typeof b.by === 'string' ? b.by : '',
+          via: 'engine',
+          dry_run: b.dry_run === true,
+        });
+        await mirror.logWrite({ endpoint, kind: 'vfarm_gates', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: r.record.id, outcome: r.dry_run ? 'read' : !r.written ? 'unchanged' : r.created ? 'inserted' : 'updated', detail: r.message.slice(0, 500), ms: Date.now() - t0 });
+        return send(res, r.written && r.created ? 201 : 200, r);
+      } catch (e) {
+        if (e instanceof vfarmGates.GateRefused) {
+          await mirror.logWrite({ endpoint, kind: 'vfarm_gates', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: oid, outcome: 'rejected', detail: `${e.reason}: ${e.message}`.slice(0, 500), ms: Date.now() - t0 });
+          return send(res, 409, { ok: false, written: false, reason: e.reason, message: `${e.message} Nothing was written.`, ...e.extra });
+        }
+        throw e;
+      }
+    }
+    /**
      * One click on an approval card (2026-10-04, 8185). n8n's Bays — Front Door
      * checks Slack's signature and sends the click here; the Slack id it
      * carries is the only thing that says who decided, so this route is only
@@ -712,7 +750,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         await mirror.logWrite({ endpoint, kind: 'approvals', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: approvalId || undefined, outcome: 'rejected', detail: 'approval_id, decision (approve or deny) and a Slack user_id are all required', ms: Date.now() - t0 });
         throw new HttpError(422, 'approval_id, decision ("approve" or "deny") and user_id (a Slack user id) are all required.');
       }
-      const r = await approvals.decide({ approval_id: approvalId, decision, user_id: userId, channel_id: typeof b.channel_id === 'string' ? b.channel_id.trim() : null });
+      // A vFarm gate card (2026-10-09, 7S0O) uses the same two buttons; its id starts VFP-.
+      const r = vfarmGateAuto.isPromptId(approvalId)
+        ? await vfarmGateAuto.decide({ prompt_id: approvalId, decision, user_id: userId })
+        : await approvals.decide({ approval_id: approvalId, decision, user_id: userId, channel_id: typeof b.channel_id === 'string' ? b.channel_id.trim() : null });
       await mirror.logWrite({
         endpoint,
         kind: 'approvals',
@@ -788,6 +829,19 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * read from what is held and calling nothing. Above the kind routes,
      * because `recovery/plan` would otherwise read as kind + row id.
      */
+    /**
+     * Research signals (2026-10-11, Q9CR): what is waiting on the daily budget
+     * or on credit, for Monday's research digest. GET, read only. `all=1`
+     * returns the newest signals in every state.
+     */
+    if (p === '/api/engine/research-signals') {
+      if (method !== 'GET') throw new HttpError(405, 'GET the signals. The pass runs on its own clock, or through the MCP tool run_research_signals.');
+      const all = new URL(req.url ?? '', 'http://x').searchParams.get('all') === '1';
+      const r = await researchSignals.read({ held_only: !all, limit: 200 });
+      await mirror.logWrite({ endpoint, kind: 'research_signals', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `${all ? 'all' : 'waiting'}: ${(r.signals as unknown[]).length} signal(s)`, ms: Date.now() - t0 });
+      return send(res, 200, { ok: true, ...r });
+    }
+
     if (p === '/api/engine/recovery/plan') {
       if (method !== 'GET') throw new HttpError(405, 'GET the plan. It calls nothing; the watcher itself runs on its own clock.');
       const plan = await recovery.plan();
@@ -1234,8 +1288,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** Reminder posts scheduled through Bays (2026-10-05). A read. */
       case '/api/bays/reminders':
         return send(res, 200, await reminderTools.reminders());
+      /** Every scheduler's runs on one page (2026-10-09, K9B7). A read. */
+      case '/api/logstream':
+        return send(res, 200, await logstream.read());
+      case '/api/scheduled-runs':
+        return send(res, 200, await scheduledRuns.scheduledRuns());
       case '/api/vfarm/live':
         return send(res, 200, await systemFeeds.vfarmData());
+      /** The stage gates and the 5-rack offer, for the Gates tab (2026-10-09, 7S0O). A read. */
+      case '/api/vfarm/gates':
+        return send(res, 200, await vfarmGateAuto.scoreboard());
       case '/api/cs-twin':
         return send(res, 200, await systemFeeds.cstData());
       /** Hardik's doctrine and contract changes, as posted (2026-09-30). */
@@ -2164,6 +2226,10 @@ async function boot(): Promise<void> {
     engineEvents.startSweeping();
     doctrineGap.startWatching();
     approvals.startSweeping();
+    vfarmGateAuto.startSweeping();
+    logstream.startSweeping();
+    researchSignals.startSweeping();
+    creditOut.startWatching();
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();
   });

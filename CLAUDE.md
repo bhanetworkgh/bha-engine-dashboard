@@ -1160,7 +1160,15 @@ nothing about the gate in `approvals.ts`, so for an MCP server that is this
 dashboard's `/mcp/agent` on a bearer token the three `GATED_TOOLS` are added to
 `approval` and named in `server_gated`. `rederiveStored()` runs at boot and
 derives tools, MCP scope and tier again from the `raw` config each row already
-holds, changing nothing else — for when the derivation changes and n8n has not.
+holds, changing nothing else — for when the derivation changes and n8n has not. **A slim
+result is accepted** (2026-10-10): Bays' `get_agent` answer is past 160,000
+characters, more than a tool call carries faithfully, so
+`scripts/agent-inventory-slim.cjs` takes the long texts out by script (tool
+descriptions and bodies, skill bodies, task objectives) and replaces the
+instruction text with `instructions_chars` and `instructions_sha256` counted
+from the real text. `derive` reads no field the slim form drops, so the row is
+the same either way; `raw.slim` says which form was stored. `npm run
+test:agent-inventory` pins it, and `AGENT_FILE=` runs it on a real agent.
 
 **Agent identity, 2 Oct**: the seven BHARAG HTTP tools on the three agents no
 longer skip certificate checks (the dashboard had been verifying
@@ -1252,6 +1260,40 @@ gated** — the shared connector and the page are already a person acting.
 - `npm run test:approvals` pins all of it in process against Slack and Google
   stand-ins.
 
+**`unshare_doc`, the way back from `share_doc`** (decision 2026-10-10, Destiny —
+Jason's ask of 9 Oct on the Logstream v0 design note). `server/src/mcp/docTools.ts`,
+write connection only, in Bays' scope. Until it, this server could open a file
+to anyone with the link and had no way to close it again. It removes Drive
+permissions of type `anyone` **and nothing else**: the domain permission and
+every named person are never touched. Three rules: a file with no public
+permission is refused `not_public` and nothing is called; **the permissions are
+read again after the removal and it is `ok: true` only when none of type
+`anyone` is left** (`still_public` and `failed` otherwise, never reported
+closed); and it is the fourth of `GATED_TOOLS`, so an agent's call posts the
+same Approve / Deny card `share_doc` does. Closing is the safe direction, but
+one rule for every sharing change has no exception to remember. Unlike
+`share_doc`, `dry_run` reads Drive: what would be removed is a fact about the
+file. Audited on `engine_mcp_writes` (kind `google_drive`). `npm run
+test:approvals` pins it (checks 13 to 15).
+
+**Outbound Slack has a destination guard** (2026-10-10, Destiny — agent maturity
+re-score). `send_nudge` and `post_file` (`server/src/mcp/slackTools.ts`) send at
+once to a person with a Builder Profile or to an approver, which is every DM
+Bays sends day to day. A DM to anyone else, **on an agent token only**, waits on
+the same Approve / Deny card `share_doc` uses (`unknownRecipients`,
+`approvals.DESTINATION_GATED_TOOLS`); a channel target is not held. Decided in
+code, never in the prompt. A dry run says `would_wait_for_approval`. `npm run
+test:approvals` pins it (check 16). `Bays — Slack Send`, the workflow tool the
+digests post with, is not behind it.
+
+**Tokens and tool calls are on every ask** (2026-10-10). The three Agent
+Delivery workflows write `Prompt Tokens`, `Completion Tokens`, `Total Tokens`,
+`Tool Call Count` and `Tool Calls` (tool names in order, ` > ` between them) on
+each ask row, read from the agent node's own output and null when it gave none.
+`get_agent_spend` (`server/src/mcp/spendTools.ts`, read, both connections) adds
+them up per agent: tokens, never money, because no price is stored. A scheduled
+task run and a failed run carry none and are counted apart, never as nought.
+
 **`close_incidents`, the Engine health close over MCP** (decision 2026-10-01,
 Destiny). `server/src/mcp/incidentTools.ts`, write connection only, calling
 `health.closeIncidents` — the function the page's close button calls — so the
@@ -1286,6 +1328,21 @@ row whose status is Recovered, on the page and here, because the healer
 retries whatever a person asks for from the failed step and would repeat work
 already done. **The cap of three holds for the schedule and the page's button;
 the tool may go past it**, because it carries a written reason.
+
+**`move_loop`, the Open loops builder change over MCP** (decision 2026-10-09,
+Destiny). `server/src/mcp/loopTools.ts`, write connection only, calling
+`store.editLoop` — the function the page's save calls — so the move is the
+page's: the builder is the table a row sits in, `loop_id` travels unchanged, the
+assignee is set from the destination, and the events, note and write log follow
+the row. Built because `update_record` changes fields and the builder is not
+one, so a loop on the wrong table could only be moved by a person on the page
+(Bays re-created one under a new id). A `requester_user_id` is required:
+Destiny or Jason move any loop, anyone else only one on their own table or
+assigned to them. Refused, with nothing moved: not held, already there, an
+unknown builder, or **held twice under one `loop_id`** (both rows named, never
+picked between). `dry_run` says what would move. Audited on
+`engine_mcp_writes` (kind `loops`). Not in any agent's scope. Only the seven
+builders with a loop table are destinations. `npm run test:move-loop` pins it.
 
 **Bays moves onto the dashboard MCP, finished** (decision 2026-09-24, Destiny).
 Bays is the n8n Agent `Nw5igXu4WWrjUMWB` behind `Bays — Front Door` →
@@ -1932,6 +1989,185 @@ checks it against `AUTH_PASSWORD_HASH` and sets a twelve-hour cookie. Five
 failures from one address lock it for thirty seconds. No user management, no
 roles, no signup.
 
+**Logstream v0: table, writer and trigger, built** (2026-10-10, Destiny —
+Jason's go-ahead of 9 Oct, #bha-north-star-twin: "a read/analysis spine", no
+autopay, no pay wiring, no destructive automated action).
+`server/src/logstream.ts`, migration 64. `docs/design/logstream-v0.md` section
+10 is the contract and its numbers are `RULE` in that file and nowhere else.
+
+- **`engine_logstream`** is append-only: one row per state an incident reaches
+  (`observed`, `closed`, `research_opened`), unique on (incident, state), in the
+  design note's field list. `person_confirmed` and `autopay_enabled` default
+  false, **nothing sets them and nothing reads them**. `pattern_ids_applied` is
+  empty: nothing tags an incident with a build pattern yet, and this does not
+  guess. `time_to_recovery_trusted` is true only for a close on or after
+  2 Oct 2026.
+- **The writer reads `engine_incidents`**, which the ledger poll already fills.
+  No workflow is changed and no reporting node is added.
+- **The trigger**, every five minutes, over the last 7 days, **per fault
+  signature (workflow + the step that failed), never per lane**: 3 opens **one**
+  Research Twin job for the pattern (`Opened By: Logstream`); 5 posts one alert
+  in the engine alerts channel as Bays; a workflow with 20% or more of its
+  production runs failing, at least 10 runs and 3 failures, opens one job; 5 or
+  more workflows crossing is one `shared_outage` alert, and research triggers
+  first seen while it holds are `suppressed_shared_outage`. Each crossing is one
+  row in `engine_logstream_triggers`, once per 7 days, and one
+  `logstream_threshold_crossed` event.
+- **The rate rule leaves a guard's refusals out too** (10 Oct): a run whose
+  incident is excluded (matched on the incident's `execution_id`) is dropped
+  from both the runs and the failures. A refused ask throws on purpose, so
+  without this a door that refuses three asks reads as a failing workflow.
+- **Counted in nothing**: a workflow named `TEST …`, anything simulated (the
+  name, or the `simulated` impact tag), and the step `Raise Refused Ask`. The
+  rows are still written, with `excluded_reason`.
+- **All it can do is open a research job and post a Slack message.** It never
+  closes, retries, edits or deletes, and never touches pay. A job or alert that
+  does not land keeps its trigger at `failed` with the reason and is tried again
+  on every pass.
+- **GNER stays a candidate; no runtime decision depends on it; empty reads are
+  not recorded.** These are v0 numbers: the re-tune is due about 9 Nov 2026
+  (LOOP-1791558515351-4DR6).
+- **Which pattern applied** (second pass, 10 Oct): once an incident is closed
+  it gets one `patterns_evaluated` row. **Only two patterns are judged, from
+  records the engine already keeps**: S757, the closure protocol, for a close on
+  or after 7 Oct 2026 — `followed` where a `close_incidents` audit line carries
+  a written reason, `not_followed` where the ledger, the healer or the recovery
+  watcher closed it; and BW9S, the guarded retry, `followed` where
+  `retry_incident` left an audit line. Anything the record does not settle is
+  `not_applicable`, never a guess. GRM8 is a pattern-draft outcome and raises no
+  incident, so it never applies; GNER is not evaluated.
+- **The guidance step**: when the job a trigger opened is `Resolved`, the sweep
+  posts the finding once to n8n's `Logstream — Guidance Ask`
+  (`SW9da2D0pDqBk0dq`, `POST /webhook/logstream-guidance`, `x-dashboard-key`),
+  which asks North Star through its own Front Door, source `logstream`, to post
+  a recommendation in #bha-north-star-twin. **A recommendation only**: North
+  Star sets no tag and edits no card, and no agent was changed for this (the ask
+  carries its own instructions). `guidance_state` on the trigger is `asked`,
+  `failed` (with the reason, retried every pass) or `no_finding` (a capped job).
+  `LOGSTREAM_GUIDANCE_PATH` and `LOGSTREAM_GUIDANCE_CHANNEL` are optional.
+- **The page**: `/logstream`, under Records, `GET /api/logstream`
+  (`logstream.read()`), four tabs: Crossings, Faults, Rows, Patterns. A read and
+  nothing else. Colour marks an action that did not land and a fault at the
+  level that calls a person; a research job opened is the accent, not green.
+- **How the twins read it** (third pass, 10 Oct — Jason: "document the schema
+  and how RT and NS will read from it"): `read_logstream`,
+  `server/src/mcp/logstreamTools.ts`, read only, both connections, in North
+  Star's and Research Twin's scope. No arguments: the rule in words, the
+  summary, what holds now, the last 30 days of crossings with what was done,
+  the faults nearest the line, adherence and the empty-read count. `signature`
+  or `workflow`: that fault's incidents, each with how it closed. Budgeted to
+  20,000 characters (40,000 at most), cut from the longest list and marked. It
+  never returns the pay fields. Research Twin reads a fault's history before
+  writing the finding on a job Logstream opened; North Star reads it for
+  guidance. One `read` line per call on `engine_writes`.
+- **Every agent reads Logstream and the engine's events** (fourth pass, 10 Oct
+  — Jason's go-time notice: "finish the agent/twin consumption paths (Bays, NS,
+  RT, Slack Genie) off engine.event.v1 and Logstream"). `read_logstream` is in
+  Bays' scope too. `read_engine_events`, same file, read only, both
+  connections, in all three agents' scope: counts by event type over a window
+  (7 days by default, 30 at most) and the newest events (50, at most 200),
+  narrowed by `event_type`, `subject_id`, `lane`. A detail past 600 characters
+  is cut and marked; the answer is budgeted like `read_logstream`'s; an empty
+  window says none was recorded, not that nothing happened. One `read` line per
+  call on `engine_writes`. **Genie is not wired**: it is Kaiqi's service and
+  reads neither yet.
+- **Empty reads are counted, and nothing decides on them** (same day).
+  `Bays — Daily Doc Rotator` posts one `empty_read_check` event per run to
+  `/api/engine/events` (reads, empty, which channels; a clean run too, so a
+  night with no event is never read as a night with none).
+  `logstream.emptyReads()` sums them. This is the count Jason's 9 Oct rule asks
+  for before GNER can graduate; the decision is for the re-tune. `evaluate()`
+  does not read it.
+- **Not built**: a person's review of a row (`evaluated_by`,
+  `person_confirmed` stay empty).
+- The Monitoring Twin's own 3-in-7 rule (above) is separate. `npm run
+  test:logstream` pins the rule against history and the writer and trigger
+  against a local database.
+
+**Research signals: one job per signal, a daily budget, and triggers T4, T5, T6
+and T8** (2026-10-11, Destiny — LOOP-1788310653393-Q9CR; the contract is
+BP-CONTRACT-005-CLOSED_LOOP_V1, whose "NOT YET WIRED" guards and triggers this
+builds, except T7). `server/src/researchSignals.ts`, migration 68,
+`engine_research_signals`, one row per signal key.
+
+- **`researchSignals.open()` is the one way an automatic research job is
+  opened.** Logstream's trigger and the Monitoring Twin's recurrence rule call
+  it too; never write an `rt-jobs` row for an automatic trigger any other way.
+  Research Twin's own `queue_followup_research` is not behind it: that is the
+  agent following up inside a run, not a trigger.
+- **One job per signal.** The key is the fault signature (`fault:<workflow ::
+  step>`, Logstream's own, so its trigger and T4 cannot open two jobs), a card
+  and its state, a lane and its gap, or a red flag name. A signal whose job is
+  still open adds one dated line to that job's Context. A capped or removed job
+  is never reopened. A resolved one reopens only where the signal re-arms (a
+  fault after 7 days, a red flag after 14), and "not yet" is told apart from
+  "never" (`wait: true`), so a caller with its own row keeps waiting. Before
+  opening, an open job already carrying the `Signal Key` is adopted, which is
+  how a job whose own record was lost is never opened twice.
+- **Five new automatic jobs a day (UTC), across the engine.** Over that the
+  signal is `held_budget` and tried again every pass. **Backlog takes at most
+  three of the five** (a card that has had missing research for weeks), so a
+  new fault always has room; live signals are taken before backlog.
+- **Nothing opens while the model credit is under $15 or cannot be read**
+  (`held_credit`). The balance is `GET /credits` on OpenRouter with
+  `OPENROUTER_API_KEY`, held for ten minutes. $15 is the eval runner's floor.
+- **The triggers** (`detect()`, every five minutes):
+  **T4** an incident whose handler set `research_needed`, or the same workflow
+  and step ending `needs_human` at the repair bridge twice in 7 days (test,
+  simulator and refused-ask left out, as Logstream leaves them out);
+  **T5** a North Star answer with Architect Attention true or lane health
+  Needs Intervention / Critical that ends its gaps with a line `Research Twin
+  question: <question>`, and not one where North Star already asked Research
+  Twin in that run (`Linked Twin Ask`). **North Star writes that line; code
+  never decides what an outside-world question is**;
+  **T6** a card at `needs_revision` or `pilot_failed`, and, once each, a card
+  with `missing_research_count` above nought and no research job ever (the
+  job carries the card id, so a finding still reaches back to the card);
+  **T8** the same `Red Flag Name` on 3 or more logs in 14 days. That field is
+  written by `Bays — Submit Actions` from 11 Oct 2026; older logs do not
+  carry it, so the count starts then. Its answer can only become a pattern
+  candidate, never a pay decision.
+- **A waiting signal is tried again from what was stored** (a question does
+  not stop being one because a week passed). A waiting card or red flag that
+  stops holding is let go and says so, only on a pass where every source was
+  read. A source that could not be read is one `research_signals_source_unread`
+  event a day and is named on the page.
+- **Not built**: T7 (vFarm anomalies; Jegan's contract), and T6's "high-intent
+  front-door lead" (nobody has defined one).
+- **Reads**: the Research signals tab on `/logstream` (`research_signals` on
+  `GET /api/logstream`), `read_logstream`'s overview (`research_signals`),
+  and `GET /api/engine/research-signals` (`x-dashboard-key`; waiting only, or
+  `?all=1`), which Monday's `Research Queue — Weekly Digest` reads.
+- **`run_research_signals`** (write connection, no agent's scope): the pass on
+  demand. `dry_run` defaults to true and lists what each signal would get.
+  `fixture` puts one marked test signal through the real guard; its job carries
+  `Fixture: true` and is removed with `delete_record`. A waiting fixture is
+  never opened by the clock.
+- New fields on an automatic job: `Opened By Trigger` and `Signal Key`. Logstream
+  crossings and Monitoring recurrences gain the states `held` and
+  `not_reopened`. `npm run test:research-signals` pins all of it; every test
+  that opens a research job starts `server/test/_credit.cjs` first.
+
+**The credit-out alert** (2026-10-10, Destiny). `server/src/creditOut.ts`, a
+check every minute, no table of its own (its state is `meta`
+`credit_out.state`). On 10 Oct the OpenRouter credit ran out between two of
+n8n's balance checks and 49 eval cases and a real ask failed with nobody told.
+The n8n check (`Engine — OpenRouter Credit Alert`, **hourly** from the same
+day, was every 3 hours) says credit is getting low; this says a run has
+already failed on it. It counts, over what this database was handed in the
+last 15 minutes: an incident classed `BILLING_QUOTA` or carrying a credit
+refusal, a **Failed** ask to Bays, North Star or Research Twin whose `Error`
+is one, and an eval result whose `Checks` carry one. The first found posts
+**one** alert in the engine alerts channel as Bays, tagging
+`QUOTA_ALERT_MENTIONS`, and writes one `openrouter_credit_out` event. **One
+alert per episode**: more failures post nothing, and the episode ends after 60
+minutes with none. An alert Slack refuses is kept as failed with the reason
+and tried again every minute. It reads and posts; it retries, closes and
+changes nothing. An Answered ask that only talks about credits is not a
+failure. `Agent Evals — Runner` reads the balance before a run and does not
+start under $15 (an estimate), and stops at the first answer that fails on
+credit rather than scoring it. `npm run test:credit-out` pins the watcher.
+
 ## 5. Design
 
 **Feel:** a modern consumer dashboard in the manner of Apple's account pages.
@@ -2063,6 +2299,8 @@ RECORDS
   Commercial
   Clients
   Executions             ← every run of every workflow, tabbed by system
+  Scheduled runs         ← every scheduler's runs: agent tasks, timed workflows, reminders, timers
+  Logstream              ← faults that keep coming back, what crossed a threshold, what asked for research
   Pay Tracker            ← who is owed, for what work, and what has been paid
 
 REFERENCE
@@ -2462,6 +2700,43 @@ green on a page where almost everything succeeds is decoration.
 See section 4 for how the rows are stored and polled, for why nothing here
 claims what n8n retains, and for the two rules that keep a comparison honest.
 
+### Scheduled runs
+**Built 2026-10-09, Destiny — LOOP-1791498530857-K9B7.** On 8 Oct Jegan's
+open-loops reminder did not happen and nothing could say whether the timer never
+fired or the task died. Jason asked for a minimal run log: time, task, success
+or failure, error. `/scheduled-runs`, under Records, is every scheduler the
+engine has on one page, last 7 days, four tabs. `GET /api/scheduled-runs`,
+`server/src/scheduledRuns.ts`. **A read and nothing else.**
+
+- **Agent tasks.** Bays' twelve scheduled tasks run inside the n8n Agent, whose
+  timer keeps no history. From 9 Oct each task calls `Record_Scheduled_Run`
+  **first** with outcome `started` (one `bays-asks` row, `Task Outcome:
+  started`) and its last-step call **closes that same row** (`Finished At`,
+  `Response Seconds`, the outcome). **The page draws one row per time a task was
+  due**, from the schedule in `engine_agent_inventory` (never typed here), so a
+  miss is a row: no row for a due time is **never started** (the timer did not
+  fire, or the agent stopped before its first step; the log cannot split those
+  two, and both are the platform, not the task); a row left at started is
+  **started, not finished**; a closed row carries its outcome. A due time
+  before `RUN_LOG_SINCE` says **no record**, because only a finish line was
+  written then. A run no due time accounts for (a re-run, a hand run) is listed
+  as off schedule, never dropped. A due time under 45 minutes old is not yet a
+  miss.
+- **Workflows.** n8n runs with mode `trigger`, from `engine_execution_runs`.
+- **Reminders.** `engine_scheduled_posts`; a past one is "handed to Slack".
+- **Background timers.** This process's ten timers (`server/src/timers.ts`,
+  `timers.beat(name)` at the top of each tick): last tick and ticks since the
+  process started, in memory. One line per timer, never a row per tick.
+- **Colour** only on never started, started and not finished, and failed.
+  Finished is the normal state and carries none.
+- `Bays — Scheduled Run Watch` reads the same rows: a row at `started` is not a
+  finished run, and its alert says which missed tasks never started and which
+  started and did not finish.
+- **Adding or re-timing an agent task**: record the agent inventory again
+  (`record_agent_inventory`), or the page stays on the old schedule, and it says
+  when the schedule was last read. Claude's own scheduled checks are not held
+  here and the page says so. `npm run test:scheduled-runs` pins the states.
+
 ### Engine health
 **Built 2026-09-17, Destiny**, where a "coming soon" page stood. It answers one
 question: **is the engine actually working right now, and if not, what broke,
@@ -2716,6 +2991,64 @@ sending, no bulk action beyond copying addresses out. The moment this page could
 email somebody it would need to know who had already been emailed, and that is a
 second system, not a tab. Nothing on it is a commitment: a row says a person
 filled in a form.
+
+### vFarm — Gates (2026-10-09, Destiny — LOOP-1791479575963-7S0O)
+
+The Stage 1 lab validation, the Stage 2 pilot checklist and the 5-rack pilot
+offer: Jason's three v1 contracts (Codex 6120a262), held in `engine_vfarm_gates`
+(migration 62) under the contract's own field names. The full account is
+`docs/contracts/vfarm-gates.md`; the rules that must not be broken are these.
+
+**One function writes them: `vfarmGates.writeGate`.** The MCP tool
+(`write_vfarm_gate`), the engine route (`/api/engine/vfarm-gates`) and the test
+all call it. Never add a second writer, and never write the table directly: the
+two hard gates live there. Stage 2 stays `planned` until its Stage 1 is
+`passed`; an offer cannot be `offered` or `signed` without a Stage 2 row tied
+by `stage2_ref`.
+
+**Every change is a row and an event in one transaction.** `engineEvents.record`
+takes the transaction's client for this. The event names are Jason's, in upper
+case (`VFARM_STAGE1_STATE_CHANGED`, `VFARM_STAGE2_STATE_CHANGED`,
+`VFARM_CHECK_UPDATED`, `VFARM_OFFER_STATE_CHANGED`); do not rename them.
+
+**Stage 1 is passed only when all four checks are passed** (Jason, 9 Oct 2026).
+`writeGate` refuses `status: passed` on a Stage 1 while any check is `pending`
+or `failed` (`checks_not_passed`), reading the record as it would be after the
+write. So a check failed in the same call is refused, and so is a check that
+stops passing on a record already passed unless the status moves back in the
+same write. `pending`, `passed`, `failed` is the locked check vocabulary.
+**A dry run posts no alert**: `alerts` is empty and `alerts_would_send` lists
+what a real write would post. A refused write posts nothing and writes nothing.
+
+**Three checks are recorded by a person, and nothing may say otherwise.**
+Root-zone moisture, airflow velocity and early disease detection have no sensor
+yet; `source: "sensor"` is refused on them. Moving a check into `SENSOR_BACKED`
+is the whole change when a sensor lands.
+
+**The tab reads; it does not write.** Nobody fills in a gate, a threshold or a
+price from this dashboard on Jason's behalf, and an empty section says nobody
+has written one. A fixture is labelled on every row it appears in, and
+`delete_vfarm_gate_fixtures` is the only delete there is.
+
+**The gates keep themselves current** (second pass, same day):
+`server/src/vfarmGateAuto.ts`, a sweep every two minutes. A record that names
+its farm (`monitoring_farm_id`) takes canopy climate, and root-zone moisture
+once the crop profile holds a soil-moisture range, from the Monitoring Twin's
+live verdict, and its growth stage from the crop day; a silent feed changes
+nothing. While a Stage 1 is in progress its owner is sent one card per check no
+sensor covers, with Passed and Failed buttons (asked again after 48 hours,
+three times at most). When all four checks have passed, Jason is sent a card
+proposing Stage 1 as passed: **a status is proposed, never set**. The cards
+(`engine_vfarm_gate_prompts`, migration 63) reuse the approval card's two
+action ids, so n8n's Front Door forwards a click unchanged, and
+`/api/engine/approvals/decide` hands an id starting `VFP-` to
+`vfarmGateAuto.decide`. Every write still goes through `writeGate`. The tab's
+read is `vfarmGateAuto.scoreboard()`: the three-step strip from the newest real
+record of each kind (a fixture never stands there) and each record's numbers.
+
+**The contract's field lists are fixed.** A change is a new Architect Answer
+from Jason, then an edit to `FIELDS` in `vfarmGates.ts` and to the contract
+doc, logged here.
 
 ### Genie and vFarm, pushed as it happens (2026-09-29, Destiny — D3 / HMJV)
 **Genie is a real page and vFarm's Overview is real, with Devices and Alerts

@@ -3155,6 +3155,89 @@ export interface VfarmLead {
   stage_changed_at: string | null;
   /** Every move between stages, oldest first, never rewritten. */
   stage_history: { from: number; to: number; at: string; by: string; reason: string | null; via: 'page' | 'engine' }[];
+  /** The 5-rack pilot offers this lead is tied to (2026-10-09, 7S0O). Internal only. Absent on an optimistic copy. */
+  pilot_offers?: { id: string; status: string }[];
+}
+
+/* ------------------------------------------------------------ vFarm gates */
+
+/** One check on a Stage 1 record: a verdict with who, when and how (2026-10-09, 7S0O). */
+export interface VfarmGateCheck {
+  status?: string;
+  thresholds?: unknown;
+  notes?: string;
+  value?: unknown;
+  source?: string;
+  checked_by?: string;
+  checked_at?: string;
+  evidence_ref?: string;
+}
+
+/**
+ * One Stage 1, Stage 2 or offer record, as the v1 contract words it. Beyond
+ * the fields named here the record carries whatever else the contract holds,
+ * under the contract's own names.
+ */
+export interface VfarmGateRecord {
+  id: string;
+  contract: string;
+  kind: 'stage1' | 'stage2' | 'offer';
+  /** A test record. Labelled wherever it is shown. */
+  fixture: boolean;
+  status: string;
+  stage1_ref?: string | null;
+  stage2_ref?: string | null;
+  loop_ref?: string;
+  owner_slack_id?: string;
+  target_date?: string;
+  crop_profile?: string;
+  growth_stage?: string;
+  rack_count?: number;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+  linked_leads?: { id: string; full_name: string; organization_name: string | null; stage: number; status: string }[];
+  [field: string]: unknown;
+}
+
+export interface VfarmGatesData {
+  stage1: VfarmGateRecord[];
+  stage2: VfarmGateRecord[];
+  offers: VfarmGateRecord[];
+  fixtures: number;
+  checks: { name: string; label: string; recorded_by: string }[];
+  gates: string[];
+  alert_channel_configured: boolean;
+  events: { id: number; event_type: string; at: string; subject_id: string; actor: string | null; detail: Record<string, unknown> }[];
+  note: string;
+  /** The three steps, from the newest real record of each kind. A fixture never stands here. */
+  pipeline: { key: string; label: string; record_id: string | null; status: string | null; locked: boolean; locked_reason: string | null }[];
+  /** The numbers for each record, keyed by its id. */
+  boards: Record<string, VfarmGateBoard>;
+  prompts_waiting: { prompt_id: string; kind: string; object_id: string; check: string | null; asked_user: string; asked_at: string; fixture: boolean }[];
+  automation: { sensor_checks: string; status: string; twin_error: string | null };
+}
+
+/** What the server worked out about one gate record (2026-10-09, 7S0O second pass). */
+export interface VfarmGateBoard {
+  days_in_status: number | null;
+  days_to_target: number | null;
+  farm: { farm_id: string; name: string | null; simulated: boolean; feed_silent: boolean; last_snapshot_at: string | null } | null;
+  checks_total?: number;
+  checks_passed?: number;
+  checks_failed?: number;
+  checks_pending?: number;
+  checks?: Record<string, { fed_by: string; asked_user: string | null; asked_at: string | null }>;
+  status_proposed_to?: string | null;
+  status_proposed_at?: string | null;
+  locked?: boolean;
+  stage1_status?: string | null;
+  uptime_pct?: number | null;
+  uptime_target_pct?: number | null;
+  incidents_7d?: number | null;
+  alert_budget_per_week?: number | null;
+  leads_tied?: number;
 }
 
 export interface VfarmLeadsData {
@@ -3973,4 +4056,151 @@ export interface AskTraceDetail {
   found: boolean;
   hops: AskTraceHop[];
   note: string;
+}
+
+/** The Scheduled runs page (server/src/scheduledRuns.ts, 2026-10-09). */
+export type AgentRunState = 'finished' | 'failed' | 'started_not_finished' | 'never_started' | 'no_record' | 'due_soon' | 'unscheduled';
+export interface ScheduledAgentRun {
+  key: string;
+  agent: string;
+  task: string;
+  due_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  state: AgentRunState;
+  outcome: string | null;
+  seconds: number | null;
+  summary: string | null;
+  error: string | null;
+  tool_issues: string | null;
+  slack_link: string | null;
+  ask_id: string | null;
+  finish_only: boolean;
+}
+export interface ScheduledWorkflowRun {
+  execution_id: string;
+  workflow_id: string;
+  workflow: string;
+  status: string;
+  started_at: string;
+  stopped_at: string | null;
+  seconds: number | null;
+}
+export interface ScheduledRunsData {
+  window: { days: number; from: string; to: string };
+  run_log_since: string;
+  agent: {
+    tasks: Array<{ agent: string; task: string; cron: string; timezone: string }>;
+    schedule_read_at: string | null;
+    runs: ScheduledAgentRun[];
+    summary: { due: number; finished: number; failed: number; started_not_finished: number; never_started: number; no_record: number; unscheduled: number };
+  };
+  workflows: {
+    runs: ScheduledWorkflowRun[];
+    by_workflow: Array<{ workflow: string; runs: number; failed: number; last_run_at: string; last_status: string }>;
+    summary: { workflows: number; runs: number; failed: number };
+  };
+  reminders: Array<{ reminder_id: string; channel_id: string; text: string; post_at: string; state: string; requested_by: string | null }>;
+  timers: { since: string; list: Array<{ name: string; what: string; every: string; last_tick_at: string | null; ticks: number }> };
+  notes: string[];
+}
+
+/** The Logstream page (server/src/logstream.ts, 2026-10-10). */
+export interface LogstreamTrigger {
+  trigger_id: string;
+  kind: 'signature_research' | 'signature_escalation' | 'workflow_rate' | 'shared_outage';
+  key: string;
+  workflow: string | null;
+  failed_node: string | null;
+  lane_id: string | null;
+  n: number;
+  runs: number | null;
+  failures: number | null;
+  incident_ids: string[];
+  workflows: string[];
+  first_at: string | null;
+  last_at: string | null;
+  detected_at: string;
+  action: 'research_job' | 'alert_person';
+  action_state: 'pending' | 'job_opened' | 'alerted' | 'suppressed_shared_outage' | 'failed' | 'withdrawn' | 'held' | 'not_reopened';
+  job_id: string | null;
+  job_status: string | null;
+  alert_channel: string | null;
+  alert_ts: string | null;
+  error: string | null;
+  attempts: number;
+  guidance_state: 'asked' | 'failed' | 'no_finding' | null;
+  guidance_error: string | null;
+  guidance_at: string | null;
+}
+export interface LogstreamSignature {
+  signature: string;
+  workflow: string | null;
+  failed_node: string | null;
+  lane_id: string | null;
+  excluded_reason: string | null;
+  total: number;
+  last_7d: number;
+  last_30d: number;
+  last_at: string;
+}
+export interface LogstreamRow {
+  logstream_row_id: string;
+  incident_id: string;
+  state: 'observed' | 'closed' | 'research_opened' | 'patterns_evaluated';
+  lane_id: string | null;
+  signature: string;
+  excluded_reason: string | null;
+  occurred_at: string;
+  written_at: string;
+  objective_outcomes: { incident_frequency_7d?: number; time_to_recovery_seconds?: number | null; time_to_recovery_trusted?: boolean; closed_by?: string | null };
+  research_trigger: { threshold_crossed?: boolean; rt_job_id?: string | null };
+  pattern_ids_applied: string[];
+  pattern_adherence: Record<string, { result: 'followed' | 'not_followed' | 'not_applicable'; why: string }>;
+  person_confirmed: boolean;
+  autopay_enabled: boolean;
+}
+/** One signal that asked for research (server/src/researchSignals.ts, 2026-10-11). */
+export interface ResearchSignal {
+  signal_id: string;
+  signal_key: string;
+  trigger_code: 'T4' | 'T5' | 'T6' | 'T8' | 'MONITORING';
+  source: string;
+  priority: number;
+  lane: string | null;
+  card_id: string | null;
+  question: string;
+  state: 'opening' | 'job_opened' | 'held_budget' | 'held_credit' | 'not_reopened' | 'failed';
+  reason: string | null;
+  job_id: string | null;
+  job_status: string | null;
+  previous_jobs: string[];
+  occurrences: number;
+  fixture: boolean;
+  detected_at: string;
+  last_seen_at: string;
+  opened_at: string | null;
+}
+export interface ResearchSignalsData {
+  rule: { daily_budget: number; backlog_daily_cap: number; credit_floor_usd: number; words: string[]; not_built: string[]; contract: string };
+  today: { utc_day: string; opened: number; backlog_opened: number; budget: number; left: number };
+  credit: { read: boolean; remaining_usd?: number; error?: string; floor_usd: number; read_at: string | null };
+  by_state: Record<string, number>;
+  signals: ResearchSignal[];
+  signals_cap: number;
+  last_pass: { at: string | null; errors?: string[] };
+}
+export interface LogstreamData {
+  /** Absent when an older server answers during a deploy. */
+  research_signals?: ResearchSignalsData;
+  rule: { window_days: number; research_at: number; escalate_at: number; words: string[]; locked_by: string };
+  summary: { incidents: number; counted: number; excluded: number; closed: number; last_7d: number; person_confirmed: number; autopay_enabled: number; first_at: string | null; last_written_at: string | null };
+  holding_now: { kind: string; key: string; n: number; runs: number | null; failures: number | null }[];
+  triggers: LogstreamTrigger[];
+  signatures: LogstreamSignature[];
+  rows: LogstreamRow[];
+  rows_cap: number;
+  adherence: { pattern: string; result: string; n: number }[];
+  patterns: Record<string, string>;
+  notes: string[];
 }

@@ -354,9 +354,9 @@ async function call(name, args) {
     const n = Object.fromEntries(reads.rows.map((r) => [r.endpoint, r.n]));
     assert.equal(n['mcp:read_slack'], 7);
     assert.equal(n['mcp:read_open_loops'], 3);
-    assert.equal(n['mcp:get_priority_evidence'], 3);
+    assert.equal(n['mcp:get_priority_evidence'], 4); // all, one lane, the refused guess, the small budget
     const sized = await query(`SELECT detail FROM engine_writes WHERE endpoint = 'mcp:get_priority_evidence' AND at > $1`, [new Date(T).toISOString()]);
-    assert.ok(sized.rows.every((r) => / chars$/.test(r.detail)), 'every read logs its size');
+    assert.ok(sized.rows.every((r) => /^refused /.test(r.detail) || / chars$/.test(r.detail)), 'every read logs its size');
     step('every call logged as a read');
 
     console.log(passed.map((p) => `  ✓ ${p}`).join('\n'));

@@ -1346,6 +1346,10 @@ export async function resolveDuplicate(id: string, actor = 'dashboard'): Promise
 
 /** The Slack id that belongs to each builder's table, for the assignee this dashboard holds. */
 const SLACK_TO_BUILDER_ID: Record<string, string> = Object.fromEntries(Object.entries(SLACK_TO_BUILDER).map(([slack, builder]) => [builder, slack]));
+/** The builder a Slack id belongs to, or null (for move_loop's permission check). */
+export const builderForSlackId = (slack: string): string | null => SLACK_TO_BUILDER[slack] ?? null;
+/** A builder's Slack id, or null. */
+export const slackIdForBuilder = (builder: string): string | null => SLACK_TO_BUILDER_ID[builder] ?? null;
 
 /** Changes one record's status, and records the change in the ledger. */
 export async function setStatus(kind: RecordKind, id: string, status: string, note?: string, actor = 'dashboard'): Promise<Loop | CodexEntry | BuildPattern | Opportunity> {
