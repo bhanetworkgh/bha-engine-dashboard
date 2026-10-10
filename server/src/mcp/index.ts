@@ -159,7 +159,7 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'get_health', 'get_recovery_status', 'list_n8n_workflows', 'get_n8n_workflow', 'read_slack_file',
         'rank_lanes', 'lane_health',
         // 2026-10-01: what may be said about vFarm (T0NO).
-        'read_media_doctrine', 'read_publication_decision',
+        'read_media_doctrine', 'read_publication_decision', 'read_doctrine_gap_summary',
       ]),
     },
     {
@@ -167,7 +167,7 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       env: 'MCP_AGENT_TOKEN_RESEARCH_TWIN',
       access: 'write',
       tools: new Set([
-        'find_records', 'write_research_finding', 'write_commercial_card_fields', 'compute_lane_state',
+        'find_records', 'read_media_doctrine', 'read_publication_decision', 'read_doctrine_gap_summary', 'write_research_finding', 'write_commercial_card_fields', 'compute_lane_state',
         'queue_followup_research', 'update_watched_client_question', 'create_client_report_doc',
       ]),
     },
@@ -185,7 +185,7 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-05: reminder posts Slack holds and sends as Bays.
         'schedule_reminder', 'list_reminders', 'cancel_reminder',
         // 2026-10-01: what may be said about vFarm (T0NO).
-        'read_media_doctrine', 'read_publication_decision',
+        'read_media_doctrine', 'read_publication_decision', 'read_doctrine_gap_summary',
         // 2026-10-08: the candidate flow from Slack. Granted to the write connection on 25 Sep and
         // left off this list when tokens were scoped on 28 Sep, so Bays saved a candidate's pattern
         // with create_record instead (BP-GENIE-1791419670135-5KR7).
