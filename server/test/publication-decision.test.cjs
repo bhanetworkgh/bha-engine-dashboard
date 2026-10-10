@@ -81,6 +81,11 @@ const source = fs.readFileSync(path.join(root, 'server/src/publicationDecision.t
 assert.match(source, /DISTINCT ON[\s\S]{0,900}ORDER BY[\s\S]{0,200}at DESC, id DESC/);
 ok('canonical query deterministically selects the latest exact claim and surface row');
 
+// Static only: proves the source text is grouped, not that Postgres accepts it. test:vrfk-db runs it.
+assert.match(source, /\(\(detail->>'doctrine_id'\) \|\| ':' \|\| \(detail->>'claim_id'\)\) = ANY\(\$4::text\[\]\)/);
+assert.doesNotMatch(source, /detail->>'doctrine_id' \|\| ':' \|\| detail->>'claim_id'/);
+ok('claim-key expression groups both ->> terms (static check; execution is test:vrfk-db)');
+
 const http = fs.readFileSync(path.join(root, 'server/src/index.ts'), 'utf8');
 const mcp = fs.readFileSync(path.join(root, 'server/src/mcp/tools.ts'), 'utf8');
 const media = fs.readFileSync(path.join(root, 'src/screens/MediaTwin/index.tsx'), 'utf8');
@@ -89,4 +94,44 @@ assert.match(mcp, /name: 'read_publication_decision'[\s\S]{0,2600}publicationDec
 assert.match(media, /publication_decisions[\s\S]{0,1000}MISSING_PUBLICATION_DECISION|publication_decisions/);
 ok('HTTP, MCP and Media Twin consume the one canonical read resolver');
 
-console.log(`\n${passed} VRFK checks passed.`);
+// storeDecision with the event store and the read stood in: no database.
+(async () => {
+  const events = require(path.join(DIST, 'server/src/engineEvents.js'));
+  const pg = require(path.join(DIST, 'server/src/pg.js'));
+  const realRecord = events.record;
+  const realQuery = pg.query;
+  try {
+    const first = vrfk.prepareDecision(input(), claim()).detail;
+    // jsonb hands keys back in its own order, nested objects included: reverse every level.
+    const reorder = (v) => (Array.isArray(v) ? v.map(reorder) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).reverse().map((k) => [k, reorder(v[k])])) : v);
+    const fromJsonb = reorder(first);
+    events.record = async () => ({ recorded: false, id: null });
+    pg.query = async (sql, params) => {
+      assert.match(sql, /WHERE dedupe_key = \$1/);
+      assert.equal(params[0], 'VFAM.claim_publication_decision:DECISION-1');
+      return { rows: [{ id: '41', detail: fromJsonb }], rowCount: 1 };
+    };
+    const same = await vrfk.storeDecision(input(), claim());
+    assert.equal(same.recorded, false);
+    assert.equal(same.duplicate, true);
+    assert.equal(same.id, 41);
+    assert.deepEqual(same.differs_from_request, []);
+    ok('identical retry answers with the stored row and no differing fields, whatever order jsonb keys come back in');
+
+    const changed = await vrfk.storeDecision(input({ reason: 'A different reason', evidence_refs: ['EVIDENCE-2'] }), claim());
+    assert.equal(changed.decision.reason, first.reason);
+    assert.deepEqual(changed.differs_from_request, ['evidence_refs', 'reason']);
+    ok('retry with different content answers with what is stored, never the request, and names the fields it tried to change');
+
+    events.record = async () => ({ recorded: true, id: 42 });
+    const fresh = await vrfk.storeDecision(input(), claim());
+    assert.equal(fresh.recorded, true);
+    assert.equal(fresh.duplicate, false);
+    assert.equal(fresh.id, 42);
+    ok('a new decision_id is recorded and reported as not a duplicate');
+  } finally {
+    events.record = realRecord;
+    pg.query = realQuery;
+  }
+  console.log(`\n${passed} VRFK checks passed.`);
+})().catch((e) => { console.error(e); process.exit(1); });

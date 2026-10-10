@@ -279,15 +279,32 @@ export async function observe(input: DoctrineGapInput) {
     }
   } catch (e) {
     incident.error = e instanceof Error ? e.message : String(e);
+    // The sweep discards its results, so without this line a failed open or close would be silent.
+    console.error(`[doctrine-gap] incident sync failed for ${o.recovery_key} (${o.condition}, ${policy.reason}): ${incident.error}`);
   }
   return { observation: o, policy, guidance: guidanceFor(o), incident };
 }
 
+/** The newest observations summary() reads in one window; one more is fetched to tell a full window from a cut one. */
+export const SUMMARY_LIMIT = 2000;
+
+/** Pure: the rows a capped read keeps, and whether the window held more than the cap. */
+export function capRows<T>(rows: T[], limit = SUMMARY_LIMIT): { rows: T[]; truncated: boolean } {
+  return { rows: rows.slice(0, limit), truncated: rows.length > limit };
+}
+
 export async function summary(hours = 24) {
   const safeHours = Math.max(1, Math.min(24 * 30, Math.floor(hours)));
-  const r = await query<EventRow>(`SELECT event_type, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS at, detail FROM engine_events WHERE event_type = $1 AND at >= now() - ($2::text || ' hours')::interval ORDER BY at DESC, id DESC LIMIT 2000`, [OBSERVED_EVENT, String(safeHours)]);
-  const observations = r.rows.map((x) => x.detail);
-  return { schema: SUMMARY_SCHEMA, read_at: new Date().toISOString(), window_hours: safeHours, policy: { status: 'PROPOSED', ...PROPOSED_POLICY }, counts: { observations: observations.length, groups: aggregateObservations(observations).length }, groups: aggregateObservations(observations) };
+  const r = await query<EventRow>(`SELECT event_type, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS at, detail FROM engine_events WHERE event_type = $1 AND at >= now() - ($2::text || ' hours')::interval ORDER BY at DESC, id DESC LIMIT $3`, [OBSERVED_EVENT, String(safeHours), SUMMARY_LIMIT + 1]);
+  const { rows, truncated } = capRows(r.rows);
+  const observations = rows.map((x) => x.detail);
+  const groups = aggregateObservations(observations);
+  return {
+    schema: SUMMARY_SCHEMA, read_at: new Date().toISOString(), window_hours: safeHours, policy: { status: 'PROPOSED', ...PROPOSED_POLICY },
+    counts: { observations: observations.length, groups: groups.length, limit: SUMMARY_LIMIT, truncated },
+    note: truncated ? `More than ${SUMMARY_LIMIT} observations in the last ${safeHours} hours; only the newest ${SUMMARY_LIMIT} were read, so every count here is a floor. Ask for fewer hours to see the rest.` : null,
+    groups,
+  };
 }
 
 export async function sweepCanonical() {

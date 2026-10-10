@@ -69,6 +69,17 @@ assert.equal(unresolvedCad.claims[0].fail_closed.reason, 'MISSING_CAD_PROVENANCE
 assert.equal(unresolvedCad.claims[0].allowed_use.media_twin, false);
 ok('unresolved cad_provenance holds Media Twin publication');
 
+// A claim stored before T0NO carries only these five keys: the six new ones are absent, not null.
+const legacyClaim = { claim_id: 'EA-1', label: 'Early Access', maturity: 'PROVEN_NOW', allowed_wording: 'Join Early Access.', prohibited_wording: null };
+const legacy = JSON.parse(JSON.stringify(feeds.resolveDoctrineClaims(data([legacyClaim]), {}, READ_AT)));
+assert.deepEqual(feeds.T0NO_CORE_FIELDS.filter((k) => !(k in legacy.claims[0])), []);
+assert.equal(legacy.claims[0].config_hash, null);
+assert.equal(legacy.claims[0].claim_state, 'UNKNOWN');
+assert.equal(legacy.claims[0].fail_closed.needs_evidence, true);
+assert.equal(legacy.claims[0].fail_closed.reason, 'MISSING_CLAIM_STATE_AND_CONFIG_HASH_AND_CAD_PROVENANCE_AND_EVIDENCE_PUBLICATION_STATUS_AND_ALLOWED_USE');
+assert.deepEqual(legacy.claims[0].allowed_use, { media_twin: false, vfarm: false, genie_ns: true });
+ok('legacy claim with absent keys keeps all seven fields through JSON, config_hash null, and fails closed');
+
 const none = feeds.resolveDoctrineClaims({ ...data([]), doctrines: [] }, { doctrine_id: 'B93H' }, READ_AT);
 assert.equal(none.claims.length, 0);
 assert.equal(none.warnings.some((w) => w.includes('No doctrine has been posted')), true);
