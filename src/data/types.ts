@@ -3757,6 +3757,30 @@ export interface T0noDoctrineRead {
   counts: { doctrines_in_force: number; claims_in_force: number; claims_returned: number; by_maturity: Array<{ key: string; label: string; n: number }> };
 }
 
+export interface PublicationDecisionRead {
+  doctrine_id: string;
+  claim_id: string;
+  surface: 'media_twin' | 'vfarm' | 'genie_ns';
+  decision: 'allowed' | 'hold' | 'needs_evidence';
+  recorded_decision: 'allowed' | 'hold' | 'needs_evidence' | null;
+  applicable: boolean;
+  reason: string;
+  decision_id: string | null;
+  event_id: number | null;
+  decided_at: string | null;
+  recorded_at: string | null;
+  evidence_refs: string[];
+}
+
+export interface PublicationDecisionSet {
+  schema: string;
+  event_name: 'VFAM.claim_publication_decision';
+  read_at: string;
+  surface: 'media_twin' | 'vfarm' | 'genie_ns';
+  decisions: PublicationDecisionRead[];
+  counts: { claims: number; allowed: number; held: number };
+}
+
 export interface DoctrineChange {
   change_id: string;
   doctrine_id: string;
@@ -3795,6 +3819,8 @@ export interface DoctrineData {
   };
   /** The canonical T0NO resolver result. Media Twin never derives a gate locally. */
   resolved: T0noDoctrineRead;
+  /** VRFK trace: a current, surface-scoped decision is required in addition to T0NO. */
+  publication_decisions: PublicationDecisionSet;
 }
 
 /* ---------------------------------------------------- Monitoring Twin (2026-10-01) */

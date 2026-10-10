@@ -60,6 +60,7 @@ import * as dataGovernance from './dataGovernance';
 import * as monitoringTwin from './monitoringTwin';
 import * as qualityAlert from './qualityAlert';
 import * as engineEvents from './engineEvents';
+import * as publicationDecision from './publicationDecision';
 import * as approvals from './approvals';
 import * as agentInventory from './agentInventory';
 import * as candidateActions from './candidateActions';
@@ -534,6 +535,38 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         ms: Date.now() - t0,
       });
       return send(res, 200, { ok: true, ...r });
+    }
+    /**
+     * VRFK's durable publication trace. Doctrine is resolved first; the event
+     * writer may record only the decision that the current T0NO claim yields.
+     * GET reads the latest exact claim+surface event and re-validates it
+     * against current doctrine, so stale or contradictory rows fail closed.
+     */
+    if (p === '/api/engine/publication-decision') {
+      const body = method === 'POST' ? await readJson(req, 64 * 1024) : null;
+      if (method !== 'GET' && method !== 'POST') throw new HttpError(405, 'GET or POST only.');
+      const doctrineId = method === 'GET' ? url.searchParams.get('doctrine_id') : str(body?.doctrine_id, 100);
+      const claimId = method === 'GET' ? url.searchParams.get('claim_id') : str(body?.claim_id, 200);
+      const surfaceRaw = method === 'GET' ? url.searchParams.get('surface') : str(body?.surface, 40);
+      if (!doctrineId || !claimId || !publicationDecision.SURFACES.includes(surfaceRaw as publicationDecision.PublicationSurface))
+        throw new HttpError(422, `doctrine_id, claim_id and surface (${publicationDecision.SURFACES.join(', ')}) are required.`);
+      const doctrine = await systemFeeds.doctrineClaims({ doctrine_id: doctrineId, claim_id: claimId });
+      if (doctrine.claims.length !== 1)
+        throw new HttpError(404, `Exactly one current doctrine claim must match ${doctrineId}:${claimId}; found ${doctrine.claims.length}.`);
+      const claim = doctrine.claims[0] as publicationDecision.ResolvedClaim;
+      try {
+        if (method === 'GET') {
+          const result = await publicationDecision.readDecisions([claim], surfaceRaw as publicationDecision.PublicationSurface);
+          await mirror.logWrite({ endpoint, kind: 'engine_events', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: `${claim.doctrine_id}:${claim.claim_id}:${surfaceRaw}`, outcome: 'read', detail: `${publicationDecision.EVENT_NAME} → ${result.decisions[0]?.decision ?? 'needs_evidence'}`, ms: Date.now() - t0 });
+          return send(res, 200, { ok: true, ...result });
+        }
+        const result = await publicationDecision.storeDecision(body ?? {}, claim);
+        await mirror.logWrite({ endpoint, kind: 'engine_events', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: result.decision.decision_id, outcome: result.dry_run ? 'unchanged' : result.recorded ? 'inserted' : 'unchanged', detail: `${publicationDecision.EVENT_NAME} ${result.decision.decision} for ${claim.doctrine_id}:${claim.claim_id}:${surfaceRaw}${result.dry_run ? ' (dry run)' : ''}`, ms: Date.now() - t0 });
+        return send(res, result.recorded ? 201 : 200, { ok: true, event_shape: engineEvents.EVENT_SHAPE, ...result });
+      } catch (e) {
+        if (e instanceof publicationDecision.PublicationDecisionError) throw new HttpError(e.status, e.message);
+        throw e;
+      }
     }
     /**
      * The Monitoring Twin (2026-10-01, Destiny — tomato-first memo, UN9D). One
@@ -1200,10 +1233,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** Hardik's doctrine and contract changes, as posted (2026-09-30). */
       case '/api/media-doctrine': {
         // Media Twin renders the history and consumes the exact same resolved
-        // T0NO gate as HTTP/MCP readers.  The history remains presentation;
-        // publication authority comes only from doctrineClaims().
+        // T0NO gate as HTTP/MCP readers. The history remains presentation;
+        // publication also requires VRFK's current surface-scoped trace.
         const [data, resolved] = await Promise.all([systemFeeds.doctrineData(), systemFeeds.doctrineClaims()]);
-        return send(res, 200, { ...data, resolved });
+        const publication_decisions = await publicationDecision.readDecisions(resolved.claims as publicationDecision.ResolvedClaim[], 'media_twin');
+        return send(res, 200, { ...data, resolved, publication_decisions });
       }
       /** The Monitoring Twin's judgement of every farm vFarm sends (2026-10-01). */
       case '/api/monitoring-twin':
