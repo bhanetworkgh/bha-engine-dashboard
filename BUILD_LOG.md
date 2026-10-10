@@ -11918,3 +11918,11 @@ Fix:        First pass, 22:22 UTC, credit read: four jobs opened. T4 JOB-1791670
             EVAL-202610102238 (execution 32382): 95 of 96. Bays 36 of 36, Research Twin 27 of 27, North Star 32 of 33. NS-06 repeat 3 left out its Sources block (it passed 3 of 3 in EVAL-202610101933). Rolled back by the checklist: restore point 28c4509c republished at about 23:20 UTC, confirmed active, one call, under a minute.
 Decision:   T5 is not live. The detector is; the line it reads is on North Star's draft only. Next: make the draft say the Sources block comes first as always, test NS-06 on the draft, publish, run the evals again. That run needs a credit top-up.
             Not proven live: T8 and the Red Flag Name field (first real log), the digest (Monday), added_to_job, the fixture (run_research_signals is not on Claude's connection until the connector is refreshed).
+
+## 2026-10-11 00:50 — the two deferred checks from 10 Oct, read at 23:45 UTC
+Intent:     the scheduled read-only check set up on 10 Oct (Lagos time).
+Files:      none.
+Problem:    none.
+Fix:        1. Start line on a timed task: "Log review nudge -- Jason" fired at 22:00 UTC and wrote one row, BAYS-SCHED-1791669608104-N491, Asked At 22:00:08, Finished At 22:00:37, 29.8 seconds, outcome completed. One row opened at the start and closed at the end, not a finish-only row. LOOP-1791575435573-1QKF was already closed on the 16:00 UTC run (audit 1589); this is a second real run of the same proof.
+            2. Empty reads: Bays — Daily Doc Rotator ran on its trigger at 23:00 UTC (execution 32383, success, 7 minutes) and wrote one empty_read_check event at 23:01:51 UTC: reads 37, empty 0, no empty channels.
+Decision:   The rotator's Slack completion message was not read: a search did not find it, so "no 'not recorded' line" is not confirmed from Slack. The event itself landed, which is the thing that line would report. LOOP-1791668377856-DOCU, opened by the Codex entry for this check, is left open for Destiny to close.
