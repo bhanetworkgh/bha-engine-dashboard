@@ -47,6 +47,14 @@ import * as timers from './timers';
 /** Destiny and Jason. The only two people whose click decides anything. */
 export const APPROVERS: ReadonlyArray<string> = ['U0AEW3TBYH1', 'U0A9V97949F'];
 export const GATED_TOOLS: ReadonlyArray<string> = ['share_doc', 'unshare_doc', 'grant_drive_access', 'delete_record'];
+/**
+ * Gated only for some calls (2026-10-10): `send_nudge` and `post_file` go
+ * straight through to a person with a Builder Profile, which is every DM Bays
+ * sends day to day, and wait on the same card when the person is anyone else.
+ * Kept apart from GATED_TOOLS so the inventory never counts them as always
+ * behind approval.
+ */
+export const DESTINATION_GATED_TOOLS: ReadonlyArray<string> = ['send_nudge', 'post_file'];
 export const TTL_HOURS = 24;
 export const ACTION_APPROVE = 'engine_approval_approve';
 export const ACTION_DENY = 'engine_approval_deny';

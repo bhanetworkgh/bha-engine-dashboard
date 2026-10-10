@@ -21,6 +21,8 @@
  * last, like the record and Drive tools.
  */
 import * as slack from '../slack';
+import { query } from '../pg';
+import * as approvals from '../approvals';
 import { auditClose, auditOpen } from './writeTools';
 import type { ToolDefinition, ToolDeps } from './tools';
 
@@ -55,6 +57,21 @@ export async function audited(
     await auditClose(audit, { outcome: 'failed', detail: message });
     return { ok: false, reason: 'error', message, audit_id: audit };
   }
+}
+
+/**
+ * The destination guard (2026-10-10, agent maturity re-score: outbound Slack
+ * had no guard at all). A DM to a person with a Builder Profile, or to one of
+ * the two approvers, goes straight out: that is every nudge Bays sends day to
+ * day. A DM to anyone else is held for a person, on an agent token only, on
+ * the card share_doc uses. Decided here, in code, never by the prompt.
+ */
+export async function unknownRecipients(ids: string[]): Promise<string[]> {
+  const want = [...new Set(ids)].filter((u) => !approvals.APPROVERS.includes(u));
+  if (!want.length) return [];
+  const r = await query<{ natural_id: string }>(`SELECT natural_id FROM engine_builder_profiles WHERE natural_id = ANY($1)`, [want]);
+  const known = new Set(r.rows.map((x) => x.natural_id));
+  return want.filter((u) => !known.has(u));
 }
 
 /* ------------------------------------------------------------- send_nudge */
@@ -111,7 +128,7 @@ function summarise(results: NudgeLine[]): string {
 export const sendNudge: ToolDefinition = {
   name: 'send_nudge',
   description:
-    'DM every person named, one Slack DM each — the person being nudged AND everyone cc\'d. recipients: user ids (U…/W…) or <@U…> mentions, as an array or one string separated by spaces or commas. Anything that is not a Slack user id comes back as not_a_slack_user_id, never dropped. thread_link is appended to the text unless already in it. Returns {ok (every recipient sent), sent_count, failed_count, results: [{recipient, user_id, ok, ts, error}], summary}. Empty text or no valid recipient: ok:false and nothing is sent. As the Bays bot; audited on engine_mcp_writes.',
+    'DM every person named, one Slack DM each — the person being nudged AND everyone cc\'d. recipients: user ids (U…/W…) or <@U…> mentions, as an array or one string separated by spaces or commas. Anything that is not a Slack user id comes back as not_a_slack_user_id, never dropped. thread_link is appended to the text unless already in it. Returns {ok (every recipient sent), sent_count, failed_count, results: [{recipient, user_id, ok, ts, error}], summary}. Empty text or no valid recipient: ok:false and nothing is sent. A DM to someone with no Builder Profile is not sent on an agent token: a person is asked in Slack first and the answer is ok:false, reason awaiting_approval (say so, do not retry). As the Bays bot; audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -145,6 +162,7 @@ export const sendNudge: ToolDefinition = {
           answer: { ok: false, reason: !body ? 'no_message_text' : 'no_valid_recipients', sent_count: 0, failed_count: invalidLines.length, results: invalidLines, summary },
         };
       }
+      const unknown = await unknownRecipients(valid);
       if (args.dry_run === true) {
         return {
           outcome: 'dry_run',
@@ -154,6 +172,8 @@ export const sendNudge: ToolDefinition = {
             ok: invalid.length === 0,
             dry_run: true,
             would_send_to: valid,
+            not_in_builder_profiles: unknown,
+            would_wait_for_approval: unknown.length > 0 && approvals.needsApproval(),
             not_a_slack_user_id: invalid,
             text,
             slack_configured: slack.slackConfigured(),
@@ -162,6 +182,17 @@ export const sendNudge: ToolDefinition = {
         };
       }
       if (!slack.slackConfigured()) return { outcome: 'refused', detail: 'not configured', target: valid.join(','), answer: notConfigured() };
+      if (unknown.length && approvals.needsApproval()) {
+        const asked = approvals.pendingAnswer(
+          await approvals.request({
+            tool: 'send_nudge',
+            args: { ...args, destination: valid.join(',') },
+            target: valid.join(','),
+            summary: `send a DM as Bays to ${unknown.map((u) => `<@${u}>`).join(', ')}, who ${unknown.length === 1 ? 'has' : 'have'} no Builder Profile${valid.length > unknown.length ? ` (and to ${valid.length - unknown.length} known team member${valid.length - unknown.length === 1 ? '' : 's'})` : ''}. Message: "${text.slice(0, 400)}"`,
+          }),
+        );
+        return { ...asked, target: valid.join(',') };
+      }
 
       // One post per recipient, in order. A refusal for one never stops the rest.
       const results: NudgeLine[] = [];
@@ -238,6 +269,17 @@ export const postFile: ToolDefinition = {
         };
       }
       if (!slack.slackConfigured()) return { outcome: 'refused', detail: 'not configured', target, answer: notConfigured() };
+      if (isUser && approvals.needsApproval() && (await unknownRecipients([target])).length) {
+        const asked = approvals.pendingAnswer(
+          await approvals.request({
+            tool: 'post_file',
+            args: { ...args, destination: target },
+            target,
+            summary: `send the file "${filename}" (${bytes.length} bytes) as Bays in a DM to <@${target}>, who has no Builder Profile`,
+          }),
+        );
+        return { ...asked, target };
+      }
 
       const fail = (step: string, error: string, extra: Record<string, unknown> = {}) => ({
         outcome: 'failed',
