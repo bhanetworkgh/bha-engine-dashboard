@@ -1248,6 +1248,22 @@ gated** — the shared connector and the page are already a person acting.
 - `npm run test:approvals` pins all of it in process against Slack and Google
   stand-ins.
 
+**`unshare_doc`, the way back from `share_doc`** (decision 2026-10-10, Destiny —
+Jason's ask of 9 Oct on the Logstream v0 design note). `server/src/mcp/docTools.ts`,
+write connection only, in Bays' scope. Until it, this server could open a file
+to anyone with the link and had no way to close it again. It removes Drive
+permissions of type `anyone` **and nothing else**: the domain permission and
+every named person are never touched. Three rules: a file with no public
+permission is refused `not_public` and nothing is called; **the permissions are
+read again after the removal and it is `ok: true` only when none of type
+`anyone` is left** (`still_public` and `failed` otherwise, never reported
+closed); and it is the fourth of `GATED_TOOLS`, so an agent's call posts the
+same Approve / Deny card `share_doc` does. Closing is the safe direction, but
+one rule for every sharing change has no exception to remember. Unlike
+`share_doc`, `dry_run` reads Drive: what would be removed is a fact about the
+file. Audited on `engine_mcp_writes` (kind `google_drive`). `npm run
+test:approvals` pins it (checks 13 to 15).
+
 **`close_incidents`, the Engine health close over MCP** (decision 2026-10-01,
 Destiny). `server/src/mcp/incidentTools.ts`, write connection only, calling
 `health.closeIncidents` — the function the page's close button calls — so the

@@ -16,6 +16,10 @@
  *   - An expired request is marked, its card says so, and a late click is refused.
  *   - A card Slack refuses is approval_card_not_posted, and nothing is left pending.
  *   - An approved action that fails says so and asks to be raised.
+ *   - unshare_doc (2026-10-10) removes the public permission and nothing else,
+ *     reads Drive again before saying so, refuses a file that is not public,
+ *     says still_public when Drive keeps the link, and waits for a person when
+ *     an agent asks.
  *
  * Run with:  npm run test:approvals   (needs a LOCAL DATABASE_URL)
  */
@@ -34,7 +38,22 @@ const DESTINY = 'U0AEW3TBYH1';
 const JASON = 'U0A9V97949F';
 const HARDIK = 'U0BKT6MAW2Y';
 
-const seen = { posts: [], updates: [], ephemerals: [], google: [] };
+const seen = { posts: [], updates: [], ephemerals: [], google: [], deletes: [], lists: [] };
+/**
+ * Who each Drive file is shared with, for unshare_doc. A file whose id starts
+ * PUB_ or STUCK_ begins public; STUCK_ takes a delete and keeps the permission.
+ */
+const drive = new Map();
+const permsOf = (id) => {
+  if (!drive.has(id)) {
+    const base = [
+      { id: 'dom1', type: 'domain', role: 'writer', domain: 'bhanetwork.org' },
+      { id: 'u1', type: 'user', role: 'owner', emailAddress: 'admin@bhanetwork.org' },
+    ];
+    drive.set(id, /^(PUB_|STUCK_)/.test(id) ? [{ id: 'anyoneWithLink', type: 'anyone', role: 'reader' }, ...base] : base);
+  }
+  return drive.get(id);
+};
 let ts = 1791000000;
 
 const readBody = (req) =>
@@ -80,6 +99,17 @@ const google = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x');
   if (u.pathname === '/token') return json(res, 200, { access_token: 'tok', expires_in: 3600 });
   const perm = /^\/drive\/v3\/files\/([^/]+)\/permissions$/.exec(u.pathname);
+  if (perm && req.method === 'GET') {
+    seen.lists.push(perm[1]);
+    return json(res, 200, { permissions: permsOf(perm[1]) });
+  }
+  const one = /^\/drive\/v3\/files\/([^/]+)\/permissions\/([^/]+)$/.exec(u.pathname);
+  if (one && req.method === 'DELETE') {
+    seen.deletes.push({ file: one[1], permission: one[2] });
+    if (!one[1].startsWith('STUCK_')) drive.set(one[1], permsOf(one[1]).filter((p) => p.id !== one[2]));
+    res.writeHead(204);
+    return res.end();
+  }
   if (perm && req.method === 'POST') {
     if (perm[1] === 'FILE_DENIED') return json(res, 403, { error: { message: 'The caller does not have permission', errors: [{ reason: 'forbidden' }] } });
     seen.google.push({ file: perm[1], ...b });
@@ -322,6 +352,74 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.addr
     assert.ok(seen.updates[seen.updates.length - 1].blocks[0].text.text.includes('but it failed'));
     await query(`DELETE FROM engine_approvals WHERE target = 'FILE_DENIED'`);
     ok('an approved action that fails says so on the card and asks to be raised');
+  }
+
+  /* 13 — unshare_doc: a person closes a public link, and only that */
+  {
+    const file = `PUB_PERSON_${T}`;
+    const dry = await asPerson('unshare_doc', { document_id: file, dry_run: true });
+    assert.equal(dry.ok, true);
+    assert.equal(dry.dry_run, true);
+    assert.deepEqual(dry.would.remove, [{ permission_id: 'anyoneWithLink', role: 'reader' }]);
+    assert.equal(seen.deletes.length, 0, 'a dry run removes nothing');
+    const r = await asPerson('unshare_doc', { document_id: file, requester_user_id: DESTINY });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.public_link_removed, true);
+    assert.deepEqual(seen.deletes, [{ file, permission: 'anyoneWithLink' }]);
+    assert.deepEqual(r.removed, [{ permission_id: 'anyoneWithLink', role: 'reader' }]);
+    assert.deepEqual(r.still_has_access.map((a) => a.who), ['everyone at bhanetwork.org', 'admin@bhanetwork.org'], 'the domain and the named people are untouched');
+    assert.equal(seen.lists.filter((f) => f === file).length, 3, 'read for the dry run, read before, and read again after');
+    assert.equal((await query('SELECT count(*)::int AS n FROM engine_approvals WHERE target = $1', [file])).rows[0].n, 0);
+    const audit = (await query('SELECT outcome, detail, natural_id FROM engine_mcp_writes WHERE id = $1', [r.audit_id])).rows[0];
+    assert.equal(audit.outcome, 'applied');
+    assert.equal(audit.natural_id, file);
+    assert.ok(audit.detail.includes('read back, none left'));
+    ok('a person’s unshare_doc removes the public permission only, and reads Drive again before saying so');
+
+    const again = await asPerson('unshare_doc', { document_id: file });
+    assert.equal(again.ok, false);
+    assert.equal(again.reason, 'not_public');
+    assert.equal(seen.deletes.length, 1, 'a file that is not public is not touched');
+    ok('a file with no public link is refused not_public and nothing is removed');
+  }
+
+  /* 14 — unshare_doc: Drive takes the removal and keeps the link */
+  {
+    const file = `STUCK_${T}`;
+    const d = seen.deletes.length;
+    const r = await asPerson('unshare_doc', { document_id: file });
+    assert.equal(seen.deletes.length, d + 1);
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'still_public');
+    assert.equal(r.public_link_removed, false);
+    assert.equal((await query('SELECT outcome FROM engine_mcp_writes WHERE id = $1', [r.audit_id])).rows[0].outcome, 'failed');
+    ok('a link Drive keeps is still_public and failed, never reported closed');
+  }
+
+  /* 15 — unshare_doc: an agent waits for a person, like share_doc */
+  {
+    const file = `PUB_AGENT_${T}`;
+    const d = seen.deletes.length;
+    const p = seen.posts.length;
+    const notOpen = await asAgent('unshare_doc', { document_id: `DOC_CLOSED_${T}`, requester_user_id: HARDIK, channel_id: 'C0THREAD01' });
+    assert.equal(notOpen.reason, 'not_public');
+    assert.equal(seen.posts.length, p, 'a refusal posts no card');
+    const r = await asAgent('unshare_doc', { document_id: file, requester_user_id: HARDIK, channel_id: 'C0THREAD01', thread_ts: '1791000000.000015' });
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'awaiting_approval', JSON.stringify(r));
+    assert.equal(seen.deletes.length, d, 'nothing is removed before a person approves');
+    assert.equal(seen.posts.length, p + 1);
+    assert.ok(seen.posts[p].blocks[0].text.text.includes('turn off "anyone with the link"'));
+    const u = seen.updates.length;
+    const done = await approvals.decide({ approval_id: r.approval_id, decision: 'approve', user_id: JASON });
+    assert.equal(done.body.ok, true, JSON.stringify(done.body));
+    assert.equal(done.body.raise, false);
+    assert.deepEqual(seen.deletes.slice(d), [{ file, permission: 'anyoneWithLink' }]);
+    assert.ok(seen.updates[u].blocks[0].text.text.includes('The public link is off'));
+    const audit = (await query(`SELECT actor, outcome FROM engine_mcp_writes WHERE tool = 'unshare_doc' AND natural_id = $1 ORDER BY id DESC LIMIT 1`, [file])).rows[0];
+    assert.equal(audit.outcome, 'applied');
+    assert.ok(audit.actor.includes(`approved-by:${JASON}`), audit.actor);
+    ok('an agent’s unshare_doc waits for a card, and Approve closes the link once');
   }
 
   /* 12 — unknown id */

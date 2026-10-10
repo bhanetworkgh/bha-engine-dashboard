@@ -6,6 +6,8 @@
  *                            shared with Bays, as text; a PDF has its text
  *                            layer extracted (`../pdf.ts`, no dependency).
  *   `share_doc`           — anyone with the link can read.
+ *   `unshare_doc`         — the way back from that (2026-10-10): the public
+ *                            link is turned off and nothing else is touched.
  *   `grant_drive_access`  — one person, **@bhanetwork.org only**, enforced
  *                            here in code and never left to a prompt.
  *   `create_doc`          — a Google Doc in a folder, for the daily digest
@@ -14,11 +16,12 @@
  *                            a folder is one thing, and one tool that does one
  *                            thing is one a caller can reason about.
  *
- * The three that change Drive are write tools: only on the write connection,
+ * The four that change Drive are write tools: only on the write connection,
  * every call — refused and dry-run ones included — on `engine_mcp_writes`,
  * opened before the call and closed after it, like the record tools.
  *
- * From 2026-10-04 (8185) `share_doc` and `grant_drive_access` do not act when
+ * From 2026-10-04 (8185) `share_doc` and `grant_drive_access` (and
+ * `unshare_doc` from the day it was added) do not act when
  * an **agent** calls them: every check below still runs first, and then a
  * person is asked in Slack (`../approvals.ts`). The agent is answered
  * `awaiting_approval`; the real call happens only when Destiny or Jason
@@ -204,6 +207,108 @@ export const shareDoc: ToolDefinition = {
     }),
 };
 
+/** Who a permission is for, in words a person can check against Drive's own Share dialog. */
+function whoOf(p: google.DrivePermission): string {
+  if (p.type === 'anyone') return 'anyone with the link';
+  if (p.type === 'domain') return `everyone at ${p.domain ?? 'the domain'}`;
+  return p.emailAddress ?? `${p.type} ${p.id}`;
+}
+const accessOf = (p: google.DrivePermission) => ({ who: whoOf(p), type: p.type, role: p.role });
+
+/**
+ * The way back from `share_doc` (2026-10-10, Destiny — Jason's ask of 9 Oct on
+ * the Logstream v0 design note: "turn off the public 'anyone with the link'
+ * permission"). Until this, the server could open a file to the internet and
+ * had no way to close it again; Bays said so twice in that thread.
+ *
+ * It removes Drive permissions of type `anyone` and nothing else. The domain
+ * permission and every named person are never touched, so nobody at BHA loses
+ * a file by it. Three things it must not do quietly:
+ *
+ *   - **say it closed a link that was never open** — a file with no public
+ *     permission is refused `not_public`, and nothing is called;
+ *   - **say it closed a link Drive kept** — the permissions are read again
+ *     after the removal, and it is `ok: true` only when none of type `anyone`
+ *     is left;
+ *   - **act for an agent on its own** — the same approval card as `share_doc`.
+ *     Closing is the safe direction, but one rule for every sharing change is
+ *     a rule nobody has to remember the exceptions to.
+ */
+export const unshareDoc: ToolDefinition = {
+  name: 'unshare_doc',
+  description:
+    `Turn off "anyone with the link" on a Google Doc or any Drive file — the opposite of share_doc. Removes every Drive permission of type anyone and nothing else: the ${ALLOWED_DOMAIN} domain and each named person keep exactly the access they have. The file's permissions are read first: a file with no public link is refused ok:false, reason not_public, and nothing is changed. They are read again afterwards, and the answer is ok:true only when no public permission is left. Returns {ok, document_id, public_link_removed, removed, still_has_access, link}. dry_run reads the permissions and says what would be removed, changing nothing. Audited on engine_mcp_writes.${APPROVAL_NOTE}`,
+  inputSchema: {
+    type: 'object',
+    properties: { document_id: { type: 'string', description: 'The Drive file id — the part of a Docs link after /d/.' }, ...DRY, ...REQUESTER, ...ORIGIN },
+    required: ['document_id'],
+    additionalProperties: false,
+  },
+  annotations: { ...WRITE_ANNOTATIONS, idempotentHint: true, title: 'Turn off a file’s public link' },
+  handler: (args, deps) =>
+    audited('unshare_doc', args, deps, async () => {
+      const id = str(args, 'document_id');
+      if (!id) return { outcome: 'refused', detail: 'no document_id', answer: { ok: false, reason: 'bad_argument', message: '"document_id" is required.' } };
+      // Unlike share_doc, a dry run here reads Drive: what would be removed is a fact about the file, not about the call.
+      if (!google.googleConfigured()) return { outcome: 'refused', detail: 'not configured', target: id, answer: { ok: false, reason: 'not_configured', message: google.notConfiguredMessage() } };
+      const before = await google.listPermissions(id);
+      const open = before.filter((p) => p.type === 'anyone');
+      const kept = before.filter((p) => p.type !== 'anyone').map(accessOf);
+      if (!open.length) {
+        return {
+          outcome: 'refused',
+          detail: 'not_public: no permission of type anyone',
+          target: id,
+          answer: { ok: false, reason: 'not_public', document_id: id, message: 'This file has no "anyone with the link" access, so there is nothing to turn off. Nothing was changed.', still_has_access: kept },
+        };
+      }
+      const would = open.map((p) => ({ permission_id: p.id, role: p.role }));
+      if (args.dry_run === true) {
+        return { outcome: 'dry_run', detail: `would remove ${open.length} anyone permission${open.length === 1 ? '' : 's'}`, target: id, answer: { ok: true, dry_run: true, would: { document_id: id, remove: would }, keeps: kept } };
+      }
+      if (approvals.needsApproval()) {
+        const asked = approvals.pendingAnswer(
+          await approvals.request({ tool: 'unshare_doc', args, target: id, summary: `turn off "anyone with the link" on the file ${await fileLabel(id)}, so only the people it is shared with by name or through ${ALLOWED_DOMAIN} can open it` }),
+        );
+        return { ...asked, target: id };
+      }
+      const removed: { permission_id: string; role: string }[] = [];
+      try {
+        for (const p of open) {
+          await google.deletePermission(id, p.id);
+          removed.push({ permission_id: p.id, role: p.role });
+        }
+      } catch (e) {
+        const err = errorOf(e);
+        return {
+          outcome: 'failed',
+          detail: `removed ${removed.length} of ${open.length}, then: ${err.message}`,
+          target: id,
+          answer: { ok: false, reason: 'google_error', step: err.step, status: err.status, document_id: id, public_link_removed: false, removed, message: `${removed.length ? `${removed.length} of ${open.length} public permissions were removed before this, and the file is still public. ` : 'Nothing was changed. '}${err.message}` },
+        };
+      }
+      // The proof: Drive is asked again, and its answer is what this tool reports.
+      const after = await google.listPermissions(id);
+      const left = after.filter((p) => p.type === 'anyone');
+      const still = after.filter((p) => p.type !== 'anyone').map(accessOf);
+      if (left.length) {
+        return {
+          outcome: 'failed',
+          detail: `still public after removing ${removed.length}: ${left.map((p) => p.id).join(', ')}`,
+          target: id,
+          answer: { ok: false, reason: 'still_public', document_id: id, public_link_removed: false, removed, message: `Drive took the removal and the file is still readable by anyone with the link (permission ${left.map((p) => p.id).join(', ')}). It is not closed.`, still_has_access: still },
+        };
+      }
+      let link = google.docLink(id);
+      try {
+        link = (await google.fileMeta(id)).webViewLink ?? link;
+      } catch {
+        /* the link is closed; the fallback link is the Docs one */
+      }
+      return { outcome: 'applied', detail: `removed anyone ${removed.map((r) => r.permission_id).join(', ')}; read back, none left`, target: id, answer: { ok: true, document_id: id, public_link_removed: true, removed, still_has_access: still, link } };
+    }),
+};
+
 export const grantDriveAccess: ToolDefinition = {
   name: 'grant_drive_access',
   description: `Give one person access to a Drive file: role reader (default), commenter or writer. **Only addresses ending @${ALLOWED_DOMAIN}** — enforced by the server, not the prompt. Anything else is refused ok:false, reason non_bhanetwork_email, nothing is shared, and Destiny is sent a Slack DM naming the address and the file. Audited on engine_mcp_writes.${APPROVAL_NOTE}`,
@@ -304,4 +409,4 @@ export const createDoc: ToolDefinition = {
     }),
 };
 
-export const DOC_WRITE_TOOLS: ToolDefinition[] = [shareDoc, grantDriveAccess, createDoc];
+export const DOC_WRITE_TOOLS: ToolDefinition[] = [shareDoc, unshareDoc, grantDriveAccess, createDoc];

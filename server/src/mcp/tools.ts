@@ -951,7 +951,7 @@ export function toolByName(name: string, access: 'read' | 'write' = 'read'): Too
 /**
  * How an approved request is run (2026-10-04, 8185): the gated tool's own
  * handler, on the write connection, so the checks, the action and the audit
- * line are exactly an MCP call's. Only the three gated tools can be run this
+ * line are exactly an MCP call's. Only the gated tools can be run this
  * way, whatever a stored row says.
  */
 approvals.setExecutor(async (tool, args) => {
