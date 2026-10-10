@@ -369,6 +369,24 @@ const hook = http.createServer((req, res) => {
     const none = await readLogstream.handler({ signature: `no such fault ${T}` }, { access: 'read' });
     assert.equal(none.ok, false);
     assert.equal(none.reason, 'no_such_fault');
+    // read_engine_events: counts by type, the newest events, the filters, and a long detail cut and marked.
+    const { readEngineEvents } = req('mcp/logstreamTools.js');
+    await record({ event_type: 'lstest_event', subject_id: `lstest:${T}:c`, lane: 'LSTEST', detail: { big: 'x'.repeat(900) }, dedupe_key: `lstest:${T}:c` });
+    const ev = await readEngineEvents.handler({ event_type: ['empty_read_check', 'lstest_event'], since_hours: 1 }, { access: 'read' });
+    assert.equal(ev.ok, true);
+    assert.equal(ev.shape, 'engine.event.v1');
+    assert.ok(ev.by_type.find((c) => c.event_type === 'empty_read_check').n >= 2);
+    assert.ok(ev.events.every((e) => ['empty_read_check', 'lstest_event'].includes(e.event_type)));
+    const one_ev = await readEngineEvents.handler({ subject_id: `lstest:${T}:c`, lane: 'LSTEST' }, { access: 'read' });
+    assert.equal(one_ev.total_in_window, 1);
+    assert.equal(one_ev.events[0].detail_cut, true);
+    assert.equal(one_ev.events[0].detail_chars > 900, true);
+    const no_ev = await readEngineEvents.handler({ event_type: `nothing_${T}` }, { access: 'read' });
+    assert.equal(no_ev.ok, true);
+    assert.equal(no_ev.total_in_window, 0);
+    assert.ok(no_ev.notes.some((n) => /not proof/.test(n)));
+    await query(`DELETE FROM engine_events WHERE event_type = 'lstest_event' AND subject_id LIKE 'lstest:%'`);
+    ok('read_engine_events counts by type, filters, cuts a long detail and marks it, and says an empty window is not proof');
     await query(`DELETE FROM engine_events WHERE event_type = 'empty_read_check' AND subject_id LIKE 'lstest:%'`);
     ok('read_logstream gives the overview, one fault\'s history, and a plain refusal for a fault it does not hold');
   }

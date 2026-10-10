@@ -140,4 +140,88 @@ export const readLogstream: ToolDefinition = {
   },
 };
 
-export const LOGSTREAM_READ_TOOLS: ToolDefinition[] = [readLogstream];
+/**
+ * engine.event.v1 over MCP (10 Oct 2026, Destiny — Jason's go-time notice of the
+ * same day: "finish the agent/twin consumption paths (Bays, NS, RT, Slack Genie)
+ * off engine.event.v1 and Logstream").
+ *
+ *   read_engine_events — read, both connections, in Bays', North Star's and
+ *                        Research Twin's scope. The append-only engine_events
+ *                        table: counts by type over a window, and the newest
+ *                        events that match. It reads and nothing else.
+ */
+const EVENT_HOURS = 168;
+const EVENT_HOURS_MAX = 720;
+const EVENT_LIMIT = 50;
+const EVENT_LIMIT_MAX = 200;
+const DETAIL_CHARS = 600;
+
+export const readEngineEvents: ToolDefinition = {
+  name: 'read_engine_events',
+  description:
+    'The engine’s own structured events, in the shape engine.event.v1: { event_type, at, subject_id, lane, actor, source_ref, detail }. Append-only; this tool reads and never writes. What is recorded today: digest_dispatch_succeeded / digest_dispatch_failed (was a digest actually posted), lane_blocker_cleared, the vFarm gate events (VFARM_STAGE1_STATE_CHANGED, VFARM_STAGE2_STATE_CHANGED, VFARM_CHECK_UPDATED, VFARM_OFFER_STATE_CHANGED), approval_requested / approval_decided / approval_expired, monitoring_recurrence_detected, logstream_threshold_crossed, openrouter_credit_out and empty_read_check. Without arguments it returns counts by event type over the last 7 days and the newest 50 events. Narrow with event_type (one name or a list, exact), subject_id (exact), lane (exact) and since_hours (at most 720). Use it to answer "did the digest go out", "what changed on the vFarm gates and when", "what was approved or denied", "when did this blocker clear". No event of a type in the window means none was recorded, which is not proof that nothing happened: say so. For recurring faults use read_logstream instead.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      event_type: { description: 'One event type, or a list of them, exactly as written.', oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+      subject_id: { type: 'string', description: 'The id of the thing the event is about, exactly.' },
+      lane: { type: 'string', description: 'The lane on the event, exactly.' },
+      since_hours: { type: 'number', description: `How far back to read. Default ${EVENT_HOURS}, at most ${EVENT_HOURS_MAX}.` },
+      limit: { type: 'number', description: `How many events to return, newest first. Default ${EVENT_LIMIT}, at most ${EVENT_LIMIT_MAX}.` },
+      max_chars: { type: 'number', description: `Size budget for the answer. Default ${DEFAULT_CHARS}, at most ${MAX_CHARS}.` },
+    },
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Engine events (engine.event.v1)' },
+  handler: async (args, deps) => {
+    const t0 = Date.now();
+    const maxChars = Math.max(MIN_CHARS, Math.min(MAX_CHARS, Number(args.max_chars) || DEFAULT_CHARS));
+    const hours = Math.max(1, Math.min(EVENT_HOURS_MAX, Number(args.since_hours) || EVENT_HOURS));
+    const limit = Math.max(1, Math.min(EVENT_LIMIT_MAX, Math.floor(Number(args.limit)) || EVENT_LIMIT));
+    const types = (Array.isArray(args.event_type) ? args.event_type : args.event_type == null ? [] : [args.event_type])
+      .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+      .map((t) => t.trim());
+    const subject = typeof args.subject_id === 'string' && args.subject_id.trim() ? args.subject_id.trim() : null;
+    const lane = typeof args.lane === 'string' && args.lane.trim() ? args.lane.trim() : null;
+    const since = new Date(Date.now() - hours * 3_600_000).toISOString();
+    const where = `at > $1 AND ($2::text[] IS NULL OR event_type = ANY($2)) AND ($3::text IS NULL OR subject_id = $3) AND ($4::text IS NULL OR lane = $4)`;
+    const values = [since, types.length ? types : null, subject, lane];
+    const counts = await query<{ event_type: string; n: number; last_at: string }>(
+      `SELECT event_type, count(*)::int AS n, to_char(max(at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_at
+         FROM engine_events WHERE ${where} GROUP BY 1 ORDER BY 2 DESC, 1`,
+      values,
+    );
+    const rows = await query<Dict>(
+      `SELECT id::int AS id, event_type, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at, subject_id, lane, actor, source_ref, detail
+         FROM engine_events WHERE ${where} ORDER BY at DESC, id DESC LIMIT ${limit}`,
+      values,
+    );
+    const total = counts.rows.reduce((a, c) => a + c.n, 0);
+    const events = rows.rows.map((r) => {
+      const text = JSON.stringify(r.detail ?? {});
+      return text.length > DETAIL_CHARS ? { ...r, detail: `${text.slice(0, DETAIL_CHARS)}…`, detail_cut: true, detail_chars: text.length } : r;
+    });
+    const out = fit(
+      {
+        ok: true,
+        shape: 'engine.event.v1',
+        window: { since, hours },
+        asked_for: { event_type: types.length ? types : null, subject_id: subject, lane },
+        total_in_window: total,
+        returned: events.length,
+        by_type: counts.rows,
+        events,
+        notes: [
+          total > events.length ? `${total} events matched and the newest ${events.length} are returned. Narrow with event_type, subject_id or lane, or raise limit (at most ${EVENT_LIMIT_MAX}).` : 'Every matching event is returned.',
+          'No event of a type in the window means none was recorded. It is not proof that nothing happened.',
+        ],
+      },
+      ['events'],
+      maxChars,
+    );
+    await mirror.logWrite({ endpoint: 'mcp:read_engine_events', kind: 'engine_events', method: 'MCP', key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET', outcome: 'read', detail: `${hours}h ${types.join(',') || 'all types'}${subject ? ` subject ${subject}` : ''}${lane ? ` lane ${lane}` : ''} → ${events.length} of ${total}, ${out.result_chars} chars`.slice(0, 400), ms: Date.now() - t0 });
+    return out;
+  },
+};
+
+export const LOGSTREAM_READ_TOOLS: ToolDefinition[] = [readLogstream, readEngineEvents];

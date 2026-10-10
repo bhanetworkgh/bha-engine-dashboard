@@ -11833,3 +11833,10 @@ Files:      server/test/north-star-tools.test.cjs
 Problem:    `AssertionError: 4 !== 3` at line 357, the count of `mcp:get_priority_evidence` read lines. Once that was corrected, the next assertion failed too: 'every read logs its size'.
 Fix:        The test makes four evidence calls (all lanes, one lane, the refused lower-case lane id, the 5,000-character budget). The refused call was added on 28 Sep with the unknown-lane refusal and the count stayed at 3. It is 4 now. A refused read logs its reason ("refused unknown lane …"), not a size, so the size check now allows a line that starts with "refused". 11 of 11 checks pass on the local database.
 Decision:   The test was wrong, not the server. A refused read is still logged as a read, with the reason, which is what the engine_writes log is for. No server code changed.
+
+## 2026-10-10 18:50 — read_engine_events, and Bays reads Logstream
+Intent:     Jason's go-time notice (10 Oct, #bha-coordination): "finish the agent/twin consumption paths (Bays, NS, RT, Slack Genie) off engine.event.v1 and Logstream". North Star and Research Twin had read_logstream; Bays did not, and no agent could read engine_events at all.
+Files:      server/src/mcp/logstreamTools.ts, server/src/mcp/index.ts, server/test/logstream.test.cjs, CLAUDE.md
+Problem:    none.
+Fix:        New read tool read_engine_events (both connections): counts by type over a window and the newest matching events, filters event_type / subject_id / lane / since_hours, detail cut at 600 characters and marked, answer budgeted to 20,000 characters. read_logstream and read_engine_events added to Bays' scope; read_engine_events added to North Star's and Research Twin's. test:logstream is 19 checks.
+Decision:   One generic read of the events table, not one tool per event family: the shape is the same for every event and a new event type should need no code. Genie is not wired here: it is Kaiqi's service, so that is a loop for his lane.
