@@ -12045,3 +12045,10 @@ Fix:        Bays, asked through n8n's agent call with its real tools: Slack_Send
             Migration 71 writes the three North Star version changes of 10 and 11 Oct into engine_agent_versions from n8n's version list and the stored eval runs, the hand rollback to 28c4509c included, and one agent_rolled_back event. Each row says it was backfilled and why its time is what it is.
 Decision:   The backfill is labelled as one on every row. n8n keeps no time for publishing an old version again, so the rollback row is dated by the end of the run that caused it, and says so.
             The two test approvals are left pending on purpose: the decision is a person's.
+
+## 2026-10-11 07:05 — a read on an agent's token is logged as that agent's
+Intent:     North Star and Research Twin read Logstream on their own tokens an hour ago, and engine_writes showed the reads as MCP_SECRET and MCP_WRITE_TOKEN.
+Files:      server/src/mirror.ts.
+Problem:    Every read tool labels its log line by connection (`deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET'`), so an agent's read was indistinguishable from the shared connector's. That is why two re-scores in a row counted nought agent reads of Logstream: the log could not show one.
+Fix:        logWrite replaces those two labels with `agent token: <agent>` when the call came in on an agent's token (the caller store already knows). One place, every tool. The reads made before this deploy keep the old label; they are in the n8n agent runs (North Star DwxaoMSF3OdVMFDv, Research Twin 69fXVI7pzljZK61t).
+Decision:   Fixed in the one writer and not in thirty tools. The write audit (engine_mcp_writes.agent) already had this right.

@@ -22,6 +22,7 @@
  * promoted out of the blob only where something keys or filters on them, and
  * always derived from the payload, so they cannot disagree with it.
  */
+import { currentAgent } from './mcp/caller';
 import { nowIso } from './db';
 import { query, withTransaction, type Queryable } from './pg';
 import { CODEX_TABLES, LOOP_TABLES, SLACK_TO_BUILDER, type AtRecord } from './sources';
@@ -623,7 +624,12 @@ export interface WriteLogEntry {
  * describing. It is logged to stdout as well, so a row that never reached the
  * table is still visible in Render's logs.
  */
-export async function logWrite(e: WriteLogEntry): Promise<void> {
+export async function logWrite(entry: WriteLogEntry): Promise<void> {
+  // A call that came in on an agent's own token says so (11 Oct 2026). The tools label a call by
+  // its connection, MCP_SECRET or MCP_WRITE_TOKEN, which made an agent's read look like the
+  // shared connector's: nobody could tell whether an agent had ever read Logstream.
+  const agent = currentAgent();
+  const e: WriteLogEntry = agent && (entry.key_label === 'MCP_SECRET' || entry.key_label === 'MCP_WRITE_TOKEN') ? { ...entry, key_label: `agent token: ${agent}` } : entry;
   const line = `engine-write ${e.method} ${e.endpoint} kind=${e.kind} key=${e.key_label ?? 'none'} id=${e.airtable_record_id ?? e.natural_id ?? '-'} → ${e.outcome}${e.detail ? ` (${e.detail})` : ''}${e.ms !== undefined ? ` ${e.ms}ms` : ''}`;
   console.log(line);
   try {
