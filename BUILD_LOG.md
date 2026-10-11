@@ -12126,3 +12126,10 @@ Files:      server/src/mcp/writeTools.ts, CLAUDE.md
 Problem:    delete_record refuses every codex row, and the Codex page's typed-id delete needs the page's session.
 Fix:        One narrow exception: a codex row with no Codex Entry ID, no Processed At, no Jason Reviewed At and not Approved or Input Added can be deleted over MCP with the usual confirm, record_deletions copy and audit line. A processed log is refused as before. mcp-write test passes.
 Decision:   The nudge is the Bays scheduled task "Log review nudge -- Jason", which lists every Pending codex row older than 6 hours. Its rule (count only logs that were processed) is an agent task change and stays in LOOP-1791727839183-V8ZC, to go through the change checklist with an eval before the publish.
+
+## 2026-10-11 16:50 — Two leftover Codex rows deleted; Genie reference says where the key is
+Intent:     Remove the two duplicate 6 Oct submissions behind Jason's review reminder, and tell Kaiqi where the Genie token lives.
+Files:      docs/contracts/genie-logstream-read.md
+Problem:    None. 3fe88d5 confirmed live by get_health; mcp-write test re-run locally, all assertions passed.
+Fix:        delete_record kind codex on U0AEW3TBYH1_1791319651246 (id 284, audit 1728) and U0AEW3TBYH1_1791320688956 (id 285, audit 1729); both kept in record_deletions. The reference now says the token is on Render as READONLY_SECRETS_GENIE and Kaiqi copies it from there.
+Decision:   Rows 292 (SUB-BHARAG-DOMAIN-20261007, Kaiqi) and 310 (CAPITAL-LANE-V0-DEFINITION) are still Pending with no Codex entry id and were left alone: not asked for. The nudge rule itself stays with LOOP-1791727839183-V8ZC.

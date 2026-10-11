@@ -83,5 +83,7 @@ its deployed service, Destiny confirms both lines and QRTH can close.
 
 ## Where the token is
 
-Set on the dashboard service as `READONLY_SECRETS_GENIE`. Destiny hands the
-value to Kaiqi directly; it is not in this repo or in Slack.
+On Render, on the dashboard service (`bha-engine-dashboard`), under Environment,
+as `READONLY_SECRETS_GENIE`. Kaiqi copies the value from there and sets it as a
+secret on the Genie service. It is not in this repo or in Slack, and must not be
+pasted into either.
