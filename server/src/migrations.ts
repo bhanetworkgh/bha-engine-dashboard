@@ -3025,6 +3025,59 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    /**
+     * Decision Watch (2026-10-11, Destiny — LOOP-1791743584778-5YQA): one row
+     * per decision waiting on one named person. Its own table, not a loop: a
+     * loop is a piece of work, a watch is "somebody owes an answer here". The
+     * partial unique index is what makes a second ask for the same thread and
+     * owner answer the first; `auto_key` is what makes a standing rule (PX07)
+     * watch a record once and never again.
+     */
+    id: 73,
+    name: 'engine_decision_watches: a decision waiting on a named person, and what was done when it went quiet',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_decision_watches (
+         id bigserial PRIMARY KEY,
+         watch_id text NOT NULL UNIQUE,
+         decision text NOT NULL,
+         owner_user_id text NOT NULL,
+         owner_name text,
+         lane text,
+         sop_refs text,
+         ns_refs text,
+         next_step text,
+         channel_id text,
+         thread_ts text,
+         thread_link text,
+         record_kind text,
+         record_id text,
+         status text NOT NULL DEFAULT 'watching',
+         close_reason text,
+         closed_by text,
+         closed_at timestamptz,
+         wait_minutes integer NOT NULL DEFAULT 1440,
+         max_reminders integer NOT NULL DEFAULT 3,
+         reminders_sent integer NOT NULL DEFAULT 0,
+         quiet_since timestamptz NOT NULL DEFAULT now(),
+         last_reminder_at timestamptz,
+         last_reminder_ts text,
+         last_checked_at timestamptz,
+         last_error text,
+         created_at timestamptz NOT NULL DEFAULT now(),
+         created_by text,
+         created_via text,
+         auto_key text UNIQUE,
+         record_hash text,
+         fixture boolean NOT NULL DEFAULT false,
+         history jsonb NOT NULL DEFAULT '[]'::jsonb
+       )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_decision_watches_open_thread
+         ON engine_decision_watches (channel_id, thread_ts, owner_user_id)
+         WHERE status = 'watching' AND thread_ts IS NOT NULL`,
+      `CREATE INDEX IF NOT EXISTS engine_decision_watches_status ON engine_decision_watches (status, last_checked_at)`,
+    ],
+  },
+  {
     id: 71,
     name: 'engine_agent_versions: North Star version changes of 10 and 11 Oct, backfilled, with the hand rollback',
     statements: [

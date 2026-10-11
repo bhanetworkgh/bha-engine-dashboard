@@ -60,6 +60,7 @@ import * as evalRuns from './evalRuns';
 import * as reminderTools from './mcp/reminderTools';
 import * as slackTools from './mcp/slackTools';
 import * as publishGate from './publishGate';
+import * as decisionWatch from './decisionWatch';
 import { toolByName as mcpToolByName } from './mcp/tools';
 import { callerStore } from './mcp/caller';
 import * as dataGovernance from './dataGovernance';
@@ -1324,6 +1325,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** Reminder posts scheduled through Bays (2026-10-05). A read. */
       case '/api/bays/reminders':
         return send(res, 200, await reminderTools.reminders());
+      /** Decisions being watched until somebody answers (2026-10-11, 5YQA). A read. */
+      case '/api/bays/decision-watches':
+        return send(res, 200, await decisionWatch.read({ fixtures: url.searchParams.get('fixtures') === '1' }));
       /** Every scheduler's runs on one page (2026-10-09, K9B7). A read. */
       case '/api/logstream':
         return send(res, 200, await logstream.read());
@@ -2280,6 +2284,7 @@ async function boot(): Promise<void> {
       .catch((e) => console.error(`[vfarm-customers] lead backfill failed: ${(e as Error).message}`));
     creditOut.startWatching();
     publishGate.startSweeping();
+    decisionWatch.startSweeping();
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();
   });

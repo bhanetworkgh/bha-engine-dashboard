@@ -2281,6 +2281,44 @@ builds, except T7). `server/src/researchSignals.ts`, migration 68,
   `not_reopened`. `npm run test:research-signals` pins all of it; every test
   that opens a research job starts `server/test/_credit.cjs` first.
 
+**Decision Watch** (2026-10-11, Destiny — LOOP-1791743584778-5YQA, backlog task
+FJOO; Jason, #bha-coordination: "solved as infra, not as vibes"). The spec is
+`docs/design/decision-watch-v0.md`. `server/src/decisionWatch.ts`, migration 73,
+`engine_decision_watches`: one row per decision waiting on one named person,
+with the thread and/or the loop or backlog task it lives in, the SOP and North
+Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
+24 hours, 3 reminders, then one escalation to Jason and Destiny; 12 posts a day.
+
+- **A sweep every five minutes.** The linked record closed closes the watch
+  (`moved`); a real change to it (a hash of its fields, never `updated_at`,
+  which every write sets) restarts the wait. The owner replying in the thread
+  closes it (`answered`); anyone else replying restarts the wait; a bot post is
+  never movement. Quiet past the wait posts one reminder as Bays in the thread,
+  or by DM to the owner where there is no thread.
+- **It never reminds on a thread it could not read.** The watch stays open with
+  the reason and writes one `decision_watch_unread` event a day.
+- **The row is claimed before anything goes to Slack**, so the timer and a
+  person, or two instances during a deploy, post one reminder and not two. A
+  refused post gives the claim back and is retried.
+- **The reminder is written in code from the watch's own fields**; the Bays
+  agent is not run to compose it. Running the agent on a quiet watch is the
+  next step and is not built.
+- **Three ways in**: `open_decision_watch` (Bays, in a thread it is already in,
+  or "Bays, watch this"), and the one standing rule, `autoCapital` (PX07): each
+  open CAPITAL-lane loop or backlog task whose owner is one named person gets
+  one watch, once, keyed `capital:<id>`. Bays never scans channels.
+- **The destination guard applies**: the owner must have a Builder Profile or
+  be an approver, and on an agent token the channel must be one the engine
+  knows (`slackTools.destinationVerdict`). No approval card in v0: unknown is
+  refused.
+- Tools, write connection: `open_decision_watch`, `list_decision_watches`,
+  `close_decision_watch` (Bays' scope) and `run_decision_watch` (a person;
+  `dry_run` by default). `fixture: true` makes a marked test watch whose posts
+  start "TEST." and which is kept off the page; refused on an agent token.
+  Audited on `engine_mcp_writes` (kind `decision_watch`).
+- The Bays page's fourth tab, Decision watch (`GET /api/bays/decision-watches`).
+  A read. `npm run test:decision-watch`.
+
 **The credit-out alert** (2026-10-10, Destiny). `server/src/creditOut.ts`, a
 check every minute, no table of its own (its state is `meta`
 `credit_out.state`). On 10 Oct the OpenRouter credit ran out between two of
