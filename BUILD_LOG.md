@@ -12052,3 +12052,14 @@ Files:      server/src/mirror.ts.
 Problem:    Every read tool labels its log line by connection (`deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET'`), so an agent's read was indistinguishable from the shared connector's. That is why two re-scores in a row counted nought agent reads of Logstream: the log could not show one.
 Fix:        logWrite replaces those two labels with `agent token: <agent>` when the call came in on an agent's token (the caller store already knows). One place, every tool. The reads made before this deploy keep the old label; they are in the n8n agent runs (North Star DwxaoMSF3OdVMFDv, Research Twin 69fXVI7pzljZK61t).
 Decision:   Fixed in the one writer and not in thirty tools. The write audit (engine_mcp_writes.agent) already had this right.
+
+## 2026-10-11 07:15 — both held test cards decided, 19 pattern drafts, the eval floor, and a rollback run on Research Twin
+Intent:     keep the agent maturity work moving after the second re-score pass (6.2, unchanged), and use the wait for D3.
+Files:      none in the repo yet. n8n: Agent Evals — Runner (8nv31oanjnkEGHie) published 3a8f4fde, restore point 227254d4. Research Twin republished on dbaf49a8.
+Problem:    none.
+Fix:        Destiny approved both test cards at 06:02 UTC. APR-…-JHXJ posted the held line into #bha-water-twin (ts 1791698571.337599, audit 1626). APR-…-WP1P ran and failed as it had to: U0GUARDTEST1 is not a real person, Slack said channel_not_found (audit 1625), and the card says approved, then failed.
+            Nineteen pattern drafts for the candidates where Destiny is the suggested architect, through draft_pattern_candidate, $0.88 in all. Saved to the project as claude/Pattern_Candidate_Drafts_Oct_11.md with one review line each. Nothing registered. GNER not drafted: it stays a candidate until the 9 Nov re-tune.
+            Eval floor $15 to $5. The account's total credits were $3,245 at 20:07 UTC on 10 Oct and $3,295 at 05:07 on 11 Oct: $50 arrived overnight with nobody adding it, so auto top-up is on, as Destiny said. A $15 floor only blocked runs while the balance sat under it ($10.17 at 06:07).
+            Rollback run: Research Twin put back on yesterday's version dbaf49a8 at 06:09 UTC and the inventory recorded at once (audit 1627), so the publish check sees a rollback and asks for a run by itself. Today's version 96007353 goes back once the run has been read.
+Decision:   Bays' tool list was not cut. grant_drive_access has never been called by Bays, but it is written into the prompt and the Docs and Drive skill and sits behind the approval card: an unused, gated feature, not dead weight. create_doc alone is one tool of 66 and proves nothing. A real cut needs a week of the tool-call rows that started on 10 Oct.
+            INC-GENIE.CONTEXT-002 was not closed: Genie has sent no event since the timeout, so there is no evidence it works again.
