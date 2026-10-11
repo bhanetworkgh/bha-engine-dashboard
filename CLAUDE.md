@@ -1224,6 +1224,27 @@ Early Access). `LANE-VFARM-FOUNDING_ACCESS_INTAKE` is a different product and is
 never linked. **No capital target or date is stored anywhere**: Jason's rule is
 that none is set until Hardik's two blockers clear.
 
+**vFarm customer events** (2026-10-11, Destiny — LOOP-1789326230248-ZX0W, Jason's
+ask of 13 Sep). `server/src/vfarmCustomerEvents.ts`, contract
+`docs/contracts/vfarm-customer-events.md` (`vfarm.customer.events.v0`). Five
+`engine.event.v1` types: `VFARM_LEAD_CAPTURED`, `VFARM_BUYER_STATE_CHANGED`,
+`VFARM_SUBSCRIBER_STATE_CHANGED`, `VFARM_SUBSCRIBER_DELIVERY`,
+`VFARM_SUBSCRIBER_UPGRADED`. **Enforced in `engineEvents.record`**: an event
+whose type starts `VFARM_LEAD_`, `VFARM_BUYER_` or `VFARM_SUBSCRIBER_` is
+refused unless it is one of the five, carries its required fields, keeps to
+the state vocabularies, and has `subject_id` equal to its own id in `detail`.
+`config_hash` and `cad_revision` are required when a subscriber becomes active
+and on every upgrade, stored as sent, never derived. `storeFormA` writes the
+lead's event (never able to fail the lead), and a boot backfill writes one for
+every lead already held; the dedupe key is the buyer intake id. **One query
+path**: `read_engine_events` with `catalog: "vfarm_customers"`, which every
+agent already holds, so no agent was changed. It returns counts for leads and
+buyers and one row per subscriber, and never a name or an email. Only the lead
+event has a writer today; the other four wait on a checkout and on config
+identity, and the catalog says "none recorded", not "none exist". The state
+names are a v0 proposal and are Jason's to change. `npm run
+test:vfarm-customers` pins it.
+
 **A monitoring incident that keeps coming back opens one Research Twin job**
 (2026-10-04, Destiny). `server/src/monitoringRecurrence.ts`, migration 55,
 `engine_monitoring_recurrences`. The rule is Canon v1 as Jason approved it on

@@ -38,6 +38,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { query } from './pg';
 import * as events from './events';
+import * as vfarmCustomerEvents from './vfarmCustomerEvents';
 import { offersByLead } from './vfarmGates';
 import { FORM_A_QUESTIONS } from '../../src/data/formA';
 
@@ -709,6 +710,11 @@ export async function storeFormA(body: Record<string, unknown>): Promise<FormAWr
   );
 
   events.changed('vfarm_leads', r.rows[0].id);
+  // The lead's event (ZX0W). Never able to fail the lead: a lead nobody could tag is still a lead,
+  // and the boot backfill writes the event the next time the process starts.
+  await vfarmCustomerEvents
+    .recordLead({ id: r.rows[0].id, buyer_intake_id: buyer, early_access_lead_id: stored.early_access_lead_id, correlation_id: stored.correlation_id, source_campaign: stored.source_campaign, source_surface: 'form_a', at: submittedAt })
+    .catch((e) => console.error(`[vfarm-customers] lead event not recorded for ${buyer}: ${(e as Error).message}`));
   const known = new Set(FORM_A_QUESTIONS);
   return {
     id: r.rows[0].id,

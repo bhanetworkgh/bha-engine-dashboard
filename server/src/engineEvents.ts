@@ -39,6 +39,16 @@ export interface EngineEvent {
 
 export class EventError extends Error {}
 
+/**
+ * The vFarm customer families (lead, buyer, subscriber) have a fixed set of
+ * types and fields (vfarmCustomerEvents.ts, ZX0W). That file registers its
+ * check here, so every writer goes through it without this file importing it.
+ */
+let customerCheck: ((e: EngineEvent) => void) | null = null;
+export function setCustomerCheck(fn: (e: EngineEvent) => void): void {
+  customerCheck = fn;
+}
+
 const str = (v: unknown, max: number): string | null => {
   if (typeof v !== 'string') return null;
   const t = v.trim();
@@ -62,6 +72,7 @@ export async function record(e: EngineEvent, db?: Queryable): Promise<{ recorded
     at = d.toISOString();
   }
   if (e.detail != null && (typeof e.detail !== 'object' || Array.isArray(e.detail))) throw new EventError('detail must be an object.');
+  if (customerCheck) customerCheck(e);
   const run = db ? (text: string, values: unknown[]) => db.query<{ id: string }>(text, values) : (text: string, values: unknown[]) => query<{ id: string }>(text, values);
   const r = await run(
     `INSERT INTO engine_events (event_type, at, subject_id, lane, actor, source_ref, detail, dedupe_key)

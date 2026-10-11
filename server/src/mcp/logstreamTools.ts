@@ -24,6 +24,7 @@ import { query } from '../pg';
 import * as mirror from '../mirror';
 import * as logstream from '../logstream';
 import * as researchSignals from '../researchSignals';
+import * as vfarmCustomers from '../vfarmCustomerEvents';
 import type { ToolDefinition } from './tools';
 
 const DEFAULT_CHARS = 20_000;
@@ -170,13 +171,16 @@ const DETAIL_CHARS = 600;
 export const readEngineEvents: ToolDefinition = {
   name: 'read_engine_events',
   description:
-    'The engine’s own structured events, in the shape engine.event.v1: { event_type, at, subject_id, lane, actor, source_ref, detail }. Append-only; this tool reads and never writes. What is recorded today: digest_dispatch_succeeded / digest_dispatch_failed (was a digest actually posted), lane_blocker_cleared, the vFarm gate events (VFARM_STAGE1_STATE_CHANGED, VFARM_STAGE2_STATE_CHANGED, VFARM_CHECK_UPDATED, VFARM_OFFER_STATE_CHANGED), approval_requested / approval_decided / approval_expired, monitoring_recurrence_detected, logstream_threshold_crossed, openrouter_credit_out and empty_read_check. Without arguments it returns counts by event type over the last 7 days and the newest 50 events. Narrow with event_type (one name or a list, exact), subject_id (exact), lane (exact) and since_hours (at most 720). Use it to answer "did the digest go out", "what changed on the vFarm gates and when", "what was approved or denied", "when did this blocker clear". No event of a type in the window means none was recorded, which is not proof that nothing happened: say so. For recurring faults use read_logstream instead.',
+    'The engine’s own structured events, in the shape engine.event.v1: { event_type, at, subject_id, lane, actor, source_ref, detail }. Append-only; this tool reads and never writes. What is recorded today: digest_dispatch_succeeded / digest_dispatch_failed (was a digest actually posted), lane_blocker_cleared, the vFarm gate events (VFARM_STAGE1_STATE_CHANGED, VFARM_STAGE2_STATE_CHANGED, VFARM_CHECK_UPDATED, VFARM_OFFER_STATE_CHANGED), approval_requested / approval_decided / approval_expired, monitoring_recurrence_detected, logstream_threshold_crossed, openrouter_credit_out and empty_read_check. Without arguments it returns counts by event type over the last 7 days and the newest 50 events. Narrow with event_type (one name or a list, exact), subject_id (exact), lane (exact) and since_hours (at most 720). Use it to answer "did the digest go out", "what changed on the vFarm gates and when", "what was approved or denied", "when did this blocker clear". No event of a type in the window means none was recorded, which is not proof that nothing happened: say so. For recurring faults use read_logstream instead. vFarm customers: the lead, buyer, subscriber and upgrade events (VFARM_LEAD_CAPTURED, VFARM_BUYER_STATE_CHANGED, VFARM_SUBSCRIBER_STATE_CHANGED, VFARM_SUBSCRIBER_DELIVERY, VFARM_SUBSCRIBER_UPGRADED) are held here too, and catalog: "vfarm_customers" returns them added up in one answer: leads by campaign (the flagship is vfarm_flagship_1031), buyers by state, and each subscriber with its state, subscription lane, config_hash, cad_revision, when its farm levelled up, whether a newer config_hash exists, and what it last received. Use that for "who are vFarm’s subscribers", "what did they last receive", "what spec is this subscriber on". Narrow it with subscriber_id or campaign. A lead is interest only, never a reservation or a payment; no name or email is returned.',
   inputSchema: {
     type: 'object',
     properties: {
       event_type: { description: 'One event type, or a list of them, exactly as written.', oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
       subject_id: { type: 'string', description: 'The id of the thing the event is about, exactly.' },
       lane: { type: 'string', description: 'The lane on the event, exactly.' },
+      catalog: { type: 'string', enum: ['vfarm_customers'], description: 'Return the vFarm customer catalog (leads, buyers, subscribers) in place of raw events. Over all time, not a window.' },
+      subscriber_id: { type: 'string', description: 'With catalog: only this subscriber.' },
+      campaign: { type: 'string', description: 'With catalog: only this source_campaign, e.g. vfarm_flagship_1031.' },
       since_hours: { type: 'number', description: `How far back to read. Default ${EVENT_HOURS}, at most ${EVENT_HOURS_MAX}.` },
       limit: { type: 'number', description: `How many events to return, newest first. Default ${EVENT_LIMIT}, at most ${EVENT_LIMIT_MAX}.` },
       max_chars: { type: 'number', description: `Size budget for the answer. Default ${DEFAULT_CHARS}, at most ${MAX_CHARS}.` },
@@ -187,6 +191,18 @@ export const readEngineEvents: ToolDefinition = {
   handler: async (args, deps) => {
     const t0 = Date.now();
     const maxChars = Math.max(MIN_CHARS, Math.min(MAX_CHARS, Number(args.max_chars) || DEFAULT_CHARS));
+    if (args.catalog !== undefined && args.catalog !== null && args.catalog !== '') {
+      if (args.catalog !== 'vfarm_customers') return { ok: false, reason: 'unknown_catalog', message: `catalog "${String(args.catalog)}" is not held. The one catalog is "vfarm_customers".` };
+      const cat = await vfarmCustomers.catalog({
+        subscriber_id: typeof args.subscriber_id === 'string' ? args.subscriber_id : null,
+        campaign: typeof args.campaign === 'string' ? args.campaign : null,
+        limit: Number(args.limit) || undefined,
+      });
+      const rows = list(cat.subscribers.rows);
+      const out = fit({ ok: true, catalog: 'vfarm_customers', ...cat, subscribers: { ...cat.subscribers, rows: undefined }, subscriber_rows: rows }, ['subscriber_rows'], maxChars);
+      await mirror.logWrite({ endpoint: 'mcp:read_engine_events', kind: 'engine_events', method: 'MCP', key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET', outcome: 'read', detail: `catalog vfarm_customers → ${cat.leads.total} leads, ${cat.buyers.total} buyers, ${cat.subscribers.total} subscribers, ${out.result_chars} chars`, ms: Date.now() - t0 });
+      return out;
+    }
     const hours = Math.max(1, Math.min(EVENT_HOURS_MAX, Number(args.since_hours) || EVENT_HOURS));
     const limit = Math.max(1, Math.min(EVENT_LIMIT_MAX, Math.floor(Number(args.limit)) || EVENT_LIMIT));
     const types = (Array.isArray(args.event_type) ? args.event_type : args.event_type == null ? [] : [args.event_type])

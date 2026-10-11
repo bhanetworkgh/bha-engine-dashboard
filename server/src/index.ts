@@ -62,6 +62,7 @@ import * as monitoringTwin from './monitoringTwin';
 import * as qualityAlert from './qualityAlert';
 import * as logstream from './logstream';
 import * as researchSignals from './researchSignals';
+import * as vfarmCustomerEvents from './vfarmCustomerEvents';
 import * as creditOut from './creditOut';
 import * as engineEvents from './engineEvents';
 import * as vfarmGates from './vfarmGates';
@@ -2175,6 +2176,11 @@ async function boot(): Promise<void> {
     vfarmGateAuto.startSweeping();
     logstream.startSweeping();
     researchSignals.startSweeping();
+    // Every lead held gets its VFARM_LEAD_CAPTURED event, once (ZX0W). Not awaited: the dedupe key makes a repeat a no-op.
+    vfarmCustomerEvents
+      .backfillLeads()
+      .then((n) => n && console.log(`[vfarm-customers] ${n} lead event(s) written for leads already held`))
+      .catch((e) => console.error(`[vfarm-customers] lead backfill failed: ${(e as Error).message}`));
     creditOut.startWatching();
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();
