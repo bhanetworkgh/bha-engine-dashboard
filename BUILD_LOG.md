@@ -11986,3 +11986,13 @@ Files:      docs/design/vfarm-infra-hardening-408M.md (new)
 Problem:    The loop is from 24 Aug and names three deliverables. The first was built in pieces across six weeks and nothing said so in one place; the second and third had no engine-side half written down.
 Fix:        One note: the incident shape, the seven error classes and what happens after a failure, with the seven patterns that record it; a map of which tags and events live on which record and the tool a twin reads each with (field names read from the live tables, not from memory); the infra half of the media-safe brief, as what a record supports today and what it does not.
 Decision:   Nothing was built for this loop. The work was already live; the gap was that it was not written as an answer to the loop. Hardik's media half and Jegan's pump, valve and soil thresholds are theirs.
+
+## 2026-10-11 06:58 — the twins read the cabinet and the evidence rules, and the eval run that checked it (IMFX)
+Intent:     finish IMFX on the agents, by the engine change checklist (Lagos time).
+Files:      none in the repo. n8n: North Star (8NQRXadH0OrKe5XV), Research Twin (dDtsExaaXhlFd2dv).
+Problem:    The rules and the cycle boundary were on two reads Research Twin could not call, and North Star could not read the twin.
+Fix:        Research Twin: read_monitoring_twin and read_media_doctrine on its allow-list, and a skill, "Evidence about a vFarm cabinet" (skill_ca4Pzaj2rqmjTN4D). Restore point dbaf49a8, published 96007353. North Star: read_monitoring_twin on its allow-list and an Evidence rules section in "What may be said about vFarm". Restore point d5b43089, published 08671da0.
+            Draft tests, one each. Research Twin, asked which stages the cabinet runs and whether Coimbatore's 65 to 75 days can be claimed for it: flowering 0 to 9, fruit set 10 to 44, harvest 45 to 85 from first-flower entry, nursery and vegetative at the supplier, and no, on both the different day 0 and the evidence class. North Star, asked whether Media Twin may say it: no, by rule COIMBATORE_REFERENCE_ONLY, and no real cabinet is in any stage.
+            EVAL-202610110314 (execution 32443): 96 of 96. Bays 36, North Star 33, Research Twin 27. It is also the first pass of the NS-04 check revised an hour earlier.
+Decision:   Not done: the agent inventory is not re-recorded for North Star and Research Twin after these publishes. It is owed before the next re-score.
+            Bays was not given read_monitoring_twin: the loop names Research Twin and the claim gate, and a tool on the server's list and not on n8n's is the mismatch the scope rule exists to stop.
