@@ -12105,3 +12105,17 @@ Files:      server/src/mcp/index.ts, server/src/index.ts, render.yaml, .env.exam
 Problem:    none.
 Fix:        A fourth entry in AGENT_KEYS: agent genie, READONLY_SECRETS_GENIE, read, two tools (read_logstream, read_engine_events). Proved on a local server: tools/list returns exactly the two, read_engine_events answers and is logged as "agent token: genie", find_records is refused by name, a wrong token is a 404.
 Decision:   A scoped MCP token and not a new plain read route: the three agents already read through these two tools, so Genie gets the same answers and the same log line with no second read path to keep in step. The token value is set on the Render service and handed to Kaiqi by Destiny; it is in no file.
+
+## 2026-10-11 16:00 — eval clean after the merge, incidents closed, third re-score still 6.2 and stored
+Intent:     finish deliverable 2 as far as the evidence goes, close the morning's incidents and store the score (Lagos time).
+Files:      server/src/migrations.ts (migration 72). Records: audit 1713 (close_incidents), loops LOOP-1791727839183-V8ZC and LOOP-1791727843989-NA4M.
+Problem:    1. I had told Destiny credit was still out. It was not: the hourly check (execution 32827) read 3370 credits against 3309.82 used at 13:07 UTC, about 60 dollars, and Bays had answered every ask since 12:15 UTC.
+            2. INC-BAYS.AGENT-051 and 053 carry OpenRouter's out-of-credit message classed NETWORK_TIMEOUT with the advice "Rate limited, not out of credit". The balance was 3.91 dollars.
+            3. Jason was reminded of two logs waiting four days and had no card: rows U0AEW3TBYH1_1791319651246 and U0AEW3TBYH1_1791320688956 are two failed duplicate submissions of the 6 Oct log, Pending, never processed. The third copy (CODEX-20261006-destiny-arupi-loop-closure-key-lockdown) is approved and paid.
+Fix:        EVAL-202610111407 (execution 32850, 14:07 to 14:49 UTC): 96 of 96, 32 of 32 cases, on the code with PR 12 merged. Measured cost 22.45 dollars as an upper bound, 34.02 left. Two deploys landed during the run (3298b78 and the READONLY_SECRETS_GENIE setting) and no case failed.
+            The 13:03 UTC Workspace Digest went through the channel-post guard for real (execution 32823: allow, "one of the engine's own channels", posted).
+            INC-BAYS.AGENT-050 to 053 closed with a written reason. Problems 2 and 3 are raised as loops, not fixed.
+            Genie's token is on the service: the boot line of 14:11 UTC lists genie (READONLY_SECRETS_GENIE, read, 2 tools).
+            Third independent re-score, read-only: 74 of 120, 6.2, no dimension moved. Stored by migration 72.
+Decision:   6.5 was not reached and nothing was staged to reach it. The reviewer's reasons stand: the eval still follows the publish, Bays' tool list is uncut, no token rotation is on record, and my own change to the eval floor this morning counts against change control. Research Twin 96007353 keeps its no_eval verdict: the check takes the first run after a change and that window closed at 08:27 UTC.
+            Not done: the two leftover Codex rows are deleted only from the Codex page by typed id, which is Destiny's step. Bays' inventory row is from 10 Oct.
