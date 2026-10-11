@@ -3934,6 +3934,16 @@ export interface MonitoringFarm {
     after_end: boolean;
   } | null;
   uptime: { window_h: number; observed_s: number; offline_s: number; pct: number | null; note: string };
+  /** The twin envelope (3FP4). Optional: an older server does not send it. */
+  envelope?: {
+    farm_id: string;
+    cabinet_id: string | null;
+    config_hash: string | null;
+    burn_in_state: 'not_started' | 'burn_in' | 'passed' | null;
+    worker_health: { state: 'healthy' | 'unhealthy' | null; status: string | null; as_of: string | null; note: string };
+    retry_envelope: { self_healed: number; retrying: number; needs_human: number; closed_by_person: number; window: string };
+    sources: { cabinet_id: string; config_hash: string; burn_in_state: string };
+  };
   state_counts: Record<string, number>;
   devices: MonitoringDevice[];
   open_incidents: MonitoringIncident[];

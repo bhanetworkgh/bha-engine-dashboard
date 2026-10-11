@@ -1177,6 +1177,22 @@ parser routes on `body.event.type`, so a forged mention with no `type` walked
 past the gate until 2 Oct (production proof: execution 24613 → refused 401 →
 INC-BAYS.AGENT-042; real traffic five seconds later passed).
 
+**The twin envelope** (2026-10-11, Destiny — LOOP-1789426955094-3FP4, Jason's
+ask of 14 Sep). Every farm in the Monitoring Twin's read (`monitoringData`, so
+the page, `GET /api/engine/monitoring-twin` and `read_monitoring_twin` alike)
+carries `envelope`: `farm_id`, `cabinet_id`, `config_hash`, `burn_in_state`
+(`not_started` / `burn_in` / `passed`), `worker_health` (healthy / unhealthy,
+from `alert_pipeline.status` on the newest snapshot) and `retry_envelope`
+(counts). Every device carries the three identity fields (its own, else its
+farm's) and every incident its own `retry_envelope`: `self_healed`, `retrying`,
+`needs_human` (the healer exhausted, a recovery failed again, or open over
+`NEEDS_HUMAN_AFTER_S`, 60 minutes) or `closed_by_person`. **The three identity
+fields are read from the snapshot and never guessed**: null, with the source
+"not sent by vFarm yet", until vFarm sends them (optional fields in
+`docs/contracts/vfarm.md`). A `burn_in_state` outside the three is a 422. No
+migration: the snapshot's farm and device objects were already stored whole.
+`npm run test:twin-envelope` pins it.
+
 **A monitoring incident that keeps coming back opens one Research Twin job**
 (2026-10-04, Destiny). `server/src/monitoringRecurrence.ts`, migration 55,
 `engine_monitoring_recurrences`. The rule is Canon v1 as Jason approved it on

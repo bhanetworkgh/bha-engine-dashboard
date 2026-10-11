@@ -64,6 +64,18 @@ Where each field comes from:
 | `open_alerts[]` | `alerts.alert_state` where `cleared_at IS NULL`, joined for names. `id` is the alert_state id. |
 | `alert_pipeline` | The same object `GET /api/v1/alerts/threshold/health` returns. |
 
+### Three optional identity fields (11 Oct 2026, LOOP-1789426955094-3FP4)
+
+Jason asked that the twin envelope carry the cabinet, its config and its burn-in state, so Monitoring Twin, Slack Genie, North Star and Research Twin can say which cabinet and which spec they are talking about. The dashboard now reads three optional fields. Send them on a farm, on a device, or both; a device without its own takes its farm's.
+
+| Field | On | Value |
+|---|---|---|
+| `cabinet_id` | `farms[]`, `devices[]` | the cabinet's own id, as vFarm names it |
+| `config_hash` | `farms[]`, `devices[]` | the config identity hash from the config identity spine |
+| `burn_in_state` | `farms[]`, `devices[]` | exactly `not_started`, `burn_in` or `passed`. Anything else is refused with `422` naming the field |
+
+All three are optional. Until they are sent the twin reads `null` and says "not sent by vFarm yet"; nothing is guessed. Worker health needs nothing new: it is read from `alert_pipeline.status` (`ok` is healthy, anything else unhealthy).
+
 Rules:
 
 - **List every farm the snapshot covers, with all of its devices and all of its open alerts.** The dashboard reads absence *within the farms you list*: a device you stop listing is marked gone, and an open alert you stop listing is marked cleared. A farm you leave out is left exactly as it was, so a partial snapshot never empties a farm.

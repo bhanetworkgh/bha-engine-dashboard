@@ -31,6 +31,21 @@ Readings from `LIVE` and `STALE` devices are checked against the **crop profile*
 
 **Uptime** is Jason's definition: the share of observed time with no device `OFFLINE`, over the last 24 h (or since the twin started watching the farm), with time when the feed was silent left out.
 
+## The twin envelope (11 Oct 2026, LOOP-1789426955094-3FP4)
+
+Every farm in `monitoring.twin.v1` carries `envelope`, six fields, always present:
+
+| Field | Values | Where it comes from |
+|---|---|---|
+| `farm_id` | the farm's id | the snapshot |
+| `cabinet_id` | text, or `null` | the snapshot's optional `cabinet_id` |
+| `config_hash` | text, or `null` | the snapshot's optional `config_hash` |
+| `burn_in_state` | `not_started`, `burn_in`, `passed`, or `null` | the snapshot's optional `burn_in_state` |
+| `worker_health` | `state`: `healthy`, `unhealthy`, or `null` | `alert_pipeline.status` on the newest snapshot |
+| `retry_envelope` | counts of `self_healed`, `retrying`, `needs_human`, `closed_by_person` | this twin's incidents, open now and closed in 7 days |
+
+`envelope.sources` says where each identity value came from, and reads "not sent by vFarm yet" for one that is `null`. Every device carries `cabinet_id`, `config_hash` and `burn_in_state` too (its own, else its farm's). Every incident carries its own `retry_envelope`: `self_healed` when it cleared on its own or the healer or recovery watcher recovered it; `retrying` while it is open and judged again every minute; `needs_human` when the healer used its attempts, a recovery failed again, or it has been open over 60 minutes.
+
 ## Crop profiles are versioned
 
 `POST /api/engine/monitoring-profile` (same `x-dashboard-key`):

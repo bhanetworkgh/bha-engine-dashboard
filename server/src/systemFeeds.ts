@@ -28,6 +28,7 @@
  */
 import { query, withTransaction } from './pg';
 import * as events from './events';
+import { BURN_IN_STATES, burnInState } from './monitoringTwin';
 
 export class FeedError extends Error {
   constructor(public status: number, message: string) {
@@ -250,6 +251,12 @@ export interface SnapshotStoreResult {
  * exactly as it was — a partial snapshot must never read as a farm emptying.
  * An older snapshot arriving after a newer one changes nothing.
  */
+/** burn_in_state is optional; when sent it is one of Jason's three states (LOOP-…-3FP4), never a fourth. */
+function checkBurnIn(v: unknown, where: string): void {
+  if (v === undefined || v === null || v === '') return;
+  if (burnInState(v) === null) throw new FeedError(422, `${where}.burn_in_state "${String(v)}" is not one of ${BURN_IN_STATES.join(', ')}.`);
+}
+
 export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult & { dry_run: boolean }> {
   const schema = str(body.schema);
   if (schema !== 'vfarm.snapshot.v1') throw new FeedError(422, `schema must be "vfarm.snapshot.v1"${schema ? `, not "${schema}"` : ''}.`);
@@ -266,6 +273,7 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
     if (!isObj(f)) throw new FeedError(422, `farms[${i}] is not an object.`);
     const id = str(f.id);
     if (!id) throw new FeedError(422, `farms[${i}].id is required.`);
+    checkBurnIn(f.burn_in_state, `farms[${i}]`);
     return { id, f };
   });
   const farmIds = farms.map((x) => x.id);
@@ -285,6 +293,7 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
     for (const k of ['last_seen_at', 'last_reading_at'] as const) {
       if (d[k] !== undefined && d[k] !== null && !iso(d[k])) throw new FeedError(422, `devices[${i}].${k} "${String(d[k])}" is not an ISO 8601 time.`);
     }
+    checkBurnIn(d.burn_in_state, `devices[${i}] (${id})`);
     return { id, farmId, d };
   });
   const opens = alerts.map((a, i) => {

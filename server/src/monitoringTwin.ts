@@ -289,7 +289,7 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
       `SELECT c.farm_id, to_char(c.transplanted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS transplanted_at, c.time_scale::float8 AS time_scale, p.content
          FROM engine_monitoring_cycles c JOIN engine_monitoring_profiles p ON p.profile_id = c.profile_id AND p.version = c.profile_version`,
     );
-    const cycleOf = new Map(cycles.rows.map((c) => [c.farm_id, c]));
+  const cycleOf = new Map(cycles.rows.map((c) => [c.farm_id, c]));
     const faults: Fault[] = [];
     let judged = 0;
     for (const f of farms.rows) {
@@ -595,14 +595,98 @@ export function unionMs(intervals: Interval[], lo: number, hi: number): number {
 
 const ISO = (col: string) => `to_char(${col} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`;
 
+/* ------------------------------------------------------------------ the twin envelope (LOOP-…-3FP4) */
+
+/** Jason's three burn-in states (14 Sep 2026). Anything else on a snapshot is refused by the feed. */
+export const BURN_IN_STATES = ['not_started', 'burn_in', 'passed'] as const;
+export type BurnInState = (typeof BURN_IN_STATES)[number];
+/** An incident still open after this long has not healed itself: a person should look. */
+export const NEEDS_HUMAN_AFTER_S = 3600;
+export type RetryState = 'self_healed' | 'retrying' | 'needs_human' | 'closed_by_person';
+
+const NOT_SENT = 'not sent by vFarm yet';
+const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : typeof v === 'number' && Number.isFinite(v) ? String(v) : null);
+const asObj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+
+/** One of the three burn-in states, or null. Hyphens, spaces and case are forgiven; an unknown word is null. */
+export function burnInState(v: unknown): BurnInState | null {
+  const k = String(v ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return (BURN_IN_STATES as readonly string[]).includes(k) ? (k as BurnInState) : null;
+}
+
+/** healthy / unhealthy from the alert worker's own status on the last snapshot; null where none was sent. */
+export function workerHealth(pipeline: unknown): { state: 'healthy' | 'unhealthy' | null; status: string | null; lag: number | null; last_processed_at: string | null; last_processed_age_s: number | null; note: string } {
+  const p = asObj(pipeline);
+  const status = text(p.status);
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return {
+    state: status === null ? null : ['ok', 'healthy'].includes(status.toLowerCase()) ? 'healthy' : 'unhealthy',
+    status,
+    lag: n(p.lag),
+    last_processed_at: text(p.last_processed_at),
+    last_processed_age_s: n(p.last_processed_age_s),
+    note: status === null ? `alert_pipeline ${NOT_SENT}` : 'vFarm\'s alert worker, as its last snapshot reported it (alert_pipeline.status). "ok" is healthy; anything else is unhealthy.',
+  };
+}
+
+/**
+ * The identity half of the envelope for a farm or a device: cabinet_id,
+ * config_hash and burn-in state, read from what vFarm sent and never guessed.
+ * A device falls back to its farm's value, and says which of the two answered.
+ */
+export function identityOf(own: unknown, farm?: unknown) {
+  const o = asObj(own);
+  const f = asObj(farm);
+  const pick = (k: string, read: (v: unknown) => string | null) => {
+    const mine = read(o[k]);
+    if (mine !== null) return { value: mine, source: farm === undefined ? 'snapshot (farm)' : 'snapshot (device)' };
+    const theirs = farm === undefined ? null : read(f[k]);
+    return theirs !== null ? { value: theirs, source: 'snapshot (farm)' } : { value: null, source: NOT_SENT };
+  };
+  const cabinet = pick('cabinet_id', text);
+  const hash = pick('config_hash', text);
+  const burn = pick('burn_in_state', burnInState);
+  return {
+    cabinet_id: cabinet.value,
+    config_hash: hash.value,
+    burn_in_state: burn.value as BurnInState | null,
+    sources: { cabinet_id: cabinet.source, config_hash: hash.source, burn_in_state: burn.source },
+  };
+}
+
+/**
+ * Where an incident stands: self_healed (it cleared on its own, or the healer
+ * or recovery watcher recovered it), retrying (open, and judged again every
+ * minute), needs_human (the healer gave up, a recovery failed again, or it has
+ * been open over an hour), closed_by_person.
+ */
+export function retryEnvelope(
+  i: { closed_at: string | null; close_reason: string | null; opened_at: string },
+  healer: { retry_status?: string | null; recovery_status?: string | null } = {},
+  now = Date.now(),
+): { state: RetryState; why: string; open_for_s: number | null } {
+  const retry = String(healer.retry_status ?? '').toLowerCase();
+  const recov = String(healer.recovery_status ?? '').toLowerCase();
+  if (i.closed_at) {
+    if (/person|manual|human|close_incidents/i.test(i.close_reason ?? '')) return { state: 'closed_by_person', why: i.close_reason ?? 'closed by a person', open_for_s: null };
+    return { state: 'self_healed', why: i.close_reason ?? 'cleared on its own', open_for_s: null };
+  }
+  const openFor = Math.max(0, Math.round((now - Date.parse(i.opened_at)) / 1000));
+  if (retry === 'exhausted') return { state: 'needs_human', why: 'the healer used its three attempts', open_for_s: openFor };
+  if (recov === 'failed_again' || recov === 'data_gone') return { state: 'needs_human', why: `the recovery watcher ended at ${recov}`, open_for_s: openFor };
+  if (openFor > NEEDS_HUMAN_AFTER_S) return { state: 'needs_human', why: `open for over ${NEEDS_HUMAN_AFTER_S / 60} minutes without clearing`, open_for_s: openFor };
+  return { state: 'retrying', why: retry === 'retrying' ? 'the healer is retrying it' : 'open; the twin judges it again every minute and closes it when the fault clears', open_for_s: openFor };
+}
+
+
 export async function monitoringData(db: Queryable = { query }) {
   const now = Date.now();
   const [farms, devices, cycles, profiles, incidents, watch] = await Promise.all([
-    db.query<{ farm_id: string; name: string | null; code: string | null; snapshot_at: string; synthetic: boolean }>(
-      `SELECT farm_id, name, code, ${ISO('snapshot_at')} AS snapshot_at, coalesce((fields->>'synthetic')::boolean, false) AS synthetic FROM engine_vfarm_farms ORDER BY synthetic, name NULLS LAST`,
+    db.query<{ farm_id: string; name: string | null; code: string | null; snapshot_at: string; synthetic: boolean; fields: unknown }>(
+      `SELECT farm_id, name, code, ${ISO('snapshot_at')} AS snapshot_at, coalesce((fields->>'synthetic')::boolean, false) AS synthetic, fields FROM engine_vfarm_farms ORDER BY synthetic, name NULLS LAST`,
     ),
-    db.query<{ device_id: string; farm_id: string; place: string | null; device_type: string | null; model: string | null; latest: unknown; last_reading_at: string | null; last_seen_at: string | null; state: string | null; since: string | null; age_s: number | null; checks: Check[] | null; evaluated_at: string | null }>(
-      `SELECT d.device_id, d.farm_id, d.place, d.device_type, d.model, d.latest, ${ISO('d.last_reading_at')} AS last_reading_at, ${ISO('d.last_seen_at')} AS last_seen_at,
+    db.query<{ device_id: string; farm_id: string; place: string | null; device_type: string | null; model: string | null; latest: unknown; fields: unknown; last_reading_at: string | null; last_seen_at: string | null; state: string | null; since: string | null; age_s: number | null; checks: Check[] | null; evaluated_at: string | null }>(
+      `SELECT d.device_id, d.farm_id, d.place, d.device_type, d.model, d.latest, d.fields, ${ISO('d.last_reading_at')} AS last_reading_at, ${ISO('d.last_seen_at')} AS last_seen_at,
               s.state, ${ISO('s.since')} AS since, s.age_s, s.checks, ${ISO('s.evaluated_at')} AS evaluated_at
          FROM engine_vfarm_devices d LEFT JOIN engine_monitoring_device_state s ON s.device_id = d.device_id
         ORDER BY d.farm_id, d.device_id`,
@@ -627,6 +711,27 @@ export async function monitoringData(db: Queryable = { query }) {
       `SELECT farm_id, (extract(epoch FROM first_watched_at) * 1000)::bigint::text AS first_watched_ms, ${ISO('last_evaluated_at')} AS last_evaluated_at FROM engine_monitoring_watch`,
     ),
   ]);
+    // The envelope's other two halves: the alert worker's health off the newest snapshot of
+  // each kind (real, simulated), and what the healer and the recovery watcher hold per ledger id.
+  const [pipes, healer] = await Promise.all([
+    db.query<{ synthetic: boolean; pipeline: unknown; taken_at: string }>(
+      `SELECT DISTINCT ON (synthetic) synthetic, pipeline, ${ISO('taken_at')} AS taken_at FROM engine_vfarm_snapshots ORDER BY synthetic, taken_at DESC`,
+    ),
+    db.query<{ ledger_id: string; retry_status: string | null; recovery_status: string | null }>(
+      `SELECT i.ledger_id,
+              (SELECT ra.fields->>'status' FROM engine_retry_attempts ra WHERE ra.natural_id = i.ledger_id ORDER BY ra.id DESC LIMIT 1) AS retry_status,
+              (SELECT rc.status FROM engine_recovery rc WHERE rc.incident_id = i.ledger_id LIMIT 1) AS recovery_status
+         FROM engine_monitoring_incidents i
+        WHERE i.ledger_id IS NOT NULL AND (i.closed_at IS NULL OR i.closed_at > now() - interval '7 days')`,
+    ),
+  ]);
+  const pipeOf = new Map(pipes.rows.map((r) => [r.synthetic, r]));
+  const healerOf = new Map(healer.rows.map((r) => [r.ledger_id, r]));
+  const withRetry = <T extends { closed_at: string | null; close_reason: string | null; opened_at: string; ledger_id: string | null }>(i: T) => ({
+    ...i,
+    canonical_id: i.ledger_id,
+    retry_envelope: retryEnvelope(i, i.ledger_id ? healerOf.get(i.ledger_id) : undefined, now),
+  });
   const cycleOf = new Map(cycles.rows.map((c) => [c.farm_id, c]));
   const watchOf = new Map(watch.rows.map((w) => [w.farm_id, w]));
   const windowMs = UPTIME_WINDOW_H * 3_600_000;
@@ -645,8 +750,23 @@ export async function monitoringData(db: Queryable = { query }) {
     const down = unionMs(offline, lo, now);
     const counts: Record<string, number> = {};
     for (const d of devs) counts[d.state ?? 'NOT_JUDGED'] = (counts[d.state ?? 'NOT_JUDGED'] ?? 0) + 1;
+    const identity = identityOf(f.fields);
+    const pipe = pipeOf.get(f.synthetic);
+    const openInc = inc.filter((i) => !i.closed_at).map(({ opened_ms, closed_ms, ...i }) => withRetry(i));
+    const recentInc = inc.filter((i) => i.closed_at).slice(0, 50).map(({ opened_ms, closed_ms, ...i }) => withRetry(i));
+    const retryCounts: Record<string, number> = { self_healed: 0, retrying: 0, needs_human: 0, closed_by_person: 0 };
+    for (const i of [...openInc, ...recentInc]) retryCounts[i.retry_envelope.state]++;
     return {
       farm_id: f.farm_id,
+      envelope: {
+        farm_id: f.farm_id,
+        cabinet_id: identity.cabinet_id,
+        config_hash: identity.config_hash,
+        burn_in_state: identity.burn_in_state,
+        worker_health: { ...workerHealth(pipe?.pipeline), as_of: pipe?.taken_at ?? null },
+        retry_envelope: { ...retryCounts, window: 'open now, and closed in the last 7 days (the newest 50)' },
+        sources: identity.sources,
+      },
       name: f.name ?? f.code ?? f.farm_id,
       synthetic: f.synthetic,
       feed: { last_snapshot_at: f.snapshot_at, age_s: feedAge, silent: feedAge > THRESHOLDS.feed_silent_s },
@@ -674,6 +794,7 @@ export async function monitoringData(db: Queryable = { query }) {
       state_counts: counts,
       devices: devs.map((d) => ({
         device_id: d.device_id,
+        ...(({ sources, ...id }) => ({ ...id, identity_sources: sources }))(identityOf(d.fields, f.fields)),
         place: d.place,
         device_type: d.device_type,
         model: d.model,
@@ -686,8 +807,8 @@ export async function monitoringData(db: Queryable = { query }) {
         checks: d.checks ?? [],
         evaluated_at: d.evaluated_at,
       })),
-      open_incidents: inc.filter((i) => !i.closed_at).map(({ opened_ms, closed_ms, ...i }) => ({ ...i, canonical_id: i.ledger_id })),
-      recent_incidents: inc.filter((i) => i.closed_at).slice(0, 50).map(({ opened_ms, closed_ms, ...i }) => ({ ...i, canonical_id: i.ledger_id })),
+      open_incidents: openInc,
+      recent_incidents: recentInc,
       last_evaluated_at: w?.last_evaluated_at ?? null,
     };
   });
@@ -719,6 +840,17 @@ export async function monitoringData(db: Queryable = { query }) {
       note: `Every incident is also opened in the BHARAG incident ledger on the ${LEDGER_LANE} (engine) lane, subsystem ${LEDGER_SUBSYSTEM}, and closed there as self_healed when it clears here. Simulated farms' incidents go too, marked [SIMULATED]. Incidents closed before 3 Oct 2026 were never sent and say so.`,
       identity: 'One incident, one canonical id: the ledger id (INC-BAYS.MONITORING-nnn), given here as canonical_id and ledger_id, and the id Engine health shows. incident_id (INC-VFARM…) is this twin\'s own reference for the same incident; the ledger carries it as execution_id. canonical_id is null only until the ledger has taken the incident.',
       downstream: 'Engine health holds every incident the ledger took, written at the moment it was opened and marked closed when it clears, under the same ledger id.',
+    },
+    envelope: {
+      fields: ['farm_id', 'cabinet_id', 'config_hash', 'burn_in_state', 'worker_health', 'retry_envelope'],
+      burn_in_states: BURN_IN_STATES,
+      retry_states: {
+        self_healed: 'it cleared on its own, or the healer or the recovery watcher recovered it',
+        retrying: 'open; the twin judges it again every minute and closes it when the fault clears',
+        needs_human: `the healer used its attempts, a recovery failed again, or it has been open over ${NEEDS_HUMAN_AFTER_S / 60} minutes`,
+        closed_by_person: 'a person closed it',
+      },
+      note: 'Every farm carries envelope; every device carries cabinet_id, config_hash and burn_in_state (its own, else its farm\'s); every incident carries retry_envelope. cabinet_id, config_hash and burn_in_state are read from the vFarm snapshot and are null, with the source saying so, until vFarm sends them. Nothing here is guessed.',
     },
     recurrence: await recurrence.recent(),
     counts: {

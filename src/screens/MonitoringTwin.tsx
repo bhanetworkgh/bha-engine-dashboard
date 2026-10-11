@@ -118,6 +118,32 @@ function Farms({ data }: { data: MonitoringTwinData }) {
   );
 }
 
+/**
+ * The twin envelope in one line (3FP4): the cabinet, its config, burn-in, the
+ * alert worker and where the incidents stand. A value vFarm has not sent says
+ * so; it is never drawn as a dash that could read as a value. Colour only on
+ * an unhealthy worker and on incidents needing a person.
+ */
+function EnvelopeLine({ e }: { e: NonNullable<MonitoringFarm['envelope']> }) {
+  const burn = { not_started: 'not started', burn_in: 'in burn-in', passed: 'passed' } as const;
+  const missing = <span className="text-faint">not sent by vFarm yet</span>;
+  const r = e.retry_envelope;
+  return (
+    <p className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-dim">
+      <span>Cabinet {e.cabinet_id ? <RecordId>{e.cabinet_id}</RecordId> : missing}</span>
+      <span>Config {e.config_hash ? <RecordId>{e.config_hash}</RecordId> : missing}</span>
+      <span>Burn-in {e.burn_in_state ? burn[e.burn_in_state] : missing}</span>
+      <span title={e.worker_health.note}>
+        Alert worker{' '}
+        {e.worker_health.state === null ? missing : <span className={e.worker_health.state === 'unhealthy' ? 'text-degraded' : undefined}>{e.worker_health.state}</span>}
+      </span>
+      <span title={r.window}>
+        Incidents: {r.self_healed} self-healed, {r.retrying} retrying, <span className={r.needs_human ? 'text-degraded' : undefined}>{r.needs_human} needing a person</span>
+      </span>
+    </p>
+  );
+}
+
 function FarmCard({ f }: { f: MonitoringFarm }) {
   const live = f.state_counts.LIVE ?? 0;
   const judged = f.devices.filter((d) => d.state !== 'GONE').length;
@@ -136,6 +162,7 @@ function FarmCard({ f }: { f: MonitoringFarm }) {
           last snapshot {when(f.feed.last_snapshot_at)} UTC ({relativeTime(f.feed.last_snapshot_at) ?? '—'}){f.feed.silent ? (f.synthetic ? ' · the test is not running' : ' · the feed has stopped') : ''}
         </span>
       </div>
+      {f.envelope && <EnvelopeLine e={f.envelope} />}
       <StatStrip cols={5} flush>
         <FigureCell label="Devices live" value={live} caption={`of ${judged} listed`} note="A reading at most 90 s old when vFarm last looked." />
         <FigureCell label="Offline" value={offline} tone={offline ? 'degraded' : undefined} caption="no reading for over 15 min" note="Each one is an INC-VFARM.SENSOR incident until it reads again." />
