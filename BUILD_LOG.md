@@ -12133,3 +12133,10 @@ Files:      docs/contracts/genie-logstream-read.md
 Problem:    None. 3fe88d5 confirmed live by get_health; mcp-write test re-run locally, all assertions passed.
 Fix:        delete_record kind codex on U0AEW3TBYH1_1791319651246 (id 284, audit 1728) and U0AEW3TBYH1_1791320688956 (id 285, audit 1729); both kept in record_deletions. The reference now says the token is on Render as READONLY_SECRETS_GENIE and Kaiqi copies it from there.
 Decision:   Rows 292 (SUB-BHARAG-DOMAIN-20261007, Kaiqi) and 310 (CAPITAL-LANE-V0-DEFINITION) are still Pending with no Codex entry id and were left alone: not asked for. The nudge rule itself stays with LOOP-1791727839183-V8ZC.
+
+## 2026-10-11 17:35 — Review nudge counts only submitted logs (LOOP-1791727839183-V8ZC)
+Intent:     Stop the "logs waiting on your review" nudge counting rows that never reached Jason as a review card.
+Files:      n8n Agent Bays (Nw5igXu4WWrjUMWB), task "Log review nudge -- Jason (every 6h)" (task_5jMEZRdOBkUnKmpo); CLAUDE.md
+Problem:    The task read every codex row with Jason Status Pending. Row 310 (CAPITAL-LANE-V0-DEFINITION, Submission Source "dashboard", a lane definition, no Layer1 Review, no transcript) is Pending and over 6h old, so the 12:00 ET run would have nudged Jason about it. All 298 real logs carry Submission Source "otter".
+Fix:        Step 1's filter is now { "Jason Status": "Pending", "Submission Source": "otter" }, with one sentence saying why. Nothing else in the task changed (diffed against the published text). Restore point 30197da1-5693-41f2-816f-0f60959d84a8; published 3d7bc372-33b8-450f-861f-4fbc172bafc0. validate_agent valid; draft test (call_agent, read only) returned total 0 and "would not be nudged". Inventory recorded (audit 1730), which starts the publish check.
+Decision:   The task objective was changed, not the agent's instructions (sha256 unchanged). Also corrected CLAUDE.md on the 3fe88d5 delete exception: review happens before processing, so "unprocessed" includes a real log still waiting on review; the note said otherwise.
