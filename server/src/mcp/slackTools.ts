@@ -333,4 +333,134 @@ export const postFile: ToolDefinition = {
     }),
 };
 
-export const SLACK_WRITE_TOOLS: ToolDefinition[] = [sendNudge, postFile];
+/* ------------------------------------------------- post_channel_message */
+
+/**
+ * The channel-post guard (2026-10-11, Destiny — agent maturity). n8n's
+ * `Bays — Slack Send` is the tool Bays posts digests and messages with, and it
+ * posted wherever the agent named. It now asks here first.
+ *
+ * A destination is known when it is: a channel in channel_tracking (every
+ * channel Bays captures), one of the engine's own channels below, a channel a
+ * person has already approved a post into, a person with a Builder Profile or
+ * an approver, or a DM (D…) Slack says is with such a person. Anything else is
+ * held on the Approve / Deny card and posted by `post_channel_message` only
+ * once Destiny or Jason approves. A DM Slack cannot tell us about is held:
+ * unknown is never read as known.
+ */
+export const ENGINE_CHANNELS: ReadonlyArray<string> = ['C0C534NQ0HG', 'C0BDD5TSDQV', 'C0ASVQQ8CH3', 'C0B0668PRNW', 'C0B9LKU7DQV'];
+const DEST_RE = /^[CDGUW][A-Z0-9]{6,}$/;
+
+export type DestinationVerdict = { known: boolean; kind: 'channel' | 'user' | 'dm'; why: string };
+
+export async function destinationVerdict(dest: string): Promise<DestinationVerdict> {
+  if (/^[UW]/.test(dest)) {
+    const unknown = await unknownRecipients([dest]);
+    return { known: unknown.length === 0, kind: 'user', why: unknown.length ? 'this person has no Builder Profile and is not an approver' : 'a person with a Builder Profile, or an approver' };
+  }
+  if (dest.startsWith('D')) {
+    const info = await slack.botCall('conversations.info', { channel: dest }, 'form');
+    const user = (info.channel as { user?: string } | undefined)?.user;
+    if (!info.ok || typeof user !== 'string') return { known: false, kind: 'dm', why: `Slack could not say who this DM is with (${String(info.error ?? 'no user in the answer')})` };
+    const unknown = await unknownRecipients([user]);
+    return { known: unknown.length === 0, kind: 'dm', why: unknown.length ? `a DM with ${user}, who has no Builder Profile and is not an approver` : `a DM with ${user}, who has a Builder Profile or is an approver` };
+  }
+  const extra = (process.env.SLACK_KNOWN_CHANNELS || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const alerts = process.env.QUOTA_ALERT_CHANNEL?.trim();
+  if (ENGINE_CHANNELS.includes(dest) || extra.includes(dest) || dest === alerts) return { known: true, kind: 'channel', why: 'one of the engine\'s own channels' };
+  const tracked = await query(`SELECT 1 FROM engine_channel_tracking WHERE natural_id = $1 LIMIT 1`, [dest]);
+  if (tracked.rows.length) return { known: true, kind: 'channel', why: 'a channel Bays captures (channel_tracking)' };
+  const approved = await query(`SELECT 1 FROM engine_approvals WHERE tool = 'post_channel_message' AND status = 'approved' AND result_ok IS TRUE AND target = $1 LIMIT 1`, [dest]);
+  if (approved.rows.length) return { known: true, kind: 'channel', why: 'a channel a person has already approved a post into' };
+  return { known: false, kind: 'channel', why: 'a channel the engine does not capture and has never been approved to post into' };
+}
+
+type Part = unknown[];
+function partsOf(args: Record<string, unknown>): Part[] {
+  const raw = Array.isArray(args.parts) ? args.parts : [];
+  return raw.filter((p): p is Part => Array.isArray(p) && p.length > 0).slice(0, 40);
+}
+
+async function postParts(dest: string, text: string, parts: Part[], threadTs: string | undefined) {
+  let channel = dest;
+  if (/^[UW]/.test(dest)) {
+    const o = await slack.botCall('conversations.open', { users: dest }, 'form');
+    const ch = (o.channel as { id?: string } | undefined)?.id;
+    if (!o.ok || !ch) return { ok: false as const, step: 'conversations.open', error: String(o.error ?? 'no channel id in the answer') };
+    channel = ch;
+  }
+  const fallback = text.replace(/\s+/g, ' ').trim().slice(0, 280) || 'Bays message';
+  const bodies = parts.length ? parts : [null];
+  let firstTs = '';
+  const failed: { part: number; error: string }[] = [];
+  for (let i = 0; i < bodies.length; i++) {
+    const r = await slack.botCall('chat.postMessage', {
+      channel,
+      text: bodies[i] ? (i ? `${fallback} (part ${i + 1} of ${bodies.length})` : fallback) : text.slice(0, 39000),
+      blocks: bodies[i] ?? undefined,
+      thread_ts: i ? threadTs || firstTs : threadTs,
+      unfurl_links: false,
+    });
+    if (i === 0) {
+      if (!r.ok || typeof r.ts !== 'string') return { ok: false as const, step: `part 1 of ${bodies.length}`, error: String(r.error ?? 'no ts in the answer') };
+      firstTs = r.ts;
+      if (typeof r.channel === 'string') channel = r.channel;
+    } else if (!r.ok) failed.push({ part: i + 1, error: String(r.error ?? 'unknown_error') });
+  }
+  return { ok: failed.length === 0, channel, ts: firstTs, parts: bodies.length, failed_parts: failed, permalink: `https://bayshorizonnetwork.slack.com/archives/${channel}/p${firstTs.replace('.', '')}` };
+}
+
+export const postChannelMessage: ToolDefinition = {
+  name: 'post_channel_message',
+  description:
+    'Post a message as the Bays bot into a channel, DM or to a person. This is the tool an approved "Bays — Slack Send" post runs through: on an agent token a destination the engine does not know (not in channel_tracking, not an engine channel, never approved before; or a person with no Builder Profile) is not posted and waits on an Approve / Deny card. destination: C…, G…, D… or a U… user id. text: the message (used as the notification text when parts are given). parts: optional array of Slack block arrays; part 1 posts at the destination and the rest as replies in its thread. Every post is checked for Slack\'s ok:false. Audited on engine_mcp_writes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      destination: { type: 'string', description: 'C…, G…, D… or a U… user id.' },
+      text: { type: 'string', description: 'The message text.' },
+      parts: { type: 'array', description: 'Optional: Slack block arrays, one per message part.', items: { type: 'array', items: {} } },
+      thread_ts: { type: 'string', description: 'Optional thread to post into.' },
+      ...DRY,
+      ...REQUESTER,
+    },
+    required: ['destination', 'text'],
+    additionalProperties: false,
+  },
+  annotations: { ...WRITE_ANNOTATIONS, title: 'Post a message as Bays' },
+  handler: (args, deps) =>
+    audited('post_channel_message', args, deps, async () => {
+      const dest = str(args, 'destination');
+      const text = typeof args.text === 'string' ? args.text : '';
+      const threadTs = str(args, 'thread_ts') || undefined;
+      const parts = partsOf(args);
+      if (!DEST_RE.test(dest) || !text.trim()) {
+        return { outcome: 'refused', detail: 'bad destination or empty text', answer: { ok: false, reason: 'bad_argument', message: '"destination" (C…, G…, D… or U…) and a non-empty "text" are required. Nothing was posted.' } };
+      }
+      const verdict = await destinationVerdict(dest);
+      const held = !verdict.known && approvals.needsApproval();
+      if (args.dry_run === true) {
+        return { outcome: 'dry_run', detail: verdict.why, target: dest, answer: { ok: true, dry_run: true, destination: dest, known: verdict.known, why: verdict.why, would_wait_for_approval: held, parts: parts.length || 1 } };
+      }
+      if (!slack.slackConfigured()) return { outcome: 'refused', detail: 'not configured', target: dest, answer: notConfigured() };
+      if (held) {
+        const where = verdict.kind === 'channel' ? `<#${dest}>` : verdict.kind === 'user' ? `a DM to <@${dest}>` : `the DM ${dest}`;
+        const asked = approvals.pendingAnswer(
+          await approvals.request({
+            tool: 'post_channel_message',
+            args: { destination: dest, text, parts, ...(threadTs ? { thread_ts: threadTs } : {}) },
+            target: dest,
+            summary: `post a message as Bays in ${where} (${verdict.why}): "${text.replace(/\s+/g, ' ').trim().slice(0, 300)}"`,
+          }),
+        );
+        return { ...asked, target: dest };
+      }
+      const r = await postParts(dest, text, parts, threadTs);
+      if (!r.ok) {
+        return { outcome: 'failed', detail: `${'step' in r ? r.step : 'some parts'}: ${'error' in r ? r.error : 'some_parts_failed'}`, target: dest, answer: { ...r, ok: false, error: 'error' in r ? r.error : 'some_parts_failed', message: 'Slack refused the post, or part of it. See error.' } };
+      }
+      return { outcome: 'applied', detail: `${r.parts} part(s) → ${r.channel}`, target: dest, answer: { ...r } };
+    }),
+};
+
+export const SLACK_WRITE_TOOLS: ToolDefinition[] = [sendNudge, postFile, postChannelMessage];

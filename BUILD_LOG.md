@@ -11996,3 +11996,10 @@ Fix:        Research Twin: read_monitoring_twin and read_media_doctrine on its a
             EVAL-202610110314 (execution 32443): 96 of 96. Bays 36, North Star 33, Research Twin 27. It is also the first pass of the NS-04 check revised an hour earlier.
 Decision:   Not done: the agent inventory is not re-recorded for North Star and Research Twin after these publishes. It is owed before the next re-score.
             Bays was not given read_monitoring_twin: the loop names Research Twin and the claim gate, and a tool on the server's list and not on n8n's is the mismatch the scope rule exists to stop.
+
+## 2026-10-11 05:25 — the channel-post guard: Bays — Slack Send asks before it posts (agent maturity, D2)
+Intent:     close the 10 Oct evening re-score's open gap: send_nudge and post_file had a destination guard, the workflow tool Bays posts messages and digests with had none (Lagos time).
+Files:      server/src/mcp/slackTools.ts (destinationVerdict, post_channel_message), server/src/approvals.ts (DESTINATION_GATED_TOOLS), server/src/index.ts (POST /api/engine/slack-destination), server/test/approvals.test.cjs (check 17), CLAUDE.md.
+Problem:    First test run: `null value in column "first_seen_at" of relation "engine_channel_tracking" violates not-null constraint` — the test's own seed row, not the code. Fixed in the test.
+Fix:        A known destination (channel_tracking, the engine's own channels, a channel approved before, a builder or approver, a DM Slack names as one) answers allow. Anything else stores the message on an approval, posts the Approve / Deny card and answers held; Approve posts every part from the dashboard, Deny posts nothing. approvals test: 20 checks passed.
+Decision:   A channel approved once is known from then on: asking again for every post into a channel a person has already said yes to would train people to click Approve. A DM that Slack cannot name is held, because unknown must not read as known. The n8n side is a separate entry, after the workflow checklist.

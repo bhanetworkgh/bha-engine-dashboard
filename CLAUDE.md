@@ -1350,6 +1350,19 @@ code, never in the prompt. A dry run says `would_wait_for_approval`. `npm run
 test:approvals` pins it (check 16). `Bays — Slack Send`, the workflow tool the
 digests post with, is not behind it.
 
+**Channel posts have the guard too** (2026-10-11, Destiny). n8n's
+`Bays — Slack Send` asks `POST /api/engine/slack-destination`
+(`x-dashboard-key`) before it posts. `slackTools.destinationVerdict` decides: a
+destination is known when it is in `channel_tracking`, one of `ENGINE_CHANNELS`
+(or `SLACK_KNOWN_CHANNELS`, `QUOTA_ALERT_CHANNEL`), a channel a person has
+already approved a post into, a person with a Builder Profile or an approver,
+or a DM Slack says is with one. Known answers `allow` and n8n posts as before.
+Unknown is not posted: the message is stored on the approval and
+`post_channel_message` (write connection, third of `DESTINATION_GATED_TOOLS`,
+in no agent's scope) posts it whole once Destiny or Jason approves. **A DM
+Slack cannot name is held, never read as known.** A card that cannot be posted
+answers `held_failed` with `raise: true`. `npm run test:approvals` check 17.
+
 **Tokens and tool calls are on every ask** (2026-10-10). The three Agent
 Delivery workflows write `Prompt Tokens`, `Completion Tokens`, `Total Tokens`,
 `Tool Call Count` and `Tool Calls` (tool names in order, ` > ` between them) on

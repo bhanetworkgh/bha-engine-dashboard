@@ -57,6 +57,9 @@ import * as scheduledRuns from './scheduledRuns';
 import * as askTrace from './askTrace';
 import * as evalRuns from './evalRuns';
 import * as reminderTools from './mcp/reminderTools';
+import * as slackTools from './mcp/slackTools';
+import { toolByName as mcpToolByName } from './mcp/tools';
+import { callerStore } from './mcp/caller';
 import * as dataGovernance from './dataGovernance';
 import * as monitoringTwin from './monitoringTwin';
 import * as qualityAlert from './qualityAlert';
@@ -684,6 +687,36 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         }
         throw e;
       }
+    }
+    /**
+     * The channel-post guard (2026-10-11): n8n's Bays — Slack Send asks before
+     * it posts. A known destination answers decision "allow" and n8n posts as
+     * it always has. An unknown one is not posted: the message is stored on an
+     * approval and a card goes to a person (decision "held"), and it is posted
+     * from here once approved. A card that could not be posted is "held_failed"
+     * with raise:true. dry_run answers the verdict and stores nothing.
+     */
+    if (p === '/api/engine/slack-destination') {
+      if (method !== 'POST') throw new HttpError(405, 'POST { channel, text, parts?, thread_ts?, dry_run? }.');
+      const b = (await readJson(req, 512 * 1024)) as Record<string, unknown>;
+      const dest = typeof b.channel === 'string' ? b.channel.trim().replace(/^<[@#]?([A-Z0-9]+)(\|[^>]*)?>$/, '$1') : '';
+      const text = typeof b.text === 'string' ? b.text : '';
+      if (!/^[CDGUW][A-Z0-9]{6,}$/.test(dest) || !text.trim()) {
+        await mirror.logWrite({ endpoint, kind: 'slack_destination', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: dest || undefined, outcome: 'rejected', detail: 'channel is not a Slack id, or text is empty', ms: Date.now() - t0 });
+        throw new HttpError(422, 'channel (C…, G…, D… or U…) and a non-empty text are required.');
+      }
+      const verdict = await slackTools.destinationVerdict(dest);
+      if (verdict.known || b.dry_run === true) {
+        await mirror.logWrite({ endpoint, kind: 'slack_destination', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: dest, outcome: 'read', detail: `${verdict.known ? 'allow' : 'would hold'}: ${verdict.why}`, ms: Date.now() - t0 });
+        return send(res, 200, { ok: true, decision: verdict.known ? 'allow' : 'would_hold', destination: dest, why: verdict.why, dry_run: b.dry_run === true });
+      }
+      const tool = mcpToolByName('post_channel_message', 'write');
+      if (!tool) throw new HttpError(500, 'post_channel_message is not registered.');
+      const args: Record<string, unknown> = { destination: dest, text, ...(Array.isArray(b.parts) ? { parts: b.parts } : {}), ...(typeof b.thread_ts === 'string' && b.thread_ts.trim() ? { thread_ts: b.thread_ts.trim() } : {}) };
+      const a = (await callerStore.run({ agent: 'bays' }, () => tool.handler(args, { access: 'write', startedAt: STARTED_AT, dispatch: async () => ({ status: 404, body: null }), agent: 'bays' }))) as Record<string, unknown>;
+      const heldOk = a.reason === 'awaiting_approval';
+      await mirror.logWrite({ endpoint, kind: 'slack_destination', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: dest, outcome: heldOk ? 'unchanged' : 'error', detail: `${heldOk ? 'held' : 'held, and the card was not posted'}: ${verdict.why} (${String(a.approval_id ?? 'no approval id')})`, ms: Date.now() - t0 });
+      return send(res, 200, { ok: true, decision: heldOk ? 'held' : 'held_failed', raise: !heldOk, destination: dest, why: verdict.why, approval_id: a.approval_id ?? null, card_link: a.card_link ?? null, message: heldOk ? `Nothing was posted. ${dest} is ${verdict.why}, so the message is waiting on an Approve / Deny card (${String(a.card_link)}). Only Destiny or Jason can decide; it is posted from the dashboard once approved. Do not post it again.` : `Nothing was posted, and nobody could be asked to approve: ${String(a.message ?? a.reason)}.` });
     }
     /**
      * One click on an approval card (2026-10-04, 8185). n8n's Bays — Front Door

@@ -91,6 +91,7 @@ const slack = http.createServer(async (req, res) => {
     seen.ephemerals.push(b);
     return json(res, 200, { ok: true });
   }
+  if (u.pathname === '/conversations.info') return String(b.channel).startsWith('D0APPROVER') ? json(res, 200, { ok: true, channel: { id: b.channel, user: DESTINY } }) : json(res, 200, { ok: false, error: 'channel_not_found' });
   return json(res, 200, { ok: false, error: 'unknown_method' });
 });
 
@@ -456,6 +457,60 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.addr
     await query(`DELETE FROM engine_builder_profiles WHERE natural_id = $1`, [known]);
     await query(`DELETE FROM engine_approvals WHERE target LIKE $1`, [`%${stranger}%`]);
     ok('send_nudge and post_file: a known builder is sent to at once, anyone else waits for Approve, and a person is never gated');
+  }
+
+  /* 17 — the channel-post guard (2026-10-11) */
+  {
+    const slackTools = req('mcp/slackTools.js');
+    const tracked = `C0TRACK${T}`;
+    const strange = `C0STRANGE${T}`;
+    await query(`INSERT INTO engine_channel_tracking (airtable_record_id, natural_id, fields, source, first_seen_at, updated_at) VALUES ($1, $2, '{}'::jsonb, 'engine', now()::text, now()::text)`, [`test-${T}`, tracked]);
+    assert.equal((await slackTools.destinationVerdict(tracked)).known, true);
+    assert.equal((await slackTools.destinationVerdict('C0C534NQ0HG')).known, true, 'the digest channel is known');
+    assert.equal((await slackTools.destinationVerdict(DESTINY)).known, true);
+    assert.equal((await slackTools.destinationVerdict(`D0APPROVER${T}`)).known, true, 'a DM Slack says is with an approver');
+    assert.equal((await slackTools.destinationVerdict(`D0WHO${T}`)).known, false, 'a DM Slack cannot name is never read as known');
+    assert.equal((await slackTools.destinationVerdict(strange)).known, false);
+
+    let p = seen.posts.length;
+    const direct = await asAgent('post_channel_message', { destination: tracked, text: `Guard ${T}: known channel.` });
+    assert.equal(direct.ok, true, JSON.stringify(direct));
+    assert.equal(seen.posts.length, p + 1);
+    assert.equal(seen.posts[p].channel, tracked);
+
+    p = seen.posts.length;
+    const parts = [[{ type: 'section', text: { type: 'mrkdwn', text: 'one' } }], [{ type: 'section', text: { type: 'mrkdwn', text: 'two' } }]];
+    const dry = await asAgent('post_channel_message', { destination: strange, text: `Guard ${T}: strange channel.`, parts, dry_run: true });
+    assert.equal(dry.would_wait_for_approval, true);
+    const held = await asAgent('post_channel_message', { destination: strange, text: `Guard ${T}: strange channel.`, parts });
+    assert.equal(held.reason, 'awaiting_approval', JSON.stringify(held));
+    assert.equal(seen.posts.length, p + 1, 'only the card is posted');
+    assert.equal(seen.posts[p].channel, ALERTS);
+    const again = await asAgent('post_channel_message', { destination: strange, text: `Guard ${T}: strange channel.`, parts });
+    assert.equal(again.already_pending, true);
+    assert.equal(seen.posts.length, p + 1, 'a repeat posts no second card');
+    const no = await approvals.decide({ approval_id: held.approval_id, decision: 'approve', user_id: HARDIK });
+    assert.notEqual(no.body.ok, true);
+    assert.equal(seen.posts.filter((x) => x.channel === strange).length, 0);
+    const done = await approvals.decide({ approval_id: held.approval_id, decision: 'approve', user_id: JASON });
+    assert.equal(done.body.ok, true, JSON.stringify(done.body));
+    const sent = seen.posts.filter((x) => x.channel === strange);
+    assert.equal(sent.length, 2, 'both parts are posted on Approve');
+    assert.equal(sent[1].thread_ts, sent[0].ts, 'part 2 is a reply to part 1');
+    assert.equal((await slackTools.destinationVerdict(strange)).known, true, 'a channel approved once is known from then on');
+
+    const other = `C0OTHER${T}`;
+    const h2 = await asAgent('post_channel_message', { destination: other, text: `Guard ${T}: denied.` });
+    await approvals.decide({ approval_id: h2.approval_id, decision: 'deny', user_id: DESTINY });
+    assert.equal(seen.posts.filter((x) => x.channel === other).length, 0, 'Deny posts nothing');
+    assert.equal((await slackTools.destinationVerdict(other)).known, false);
+
+    p = seen.posts.length;
+    const person = await asPerson('post_channel_message', { destination: `C0PERSON${T}`, text: 'a person asking' });
+    assert.equal(person.ok, true);
+    assert.equal(seen.posts.length, p + 1, 'a person on the connector is not gated');
+    await query(`DELETE FROM engine_channel_tracking WHERE natural_id = $1`, [tracked]);
+    ok('post_channel_message: a known destination is posted to at once; an unknown one waits, posts whole on Approve, nothing on Deny');
   }
 
   /* 12 — unknown id */

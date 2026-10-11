@@ -54,7 +54,7 @@ export const GATED_TOOLS: ReadonlyArray<string> = ['share_doc', 'unshare_doc', '
  * Kept apart from GATED_TOOLS so the inventory never counts them as always
  * behind approval.
  */
-export const DESTINATION_GATED_TOOLS: ReadonlyArray<string> = ['send_nudge', 'post_file'];
+export const DESTINATION_GATED_TOOLS: ReadonlyArray<string> = ['send_nudge', 'post_file', 'post_channel_message'];
 export const TTL_HOURS = 24;
 export const ACTION_APPROVE = 'engine_approval_approve';
 export const ACTION_DENY = 'engine_approval_deny';
