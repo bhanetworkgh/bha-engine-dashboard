@@ -3043,6 +3043,34 @@ const MIGRATIONS: Migration[] = [
         WHERE NOT EXISTS (SELECT 1 FROM engine_events WHERE dedupe_key = 'agent_version:backfill:1149ec32')`,
     ],
   },
+  {
+    id: 72,
+    name: 'engine_agent_scorecard: the 11 Oct independent re-score',
+    statements: [
+      /**
+       * 11 Oct 2026, Destiny: three independent read-only re-scores in one day,
+       * two in the morning and one in the afternoon, all 74 of 120 (6.2), from
+       * 6.1 the evening before. Only cost moved (5 to 6, in the morning). The
+       * target of 6.5 was not reached. Stored as the afternoon pass reported.
+       * The three credentials in personal projects are out of scope by the
+       * owner's ruling.
+       */
+      `INSERT INTO engine_agent_scorecard (scored_on, dimension, name, score, floor, goal, evidence, source) VALUES
+        ('2026-10-11', 1, $v$Governance and inventory$v$, 6, 8, 10, $v$Independent re-score, 11 Oct 2026 afternoon (claude/Agent_Maturity_Rescore_Oct_11_Afternoon.md in the BHA Agent project): Three inventory rows matching n8n's active versions; Bays' row is from 10 Oct; inventory still recorded by hand.$v$, 'rescore'),
+        ('2026-10-11', 2, $v$Agent identity and secrets$v$, 5, 8, 10, $v$Independent re-score, 11 Oct 2026 afternoon (claude/Agent_Maturity_Rescore_Oct_11_Afternoon.md in the BHA Agent project): Per-agent bearer credentials unchanged; a fourth read-only two-tool token (Genie) repeats the pattern and is neutral; no rotation on record.$v$, 'rescore'),
+        ('2026-10-11', 3, $v$Tool privilege$v$, 6, 8, 10, $v$Independent re-score, 11 Oct 2026 afternoon (claude/Agent_Maturity_Rescore_Oct_11_Afternoon.md in the BHA Agent project): The channel-post guard allowed a real scheduled digest (execution 32823); no organic hold yet; Bays' tool list uncut.$v$, 'rescore'),
+        ('2026-10-11', 4, $v$Runtime controls and injection defense$v$, 7, 8, 10, $v$Independent re-score, 11 Oct 2026 afternoon (claude/Agent_Maturity_Rescore_Oct_11_Afternoon.md in the BHA Agent project): No new evidence.$v$, 'rescore'),
+        ('2026-10-11', 5, $v$Human oversight$v$, 6, 8, 10, $v$Independent re-score, 11 Oct 2026 afternoon (claude/Agent_Maturity_Rescore_Oct_11_Afternoon.md in the BHA Agent project): Two test cards decided by an approver at 06:02 UTC; still deliberate checks; no refused non-approver click.$v$, 'rescore'),
+        ('2026-10-11', 6, $v$Evaluation and testing$v$, 6, 8, 10, $v$Independent re-score, 11 Oct 2026 afternoon (claude/Agent_Maturity_Rescore_Oct_11_Afternoon.md in the BHA Agent project): EVAL-202610111407 was 95 of 95 and still running when read; the publish check's no-eval alert fired for real on Research Twin 96007353; eval still follows the publish.$v$, 'rescore'),
+        ('2026-10-11', 7, $v$Observability$v$, 7, 8, 10, $v$Independent re-score, 11 Oct 2026 afternoon (claude/Agent_Maturity_Rescore_Oct_11_Afternoon.md in the BHA Agent project): Token rows today: Bays 22 of 34, North Star 9 of 9, Research Twin 0 of 0; agent-token reads now routine; one day, not a week.$v$, 'rescore'),
+        ('2026-10-11', 8, $v$Incident response and recovery$v$, 7, 8, 10, $v$Independent re-score, 11 Oct 2026 afternoon (claude/Agent_Maturity_Rescore_Oct_11_Afternoon.md in the BHA Agent project): Four incidents closed with a specific written reason (audit 1713); credit-out detected within a minute twice; the handler files the credit refusal as a rate limit (LOOP-1791727843989-NA4M, open); INC-GENIE.CONTEXT-002 open.$v$, 'rescore'),
+        ('2026-10-11', 9, $v$Change and rollback$v$, 6, 8, 10, $v$Independent re-score, 11 Oct 2026 afternoon (claude/Agent_Maturity_Rescore_Oct_11_Afternoon.md in the BHA Agent project): Two rollback rows written by the check itself; PR 12 conflict-resolved and tested; against it, the eval floor lowered to 5 dollars on an unverified belief and reversed after a dead run, and a merge before an eval.$v$, 'rescore'),
+        ('2026-10-11', 10, $v$Reliability and handoffs$v$, 6, 8, 10, $v$Independent re-score, 11 Oct 2026 afternoon (claude/Agent_Maturity_Rescore_Oct_11_Afternoon.md in the BHA Agent project): No new measured evidence; both digests dispatched; credit-out window 06:25 to about 12:10 UTC.$v$, 'rescore'),
+        ('2026-10-11', 11, $v$Cost and capacity$v$, 6, 8, 10, $v$Independent re-score, 11 Oct 2026 afternoon (claude/Agent_Maturity_Rescore_Oct_11_Afternoon.md in the BHA Agent project): The credit-out watcher worked on a real event; the account still ran dry after the floor was lowered; one eval_run_cost event.$v$, 'rescore'),
+        ('2026-10-11', 12, $v$Data governance and retention$v$, 6, 7, 10, $v$Independent re-score, 11 Oct 2026 afternoon (claude/Agent_Maturity_Rescore_Oct_11_Afternoon.md in the BHA Agent project): No new evidence; retention last ran 6 Oct, 0 cleared.$v$, 'rescore')
+       ON CONFLICT (scored_on, dimension) DO NOTHING`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
