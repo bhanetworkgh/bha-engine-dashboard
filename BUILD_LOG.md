@@ -11926,3 +11926,15 @@ Problem:    none.
 Fix:        1. Start line on a timed task: "Log review nudge -- Jason" fired at 22:00 UTC and wrote one row, BAYS-SCHED-1791669608104-N491, Asked At 22:00:08, Finished At 22:00:37, 29.8 seconds, outcome completed. One row opened at the start and closed at the end, not a finish-only row. LOOP-1791575435573-1QKF was already closed on the 16:00 UTC run (audit 1589); this is a second real run of the same proof.
             2. Empty reads: Bays — Daily Doc Rotator ran on its trigger at 23:00 UTC (execution 32383, success, 7 minutes) and wrote one empty_read_check event at 23:01:51 UTC: reads 37, empty 0, no empty channels.
 Decision:   The rotator's Slack completion message was not read: a search did not find it, so "no 'not recorded' line" is not confirmed from Slack. The event itself landed, which is the thing that line would report. LOOP-1791668377856-DOCU, opened by the Codex entry for this check, is left open for Destiny to close.
+
+## 2026-10-11 03:55 — North Star's T5 line published, and LOOP-1788310653393-Q9CR closed
+Intent:     finish what the last entry left open and close the loop (Lagos time).
+Files:      none in the repo. n8n: North Star (8NQRXadH0OrKe5XV), data table agent_eval_set.
+Problem:    The first publish was rolled back because NS-06 repeat 3 left out its Sources block.
+Fix:        The skill "The Research Twin line" now says, in its description and its body, that the Sources list still closes the first section and to check it before finishing. NS-06's question asked three times on the draft: three Sources lists, three "Research Twin question: none". Validated, published d5b43089 (restore point 28c4509c).
+            EVAL-202610110210 (execution 32435): 95 of 96. Bays 36 of 36, Research Twin 27 of 27, North Star 32 of 33, NS-06 3 of 3. The one failure is NS-04 repeat 1, and the check is wrong, not the agent: it forbids "answer will arrive" unless "no " comes first, and the answer said "I am not saying an answer will arrive in any thread", which is the denial the case asks for. Fixed in the check: a revised NS-04 row appended to agent_eval_set (newest row wins). Not rolled back. That same answer ended with a real Research Twin question on a callback ask, which is T5's line doing its job.
+            Credit read 27.96 dollars at 02:02 UTC, before this run.
+            Budget reset seen: three more backlog jobs opened after 00:00 UTC (JOB-1791676927705-ONK0, -5I0S, -X3S1), ten cards still waiting.
+            Loop closed with a note against each of its six parts (audit 1603).
+Decision:   One of the three draft answers put the line at the end of a paragraph, not on its own line. The detector reads only a line that starts with it, so that answer reads as no question. It fails safe (a missed question, never an invented one); left as it is and named here.
+            Not done: North Star's row in the agent inventory is not re-recorded after this publish. The revised NS-04 check has not run yet; the next eval run is its proof.
