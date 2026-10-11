@@ -61,7 +61,8 @@ const srv = http.createServer((req, res) => {
   let passed = 0;
   const ok = (n) => (passed++, console.log(`  ok  ${n}`));
   // Leftovers from an earlier run must not be swept or counted.
-  await query(`UPDATE engine_decision_watches SET status = 'cancelled' WHERE status = 'watching'`);
+  // Their posts must not count against this run's daily cap either (the cap is read from history).
+  await query(`UPDATE engine_decision_watches SET status = 'cancelled', history = '[]'::jsonb`);
   await query(`DELETE FROM engine_events WHERE event_type LIKE 'decision_watch_%'`);
 
   /* 1. open, and a second ask for the same thread and owner */
