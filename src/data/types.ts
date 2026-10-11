@@ -3461,6 +3461,41 @@ export interface BaysRemindersData {
   note: string;
 }
 
+/** One watched decision (server/src/decisionWatch.ts). */
+export interface DecisionWatch {
+  watch_id: string;
+  /** watching · answered · moved · escalated · cancelled */
+  status: 'watching' | 'answered' | 'moved' | 'escalated' | 'cancelled';
+  state: string;
+  decision: string;
+  owner_user_id: string;
+  owner_name: string | null;
+  lane: string | null;
+  sop_refs: string | null;
+  ns_refs: string | null;
+  next_step: string | null;
+  thread_link: string | null;
+  record: { kind: string | null; id: string } | null;
+  wait: string;
+  reminders_sent: number;
+  max_reminders: number;
+  next_action_at: string | null;
+  next_action: string | null;
+  next_action_when: string | null;
+  overdue: boolean;
+  problem: string | null;
+  close_reason: string | null;
+  closed_at: string | null;
+  created_at: string | null;
+  created_via: string | null;
+}
+export interface DecisionWatchData {
+  rule: { wait_hours: number; max_reminders: number; daily_cap: number; in_words: string };
+  counts: { watching: number; with_a_problem: number; answered: number; moved: number; escalated: number; cancelled: number };
+  posted_today: number;
+  watches: DecisionWatch[];
+}
+
 /** One eval run (server/src/evalRuns.ts). A case passes only if every repeat passed. */
 export interface EvalRun {
   run_id: string;

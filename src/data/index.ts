@@ -15,6 +15,7 @@ import type {
   AskBaysData,
   BaysData,
   BaysRemindersData,
+  DecisionWatchData,
   ScheduledRunsData,
   LogstreamData,
   AskTraceDetail,
@@ -594,6 +595,8 @@ export const getGenie = () => api<GenieData>('/api/genie');
 /** Bays' ask ledger: Slack turns, scheduled task runs and panel questions (2026-10-05). */
 export const getBays = () => api<BaysData>('/api/bays');
 export const getBaysReminders = () => api<BaysRemindersData>('/api/bays/reminders');
+/** Decisions being watched until somebody answers (2026-10-11, 5YQA). */
+export const getDecisionWatches = () => api<DecisionWatchData>('/api/bays/decision-watches');
 /** Every scheduler's runs on one page (2026-10-09, K9B7). */
 export const getScheduledRuns = () => api<ScheduledRunsData>('/api/scheduled-runs');
 /** Logstream v0: repeating faults, what crossed a threshold and what was done (2026-10-10). */

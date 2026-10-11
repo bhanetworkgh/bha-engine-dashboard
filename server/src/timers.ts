@@ -1,7 +1,7 @@
 /**
  * The dashboard's own background timers (2026-10-09, Destiny — K9B7).
  *
- * Ten things in this process run on a timer. Most ticks do nothing, so a row
+ * Several things in this process run on a timer. Most ticks do nothing, so a row
  * per tick would bury every other scheduler on the Scheduled runs page. This
  * keeps one line per timer: when it last ticked and how many times since the
  * process started. It is held in memory, so a deploy or a restart starts the
@@ -28,6 +28,7 @@ const KNOWN: Array<{ name: string; what: string; every: string }> = [
   { name: 'logstream sweep', what: 'Writes Logstream rows and acts on faults that crossed a threshold', every: '5 minutes' },
   { name: 'research signals', what: 'Finds signals that ask for research and opens one job each, within the daily budget', every: '5 minutes' },
   { name: 'publish check', what: 'Asks for an eval run after an agent version change and alerts if it regressed', every: '2 minutes' },
+  { name: 'decision watch', what: 'Checks watched decisions and posts a reminder where one has gone quiet past its wait', every: '5 minutes' },
   { name: 'retention', what: 'Clears personal text past its retention period (acts once a week)', every: '6 hours' },
 ];
 

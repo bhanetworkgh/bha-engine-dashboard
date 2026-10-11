@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useData } from '../../app/useData';
-import { getBays, getBaysReminders, type BaysAsk, type BaysData, type BaysReminder, type Percentiles, type Share } from '../../data';
+import { getBays, getBaysReminders, getDecisionWatches, type BaysAsk, type BaysData, type BaysReminder, type DecisionWatch, type Percentiles, type Share } from '../../data';
 import type { RecordColumn } from '../../components/ui';
 import {
   Button,
@@ -52,7 +52,7 @@ import RecordStatistics from '../../components/RecordStatistics';
  * Read only. The rows are written by n8n; nothing here changes one.
  */
 
-const TABS = ['Asks', 'Statistics', 'Reminders'] as const;
+const TABS = ['Asks', 'Statistics', 'Reminders', 'Decision watch'] as const;
 type Tab = (typeof TABS)[number];
 
 type Filter = 'all' | 'Answered' | 'issues' | 'Failed' | 'undelivered';
@@ -447,6 +447,80 @@ function Reminders() {
   );
 }
 
+/* ----------------------------------------------------------- decision watch */
+
+/**
+ * Decision Watch (2026-10-11, Destiny). A decision put to a named person and
+ * then left quiet had nothing that came back to it. Each row is one such
+ * decision: who owes the answer, where, and what happens next. Read only; a
+ * watch is opened or closed by asking Bays. Colour marks what needs a person:
+ * a watch that could not be checked or posted, and one that was escalated.
+ */
+function WatchState({ w }: { w: DecisionWatch }) {
+  if (w.status === 'escalated') return <Pill tone="failing">escalated</Pill>;
+  if (w.status !== 'watching') return <Pill>{w.status}</Pill>;
+  if (w.problem) return <Pill tone="degraded">{w.state}</Pill>;
+  return <Pill tone="accent">{w.state}</Pill>;
+}
+
+function DecisionWatches() {
+  const { status, data, error } = useData(getDecisionWatches, []);
+  const paged = usePaged(data?.watches ?? [], 'decision-watches');
+  if (status === 'loading' && !data) return <Loading />;
+  if (status === 'error' && !data) return <LoadFailed error={error} />;
+  if (!data) return <Loading />;
+  return (
+    <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+      <div className="shrink-0 space-y-2 px-6 pb-4 md:px-8">
+        <p className="text-[12px] text-dim">
+          {data.counts.watching} being watched · {data.counts.answered} answered · {data.counts.moved} moved · {data.counts.escalated} escalated · {data.posted_today} of {data.rule.daily_cap} posts used today
+        </p>
+        <p className="text-[12px] text-faint">{data.rule.in_words} To watch a decision or close a watch, ask Bays in Slack.</p>
+      </div>
+      {data.watches.length === 0 ? (
+        <EmptyState>No decision is being watched yet. Bays opens a watch when a decision is put to a named person in a thread it is in, or when somebody says "Bays, watch this".</EmptyState>
+      ) : (
+        <>
+          <RecordTable<DecisionWatch>
+            label="Watched decisions"
+            rowKey={(w) => w.watch_id}
+            rows={paged.rows}
+            columns={[
+              { key: 'state', header: 'state', card: 'meta', className: 'card-meta', cell: (w) => <WatchState w={w} /> },
+              { key: 'decision', header: 'waiting on', card: 'title', width: '56ch', clip: true, title: (w) => w.decision, cell: (w) => w.decision },
+              { key: 'owner', header: 'owner', className: 'text-dim', cell: (w) => w.owner_name ?? w.owner_user_id },
+              {
+                key: 'next',
+                header: 'next',
+                className: 'tabular text-dim',
+                title: (w) => w.problem ?? w.close_reason ?? '',
+                cell: (w) => (w.status === 'watching' ? (w.problem ? w.problem : `${w.next_action}${w.next_action_when ? `, ${w.next_action_when}` : ''}`) : (w.close_reason ?? <span className="text-faint">closed</span>)),
+              },
+              {
+                key: 'where',
+                header: 'where',
+                className: 'tabular text-dim',
+                cell: (w) =>
+                  w.thread_link ? (
+                    <a className="text-accent hover:underline" href={w.thread_link} target="_blank" rel="noreferrer">
+                      thread
+                    </a>
+                  ) : w.record ? (
+                    w.record.id
+                  ) : (
+                    <span className="text-faint">not recorded</span>
+                  ),
+              },
+              { key: 'id', header: 'id', className: 'tabular text-faint', cell: (w) => w.watch_id },
+            ]}
+          />
+          <Pagination paged={paged} unit="watches" />
+        </>
+      )}
+    </div>
+  );
+}
+
 /* --------------------------------------------------------------------- page */
 
 export default function Bays() {
@@ -467,6 +541,8 @@ export default function Bays() {
       />
       {tab === 'Reminders' ? (
         <Reminders />
+      ) : tab === 'Decision watch' ? (
+        <DecisionWatches />
       ) : status === 'loading' && !data ? (
         <Loading />
       ) : status === 'error' && !data ? (
