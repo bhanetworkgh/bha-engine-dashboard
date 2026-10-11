@@ -291,6 +291,59 @@ export async function close(watchId: string, by: string, status: 'answered' | 'c
   return { ok: true, watch_id: watchId, status };
 }
 
+/* ---------------------------------------------------------------- update */
+
+export const UPDATABLE = ['sop_refs', 'ns_refs', 'next_step'] as const;
+export type Updatable = (typeof UPDATABLE)[number];
+export type UpdateResult =
+  | { ok: true; watch: WatchRow; changed: Array<{ field: Updatable; from: string | null; to: string | null }> }
+  | { ok: false; reason: string; message: string };
+
+/**
+ * Sets or adds to the references on a watch that is still open (2026-10-11,
+ * Jason, #bha-coordination 1791746835.121559: an SOP written after a watch was
+ * opened could not be attached to it, so its reminders could only say "this is
+ * quiet"). Three fields and no others: what is being waited on, who owes it and
+ * where are what the watch *is*, and changing those is a new watch. `append`
+ * adds to what is held instead of replacing it. Every change is a dated line in
+ * the watch's history and one `decision_watch_updated` event with both values.
+ */
+export async function update(watchId: string, by: string, changes: Partial<Record<Updatable, string | null>>, opts: { append?: boolean } = {}, now = new Date()): Promise<UpdateResult> {
+  const found = await query<WatchRow>(`SELECT * FROM engine_decision_watches WHERE watch_id = $1`, [watchId]);
+  const w = found.rows[0];
+  if (!w) return { ok: false, reason: 'not_found', message: `No watch has the id "${watchId}". Use list_decision_watches to find it.` };
+  if (w.status !== 'watching') return { ok: false, reason: 'already_closed', message: `${watchId} is ${w.status}, so its reminders are over and there is nothing to attach a reference to.` };
+  const may = by === w.created_by || by === w.owner_user_id || (APPROVERS as readonly string[]).includes(by);
+  if (!may) return { ok: false, reason: 'not_permitted', message: `${watchId} can be changed by the person who asked for it, by its owner <@${w.owner_user_id}>, or by Destiny or Jason.` };
+  const changed: Array<{ field: Updatable; from: string | null; to: string | null }> = [];
+  for (const field of UPDATABLE) {
+    if (!(field in changes)) continue;
+    const given = changes[field];
+    const from = w[field] ?? null;
+    let to = typeof given === 'string' ? given.trim() || null : null;
+    if (to && opts.append && from) to = from.toLowerCase().includes(to.toLowerCase()) ? from : `${from}; ${to}`;
+    if (to && to.length > 1200) return { ok: false, reason: 'too_long', message: `${field} would be ${to.length} characters; the limit is 1200.` };
+    if (to !== from) changed.push({ field, from, to });
+  }
+  if (!changed.length) return { ok: true, watch: w, changed };
+  const next = Object.fromEntries(changed.map((c) => [c.field, c.to])) as Partial<Record<Updatable, string | null>>;
+  const line = changed.map((c) => `${c.field} ${c.from ? 'changed' : 'set'}${c.to ? ` to "${clip(c.to, 200)}"` : ' to nothing'}`).join('; ');
+  const r = await query<WatchRow>(
+    `UPDATE engine_decision_watches
+        SET sop_refs = CASE WHEN $2::boolean THEN $3 ELSE sop_refs END,
+            ns_refs = CASE WHEN $4::boolean THEN $5 ELSE ns_refs END,
+            next_step = CASE WHEN $6::boolean THEN $7 ELSE next_step END,
+            history = history || $8::jsonb
+      WHERE watch_id = $1 AND status = 'watching'
+      RETURNING *`,
+    [watchId, 'sop_refs' in next, next.sop_refs ?? null, 'ns_refs' in next, next.ns_refs ?? null, 'next_step' in next, next.next_step ?? null, JSON.stringify([{ at: now.toISOString(), what: `updated by ${by}: ${line}` }])],
+  );
+  if (!r.rows[0]) return { ok: false, reason: 'already_closed', message: `${watchId} closed while it was being changed. Nothing was changed.` };
+  // Not deduped: every change is its own event.
+  await event('decision_watch_updated', r.rows[0], `dw:${watchId}:updated:${now.getTime()}:${Math.random().toString(36).slice(2, 8)}`, { by, changes: changed });
+  return { ok: true, watch: r.rows[0], changed };
+}
+
 /* ------------------------------------------------------------ Slack side */
 
 interface Msg {

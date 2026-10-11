@@ -2312,6 +2312,11 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
   be an approver, and on an agent token the channel must be one the engine
   knows (`slackTools.destinationVerdict`). No approval card in v0: unknown is
   refused.
+- **`update_decision_watch`** (Bays' scope; Jason, 11 Oct): sets or, with
+  `append`, adds to `sop_refs`, `ns_refs` and `next_step` on a watch still
+  open, for an SOP written after the watch was. Nothing else on a watch can be
+  changed. Each change is a line in its history and one
+  `decision_watch_updated` event with the old and new value.
 - Tools, write connection: `open_decision_watch`, `list_decision_watches`,
   `close_decision_watch` (Bays' scope) and `run_decision_watch` (a person;
   `dry_run` by default). `fixture: true` makes a marked test watch whose posts

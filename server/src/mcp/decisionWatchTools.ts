@@ -6,6 +6,8 @@
  *                             "Bays, watch this".
  *   `list_decision_watches` — what is being watched and what happened to the rest.
  *   `close_decision_watch`  — the requester, the owner, Destiny or Jason.
+ *   `update_decision_watch` — attach an SOP or North Star reference to a watch
+ *                             opened before the rule existed (in Bays' scope).
  *   `run_decision_watch`    — the sweep on demand, for a person on the
  *                             connector. In no agent's scope.
  *
@@ -139,7 +141,7 @@ export const openDecisionWatch: ToolDefinition = {
           watch: shown,
           message: r.created
             ? `Watching. If <@${r.watch.owner_user_id}> has not replied and nothing has moved in ${shown.wait}, a reminder is posted as Bays. Say this plainly to the person; do not promise anything more than that.`
-            : `This decision is already being watched as ${r.watch.watch_id}; no second watch was made.`,
+            : `This decision is already being watched as ${r.watch.watch_id}; no second watch was made, and nothing on it was changed. To attach an SOP or North Star reference to it, call update_decision_watch.`,
         },
       };
     }),
@@ -203,6 +205,46 @@ export const closeDecisionWatch: ToolDefinition = {
     }),
 };
 
+export const updateDecisionWatch: ToolDefinition = {
+  name: 'update_decision_watch',
+  description:
+    'Set or add to the references on a watch that is still open, by its watch_id (DW-…): sop_refs (the SOP title and BHARAG id its reminders point to), ns_refs (the North Star position) and next_step. Use it when an SOP is written, or found, after the watch was opened, so the next reminder names the rule and not only that the thread is quiet. Send only the fields to change. append: true ADDS to what the watch already holds (for a second SOP on the same watch); without it the field is replaced. An empty string clears a field. What is being waited on, the owner and the thread cannot be changed: that is a different watch. Only the person who asked for the watch, its owner, Destiny or Jason may change it. Every change is a dated line in the watch\'s history and a decision_watch_updated engine event carrying the old and new value. Returns {ok, changed, watch}. Audited on engine_mcp_writes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      watch_id: { type: 'string', description: 'DW-…' },
+      sop_refs: { type: 'string', description: 'The SOP it ties to: title and BHARAG id. Never invent one.' },
+      ns_refs: { type: 'string', description: 'The North Star position or lane ranking it ties to.' },
+      next_step: { type: 'string', description: 'The next logged step expected of the owner.' },
+      append: { type: 'boolean', description: 'Add to what is held (separated by "; ") instead of replacing it. A reference already held is not added twice.' },
+      requester_user_id: { type: 'string', description: 'Slack id of the person asking. Required.' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['watch_id', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { ...WRITE, title: 'Attach an SOP or North Star reference to a watched decision' },
+  handler: (args, deps) =>
+    audited('update_decision_watch', args, deps, async () => {
+      const id = str(args, 'watch_id');
+      const refuse = (reason: string, message: string) => ({ outcome: 'refused', detail: reason, target: id || null, answer: { ok: false, reason, message: `${message} Nothing was changed.` } });
+      const requester = bare(str(args, 'requester_user_id'));
+      if (!USER_RE.test(requester)) return refuse('requester_required', '"requester_user_id" must be the Slack id (U…) of the person asking.');
+      const changes: Partial<Record<dw.Updatable, string | null>> = {};
+      for (const f of dw.UPDATABLE) if (typeof args[f] === 'string') changes[f] = args[f] as string;
+      if (!Object.keys(changes).length) return refuse('nothing_to_change', 'Send at least one of sop_refs, ns_refs or next_step.');
+      if (args.dry_run === true) return { outcome: 'dry_run', detail: null, target: id, answer: { ok: true, dry_run: true, would_change: { watch_id: id, ...changes, append: args.append === true } } };
+      const r = await dw.update(id, requester, changes, { append: args.append === true });
+      if (!r.ok) return refuse(r.reason, r.message);
+      return {
+        outcome: r.changed.length ? 'applied' : 'unchanged',
+        detail: r.changed.length ? `${id}: ${r.changed.map((c) => c.field).join(', ')} changed by ${requester}${deps.agent ? ` through ${deps.agent}` : ''}` : `${id}: already holds this`,
+        target: id,
+        answer: { ok: true, watch_id: id, changed: r.changed, watch: dw.show(r.watch), message: r.changed.length ? `${id} updated. Its next reminder will carry this.` : `${id} already holds exactly this; nothing was changed.` },
+      };
+    }),
+};
+
 export const runDecisionWatch: ToolDefinition = {
   name: 'run_decision_watch',
   description:
@@ -226,4 +268,4 @@ export const runDecisionWatch: ToolDefinition = {
   },
 };
 
-export const DECISION_WATCH_WRITE_TOOLS: ToolDefinition[] = [openDecisionWatch, listDecisionWatches, closeDecisionWatch, runDecisionWatch];
+export const DECISION_WATCH_WRITE_TOOLS: ToolDefinition[] = [openDecisionWatch, listDecisionWatches, closeDecisionWatch, updateDecisionWatch, runDecisionWatch];
