@@ -324,6 +324,12 @@ services:
       # boot line says so rather than claiming a guarantee that isn't there.
       - key: READONLY_SECRETS_NORTH_STAR
         sync: false
+      # Slack Genie's read-only MCP token (11 Oct 2026, LOOP-1791653985161-QRTH):
+      # read_logstream and read_engine_events and nothing else. sync: false,
+      # the same value goes into Genie's own environment. Unset, Genie has no
+      # way in, and the boot line does not list it.
+      - key: READONLY_SECRETS_GENIE
+        sync: false
       # vFarm Early Access (20 Sep 2026). The n8n webhook that posts a new
       # lead into #vfarm-early-access. sync: false — it is a webhook URL with
       # its own Slack credential behind it, and no Slack token belongs in this

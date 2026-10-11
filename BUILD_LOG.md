@@ -12098,3 +12098,10 @@ Problem:    The PR was clean when opened at 04:52 Lagos time and conflicted by t
 Fix:        Both sides kept: the PR's seven-field description with main's evidence sentence added, the PR's counts and t0no_core_fields with main's evidence block. not_held is gone, replaced by fail_closed on each claim, as the PR intends. BUILD_LOG keeps both sets of entries. Research Twin's scope listed read_media_doctrine twice after the merge; one removed.
             On the merged tree: server build clean; t0no 11, VRFK 17, VRFK database 5, SE8L 19, twin-envelope 8, approvals 20, mcp-write all pass.
 Decision:   Merged before an eval run. read_media_doctrine now answers maturity_state where it answered maturity; the next eval run is the check that no agent leaned on the old name. DOCTRINE_GAP_WATCH_ENABLED is not set, so the gap watcher stays off and opens no incidents. Hardik's five owner decisions are open and are his and Jason's. Not done: the two new read tools are not on the three agents' n8n allow-lists yet.
+
+## 2026-10-11 15:25 — a read-only token for Genie, and the reference doc Kaiqi asked for (QRTH)
+Intent:     Kaiqi asked in #bha-coordination for a reference doc of what to wire for LOOP-1791653985161-QRTH once read access exists. Issue the access and write the doc.
+Files:      server/src/mcp/index.ts, server/src/index.ts, render.yaml, .env.example, docs/contracts/genie-logstream-read.md (new), CLAUDE.md
+Problem:    none.
+Fix:        A fourth entry in AGENT_KEYS: agent genie, READONLY_SECRETS_GENIE, read, two tools (read_logstream, read_engine_events). Proved on a local server: tools/list returns exactly the two, read_engine_events answers and is logged as "agent token: genie", find_records is refused by name, a wrong token is a 404.
+Decision:   A scoped MCP token and not a new plain read route: the three agents already read through these two tools, so Genie gets the same answers and the same log line with no second read path to keep in step. The token value is set on the Render service and handed to Kaiqi by Destiny; it is in no file.

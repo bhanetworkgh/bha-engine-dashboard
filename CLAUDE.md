@@ -2168,8 +2168,10 @@ autopay, no pay wiring, no destructive automated action).
   narrowed by `event_type`, `subject_id`, `lane`. A detail past 600 characters
   is cut and marked; the answer is budgeted like `read_logstream`'s; an empty
   window says none was recorded, not that nothing happened. One `read` line per
-  call on `engine_writes`. **Genie is not wired**: it is Kaiqi's service and
-  reads neither yet.
+  call on `engine_writes`. **Genie has a read-only token for these two tools and
+  nothing else** (11 Oct, `READONLY_SECRETS_GENIE`, agent `genie` in `AGENT_KEYS`;
+  `docs/contracts/genie-logstream-read.md` is Kaiqi's reference). Wiring the call
+  inside Genie is his, and it is not done yet.
 - **Empty reads are counted, and nothing decides on them** (same day).
   `Bays — Daily Doc Rotator` posts one `empty_read_check` event per run to
   `/api/engine/events` (reads, empty, which channels; a clean run too, so a

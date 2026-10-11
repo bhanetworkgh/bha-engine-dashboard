@@ -2186,7 +2186,7 @@ async function boot(): Promise<void> {
       console.log(
         agents.length
           ? `  mcp:      agent tokens — ${agents.join('; ')}. Path /mcp/<token> or Bearer on /mcp/agent.`
-          : `  mcp:      no agent tokens set (READONLY_SECRETS_NORTH_STAR, MCP_AGENT_TOKEN_RESEARCH_TWIN, MCP_AGENT_TOKEN_BAYS) — every agent connects on the shared secret and writes carry no agent name.`,
+          : `  mcp:      no agent tokens set (READONLY_SECRETS_NORTH_STAR, MCP_AGENT_TOKEN_RESEARCH_TWIN, MCP_AGENT_TOKEN_BAYS, READONLY_SECRETS_GENIE) — every agent connects on the shared secret and writes carry no agent name.`,
       );
     }
     // The Slack and Google credentials the file and Doc tools need (2026-09-24).
