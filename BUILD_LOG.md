@@ -12119,3 +12119,10 @@ Fix:        EVAL-202610111407 (execution 32850, 14:07 to 14:49 UTC): 96 of 96, 3
             Third independent re-score, read-only: 74 of 120, 6.2, no dimension moved. Stored by migration 72.
 Decision:   6.5 was not reached and nothing was staged to reach it. The reviewer's reasons stand: the eval still follows the publish, Bays' tool list is uncut, no token rotation is on record, and my own change to the eval floor this morning counts against change control. Research Twin 96007353 keeps its no_eval verdict: the check takes the first run after a change and that window closed at 08:27 UTC.
             Not done: the two leftover Codex rows are deleted only from the Codex page by typed id, which is Destiny's step. Bays' inventory row is from 10 Oct.
+
+## 2026-10-11 16:35 — delete_record takes a codex submission that never finished processing
+Intent:     Destiny: delete the two leftover duplicate submissions of the 6 Oct log that Jason's review nudge kept counting.
+Files:      server/src/mcp/writeTools.ts, CLAUDE.md
+Problem:    delete_record refuses every codex row, and the Codex page's typed-id delete needs the page's session.
+Fix:        One narrow exception: a codex row with no Codex Entry ID, no Processed At, no Jason Reviewed At and not Approved or Input Added can be deleted over MCP with the usual confirm, record_deletions copy and audit line. A processed log is refused as before. mcp-write test passes.
+Decision:   The nudge is the Bays scheduled task "Log review nudge -- Jason", which lists every Pending codex row older than 6 hours. Its rule (count only logs that were processed) is an agent task change and stays in LOOP-1791727839183-V8ZC, to go through the change checklist with an eval before the publish.

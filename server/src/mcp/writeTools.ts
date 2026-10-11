@@ -588,7 +588,19 @@ const deleteRecord: ToolDefinition = {
     const requester = s(args, 'requester_user_id');
     const ctx = ctxFor('delete_record', deps);
     const audit = await auditOpen({ tool: 'delete_record', args, access: deps.access, kind: spec.kind, requester, dry_run: dry });
-    if (!spec.deletable) {
+    // 2026-10-11, Destiny: one narrow way through for codex. A submission that never finished
+    // processing (no Codex Entry ID, no Processed At, not reviewed) is not a log anybody can
+    // review or pay; two such duplicates sat Pending for five days and Jason's review nudge
+    // counted them. Anything that was processed keeps the page's typed-id delete as its only way out.
+    let unprocessedCodex = false;
+    if (!spec.deletable && spec.kind === 'codex') {
+      const probe = await target(spec.kind, args, ctx).catch(() => null);
+      const f = (probe?.fields ?? {}) as Record<string, unknown>;
+      const has = (k: string) => String(f[k] ?? '').trim().length > 0;
+      const reviewed = ['approved', 'input added'].includes(String(f['Jason Status'] ?? '').trim().toLowerCase());
+      unprocessedCodex = Boolean(probe) && !has('Codex Entry ID') && !has('Processed At') && !has('Jason Reviewed At') && !reviewed;
+    }
+    if (!spec.deletable && !unprocessedCodex) {
       const r: guards.Refusal = { ok: false, reason: 'not_writable', message: `${spec.kind} cannot be hard-deleted over MCP. A Codex entry is removed only from the Codex page, confirmed by typing its id back, where the whole flow is.`, checks: [] };
       await auditClose(audit, { outcome: 'refused', detail: r.message });
       return refused(r, { audit_id: audit });
