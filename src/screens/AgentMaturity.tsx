@@ -131,7 +131,7 @@ function Scorecard({ tabs }: { tabs: ReactNode }) {
                 </td>
                 <td className="px-3 py-2 tabular text-dim">
                   {a.tools.length} · {a.write_tools} write
-                  {a.unapproved_write_tools > 0 ? <div className="text-[12px] text-faint">{a.unapproved_write_tools} without approval</div> : <div className="text-[12px] text-faint">all writes approved</div>}
+                  {a.unapproved_write_tools > 0 ? <div className="text-[12px] text-faint">{a.unapproved_write_tools} without approval{a.destination_guarded_tools > 0 ? `, ${a.destination_guarded_tools} of them held for a person when the destination is unknown` : ''}</div> : <div className="text-[12px] text-faint">all writes approved</div>}
                 </td>
                 <td className="px-3 py-2">
                   {a.mcp_servers.length === 0 ? (

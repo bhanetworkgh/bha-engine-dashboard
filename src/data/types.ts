@@ -3565,6 +3565,7 @@ export interface AgentInventoryRow {
   updated_at: string;
   write_tools: number;
   unapproved_write_tools: number;
+  destination_guarded_tools: number;
   scheduled_tasks: number;
   tokens_in_url: number;
   stale: boolean;

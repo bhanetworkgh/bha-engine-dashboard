@@ -12028,3 +12028,10 @@ Fix:        The draft was put back to "BHARAG Cluster". A key per agent for the 
             Publish check, live: the inventory was recorded for Research Twin (96007353, audit 1620) and North Star (08671da0, audit 1621) at 04:29 UTC. Two rows in engine_agent_versions. At 04:34:22 the dashboard asked for one run; execution 32469 started on the webhook trigger half a second later. EVAL-202610110434: 96 of 96. Both rows settled as passed (Research Twin 9 of 9 cases, North Star 11 of 11), no alert.
             Cost, measured for the first time: account usage went from $3,269.20 to $3,282.82 during the run, so $13.62 for 96 results, about 14 cents each. The $15 floor was an estimate and is close to right. Credit left after the run: $12.18, which is under the floor, so the next run will not start until the account is topped up.
 Decision:   The North Star row was recorded with its five skill descriptions shortened by hand. They do not change the derived row, but the inventory is meant to be what n8n returned, so it is recorded again in full before the re-score.
+
+## 2026-10-11 06:35 — the inventory says which write tools are behind the destination guard
+Intent:     the inventory showed Slack_Send_Message, send_nudge and post_file as plain "writes without approval", which stopped being the whole truth this morning.
+Files:      server/src/agentInventory.ts, src/screens/AgentMaturity.tsx, src/data/types.ts.
+Problem:    none.
+Fix:        A tool gains `guard: "destination"` when it is send_nudge, post_file or post_channel_message on an agent token, or the workflow tool Bays — Slack Send (named by workflow id, because n8n's config cannot say it). `approval` stays false: a known destination still goes at once. The stored rows are re-derived at boot from the config they hold; n8n is not re-read.
+Decision:   Not counted as approved. "Held for a person when the destination is unknown" is a different statement from "always asks", and the page says the first.

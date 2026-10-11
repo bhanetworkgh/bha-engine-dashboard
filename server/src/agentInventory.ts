@@ -29,7 +29,14 @@ import { createHash } from 'node:crypto';
 import { nowIso } from './db';
 import { query } from './pg';
 import { mcpWriteToolNames } from './mcp/tools';
-import { GATED_TOOLS } from './approvals';
+import { DESTINATION_GATED_TOOLS, GATED_TOOLS } from './approvals';
+
+/**
+ * n8n workflow tools that ask this server before they post (11 Oct 2026):
+ * `Bays — Slack Send` checks its destination at /api/engine/slack-destination.
+ * n8n's config says nothing about that, so it is named here by workflow id.
+ */
+export const DESTINATION_GUARDED_WORKFLOWS: ReadonlyArray<string> = ['7oha1SgDsAtVas0j'];
 
 export const STALE_AFTER_DAYS = 7;
 
@@ -49,6 +56,8 @@ export interface InventoryTool {
   /** How `writes` was decided. */
   writes_rule: 'server registry' | 'name verb' | 'none matched';
   approval: boolean;
+  /** 'destination': it acts at once on a known destination and waits for a person on an unknown one. Held by this server, not by n8n. */
+  guard?: 'destination';
 }
 
 export interface InventoryMcpServer {
@@ -162,6 +171,7 @@ export function derive(result: Dict, opts: { owner?: string | null; recordedBy?:
       writes,
       writes_rule: writes ? 'name verb' : 'none matched',
       approval: t.requireApproval === true,
+      ...(type === 'workflow' && DESTINATION_GUARDED_WORKFLOWS.includes(str(t.workflowId) ?? str(t.workflow) ?? '') ? { guard: 'destination' as const } : {}),
     });
   }
 
@@ -191,7 +201,7 @@ export function derive(result: Dict, opts: { owner?: string | null; recordedBy?:
       server_gated: serverGated,
     });
     for (const tn of allowed) {
-      tools.push({ name: tn, type: 'mcp', via: mname, writes: writeNames.has(tn), writes_rule: 'server registry', approval: approved.includes(tn) });
+      tools.push({ name: tn, type: 'mcp', via: mname, writes: writeNames.has(tn), writes_rule: 'server registry', approval: approved.includes(tn), ...(onAgentToken && DESTINATION_GATED_TOOLS.includes(tn) ? { guard: 'destination' as const } : {}) });
     }
   }
   if (str(config.credential)) credentials.push({ id: str(config.credential), name: 'model credential', type: 'model' });
@@ -352,6 +362,8 @@ export interface InventoryView {
     memory_enabled: boolean | null;
     write_tools: number;
     unapproved_write_tools: number;
+    /** Of the writes without approval, how many wait for a person when the destination is unknown. */
+    destination_guarded_tools: number;
     scheduled_tasks: number;
     tokens_in_url: number;
     stale: boolean;
@@ -414,6 +426,7 @@ export async function view(): Promise<InventoryView> {
       memory_enabled: memory && typeof memory.enabled === 'boolean' ? (memory.enabled as boolean) : null,
       write_tools: r.tools.filter((t) => t.writes).length,
       unapproved_write_tools: r.tools.filter((t) => t.writes && !t.approval).length,
+      destination_guarded_tools: r.tools.filter((t) => t.guard === 'destination').length,
       scheduled_tasks: r.tasks.filter((t) => t.enabled).length,
       tokens_in_url: r.mcp_servers.filter((m) => m.token_in === 'url path').length,
       stale: new Date(r.read_at).getTime() < cutoff,
