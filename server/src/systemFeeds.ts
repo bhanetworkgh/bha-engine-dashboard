@@ -29,6 +29,7 @@
 import { query, withTransaction } from './pg';
 import * as events from './events';
 import { BURN_IN_STATES, burnInState } from './monitoringTwin';
+import { evidenceBlock } from './evidenceRules';
 
 export class FeedError extends Error {
   constructor(public status: number, message: string) {
@@ -1124,6 +1125,7 @@ export async function doctrineClaims(f: DoctrineReadFilter = {}) {
     retired: d.doctrines.filter((x) => x.retired).map((x) => x.doctrine_id),
     claims,
     counts: { doctrines_in_force: inForce.length, claims_in_force: all.length, claims_returned: claims.length, by_maturity: tally(claims.map((c) => c.maturity), '(none)') },
+    evidence: evidenceBlock(),
     not_held: {
       fields: [...T0NO_FIELDS_NOT_HELD],
       note: 'T0NO’s core fields this table does not carry yet. A reader must treat them as unknown and fail closed, never assume a default.',

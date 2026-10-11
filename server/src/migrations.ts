@@ -2963,6 +2963,42 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE engine_monitoring_recurrences ADD CONSTRAINT engine_monitoring_recurrences_job_state_check CHECK (job_state IN ('pending', 'opened', 'not_opened_simulated', 'failed', 'held', 'not_reopened'))`,
     ],
   },
+  {
+    id: 69,
+    name: 'tomato profile v2: cabinet cycle 1 starts at first flower (IMFX)',
+    statements: [
+      // Jason's locking message of 4 Oct 2026 (LOOP-1790871612769-IMFX): single variety PKM 1; cycle 1
+      // starts at first-flower entry; cabinet-relative timing: fruit set about 7 to 10 days after entry,
+      // first pick about 40 to 45 days, last pick about 75 to 85 days; nursery and vegetative stages
+      // happen at the supplier and are reference only. The ranges are v1's own, stage for stage: only
+      // the days and the boundary change. Each stage ends at the upper end of Jason's range, so a
+      // stage's targets are never applied early. Only where v1 is held and v2 is not.
+      `INSERT INTO engine_monitoring_profiles (profile_id, version, previous_version, crop, reason, changed_by, content)
+       SELECT p.profile_id, 2, 1, p.crop,
+              'Cabinet cycle 1 starts at first-flower entry, not at transplant (Jason, 4 Oct 2026, LOOP-1790871612769-IMFX). Day 0 is entry at first flower: fruit set about 7 to 10 days after entry, first pick about 40 to 45 days, last pick about 75 to 85 days. Nursery and vegetative stages happen at the supplier this cycle and are reference only. Target ranges are unchanged from v1.',
+              'Destiny (IMFX wiring)',
+              jsonb_build_object(
+                'crop', p.content->'crop',
+                'day0', 'first_flower_entry',
+                'reference_only_stages', jsonb_build_array(
+                  jsonb_build_object('stage', 'nursery', 'where', 'supplier', 'note', 'Sowing to transplant-ready sapling. Not run in the cabinet this cycle.'),
+                  jsonb_build_object('stage', 'vegetative', 'where', 'supplier', 'note', 'Up to first flower. Not run in the cabinet this cycle; v1 holds its ranges for reference.')
+                ),
+                'stages', jsonb_build_array(
+                  (SELECT s || jsonb_build_object('from_day', 0, 'to_day', 9) FROM jsonb_array_elements(p.content->'stages') s WHERE s->>'stage' = 'flowering'),
+                  (SELECT s || jsonb_build_object('from_day', 10, 'to_day', 44) FROM jsonb_array_elements(p.content->'stages') s WHERE s->>'stage' = 'fruit_set'),
+                  (SELECT s || jsonb_build_object('from_day', 45, 'to_day', 85) FROM jsonb_array_elements(p.content->'stages') s WHERE s->>'stage' = 'harvest')
+                ),
+                'sources', (p.content->'sources') || jsonb_build_array(
+                  'Cabinet-relative timing and the first-flower boundary: Jason Bays, locking message of 4 Oct 2026 (thread C0ASMPYQLG3/1790779143.330719), on LOOP-1790871612769-IMFX. These timings are an agronomy reference, never cabinet proof.'
+                )
+              )
+         FROM engine_monitoring_profiles p
+        WHERE p.profile_id = 'tomato-dwarf-determinate' AND p.version = 1
+          AND (SELECT count(*) FROM jsonb_array_elements(p.content->'stages') s WHERE s->>'stage' IN ('flowering', 'fruit_set', 'harvest')) = 3
+          AND NOT EXISTS (SELECT 1 FROM engine_monitoring_profiles q WHERE q.profile_id = p.profile_id AND q.version = 2)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

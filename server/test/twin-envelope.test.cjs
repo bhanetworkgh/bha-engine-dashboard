@@ -121,6 +121,36 @@ const req = (m) => require(path.join(DIST, 'server/src', m));
       { s: 1, r: 1, n: 1 },
     );
     ok('each incident carries its retry state, and the farm counts them');
+
+    // The cycle boundary and the evidence rules (IMFX).
+    const PROFILE = `test-env-profile-${t}`;
+    const stage = (name, from, to) => ({ stage: name, from_day: from, to_day: to, targets: { temperature: { min: 18, max: 27, unit: 'C', source: 'test' } } });
+    const profile = (extra) => ({ profile_id: PROFILE, version: 1, crop: 'tomato', reason: 'test', stages: [stage('flowering', 0, 9), stage('fruit_set', 10, 44)], ...extra });
+    await assert.rejects(() => twin.storeProfile(profile({ day0: 'sowing' })), (e) => e.status === 422 && /day0 "sowing"/.test(e.message));
+    await assert.rejects(
+      () => twin.storeProfile(profile({ reference_only_stages: [{ stage: 'flowering', where: 'supplier' }] })),
+      (e) => e.status === 422 && /never both/.test(e.message),
+    );
+    await twin.storeProfile(profile({ day0: 'first_flower_entry', reference_only_stages: [{ stage: 'nursery', where: 'supplier' }, { stage: 'vegetative', where: 'supplier' }] }));
+    await twin.storeCycle({ farm_id: FULL, profile_id: PROFILE, transplanted_at: iso(t - 3 * 86400e3), synthetic: true });
+    const again = await twin.monitoringData();
+    const cyc = again.farms.find((f) => f.farm_id === FULL).cycle;
+    assert.equal(cyc.day0, 'first_flower_entry');
+    assert.match(cyc.day0_means, /at the supplier, not in the cabinet/);
+    assert.deepEqual(cyc.reference_only_stages.map((r) => r.stage), ['nursery', 'vegetative']);
+    assert.equal(cyc.stage.stage, 'flowering');
+    ok('a cycle says where day 0 is and which stages the cabinet never runs; a stage cannot be both');
+
+    assert.equal(again.farms.find((f) => f.farm_id === FULL).evidence_class, 'simulated');
+    assert.equal(again.profiles.find((p) => p.profile_id === PROFILE).evidence_class, 'agronomy_reference');
+    const ids = again.evidence.rules.map((r) => r.id);
+    for (const id of ['COIMBATORE_REFERENCE_ONLY', 'CABINET_CYCLE_STARTS_AT_FIRST_FLOWER', 'SIMULATED_IS_NOT_THE_RACK', 'UPTIME_FROM_INCIDENTS_ONLY']) assert.ok(ids.includes(id), id);
+    const doctrine = await feeds.doctrineClaims();
+    assert.deepEqual(doctrine.evidence.rules.map((r) => r.id), ids);
+    assert.match(doctrine.evidence.rules[0].rule, /never cabinet proof/);
+    ok('the evidence rules are on both reads, the same list, and Coimbatore is reference only');
+    await query(`DELETE FROM engine_monitoring_cycles WHERE farm_id = $1`, [FULL]);
+    await query(`DELETE FROM engine_monitoring_profiles WHERE profile_id = $1`, [PROFILE]);
   } finally {
     await query(`DELETE FROM engine_monitoring_incidents WHERE incident_id LIKE $1`, [`INC-TEST-ENV-${t}-%`]);
     await query(`DELETE FROM engine_monitoring_device_state WHERE device_id LIKE $1 OR device_id LIKE $2`, [`${BARE}-%`, `${FULL}-%`]);

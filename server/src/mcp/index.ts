@@ -166,6 +166,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'read_logstream',
         // 2026-10-10: the engine's own events (engine.event.v1), Jason's go-time notice.
         'read_engine_events',
+        // 2026-10-11: what the cabinet is doing, its cycle boundary and the evidence rules (IMFX).
+        'read_monitoring_twin',
       ]),
     },
     {
@@ -178,6 +180,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-10: a fault's own history, read before writing the finding on a Logstream job.
         'read_logstream',
         'read_engine_events',
+        // 2026-10-11: the crop cycle's real boundary and what Coimbatore data may be used for (IMFX),
+        // so a finding never infers a stage the cabinet does not run.
+        'read_monitoring_twin', 'read_media_doctrine',
       ]),
     },
     {

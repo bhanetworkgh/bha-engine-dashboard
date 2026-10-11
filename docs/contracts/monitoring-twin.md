@@ -46,6 +46,19 @@ Every farm in `monitoring.twin.v1` carries `envelope`, six fields, always presen
 
 `envelope.sources` says where each identity value came from, and reads "not sent by vFarm yet" for one that is `null`. Every device carries `cabinet_id`, `config_hash` and `burn_in_state` too (its own, else its farm's). Every incident carries its own `retry_envelope`: `self_healed` when it cleared on its own or the healer or recovery watcher recovered it; `retrying` while it is open and judged again every minute; `needs_human` when the healer used its attempts, a recovery failed again, or it has been open over 60 minutes.
 
+## Where day 0 is, and what the cabinet never runs (11 Oct 2026, LOOP-1790871612769-IMFX)
+
+Jason locked this on 4 Oct: cabinet cycle 1 starts at **first-flower entry**, not at sowing. Nursery and vegetative stages happen at the supplier this cycle and are reference only.
+
+- A profile may say `day0`: `transplant` (the default) or `first_flower_entry`, and `reference_only_stages`: `[{ stage, where, note }]`, stages of the crop that happen outside the cabinet. A stage is judged in the cabinet or it is reference only, never both.
+- `tomato-dwarf-determinate` **v2** is the cabinet's profile: flowering days 0 to 9, fruit set and development days 10 to 44, harvest days 45 to 85, counted from entry. Ranges are v1's. v1 stays readable and keeps the vegetative ranges for reference.
+- Every cycle in the read says `day0`, `day0_means` and `reference_only_stages`. A reader never reports a reference-only stage as one the cabinet ran.
+- For a v2 cycle, `transplanted_at` on `POST /api/engine/monitoring-cycle` is the day of entry at first flower. The field keeps its name.
+
+## Evidence rules
+
+`evidence` on this read, and on `read_media_doctrine`, carries the rules held in code (`server/src/evidenceRules.ts`): Coimbatore data is an agronomy reference only, never cabinet proof; cabinet cycle 1 starts at first flower; a simulated farm is never the real rack; uptime comes from this twin's incidents and nothing else. Each farm says its `evidence_class` (`cabinet_telemetry` or `simulated`) and each profile says `agronomy_reference`.
+
 ## Crop profiles are versioned
 
 `POST /api/engine/monitoring-profile` (same `x-dashboard-key`):
@@ -75,4 +88,4 @@ A snapshot whose farms carry `"synthetic": true` goes through the same route and
 
 - Incidents are held on the dashboard; they are not yet written to the BHARAG incident ledger.
 - The launch gates (uptime X%, incident envelope Y, yield N) are Jegan's to propose from the first real snapshots (IMFX). Nothing is gated on them yet.
-- North Star and Bays do not have `read_monitoring_twin` in their token scope yet. That goes through the agent checklist as its own step.
+- North Star and Research Twin read this with `read_monitoring_twin` from 11 Oct 2026. Bays does not yet.

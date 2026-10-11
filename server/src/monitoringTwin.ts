@@ -50,6 +50,7 @@ import * as bharag from './bharag';
 import * as recurrence from './monitoringRecurrence';
 import * as mirror from './mirror';
 import * as timers from './timers';
+import { evidenceBlock } from './evidenceRules';
 
 export class TwinError extends Error {
   constructor(
@@ -100,6 +101,13 @@ export interface Stage {
  * content is a 409 — a correction is the next version, carrying the reason, and
  * the old one stays readable. Versions go up by one, so none is skipped.
  */
+/** Where a profile's day 0 is. A profile that does not say counts from transplant. */
+export const DAY0 = ['transplant', 'first_flower_entry'] as const;
+const DAY0_WORDS: Record<string, string> = {
+  transplant: 'Day 0 is the day the plants were transplanted.',
+  first_flower_entry: 'Day 0 is the day the plants entered the cabinet at first flower. Everything before it happened at the supplier, not in the cabinet.',
+};
+
 export async function storeProfile(body: Obj) {
   const profileId = str(body.profile_id);
   if (!profileId || !/^[A-Za-z0-9_.-]{2,60}$/.test(profileId)) throw new TwinError(422, 'profile_id is required: letters, digits, _ . - (2 to 60), e.g. "tomato-dwarf-determinate".');
@@ -135,7 +143,18 @@ export async function storeProfile(body: Obj) {
   for (let i = 1; i < stages.length; i++) {
     if (stages[i].from_day <= stages[i - 1].to_day) throw new TwinError(422, `stages[${i}] (${stages[i].stage}) starts on day ${stages[i].from_day}, inside ${stages[i - 1].stage} (to day ${stages[i - 1].to_day}). Stages run in order and do not overlap.`);
   }
-  const content = { crop, stages, sources: Array.isArray(body.sources) ? body.sources : [] };
+  // Where day 0 is, and which stages happen somewhere else (IMFX, 4 Oct 2026). Both optional;
+  // a profile that says neither counts from transplant and has no reference-only stage, as v1 does.
+  const day0 = body.day0 === undefined || body.day0 === null ? null : str(body.day0);
+  if (day0 !== null && !(DAY0 as readonly string[]).includes(day0)) throw new TwinError(422, `day0 "${day0}" is not one of ${DAY0.join(', ')}.`);
+  const refOnly = body.reference_only_stages === undefined || body.reference_only_stages === null ? [] : body.reference_only_stages;
+  if (!Array.isArray(refOnly) || refOnly.some((r) => !isObj(r) || !str(r.stage) || !str(r.where))) throw new TwinError(422, 'reference_only_stages is a list of { stage, where, note? }: stages of the crop that happen outside the cabinet.');
+  for (const r of refOnly as Obj[]) {
+    if (stages.some((s) => s.stage === str(r.stage))) throw new TwinError(422, `reference_only_stages names "${str(r.stage)}", which is also one of this profile's own stages. A stage is judged in the cabinet or it is reference only, never both.`);
+  }
+  const content: { crop: string; stages: Stage[]; sources: unknown[]; day0?: string; reference_only_stages?: unknown[] } = { crop, stages, sources: Array.isArray(body.sources) ? body.sources : [] };
+  if (day0 !== null) content.day0 = day0;
+  if ((refOnly as unknown[]).length) content.reference_only_stages = (refOnly as Obj[]).map((r) => ({ stage: str(r.stage), where: str(r.where), note: str(r.note) }));
   const dry = body.dry_run === true;
   return withTransaction(async (db) => {
     const held = await db.query<{ content: unknown; reason: string }>(`SELECT content, reason FROM engine_monitoring_profiles WHERE profile_id = $1 AND version = $2`, [profileId, version]);
@@ -691,11 +710,11 @@ export async function monitoringData(db: Queryable = { query }) {
          FROM engine_vfarm_devices d LEFT JOIN engine_monitoring_device_state s ON s.device_id = d.device_id
         ORDER BY d.farm_id, d.device_id`,
     ),
-    db.query<{ farm_id: string; profile_id: string; profile_version: number; transplanted_at: string; time_scale: number; synthetic: boolean; note: string | null; content: { crop: string; stages: Stage[] } }>(
+    db.query<{ farm_id: string; profile_id: string; profile_version: number; transplanted_at: string; time_scale: number; synthetic: boolean; note: string | null; content: { crop: string; stages: Stage[]; day0?: string; reference_only_stages?: Array<{ stage: string; where: string; note: string | null }> } }>(
       `SELECT c.farm_id, c.profile_id, c.profile_version, ${ISO('c.transplanted_at')} AS transplanted_at, c.time_scale::float8 AS time_scale, c.synthetic, c.note, p.content
          FROM engine_monitoring_cycles c JOIN engine_monitoring_profiles p ON p.profile_id = c.profile_id AND p.version = c.profile_version`,
     ),
-    db.query<{ profile_id: string; version: number; previous_version: number | null; crop: string; reason: string; changed_by: string | null; created_at: string; content: { stages: Stage[]; sources?: unknown[] } }>(
+    db.query<{ profile_id: string; version: number; previous_version: number | null; crop: string; reason: string; changed_by: string | null; created_at: string; content: { stages: Stage[]; sources?: unknown[]; day0?: string; reference_only_stages?: unknown[] } }>(
       `SELECT profile_id, version, previous_version, crop, reason, changed_by, ${ISO('created_at')} AS created_at, content FROM engine_monitoring_profiles ORDER BY profile_id, version DESC`,
     ),
     db.query<{ incident_id: string; farm_id: string; device_id: string | null; kind: string; metric: string | null; severity: string; detail: string; first_value: number | null; last_value: number | null; range_min: number | null; range_max: number | null; stage: string | null; synthetic: boolean; opened_at: string; closed_at: string | null; close_reason: string | null; ledger_id: string | null; ledger_state: string; ledger_error: string | null; ledger_attempts: number; ledger_synced_at: string | null; opened_ms: string; closed_ms: string | null }>(
@@ -758,6 +777,7 @@ export async function monitoringData(db: Queryable = { query }) {
     for (const i of [...openInc, ...recentInc]) retryCounts[i.retry_envelope.state]++;
     return {
       farm_id: f.farm_id,
+      evidence_class: f.synthetic ? 'simulated' : 'cabinet_telemetry',
       envelope: {
         farm_id: f.farm_id,
         cabinet_id: identity.cabinet_id,
@@ -782,6 +802,9 @@ export async function monitoringData(db: Queryable = { query }) {
             stage: st?.stage ? { stage: st.stage.stage, label: st.stage.label, from_day: st.stage.from_day, to_day: st.stage.to_day, targets: st.stage.targets } : null,
             before_start: st?.before_start ?? false,
             after_end: st?.after_end ?? false,
+            day0: cyc.content.day0 ?? 'transplant',
+            day0_means: DAY0_WORDS[cyc.content.day0 ?? 'transplant'],
+            reference_only_stages: cyc.content.reference_only_stages ?? [],
           }
         : null,
       uptime: {
@@ -831,7 +854,19 @@ export async function monitoringData(db: Queryable = { query }) {
       profile_id,
       crop: versions[0].crop,
       current_version: versions[0].version,
-      versions: versions.map((v) => ({ version: v.version, previous_version: v.previous_version, reason: v.reason, changed_by: v.changed_by, created_at: v.created_at, stages: v.content.stages, sources: v.content.sources ?? [] })),
+      evidence_class: 'agronomy_reference',
+      versions: versions.map((v) => ({
+        version: v.version,
+        previous_version: v.previous_version,
+        reason: v.reason,
+        changed_by: v.changed_by,
+        created_at: v.created_at,
+        day0: v.content.day0 ?? 'transplant',
+        day0_means: DAY0_WORDS[v.content.day0 ?? 'transplant'],
+        reference_only_stages: v.content.reference_only_stages ?? [],
+        stages: v.content.stages,
+        sources: v.content.sources ?? [],
+      })),
     })),
     ledger: {
       lane: LEDGER_LANE,
@@ -852,6 +887,7 @@ export async function monitoringData(db: Queryable = { query }) {
       },
       note: 'Every farm carries envelope; every device carries cabinet_id, config_hash and burn_in_state (its own, else its farm\'s); every incident carries retry_envelope. cabinet_id, config_hash and burn_in_state are read from the vFarm snapshot and are null, with the source saying so, until vFarm sends them. Nothing here is guessed.',
     },
+    evidence: evidenceBlock(),
     recurrence: await recurrence.recent(),
     counts: {
       farms: farmsOut.filter((f) => !f.synthetic).length,

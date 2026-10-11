@@ -1193,6 +1193,24 @@ fields are read from the snapshot and never guessed**: null, with the source
 migration: the snapshot's farm and device objects were already stored whole.
 `npm run test:twin-envelope` pins it.
 
+**Evidence rules, and where the cabinet's cycle starts** (2026-10-11, Destiny —
+LOOP-1790871612769-IMFX, Jason's locking message of 4 Oct).
+`server/src/evidenceRules.ts` holds the rules in code: Coimbatore data is an
+agronomy reference only, never cabinet proof; cabinet cycle 1 starts at
+first-flower entry; a simulated farm is never the real rack; uptime comes from
+the twin's incidents and nothing else. `evidenceBlock()` is returned whole by
+both `read_monitoring_twin` and `read_media_doctrine`, so the two cannot word a
+rule differently. **Changing a rule is a new Architect Answer and a BUILD_LOG
+line.** A crop profile may say `day0` (`transplant`, the default, or
+`first_flower_entry`) and `reference_only_stages` (stages that happen outside
+the cabinet; a stage is never both). Migration 69 adds
+`tomato-dwarf-determinate` v2 from v1's own ranges: flowering days 0 to 9,
+fruit set 10 to 44, harvest 45 to 85, from entry at first flower, nursery and
+vegetative reference only. `read_monitoring_twin` is in North Star's and
+Research Twin's scope, and `read_media_doctrine` in Research Twin's, from the
+same day. Uptime was already counted only from the twin's own offline and
+feed-silent incidents at 90 s and 900 s; nothing was changed there.
+
 **A monitoring incident that keeps coming back opens one Research Twin job**
 (2026-10-04, Destiny). `server/src/monitoringRecurrence.ts`, migration 55,
 `engine_monitoring_recurrences`. The rule is Canon v1 as Jason approved it on
