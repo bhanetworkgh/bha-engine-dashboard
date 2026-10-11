@@ -213,6 +213,15 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'read_logstream', 'read_engine_events',
       ]),
     },
+    {
+      // 2026-10-11: Slack Genie (Kaiqi's service), LOOP-1791653985161-QRTH. Jason's go-time notice:
+      // Genie reads the same two surfaces the three agents read, read-only, so it never builds its
+      // own view of incidents. A read token can never resolve to write.
+      agent: 'genie',
+      env: 'READONLY_SECRETS_GENIE',
+      access: 'read',
+      tools: new Set(['read_logstream', 'read_engine_events']),
+    },
   ] as Array<Omit<AgentKey, 'secret'>>
 )
   .map((k) => ({ ...k, secret: process.env[k.env]?.trim() || '' }))
