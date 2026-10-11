@@ -46,6 +46,7 @@ import * as bharag from './bharag';
 import { monthly } from './monthly';
 import { isStatKind, stats } from './stats';
 import { N8N_API_VAR, n8nBase, n8nConfigured } from './n8n';
+import { N8N_MCP_VAR, n8nMcpConfigured, n8nMcpUrl } from './n8nMcp';
 import * as slack from './slack';
 import * as google from './google';
 import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, agentTokensConfigured, MCP_SECRET_VAR, MCP_WRITE_TOKEN_VAR, MCP_ONE_URL } from './mcp';
@@ -2154,6 +2155,14 @@ async function boot(): Promise<void> {
       n8nConfigured()
         ? `  n8n:      ${n8nBase()} (${N8N_API_VAR} set) \u2014 executions polled every ${Math.round(executions.POLL_EVERY_MS / 1000)}s, one row per execution`
         : `  n8n:      NOT configured \u2014 ${N8N_API_VAR} is not set, so no execution is ever read and the Executions page says so rather than reading zero.`,
+    );
+    // n8n's own MCP server, read for one thing: an agent's config, which the
+    // public API cannot give (11 Oct 2026). Unset, the inventory still takes a
+    // get_agent result handed to it; it just cannot fetch one itself.
+    console.log(
+      n8nMcpConfigured()
+        ? `  n8n mcp:  ${n8nMcpUrl()} (${N8N_MCP_VAR} set) \u2014 record_agent_inventory reads an agent's config from n8n itself`
+        : `  n8n mcp:  NOT configured \u2014 ${N8N_MCP_VAR} is not set, so record_agent_inventory cannot read an agent from n8n and must be handed the get_agent result.`,
     );
     /**
      * Named lane by lane, because a missing key is not a quiet default here:
