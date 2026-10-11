@@ -3571,8 +3571,22 @@ export interface AgentInventoryRow {
   last_eval: { run: string; passed: number; cases: number } | null;
 }
 
+export interface AgentVersionChange {
+  id: string;
+  name: string;
+  version_id: string;
+  previous_version_id: string | null;
+  is_rollback: boolean;
+  seen_at: string;
+  eval_state: string;
+  eval_run_id: string | null;
+  eval_detail: string | null;
+  alert_state: string | null;
+}
+
 export interface AgentInventoryView {
   agents: AgentInventoryRow[];
+  versions: AgentVersionChange[];
   tiers: { tier: string; meaning: string }[];
   stale_after_days: number;
   note: string;

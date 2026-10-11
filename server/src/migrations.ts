@@ -2999,6 +2999,31 @@ const MIGRATIONS: Migration[] = [
           AND NOT EXISTS (SELECT 1 FROM engine_monitoring_profiles q WHERE q.profile_id = p.profile_id AND q.version = 2)`,
     ],
   },
+  {
+    id: 70,
+    name: 'engine_agent_versions: one row per agent version change, and what the eval run after it said',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_agent_versions (
+         id bigserial PRIMARY KEY,
+         agent_id text NOT NULL,
+         name text NOT NULL,
+         version_id text NOT NULL,
+         previous_version_id text,
+         config_hash text,
+         is_rollback boolean NOT NULL DEFAULT false,
+         seen_at timestamptz NOT NULL DEFAULT now(),
+         eval_state text NOT NULL DEFAULT 'pending',
+         requested_at timestamptz,
+         eval_run_id text,
+         eval_detail text,
+         settled_at timestamptz,
+         alert_state text,
+         alert_detail text,
+         alert_text text
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_agent_versions_agent ON engine_agent_versions (agent_id, id DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

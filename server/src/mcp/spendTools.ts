@@ -73,7 +73,7 @@ export async function spend(days: number): Promise<Record<string, unknown>[]> {
 export const getAgentSpend: ToolDefinition = {
   name: 'get_agent_spend',
   description:
-    `Tokens and tool calls per agent (Bays, North Star, Research Twin), added up from each agent's own ask ledger. For each agent over the window: asks, how many carried a token count, prompt, completion and total tokens, tokens per ask as p50, p95 and max, tool calls, the tools called most, and tokens by day. Tokens, not money: no price is stored. The fields were first written on ${TOKENS_SINCE}; an older ask, a scheduled task run and a failed run carry none and are counted as asks_without_tokens, never as nought. Read only.`,
+    `Tokens and tool calls per agent (Bays, North Star, Research Twin), added up from each agent's own ask ledger. For each agent over the window: asks, how many carried a token count, prompt, completion and total tokens, tokens per ask as p50, p95 and max, tool calls, the tools called most, and tokens by day. Tokens, not money, for the agents: no price is stored. eval_runs gives what each eval run cost in dollars, measured from the account. The fields were first written on ${TOKENS_SINCE}; an older ask, a scheduled task run and a failed run carry none and are counted as asks_without_tokens, never as nought. Read only.`,
   inputSchema: {
     type: 'object',
     properties: { days: { type: 'number', description: 'How many days back to read. Default 7, at most 90.' } },
@@ -84,13 +84,20 @@ export const getAgentSpend: ToolDefinition = {
     const t0 = Date.now();
     const days = Math.max(1, Math.min(90, Math.floor(Number(args.days)) || 7));
     const agents = await spend(days);
+    // What each eval run cost in money (11 Oct 2026): the runner reads OpenRouter usage before and after and writes one event.
+    const evals = await query<{ run_id: string; at: string; detail: Record<string, unknown> }>(
+      `SELECT subject_id AS run_id, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at, detail FROM engine_events WHERE event_type = 'eval_run_cost' AND at > now() - make_interval(days => $1::int) ORDER BY at DESC LIMIT 30`,
+      [days],
+    );
     await mirror.logWrite({ endpoint: 'mcp:get_agent_spend', kind: 'agent_spend', method: 'MCP', key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET', outcome: 'read', detail: `${days}d → ${agents.map((a) => `${a.agent} ${a.total_tokens}`).join(', ')}`.slice(0, 400), ms: Date.now() - t0 });
     return {
       ok: true,
       window_days: days,
       tokens_recorded_since: TOKENS_SINCE,
       agents,
+      eval_runs: evals.rows.map((e) => ({ run_id: e.run_id, at: e.at, measured: e.detail.measured === true, spent_usd: e.detail.spent_usd ?? null, usd_per_result: e.detail.usd_per_result ?? null, results: e.detail.results ?? null, credit_left_usd: e.detail.credit_left_usd ?? null })),
       notes: [
+        'eval_runs is the one money figure here: what the OpenRouter account spent while each eval run was going, read from the account before and after. Other asks answered in that window are inside it, so it is an upper bound. Recorded from 11 Oct 2026; an earlier run has no figure.',
         'Tokens are what the agent node reported for the whole run of one ask, prompt and completion, cached prompt tokens included.',
         'No price is stored, so there is no currency figure. The OpenRouter balance is on get_recovery_status and the hourly credit check.',
         'asks_without_tokens are asks from before the fields existed, scheduled task runs and failed runs. They are not nought tokens.',

@@ -12003,3 +12003,19 @@ Files:      server/src/mcp/slackTools.ts (destinationVerdict, post_channel_messa
 Problem:    First test run: `null value in column "first_seen_at" of relation "engine_channel_tracking" violates not-null constraint` — the test's own seed row, not the code. Fixed in the test.
 Fix:        A known destination (channel_tracking, the engine's own channels, a channel approved before, a builder or approver, a DM Slack names as one) answers allow. Anything else stores the message on an approval, posts the Approve / Deny card and answers held; Approve posts every part from the dashboard, Deny posts nothing. approvals test: 20 checks passed.
 Decision:   A channel approved once is known from then on: asking again for every post into a channel a person has already said yes to would train people to click Approve. A DM that Slack cannot name is held, because unknown must not read as known. The n8n side is a separate entry, after the workflow checklist.
+
+## 2026-10-11 05:50 — Bays — Slack Send asks before it posts (n8n), by the workflow checklist
+Intent:     the n8n half of the channel-post guard.
+Files:      none in the repo. n8n: Bays — Slack Send (7oha1SgDsAtVas0j).
+Problem:    The first group I added was refused: `Node group "Check the destination first" must form a single connected subgraph with a single entry and exit (output edge from non-leaf node: "Destination Known?")`.
+Fix:        Four nodes after Valid Call?: Check Destination (HTTP, 3 tries) → Destination Decision → Destination Known? → Post First Part, or Hold Or Raise. Two groups, one for the check and one for Hold Or Raise. Sticky note updated. Restore point 22e9ca9e, published a124f50a. Pinned tests: allowed (32466, posts and hands back Slack's result), held (32467, nothing posted, awaiting_approval with the card link), check failed (32468, errors with "the destination check on the dashboard failed after 3 tries").
+Decision:   Fail closed: if the dashboard cannot be asked, nothing is posted and the run errors so it is raised. The seven days of real calls are all digests into the engine's own channels, which are known, so the day-to-day path is unchanged.
+            Deferred: the first real production run through the new nodes is today's 12:10 UTC digest. Not proven until then.
+
+## 2026-10-11 06:20 — the publish check, and what an eval run costs
+Intent:     close "nothing forces an eval before a publish", "a rollback that leaves a record" and "a measured cost per eval run" from the 10 Oct evening re-score.
+Files:      server/src/publishGate.ts (new), server/src/agentInventory.ts, server/src/migrations.ts (70), server/src/index.ts, server/src/timers.ts, server/src/mcp/spendTools.ts, src/screens/AgentMaturity.tsx, src/data/types.ts, server/test/publish-gate.test.cjs (new), package.json, CLAUDE.md. n8n: Agent Evals — Runner (8nv31oanjnkEGHie), restore point e05e8026, published 227254d4.
+Problem:    `server/src/scorecard.ts(238,5): error TS2322: Type 'InventoryView' is not assignable to type 'AgentInventoryView'` — the versions list was typed as loose records. Typed properly.
+Fix:        Recording the inventory with a changed active version writes a row and an event, asks the runner for a run three minutes later through a new webhook trigger, and reads the first finished run after the change. A regression posts one alert naming the version to publish again. The runner reads OpenRouter usage when it ends and writes eval_run_cost. test:publish-gate: 4 checks passed.
+Decision:   This is a check after a publish, not a gate before it: n8n offers no way to block or undo an agent publish from outside, and saying "gate" would be untrue. It also only starts when the inventory is recorded, so recording after every publish is now part of the agent checklist.
+            The cost figure is the account's spend in the run's window, an upper bound, and says so.

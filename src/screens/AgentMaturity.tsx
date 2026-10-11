@@ -166,6 +166,50 @@ function Scorecard({ tabs }: { tabs: ReactNode }) {
         </p>
       )}
 
+      {/* Version changes (11 Oct 2026): each time the inventory is recorded with a new active
+          version, an eval run is asked for and its verdict lands here. Only a failed verdict,
+          a missing run or an alert that did not post is coloured. */}
+      <TableFrame grow={false} label="Agent version changes">
+        <thead>
+          <tr>
+            <Th>Recorded</Th>
+            <Th>Agent</Th>
+            <Th>Version</Th>
+            <Th>Eval after it</Th>
+            <Th>What it said</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {d.inventory.versions.length === 0 ? (
+            <tr>
+              <td colSpan={5} className="px-4 py-6 text-center text-[13px] text-dim">
+                No version change has been recorded since this check was built on 11 Oct 2026.
+              </td>
+            </tr>
+          ) : (
+            d.inventory.versions.map((v) => (
+              <tr key={v.id} className="border-t border-line align-top">
+                <td className="whitespace-nowrap px-4 py-2 text-[13px] text-dim">{new Date(v.seen_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                <td className="px-4 py-2 text-[13px]">{v.name}</td>
+                <td className="px-4 py-2 text-[13px]">
+                  <span className="font-mono">{v.version_id.slice(0, 8)}</span>
+                  {v.is_rollback ? <span className="ml-2"><Pill>rollback</Pill></span> : null}
+                  {v.previous_version_id ? <div className="text-[12px] text-faint">from {v.previous_version_id.slice(0, 8)}</div> : null}
+                </td>
+                <td className="px-4 py-2 text-[13px]">
+                  {v.eval_state === 'failed' ? <Pill tone="failing">regressed</Pill> : v.eval_state === 'no_eval' ? <Pill tone="degraded">no eval run</Pill> : <span>{v.eval_state === 'pending' || v.eval_state === 'requested' ? 'waiting for the run' : v.eval_state.replace(/_/g, ' ')}</span>}
+                  {v.alert_state === 'failed' ? <div><Pill tone="failing">alert not posted</Pill></div> : null}
+                </td>
+                <td className="px-4 py-2 text-[13px] text-dim">{v.eval_detail ?? ''}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </TableFrame>
+      <p className="mx-6 -mt-2 mb-4 text-[12px] text-faint md:mx-8">
+        A change is seen when the inventory is recorded, not when n8n publishes: n8n has no way to tell this dashboard. A regression is a case that passed in the run before the change and fails in the first run after it. Nothing here rolls an agent back; the alert names the version to publish again.
+      </p>
+
       <TableFrame grow={false} label="Dimension scores">
         <thead>
           <tr>

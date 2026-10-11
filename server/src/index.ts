@@ -58,6 +58,7 @@ import * as askTrace from './askTrace';
 import * as evalRuns from './evalRuns';
 import * as reminderTools from './mcp/reminderTools';
 import * as slackTools from './mcp/slackTools';
+import * as publishGate from './publishGate';
 import { toolByName as mcpToolByName } from './mcp/tools';
 import { callerStore } from './mcp/caller';
 import * as dataGovernance from './dataGovernance';
@@ -2215,6 +2216,7 @@ async function boot(): Promise<void> {
       .then((n) => n && console.log(`[vfarm-customers] ${n} lead event(s) written for leads already held`))
       .catch((e) => console.error(`[vfarm-customers] lead backfill failed: ${(e as Error).message}`));
     creditOut.startWatching();
+    publishGate.startSweeping();
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();
   });

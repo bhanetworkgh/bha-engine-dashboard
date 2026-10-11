@@ -1363,6 +1363,24 @@ in no agent's scope) posts it whole once Destiny or Jason approves. **A DM
 Slack cannot name is held, never read as known.** A card that cannot be posted
 answers `held_failed` with `raise: true`. `npm run test:approvals` check 17.
 
+**The publish check** (2026-10-11, Destiny). `server/src/publishGate.ts`,
+migration 70, `engine_agent_versions`. n8n has no agents API, so this server
+cannot see or undo a publish. It starts when `record_agent_inventory` records an
+agent whose `active_version_id` changed: one row and one `agent_version_changed`
+event (`agent_rolled_back` when the agent has run that version before). Three
+minutes after the last change it asks `Agent Evals — Runner` for one run
+(`POST /webhook/agent-evals-run`, `x-dashboard-key`; at most four a day). The
+first finished run started after the change is the verdict: **a case that
+passed in the run before the change and fails after it is a regression**, and
+one alert in the engine alerts channel names the cases and the version to
+publish again. A case already failing before is named and is not a regression.
+No finished run in 90 minutes is `no_eval` and is alerted too. **It never
+publishes or rolls back.** The Agent maturity page lists the changes.
+**Record the inventory after every agent publish**, or none of this starts.
+The runner also writes one `eval_run_cost` event per run (account usage before
+and after), which `get_agent_spend` returns as `eval_runs`. `npm run
+test:publish-gate`.
+
 **Tokens and tool calls are on every ask** (2026-10-10). The three Agent
 Delivery workflows write `Prompt Tokens`, `Completion Tokens`, `Total Tokens`,
 `Tool Call Count` and `Tool Calls` (tool names in order, ` > ` between them) on

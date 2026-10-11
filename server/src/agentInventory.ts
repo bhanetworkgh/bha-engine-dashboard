@@ -24,6 +24,7 @@
  * because an inventory that is quietly a month old is the thing this exists to
  * replace.
  */
+import * as publishGate from './publishGate';
 import { createHash } from 'node:crypto';
 import { nowIso } from './db';
 import { query } from './pg';
@@ -276,8 +277,8 @@ export function derive(result: Dict, opts: { owner?: string | null; recordedBy?:
 export async function record(result: Dict, opts: { owner?: string | null; recordedBy?: string | null }): Promise<{ row: InventoryRow; outcome: 'inserted' | 'updated' | 'unchanged' }> {
   const d = derive(result, opts);
   const at = nowIso();
-  const before = await query<{ config_hash: string | null; autonomy_tier: string; tools: unknown; mcp_servers: unknown; tasks: unknown }>(
-    `SELECT config_hash, autonomy_tier, tools, mcp_servers, tasks FROM engine_agent_inventory WHERE agent_id = $1`,
+  const before = await query<{ config_hash: string | null; active_version_id: string | null; autonomy_tier: string; tools: unknown; mcp_servers: unknown; tasks: unknown }>(
+    `SELECT config_hash, active_version_id, autonomy_tier, tools, mcp_servers, tasks FROM engine_agent_inventory WHERE agent_id = $1`,
     [d.agent_id],
   );
   const prev = before.rows[0];
@@ -305,6 +306,10 @@ export async function record(result: Dict, opts: { owner?: string | null; record
       JSON.stringify(d.sub_agents), JSON.stringify(d.credentials), d.autonomy_tier, d.tier_reason, d.owner, d.read_from, at, d.recorded_by, JSON.stringify(d.raw),
     ],
   );
+  // The publish check starts here: this is where the server first learns of a new version.
+  if (prev && d.active_version_id && prev.active_version_id !== d.active_version_id) {
+    await publishGate.onVersionChange({ agent_id: d.agent_id, name: d.name, from: prev.active_version_id, to: d.active_version_id, config_hash: d.config_hash });
+  }
   return { row: r.rows[0], outcome: !prev ? 'inserted' : same ? 'unchanged' : 'updated' };
 }
 
@@ -355,6 +360,8 @@ export interface InventoryView {
   tiers: { tier: string; meaning: string }[];
   stale_after_days: number;
   note: string;
+  /** The last version changes this server learned of, and what the eval run after each said (publishGate). */
+  versions: publishGate.VersionChange[];
 }
 
 const TIERS: InventoryView['tiers'] = [
@@ -415,6 +422,7 @@ export async function view(): Promise<InventoryView> {
   });
   return {
     agents,
+    versions: await publishGate.recent(12),
     tiers: TIERS,
     stale_after_days: STALE_AFTER_DAYS,
     note: rows.length
