@@ -1109,6 +1109,10 @@ archive records directly, with the checks the Bays Tools Router enforces.
   name rather than inventing a status the pages would show as "Other".
   **Hard delete** needs `confirm: "DELETE <natural_id>"` exactly, and is
   refused for `codex` (the Codex page's typed-id delete is its only way out).
+  **One exception** (2026-10-11, Destiny): a codex row that never finished
+  processing (no `Codex Entry ID`, no `Processed At`, not reviewed) can be
+  deleted here with the same confirm, because it is not a log anybody can
+  review or pay. A processed log is still refused.
 - **`dry_run: true`** runs every guard and returns what would be written.
 - **BHARAG on create** for codex, patterns and commercial, in the n8n ingest
   nodes' shape (`POST /ingest`, `{title, content, source_type, content_type,
