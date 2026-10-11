@@ -558,7 +558,11 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
       if (posted >= RULE.daily_cap && !w.fixture) {
         out.held_cap.push(w.watch_id);
         if (opts.dry) would(w, `hold: today's ${RULE.daily_cap} posts are used`);
-        else await note(w, { last_error: `held: today's ${RULE.daily_cap} Decision Watch posts are used; tried again on the next pass` });
+        else {
+          await note(w, { last_error: `held: today's ${RULE.daily_cap} Decision Watch posts are used; tried again on the next pass` });
+          // Once a day per watch: the rate limit doing its job is logged, not only noted on the row.
+          await event('decision_watch_held', w, `dw:${w.watch_id}:held:${now.toISOString().slice(0, 10)}`, { reason: 'daily_cap', cap: RULE.daily_cap, posted_today: posted });
+        }
         continue;
       }
       const live = { ...w, quiet_since: quietSince };

@@ -230,6 +230,7 @@ const srv = http.createServer((req, res) => {
   assert.deepEqual(r.held_cap, [E]);
   assert.equal(slack.posts.length, posts);
   assert.match((await row(E)).last_error, /held/);
+  assert.equal((await query(`SELECT count(*)::int AS n FROM engine_events WHERE event_type = 'decision_watch_held' AND subject_id = $1`, [E])).rows[0].n, 1, 'a cap hold is an engine event');
   await query(`DELETE FROM engine_decision_watches WHERE watch_id = $1`, [`DW-CAP-${T}`]);
   ok('the daily cap holds a reminder rather than posting it');
 

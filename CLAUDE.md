@@ -2296,7 +2296,8 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
   never movement. Quiet past the wait posts one reminder as Bays in the thread,
   or by DM to the owner where there is no thread.
 - **It never reminds on a thread it could not read.** The watch stays open with
-  the reason and writes one `decision_watch_unread` event a day.
+  the reason and writes one `decision_watch_unread` event a day. A reminder the
+  daily cap held back writes one `decision_watch_held` event a day.
 - **The row is claimed before anything goes to Slack**, so the timer and a
   person, or two instances during a deploy, post one reminder and not two. A
   refused post gives the claim back and is retried.
