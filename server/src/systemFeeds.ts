@@ -895,6 +895,46 @@ export const DOCTRINE_MATURITIES = [
   'NOT_SAFE_TO_CLAIM',
 ];
 
+export interface T0noCadProvenance {
+  cad_revision: string | null;
+  provenance_ref: string | null;
+}
+
+export interface T0noFailClosed {
+  needs_evidence: boolean;
+  reason: string | null;
+}
+
+export interface T0noAllowedUse {
+  media_twin: boolean;
+  vfarm: boolean;
+  genie_ns: boolean;
+}
+
+export interface T0noPrimitive {
+  maturity_state: string;
+  claim_state: string;
+  config_hash: string | null;
+  cad_provenance: T0noCadProvenance;
+  evidence_publication_status: string;
+  fail_closed: T0noFailClosed;
+  allowed_use: T0noAllowedUse;
+}
+
+interface StoredDoctrineClaim {
+  claim_id: string | null;
+  label: string;
+  maturity: string;
+  allowed_wording: string | null;
+  prohibited_wording: string | null;
+  claim_state: string | null;
+  config_hash: string | null;
+  cad_provenance: T0noCadProvenance | null;
+  evidence_publication_status: string | null;
+  fail_closed: T0noFailClosed | null;
+  allowed_use: T0noAllowedUse | null;
+}
+
 export interface DoctrineStoreResult {
   received: number;
   inserted: number;
@@ -911,6 +951,25 @@ const strList = (v: unknown, at: string, field: string): string[] => {
     if (!s) throw new FeedError(422, `${at}: ${field}[${i}] is empty or not a string.`);
     return s;
   });
+};
+
+const optionalObject = (v: unknown, at: string): Obj | null => {
+  if (v === undefined || v === null) return null;
+  if (!isObj(v)) throw new FeedError(422, `${at} must be an object.`);
+  return v;
+};
+
+const optionalBoolean = (o: Obj, key: string, at: string): boolean => {
+  if (typeof o[key] !== 'boolean') throw new FeedError(422, `${at}.${key} must be true or false.`);
+  return o[key];
+};
+
+const canonicalReference = (v: unknown, at: string): string | null => {
+  const value = str(v);
+  if (value && /^(NOT_HELD|UNKNOWN|PENDING_CANONICAL_VALUE|TBD)$/i.test(value)) {
+    throw new FeedError(422, `${at} must be null until the canonical value is held; placeholder "${value}" is not provenance.`);
+  }
+  return value;
 };
 
 function doctrineRow(e: unknown, at: string) {
@@ -947,12 +1006,34 @@ function doctrineRow(e: unknown, at: string) {
       const maturity = str(c.maturity);
       if (!label) throw new FeedError(422, `${at}: claims[${i}].label is required.`);
       if (!maturity || !/^[A-Z][A-Z_]*$/.test(maturity)) throw new FeedError(422, `${at}: claims[${i}].maturity is required, in UPPER_SNAKE form, e.g. ${DOCTRINE_MATURITIES.join(', ')}.`);
+      const rawProvenance = optionalObject(c.cad_provenance, `${at}: claims[${i}].cad_provenance`);
+      const rawFailClosed = optionalObject(c.fail_closed, `${at}: claims[${i}].fail_closed`);
+      const rawAllowedUse = optionalObject(c.allowed_use, `${at}: claims[${i}].allowed_use`);
       return {
         claim_id: str(c.claim_id),
         label,
         maturity,
         allowed_wording: str(c.allowed_wording),
         prohibited_wording: str(c.prohibited_wording),
+        claim_state: str(c.claim_state),
+        config_hash: canonicalReference(c.config_hash, `${at}: claims[${i}].config_hash`),
+        cad_provenance: rawProvenance
+          ? {
+              cad_revision: canonicalReference(rawProvenance.cad_revision, `${at}: claims[${i}].cad_provenance.cad_revision`),
+              provenance_ref: canonicalReference(rawProvenance.provenance_ref, `${at}: claims[${i}].cad_provenance.provenance_ref`),
+            }
+          : null,
+        evidence_publication_status: str(c.evidence_publication_status),
+        fail_closed: rawFailClosed
+          ? { needs_evidence: optionalBoolean(rawFailClosed, 'needs_evidence', `${at}: claims[${i}].fail_closed`), reason: str(rawFailClosed.reason) }
+          : null,
+        allowed_use: rawAllowedUse
+          ? {
+              media_twin: optionalBoolean(rawAllowedUse, 'media_twin', `${at}: claims[${i}].allowed_use`),
+              vfarm: optionalBoolean(rawAllowedUse, 'vfarm', `${at}: claims[${i}].allowed_use`),
+              genie_ns: optionalBoolean(rawAllowedUse, 'genie_ns', `${at}: claims[${i}].allowed_use`),
+            }
+          : null,
       };
     });
   }
@@ -1029,7 +1110,7 @@ interface DoctrineRow {
   summary: string;
   contract_ids: string[];
   default_patterns: string[];
-  claims: Array<{ claim_id: string | null; label: string; maturity: string; allowed_wording: string | null; prohibited_wording: string | null }>;
+  claims: StoredDoctrineClaim[];
   approved_by: string | null;
   approved_at: string | null;
   changed_at: string;
@@ -1050,17 +1131,15 @@ interface DoctrineRow {
  * doctrineData() — the same function the Media Twin page renders from.
  *
  * It returns what is held and nothing more: the version in force of each
- * doctrine, flattened to one row per claim. It does not compute T0NO's seven
- * fields. Those it does not hold are named in `not_held`, so a reader treats
- * them as unknown and fails closed instead of assuming a default.
+ * doctrine, flattened to one row per claim. Legacy `maturity` is normalized
+ * to `maturity_state`; missing members of T0NO's locked seven-field core are
+ * represented explicitly and force the claim closed.
  *
  * A filter that matches nothing says so, and names what is in force, rather
  * than coming back as an empty list that reads like "no rules".
  */
 export const DOCTRINE_READ_SCHEMA = 'media.doctrine.read.v1';
-
-/** T0NO's mandatory core (Jason, 2026-10-01) that the doctrine table does not carry yet. */
-export const T0NO_FIELDS_NOT_HELD = ['claim_state', 'config_hash', 'cad_provenance', 'evidence_publication_status', 'fail_closed', 'allowed_use'] as const;
+export const T0NO_CORE_FIELDS = ['maturity_state', 'claim_state', 'config_hash', 'cad_provenance', 'evidence_publication_status', 'fail_closed', 'allowed_use'] as const;
 
 export interface DoctrineReadFilter {
   doctrine_id?: string | null;
@@ -1068,12 +1147,38 @@ export interface DoctrineReadFilter {
   maturity?: string | null;
 }
 
-export async function doctrineClaims(f: DoctrineReadFilter = {}) {
+function t0noPrimitive(c: StoredDoctrineClaim): T0noPrimitive {
+  const missing: string[] = [];
+  if (!c.claim_state) missing.push('CLAIM_STATE');
+  if (!c.config_hash) missing.push('CONFIG_HASH');
+  if (!c.cad_provenance?.cad_revision || !c.cad_provenance.provenance_ref) missing.push('CAD_PROVENANCE');
+  if (!c.evidence_publication_status) missing.push('EVIDENCE_PUBLICATION_STATUS');
+  if (!c.allowed_use) missing.push('ALLOWED_USE');
+  const upstreamNeedsEvidence = c.fail_closed?.needs_evidence === true;
+  const needsEvidence = missing.length > 0 || upstreamNeedsEvidence;
+  const reason = missing.length ? `MISSING_${missing.join('_AND_')}` : needsEvidence ? c.fail_closed?.reason ?? 'NEEDS_EVIDENCE' : null;
+  return {
+    maturity_state: c.maturity,
+    claim_state: c.claim_state ?? 'UNKNOWN',
+    // A claim stored before T0NO has no config_hash key at all; undefined would drop it from the JSON.
+    config_hash: c.config_hash ?? null,
+    cad_provenance: c.cad_provenance ?? { cad_revision: null, provenance_ref: null },
+    evidence_publication_status: c.evidence_publication_status ?? 'NEEDS_EVIDENCE',
+    fail_closed: { needs_evidence: needsEvidence, reason },
+    allowed_use: {
+      media_twin: needsEvidence ? false : c.allowed_use?.media_twin ?? false,
+      vfarm: needsEvidence ? false : c.allowed_use?.vfarm ?? false,
+      // Genie/NS may report an unresolved record, but may not promote its claim.
+      genie_ns: c.allowed_use?.genie_ns ?? true,
+    },
+  };
+}
+
+export function resolveDoctrineClaims(d: Awaited<ReturnType<typeof doctrineData>>, f: DoctrineReadFilter = {}, readAt = new Date().toISOString()) {
   const clean = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
   const want = { doctrine_id: clean(f.doctrine_id), claim_id: clean(f.claim_id), maturity: clean(f.maturity) };
   const same = (a: string | null | undefined, b: string) => (a ?? '').toLowerCase() === b.toLowerCase();
 
-  const d = await doctrineData();
   const inForce = d.doctrines.filter((x) => !x.retired);
   const all = inForce.flatMap((doc) =>
     doc.claims.map((c) => ({
@@ -1082,7 +1187,7 @@ export async function doctrineClaims(f: DoctrineReadFilter = {}) {
       change_id: doc.change_id,
       claim_id: c.claim_id ?? null,
       label: c.label,
-      maturity: c.maturity,
+      ...t0noPrimitive(c),
       allowed_wording: c.allowed_wording ?? null,
       prohibited_wording: c.prohibited_wording ?? null,
     })),
@@ -1091,7 +1196,7 @@ export async function doctrineClaims(f: DoctrineReadFilter = {}) {
     (c) =>
       (!want.doctrine_id || same(c.doctrine_id, want.doctrine_id)) &&
       (!want.claim_id || same(c.claim_id, want.claim_id)) &&
-      (!want.maturity || same(c.maturity, want.maturity)),
+      (!want.maturity || same(c.maturity_state, want.maturity)),
   );
 
   const warnings: string[] = [];
@@ -1101,12 +1206,12 @@ export async function doctrineClaims(f: DoctrineReadFilter = {}) {
     warnings.push(`No doctrine "${want.doctrine_id}" is in force. In force: ${ids.join(', ') || 'none'}.`);
   if (want.claim_id && !all.some((c) => same(c.claim_id, want.claim_id)))
     warnings.push(`No claim "${want.claim_id}" is held in any doctrine in force, so it has no approved wording. Treat it as not safe to make.`);
-  if (want.maturity && !all.some((c) => same(c.maturity, want.maturity)))
-    warnings.push(`No claim in force has maturity "${want.maturity}". Held: ${[...new Set(all.map((c) => c.maturity))].sort().join(', ') || 'none'}.`);
+  if (want.maturity && !all.some((c) => same(c.maturity_state, want.maturity)))
+    warnings.push(`No claim in force has maturity "${want.maturity}". Held: ${[...new Set(all.map((c) => c.maturity_state))].sort().join(', ') || 'none'}.`);
 
   return {
     schema: DOCTRINE_READ_SCHEMA,
-    read_at: new Date().toISOString(),
+    read_at: readAt,
     source: 'engine_media_doctrine: the newest change of each doctrine in force, as Hardik posted it through media.doctrine.v1',
     filters: { doctrine_id: want.doctrine_id || null, claim_id: want.claim_id || null, maturity: want.maturity || null },
     doctrines: inForce.map((x) => ({
@@ -1124,13 +1229,35 @@ export async function doctrineClaims(f: DoctrineReadFilter = {}) {
     })),
     retired: d.doctrines.filter((x) => x.retired).map((x) => x.doctrine_id),
     claims,
-    counts: { doctrines_in_force: inForce.length, claims_in_force: all.length, claims_returned: claims.length, by_maturity: tally(claims.map((c) => c.maturity), '(none)') },
+    counts: { doctrines_in_force: inForce.length, claims_in_force: all.length, claims_returned: claims.length, by_maturity: tally(claims.map((c) => c.maturity_state), '(none)') },
+    t0no_core_fields: [...T0NO_CORE_FIELDS],
     evidence: evidenceBlock(),
-    not_held: {
-      fields: [...T0NO_FIELDS_NOT_HELD],
-      note: 'T0NO’s core fields this table does not carry yet. A reader must treat them as unknown and fail closed, never assume a default.',
-    },
     warnings,
+  };
+}
+
+export async function doctrineClaims(f: DoctrineReadFilter = {}) {
+  return resolveDoctrineClaims(await doctrineData(), f);
+}
+
+/**
+ * The only public projection of T0NO. It deliberately contains no doctrine
+ * history or private evidence references. Until every returned claim explicitly
+ * permits /vfarm, the public page receives the existing interest-only fallback.
+ */
+export function vfarmDoctrineState(r: ReturnType<typeof resolveDoctrineClaims>) {
+  const permitted = r.claims.filter((c) => c.allowed_use.vfarm && !c.fail_closed.needs_evidence);
+  const blocked = r.claims.filter((c) => !c.allowed_use.vfarm || c.fail_closed.needs_evidence);
+  const resolved = r.claims.length > 0 && blocked.length === 0;
+  return {
+    claim_state: resolved && permitted.every((c) => c.claim_state === permitted[0]?.claim_state) ? permitted[0].claim_state : 'interest_only_live',
+    mode: resolved ? 'CANONICAL_DOCTRINE' : 'EARLY_ACCESS_SAFE_FALLBACK',
+    paid_subscription_url: null,
+    allowed_wording: resolved ? permitted.map((c) => c.allowed_wording).filter((x): x is string => Boolean(x)) : [],
+    fail_closed: resolved
+      ? { needs_evidence: false, reason: null }
+      : { needs_evidence: true, reason: blocked[0]?.fail_closed.reason ?? (r.claims.length ? 'CLAIM_NOT_ALLOWED_FOR_VFARM' : 'MISSING_DOCTRINE') },
+    read_at: r.read_at,
   };
 }
 

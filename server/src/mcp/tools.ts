@@ -21,6 +21,8 @@ import * as airtable from '../airtable';
 import * as bharag from '../bharag';
 import * as recovery from '../recovery';
 import * as systemFeeds from '../systemFeeds';
+import * as publicationDecision from '../publicationDecision';
+import * as doctrineGap from '../doctrineGap';
 import * as monitoringTwin from '../monitoringTwin';
 import * as approvals from '../approvals';
 import { currentAgent } from './caller';
@@ -828,7 +830,7 @@ const getExecutionQuota: ToolDefinition = {
 const readMediaDoctrine: ToolDefinition = {
   name: 'read_media_doctrine',
   description:
-    'What BHA may and may not say about vFarm: every claim in the doctrines in force (B93H buyer capabilities, OWLG mechanical/media handoff, TSNR commercial state), each with its maturity (PROVEN_NOW, PROVEN_BUT_GATED, CONTRACT_DEFINED_NOT_RUNTIME_PROVEN, IN_BUILD, NOT_SAFE_TO_CLAIM, …), its allowed wording and its prohibited wording, plus the doctrine version and change it came from. Filter by doctrine_id, claim_id or maturity (case does not matter). A claim that is not held has no approved wording: treat it as not safe to make, and say NEEDS_EVIDENCE rather than infer. `not_held` names T0NO’s core fields this record does not carry yet; treat those as unknown. A filter that matches nothing comes back with a warning naming what is in force, never as a silent empty list. evidence carries the evidence rules in force, held in code: Coimbatore data is an agronomy reference only and never cabinet proof, cabinet cycle 1 starts at first flower, and a simulated farm is never the real rack. A claim that rests on the wrong class of evidence is not safe to make, whatever its maturity says.',
+    'What BHA may and may not say about vFarm: every claim in the doctrines in force (B93H buyer capabilities, OWLG mechanical/media handoff, TSNR commercial state), resolved to T0NO’s seven fields: maturity_state, claim_state, config_hash, cad_provenance, evidence_publication_status, fail_closed and allowed_use. Filter by doctrine_id, claim_id or maturity (case does not matter). Missing evidence is explicit in fail_closed.reason and never inferred. A claim that is not held has no approved wording. A filter that matches nothing returns a warning naming what is in force, never a silent empty list. evidence carries the evidence rules in force, held in code: Coimbatore data is an agronomy reference only and never cabinet proof, cabinet cycle 1 starts at first flower, and a simulated farm is never the real rack. A claim that rests on the wrong class of evidence is not safe to make, whatever its maturity says.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -852,6 +854,64 @@ const readMediaDoctrine: ToolDefinition = {
       detail: `${JSON.stringify(out.filters).slice(0, 200)} → ${out.counts.claims_returned} of ${out.counts.claims_in_force} claim(s)`,
       ms: Date.now() - t0,
     });
+    return out;
+  },
+};
+
+/** The persisted VRFK decision for one exact doctrine claim and surface. */
+const readPublicationDecision: ToolDefinition = {
+  name: 'read_publication_decision',
+  description:
+    'Read the latest persisted VFAM.claim_publication_decision for one exact current doctrine claim and surface. The event is re-checked against current T0NO doctrine: missing, stale or contradictory decisions return needs_evidence and never authorize publication.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      doctrine_id: { type: 'string' },
+      claim_id: { type: 'string' },
+      surface: { type: 'string', enum: [...publicationDecision.SURFACES] },
+    },
+    required: ['doctrine_id', 'claim_id', 'surface'],
+    additionalProperties: false,
+  },
+  annotations: { ...READS_DB, title: 'Read a publication decision trace' },
+  handler: async (args, deps) => {
+    const t0 = Date.now();
+    const doctrineId = typeof args.doctrine_id === 'string' ? args.doctrine_id : '';
+    const claimId = typeof args.claim_id === 'string' ? args.claim_id : '';
+    const surface = args.surface as publicationDecision.PublicationSurface;
+    if (!publicationDecision.SURFACES.includes(surface)) throw new McpError('bad_argument', `surface must be one of ${publicationDecision.SURFACES.join(', ')}.`);
+    const doctrine = await systemFeeds.doctrineClaims({ doctrine_id: doctrineId, claim_id: claimId });
+    if (doctrine.claims.length !== 1) throw new McpError('not_found', `Exactly one current doctrine claim must match ${doctrineId}:${claimId}; found ${doctrine.claims.length}.`);
+    const out = await publicationDecision.readDecisions(doctrine.claims as publicationDecision.ResolvedClaim[], surface);
+    await mirror.logWrite({
+      endpoint: 'mcp:read_publication_decision',
+      kind: 'engine_events',
+      method: 'MCP',
+      key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET',
+      natural_id: `${doctrineId}:${claimId}:${surface}`,
+      outcome: 'read',
+      detail: `${out.decisions[0]?.decision ?? 'needs_evidence'} · ${out.decisions[0]?.reason ?? 'no decision'}`,
+      ms: Date.now() - t0,
+    });
+    return out;
+  },
+};
+
+/** Shared, read-only doctrine-gap aggregation for RT, North Star and Monitoring. */
+const readDoctrineGapSummary: ToolDefinition = {
+  name: 'read_doctrine_gap_summary',
+  description: 'Read canonical doctrine-gap observations from engine.event.v1, grouped by T0NO claim and surface. This is analysis/guidance only: it never changes doctrine, publication decisions, cards or loops.',
+  inputSchema: {
+    type: 'object',
+    properties: { hours: { type: 'number', description: 'Lookback in hours; default 24, capped at 720.' } },
+    additionalProperties: false,
+  },
+  annotations: { ...READS_DB, title: 'Doctrine evidence gaps and recurrence' },
+  handler: async (args, deps) => {
+    const t0 = Date.now();
+    const hours = typeof args.hours === 'number' ? args.hours : 24;
+    const out = await doctrineGap.summary(hours);
+    await mirror.logWrite({ endpoint: 'mcp:read_doctrine_gap_summary', kind: 'engine_events', method: 'MCP', key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET', outcome: 'read', detail: `${out.counts.observations} observation(s), ${out.counts.groups} group(s)`, ms: Date.now() - t0 });
     return out;
   },
 };
@@ -903,6 +963,8 @@ export const TOOLS: ToolDefinition[] = [
   findRecordsTool,
   // 2026-10-01: the vFarm doctrine, the same read as GET /api/engine/media-doctrine (T0NO).
   readMediaDoctrine,
+  readPublicationDecision,
+  readDoctrineGapSummary,
   // 2026-10-01: the Monitoring Twin's judgement of every vFarm farm.
   readMonitoringTwin,
   // 2026-09-24: what the Bays agent read through n8n tools of its own.

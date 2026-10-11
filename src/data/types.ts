@@ -3829,6 +3829,56 @@ export interface DoctrineClaim {
   prohibited_wording: string | null;
 }
 
+export interface T0noClaim {
+  doctrine_id: string;
+  doctrine_version: string;
+  change_id: string;
+  claim_id: string | null;
+  label: string;
+  maturity_state: string;
+  claim_state: string;
+  config_hash: string | null;
+  cad_provenance: { cad_revision: string | null; provenance_ref: string | null };
+  evidence_publication_status: string;
+  fail_closed: { needs_evidence: boolean; reason: string | null };
+  allowed_use: { media_twin: boolean; vfarm: boolean; genie_ns: boolean };
+  allowed_wording: string | null;
+  prohibited_wording: string | null;
+}
+
+export interface T0noDoctrineRead {
+  schema: string;
+  read_at: string;
+  claims: T0noClaim[];
+  warnings: string[];
+  t0no_core_fields: string[];
+  counts: { doctrines_in_force: number; claims_in_force: number; claims_returned: number; by_maturity: Array<{ key: string; label: string; n: number }> };
+}
+
+export interface PublicationDecisionRead {
+  doctrine_id: string;
+  claim_id: string;
+  surface: 'media_twin' | 'vfarm' | 'genie_ns';
+  decision: 'allowed' | 'hold' | 'needs_evidence';
+  recorded_decision: 'allowed' | 'hold' | 'needs_evidence' | null;
+  applicable: boolean;
+  reason: string;
+  decision_id: string | null;
+  event_id: number | null;
+  decided_at: string | null;
+  recorded_at: string | null;
+  evidence_refs: string[];
+}
+
+export interface PublicationDecisionSet {
+  schema: string;
+  event_name: 'VFAM.claim_publication_decision';
+  read_at: string;
+  surface: 'media_twin' | 'vfarm' | 'genie_ns';
+  decisions: PublicationDecisionRead[];
+  counts: { claims: number; allowed: number; held: number };
+}
+
 export interface DoctrineChange {
   change_id: string;
   doctrine_id: string;
@@ -3865,6 +3915,10 @@ export interface DoctrineData {
     contracts_bound: string[];
     default_patterns: string[];
   };
+  /** The canonical T0NO resolver result. Media Twin never derives a gate locally. */
+  resolved: T0noDoctrineRead;
+  /** VRFK trace: a current, surface-scoped decision is required in addition to T0NO. */
+  publication_decisions: PublicationDecisionSet;
 }
 
 /* ---------------------------------------------------- Monitoring Twin (2026-10-01) */
