@@ -457,7 +457,7 @@ export interface FixtureIncident {
 export type LoopStatus = 'open' | 'in progress' | 'closed';
 
 /** The locked nine-lane set plus UNASSIGNED, exactly as the loop tables' lane_tag field defines it. */
-export type LoopLaneTag = 'RT' | 'NS' | 'VFARM_HARDWARE' | 'KIOSK' | 'CAD_API' | 'MEDIA' | 'GENIE' | 'CST' | 'BAYS' | 'UNASSIGNED';
+export type LoopLaneTag = 'RT' | 'NS' | 'VFARM_HARDWARE' | 'KIOSK' | 'CAD_API' | 'MEDIA' | 'GENIE' | 'CST' | 'BAYS' | 'CAPITAL' | 'UNASSIGNED';
 
 /**
  * One loop, read from the builder's own table in the loops base. The Airtable

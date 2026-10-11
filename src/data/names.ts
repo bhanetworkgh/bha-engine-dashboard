@@ -27,4 +27,4 @@ export const BUILDER_NAMES: Record<string, string> = {
 export const LANE_LIST: readonly Lane[] = ['VFARM_CORE', 'VFARM_MEDIA', 'CLIENT_CORE', 'ENGINE_INTERNAL'];
 
 /** The loop tables' own lane_tag choices — the locked nine-lane set plus UNASSIGNED — in the table's order. */
-export const LOOP_LANE_TAGS: readonly LoopLaneTag[] = ['RT', 'NS', 'VFARM_HARDWARE', 'KIOSK', 'CAD_API', 'MEDIA', 'GENIE', 'CST', 'BAYS', 'UNASSIGNED'];
+export const LOOP_LANE_TAGS: readonly LoopLaneTag[] = ['RT', 'NS', 'VFARM_HARDWARE', 'KIOSK', 'CAD_API', 'MEDIA', 'GENIE', 'CST', 'BAYS', 'CAPITAL', 'UNASSIGNED'];

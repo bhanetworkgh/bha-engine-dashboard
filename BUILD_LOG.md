@@ -11961,3 +11961,10 @@ Fix:        evidenceRules.ts holds four rules, each quoted with who set it and w
             test:twin-envelope 8 of 8, test:monitoring-recurrence 6 of 6.
 Decision:   Mine, and put to Destiny: each v2 stage ends at the upper end of Jason's range (10 days, 45 days, 85 days), so a stage's targets are never applied early. The simulated farm stays on v1, where its cycle is pinned.
             Not built: X, Y and N. Jegan proposes them from the first real snapshot (HMTA), so nothing is gated on a number yet and the twin says so.
+
+## 2026-10-11 05:50 — CAPITAL as a lane (CAFQ, the code half)
+Intent:     LOOP-1791470987539-CAFQ, Destiny's part: a v0 CAPITAL lane bound to the Client 2 pilot (primary) and home-cabinet Early Access (secondary) (Lagos time).
+Files:      server/src/writeGuards.ts, server/src/sources.ts, src/data/names.ts, src/data/types.ts, server/test/mcp-write.test.cjs, CLAUDE.md
+Problem:    The lane list is a locked set written in four places, so a loop tagged CAPITAL was refused on update and turned into UNASSIGNED on create. The loop itself was filed under BAYS for that reason.
+Fix:        CAPITAL added to all four. No owner in LANE_OWNERS: Jason has named none, so it falls to Destiny. test:mcp-write and test:lane-ranking pass.
+Decision:   Read from the thread (#bha-media-twin 1791467935.667539), the part from Jason's CAPITAL ask to his confirmation of the lane binding; the earlier social-media part of that thread was not read.

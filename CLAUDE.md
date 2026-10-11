@@ -1211,6 +1211,19 @@ Research Twin's scope, and `read_media_doctrine` in Research Twin's, from the
 same day. Uptime was already counted only from the twin's own offline and
 feed-silent incidents at 90 s and 900 s; nothing was changed there.
 
+**CAPITAL is a lane** (2026-10-11, Destiny — LOOP-1791470987539-CAFQ; Jason, 8
+Oct, #bha-media-twin: "I want CAPITAL wired as a first-class lane now, without
+fabricating dates or targets"). It is the eleventh value of `LANES`
+(`writeGuards.ts`), `LOOP_LANE_TAGS` (`sources.ts`, `src/data/names.ts`) and
+`LoopLaneTag`; a new lane is added in all four or the page and the guard
+disagree. It has no entry in `LANE_OWNERS`, so a CAPITAL loop falls to Destiny
+and no assignee is refused. Its profile links the two commercial lanes Jason
+bound to it: `LANE-VFARM-CRE_OFFICE_HOST_KIOSK` (primary, the Client 2 5-rack
+pilot) and `LANE-VFARM-FOUNDING_BUYER_RESERVATION` (secondary, home-cabinet
+Early Access). `LANE-VFARM-FOUNDING_ACCESS_INTAKE` is a different product and is
+never linked. **No capital target or date is stored anywhere**: Jason's rule is
+that none is set until Hardik's two blockers clear.
+
 **A monitoring incident that keeps coming back opens one Research Twin job**
 (2026-10-04, Destiny). `server/src/monitoringRecurrence.ts`, migration 55,
 `engine_monitoring_recurrences`. The rule is Canon v1 as Jason approved it on

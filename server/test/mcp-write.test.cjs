@@ -117,7 +117,7 @@ async function call(token, name, args) {
     const lk = kinds.kinds.find((k) => k.kind === 'loops');
     assert.equal(lk.table, 'engine_loops');
     assert.ok(lk.columns.includes('natural_id'));
-    assert.deepEqual(lk.allowed_values.lane_tag, ['RT', 'NS', 'VFARM_HARDWARE', 'KIOSK', 'CAD_API', 'MEDIA', 'GENIE', 'CST', 'BAYS', 'UNASSIGNED']);
+    assert.deepEqual(lk.allowed_values.lane_tag, ['RT', 'NS', 'VFARM_HARDWARE', 'KIOSK', 'CAD_API', 'MEDIA', 'GENIE', 'CST', 'BAYS', 'CAPITAL', 'UNASSIGNED']);
     ok('1 list_writable_kinds', () => true);
 
     const WHAT = `MCP write test ${T}: verify the recovery watcher summary lands in the self healing channel`;

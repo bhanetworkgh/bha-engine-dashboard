@@ -34,8 +34,13 @@ import { CODEX_JASON_STATUS, JOB_STATUSES, SLACK_TO_BUILDER } from './sources';
 /**
  * Sept 2 -- the locked 9-lane set plus UNASSIGNED. lane_tag is EXECUTION
  * OWNER, not initiative: it answers "whose lane does the work land in".
+ *
+ * CAPITAL was added on 11 Oct 2026 (LOOP-1791470987539-CAFQ): Jason, 8 Oct, in
+ * #bha-media-twin, "I want CAPITAL wired as a first-class lane now". It has no
+ * owner in LANE_OWNERS, so a CAPITAL loop with no assignee falls to Destiny and
+ * no assignee is refused; Jason has not named one.
  */
-export const LANES = ['RT', 'NS', 'VFARM_HARDWARE', 'KIOSK', 'CAD_API', 'MEDIA', 'GENIE', 'CST', 'BAYS', 'UNASSIGNED'] as const;
+export const LANES = ['RT', 'NS', 'VFARM_HARDWARE', 'KIOSK', 'CAD_API', 'MEDIA', 'GENIE', 'CST', 'BAYS', 'CAPITAL', 'UNASSIGNED'] as const;
 
 /**
  * Sept 3 -- the other half of the lane map. A lane with a known owner and an
