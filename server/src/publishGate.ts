@@ -192,7 +192,7 @@ export interface VersionChange {
   eval_state: string; eval_run_id: string | null; eval_detail: string | null; requested_at: string | null; settled_at: string | null; alert_state: string | null;
 }
 export async function recent(limit = 20): Promise<VersionChange[]> {
-  return (await query<VersionChange>(`SELECT id::text, agent_id, name, version_id, previous_version_id, is_rollback, seen_at, eval_state, eval_run_id, eval_detail, requested_at, settled_at, alert_state FROM engine_agent_versions ORDER BY id DESC LIMIT $1`, [limit])).rows;
+  return (await query<VersionChange>(`SELECT id::text, agent_id, name, version_id, previous_version_id, is_rollback, seen_at, eval_state, eval_run_id, eval_detail, requested_at, settled_at, alert_state FROM engine_agent_versions ORDER BY seen_at DESC, id DESC LIMIT $1`, [limit])).rows;
 }
 
 let timer: NodeJS.Timeout | null = null;

@@ -12035,3 +12035,13 @@ Files:      server/src/agentInventory.ts, src/screens/AgentMaturity.tsx, src/dat
 Problem:    none.
 Fix:        A tool gains `guard: "destination"` when it is send_nudge, post_file or post_channel_message on an agent token, or the workflow tool Bays — Slack Send (named by workflow id, because n8n's config cannot say it). `approval` stays false: a known destination still goes at once. The stored rows are re-derived at boot from the config they hold; n8n is not re-read.
 Decision:   Not counted as approved. "Held for a person when the destination is unknown" is a different statement from "always asks", and the page says the first.
+
+## 2026-10-11 06:50 — both guards hold a real call, the agents read Logstream on their own tokens, and last night's rollback gets a record
+Intent:     the independent re-score (6.2) said the new controls had no real use behind them. Give them some, through the agents' real tools, and record what was only in this log.
+Files:      server/src/migrations.ts (71), server/src/publishGate.ts (order by seen time).
+Problem:    none in the code. The re-score's finding was fair: three pinned tests are not a production run.
+Fix:        Bays, asked through n8n's agent call with its real tools: Slack_Send_Message to the sandbox channel posted at once (ts 1791696540.918799); the same tool to #bha-water-twin, which the engine does not capture, posted nothing and came back awaiting_approval, APR-1791696541365-JHXJ, card in the alerts channel. send_nudge to an id with no Builder Profile came back awaiting_approval, APR-1791696558706-WP1P, audit 1624. Both cards are waiting on Destiny or Jason; nothing has been decided for them.
+            North Star and Research Twin, each asked a real question about recurring faults, read read_logstream (and North Star read_engine_events) on their own tokens. Research Twin opened the one fault at its threshold and read its five incidents.
+            Migration 71 writes the three North Star version changes of 10 and 11 Oct into engine_agent_versions from n8n's version list and the stored eval runs, the hand rollback to 28c4509c included, and one agent_rolled_back event. Each row says it was backfilled and why its time is what it is.
+Decision:   The backfill is labelled as one on every row. n8n keeps no time for publishing an old version again, so the rollback row is dated by the end of the run that caused it, and says so.
+            The two test approvals are left pending on purpose: the decision is a person's.

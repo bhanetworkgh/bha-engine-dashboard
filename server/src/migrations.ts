@@ -3024,6 +3024,25 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_agent_versions_agent ON engine_agent_versions (agent_id, id DESC)`,
     ],
   },
+  {
+    id: 71,
+    name: 'engine_agent_versions: North Star version changes of 10 and 11 Oct, backfilled, with the hand rollback',
+    statements: [
+      `INSERT INTO engine_agent_versions (agent_id, name, version_id, previous_version_id, is_rollback, seen_at, eval_state, eval_run_id, eval_detail, settled_at)
+       SELECT agent_id, name, version_id, previous_version_id, is_rollback, seen_at::timestamptz, eval_state, eval_run_id, eval_detail, settled_at::timestamptz FROM (VALUES
+         ('8NQRXadH0OrKe5XV', 'North Star (Agent)', '1149ec32-e419-40e1-b55c-315c866212c6', '28c4509c-84e2-4dde-a411-6089602c5c71', false, '2026-10-10T22:37:53.170Z', 'failed', 'EVAL-202610102238', $d$Backfilled on 11 Oct 2026 from n8n's version list and the stored eval runs; the publish check was built later that day. EVAL-202610102238: NS-06 failed one repeat in three (no Sources list) and had passed in the run before. The version was rolled back by hand.$d$, '2026-10-10T22:37:53.170Z'),
+         ('8NQRXadH0OrKe5XV', 'North Star (Agent)', '28c4509c-84e2-4dde-a411-6089602c5c71', '1149ec32-e419-40e1-b55c-315c866212c6', true, '2026-10-10T23:14:39.608Z', 'superseded', NULL, $d$Backfilled on 11 Oct 2026 from n8n's version list and the stored eval runs; the publish check was built later that day. Rolled back by hand after EVAL-202610102238 failed. n8n keeps no time for publishing an old version again, so this row is dated by the end of that run.$d$, '2026-10-10T23:14:39.608Z'),
+         ('8NQRXadH0OrKe5XV', 'North Star (Agent)', 'd5b43089-9f37-434b-8f60-471f27c56539', '28c4509c-84e2-4dde-a411-6089602c5c71', false, '2026-10-11T02:10:33.134Z', 'failed', 'EVAL-202610110210', $d$Backfilled on 11 Oct 2026 from n8n's version list and the stored eval runs; the publish check was built later that day. EVAL-202610110210: NS-04 failed. The check was wrong, not the agent, so the check was revised with a new row in agent_eval_set and the version was kept.$d$, '2026-10-11T02:10:33.134Z')
+       ) AS v(agent_id, name, version_id, previous_version_id, is_rollback, seen_at, eval_state, eval_run_id, eval_detail, settled_at)
+       WHERE NOT EXISTS (SELECT 1 FROM engine_agent_versions e WHERE e.agent_id = '8NQRXadH0OrKe5XV' AND e.version_id = '1149ec32-e419-40e1-b55c-315c866212c6')`,
+      `UPDATE engine_agent_versions SET previous_version_id = 'd5b43089-9f37-434b-8f60-471f27c56539' WHERE agent_id = '8NQRXadH0OrKe5XV' AND version_id = '08671da0-fe32-4000-9b7a-d9a795d7ddc5' AND previous_version_id = '28c4509c-84e2-4dde-a411-6089602c5c71'`,
+      `INSERT INTO engine_events (event_type, at, subject_id, lane, actor, detail, dedupe_key)
+       SELECT 'agent_rolled_back', '2026-10-10T23:14:39.608Z'::timestamptz, '8NQRXadH0OrKe5XV', 'ENGINE', 'backfill (migration 71)',
+              jsonb_build_object('name', 'North Star (Agent)', 'from', '1149ec32-e419-40e1-b55c-315c866212c6', 'to', '28c4509c-84e2-4dde-a411-6089602c5c71', 'rollback', true, 'reason', 'EVAL-202610102238 failed NS-06', 'backfilled', true),
+              'agent_version:backfill:1149ec32'
+        WHERE NOT EXISTS (SELECT 1 FROM engine_events WHERE dedupe_key = 'agent_version:backfill:1149ec32')`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
