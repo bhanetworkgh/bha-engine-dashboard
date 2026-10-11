@@ -11979,3 +11979,10 @@ Decision:   Mine, and put to Jason through Destiny: the buyer states (intake_sub
             The Codex record for CAPITAL is a lane definition and not a session log. It has no Codex Entry ID, so it creates no pay row; it does count as one submission awaiting Jason's approval.
             Not done on CAFQ: the four Rank_Lanes factors on the two commercial lanes. Those are a judgement, and Destiny sets them.
             Not built on ZX0W: writers for the buyer, subscriber, delivery and upgrade events. No buyer state, subscription or delivery exists in any system to write from.
+
+## 2026-10-11 06:40 — the infra hardening note for 408M
+Intent:     LOOP-1788044070646-408M, Destiny's parts: say where the golden incident pattern, the card tagging and the media-safe brief stand (Lagos time).
+Files:      docs/design/vfarm-infra-hardening-408M.md (new)
+Problem:    The loop is from 24 Aug and names three deliverables. The first was built in pieces across six weeks and nothing said so in one place; the second and third had no engine-side half written down.
+Fix:        One note: the incident shape, the seven error classes and what happens after a failure, with the seven patterns that record it; a map of which tags and events live on which record and the tool a twin reads each with (field names read from the live tables, not from memory); the infra half of the media-safe brief, as what a record supports today and what it does not.
+Decision:   Nothing was built for this loop. The work was already live; the gap was that it was not written as an answer to the loop. Hardik's media half and Jegan's pump, valve and soil thresholds are theirs.
