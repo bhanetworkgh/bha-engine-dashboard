@@ -1176,6 +1176,28 @@ from the real text. `derive` reads no field the slim form drops, so the row is
 the same either way; `raw.slim` says which form was stored. `npm run
 test:agent-inventory` pins it, and `AGENT_FILE=` runs it on a real agent.
 
+**The server reads the agent itself** (2026-10-11, Destiny). On 11 Oct the
+inventory was not recorded after a Bays publish, because carrying 166,000
+characters across by hand is where it goes wrong. `server/src/n8nMcp.ts` is a
+client for **n8n's own MCP server** (`/mcp-server/http`, streamable HTTP, so
+`fetch` and no dependency) and exports one thing, `getAgent`: initialize, then
+one `tools/call` for `get_agent`. **Read only**: nothing else on n8n's MCP
+server is reachable from here. `record_agent_inventory` takes **`agent_id`**
+(an n8n agent id, `bays`, `north_star`, `research_twin`, or `all`: those three
+plus any agent already held), reads the config and records it whole through
+the same `inventory.record`, so the tier and the publish check are unchanged.
+An agent n8n could not be read for is `ok: false` with the reason
+(`not_configured`, `unauthorised`, `unreachable`, `not_found`, `bad_answer`,
+`tool_error`), is audited as refused, and its held row is left as it was; an
+answer about a different agent is never recorded. `owner` is refused with
+`all`: one owner for several agents would re-own every one of them. A handed-over `agent` still
+works. **`N8N_MCP_TOKEN`** is the access token from n8n's Settings >
+Instance-level MCP > Connect > API key tab: no default, a different credential
+from `N8N_API_KEY`, and **generating a new one in n8n revokes the old**, so it
+must be updated on Render in the same breath. `N8N_MCP_URL` and
+`N8N_MCP_TIMEOUT_MS` are optional. Still a person's tool, in no agent's scope.
+`npm run test:n8n-mcp` pins it with no database and no network.
+
 **Agent identity, 2 Oct**: the seven BHARAG HTTP tools on the three agents no
 longer skip certificate checks (the dashboard had been verifying
 bharag2.duckdns.org's certificate all along), and each agent's dashboard token
@@ -2007,6 +2029,10 @@ row stays exactly as it was. Not the same credential as `ASK_BAYS_API_KEY`,
 which is a webhook header. Without it no execution is ever read, the Executions
 page says so rather than reading zero, and the Repairs tab says no repair can be
 put back from here.
+`N8N_MCP_TOKEN` — the access token for n8n's own MCP server (2026-10-11), read
+for one thing: an agent's config, for `record_agent_inventory`. No default;
+unset, the tool cannot fetch an agent and must be handed the result, and the
+boot line says so. Not `N8N_API_KEY`.
 `BHARAG_BAYS_INCIDENTS`, `BHARAG_NS_INCIDENTS` and `BHARAG_RT_INCIDENTS` — the
 incident ledger, one per lane, read only, no defaults. **`BHARAG_GENIE_INCIDENTS`
 is the fourth** (2026-10-05, Destiny — LOOP-1791193551334-3LXR): Genie publishes

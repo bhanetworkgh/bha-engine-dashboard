@@ -85,6 +85,16 @@ services:
       # hourly and the pages read that.
       - key: N8N_API_KEY
         sync: false
+      # n8n's own MCP server, read by this server for one thing: an agent's
+      # config (2026-10-11, Destiny). The public API has no agents endpoint, so
+      # until this the get_agent answer was carried into record_agent_inventory
+      # by hand. The value is the access token from n8n's Settings >
+      # Instance-level MCP > Connect > API key tab. A different credential from
+      # N8N_API_KEY. No default: unset, record_agent_inventory answers
+      # not_configured for agent_id and still takes a handed-over result.
+      # Generating a new token in n8n revokes the old one, so update it here.
+      - key: N8N_MCP_TOKEN
+        sync: false
       # The n8n Cloud plan's execution quota and its alerts (2026-09-26, Jason
       # and Destiny). N8N_EXECUTION_QUOTA is the plan's monthly executions
       # (50000); N8N_BILLING_CYCLE_START a day the monthly count restarted
