@@ -37,7 +37,11 @@
     "test:research-signals": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/research-signals.test.cjs",
     "test:publish-gate": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/publish-gate.test.cjs",
     "test:scheduled-runs": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/scheduled-runs.test.cjs",
-    "test:vfarm-gates": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/vfarm-gates.test.cjs && node --no-warnings=ExperimentalWarning server/test/vfarm-gate-auto.test.cjs"
+    "test:vfarm-gates": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/vfarm-gates.test.cjs && node --no-warnings=ExperimentalWarning server/test/vfarm-gate-auto.test.cjs",
+    "test:t0no": "npm run build:server --silent && node server/test/t0no.test.cjs",
+    "test:vrfk": "npm run build:server --silent && node server/test/publication-decision.test.cjs",
+    "test:vrfk-db": "npm run build:server --silent && node server/test/publication-decision.db.test.cjs",
+    "test:se8l": "npm run build:server --silent && node server/test/doctrine-gap.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",
