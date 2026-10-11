@@ -107,9 +107,18 @@ has run on real threads.
 - A person's weekend or working hours. A wait is clock hours.
 - Opening a watch from the dashboard page. It is read only; a watch is opened by asking Bays.
 
+## Changing a watch
+
+`update_decision_watch` sets or adds to three fields on a watch that is still open: `sop_refs`,
+`ns_refs` and `next_step`. It exists because an SOP is often written after the watch it governs.
+What is being waited on, the owner and the thread cannot be changed; that is a new watch. The
+requester, the owner, Destiny or Jason may change one. Every change is a dated line in the
+watch's `history` and one `decision_watch_updated` event carrying the old and new value.
+
 ## Tools
 
-`open_decision_watch`, `list_decision_watches`, `close_decision_watch` (in Bays' scope) and
+`open_decision_watch`, `list_decision_watches`, `close_decision_watch`, `update_decision_watch`
+(in Bays' scope) and
 `run_decision_watch` (a person on the connector; `dry_run` by default). Every call is audited on
 `engine_mcp_writes`. `npm run test:decision-watch` pins the behaviour against a local database
 with Slack stood in.

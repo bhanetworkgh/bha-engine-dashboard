@@ -213,6 +213,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'read_logstream', 'read_engine_events',
         // 2026-10-11: Decision Watch (5YQA). Bays opens, lists and closes; running the pass stays with a person.
         'open_decision_watch', 'list_decision_watches', 'close_decision_watch',
+        // 2026-10-11: attach an SOP written after the watch was opened (Jason, 1791746835.121559).
+        'update_decision_watch',
       ]),
     },
     {

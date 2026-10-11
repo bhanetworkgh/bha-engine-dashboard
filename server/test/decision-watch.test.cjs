@@ -296,6 +296,32 @@ const srv = http.createServer((req, res) => {
   assert.equal(audit.rows[0].kind, 'decision_watch');
   ok('the tools audit every call, refuse a test watch to an agent, and keep fixtures off the page');
 
+  /* 12b. a reference is attached to a watch opened before the SOP existed, and the reminder carries it */
+  const u0 = await dw.open({ ...base, thread_ts: '1791733301.000001', sop_refs: null, ns_refs: null, next_step: null });
+  const U = u0.watch.watch_id;
+  slack.threads[`${CH}:1791733301.000001`] = [];
+  await query(`UPDATE engine_decision_watches SET created_at = $2, quiet_since = $2 WHERE watch_id = $1`, [U, at(0).toISOString()]);
+  assert.equal((await dw.update(U, OTHER, { sop_refs: 'x' })).reason, 'not_permitted');
+  let up = await dw.update(U, JASON, { sop_refs: 'SOP -- Delivery update standard (BHARAG f0673993)' });
+  assert.deepEqual(up.changed.map((c) => [c.field, c.from]), [['sop_refs', null]]);
+  up = await dw.update(U, JASON, { sop_refs: 'SOP -- Critical-path narration (BHARAG e874c3de)' }, { append: true });
+  assert.equal(up.watch.sop_refs, 'SOP -- Delivery update standard (BHARAG f0673993); SOP -- Critical-path narration (BHARAG e874c3de)');
+  up = await dw.update(U, JASON, { sop_refs: 'SOP -- Critical-path narration (BHARAG e874c3de)' }, { append: true });
+  assert.equal(up.changed.length, 0, 'a reference already held is not added twice');
+  t = await tools.updateDecisionWatch.handler({ watch_id: U, ns_refs: 'CAPITAL ranked first', requester_user_id: OWNER }, { access: 'write', agent: 'bays', dispatch: async () => ({ status: 200, body: {} }), startedAt: '' });
+  assert.equal(t.ok, true);
+  assert.equal(t.changed[0].field, 'ns_refs');
+  t = await tools.updateDecisionWatch.handler({ watch_id: U, requester_user_id: OWNER }, { access: 'write', agent: 'bays', dispatch: async () => ({ status: 200, body: {} }), startedAt: '' });
+  assert.equal(t.reason, 'nothing_to_change');
+  r = await only(U, at(24 * 60 + 1));
+  assert.match(slack.posts.at(-1).text, /SOP:\* SOP -- Delivery update standard \(BHARAG f0673993\); SOP -- Critical-path narration/);
+  assert.match(slack.posts.at(-1).text, /North Star:\* CAPITAL ranked first/);
+  assert.equal((await query(`SELECT count(*)::int AS n FROM engine_events WHERE event_type = 'decision_watch_updated' AND subject_id = $1`, [U])).rows[0].n, 3);
+  assert.equal((await row(U)).history.filter((h) => /^updated by/.test(h.what)).length, 3);
+  await dw.close(U, JASON, 'cancelled', 'test');
+  assert.equal((await dw.update(U, JASON, { sop_refs: 'late' })).reason, 'already_closed');
+  ok('a watch takes an SOP written after it was opened, logs each change, and its reminder carries it');
+
   /* 13. events */
   const ev = await query(`SELECT event_type, count(*)::int AS n FROM engine_events WHERE subject_id = ANY($1) GROUP BY 1`, [[A, B]]);
   const n = Object.fromEntries(ev.rows.map((x) => [x.event_type, x.n]));
