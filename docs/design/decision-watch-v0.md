@@ -88,7 +88,7 @@ One pass every five minutes, on the dashboard, beside its other background check
   "CAPITAL Lane Live-Client Ownership & Escalation". The wait starts when the watch is made,
   so switching it on reminds nobody about the past. An owner that is not one person
   (for example "North Star and Research Twin") is not watched.
-- **Events:** `decision_watch_opened`, `_reminded`, `_closed`, `_escalated`, `_unread` in
+- **Events:** `decision_watch_opened`, `_reminded`, `_closed`, `_escalated`, `_unread`, `_held` (the daily cap held a post back) in
   `engine_events`, so every agent can read them through `read_engine_events`.
 - **Where it shows:** the Decision watch tab on the Bays page; `list_decision_watches`.
 
