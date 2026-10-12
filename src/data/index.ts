@@ -175,6 +175,9 @@ export function getServerStatus(): Promise<ServerStatus> {
 export const getOverview = (q: Query) => api<OverviewData>(withLane('/api/overview', q));
 export const getOpenLoops = (q: Query) => api<OpenLoopsData>(withLane('/api/open-loops', q));
 export const getCodexEntries = (q: Query) => api<CodexData>(withLane('/api/codex', q));
+/** The SOPs tab on Codex (2026-10-13): every SOP in BHARAG's codex workspace, read live by the server. */
+export const getSops = (fresh = false) => api<import('./types').SopsData>(`/api/sops${fresh ? '?fresh=1' : ''}`, { timeoutMs: 120_000 });
+export const getSop = (id: string) => api<import('./types').SopDoc>(`/api/sops/doc?id=${encodeURIComponent(id)}`);
 export const getBuildPatterns = (q: Query) => api<BuildPatternsData>(withLane('/api/build-patterns', q));
 export const getPatternCandidates = () => api<PatternCandidatesData>('/api/pattern-candidates');
 /** Builder Profiles, for the Candidates tab's acting-as and reassign pickers (2026-09-24). */

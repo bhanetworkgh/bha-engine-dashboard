@@ -3500,6 +3500,20 @@ Build patterns and Commercial share the Codex page's shape — the same filter
 bar, the same truncated list rows with the full record on click, the same chart
 treatment, the same resync control in the same place.
 
+**SOPs are a tab on Codex** (2026-10-13, Destiny): Entries · **SOPs** · Statistics,
+at `/codex?view=sops`, one SOP at `&sop=<BHARAG id>`. An SOP is a document in
+BHARAG's **codex workspace** whose title starts "SOP" — what Bays writes with
+`Ingest_To_BHARAG` — and BHARAG is the only source: nothing is copied into
+Postgres, so an SOP removed from BHARAG leaves the list on the next read.
+`server/src/sops.ts` walks every page of `GET /documents` with
+`BHARAG_CODEX_KEY` (the workspace also holds every Codex log, and BHARAG has no
+title filter), keeps the SOP titles newest first, counts SOPs sharing a title,
+and holds a **complete** read for five minutes (`?fresh=1` reads again). A read
+cut short by a failing page or the 60-page cap is `complete: false` with a note
+and is not held. `GET /api/sops` and `GET /api/sops/doc?id=` (full text,
+refused for a document that is not an SOP). A read; nothing writes to BHARAG.
+`npm run test:sops`.
+
 **Build patterns and Commercial are one shape, not two** (decision 2026-09-16,
 Destiny). Both open on the current month, chosen in a picker **to the left of the
 search box** — where it is on every record page — and the strip, the cards and

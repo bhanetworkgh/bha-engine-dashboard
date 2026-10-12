@@ -4264,3 +4264,30 @@ export interface LogstreamData {
   patterns: Record<string, string>;
   notes: string[];
 }
+
+/* SOPs, read from BHARAG's codex workspace (2026-10-13). server/src/sops.ts. */
+export interface SopRow {
+  id: string;
+  title: string;
+  created_at: string | null;
+  updated_at: string | null;
+  status: string | null;
+  source_link: string | null;
+  requested_by: string | null;
+  same_title: number;
+}
+export interface SopsData {
+  ok: boolean;
+  workspace: string;
+  read_at: string | null;
+  complete: boolean;
+  documents_scanned: number;
+  pages_read: number;
+  sops: SopRow[];
+  note: string | null;
+  error: string | null;
+}
+export interface SopDoc {
+  ok: true;
+  sop: SopRow & { content: string | null; metadata: Record<string, unknown> | null };
+}
