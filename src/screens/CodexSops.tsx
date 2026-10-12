@@ -9,7 +9,7 @@
  */
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
-import { getSop, getSops, type SopDoc, type SopRow, type SopsData } from '../data';
+import type { SopDoc, SopRow, SopsData } from '../data';
 import { Button, LoadFailed, Loading, Pagination, Pill, RecordTable, SearchBox, usePaged, type RecordColumn } from '../components/ui';
 
 function when(iso: string | null): string {
@@ -70,7 +70,7 @@ function columns(): RecordColumn<SopRow>[] {
   ];
 }
 
-function SopDialog({ id, onClose }: { id: string; onClose: () => void }) {
+function SopDialog({ id, onClose, getSop }: { id: string; onClose: () => void; getSop: (id: string) => Promise<SopDoc> }) {
   const [doc, setDoc] = useState<SopDoc['sop'] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
@@ -85,7 +85,7 @@ function SopDialog({ id, onClose }: { id: string; onClose: () => void }) {
     return () => {
       live = false;
     };
-  }, [id]);
+  }, [id, getSop]);
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', k);
@@ -132,7 +132,22 @@ function SopDialog({ id, onClose }: { id: string; onClose: () => void }) {
   );
 }
 
-export default function CodexSops({ openId, setOpenId }: { openId: string | null; setOpenId: (id: string | null) => void }) {
+/**
+ * The two reads are handed in by Codex.tsx, the page file, so the dashboard's
+ * own page-structure reader (which reads the page's file for its data calls)
+ * lists `/api/sops` as one of this page's routes.
+ */
+export default function CodexSops({
+  openId,
+  setOpenId,
+  getSops,
+  getSop,
+}: {
+  openId: string | null;
+  setOpenId: (id: string | null) => void;
+  getSops: (fresh?: boolean) => Promise<SopsData>;
+  getSop: (id: string) => Promise<SopDoc>;
+}) {
   const [data, setData] = useState<SopsData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -197,7 +212,7 @@ export default function CodexSops({ openId, setOpenId }: { openId: string | null
         empty={!data.ok ? 'BHARAG could not be read, so no SOPs are listed.' : q.trim() ? 'No SOP matches that search.' : 'BHARAG holds no document titled "SOP" in the codex workspace.'}
       />
       {rows.length > 0 && <Pagination paged={paged} unit="SOPs" />}
-      {openId && <SopDialog id={openId} onClose={() => setOpenId(null)} />}
+      {openId && <SopDialog id={openId} onClose={() => setOpenId(null)} getSop={getSop} />}
     </div>
   );
 }

@@ -4,6 +4,8 @@ import CodexSops from './CodexSops';
 import { useData } from '../app/useData';
 import {
   getCodexEntries,
+  getSop,
+  getSops,
   getRecordMetrics,
   resyncCodex,
   type CodexEntry,
@@ -615,7 +617,7 @@ export default function Codex() {
         is the list and its filters, and nothing else.
       */}
       {view === 'SOPs' ? (
-        <CodexSops openId={sopOpen} setOpenId={setSopOpen} />
+        <CodexSops openId={sopOpen} setOpenId={setSopOpen} getSops={getSops} getSop={getSop} />
       ) : view === 'Statistics' ? (
         <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-4">
           <RecordStatistics<CodexEntry>
