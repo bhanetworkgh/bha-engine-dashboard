@@ -60,13 +60,15 @@ export interface SopsRead {
   sops: SopRow[];
   note: string | null;
   error: string | null;
+  /** The five newest document titles read, whatever they are: which workspace the key opens, at a glance. */
+  newest_titles: string[];
 }
 
 let held: { at: number; value: SopsRead } | null = null;
 let inFlight: Promise<SopsRead> | null = null;
 
 async function walk(): Promise<SopsRead> {
-  const base = { ok: false, workspace: WORKSPACE, read_at: null, complete: false, documents_scanned: 0, pages_read: 0, sops: [] as SopRow[], note: null };
+  const base = { ok: false, workspace: WORKSPACE, read_at: null, complete: false, documents_scanned: 0, pages_read: 0, sops: [] as SopRow[], note: null, newest_titles: [] as string[] };
   if (!bharag.ingestConfigured(WORKSPACE)) {
     return { ...base, error: `${bharag.INGEST_KEY_VARS[WORKSPACE]} is not set on this server, so BHARAG's codex workspace cannot be read.` };
   }
@@ -75,12 +77,16 @@ async function walk(): Promise<SopsRead> {
   let pages = 0;
   let more = true;
   let error: string | null = null;
+  const newest: string[] = [];
   while (more && pages < MAX_PAGES) {
     try {
       const r = await bharag.listDocuments(WORKSPACE, PAGE, pages * PAGE);
       pages += 1;
       scanned += r.documents.length;
-      for (const d of r.documents) if (isSopTitle(d.title)) found.push(d);
+      for (const d of r.documents) {
+        if (newest.length < 5) newest.push(String(d.title ?? '(untitled)').slice(0, 120));
+        if (isSopTitle(d.title)) found.push(d);
+      }
       more = r.hasMore && r.documents.length > 0;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -115,7 +121,7 @@ async function walk(): Promise<SopsRead> {
     : more
       ? `Stopped at ${MAX_PAGES} pages (${scanned} documents). Older SOPs may be missing from this list.`
       : null;
-  return { ok: true, workspace: WORKSPACE, read_at: new Date().toISOString(), complete, documents_scanned: scanned, pages_read: pages, sops, note, error: null };
+  return { ok: true, workspace: WORKSPACE, read_at: new Date().toISOString(), complete, documents_scanned: scanned, pages_read: pages, sops, note, error: null, newest_titles: newest };
 }
 
 /** Every SOP in BHARAG, newest first. */
