@@ -51,10 +51,10 @@ srv.listen(0, async () => {
   delete process.env.BHARAG_CODEX_KEY;
   let sops = require(path.join(DIST, 'sops.js'));
   const none = await sops.read({fresh:true});
-  assert.equal(none.ok, false); assert.match(none.error, /BHARAG_CODEX_KEY is not set/);
+  assert.equal(none.ok, false); assert.match(none.error, /Neither BHARAG_SOPS_KEY nor BHARAG_CODEX_KEY is set/);
   process.env.BHARAG_CODEX_KEY = 'ws-key';
   const r = await sops.read({fresh:true});
-  assert.equal(r.ok, true); assert.equal(r.complete, true); assert.equal(seenKey, 'ws-key');
+  assert.equal(r.ok, true); assert.equal(r.complete, true); assert.equal(seenKey, 'ws-key'); assert.equal(r.key_variable, 'BHARAG_CODEX_KEY');
   assert.equal(r.documents_scanned, 251); assert.equal(r.pages_read, 3);
   assert.equal(r.sops.length, 25, 'every 10th of 250, and not SOPHISTICATED');
   assert.ok(r.sops.every(s => /^sop/i.test(s.title)));
@@ -68,10 +68,12 @@ srv.listen(0, async () => {
   failAt = 200; const part = await sops.read({fresh:true});
   assert.equal(part.ok, true); assert.equal(part.complete, false); assert.match(part.note, /stopped answering after 2 pages/);
   failAt = 0; const fail = await sops.read(); assert.equal(fail.ok, false, 'a partial read is not held'); assert.match(fail.error, /could not be read/); failAt = null;
+  // the SOP key wins over the codex key when set
+  process.env.BHARAG_SOPS_KEY = 'sops-key'; const k = await sops.read({fresh:true}); assert.equal(seenKey, 'sops-key'); assert.equal(k.key_variable, 'BHARAG_SOPS_KEY');
   // doc
   const d = await sops.doc(docs[10].id); assert.equal(d.ok, true); assert.equal(d.sop.content, 'Body of SOP -- Rule 10');
   const notSop = await sops.doc(docs[1].id); assert.equal(notSop.ok, false); assert.equal(notSop.status, 404); assert.match(notSop.reason, /not an SOP/);
   const gone = await sops.doc('00000000-0000-0000-0000-123456789012'); assert.equal(gone.status, 404); assert.match(gone.reason, /no document/);
   const bad = await sops.doc('../etc'); assert.equal(bad.status, 400);
-  console.log('sops: 19 checks passed'); srv.close();
+  console.log('sops: 22 checks passed'); srv.close();
 });

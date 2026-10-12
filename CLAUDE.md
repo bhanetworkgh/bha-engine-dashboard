@@ -3506,8 +3506,12 @@ BHARAG's **codex workspace** whose title starts "SOP" — what Bays writes with
 `Ingest_To_BHARAG` — and BHARAG is the only source: nothing is copied into
 Postgres, so an SOP removed from BHARAG leaves the list on the next read.
 `server/src/sops.ts` walks every page of `GET /documents` with
-`BHARAG_CODEX_KEY` (the workspace also holds every Codex log, and BHARAG has no
-title filter), keeps the SOP titles newest first, counts SOPs sharing a title,
+**`BHARAG_SOPS_KEY`** — the key of n8n's "BHARAG - Codex" credential, which Bays
+reads and writes SOPs with — falling back to `BHARAG_CODEX_KEY` only when unset,
+and every answer names the variable it used (`key_variable`). They are not the
+same workspace: on 13 Oct the codex key opened one whose newest documents were
+commercial cards and none of that day's SOPs. The read walks every page (the
+workspace also holds every Codex log, and BHARAG has no title filter), keeps the SOP titles newest first, counts SOPs sharing a title,
 and holds a **complete** read for five minutes (`?fresh=1` reads again). A read
 cut short by a failing page or the 60-page cap is `complete: false` with a note
 and is not held. `GET /api/sops` and `GET /api/sops/doc?id=` (full text,

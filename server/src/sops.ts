@@ -22,6 +22,19 @@ const PAGE = 100; // BHARAG's own maximum for GET /documents
 const MAX_PAGES = 60; // 6,000 documents; past that the answer says it is incomplete
 const HOLD_MS = 5 * 60_000;
 
+/**
+ * Which key opens the workspace Bays writes SOPs into (2026-10-13). The first
+ * live read with BHARAG_CODEX_KEY reached a workspace whose newest documents
+ * were commercial cards and none of that day's SOPs, while Bays reads and
+ * writes SOPs with n8n's "BHARAG - Codex" credential. So the SOP read has its
+ * own variable, holding that credential's key, and falls back to the codex key
+ * only when it is unset, saying so on every answer.
+ */
+export const SOPS_KEY_VAR = 'BHARAG_SOPS_KEY';
+function keyVar(): string {
+  return process.env[SOPS_KEY_VAR]?.trim() ? SOPS_KEY_VAR : bharag.INGEST_KEY_VARS[WORKSPACE];
+}
+
 /** A title that starts with "SOP" is an SOP. Exported for the test. */
 export function isSopTitle(title: unknown): boolean {
   return typeof title === 'string' && /^\s*SOP\b/i.test(title);
@@ -60,6 +73,8 @@ export interface SopsRead {
   sops: SopRow[];
   note: string | null;
   error: string | null;
+  /** The variable whose key opened the workspace. */
+  key_variable: string;
   /** The five newest document titles read, whatever they are: which workspace the key opens, at a glance. */
   newest_titles: string[];
 }
@@ -68,9 +83,9 @@ let held: { at: number; value: SopsRead } | null = null;
 let inFlight: Promise<SopsRead> | null = null;
 
 async function walk(): Promise<SopsRead> {
-  const base = { ok: false, workspace: WORKSPACE, read_at: null, complete: false, documents_scanned: 0, pages_read: 0, sops: [] as SopRow[], note: null, newest_titles: [] as string[] };
-  if (!bharag.ingestConfigured(WORKSPACE)) {
-    return { ...base, error: `${bharag.INGEST_KEY_VARS[WORKSPACE]} is not set on this server, so BHARAG's codex workspace cannot be read.` };
+  const base = { ok: false, workspace: WORKSPACE, key_variable: keyVar(), read_at: null, complete: false, documents_scanned: 0, pages_read: 0, sops: [] as SopRow[], note: null, newest_titles: [] as string[] };
+  if (!process.env[keyVar()]?.trim()) {
+    return { ...base, error: `Neither ${SOPS_KEY_VAR} nor ${bharag.INGEST_KEY_VARS[WORKSPACE]} is set on this server, so the workspace SOPs live in cannot be read.` };
   }
   const found: bharag.WorkspaceDocument[] = [];
   let scanned = 0;
@@ -80,7 +95,7 @@ async function walk(): Promise<SopsRead> {
   const newest: string[] = [];
   while (more && pages < MAX_PAGES) {
     try {
-      const r = await bharag.listDocuments(WORKSPACE, PAGE, pages * PAGE);
+      const r = await bharag.listDocuments(WORKSPACE, PAGE, pages * PAGE, keyVar());
       pages += 1;
       scanned += r.documents.length;
       for (const d of r.documents) {
@@ -121,7 +136,7 @@ async function walk(): Promise<SopsRead> {
     : more
       ? `Stopped at ${MAX_PAGES} pages (${scanned} documents). Older SOPs may be missing from this list.`
       : null;
-  return { ok: true, workspace: WORKSPACE, read_at: new Date().toISOString(), complete, documents_scanned: scanned, pages_read: pages, sops, note, error: null, newest_titles: newest };
+  return { ok: true, workspace: WORKSPACE, key_variable: keyVar(), read_at: new Date().toISOString(), complete, documents_scanned: scanned, pages_read: pages, sops, note, error: null, newest_titles: newest };
 }
 
 /** Every SOP in BHARAG, newest first. */
@@ -148,10 +163,10 @@ export type SopDocResult =
 /** One SOP's full text. Refused for a document whose title is not an SOP: this is not a general BHARAG reader. */
 export async function doc(id: string): Promise<SopDocResult> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return { ok: false, status: 400, reason: 'An SOP id is a BHARAG document id (a UUID).' };
-  if (!bharag.ingestConfigured(WORKSPACE)) return { ok: false, status: 503, reason: `${bharag.INGEST_KEY_VARS[WORKSPACE]} is not set on this server.` };
+  if (!process.env[keyVar()]?.trim()) return { ok: false, status: 503, reason: `Neither ${SOPS_KEY_VAR} nor ${bharag.INGEST_KEY_VARS[WORKSPACE]} is set on this server.` };
   let d: bharag.WorkspaceDocument | null;
   try {
-    d = await bharag.getDocument(WORKSPACE, id);
+    d = await bharag.getDocument(WORKSPACE, id, keyVar());
   } catch (e) {
     return { ok: false, status: 502, reason: `BHARAG could not be read: ${e instanceof Error ? e.message : String(e)}` };
   }

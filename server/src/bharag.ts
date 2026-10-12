@@ -433,18 +433,18 @@ function ingestKey(ws: IngestWorkspace): string | null {
 }
 
 /** One page of a workspace's documents, newest first, as BHARAG orders them. `limit` is at most 100 there. */
-export async function listDocuments(ws: IngestWorkspace, limit: number, offset: number): Promise<{ documents: WorkspaceDocument[]; hasMore: boolean }> {
-  const key = ingestKey(ws);
-  if (!key) throw new BharagError(`${INGEST_KEY_VARS[ws]} is not set on this server, so the ${ws} workspace cannot be read.`, 0);
+export async function listDocuments(ws: IngestWorkspace, limit: number, offset: number, keyVar?: string): Promise<{ documents: WorkspaceDocument[]; hasMore: boolean }> {
+  const key = keyVar ? process.env[keyVar]?.trim() || null : ingestKey(ws);
+  if (!key) throw new BharagError(`${keyVar ?? INGEST_KEY_VARS[ws]} is not set on this server, so the ${ws} workspace cannot be read.`, 0);
   const r = await call<{ documents?: WorkspaceDocument[]; pagination?: { hasMore?: boolean } }>(`/documents?limit=${limit}&offset=${offset}`, key);
   const documents = Array.isArray(r?.documents) ? r.documents : [];
   return { documents, hasMore: r?.pagination?.hasMore === true };
 }
 
 /** One document with its full text. `null` when BHARAG says it is not in the workspace. */
-export async function getDocument(ws: IngestWorkspace, id: string): Promise<WorkspaceDocument | null> {
-  const key = ingestKey(ws);
-  if (!key) throw new BharagError(`${INGEST_KEY_VARS[ws]} is not set on this server, so the ${ws} workspace cannot be read.`, 0);
+export async function getDocument(ws: IngestWorkspace, id: string, keyVar?: string): Promise<WorkspaceDocument | null> {
+  const key = keyVar ? process.env[keyVar]?.trim() || null : ingestKey(ws);
+  if (!key) throw new BharagError(`${keyVar ?? INGEST_KEY_VARS[ws]} is not set on this server, so the ${ws} workspace cannot be read.`, 0);
   try {
     const r = await call<{ document?: WorkspaceDocument }>(`/documents/${encodeURIComponent(id)}?include_content=true`, key);
     return r?.document ?? null;

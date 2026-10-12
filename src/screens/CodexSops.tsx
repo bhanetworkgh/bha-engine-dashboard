@@ -187,7 +187,7 @@ export default function CodexSops({
           <p className="text-[12px] text-faint">
             {data.ok ? (
               <>
-                <span className="text-ink">{data.sops.length}</span> {data.sops.length === 1 ? 'SOP' : 'SOPs'} in BHARAG&rsquo;s codex workspace, read {ago(data.read_at)} from {data.documents_scanned} documents.
+                <span className="text-ink">{data.sops.length}</span> {data.sops.length === 1 ? 'SOP' : 'SOPs'} in BHARAG&rsquo;s codex workspace, read {ago(data.read_at)} from {data.documents_scanned} documents with {data.key_variable}.
                 {copies > 0 && ` ${copies} share a title with another SOP.`}
               </>
             ) : (
