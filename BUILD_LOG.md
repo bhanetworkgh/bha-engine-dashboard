@@ -12263,3 +12263,10 @@ Problem:    Live after 9208051, GET /api/sops answered ok and complete, 167 docu
 Fix:        BHARAG_SOPS_KEY (render.yaml, sync: false): the SOP read uses it when set and BHARAG_CODEX_KEY otherwise, and every answer names the variable (`key_variable`, shown on the tab). test:sops now 22 checks, including that the SOP key wins.
 Decision:   A new variable rather than changing BHARAG_CODEX_KEY: create_record's Codex ingest uses that key today, and repointing it would move where those ingests land, which is a separate decision. Setting the value is manual: it is the secret inside n8n's "BHARAG - Codex" credential, which no tool here can read.
 Not yet:    Whether BHARAG_CODEX_KEY should also be the "BHARAG - Codex" key (so dashboard Codex ingests land where Bays' do) is open.
+
+## 2026-10-13 00:40 — log_sop and delete_sop
+Intent:     Destiny: tidy the superseded copies of the reference-patterns SOP (v1 52f35a39, v2 f58a091c, v3 4b6e370d still in BHARAG beside v4 5396900d, though their removal had been planned by hand on 12 Oct and missed), and log Jason's approved blocker SOP, both through tools rather than by hand.
+Files:      server/src/mcp/sopTools.ts (new), server/src/bharag.ts (call takes DELETE; ingestWithKey, deleteDocument), server/src/sops.ts (keyVar, forget exported), server/src/mcp/tools.ts, CLAUDE.md.
+Problem:    The dashboard could read SOPs but not write or remove one; the only paths were Bays' ingest tool (retyping the SOP to Bays) and BHARAG's console by hand.
+Fix:        log_sop: guard, duplicate-title refusal against a complete fresh read, ingest with BHARAG_SOPS_KEY, read-back comparison. delete_sop: SOP titles only, typed confirm, reason, whole text kept on the audit line, removal checked by reading the id again. BHARAG's DELETE /documents/:id takes the workspace key ("documents" op, backend/api/routes/index.ts).
+Decision:   A person's tools only (Destiny or Jason, in no agent's scope): removing doctrine the twins read is not something an agent does on its own. The text kept on the audit line is the copy of record for a removed SOP, as record_deletions is for a removed row.

@@ -97,14 +97,14 @@ export interface LedgerIncident {
   [k: string]: unknown;
 }
 
-async function call<T>(path: string, key: string, body?: unknown): Promise<T> {
+async function call<T>(path: string, key: string, body?: unknown, method?: 'DELETE'): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let res: Response;
   let text: string;
   try {
     res = await fetch(`${BHARAG_URL}${path}`, {
-      method: body === undefined ? 'GET' : 'POST',
+      method: method ?? (body === undefined ? 'GET' : 'POST'),
       headers: { 'x-api-key': key, Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: controller.signal,
@@ -451,5 +451,37 @@ export async function getDocument(ws: IngestWorkspace, id: string, keyVar?: stri
   } catch (e) {
     if (e instanceof BharagError && e.status === 404) return null;
     throw e;
+  }
+}
+
+/**
+ * The two SOP writes (2026-10-13, Destiny): log an SOP into the workspace Bays
+ * writes SOPs into, and remove one. Both use the key named by `keyVar`
+ * (`BHARAG_SOPS_KEY`), never a guessed one. An ingest goes through the write
+ * guard first, as every ingest from this server does.
+ */
+export async function ingestWithKey(keyVar: string, doc: IngestDocument, source: string): Promise<{ ok: boolean; id: string | null; detail: string }> {
+  const key = process.env[keyVar]?.trim();
+  if (!key) return { ok: false, id: null, detail: `${keyVar} is not set on this server, so nothing was sent to BHARAG.` };
+  const g = await guard({ workspace: 'codex', title: doc.title, content: doc.content, kind: 'record', source, metadata: doc.metadata, via: 'dashboard' });
+  if (!g.allow) return { ok: false, id: null, detail: `refused by the BHARAG write guard: ${g.reason}` };
+  try {
+    const r = await call<Record<string, unknown>>('/ingest', key, { ...doc, title: g.title, content: g.content, metadata: g.metadata });
+    const d = (r?.document ?? r?.data) as Record<string, unknown> | undefined;
+    const id = (r?.document_id ?? r?.id ?? d?.id ?? d?.document_id ?? null) as string | null;
+    return id ? { ok: true, id: String(id), detail: `ingested as ${String(id)}` } : { ok: false, id: null, detail: 'BHARAG answered without a document id.' };
+  } catch (e) {
+    return { ok: false, id: null, detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function deleteDocument(keyVar: string, id: string): Promise<{ ok: boolean; status: number | null; detail: string }> {
+  const key = process.env[keyVar]?.trim();
+  if (!key) return { ok: false, status: null, detail: `${keyVar} is not set on this server.` };
+  try {
+    await call<unknown>(`/documents/${encodeURIComponent(id)}`, key, undefined, 'DELETE');
+    return { ok: true, status: 200, detail: 'deleted' };
+  } catch (e) {
+    return { ok: false, status: e instanceof BharagError ? e.status || null : null, detail: e instanceof Error ? e.message : String(e) };
   }
 }
