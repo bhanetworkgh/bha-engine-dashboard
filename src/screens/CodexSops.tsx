@@ -134,7 +134,7 @@ function SopDialog({ id, onClose }: { id: string; onClose: () => void }) {
 
 export default function CodexSops({ openId, setOpenId }: { openId: string | null; setOpenId: (id: string | null) => void }) {
   const [data, setData] = useState<SopsData | null>(null);
-  const [error, setError] = useState<unknown>(null);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState('');
 
@@ -144,7 +144,7 @@ export default function CodexSops({ openId, setOpenId }: { openId: string | null
       setData(await getSops(fresh));
       setError(null);
     } catch (e) {
-      setError(e);
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
