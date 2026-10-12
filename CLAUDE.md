@@ -3515,8 +3515,15 @@ workspace also holds every Codex log, and BHARAG has no title filter), keeps the
 and holds a **complete** read for five minutes (`?fresh=1` reads again). A read
 cut short by a failing page or the 60-page cap is `complete: false` with a note
 and is not held. `GET /api/sops` and `GET /api/sops/doc?id=` (full text,
-refused for a document that is not an SOP). A read; nothing writes to BHARAG.
-`npm run test:sops`.
+refused for a document that is not an SOP). The page reads; nothing on it writes.
+`npm run test:sops`. **Two write tools, a person's** (2026-10-13,
+`server/src/mcp/sopTools.ts`, write connection, no agent's scope, Destiny or
+Jason only): `log_sop` writes one SOP with `BHARAG_SOPS_KEY` through the write
+guard, refuses a title already held, and reads the stored text back to compare
+(`verified`); `delete_sop` removes one SOP by id with `confirm: "DELETE <id>"`
+and a reason, keeps its whole text on the audit line first, and reads the id
+again to confirm it is gone. Both audited on `engine_mcp_writes` (kind
+`bharag_sop`).
 
 **Build patterns and Commercial are one shape, not two** (decision 2026-09-16,
 Destiny). Both open on the current month, chosen in a picker **to the left of the

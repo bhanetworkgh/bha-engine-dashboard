@@ -31,7 +31,7 @@ const HOLD_MS = 5 * 60_000;
  * only when it is unset, saying so on every answer.
  */
 export const SOPS_KEY_VAR = 'BHARAG_SOPS_KEY';
-function keyVar(): string {
+export function keyVar(): string {
   return process.env[SOPS_KEY_VAR]?.trim() ? SOPS_KEY_VAR : bharag.INGEST_KEY_VARS[WORKSPACE];
 }
 
@@ -137,6 +137,11 @@ async function walk(): Promise<SopsRead> {
       ? `Stopped at ${MAX_PAGES} pages (${scanned} documents). Older SOPs may be missing from this list.`
       : null;
   return { ok: true, workspace: WORKSPACE, key_variable: keyVar(), read_at: new Date().toISOString(), complete, documents_scanned: scanned, pages_read: pages, sops, note, error: null, newest_titles: newest };
+}
+
+/** Drop the held read, after an SOP is logged or removed, so the next read is BHARAG's. */
+export function forget(): void {
+  held = null;
 }
 
 /** Every SOP in BHARAG, newest first. */
