@@ -240,6 +240,11 @@ services:
       # row still saves and the answer says it is not in BHARAG.
       - key: BHARAG_CODEX_KEY
         sync: false
+      # The SOPs tab on Codex (2026-10-13): the key of n8n's "BHARAG - Codex"
+      # credential, the workspace Bays writes SOPs into and reads them from.
+      # Unset, the tab reads with BHARAG_CODEX_KEY and says which key it used.
+      - key: BHARAG_SOPS_KEY
+        sync: false
       - key: BHARAG_BUILD_PATTERNS_KEY
         sync: false
       - key: BHARAG_COMMERCIAL_KEY

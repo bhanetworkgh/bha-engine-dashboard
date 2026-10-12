@@ -4287,6 +4287,7 @@ export interface SopsData {
   note: string | null;
   error: string | null;
   newest_titles: string[];
+  key_variable: string;
 }
 export interface SopDoc {
   ok: true;
