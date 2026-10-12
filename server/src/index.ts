@@ -61,6 +61,7 @@ import * as reminderTools from './mcp/reminderTools';
 import * as slackTools from './mcp/slackTools';
 import * as publishGate from './publishGate';
 import * as decisionWatch from './decisionWatch';
+import * as sops from './sops';
 import { toolByName as mcpToolByName } from './mcp/tools';
 import { callerStore } from './mcp/caller';
 import * as dataGovernance from './dataGovernance';
@@ -1211,6 +1212,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await engine.getOpenLoops(q));
       case '/api/codex':
         return send(res, 200, await engine.getCodexEntries(q));
+      /** The SOPs tab on Codex (2026-10-13): every SOP in BHARAG's codex workspace, read live. A read. */
+      case '/api/sops':
+        return send(res, 200, await sops.read({ fresh: url.searchParams.get('fresh') === '1' }));
+      /** One SOP's full text, by BHARAG document id. A read. */
+      case '/api/sops/doc': {
+        const r = await sops.doc((url.searchParams.get('id') || '').trim());
+        return send(res, r.ok ? 200 : r.status, r.ok ? r : { ...r, message: r.reason });
+      }
       case '/api/build-patterns':
         return send(res, 200, await engine.getBuildPatterns(q));
       /** The Candidates tab on /build-patterns. Behind the cookie like every page route; read only. */

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import CodexSops from './CodexSops';
 import { useData } from '../app/useData';
 import {
   getCodexEntries,
@@ -125,7 +127,7 @@ function emptyLine({
  * better or worse — which needs month-against-month figures rather than rows,
  * and would have crowded the list off the screen if it sat above it.
  */
-const VIEWS = ['Entries', 'Statistics'] as const;
+const VIEWS = ['Entries', 'SOPs', 'Statistics'] as const;
 type View = (typeof VIEWS)[number];
 
 const TABS: { value: CodexTab; label: string }[] = [
@@ -494,7 +496,34 @@ export default function Codex() {
    * what the page assumes.
    */
   const [month, setMonth] = useState<string | null>(thisMonth());
-  const [view, setView] = useState<View>('Entries');
+  /**
+   * The tab is in the address (2026-10-13): `?view=sops` opens the SOPs tab and
+   * `&sop=<BHARAG id>` an SOP in it, so a link to one SOP can be sent.
+   */
+  const [params, setParams] = useSearchParams();
+  const view: View = params.get('view') === 'sops' ? 'SOPs' : params.get('view') === 'statistics' ? 'Statistics' : 'Entries';
+  const setView = (v: View) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        if (v === 'Entries') n.delete('view');
+        else n.set('view', v.toLowerCase());
+        n.delete('sop');
+        return n;
+      },
+      { replace: true },
+    );
+  const sopOpen = params.get('sop');
+  const setSopOpen = (id: string | null) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        if (id) n.set('sop', id);
+        else n.delete('sop');
+        return n;
+      },
+      { replace: false },
+    );
   const [open, setOpen] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const { toast, setToast } = useToast();
@@ -585,7 +614,9 @@ export default function Codex() {
         month in view, the approval-time figure and the export. The entries tab
         is the list and its filters, and nothing else.
       */}
-      {view === 'Statistics' ? (
+      {view === 'SOPs' ? (
+        <CodexSops openId={sopOpen} setOpenId={setSopOpen} />
+      ) : view === 'Statistics' ? (
         <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-4">
           <RecordStatistics<CodexEntry>
             kind="codex"

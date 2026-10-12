@@ -405,3 +405,51 @@ export async function ingest(
     return { ok: false, status: e instanceof BharagError ? e.status || null : null, detail: e instanceof Error ? e.message : String(e) };
   }
 }
+
+/* ------------------------------------------------------ document reads */
+
+/**
+ * Reading documents back out of an ingest workspace (2026-10-13, Destiny — the
+ * SOPs tab on Codex). BHARAG's `GET /documents` and `GET /documents/:id`, with
+ * the same workspace key the ingest uses: a workspace key is the one credential
+ * those routes take. Read only; nothing here changes a document.
+ */
+export interface WorkspaceDocument {
+  id: string;
+  title: string | null;
+  source_type?: string | null;
+  source_url?: string | null;
+  content_type?: string | null;
+  status?: string | null;
+  project_tag?: unknown;
+  metadata?: Record<string, unknown> | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  raw_content?: string | null;
+}
+
+function ingestKey(ws: IngestWorkspace): string | null {
+  return process.env[INGEST_KEY_VARS[ws]]?.trim() || null;
+}
+
+/** One page of a workspace's documents, newest first, as BHARAG orders them. `limit` is at most 100 there. */
+export async function listDocuments(ws: IngestWorkspace, limit: number, offset: number): Promise<{ documents: WorkspaceDocument[]; hasMore: boolean }> {
+  const key = ingestKey(ws);
+  if (!key) throw new BharagError(`${INGEST_KEY_VARS[ws]} is not set on this server, so the ${ws} workspace cannot be read.`, 0);
+  const r = await call<{ documents?: WorkspaceDocument[]; pagination?: { hasMore?: boolean } }>(`/documents?limit=${limit}&offset=${offset}`, key);
+  const documents = Array.isArray(r?.documents) ? r.documents : [];
+  return { documents, hasMore: r?.pagination?.hasMore === true };
+}
+
+/** One document with its full text. `null` when BHARAG says it is not in the workspace. */
+export async function getDocument(ws: IngestWorkspace, id: string): Promise<WorkspaceDocument | null> {
+  const key = ingestKey(ws);
+  if (!key) throw new BharagError(`${INGEST_KEY_VARS[ws]} is not set on this server, so the ${ws} workspace cannot be read.`, 0);
+  try {
+    const r = await call<{ document?: WorkspaceDocument }>(`/documents/${encodeURIComponent(id)}?include_content=true`, key);
+    return r?.document ?? null;
+  } catch (e) {
+    if (e instanceof BharagError && e.status === 404) return null;
+    throw e;
+  }
+}
