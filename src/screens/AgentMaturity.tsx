@@ -175,6 +175,7 @@ function Scorecard({ tabs }: { tabs: ReactNode }) {
             <Th>Recorded</Th>
             <Th>Agent</Th>
             <Th>Version</Th>
+            <Th>Draft eval before it</Th>
             <Th>Eval after it</Th>
             <Th>What it said</Th>
           </tr>
@@ -182,7 +183,7 @@ function Scorecard({ tabs }: { tabs: ReactNode }) {
         <tbody>
           {d.inventory.versions.length === 0 ? (
             <tr>
-              <td colSpan={5} className="px-4 py-6 text-center text-[13px] text-dim">
+              <td colSpan={6} className="px-4 py-6 text-center text-[13px] text-dim">
                 No version change has been recorded since this check was built on 11 Oct 2026.
               </td>
             </tr>
@@ -197,6 +198,11 @@ function Scorecard({ tabs }: { tabs: ReactNode }) {
                   {v.previous_version_id ? <div className="text-[12px] text-faint">from {v.previous_version_id.slice(0, 8)}</div> : null}
                 </td>
                 <td className="px-4 py-2 text-[13px]">
+                  {v.draft_state === 'passed_before_publish' ? <span>passed</span> : v.draft_state === 'failed_before_publish' ? <Pill tone="failing">failed, published anyway</Pill> : v.draft_state === 'none' ? <Pill tone="degraded">none</Pill> : <span className="text-faint">not checked (before 13 Oct)</span>}
+                  {v.draft_run_id ? <div className="font-mono text-[12px] text-faint">{v.draft_run_id}</div> : null}
+                  {v.draft_alert_state === 'failed' ? <div><Pill tone="failing">alert not posted</Pill></div> : null}
+                </td>
+                <td className="px-4 py-2 text-[13px]">
                   {v.eval_state === 'failed' ? <Pill tone="failing">regressed</Pill> : v.eval_state === 'no_eval' ? <Pill tone="degraded">no eval run</Pill> : <span>{v.eval_state === 'pending' || v.eval_state === 'requested' ? 'waiting for the run' : v.eval_state.replace(/_/g, ' ')}</span>}
                   {v.alert_state === 'failed' ? <div><Pill tone="failing">alert not posted</Pill></div> : null}
                 </td>
@@ -207,7 +213,7 @@ function Scorecard({ tabs }: { tabs: ReactNode }) {
         </tbody>
       </TableFrame>
       <p className="mx-6 -mt-2 mb-4 text-[12px] text-faint md:mx-8">
-        A change is seen when the inventory is recorded, not when n8n publishes: n8n has no way to tell this dashboard. A regression is a case that passed in the run before the change and fails in the first run after it. Nothing here rolls an agent back; the alert names the version to publish again.
+        A change is seen when the inventory is recorded, not when n8n publishes: n8n has no way to tell this dashboard. The draft eval column is a run of the agent's eval cases against its unpublished draft (run_draft_eval), matched to the version by its config; none means it went live untested. A regression is a case that passed in the run before the change and fails in the first run after it. Nothing here rolls an agent back; the alert names the version to publish again.
       </p>
 
       <TableFrame grow={false} label="Dimension scores">

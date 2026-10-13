@@ -22,6 +22,7 @@
  * It reads, asks for a run and posts. It never publishes, never rolls back
  * and never edits an agent: the rollback is a person's, with the id in hand.
  */
+import * as draftEval from './draftEval';
 import * as engineEvents from './engineEvents';
 import * as n8n from './n8n';
 import { query } from './pg';
@@ -59,9 +60,48 @@ export async function onVersionChange(input: { agent_id: string; name: string; f
       detail: { name: input.name, from: input.from, to: input.to, config_hash: input.config_hash, rollback },
       dedupe_key: `agent_version:${r.rows[0].id}`,
     });
+    await draftCheck(r.rows[0].id, input);
   } catch (e) {
     console.error(`[publish-check] ${input.name}: the version change was not recorded: ${e instanceof Error ? e.message : String(e)}`);
   }
+}
+
+/**
+ * 13 Oct 2026: was this version tested as a draft before it went live?
+ * The draft eval (draftEval.ts) ties a run to the draft config it tested; a
+ * version whose config matches a finished passing run is "tested before
+ * publish". No such run, or a failing one, is said in the engine alerts
+ * channel at once. The eval after the publish still runs either way.
+ */
+async function draftCheck(versionRowId: string, input: { agent_id: string; name: string; to: string | null; from: string | null; config_hash: string | null }): Promise<void> {
+  const v = await draftEval.verdictFor(input.agent_id, input.config_hash);
+  const to = (input.to ?? '').slice(0, 8);
+  let state: string;
+  let detail: string;
+  let alert: string | null = null;
+  if (v && v.state === 'passed') {
+    state = 'passed_before_publish';
+    detail = `${v.run_id}: ${v.detail ?? 'passed'}`;
+  } else if (v) {
+    state = 'failed_before_publish';
+    detail = `${v.run_id}: ${v.detail ?? 'failed'}`;
+    alert = `:rotating_light: *${input.name} was published on version \`${to}\` although its draft eval failed.* ${quota.mentions()}\n${detail}\n${input.from ? `To roll back, publish version \`${input.from}\` again.` : 'No earlier version is on record to roll back to.'} Nothing has been changed for you.`;
+  } else {
+    state = 'none';
+    detail = input.config_hash ? `no finished draft eval matches config ${input.config_hash.slice(0, 12)}` : 'the inventory carried no config hash, so no draft eval can be matched';
+    alert = `:warning: *${input.name} went live on version \`${to}\` without a draft eval behind it.* ${quota.mentions()}\nNo finished draft eval tested this exact config before the publish (run_draft_eval). The eval after the publish still runs.`;
+  }
+  let alertState: string | null = null;
+  let alertDetail: string | null = null;
+  if (alert) {
+    const sent = await post(alert);
+    alertState = sent.ok ? 'posted' : 'failed';
+    alertDetail = sent.ok ? sent.ts : sent.error;
+  }
+  await query(`UPDATE engine_agent_versions SET draft_run_id = $2, draft_state = $3, draft_detail = $4, draft_alert_state = $5, draft_alert_detail = $6, draft_alert_text = $7 WHERE id = $1`, [versionRowId, v?.run_id ?? null, state, detail, alertState, alertDetail, alert]);
+  await engineEvents
+    .record({ event_type: `agent_publish_draft_${state}`, subject_id: input.agent_id, lane: 'ENGINE', actor: 'publish check', detail: { name: input.name, version: input.to, run: v?.run_id ?? null, detail }, dedupe_key: `agent_publish_draft:${versionRowId}` })
+    .catch((e) => console.error(`[publish-check] draft event not recorded: ${e instanceof Error ? e.message : String(e)}`));
 }
 
 async function post(text: string): Promise<{ ok: true; ts: string } | { ok: false; error: string }> {
@@ -111,7 +151,10 @@ const FINISHED = `WITH runs AS (
 export async function sweep(now = new Date()): Promise<{ asked: boolean; settled: number; alerts: number; failed: number }> {
   const out = { asked: false, settled: 0, alerts: 0, failed: 0 };
   const open = (await query<VRow>(`SELECT id::text, agent_id, name, version_id, previous_version_id, is_rollback, seen_at, eval_state, requested_at, alert_state FROM engine_agent_versions WHERE eval_state IN ('pending', 'requested') OR alert_state = 'failed' ORDER BY id`)).rows;
-  if (!open.length) return out;
+  if (!open.length) {
+    const draftStuck = await query<{ n: string }>(`SELECT count(*)::text AS n FROM engine_agent_versions WHERE draft_alert_state = 'failed'`);
+    if (draftStuck.rows[0]?.n === '0') return out;
+  }
 
   // 2. ask for one run for everything that has settled.
   const pending = open.filter((v) => v.eval_state === 'pending');
@@ -175,6 +218,16 @@ export async function sweep(now = new Date()): Promise<{ asked: boolean; settled
       .catch((e) => console.error(`[publish-check] event not recorded: ${e instanceof Error ? e.message : String(e)}`));
   }
 
+  // A draft alert Slack refused is tried again every pass too.
+  const stuckDraft = await query<{ id: string; draft_alert_text: string }>(`SELECT id::text, draft_alert_text FROM engine_agent_versions WHERE draft_alert_state = 'failed' AND draft_alert_text IS NOT NULL`);
+  for (const s of stuckDraft.rows) {
+    const sent = await post(s.draft_alert_text);
+    if (sent.ok) {
+      await query(`UPDATE engine_agent_versions SET draft_alert_state = 'posted', draft_alert_detail = $2 WHERE id = $1`, [s.id, sent.ts]);
+      out.alerts++;
+    } else out.failed++;
+  }
+
   // An alert Slack refused is tried again every pass.
   const stuck = await query<{ id: string; alert_text: string }>(`SELECT id::text, alert_text FROM engine_agent_versions WHERE alert_state = 'failed' AND alert_text IS NOT NULL AND settled_at < $1::timestamptz`, [now.toISOString()]);
   for (const s of stuck.rows) {
@@ -190,9 +243,10 @@ export async function sweep(now = new Date()): Promise<{ asked: boolean; settled
 export interface VersionChange {
   id: string; agent_id: string; name: string; version_id: string; previous_version_id: string | null; is_rollback: boolean; seen_at: string;
   eval_state: string; eval_run_id: string | null; eval_detail: string | null; requested_at: string | null; settled_at: string | null; alert_state: string | null;
+  draft_run_id: string | null; draft_state: string | null; draft_detail: string | null; draft_alert_state: string | null;
 }
 export async function recent(limit = 20): Promise<VersionChange[]> {
-  return (await query<VersionChange>(`SELECT id::text, agent_id, name, version_id, previous_version_id, is_rollback, seen_at, eval_state, eval_run_id, eval_detail, requested_at, settled_at, alert_state FROM engine_agent_versions ORDER BY seen_at DESC, id DESC LIMIT $1`, [limit])).rows;
+  return (await query<VersionChange>(`SELECT id::text, agent_id, name, version_id, previous_version_id, is_rollback, seen_at, eval_state, eval_run_id, eval_detail, requested_at, settled_at, alert_state, draft_run_id, draft_state, draft_detail, draft_alert_state FROM engine_agent_versions ORDER BY seen_at DESC, id DESC LIMIT $1`, [limit])).rows;
 }
 
 let timer: NodeJS.Timeout | null = null;
