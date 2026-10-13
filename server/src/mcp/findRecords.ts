@@ -172,7 +172,16 @@ export async function findRecords(input: Record<string, unknown>): Promise<Recor
     }
     const isColumn = (COLUMNS as readonly string[]).includes(name);
     if (isColumn && !cols.has(name)) {
-      warnings.push(`"${name}" is not a column ${spec.table} has (it has ${COLUMNS.filter((c) => cols.has(c)).join(', ')}), so this filter matches nothing.`);
+      // 13 Oct 2026: this pushed the value as a parameter and then wrote a bare
+      // `false` that never used it, so Postgres refused the whole read ("bind
+      // message supplies 1 parameters, but prepared statement requires 0") and
+      // North Star's builder_profiles lookup by builder_id raised an incident
+      // (NS Agent Delivery execution 35051). A missing column matches nothing,
+      // with no parameter, and the warning names the column to use instead.
+      const hint = kind === 'builder_profiles' && name === 'builder_id' ? ' A builder profile is keyed on its Slack user id: filter on natural_id (or the user_id field) instead.' : '';
+      warnings.push(`"${name}" is not a column ${spec.table} has (it has ${COLUMNS.filter((c) => cols.has(c)).join(', ')}), so this filter matches nothing.${hint}`);
+      where.push('false');
+      continue;
     }
     if (!isColumn) {
       const seen = await query(`SELECT 1 FROM ${spec.table} WHERE fields ? $1 LIMIT 1`, [name]);

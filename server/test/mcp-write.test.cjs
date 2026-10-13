@@ -230,6 +230,12 @@ async function call(token, name, args) {
     assert.equal(byCard.total, 1);
     const l0 = await call(READ, 'find_records', { kind: 'layer0', filters: { Status: 'pending_builder_input' } });
     assert.equal(typeof l0.total, 'number');
+    // 13 Oct 2026: a column the kind's table has not got matched nothing by
+    // crashing ("bind message supplies 1 parameters..."). Now it is an empty
+    // answer with a warning, and later filters still bind correctly.
+    const noCol = await call(READ, 'find_records', { kind: 'builder_profiles', filters: { builder_id: 'U0AEW3TBYH1', role: 'x' } });
+    assert.equal(noCol.total, 0, 'a missing column matches nothing');
+    assert.ok(noCol.warnings.some((w) => w.includes('builder_id') && w.includes('natural_id')), 'the warning names natural_id');
     const readLog = await query(`SELECT outcome FROM engine_writes WHERE endpoint = 'mcp:find_records' ORDER BY at DESC LIMIT 1`);
     assert.equal(readLog.rows[0].outcome, 'read', 'a find is logged as a read');
     ok('find_records', () => true);
