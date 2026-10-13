@@ -12314,3 +12314,10 @@ Intent:     Prove the draft eval on a real change: one line in Bays' instruction
 Files:      None in this repo. n8n: Bays (Agent) Nw5igXu4WWrjUMWB, restore point cce949df-6813-4f66-92fc-e1c1ea326c96.
 Problem:    My first draft edit carried one invented trailing line in the skill index; replaced at once with the exact text (draft config 212d17b4). Two runs before the passing one were not verdicts: DRAFT-202610131527-GQZ6 (n8n MCP 429s) and DRAFT-202610131535-H2QW (2 dropped calls, incomplete).
 Fix:        DRAFT-202610131602-19A2 on draft 212d17b4: 20 of 20 cases, 60 of 60 answers, config the same before and after, compared with EVAL-202610130726. Published as 06732d97-3f86-4ff8-9077-68f50d189b99; inventory recorded (audit 1979); the publish check wrote draft_state passed_before_publish against that run. The stored instructions sha256 (3356b1af…) equals the intended text's, 13,863 characters. The eval after the publish is still asked, as before.
+
+## 2026-10-13 17:45 — Codex ingests land in Bays' Codex workspace
+Intent:     The dashboard's own Codex ingests (create_record kind codex) should land in the same BHARAG workspace Bays reads and writes. Destiny, 13 Oct: "it should".
+Files:      server/src/bharag.ts, server/src/mcp/writeTools.ts, CLAUDE.md
+Problem:    BHARAG_CODEX_KEY and BHARAG_SOPS_KEY open two different workspaces (found building the SOPs tab: the codex key's newest documents were commercial cards and none of that day's SOPs). So a Codex entry ingested from here went somewhere Bays' Search_Codex never looks.
+Fix:        bharag.ingestKeyVar(ws): for 'codex' it is BHARAG_SOPS_KEY where set, else BHARAG_CODEX_KEY. ingest() and ingestConfigured() use it; the ingest detail line says which variable it used, and list_writable_kinds reports it as key_variable.
+Decision:   A fallback rather than a rename: BHARAG_CODEX_KEY stays valid, so an environment without BHARAG_SOPS_KEY behaves exactly as before. Earlier ingests stay where they landed; nothing is moved.

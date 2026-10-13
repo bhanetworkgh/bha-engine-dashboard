@@ -358,8 +358,21 @@ export const INGEST_KEY_VARS = {
 } as const;
 export type IngestWorkspace = keyof typeof INGEST_KEY_VARS;
 
+/**
+ * Which variable holds a workspace's key. **Codex goes where Bays' Codex goes**
+ * (2026-10-13, Destiny: "it should"): `BHARAG_SOPS_KEY` is the key of n8n's
+ * "BHARAG - Codex" credential, the workspace Bays writes Codex logs and SOPs
+ * into, and on 13 Oct `BHARAG_CODEX_KEY` opened a different workspace. So a
+ * Codex ingest uses `BHARAG_SOPS_KEY` when it is set and falls back to
+ * `BHARAG_CODEX_KEY` only when it is not; every answer names the one used.
+ */
+export function ingestKeyVar(ws: IngestWorkspace): string {
+  if (ws === 'codex' && process.env.BHARAG_SOPS_KEY?.trim()) return 'BHARAG_SOPS_KEY';
+  return INGEST_KEY_VARS[ws];
+}
+
 export function ingestConfigured(ws: IngestWorkspace): boolean {
-  return Boolean(process.env[INGEST_KEY_VARS[ws]]?.trim());
+  return Boolean(process.env[ingestKeyVar(ws)]?.trim());
 }
 
 export interface IngestDocument {
@@ -382,8 +395,9 @@ export async function ingest(
   doc: IngestDocument,
   opts: { kind?: GuardKind; outcome?: string | null; source?: string; run_id?: string | null } = {},
 ): Promise<{ ok: boolean; status: number | null; detail: string }> {
-  const key = process.env[INGEST_KEY_VARS[ws]]?.trim();
-  if (!key) return { ok: false, status: null, detail: `${INGEST_KEY_VARS[ws]} is not set on this server, so nothing was sent to BHARAG.` };
+  const keyVar = ingestKeyVar(ws);
+  const key = process.env[keyVar]?.trim();
+  if (!key) return { ok: false, status: null, detail: `${keyVar} is not set on this server, so nothing was sent to BHARAG.` };
   const g = await guard({
     workspace: ws,
     title: doc.title,
@@ -400,7 +414,7 @@ export async function ingest(
   try {
     const r = await call<Record<string, unknown>>('/ingest', key, doc);
     const id = r && typeof r === 'object' ? (r.document_id ?? r.id ?? (r.data as Record<string, unknown> | undefined)?.document_id ?? null) : null;
-    return { ok: true, status: 200, detail: id ? `ingested as ${String(id)}` : 'ingested' };
+    return { ok: true, status: 200, detail: `${id ? `ingested as ${String(id)}` : 'ingested'} (workspace key ${keyVar})` };
   } catch (e) {
     return { ok: false, status: e instanceof BharagError ? e.status || null : null, detail: e instanceof Error ? e.message : String(e) };
   }

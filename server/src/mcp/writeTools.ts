@@ -291,7 +291,7 @@ const listWritableKinds: ToolDefinition = {
         values_held: held,
         archive: spec.archive ? `sets ${spec.archive.field} = ${spec.archive.value}; the row stays` : 'none — this kind has no archived state a page understands; update its status or delete it',
         hard_delete: spec.deletable ? 'allowed, with confirm "DELETE <natural_id>"' : 'refused for this kind',
-        bharag_ingest_on_create: spec.ingest ? { workspace: spec.ingest, key_variable: bharag.INGEST_KEY_VARS[spec.ingest], configured: bharag.ingestConfigured(spec.ingest) } : null,
+        bharag_ingest_on_create: spec.ingest ? { workspace: spec.ingest, key_variable: bharag.ingestKeyVar(spec.ingest), configured: bharag.ingestConfigured(spec.ingest) } : null,
         extra_arguments: spec.envelope ?? null,
         guards: spec.guards,
       });

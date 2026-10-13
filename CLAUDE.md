@@ -1122,6 +1122,13 @@ archive records directly, with the checks the Bays Tools Router enforces.
   `BHARAG_BUILD_PATTERNS_KEY`, `BHARAG_COMMERCIAL_KEY`, no defaults. The row
   and the ingest are reported separately: `saved: true, ingested_to_bharag:
   false` says the record is not in BHARAG and is never full success.
+  **A Codex entry lands in Bays' Codex workspace** (decision 2026-10-13,
+  Destiny: "it should"): `bharag.ingestKeyVar('codex')` is `BHARAG_SOPS_KEY`
+  where it is set, the "BHARAG - Codex" key Bays reads and writes with, and
+  `BHARAG_CODEX_KEY` only where it is not. Before this the two keys opened two
+  different workspaces, so a log ingested from here was not where Bays'
+  Search_Codex looks. The ingest's detail line and `list_writable_kinds` name
+  the variable used.
 - **Audit**: `engine_mcp_writes`, the write gate's table, extended by
   migration 29 (`access`, `kind`, `record_id`, `natural_id`, `guard_result`,
   `dry_run`, `requester_user_id`). `access` is the brief's "token" column —
