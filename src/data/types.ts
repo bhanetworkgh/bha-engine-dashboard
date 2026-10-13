@@ -3618,6 +3618,10 @@ export interface AgentVersionChange {
   eval_run_id: string | null;
   eval_detail: string | null;
   alert_state: string | null;
+  draft_run_id?: string | null;
+  draft_state?: string | null;
+  draft_detail?: string | null;
+  draft_alert_state?: string | null;
 }
 
 export interface AgentInventoryView {

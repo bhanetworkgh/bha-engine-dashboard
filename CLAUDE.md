@@ -1413,6 +1413,33 @@ The runner also writes one `eval_run_cost` event per run (account usage before
 and after), which `get_agent_spend` returns as `eval_runs`. `npm run
 test:publish-gate`.
 
+**The draft eval: an agent tested before it is published** (2026-10-13, Destiny
+— agent maturity, evaluation and change control: "the eval still follows the
+publish"). `server/src/draftEval.ts`, migration 74, `engine_draft_eval_runs`.
+`run_draft_eval` (write connection, no agent's scope) asks every active case in
+`agent_eval_set` for one agent of its **unpublished draft**, through n8n's own
+`call_agent` (`n8nMcp.callAgentDraft`, Preview chat, a fresh session per
+answer), every repeat, with the runner's context block, scored by the runner's
+Score Answer checks ported as `score`. A case passes only if every repeat does;
+a regression is a case that passed in the latest finished production run and
+fails on the draft. **The draft's config hash is read before and after**: a
+draft edited mid-run is `draft_changed`, never a verdict. Refused with nothing
+asked when `N8N_MCP_TOKEN` is unset, the OpenRouter balance is under $15 or
+unreadable, a run is already going for that agent, or there are no cases. It
+runs in the background (three at a time, 120 minutes at most); a credit refusal
+stops it (`stopped_credit`); a run left `running` at boot is `interrupted`.
+`read_draft_eval` reads a run case by case. **It never writes to
+`engine_eval_runs`**, whose six readers treat every row as production.
+North Star answers are scored raw (the runner's pronoun guard is not applied)
+and the run says so. **The publish check reads it**: when the inventory records
+a version change, `publishGate.draftCheck` looks for a finished draft run whose
+config hash is the config now published. Passed is `passed_before_publish`; a
+failed run or none posts one alert in the engine alerts channel at once ("went
+live without a draft eval"). The eval after the publish still runs. The Agent
+maturity page shows the draft verdict beside each version. **To change an
+agent: edit the draft, `run_draft_eval`, publish only once it reads passed,
+then record the inventory.** `npm run test:draft-eval` pins the pure parts.
+
 **Tokens and tool calls are on every ask** (2026-10-10). The three Agent
 Delivery workflows write `Prompt Tokens`, `Completion Tokens`, `Total Tokens`,
 `Tool Call Count` and `Tool Calls` (tool names in order, ` > ` between them) on

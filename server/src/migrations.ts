@@ -3124,6 +3124,50 @@ const MIGRATIONS: Migration[] = [
        ON CONFLICT (scored_on, dimension) DO NOTHING`,
     ],
   },
+  {
+    /**
+     * 13 Oct 2026, Destiny — agent maturity, evaluation and change control:
+     * "the eval still follows the publish". One row per draft eval run: an
+     * agent's eval cases asked of its unpublished draft through n8n's
+     * call_agent, scored by the runner's own checks, with the draft's config
+     * hash read before and after so a draft that changed mid-run is never a
+     * verdict. The publish check reads it when a version change is recorded.
+     */
+    id: 74,
+    name: 'engine_draft_eval_runs: an agent draft tested before it is published, and the publish check reading it',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_draft_eval_runs (
+         id bigserial PRIMARY KEY,
+         run_id text NOT NULL UNIQUE,
+         agent text NOT NULL,
+         agent_id text NOT NULL,
+         agent_name text NOT NULL,
+         config_hash_before text,
+         config_hash_after text,
+         state text NOT NULL DEFAULT 'running',
+         detail text,
+         cases integer NOT NULL DEFAULT 0,
+         results_expected integer NOT NULL DEFAULT 0,
+         results_done integer NOT NULL DEFAULT 0,
+         cases_passed integer,
+         failed_cases jsonb NOT NULL DEFAULT '[]'::jsonb,
+         regressed jsonb NOT NULL DEFAULT '[]'::jsonb,
+         compared_with text,
+         results jsonb NOT NULL DEFAULT '[]'::jsonb,
+         credit_before_usd numeric,
+         requested_by text,
+         started_at timestamptz NOT NULL DEFAULT now(),
+         finished_at timestamptz
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_draft_eval_runs_agent ON engine_draft_eval_runs (agent_id, finished_at DESC)`,
+      `ALTER TABLE engine_agent_versions ADD COLUMN IF NOT EXISTS draft_run_id text`,
+      `ALTER TABLE engine_agent_versions ADD COLUMN IF NOT EXISTS draft_state text`,
+      `ALTER TABLE engine_agent_versions ADD COLUMN IF NOT EXISTS draft_detail text`,
+      `ALTER TABLE engine_agent_versions ADD COLUMN IF NOT EXISTS draft_alert_state text`,
+      `ALTER TABLE engine_agent_versions ADD COLUMN IF NOT EXISTS draft_alert_detail text`,
+      `ALTER TABLE engine_agent_versions ADD COLUMN IF NOT EXISTS draft_alert_text text`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

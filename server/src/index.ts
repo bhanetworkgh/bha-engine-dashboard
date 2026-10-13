@@ -60,6 +60,7 @@ import * as evalRuns from './evalRuns';
 import * as reminderTools from './mcp/reminderTools';
 import * as slackTools from './mcp/slackTools';
 import * as publishGate from './publishGate';
+import * as draftEval from './draftEval';
 import * as decisionWatch from './decisionWatch';
 import * as sops from './sops';
 import { toolByName as mcpToolByName } from './mcp/tools';
@@ -2293,6 +2294,8 @@ async function boot(): Promise<void> {
       .catch((e) => console.error(`[vfarm-customers] lead backfill failed: ${(e as Error).message}`));
     creditOut.startWatching();
     publishGate.startSweeping();
+    // A draft eval left running by the last process is not resumed (13 Oct 2026).
+    void draftEval.markInterrupted().then((n) => { if (n) console.log(`[draft-eval] ${n} run(s) left running by the last process marked interrupted`); }).catch((e) => console.error(`[draft-eval] interrupted runs not marked: ${(e as Error).message}`));
     decisionWatch.startSweeping();
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();
