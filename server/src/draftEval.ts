@@ -43,7 +43,8 @@ import * as n8nMcp from './n8nMcp';
 import { query } from './pg';
 import * as researchSignals from './researchSignals';
 
-export const RULE = { credit_floor_usd: 15, concurrency: 3, call_timeout_ms: 300_000, run_limit_minutes: 120 } as const;
+// concurrency 1 from 13 Oct 2026: at 3, n8n's MCP server answered 429 to 32 of 60 calls in the first run.
+export const RULE = { credit_floor_usd: 15, concurrency: 1, call_timeout_ms: 300_000, run_limit_minutes: 120 } as const;
 
 export const AGENTS: Record<string, { id: string; name: string }> = {
   bays: { id: 'Nw5igXu4WWrjUMWB', name: 'Bays (Agent)' },
@@ -208,7 +209,7 @@ export async function start(input: { agent: string; requested_by: string | null;
   return { ...out, run_id: runId };
 }
 
-interface Result { case_id: string; repeat: number; passed: boolean; failed_checks: string; answer: string; execution_id: string | null; status: string }
+interface Result { case_id: string; repeat: number; passed: boolean; failed_checks: string; answer: string; execution_id: string | null; status: string; not_asked?: boolean }
 
 async function run(runId: string, agent: string, agentId: string, cases: EvalCase[]): Promise<void> {
   const items = cases.flatMap((c) => Array.from({ length: c.repeats }, (_, i) => ({ c, repeat: i + 1 })));
@@ -225,10 +226,14 @@ async function run(runId: string, agent: string, agentId: string, cases: EvalCas
       const it = items[next++];
       const ask = `${runId}-${it.c.case_id}-${it.repeat}`;
       let ans: n8nMcp.DraftAnswer;
+      let notAsked = false;
       try {
         ans = await n8nMcp.callAgentDraft(agentId, contextFor(agent, ask, it.c.question), RULE.call_timeout_ms);
       } catch (e) {
-        ans = { status: 'error', response: '', execution_id: null, error: e instanceof Error ? e.message : String(e) };
+        // A transport failure (n8n's MCP server unreachable, refusing, rate-limiting) is a fact
+        // about the road to the draft, not about the draft: the answer was never asked for.
+        notAsked = true;
+        ans = { status: 'not_asked', response: '', execution_id: null, error: e instanceof Error ? e.message : String(e) };
       }
       if (!ans.response && CREDIT_ERROR.test(String(ans.error))) {
         stop = { state: 'stopped_credit', detail: `stopped at ${it.c.case_id} (repeat ${it.repeat}): OpenRouter credit is out. The answers so far are a partial run, not a verdict. The agent said: ${String(ans.error).slice(0, 300)}` };
@@ -243,6 +248,7 @@ async function run(runId: string, agent: string, agentId: string, cases: EvalCas
         answer: ans.response.slice(0, 4000),
         execution_id: ans.execution_id,
         status: ans.status,
+        ...(notAsked ? { not_asked: true } : {}),
       });
       await query(`UPDATE engine_draft_eval_runs SET results_done = $2 WHERE run_id = $1`, [runId, results.length]).catch(() => undefined);
     }
@@ -271,9 +277,16 @@ async function run(runId: string, agent: string, agentId: string, cases: EvalCas
     compared = base?.run_id ?? null;
     regressed = base ? failed.filter((c) => !base.failed.has(c)) : failed;
     const known = failed.filter((c) => !regressed.includes(c));
-    if (!hashAfter || !before || hashAfter !== before) {
+    const unasked = results.filter((r) => r.not_asked);
+    if (unasked.length) {
+      state = 'incomplete';
+      detail = `${unasked.length} of ${results.length} answers were never asked of the draft (${String(unasked[0].failed_checks).slice(0, 200)}), so this is not a verdict; run it again`;
+    } else if (!hashAfter || !before) {
+      state = 'incomplete';
+      detail = 'the draft config could not be read again after the run, so this run cannot be tied to one draft; run it again';
+    } else if (hashAfter !== before) {
       state = 'draft_changed';
-      detail = hashAfter && before ? `the draft changed during the run (config ${before.slice(0, 12)} before, ${hashAfter.slice(0, 12)} after), so this is not a verdict about either` : 'the draft config could not be read again after the run, so this run cannot be tied to one draft';
+      detail = `the draft changed during the run (config ${before.slice(0, 12)} before, ${hashAfter.slice(0, 12)} after), so this is not a verdict about either`;
     } else if (regressed.length) {
       state = 'failed';
       detail = `${passed} of ${byCase.size} cases passed; ${regressed.join(', ')} failed${base ? ` and passed in ${base.run_id}` : ' (no finished production run to compare with)'}${known.length ? `; already failing before: ${known.join(', ')}` : ''}`;

@@ -93,7 +93,25 @@ function readRpc(body: string, contentType: string, id: number | null): Dict | n
   return null;
 }
 
+/**
+ * n8n's MCP server rate-limits (HTTP 429 "Too many requests"; first seen 13 Oct 2026, when
+ * the draft eval asked it three answers at a time). A 429 is waited out and the same request
+ * sent again: its Retry-After where it gives one, else 10, 20, 40 and 60 seconds. Still
+ * refused after that, the 429 is the answer, as before.
+ */
+const RETRY_WAITS_MS = [10_000, 20_000, 40_000, 60_000];
+
 async function post(message: Dict, sessionId: string | null, version: string | null, timeoutMs = TIMEOUT_MS): Promise<{ status: number; body: string; contentType: string; sessionId: string | null }> {
+  for (let attempt = 0; ; attempt++) {
+    const r = await postOnce(message, sessionId, version, timeoutMs);
+    if (r.status !== 429 || attempt >= RETRY_WAITS_MS.length) return r;
+    const after = Number(r.retryAfter);
+    const wait = Number.isFinite(after) && after > 0 ? Math.min(after * 1000, 120_000) : RETRY_WAITS_MS[attempt];
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+}
+
+async function postOnce(message: Dict, sessionId: string | null, version: string | null, timeoutMs: number): Promise<{ status: number; body: string; contentType: string; sessionId: string | null; retryAfter: string | null }> {
   if (!TOKEN) throw new N8nMcpError(`${N8N_MCP_VAR} is not set on this server, so n8n's MCP server could not be asked for the agent.`, 'not_configured');
   const headers: Record<string, string> = {
     authorization: `Bearer ${TOKEN}`,
@@ -120,7 +138,7 @@ async function post(message: Dict, sessionId: string | null, version: string | n
     // A timeout or a dropped connection part-way through a large answer.
     throw new N8nMcpError(`n8n's MCP server at ${URL_} stopped answering part-way through: ${e instanceof Error ? e.message : String(e)}`, 'unreachable', res.status);
   }
-  return { status: res.status, body, contentType: res.headers.get('content-type') || '', sessionId: res.headers.get('mcp-session-id') || sessionId };
+  return { status: res.status, body, contentType: res.headers.get('content-type') || '', sessionId: res.headers.get('mcp-session-id') || sessionId, retryAfter: res.headers.get('retry-after') };
 }
 
 /** initialize, then one tools/call. Returns the tool's own answer, parsed. */
