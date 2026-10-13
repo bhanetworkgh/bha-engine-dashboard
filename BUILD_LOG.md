@@ -12308,3 +12308,9 @@ Intent:     Second Bays run, DRAFT-202610131535-H2QW (draft 212d17b4).
 Files:      server/src/draftEval.ts.
 Problem:    58 of 60 answers came back and passed; 2 (BAYS-DW-03 r2, BAYS-SOP-05 r1) ended verbatim `n8n's MCP server at https://bayshorizonnetwork.app.n8n.cloud/mcp-server/http stopped answering part-way through: terminated`. The run correctly read `incomplete`, not passed.
 Fix:        A call that fails in transport is tried once more 30 seconds later (not a refused token). Eval cases write nothing, so a second ask is safe. Still failing, the answer is not_asked and the run incomplete, as before.
+
+## 2026-10-13 17:30 — First agent change tested before it went live
+Intent:     Prove the draft eval on a real change: one line in Bays' instructions, section 2 — an error report whose advice ends "(The AI classifier did not run: ...)" is passed on as labelled by the fixed rules only (follows the error-handler change of the same day).
+Files:      None in this repo. n8n: Bays (Agent) Nw5igXu4WWrjUMWB, restore point cce949df-6813-4f66-92fc-e1c1ea326c96.
+Problem:    My first draft edit carried one invented trailing line in the skill index; replaced at once with the exact text (draft config 212d17b4). Two runs before the passing one were not verdicts: DRAFT-202610131527-GQZ6 (n8n MCP 429s) and DRAFT-202610131535-H2QW (2 dropped calls, incomplete).
+Fix:        DRAFT-202610131602-19A2 on draft 212d17b4: 20 of 20 cases, 60 of 60 answers, config the same before and after, compared with EVAL-202610130726. Published as 06732d97-3f86-4ff8-9077-68f50d189b99; inventory recorded (audit 1979); the publish check wrote draft_state passed_before_publish against that run. The stored instructions sha256 (3356b1af…) equals the intended text's, 13,863 characters. The eval after the publish is still asked, as before.
