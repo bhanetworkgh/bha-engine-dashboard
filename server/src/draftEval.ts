@@ -228,7 +228,16 @@ async function run(runId: string, agent: string, agentId: string, cases: EvalCas
       let ans: n8nMcp.DraftAnswer;
       let notAsked = false;
       try {
-        ans = await n8nMcp.callAgentDraft(agentId, contextFor(agent, ask, it.c.question), RULE.call_timeout_ms);
+        try {
+          ans = await n8nMcp.callAgentDraft(agentId, contextFor(agent, ask, it.c.question), RULE.call_timeout_ms);
+        } catch (first) {
+          // One more try, 30 seconds later, when the road dropped (13 Oct 2026: 2 of 60 calls ended
+          // "stopped answering part-way through: terminated"). The eval cases write nothing, so asking
+          // the draft a second time is safe. A refusal of the token is not retried.
+          if (first instanceof n8nMcp.N8nMcpError && first.reason === 'unauthorised') throw first;
+          await new Promise((resolve) => setTimeout(resolve, 30_000));
+          ans = await n8nMcp.callAgentDraft(agentId, contextFor(agent, ask, it.c.question), RULE.call_timeout_ms);
+        }
       } catch (e) {
         // A transport failure (n8n's MCP server unreachable, refusing, rate-limiting) is a fact
         // about the road to the draft, not about the draft: the answer was never asked for.
