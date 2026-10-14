@@ -3180,6 +3180,28 @@ const MIGRATIONS: Migration[] = [
     name: 'engine_decision_watches.close_on_reply: a multi-part decision is not closed by the first reply',
     statements: [`ALTER TABLE engine_decision_watches ADD COLUMN IF NOT EXISTS close_on_reply boolean NOT NULL DEFAULT true`],
   },
+  {
+    /**
+     * Intake-2 on the lead's own row (14 Oct 2026, Destiny; Hardik's contract
+     * of 13 Oct: "extend the current buyer row with intake_2 jsonb +
+     * intake_2_completed_at"; Jason the same day: one opaque link per lead,
+     * written back onto the existing record, no duplicate contact).
+     * `intake_2_invite` holds the invite and every email sent for it; the
+     * link's secret is never stored, only its sha256, which is unique so one
+     * link can only ever open one lead.
+     */
+    id: 76,
+    name: 'engine_vfarm_leads: Intake-2 invite and answers on the lead row',
+    statements: [
+      `ALTER TABLE engine_vfarm_leads
+         ADD COLUMN IF NOT EXISTS intake_2              jsonb,
+         ADD COLUMN IF NOT EXISTS intake_2_completed_at timestamptz,
+         ADD COLUMN IF NOT EXISTS intake_2_invite       jsonb`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_vfarm_leads_intake2_token
+         ON engine_vfarm_leads ((intake_2_invite->>'token_sha256'))
+         WHERE intake_2_invite ? 'token_sha256'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

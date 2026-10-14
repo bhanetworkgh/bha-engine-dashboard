@@ -256,6 +256,43 @@ export async function deletePermission(fileId: string, permissionId: string): Pr
   await authed('remove the permission (drive permissions.delete)', `${DRIVE}/files/${encodeURIComponent(fileId)}/permissions/${encodeURIComponent(permissionId)}?supportsAllDrives=true`, { method: 'DELETE' });
 }
 
+const UPLOAD = OVERRIDE ? `${OVERRIDE}/upload/drive/v3` : 'https://www.googleapis.com/upload/drive/v3';
+
+/** A Drive folder, inside `parentId` or at the top of the credential's own Drive (14 Oct 2026, Intake-2). */
+export async function createFolder(name: string, parentId: string | null): Promise<{ id: string; link: string | null }> {
+  const r = await authed('create the folder (drive files.create)', `${DRIVE}/files?supportsAllDrives=true&fields=id,webViewLink`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', ...(parentId ? { parents: [parentId] } : {}) }),
+  });
+  const b = (r.body ?? {}) as { id?: string; webViewLink?: string };
+  if (!b.id) throw new GoogleError('Drive answered the folder create without an id.', 'create the folder (drive files.create)', r.status);
+  return { id: b.id, link: b.webViewLink ?? null };
+}
+
+/**
+ * One file into a folder, in a single multipart upload (14 Oct 2026, Intake-2).
+ * Private: no permission is added, so only the credential's owner and whoever
+ * the folder is already shared with can open it.
+ */
+export async function uploadFile(folderId: string, name: string, mime: string, bytes: Buffer): Promise<{ id: string; name: string; mime: string; size: number; link: string | null }> {
+  const boundary = `bha-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const meta = JSON.stringify({ name, parents: [folderId] });
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: ${mime}\r\n\r\n`),
+    bytes,
+    Buffer.from(`\r\n--${boundary}--`),
+  ]);
+  const r = await authed('upload the file (drive files.create, multipart)', `${UPLOAD}/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,mimeType,size,webViewLink`, {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  const b = (r.body ?? {}) as { id?: string; name?: string; mimeType?: string; size?: string; webViewLink?: string };
+  if (!b.id) throw new GoogleError('Drive answered the upload without a file id.', 'upload the file (drive files.create, multipart)', r.status);
+  return { id: b.id, name: b.name ?? name, mime: b.mimeType ?? mime, size: Number(b.size ?? bytes.length), link: b.webViewLink ?? null };
+}
+
 /** For tests: forget the cached token. */
 export function resetForTests(): void {
   cached = null;

@@ -69,6 +69,11 @@ services:
       # deleted.
       - key: DASHBOARD_INBOUND_KEY
         generateValue: true
+      # Intake-2 (14 Oct 2026): the secret each lead's opaque link is an HMAC
+      # under. Changing it breaks every link already emailed, so never rotate
+      # it casually. Only the link's sha256 is stored.
+      - key: INTAKE2_LINK_SECRET
+        generateValue: true
       # The n8n instance API key, for the Executions page (15 Sep 2026).
       # READ ONLY: the two endpoints used are GET /api/v1/executions and
       # GET /api/v1/workflows (names only) and nothing here can write to n8n.

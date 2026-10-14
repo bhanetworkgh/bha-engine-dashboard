@@ -12461,3 +12461,34 @@ Decision:   Every commit number changed, so the numbers quoted in this log (92 p
             The four merged claude/... branches here and one in the bridge still exist: the session's
             git proxy refuses branch deletion (HTTP 403), so they are deleted by hand on GitHub.
             From now on commits are authored by Destiny Arupi with no Claude lines.
+
+## 2026-10-15 22:20 — Intake-2: the serious-buyer site specification, one private link per lead
+Intent:     Build Intake-2 as Jason approved on 14 Oct in #bha-media-twin: one opaque link per lead,
+            written onto the lead's existing record, Hardik's 31 fields exactly (VFARM_BUYER_INTAKE.v1,
+            his field list of 14 Oct in #bha-coordination), both uploads without a Google sign-in, and
+            Hardik's 13 Oct implementation target (Stage 1 to 2 move as the trigger, deterministic ids,
+            one completion event, fail closed on identity).
+Files:      src/data/intake2.ts (new: the 31 fields, sections, stored shapes), server/src/intake2.ts (new),
+            server/src/intake2Page.ts (new: the buyer page), server/src/migrations.ts (76),
+            server/src/earlyAccess.ts (stage trigger, lead read), server/src/google.ts (createFolder,
+            uploadFile), server/src/index.ts (page, public, page and engine routes, boot line),
+            src/screens/VFarm/Intake2Panel.tsx (new), src/screens/VFarm/EarlyAccess.tsx, src/data/types.ts,
+            src/data/index.ts, server/test/intake2.test.cjs (new), package.json, render.yaml, CLAUDE.md.
+            n8n: new workflow vFarm — Intake-2 Invite (bVq6EF3sjn0xtOOg, folder vFarm, published
+            855c0462), one sticky note, three groups, error workflow Bays — Error Handler.
+            Render: INTAKE2_LINK_SECRET set on the dashboard service.
+Problem:    The first test run failed "the token itself is never stored": the invite stored its link,
+            and the link carries the token. Client 2 has no Form A record yet, so the live proof runs
+            on the internal test lead already in Stage 2.
+Fix:        The link is no longer stored; the dashboard works it out again from the invite id under the
+            secret. Only the token's sha256 is on the row, under a unique index.
+Decision:   The page is served by this server at dashboard.bhanetwork.org/intake/<token>, server-rendered
+            and self-contained in the vFarm email look, rather than on the website, so the engine owns
+            the whole path and the site's deploys are not in it. The email goes through n8n's Admin Gmail,
+            the same sender as the Form A confirmation, because this server has no Gmail credential.
+            Answers are stored once: the same answers again are a retry, different ones are refused and
+            the buyer is told to reply to the email, because the first is what the record says they told
+            us. Files go to a private Drive folder per lead through the server's own Google credential.
+            Tests: npm run test:intake2, 12 of 12 against local Postgres 16 with n8n, Google and Slack
+            stood in. The buyer page was checked at 390 px and 1100 px wide (no sideways scroll, errors
+            shown under each question).

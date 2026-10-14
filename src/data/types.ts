@@ -1,3 +1,4 @@
+import type { Intake2Invite, Intake2Send, Intake2Stored } from './intake2';
 /**
  * Shapes returned by the data module.
  *
@@ -3157,6 +3158,23 @@ export interface VfarmLead {
   stage_history: { from: number; to: number; at: string; by: string; reason: string | null; via: 'page' | 'engine' }[];
   /** The 5-rack pilot offers this lead is tied to (2026-10-09, 7S0O). Internal only. Absent on an optimistic copy. */
   pilot_offers?: { id: string; status: string }[];
+  /** Intake-2's answers once the buyer sent them, keyed by the contract's labels (2026-10-14). */
+  intake_2?: (Intake2Stored & { notified?: { at: string; channel: string; ts: string | null; error: string | null } | null }) | null;
+  intake_2_completed_at?: string | null;
+  /** The invite and every email sent for it. Never the link's hash. */
+  intake_2_invite?: Omit<Intake2Invite, 'token_sha256'> | null;
+  /** Only on the answer to a stage move: what happened to the Intake-2 invite the move triggered. */
+  intake_2_invite_result?: Intake2InviteOutcome;
+}
+
+/** What sending (or resending) an Intake-2 invite did. */
+export interface Intake2InviteOutcome {
+  ok: boolean;
+  reason: string;
+  message: string;
+  invite_id?: string;
+  link?: string;
+  send?: Intake2Send | null;
 }
 
 /* ------------------------------------------------------------ vFarm gates */

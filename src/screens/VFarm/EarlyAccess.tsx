@@ -4,6 +4,7 @@ import type { RecordColumn } from '../../components/ui';
 import { Pagination, Button, Pill, Toast, RecordTable, SearchBox, Segmented, Stat, StatCell, StatStrip, usePaged, useToast } from '../../components/ui';
 import { EditableCell } from '../Registry/Editable';
 import { FORM_A_GROUPS, FORM_A_QUESTIONS } from '../../data/formA';
+import { Intake2Panel } from './Intake2Panel';
 
 /**
  * The receiving end of the vFarm Early Access funnel, as a small CRM.
@@ -134,7 +135,12 @@ export default function EarlyAccess({ data, onChange, initialOpen = null }: { da
     try {
       const updated = await moveVfarmLeadStage(lead.id, to, reason);
       onChange(leads.map((l) => (l.id === lead.id ? updated : l)));
-      setToast({ text: `${lead.full_name} moved to Stage ${to}. Their Stage ${lead.stage} answers are kept on the row.`, tone: 'ok' });
+      const inv = updated.intake_2_invite_result;
+      setToast(
+        inv
+          ? { text: `${lead.full_name} moved to Stage ${to}. ${inv.message}`, tone: inv.ok ? 'ok' : 'failing' }
+          : { text: `${lead.full_name} moved to Stage ${to}. Their Stage ${lead.stage} answers are kept on the row.`, tone: 'ok' },
+      );
     } catch (e) {
       setToast({ text: e instanceof Error ? e.message : 'That move did not save.', tone: 'failing' });
     }
@@ -375,7 +381,7 @@ export default function EarlyAccess({ data, onChange, initialOpen = null }: { da
       <div className="min-h-0 flex-1 overflow-y-auto pb-8">
         {openLead && (
           <div className="px-6 md:px-8">
-            <LeadAnswers lead={openLead} onClose={() => setOpenId(null)} onMove={move} />
+            <LeadAnswers lead={openLead} onClose={() => setOpenId(null)} onMove={move} onToast={(text, tone) => setToast({ text, tone })} />
           </div>
         )}
         <RecordTable
@@ -416,7 +422,7 @@ function answerText(v: unknown): string {
  * Form A's questions is shown under its own heading rather than dropped: a
  * renamed question should be visible, not lost.
  */
-function LeadAnswers({ lead, onClose, onMove }: { lead: VfarmLead; onClose: () => void; onMove: (lead: VfarmLead, to: 1 | 2, reason: string | null) => Promise<void> }) {
+function LeadAnswers({ lead, onClose, onMove, onToast }: { lead: VfarmLead; onClose: () => void; onMove: (lead: VfarmLead, to: 1 | 2, reason: string | null) => Promise<void>; onToast: (text: string, tone: 'ok' | 'failing') => void }) {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const to: 1 | 2 = lead.stage === 2 ? 1 : 2;
@@ -484,6 +490,8 @@ function LeadAnswers({ lead, onClose, onMove }: { lead: VfarmLead; onClose: () =
           </ul>
         )}
       </section>
+
+      <Intake2Panel lead={lead} onToast={onToast} />
 
       {!f ? (
         <p className="text-[12.5px] text-dim">

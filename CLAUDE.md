@@ -1263,6 +1263,49 @@ Early Access). `LANE-VFARM-FOUNDING_ACCESS_INTAKE` is a different product and is
 never linked. **No capital target or date is stored anywhere**: Jason's rule is
 that none is set until Hardik's two blockers clear.
 
+**Intake-2, the serious-buyer site specification** (2026-10-15, Destiny — Hardik's
+contract of 13 Oct and field list of 14 Oct, `VFARM_BUYER_INTAKE.v1`; Jason in
+#bha-media-twin the same day: "one opaque link per lead, not a public form; writes to
+that lead's existing record; the 31 fields exactly as defined, including the two file
+uploads without forcing Google login"). `server/src/intake2.ts`, the page
+`server/src/intake2Page.ts`, the fields `src/data/intake2.ts` (labels copied character
+for character; a label is the key an answer is stored under, so a change is Hardik's,
+then here, then BUILD_LOG), migration 76.
+
+- **The Stage 1 → 2 move is the trigger.** `earlyAccess.moveStage` to 2 calls
+  `intake2.issueInvite`; the invite never undoes the move, and its outcome comes back
+  beside the lead (`intake_2_invite_result`). A lead already in Stage 2 is sent from the
+  lead panel's Send invite (`POST /api/vfarm/leads/:id/intake-2/invite`) or
+  `POST /api/engine/vfarm-leads/intake-2/invite` (`x-dashboard-key`, by `buyer_intake_id`).
+- **Fails closed**: no `buyer_intake_id`, no valid email, or not in Stage 2 is refused by
+  name. Two leads with one buyer id is a 409 naming both.
+- **Deterministic ids** from the buyer id's suffix: `VFINT2-INV-…`, `VFINT2-SUB-…`,
+  `VFINT2-SEND-…-<n>`. The link is `/intake/<token>`, the token an HMAC of the invite id
+  under **`INTAKE2_LINK_SECRET`** (no default; changing it breaks every link sent).
+  **Neither the token nor the link is stored**, only its sha256 (unique index); the
+  dashboard works the link out again to show it.
+- **The email** is n8n's `vFarm — Intake-2 Invite` (`bVq6EF3sjn0xtOOg`, folder vFarm,
+  `POST /webhook/vfarm-intake2-invite`, Admin Gmail, from admin@bhanetwork.org). A repeat
+  sends nothing (`already_sent`); `resend` sends with the next send id and the same link.
+  A send that does not come back with Gmail's message id is stored as failed with the
+  reason and shown on the lead.
+- **The page is public by necessity and knows a first name and an organisation**, never
+  an email or an id. Any link that opens nothing gets the same "not valid" page.
+  `GET/POST /api/public/intake-2/<token>` and `POST …/file?field=5|31`.
+- **Files**: PDF, JPG or PNG, 15 MB each, 5 per question, 20 per link, uploaded by this
+  server into a private Drive folder per lead (under `INTAKE2_DRIVE_FOLDER_ID`, else a
+  folder this server makes once and keeps in `meta` `intake2.drive_parent`). Only a file
+  uploaded on that link can be named in the answers.
+- **Submitted once.** The answers land on the lead's own row (`intake_2`,
+  `intake_2_completed_at`) keyed by label, with **one** `serious_buyer_spec_intake_completed`
+  event in the same transaction (`serious_buyer_spec_intake_invited` when the invite is
+  made). The same answers again are a retry (`already: true`); different answers are a 409.
+  Then one post in #vfarm-early-access as Bays, whose outcome is written on the row.
+- **Interest only.** The five request checks (feasibility, pricing, ownership, licensing,
+  food safety) are never touched: the answers are evidence for them, not a decision.
+- `npm run test:intake2` pins it against a local database with n8n, Google and Slack
+  stood in.
+
 **vFarm customer events** (2026-10-11, Destiny — LOOP-1789326230248-ZX0W, Jason's
 ask of 13 Sep). `server/src/vfarmCustomerEvents.ts`, contract
 `docs/contracts/vfarm-customer-events.md` (`vfarm.customer.events.v0`). Five
