@@ -342,7 +342,11 @@ export async function update(watchId: string, by: string, changes: Partial<Recor
   const flip = typeof opts.closeOnReply === 'boolean' && opts.closeOnReply !== (w.close_on_reply !== false);
   if (!changed.length && !flip) return { ok: true, watch: w, changed, flipped: false };
   const next = Object.fromEntries(changed.map((c) => [c.field, c.to])) as Partial<Record<Updatable, string | null>>;
-  const lines = changed.map((c) => `${c.field} ${c.from ? (c.to && c.to.startsWith(c.from) ? 'added to' : 'changed') : 'set'}${c.to ? ` to "${clip(c.to, 200)}"` : ' to nothing'}`);
+  const lines = changed.map((c) =>
+    c.from && c.to && c.to.startsWith(c.from)
+      ? `${c.field} added to: "${clip(c.to.slice(c.from.length).replace(/^(\n|; )/, ''), 200)}"`
+      : `${c.field} ${c.from ? 'changed' : 'set'}${c.to ? ` to "${clip(c.to, 200)}"` : ' to nothing'}`,
+  );
   if (flip) lines.push(opts.closeOnReply ? 'a reply from the owner now closes it' : 'more than one part: a reply from the owner no longer closes it');
   const line = lines.join('; ');
   const r = await query<WatchRow>(
