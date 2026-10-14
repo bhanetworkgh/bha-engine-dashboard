@@ -3168,6 +3168,18 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE engine_agent_versions ADD COLUMN IF NOT EXISTS draft_alert_text text`,
     ],
   },
+  {
+    /**
+     * 14 Oct 2026, Destiny (Jason, #workflow-logs-kaiqi: "keep reminding until
+     * all three are addressed"). DW-1791901078077-O0B8 closed as answered when
+     * Kaiqi replied once, with two of Jason's three asks still owed. A watch on
+     * a decision with more than one part now stays open through the owner's
+     * reply. Every existing watch keeps today's behaviour (true).
+     */
+    id: 75,
+    name: 'engine_decision_watches.close_on_reply: a multi-part decision is not closed by the first reply',
+    statements: [`ALTER TABLE engine_decision_watches ADD COLUMN IF NOT EXISTS close_on_reply boolean NOT NULL DEFAULT true`],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

@@ -353,6 +353,23 @@ const DEST_RE = /^[CDGUW][A-Z0-9]{6,}$/;
 
 export type DestinationVerdict = { known: boolean; kind: 'channel' | 'user' | 'dm'; why: string };
 
+/**
+ * The person a DM channel is with, from the DMs Bays has already sent there by user id:
+ * send_nudge stores each recipient's user id beside the D… channel Slack answered with.
+ * Only a post Slack confirmed counts. Null when Bays has never DM'd anyone there.
+ */
+export async function dmPersonFromHistory(dmChannel: string): Promise<string | null> {
+  if (!/^D[A-Z0-9]{6,}$/.test(dmChannel)) return null;
+  const r = await query<{ user_id: string }>(
+    `SELECT x->>'user_id' AS user_id
+       FROM engine_mcp_writes w, jsonb_array_elements(CASE WHEN jsonb_typeof(w.after->'results') = 'array' THEN w.after->'results' ELSE '[]'::jsonb END) x
+      WHERE w.tool = 'send_nudge' AND w.outcome = 'applied' AND x->>'channel' = $1 AND x->>'ok' = 'true' AND coalesce(x->>'user_id', '') ~ '^[UW][A-Z0-9]+$'
+      ORDER BY w.id DESC LIMIT 1`,
+    [dmChannel],
+  ).catch(() => ({ rows: [] as Array<{ user_id: string }> }));
+  return r.rows[0]?.user_id ?? null;
+}
+
 export async function destinationVerdict(dest: string): Promise<DestinationVerdict> {
   if (/^[UW]/.test(dest)) {
     const unknown = await unknownRecipients([dest]);
@@ -361,7 +378,23 @@ export async function destinationVerdict(dest: string): Promise<DestinationVerdi
   if (dest.startsWith('D')) {
     const info = await slack.botCall('conversations.info', { channel: dest }, 'form');
     const user = (info.channel as { user?: string } | undefined)?.user;
-    if (!info.ok || typeof user !== 'string') return { known: false, kind: 'dm', why: `Slack could not say who this DM is with (${String(info.error ?? 'no user in the answer')})` };
+    if (!info.ok || typeof user !== 'string') {
+      // 14 Oct 2026: Bays' token cannot read DM details (missing_scope), so a post into
+      // Jegan's DM by its D… id was held for approval although Bays had DM'd him there by
+      // user id that day. The DM's person is read back from Bays' own successful DMs.
+      const earlier = await dmPersonFromHistory(dest);
+      if (earlier) {
+        const unknownEarlier = await unknownRecipients([earlier]);
+        return {
+          known: unknownEarlier.length === 0,
+          kind: 'dm',
+          why: unknownEarlier.length
+            ? `a DM with ${earlier} (from Bays' earlier DMs there), who has no Builder Profile and is not an approver`
+            : `a DM with ${earlier} (from Bays' earlier DMs there; Slack itself could not say: ${String(info.error ?? 'no user in the answer')}), who has a Builder Profile or is an approver`,
+        };
+      }
+      return { known: false, kind: 'dm', why: `Slack could not say who this DM is with (${String(info.error ?? 'no user in the answer')}), and Bays has never DM'd anyone there by user id` };
+    }
     const unknown = await unknownRecipients([user]);
     return { known: unknown.length === 0, kind: 'dm', why: unknown.length ? `a DM with ${user}, who has no Builder Profile and is not an approver` : `a DM with ${user}, who has a Builder Profile or is an approver` };
   }
