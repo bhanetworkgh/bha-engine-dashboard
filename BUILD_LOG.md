@@ -12374,3 +12374,28 @@ Problem:    In #bha-coordination (KMG9 thread 1791991206.574959) Bays opened two
 Fix:        `checkThread(channel, ts)` runs on every threaded open, dry runs included (one `conversations.replies`, limit 1, as Bays then North Star). A reply's ts becomes its thread's root however the place was given, so a second ask on the same thread matches the first. Refusals: `thread_not_found` (Slack answered thread_not_found or message_not_found, or no message), `thread_not_readable` (neither bot can read the place, so the watch could never see a reply), `thread_check_failed` (any other Slack answer; try again). No Slack token configured: the ts is kept as given and the dry run says `thread_checked: false`. `resolveRoot` is kept as a thin wrapper. OSK0 cancelled as a duplicate on a thread it cannot read (audit 2162).
 Test:       `npm run test:decision-watch` against a local Postgres 16 with a Slack stand-in that now answers the open-time check the way Slack does (a reply names its thread, an unknown ts is thread_not_found): 15 of 15, including the new check (an unknown ts refused, also on a dry run; a reply ts matched to the watch already on its thread; an unreadable channel refused; every call audited). First time this suite has run since 13 Oct: pg and its dependencies were assembled from GitHub because the package registry is unreachable from the workspace.
 Decision:   Refuse rather than open and let the sweep complain: a watch that cannot read its thread only nags, and its nagging lands on the owner and then on Jason and Destiny. The duplicate rule stays thread + owner; a second key on owner + loop was not added, because one person can owe two different answers on one loop.
+
+## 2026-10-15 10:30 — A channel Bays is in but never set up is set up on the first Decision Watch
+Intent:     Jason's review of the 13 Oct log, ask 1 ("from half done to fully"). Bays could not open a
+            watch in a channel it was already in when the engine had never set that channel up (no
+            channel_tracking row): the destination guard read it as unknown and refused, and a person
+            had to fix the row by hand.
+Files:      server/src/channelRegister.ts (new), server/src/mcp/decisionWatchTools.ts,
+            server/test/decision-watch.test.cjs, CLAUDE.md. n8n: new workflow `Bays — Channel Register`
+            (d7Q7SKn0Q2CbAghj, Slack In & Out, published 6fba58cd), error workflow Bays — Error Handler.
+Problem:    The setup a channel gets (Drive folder, daily doc, tracking row, greeting) only ran on a Bays
+            join event, so a channel joined before the setup existed, or whose setup failed, stayed
+            unknown forever.
+Fix:        `channelRegister.register(channel)`: refuses #bha-pay-reviews (C0C24D5PZQE, plus
+            CHANNEL_REGISTER_EXCLUDED), archived channels and names starting test-/tmp-/old-/archive-/zz-;
+            asks Slack (conversations.info as Bays) whether Bays is a member and refuses with numbered
+            steps (/invite @Bays) when it is not; otherwise POSTs `/webhook/channel-register`
+            (x-dashboard-key), which hands Message Capture the same channel_joined event a Bays join gives
+            it, so the setup is the one path that already exists. The 200 is not trusted: the tracking row
+            is read back and only a row that is there counts. On an agent token a failed setup refuses the
+            watch (bays_not_in_channel, channel_excluded, register_failed, or unknown_destination where
+            Slack would not answer); on the connector the watch opens anyway and `channel_setup` says what
+            happened. A dry run calls nothing and says it would set the channel up.
+Decision:   Reuse Message Capture's onboarding branch rather than copy it into the dashboard: two setup
+            paths would drift. Tests: `npm run test:decision-watch` 16/16 (check 12c new: dry run, setup,
+            inbound key, not a member, pay reviews, test channel, a 200 with no row, the connector path).

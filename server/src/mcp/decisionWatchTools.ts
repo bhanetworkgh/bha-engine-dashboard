@@ -17,6 +17,7 @@
  */
 import * as dw from '../decisionWatch';
 import { destinationVerdict } from './slackTools';
+import * as channelRegister from '../channelRegister';
 import { auditClose, auditOpen } from './writeTools';
 import type { ToolDefinition, ToolDeps } from './tools';
 
@@ -46,7 +47,7 @@ async function audited(
 export const openDecisionWatch: ToolDefinition = {
   name: 'open_decision_watch',
   description:
-    `Start watching one decision that is waiting on one named person, so it cannot be forgotten. Use it (a) when you are already in a thread and a decision, question or lane step is put to a named person and not answered there and then, or (b) when somebody says "Bays, watch this". Never to watch a thread nobody asked a named person anything in. The dashboard then checks every few minutes: a reply from the owner closes the watch (unless close_on_reply is false), any other reply or a change to the linked loop or task restarts the wait, and after ${dw.RULE.wait_hours} quiet hours a reminder is posted in the thread as Bays, up to ${dw.RULE.max_reminders}, then one escalation to Jason and Destiny and it stops. Pass the thread as thread_link (a Slack message link) or channel_id + thread_ts; a watch with no thread needs record_id (a LOOP-… or TASK-… id) and reminds the owner by DM. sop_refs and ns_refs are the SOP title and id and the North Star position the decision ties to: look them up first and pass what you found, or leave them out; never invent one. A second call for the same thread and owner while the first is open answers the first and makes no duplicate. The thread is checked first: a ts Slack has no message for is refused (thread_not_found), a place no bot can read is refused (thread_not_readable), and a reply's ts is turned into its thread, so pass the link of the message the ask was made in. Returns {ok, watch_id, created, next_action_at}. Audited on engine_mcp_writes.`,
+    `Start watching one decision that is waiting on one named person, so it cannot be forgotten. Use it (a) when you are already in a thread and a decision, question or lane step is put to a named person and not answered there and then, or (b) when somebody says "Bays, watch this". Never to watch a thread nobody asked a named person anything in. The dashboard then checks every few minutes: a reply from the owner closes the watch (unless close_on_reply is false), any other reply or a change to the linked loop or task restarts the wait, and after ${dw.RULE.wait_hours} quiet hours a reminder is posted in the thread as Bays, up to ${dw.RULE.max_reminders}, then one escalation to Jason and Destiny and it stops. Pass the thread as thread_link (a Slack message link) or channel_id + thread_ts; a watch with no thread needs record_id (a LOOP-… or TASK-… id) and reminds the owner by DM. sop_refs and ns_refs are the SOP title and id and the North Star position the decision ties to: look them up first and pass what you found, or leave them out; never invent one. A second call for the same thread and owner while the first is open answers the first and makes no duplicate. The thread is checked first: a ts Slack has no message for is refused (thread_not_found), a place no bot can read is refused (thread_not_readable), and a reply's ts is turned into its thread, so pass the link of the message the ask was made in. A channel you are in that the engine never set up is set up on this call (Drive folder, daily doc, tracking, the same setup as when you join), and channel_setup says so: tell the person it was set up. A channel you are not in (bays_not_in_channel), one kept out on purpose or a test channel (channel_excluded), or a setup that failed (register_failed) is refused with numbered steps: pass those steps to the person as they are. Returns {ok, watch_id, created, next_action_at, channel_setup}. Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -97,9 +98,26 @@ export const openDecisionWatch: ToolDefinition = {
         const who = await destinationVerdict(owner);
         if (!who.known) return refuse('unknown_owner', `<@${owner}> cannot be watched: ${who.why}.`);
       }
+      // A channel Bays is in but the engine never set up is set up here, on the first watch, by the
+      // same setup a Bays join runs (14 Oct 2026, Jason's ask 1). Anything else is refused with steps.
+      let registered: { channel_id: string; message: string; dry_run: boolean } | null = null;
       if (channel && deps.agent) {
         const where = await destinationVerdict(channel);
-        if (!where.known) return refuse('unknown_destination', `Bays cannot post reminders there: ${where.why}. A person can open this watch through the connector.`);
+        if (!where.known && where.kind === 'channel') {
+          const reg = await channelRegister.register(channel, { dry_run: args.dry_run === true, requested_by: requester });
+          if (!reg.ok) return refuse(reg.reason === 'channel_unreadable' ? 'unknown_destination' : reg.reason, reg.message);
+          registered = { channel_id: reg.channel_id, message: reg.message, dry_run: reg.dry_run };
+        } else if (!where.known) {
+          return refuse('unknown_destination', `Bays cannot post reminders there: ${where.why}. A person can open this watch through the connector.`);
+        }
+      } else if (channel && /^[CG]/.test(channel)) {
+        // A person on the connector may watch anywhere, but a channel the engine never set up is still
+        // set up, so it is captured like every other. Here a refusal does not stop the watch: it is said.
+        const where = await destinationVerdict(channel);
+        if (!where.known) {
+          const reg = await channelRegister.register(channel, { dry_run: args.dry_run === true, requested_by: requester });
+          registered = { channel_id: channel, message: reg.message, dry_run: reg.ok ? reg.dry_run : args.dry_run === true };
+        }
       }
       // The thread must exist and be readable, and a reply's ts becomes its thread's root,
       // however the place was given (14 Oct 2026: a watch on a ts no message carried, DW-…-OSK0).
@@ -132,24 +150,25 @@ export const openDecisionWatch: ToolDefinition = {
         close_on_reply: args.close_on_reply !== false,
       };
       if (args.dry_run === true) {
-        return { outcome: 'dry_run', detail: null, answer: { ok: true, dry_run: true, thread_checked: threadCheck?.ok ? threadCheck.checked : null, would_watch: { ...input, wait_minutes: input.wait_minutes ?? dw.RULE.wait_hours * 60, max_reminders: dw.RULE.max_reminders } } };
+        return { outcome: 'dry_run', detail: null, answer: { ok: true, dry_run: true, thread_checked: threadCheck?.ok ? threadCheck.checked : null, channel_setup: registered?.message ?? null, would_watch: { ...input, wait_minutes: input.wait_minutes ?? dw.RULE.wait_hours * 60, max_reminders: dw.RULE.max_reminders } } };
       }
       const r = await dw.open(input);
       if (!r.ok) return refuse(r.reason, r.message);
       const shown = dw.show(r.watch);
       return {
         outcome: r.created ? 'applied' : 'unchanged',
-        detail: `${r.watch.watch_id} ${r.created ? 'opened' : 'already open'} for ${r.watch.owner_user_id}`,
+        detail: `${r.watch.watch_id} ${r.created ? 'opened' : 'already open'} for ${r.watch.owner_user_id}${registered ? `; ${registered.channel_id} set up first` : ''}`,
         target: r.watch.watch_id,
         answer: {
           ok: true,
           created: r.created,
           watch_id: r.watch.watch_id,
+          channel_setup: registered?.message ?? null,
           next_action: shown.next_action,
           next_action_at: shown.next_action_at,
           watch: shown,
           message: r.created
-            ? `Watching. If <@${r.watch.owner_user_id}> has not replied and nothing has moved in ${shown.wait}, a reminder is posted as Bays.${r.watch.close_on_reply === false ? ' It has more than one part, so a reply from the owner restarts the wait and does not close it; close it with close_decision_watch once every part is answered.' : ''} Say this plainly to the person; do not promise anything more than that.`
+            ? `${registered ? `${registered.message} ` : ''}Watching. If <@${r.watch.owner_user_id}> has not replied and nothing has moved in ${shown.wait}, a reminder is posted as Bays.${r.watch.close_on_reply === false ? ' It has more than one part, so a reply from the owner restarts the wait and does not close it; close it with close_decision_watch once every part is answered.' : ''} Say this plainly to the person; do not promise anything more than that.`
             : `This decision is already being watched as ${r.watch.watch_id}; no second watch was made, and nothing on it was changed. To attach an SOP or North Star reference to it, call update_decision_watch.`,
         },
       };

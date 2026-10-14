@@ -12,7 +12,7 @@ if (!/@(localhost|127\.0\.0\.1)[:/]/.test(process.env.DATABASE_URL || '')) {
 const DIST = process.env.SERVER_DIST || path.join(__dirname, '../../server-dist');
 
 /** The stand-in Slack: threads and DMs are arrays of messages; posts are kept. */
-const slack = { threads: {}, replyOf: {}, dms: {}, posts: [], unreadable: new Set(), refusePost: false, calls: [] };
+const slack = { threads: {}, replyOf: {}, dms: {}, posts: [], unreadable: new Set(), refusePost: false, calls: [], channels: {}, registers: [], onRegister: null };
 const srv = http.createServer((req, res) => {
   const chunks = [];
   req.on('data', (c) => chunks.push(c));
@@ -39,6 +39,15 @@ const srv = http.createServer((req, res) => {
       }
       return send({ ok: true, messages: (slack.threads[`${b.channel}:${b.ts}`] || []).filter((m) => Number(m.ts) > Number(b.oldest || 0)) });
     }
+    if (req.url === '/conversations.info') {
+      const c = slack.channels[b.channel];
+      return send(c ? { ok: true, channel: { id: b.channel, ...c } } : { ok: false, error: 'channel_not_found' });
+    }
+    // The stand-in n8n: Bays — Channel Register.
+    if (req.url === '/webhook/channel-register') {
+      slack.registers.push({ key: req.headers['x-dashboard-key'], ...b });
+      return Promise.resolve(slack.onRegister ? slack.onRegister(b.channel_id) : null).then(() => send({ ok: true, channel_id: b.channel_id }));
+    }
     if (req.url === '/conversations.history') return send({ ok: true, messages: (slack.dms[b.channel] || []).filter((m) => Number(m.ts) > Number(b.oldest || 0)) });
     send({ ok: false, error: 'unknown_method' });
   });
@@ -50,6 +59,8 @@ const srv = http.createServer((req, res) => {
   process.env.SLACK_BAYS_BOT_TOKEN = 'xoxb-bays';
   process.env.SLACK_NORTH_STAR_BOT_TOKEN = 'xoxb-ns';
   process.env.QUOTA_ALERT_CHANNEL = 'C0ALERTS001';
+  process.env.N8N_API_URL = `http://127.0.0.1:${port}/api/v1`;
+  process.env.DASHBOARD_INBOUND_KEY = 'test-inbound-key';
   const req = (m) => require(path.join(DIST, 'server/src', m));
   await req('migrations.js').migrate();
   const { query } = req('pg.js');
@@ -272,6 +283,59 @@ const srv = http.createServer((req, res) => {
   assert.equal(t0.reason, 'unknown_owner', 'a person with no Builder Profile is never reminded');
   t0 = await tools.openDecisionWatch.handler({ decision: 'A channel nobody approved', owner_user_id: OWNER, requester_user_id: JASON, channel_id: CH, thread_ts: '1791733300.000009' }, { access: 'write', agent: 'bays', dispatch: async () => ({ status: 200, body: {} }), startedAt: '' });
   assert.equal(t0.reason, 'unknown_destination', 'an agent cannot aim reminders at a channel the engine does not know');
+
+  /* 12c. a channel Bays is in but the engine never set up is set up on the first watch (Jason's ask 1, 14 Oct) */
+  const reg = (c) => `C0R${String(T).slice(-6)}${c}`;
+  const [RIN, ROUT, RNAME, RFAIL] = ['1', '2', '3', '4'].map(reg);
+  for (const c of [RIN, ROUT, RNAME, RFAIL]) slack.threads[`${c}:1791733300.000020`] = [];
+  slack.channels[RIN] = { name: 'bha-new-lane', is_member: true };
+  slack.channels[ROUT] = { name: 'bha-elsewhere', is_member: false };
+  slack.channels[RNAME] = { name: 'test-scratch', is_member: true };
+  slack.channels[RFAIL] = { name: 'bha-broken', is_member: true };
+  slack.onRegister = async (c) => {
+    if (c === RFAIL) return; // answers 200 and writes nothing
+    await query(`INSERT INTO engine_channel_tracking (airtable_record_id, natural_id, fields, source, first_seen_at, updated_at, created_time) VALUES ($1, $1, $2::jsonb, 'engine', now(), now(), now()) ON CONFLICT DO NOTHING`, [c, JSON.stringify({ channel_id: c })]);
+  };
+  const regArgs = (c, extra = {}) => ({ decision: 'Register test', owner_user_id: OWNER, requester_user_id: JASON, channel_id: c, thread_ts: '1791733300.000020', ...extra });
+  const regDeps = { access: 'write', agent: 'bays', dispatch: async () => ({ status: 200, body: {} }), startedAt: '' };
+  let rg = await tools.openDecisionWatch.handler(regArgs(RIN, { dry_run: true }), regDeps);
+  assert.equal(rg.ok, true);
+  assert.match(rg.channel_setup, /would set it up/, 'a dry run says the channel would be set up');
+  assert.equal(slack.registers.length, 0, 'a dry run calls nothing');
+  rg = await tools.openDecisionWatch.handler(regArgs(RIN), regDeps);
+  assert.equal(rg.ok, true, `an untracked channel Bays is in is set up and watched: ${rg.message}`);
+  assert.match(rg.channel_setup, /it is now/);
+  assert.equal(slack.registers.length, 1);
+  assert.equal(slack.registers[0].key, 'test-inbound-key', 'the webhook carries the inbound key');
+  assert.equal(slack.registers[0].channel_id, RIN);
+  const regWatch = rg.watch_id;
+  rg = await tools.openDecisionWatch.handler(regArgs(ROUT), regDeps);
+  assert.equal(rg.reason, 'bays_not_in_channel');
+  assert.match(rg.message, /\/invite @Bays/, 'the refusal says how to fix it');
+  rg = await tools.openDecisionWatch.handler(regArgs('C0C24D5PZQE'), regDeps);
+  assert.equal(rg.reason, 'channel_excluded', '#bha-pay-reviews is never set up');
+  rg = await tools.openDecisionWatch.handler(regArgs(RNAME), regDeps);
+  assert.equal(rg.reason, 'channel_excluded', 'a test channel is never set up');
+  rg = await tools.openDecisionWatch.handler(regArgs(RFAIL), regDeps);
+  assert.equal(rg.reason, 'register_failed', 'a 200 with no tracking row is not a setup');
+  assert.equal(slack.registers.length, 2, 'only the two channels that passed every check reached n8n');
+  // A person on the connector: the watch opens either way, and an untracked channel is still set up.
+  const RPERSON = reg('5');
+  slack.channels[RPERSON] = { name: 'bha-person-lane', is_member: true };
+  slack.threads[`${RPERSON}:1791733300.000020`] = [];
+  rg = await tools.openDecisionWatch.handler(regArgs(RPERSON), { ...regDeps, agent: null });
+  assert.equal(rg.ok, true);
+  assert.match(rg.channel_setup, /it is now/, 'a person opening a watch also gets the channel set up');
+  assert.equal(slack.registers.length, 3);
+  const personWatch = rg.watch_id;
+  rg = await tools.openDecisionWatch.handler(regArgs(ROUT), { ...regDeps, agent: null });
+  assert.equal(rg.ok, true, 'a person may watch where Bays is not set up');
+  assert.match(rg.channel_setup, /not a member/, 'and is told why the channel was not set up');
+  await dw.close(personWatch, JASON, 'cancelled', 'test');
+  await dw.close(rg.watch_id, JASON, 'cancelled', 'test');
+  await dw.close(regWatch, JASON, 'cancelled', 'test');
+  await query(`DELETE FROM engine_channel_tracking WHERE natural_id = ANY($1)`, [[RIN, ROUT, RNAME, RFAIL, RPERSON]]);
+  ok('an untracked channel Bays is in is set up on the first watch; the rest are refused with steps');
   await query(`INSERT INTO engine_channel_tracking (airtable_record_id, natural_id, fields, source, first_seen_at, updated_at, created_time) VALUES ($1, $1, '{}'::jsonb, 'engine', $2, $2, $2) ON CONFLICT DO NOTHING`, [CH, at(0).toISOString()]);
   const deps = (agent) => ({ access: 'write', agent, dispatch: async () => ({ status: 200, body: {} }), startedAt: '' });
   const open = (args, agent = null) => tools.openDecisionWatch.handler(args, deps(agent));

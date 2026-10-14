@@ -2353,6 +2353,15 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
   included: a reply's ts becomes its thread's root, so the duplicate check
   matches; `thread_not_found`, `thread_not_readable` and `thread_check_failed`
   are refused. With no Slack token the ts is kept as given.
+- **A channel Bays is in but the engine never set up is set up on the first
+  watch** (15 Oct 2026, Jason's ask on the 13 Oct log). `server/src/channelRegister.ts`
+  asks Slack whether Bays is a member, then calls n8n's `Bays — Channel Register`
+  (d7Q7SKn0Q2CbAghj, `POST /webhook/channel-register`, `x-dashboard-key`), which
+  hands `Bays — Message Capture` the same `channel_joined` event a join gives it:
+  one setup path, never a copy. Counted only once the `channel_tracking` row reads
+  back. #bha-pay-reviews, archived and test- or old- named channels are never set
+  up. On an agent token a failure refuses with numbered steps; on the connector the
+  watch opens anyway and `channel_setup` says what happened.
 - **The destination guard applies**: the owner must have a Builder Profile or
   be an approver, and on an agent token the channel must be one the engine
   knows (`slackTools.destinationVerdict`). No approval card in v0: unknown is
