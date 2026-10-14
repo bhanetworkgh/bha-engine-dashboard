@@ -415,20 +415,56 @@ async function readSince(channel: string, threadTs: string, oldest: string): Pro
   return { ok: false, error: `conversations.replies could not read ${channel} thread ${threadTs} (${tried.join('; ')})` };
 }
 
+/** Slack's answers that mean the message is not there, as opposed to "not allowed to look". */
+const GONE_ERRORS = new Set(['thread_not_found', 'message_not_found']);
+
+export type ThreadCheck =
+  | { ok: true; root: string; checked: boolean; read_as: 'Bays' | 'North Star' | null }
+  | { ok: false; reason: 'thread_not_found' | 'thread_not_readable' | 'thread_check_failed'; message: string };
+
 /**
- * A link to a reply names the reply, not its thread. One read at open finds
- * the root, so the watch reads the whole thread and not one message. A place
- * that cannot be read keeps the ts as given, and the sweep says why.
+ * Every threaded watch is checked at open (14 Oct 2026, Destiny). On 14 Oct
+ * DW-1791991788784-OSK0 was opened on a ts no message in #bha-coordination
+ * carries: it could never read its thread (`thread_not_found` on every sweep),
+ * so it could never see the owner answer and would have reminded and escalated
+ * regardless, and the duplicate check, which matches on the thread, missed
+ * that it was the same ask as DW-1791991978962-19QD a minute later. So:
+ *  - a reply's ts becomes its thread's root, whichever way the place was given,
+ *    so the watch reads the whole thread and a second ask matches the first;
+ *  - a ts Slack says is not there is refused (`thread_not_found`);
+ *  - a place neither Bays nor North Star can read is refused
+ *    (`thread_not_readable`): a watch that cannot see replies only nags;
+ *  - any other Slack answer is refused (`thread_check_failed`), to try again.
+ * With no Slack token configured nothing can be checked and the ts is kept as
+ * given (`checked: false`); the sweep already says why it cannot read.
  */
-export async function resolveRoot(channel: string, ts: string): Promise<string> {
-  for (const token of [undefined, slack.northStarToken()]) {
-    if (token === null) continue;
-    const r = await slack.botCall('conversations.replies', { channel, ts, limit: 1 }, 'form', token);
-    const first = r.ok ? ((r.messages as Array<{ thread_ts?: string }>) ?? [])[0] : null;
-    if (first?.thread_ts && /^\d+\.\d+$/.test(first.thread_ts)) return first.thread_ts;
-    if (r.ok) return ts;
+export async function checkThread(channel: string, ts: string): Promise<ThreadCheck> {
+  const tokens: Array<{ token: string | undefined; as: 'Bays' | 'North Star' }> = [];
+  if (slack.slackConfigured()) tokens.push({ token: undefined, as: 'Bays' });
+  const ns = slack.northStarToken();
+  if (ns) tokens.push({ token: ns, as: 'North Star' });
+  if (!tokens.length) return { ok: true, root: ts, checked: false, read_as: null };
+  const tried: string[] = [];
+  for (const t of tokens) {
+    const r = await slack.botCall('conversations.replies', { channel, ts, limit: 1 }, 'form', t.token);
+    if (r.ok) {
+      const first = ((r.messages as Array<{ ts?: string; thread_ts?: string }>) ?? [])[0];
+      if (!first) return { ok: false, reason: 'thread_not_found', message: `Slack has no message ${ts} in ${channel}. Pass the link of the message the ask was made in (Copy link in Slack), not an id from somewhere else.` };
+      const root = first.thread_ts && /^\d+\.\d+$/.test(first.thread_ts) ? first.thread_ts : ts;
+      return { ok: true, root, checked: true, read_as: t.as };
+    }
+    const error = String(r.error);
+    if (GONE_ERRORS.has(error)) return { ok: false, reason: 'thread_not_found', message: `Slack has no message ${ts} in ${channel} (${error}). Pass the link of the message the ask was made in (Copy link in Slack), not an id from somewhere else.` };
+    tried.push(`${t.as}: ${error}`);
+    if (!SCOPE_ERRORS.has(error)) return { ok: false, reason: 'thread_check_failed', message: `Could not check ${channel} thread ${ts} (${tried.join('; ')}). Nothing was opened; try again.` };
   }
-  return ts;
+  return { ok: false, reason: 'thread_not_readable', message: `Neither Bays nor North Star can read ${channel} (${tried.join('; ')}), so a watch there could never see a reply. Add Bays to the channel, or watch the loop or task instead (record_id, no thread).` };
+}
+
+/** The thread's root for a ts, or the ts as given where it cannot be read. Kept for callers that only want the root. */
+export async function resolveRoot(channel: string, ts: string): Promise<string> {
+  const c = await checkThread(channel, ts);
+  return c.ok ? c.root : ts;
 }
 
 const mention = (id: string) => `<@${id}>`;

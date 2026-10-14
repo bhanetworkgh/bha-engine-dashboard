@@ -2347,6 +2347,12 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
   or "Bays, watch this"), and the one standing rule, `autoCapital` (PX07): each
   open CAPITAL-lane loop or backlog task whose owner is one named person gets
   one watch, once, keyed `capital:<id>`. Bays never scans channels.
+- **A watch is opened only on a thread that exists and can be read** (14 Oct
+  2026, Destiny: DW-1791991788784-OSK0 was opened on a ts no message carried and
+  duplicated DW-…-19QD). `checkThread` runs on every threaded open, dry runs
+  included: a reply's ts becomes its thread's root, so the duplicate check
+  matches; `thread_not_found`, `thread_not_readable` and `thread_check_failed`
+  are refused. With no Slack token the ts is kept as given.
 - **The destination guard applies**: the owner must have a Builder Profile or
   be an approver, and on an agent token the channel must be one the engine
   knows (`slackTools.destinationVerdict`). No approval card in v0: unknown is

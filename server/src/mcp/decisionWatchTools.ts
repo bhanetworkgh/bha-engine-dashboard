@@ -46,7 +46,7 @@ async function audited(
 export const openDecisionWatch: ToolDefinition = {
   name: 'open_decision_watch',
   description:
-    `Start watching one decision that is waiting on one named person, so it cannot be forgotten. Use it (a) when you are already in a thread and a decision, question or lane step is put to a named person and not answered there and then, or (b) when somebody says "Bays, watch this". Never to watch a thread nobody asked a named person anything in. The dashboard then checks every few minutes: a reply from the owner closes the watch (unless close_on_reply is false), any other reply or a change to the linked loop or task restarts the wait, and after ${dw.RULE.wait_hours} quiet hours a reminder is posted in the thread as Bays, up to ${dw.RULE.max_reminders}, then one escalation to Jason and Destiny and it stops. Pass the thread as thread_link (a Slack message link) or channel_id + thread_ts; a watch with no thread needs record_id (a LOOP-… or TASK-… id) and reminds the owner by DM. sop_refs and ns_refs are the SOP title and id and the North Star position the decision ties to: look them up first and pass what you found, or leave them out; never invent one. A second call for the same thread and owner while the first is open answers the first and makes no duplicate. Returns {ok, watch_id, created, next_action_at}. Audited on engine_mcp_writes.`,
+    `Start watching one decision that is waiting on one named person, so it cannot be forgotten. Use it (a) when you are already in a thread and a decision, question or lane step is put to a named person and not answered there and then, or (b) when somebody says "Bays, watch this". Never to watch a thread nobody asked a named person anything in. The dashboard then checks every few minutes: a reply from the owner closes the watch (unless close_on_reply is false), any other reply or a change to the linked loop or task restarts the wait, and after ${dw.RULE.wait_hours} quiet hours a reminder is posted in the thread as Bays, up to ${dw.RULE.max_reminders}, then one escalation to Jason and Destiny and it stops. Pass the thread as thread_link (a Slack message link) or channel_id + thread_ts; a watch with no thread needs record_id (a LOOP-… or TASK-… id) and reminds the owner by DM. sop_refs and ns_refs are the SOP title and id and the North Star position the decision ties to: look them up first and pass what you found, or leave them out; never invent one. A second call for the same thread and owner while the first is open answers the first and makes no duplicate. The thread is checked first: a ts Slack has no message for is refused (thread_not_found), a place no bot can read is refused (thread_not_readable), and a reply's ts is turned into its thread, so pass the link of the message the ask was made in. Returns {ok, watch_id, created, next_action_at}. Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -101,8 +101,15 @@ export const openDecisionWatch: ToolDefinition = {
         const where = await destinationVerdict(channel);
         if (!where.known) return refuse('unknown_destination', `Bays cannot post reminders there: ${where.why}. A person can open this watch through the connector.`);
       }
-      // A link to a reply names the reply; the watch needs the thread it sits in.
-      if (channel && thread && link && !/[?&]thread_ts=/.test(link) && args.dry_run !== true) thread = await dw.resolveRoot(channel, thread);
+      // The thread must exist and be readable, and a reply's ts becomes its thread's root,
+      // however the place was given (14 Oct 2026: a watch on a ts no message carried, DW-…-OSK0).
+      // A dry run checks too: it is a read, and "would watch" a thread that is not there is a false answer.
+      let threadCheck: dw.ThreadCheck | null = null;
+      if (channel && thread) {
+        threadCheck = await dw.checkThread(channel, thread);
+        if (!threadCheck.ok) return refuse(threadCheck.reason, threadCheck.message);
+        thread = threadCheck.root;
+      }
       const recordId = str(args, 'record_id') || null;
       const recordKind = recordId ? (recordId.startsWith('LOOP-') ? 'loops' : recordId.startsWith('TASK-') ? 'lane_backlog' : null) : null;
       if (recordId && !recordKind) return refuse('bad_record_id', `"${recordId}" is not a loop id (LOOP-…) or a backlog task id (TASK-…).`);
@@ -125,7 +132,7 @@ export const openDecisionWatch: ToolDefinition = {
         close_on_reply: args.close_on_reply !== false,
       };
       if (args.dry_run === true) {
-        return { outcome: 'dry_run', detail: null, answer: { ok: true, dry_run: true, would_watch: { ...input, wait_minutes: input.wait_minutes ?? dw.RULE.wait_hours * 60, max_reminders: dw.RULE.max_reminders } } };
+        return { outcome: 'dry_run', detail: null, answer: { ok: true, dry_run: true, thread_checked: threadCheck?.ok ? threadCheck.checked : null, would_watch: { ...input, wait_minutes: input.wait_minutes ?? dw.RULE.wait_hours * 60, max_reminders: dw.RULE.max_reminders } } };
       }
       const r = await dw.open(input);
       if (!r.ok) return refuse(r.reason, r.message);
