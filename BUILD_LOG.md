@@ -12358,6 +12358,7 @@ Files:      none in this repo. n8n agent Bays (Nw5igXu4WWrjUMWB): read_sop added
 Problem:    See 12:45: the live test answered from search pieces and named the wrong second.
 Fix:        Restore point 02c1a098 (its post-publish eval EVAL-202610140840: 20 of 20). Draft validated; spot test through n8n preview (execution W0Ye4wE6ljBEPGCt) with the same question: Bays read the playbook whole (engine_writes seq 66722, mcp:read_sop, 8446 chars), cited section B, gave the worked example's steps, named Hardik and the 7 to 9 pm window. Draft eval DRAFT-202610141137-KNRT passed 20 of 20 against EVAL-202610140840. Published 4485b1c1, inventory recorded (audit 2100), publish check reads passed_before_publish; the post-publish eval is pending.
 Decision:   A skill rather than an instructions edit, so the change is one trigger and one tool; the instructions' skill index was not touched.
+2026-10-14 13:17 UTC: post-publish eval EVAL-202610141202 passed 20 of 20 (engine_agent_versions row 21, eval_state passed, settled 13:02:04, no alert). 4485b1c1 stands; restore point 02c1a098 not needed.
 
 ## 2026-10-14 13:20 — Session record: Message Capture join fix, D5 loop records, Kavin's watch (logged at close)
 Intent:     Put on the log the day's changes that are not in this repo.
