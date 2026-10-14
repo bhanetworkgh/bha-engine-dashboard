@@ -1668,7 +1668,7 @@ crash, when seven North Star runs read Slack at 08:00 at once.
   `cached` (`NORTH_STAR_SLACK_CACHE_SECONDS`, optional, 0 in the tests). Every
   call's size is on its `engine_writes` line.
 - `npm run test:north-star` pins them against a Slack stand-in.
-  **Live 24 Sep** (3954e59): the North Star Agent re-tested with each tool
+  **Live 24 Sep** (59c2335): the North Star Agent re-tested with each tool
   called once — 19,882 / 13,438 / 19,974 characters — and no loop, and was
   published on them. **`North Star — Tools Router` (`G6Myypk64kpcaVhz`) is
   retired** (Destiny unpublished it; seed, and migration 31 on a live

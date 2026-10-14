@@ -1132,7 +1132,7 @@ Verified:  Server compiled and run locally against a mock Bays workflow on
 
 Intent:    Get the Render deploy building again. It became a web service
            (Node) running `npm install && npm run build`, and the build fails
-           at `tsc -b` on 04a9561 with around forty errors across
+           at `tsc -b` on 28194a3 with around forty errors across
            `src/screens/Overview.tsx` and `src/screens/VFarm/index.tsx`.
 
 Files:     src/data/api.ts     (new — the generic fetch helper)
@@ -1141,7 +1141,7 @@ Files:     src/data/api.ts     (new — the generic fetch helper)
            package-lock.json   (npm syncing the `engines` field already in
                                package.json; produced by the install itself)
 
-Problem:   A clean clone of 04a9561 does not compile. `npm run build` from a
+Problem:   A clean clone of 28194a3 does not compile. `npm run build` from a
            fresh tree:
 
              src/app/session.tsx(3,40): error TS2307: Cannot find module
@@ -1162,11 +1162,11 @@ Problem:   A clean clone of 04a9561 does not compile. `npm run build` from a
            across ten files, and neither screen is the cause. **Two source
            files were written last session but never committed:**
            `src/data/api.ts` and `src/data/names.ts`. They exist on the
-           machine that built 04a9561 and are absent from git — `git ls-files
+           machine that built 28194a3 and are absent from git — `git ls-files
            src/data/` lists only `index.ts`, `types.ts` and `fixtures/`.
 
            And they were not forgotten, they were swallowed. `.gitignore`
-           line 147, added in 04a9561 with the server:
+           line 147, added in 28194a3 with the server:
 
              # BHA dashboard server
              server-dist/
@@ -1278,9 +1278,9 @@ Verified:  `rm -rf dist server-dist node_modules && npm install && npm run
            `server-dist/` and the two `.tsbuildinfo` files — so no other
            source file is missing for the same reason.
 
-           On Render: deploy dep-dagjdp9srm7s73fgnb1g on f0fbf80 went
+           On Render: deploy dep-dagjdp9srm7s73fgnb1g on 194748f went
            build_in_progress → **live** in 45 seconds (10:37:25 → 10:38:10),
-           against the failed dep-dagj852jnfac73ds528g on 04a9561. The
+           against the failed dep-dagj852jnfac73ds528g on 28194a3. The
            service booted: "BHA engine dashboard on http://localhost:10000",
            "Your service is live", available at
            https://bha-engine-dashboard.onrender.com. Could not curl that URL
@@ -1736,7 +1736,7 @@ Open:      - **AIRTABLE_API_KEY is not set on Render.** Until it is, the
            - The engine-lane filter still exists in session state and is
              'all'; it does not apply to the Airtable-backed kinds.
 
-           On Render: deploy dep-dago7fks728c73deepqg on 8c2d063 went live in
+           On Render: deploy dep-dago7fks728c73deepqg on 0cbcb8b went live in
            50 seconds. Boot log: "sign-in: configured" (the hash from this
            morning works), "sessions: SESSION_SECRET set", "ask bays:
            https://n8n.arupiautomates.cloud/webhook/dashboard-ask-bays",
@@ -1876,7 +1876,7 @@ Decision:   Approval is not inferred. Pending = a JASON_SPOTCHECK request;
             console errors only the Inter font this sandbox cannot fetch.
             Live verification follows below after the push.
 
-           On Render: deploy dep-dagqvp3m8hqs73fc7ncg on 927f146 built in
+           On Render: deploy dep-dagqvp3m8hqs73fc7ncg on bcc8dde built in
            28 s and was live at 19:14:28 UTC, 48 s end to end. Boot log:
            "sign-in: configured", "sessions: SESSION_SECRET set", "ask bays:
            https://n8n.arupiautomates.cloud/webhook/dashboard-ask-bays",
@@ -2079,7 +2079,7 @@ Files:      server/src/{sync,sources,store,engine,index}.ts; src/data/
 Problem:    1. The vFarm coming-soon state DID land, on 2026-09-10 in commit
                4482885, on branch claude/bha-engine-dashboard-refinement-9v4t9r.
                It is not on the live service because `origin/main` is still at
-               04a9561 — three commits behind — and render.yaml deploys from
+               28194a3 — three commits behind — and render.yaml deploys from
                the default branch on commit. The whole previous refinement pass
                is unmerged and undeployed, not just the vFarm state.
             2. NS Records: `outcome` is empty on all 34 rows, including the
@@ -3283,7 +3283,7 @@ Fix:        Carried. CARRIED in loops.ts is loop_id, What, Status, lane_tag,
 
 Decision:   **The env var is AIRTABLE_TOKEN, and it does not match.** The
             client deleted on 13 Sep read `AIRTABLE_API_KEY` (confirmed at
-            7d6e58c^:server/src/airtable.ts:18). The variable set on the
+            f4bcbf4^:server/src/airtable.ts:18). The variable set on the
             service is `AIRTABLE_TOKEN`, so that is what this reads, and
             `AIRTABLE_API_KEY` is now unused anywhere. Raised with Destiny.
 
@@ -6694,7 +6694,7 @@ Decision:   Worth stating plainly, because it is the failure mode the whole tool
 Decision:   Restarted this branch from `main` rather than stacking on the
             already-merged history. A merged pull request is finished, so the
             merge commit this session made to resolve the conflict is
-            superseded — Destiny's own resolution (a66ba25) is what landed, and
+            superseded — Destiny's own resolution (5d724a1) is what landed, and
             it kept both sides' entries, which is what section 9 requires. Its
             ordering puts 19:58 above 19:30; that is left exactly as merged,
             because reordering an entry somebody else committed is rewriting it.
@@ -6729,7 +6729,7 @@ Not tested: Nothing against the live Render service. There is **no CI on this
             scanner sweep over every page, and the browser pass above.
 
 ## 2026-09-18 20:40 — the connector could not discover the endpoint, because GET was a 405
-Intent:     The MCP server is merged and live (07bd015) and adding it as a
+Intent:     The MCP server is merged and live (0449880) and adding it as a
             Claude custom connector still failed. Destiny found why:
             `GET https://dashboard.bhanetwork.org/mcp/<secret>` answered 405.
             Claude's connector check **opens with a GET**, read the 405 as
@@ -6855,7 +6855,7 @@ Verified:   **The diagnosis is confirmed against the live service, not merely
             `responseTimeMS=6`, `responseBytes=462`, user agent
             `Claude-User/1.0 (+claude-user@anthropic.com)` — the connector
             check, opening with a GET, getting the 405 this commit removes.
-            The deploy of 01c0cf4 went live at 20:37:35 on instance
+            The deploy of 89c03ac went live at 20:37:35 on instance
             `srv-dagj84ijnfac73ds5100-gd6nk`, and that instance's own boot line
             reads `mcp: /mcp/<MCP_SECRET> — read-only tools over streamable
             HTTP, MCP_SECRET set`.
@@ -7439,7 +7439,7 @@ Problem:    **My own first fix, earlier today, was the wrong one and this is
             trap armed: the field name was still hardcoded, so the next person
             to repoint the probe would have found it exactly the same way. And
             it did not make the probe cheap — measured live on main through the
-            deployed connector at 21:00 UTC today, commit 8ba479a: **reachable
+            deployed connector at 21:00 UTC today, commit 33e9d23: **reachable
             true, 2,661ms**, which is *slower* than the broken version's 2,244ms,
             because it now walks Layer 0 to completion instead of being refused
             on the first page. A probe that takes two and a half seconds to
@@ -8004,7 +8004,7 @@ Not tested: Against the production database or the deployed service — neither
             it does not do it.
 
 ## 2026-09-23 10:40 — two Airtable-backed kinds, the Bays four in the final import, and onboarding without a deploy
-Intent:     Follow-up to 74fbd54. Four things the Bays cutover still needed:
+Intent:     Follow-up to c229a9f. Four things the Bays cutover still needed:
             two kinds that were never mirrored and hold real data, the four
             kinds added yesterday as engine-only brought into the final import
             because each holds real Airtable history, a way to add a builder
@@ -8230,7 +8230,7 @@ Files:      server/src/bharag.ts, server/src/health.ts, server/src/index.ts,
             src/components/ui/Tabs.tsx, src/components/ui/index.ts,
             src/screens/EngineHealth/{index,LaneView}.tsx,
             src/screens/EngineHealth/FinalImport.tsx (deleted)
-Verified:   6.1 after the deploy of ed45ffb, through the MCP `resync("incidents")`:
+Verified:   6.1 after the deploy of 1267325, through the MCP `resync("incidents")`:
             37 → 54 rows. Bays read 23 (3 new), North Star 22 (14 new),
             Research Twin 9 (0 new). The 17 new ones occurred between
             2026-09-21 08:00 and 2026-09-22 08:06 UTC — none on 18, 19 or 20
@@ -8357,7 +8357,7 @@ Verified:   The brief's cause does not hold. engine_loops 975 rows, 739 from an
             locally with three loops, one without a loop_id: the "null" was in
             the **age** column, reading `nulld` on every row, and "How long
             these have been sitting" said 0 open beside a strip saying 2.
-Problem:    `dayDiff` in store.ts, since f128037 ("Engine health is a real
+Problem:    `dayDiff` in store.ts, since 260deec ("Engine health is a real
             page", 2026-09-17 21:16Z), read
             `Date.parse(\`${b}T00:00:00Z) - Date.parse(${a}T00:00:00Z\`)` — the
             two parses had been run into one template literal, so it parsed a
@@ -8783,7 +8783,7 @@ Not done:   CLAUDE.md says one tile per sidebar section; Customer Service Twin,
             raised rather than built. The two 24-hour columns are still the
             phase 1 fixtures CLAUDE.md says they are, dated 7 Sep.
 
-## 2026-09-22 19:50 UTC — Production check after bb8a19b
+## 2026-09-22 19:50 UTC — Production check after 7986daf
 Verified:   Live /api/overview: every signal is a sentence; Engine health "0
             incidents open" beside "1 exhausted retry needs a person." (was 5);
             Open loops 712, oldest 52 d; Codex 4 awaiting; Commercial 86 open
@@ -8904,7 +8904,7 @@ Decision:   Resolved on the server, id first then recording URL, each only on
             link. Every other Airtable word on /pay went too: the Owed empty
             state, two Sessions notes, the Sessions SourceLink ("Airtable ↗"),
             Statements' "Open in Airtable", and two notes pay.ts writes.
-Problem:    Sessions was already month-scoped (4ba4feb, 19:25 UTC on 22 Sep); the
+Problem:    Sessions was already month-scoped (5289335, 19:25 UTC on 22 Sep); the
             loop was raised at 21:34. With an August row seeded locally the tab
             shows only September — but its "N rows are held for M sessions" line
             counted the whole ledger. It now says so ("Across the whole ledger,
@@ -8921,7 +8921,7 @@ Intent:     Destiny, 23 Sep. Two jobs: remove every trace of Airtable from the
             UI (AIRTABLE_RETIRED=true since 21 Sep; any link there opens a stale,
             capped copy), and the Pay Tracker "Open" buttons + Sessions month
             scope (LOOP-1790112860892-45ZS).
-Job 2:      Already built and pushed as 5a809bc in the previous turn, and live:
+Job 2:      Already built and pushed as 4754c91 in the previous turn, and live:
             production's search_source shows codexForPaySession in store.ts and
             the /api/pay/sessions/:id/codex route in index.ts. Not redone.
 Files:      src/components/ui/{Records,Resync,SourceLink}.tsx;
@@ -9038,7 +9038,7 @@ Decision:   Every boot rather than once: a log written while the process was
             restarting never reached the hook, and this is what catches it.
 
 ## 2026-09-23 13:05 — First production pay reconcile
-Intent:     Confirm 9cb4fa4 is live and read the first reconcile.
+Intent:     Confirm 767b712 is live and read the first reconcile.
 Files:      BUILD_LOG.md only.
 Problem:    None.
 Fix:        —
@@ -9153,7 +9153,7 @@ Intent:     Put the right count on the record.
 Files:      BUILD_LOG.md only.
 Problem:    The 14:40 entry says "52 buttons" moved onto <Button>; that was
             written before counting.
-Fix:        Counted in the source after the commit (0b40d91): 55 <Button>, 7
+Fix:        Counted in the source after the commit (982b2b1): 55 <Button>, 7
             <ButtonAnchor>, 1 <ButtonLink>.
 Decision:   Recorded as its own entry rather than editing the earlier one.
 
@@ -9286,7 +9286,7 @@ Problem:    None in the code. Worth recording what the first tick found: the
             from the OpenRouter outage. The mirror only fills on a Resync from
             BHARAG. The watcher reads the ledger live, so it saw them all.
 Fix:        —
-Decision:   Deploy dep-daq359jtqb8s73bpftbg (c12e1d7) went live 20:13; migration
+Decision:   Deploy dep-daq359jtqb8s73bpftbg (1f50795) went live 20:13; migration
             28 applied; the five `never` rows are right. First tick 20:14: the
             probe said OpenRouter ok ($30.78, floor $1), and one batch of 23
             (rec-openrouter-20260923201417-ji6c) drained to 20:22:
@@ -9390,7 +9390,7 @@ Fix:        —
 Decision:   MCP_WRITE_TOKEN was generated (48 random url-safe characters) and
             set on srv-dagj84ijnfac73ds5100, with Destiny's go-ahead, in Bays'
             workspace, merged so nothing else changed. Deploy
-            dep-daqam3c9v7es73cfucog (6531fff) went live 04:46:46Z. The boot
+            dep-daqam3c9v7es73cfucog (8b086f2) went live 04:46:46Z. The boot
             line reads "/mcp/<MCP_WRITE_TOKEN> — the write connection …", and
             migration 29 is applied (the seven new engine_mcp_writes columns
             are present). Check 8 holds on production: the read connector lists
@@ -9496,7 +9496,7 @@ Problem:    This session's own connector lists the tools it was given when it
             the connector refreshes. That is the same refresh the brief
             expects a client to do.
 Fix:        —
-Decision:   Deploy dep-daqbq5ou01pc73clpijg (2eefd32) went live 06:03:47Z.
+Decision:   Deploy dep-daqbq5ou01pc73clpijg (dc6f555) went live 06:03:47Z.
             #7 live: a dry-run create of "Dry-run connectivity test from Bays
             agent" (BAYS, Destiny) passes every guard, the duplicate gate
             included (audit_id 7).
@@ -9631,7 +9631,7 @@ Decision:   Ported as written: every cap, clip, label rule, sort and message
 Intent:     Put the three North Star tools live and check them against
             production.
 Files:      BUILD_LOG.md.
-Problem:    Deploy of 36fc9b0 went live at 08:03:27Z. The boot line reads
+Problem:    Deploy of ac2a627 went live at 08:03:27Z. The boot line reads
             "SLACK_NORTH_STAR_BOT_TOKEN NOT set". This session's connector still
             lists the tools it had when it connected, so the three new tools
             were not callable from here.
@@ -9731,7 +9731,7 @@ Decision:   The 60-second cache was not in the brief. It is added because
             the build is clean.
 
 ## 2026-09-24 09:40 — North Star — Tools Router retired in the registry
-Intent:     Destiny re-tested the North Star Agent after 3954e59, and it now
+Intent:     Destiny re-tested the North Star Agent after 59c2335, and it now
             works on the three MCP tools. Record in the registry that the
             Router it replaced is retired.
 Files:      server/src/registrySeed.ts, server/src/migrations.ts (31),
@@ -9794,7 +9794,7 @@ Decision:   Ported as written. That covers SNG - Build Recipients' tokeniser
             gate and recovery all pass, and the build is clean.
 
 ## 2026-09-24 10:15 — brief (g) deployed; live proofs handed to Destiny
-Intent:     Deploy 282608e and prove it on production.
+Intent:     Deploy 29e62aa and prove it on production.
 Files:      BUILD_LOG.md.
 Problem:    Deploy dep-daqfeq8u01pc73cpjnkg went live at 10:12:37Z, and
             migration 32 was applied at 10:12:33Z. On production,
@@ -9870,7 +9870,7 @@ Decision:   Every Code node is its own exported function. Before wiring
             - The build is clean.
 
 ## 2026-09-24 11:45 — RT tools live; row 9 deleted; agent draft switched (five of six)
-Intent:     Deploy 675934c, delete the Sept 24 delivery test ask, and put the
+Intent:     Deploy 010bc3b, delete the Sept 24 delivery test ask, and put the
             new tools on Research Twin (Agent)'s allow-list.
 Files:      server/src/mcp/researchTwinTools.ts (descriptions), CLAUDE.md,
             BUILD_LOG.md.
@@ -10074,7 +10074,7 @@ Verified:   Locally:
             - Build clean.
 
 ## 2026-09-24 13:20 — Candidate actions: deployed and checked on production
-Intent:     Deploy c1f2c21 and check it live, per the brief's "test each action
+Intent:     Deploy e949d45 and check it live, per the brief's "test each action
             end to end on a throwaway candidate, then delete it".
 Files:      BUILD_LOG.md
 Problem:    The page actions sit behind the dashboard's session cookie. This
@@ -10104,7 +10104,7 @@ Decision:   The three page actions were proved end to end locally, in
             That is not reported as done.
 
 ## 2026-09-24 14:00 — Candidates: announce registered patterns in #bha-build-patterns, draft a full pattern
-Intent:     Follow-up on c1f2c21.
+Intent:     Follow-up on e949d45.
             1. After a Register, post one message as Bays in
                #bha-build-patterns (C0B0668PRNW). It carries the name, the BP-
                id, a one-line problem, <@who registered it>, the builder, the
@@ -10235,7 +10235,7 @@ Verified:   Locally:
             - Build clean.
 
 ## 2026-09-24 14:00 — Announce and draft: deployed; OPENROUTER_API_KEY not set on the service
-Intent:     Deploy bf18ec4 and check what production can run.
+Intent:     Deploy 21c2ca1 and check what production can run.
 Files:      BUILD_LOG.md
 Problem:    1. The boot line on deploy dep-daqimqff3r2c739eq5n0 (live
                13:54:29Z) says:
@@ -10307,7 +10307,7 @@ Decision:   One node per save, so each version in n8n's history holds exactly
             with the new model asserted.
 
 ## 2026-09-24 14:12 — Deployed; throwaway candidate staged for Destiny's production run
-Intent:     Put baea392 live and stage one throwaway candidate so Destiny can
+Intent:     Put 9dc7455 live and stage one throwaway candidate so Destiny can
             press Draft full pattern and Register on production.
 Files:      BUILD_LOG.md
 Problem:    None. Deploy dep-daqitvbbc2fs73ft50fg was live at 14:09:46Z. Its
@@ -10417,7 +10417,7 @@ Tested:     Local Postgres 16:
             - typecheck and build clean;
             - the Candidates tab screenshotted with the strip and the new
               buttons.
-Restore:    Before this, main was 69b86df, live as deploy
+Restore:    Before this, main was 53d4c85, live as deploy
             dep-daqiuplckfvc738qglgg.
 
 ## 2026-09-25 — Deployed 8733723
@@ -10491,7 +10491,7 @@ Tested:     Server typecheck clean (tsc against @types/node, with a local pg
             so no local build or Postgres test run; the Render build is the
             compile check. Billing-cycle arithmetic checked for mid-month,
             the reset instant and 31 Jan -> 28 Feb.
-Restore:    Before this, main was b5ad478.
+Restore:    Before this, main was 7123dda.
 
 ## 2026-09-26 — Quota calibrated to n8n's own figure
 Intent:     n8n's plan page read 11k+ used after the upgrade (the count
@@ -10556,7 +10556,7 @@ Tested:     Server typecheck clean; page checked against local type stubs.
 
 ## 2026-09-26 — Self-heal "awaiting proof" outcome, and a live incident list
 
-- `repaired_pending` is now a known repair outcome. The repair bridge (commit ed9f36f) sends it when it has changed a workflow whose failed run was called by an agent or another workflow: the fix is proved by the next real run, and a second report under the same `repair_id` settles the row (the store is already an upsert). Before this the dashboard refused the record with a 422, so the repair was never saved. The row is revertible like a repair, shows as "fixed, awaiting proof", and counts under the Repaired filter.
+- `repaired_pending` is now a known repair outcome. The repair bridge (commit bb72d7b) sends it when it has changed a workflow whose failed run was called by an agent or another workflow: the fix is proved by the next real run, and a second report under the same `repair_id` settles the row (the store is already an upsert). Before this the dashboard refused the record with a 422, so the repair was never saved. The row is revertible like a repair, shows as "fixed, awaiting proof", and counts under the Repaired filter.
 - The incident ledger is now read every 3 minutes (`health.startLedgerPolling`, ledger only, never Airtable). The list had only refreshed on a manual Resync and had been stale since 23 Sep, reading "0 open" while real incidents were being raised.
 
 ---
@@ -10568,7 +10568,7 @@ Intent:    Apply the bhanetwork.org design system (Field Lab) to the dashboard
            it stays the default and one click away.
 
 Safety net:
-- Git tag `pre-fieldlab` on a375102, the last commit before this work.
+- Git tag `pre-fieldlab` on f1a626f, the last commit before this work.
 - Settings → Appearance → **Look**: Original (default) or Field Lab. Stored
   per browser in localStorage `bha.look`, stamped on `<html data-look>` by
   index.html before first paint. Render can also roll back to the previous
@@ -10602,9 +10602,9 @@ came from the local mock server, not the live dashboard.
 Destiny compared both looks live and kept the Original: it reads better for
 the dashboard, while Field Lab stays on bhanetwork.org. The look switch,
 `src/fieldlab.css`, the Phosphor set and the self-hosted fonts are removed,
-and Icons, Settings, main.tsx and index.css are back to a375102 exactly.
-Kept from c8b931d: robots.txt (Disallow: /), meta noindex, and the server
-security headers. The branch `pre-fieldlab` (a375102) stays as a snapshot.
+and Icons, Settings, main.tsx and index.css are back to f1a626f exactly.
+Kept from 03e55c2: robots.txt (Disallow: /), meta noindex, and the server
+security headers. The branch `pre-fieldlab` (f1a626f) stays as a snapshot.
 (The earlier entry says "tag": GitHub's proxy refused the tag push, so the
 snapshot is a branch.)
 
@@ -10682,9 +10682,9 @@ Decision:   No typecheck was possible here (npm ci answers 403 from the sandbox 
 
 ## 2026-09-28 13:20 — Stream cap reverted
 Intent:     Check the MCP stream cap from 13:15 against live traffic before calling it done.
-Files:      server/src/mcp/index.ts (reverted to cdce41b's stream handling), CLAUDE.md
-Problem:    After deploy e50f0a0 the log shows the same session ids reopening streams — 00c1d2a8…, 0ab6fd1b…, 6c5c865c…, e1c438a8…, 0e465c23…, all seen at 10:48 too — in bursts at 12:14:36 and 12:16:41, each open immediately ending the oldest: "GET stream closed (over cap) after 0s — 40 open". The ~130 streams are long-lived n8n MCP client sessions that reconnect about two minutes after a stream ends. Capping did not lower anything; it replaced 130 idle streams with ~90 reconnects every two minutes.
-Fix:        Stream cap and max age removed; holdEventStream is back to what cdce41b shipped. CLAUDE.md now says not to cap them and why.
+Files:      server/src/mcp/index.ts (reverted to 5589300's stream handling), CLAUDE.md
+Problem:    After deploy 5af9293 the log shows the same session ids reopening streams — 00c1d2a8…, 0ab6fd1b…, 6c5c865c…, e1c438a8…, 0e465c23…, all seen at 10:48 too — in bursts at 12:14:36 and 12:16:41, each open immediately ending the oldest: "GET stream closed (over cap) after 0s — 40 open". The ~130 streams are long-lived n8n MCP client sessions that reconnect about two minutes after a stream ends. Capping did not lower anything; it replaced 130 idle streams with ~90 reconnects every two minutes.
+Fix:        Stream cap and max age removed; holdEventStream is back to what 5589300 shipped. CLAUDE.md now says not to cap them and why.
 Decision:   The unknown-lane refusal stays — it is verified live (LANE-VFARM-ZONE-MONITORING refused with the two ZONE_MONITORING lanes first among five close matches; LANE-VFARM-ZONE_MONITORING_SAAS answered normally). The 27 Sep 520 is left unexplained: the failed call never reached this server, and nothing here proves a cause.
 
 ## 2026-09-28 13:35 — n8n agents get 405 on the MCP GET stream
@@ -10702,7 +10702,7 @@ Fix:        engine_agent_scorecard (one row per dimension per scoring), seeded w
 Decision:   Scores are rows written by a scoring, never typed onto the page. No typecheck here (sandbox npm 403); the Render build is the check.
 
 ## 2026-09-28 15:10 — Scorecard verified live; timing-safe key gate on the three front doors (plan step 1.3)
-Intent:     Confirm the 87bec1f deploy, then replace the plain !== service-key comparison on the Bays, North Star and Research Twin front doors.
+Intent:     Confirm the 7c6e519 deploy, then replace the plain !== service-key comparison on the Bays, North Star and Research Twin front doors.
 Files:      none in this repo — n8n workflows 134ezjaO6gYqYjez, 6S4X6UYtDpETB6u6, K1iQ72ZTEzQKrxb9
 Problem:    get_page_data /agent-maturity answered average 4.3, weakest "Evaluation and testing" 2, quota 24% (12,169 of 50,000), 26 MCP refusals in 7 days, North Star 65 asks / 65 delivered / 52 thin, Research Twin 31 / 27 / 1 — migration 34 applied. Each front door's Parse & Classify compared x-api-key with !==, which returns at the first differing character.
 Fix:        A new "Service Key Gate" Code node before each classifier compares the key in constant time (full length of the longer string, length difference folded in) against the door's own Variable, and on a mismatch removes the header, so the classifier refuses 401 without ever comparing a wrong key. Matching key, missing key, unset Variable and all Slack traffic pass through untouched; binary (Genie's raw body) is carried. Tests: 9/9 local cases; pinned runs — wrong key refused 401 on all three (RT 19989, NS 19991 raise incidents; Bays 19993 to Deliberately Ignored), app_home passes (19990, 19992), a callback with raw body still reads _rawBodyCaptured true (19994). Published: RT f383862e (restore 471f24b8), NS 34c8cc5f (restore 69619033), Bays f217238c (restore 905d5fc1).
@@ -10716,7 +10716,7 @@ Fix:        AGENT_KEYS: READONLY_SECRETS_NORTH_STAR (read, 10 tools), MCP_AGENT_
 Decision:   Path tokens now, Bearer supported for later: n8n credentials cannot be created over MCP, so a switch to Bearer needs Destiny to add one credential per agent; the path form changes nothing but the URL. Typechecked here against /opt/node-tools @types/node with a local pg stub (tsconfig.check.json, not committed): no errors in the changed files.
 
 ## 2026-09-28 15:55 — Step 1.4 verified live; Bays and Research Twin moved onto their own tokens
-Intent:     Prove the 692f5d1 deploy against real traffic, then switch the two write agents off the shared secret.
+Intent:     Prove the a365339 deploy against real traffic, then switch the two write agents off the shared secret.
 Files:      none here — n8n agents dDtsExaaXhlFd2dv (Research Twin) and Nw5igXu4WWrjUMWB (Bays)
 Problem:    —
 Fix:        Boot line names all three tokens; migration 35 applied. verify_agent_mcp_server lists exactly 7 tools for Research Twin's token, 19 for Bays', 10 for North Star's. A throwaway n8n workflow (CGUMeNb7spM77B1k, archived after, run 20011) called raw: Research Twin's token calling get_health and create_record → refused, rows 677/678 agent research_twin outcome refused detail out_of_scope; Bearer on /mcp/agent with Research Twin's token → its 7 tools; a wrong Bearer → 404; Bays' token create_record dry run → row 679 agent bays, actor mcp:write:bays:U0AEW3TBYH1. Both agents' MCP URLs switched to their own token; call_agent on each draft read find_records (rt-jobs 9 open, loops 497 open) and the server log tags them [mcp:write:research_twin] and [mcp:write:bays]. Published: Research Twin 5c859f4c, Bays a9ec6634.
@@ -10773,7 +10773,7 @@ Decision:   Manual only, per the plan's autonomy freeze until Phase 3 is done; m
 
 ## 2026-09-28 18:45 — Agent upgrade step 4.4: the healer reverts its own failed changes
 Intent:     Gate the repair bridge so a failed fix never stays live and the six agent-facing workflows are never edited by a machine.
-Files:      bha-repair-bridge: src/refusals.js, src/n8n.js, src/repair.js, src/scripts.js, test/revert.test.js, README.md (780de98). This repo: server/src/repairs.ts.
+Files:      bha-repair-bridge: src/refusals.js, src/n8n.js, src/repair.js, src/scripts.js, test/revert.test.js, README.md (0a21642). This repo: server/src/repairs.ts.
 Problem:    A not_repaired repair left its edit live — changed and still broken — until somebody pressed Revert. And a dry run relied on the prompt alone: the new protected-workflow test failed with "nothing was written to a protected workflow — 1 !== 0", because the fake model ran ./n8n-put-workflow.sh and the helper reached n8n.
 Fix:        The bridge restores its pre-repair snapshot after a failed retry, and again when a pending repair settles failed, unless the workflow's version moved since (then the row says NOT REVERTED and why). The three Front Doors and three Agent Deliveries are forced read only: nothing written or retried, change summary prefixed PROPOSED ONLY, outcome needs_human. In any read-only run the put helper is written as a script that exits 3 and calls nothing. Here, store() takes the bridge's auto_reverted/reverted_at and stamps reverted_by = 'bridge (auto)', through COALESCE so a revert made on this dashboard is never overwritten.
 Decision:   Enforce read-only in the script, not the prompt — a guard that lives only in a prompt is not a guard. Verified: bridge suite 75/75 (4 new); the upsert run against a local Postgres 16 for a fresh auto revert, a repost after a manual revert, and a repost carrying a different auto revert — the manual one kept in both.
@@ -10843,7 +10843,7 @@ Decision:   The signing gates on the Bays, North Star and Research Twin doors we
 
 ## 2026-09-28 19:55 — Digest Truncation & Routing Standard: the fixes
 Intent:     Implement the 14 audit items on LOOP-1790601500973-1GKM: nothing Bays, the twins or the pipeline posts to Slack may be cut silently, and every surface names its channel and limits in its sticky.
-Files:      src/screens/EngineHealth/index.tsx (`?tab=repairs` opens the Repairs tab, so a self-healing report's button lands there). Earlier today: server/src/store.ts and src/screens/Commercial.tsx (`?open=` resolves BP-… and CARD-… ids) in 79b5be8. The rest is n8n.
+Files:      src/screens/EngineHealth/index.tsx (`?tab=repairs` opens the Repairs tab, so a self-healing report's button lands there). Earlier today: server/src/store.ts and src/screens/Commercial.tsx (`?open=` resolves BP-… and CARD-… ids) in 1e6aa41. The rest is n8n.
 Problem:    Bays' Slack_Send_Message sliced at 49 blocks and added a warning; Submit Actions sliced the Codex post at 50; the pattern card cut mid-sentence under a 12,000 budget and the commercial card had no length handling; Self Healer Reports, the error handlers and Recovery Summary cut the story fields at 500–1,200 characters; /log-status and the NS home tab capped lists without saying so; RT named-job summaries cut mid-word and took a channel from model output; Slack_Request could post anywhere; six workflows had no sticky.
 Fix:        One pattern everywhere: split, never cut. A message ends at 45 blocks or ~6,000 characters of block JSON and the rest goes as thread replies; long text splits at a newline, then a sentence, then a word (`splitText`). Restore points / published versions:
             1. New Bays — Slack Send (7oha1SgDsAtVas0j, 89d9faa3) replaces the agent's HTTP tool; Weekly Report channel name fixed; Bays agent 857e8d2e (restore f50cf185). Live test in C0ATTFED35E: 70 lines in 2 parts.
@@ -10868,7 +10868,7 @@ Checked:    Compiled with tsc --noCheck and called resolveLane directly: the vFa
 
 ## 2026-09-29 13:15 — D2 closed: three incidents fixed at the cause, proven live, closed on the ledger
 Intent:     Finish D2. Each incident is closed only after its cause is fixed and a real run shows it.
-Files:      none in this repo beyond 02f3828 above. n8n: Bays — Front Door (134ezjaO6gYqYjez), North Star — Front Door (6S4X6UYtDpETB6u6), Research Twin — Front Door (K1iQ72ZTEzQKrxb9).
+Files:      none in this repo beyond 33b469a above. n8n: Bays — Front Door (134ezjaO6gYqYjez), North Star — Front Door (6S4X6UYtDpETB6u6), Research Twin — Front Door (K1iQ72ZTEzQKrxb9).
 Problem:    INC-BAYS.AGENT-028 (execution 20733): Slack sent Bays a genuine, correctly signed member_joined_channel event when Bays was added to #bha-engine-digests on 28 Sep. Parse & Classify has no route for that event type, so it fell to the catch-all as a malformed outside ask and Raise Refused Ask raised it. North Star's and Research Twin's doors carry the same catch-all and would also have answered Slack 400 (Slack retries and counts it as a failure).
 Fix:        A new node, Quiet Unhandled Slack Events, sits between Parse & Classify Event and Slack Signature Gate on all three doors. A Slack event_callback the classifier did not route becomes a quiet drop (200, no incident). The signature gate still runs next, so an unsigned or forged "Slack" event is still refused 401 and raised. Grouped under "2. Classify the request". Published: Bays 8e4bcff2 (restore 5db4d1cc), North Star 0de91a9f (restore 2f2906df), Research Twin feb0c5e5 (restore 1be29bad).
 Checked:    Pinned tests 21186 / 21190 / 21196: the new node turned member_joined_channel into slack_event_not_handled, and the unsigned event was still refused and raised by the signature gate. Regression 21189 / 21197 / 21198: an outside ask with no key is still refused 401 and raised. Live after publish: real signed Slack traffic passed through the node with no incident (Bays 21210, Research Twin 21208), and Research Twin's door accepted the Weekly Clock's real ask (21205).
@@ -10895,7 +10895,7 @@ Checked:    esbuild parses every changed file. The server type-check shows the s
 ## 2026-09-29 14:10 — D3 routes proved live with dry runs
 Intent:     Prove the three routes against production without leaving a test row on a live page.
 Files:      none. n8n one-off tR0SEb4nmuFJwNTf (archived after the run), which posted with the DASHBOARD_INBOUND_KEY n8n already holds.
-Checked:    0300a94 went live at 13:04 (Render dep-datrebbrjlhs73c1goo0; its build includes tsc -b, so the pages type-checked). Execution 21316 ran 8 of 8 cases as expected:
+Checked:    9c6348c went live at 13:04 (Render dep-datrebbrjlhs73c1goo0; its build includes tsc -b, so the pages type-checked). Execution 21316 ran 8 of 8 cases as expected:
             - Genie: single and batch dry runs 200 (1, and then 2, inserted then rolled back); no eventId 422; an eventType not starting "genie." 422.
             - vFarm alerts: two-device digest 200 (event ids 901, 902); empty devices 422.
             - vFarm snapshot: 1 farm, 2 devices, 1 open alert 200; a device naming a farm not in the snapshot 422.
@@ -10912,7 +10912,7 @@ Decision:   Delivered is the one coloured figure (a reply that never reached a c
 ## 2026-09-29 14:35 — CST route proved live with dry runs
 Intent:     Prove /api/engine/cst-events against production without leaving a row.
 Files:      none. n8n one-off OjzW8kMS7TPyClaL (archived after the run), posting with $vars.DASHBOARD_INBOUND_KEY.
-Checked:    fa335f8 live at 13:29 (Render dep-datrpv3rjlhs73c228dg; migration 41 applied). Execution 21334, 8 of 8 as expected: single turn 200 (1 inserted, rolled back); turn then delivery 200 (1 inserted, 1 updated); delivery before turn 200 (same, order does not matter); escalate + onboarding + error batch 200 (3); no turn_id, channel "fax", status "done" and delivery status "read" each 422 with the field named. Afterwards engine_cst_turns holds 0 rows and engine_writes 8 lines for the route; /cs-twin answers with its empty state; Home carries the Genie and CST tiles as "Not connected yet" until the first push.
+Checked:    79dd3de live at 13:29 (Render dep-datrpv3rjlhs73c228dg; migration 41 applied). Execution 21334, 8 of 8 as expected: single turn 200 (1 inserted, rolled back); turn then delivery 200 (1 inserted, 1 updated); delivery before turn 200 (same, order does not matter); escalate + onboarding + error batch 200 (3); no turn_id, channel "fax", status "done" and delivery status "read" each 422 with the field named. Afterwards engine_cst_turns holds 0 rows and engine_writes 8 lines for the route; /cs-twin answers with its empty state; Home carries the Genie and CST tiles as "Not connected yet" until the first push.
 
 ## 2026-09-29 15:30 — Data governance: retention clears personal text, and a guard on every BHARAG write-back (D4)
 Intent:     Agent Upgrade Plan 5.4 and 5.5, the weakest dimension (3) on the 28 Sep re-score. Destiny's call: clear personal text after its period and keep the row, rather than deleting rows.
@@ -10923,8 +10923,8 @@ Decision:   Redact rather than refuse on a secret, so one pasted key does not co
 
 ## 2026-09-29 16:20 — D4 proved live; the guard wired into the three riskiest n8n ingests
 Intent:     Prove retention and the guard against production, then put the guard in front of the n8n ingests that store failed answers or raw Slack text.
-Files:      server/src/dataGovernance.ts, server/src/index.ts (34be58a: dry_run on the guard decides without recording). n8n: North Star — Agent Delivery, Research Twin — Agent Delivery, Bays — Daily Doc Rotator.
-Checked:    696a292 then 34be58a live (Render dep-datt908u01pc73fnuhd0, dep-datt9ns9v7es73asncjg; migration 42 applied). One-off 5JjVmhY26prDsQQC (archived), execution 21531, 9 of 9 as expected: Answered Q&A allowed; Thin and Failed Q&A refused not_answered; an archive holding a Slack bot token redacted to "[redacted: slack token]"; no source refused; kind "banana" 422; retention dry run today clears 0 in every store; dry run as of 2027-12-31 would clear North Star 67, Research Twin 36, Bays 125 and 1 Early Access lead (CST and Genie hold no rows yet); as_of without dry_run 422. engine_bharag_guard held 0 rows afterwards (every guard case was a dry run).
+Files:      server/src/dataGovernance.ts, server/src/index.ts (0b9bc32: dry_run on the guard decides without recording). n8n: North Star — Agent Delivery, Research Twin — Agent Delivery, Bays — Daily Doc Rotator.
+Checked:    075e208 then 0b9bc32 live (Render dep-datt908u01pc73fnuhd0, dep-datt9ns9v7es73asncjg; migration 42 applied). One-off 5JjVmhY26prDsQQC (archived), execution 21531, 9 of 9 as expected: Answered Q&A allowed; Thin and Failed Q&A refused not_answered; an archive holding a Slack bot token redacted to "[redacted: slack token]"; no source refused; kind "banana" 422; retention dry run today clears 0 in every store; dry run as of 2027-12-31 would clear North Star 67, Research Twin 36, Bays 125 and 1 Early Access lead (CST and Genie hold no rows yet); as_of without dry_run 422. engine_bharag_guard held 0 rows afterwards (every guard case was a dry run).
             North Star — Agent Delivery: Check With Write Guard + Guard Allowed? between Write Ask To Dashboard and Ingest Answer To BHARAG; the ingest sends the guard's title, content and metadata; Raise If Anything Failed raises when the guard did not answer. Pinned tests 21534 (Thin: guard refused, ingest skipped, run ok with "not stored: not_answered"), 21535 (guard unreachable: raised), 21536 (allowed: ingested). Published 03b3571f (restore 4c1f72fe).
             Research Twin — Agent Delivery: the same. Pinned 21537 (refused, ingest skipped), 21538 (guard unreachable: raised). Published 23a4c863 (restore d2d132b3).
             Bays — Daily Doc Rotator: the guard sits inside the ingest loop; a refusal or a guard failure goes to Ingest Failed — Notify (now naming the guard's reason), never ingested unscanned. Pinned 21544: guard redacted, ingest ran, rotation completed. Published 2fa0440b (restore 251b38fe).
@@ -10953,14 +10953,14 @@ Fix:        Ingest History Doc to RAG now uses "BHARAG - Channel Archives" (T1YW
 Not yet:    No /bays-history run since, so the first real ingest into Channel Archives is still to be seen. Earlier /bays-history dumps stay in the Codex workspace; nothing here moves or deletes them.
 
 ## 2026-09-30 11:40 — Healer support: repair history for the bridge, Apply / Discard for prepared fixes
-Intent:     Destiny: the self-healer has to be strong enough to trust with fixes. The bridge (bha-repair-bridge a3cece3) now reads a workflow's earlier repairs before diagnosing, and for the six protected workflows and the agents' own settings it drafts a fix through n8n's MCP server, tests it, and hands it over for a person to apply. This repo carries the two ends of that.
+Intent:     Destiny: the self-healer has to be strong enough to trust with fixes. The bridge (bha-repair-bridge d23822b) now reads a workflow's earlier repairs before diagnosing, and for the six protected workflows and the agents' own settings it drafts a fix through n8n's MCP server, tests it, and hands it over for a person to apply. This repo carries the two ends of that.
 Files:      server/src/repairs.ts (recentFor, actOnPrepared, preparedOutcome, prepared_fix/prepared_state/prepared_note on every Repair), server/src/index.ts (GET /api/engine/repairs?workflow_id=, POST /api/engine/repairs/:id/prepared-outcome, POST /api/repairs/:id/apply|discard), src/data/types.ts, src/data/index.ts (actOnPreparedFix), src/screens/EngineHealth/Repairs.tsx (Apply and Discard on a row with a pending prepared fix; "fix <state>" once acted on).
 Decision:   The dashboard never touches n8n for a prepared fix. Apply and Discard post to the bridge (REPAIR_BRIDGE_URL, default https://heal.bhanetwork.org) with the DASHBOARD_INBOUND_KEY both services already hold, so no new secret. The bridge re-checks that the draft is the tested one and live is the recorded one before publishing, and the row is stamped with what the bridge says happened, never with what was asked. Its later verdict (held → outcome repaired; reverted → not_repaired with reverted_by "bridge (auto)"; unproven) arrives on the prepared-outcome route under the same key. State lives in the payload jsonb, so no migration.
             GET /api/engine/repairs is the one new read under /api/engine besides the lookup: the bridge needs a workflow's last six repairs, including which were put back, so it stops retrying fixes that already failed.
 Checked:    Server typecheck: no new errors (the only errors are the pre-existing ones from pg's types not being installed here). All five changed files transpile cleanly. Live proof after deploy is in the next entry.
 
 ## 2026-09-30 12:15 — Healer routes proved live
-Checked:    Dashboard 1b0a2a9 live (dep-daueprnf3r2c73fpbu60); bridge a3cece3 live (dep-daues9nf3r2c73erlvn0). One-off n8n probe DSgKsyjsvUHD0MdS (BHA Engine project, archived after), execution 22577: GET /api/engine/repairs?workflow_id=lEyirYDareupAmlB answered 200 with 3 repairs (newest REP-lEyirYDareupAmlB-22467, not_repaired); the bridge's /prepared/HARNESS-1/apply refused a wrong key with 401 and, with the right key, refused to publish because N8N_MCP_URL / N8N_MCP_TOKEN are not set yet (the intended state until Destiny adds them); POST /api/engine/repairs/HARNESS-NO-SUCH/prepared-outcome answered 404 "No such repair." and a bad state 422. /health reports n8n_mcp false and the deep check answers on claude-opus-5-5.
+Checked:    Dashboard f1260fd live (dep-daueprnf3r2c73fpbu60); bridge d23822b live (dep-daues9nf3r2c73erlvn0). One-off n8n probe DSgKsyjsvUHD0MdS (BHA Engine project, archived after), execution 22577: GET /api/engine/repairs?workflow_id=lEyirYDareupAmlB answered 200 with 3 repairs (newest REP-lEyirYDareupAmlB-22467, not_repaired); the bridge's /prepared/HARNESS-1/apply refused a wrong key with 401 and, with the right key, refused to publish because N8N_MCP_URL / N8N_MCP_TOKEN are not set yet (the intended state until Destiny adds them); POST /api/engine/repairs/HARNESS-NO-SUCH/prepared-outcome answered 404 "No such repair." and a bad state 422. /health reports n8n_mcp false and the deep check answers on claude-opus-5-5.
 Not yet:    Prepared fixes switch on when N8N_MCP_URL and N8N_MCP_TOKEN are on the bridge service. First real proof is the next protected-workflow failure after that.
 
 ## 2026-09-30 13:20 — The healer's n8n MCP key works
@@ -10979,7 +10979,7 @@ Decision:   Rebuilt the card through a manual test run rather than a production 
 Intent:     Close HMJV. Jason's 28 Sep ask was "what doctrine/contract changes Hardik must post (doctrine version, contract IDs, default patterns applied)", and his 29 Sep bar was "written and backed by at least one concrete example of them being applied".
 Files:      server/src/migrations.ts (43, engine_media_doctrine), server/src/systemFeeds.ts (storeDoctrine, doctrineData), server/src/index.ts (POST /api/engine/media-doctrine, GET /api/media-doctrine), server/src/engine.ts (Home's Media Twin tile), src/screens/MediaTwin/index.tsx (Doctrine tab), src/data/{index,types}.ts, src/screens/Overview.tsx, docs/contracts/media-doctrine.md, CLAUDE.md.
 Problem:    First probe run (execution 22870) came back 401 on every call. The one-off was created in my personal n8n project, where $vars.DASHBOARD_INBOUND_KEY is not visible, so it sent no key. Recreated in the BHA Engine project. In 22871, "bad maturity refused" came back 200: the check upper-cased "maybe" to MAYBE before testing it against UPPER_SNAKE, so any word passed.
-Fix:        Build the probe in the BHA Engine project. Check a claim's maturity as sent (894392e). 22872: every refusal holds — 401 without the key, 422 for an amendment without previous_version, a lower-case maturity, and previous_version equal to version, 409 for a changed repeat of a change_id and for a restated version.
+Fix:        Build the probe in the BHA Engine project. Check a claim's maturity as sent (a51ae24). 22872: every refusal holds — 401 without the key, 422 for an amendment without previous_version, a lower-case maturity, and previous_version equal to version, 409 for a changed repeat of a change_id and for a restated version.
 Decision:   No silent edits, enforced on the server: a change_id repeat is unchanged only when identical, and (doctrine_id, version) is unique, so a correction is a new version that supersedes — OWLG's own rule. Maturity states are drawn neutral on the page, because NOT_SAFE_TO_CLAIM is a rule doing its job. Seeded B93H v0.1, TSNR v0 and OWLG v0.1 from their loop records (14 claims, 3 contracts) as the concrete example Jason asked for, posted_by naming that they were recorded from the loops. HMJV closed with this evidence. Media Twin's own output (posts, clips, weekly report) is not on the page yet.
 
 ## 2026-09-30 18:10 — Self healer went silent on every successful retry since 22 Sep; fixed at the root
@@ -10998,7 +10998,7 @@ Decision:   One function behind both doors, itself built on doctrineData(), whic
 Checked:    npm registry refused this session (403), so no local build or test run. Server typecheck with the global tsc: 416 errors before and after, all pre-existing missing-package errors, none new. Live proof after deploy is in the next entry.
 
 ## 2026-10-01 14:40 — Doctrine read door proved live
-Checked:    9d209fb live (get_health: commit 9d209fb, booted 13:29:40 UTC). One-off probe 5HFiymHVnJCpo2Kt in the BHA Engine project (archived after), execution 23461:
+Checked:    ef16039 live (get_health: commit ef16039, booted 13:29:40 UTC). One-off probe 5HFiymHVnJCpo2Kt in the BHA Engine project (archived after), execution 23461:
             GET /api/engine/media-doctrine → 200, media.doctrine.read.v1, 3 doctrines in force (TSNR v0, B93H v0.1, OWLG v0.1), 14 claims, not_held lists the six T0NO fields. Claim 6.1 came back IN_BUILD with its prohibited wording.
             ?doctrine_id=b93h&maturity=in_build (lower case on purpose) → 200, B93H 3.2, 5.2 and 6.1, no warnings.
             ?claim_id=NO-SUCH-CLAIM → 200, 0 claims, with the warning "No claim … is held … Treat it as not safe to make."
@@ -11011,7 +11011,7 @@ Files:      server/src/mcp/index.ts — read_media_doctrine added to the north_s
 
 ## 2026-10-01 15:58 — North Star and Bays read the vFarm doctrine (agent checklist A)
 Intent:     Close the second gap from the doctrine read door: the agents that answer about vFarm should read the doctrine, not memory.
-Changes:    Dashboard f97cb9f: read_media_doctrine in the north_star and bays token scopes (boot line: north_star 13 tools, bays 20). n8n agents, draft then publish:
+Changes:    Dashboard db338f3: read_media_doctrine in the north_star and bays token scopes (boot line: north_star 13 tools, bays 20). n8n agents, draft then publish:
             North Star 8NQRXadH0OrKe5XV: read_media_doctrine added to the BHA_Dashboard allow-list; new skill "What may be said about vFarm" (skill_Nc4J1CuLlIFgFEBW, allowedTools BHA_Dashboard_read_media_doctrine). Restore point b276b2d6-6812-442e-9b29-d6fb1e3148f5; published d8c4707f-581d-4b8c-9cb7-73bcc49bc9b8.
             Bays Nw5igXu4WWrjUMWB: same allow-list entry; new skill "What may be said about vFarm" (skill_JDCKDyYFEb2HwHaR). Restore point ab4daa47-7cf1-4ef3-8ea4-629d0b7b7d19; published 6006c2ad-d61b-418a-82d9-26564d776310.
             New skills rather than edits to existing ones, so nothing that already passed evals was rewritten.
@@ -11245,7 +11245,7 @@ Not done:   The mapping between the twin's six device states and Hardik's four e
 Tests:      npm run test:monitoring-recurrence, 6 checks, locally against Postgres 16 with the psql-backed pg stand-in. The Engine health copy was checked locally by hand (upsert, open, closed, read back through health.incidents). Server type-checked with the global tsc; the page is checked by Render's build.
 
 ## 2026-10-04 21:35 — Migration 56 proven live on the simulator; a deploy-overlap duplicate cleaned up (migration 57)
-Intent:     Prove f90266d live, the way it runs in production.
+Intent:     Prove e24e31a live, the way it runs in production.
 Proof:      Deploy dep-db1aaf7f3r2c73bqfebg live 19:14:55 UTC. Simulator full run 25844, 5 of 5. The two incidents it raised, INC-VFARM.SENSOR-1791141588520-WE8T and INC-VFARM.ENVIRONMENT-1791141603615-WD2W, are in the ledger as INC-BAYS.MONITORING-005 and -006 and in engine_incidents under those same ids, open_now false, resolved_at equal to the twin's closed_at, resolved_by "monitoring-twin (cleared on the next snapshot)". Each was open for 15 seconds, which the three-minute poll would have missed. Recurrence rows 1 and 2, re-keyed to MONITORING|SIM-TOMATO-01|offline and MONITORING|SIM-TOMATO-01|out_of_range:humidity, went from 4 incidents to 5 with nothing detected twice and no job opened.
 Problem:    Rows 3 and 4 of engine_monitoring_recurrences, detected 19:14:57 UTC under the old key shape. During the deploy the old instance swept once after migration 56 had re-keyed its rows, did not find them, and recorded both simulated patterns again, with two extra monitoring_recurrence_detected events. On a real farm that would have been a second Research Twin job for one pattern.
 Fix:        Migration 57 deletes the old-shape rows (three bars in the key). The two events stay; engine_events is append-only.
@@ -11351,7 +11351,7 @@ Intent:     Give the Bays agent the three reminder tools and prove them end to e
 Files:      n8n only. Bays (Agent) Nw5igXu4WWrjUMWB: schedule_reminder, list_reminders, cancel_reminder added to the BHA Dashboard MCP allow-list; new skill "Scheduled reminders" (skill_EH5mQCChBMWPAjqp).
 Problem:    None. (This session's own connector did not list the three new tools after a refresh, so they were proved through Bays itself, which is the real path.)
 Fix:        n/a
-Decision:   Restore point 4045eac2-8a33-4663-bcf1-96a30470c393; published 1599edd6-81fa-45e7-b284-fa63ed26bc2f. Draft test through call_agent: preview (nothing scheduled, audit "preview"), confirm (REM-1791225220057-GH68, Slack id Q0C7QES1MK2, 12 Jan 2027 09:00 Lagos, in the Media Twin thread), list, cancel (row "cancelled", Slack will not post it). Dashboard commit 5656d3c, migration 59 applied. Eval run started after publish; its id goes in the next entry.
+Decision:   Restore point 4045eac2-8a33-4663-bcf1-96a30470c393; published 1599edd6-81fa-45e7-b284-fa63ed26bc2f. Draft test through call_agent: preview (nothing scheduled, audit "preview"), confirm (REM-1791225220057-GH68, Slack id Q0C7QES1MK2, 12 Jan 2027 09:00 Lagos, in the Media Twin thread), list, cancel (row "cancelled", Slack will not post it). Dashboard commit d1d89a5, migration 59 applied. Eval run started after publish; its id goes in the next entry.
 
 ## 2026-10-05 20:55 — North Star can read Genie's incidents
 Intent:     Close the last gate on LOOP-1791193551334-3LXR: North Star reading source=genie incident context.
@@ -11375,11 +11375,11 @@ Fix:        Both added to DELETE_ONLY beside rt-asks. Same confirm, same record_
 Decision:   Extended the existing delete tool rather than adding a new one (Destiny: "to the current ones").
 
 ## 2026-10-05 20:45 — Build fix for the delete-only kinds
-Intent:     Deploy dep-db1vk0e7bikc73ddf1g0 (578cf7f) ended build_failed.
+Intent:     Deploy dep-db1vk0e7bikc73ddf1g0 (25844f3) ended build_failed.
 Files:      server/src/writeGuards.ts
 Problem:    The new deleteOnly helper took `kind: string`, and WritableKind.kind is mirror.MirrorKind. The filtered local type-check did not surface it.
 Fix:        The helper takes mirror.MirrorKind.
-Decision:   The live service stayed on 9e53d59 throughout; a failed build deploys nothing.
+Decision:   The live service stayed on f4b04b9 throughout; a failed build deploys nothing.
 
 ## 2026-10-06 16:40 — Register path only, and patterns keep their Doc link
 Intent:     Close LOOP-1791233664168-BCYK (a candidate could be marked Registered by a plain update, skipping the pattern, BHARAG, the Doc and the announcement) and keep each pattern's Google Doc link on its row (Destiny, after BP-APPROVAL-1791227916261-20QV's link had to be dug out of the audit log).
@@ -11418,7 +11418,7 @@ Decision:   No new variable. If the key is unset the header is left off, as befo
 
 ## 2026-10-06 20:00 — The three keyless webhooks now check the inbound key
 Intent:     /engine-heal, /repair-result and /commercial-pattern-extractors accepted a call from anyone holding the URL. The last one starts a paid model call and writes a record.
-Files:      Dashboard: server/src/bharag.ts (commit 486a0bf, heal() sends x-dashboard-key). bha-repair-bridge: src/report.js (commit dfef315, the report webhook post sends it). n8n: BHA — Self Healer (webhook "Retry Now (Dashboard Button)" on header auth; "Report Retry Outcome" and "Report Needs A Person" send the key), BHA — Self Healer Reports (webhook "Repair Result Received" on header auth), Bays — Commercial & Pattern Extractors ("Extractors Webhook" on header auth), Bays — Submit Actions ("Call Commercial & Pattern Extractors (Webhook)" sends the key), and the replay one-off's sender.
+Files:      Dashboard: server/src/bharag.ts (commit e814e55, heal() sends x-dashboard-key). bha-repair-bridge: src/report.js (commit 260ae8b, the report webhook post sends it). n8n: BHA — Self Healer (webhook "Retry Now (Dashboard Button)" on header auth; "Report Retry Outcome" and "Report Needs A Person" send the key), BHA — Self Healer Reports (webhook "Repair Result Received" on header auth), Bays — Commercial & Pattern Extractors ("Extractors Webhook" on header auth), Bays — Submit Actions ("Call Commercial & Pattern Extractors (Webhook)" sends the key), and the replay one-off's sender.
 Problem:    None in the build. The bridge's full test run did not finish inside this workspace's two-minute limit, so its suite is not confirmed green on this commit; the change is one header on one call.
 Fix:        Callers first, then the check: each caller was live and sending the key before its webhook began refusing calls without one.
 Decision:   All three use the existing credential "BHA Dashboard — Inbound Key"; no new secret. Proved: a call with no key gets 403 on all six keyed webhooks (n8n execution 27804). Not proved yet, each waits for its next real use: Retry now from the dashboard, a repair report from the bridge, a log handed to the extractors by Submit Actions.
@@ -11578,11 +11578,11 @@ Fix:        draft_pattern_candidate and register_pattern_candidate added to Bays
 Decision:   Run as Destiny, not Kaiqi, so the announcement reads "Registered by Destiny": the actor is declared, and declaring someone else would be false.
 
 ## 2026-10-08 11:10 — test:candidates extended for the register path, and run
-Intent:     Pin the two behaviours b597765 added, and run the suites the change touches.
+Intent:     Pin the two behaviours 382e3ca added, and run the suites the change touches.
 Files:      server/test/pattern-candidates.test.cjs
-Problem:    npm ci cannot reach the registry from this workspace ("request to https://registry.npmjs.org/... failed", ENOTFOUND, and the proxy refuses it), so no test had been run for b597765.
+Problem:    npm ci cannot reach the registry from this workspace ("request to https://registry.npmjs.org/... failed", ENOTFOUND, and the proxy refuses it), so no test had been run for 382e3ca.
 Fix:        Stood the suite up without the registry: a local Postgres 16, `pg` 8.23.1 and its runtime dependencies assembled from their GitHub sources into node_modules (not committed), the server built with the global tsc and --noCheck. Baseline first: 14 of 14 steps held on the new code. Two steps added, 16 of 16 held: create_record refuses a pattern an open candidate names (use_register_path, case- and punctuation-blind, dry run too, audited) while Register still creates; existing_pattern_id refuses a name mismatch, an unknown id and a stranger, and on success creates, ingests and documents nothing a second time, announces once and hands the candidate off with the Pattern ID. test:mcp-write and test:bays-tools also pass.
-Decision:   The build was emitted with --noCheck because @types/node cannot be installed here, so this run proves behaviour, not types; Render's build is still the type check, and it passed for b597765.
+Decision:   The build was emitted with --noCheck because @types/node cannot be installed here, so this run proves behaviour, not types; Render's build is still the type check, and it passed for 382e3ca.
 
 ## 2026-10-08 11:30 — Bays told its own Slack ID; evals clean
 Intent:     Stop Bays relaying an ask that tags its own ID to "Bays" and waiting (7 Oct, the legal pages thread: Jason asked four times for one nudge).
@@ -11606,7 +11606,7 @@ Fix:        Each front door hands both values to its delivery workflow (the Nort
 Decision:   The trace is a read over the three ask tables keyed on 'Origin Correlation ID', with no migration: the blob is stored whole. Rows from before 8 Oct carry no origin id and are left out, never linked by guess; 'Linked Twin Ask' is not used because it proves a link and no origin. Hops are ordered by chain length, then time. The page has no sidebar item (the sidebar rule is that every item fits); it is reached from the Bays page header and at /trace?origin=<id>. Not covered: Bays' Rank_With_North_Star helper call and the Ask Bays panel write no origin id, so those rows are not in a trace.
 
 ## 2026-10-08 13:58 — UDC7 proved live and closed; SNI2 drill fault planted; 750X and YT4K closed
-Checked:    Dashboard 0ff0cf5 is live: /api/ask-trace answers. Destiny's test message in C0ATTFED35E produced origin ORIG-BAYS-1791462730546-XVC3 with four ledger rows: Bays (chain "bays", execution 29925), Research Twin ("bays > research_twin", 29927), North Star asked by Bays ("bays > north_star", 29929) and North Star asked by Research Twin ("bays > research_twin > north_star", 29933). The origin id is the same on all four and the third hop did not restart the chain. Eval run EVAL-202610081227 (execution 29911): 62 of 62 rows passed. LOOP-1790612166457-UDC7 closed (audit 1405).
+Checked:    Dashboard bbd286a is live: /api/ask-trace answers. Destiny's test message in C0ATTFED35E produced origin ORIG-BAYS-1791462730546-XVC3 with four ledger rows: Bays (chain "bays", execution 29925), Research Twin ("bays > research_twin", 29927), North Star asked by Bays ("bays > north_star", 29929) and North Star asked by Research Twin ("bays > research_twin > north_star", 29933). The origin id is the same on all four and the third hop did not restart the chain. Eval run EVAL-202610081227 (execution 29911): 62 of 62 rows passed. LOOP-1790612166457-UDC7 closed (audit 1405).
 Files:      none in this repo beyond the entry above. n8n: North Star — Agent Delivery cnOz6iomtnWVXjso now on 96dac30b, a DRILL version for LOOP-1790805930203-SNI2.
 Decision:   SNI2 is run as a labelled drill. Prepare Turn carries one extra line that reads t.drill.tag only when the message text contains SNI2-DRILL, which throws; no other message is affected. The clean version to return to is b168d041-ef8e-4acb-82e5-d931f93f92b3. The drill needs a person to post the marker message and to press Apply on the Repairs tab, so it is not finished in this entry. Until it is, the drill line is live.
             LOOP-1788721024387-750X closed (audit 1409): pattern BP-BAYS-1791464104329-TN2Y created through create_record (audit 1406), BHARAG ingested, Doc made. Created directly, so it was not announced in #bha-build-patterns. LOOP-1789080441990-YT4K closed (audit 1410): commercial card CARD-1791464134711-KT61 (audit 1408), BHARAG ingested. The MN0M leftover row 908 in Destiny's table was deleted (audit 1404); Hardik's row 926 stays.
@@ -11618,7 +11618,7 @@ Fix:        One tool, action "apply" or "discard", calling repairs.actOnPrepared
 Decision:   Not put in any agent's scope. It publishes to a protected workflow, so it stays with a person acting through the connector. Server type-check shows no error in the file; its first real proof is the drill's Apply on REP-cnOz6iomtnWVXjso-29967.
 
 ## 2026-10-08 14:24 — SNI2 drill finished: prepared, applied over MCP, held
-Checked:    Dashboard d90df3c live; act_on_prepared_fix listed on the write connection. Drill, in order: Destiny's post "@North Star SNI2-DRILL test" failed North Star — Agent Delivery at Prepare Turn (execution 29967, "Cannot read properties of undefined (reading 'tag') [line 15]"); North Star — Error Handler ran (29968, 29969) and classed it schema_validation; the bridge reported REP-cnOz6iomtnWVXjso-29967 as needs_human with a prepared fix (draft 631265a3, restore 96dac30b, pinned test 29979) that removes the drill line. act_on_prepared_fix apply (audit 1411) published 631265a3 at 13:10:36 UTC. Destiny's second post ran clean (29996, 13:11:09 UTC). At its ten-minute check the bridge posted the verdict: prepared_state held, outcome repaired, "Proved by a real run after the fix was applied: 29996". versionId equals activeVersionId (631265a3). LOOP-1790805930203-SNI2 closed as a drill.
+Checked:    Dashboard 8b4a49e live; act_on_prepared_fix listed on the write connection. Drill, in order: Destiny's post "@North Star SNI2-DRILL test" failed North Star — Agent Delivery at Prepare Turn (execution 29967, "Cannot read properties of undefined (reading 'tag') [line 15]"); North Star — Error Handler ran (29968, 29969) and classed it schema_validation; the bridge reported REP-cnOz6iomtnWVXjso-29967 as needs_human with a prepared fix (draft 631265a3, restore 96dac30b, pinned test 29979) that removes the drill line. act_on_prepared_fix apply (audit 1411) published 631265a3 at 13:10:36 UTC. Destiny's second post ran clean (29996, 13:11:09 UTC). At its ten-minute check the bridge posted the verdict: prepared_state held, outcome repaired, "Proved by a real run after the fix was applied: 29996". versionId equals activeVersionId (631265a3). LOOP-1790805930203-SNI2 closed as a drill.
 Not yet:    The automatic put-back was not exercised: it fires only when an applied fix fails the same way, and this fix held. Its only proofs remain the bridge's own tests.
 
 ## 2026-10-08 14:30 — BP-BAYS-1791464104329-TN2Y announced
@@ -11633,7 +11633,7 @@ Decision:   One table with status and the two refs as columns and the rest in fi
 Not yet:    Bays' n8n allow-list does not carry the two tools yet, so Bays cannot call them until its agent is updated and its evals run. VFARM_GATE_ALERT_CHANNEL is not set, so alerts go to QUOTA_ALERT_CHANNEL.
 
 ## 2026-10-09 07:30 — 7S0O proved live on fixtures; Bays published with the two gate tools
-Checked:    Dashboard 076d38e live, migration 62 applied, /api/vfarm/gates answers. On marked fixtures through write_vfarm_gate: Stage 1 FIXTURE-VFS1-1791527285310-OW3T created (audit 1478), Stage 2 planned (1479); Stage 2 in_progress refused, "Stage 2 cannot be in_progress yet: Stage 1 (FIXTURE-VFS1-1791527285310-OW3T) is planned, not passed" (1480); airflow_velocity_check failed saved, VFARM_CHECK_UPDATED written, alert posted in #bha-engine-alerts as Bays, ts 1791527295.584979 (1481); source sensor on root_zone_moisture_check refused, no_sensor_yet (1482); offer offered with no Stage 2 refused, stage2_required (1483); then Stage 1 passed (1484), Stage 2 in_progress (1485), offer tied and offered (1486). Six alerts, each labelled TEST FIXTURE, read back from the channel. delete_vfarm_gate_fixtures removed the three (1487); the Gates page is empty.
+Checked:    Dashboard b5c4f13 live, migration 62 applied, /api/vfarm/gates answers. On marked fixtures through write_vfarm_gate: Stage 1 FIXTURE-VFS1-1791527285310-OW3T created (audit 1478), Stage 2 planned (1479); Stage 2 in_progress refused, "Stage 2 cannot be in_progress yet: Stage 1 (FIXTURE-VFS1-1791527285310-OW3T) is planned, not passed" (1480); airflow_velocity_check failed saved, VFARM_CHECK_UPDATED written, alert posted in #bha-engine-alerts as Bays, ts 1791527295.584979 (1481); source sensor on root_zone_moisture_check refused, no_sensor_yet (1482); offer offered with no Stage 2 refused, stage2_required (1483); then Stage 1 passed (1484), Stage 2 in_progress (1485), offer tied and offered (1486). Six alerts, each labelled TEST FIXTURE, read back from the channel. delete_vfarm_gate_fixtures removed the three (1487); the Gates page is empty.
 Files:      none in this repo (n8n Agent Bays Nw5igXu4WWrjUMWB)
 Fix:        get_vfarm_gates and write_vfarm_gate added to Bays' dashboard MCP allow-list; new skill "vFarm stage gates and pilot offer" (skill_yQTwgJ3a8RQiPH9q): read before answering, write only what a person gave, never work out a gate or price, relay a refusal as written. Restore point a607c046, published e1c9a2e7. Draft tests: Bays read the store and said no real record exists; asked to start a Stage 2 against a made-up Stage 1 it relayed stage1_required word for word (audit 1488); an open-loops question answered correctly.
 Not yet:    Eval run EVAL-202610090717 (execution 30964) was still running when this was written; its result is the next entry. The Early Access tie is proven on the local test only. No real Stage 1 record exists.
@@ -11694,7 +11694,7 @@ Problem:    The rule lived only in the card (vfarmGateAuto proposes "passed" whe
 Fix:        plan() refuses with checks_not_passed, naming each check and its state, reading the record as it would be after the write. Dry runs return alerts_would_send (about, channel, text) and say in the message that nothing was posted. Tests rewritten: step 7 now proves four refusals (update, failed-in-same-call, create, dry run) with no event and no post, then the pass; step 11 proves a check cannot slip on a passed record; step 12 proves the dry-run alert list. 14 of 14, auto file 10 of 10, approvals and mcp-write pass.
 Decision:   The refused attempt posts no alert: Jason asked for a clear error, and Bays' loop note asking for an alert on rejection was Bays' addition. The refusal is on engine_mcp_writes as refused. A failed check on a real write always alerts (shown by audit 1509).
 
-## 2026-10-09 16:15 — Write-boundary rule proved live (commit 690dfe6)
+## 2026-10-09 16:15 — Write-boundary rule proved live (commit 1d7950b)
 Intent:     Jason's proof shape: the failing example before the fix, then the rejected write and the alert behaviour after it.
 Files:      none
 Problem:    none
@@ -11715,7 +11715,7 @@ Problem:    The only scheduler with no running record is the Bays agent's own ta
 Fix:        Recorder: outcome "started" writes the row; the last-step call finds that open row (same task name, last 6 hours) and PATCHes it closed with Finished At and Response Seconds; a finish with no open start still writes its own row. Restore point 77d1e9c8, published 165d6fa5. Pinned tests 31346 (closes the open row by PATCH, 156 s), 31347 (a row that does not land throws), 31348 (start read fails, finish still written).
             Watch: a row at started is not a finished run; missed tasks are split into never started and started-not-finished in the alert and the raised error. Restore point 58fc75e6, published 6af9d7c4. Pinned test 31349: one task started-only and recovered, one never started and still missing after the re-run, raised naming it [never started]. Its own 11:30 ET run on the new version, 31355, was clean.
             Bays: Record_Scheduled_Run's description now says call it twice, first with started. Restore point e1c9a2e7, draft validated, published fe58d999. Draft test: my own reminder re-run by hand wrote one row, BAYS-SCHED-1791559836307-4ZGU, started 15:30:36 and closed 15:31:28 UTC (52.6 s), and did not repost.
-            Dashboard: /scheduled-runs with four tabs. Agent tasks draws one row per due time from the inventory's schedule. test:scheduled-runs 7 of 7. Commit c03aa59, live: 94 due times in 7 days, 50 finished, 2 failed, 42 no record (before recording), 0 never started; 189 workflow runs across 9 workflows.
+            Dashboard: /scheduled-runs with four tabs. Agent tasks draws one row per due time from the inventory's schedule. test:scheduled-runs 7 of 7. Commit dfa24cb, live: 94 due times in 7 days, 50 finished, 2 failed, 42 no record (before recording), 0 never started; 189 workflow runs across 9 workflows.
 Decision:   The start line is asked for in the tool's description, not in each of the 12 task texts: one change covers every task, the watch's re-runs and any task added later. If a scheduled run tomorrow writes a finish with no start, the step goes into the task texts. "Never started" cannot split a timer that did not fire from an agent that stopped before its first step; both are platform-level and the page says so. Background timers get one line each, in memory, never a row per tick. Claude's own scheduled checks are not in this database and are not listed. The agent inventory was not re-recorded (the schedule did not change).
 
 ## 2026-10-09 16:55 — Evals after the Bays change (fe58d999)
@@ -11845,7 +11845,7 @@ Decision:   One generic read of the events table, not one tool per event family:
 Intent:     finish Jason's go-time mandate for the engine on the agents themselves (Lagos time).
 Files:      none in the repo (n8n agents, dashboard records).
 Problem:    none.
-Fix:        Allow-list only, no instruction change. Bays: read_logstream and read_engine_events added, restore 10c623be, published 30197da1-5693-41f2-816f-0f60959d84a8. North Star: read_engine_events, restore 8cda5cf7, published 28c4509c-84e2-4dde-a411-6089602c5c71. Research Twin: read_engine_events, restore a559a95e, published 37857864-e194-4118-bdf0-b81bd7ce1edc. Each draft validated and tested with a question that needed the new tool: Bays read the digest events and what is over a threshold now; North Star read the week's vFarm gate events and said every one is a fixture; Research Twin read the three threshold crossings. Dashboard deploy 6e8bc47 was live before the tests.
+Fix:        Allow-list only, no instruction change. Bays: read_logstream and read_engine_events added, restore 10c623be, published 30197da1-5693-41f2-816f-0f60959d84a8. North Star: read_engine_events, restore 8cda5cf7, published 28c4509c-84e2-4dde-a411-6089602c5c71. Research Twin: read_engine_events, restore a559a95e, published 37857864-e194-4118-bdf0-b81bd7ce1edc. Each draft validated and tested with a question that needed the new tool: Bays read the digest events and what is over a threshold now; North Star read the week's vFarm gate events and said every one is a fixture; Research Twin read the three threshold crossings. Dashboard deploy adbaf06 was live before the tests.
             Pattern candidate CAND-1791653519472-I45C flagged for the Logstream spine (audit 1585). Loop LOOP-1791653985161-QRTH opened for Kaiqi: Genie is the fourth consumer Jason named and is not wired (audit 1587).
             Evals: EVAL-202610101739 started (execution 32223). At 13 results in, one failure: RT-04, a citation marker [S4] not in its Sources list. That is a web-research answer and no tool it used changed; result of the full run to be added below.
 Decision:   The tool descriptions say when to use each tool, so no agent's instructions were touched. That keeps the change small and the evals comparable with this afternoon's 62 of 62.
@@ -11885,13 +11885,13 @@ Fix:        North Star — Recorded Helper Ask: the ledger write adds Prompt Tok
             EVAL-202610101933 (execution 32263), the first run with every case at three repeats: 96 of 96 results, 32 of 32 cases. Bays 36 of 36, North Star 33 of 33, Research Twin 27 of 27. Finished 20:09 UTC.
             Independent re-score in the evening, read-only, by an agent that had not seen the work: 6.1 (6.0 that afternoon). Governance and inventory 5 to 6; nothing fell; the floor is 5 on identity and on cost. Stored as migration 67, dimension for dimension, and saved to the project as claude/Agent_Maturity_Rescore_Oct_10_Evening.md.
 Decision:   Deferred, not passed: the token fields on North Star — Agent Delivery (9e737698) and Research Twin — Agent Delivery (62fd5cd4) wait on the first real ask through each; the Slack destination guard has not held a real call; no agent has read Logstream or the events on its own token. Research Twin's citation line was published before the eval run that checked it, the same order the re-score marks down. The run passed, and the order was still wrong.
-            Not done: the change note in #bha-coordination for the Slack destination guard. It is a sharing-class change and went live at 40b9ac7 without one. Raised to Destiny at close.
+            Not done: the change note in #bha-coordination for the Slack destination guard. It is a sharing-class change and went live at 5ef55ba without one. Raised to Destiny at close.
             The three credentials in personal projects are out of scope for every re-score, by Destiny's ruling of 10 Oct: they are under BHA network emails and outside the engine project. Every re-score brief says so.
 
 ## 2026-10-10 21:26 — the change note for the Slack destination guard
 Intent:     close the item the last entry left open (Lagos time).
 Files:      none.
-Problem:    The destination guard on send_nudge and post_file (40b9ac7) went live without its change note in #bha-coordination.
+Problem:    The destination guard on send_nudge and post_file (5ef55ba) went live without its change note in #bha-coordination.
 Fix:        Change note written for #bha-coordination and posted by Destiny: what changed, who is affected (nobody in daily use: all seven recipients of the last 14 days' nudges have a Builder Profile), what is not covered (channel posts), status (live, tested in process, not yet held a real call), and the roll back (one revert).
 Decision:   The note went up after the change, and it says so. Next time the note goes first. Channel posts get their own note before that change ships.
 
@@ -11910,7 +11910,7 @@ Decision:   Mine, and put to Destiny: backlog takes at most three of the five a 
 ## 2026-10-11 00:25 — research signals live, the digest and the red flag name, and North Star's T5 line rolled back
 Intent:     finish LOOP-1788310653393-Q9CR's wiring outside the repo, and prove it (Lagos time).
 Files:      none in the repo. n8n: Bays — Submit Actions (YTpezWSOIN6TNYcX), Research Queue — Weekly Digest (g2xQxuOCbH7LhgAj), North Star (8NQRXadH0OrKe5XV).
-Problem:    344320b went live at 22:19 UTC (dep-db5bjhjrjlhs73alde50). T8 needs the red flag's name on the log, T5 needs North Star to end its answer with the Research Twin line, and nobody was told about signals left waiting.
+Problem:    1f87ecd went live at 22:19 UTC (dep-db5bjhjrjlhs73alde50). T8 needs the red flag's name on the log, T5 needs North Star to end its answer with the Research Twin line, and nobody was told about signals left waiting.
 Fix:        First pass, 22:22 UTC, credit read: four jobs opened. T4 JOB-1791670950093-VYG5 (Bays — Scheduled Run Watch :: Compare Against Schedule), and three backlog cards, JOB-1791670950389-C83A, JOB-1791670950409-7DKU, JOB-1791670950490-3FC3. Thirteen backlog cards held on the budget. An hour of later passes opened nothing more: still four jobs, no Signal Key on two jobs.
             Bays — Submit Actions writes Red Flag Name on the log, restore e8bdcd55, published 35f09818. Not pin-testable (a pinned HTTP node does not evaluate its body); the first real log is its proof.
             Research Queue — Weekly Digest reads the waiting signals and reports them, and says so when it cannot read them, restore 042655dd, published eb835226. Pinned executions 32379 (resolved and two waiting), 32380 (nothing, no post), 32381 (read failed, and a Slack refusal raises). First real run Monday 13:00 Lagos.
@@ -12079,7 +12079,7 @@ Problem:    three drafts were wrong in one detail each: a tool named "diff_score
 Fix:        corrected in the fields passed to register_pattern_candidate. All nineteen: row saved, Google Doc made, BHARAG ingested, announced in #bha-build-patterns, candidate handed off.
 Decision:   CAND-1791450711610-GNER stays a candidate (Jason's rule of 9 Oct). Overlaps were registered with a naming note and named in the report rather than dropped: the two owned-domain patterns (rows 305 and 310), the Logstream spine against BP-LOG-001, the is_reviewer gate against BP-BAYS-012, the multi-handler healer against BP-HEALING-002. Report: project doc claude/Pattern_Candidates_Registered_Oct_11.md.
 ## 2026-10-10 19:20 — T0NO, VRFK and SE8L: closure fixes, proved locally
-Intent:     Make 886fd3f (T0NO), 3530ff0 (VRFK) and 4c9c9a8 (SE8L) closure candidates: fix the defects an audit found, with a regression test for each, without changing publication policy.
+Intent:     Make b3874a3 (T0NO), d8c8e99 (VRFK) and 071a3e3 (SE8L) closure candidates: fix the defects an audit found, with a regression test for each, without changing publication policy.
 Files:      server/src/systemFeeds.ts (t0noPrimitive config_hash), server/src/publicationDecision.ts (readDecisions, storeDecision, canonicalJson), server/src/doctrineGap.ts (observe, SUMMARY_LIMIT, capRows, summary), server/test/{t0no,publication-decision,doctrine-gap}.test.cjs, server/test/publication-decision.db.test.cjs (new), package.json (test:vrfk-db).
 Problem:    1. VRFK's read of every publication decision could not run. publicationDecision.ts:215 was `(detail->>'doctrine_id' || ':' || detail->>'claim_id')`; ->> and || share one precedence and group left to right, so Postgres read text ->> 'claim_id' and refused it: "operator does not exist: text ->> unknown". It sat under the Media Twin data route, GET /api/engine/publication-decision, read_publication_decision and the SE8L sweep. test:vrfk matched the query text with a regex and passed.
             2. A claim stored before T0NO has no config_hash key, so t0noPrimitive returned undefined and JSON dropped the key, against media-doctrine.md ("Every row exposes … config_hash"). The gate was still closed.
@@ -12112,7 +12112,7 @@ Files:      server/src/migrations.ts (migration 72). Records: audit 1713 (close_
 Problem:    1. I had told Destiny credit was still out. It was not: the hourly check (execution 32827) read 3370 credits against 3309.82 used at 13:07 UTC, about 60 dollars, and Bays had answered every ask since 12:15 UTC.
             2. INC-BAYS.AGENT-051 and 053 carry OpenRouter's out-of-credit message classed NETWORK_TIMEOUT with the advice "Rate limited, not out of credit". The balance was 3.91 dollars.
             3. Jason was reminded of two logs waiting four days and had no card: rows U0AEW3TBYH1_1791319651246 and U0AEW3TBYH1_1791320688956 are two failed duplicate submissions of the 6 Oct log, Pending, never processed. The third copy (CODEX-20261006-destiny-arupi-loop-closure-key-lockdown) is approved and paid.
-Fix:        EVAL-202610111407 (execution 32850, 14:07 to 14:49 UTC): 96 of 96, 32 of 32 cases, on the code with PR 12 merged. Measured cost 22.45 dollars as an upper bound, 34.02 left. Two deploys landed during the run (3298b78 and the READONLY_SECRETS_GENIE setting) and no case failed.
+Fix:        EVAL-202610111407 (execution 32850, 14:07 to 14:49 UTC): 96 of 96, 32 of 32 cases, on the code with PR 12 merged. Measured cost 22.45 dollars as an upper bound, 34.02 left. Two deploys landed during the run (bb46055 and the READONLY_SECRETS_GENIE setting) and no case failed.
             The 13:03 UTC Workspace Digest went through the channel-post guard for real (execution 32823: allow, "one of the engine's own channels", posted).
             INC-BAYS.AGENT-050 to 053 closed with a written reason. Problems 2 and 3 are raised as loops, not fixed.
             Genie's token is on the service: the boot line of 14:11 UTC lists genie (READONLY_SECRETS_GENIE, read, 2 tools).
@@ -12130,7 +12130,7 @@ Decision:   The nudge is the Bays scheduled task "Log review nudge -- Jason", wh
 ## 2026-10-11 16:50 — Two leftover Codex rows deleted; Genie reference says where the key is
 Intent:     Remove the two duplicate 6 Oct submissions behind Jason's review reminder, and tell Kaiqi where the Genie token lives.
 Files:      docs/contracts/genie-logstream-read.md
-Problem:    None. 3fe88d5 confirmed live by get_health; mcp-write test re-run locally, all assertions passed.
+Problem:    None. 9586729 confirmed live by get_health; mcp-write test re-run locally, all assertions passed.
 Fix:        delete_record kind codex on U0AEW3TBYH1_1791319651246 (id 284, audit 1728) and U0AEW3TBYH1_1791320688956 (id 285, audit 1729); both kept in record_deletions. The reference now says the token is on Render as READONLY_SECRETS_GENIE and Kaiqi copies it from there.
 Decision:   Rows 292 (SUB-BHARAG-DOMAIN-20261007, Kaiqi) and 310 (CAPITAL-LANE-V0-DEFINITION) are still Pending with no Codex entry id and were left alone: not asked for. The nudge rule itself stays with LOOP-1791727839183-V8ZC.
 
@@ -12139,7 +12139,7 @@ Intent:     Stop the "logs waiting on your review" nudge counting rows that neve
 Files:      n8n Agent Bays (Nw5igXu4WWrjUMWB), task "Log review nudge -- Jason (every 6h)" (task_5jMEZRdOBkUnKmpo); CLAUDE.md
 Problem:    The task read every codex row with Jason Status Pending. Row 310 (CAPITAL-LANE-V0-DEFINITION, Submission Source "dashboard", a lane definition, no Layer1 Review, no transcript) is Pending and over 6h old, so the 12:00 ET run would have nudged Jason about it. All 298 real logs carry Submission Source "otter".
 Fix:        Step 1's filter is now { "Jason Status": "Pending", "Submission Source": "otter" }, with one sentence saying why. Nothing else in the task changed (diffed against the published text). Restore point 30197da1-5693-41f2-816f-0f60959d84a8; published 3d7bc372-33b8-450f-861f-4fbc172bafc0. validate_agent valid; draft test (call_agent, read only) returned total 0 and "would not be nudged". Inventory recorded (audit 1730), which starts the publish check.
-Decision:   The task objective was changed, not the agent's instructions (sha256 unchanged). Also corrected CLAUDE.md on the 3fe88d5 delete exception: review happens before processing, so "unprocessed" includes a real log still waiting on review; the note said otherwise.
+Decision:   The task objective was changed, not the agent's instructions (sha256 unchanged). Also corrected CLAUDE.md on the 9586729 delete exception: review happens before processing, so "unprocessed" includes a real log still waiting on review; the note said otherwise.
 
 ## 2026-10-11 18:00 — Submit Actions refuses a resubmission while the same recording waits on review
 Intent:     Close the gap behind the 6 Oct triple submission: nothing stopped a builder submitting the same recording again while the first copy was Pending.
@@ -12181,7 +12181,7 @@ Decision:   The reminder is composed in code and posted as the Bays bot; the Bay
 Intent:     Deploy Decision Watch, give Bays the three tools and the skill that opens a watch, and start the first real proof.
 Files:      n8n Agent Bays (Nw5igXu4WWrjUMWB); n8n Data Table agent_eval_set; no further file in this repo
 Problem:    The first draft test refused Destiny's own "watch this for me": the skill listed "the person asked is the Sender" under never-open, which also blocked an explicit ask. The second problem: with Jason as Sender and "Destiny, please confirm…", Bays noted it and opened nothing, because the skill's description only said when it could be used.
-Fix:        Dashboard ceed0e8 live at 19:44 UTC (get_health); the Render build passed, which was the only check the Bays page tab could get. The first sweep opened the two PX07 watches by itself: DW-1791748199683-S4YX (TASK-…-MXZ7) and DW-1791748199783-J5RC (TASK-…-B527), both Hardik, first reminder due in 24 hours; TASK-…-TJO0 is not watched because its owner is not one person. Bays: allow-list plus open_decision_watch, list_decision_watches, close_decision_watch; skill "Decision Watch" (skill_zvKrRXwGQ1TVBk9Y). The Sender rule moved to the unasked case only, and the description now opens with "ALWAYS check before sending any reply", the wording that made the SOP skill fire. Draft tests by call_agent: an explicit ask opened DW-1791748139004-NSJ1 on the sandbox thread (C0ATTFED35E 1791743559.914199, owner Destiny, 1 hour); Jason putting a decision to Destiny reached the tool unasked and got "already watched", no duplicate; a thank-you opened nothing; "what are you watching" listed all three. validate_agent valid. Restore point 6d0d7962-0a01-4ee7-a6ae-6c42781660ac; published ba8ec24e-d619-4d9f-978f-5b80ea4a6203. Inventory recorded (audit 1753), which starts the publish check's eval. Eval cases BAYS-DW-01 (must say "decision watch") and BAYS-DW-02 (a thank-you must not), both replay-worded with no Slack context so an eval can never open a real watch.
+Fix:        Dashboard 2722b0c live at 19:44 UTC (get_health); the Render build passed, which was the only check the Bays page tab could get. The first sweep opened the two PX07 watches by itself: DW-1791748199683-S4YX (TASK-…-MXZ7) and DW-1791748199783-J5RC (TASK-…-B527), both Hardik, first reminder due in 24 hours; TASK-…-TJO0 is not watched because its owner is not one person. Bays: allow-list plus open_decision_watch, list_decision_watches, close_decision_watch; skill "Decision Watch" (skill_zvKrRXwGQ1TVBk9Y). The Sender rule moved to the unasked case only, and the description now opens with "ALWAYS check before sending any reply", the wording that made the SOP skill fire. Draft tests by call_agent: an explicit ask opened DW-1791748139004-NSJ1 on the sandbox thread (C0ATTFED35E 1791743559.914199, owner Destiny, 1 hour); Jason putting a decision to Destiny reached the tool unasked and got "already watched", no duplicate; a thank-you opened nothing; "what are you watching" listed all three. validate_agent valid. Restore point 6d0d7962-0a01-4ee7-a6ae-6c42781660ac; published ba8ec24e-d619-4d9f-978f-5b80ea4a6203. Inventory recorded (audit 1753), which starts the publish check's eval. Eval cases BAYS-DW-01 (must say "decision watch") and BAYS-DW-02 (a thank-you must not), both replay-worded with no Slack context so an eval can never open a real watch.
 Decision:   The instructions were not touched (a skill and three allow-list entries). Not yet proven: a real reminder posted by the timer. NSJ1 comes due at about 20:49 UTC; the loops stay In Progress until that post is read in the thread.
 
 ## 2026-10-11 21:20 — Decision Watch logs a rate-limit hit
@@ -12194,7 +12194,7 @@ Decision:   Once a day per watch, like the unread event, so a held watch does no
 ## 2026-10-11 21:35 — update_decision_watch: an SOP written after a watch was opened can be attached to it
 Intent:     Jason, #bha-coordination 1791746835.121559: Bays logged three SOPs for Client 2 and vFarm and could not attach them to the two watches it had already opened, because a watch's references were only settable at creation. He asked for an update capability with changes logged, then a backfill of DW-1791748613019-I6P9 and DW-1791748613233-5M3U.
 Files:      server/src/decisionWatch.ts, server/src/mcp/decisionWatchTools.ts, server/src/mcp/index.ts, server/test/decision-watch.test.cjs, docs/design/decision-watch-v0.md, CLAUDE.md
-Problem:    An earlier push today (6b67988) went out after a test run that had not run: the local Postgres had stopped and the pipeline's exit code was tail's, not node's ("Error: connect ECONNREFUSED 127.0.0.1:5544"). Re-run properly, the change passed; a second fault was the test itself, which counted earlier runs' reminder history against the daily cap and failed check 7. Fixed in ba552b9. Tests here are now run with their exit code read directly.
+Problem:    An earlier push today (545bb05) went out after a test run that had not run: the local Postgres had stopped and the pipeline's exit code was tail's, not node's ("Error: connect ECONNREFUSED 127.0.0.1:5544"). Re-run properly, the change passed; a second fault was the test itself, which counted earlier runs' reminder history against the daily cap and failed check 7. Fixed in 92d6f9d. Tests here are now run with their exit code read directly.
 Fix:        `decisionWatch.update()` and the tool `update_decision_watch` (Bays' scope): sop_refs, ns_refs and next_step on an open watch, replace or `append`; a reference already held is not added twice; the requester, the owner, Destiny or Jason may change one; a closed watch is refused. Each change is a line in the watch's history and one `decision_watch_updated` event with the old and new value. open_decision_watch's "already watched" answer now names the update tool. 14 checks pass (exit code 0), including a reminder carrying both appended SOPs.
 Decision:   Three fields and no others. What is being waited on, the owner and the thread are what the watch is; changing them is a new watch.
 
@@ -12202,7 +12202,7 @@ Decision:   Three fields and no others. What is being waited on, the owner and t
 Intent:     Ship update-watch with logging and backfill DW-1791748613019-I6P9 and DW-1791748613233-5M3U, as Jason asked in #bha-coordination 1791746835.121559.
 Files:      n8n Agent Bays (Nw5igXu4WWrjUMWB); no further file in this repo
 Problem:    None.
-Fix:        Dashboard 52ea9fd live at 20:21 UTC (get_health). Bays: allow-list plus update_decision_watch, and the Decision Watch skill gained "Attaching an SOP to a watch that is already open" and now says to set sop_refs at creation whenever an SOP covers the decision. validate_agent valid. The draft test was the backfill itself, read back from the database: I6P9 (HJ22, Jegan) holds the Client-2 delivery SOP (f0673993) and the vFarm critical-path SOP (e874c3de), two decision_watch_updated events; 5M3U (WFJO, Destiny) holds the Client-2 BOM/pricing SOP (841164c1), one event. Restore point ba8ec24e-d619-4d9f-978f-5b80ea4a6203; published cdf3bcfa-ecc8-4220-9b71-f4cc9f437f66. Inventory recorded (audit 1770).
+Fix:        Dashboard b2f6086 live at 20:21 UTC (get_health). Bays: allow-list plus update_decision_watch, and the Decision Watch skill gained "Attaching an SOP to a watch that is already open" and now says to set sop_refs at creation whenever an SOP covers the decision. validate_agent valid. The draft test was the backfill itself, read back from the database: I6P9 (HJ22, Jegan) holds the Client-2 delivery SOP (f0673993) and the vFarm critical-path SOP (e874c3de), two decision_watch_updated events; 5M3U (WFJO, Destiny) holds the Client-2 BOM/pricing SOP (841164c1), one event. Restore point ba8ec24e-d619-4d9f-978f-5b80ea4a6203; published cdf3bcfa-ecc8-4220-9b71-f4cc9f437f66. Inventory recorded (audit 1770).
 Decision:   The PX07 rule also opened DW-1791748651493-58TK on Destiny for LOOP-1791748310785-WFJO, because that loop is in the CAPITAL lane and fell to him by the no-owner default. Left as it is until Jason answers who owns Client 2 pricing.
 
 ## 2026-10-11 22:30 — Decision Watch: first timer-posted reminder and first auto-close; the credit-out alert proven and O97T closed
@@ -12259,7 +12259,7 @@ Decision:   BHARAG is the only source, not a Postgres copy: the twins read BHARA
 ## 2026-10-13 00:25 — SOPs tab: its own BHARAG key
 Intent:     Make the SOPs tab read the workspace Bays actually writes SOPs into.
 Files:      server/src/sops.ts, server/src/bharag.ts, src/screens/CodexSops.tsx, src/data/types.ts, server/test/sops.test.cjs, render.yaml, CLAUDE.md.
-Problem:    Live after 9208051, GET /api/sops answered ok and complete, 167 documents over 2 pages, and no SOP. The five newest titles it read (added in fac42d6 to find out) were "Comm Readiness — CARD-1791828771993-FSQ0", two "Commercial Opportunity — …" cards and "BHA Codex — Destiny Arupi — 2026-10-11…": none of the four SOPs or three Codex logs engine_bharag_guard recorded going into workspace `codex` on 12 Oct. Bays' recorded inventory lists its BHARAG credential as "BHARAG - Codex" (RmcU0AR3sSBKYgPN), which its Search_Codex de-dupe finds SOPs with. So BHARAG_CODEX_KEY on Render is not that credential's key.
+Problem:    Live after 9208051, GET /api/sops answered ok and complete, 167 documents over 2 pages, and no SOP. The five newest titles it read (added in 3147113 to find out) were "Comm Readiness — CARD-1791828771993-FSQ0", two "Commercial Opportunity — …" cards and "BHA Codex — Destiny Arupi — 2026-10-11…": none of the four SOPs or three Codex logs engine_bharag_guard recorded going into workspace `codex` on 12 Oct. Bays' recorded inventory lists its BHARAG credential as "BHARAG - Codex" (RmcU0AR3sSBKYgPN), which its Search_Codex de-dupe finds SOPs with. So BHARAG_CODEX_KEY on Render is not that credential's key.
 Fix:        BHARAG_SOPS_KEY (render.yaml, sync: false): the SOP read uses it when set and BHARAG_CODEX_KEY otherwise, and every answer names the variable (`key_variable`, shown on the tab). test:sops now 22 checks, including that the SOP key wins.
 Decision:   A new variable rather than changing BHARAG_CODEX_KEY: create_record's Codex ingest uses that key today, and repointing it would move where those ingests land, which is a separate decision. Setting the value is manual: it is the secret inside n8n's "BHARAG - Codex" credential, which no tool here can read.
 Not yet:    Whether BHARAG_CODEX_KEY should also be the "BHARAG - Codex" key (so dashboard Codex ingests land where Bays' do) is open.
@@ -12330,12 +12330,12 @@ Fix:        (1) update() adds by default: next_step gets a dated "Update YYYY-MM
 Decision:   The loop permission rule (only the assignee, Destiny or Jason change a loop) is correct and unchanged (Destiny, 14 Oct). The slip on LOOP-1791903777614-DQ3H was assigning a two-person ask to one person; that is a Bays instruction change (one loop per builder), made on the agent, not here. The fallback trusts only a DM Slack confirmed (ok true, channel and user id from Slack's own answer), never a channel a caller names. Not built: adding im:read to Bays' Slack app (a manual reinstall), which would make the fallback unnecessary.
 Test:       npm install is blocked from this workspace (registry ENOTFOUND / proxy connect_rejected), so the suites were not run here. tsc 6.0.3 with node types off: 571 errors before and after, the same set (all missing Node types), none new. dmPersonFromHistory's SQL run read-only against production: D0BDLTZA2Q2 → U0AF011R821 (Jegan). Live checks after the deploy below.
 
-## 2026-10-14 09:15 — Decision Watch history line for an added next step; live proof of 6a1f08c
+## 2026-10-14 09:15 — Decision Watch history line for an added next step; live proof of 803dc70
 Intent:     Word the history line for an added field plainly, and record the live checks on the 08:45 change.
 Files:      server/src/decisionWatch.ts
 Problem:    The history line for an added next step read `next_step added to to "<whole text>"` (fixture DW-1791964166791-CLRQ).
 Fix:        An added field's line now names only what was added: `next_step added to: "<new part>"`.
-Live proof of 6a1f08c (deployed 07:46 UTC, migration 75 applied 07:46:48): post_channel_message dry run to D0BDLTZA2Q2 is known ("a DM with U0AF011R821 (from Bays' earlier DMs there; Slack itself could not say: missing_scope)"), would_wait_for_approval false (audit 2031); D0ZZZZZZZZZ stays unknown (audit 2032). Fixture DW-1791964166791-CLRQ: update_decision_watch without append kept the three-part next step and added "Update 2026-10-14: ..." under it (audit 2034); closed (2035). Bays skills Decision Watch, Open loops and Slack posting updated on the draft (byte-identical to the files; config hash 212d17b4 unchanged, skills sit outside it). DRAFT-202610140749-IOPS: 19 of 20, BAYS-SOP-01 repeat 3 failed the "already logged" check; that skill was not changed and repeats 1 and 2 passed, so the run is repeated rather than the check or the agent changed.
+Live proof of 803dc70 (deployed 07:46 UTC, migration 75 applied 07:46:48): post_channel_message dry run to D0BDLTZA2Q2 is known ("a DM with U0AF011R821 (from Bays' earlier DMs there; Slack itself could not say: missing_scope)"), would_wait_for_approval false (audit 2031); D0ZZZZZZZZZ stays unknown (audit 2032). Fixture DW-1791964166791-CLRQ: update_decision_watch without append kept the three-part next step and added "Update 2026-10-14: ..." under it (audit 2034); closed (2035). Bays skills Decision Watch, Open loops and Slack posting updated on the draft (byte-identical to the files; config hash 212d17b4 unchanged, skills sit outside it). DRAFT-202610140749-IOPS: 19 of 20, BAYS-SOP-01 repeat 3 failed the "already logged" check; that skill was not changed and repeats 1 and 2 passed, so the run is repeated rather than the check or the agent changed.
 
 
 ## 2026-10-14 10:57 — Research Queue weekly sweep works six jobs, not one (5NOW)
@@ -12404,7 +12404,7 @@ Decision:   Reuse Message Capture's onboarding branch rather than copy it into t
 Intent:     Prove the channel setup on a real channel Bays was in with no tracking row.
 Files:      none (proof only).
 Problem:    none.
-Fix:        b841752 live on Render 18:24 UTC. Dry run (audit 2179) said it would set the channel up and
+Fix:        c11afb1 live on Render 18:24 UTC. Dry run (audit 2179) said it would set the channel up and
             called nothing. Real open (audit 2180, DW-1792002449002-VT00) answered "#bha-self-healing was
             not set up; it is now". n8n execution 37663 (Bays — Channel Register) succeeded in 7s; the
             tracking row C0C3AGDQWDS holds doc 1L_eeU4O… and folder 1rkB3f9w…; Bays posted ":wave: Bays is
@@ -12438,3 +12438,26 @@ Decision:   A code fix rather than a longer prompt: the canon list was already i
             Oct transcript is corrected. Live proof is the next Otter submission. Commit hashes and ids spoken
             aloud cannot be corrected by a map; a builder who pastes the written narration into the transcript
             box (with a summary) skips the scrape and the Codex reads the exact text.
+
+## 2026-10-15 12:10 — History rewritten: Destiny Arupi is the author on main in all three repos
+Intent:     Destiny's ask (14 Oct): take Claude off the contributors list of bha-engine-dashboard,
+            bha-repair-bridge and bhanetwork-site and show Destiny Arupi instead.
+Files:      main in all three repos (every commit re-authored), BUILD_LOG.md and CLAUDE.md (commit
+            numbers swapped), docs/history/commit-map-2026-10-14.md (new).
+Problem:    397 dashboard commits, 3 bridge commits and 38 site commits were authored by
+            "Claude <noreply@anthropic.com>", and most carried Co-Authored-By: Claude and
+            Claude-Session lines.
+Fix:        git filter-branch on main: author and committer noreply@anthropic.com became
+            "Destiny Arupi <destiny@arupra.ai>"; the Co-Authored-By: Claude, Claude-Session and
+            "Generated with Claude Code" lines were removed from every message. Every new commit
+            was checked against its old one: the file tree is identical in all 513 pairs
+            (448 + 15 + 50). Force-pushed with a lease on the old tip. Each repo's old main is kept
+            as a git bundle outside the repo. Hardik's, Codex's and bhanetworkgh's commits keep
+            their own authors.
+Decision:   Every commit number changed, so the numbers quoted in this log (92 places) and
+            CLAUDE.md (1) were swapped for the new ones by an exact old-to-new match; nothing else
+            in the earlier entries was touched. The full map is docs/history/commit-map-2026-10-14.md,
+            for numbers quoted in Codex entries, Slack and narrations, which cannot be rewritten.
+            The four merged claude/... branches here and one in the bridge still exist: the session's
+            git proxy refuses branch deletion (HTTP 403), so they are deleted by hand on GitHub.
+            From now on commits are authored by Destiny Arupi with no Claude lines.
