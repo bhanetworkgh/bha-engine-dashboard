@@ -90,6 +90,7 @@ import type {
   VfarmGatesData,
   SopsData,
   SopDoc,
+  Intake2InviteOutcome,
 } from './types';
 
 export * from './types';
@@ -621,6 +622,11 @@ export const getMediaDoctrine = () => api<DoctrineData>('/api/media-doctrine');
  */
 export function editVfarmLead(id: string, changes: { status?: VfarmLeadStatus; notes?: string | null }): Promise<VfarmLead> {
   return api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}`, { method: 'PATCH', body: changes });
+}
+
+/** Send a lead's Intake-2 invite, or send it again (2026-10-14). Moving a lead to Stage 2 already sends it. */
+export function sendIntake2Invite(id: string, resend: boolean): Promise<Intake2InviteOutcome> {
+  return api<Intake2InviteOutcome>(`/api/vfarm/leads/${encodeURIComponent(id)}/intake-2/invite`, { method: 'POST', body: { resend } });
 }
 
 /** Move a lead between Stage 1 and Stage 2 (2026-10-03, VFIG). The move is appended to its history. */

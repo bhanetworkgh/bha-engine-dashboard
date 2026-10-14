@@ -52,6 +52,8 @@ import * as google from './google';
 import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, agentTokensConfigured, MCP_SECRET_VAR, MCP_WRITE_TOKEN_VAR, MCP_ONE_URL } from './mcp';
 import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
+import * as intake2 from './intake2';
+import * as intake2Page from './intake2Page';
 import * as systemFeeds from './systemFeeds';
 import * as baysAsks from './baysAsks';
 import * as scheduledRuns from './scheduledRuns';
@@ -82,6 +84,7 @@ import * as agentInventory from './agentInventory';
 import * as candidateActions from './candidateActions';
 import * as patternDraft from './patternDraft';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
+import { INTAKE2_FILE_MAX_BYTES } from '../../src/data/intake2';
 
 /**
  * Inbound writes from n8n carry this key in x-dashboard-key. Same pattern as
@@ -157,6 +160,25 @@ async function readJson(req: IncomingMessage, limit = 64 * 1024): Promise<Record
   });
 }
 
+/** A request body as bytes, for the Intake-2 file upload. */
+async function readRaw(req: IncomingMessage, limit: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks: Buffer[] = [];
+    req.on('data', (c: Buffer) => {
+      size += c.length;
+      if (size > limit) {
+        reject(new HttpError(413, `Each file can be up to ${Math.round(limit / 1024 / 1024)} MB.`));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', () => reject(new HttpError(400, 'The request body could not be read.')));
+  });
+}
+
 function str(v: unknown, max = 4000): string {
   return typeof v === 'string' ? v.slice(0, max) : '';
 }
@@ -194,6 +216,54 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
   }
   if (p === '/api/health' && method === 'GET') {
     return send(res, 200, { ok: true, started_at: STARTED_AT });
+  }
+  /**
+   * Intake-2's three public calls (14 Oct 2026): the page's state, one file,
+   * and the answers. The token in the path is the only credential; a token that
+   * opens nothing is a plain 404, whatever the reason.
+   */
+  const pub2 = p.match(/^\/api\/public\/intake-2\/([A-Za-z0-9_-]{1,80})(\/file)?$/);
+  if (pub2) {
+    const token = pub2[1];
+    const wrap = async (fn: () => Promise<void>) => {
+      try {
+        await fn();
+      } catch (e) {
+        if (e instanceof intake2.Intake2Error) return send(res, e.status, { ok: false, reason: e.reason, message: e.message, ...(e.errors ? { errors: e.errors } : {}) });
+        throw e;
+      }
+    };
+    if (pub2[2]) {
+      if (method !== 'POST') throw new HttpError(405, 'POST one file.');
+      return wrap(async () => {
+        const fieldNo = Number(url.searchParams.get('field'));
+        let name = 'file';
+        try {
+          name = decodeURIComponent(String(req.headers['x-file-name'] ?? 'file'));
+        } catch {
+          /* keep the default */
+        }
+        const mime = String(req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+        const bytes = await readRaw(req, INTAKE2_FILE_MAX_BYTES + 1024);
+        const f = await intake2.upload(token, fieldNo, name, mime, bytes);
+        send(res, 200, { ok: true, file: { file_id: f.file_id, name: f.name, size: f.size } });
+      });
+    }
+    if (method === 'GET') {
+      return wrap(async () => {
+        const st = await intake2.pageState(token);
+        if (!st) return send(res, 404, { ok: false, reason: 'not_found', message: 'This link is not valid.' });
+        send(res, 200, { ok: true, ...st });
+      });
+    }
+    if (method === 'POST') {
+      return wrap(async () => {
+        const body = await readJson(req, 256 * 1024);
+        const r = await intake2.submit(token, body, typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : null);
+        send(res, 200, r);
+      });
+    }
+    throw new HttpError(405, 'GET the form state or POST the answers.');
   }
   if (p === '/api/public/vfarm-doctrine' && method === 'GET') {
     const origin = earlyAccess.originOf(req);
@@ -821,6 +891,28 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * follow-up path posts { buyer_intake_id, stage: 2, by, reason } when a
      * lead enters it. Same key and log as every other engine write.
      */
+    /**
+     * The same invite from n8n or a person's tool (14 Oct 2026), by the lead's
+     * buyer_intake_id: { buyer_intake_id, by, resend, dry_run }.
+     */
+    if (p === '/api/engine/vfarm-leads/intake-2/invite') {
+      if (method !== 'POST') throw new HttpError(405, 'POST { buyer_intake_id, by, resend, dry_run }.');
+      const body = (await readJson(req)) as Record<string, unknown>;
+      const intake = typeof body.buyer_intake_id === 'string' ? body.buyer_intake_id.trim() : '';
+      try {
+        const id = await intake2.leadIdByBuyer(intake);
+        const r = await intake2.issueInvite(id, { by: typeof body.by === 'string' ? body.by : 'engine', resend: body.resend === true, dry_run: body.dry_run === true });
+        await mirror.logWrite({ endpoint, kind: 'vfarm_leads', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: intake, outcome: r.ok ? 'updated' : 'error', detail: `intake-2 invite: ${r.reason}${r.send?.error ? ` — ${r.send.error.slice(0, 200)}` : ''}`, ms: Date.now() - t0 });
+        return send(res, r.ok ? 200 : 502, r);
+      } catch (e) {
+        if (e instanceof intake2.Intake2Error) {
+          await mirror.logWrite({ endpoint, kind: 'vfarm_leads', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: intake || undefined, outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          return send(res, e.status, { ok: false, reason: e.reason, message: e.message });
+        }
+        throw e;
+      }
+    }
+
     if (p === '/api/engine/vfarm-leads/stage') {
       if (method !== 'POST') throw new HttpError(405, 'POST { buyer_intake_id, stage, by, reason }.');
       const body = (await readJson(req)) as Record<string, unknown>;
@@ -1472,6 +1564,24 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     }
   }
 
+  /**
+   * Send (or resend) a lead's Intake-2 invite from the Early Access tab
+   * (14 Oct 2026). Moving a lead to Stage 2 already sends it; this is for a
+   * lead that was in Stage 2 before Intake-2 existed, or a send that failed.
+   */
+  const invite2 = p.match(/^\/api\/vfarm\/leads\/([^/]+)\/intake-2\/invite$/);
+  if (invite2 && method === 'POST') {
+    const body = await readJson(req);
+    try {
+      const by = typeof body.by === 'string' && body.by.trim() ? body.by : 'the dashboard login';
+      const r = await intake2.issueInvite(decodeURIComponent(invite2[1]), { by, resend: body.resend === true });
+      return send(res, r.ok ? 200 : 502, r);
+    } catch (e) {
+      if (e instanceof intake2.Intake2Error) return send(res, e.status, { ok: false, reason: e.reason, message: e.message });
+      throw e;
+    }
+  }
+
   if (method === 'PATCH') {
     /**
      * One lead's status, or its notes, or both. Nothing else about a lead is
@@ -2067,6 +2177,30 @@ const server = createServer((req, res) => {
     });
     return;
   }
+  /**
+   * The buyer's Intake-2 page (14 Oct 2026). Public by necessity, like the
+   * Early Access form: a buyer has no login. The link itself is the lock, and a
+   * link that opens nothing gets the same page whatever the reason.
+   */
+  const intakePage = url.pathname.match(/^\/intake\/([A-Za-z0-9_-]{1,80})\/?$/);
+  if (intakePage) {
+    const html = (status: number, body: string) => {
+      res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(body), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+      res.end(req.method === 'HEAD' ? undefined : body);
+    };
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      send(res, 405, { ok: false, message: 'Method not allowed.' });
+      return;
+    }
+    intake2
+      .isValid(intakePage[1])
+      .then((ok) => (ok ? html(200, intake2Page.formPage()) : html(404, intake2Page.notValidPage())))
+      .catch((e: unknown) => {
+        console.error('[intake-2] page', e);
+        html(500, intake2Page.notValidPage());
+      });
+    return;
+  }
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
     api(req, res, url).catch((e: unknown) => {
       if (e instanceof HttpError) return send(res, e.status, { ok: false, message: e.message });
@@ -2242,6 +2376,11 @@ async function boot(): Promise<void> {
       google.googleMode()
         ? `  google:   ${google.googleMode() === 'oauth' ? 'OAuth refresh token' : 'service account'} — share_doc, grant_drive_access, create_doc and pattern Docs work`
         : `  google:   NOT configured — ${google.notConfiguredMessage()}`,
+    );
+    console.log(
+      intake2.configured()
+        ? '  intake-2: links on — /intake/<token> is public; the Stage 2 move emails the invite through n8n vFarm — Intake-2 Invite'
+        : `  intake-2: ${intake2.SECRET_VAR} NOT set — no Intake-2 link can be made, and the Stage 2 move says so`,
     );
     /**
      * The one public write route, said out loud at boot.

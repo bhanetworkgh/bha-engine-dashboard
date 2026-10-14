@@ -41,6 +41,8 @@ import * as events from './events';
 import * as vfarmCustomerEvents from './vfarmCustomerEvents';
 import { offersByLead } from './vfarmGates';
 import { FORM_A_QUESTIONS } from '../../src/data/formA';
+import type { Intake2Invite, Intake2Stored } from '../../src/data/intake2';
+import * as intake2 from './intake2';
 
 /* ------------------------------------------------------------------ config */
 
@@ -459,6 +461,11 @@ export interface Lead {
   stage_history: StageMove[];
   /** The 5-rack pilot offers this lead is tied to (2026-10-09, 7S0O). Internal: never sent to the person who signed up. */
   pilot_offers: { id: string; status: string }[];
+  /** Intake-2's answers, once the buyer sent them (14 Oct 2026). */
+  intake_2: (Intake2Stored & { notified?: { at: string; channel: string; ts: string | null; error: string | null } | null }) | null;
+  intake_2_completed_at: string | null;
+  /** The invite and every email sent for it; never the link's hash. */
+  intake_2_invite: Omit<Intake2Invite, 'token_sha256'> | null;
 }
 
 export interface StageMove {
@@ -491,12 +498,13 @@ export interface LeadsData {
  * up somewhere it should not be.
  */
 export async function leads(): Promise<LeadsData> {
-  const r = await query<Omit<Lead, 'stage_changed_at' | 'pilot_offers'> & { created_at: Date; notified_at: Date | null; submitted_at: Date | null; stage_changed_at: Date | null; seq: string }>(
+  const r = await query<Omit<Lead, 'stage_changed_at' | 'pilot_offers' | 'intake_2_completed_at' | 'intake_2_invite'> & { created_at: Date; notified_at: Date | null; submitted_at: Date | null; stage_changed_at: Date | null; intake_2_completed_at: Date | null; intake_2_invite: Omit<Intake2Invite, 'link'> | null; seq: string }>(
     `SELECT id, full_name, email, organization_name, source_surface, source_page, source_campaign,
             page_contract_version, mechanics_contract_version, claim_state, status, notes,
             notified_at, submitted_at, created_at, user_agent,
             utm_source, utm_medium, utm_campaign, asset_id, source_channel,
             landing_variant, contract_version, form_a, stage, stage_changed_at, stage_history,
+            intake_2, intake_2_completed_at, intake_2_invite,
             row_number() OVER (PARTITION BY email ORDER BY created_at, id) AS seq
        FROM engine_vfarm_leads
       ORDER BY created_at DESC, id DESC`,
@@ -512,6 +520,8 @@ export async function leads(): Promise<LeadsData> {
     submitted_at: iso(row.submitted_at),
     stage_changed_at: iso(row.stage_changed_at),
     stage_history: Array.isArray(row.stage_history) ? row.stage_history : [],
+    intake_2_completed_at: iso(row.intake_2_completed_at),
+    intake_2_invite: intake2.forPage(row.intake_2_invite),
     // Row one of an address is the first time it was seen; anything after is a repeat.
     is_repeat_email: Number(row.seq) > 1,
   }));
@@ -541,7 +551,7 @@ export async function moveStage(
   by: string,
   reason: string | null,
   via: 'page' | 'engine',
-): Promise<Lead> {
+): Promise<Lead & { intake_2_invite_result?: intake2.InviteOutcome }> {
   if (!(LEAD_STAGES as readonly number[]).includes(to)) throw new SubmissionError(422, `"${to}" is not a stage. A lead is in stage 1 (Form A, interest only) or stage 2 (serious buyer, follow-up path).`);
   const who = by.trim().slice(0, 120);
   if (!who) throw new SubmissionError(422, 'Say who is moving the lead (by).');
@@ -560,10 +570,21 @@ export async function moveStage(
     [row.id, to, JSON.stringify([move])],
   );
   events.changed('vfarm_leads', row.id);
+  // Stage 2 is Intake-2's trigger (Hardik's contract, 13 Oct). The invite never undoes the move:
+  // a refusal or a failed email is the outcome, stored on the lead and returned beside it.
+  let invite: intake2.InviteOutcome | null = null;
+  if (to === 2) {
+    try {
+      invite = await intake2.issueInvite(row.id, { by: who });
+    } catch (e) {
+      invite = { ok: false, reason: e instanceof intake2.Intake2Error ? e.reason : 'error', message: e instanceof Error ? e.message : String(e) };
+      console.error(`[intake-2] invite on stage move for ${row.id}: ${invite.message}`);
+    }
+  }
   const all = await leads();
   const updated = all.leads.find((l) => l.id === row.id);
   if (!updated) throw new SubmissionError(404, 'No lead with that id.');
-  return updated;
+  return invite ? { ...updated, intake_2_invite_result: invite } : updated;
 }
 
 /**
