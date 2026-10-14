@@ -1395,7 +1395,12 @@ digests post with, is not behind it.
 destination is known when it is in `channel_tracking`, one of `ENGINE_CHANNELS`
 (or `SLACK_KNOWN_CHANNELS`, `QUOTA_ALERT_CHANNEL`), a channel a person has
 already approved a post into, a person with a Builder Profile or an approver,
-or a DM Slack says is with one. Known answers `allow` and n8n posts as before.
+or a DM Slack says is with one. **Where Slack will not say who a DM is with**
+(Bays' token has no DM-read scope, `missing_scope`), the person is read back
+from Bays' own confirmed `send_nudge` DMs into that channel
+(`dmPersonFromHistory`, 14 Oct 2026, Destiny): a post into Jegan's DM by its
+D… id was held for approval the day Bays had DM'd him there by user id.
+Known answers `allow` and n8n posts as before.
 Unknown is not posted: the message is stored on the approval and
 `post_channel_message` (write connection, third of `DESTINATION_GATED_TOOLS`,
 in no agent's scope) posts it whole once Destiny or Jason approves. **A DM
@@ -2346,11 +2351,22 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
   be an approver, and on an agent token the channel must be one the engine
   knows (`slackTools.destinationVerdict`). No approval card in v0: unknown is
   refused.
-- **`update_decision_watch`** (Bays' scope; Jason, 11 Oct): sets or, with
-  `append`, adds to `sop_refs`, `ns_refs` and `next_step` on a watch still
-  open, for an SOP written after the watch was. Nothing else on a watch can be
-  changed. Each change is a line in its history and one
-  `decision_watch_updated` event with the old and new value.
+- **`update_decision_watch`** (Bays' scope; Jason, 11 Oct): adds to
+  `sop_refs`, `ns_refs` and `next_step` on a watch still open, for an SOP
+  written after the watch was. **Adding is the default** (14 Oct 2026, Destiny:
+  a replace dropped Jason's three-point next step on DW-1791901078077-O0B8):
+  `next_step` gains a dated "Update" line under the old text, the references a
+  "; "; only `replace: true` (or `append: false`) or an empty string takes text
+  away. `next_step` holds up to 3,000 characters. It also sets
+  `close_on_reply`. Nothing else on a watch can be changed. Each change is a
+  line in its history and one `decision_watch_updated` event with the old and
+  new value.
+- **A decision with more than one part is not closed by the first reply**
+  (14 Oct 2026, Destiny; migration 75, `close_on_reply`, default true).
+  `open_decision_watch` or `update_decision_watch` with `close_on_reply: false`
+  makes the owner's reply restart the wait like anyone else's, with a history
+  line; the watch closes on `close_decision_watch` once every part is answered,
+  or when its linked record closes, and keeps reminding until then.
 - Tools, write connection: `open_decision_watch`, `list_decision_watches`,
   `close_decision_watch` (Bays' scope) and `run_decision_watch` (a person;
   `dry_run` by default). `fixture: true` makes a marked test watch whose posts

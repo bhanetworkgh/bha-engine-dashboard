@@ -14,7 +14,9 @@
  *      done closes the watch (`moved`); a change to the row is movement and
  *      restarts the wait.
  *   2. The thread is read from Slack. A message from the owner closes the
- *      watch (`answered`); a message from anyone else restarts the wait. Bot
+ *      watch (`answered`), unless the decision has more than one part
+ *      (`close_on_reply` false, 14 Oct 2026), when it restarts the wait like
+ *      anyone else's; a message from anyone else restarts the wait. Bot
  *      posts, this module's own reminders included, are never movement.
  *   3. Quiet past the wait: one reminder, as Bays, in the thread (a DM to the
  *      owner where the watch has no thread), naming the decision, the SOP and
@@ -97,6 +99,8 @@ export interface WatchRow {
   auto_key: string | null;
   record_hash: string | null;
   fixture: boolean;
+  /** False for a decision with more than one part: the owner replying restarts the wait instead of closing the watch (14 Oct 2026). */
+  close_on_reply: boolean;
   history: Array<{ at: string; what: string; post?: string }>;
 }
 
@@ -150,6 +154,8 @@ export interface OpenInput {
   created_via?: string | null;
   auto_key?: string | null;
   fixture?: boolean;
+  /** Default true. False when the decision has more than one part; see `WatchRow.close_on_reply`. */
+  close_on_reply?: boolean;
 }
 
 export type OpenResult = { ok: true; created: boolean; watch: WatchRow } | { ok: false; reason: string; message: string };
@@ -216,8 +222,8 @@ export async function open(input: OpenInput): Promise<OpenResult> {
   const r = await query<WatchRow>(
     `INSERT INTO engine_decision_watches
        (watch_id, decision, owner_user_id, owner_name, lane, sop_refs, ns_refs, next_step, channel_id, thread_ts, thread_link,
-        record_kind, record_id, wait_minutes, max_reminders, created_by, created_via, auto_key, fixture, history, record_hash)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::jsonb,$21)
+        record_kind, record_id, wait_minutes, max_reminders, created_by, created_via, auto_key, fixture, history, record_hash, close_on_reply)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::jsonb,$21,$22)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
@@ -240,8 +246,9 @@ export async function open(input: OpenInput): Promise<OpenResult> {
       input.created_via ?? null,
       input.auto_key ?? null,
       input.fixture === true,
-      JSON.stringify([{ at: new Date().toISOString(), what: `opened${input.created_via ? ` through ${input.created_via}` : ''}` }]),
+      JSON.stringify([{ at: new Date().toISOString(), what: `opened${input.created_via ? ` through ${input.created_via}` : ''}${input.close_on_reply === false ? '; more than one part, so a reply from the owner does not close it' : ''}` }]),
       recordHash,
+      input.close_on_reply !== false,
     ],
   );
   if (!r.rows[0]) {
@@ -296,7 +303,7 @@ export async function close(watchId: string, by: string, status: 'answered' | 'c
 export const UPDATABLE = ['sop_refs', 'ns_refs', 'next_step'] as const;
 export type Updatable = (typeof UPDATABLE)[number];
 export type UpdateResult =
-  | { ok: true; watch: WatchRow; changed: Array<{ field: Updatable; from: string | null; to: string | null }> }
+  | { ok: true; watch: WatchRow; changed: Array<{ field: Updatable; from: string | null; to: string | null }>; flipped?: boolean }
   | { ok: false; reason: string; message: string };
 
 /**
@@ -308,7 +315,7 @@ export type UpdateResult =
  * adds to what is held instead of replacing it. Every change is a dated line in
  * the watch's history and one `decision_watch_updated` event with both values.
  */
-export async function update(watchId: string, by: string, changes: Partial<Record<Updatable, string | null>>, opts: { append?: boolean } = {}, now = new Date()): Promise<UpdateResult> {
+export async function update(watchId: string, by: string, changes: Partial<Record<Updatable, string | null>>, opts: { append?: boolean; replace?: boolean; closeOnReply?: boolean } = {}, now = new Date()): Promise<UpdateResult> {
   const found = await query<WatchRow>(`SELECT * FROM engine_decision_watches WHERE watch_id = $1`, [watchId]);
   const w = found.rows[0];
   if (!w) return { ok: false, reason: 'not_found', message: `No watch has the id "${watchId}". Use list_decision_watches to find it.` };
@@ -321,27 +328,38 @@ export async function update(watchId: string, by: string, changes: Partial<Recor
     const given = changes[field];
     const from = w[field] ?? null;
     let to = typeof given === 'string' ? given.trim() || null : null;
-    if (to && opts.append && from) to = from.toLowerCase().includes(to.toLowerCase()) ? from : `${from}; ${to}`;
-    if (to && to.length > 1200) return { ok: false, reason: 'too_long', message: `${field} would be ${to.length} characters; the limit is 1200.` };
+    // Adds by default (14 Oct 2026): a replace dropped Jason's three-point next step on DW-1791901078077-O0B8.
+    // Only `replace: true`, or an empty string to clear a field, takes what is held away.
+    const append = opts.replace !== true && opts.append !== false;
+    if (to && append && from) {
+      if (from.toLowerCase().includes(to.toLowerCase())) to = from;
+      else to = field === 'next_step' ? `${from}\nUpdate ${now.toISOString().slice(0, 10)}: ${to}` : `${from}; ${to}`;
+    }
+    const limit = field === 'next_step' ? 3000 : 1200;
+    if (to && to.length > limit) return { ok: false, reason: 'too_long', message: `${field} would be ${to.length} characters; the limit is ${limit}. Send it with replace: true and a shorter text that keeps every part still owed.` };
     if (to !== from) changed.push({ field, from, to });
   }
-  if (!changed.length) return { ok: true, watch: w, changed };
+  const flip = typeof opts.closeOnReply === 'boolean' && opts.closeOnReply !== (w.close_on_reply !== false);
+  if (!changed.length && !flip) return { ok: true, watch: w, changed, flipped: false };
   const next = Object.fromEntries(changed.map((c) => [c.field, c.to])) as Partial<Record<Updatable, string | null>>;
-  const line = changed.map((c) => `${c.field} ${c.from ? 'changed' : 'set'}${c.to ? ` to "${clip(c.to, 200)}"` : ' to nothing'}`).join('; ');
+  const lines = changed.map((c) => `${c.field} ${c.from ? (c.to && c.to.startsWith(c.from) ? 'added to' : 'changed') : 'set'}${c.to ? ` to "${clip(c.to, 200)}"` : ' to nothing'}`);
+  if (flip) lines.push(opts.closeOnReply ? 'a reply from the owner now closes it' : 'more than one part: a reply from the owner no longer closes it');
+  const line = lines.join('; ');
   const r = await query<WatchRow>(
     `UPDATE engine_decision_watches
         SET sop_refs = CASE WHEN $2::boolean THEN $3 ELSE sop_refs END,
             ns_refs = CASE WHEN $4::boolean THEN $5 ELSE ns_refs END,
             next_step = CASE WHEN $6::boolean THEN $7 ELSE next_step END,
+            close_on_reply = CASE WHEN $9::boolean THEN $10 ELSE close_on_reply END,
             history = history || $8::jsonb
       WHERE watch_id = $1 AND status = 'watching'
       RETURNING *`,
-    [watchId, 'sop_refs' in next, next.sop_refs ?? null, 'ns_refs' in next, next.ns_refs ?? null, 'next_step' in next, next.next_step ?? null, JSON.stringify([{ at: now.toISOString(), what: `updated by ${by}: ${line}` }])],
+    [watchId, 'sop_refs' in next, next.sop_refs ?? null, 'ns_refs' in next, next.ns_refs ?? null, 'next_step' in next, next.next_step ?? null, JSON.stringify([{ at: now.toISOString(), what: `updated by ${by}: ${line}` }]), flip, opts.closeOnReply === true],
   );
   if (!r.rows[0]) return { ok: false, reason: 'already_closed', message: `${watchId} closed while it was being changed. Nothing was changed.` };
   // Not deduped: every change is its own event.
-  await event('decision_watch_updated', r.rows[0], `dw:${watchId}:updated:${now.getTime()}:${Math.random().toString(36).slice(2, 8)}`, { by, changes: changed });
-  return { ok: true, watch: r.rows[0], changed };
+  await event('decision_watch_updated', r.rows[0], `dw:${watchId}:updated:${now.getTime()}:${Math.random().toString(36).slice(2, 8)}`, { by, changes: changed, ...(flip ? { close_on_reply: opts.closeOnReply } : {}) });
+  return { ok: true, watch: r.rows[0], changed, flipped: flip };
 }
 
 /* ------------------------------------------------------------ Slack side */
@@ -591,15 +609,27 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
         }
         const human = (read.ok ? read.messages : []).filter((m) => m.user && !m.bot_id && (!m.subtype || m.subtype === 'thread_broadcast') && m.ts && Number(m.ts) > Number(oldest));
         const fromOwner = human.filter((m) => m.user === w.owner_user_id).sort((a, b) => Number(b.ts) - Number(a.ts))[0];
-        if (fromOwner) {
+        if (fromOwner && w.close_on_reply !== false) {
           const why = `${w.owner_name || 'the owner'} replied ${w.thread_ts ? 'in the thread' : 'under the reminder'} (${permalink(place.channel, fromOwner.ts as string)})`;
           if (opts.dry) would(w, `close as answered: ${why}`);
           else (await settle(w, 'answered', why, w.owner_user_id, now), out.closed.push(w.watch_id));
           continue;
         }
+        // A watch with more than one part (14 Oct 2026, Jason in #workflow-logs-kaiqi: "keep reminding until
+        // all three are addressed"): the owner's reply is movement, never the answer. It closes only when a
+        // person, or Bays for one, confirms every part was answered, or the linked record closes.
+        const ownerReplyNew = fromOwner && w.close_on_reply === false && Number(fromOwner.ts) * 1000 > quietSince.getTime() ? fromOwner : null;
         const newest = human.map((m) => Number(m.ts) * 1000).sort((a, b) => b - a)[0];
         if (newest && newest > quietSince.getTime()) quietSince = new Date(newest);
-        if (!opts.dry && readOk) await note(w, { quiet_since: quietSince, last_error: null, checked: now });
+        if (ownerReplyNew && opts.dry) would(w, 'the owner replied; this watch has more than one part, so the wait starts again and it stays open');
+        if (!opts.dry && readOk) {
+          await note(w, {
+            quiet_since: quietSince,
+            last_error: null,
+            checked: now,
+            ...(ownerReplyNew ? { history: `${w.owner_name || 'the owner'} replied (${permalink(place.channel, ownerReplyNew.ts as string)}); more than one part, so it stays open until every part is confirmed answered` } : {}),
+          });
+        }
       } else if (!opts.dry && !place) await note(w, { checked: now });
 
       // 3. Quiet past the wait.
@@ -711,6 +741,7 @@ export function show(w: WatchRow, now = new Date()) {
     created_by: w.created_by,
     created_via: w.created_via,
     fixture: w.fixture,
+    closes_on_owner_reply: w.close_on_reply !== false,
     history: w.history ?? [],
   };
 }
