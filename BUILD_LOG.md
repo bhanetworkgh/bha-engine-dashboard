@@ -12399,3 +12399,15 @@ Fix:        `channelRegister.register(channel)`: refuses #bha-pay-reviews (C0C24
 Decision:   Reuse Message Capture's onboarding branch rather than copy it into the dashboard: two setup
             paths would drift. Tests: `npm run test:decision-watch` 16/16 (check 12c new: dry run, setup,
             inbound key, not a member, pay reviews, test channel, a 200 with no row, the connector path).
+
+## 2026-10-15 10:45 — Live proof: #bha-self-healing set up on its first watch
+Intent:     Prove the channel setup on a real channel Bays was in with no tracking row.
+Files:      none (proof only).
+Problem:    none.
+Fix:        b841752 live on Render 18:24 UTC. Dry run (audit 2179) said it would set the channel up and
+            called nothing. Real open (audit 2180, DW-1792002449002-VT00) answered "#bha-self-healing was
+            not set up; it is now". n8n execution 37663 (Bays — Channel Register) succeeded in 7s; the
+            tracking row C0C3AGDQWDS holds doc 1L_eeU4O… and folder 1rkB3f9w…; Bays posted ":wave: Bays is
+            now active in this channel." The test watch was cancelled (audit 2181).
+Decision:   #bha-self-healing chosen because it is Destiny's own engine channel, Bays was a member, and
+            it had no row: the exact case Jason described.
