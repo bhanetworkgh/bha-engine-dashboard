@@ -12411,3 +12411,30 @@ Fix:        b841752 live on Render 18:24 UTC. Dry run (audit 2179) said it would
             now active in this channel." The test watch was cancelled (audit 2181).
 Decision:   #bha-self-healing chosen because it is Destiny's own engine channel, Bays was a member, and
             it had no row: the exact case Jason described.
+
+## 2026-10-15 11:20 — Codex: the loop check reads a corrected answer, and BHA's names are fixed before any layer reads them
+Intent:     Jason's review of the 14 Oct log. The Codex for CODEX-20261014-destiny-arupi-research-sweep-fix said
+            "the loop check did not run", and named Bays "Bayes", Jegan "Jagan", BHARAG "Barag" and Kavin "Cabin".
+Files:      n8n only: `Bays — Submit Actions` (YTpezWSOIN6TNYcX), published 7df1047a. Restore point 9156e277.
+Problem:    Execution 37108. The loop check did answer: the model wrote one JSON block, then "Wait, the schema
+            requires more fields. Let me output the complete JSON.", then a second, complete block (7 loops moved,
+            1 opened). Attach Session Metadata parses the whole reply as one object and threw
+            "Unexpected non-whitespace character after JSON at position 1214 (line 16 column 1)", so ran=false.
+            The names: the 14 Oct Otter transcript held "Bayes" 52 times, "Jagan" 6, "Cabin" 5, "Barag" 4,
+            "Hardick" 3, plus "Biarag", "Caven", "Kaiki", "codec". The orchestrator's canon-name list is a
+            prompt instruction, and the loop check and Layer 1 have none, so the garbles reached the Codex.
+Fix:        (1) New node `Pick Loop Check Answer` between `Match Loops And Tag Session` and `Attach Session
+            Metadata` (group G1a): a reply that already parses passes as is; otherwise every fenced block (or,
+            with none, every balanced object) is tried and the last one carrying loops_closed, loops_touched and
+            loops_opened wins. Nothing parseable passes through unchanged, so Attach still records the real
+            error. (2) `Clean Scraper Output` runs the transcript and the Otter summary through one fixed name
+            map (Bayes→Bays, Barag/Biarag/BRog→BHARAG, Jagan/JGAN→Jegan, Cabin/Caven→Kavin, Kaiki/Kai Key→Kaiqi,
+            Hardick→Hardik, Northstar→North Star, V Farm→vFarm, codec→Codex), word-bounded, so every layer
+            and the loop check read the right names. "cabinet" and correct spellings are untouched.
+Decision:   A code fix rather than a longer prompt: the canon list was already in the orchestrator prompt and
+            the Codex still said "Jagan". Tests on the real data (scratch harness): the 14 Oct reply fails the old
+            parse and now yields 7 touched loops incl. KMG9 and 1 opened; Jegan's clean 14 Oct reply passes
+            unchanged; an unparseable reply passes through so the error is still named; every garble in the 14
+            Oct transcript is corrected. Live proof is the next Otter submission. Commit hashes and ids spoken
+            aloud cannot be corrected by a map; a builder who pastes the written narration into the transcript
+            box (with a summary) skips the scrape and the Codex reads the exact text.
