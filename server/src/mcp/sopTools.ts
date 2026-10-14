@@ -17,6 +17,7 @@
  * can still be read. Only a document whose title starts "SOP" can be touched.
  */
 import * as bharag from '../bharag';
+import * as mirror from '../mirror';
 import * as sops from '../sops';
 import { ADMIN_IDS } from '../writeGuards';
 import { auditClose, auditOpen } from './writeTools';
@@ -147,5 +148,90 @@ export const deleteSopTool: ToolDefinition = {
       : { ok: false, deleted: false, verified_gone: false, id, reason: 'still_there', message: 'BHARAG answered the delete, but the SOP still reads.', raise: true, audit_id: audit };
   },
 };
+
+/**
+ * read_sop (2026-10-14, Destiny — LOOP-1791848474713-ZZVU). One SOP's whole text, by BHARAG id
+ * or by exact title, the same read the Codex page's SOPs tab makes (sops.doc).
+ *
+ * Built because a search returns pieces of a document, not the document. On 14 Oct Bays was
+ * asked to walk a blocked builder through Destiny's Operator Playbook and its three searches
+ * returned the playbook's top, its Twilio part and its escalation order, but not the section
+ * that covered the error, so it answered with general advice and named the wrong second. An
+ * agent that has found an SOP reads it whole with this before it tells anyone what to do.
+ *
+ * Read only, both connections, in Bays' scope. Only a document whose title starts "SOP" can be
+ * read. A title that matches nothing returns the closest titles with their ids, never a guess.
+ * One `read` line per call on engine_writes.
+ */
+const MAX_SOP_CHARS = 30000;
+const normTitle = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+export const readSopTool: ToolDefinition = {
+  name: 'read_sop',
+  description:
+    'Read one SOP in full: its whole text, title, id, dates and source link. Use it after a search finds an SOP, because a search returns pieces of a document and the piece you need may not be among them. Before telling a blocked person how to clear something from a builder\'s Operator Playbook ("SOP -- Operator Playbook: <name>"), read that playbook whole with this tool and answer from the section that matches. Name the SOP by id (the BHARAG document id a search returns) or by its exact title. A title that matches nothing returns the closest SOP titles and their ids; nothing is guessed. Read only.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', description: 'The SOP\'s BHARAG document id (a UUID).' },
+      title: { type: 'string', description: 'The SOP\'s exact title, e.g. "SOP -- Operator Playbook: Destiny Arupi (Engine Steward)". Case and punctuation do not matter.' },
+    },
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Read one SOP in full' },
+  handler: async (args, deps) => {
+    const t0 = Date.now();
+    const keyLabel = deps.access === 'read' ? 'MCP_SECRET' : 'MCP_WRITE_TOKEN';
+    const log = (detail: string) => mirror.logWrite({ endpoint: 'mcp:read_sop', kind: 'bharag_sop', method: 'MCP', key_label: keyLabel, outcome: 'read', detail: detail.slice(0, 400), ms: Date.now() - t0 });
+    let id = str(args.id);
+    const title = str(args.title);
+    if (!id && !title) return { ok: false, reason: 'no_sop_named', message: 'Send id (the BHARAG document id) or title (the SOP\'s exact title).' };
+    if (!id) {
+      const list = await sops.read();
+      if (!list.ok) {
+        await log(`title "${title}" → list unreadable: ${list.error ?? 'unknown'}`);
+        return { ok: false, reason: 'sops_unreadable', message: `The SOP list could not be read from BHARAG: ${list.error ?? 'unknown error'}. Nothing was guessed.` };
+      }
+      const want = normTitle(title);
+      const exact = list.sops.filter((s) => normTitle(s.title) === want);
+      if (exact.length === 0) {
+        const words = want.split(' ').filter((w) => w.length > 2 && w !== 'sop');
+        const close = list.sops
+          .map((s) => ({ s, hits: words.filter((w) => normTitle(s.title).includes(w)).length }))
+          .filter((x) => x.hits > 0)
+          .sort((a, b) => b.hits - a.hits)
+          .slice(0, 10)
+          .map((x) => ({ id: x.s.id, title: x.s.title }));
+        await log(`title "${title}" → no exact match, ${close.length} close`);
+        return { ok: false, reason: 'no_such_title', message: `No SOP is titled "${title}". The closest titles are listed; read one by its id.${list.complete ? '' : ' The SOP list was read only in part, so one may be missing from it.'}`, close_matches: close };
+      }
+      id = exact[0].id; // newest first, so a repeated title reads its newest copy
+    }
+    const d = await sops.doc(id);
+    if (!d.ok) {
+      await log(`${id} → ${d.status} ${d.reason}`);
+      return { ok: false, reason: d.status === 404 ? 'not_found' : 'unreadable', message: d.reason };
+    }
+    const content = d.sop.content ?? '';
+    const truncated = content.length > MAX_SOP_CHARS;
+    await log(`${id} "${d.sop.title}" → ${content.length} chars${truncated ? ' (cut)' : ''}`);
+    return {
+      ok: true,
+      id: d.sop.id,
+      title: d.sop.title,
+      created_at: d.sop.created_at,
+      updated_at: d.sop.updated_at,
+      source_link: d.sop.source_link,
+      same_title: d.sop.same_title,
+      content: truncated ? content.slice(0, MAX_SOP_CHARS) : content,
+      content_chars: content.length,
+      truncated,
+      ...(d.sop.content === null ? { note: 'BHARAG returned no text for this SOP.' } : {}),
+      ...(truncated ? { note: `Cut at ${MAX_SOP_CHARS} of ${content.length} characters.` } : {}),
+    };
+  },
+};
+
+export const SOP_READ_TOOLS: ToolDefinition[] = [readSopTool];
 
 export const SOP_WRITE_TOOLS: ToolDefinition[] = [logSopTool, deleteSopTool];
