@@ -3574,6 +3574,13 @@ guard, refuses a title already held, and reads the stored text back to compare
 and a reason, keeps its whole text on the audit line first, and reads the id
 again to confirm it is gone. Both audited on `engine_mcp_writes` (kind
 `bharag_sop`).
+**`read_sop`, the whole SOP for an agent** (2026-10-14, Destiny — ZZVU).
+Same file, read only, both connections, in Bays' scope: one SOP's full text by
+BHARAG id or exact title, through `sops.doc`. A search returns pieces of a
+document, and on 14 Oct Bays answered a blocked builder from the wrong pieces
+of Destiny's Operator Playbook. A title that matches nothing returns the
+closest titles with their ids, never a guess; 30,000 characters at most, cut
+and marked. One `read` line per call on `engine_writes`.
 
 **Build patterns and Commercial are one shape, not two** (decision 2026-09-16,
 Destiny). Both open on the current month, chosen in a picker **to the left of the

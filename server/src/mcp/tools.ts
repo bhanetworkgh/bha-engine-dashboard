@@ -43,7 +43,7 @@ import { INCIDENT_WRITE_TOOLS } from './incidentTools';
 import { SIGNAL_WRITE_TOOLS } from './signalTools';
 import { LOOP_WRITE_TOOLS } from './loopTools';
 import { DRAFT_EVAL_WRITE_TOOLS } from './draftEvalTools';
-import { SOP_WRITE_TOOLS } from './sopTools';
+import { SOP_READ_TOOLS, SOP_WRITE_TOOLS } from './sopTools';
 import { INVENTORY_WRITE_TOOLS } from './inventoryTools';
 import { VFARM_GATE_READ_TOOLS, VFARM_GATE_WRITE_TOOLS } from './vfarmGateTools';
 import { findRecords, READABLE_KINDS } from './findRecords';
@@ -986,6 +986,8 @@ export const TOOLS: ToolDefinition[] = [
   ...SPEND_READ_TOOLS,
   // 2026-10-09: the vFarm stage gates and 5-rack offer (7S0O).
   ...VFARM_GATE_READ_TOOLS,
+  // 2026-10-14: one SOP's whole text, after a search found it (ZZVU operator playbooks).
+  ...SOP_READ_TOOLS,
   // The one that is not a read.
   resyncTool,
 ];

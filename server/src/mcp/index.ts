@@ -215,6 +215,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'open_decision_watch', 'list_decision_watches', 'close_decision_watch',
         // 2026-10-11: attach an SOP written after the watch was opened (Jason, 1791746835.121559).
         'update_decision_watch',
+        // 2026-10-14: read an SOP whole after a search finds it, so a blocked builder is walked
+        // through the right section of an Operator Playbook (ZZVU).
+        'read_sop',
       ]),
     },
     {
