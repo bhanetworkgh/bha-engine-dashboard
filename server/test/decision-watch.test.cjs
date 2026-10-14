@@ -12,7 +12,7 @@ if (!/@(localhost|127\.0\.0\.1)[:/]/.test(process.env.DATABASE_URL || '')) {
 const DIST = process.env.SERVER_DIST || path.join(__dirname, '../../server-dist');
 
 /** The stand-in Slack: threads and DMs are arrays of messages; posts are kept. */
-const slack = { threads: {}, dms: {}, posts: [], unreadable: new Set(), refusePost: false, calls: [] };
+const slack = { threads: {}, replyOf: {}, dms: {}, posts: [], unreadable: new Set(), refusePost: false, calls: [] };
 const srv = http.createServer((req, res) => {
   const chunks = [];
   req.on('data', (c) => chunks.push(c));
@@ -30,6 +30,13 @@ const srv = http.createServer((req, res) => {
     }
     if (req.url === '/conversations.replies') {
       if (slack.unreadable.has(b.channel)) return send({ ok: false, error: 'channel_not_found' });
+      // The open-time check (no oldest): as Slack does, a reply names its thread, an unknown ts is thread_not_found.
+      if (b.oldest === undefined) {
+        const key = `${b.channel}:${b.ts}`;
+        if (slack.replyOf[key]) return send({ ok: true, messages: [{ ts: slack.replyOf[key], thread_ts: slack.replyOf[key] }, { ts: b.ts, thread_ts: slack.replyOf[key] }] });
+        if (key in slack.threads) return send({ ok: true, messages: [{ ts: b.ts }] });
+        return send({ ok: false, error: 'thread_not_found' });
+      }
       return send({ ok: true, messages: (slack.threads[`${b.channel}:${b.ts}`] || []).filter((m) => Number(m.ts) > Number(b.oldest || 0)) });
     }
     if (req.url === '/conversations.history') return send({ ok: true, messages: (slack.dms[b.channel] || []).filter((m) => Number(m.ts) > Number(b.oldest || 0)) });
@@ -268,6 +275,8 @@ const srv = http.createServer((req, res) => {
   await query(`INSERT INTO engine_channel_tracking (airtable_record_id, natural_id, fields, source, first_seen_at, updated_at, created_time) VALUES ($1, $1, '{}'::jsonb, 'engine', $2, $2, $2) ON CONFLICT DO NOTHING`, [CH, at(0).toISOString()]);
   const deps = (agent) => ({ access: 'write', agent, dispatch: async () => ({ status: 200, body: {} }), startedAt: '' });
   const open = (args, agent = null) => tools.openDecisionWatch.handler(args, deps(agent));
+  slack.threads[`${CH}:1791733300.000002`] = [];
+  slack.threads[`${CH}:1791733300.000003`] = [];
   let t = await open({ decision: 'Test watch for the build proof', owner_user_id: OWNER, requester_user_id: JASON, thread_link: `https://bayshorizonnetwork.slack.com/archives/${CH}/p1791733400000100?thread_ts=1791733300.000002&cid=${CH}`, fixture: true, wait_minutes: 1 }, 'bays');
   assert.equal(t.reason, 'fixture_not_for_agents');
   t = await open({ decision: 'Test watch for the build proof', owner_user_id: `<@${OWNER}>`, requester_user_id: JASON, thread_link: `https://bayshorizonnetwork.slack.com/archives/${CH}/p1791733400000100?thread_ts=1791733300.000002&cid=${CH}`, fixture: true, wait_minutes: 1 });
@@ -276,13 +285,29 @@ const srv = http.createServer((req, res) => {
   assert.equal(t.watch.wait_minutes, 1);
   assert.ok(t.audit_id > 0);
   const F = t.watch_id;
-  slack.threads[`${CH}:1791733300.000002`] = [];
   r = await only(F, new Date(Date.now() + 2 * 60_000));
   assert.match(slack.posts.at(-1).text, /^TEST\. /);
   assert.equal((await dw.read()).watches.some((w) => w.watch_id === F), false, 'a fixture is not on the page');
   assert.equal((await dw.read({ fixtures: true })).watches.some((w) => w.watch_id === F), true);
   t = await open({ decision: 'Agent ask with a short wait', owner_user_id: OWNER, requester_user_id: JASON, channel_id: CH, thread_ts: '1791733300.000003', wait_hours: 0.1 }, 'bays');
   assert.equal(t.reason, 'bad_wait');
+  ok('the tools audit every call, refuse a test watch to an agent, and keep fixtures off the page');
+  /* 12b. the thread is checked at open (14 Oct 2026, DW-1791991788784-OSK0) */
+  const auditBefore = (await query(`SELECT count(*)::int AS n FROM engine_mcp_writes WHERE tool = 'open_decision_watch'`)).rows[0].n;
+  t = await open({ decision: 'A ts no message carries', owner_user_id: OWNER, requester_user_id: JASON, channel_id: CH, thread_ts: '1791991699.614149', fixture: true, wait_minutes: 1 });
+  assert.equal(t.reason, 'thread_not_found', 'a ts Slack has no message for is refused');
+  t = await open({ decision: 'A ts no message carries, dry run', owner_user_id: OWNER, requester_user_id: JASON, channel_id: CH, thread_ts: '1791991699.614149', dry_run: true });
+  assert.equal(t.reason, 'thread_not_found', 'a dry run checks the thread too');
+  slack.replyOf[`${CH}:1791733300.000077`] = '1791733300.000002';
+  t = await open({ decision: 'Test watch for the build proof', owner_user_id: OWNER, requester_user_id: JASON, channel_id: CH, thread_ts: '1791733300.000077', fixture: true, wait_minutes: 1 });
+  assert.equal(t.ok && t.created, false, 'a reply ts given as a thread_ts matches the watch already on its thread');
+  assert.equal(t.watch_id, F);
+  const CH2 = `C0U${String(T).slice(-7)}`;
+  slack.unreadable.add(CH2);
+  t = await open({ decision: 'A place no bot can read', owner_user_id: OWNER, requester_user_id: JASON, channel_id: CH2, thread_ts: '1791733300.000005', fixture: true, wait_minutes: 1 });
+  assert.equal(t.reason, 'thread_not_readable', 'a place no bot can read is refused');
+  assert.equal((await query(`SELECT count(*)::int AS n FROM engine_mcp_writes WHERE tool = 'open_decision_watch'`)).rows[0].n, auditBefore + 4, 'every check is audited');
+  ok('a watch is opened only on a thread that exists and can be read, on its root');
   t = await open({ decision: 'A dry run', owner_user_id: OWNER, requester_user_id: JASON, record_id: 'LOOP-123', dry_run: true }, 'bays');
   assert.equal(t.dry_run, true);
   t = await tools.closeDecisionWatch.handler({ watch_id: F, outcome: 'cancelled', reason: 'test over', requester_user_id: JASON }, deps('bays'));
@@ -290,11 +315,10 @@ const srv = http.createServer((req, res) => {
   const list = await tools.listDecisionWatches.handler({ open_only: true }, deps('bays'));
   assert.equal(list.watches.every((w) => w.status === 'watching'), true);
   const audit = await query(`SELECT outcome, kind FROM engine_mcp_writes WHERE tool = 'open_decision_watch' ORDER BY id DESC LIMIT 4`);
-  assert.deepEqual(audit.rows.map((x) => x.outcome), ['dry_run', 'refused', 'applied', 'refused']);
+  assert.deepEqual(audit.rows.map((x) => x.outcome), ['dry_run', 'refused', 'unchanged', 'refused']);
   await query(`DELETE FROM engine_channel_tracking WHERE natural_id = $1`, [CH]);
   await query(`DELETE FROM engine_builder_profiles WHERE natural_id = $1`, [OWNER]);
   assert.equal(audit.rows[0].kind, 'decision_watch');
-  ok('the tools audit every call, refuse a test watch to an agent, and keep fixtures off the page');
 
   /* 12b. a reference is attached to a watch opened before the SOP existed, and the reminder carries it */
   const u0 = await dw.open({ ...base, thread_ts: '1791733301.000001', sop_refs: null, ns_refs: null, next_step: null });
