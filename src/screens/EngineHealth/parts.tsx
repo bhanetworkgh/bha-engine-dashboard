@@ -164,6 +164,8 @@ export function IncidentPanel({ incident, retry, onClose }: { incident: Incident
           {i.reclassified_from && <Fact label="Reclassified from" value={i.reclassified_from.toLowerCase().replace(/_/g, ' ')} />}
           {i.resolved_at && <Fact label="Resolved" value={when(i.resolved_at)} hint={i.resolved_by ? `by ${i.resolved_by}` : undefined} />}
           {i.hours_to_resolve !== null && <Fact label="Took" value={`${i.hours_to_resolve} h`} />}
+          {i.pattern_refs && i.pattern_refs.length > 0 && <Fact label="Fixed by pattern" value={i.pattern_refs.join(', ')} />}
+          {i.pattern_candidate_id && !(i.pattern_refs && i.pattern_refs.length) && <Fact label="Pattern candidate" value={i.pattern_candidate_id} hint="no pattern on record yet; on Build patterns, Candidates" />}
         </div>
 
         {i.error_message && (

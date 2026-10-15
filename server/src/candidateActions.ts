@@ -41,6 +41,7 @@
  * registration still counts after its row has gone.
  */
 import * as mirror from './mirror';
+import * as patternCapture from './patternCapture';
 import { ADMIN_IDS } from './writeGuards';
 import { toolByName, type ToolDeps } from './mcp/tools';
 import { McpError } from './mcp/source';
@@ -276,6 +277,8 @@ export async function register(ref: string, input: RegisterInput): Promise<Recor
    * the Pattern ID and the announcement. A delete that does not land leaves a
    * Registered candidate on the page, which is said, not retried.
    */
+  // A candidate captured from an incident hands its pattern id to every incident it came from (15 Oct 2026).
+  if (marked.ok === true) await patternCapture.linkRegistered(row.fields, patternId).catch((e: unknown) => console.error(`[pattern-capture] ${patternId} not linked to its incidents: ${e instanceof Error ? e.message : String(e)}`));
   let removed: Record<string, unknown> | null = null;
   if (marked.ok === true) {
     removed = await call('delete_record', {

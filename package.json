@@ -35,6 +35,7 @@
     "test:agent-inventory": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/agent-inventory.test.cjs",
     "test:n8n-mcp": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/n8n-mcp.test.cjs",
     "test:sops": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/sops.test.cjs",
+    "test:pattern-capture": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/pattern-capture.test.cjs",
     "test:credit-out": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/credit-out.test.cjs",
     "test:logstream": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/logstream.test.cjs",
     "test:vfarm-customers": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/vfarm-customers.test.cjs",
