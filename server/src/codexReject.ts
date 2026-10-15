@@ -60,6 +60,8 @@ interface HeldRow {
   session_url: string | null;
   builder_channel: string | null;
   logged_at: string | null;
+  session_type: string | null;
+  narration_quality: string | null;
 }
 
 /** The row a reference names: this table's id, a Submission ID or a Codex Entry ID. Exactly one, or a refusal. */
@@ -68,7 +70,8 @@ export async function resolve(ref: string): Promise<HeldRow> {
     `SELECT id::text, coalesce(airtable_record_id, 'row-' || id) AS record_id, fields->>'Submission ID' AS submission_id, fields->>'Codex Entry ID' AS codex_entry_id,
             fields->>'Jason Status' AS jason_status, fields->>'Builder User ID' AS builder_user_id,
             left(fields->>'Session Description', 300) AS description,
-            fields->>'Session Url' AS session_url, fields->>'Builder Channel ID' AS builder_channel, fields->>'Timestamp' AS logged_at
+            fields->>'Session Url' AS session_url, fields->>'Builder Channel ID' AS builder_channel, fields->>'Timestamp' AS logged_at,
+            fields->>'Session Type' AS session_type, fields->>'Narration Quality' AS narration_quality
        FROM engine_codex_submissions
       WHERE id::text = $1 OR 'row-' || id = $1 OR airtable_record_id = $1 OR natural_id = $1 OR fields->>'Submission ID' = $1 OR fields->>'Codex Entry ID' = $1
       ORDER BY id`,
@@ -80,7 +83,7 @@ export async function resolve(ref: string): Promise<HeldRow> {
 }
 
 interface Card {
-  what: 'review_card' | 'sent_back_message' | 'builder_reply';
+  what: 'review_card' | 'sent_back_message' | 'builder_notice';
   channel: string;
   ts: string;
   ok: boolean;
@@ -160,6 +163,34 @@ async function sentBackInChannel(row: HeldRow, channel: string): Promise<{ ok: t
   return { ok: false, error: `conversations.history could not read ${channel} (${tried.join('; ') || 'no Slack token'})` };
 }
 
+function dashboardUrl(): string {
+  return (process.env.PUBLIC_DASHBOARD_URL || 'https://dashboard.bhanetwork.org').replace(/\/+$/, '');
+}
+
+/** The builder's notice: the log's details, why, and the link. Exported for the test. */
+export function noticeOf(row: HeldRow, by: string, reason: string, at: string) {
+  const link = `${dashboardUrl()}/codex/${encodeURIComponent(row.codex_entry_id ?? row.submission_id ?? row.record_id)}`;
+  const who = row.builder_user_id ? `<@${row.builder_user_id}>` : 'The builder';
+  const submitted = row.logged_at && !Number.isNaN(Date.parse(row.logged_at)) ? day(row.logged_at) : 'not recorded';
+  const facts = [
+    `*Session:* ${row.description ?? 'not described'}`,
+    `*Submitted:* ${submitted}`,
+    `*Session type:* ${row.session_type ?? 'not stated'}`,
+    ...(row.narration_quality ? [`*Narration quality:* ${row.narration_quality}`] : []),
+    `*Submission ID:* \`${row.submission_id ?? row.id}\``,
+    ...(row.session_url ? [`*Recording:* <${row.session_url}|session recording>`] : []),
+  ].join('\n');
+  const text = `:no_entry: ${who}, ${by} has rejected one of your logs. Why: ${reason}. It will not go to the Codex and is not counted for pay. ${link}`;
+  const blocks = [
+    { type: 'section', text: { type: 'mrkdwn', text: `:no_entry: *${who}, ${by} has rejected one of your logs.*` } },
+    { type: 'section', text: { type: 'mrkdwn', text: facts } },
+    { type: 'section', text: { type: 'mrkdwn', text: `*Why it was rejected:*\n>${reason.replace(/\n/g, '\n>')}` } },
+    { type: 'context', elements: [{ type: 'mrkdwn', text: `Rejected ${day(at)}. This log will not go to the Codex and is not counted for pay. There is nothing to send back on it.` }] },
+    { type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'View it on the dashboard' }, url: link, action_id: 'open_rejected_log' }] },
+  ];
+  return { text, blocks, link };
+}
+
 function day(iso: string): string {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 }
@@ -213,6 +244,7 @@ export async function reject(input: RejectInput) {
     rejected_by: by,
     reason,
     builder_channel_read: channelRead,
+    builder_notice_channel: row.builder_channel ?? cards.chasers[0]?.channel ?? null,
     cards_to_rewrite: [...(cards.review ? [{ what: 'review_card', channel: cards.review.channel, ts: cards.review.ts }] : []), ...cards.chasers.map((c) => ({ what: 'sent_back_message', ...c }))],
   };
   if (input.dry_run) return { ok: true, dry_run: true, rejected: false, ...plan, note: 'Nothing was changed. Call again without dry_run to reject it.' };
@@ -230,21 +262,21 @@ export async function reject(input: RejectInput) {
     const r = await slack.botCall('chat.update', { channel: cards.review.channel, ts: cards.review.ts, text: `Rejected by ${by}: ${reason}`, blocks });
     done.push({ what: 'review_card', channel: cards.review.channel, ts: cards.review.ts, ok: r.ok, ...(r.ok ? {} : { error: r.error }) });
   }
-  const builderTag = row.builder_user_id ? `<@${row.builder_user_id}>` : 'The builder';
   for (const c of cards.chasers) {
     const text = `${headline}\n*Session:* ${row.description ?? row.submission_id ?? ''}\n${why}\nThere is nothing to send back on this log.`;
     const r = await slack.botCall('chat.update', { channel: c.channel, ts: c.ts, text: `Rejected by ${by}: ${reason}`, blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }] });
     done.push({ what: 'sent_back_message', channel: c.channel, ts: c.ts, ok: r.ok, ...(r.ok ? {} : { error: r.error }) });
   }
-  const newest = cards.chasers[cards.chasers.length - 1];
-  if (newest) {
-    const r = await slack.botCall('chat.postMessage', {
-      channel: newest.channel,
-      thread_ts: newest.ts,
-      unfurl_links: false,
-      text: `${builderTag}, ${by} rejected this log: ${reason}\nIt will not go to the Codex and is not counted for pay. There is nothing more to do on it.`,
-    });
-    done.push({ what: 'builder_reply', channel: newest.channel, ts: String(r.ts ?? newest.ts), ok: r.ok, ...(r.ok ? {} : { error: r.error }) });
+  // One top-level post in the builder's log channel (2026-10-15, Destiny): the log's
+  // details, the reason, and the link to it on the dashboard. Not a thread reply and not
+  // ephemeral, so it sits in the channel where the builder reads their logs.
+  const notice = noticeOf(row, by, reason, at);
+  const noticeChannel = row.builder_channel ?? cards.chasers[0]?.channel ?? null;
+  if (noticeChannel) {
+    const r = await slack.botCall('chat.postMessage', { channel: noticeChannel, unfurl_links: false, unfurl_media: false, text: notice.text, blocks: notice.blocks });
+    done.push({ what: 'builder_notice', channel: noticeChannel, ts: String(r.ts ?? ''), ok: r.ok, ...(r.ok ? {} : { error: r.error }) });
+  } else {
+    done.push({ what: 'builder_notice', channel: '(none)', ts: '', ok: false, error: 'the log names no Builder Channel ID and no sent-back message was found, so the builder could not be told' });
   }
   // A channel that could not be read may still hold a sent-back message with its buttons: say so.
   if (channelRead && !channelRead.read && channel) done.push({ what: 'sent_back_message', channel, ts: '(channel not read)', ok: false, error: channelRead.error });

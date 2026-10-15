@@ -117,10 +117,14 @@ const slack = http.createServer((rq, rs) => {
     assert.ok(card.body.blocks.every((b) => b.type !== 'actions'), 'buttons still on the review card');
     assert.ok(card.body.blocks.some((b) => b.type === 'header'), 'review content dropped');
     const reply = calls.filter((c) => c.method === 'chat.postMessage');
-    assert.equal(reply.length, 1); assert.equal(reply[0].body.thread_ts, '2000.0003'); assert.match(reply[0].body.text, /<@U0AC6RFNP3P>/);
+    assert.equal(reply.length, 1); assert.equal(reply[0].body.channel, 'CBUILDER'); assert.equal(reply[0].body.thread_ts, undefined, 'the notice must be top level');
+    const notice = JSON.stringify(reply[0].body.blocks);
+    assert.match(notice, /<@U0AC6RFNP3P>/); assert.match(notice, /Your newer log covers what was asked\./); assert.match(notice, /Test session TESTREJ_1/);
+    assert.match(notice, /TESTREJ_1/); assert.match(notice, /dashboard\.bhanetwork\.org\/codex\/TESTREJ_1/); assert.match(notice, /otter\.ai\/u\/TESTREJ_1/);
+    assert.equal(r.cards.find((c) => c.what === 'builder_notice').ok, true);
     const a = (await query(`SELECT outcome FROM engine_mcp_writes WHERE tool = 'reject_codex_log' AND arguments->>'log' = $1 AND outcome = 'applied'`, [S])).rows;
     assert.equal(a.length, 1);
-    ok('Jason rejects: status, who, when, why, other fields kept, stage rejected, the card loses its buttons, both sent-back messages rewritten, the builder told, audited');
+    ok('Jason rejects: status, who, when, why, other fields kept, stage rejected, the card loses its buttons, every sent-back message rewritten, one top-level notice in the builder\'s channel with the log\'s details, the reason and the dashboard link, audited');
     /* 4 */
     assert.equal((await call({ log: S, requester_user_id: DESTINY, reason: 'again' })).reason, 'already_rejected');
     ok('rejecting it again is refused');
