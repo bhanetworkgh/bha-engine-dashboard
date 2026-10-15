@@ -380,3 +380,62 @@ export function answerText(f: Intake2Field, v: unknown): string {
     .filter(Boolean)
     .join(' · ');
 }
+
+/**
+ * The follow-up timing (15 Oct 2026, Destiny), counted from the first Form 2 email that went
+ * out. The numbers live here and nowhere else: the server's sweep sends by them and the page's
+ * tracker shows them, so the two cannot disagree about when a reminder is due.
+ */
+export const FOLLOW_UP = { first_days: 3, second_days: 7, unresponsive_days: 14, max_attempts: 3, tick_minutes: 15 } as const;
+
+export interface FollowUpStep {
+  key: 'sent' | 'fu1' | 'fu2' | 'unresponsive';
+  label: string;
+  /** done: it happened; failed: an email that did not go; due: it will happen on `at`; stopped: it will not happen. */
+  state: 'done' | 'failed' | 'due' | 'stopped';
+  at: string | null;
+  note?: string;
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Where a lead's Form 2 follow-ups stand, as four steps: Form 2 sent, reminder 1, reminder 2,
+ * marked unresponsive. A due date is the earliest the 15-minute sweep will act, using the same
+ * spacing it uses (reminder 2 at least 4 days after reminder 1, unresponsive at least 7 after
+ * reminder 2). Answering, or a closed lead, stops what has not happened.
+ */
+export function followUpPlan(inv: Omit<Intake2Invite, 'token_sha256'> | null | undefined, opts: { answered_at?: string | null; closed?: boolean } = {}): FollowUpStep[] | null {
+  if (!inv) return null;
+  const sent = (inv.sends ?? []).filter((s) => s.outcome === 'sent');
+  const first = sent[0]?.at ?? null;
+  const lastFail = (inv.sends ?? []).filter((s) => s.outcome === 'failed').slice(-1)[0];
+  const stopNote = opts.answered_at ? 'not needed, they answered' : opts.closed ? 'stopped, lead closed' : null;
+  const steps: FollowUpStep[] = [
+    first
+      ? { key: 'sent', label: 'Form 2 sent', state: 'done', at: first }
+      : { key: 'sent', label: 'Form 2 sent', state: lastFail ? 'failed' : 'due', at: lastFail?.at ?? null, note: lastFail ? `did not go: ${lastFail.error}` : 'not sent yet' },
+  ];
+  const f = inv.followups ?? {};
+  const start = first ? Date.parse(first) : null;
+  const step = (key: 'fu1' | 'fu2', label: string, dueMs: number | null): FollowUpStep => {
+    const x = f[key];
+    if (x?.outcome === 'sent') return { key, label, state: 'done', at: x.at };
+    if (x?.outcome === 'failed') return { key, label, state: 'failed', at: x.at, note: `did not go (try ${x.attempts ?? 1} of ${FOLLOW_UP.max_attempts}): ${x.error}` };
+    if (stopNote || inv.unresponsive_at) return { key, label, state: 'stopped', at: null, note: stopNote ?? 'not sent' };
+    return { key, label, state: 'due', at: dueMs === null ? null : new Date(dueMs).toISOString() };
+  };
+  const fu1Due = start === null ? null : start + FOLLOW_UP.first_days * DAY_MS;
+  steps.push(step('fu1', 'Reminder 1', fu1Due));
+  const fu1At = f.fu1?.at ? Date.parse(f.fu1.at) : null;
+  const fu2Due = start === null ? null : Math.max(start + FOLLOW_UP.second_days * DAY_MS, (fu1At ?? fu1Due!) + (FOLLOW_UP.second_days - FOLLOW_UP.first_days) * DAY_MS);
+  steps.push(step('fu2', 'Reminder 2', fu2Due));
+  if (inv.unresponsive_at) steps.push({ key: 'unresponsive', label: 'Marked unresponsive', state: 'done', at: inv.unresponsive_at });
+  else if (stopNote) steps.push({ key: 'unresponsive', label: 'Marked unresponsive', state: 'stopped', at: null, note: stopNote });
+  else {
+    const fu2At = f.fu2?.at ? Date.parse(f.fu2.at) : null;
+    const due = start === null ? null : Math.max(start + FOLLOW_UP.unresponsive_days * DAY_MS, (fu2At ?? fu2Due!) + (FOLLOW_UP.unresponsive_days - FOLLOW_UP.second_days) * DAY_MS);
+    steps.push({ key: 'unresponsive', label: 'Marked unresponsive', state: 'due', at: due === null ? null : new Date(due).toISOString(), note: 'if they have not answered' });
+  }
+  return steps;
+}

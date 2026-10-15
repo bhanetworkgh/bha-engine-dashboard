@@ -2,39 +2,38 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   addVfarmLeadNote,
+  clearIntake2Unresponsive,
   closeVfarmLead,
   moveVfarmLeadStage,
   reopenVfarmLead,
-  setVfarmLeadNextStep,
+  sendIntake2Invite,
   type VfarmLead,
   type VfarmLeadsData,
 } from '../../data';
 import type { RecordColumn } from '../../components/ui';
 import { Button, Pagination, Pill, RecordTable, SearchBox, Segmented, Stat, StatCell, StatStrip, Toast, usePaged, useToast } from '../../components/ui';
 import { FORM_A_GROUPS, FORM_A_QUESTIONS } from '../../data/formA';
-import { CLOSE_REASONS, PIPELINE, closeReasonLabel, pipelineOf, rotting, type PipelineKey } from '../../data/leadPipeline';
-import { Intake2Panel, Intake2Tag } from './Intake2Panel';
+import { CLOSE_REASONS, PIPELINE, closeReasonLabel, pipelineOf, type PipelineKey } from '../../data/leadPipeline';
+import { FollowUpTracker, Form2Answers, followUpLine } from './Intake2Panel';
 
 /**
- * vFarm Early Access, as a CRM (rebuilt 15 Oct 2026, Destiny: "the entire early access page
- * needs to be completely rebuilt following CRM standards because that's what it is").
+ * vFarm Early Access, as a CRM (rebuilt 15 Oct 2026, simplified the same morning on Destiny's
+ * read of it: "I can't tell stage 1 from 2 from 3 clearly").
  *
- * The shape follows what Pipedrive, HubSpot, Attio and Close share: a board of the pipeline's
- * columns and the same leads as a list; days in the column on every card, amber once past the
- * column's limit (src/data/leadPipeline.ts); one record page per lead with who they are on the
- * left, the next step and the timeline in the middle, and Intake-2 on the right; and a close
- * that needs a reason. No owner field: the dashboard has one login.
+ * The columns lead with his stage numbers: Stage 1 · Interest (filled in Form A), Stage 2 ·
+ * Invited (Jason cleared them and Form 2 went out), Stage 2 · Spec received (they sent Form 2
+ * back), Stage 3 · Paying (a placeholder) and Closed. Form 2 is the buyer's site specification,
+ * Intake-2 in the code; on screen it is Form 2 everywhere.
  *
- * Nothing here is a commitment. A lead says a person filled in a form, and the five request
- * checks stay open whatever column a lead is in.
+ * A lead's page reads top to bottom: where they are and the one thing to do next, the follow-up
+ * tracker while we wait on Form 2, their answers, then notes and history.
  */
 
-const day = (iso: string | null | undefined) => (iso ? iso.slice(0, 10) : '');
 const stamp = (iso: string | null | undefined) => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : '');
-const today = () => new Date().toISOString().slice(0, 10);
+const day = (iso: string | null | undefined) =>
+  iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '';
 
 type View = 'board' | 'list';
-type ListFilter = 'open' | PipelineKey | 'all';
 
 async function copy(text: string): Promise<boolean> {
   try {
@@ -46,13 +45,15 @@ async function copy(text: string): Promise<boolean> {
 }
 
 const colOf = (l: VfarmLead) => pipelineOf({ ...l, stage: l.stage ?? 1 }).key;
-const rotOf = (l: VfarmLead) => rotting({ ...l, stage: l.stage ?? 1 });
-const overdue = (l: VfarmLead) => !!l.next_step_due && l.next_step_due < today() && !l.closed_at;
+const colName = (k: PipelineKey) => {
+  const c = PIPELINE.find((x) => x.key === k)!;
+  return c.stage ? `${c.stage} · ${c.label}` : c.label;
+};
 
 export default function EarlyAccess({ data, onChange, initialOpen = null }: { data: VfarmLeadsData; onChange: (leads: VfarmLead[]) => void; initialOpen?: string | null }) {
   const [params, setParams] = useSearchParams();
   const [view, setView] = useState<View>(() => (params.get('view') === 'list' ? 'list' : 'board'));
-  const [filter, setFilter] = useState<ListFilter>('open');
+  const [filter, setFilter] = useState<PipelineKey>('interest');
   const [q, setQ] = useState('');
   const { toast, setToast } = useToast();
   const leads = data.leads;
@@ -63,7 +64,7 @@ export default function EarlyAccess({ data, onChange, initialOpen = null }: { da
     next.set('tab', 'early-access');
     if (id) next.set('lead', id);
     else next.delete('lead');
-    setParams(next, { replace: false });
+    setParams(next);
   }
   function pickView(v: View) {
     setView(v);
@@ -74,7 +75,6 @@ export default function EarlyAccess({ data, onChange, initialOpen = null }: { da
     setParams(next, { replace: true });
   }
 
-  /** Every write answers with the lead as it now is; that row replaces the one on screen. */
   function replace(updated: VfarmLead) {
     onChange(leads.map((l) => (l.id === updated.id ? updated : l)));
   }
@@ -83,27 +83,19 @@ export default function EarlyAccess({ data, onChange, initialOpen = null }: { da
   const matched = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return leads;
-    return leads.filter(
-      (l) => l.full_name.toLowerCase().includes(needle) || l.email.includes(needle) || (l.organization_name ?? '').toLowerCase().includes(needle),
-    );
+    return leads.filter((l) => l.full_name.toLowerCase().includes(needle) || l.email.includes(needle) || (l.organization_name ?? '').toLowerCase().includes(needle));
   }, [leads, q]);
 
   const byCol = useMemo(() => {
     const m = new Map<PipelineKey, VfarmLead[]>(PIPELINE.map((c) => [c.key, []]));
     for (const l of matched) m.get(colOf(l))!.push(l);
-    // Longest in the column first: the card most likely to need somebody sits at the top.
-    for (const [k, list] of m) list.sort((a, b) => (k === 'closed' ? (b.closed_at ?? '').localeCompare(a.closed_at ?? '') : rotOf(b).days - rotOf(a).days));
-    return m;
+    return m; // newest first, as the server sends them
   }, [matched]);
 
-  const open = leads.filter((l) => !l.closed_at);
-  const late = open.filter((l) => rotOf(l).over);
-  const due = open.filter(overdue);
-  const closed = leads.filter((l) => l.closed_at);
-  const reasons = CLOSE_REASONS.map((r) => ({ ...r, n: closed.filter((l) => l.closed_reason === r.key).length })).filter((r) => r.n > 0);
+  const count = (k: PipelineKey) => leads.filter((l) => colOf(l) === k).length;
+  const unresponsive = leads.filter((l) => !l.closed_at && !l.intake_2 && l.intake_2_invite?.unresponsive_at).length;
 
   const openLead = openId ? leads.find((l) => l.id === openId) ?? null : null;
-
   if (openId && openLead) {
     return (
       <div className="relative flex min-h-0 flex-1 flex-col">
@@ -113,28 +105,29 @@ export default function EarlyAccess({ data, onChange, initialOpen = null }: { da
     );
   }
 
-  const listRows = matched.filter((l) => (filter === 'all' ? true : filter === 'open' ? !l.closed_at : colOf(l) === filter));
-
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <StatStrip cols={4}>
         <StatCell>
-          <Stat label="Open leads" value={open.length} hint={`${data.summary.last_7_days} joined in the last 7 days`} />
+          <Stat label="Stage 1 · interest" value={count('interest')} hint="waiting on Jason to clear them" />
         </StatCell>
         <StatCell>
-          <Stat label="Past their time" value={late.length} tone={late.length ? 'degraded' : undefined} hint="longer in their column than it should take" />
+          <Stat label="Stage 2 · invited" value={count('invited')} hint={unresponsive ? `${unresponsive} unresponsive` : 'waiting on their Form 2'} tone={unresponsive ? 'degraded' : undefined} />
         </StatCell>
         <StatCell>
-          <Stat label="Next step overdue" value={due.length} tone={due.length ? 'degraded' : undefined} hint="a due date that has passed" />
+          <Stat label="Stage 2 · spec received" value={count('spec')} hint="Form 2 back, for BHA to review" />
         </StatCell>
         <StatCell>
-          <Stat label="Closed" value={closed.length} hint={reasons.length ? reasons.map((r) => `${r.label} ${r.n}`).join(' · ') : 'none closed yet'} />
+          <Stat label="Closed" value={count('closed')} hint={`${data.summary.last_7_days} new leads in the last 7 days`} />
         </StatCell>
       </StatStrip>
 
       {openId && !openLead && (
         <p className="px-6 pb-2 text-[12.5px] text-dim md:px-8">
-          No lead with id {openId} is held. <button className="link" onClick={() => setOpen(null)}>Show the pipeline</button>
+          No lead with id {openId} is held.{' '}
+          <button className="link" onClick={() => setOpen(null)}>
+            Show all leads
+          </button>
         </p>
       )}
 
@@ -149,30 +142,9 @@ export default function EarlyAccess({ data, onChange, initialOpen = null }: { da
           ariaLabel="View"
         />
         {view === 'list' && (
-          <Segmented
-            options={[
-              { value: 'open' as ListFilter, label: 'Open', count: matched.filter((l) => !l.closed_at).length },
-              ...PIPELINE.map((c) => ({ value: c.key as ListFilter, label: c.label, count: byCol.get(c.key)!.length })),
-              { value: 'all' as ListFilter, label: 'All', count: matched.length },
-            ]}
-            value={filter}
-            onChange={setFilter}
-            ariaLabel="Column"
-          />
+          <Segmented options={PIPELINE.map((c) => ({ value: c.key as PipelineKey, label: colName(c.key), count: byCol.get(c.key)!.length }))} value={filter} onChange={setFilter} ariaLabel="Stage" />
         )}
         <SearchBox value={q} onChange={setQ} placeholder="Search name, email or organisation" />
-        <Button
-          size="sm"
-          disabled={(view === 'list' ? listRows : matched.filter((l) => !l.closed_at)).length === 0}
-          onClick={async () => {
-            const rows = view === 'list' ? listRows : matched.filter((l) => !l.closed_at);
-            const emails = [...new Set(rows.map((l) => l.email))];
-            const ok = await copy(emails.join(', '));
-            say(ok ? `Copied ${emails.length} ${emails.length === 1 ? 'address' : 'addresses'}` : 'The browser would not let the page write to the clipboard.', ok ? 'ok' : 'failing');
-          }}
-        >
-          Copy emails
-        </Button>
       </div>
 
       <div className="min-h-0 flex-1 pb-8">
@@ -183,7 +155,7 @@ export default function EarlyAccess({ data, onChange, initialOpen = null }: { da
         ) : view === 'board' ? (
           <Board byCol={byCol} onOpen={(l) => setOpen(l.id)} />
         ) : (
-          <LeadList rows={listRows} filterKey={`${filter}:${q}`} onOpen={(l) => setOpen(l.id)} onToast={say} />
+          <LeadList rows={byCol.get(filter)!} filterKey={`${filter}:${q}`} stage={filter} onOpen={(l) => setOpen(l.id)} onToast={say} />
         )}
       </div>
       <Toast toast={toast} />
@@ -205,14 +177,12 @@ function Board({ byCol, onOpen }: { byCol: Map<PipelineKey, VfarmLead[]>; onOpen
           return (
             <section key={c.key} className="flex min-w-0 flex-col rounded-[14px] bg-hover p-2">
               <header className="px-1.5 pb-2 pt-1">
+                {c.stage && <div className="text-[11px] font-medium text-accent-ink">{c.stage}</div>}
                 <div className="flex items-baseline justify-between gap-2">
-                  <h3 className="text-[13px] font-medium text-ink">{c.label}</h3>
+                  <h3 className="text-[13.5px] font-semibold text-ink">{c.label}</h3>
                   <span className="tabular text-[12px] text-faint">{list.length}</span>
                 </div>
-                <div className="text-[11px] leading-snug text-faint">
-                  {c.hint}
-                  {c.limit_days ? ` · ${c.limit_days} days` : ''}
-                </div>
+                <div className="text-[11px] leading-snug text-faint">{c.hint}</div>
               </header>
               <div className="space-y-2">
                 {list.slice(0, BOARD_CAP).map((l) => (
@@ -230,27 +200,17 @@ function Board({ byCol, onOpen }: { byCol: Map<PipelineKey, VfarmLead[]>; onOpen
 }
 
 function LeadCard({ lead: l, onOpen }: { lead: VfarmLead; onOpen: () => void }) {
-  const r = rotOf(l);
   const col = colOf(l);
+  const fu = col === 'invited' || col === 'spec' ? followUpLine(l) : null;
   return (
     <button type="button" onClick={onOpen} className="card block w-full px-3 py-2.5 text-left transition hover:ring-1 hover:ring-accent/40">
       <div className="truncate text-[13px] font-medium text-ink">{l.full_name}</div>
       <div className="truncate text-[11.5px] text-dim">{l.organization_name ?? l.email}</div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
-        {col === 'closed' ? (
+      <div className="mt-1 text-[11px] text-faint">Form A {day(l.created_at)}</div>
+      {fu && <div className={`mt-1 text-[11.5px] ${fu.tone === 'failing' ? 'text-failing' : fu.tone === 'degraded' ? 'text-degraded' : 'text-dim'}`}>{fu.text}</div>}
+      {col === 'closed' && (
+        <div className="mt-1.5">
           <Pill>{closeReasonLabel(l.closed_reason)}</Pill>
-        ) : (
-          <span className={`tabular ${r.over ? 'text-degraded' : 'text-faint'}`} title={r.limit ? `${r.days} of ${r.limit} days in ${col}` : undefined}>
-            {r.days === 0 ? 'today' : `${r.days}d`}
-          </span>
-        )}
-        {(col === 'invited' || col === 'spec') && <Intake2Tag lead={l} />}
-        {l.is_repeat_email && <Pill>repeat</Pill>}
-      </div>
-      {l.next_step && (
-        <div className={`mt-1.5 truncate text-[11.5px] ${overdue(l) ? 'text-degraded' : 'text-dim'}`} title={l.next_step}>
-          Next: {l.next_step}
-          {l.next_step_due ? ` · ${l.next_step_due}` : ''}
         </div>
       )}
     </button>
@@ -259,43 +219,12 @@ function LeadCard({ lead: l, onOpen }: { lead: VfarmLead; onOpen: () => void }) 
 
 /* ───────────────────────────── list ───────────────────────────── */
 
-function LeadList({ rows, filterKey, onOpen, onToast }: { rows: VfarmLead[]; filterKey: string; onOpen: (l: VfarmLead) => void; onToast: (t: string, tone: 'ok' | 'failing') => void }) {
+function LeadList({ rows, filterKey, stage, onOpen, onToast }: { rows: VfarmLead[]; filterKey: string; stage: PipelineKey; onOpen: (l: VfarmLead) => void; onToast: (t: string, tone: 'ok' | 'failing') => void }) {
   const paged = usePaged(rows, filterKey);
   const columns: RecordColumn<VfarmLead>[] = [
     { key: 'joined', header: 'joined', className: 'tabular text-faint', card: 'meta', cell: (l) => day(l.created_at), title: (l) => stamp(l.created_at) },
     { key: 'name', header: 'name', card: 'title', width: '20ch', clip: true, title: (l) => l.full_name, cell: (l) => l.full_name },
     { key: 'org', header: 'organisation', card: 'meta', width: '20ch', clip: true, className: 'text-dim', cell: (l) => l.organization_name ?? <span className="text-faint">—</span> },
-    {
-      key: 'col',
-      header: 'column',
-      card: 'meta',
-      width: '16ch',
-      cell: (l) => <Pill>{l.closed_at ? `Closed · ${closeReasonLabel(l.closed_reason)}` : PIPELINE.find((c) => c.key === colOf(l))!.label}</Pill>,
-    },
-    {
-      key: 'days',
-      header: 'days',
-      align: 'right',
-      card: 'meta',
-      className: 'tabular',
-      cellClass: (l) => (rotOf(l).over ? 'text-degraded' : 'text-faint'),
-      title: (l) => {
-        const r = rotOf(l);
-        return r.limit ? `${r.days} of ${r.limit} days` : `${r.days} days`;
-      },
-      cell: (l) => (l.closed_at ? '' : rotOf(l).days),
-    },
-    { key: 'intake2', header: 'intake-2', card: 'meta', width: '20ch', cell: (l) => <Intake2Tag lead={l} /> },
-    {
-      key: 'next',
-      header: 'next step',
-      card: 'full',
-      width: '30ch',
-      clip: true,
-      cellClass: (l) => (overdue(l) ? 'text-degraded' : 'text-dim'),
-      title: (l) => l.next_step ?? undefined,
-      cell: (l) => (l.next_step ? `${l.next_step_due ? `${l.next_step_due} · ` : ''}${l.next_step}` : <span className="text-faint">—</span>),
-    },
     {
       key: 'email',
       header: 'email',
@@ -310,109 +239,58 @@ function LeadList({ rows, filterKey, onOpen, onToast }: { rows: VfarmLead[]; fil
         </span>
       ),
     },
-    {
-      key: 'actions',
-      header: '',
-      align: 'right',
-      card: 'actions',
-      className: 'card-actions',
-      cell: (l) => (
-        <button
-          type="button"
-          className="link text-[11.5px]"
-          onClick={async (e) => {
-            e.stopPropagation();
-            const ok = await copy(l.email);
-            onToast(ok ? `Copied ${l.email}` : 'The browser would not let the page write to the clipboard.', ok ? 'ok' : 'failing');
-          }}
-        >
-          Copy email
-        </button>
-      ),
-    },
   ];
+  if (stage === 'invited' || stage === 'spec') {
+    columns.push({
+      key: 'fu',
+      header: 'follow-ups',
+      card: 'meta',
+      width: '34ch',
+      clip: true,
+      cell: (l) => {
+        const f = followUpLine(l);
+        return f ? <span className={f.tone === 'failing' ? 'text-failing' : f.tone === 'degraded' ? 'text-degraded' : 'text-dim'}>{f.text}</span> : null;
+      },
+    });
+  }
+  if (stage === 'closed') {
+    columns.push({ key: 'reason', header: 'why closed', card: 'meta', width: '20ch', cell: (l) => <Pill>{closeReasonLabel(l.closed_reason)}</Pill> });
+  }
+  columns.push({
+    key: 'actions',
+    header: '',
+    align: 'right',
+    card: 'actions',
+    className: 'card-actions',
+    cell: (l) => (
+      <button
+        type="button"
+        className="link text-[11.5px]"
+        onClick={async (e) => {
+          e.stopPropagation();
+          const ok = await copy(l.email);
+          onToast(ok ? `Copied ${l.email}` : 'The browser would not let the page write to the clipboard.', ok ? 'ok' : 'failing');
+        }}
+      >
+        Copy email
+      </button>
+    ),
+  });
   return (
     <>
-      <RecordTable columns={columns} rows={paged.rows} rowKey={(l) => l.id} onOpen={onOpen} label="vFarm Early Access leads" empty="No lead matches that filter." />
+      <RecordTable columns={columns} rows={paged.rows} rowKey={(l) => l.id} onOpen={onOpen} label="vFarm Early Access leads" empty={`Nobody is at ${colName(stage)}.`} />
       <Pagination paged={paged} unit="leads" />
     </>
   );
 }
 
-/* ───────────────────────────── record ───────────────────────────── */
+/* ───────────────────────────── one lead ───────────────────────────── */
 
-function LeadRecord({ lead, onBack, onUpdated, onToast }: { lead: VfarmLead; onBack: () => void; onUpdated: (l: VfarmLead) => void; onToast: (t: string, tone: 'ok' | 'failing') => void }) {
-  const col = colOf(lead);
+function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode }) {
   return (
-    <div className="px-6 pb-10 md:px-8">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <Button variant="ghost" size="sm" onClick={onBack}>
-            ← Pipeline
-          </Button>
-          <h2 className="mt-1 truncate text-[20px] font-semibold text-ink">{lead.full_name}</h2>
-          <div className="truncate text-[12.5px] text-dim">
-            {lead.organization_name ?? 'No organisation given'} · joined {day(lead.created_at)}
-          </div>
-        </div>
-        <PipelineSteps current={col} />
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1.2fr)]">
-        <div className="min-w-0 space-y-4">
-          <Profile lead={lead} onToast={onToast} />
-        </div>
-        <div className="min-w-0 space-y-4">
-          <Actions lead={lead} onUpdated={onUpdated} onToast={onToast} />
-          <NextStep lead={lead} onUpdated={onUpdated} onToast={onToast} />
-          <Timeline lead={lead} onUpdated={onUpdated} onToast={onToast} />
-        </div>
-        <div className="min-w-0 space-y-4">
-          {(lead.stage ?? 1) >= 2 || lead.intake_2_invite || lead.intake_2 ? (
-            <div className="card px-4 py-3">
-              <Intake2Panel lead={lead} onToast={onToast} />
-            </div>
-          ) : (
-            <div className="card px-4 py-3 text-[12.5px] text-dim">
-              <h3 className="kicker mb-1.5">Intake-2</h3>
-              Not sent. Moving the lead to Invited emails them their own site specification link.
-            </div>
-          )}
-          <div className="card px-4 py-3 text-[12px] text-dim">
-            <h3 className="kicker mb-1.5">The five request checks</h3>
-            Feasibility, pricing, ownership, licensing and food safety stay open in every column. What a lead tells us is evidence for them, never a decision.
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PipelineSteps({ current }: { current: PipelineKey }) {
-  const steps = PIPELINE.filter((c) => c.key !== 'closed');
-  const at = steps.findIndex((c) => c.key === current);
-  return (
-    <ol className="flex flex-wrap items-center gap-1 text-[11.5px]" aria-label="Where this lead is">
-      {current === 'closed' ? (
-        <li>
-          <Pill>Closed</Pill>
-        </li>
-      ) : (
-        steps.map((c, i) => (
-          <li key={c.key} className={`rounded-full px-2.5 py-1 ${i === at ? 'bg-accent text-accent-on' : i < at ? 'bg-accent-soft text-accent-ink' : 'bg-hover text-faint'}`}>
-            {c.label}
-          </li>
-        ))
-      )}
-    </ol>
-  );
-}
-
-function Card({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode }) {
-  return (
-    <section className="card px-4 py-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="kicker">{title}</h3>
+    <section className="card px-5 py-4">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h3 className="text-[14px] font-semibold text-ink">{title}</h3>
         {right}
       </div>
       {children}
@@ -420,26 +298,86 @@ function Card({ title, children, right }: { title: string; children: ReactNode; 
   );
 }
 
-/** Forward is the one primary on the record; back and close are secondary. */
-function Actions({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdated: (l: VfarmLead) => void; onToast: (t: string, tone: 'ok' | 'failing') => void }) {
+function LeadRecord({ lead, onBack, onUpdated, onToast }: { lead: VfarmLead; onBack: () => void; onUpdated: (l: VfarmLead) => void; onToast: (t: string, tone: 'ok' | 'failing') => void }) {
+  const col = colOf(lead);
+  return (
+    <div className="mx-auto w-full max-w-[900px] space-y-4 px-6 pb-10 md:px-8">
+      <div>
+        <Button variant="ghost" size="sm" onClick={onBack}>
+          ← All leads
+        </Button>
+        <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="truncate text-[22px] font-semibold text-ink">{lead.full_name}</h2>
+            <div className="flex flex-wrap items-center gap-x-2 text-[12.5px] text-dim">
+              <span>{lead.organization_name ?? 'No organisation given'}</span>
+              <span>·</span>
+              <span>{lead.email}</span>
+              <button
+                type="button"
+                className="link text-[11.5px]"
+                onClick={async () => {
+                  const ok = await copy(lead.email);
+                  onToast(ok ? `Copied ${lead.email}` : 'The browser would not let the page write to the clipboard.', ok ? 'ok' : 'failing');
+                }}
+              >
+                copy
+              </button>
+              {lead.is_repeat_email && <Pill>this address is on an earlier lead too</Pill>}
+            </div>
+          </div>
+          <StageSteps current={col} />
+        </div>
+      </div>
+
+      <NextUp lead={lead} onUpdated={onUpdated} onToast={onToast} />
+
+      {lead.intake_2 && (
+        <Section title="Their Form 2 answers" right={<span className="text-[12px] text-faint">sent {day(lead.intake_2.submitted_at)}</span>}>
+          <Form2Answers lead={lead} />
+        </Section>
+      )}
+
+      <FormASection lead={lead} startOpen={col === 'interest'} />
+
+      <History lead={lead} onUpdated={onUpdated} onToast={onToast} />
+    </div>
+  );
+}
+
+function StageSteps({ current }: { current: PipelineKey }) {
+  if (current === 'closed') return <Pill>Closed</Pill>;
+  const steps = PIPELINE.filter((c) => c.key !== 'closed');
+  const at = steps.findIndex((c) => c.key === current);
+  return (
+    <ol className="flex flex-wrap items-center gap-1 text-[11.5px]" aria-label="Where this lead is">
+      {steps.map((c, i) => (
+        <li key={c.key} className={`rounded-full px-2.5 py-1 ${i === at ? 'bg-accent text-accent-on' : i < at ? 'bg-accent-soft text-accent-ink' : 'bg-hover text-faint'}`}>
+          {c.stage} · {c.label}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** Where the lead is, in words, and the one thing to do. Close lives here too, as the quiet option. */
+function NextUp({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdated: (l: VfarmLead) => void; onToast: (t: string, tone: 'ok' | 'failing') => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
   const [reason, setReason] = useState<string>('unresponsive');
   const [note, setNote] = useState('');
-  const [why, setWhy] = useState('');
-  const stage = lead.stage ?? 1;
   const col = colOf(lead);
-  const forward: { to: 2 | 3; label: string } | null =
-    lead.closed_at ? null : stage === 1 ? { to: 2, label: 'Move to Invited and send Intake-2' } : stage === 2 && lead.intake_2_completed_at ? { to: 3, label: 'Move to Paying' } : null;
-  const back: { to: 1 | 2; label: string } | null = lead.closed_at ? null : stage === 2 ? { to: 1, label: 'Back to Interest' } : stage === 3 ? { to: 2, label: 'Back to Spec received' } : null;
+  const inv = lead.intake_2_invite;
 
-  async function run(key: string, fn: () => Promise<VfarmLead>, ok: (l: VfarmLead) => string) {
+  async function run(key: string, fn: () => Promise<VfarmLead | { ok: boolean; message: string }>, ok: string) {
     setBusy(key);
     try {
-      const l = await fn();
-      onUpdated(l);
-      const inv = l.intake_2_invite_result;
-      onToast(inv ? `${ok(l)} ${inv.message}` : ok(l), inv && !inv.ok ? 'failing' : 'ok');
+      const r = await fn();
+      if ('id' in r) {
+        onUpdated(r);
+        const invRes = r.intake_2_invite_result;
+        onToast(invRes ? `${ok} ${invRes.message}` : ok, invRes && !invRes.ok ? 'failing' : 'ok');
+      } else onToast(r.message, r.ok ? 'ok' : 'failing');
       return true;
     } catch (e) {
       onToast(e instanceof Error ? e.message : 'That did not save.', 'failing');
@@ -451,133 +389,214 @@ function Actions({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdated: (l:
 
   if (lead.closed_at) {
     return (
-      <Card title="Closed">
-        <p className="text-[12.5px] text-ink">
-          {closeReasonLabel(lead.closed_reason)} · {stamp(lead.closed_at)}
+      <Section title="Closed">
+        <p className="text-[13px] text-ink">
+          {closeReasonLabel(lead.closed_reason)} · closed {day(lead.closed_at)}
         </p>
         {lead.closed_note && <p className="mt-1 whitespace-pre-wrap text-[12.5px] text-dim">{lead.closed_note}</p>}
+        <p className="mt-1 text-[12px] text-faint">No reminders go to a closed lead. If they send Form 2 anyway, the lead opens again by itself.</p>
         <div className="mt-3">
-          <Button size="sm" loading={busy === 'reopen'} onClick={() => run('reopen', () => reopenVfarmLead(lead.id), () => 'Reopened.')}>
+          <Button size="sm" loading={busy === 'reopen'} onClick={() => run('reopen', () => reopenVfarmLead(lead.id), 'Reopened.')}>
             Reopen
           </Button>
         </div>
-      </Card>
+      </Section>
     );
   }
 
-  return (
-    <Card title={PIPELINE.find((c) => c.key === col)!.label}>
-      <p className="mb-2 text-[12px] text-dim">
-        {col === 'interest' && 'Form A is in. Interest only, nothing promised.'}
-        {col === 'invited' && 'Waiting on their site specification. Follow-ups go at 3 and 7 days; Unresponsive at 14.'}
-        {col === 'spec' && 'Their site specification is in. BHA reviews it before anything else.'}
-        {col === 'paying' && 'A placeholder: no payment is taken here until Jason and Hardik set the price and the checkout.'}
-        {stage === 2 && !lead.intake_2_completed_at ? ' Paying opens once their site specification is in.' : ''}
-      </p>
-      {(forward || back) && (
-        <input className="input mb-2 h-8 w-full text-[12.5px]" placeholder="Why (optional, goes on the timeline)" value={why} onChange={(e) => setWhy(e.target.value)} />
-      )}
-      <div className="flex flex-wrap gap-2">
-        {forward && (
-          <Button
-            variant="primary"
-            size="sm"
-            loading={busy === 'fwd'}
-            onClick={async () => {
-              if (await run('fwd', () => moveVfarmLeadStage(lead.id, forward.to, why.trim() || null), () => `Moved to ${forward.to === 2 ? 'Invited' : 'Paying'}.`)) setWhy('');
-            }}
-          >
-            {forward.label}
-          </Button>
-        )}
-        {back && (
-          <Button
-            size="sm"
-            variant="ghost"
-            loading={busy === 'back'}
-            onClick={async () => {
-              if (await run('back', () => moveVfarmLeadStage(lead.id, back.to, why.trim() || null), () => `${back.label}.`)) setWhy('');
-            }}
-          >
-            {back.label}
-          </Button>
-        )}
-        <Button size="sm" onClick={() => setClosing((v) => !v)}>
-          {closing ? 'Cancel' : 'Close lead'}
+  const closeControl = (
+    <div className="mt-4 border-t border-line pt-3">
+      {!closing ? (
+        <Button size="sm" variant="ghost" onClick={() => setClosing(true)}>
+          Close this lead
         </Button>
-      </div>
-      {closing && (
-        <div className="mt-3 space-y-2 rounded-[10px] border border-line p-3">
-          <div className="text-[12px] text-dim">Why is it closing?</div>
-          <Segmented options={CLOSE_REASONS.map((r) => ({ value: r.key as string, label: r.label }))} value={reason} onChange={setReason} ariaLabel="Close reason" />
-          <textarea
-            className="input min-h-[60px] w-full py-2 text-[12.5px]"
-            placeholder={reason === 'other' ? 'Say why (needed for Other)' : 'A note (optional)'}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-          <Button
-            size="sm"
-            variant="destructive"
-            disabled={reason === 'other' && !note.trim()}
-            loading={busy === 'close'}
-            onClick={async () => {
-              if (await run('close', () => closeVfarmLead(lead.id, reason, note.trim() || null), () => `Closed: ${closeReasonLabel(reason)}.`)) {
-                setClosing(false);
-                setNote('');
-              }
-            }}
-          >
-            Close as {closeReasonLabel(reason)}
-          </Button>
-          {lead.intake_2_invite && !lead.intake_2 && <p className="text-[11.5px] text-faint">Closing stops Intake-2&rsquo;s follow-ups. If they answer anyway, the lead opens again by itself.</p>}
+      ) : (
+        <div className="space-y-2">
+          <div className="text-[12.5px] text-dim">Why is it closing?</div>
+          <Segmented options={CLOSE_REASONS.map((r) => ({ value: r.key as string, label: r.label }))} value={reason} onChange={setReason} ariaLabel="Why closed" />
+          <textarea className="input min-h-[56px] w-full py-2 text-[12.5px]" placeholder={reason === 'other' ? 'Say why (needed for Other)' : 'A note (optional)'} value={note} onChange={(e) => setNote(e.target.value)} />
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={reason === 'other' && !note.trim()}
+              loading={busy === 'close'}
+              onClick={async () => {
+                if (await run('close', () => closeVfarmLead(lead.id, reason, note.trim() || null), `Closed: ${closeReasonLabel(reason)}.`)) {
+                  setClosing(false);
+                  setNote('');
+                }
+              }}
+            >
+              Close as {closeReasonLabel(reason)}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setClosing(false)}>
+              Cancel
+            </Button>
+          </div>
         </div>
       )}
-    </Card>
+    </div>
+  );
+
+  if (col === 'interest') {
+    return (
+      <Section title="Stage 1 · Interest">
+        <p className="text-[13px] text-ink">They filled in Form A on {day(lead.created_at)}. Read their answers below.</p>
+        <p className="mt-1 text-[12.5px] text-dim">Next: Jason clears them for Stage 2. That emails them Form 2 (their site specification) and starts the reminders.</p>
+        <div className="mt-3">
+          {lead.form_a ? (
+            <Button variant="primary" size="sm" loading={busy === 'fwd'} onClick={() => run('fwd', () => moveVfarmLeadStage(lead.id, 2, null), 'Cleared for Stage 2.')}>
+              Clear for Stage 2 and send Form 2
+            </Button>
+          ) : (
+            <p className="text-[12px] text-faint">This lead came through the old public form, not Form A, so Form 2 cannot be sent to it.</p>
+          )}
+        </div>
+        {closeControl}
+      </Section>
+    );
+  }
+
+  if (col === 'invited') {
+    const sentOnce = (inv?.sends ?? []).some((s) => s.outcome === 'sent');
+    return (
+      <Section title="Stage 2 · Invited: waiting on their Form 2">
+        <FollowUpTracker lead={lead} />
+        <div className="mt-3 flex flex-wrap gap-2">
+          {inv?.unresponsive_at && (
+            <Button size="sm" loading={busy === 'clear'} onClick={() => run('clear', () => clearIntake2Unresponsive(lead.id), 'Cleared.')}>
+              They replied: clear unresponsive
+            </Button>
+          )}
+          <Button size="sm" variant={inv ? 'secondary' : 'primary'} loading={busy === 'send'} onClick={() => run('send', () => sendIntake2Invite(lead.id, sentOnce), sentOnce ? 'Sent again.' : 'Sent.')}>
+            {sentOnce ? 'Send Form 2 again' : 'Send Form 2'}
+          </Button>
+          {inv?.link && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={async () => {
+                const ok = await copy(inv.link);
+                onToast(ok ? 'Their Form 2 link is copied. It is theirs alone: do not share it.' : 'Could not copy the link.', ok ? 'ok' : 'failing');
+              }}
+            >
+              Copy their link
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" loading={busy === 'back'} onClick={() => run('back', () => moveVfarmLeadStage(lead.id, 1, null), 'Back to Stage 1.')}>
+            Back to Stage 1
+          </Button>
+        </div>
+        {closeControl}
+      </Section>
+    );
+  }
+
+  if (col === 'spec') {
+    const done = lead.intake_2!;
+    return (
+      <Section title="Stage 2 · Spec received">
+        <p className="text-[13px] text-ink">They sent Form 2 back on {day(done.submitted_at)}. Their answers are below.</p>
+        <ul className="mt-1 space-y-0.5 text-[12.5px] text-dim">
+          <li>
+            {done.notified?.ts ? 'Posted in #vfarm-early-access.' : done.notified?.error ? <span className="text-failing">Not posted in Slack: {done.notified.error}</span> : 'Slack post not recorded.'}
+          </li>
+          <li>
+            {done.confirmation_email?.outcome === 'sent' ? (
+              `Receipt emailed to ${done.confirmation_email.to}.`
+            ) : done.confirmation_email?.outcome === 'failed' ? (
+              <span className="text-failing">Receipt email did not go: {done.confirmation_email.error}</span>
+            ) : (
+              'Receipt email not recorded.'
+            )}
+          </li>
+        </ul>
+        <p className="mt-2 text-[12.5px] text-dim">Next: BHA reviews it. Nothing here confirms feasibility, pricing or anything else; their answers are information, not a decision.</p>
+        <div className="mt-3">
+          <Button variant="primary" size="sm" loading={busy === 'fwd'} onClick={() => run('fwd', () => moveVfarmLeadStage(lead.id, 3, null), 'Moved to Stage 3.')}>
+            Move to Stage 3 · Paying
+          </Button>
+        </div>
+        {closeControl}
+      </Section>
+    );
+  }
+
+  // paying
+  return (
+    <Section title="Stage 3 · Paying">
+      <p className="text-[13px] text-ink">A placeholder. No payment is taken here until Jason and Hardik set the price and the checkout.</p>
+      <div className="mt-3">
+        <Button size="sm" variant="ghost" loading={busy === 'back'} onClick={() => run('back', () => moveVfarmLeadStage(lead.id, 2, null), 'Back to Stage 2.')}>
+          Back to Stage 2
+        </Button>
+      </div>
+      {closeControl}
+    </Section>
   );
 }
 
-function NextStep({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdated: (l: VfarmLead) => void; onToast: (t: string, tone: 'ok' | 'failing') => void }) {
-  const [step, setStep] = useState(lead.next_step ?? '');
-  const [due, setDue] = useState(lead.next_step_due ?? '');
-  const [busy, setBusy] = useState(false);
-  if (lead.closed_at) return null;
-  const changed = step.trim() !== (lead.next_step ?? '') || due !== (lead.next_step_due ?? '');
-  async function save(s: string | null, d: string | null) {
-    setBusy(true);
-    try {
-      const l = await setVfarmLeadNextStep(lead.id, s, d);
-      onUpdated(l);
-      setStep(l.next_step ?? '');
-      setDue(l.next_step_due ?? '');
-      onToast(s ? 'Next step saved.' : 'Next step cleared.', 'ok');
-    } catch (e) {
-      onToast(e instanceof Error ? e.message : 'That did not save.', 'failing');
-    } finally {
-      setBusy(false);
-    }
-  }
+function answerText(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (Array.isArray(v)) return v.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(', ');
+  return JSON.stringify(v);
+}
+
+function FormASection({ lead: l, startOpen }: { lead: VfarmLead; startOpen: boolean }) {
+  const f = l.form_a;
+  const extra = f ? Object.keys(f.answers).filter((k) => !FORM_A_QUESTIONS.includes(k)) : [];
   return (
-    <Card title="Next step" right={overdue(lead) ? <Pill tone="degraded">overdue</Pill> : undefined}>
-      <div className="flex flex-wrap gap-2">
-        <input className="input h-8 min-w-[18ch] flex-1 text-[12.5px]" placeholder="What happens next, for example: call to review their site" value={step} onChange={(e) => setStep(e.target.value)} />
-        <input type="date" className="input h-8 w-[16ch] text-[12.5px]" value={due} onChange={(e) => setDue(e.target.value)} aria-label="Due" />
-      </div>
-      <div className="mt-2 flex gap-2">
-        <Button size="sm" disabled={!changed || !step.trim()} loading={busy} onClick={() => save(step.trim(), due || null)}>
-          Save
-        </Button>
-        {lead.next_step && (
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => save(null, null)}>
-            Done, clear it
-          </Button>
+    <details className="card px-5 py-4" open={startOpen}>
+      <summary className="cursor-pointer text-[14px] font-semibold text-ink">
+        Their Form A answers <span className="text-[12px] font-normal text-faint">· sent {day(f?.submitted_at && /^\d{4}-/.test(f.submitted_at) ? f.submitted_at : l.created_at)}</span>
+      </summary>
+      <div className="mt-3">
+        {!f ? (
+          <p className="text-[12.5px] text-dim">This lead came through the old public form, which stored only name, email and organisation.</p>
+        ) : (
+          <div className="space-y-4">
+            {FORM_A_GROUPS.map((g) => (
+              <section key={g.title}>
+                <h4 className="mb-1.5 text-[12px] font-medium text-dim">{g.title}</h4>
+                <dl className="divide-y divide-line rounded-[10px] border border-line">
+                  {g.questions.map((qn) => {
+                    const v = f.answers[qn];
+                    return (
+                      <div key={qn} className="grid gap-x-4 px-3 py-2 text-[12.5px] sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                        <dt className="text-dim">{qn.trim()}</dt>
+                        <dd className={`whitespace-pre-wrap ${v === undefined ? 'text-faint' : 'text-ink'}`}>{v === undefined ? 'not answered' : answerText(v)}</dd>
+                      </div>
+                    );
+                  })}
+                </dl>
+              </section>
+            ))}
+            {extra.length > 0 && (
+              <section>
+                <h4 className="mb-1.5 text-[12px] font-medium text-dim">Questions this page does not know</h4>
+                <dl className="divide-y divide-line rounded-[10px] border border-line">
+                  {extra.map((k) => (
+                    <div key={k} className="grid gap-x-4 px-3 py-2 text-[12.5px] sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                      <dt className="text-dim">{k}</dt>
+                      <dd className="whitespace-pre-wrap text-ink">{answerText(f.answers[k])}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            )}
+            <p className="text-[11px] text-faint">
+              Buyer id {f.buyer_intake_id}
+              {l.source_campaign ? ` · campaign ${l.source_campaign}` : ''}. Section headings are this page&rsquo;s, not the form&rsquo;s.
+            </p>
+          </div>
         )}
       </div>
-    </Card>
+    </details>
   );
 }
 
-/** One line of the timeline, from whichever record holds it. Newest first. */
+/** One line of history. Newest first. */
 interface Moment {
   at: string;
   what: ReactNode;
@@ -586,46 +605,33 @@ interface Moment {
 }
 
 function moments(l: VfarmLead): Moment[] {
-  const m: Moment[] = [];
-  m.push({ at: l.form_a?.submitted_at && /^\d{4}-/.test(l.form_a.submitted_at) ? l.form_a.submitted_at : l.created_at, what: l.form_a ? 'Form A received' : 'Signed up on the old public form', who: l.form_a ? 'Hardik’s tracker' : undefined });
-  for (const s of l.stage_history ?? []) {
-    const name = (n: number) => (n === 1 ? 'Interest' : n === 2 ? 'Invited' : 'Paying');
-    m.push({ at: s.at, what: `Moved from ${name(s.from)} to ${name(s.to)}${s.reason ? `: ${s.reason}` : ''}`, who: s.via === 'engine' ? `${s.by} (n8n)` : s.by });
-  }
+  const name = (n: number) => (n === 1 ? 'Stage 1' : n === 2 ? 'Stage 2' : 'Stage 3');
+  const m: Moment[] = [{ at: l.form_a?.submitted_at && /^\d{4}-/.test(l.form_a.submitted_at) ? l.form_a.submitted_at : l.created_at, what: l.form_a ? 'Filled in Form A' : 'Signed up on the old public form' }];
+  for (const s of l.stage_history ?? []) m.push({ at: s.at, what: `Moved from ${name(s.from)} to ${name(s.to)}${s.reason ? `: ${s.reason}` : ''}`, who: s.via === 'engine' ? `${s.by} (n8n)` : s.by });
   const inv = l.intake_2_invite;
-  for (const s of inv?.sends ?? []) {
-    m.push({ at: s.at, what: s.outcome === 'sent' ? `Intake-2 invite emailed to ${s.to}` : `Intake-2 invite did not go: ${s.error}`, who: s.by, tone: s.outcome === 'failed' ? 'failing' : undefined });
-  }
-  if (inv?.opened_at) m.push({ at: inv.opened_at, what: 'They opened the Intake-2 page' });
+  for (const s of inv?.sends ?? []) m.push({ at: s.at, what: s.outcome === 'sent' ? `Form 2 emailed to ${s.to}` : `Form 2 email did not go: ${s.error}`, tone: s.outcome === 'failed' ? 'failing' : undefined });
+  if (inv?.opened_at) m.push({ at: inv.opened_at, what: 'Opened Form 2' });
   (['fu1', 'fu2'] as const).forEach((k, i) => {
     const f = inv?.followups?.[k];
-    if (f?.at) m.push({ at: f.at, what: f.outcome === 'sent' ? `Follow-up ${i + 1} emailed` : `Follow-up ${i + 1} did not go: ${f.error}`, tone: f.outcome === 'failed' ? 'failing' : undefined });
+    if (f?.at && f.outcome) m.push({ at: f.at, what: f.outcome === 'sent' ? `Reminder ${i + 1} emailed` : `Reminder ${i + 1} did not go: ${f.error}`, tone: f.outcome === 'failed' ? 'failing' : undefined });
   });
-  if (inv?.unresponsive_at) m.push({ at: inv.unresponsive_at, what: 'Marked Unresponsive: no answer 14 days after the invite', tone: 'degraded' });
-  if (l.intake_2) m.push({ at: l.intake_2.submitted_at, what: 'They sent their site specification', who: 'the buyer' });
+  if (inv?.unresponsive_at) m.push({ at: inv.unresponsive_at, what: 'Marked unresponsive: no answer 14 days after Form 2', tone: 'degraded' });
+  for (const c of inv?.unresponsive_cleared ?? []) m.push({ at: c.at, what: 'Unresponsive cleared', who: c.by });
+  if (l.intake_2) m.push({ at: l.intake_2.submitted_at, what: 'Sent Form 2 back' });
   for (const a of l.activity ?? []) {
-    const what =
-      a.kind === 'note'
-        ? <span className="whitespace-pre-wrap text-ink">{a.text}</span>
-        : a.kind === 'next_step'
-        ? a.text
-          ? `Next step: ${a.text}${a.due ? ` (due ${a.due})` : ''}`
-          : 'Next step cleared'
-        : a.kind === 'closed'
-        ? `Closed: ${closeReasonLabel(a.reason)}${a.text ? `. ${a.text}` : ''}`
-        : `Reopened${a.text ? `. ${a.text}` : ''}`;
+    if (a.kind === 'next_step') continue;
+    const what = a.kind === 'note' ? <span className="whitespace-pre-wrap text-ink">{a.text}</span> : a.kind === 'closed' ? `Closed: ${closeReasonLabel(a.reason)}${a.text ? `. ${a.text}` : ''}` : `Reopened${a.text ? `. ${a.text}` : ''}`;
     m.push({ at: a.at, what, who: a.by });
   }
   return m.sort((a, b) => b.at.localeCompare(a.at));
 }
 
-function Timeline({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdated: (l: VfarmLead) => void; onToast: (t: string, tone: 'ok' | 'failing') => void }) {
+function History({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdated: (l: VfarmLead) => void; onToast: (t: string, tone: 'ok' | 'failing') => void }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  const list = moments(lead);
   return (
-    <Card title="Timeline">
-      <textarea className="input min-h-[60px] w-full py-2 text-[12.5px]" placeholder="Add a note: a call, an email, what they said" value={text} onChange={(e) => setText(e.target.value)} />
+    <Section title="Notes and history">
+      <textarea className="input min-h-[56px] w-full py-2 text-[12.5px]" placeholder="Add a note: a call, an email, what they said" value={text} onChange={(e) => setText(e.target.value)} />
       <div className="mt-2">
         <Button
           size="sm"
@@ -646,8 +652,8 @@ function Timeline({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdated: (l
           Add note
         </Button>
       </div>
-      <ol className="mt-3 space-y-2 border-l border-line pl-3">
-        {list.map((x, i) => (
+      <ol className="mt-4 space-y-2 border-l border-line pl-3">
+        {moments(lead).map((x, i) => (
           <li key={i} className="text-[12.5px]">
             <div className={x.tone === 'failing' ? 'text-failing' : x.tone === 'degraded' ? 'text-degraded' : 'text-dim'}>{x.what}</div>
             <div className="text-[11px] text-faint">
@@ -657,131 +663,7 @@ function Timeline({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdated: (l
           </li>
         ))}
       </ol>
-      {(lead.notes || (lead.status && lead.status !== 'new')) && (
-        <p className="mt-3 text-[11.5px] text-faint">
-          From before the timeline: status {lead.status}
-          {lead.notes ? `; note: ${lead.notes}` : ''}.
-        </p>
-      )}
-    </Card>
-  );
-}
-
-function answerText(v: unknown): string {
-  if (typeof v === 'string') return v;
-  if (Array.isArray(v)) return v.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(', ');
-  return JSON.stringify(v);
-}
-
-const ATTRIBUTION = ['utm_source', 'utm_medium', 'utm_campaign', 'asset_id', 'source_channel', 'landing_variant', 'contract_version'] as const;
-
-function Profile({ lead: l, onToast }: { lead: VfarmLead; onToast: (t: string, tone: 'ok' | 'failing') => void }) {
-  const f = l.form_a;
-  const extra = f ? Object.keys(f.answers).filter((k) => !FORM_A_QUESTIONS.includes(k)) : [];
-  const attribution = l.contract_version === null ? null : ATTRIBUTION.map((k) => [k, l[k] || '—'] as const);
-  return (
-    <>
-      <Card title="Contact">
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[12.5px]">
-          <dt className="text-faint">email</dt>
-          <dd className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-ink">{l.email}</span>
-            <button
-              type="button"
-              className="link text-[11.5px]"
-              onClick={async () => {
-                const ok = await copy(l.email);
-                onToast(ok ? `Copied ${l.email}` : 'The browser would not let the page write to the clipboard.', ok ? 'ok' : 'failing');
-              }}
-            >
-              copy
-            </button>
-          </dd>
-          <dt className="text-faint">organisation</dt>
-          <dd className="text-ink">{l.organization_name ?? '—'}</dd>
-          <dt className="text-faint">joined</dt>
-          <dd className="text-ink">{stamp(l.created_at)}</dd>
-          <dt className="text-faint">came from</dt>
-          <dd className="text-dim">
-            {l.source_page ?? l.source_surface}
-            {l.source_campaign ? ` · ${l.source_campaign}` : ''}
-          </dd>
-          {l.is_repeat_email && (
-            <>
-              <dt className="text-faint">note</dt>
-              <dd className="text-dim">this address is on an earlier lead too</dd>
-            </>
-          )}
-          {l.pilot_offers && l.pilot_offers.length > 0 && (
-            <>
-              <dt className="text-faint">pilot offer</dt>
-              <dd className="text-dim">{l.pilot_offers.map((o) => `${o.id} (${o.status})`).join(', ')}</dd>
-            </>
-          )}
-        </dl>
-        {attribution && (
-          <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[11.5px]">
-            {attribution.map(([k, v]) => (
-              <div key={k} className="contents">
-                <dt className="text-faint">{k}</dt>
-                <dd className="truncate text-dim">{v}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
-      </Card>
-
-      <Card title="Form A">
-        {!f ? (
-          <p className="text-[12.5px] text-dim">This lead came through the old public form route, which stored only name, email and organisation.</p>
-        ) : (
-          <div className="space-y-3">
-            {FORM_A_GROUPS.map((g) => (
-              <section key={g.title}>
-                <h4 className="mb-1 text-[11.5px] font-medium text-dim">{g.title}</h4>
-                <dl className="space-y-1.5">
-                  {g.questions.map((qn) => {
-                    const v = f.answers[qn];
-                    return (
-                      <div key={qn} className="text-[12px]">
-                        <dt className="text-faint">{qn.trim()}</dt>
-                        <dd className={`whitespace-pre-wrap ${v === undefined ? 'text-faint' : 'text-ink'}`}>{v === undefined ? 'not answered' : answerText(v)}</dd>
-                      </div>
-                    );
-                  })}
-                </dl>
-              </section>
-            ))}
-            {extra.length > 0 && (
-              <section>
-                <h4 className="mb-1 text-[11.5px] font-medium text-dim">Questions this page does not know</h4>
-                {extra.map((k) => (
-                  <div key={k} className="text-[12px]">
-                    <div className="text-faint">{k}</div>
-                    <div className="whitespace-pre-wrap text-ink">{answerText(f.answers[k])}</div>
-                  </div>
-                ))}
-              </section>
-            )}
-            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 border-t border-line pt-2 text-[11px]">
-              {(
-                [
-                  ['buyer_intake_id', f.buyer_intake_id],
-                  ['early_access_lead_id', f.early_access_lead_id],
-                  ['correlation_id', f.correlation_id],
-                  ['submitted_at', f.submitted_at],
-                ] as const
-              ).map(([k, v]) => (
-                <div key={k} className="contents">
-                  <dt className="text-faint">{k}</dt>
-                  <dd className="tabular truncate text-dim">{v ?? 'not sent'}</dd>
-                </div>
-              ))}
-            </dl>
-            <p className="text-[11px] text-faint">Headings are this page&rsquo;s, not the form&rsquo;s.</p>
-          </div>
-        )}
-      </Card>
-    </>
+      {lead.notes && <p className="mt-3 text-[11.5px] text-faint">Note from before: {lead.notes}</p>}
+    </Section>
   );
 }
