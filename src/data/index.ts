@@ -432,6 +432,22 @@ export function setCodexStatus(id: string, jasonStatus: string): Promise<CodexEn
   return api<CodexEntry>(`/api/codex/${encodeURIComponent(id)}`, { method: 'PATCH', body: { jason_status: jasonStatus }, timeoutMs: 60_000 });
 }
 
+/** What a reject answers (server/src/codexReject.ts). */
+export interface CodexRejectResult {
+  ok: boolean;
+  rejected: boolean;
+  submission_id: string | null;
+  rejected_by: string;
+  reason: string;
+  cards?: { what: string; channel: string; ts: string; ok: boolean; error?: string }[];
+  message?: string;
+}
+
+/** Rejects one Codex log (2026-10-15): Jason or Destiny, with a reason. */
+export function rejectCodexLog(id: string, requesterUserId: string, reason: string): Promise<CodexRejectResult> {
+  return api<CodexRejectResult>(`/api/codex/${encodeURIComponent(id)}/reject`, { method: 'POST', body: { requester_user_id: requesterUserId, reason }, timeoutMs: 60_000 });
+}
+
 /**
  * Deletes one submission from Airtable and from here. `confirm` is the Codex
  * entry id typed back — the server refuses anything else.

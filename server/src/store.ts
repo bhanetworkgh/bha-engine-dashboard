@@ -1512,6 +1512,51 @@ export async function setJasonStatus(id: string, status: string, actor = 'dashbo
 }
 
 /**
+ * Rejects one submission (2026-10-15, Destiny — Jason's ask in Ahad's thread:
+ * "how this log can be rejected now that it's in limbo"). The caller,
+ * `codexReject.reject`, has already checked who is asking and why; this is the
+ * write: Jason Status `Rejected` and four new fields, every field the row
+ * already had kept, the status dated, and one `record_writes` line. New field
+ * names only — nothing the engine writes is renamed.
+ */
+export async function rejectCodex(
+  id: string,
+  r: { by_name: string; by_slack_id: string; reason: string; at: string },
+  actor = 'dashboard',
+): Promise<CodexEntryDetail> {
+  const mr = await mirrorRowById('codex', id);
+  if (!mr) throw new StoreError('That submission is not held by this dashboard.', 404);
+  const m = await writeFields('codex', mr, {
+    [codex_.FIELD.jasonStatus]: 'Rejected',
+    'Rejected At': r.at,
+    'Rejected By': r.by_name,
+    'Rejected By Slack ID': r.by_slack_id,
+    'Rejected Reason': r.reason,
+  });
+  await recordState('codex', m, 'ui', r.at, await lastEventFor('codex', id));
+  const fields = mr.fields ?? {};
+  await logRecordWrite({
+    kind: 'codex',
+    record_id: id,
+    natural_id: typeof fields[codex_.FIELD.submissionId] === 'string' ? (fields[codex_.FIELD.submissionId] as string) : null,
+    state: 'skipped',
+    status: 'Rejected',
+    action: 'reject',
+    detail: `${codex_.FIELD.jasonStatus} → Rejected by ${r.by_name}: ${r.reason}`.slice(0, 1000),
+    reason: null,
+    http: null,
+    steps: [],
+    from_table: tableOf('codex', mr),
+    to_table: null,
+    new_record_id: null,
+    actor,
+  });
+  const out = await rowById('codex', id);
+  if (!out) throw new StoreError('The submission was rejected but could not be read back.', 500);
+  return JSON.parse(out.json) as CodexEntryDetail;
+}
+
+/**
  * Deletes one submission from Airtable and from here.
  *
  * This exists for production testing: driving a log through Layer 0, Layer 1
@@ -2760,6 +2805,7 @@ const APPROVAL_LABELS: Record<CodexApproval, string> = {
   approved: 'Approved',
   pending: 'Pending',
   'input added': 'Input added',
+  rejected: 'Rejected',
   unset: 'Not set',
 };
 
@@ -2787,6 +2833,7 @@ const TAB_RULES: { tab: CodexTab; label: string; layer: string; test: (e: CodexE
   { tab: 'approved', label: 'Approved', layer: 'Builder codex', test: (e) => e.stage === 'approved' },
   { tab: 'awaiting', label: 'Awaiting approval', layer: 'Pending review', test: (e) => e.stage === 'awaiting' },
   { tab: 'needs_input', label: 'Needs input', layer: 'Completeness check', test: (e) => e.stage === 'needs_input' },
+  { tab: 'rejected', label: 'Rejected', layer: 'Rejected', test: (e) => e.stage === 'rejected' },
 ];
 
 export function codexTabRule(tab: CodexTab): (e: CodexEntry) => boolean {
@@ -2831,7 +2878,7 @@ export async function codexMetrics(builder: string | null, month?: string | null
     weeks: weekStarts.map((w) => ({ week: isoWeek(w), start: w, label: weekLabel(w), short: shortWeekLabel(w), n: everything.filter((e) => e.builder_id === o && e.week === isoWeek(w)).length })),
   }));
 
-  const approvals: CodexApproval[] = ['approved', 'pending', 'input added', 'unset'];
+  const approvals: CodexApproval[] = ['approved', 'pending', 'input added', 'rejected', 'unset'];
   /**
    * The pipeline's three tiers, highest to lowest. Not sorted: sorting gave
    * Excellent, Good, Great — alphabetical, which reads as Good outranking

@@ -6,7 +6,7 @@
  */
 import { createPortal } from 'react-dom';
 import { useEffect, useState } from 'react';
-import { deleteCodexEntry, getCodexDetail, setCodexStatus, type CodexEntry, type CodexEntryDetail } from '../data';
+import { deleteCodexEntry, getCodexDetail, rejectCodexLog, setCodexStatus, type CodexEntry, type CodexEntryDetail } from '../data';
 import { Button, Pill, NotLanded, unlanded } from '../components/ui';
 import { ENTRY_DEFS, JASON_STATUS_DEFS, PAID_DEFS, QUALITY_DEF, STAGE_DEFS } from './codexDefinitions';
 
@@ -22,7 +22,7 @@ export function when(iso: string | null): string {
 export function StagePill({ entry }: { entry: CodexEntry }) {
   // Pill takes no title, so the definition sits on a wrapper (see codexDefinitions.ts).
   const pill =
-    entry.stage === 'approved' ? <Pill tone="ok">approved</Pill> : entry.stage === 'needs_input' ? <Pill tone="degraded">needs input</Pill> : <Pill>awaiting approval</Pill>;
+    entry.stage === 'rejected' ? <Pill>rejected</Pill> : entry.stage === 'approved' ? <Pill tone="ok">approved</Pill> : entry.stage === 'needs_input' ? <Pill tone="degraded">needs input</Pill> : <Pill>awaiting approval</Pill>;
   return <span title={STAGE_DEFS[entry.stage]}>{pill}</span>;
 }
 
@@ -113,6 +113,10 @@ export function CodexEntryDialog({
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirm, setConfirm] = useState('');
+  // Reject (2026-10-15): Jason's or Destiny's, with a reason the builder is shown.
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectAs, setRejectAs] = useState<'U0A9V97949F' | 'U0AEW3TBYH1'>('U0A9V97949F');
 
   useEffect(() => {
     let live = true;
@@ -143,6 +147,26 @@ export function CodexEntryDialog({
       );
     } catch (e) {
       setToast?.({ text: e instanceof Error ? e.message : 'The change did not save.', tone: 'failing' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reject() {
+    setBusy(true);
+    try {
+      const r = await rejectCodexLog(id, rejectAs, rejectReason.trim());
+      const fresh = await getCodexDetail(id);
+      setDetail(fresh);
+      onSaved?.(fresh);
+      setRejecting(false);
+      setToast?.(
+        r.ok
+          ? { text: `Rejected. The builder was told in Slack and the review card no longer has buttons.`, tone: 'ok' }
+          : { text: r.message ?? 'Rejected, but a Slack message was not rewritten.', tone: 'failing' },
+      );
+    } catch (e) {
+      setToast?.({ text: e instanceof Error ? e.message : 'The log was not rejected.', tone: 'failing' });
     } finally {
       setBusy(false);
     }
@@ -204,9 +228,14 @@ export function CodexEntryDialog({
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {!readOnly && detail.approval !== 'approved' && (
+                {!readOnly && detail.approval !== 'approved' && detail.approval !== 'rejected' && (
                   <Button variant="primary" size="sm" disabled={busy} onClick={() => void review('Approved')}>
                     {busy ? 'Writing…' : 'Approve'}
+                  </Button>
+                )}
+                {!readOnly && detail.approval !== 'approved' && detail.approval !== 'input added' && detail.approval !== 'rejected' && !detail.codex_entry_id && !rejecting && (
+                  <Button variant="secondary" size="sm" disabled={busy} onClick={() => setRejecting(true)}>
+                    Reject
                   </Button>
                 )}
                 {!readOnly && detail.approval === 'approved' && (
@@ -254,6 +283,52 @@ export function CodexEntryDialog({
                 </div>
               )}
             </div>
+
+            {detail.rejected && (
+              <div className="mt-4 rounded-[14px] border border-line px-4 py-3 text-[12.5px] leading-relaxed">
+                <div className="font-medium text-ink">
+                  Rejected{detail.rejected.by ? ` by ${detail.rejected.by}` : ''}
+                  {detail.rejected.at ? ` on ${when(detail.rejected.at)}` : ''}
+                </div>
+                <div className="text-dim">{detail.rejected.reason ?? 'No reason was recorded.'}</div>
+                <div className="mt-1 text-[11.5px] text-faint">It does not go to the Codex and is not counted for pay. Nothing in the engine can change it.</div>
+              </div>
+            )}
+
+            {rejecting && !detail.rejected && (
+              <div className="mt-4 rounded-[14px] border border-line px-4 py-3">
+                <div className="text-[12.5px] leading-relaxed text-ink">
+                  Reject this log. It will never go to the Codex or count for pay, the review card and the sent-back messages lose their buttons, and the builder is told in
+                  Slack with your reason.
+                </div>
+                <textarea
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  rows={3}
+                  maxLength={1000}
+                  placeholder="Why, in a sentence the builder will read. For example: your newer log covers what was asked for."
+                  className="input mt-2.5 w-full"
+                  aria-label="Why this log is rejected"
+                />
+                <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                  <label className="text-[12px] text-dim">
+                    Rejecting as{' '}
+                    <select value={rejectAs} onChange={(e) => setRejectAs(e.target.value as 'U0A9V97949F' | 'U0AEW3TBYH1')} className="input ml-1 inline-block w-auto py-1">
+                      <option value="U0A9V97949F">Jason</option>
+                      <option value="U0AEW3TBYH1">Destiny</option>
+                    </select>
+                  </label>
+                  <span className="text-[11.5px] text-faint">One shared login, so this is declared, not checked.</span>
+                  <span className="flex-1" />
+                  <Button variant="destructive" size="sm" loading={busy} disabled={busy || rejectReason.trim().length < 3} onClick={() => void reject()}>
+                    Reject log
+                  </Button>
+                  <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setRejecting(false); setRejectReason(''); }}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/* The gate's own verdict, in full, where it stopped the log. */}
             {detail.layer0_flagged && (

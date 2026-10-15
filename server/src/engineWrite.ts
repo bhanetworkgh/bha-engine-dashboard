@@ -15,6 +15,13 @@
  */
 import * as mirror from './mirror';
 import * as store from './store';
+import { guardRejected } from './codexReject';
+
+/** The submission a whole-record codex write names, for the rejected-log guard. */
+function submissionOf(fields: unknown): string | null {
+  const v = fields && typeof fields === 'object' ? (fields as Record<string, unknown>)['Submission ID'] : null;
+  return typeof v === 'string' && v.trim() ? v.trim() : null;
+}
 
 export interface WriteCtx {
   /** What the log calls the caller: a route path, or `mcp:<tool>`. */
@@ -53,6 +60,8 @@ function detail(ctx: WriteCtx, text: string): string {
  */
 export async function postRecord(kind: mirror.MirrorKind, body: mirror.MirrorInput, ctx: WriteCtx): Promise<PostResult> {
   try {
+    // A rejected Codex log is closed to the engine (2026-10-15, codexReject.ts).
+    if (kind === 'codex') await guardRejected({ submissionId: submissionOf(body.fields) }, (body.fields as Record<string, unknown> | null) ?? null);
     const result = await mirror.upsert(kind, body, 'engine');
     // The row is stored; this dates the status it left the record in. It is
     // the only place a status change is timestamped, so it happens on the
@@ -111,6 +120,7 @@ export async function patchRecord(
   naturalKey: string | null = null,
 ): Promise<mirror.PatchResult & { ok: true }> {
   try {
+    if (kind === 'codex') await guardRejected({ rowId }, fields);
     const r = await mirror.patchFields(kind, rowId, fields, 'engine');
     // Same as a POST: the row is stored, and this dates the status it was
     // left in. A patch that sets Status is exactly such a change.

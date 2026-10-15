@@ -31,6 +31,8 @@ import * as airtable_ from './airtable';
 import { LOOPS_BASE_ID, OPEN_LOOPS_BASE_VAR, RETIRED_VAR, SUBMISSIONS_BASE_FROM_ENV, SUBMISSIONS_BASE_ID, SUBMISSIONS_BASE_VAR, WRITEBACK_VAR, airtableConfigured, retired as airtableRetired, writebackEnabled as airtableWritebackEnabled } from './airtable';
 import { IMPORT_GROUPS, finalImport as runFinalImport, isImportGroup } from './finalImport';
 import * as codex from './codex';
+import * as codexReject from './codexReject';
+import * as writeTools from './mcp/writeTools';
 import * as loops from './loops';
 import * as mirror from './mirror';
 import * as engineWrite from './engineWrite';
@@ -1673,6 +1675,32 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * pending; "Input Added" is the pipeline's to set and is never a button
      * here, so it is not accepted.
      */
+    /**
+     * Reject one Codex log (2026-10-15, Destiny): Jason's or Destiny's, with a
+     * reason, and only for a log that will never be approved. The rules and the
+     * Slack cards are codexReject.reject's; the MCP tool reject_codex_log calls
+     * the same function. Audited on engine_mcp_writes as access `page`.
+     */
+    const codexReject_ = p.match(/^\/api\/codex\/([^/]+)\/reject$/);
+    if (codexReject_) {
+      const body = await readJson(req);
+      const requester = typeof body.requester_user_id === 'string' ? body.requester_user_id : null;
+      const args = { id: decodeURIComponent(codexReject_[1]), reason: body.reason, requester_user_id: requester };
+      const audit = await writeTools.auditOpen({ tool: 'reject_codex_log', args, access: 'page', kind: 'codex', requester, dry_run: false });
+      try {
+        const r = await codexReject.reject({ ref: args.id, requester_user_id: requester, reason: typeof body.reason === 'string' ? body.reason : null, actor: sessionInfo(req).email });
+        await writeTools.auditClose(audit, { outcome: r.ok ? 'applied' : 'applied_with_errors', detail: 'message' in r ? String(r.message) : `rejected by ${r.rejected_by}`, record_id: r.row_id, natural_id: r.submission_id, after: r });
+        return send(res, 200, r);
+      } catch (e) {
+        if (e instanceof codexReject.RejectError) {
+          await writeTools.auditClose(audit, { outcome: 'refused', detail: `${e.reason}: ${e.message}`, guard_result: { reason: e.reason } });
+          throw new HttpError(e.status, e.message);
+        }
+        await writeTools.auditClose(audit, { outcome: 'error', detail: e instanceof Error ? e.message : String(e) });
+        throw e;
+      }
+    }
+
     const codexEdit = p.match(/^\/api\/codex\/([^/]+)$/);
     if (codexEdit) {
       const body = await readJson(req);
