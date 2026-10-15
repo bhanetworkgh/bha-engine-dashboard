@@ -63,6 +63,8 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
     await query(`DELETE FROM meta WHERE key LIKE 'vfarm.first_real.%'`);
     await query(`DELETE FROM engine_events WHERE subject_id IN ($1,$2) OR event_type IN ('vfarm_first_real_data','vfarm_first_real_data_notice_failed')`, [SIM, REAL]);
     await query(`DELETE FROM engine_vfarm_devices WHERE farm_id = $1`, [SIM]);
+    await query(`DELETE FROM engine_monitoring_incidents WHERE farm_id = $1`, [SIM]);
+    await query(`DELETE FROM engine_incidents WHERE natural_id = 'INC-TEST-UN9D-001'`);
     await query(`DELETE FROM engine_vfarm_farms WHERE farm_id = $1`, [SIM]);
   };
   await clean();
@@ -95,8 +97,14 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
     assert.equal(ev.rows[0].n, 1);
     ok('a failed DM gives the claim back; the first real dry run DMs Destiny once with farm and device count; the second sends nothing');
 
-    // 3. check on the simulated farm
+    // 3. check on the simulated farm, with one ledgered silent-device incident and Engine health's copy (resolved_at is text there)
+    await query(`INSERT INTO engine_monitoring_incidents (incident_id, farm_id, device_id, kind, severity, detail, synthetic, opened_at, closed_at, ledger_id, ledger_state)
+                 VALUES ('INC-VFARM-TEST-UN9D', $1, 'test-un9d-dev', 'offline', 'warning', 'test', true, '2026-10-09T12:00:00Z', '2026-10-09T12:20:00Z', 'INC-TEST-UN9D-001', 'closed')`, [SIM]);
+    await query(`INSERT INTO engine_incidents (natural_id, fields, source, first_seen_at, updated_at, open_now, resolved_at)
+                 VALUES ('INC-TEST-UN9D-001', '{}', 'engine', '2026-10-09T12:00:00Z', '2026-10-09T12:20:00Z', false, '2026-10-09T12:20:00.000Z')`);
     const c = await un9d.check(SIM, { actor: 'test' });
+    assert.equal(c.tests[1].conditions.find((x) => x.id === 'downstream_agrees').verdict, 'pass');
+    assert.equal(c.tests[1].verdict, 'pass');
     assert.equal(c.simulated, true);
     assert.match(c.claim, /NOT_SAFE_TO_CLAIM/);
     assert.equal(c.tests.length, 2);
