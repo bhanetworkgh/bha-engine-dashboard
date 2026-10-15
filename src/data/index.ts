@@ -624,6 +624,14 @@ export function editVfarmLead(id: string, changes: { status?: VfarmLeadStatus; n
   return api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}`, { method: 'PATCH', body: changes });
 }
 
+/** The Early Access CRM (2026-10-15): a note, the next step, close with a reason, reopen. */
+export const addVfarmLeadNote = (id: string, text: string) => api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}/note`, { method: 'POST', body: { text } });
+export const setVfarmLeadNextStep = (id: string, step: string | null, due: string | null) =>
+  api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}/next-step`, { method: 'POST', body: { step, due } });
+export const closeVfarmLead = (id: string, reason: string, note: string | null) =>
+  api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}/close`, { method: 'POST', body: { reason, note } });
+export const reopenVfarmLead = (id: string) => api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}/reopen`, { method: 'POST', body: {} });
+
 /** Clear a lead's Unresponsive mark (2026-10-15). */
 export function clearIntake2Unresponsive(id: string): Promise<{ ok: boolean; message: string }> {
   return api<{ ok: boolean; message: string }>(`/api/vfarm/leads/${encodeURIComponent(id)}/intake-2/responsive`, { method: 'POST', body: {} });

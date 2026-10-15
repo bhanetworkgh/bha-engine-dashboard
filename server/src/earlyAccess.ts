@@ -43,6 +43,7 @@ import { offersByLead } from './vfarmGates';
 import { FORM_A_QUESTIONS } from '../../src/data/formA';
 import type { Intake2Invite, Intake2Stored } from '../../src/data/intake2';
 import * as intake2 from './intake2';
+import { CLOSE_REASONS, type LeadActivity } from '../../src/data/leadPipeline';
 
 /* ------------------------------------------------------------------ config */
 
@@ -466,6 +467,13 @@ export interface Lead {
   intake_2_completed_at: string | null;
   /** The invite and every email sent for it; never the link's hash. */
   intake_2_invite: Omit<Intake2Invite, 'token_sha256'> | null;
+  /** The CRM (15 Oct 2026): what happens next and by when, a close with a reason, and the timeline. */
+  next_step: string | null;
+  next_step_due: string | null;
+  closed_at: string | null;
+  closed_reason: string | null;
+  closed_note: string | null;
+  activity: LeadActivity[];
 }
 
 export interface StageMove {
@@ -498,13 +506,14 @@ export interface LeadsData {
  * up somewhere it should not be.
  */
 export async function leads(): Promise<LeadsData> {
-  const r = await query<Omit<Lead, 'stage_changed_at' | 'pilot_offers' | 'intake_2_completed_at' | 'intake_2_invite'> & { created_at: Date; notified_at: Date | null; submitted_at: Date | null; stage_changed_at: Date | null; intake_2_completed_at: Date | null; intake_2_invite: Omit<Intake2Invite, 'link'> | null; seq: string }>(
+  const r = await query<Omit<Lead, 'stage_changed_at' | 'pilot_offers' | 'intake_2_completed_at' | 'intake_2_invite' | 'closed_at' | 'next_step_due'> & { closed_at: Date | null; next_step_due: string | Date | null; created_at: Date; notified_at: Date | null; submitted_at: Date | null; stage_changed_at: Date | null; intake_2_completed_at: Date | null; intake_2_invite: Omit<Intake2Invite, 'link'> | null; seq: string }>(
     `SELECT id, full_name, email, organization_name, source_surface, source_page, source_campaign,
             page_contract_version, mechanics_contract_version, claim_state, status, notes,
             notified_at, submitted_at, created_at, user_agent,
             utm_source, utm_medium, utm_campaign, asset_id, source_channel,
             landing_variant, contract_version, form_a, stage, stage_changed_at, stage_history,
             intake_2, intake_2_completed_at, intake_2_invite,
+            next_step, to_char(next_step_due, 'YYYY-MM-DD') AS next_step_due, closed_at, closed_reason, closed_note, activity,
             row_number() OVER (PARTITION BY email ORDER BY created_at, id) AS seq
        FROM engine_vfarm_leads
       ORDER BY created_at DESC, id DESC`,
@@ -522,6 +531,9 @@ export async function leads(): Promise<LeadsData> {
     stage_history: Array.isArray(row.stage_history) ? row.stage_history : [],
     intake_2_completed_at: iso(row.intake_2_completed_at),
     intake_2_invite: intake2.forPage(row.intake_2_invite),
+    next_step_due: row.next_step_due ? String(row.next_step_due) : null,
+    closed_at: iso(row.closed_at),
+    activity: Array.isArray(row.activity) ? row.activity : [],
     // Row one of an address is the first time it was seen; anything after is a repeat.
     is_repeat_email: Number(row.seq) > 1,
   }));
@@ -559,10 +571,11 @@ export async function moveStage(
   const where = key.id ? `id = $1` : `form_a->>'buyer_intake_id' = $1`;
   const val = key.id ?? key.buyer_intake_id;
   if (!val) throw new SubmissionError(422, 'Name the lead by id or buyer_intake_id.');
-  const cur = await query<{ id: string; stage: number; intake_2_completed_at: Date | null }>(`SELECT id, stage, intake_2_completed_at FROM engine_vfarm_leads WHERE ${where}`, [val]);
+  const cur = await query<{ id: string; stage: number; intake_2_completed_at: Date | null; closed_at: Date | null }>(`SELECT id, stage, intake_2_completed_at, closed_at FROM engine_vfarm_leads WHERE ${where}`, [val]);
   if (!cur.rows.length) throw new SubmissionError(404, `No lead with that ${key.id ? 'id' : 'buyer_intake_id'}.`);
   if (cur.rows.length > 1) throw new SubmissionError(409, `More than one lead carries that buyer_intake_id: ${cur.rows.map((r) => r.id).join(', ')}.`);
   const row = cur.rows[0];
+  if (row.closed_at) throw new SubmissionError(409, 'That lead is closed. Reopen it before moving it.');
   if (row.stage === to) throw new SubmissionError(409, `That lead is already in stage ${to}.`);
   // Stage 3 is paying, which Jason gated behind Intake-2 (14 Oct). A placeholder still keeps the gate.
   if (to === 3 && !row.intake_2_completed_at) throw new SubmissionError(409, 'Stage 3 is for a buyer whose site specification (Intake-2) is in. This lead has not sent it yet.');
@@ -748,4 +761,83 @@ export async function storeFormA(body: Record<string, unknown>): Promise<FormAWr
     missing_questions: FORM_A_QUESTIONS.filter((q) => !(q in answers)),
     ignored_fields: Object.keys(body).filter((k) => !ENGINE_FIELDS.includes(k)),
   };
+}
+
+
+/**
+ * The CRM's four writes (15 Oct 2026, Destiny). Each appends one line to `activity` with who
+ * and when, in the same statement that changes the row, so the timeline cannot miss a change.
+ * One shared login means `by` is whoever the page says, never checked.
+ */
+async function one(id: string): Promise<Lead> {
+  events.changed('vfarm_leads', id);
+  const all = await leads();
+  const l = all.leads.find((x) => x.id === id);
+  if (!l) throw new SubmissionError(404, 'No lead with that id.');
+  return l;
+}
+
+const who = (by: string | null | undefined) => (by && by.trim() ? by.trim().slice(0, 120) : 'the dashboard login');
+
+export async function addNote(id: string, text: string, by?: string): Promise<Lead> {
+  const t = String(text ?? '').trim().slice(0, 4000);
+  if (!t) throw new SubmissionError(422, 'A note needs some text.');
+  const a: LeadActivity = { at: new Date().toISOString(), by: who(by), kind: 'note', text: t };
+  const r = await query(`UPDATE engine_vfarm_leads SET activity = activity || $2::jsonb WHERE id::text = $1 RETURNING id`, [id, JSON.stringify([a])]);
+  if (!r.rows.length) throw new SubmissionError(404, 'No lead with that id.');
+  return one(id);
+}
+
+/** Sets, changes or clears what happens next. A due date is a calendar day, YYYY-MM-DD. */
+export async function setNextStep(id: string, step: string | null, due: string | null, by?: string): Promise<Lead> {
+  const t = step && step.trim() ? step.trim().slice(0, 500) : null;
+  const d = due && due.trim() ? due.trim() : null;
+  if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new SubmissionError(422, 'The due date must be a day, YYYY-MM-DD.');
+  if (d && !t) throw new SubmissionError(422, 'A due date needs a next step to go with it.');
+  const a: LeadActivity = { at: new Date().toISOString(), by: who(by), kind: 'next_step', text: t, due: d };
+  const r = await query(
+    `UPDATE engine_vfarm_leads SET next_step = $2, next_step_due = $3::date, activity = activity || $4::jsonb WHERE id::text = $1 RETURNING id`,
+    [id, t, d, JSON.stringify([a])],
+  );
+  if (!r.rows.length) throw new SubmissionError(404, 'No lead with that id.');
+  return one(id);
+}
+
+/**
+ * Closing needs a reason, and Other needs a note (the CRM standard: a lost deal without a
+ * reason teaches nothing). Closing stops Intake-2's follow-ups; it keeps everything on the row.
+ * The next step is cleared, because a closed lead has none.
+ */
+export async function close(id: string, reason: string, note: string | null, by?: string): Promise<Lead> {
+  const keys = CLOSE_REASONS.map((r) => r.key) as readonly string[];
+  if (!keys.includes(reason)) throw new SubmissionError(422, `Say why the lead is closed: one of ${keys.join(', ')}.`);
+  const n = note && note.trim() ? note.trim().slice(0, 2000) : null;
+  if (reason === 'other' && !n) throw new SubmissionError(422, 'Other needs a note saying why.');
+  const a: LeadActivity = { at: new Date().toISOString(), by: who(by), kind: 'closed', text: n, reason };
+  const r = await query(
+    `UPDATE engine_vfarm_leads SET closed_at = now(), closed_reason = $2, closed_note = $3, next_step = NULL, next_step_due = NULL,
+            activity = activity || $4::jsonb
+      WHERE id::text = $1 AND closed_at IS NULL RETURNING id`,
+    [id, reason, n, JSON.stringify([a])],
+  );
+  if (!r.rows.length) {
+    const e = await query(`SELECT 1 FROM engine_vfarm_leads WHERE id::text = $1`, [id]);
+    throw new SubmissionError(e.rows.length ? 409 : 404, e.rows.length ? 'That lead is already closed.' : 'No lead with that id.');
+  }
+  return one(id);
+}
+
+/** Opens a closed lead again in the column its stage puts it in. The close stays on the timeline. */
+export async function reopen(id: string, by?: string): Promise<Lead> {
+  const a: LeadActivity = { at: new Date().toISOString(), by: who(by), kind: 'reopened', text: null };
+  const r = await query(
+    `UPDATE engine_vfarm_leads SET closed_at = NULL, closed_reason = NULL, closed_note = NULL, activity = activity || $2::jsonb
+      WHERE id::text = $1 AND closed_at IS NOT NULL RETURNING id`,
+    [id, JSON.stringify([a])],
+  );
+  if (!r.rows.length) {
+    const e = await query(`SELECT 1 FROM engine_vfarm_leads WHERE id::text = $1`, [id]);
+    throw new SubmissionError(e.rows.length ? 409 : 404, e.rows.length ? 'That lead is not closed.' : 'No lead with that id.');
+  }
+  return one(id);
 }

@@ -1569,6 +1569,26 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
    * (14 Oct 2026). Moving a lead to Stage 2 already sends it; this is for a
    * lead that was in Stage 2 before Intake-2 existed, or a send that failed.
    */
+  /**
+   * The Early Access CRM's four writes (15 Oct 2026): a note, the next step, close with a
+   * reason, reopen. Each lands on the lead's timeline. Behind the cookie like the rest.
+   */
+  const crm = p.match(/^\/api\/vfarm\/leads\/([^/]+)\/(note|next-step|close|reopen)$/);
+  if (crm && method === 'POST') {
+    const body = await readJson(req);
+    const id = decodeURIComponent(crm[1]);
+    const by = typeof body.by === 'string' ? body.by : undefined;
+    const str = (v: unknown) => (typeof v === 'string' ? v : null);
+    try {
+      if (crm[2] === 'note') return send(res, 200, await earlyAccess.addNote(id, str(body.text) ?? '', by));
+      if (crm[2] === 'next-step') return send(res, 200, await earlyAccess.setNextStep(id, str(body.step), str(body.due), by));
+      if (crm[2] === 'close') return send(res, 200, await earlyAccess.close(id, str(body.reason) ?? '', str(body.note), by));
+      return send(res, 200, await earlyAccess.reopen(id, by));
+    } catch (e) {
+      if (e instanceof earlyAccess.SubmissionError) throw new HttpError(e.status, e.message);
+      throw e;
+    }
+  }
   const invite2 = p.match(/^\/api\/vfarm\/leads\/([^/]+)\/intake-2\/invite$/);
   const resp2 = p.match(/^\/api\/vfarm\/leads\/([^/]+)\/intake-2\/responsive$/);
   if (resp2 && method === 'POST') {

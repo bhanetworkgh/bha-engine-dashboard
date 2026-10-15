@@ -1,4 +1,5 @@
 import type { Intake2Invite, Intake2Send, Intake2Stored } from './intake2';
+import type { LeadActivity } from './leadPipeline';
 /**
  * Shapes returned by the data module.
  *
@@ -3163,6 +3164,13 @@ export interface VfarmLead {
   intake_2_completed_at?: string | null;
   /** The invite and every email sent for it. Never the link's hash. */
   intake_2_invite?: Omit<Intake2Invite, 'token_sha256'> | null;
+  /** The CRM (2026-10-15): what happens next and by when (a day), a close with a reason, the timeline. */
+  next_step?: string | null;
+  next_step_due?: string | null;
+  closed_at?: string | null;
+  closed_reason?: string | null;
+  closed_note?: string | null;
+  activity?: LeadActivity[];
   /** Only on the answer to a stage move: what happened to the Intake-2 invite the move triggered. */
   intake_2_invite_result?: Intake2InviteOutcome;
 }
