@@ -142,6 +142,9 @@ interface HeldRow {
   last_seen_open?: string | null;
   resolved_at?: string | null;
   resolved_by?: string | null;
+  pattern_refs?: unknown[] | null;
+  canonical_id?: string | null;
+  pattern_candidate_id?: string | null;
 }
 
 function asRecord(r: HeldRow): AtRecord {
@@ -158,18 +161,23 @@ function asRecord(r: HeldRow): AtRecord {
  */
 export async function incidents(): Promise<Incident[]> {
   const r = await query<HeldRow>(
-    `SELECT id::text AS pk, airtable_record_id, natural_id, created_time, fields, first_seen_at, updated_at, open_now, last_seen_open, resolved_at, resolved_by
+    `SELECT id::text AS pk, airtable_record_id, natural_id, created_time, fields, first_seen_at, updated_at, open_now, last_seen_open, resolved_at, resolved_by,
+            pattern_refs, canonical_id, pattern_candidate_id
        FROM engine_incidents`,
   );
-  const mapped = r.rows.map((row) =>
-    mapIncident(asRecord(row), {
+  const mapped = r.rows.map((row) => ({
+    ...mapIncident(asRecord(row), {
       open_now: row.open_now ?? true,
       last_seen_open: row.last_seen_open ?? null,
       first_seen_at: row.first_seen_at,
       resolved_at: row.resolved_at ?? null,
       resolved_by: row.resolved_by ?? null,
     }),
-  );
+    // SPEC-CORE.INCIDENTS-002, minimal form (patternCapture.ts).
+    pattern_refs: Array.isArray(row.pattern_refs) ? row.pattern_refs.map(String) : [],
+    canonical_id: row.canonical_id ?? null,
+    pattern_candidate_id: row.pattern_candidate_id ?? null,
+  }));
 
   // Only numeric ids: `engine_execution_runs.execution_id` is a bigint, so a
   // non-numeric id from the ledger would make the query itself fail rather than

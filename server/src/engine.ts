@@ -758,6 +758,12 @@ export async function getPatternCandidates(): Promise<PatternCandidatesData> {
       declined_at: s(f, 'Declined At'),
       reassigned_by: s(f, 'Reassigned By'),
       reassigned_at: s(f, 'Reassigned At'),
+      // Captured from an incident the repair bridge found no pattern for (patternCapture.ts, 15 Oct 2026).
+      origin: s(f, 'Origin'),
+      fault_signature: s(f, 'Fault Signature'),
+      incident_ids: s(f, 'Incident IDs'),
+      occurrences: typeof f.Occurrences === 'number' ? f.Occurrences : null,
+      last_seen: s(f, 'Last Seen'),
       // Filled by candidateActions.withPipeline, which reads the draft log.
       draft_runs: 0,
       draft_failures: 0,

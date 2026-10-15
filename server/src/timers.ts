@@ -29,6 +29,7 @@ const KNOWN: Array<{ name: string; what: string; every: string }> = [
   { name: 'research signals', what: 'Finds signals that ask for research and opens one job each, within the daily budget', every: '5 minutes' },
   { name: 'publish check', what: 'Asks for an eval run after an agent version change and alerts if it regressed', every: '2 minutes' },
   { name: 'intake-2 follow-ups', what: 'Sends the Stage 2 follow-up emails at 3 and 7 days and marks a lead Unresponsive at 14', every: '15 minutes' },
+  { name: 'pattern capture', what: 'Turns a failure the repair bridge found no build pattern for into one pattern candidate per fault', every: '10 minutes' },
   { name: 'decision watch', what: 'Checks watched decisions and posts a reminder where one has gone quiet past its wait', every: '5 minutes' },
   { name: 'retention', what: 'Clears personal text past its retention period (acts once a week)', every: '6 hours' },
 ];

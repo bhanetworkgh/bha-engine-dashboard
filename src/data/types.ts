@@ -1561,6 +1561,14 @@ export interface Incident {
   self_healing_strategy: string | null;
   resolved_at: string | null;
   resolved_by: string | null;
+  /**
+   * SPEC-CORE.INCIDENTS-002, minimal form (15 Oct 2026): the build patterns that fix this
+   * incident's fault, the fault's canonical id (`fault:<workflow> :: <step>`) and the pattern
+   * candidate it was captured into. This dashboard's own columns; the ledger refuses the keys.
+   */
+  pattern_refs?: string[];
+  canonical_id?: string | null;
+  pattern_candidate_id?: string | null;
   /** Set where the handler overrode its own first classification. */
   reclassified_from: string | null;
   first_seen_at: string | null;
@@ -3331,6 +3339,14 @@ export interface PatternCandidate {
   draft_runs: number;
   draft_failures: number;
   days_in_proposed: number | null;
+  /** 'incident' when the engine captured it from a failure with no pattern on record (15 Oct 2026). */
+  origin?: string | null;
+  /** The fault it was captured from: `<workflow> :: <failed step>`. */
+  fault_signature?: string | null;
+  /** The incidents it was captured from, comma-separated ledger ids. */
+  incident_ids?: string | null;
+  occurrences?: number | null;
+  last_seen?: string | null;
 }
 
 /** A percentage with its denominator, never on its own. */

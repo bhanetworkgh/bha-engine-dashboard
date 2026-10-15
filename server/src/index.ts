@@ -67,6 +67,7 @@ import * as slackTools from './mcp/slackTools';
 import * as publishGate from './publishGate';
 import * as draftEval from './draftEval';
 import * as decisionWatch from './decisionWatch';
+import * as patternCapture from './patternCapture';
 import * as sops from './sops';
 import { toolByName as mcpToolByName } from './mcp/tools';
 import { callerStore } from './mcp/caller';
@@ -518,6 +519,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           detail: `repair reported as ${result.outcome}`,
           ms: Date.now() - t0,
         });
+        // A failure with no build pattern on record becomes a pattern candidate (15 Oct 2026). Never awaited:
+        // the capture cannot fail the bridge's own write, and the sweep picks up anything it misses.
+        void patternCapture.fromRepair(result.repair_id);
         return send(res, result.inserted ? 201 : 200, { ok: true, repair_id: result.repair_id, outcome: result.outcome, stored: result.inserted ? 'inserted' : 'updated' });
       } catch (e) {
         if (e instanceof repairs.RepairError) {
@@ -2518,6 +2522,7 @@ async function boot(): Promise<void> {
     // A draft eval left running by the last process is not resumed (13 Oct 2026).
     void draftEval.markInterrupted().then((n) => { if (n) console.log(`[draft-eval] ${n} run(s) left running by the last process marked interrupted`); }).catch((e) => console.error(`[draft-eval] interrupted runs not marked: ${(e as Error).message}`));
     decisionWatch.startSweeping();
+    patternCapture.startSweeping();
     intake2.startSweeping();
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();
