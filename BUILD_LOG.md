@@ -12572,3 +12572,10 @@ Files:      server/src/un9d.ts, server/test/un9d.test.cjs
 Problem:    First live call answered `function pg_catalog.timezone(unknown, text) does not exist`. engine_incidents.resolved_at is text, not timestamptz, and the read wrapped it in `AT TIME ZONE 'UTC'`. The local test never reached that line because its simulated farm had no ledgered incident.
 Fix:        Read it as `resolved_at::text`. The test now seeds one ledgered silent-device incident and Engine health's copy, so Test 2's downstream condition runs and must pass.
 Decision:   None beyond the fix; the bug was in the test's coverage as much as the query.
+
+## 2026-10-15 14:25 — first live UN9D check on SIM-TOMATO-01, and a precision bug in it
+Intent:     Prove check_un9d_acceptance live on the simulated farm (event 462, audit 2247).
+Files:      server/src/un9d.ts, server/test/un9d.test.cjs
+Problem:    Test 1 "agreement" failed on four devices ("sim-co2-01 last reading differs" …). The Monitoring Twin read formats times to the whole second (`to_char(... 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`) and the stored rows carry milliseconds, so the same instant compared unequal. A checker bug, not a disagreement in the data.
+Fix:        Compare to the second, and name both values when they really differ. The test pins both directions.
+Decision:   The other Test 1 fail stands and is real: sim-camera-01 has no last_reading_at (the simulator never sends a camera reading). Whether a device with no reading at all fails "observed time" or counts as NOT_WIRED is Hardik's call; the checker keeps failing it until he says.
