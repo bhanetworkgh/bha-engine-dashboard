@@ -12565,3 +12565,10 @@ Problem:    None in the build. As of ~13:45 Lagos no vFarm snapshot or alert (dr
 Fix:        firstRealData runs after every post to the two vFarm routes (stored, dry run, refused), skips anything simulated, claims meta vfarm.first_real.<arrival> before the DM and gives it back if Slack refuses. check_un9d_acceptance runs Test 1 and Test 2 against the held rows, the Monitoring Twin read and Engine health, pass / fail / not_yet_possible per condition with the reason, and records un9d_acceptance_checked.
 Decision:   Three separate firsts (dry run, stored, refused) rather than one, because a refused first post is exactly the case Destiny needs to hear about. "Dashboard and feed agree" is stated as the dashboard against what vFarm sent; reading vFarm's own database is not something this server can do and the answer says so. The DM goes to Destiny only, as Bays.
 Tests:      npm run test:un9d, 5 checks.
+
+## 2026-10-15 14:20 — check_un9d_acceptance failed on its first live run
+Intent:     Prove the new check on SIM-TOMATO-01 in production.
+Files:      server/src/un9d.ts, server/test/un9d.test.cjs
+Problem:    First live call answered `function pg_catalog.timezone(unknown, text) does not exist`. engine_incidents.resolved_at is text, not timestamptz, and the read wrapped it in `AT TIME ZONE 'UTC'`. The local test never reached that line because its simulated farm had no ledgered incident.
+Fix:        Read it as `resolved_at::text`. The test now seeds one ledgered silent-device incident and Engine health's copy, so Test 2's downstream condition runs and must pass.
+Decision:   None beyond the fix; the bug was in the test's coverage as much as the query.
