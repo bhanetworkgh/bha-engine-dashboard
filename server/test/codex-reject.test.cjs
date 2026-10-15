@@ -16,6 +16,7 @@
  */
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const qs = require('node:querystring');
 const path = require('node:path');
 if (!/@(localhost|127\.0\.0\.1)[:/]/.test(process.env.DATABASE_URL || '')) {
   console.error('This test writes rows, so it only runs against a local DATABASE_URL (localhost or 127.0.0.1).');
@@ -29,14 +30,18 @@ const DESTINY = 'U0AEW3TBYH1', JASON = 'U0A9V97949F', AHAD = 'U0AC6RFNP3P';
 
 const calls = [];
 let failUpdatesFor = null;
+let history = [];
 const slack = http.createServer((rq, rs) => {
   let b = '';
   rq.on('data', (c) => (b += c));
   rq.on('end', () => {
-    const body = JSON.parse(b || '{}');
+    const body = (rq.headers['content-type'] || '').includes('json') ? JSON.parse(b || '{}') : qs.parse(b);
     const method = rq.url.replace(/^\//, '');
     calls.push({ method, body });
     rs.setHeader('content-type', 'application/json');
+    if (method === 'conversations.history') {
+      return rs.end(JSON.stringify({ ok: true, messages: history }));
+    }
     if (method === 'chat.update' && failUpdatesFor && body.ts === failUpdatesFor) return rs.end(JSON.stringify({ ok: false, error: 'message_not_found' }));
     rs.end(JSON.stringify({ ok: true, ts: method === 'chat.postMessage' ? '9999.0001' : body.ts }));
   });
@@ -59,7 +64,7 @@ const slack = http.createServer((rq, rs) => {
     await query(`DELETE FROM engine_review_returns WHERE natural_id LIKE 'TESTREJ_%'`);
     await query(`DELETE FROM engine_mcp_writes WHERE tool = 'reject_codex_log' AND arguments->>'log' LIKE 'TESTREJ_%'`);
   };
-  const log = (sub, extra = {}) => ({ builder_id: 'ahad', fields: { 'Submission ID': sub, 'Builder User ID': AHAD, 'Jason Status': 'Pending', 'Session Description': 'Test session ' + sub, Summary: 'kept', ...extra } });
+  const log = (sub, extra = {}) => ({ builder_id: 'ahad', fields: { 'Submission ID': sub, 'Builder User ID': AHAD, 'Jason Status': 'Pending', 'Session Description': 'Test session ' + sub, 'Session Url': 'https://otter.ai/u/' + sub, 'Builder Channel ID': 'CBUILDER', Timestamp: '2026-10-12T10:00:00Z', Summary: 'kept', ...extra } });
   const round = (sub, r, chaser) => mirror.upsert('review_returns', { natural_id: `${sub}::r${r}`, fields: {
     'Return ID': `${sub}::r${r}`, 'Submission ID': sub, Round: String(r), Status: 'answered',
     'Review Channel ID': 'CREVIEW', 'Review Message TS': '1000.0001', 'Builder Channel ID': 'CBUILDER', 'Chaser Message TS': chaser,
@@ -71,14 +76,22 @@ const slack = http.createServer((rq, rs) => {
     await mirror.upsert('codex', log(S), 'engine');
     await round(S, 1, '2000.0001');
     await round(S, 2, '2000.0002');
+    // The channel holds one sent-back message no round recorded, one for another log, and one person's post.
+    history = [
+      { ts: '2000.0003', bot_id: 'B1', text: ':leftwards_arrow_with_hook: Jason has sent a log back to you. Session recording: https://otter.ai/u/' + S },
+      { ts: '2000.0004', bot_id: 'B1', text: 'Jason has sent a log back to you. Session recording: https://otter.ai/u/OTHER' },
+      { ts: '2000.0005', user: AHAD, text: 'I sent a log back https://otter.ai/u/' + S },
+    ];
     /* 1 */
     calls.length = 0;
     const dry = await call({ log: S, requester_user_id: JASON, reason: 'Newer log covers it', dry_run: true });
     assert.equal(dry.ok, true); assert.equal(dry.rejected, false);
-    assert.equal(dry.cards_to_rewrite.length, 3, JSON.stringify(dry.cards_to_rewrite));
+    assert.equal(dry.cards_to_rewrite.length, 4, JSON.stringify(dry.cards_to_rewrite));
+    assert.ok(dry.cards_to_rewrite.some((c) => c.ts === '2000.0003'), 'the unrecorded sent-back message was not found');
+    assert.equal(dry.builder_channel_read.added, 1);
     assert.equal((await row(S)).fields['Jason Status'], 'Pending');
-    assert.equal(calls.length, 0);
-    ok('a dry run changes nothing, calls Slack for nothing and names the review card and both sent-back messages');
+    assert.equal(calls.filter((c) => c.method !== 'conversations.history').length, 0);
+    ok('a dry run changes nothing, writes nothing to Slack, and names the review card, both recorded sent-back messages and the one only the channel holds');
     /* 2 */
     assert.equal((await call({ log: S, reason: 'x y z' })).reason, 'who_is_required');
     assert.equal((await call({ log: S, requester_user_id: AHAD, reason: 'mine' })).reason, 'not_permitted');
@@ -89,7 +102,7 @@ const slack = http.createServer((rq, rs) => {
     assert.equal((await call({ log: S3, requester_user_id: JASON, reason: 'in codex' })).reason, 'in_codex');
     assert.equal((await call({ log: 'TESTREJ_NONE', requester_user_id: JASON, reason: 'gone' })).reason, 'not_found');
     assert.equal((await row(S)).fields['Jason Status'], 'Pending');
-    assert.equal(calls.length, 0);
+    assert.equal(calls.filter((c) => c.method !== 'conversations.history').length, 0);
     ok('no requester, a non-admin, no reason, an approved log, a log in the Codex and an unknown log are refused, nothing written');
     /* 3 */
     const r = await call({ log: S, requester_user_id: JASON, reason: 'Your newer log covers what was asked.' });
@@ -99,12 +112,12 @@ const slack = http.createServer((rq, rs) => {
     assert.equal(f['Rejected Reason'], 'Your newer log covers what was asked.'); assert.ok(f['Rejected At']); assert.equal(f.Summary, 'kept');
     assert.equal(r.entry.stage, 'rejected'); assert.equal(r.entry.rejected.by, 'Jason');
     const upd = calls.filter((c) => c.method === 'chat.update');
-    assert.equal(upd.length, 3);
+    assert.equal(upd.length, 4);
     const card = upd.find((c) => c.body.ts === '1000.0001');
     assert.ok(card.body.blocks.every((b) => b.type !== 'actions'), 'buttons still on the review card');
     assert.ok(card.body.blocks.some((b) => b.type === 'header'), 'review content dropped');
     const reply = calls.filter((c) => c.method === 'chat.postMessage');
-    assert.equal(reply.length, 1); assert.equal(reply[0].body.thread_ts, '2000.0002'); assert.match(reply[0].body.text, /<@U0AC6RFNP3P>/);
+    assert.equal(reply.length, 1); assert.equal(reply[0].body.thread_ts, '2000.0003'); assert.match(reply[0].body.text, /<@U0AC6RFNP3P>/);
     const a = (await query(`SELECT outcome FROM engine_mcp_writes WHERE tool = 'reject_codex_log' AND arguments->>'log' = $1 AND outcome = 'applied'`, [S])).rows;
     assert.equal(a.length, 1);
     ok('Jason rejects: status, who, when, why, other fields kept, stage rejected, the card loses its buttons, both sent-back messages rewritten, the builder told, audited');
@@ -123,7 +136,7 @@ const slack = http.createServer((rq, rs) => {
     await engineWrite.patchRecord('codex', id4, { Summary: 'other logs still take writes' }, ctx);
     ok('a rejected log is closed to the engine: PATCH and POST refused 409, Rejected cannot be set by an engine write, other logs unaffected');
     /* 6 */
-    calls.length = 0; failUpdatesFor = '1000.0001';
+    calls.length = 0; failUpdatesFor = '1000.0001'; history = [];
     await round(S4, 1, '3000.0001');
     const r6 = await call({ log: S4, requester_user_id: DESTINY, reason: 'Test of a card that will not update.' });
     assert.equal(r6.rejected, true); assert.equal(r6.ok, false); assert.equal(r6.raise, true);
