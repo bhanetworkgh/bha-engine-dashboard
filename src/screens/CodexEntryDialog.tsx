@@ -162,7 +162,7 @@ export function CodexEntryDialog({
       setRejecting(false);
       setToast?.(
         r.ok
-          ? { text: `Rejected. The builder was told in Slack and the review card no longer has buttons.`, tone: 'ok' }
+          ? { text: `Rejected. The builder was sent a message in their log channel, and the review card no longer has buttons.`, tone: 'ok' }
           : { text: r.message ?? 'Rejected, but a Slack message was not rewritten.', tone: 'failing' },
       );
     } catch (e) {
@@ -295,37 +295,56 @@ export function CodexEntryDialog({
               </div>
             )}
 
+            {/* Reject asks for its reason in a pop-up of its own (2026-10-15, Destiny), over the entry. */}
             {rejecting && !detail.rejected && (
-              <div className="mt-4 rounded-[14px] border border-line px-4 py-3">
-                <div className="text-[12.5px] leading-relaxed text-ink">
-                  Reject this log. It will never go to the Codex or count for pay, the review card and the sent-back messages lose their buttons, and the builder is told in
-                  Slack with your reason.
-                </div>
-                <textarea
-                  value={rejectReason}
-                  onChange={(e) => setRejectReason(e.target.value)}
-                  rows={3}
-                  maxLength={1000}
-                  placeholder="Why, in a sentence the builder will read. For example: your newer log covers what was asked for."
-                  className="input mt-2.5 w-full"
-                  aria-label="Why this log is rejected"
-                />
-                <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                  <label className="text-[12px] text-dim">
-                    Rejecting as{' '}
-                    <select value={rejectAs} onChange={(e) => setRejectAs(e.target.value as 'U0A9V97949F' | 'U0AEW3TBYH1')} className="input ml-1 inline-block w-auto py-1">
-                      <option value="U0A9V97949F">Jason</option>
-                      <option value="U0AEW3TBYH1">Destiny</option>
-                    </select>
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!busy) setRejecting(false);
+                }}
+              >
+                <div className="card fade-up w-full max-w-[520px] px-6 py-5" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Reject this log">
+                  <h3 className="text-[16px] font-semibold text-ink">Reject this log</h3>
+                  <div className="mt-1 text-[12.5px] leading-relaxed text-dim">
+                    {detail.session_description ?? detail.submission_id}
+                  </div>
+                  <div className="mt-3 text-[12.5px] leading-relaxed text-ink">
+                    It will never go to the Codex or count for pay. The review card and the sent-back messages lose their buttons, and{' '}
+                    <span className="capitalize">{detail.builder_id}</span> gets a message in their log channel with this log's details, your reason and a link to it here.
+                  </div>
+                  <label className="mt-4 block text-[12px] font-medium text-dim" htmlFor="reject-reason">
+                    Why are you rejecting it?
                   </label>
-                  <span className="text-[11.5px] text-faint">One shared login, so this is declared, not checked.</span>
-                  <span className="flex-1" />
-                  <Button variant="destructive" size="sm" loading={busy} disabled={busy || rejectReason.trim().length < 3} onClick={() => void reject()}>
-                    Reject log
-                  </Button>
-                  <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setRejecting(false); setRejectReason(''); }}>
-                    Cancel
-                  </Button>
+                  <textarea
+                    id="reject-reason"
+                    autoFocus
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    rows={4}
+                    maxLength={1000}
+                    placeholder="In a sentence the builder will read. For example: your newer log covers what was asked for."
+                    className="input mt-1.5 w-full"
+                  />
+                  <div className="mt-1 text-right text-[11px] text-faint tabular">{rejectReason.trim().length} / 1,000</div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <label className="text-[12px] text-dim">
+                      Rejecting as{' '}
+                      <select value={rejectAs} onChange={(e) => setRejectAs(e.target.value as 'U0A9V97949F' | 'U0AEW3TBYH1')} className="input ml-1 inline-block w-auto py-1">
+                        <option value="U0A9V97949F">Jason</option>
+                        <option value="U0AEW3TBYH1">Destiny</option>
+                      </select>
+                    </label>
+                    <span className="text-[11.5px] text-faint">One shared login, so this is declared, not checked.</span>
+                  </div>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setRejecting(false); setRejectReason(''); }}>
+                      Cancel
+                    </Button>
+                    <Button variant="destructive" size="sm" loading={busy} disabled={busy || rejectReason.trim().length < 3} onClick={() => void reject()}>
+                      Reject log
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
