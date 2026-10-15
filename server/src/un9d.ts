@@ -137,6 +137,7 @@ export function rollUp(conds: Condition[]): Verdict {
   return 'not_yet_possible';
 }
 
+const sec = (t: string | null | undefined): number | null => (t ? Math.floor(Date.parse(t) / 1000) : null);
 const C = (id: string, condition: string, verdict: Verdict, reason: string): Condition => ({ id, condition, verdict, reason });
 
 interface Device { device_id: string; place: string | null; device_type: string | null; last_reading_at: string | null; last_seen_at: string | null; snapshot_at: string | null; gone: boolean; state: string | null }
@@ -190,7 +191,8 @@ export function test1(farm: { snapshot_at: string; synthetic: boolean } , device
     for (const d of live) {
       const r = byId.get(d.device_id);
       if (!r) disagree.push(`${d.device_id} missing from the read`);
-      else if ((r.last_reading_at ?? null) !== (d.last_reading_at ?? null) && !(r.last_reading_at && d.last_reading_at && Date.parse(r.last_reading_at) === Date.parse(d.last_reading_at))) disagree.push(`${d.device_id} last reading differs`);
+      // The twin read gives times to the whole second (monitoringTwin's ISO), so the two are compared to the second.
+      else if (sec(r.last_reading_at) !== sec(d.last_reading_at)) disagree.push(`${d.device_id} last reading differs (${d.last_reading_at ?? 'none'} stored, ${r.last_reading_at ?? 'none'} read)`);
       else if ((r.state ?? null) !== (d.state ?? null)) disagree.push(`${d.device_id} state differs`);
     }
     conds.push(
@@ -200,7 +202,7 @@ export function test1(farm: { snapshot_at: string; synthetic: boolean } , device
         disagree.length ? 'fail' : 'pass',
         disagree.length
           ? `${disagree.slice(0, 5).join('; ')}.`
-          : `The Monitoring Twin read and the stored feed rows agree on all ${live.length} device(s). This compares the dashboard with what vFarm sent; it does not read vFarm's own database.`,
+          : `The Monitoring Twin read and the stored feed rows agree on all ${live.length} device(s), to the second. This compares the dashboard with what vFarm sent; it does not read vFarm's own database.`,
       ),
     );
   }

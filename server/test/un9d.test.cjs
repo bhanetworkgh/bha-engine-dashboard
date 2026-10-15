@@ -33,8 +33,10 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
 
   // 1. pure
   const fresh = { snapshot_at: '2026-10-15T11:59:40.000Z', synthetic: false };
-  let t = un9d.test1(fresh, [dev('a'), dev('b')], { feed_silent: false, devices: [dev('a'), dev('b')] }, now);
-  assert.equal(t.verdict, 'pass');
+  let t = un9d.test1(fresh, [dev('a'), dev('b')], { feed_silent: false, devices: [dev('a', { last_reading_at: '2026-10-15T11:59:30Z' }), dev('b')] }, now);
+  assert.equal(t.verdict, 'pass', 'the twin read gives whole seconds; the same instant must agree');
+  t = un9d.test1(fresh, [dev('a')], { feed_silent: false, devices: [dev('a', { last_reading_at: '2026-10-15T11:59:31Z' })] }, now);
+  assert.equal(t.conditions.find((c) => c.id === 'agreement').verdict, 'fail');
   t = un9d.test1(fresh, [dev('a', { place: null })], { feed_silent: false, devices: [dev('a')] }, now);
   assert.equal(t.conditions.find((c) => c.id === 'placement').verdict, 'fail');
   assert.equal(t.verdict, 'fail');
