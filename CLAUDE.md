@@ -3606,6 +3606,11 @@ in-process (`bharag.ingest`); n8n's ingest nodes call
 `POST /api/engine/bharag-guard` and ingest the title, content and metadata it
 hands back, skipping the ingest when `allow` is false. Every decision is a row
 in `engine_bharag_guard`, counted on the Agent maturity page.
+**The content may be sent as `content_b64`** (base64 of the UTF-8 text, 15 Oct
+2026): Render's edge filter blocks a body that reads like a shell command
+(`curl https://…`) before it reaches this server, which is how Kaiqi's playbook
+was refused twice and reported as "the guard did not answer". `Bays — Guarded
+BHARAG Ingest` sends it that way; plain `content` still works.
 
 **The Customer Service Twin joined the same day** (2026-09-29, Destiny), fourth
 route, same rules: `POST /api/engine/cst-events`, `cst.event.v1`, migration 41,
