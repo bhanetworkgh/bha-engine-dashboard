@@ -3202,6 +3202,19 @@ const MIGRATIONS: Migration[] = [
          WHERE intake_2_invite ? 'token_sha256'`,
     ],
   },
+  {
+    /**
+     * Stage 3, paying (15 Oct 2026, Destiny), as a placeholder: a lead can sit there once its
+     * Intake-2 is in, and nothing takes a payment until Jason and Hardik set the price and the
+     * Stripe-to-ledger contract.
+     */
+    id: 77,
+    name: 'engine_vfarm_leads: stage 3 (paying, placeholder)',
+    statements: [
+      `ALTER TABLE engine_vfarm_leads DROP CONSTRAINT IF EXISTS engine_vfarm_leads_stage_check`,
+      `ALTER TABLE engine_vfarm_leads ADD CONSTRAINT engine_vfarm_leads_stage_check CHECK (stage IN (1, 2, 3))`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
