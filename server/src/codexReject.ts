@@ -57,6 +57,9 @@ interface HeldRow {
   jason_status: string | null;
   builder_user_id: string | null;
   description: string | null;
+  session_url: string | null;
+  builder_channel: string | null;
+  logged_at: string | null;
 }
 
 /** The row a reference names: this table's id, a Submission ID or a Codex Entry ID. Exactly one, or a refusal. */
@@ -64,7 +67,8 @@ export async function resolve(ref: string): Promise<HeldRow> {
   const r = await query<HeldRow>(
     `SELECT id::text, coalesce(airtable_record_id, 'row-' || id) AS record_id, fields->>'Submission ID' AS submission_id, fields->>'Codex Entry ID' AS codex_entry_id,
             fields->>'Jason Status' AS jason_status, fields->>'Builder User ID' AS builder_user_id,
-            left(fields->>'Session Description', 300) AS description
+            left(fields->>'Session Description', 300) AS description,
+            fields->>'Session Url' AS session_url, fields->>'Builder Channel ID' AS builder_channel, fields->>'Timestamp' AS logged_at
        FROM engine_codex_submissions
       WHERE id::text = $1 OR 'row-' || id = $1 OR airtable_record_id = $1 OR natural_id = $1 OR fields->>'Submission ID' = $1 OR fields->>'Codex Entry ID' = $1
       ORDER BY id`,
@@ -113,6 +117,49 @@ async function cardsOf(submissionId: string): Promise<{ review: { channel: strin
   return { review, chasers };
 }
 
+/**
+ * The sent-back messages the review rounds did not record (2026-10-15). A log
+ * sent back eight times kept only four chaser timestamps on its rounds — a
+ * later round overwrote an earlier one's — so the message Jason asked in still
+ * carried its "Send Back To Jason" button. So the builder's channel is read
+ * too, from the log's own time: a Bays post that says a log was sent back and
+ * names this log's recording or session is one of them. Bays' token first,
+ * North Star's where Bays cannot read the channel. A channel that cannot be
+ * read is said, never taken as having none.
+ */
+async function sentBackInChannel(row: HeldRow, channel: string): Promise<{ ok: true; ts: string[]; read_as: string } | { ok: false; error: string }> {
+  const oldest = row.logged_at && !Number.isNaN(Date.parse(row.logged_at)) ? String(Math.floor(Date.parse(row.logged_at) / 1000) - 60) : '0';
+  const desc = (row.description ?? '').slice(0, 80).trim();
+  const url = (row.session_url ?? '').trim();
+  const mine = (m: { text?: string; bot_id?: string; blocks?: unknown }) => {
+    if (!m.bot_id) return false;
+    const text = `${m.text ?? ''} ${JSON.stringify(m.blocks ?? '')}`;
+    if (!/sent a log back/i.test(text)) return false;
+    return (url && text.includes(url)) || (desc.length >= 20 && text.includes(desc));
+  };
+  const tried: string[] = [];
+  for (const [label, token] of [['Bays', undefined], ['North Star', slack.northStarToken()]] as const) {
+    if (token === null) continue;
+    const found: string[] = [];
+    let cursor: string | undefined;
+    let error: string | null = null;
+    for (let page = 0; page < 5; page++) {
+      const r = await slack.botCall('conversations.history', { channel, oldest, limit: 200, cursor }, 'form', token);
+      if (!r.ok) {
+        error = String(r.error);
+        break;
+      }
+      for (const m of (r.messages as { ts?: string; text?: string; bot_id?: string; blocks?: unknown }[]) ?? []) if (m.ts && mine(m)) found.push(m.ts);
+      cursor = (r.response_metadata as { next_cursor?: string } | undefined)?.next_cursor || undefined;
+      if (!cursor) break;
+      if (page === 4) error = 'more than 1,000 messages since the log';
+    }
+    if (!error) return { ok: true, ts: found, read_as: label };
+    tried.push(`${label}: ${error}`);
+  }
+  return { ok: false, error: `conversations.history could not read ${channel} (${tried.join('; ') || 'no Slack token'})` };
+}
+
 function day(iso: string): string {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 }
@@ -144,6 +191,18 @@ export async function reject(input: RejectInput) {
   }
 
   const cards = row.submission_id ? await cardsOf(row.submission_id) : { review: null, chasers: [] };
+  // Add the sent-back messages the rounds did not record, read from the builder's channel.
+  const channel = row.builder_channel ?? cards.chasers[0]?.channel ?? null;
+  let channelRead: { read: boolean; read_as?: string; error?: string; found: number; added: number } | null = null;
+  if (channel) {
+    const h = await sentBackInChannel(row, channel);
+    if (h.ok) {
+      const before = cards.chasers.length;
+      for (const ts of h.ts) if (!cards.chasers.some((c) => c.ts === ts)) cards.chasers.push({ channel, ts });
+      cards.chasers.sort((a, b) => Number(a.ts) - Number(b.ts));
+      channelRead = { read: true, read_as: h.read_as, found: h.ts.length, added: cards.chasers.length - before };
+    } else channelRead = { read: false, error: h.error, found: 0, added: 0 };
+  }
   const by = NAMES[requester];
   const plan = {
     submission_id: row.submission_id,
@@ -153,6 +212,7 @@ export async function reject(input: RejectInput) {
     jason_status_before: row.jason_status,
     rejected_by: by,
     reason,
+    builder_channel_read: channelRead,
     cards_to_rewrite: [...(cards.review ? [{ what: 'review_card', channel: cards.review.channel, ts: cards.review.ts }] : []), ...cards.chasers.map((c) => ({ what: 'sent_back_message', ...c }))],
   };
   if (input.dry_run) return { ok: true, dry_run: true, rejected: false, ...plan, note: 'Nothing was changed. Call again without dry_run to reject it.' };
@@ -186,6 +246,8 @@ export async function reject(input: RejectInput) {
     });
     done.push({ what: 'builder_reply', channel: newest.channel, ts: String(r.ts ?? newest.ts), ok: r.ok, ...(r.ok ? {} : { error: r.error }) });
   }
+  // A channel that could not be read may still hold a sent-back message with its buttons: say so.
+  if (channelRead && !channelRead.read && channel) done.push({ what: 'sent_back_message', channel, ts: '(channel not read)', ok: false, error: channelRead.error });
   const failed = done.filter((d) => !d.ok);
   if (failed.length) console.error(`[codex reject] ${row.submission_id}: ${failed.length} Slack update(s) did not land: ${failed.map((f) => `${f.what} ${f.channel}/${f.ts} ${f.error}`).join('; ')}`);
 
