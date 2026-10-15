@@ -308,7 +308,14 @@ explicitly for this. Therefore:
   run fails loudly instead of putting the log into the Codex or into pay. Then,
   as Bays, Jason's review card and every sent-back message in the builder's
   channel (read from the log's `review_returns` rounds) are rewritten without
-  their buttons, and the builder gets one reply under the newest. A card Slack
+  their buttons, and the builder gets **one top-level message in their log
+  channel** (`Builder Channel ID`), never a thread reply or an ephemeral: the
+  log's session, submitted date, type, narration quality, Submission ID and
+  recording, the reason quoted, and a "View it on the dashboard" button to
+  `/codex/<id>`. On the page the reason is asked for in a pop-up over the entry.
+  The rewrite also reads the builder's channel for sent-back messages the
+  rounds did not record (a bot post saying a log was sent back that names this
+  log's recording or session). A card Slack
   will not rewrite never undoes the reject: the answer is `ok: false`,
   `raise: true`, naming it. `npm run test:codex-reject`.
 - **The three rules are not printed on the page** (decision 2026-09-14,
