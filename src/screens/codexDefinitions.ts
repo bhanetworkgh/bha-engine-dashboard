@@ -39,6 +39,8 @@ export const STAGE_DEFS: Record<CodexTab, string> = {
     'Jason Status is Pending, empty, or anything other than Approved or Input Added, and the log’s Submission ID has no row in the Layer 0 parking table whose Status is pending_builder_input.',
   needs_input:
     'The log’s Submission ID has a row in the Layer 0 parking table whose Status is pending_builder_input — whatever Jason Status says. Layer0 Flagged does not place a log here.',
+  rejected:
+    'Jason Status is Rejected: Jason or Destiny decided this log will never be approved, and wrote why. It never goes to the Codex, is never counted for pay, and nothing in the engine can change it again.',
 };
 
 /** Jason Status, as codexApproval reads it. Only "input added" is shown as a word of its own. */

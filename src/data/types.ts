@@ -654,6 +654,11 @@ export interface CodexEntry {
   /** Jason Status verbatim: Approved, Pending, Input Added, or null. */
   jason_status: string | null;
   approval: CodexApproval;
+  /**
+   * Set when Jason or Destiny rejected the log (2026-10-15): it never goes to
+   * the Codex and is never counted for pay. Null on every other log.
+   */
+  rejected: { at: string | null; by: string | null; reason: string | null } | null;
   /** Layer0 Flagged: true when the completeness gate stopped this submission. */
   layer0_flagged: boolean;
   /** Layer0 Missing, parsed: which elements the gate found absent. */
@@ -758,7 +763,7 @@ export interface RecordStats {
 }
 
 /** Jason Status, lower-cased. 'unset' is a row he has not touched. */
-export type CodexApproval = 'approved' | 'pending' | 'input added' | 'unset';
+export type CodexApproval = 'approved' | 'pending' | 'input added' | 'rejected' | 'unset';
 
 /**
  * A submission parked at the Layer 0 completeness gate, waiting for the
@@ -801,7 +806,7 @@ export interface Layer0Hold {
  * at Awaiting approval — he either approves or asks, and the builder answers in
  * thread — so those logs stay there.
  */
-export type CodexTab = 'needs_input' | 'awaiting' | 'approved';
+export type CodexTab = 'needs_input' | 'awaiting' | 'approved' | 'rejected';
 
 export interface CodexData {
   entries: CodexEntry[];
@@ -3687,8 +3692,32 @@ export interface GenieAsk {
   outcome: string;
 }
 
+/**
+ * One coding-subagent close-out (2026-10-15, Kaiqi's handoff spec): an
+ * incident Genie's subagent finished after somebody pressed its button in
+ * Slack. Never an ask, and never counted as one.
+ */
+export interface GenieCloseout {
+  event_id: string;
+  occurred_at: string;
+  /** The incident it closed, INC-…, from response.incidentEntityId. */
+  incident_id: string | null;
+  /** The Slack id of the person who pressed. */
+  builder_id: string | null;
+  /** Their name from Builder Profiles, where they have one. */
+  pressed_by: string | null;
+  /** response.status verbatim: self_healed or skipped. */
+  status: string | null;
+  /** The pull request the subagent opened, where it opened one. */
+  pr_url: string | null;
+  request_id: string | null;
+  run_id: string | null;
+  note: string | null;
+}
+
 export interface GenieData {
   asks: GenieAsk[];
+  closeouts: GenieCloseout[];
   meta: { events: number; subagent_events: number; first_event_at: string | null; last_event_at: string | null; last_received_at: string | null };
   summary: {
     asks: number;

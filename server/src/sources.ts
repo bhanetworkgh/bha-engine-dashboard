@@ -40,7 +40,7 @@ const REC_ID = /^rec[A-Za-z0-9]{14}$/;
 import type { AskTool, BuildPattern, BuildPatternDetail, ClientLane, ClientQuestion, ClientRequest, CodexEntry, CodexEntryDetail, ErrorCount, Incident, Layer0Hold, PayBuilder, PaySession, PayStatement, Loop, LoopLaneTag, LoopStatus, NsAsk, Opportunity, ReadinessState, RecordKind, RetryAttempt, RtAsk, RtJob, Source } from '../../src/data/types';
 
 /** Jason Status as the submission tables define it, lower-cased. 'unset' is a row he has not touched. */
-export type CodexApproval = 'approved' | 'pending' | 'input added' | 'unset';
+export type CodexApproval = 'approved' | 'pending' | 'input added' | 'rejected' | 'unset';
 
 /* ------------------------------------------------------------- locations */
 
@@ -343,6 +343,7 @@ export function codexApproval(raw: string | null): CodexApproval {
   if (a === 'approved') return 'approved';
   if (a === 'pending') return 'pending';
   if (a === 'input added') return 'input added';
+  if (a === 'rejected') return 'rejected';
   return 'unset';
 }
 
@@ -443,6 +444,10 @@ export function mapCodex(rec: AtRecord, owner: string, table: string, pending?: 
     submission_source: str(f['Submission Source']),
     jason_status: jason,
     approval,
+    rejected:
+      approval === 'rejected'
+        ? { at: iso(f['Rejected At']), by: str(f['Rejected By']), reason: str(f['Rejected Reason']) }
+        : null,
     layer0_flagged: flagged,
     layer0_missing: missing,
     /** Complete exactly as specified: the gate passed it and Layer 2 generated the codex. */
@@ -463,7 +468,10 @@ export function mapCodex(rec: AtRecord, owner: string, table: string, pending?: 
      * Jason adding input means he has read the log and responded; it is a form
      * of having dealt with it, not a state of waiting for him.
      */
-    stage: needsInput ? 'needs_input' : approval === 'approved' || approval === 'input added' ? 'approved' : 'awaiting',
+    // Rejected wins over everything (2026-10-15): it is a decision that the log
+    // is finished and goes nowhere, so a Layer 0 row left behind cannot pull it
+    // back into a queue of work owed.
+    stage: approval === 'rejected' ? 'rejected' : needsInput ? 'needs_input' : approval === 'approved' || approval === 'input added' ? 'approved' : 'awaiting',
     has_entry: Boolean(layer2),
     entry_excerpt: firstLines(layer2),
     /**

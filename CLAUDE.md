@@ -290,6 +290,27 @@ explicitly for this. Therefore:
   approval until then, which put fourteen logs he had already answered in the
   queue of ones he had not reached. A log whose missing answers are supplied
   goes back to review, not through the check again.
+- **A log can be rejected, and then it is closed** (2026-10-15, Destiny —
+  Jason in Ahad's thread: "how this log can be rejected now that it's in
+  limbo"). A fourth stage, **Rejected**, and its own tab after Needs input; it
+  wins over a Layer 0 row, so the four stages still sum to the submission count.
+  `server/src/codexReject.ts`, one function behind two doors: the Codex entry's
+  **Reject** button (`POST /api/codex/:id/reject`, audited as access `page`)
+  and the write tool `reject_codex_log` (write connection, no agent's scope).
+  Jason or Destiny only (`ADMIN_IDS`, declared on the page under one shared
+  login), a reason of 3 to 1,000 characters, and refused for a log already
+  Approved or Input Added, already rejected, or carrying a `Codex Entry ID`
+  (that log is in the Codex and owed pay). It writes Jason Status `Rejected`
+  and four **new** fields — `Rejected At`, `Rejected By`, `Rejected By Slack
+  ID`, `Rejected Reason` — keeping every other field. **From then on every
+  engine write to that row is refused 409 `log_rejected`**, and no engine write
+  may set Rejected (`use_reject_path`): an old card's button or a late Layer 2
+  run fails loudly instead of putting the log into the Codex or into pay. Then,
+  as Bays, Jason's review card and every sent-back message in the builder's
+  channel (read from the log's `review_returns` rounds) are rewritten without
+  their buttons, and the builder gets one reply under the newest. A card Slack
+  will not rewrite never undoes the reject: the answer is `ok: false`,
+  `raise: true`, naming it. `npm run test:codex-reject`.
 - **The three rules are not printed on the page** (decision 2026-09-14,
   Destiny). The tab label carries the meaning; a paragraph under it restating
   the rule is furniture. They live here, in this section, where they are the
@@ -3453,7 +3474,17 @@ morning. The n8n workflow `North Star — Recorded Helper Ask`
 `bays-asks`**: `scheduled` (one row per scheduled task run, written by
 `Bays — Record Scheduled Run`, `lIQmC333fz2TAcXX`, with `Task Name` and `Task
 Outcome`) and `dashboard_panel` (the Ask Bays panel, from `Bays — Agent
-Delivery`). **Bays has its own page from the same day** (2026-10-05, Destiny): `/bays`,
+Delivery`). **Close-outs are Genie's third tab** (2026-10-15, Destiny — Kaiqi's handoff
+spec, genie-subagent-closeout-dashboard.md): Asks · Close-outs · Statistics.
+When somebody presses the coding subagent's button on an incident in Slack and
+it finishes, Genie posts one `genie.subagent.closeout` event to the same route,
+keyed `closeout:{incidentEntityId}`. `genieData()` returns them as `closeouts`
+(newest first: when, the INC id from `response.incidentEntityId` linking to
+Engine health, who pressed by name from Builder Profiles else the Slack id,
+`response.status` as Self healed or Skipped, `response.pullRequestUrl`). They
+stay out of the asks, as every `genie.subagent.%` event already did. Before the
+first one the tab says none has arrived. A read.
+**Bays has its own page from the same day** (2026-10-05, Destiny): `/bays`,
 first in the Systems group, Asks and Statistics in the shape the twins and Genie
 have. `GET /api/bays` (`server/src/baysAsks.ts`) reads `engine_bays_asks` and
 changes nothing; the answer is cut at 6,000 characters for the page and

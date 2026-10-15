@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useData } from '../../app/useData';
-import { getGenie, type GenieAsk, type GenieData, type Percentiles, type Share } from '../../data';
+import { getGenie, type GenieAsk, type GenieCloseout, type GenieData, type Percentiles, type Share } from '../../data';
 import type { RecordColumn } from '../../components/ui';
 import {
   Button,
@@ -64,7 +64,7 @@ import RecordStatistics from '../../components/RecordStatistics';
  * instant.
  */
 
-const TABS = ['Asks', 'Statistics'] as const;
+const TABS = ['Asks', 'Close-outs', 'Statistics'] as const;
 type Tab = (typeof TABS)[number];
 
 type Filter = 'all' | 'Answered' | 'Incomplete' | 'Failed' | 'handed';
@@ -413,6 +413,82 @@ function GenieTiles({ data }: { data: GenieData }) {
   );
 }
 
+/* --------------------------------------------------------------- close-outs */
+
+/**
+ * Close-outs (2026-10-15, Destiny — Kaiqi's handoff spec,
+ * genie-subagent-closeout-dashboard.md). When somebody presses the coding
+ * subagent's button on an incident in Slack and it finishes, Genie posts one
+ * `genie.subagent.closeout` event. They are not asks and are never counted as
+ * asks; this tab is the only place they show. A read, newest first.
+ */
+const CLOSEOUT_STATUS: Record<string, string> = { self_healed: 'Self healed', skipped: 'Skipped' };
+
+function Closeouts({ rows }: { rows: GenieCloseout[] }) {
+  if (!rows.length) {
+    return (
+      <div className="px-6 pb-8 pt-4 md:px-8">
+        <EmptyState>
+          No close-out has arrived yet. Genie posts one when somebody presses the coding subagent's button on an incident in Slack and the subagent finishes,
+          with the incident, who pressed, whether it self-healed or was skipped, and the pull request it opened. It appears here the moment it lands.
+        </EmptyState>
+      </div>
+    );
+  }
+  const healed = rows.filter((r) => r.status === 'self_healed').length;
+  const withPr = rows.filter((r) => r.pr_url).length;
+  return (
+    <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 pb-8 pt-4 md:px-8">
+      <p className="mb-3 text-[12.5px] text-dim">
+        {rows.length} close-out{rows.length === 1 ? '' : 's'}: {healed} self healed, {rows.length - healed} skipped or other, {withPr} with a pull request. Newest first.
+      </p>
+      <div className="card overflow-x-auto">
+        <table className="w-full text-[12.5px]">
+          <thead>
+            <tr className="border-b border-line text-left text-[11.5px] text-faint">
+              <th className="px-4 py-2 font-medium">when</th>
+              <th className="px-4 py-2 font-medium">incident</th>
+              <th className="px-4 py-2 font-medium">who pressed</th>
+              <th className="px-4 py-2 font-medium">outcome</th>
+              <th className="px-4 py-2 font-medium">pull request</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.event_id} className="border-b border-line last:border-0 align-top">
+                <td className="tabular whitespace-nowrap px-4 py-2 text-dim">{when(r.occurred_at)}</td>
+                <td className="px-4 py-2">
+                  {r.incident_id ? (
+                    <a className="link tabular" href={`/engine-health?incident=${encodeURIComponent(r.incident_id)}`}>
+                      {r.incident_id}
+                    </a>
+                  ) : (
+                    <span className="text-faint">not sent</span>
+                  )}
+                  {r.note && <div className="mt-0.5 max-w-[420px] text-[11.5px] leading-snug text-faint">{r.note}</div>}
+                </td>
+                <td className="px-4 py-2 text-ink">{r.pressed_by ?? r.builder_id ?? <span className="text-faint">not sent</span>}</td>
+                <td className="px-4 py-2">
+                  <Pill>{r.status ? CLOSEOUT_STATUS[r.status] ?? r.status : 'no status'}</Pill>
+                </td>
+                <td className="px-4 py-2">
+                  {r.pr_url ? (
+                    <a className="link break-all" href={r.pr_url} target="_blank" rel="noreferrer">
+                      {r.pr_url.replace(/^https?:\/\/(www\.)?github\.com\//, '')}
+                    </a>
+                  ) : (
+                    <span className="text-faint">none</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 /* --------------------------------------------------------------------- page */
 
 export default function Genie() {
@@ -428,7 +504,14 @@ export default function Genie() {
       <PageHeader
         title="Genie"
         subtitle="Genie's asks, as Genie reports them"
-        below={<Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Asks: data?.summary.asks ? { n: data.summary.asks } : undefined }} />}
+        below={
+          <Tabs
+            tabs={TABS}
+            value={tab}
+            onChange={setTab}
+            counts={{ Asks: data?.summary.asks ? { n: data.summary.asks } : undefined, 'Close-outs': data?.closeouts?.length ? { n: data.closeouts.length } : undefined }}
+          />
+        }
       />
       {status === 'loading' && !data ? (
         <Loading />
@@ -443,6 +526,8 @@ export default function Genie() {
             docs/contracts/genie-events.md in this repo). The first one appears here the moment it lands — there is nothing to press.
           </EmptyState>
         </div>
+      ) : tab === 'Close-outs' ? (
+        <Closeouts rows={data.closeouts ?? []} />
       ) : tab === 'Asks' ? (
         <Asks data={data} month={month} onMonth={setMonth} onOpen={(a) => setOpen(keyOf(a))} />
       ) : (
