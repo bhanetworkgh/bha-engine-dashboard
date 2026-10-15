@@ -305,7 +305,7 @@ export async function check(farmId: string, opts: { record?: boolean; actor?: st
   );
   const ids = incidents.rows.map((i) => i.ledger_id).filter((x): x is string => !!x);
   const health = ids.length
-    ? await query<HealthRow>(`SELECT natural_id, ${ISO('resolved_at')} AS resolved_at, fields->>'resolution_status' AS status FROM engine_incidents WHERE natural_id = ANY($1::text[])`, [ids])
+    ? await query<HealthRow>(`SELECT natural_id, resolved_at::text AS resolved_at, fields->>'resolution_status' AS status FROM engine_incidents WHERE natural_id = ANY($1::text[])`, [ids])
     : { rows: [] as HealthRow[] };
   const twin = (await monitoringTwin.monitoringData()) as unknown as { farms: Array<{ farm_id: string; feed: { silent: boolean }; devices: Array<{ device_id: string; state: string | null; last_reading_at: string | null }> }> };
   const mine = twin.farms.find((x) => x.farm_id === farmId) ?? null;
