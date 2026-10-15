@@ -101,7 +101,7 @@ const sendIdFor = (buyer: string, n: number): string => `VFINT2-SEND-${suffixOf(
 /** The link's secret part. Deterministic, so re-sending gives the same link; unguessable without the secret. */
 export function tokenFor(inviteId: string): string {
   const s = secret();
-  if (!s) throw new Intake2Error(503, 'not_configured', `${SECRET_VAR} is not set on this server, so no Intake-2 link can be made.`);
+  if (!s) throw new Intake2Error(503, 'not_configured', `${SECRET_VAR} is not set on this server, so no Form 2 link can be made.`);
   return createHmac('sha256', s).update(`intake2:${inviteId}`).digest('base64url');
 }
 export const linkFor = (token: string): string => `${base()}/intake/${token}`;
@@ -140,11 +140,11 @@ async function rowByToken(token: string): Promise<Row | null> {
 /** Fails closed: every reason a lead cannot be sent Intake-2, named. */
 function identityOf(row: Row): { buyer: string; email: string } {
   const buyer = row.form_a?.buyer_intake_id?.trim();
-  if (!buyer) throw new Intake2Error(422, 'no_buyer_intake_id', 'This lead has no buyer intake id (it came through the old public route, not Form A), so Intake-2 cannot be tied to it. It needs to come through Form A first.');
+  if (!buyer) throw new Intake2Error(422, 'no_buyer_intake_id', 'This lead has no buyer intake id (it came through the old public route, not Form A), so Form 2 cannot be tied to it. It needs to come through Form A first.');
   const email = (row.email ?? '').trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Intake2Error(422, 'no_valid_email', 'This lead has no valid email address, so the invite has nowhere to go.');
-  if (row.closed_at) throw new Intake2Error(409, 'closed', 'This lead is closed. Reopen it before sending Intake-2.');
-  if (row.stage !== 2) throw new Intake2Error(409, 'not_stage_2', 'Intake-2 is only sent to a lead in Stage 2. Move the lead to Stage 2 first; that sends the invite.');
+  if (row.closed_at) throw new Intake2Error(409, 'closed', 'This lead is closed. Reopen it before sending Form 2.');
+  if (row.stage !== 2) throw new Intake2Error(409, 'not_stage_2', 'Form 2 is only sent to a lead in Stage 2. Clear the lead for Stage 2 first; that sends it.');
   return { buyer, email };
 }
 
@@ -178,9 +178,9 @@ export async function issueInvite(leadId: string, opts: { by: string; resend?: b
   const row = await rowById(leadId);
   if (!row) throw new Intake2Error(404, 'no_lead', 'No lead with that id.');
   const { buyer, email } = identityOf(row);
-  if (!configured()) throw new Intake2Error(503, 'not_configured', `${SECRET_VAR} is not set on this server, so no Intake-2 link can be made.`);
+  if (!configured()) throw new Intake2Error(503, 'not_configured', `${SECRET_VAR} is not set on this server, so no Form 2 link can be made.`);
   if (row.intake_2_completed_at) {
-    return { ok: false, reason: 'already_completed', message: `This lead already answered Intake-2 on ${row.intake_2_completed_at.toISOString().slice(0, 10)}. Nothing was sent.`, invite_id: row.intake_2_invite?.invite_id };
+    return { ok: false, reason: 'already_completed', message: `This lead already answered Form 2 on ${row.intake_2_completed_at.toISOString().slice(0, 10)}. Nothing was sent.`, invite_id: row.intake_2_invite?.invite_id };
   }
   const inviteId = inviteIdFor(buyer);
   const token = tokenFor(inviteId);
@@ -190,7 +190,7 @@ export async function issueInvite(leadId: string, opts: { by: string; resend?: b
     return { ok: true, reason: 'already_sent', message: 'The invite was already emailed. Nothing was sent again; use resend to send it again.', invite_id: inviteId, link, send: null };
   }
   if (opts.dry_run) {
-    return { ok: true, reason: 'dry_run', message: `Would ${row.intake_2_invite ? '' : 'make the invite and '}email ${email} the Intake-2 link.`, invite_id: inviteId, link, dry_run: true };
+    return { ok: true, reason: 'dry_run', message: `Would ${row.intake_2_invite ? '' : 'make the invite and '}email ${email} the Form 2 link.`, invite_id: inviteId, link, dry_run: true };
   }
 
   if (!row.intake_2_invite) {
@@ -219,7 +219,7 @@ export async function issueInvite(leadId: string, opts: { by: string; resend?: b
   const send = await sendEmail({ send_id: sendIdFor(buyer, n), invite_id: inviteId, to: email, name: row.full_name, organisation: row.organization_name, link, by });
   await query(`UPDATE engine_vfarm_leads SET intake_2_invite = jsonb_set(intake_2_invite, '{sends}', coalesce(intake_2_invite->'sends', '[]'::jsonb) || $2::jsonb) WHERE id = $1`, [row.id, JSON.stringify([send])]);
   events.changed('vfarm_leads', row.id);
-  if (send.outcome === 'sent') return { ok: true, reason: 'sent', message: `Intake-2 invite emailed to ${email}.`, invite_id: inviteId, link, send };
+  if (send.outcome === 'sent') return { ok: true, reason: 'sent', message: `Form 2 emailed to ${email}.`, invite_id: inviteId, link, send };
   console.error(`[intake-2] invite ${send.send_id} to ${email} not sent: ${send.error}`);
   return { ok: false, reason: 'send_failed', message: `The invite was made but the email did not go: ${send.error}`, invite_id: inviteId, link, send };
 }
@@ -538,7 +538,7 @@ async function announce(row: Row, stored: Intake2Stored): Promise<void> {
   const site = (a[INTAKE2_FIELDS[5].label] ?? {}) as Record<string, unknown>;
   const where = [site['City'], site['Country']].filter(Boolean).join(', ') || 'not given';
   const text = [
-    '*Intake-2 received (Site & Deployment Specification)*',
+    '*Form 2 received (site and deployment specification)*',
     `*Name:* ${row.full_name}`,
     `*Organisation:* ${row.organization_name ?? 'not given'}`,
     `*Racks to evaluate:* ${get(3)}`,
@@ -594,7 +594,8 @@ async function confirmToBuyer(row: Row, buyer: string, token: string): Promise<v
  * #vfarm-early-access. Answering stops all of it; so does leaving Stage 2. A person can
  * clear Unresponsive from the lead. The numbers are here and nowhere else.
  */
-export const FOLLOW_UP = { first_days: 3, second_days: 7, unresponsive_days: 14, max_attempts: 3, tick_minutes: 15 } as const;
+export { FOLLOW_UP } from '../../src/data/intake2';
+import { FOLLOW_UP } from '../../src/data/intake2';
 const DAY = 86_400_000;
 
 type FollowUpRow = Row & { intake_2_invite: NonNullable<Row['intake_2_invite']> & { followups?: Record<string, Intake2Send & { attempts?: number; claimed_at?: string }>; unresponsive_at?: string | null } };
@@ -678,7 +679,7 @@ export async function sweepFollowUps(now = new Date()): Promise<SweepResult> {
       await engineEvents
         .record({ event_type: 'serious_buyer_spec_intake_unresponsive', at, subject_id: buyer, lane: 'CAPITAL', actor: 'intake-2 follow-up', source_ref: `${base()}/vfarm?tab=early-access&lead=${row.id}`, detail: { buyer_intake_id: buyer, lead_row_id: row.id, invite_id: inv.invite_id, days_since_invite: Math.floor(age / DAY), followups: Object.fromEntries(Object.entries(fu).map(([k, v]) => [k, v.outcome ?? 'claimed'])) }, dedupe_key: `serious_buyer_spec_intake_unresponsive:${buyer}:${inv.invite_id}:${at.slice(0, 10)}` })
         .catch((e) => console.error(`[intake-2] unresponsive event for ${buyer}: ${(e as Error).message}`));
-      const text = [`*Intake-2: no answer after ${FOLLOW_UP.unresponsive_days} days*`, `*Name:* ${row.full_name}`, `*Organisation:* ${row.organization_name ?? 'not given'}`, `*Buyer:* ${buyer}`, `The invite and two follow-ups went out with no site specification back, so the lead is marked Unresponsive. It stays in Stage 2; clear it from the lead to start again.`, `Lead: ${base()}/vfarm?tab=early-access&lead=${row.id}`].join('\n');
+      const text = [`*Form 2: no answer after ${FOLLOW_UP.unresponsive_days} days*`, `*Name:* ${row.full_name}`, `*Organisation:* ${row.organization_name ?? 'not given'}`, `*Buyer:* ${buyer}`, `Form 2 and two reminders went out with no answer back, so the lead is marked Unresponsive. It stays in Stage 2; clear it from the lead to start again.`, `Lead: ${base()}/vfarm?tab=early-access&lead=${row.id}`].join('\n');
       const p = await slack.botCall('chat.postMessage', { channel: ALERT_CHANNEL, text, unfurl_links: false });
       await query(`UPDATE engine_vfarm_leads SET intake_2_invite = intake_2_invite || jsonb_build_object('unresponsive_alert', $2::jsonb) WHERE id = $1`, [row.id, JSON.stringify(p.ok ? { ts: String(p.ts ?? ''), error: null } : { ts: null, error: String(p.error ?? 'unknown') })]);
       events.changed('vfarm_leads', row.id);

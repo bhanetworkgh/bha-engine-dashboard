@@ -1307,7 +1307,7 @@ then here, then BUILD_LOG), migration 76.
   (`invite`, `followup_1`, `followup_2`, `received`) and n8n picks the template. The buyer
   gets a receipt on submit (`VFINT2-RCV-…`, stored as `intake_2.confirmation_email`),
   beside the #vfarm-early-access post.
-- **Follow-ups** (`FOLLOW_UP` in `intake2.ts`, the numbers live there and nowhere else):
+- **Follow-ups** (`FOLLOW_UP` in `src/data/intake2.ts`, the numbers live there and nowhere else):
   a sweep every 15 minutes, counted from the first invite that went out. Follow-up 1 at 3
   days, follow-up 2 at 7 (and never sooner than 4 days after follow-up 1), Unresponsive at
   14 (and never sooner than 7 days after follow-up 2, and only once follow-up 2 went or
@@ -3308,9 +3308,6 @@ archived), which answered nothing the stages did not.
   stored (`src/data/leadPipeline.ts`, `pipelineOf`): **Interest** (Stage 1), **Invited**
   (Stage 2, no Intake-2 yet), **Spec received** (Intake-2 in), **Paying** (Stage 3, the
   placeholder) and **Closed**. `?view=list` is the list; `?lead=<id>` opens a record.
-- **Days in the column on every card, amber past its limit**: Interest 7, Invited 14 (the same
-  day Intake-2 marks a lead Unresponsive), Spec received 7. The numbers live in `PIPELINE` and
-  nowhere else. Overdue next steps are the only other amber.
 - **One record page per lead**: contact, attribution and Form A on the left; where it is, the
   move buttons, the next step with its due day and the timeline in the middle; Intake-2 and the
   five checks (always open) on the right. The timeline is built at read time from Form A, the
@@ -3327,6 +3324,18 @@ archived), which answered nothing the stages did not.
   Per-person sign-in would be the fix and is a scope change, not built.
 - `status` and `notes` stay on the table, unread except as one line of history on the
   timeline. `npm run test:intake2` pins the CRM writes (check 10e).
+- **Simplified the same morning** (15 Oct 2026, Destiny: "I can't tell stage 1 from 2 from 3
+  clearly"). The columns lead with his stage numbers (Stage 1 · Interest, Stage 2 · Invited,
+  Stage 2 · Spec received, Stage 3 · Paying, Closed). **On screen Intake-2 is Form 2**; the
+  code, columns and events keep their names. The days-in-column figure and its limits, the
+  next step, the Open and All filters and the five-checks card are gone from the page (the
+  next-step route stays, unused). A lead's page reads top to bottom: where they are and the
+  one action, the **follow-up tracker** (Form 2 sent, reminder 1, reminder 2, marked
+  unresponsive, each done, due on a date, or stopped), their Form 2 answers, their Form A
+  answers (open on Stage 1, folded after), then notes and history. The list's `follow-ups`
+  column and each board card carry the same line. **`FOLLOW_UP` moved to
+  `src/data/intake2.ts`** so the sweep and the tracker read one set of numbers;
+  `followUpPlan` mirrors the sweep's spacing.
 
 ### vFarm — Gates (2026-10-09, Destiny — LOOP-1791479575963-7S0O)
 
