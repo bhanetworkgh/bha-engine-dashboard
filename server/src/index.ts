@@ -735,15 +735,27 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * be a later date so the clearing can be proved before any row is old enough.
      */
     if (p === '/api/engine/bharag-guard') {
-      if (method !== 'POST') throw new HttpError(405, 'POST { workspace, title, content, kind, outcome, source, run_id, metadata }. The answer says allow or not, and carries the title, content and metadata to ingest.');
+      if (method !== 'POST') throw new HttpError(405, 'POST { workspace, title, content (or content_b64), kind, outcome, source, run_id, metadata }. The answer says allow or not, and carries the title, content and metadata to ingest.');
       const b = await readJson(req, 8 * 1024 * 1024);
       const text = (v: unknown) => (typeof v === 'string' ? v : v === undefined || v === null ? '' : String(v));
       const kind = text(b.kind) as dataGovernance.GuardKind;
       if (!dataGovernance.GUARD_KINDS.includes(kind)) throw new HttpError(422, `kind must be one of ${dataGovernance.GUARD_KINDS.join(', ')}; got "${text(b.kind)}".`);
+      // 15 Oct 2026: Render's edge filter blocks a request whose body reads like a shell
+      // command ("curl https://…"), before it reaches this server. A playbook that tells a
+      // person to run one was refused that way and reported as "the guard did not answer".
+      // So the content may arrive base64 as content_b64, which the filter does not read.
+      let content = text(b.content);
+      if (typeof b.content_b64 === 'string' && b.content_b64) {
+        const decoded = Buffer.from(b.content_b64, 'base64').toString('utf8');
+        if (!decoded || Buffer.from(decoded, 'utf8').toString('base64').replace(/=+$/, '') !== b.content_b64.replace(/\s+/g, '').replace(/=+$/, '')) {
+          throw new HttpError(422, 'content_b64 is not valid base64 of UTF-8 text.');
+        }
+        content = decoded;
+      }
       const g = await dataGovernance.guard({
         workspace: text(b.workspace),
         title: text(b.title),
-        content: text(b.content),
+        content,
         kind,
         outcome: b.outcome === undefined || b.outcome === null ? null : text(b.outcome),
         source: text(b.source),
