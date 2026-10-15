@@ -1377,6 +1377,30 @@ then here, then BUILD_LOG), migration 76.
   question 5 through the link's upload; `dry_run` validates and writes nothing.
 
 
+**UN9D acceptance and the first real vFarm data** (2026-10-15, Destiny — D3;
+Hardik's two tests of 30 Sep / 1 Oct, locked by Jason 2 Oct). `server/src/un9d.ts`.
+- **The first real post DMs Destiny once.** Every post to `/api/engine/vfarm-snapshot`
+  or `/vfarm-alerts`, stored, dry run or refused, calls `un9d.firstRealData` (never
+  awaited). Real means no farm in it says `synthetic` and no farm it names is a
+  simulated farm held here. Three firsts, `meta` `vfarm.first_real.{dry_run|stored|refused}`,
+  each claimed before Bays DMs Destiny (farm, device count, time, what landed or why it
+  was refused); a DM Slack refuses gives the claim back, logs, writes
+  `vfarm_first_real_data_notice_failed`, and the next post tries again. A sent one is
+  one `vfarm_first_real_data` event. Simulated data never sends.
+- **`check_un9d_acceptance`** (`server/src/mcp/un9dTools.ts`, write connection, no
+  agent's scope, audited kind `vfarm`): Test 1 (identity, placement, signal type,
+  observed time, received time, evidence flag, stale never shown as live, the Monitoring
+  Twin read agreeing with the stored feed) and Test 2 (a silent device opened an
+  incident, it has one ledger id, it recovered with no two open at once for one device
+  and no ledger id reused, and Engine health holds it once, open or closed as the twin
+  says; incidents before the 4 Oct copy into Engine health are not judged on that
+  condition). Each condition is `pass`, `fail` or `not_yet_possible` with the reason; a
+  test passes only when every condition does. "Agree" compares the dashboard with what
+  vFarm sent; nothing here reads vFarm's own database, and the answer says so. A
+  simulated farm is labelled and its result is NOT_SAFE_TO_CLAIM. The result is one
+  `un9d_acceptance_checked` event (`record: false` skips it). Changes no farm, device or
+  incident. `npm run test:un9d`.
+
 **vFarm customer events** (2026-10-11, Destiny — LOOP-1789326230248-ZX0W, Jason's
 ask of 13 Sep). `server/src/vfarmCustomerEvents.ts`, contract
 `docs/contracts/vfarm-customer-events.md` (`vfarm.customer.events.v0`). Five
