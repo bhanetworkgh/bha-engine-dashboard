@@ -7,17 +7,16 @@
  * and whether somebody closed the lead. A stored column would be a second statement of a
  * fact the row already makes, and the two would drift.
  *
- * The limits follow what CRMs call rotting (Pipedrive, HubSpot): past them the days-in-column
- * figure turns amber, which is the only colour on a card. Invited matches Intake-2's own
- * Unresponsive mark at 14 days, so the two never disagree.
+ * 15 Oct 2026 (Destiny): the columns lead with his own stage numbers, and the days-in-column
+ * limits are gone; the follow-up tracker is what says whether a lead needs somebody.
  */
 
 export const PIPELINE = [
-  { key: 'interest', label: 'Interest', hint: 'Form A in, interest only', limit_days: 7 },
-  { key: 'invited', label: 'Invited', hint: 'Stage 2, site specification sent', limit_days: 14 },
-  { key: 'spec', label: 'Spec received', hint: 'Intake-2 in, BHA to review', limit_days: 7 },
-  { key: 'paying', label: 'Paying', hint: 'placeholder until pricing and checkout are set', limit_days: null },
-  { key: 'closed', label: 'Closed', hint: 'with a reason', limit_days: null },
+  { key: 'interest', stage: 'Stage 1', label: 'Interest', hint: 'Filled in Form A. Waiting on Jason to clear them.' },
+  { key: 'invited', stage: 'Stage 2', label: 'Invited', hint: 'Cleared by Jason and sent Form 2. Waiting on their answers.' },
+  { key: 'spec', stage: 'Stage 2', label: 'Spec received', hint: 'Sent Form 2 back. BHA reviews it.' },
+  { key: 'paying', stage: 'Stage 3', label: 'Paying', hint: 'A placeholder until pricing and checkout are set.' },
+  { key: 'closed', stage: '', label: 'Closed', hint: 'Ended, with a reason.' },
 ] as const;
 
 export type PipelineKey = (typeof PIPELINE)[number]['key'];
@@ -59,14 +58,4 @@ export function pipelineOf(l: PipelineFacts): { key: PipelineKey; since: string 
   if (l.stage === 2 && l.intake_2_completed_at) return { key: 'spec', since: l.intake_2_completed_at };
   if (l.stage === 2) return { key: 'invited', since: l.stage_changed_at ?? l.created_at };
   return { key: 'interest', since: l.stage_changed_at ?? l.created_at };
-}
-
-const DAY = 86_400_000;
-
-/** Whole days in the column, and whether that is past its limit. */
-export function rotting(l: PipelineFacts, now = Date.now()): { days: number; over: boolean; limit: number | null } {
-  const p = pipelineOf(l);
-  const days = Math.max(0, Math.floor((now - Date.parse(p.since)) / DAY));
-  const limit = PIPELINE.find((c) => c.key === p.key)?.limit_days ?? null;
-  return { days, over: limit !== null && days > limit, limit };
 }
