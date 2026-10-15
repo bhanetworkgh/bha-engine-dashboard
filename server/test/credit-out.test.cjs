@@ -9,7 +9,10 @@
  *     about credits, are not credit failures;
  *   - an incident classed BILLING_QUOTA and an eval result carrying the error both count;
  *   - an alert Slack refuses is kept as failed with the reason and lands on the next look;
- *   - after 60 quiet minutes the episode is over, and a new failure alerts again.
+ *   - after 60 quiet minutes the episode is over, and a new failure alerts again;
+ *   - 15 Oct 2026: a BILLING_QUOTA label alone is not a credit failure, and OpenRouter's
+ *     "could not verify available credits ... in time" is never one: it is the second
+ *     watch, "OpenRouter is not responding", which advises against topping up.
  *
  * Run with:  npm run test:credit-out   (needs a LOCAL DATABASE_URL)
  */
@@ -39,6 +42,7 @@ const slack = http.createServer((req, res) => {
   });
 });
 
+const HANG = 'Bays (Agent) failed to answer: Agent execution failed: Failed after 3 attempts. Last error: AI_APICallError: OpenRouter could not verify available credits for this request in time. Retry shortly. [line 9]';
 const CREDIT = 'Agent execution failed: This request would exceed your available credits given your current in-flight requests. Retry after in-flight requests settle, or add credits.';
 
 (async () => {
@@ -56,8 +60,8 @@ const CREDIT = 'Agent execution failed: This request would exceed your available
   const T = Date.now();
   const clean = async () => {
     for (const t of ['engine_bays_asks', 'engine_ns_asks', 'engine_rt_asks', 'engine_eval_runs', 'engine_incidents']) await query(`DELETE FROM ${t} WHERE natural_id LIKE 'CREDTEST-%'`);
-    await query(`DELETE FROM meta WHERE key = $1`, [creditOut.STATE_KEY]);
-    await query(`DELETE FROM engine_events WHERE event_type = 'openrouter_credit_out' AND subject_id LIKE 'CREDTEST-%'`);
+    await query(`DELETE FROM meta WHERE key = ANY($1)`, [[creditOut.STATE_KEY, creditOut.PROVIDER_STATE_KEY]]);
+    await query(`DELETE FROM engine_events WHERE event_type IN ('openrouter_credit_out', 'openrouter_not_responding') AND subject_id LIKE 'CREDTEST-%'`);
   };
   await clean();
   // The clock the test runs on: every row and every look is placed against it.
@@ -92,17 +96,22 @@ const CREDIT = 'Agent execution failed: This request would exceed your available
   ok('a failed ask whose error is a credit refusal posts one alert, tags both people, and writes one event');
 
   await row('engine_ns_asks', 'a2', { Outcome: 'Failed', Error: 'Payment required - perhaps check your payment details?' });
-  await row('engine_incidents', 'i1', { payload: { error_class: 'BILLING_QUOTA', workflow_or_scenario: 'Bays — Submit Actions' } });
+  await row('engine_incidents', 'i1', { payload: { error_class: 'BILLING_QUOTA', error_message: CREDIT, workflow_or_scenario: 'Bays — Submit Actions' } });
+  // 15 Oct 2026: a BILLING_QUOTA label with no refusal text, and the provider hang the model labelled
+  // BILLING_QUOTA on 15 Oct, are not credit failures.
+  await row('engine_incidents', 'i2', { payload: { error_class: 'BILLING_QUOTA', error_message: 'Eval run not started: OpenRouter credit is $3.93, below the $15 a run needs.', workflow_or_scenario: 'Agent Evals — Runner' } });
+  await row('engine_incidents', 'label', { payload: { error_class: 'BILLING_QUOTA', error_message: 'something about a quota', workflow_or_scenario: 'Bays — Submit Actions' } });
+  await row('engine_incidents', 'hang', { payload: { error_class: 'BILLING_QUOTA', error_message: HANG, workflow_or_scenario: 'Bays — Agent Delivery' } });
   await row('engine_eval_runs', 'e1', { 'Run ID': 'EVAL-TEST', Passed: false, Checks: JSON.stringify([{ name: 'answered', ok: false, detail: CREDIT }]) });
   const found = await creditOut.hits(new Date(now.getTime() - 15 * 60_000).toISOString());
   const mine = found.filter((h) => h.id.startsWith(`CREDTEST-${T}-`)).map((h) => h.source).sort();
-  assert.deepEqual(mine, ['bays ask', 'eval result', 'incident', 'north star ask']);
-  ok('a BILLING_QUOTA incident, a North Star ask and an eval result all count');
+  assert.deepEqual(mine, ['bays ask', 'eval result', 'incident', 'incident', 'north star ask']);
+  ok('an incident carrying a refusal, the eval runner\'s own low-credit refusal, a North Star ask and an eval result all count; a bare BILLING_QUOTA label and the provider hang do not');
 
   r = await creditOut.check(now);
   assert.equal(r.outcome, 'standing');
   assert.equal(posts.length, 1);
-  assert.equal(r.state.failures, 4);
+  assert.equal(r.state.failures, 5);
   ok('more credit failures while the alert stands post nothing more');
 
   // 61 minutes later, nothing new: the episode is over.
@@ -132,6 +141,36 @@ const CREDIT = 'Agent execution failed: This request would exceed your available
   assert.equal(r.outcome, 'standing');
   assert.equal(posts.length, 2);
   ok('the owed alert lands on the next look, once, and a new episode alerts again');
+
+  // The second watch: OpenRouter not responding.
+  r = await creditOut.checkProvider(now);
+  assert.equal(r.outcome, 'quiet');
+  assert.equal(posts.length, 2);
+  ok('the provider-down watch is quiet when only the hours-old hang is in the database');
+
+  await row('engine_bays_asks', 'h1', { Outcome: 'Failed', Error: HANG, Source: 'slack_mention' }, 2);
+  await row('engine_incidents', 'h2', { payload: { error_class: 'NETWORK_TIMEOUT', error_message: HANG, workflow_or_scenario: 'Bays — Agent Delivery' } });
+  const credit = (await creditOut.hits(new Date(now.getTime() - 15 * 60_000).toISOString())).filter((h) => h.id.startsWith(`CREDTEST-${T}-h`));
+  assert.equal(credit.length, 0);
+  r = await creditOut.check(now);
+  assert.equal(r.outcome, 'standing');
+  assert.equal(posts.length, 2);
+  ok('the hang posts nothing on the credit watch');
+
+  r = await creditOut.checkProvider(now);
+  assert.equal(r.outcome, 'alerted');
+  assert.equal(posts.length, 3);
+  assert.match(posts[2].text, /OpenRouter is not responding/);
+  assert.match(posts[2].text, /not a credit problem: do not top up/);
+  assert.doesNotMatch(posts[2].text, /credit is out/);
+  assert.match(posts[2].text, new RegExp(`bays ask CREDTEST-${T}-h1 \\(slack_mention\\)`));
+  assert.match(posts[2].text, /2 failures like this/);
+  const pev = await query(`SELECT 1 FROM engine_events WHERE event_type = 'openrouter_not_responding' AND subject_id = $1`, [`CREDTEST-${T}-h1`]);
+  assert.equal(pev.rows.length, 1);
+  r = await creditOut.checkProvider(now);
+  assert.equal(r.outcome, 'standing');
+  assert.equal(posts.length, 3);
+  ok('the hang posts one "OpenRouter is not responding" alert, says not to top up, writes one event, and posts nothing more');
 
   await clean();
   console.log(`\n${passed} checks passed.`);

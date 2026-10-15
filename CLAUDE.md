@@ -2546,7 +2546,17 @@ and tried again every minute. It reads and posts; it retries, closes and
 changes nothing. An Answered ask that only talks about credits is not a
 failure. `Agent Evals — Runner` reads the balance before a run and does not
 start under $15 (an estimate), and stops at the first answer that fails on
-credit rather than scoring it. `npm run test:credit-out` pins the watcher.
+credit rather than scoring it. **An incident counts on its text, never on its
+`BILLING_QUOTA` label alone** (15 Oct 2026, Destiny): the label is the error
+handler's guess, and on 15 Oct its model labelled OpenRouter's "could not verify
+available credits for this request in time" as billing, so this alert told Jason
+to top up while $29.20 was on the account. That sentence is **OpenRouter not
+responding**, a second watch in the same file with the same window and episode
+rules (`checkProvider`, meta `provider_down.state`, event
+`openrouter_not_responding`), whose alert says it is not a credit problem and
+not to top up. `PROVIDER_HANG_TEXT` is kept in step with `PROVIDER_HANG_SIGNAL`
+in the three n8n error handlers, which class it `network_timeout`.
+`npm run test:credit-out` pins both watches.
 
 ## 5. Design
 
