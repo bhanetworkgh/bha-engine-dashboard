@@ -44,6 +44,7 @@ import { SIGNAL_WRITE_TOOLS } from './signalTools';
 import { LOOP_WRITE_TOOLS } from './loopTools';
 import { CODEX_WRITE_TOOLS } from './codexTools';
 import { INTAKE2_WRITE_TOOLS } from './intake2Tools';
+import { UN9D_WRITE_TOOLS } from './un9dTools';
 import { DRAFT_EVAL_WRITE_TOOLS } from './draftEvalTools';
 import { SOP_READ_TOOLS, SOP_WRITE_TOOLS } from './sopTools';
 import { INVENTORY_WRITE_TOOLS } from './inventoryTools';
@@ -1001,7 +1002,7 @@ export const TOOLS: ToolDefinition[] = [
  * tool a client can see is a tool a model will try.
  */
 function toolsFor(access: 'read' | 'write'): ToolDefinition[] {
-  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...REMINDER_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS, ...LANE_WRITE_TOOLS, ...INCIDENT_WRITE_TOOLS, ...INVENTORY_WRITE_TOOLS, ...VFARM_GATE_WRITE_TOOLS, ...LOOP_WRITE_TOOLS, ...CODEX_WRITE_TOOLS, ...INTAKE2_WRITE_TOOLS, ...SOP_WRITE_TOOLS, ...SIGNAL_WRITE_TOOLS, ...DECISION_WATCH_WRITE_TOOLS, ...DRAFT_EVAL_WRITE_TOOLS] : TOOLS;
+  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...REMINDER_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS, ...LANE_WRITE_TOOLS, ...INCIDENT_WRITE_TOOLS, ...INVENTORY_WRITE_TOOLS, ...VFARM_GATE_WRITE_TOOLS, ...LOOP_WRITE_TOOLS, ...CODEX_WRITE_TOOLS, ...INTAKE2_WRITE_TOOLS, ...UN9D_WRITE_TOOLS, ...SOP_WRITE_TOOLS, ...SIGNAL_WRITE_TOOLS, ...DECISION_WATCH_WRITE_TOOLS, ...DRAFT_EVAL_WRITE_TOOLS] : TOOLS;
 }
 
 /**
