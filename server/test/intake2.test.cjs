@@ -196,7 +196,14 @@ const srv = http.createServer((req, res) => {
 
   /* 8. submit: on the same row, one event, one Slack post, interest only */
   const before = Number((await query(`SELECT count(*) FROM engine_vfarm_leads`)).rows[0].count);
+  // The CRM (15 Oct): a buyer answering a closed lead opens it again, and the timeline says so.
+  await ea.close(L, 'timing', null, 'test');
   const s1 = await i2.submit(token, { answers: good }, 'test-agent');
+  {
+    const r0 = await row(L);
+    assert.equal(r0.closed_at, null, 'the answer reopened the closed lead');
+    assert.equal(r0.activity[r0.activity.length - 1].kind, 'reopened');
+  }
   assert.equal(s1.already, false);
   assert.equal(s1.submission_id, `VFINT2-SUB-FORMA-T${T}`);
   assert.equal(Number((await query(`SELECT count(*) FROM engine_vfarm_leads`)).rows[0].count), before, 'no new row');
@@ -290,6 +297,31 @@ const srv = http.createServer((req, res) => {
   assert.equal((await row(L2)).intake_2_invite.unresponsive_at, undefined);
   await assert.rejects(i2.clearUnresponsive(L2, 'test'), (e) => e.status === 409);
   ok('follow-ups at 3 and 7 days, spaced on a late start, Unresponsive at 14 with one event and one post, clearable');
+
+  /* 10e. the CRM: note, next step, close with a reason, reopen; a closed lead is left alone */
+  await assert.rejects(ea.addNote(L2, '   ', 'test'), (e) => e.status === 422);
+  await ea.addNote(L2, 'Called them, will reply next week', 'test');
+  await assert.rejects(ea.setNextStep(L2, 'Call', '15/10/2026', 'test'), (e) => e.status === 422);
+  await assert.rejects(ea.setNextStep(L2, null, '2026-10-20', 'test'), (e) => e.status === 422);
+  let c = await ea.setNextStep(L2, 'Call to review', '2026-10-20', 'test');
+  assert.equal(c.next_step_due, '2026-10-20');
+  await assert.rejects(ea.close(L2, 'other', '  ', 'test'), (e) => e.status === 422);
+  await assert.rejects(ea.close(L2, 'bored', null, 'test'), (e) => e.status === 422);
+  c = await ea.close(L2, 'timing', 'Back in spring', 'test');
+  assert.ok(c.closed_at);
+  assert.equal(c.next_step, null, 'a closed lead has no next step');
+  await assert.rejects(ea.close(L2, 'price', null, 'test'), (e) => e.status === 409);
+  await assert.rejects(ea.moveStage({ id: L2 }, 1, 'test', null, 'page'), (e) => e.status === 409);
+  await assert.rejects(i2.issueInvite(L2, { by: 'test', resend: true }), (e) => e.reason === 'closed');
+  const sentBefore = st.invites.length;
+  sw = await i2.sweepFollowUps(at(40));
+  assert.equal(st.invites.length, sentBefore, 'no follow-up goes to a closed lead');
+  assert.deepEqual(sw.unresponsive, [], 'a closed lead is not marked Unresponsive');
+  c = await ea.reopen(L2, 'test');
+  assert.equal(c.closed_at, null);
+  await assert.rejects(ea.reopen(L2, 'test'), (e) => e.status === 409);
+  assert.deepEqual(c.activity.map((x) => x.kind), ['note', 'next_step', 'closed', 'reopened']);
+  ok('the CRM: notes, a dated next step, a close that needs a reason and stops follow-ups, reopen; all on the timeline');
 
   /* 11. the buyer page's script parses, and carries no lead data */
   const html = page.formPage();

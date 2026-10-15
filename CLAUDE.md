@@ -3298,6 +3298,36 @@ email somebody it would need to know who had already been emailed, and that is a
 second system, not a tab. Nothing on it is a commitment: a row says a person
 filled in a form.
 
+### vFarm — Early Access as a CRM (2026-10-15, Destiny)
+
+**Rebuilt on CRM standards** (Destiny: "that's what it is, a CRM"), from what Pipedrive,
+HubSpot, Attio, Close and Folk share. It replaces the status bar (new / contacted / qualified /
+archived), which answered nothing the stages did not.
+
+- **A board and a list of the same leads.** Five columns, worked out from the row and never
+  stored (`src/data/leadPipeline.ts`, `pipelineOf`): **Interest** (Stage 1), **Invited**
+  (Stage 2, no Intake-2 yet), **Spec received** (Intake-2 in), **Paying** (Stage 3, the
+  placeholder) and **Closed**. `?view=list` is the list; `?lead=<id>` opens a record.
+- **Days in the column on every card, amber past its limit**: Interest 7, Invited 14 (the same
+  day Intake-2 marks a lead Unresponsive), Spec received 7. The numbers live in `PIPELINE` and
+  nowhere else. Overdue next steps are the only other amber.
+- **One record page per lead**: contact, attribution and Form A on the left; where it is, the
+  move buttons, the next step with its due day and the timeline in the middle; Intake-2 and the
+  five checks (always open) on the right. The timeline is built at read time from Form A, the
+  stage moves, every Intake-2 email, the follow-ups, the answers and `activity`.
+- **`activity`** (migration 78) is the append-only record of what a person did here: a note,
+  a next step set or cleared, a close, a reopen. Each write changes the row and appends its
+  line in one statement. `POST /api/vfarm/leads/:id/{note|next-step|close|reopen}`, behind the
+  cookie.
+- **Closing needs a reason**: Unresponsive, Not a fit, Timing, Price, or Other with a note.
+  A closed lead gets no Intake-2 follow-ups, cannot be moved or sent an invite, and has no
+  next step. **A buyer who answers Intake-2 after the close opens the lead again**, and the
+  timeline says why.
+- **No owner field**: the dashboard has one login, so an owner would be a name nobody checks.
+  Per-person sign-in would be the fix and is a scope change, not built.
+- `status` and `notes` stay on the table, unread except as one line of history on the
+  timeline. `npm run test:intake2` pins the CRM writes (check 10e).
+
 ### vFarm — Gates (2026-10-09, Destiny — LOOP-1791479575963-7S0O)
 
 The Stage 1 lab validation, the Stage 2 pilot checklist and the 5-rack pilot

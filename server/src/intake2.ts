@@ -113,12 +113,13 @@ interface Row {
   organization_name: string | null;
   stage: number;
   form_a: { buyer_intake_id?: string; early_access_lead_id?: string | null; correlation_id?: string | null } | null;
+  closed_at?: Date | string | null;
   intake_2: Intake2Stored | null;
   intake_2_completed_at: Date | null;
   intake_2_invite: (Omit<Intake2Invite, 'link'> & { uploads?: (Intake2File & { field: number; at: string })[] }) | null;
 }
 
-const COLS = `id, full_name, email, organization_name, stage, form_a, intake_2, intake_2_completed_at, intake_2_invite`;
+const COLS = `id, full_name, email, organization_name, stage, form_a, intake_2, intake_2_completed_at, intake_2_invite, closed_at`;
 
 async function rowById(id: string): Promise<Row | null> {
   const r = await query<Row>(`SELECT ${COLS} FROM engine_vfarm_leads WHERE id::text = $1`, [id]);
@@ -142,6 +143,7 @@ function identityOf(row: Row): { buyer: string; email: string } {
   if (!buyer) throw new Intake2Error(422, 'no_buyer_intake_id', 'This lead has no buyer intake id (it came through the old public route, not Form A), so Intake-2 cannot be tied to it. It needs to come through Form A first.');
   const email = (row.email ?? '').trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Intake2Error(422, 'no_valid_email', 'This lead has no valid email address, so the invite has nowhere to go.');
+  if (row.closed_at) throw new Intake2Error(409, 'closed', 'This lead is closed. Reopen it before sending Intake-2.');
   if (row.stage !== 2) throw new Intake2Error(409, 'not_stage_2', 'Intake-2 is only sent to a lead in Stage 2. Move the lead to Stage 2 first; that sends the invite.');
   return { buyer, email };
 }
@@ -480,6 +482,14 @@ export async function submit(token: string, body: Record<string, unknown>, userA
   const landed = await withTransaction(async (db) => {
     const u = await db.query(`UPDATE engine_vfarm_leads SET intake_2 = $2::jsonb, intake_2_completed_at = $3 WHERE id = $1 AND intake_2 IS NULL`, [row.id, JSON.stringify(stored), now]);
     if (!u.rowCount) return false;
+    // A buyer answering after somebody closed the lead is good news, not a mistake: the lead
+    // opens again, and the timeline says why (15 Oct 2026, the CRM).
+    await db.query(
+      `UPDATE engine_vfarm_leads SET closed_at = NULL, closed_reason = NULL, closed_note = NULL,
+              activity = activity || jsonb_build_array(jsonb_build_object('at', $2::text, 'by', 'the buyer (Intake-2 link)', 'kind', 'reopened', 'text', 'They sent their site specification after the lead was closed.'))
+        WHERE id = $1 AND closed_at IS NOT NULL`,
+      [row.id, now],
+    );
     await engineEvents.record(
       {
         event_type: COMPLETED_EVENT,
@@ -619,7 +629,7 @@ export async function sweepFollowUps(now = new Date()): Promise<SweepResult> {
   if (!configured()) return out;
   const r = await query<FollowUpRow>(
     `SELECT ${COLS} FROM engine_vfarm_leads
-      WHERE stage = 2 AND intake_2_completed_at IS NULL AND intake_2_invite IS NOT NULL
+      WHERE stage = 2 AND intake_2_completed_at IS NULL AND intake_2_invite IS NOT NULL AND closed_at IS NULL
         AND (intake_2_invite->>'unresponsive_at') IS NULL`,
   );
   for (const row of r.rows) {

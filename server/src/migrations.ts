@@ -3215,6 +3215,25 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE engine_vfarm_leads ADD CONSTRAINT engine_vfarm_leads_stage_check CHECK (stage IN (1, 2, 3))`,
     ],
   },
+  {
+    /**
+     * The Early Access CRM (15 Oct 2026, Destiny): a next step with a due date, a close with a
+     * reason, and the timeline of what a person wrote or did here. `status` and `notes` stay as
+     * they are, unread by the new page except as history: nothing drops a column.
+     */
+    id: 78,
+    name: 'engine_vfarm_leads: next step, close with a reason, activity timeline',
+    statements: [
+      `ALTER TABLE engine_vfarm_leads ADD COLUMN IF NOT EXISTS next_step text`,
+      `ALTER TABLE engine_vfarm_leads ADD COLUMN IF NOT EXISTS next_step_due date`,
+      `ALTER TABLE engine_vfarm_leads ADD COLUMN IF NOT EXISTS closed_at timestamptz`,
+      `ALTER TABLE engine_vfarm_leads ADD COLUMN IF NOT EXISTS closed_reason text`,
+      `ALTER TABLE engine_vfarm_leads ADD COLUMN IF NOT EXISTS closed_note text`,
+      `ALTER TABLE engine_vfarm_leads ADD COLUMN IF NOT EXISTS activity jsonb NOT NULL DEFAULT '[]'::jsonb`,
+      `ALTER TABLE engine_vfarm_leads DROP CONSTRAINT IF EXISTS engine_vfarm_leads_closed_reason_check`,
+      `ALTER TABLE engine_vfarm_leads ADD CONSTRAINT engine_vfarm_leads_closed_reason_check CHECK (closed_reason IS NULL OR closed_reason IN ('unresponsive', 'not_a_fit', 'timing', 'price', 'other'))`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
