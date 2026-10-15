@@ -1125,6 +1125,19 @@ archive records directly, with the checks the Bays Tools Router enforces.
   pattern already saved by mistake: nothing is created, the saved pattern is
   announced, linked and the candidate handed off, refused unless the names
   match. Both candidate tools are in Bays' scope from the same day.
+- **A pattern edit is sent to BHARAG again** (2026-10-15, Destiny — D2). A
+  created pattern keeps the id of its BHARAG copy as `bharag_doc_id` (with
+  `bharag_ingested_at`; new field names). When `update_record`, or n8n's
+  `PATCH /api/engine/patterns/…`, changes any field the BHARAG document is
+  written from (`touchesPatternText`), `reingestPattern` sends the new text
+  and only then removes the old copy, so BHARAG is never left without one; the
+  old copy is the row's `bharag_doc_id`, else the workspace document whose
+  `metadata.pattern_id` names the pattern. An edit to bookkeeping fields alone
+  sends nothing. The outcome rides on the answer (`reingested_to_bharag`,
+  `bharag`) and never fails the edit: a refused ingest leaves the old copy and
+  says BHARAG is stale. `reingest_pattern` (write connection, no agent's
+  scope) does it for one pattern on demand, for edits made before this. The
+  pattern's Google Doc is not rewritten. `npm run test:pattern-reingest`.
 - **A pattern keeps its Google Doc** (2026-10-06). When `create_record` makes
   the Doc for a pattern it writes `doc_id` and `doc_link` back onto the row
   (new fields, nothing renamed); the Build patterns panel shows the link.
@@ -1354,6 +1367,15 @@ then here, then BUILD_LOG), migration 76.
   Invite failed). Opened is a hint: it is set when the page reads the form.
 - `npm run test:intake2` pins it against a local database with n8n, Google and Slack
   stood in.
+- **`test_submit_intake2`** (2026-10-15, Destiny: "that form is too long, please test it
+  from the dashboard"), `server/src/mcp/intake2Tools.ts`, write connection, no agent's
+  scope: one valid answer per question built from `INTAKE2_FIELDS` itself (free text
+  starting "TEST"), sent through `intake2.submit`, the buyer link's own function, so the
+  answers, the event, the channel post and the receipt all run for real. Destiny or Jason
+  only, **only a lead whose email is @bhanetwork.org**, Stage 2 with a link, and
+  `confirm: "SUBMIT TEST <buyer_intake_id>"`; `with_file` uploads a one-page PDF to
+  question 5 through the link's upload; `dry_run` validates and writes nothing.
+
 
 **vFarm customer events** (2026-10-11, Destiny — LOOP-1789326230248-ZX0W, Jason's
 ask of 13 Sep). `server/src/vfarmCustomerEvents.ts`, contract

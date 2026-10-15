@@ -394,7 +394,7 @@ export async function ingest(
   ws: IngestWorkspace,
   doc: IngestDocument,
   opts: { kind?: GuardKind; outcome?: string | null; source?: string; run_id?: string | null } = {},
-): Promise<{ ok: boolean; status: number | null; detail: string }> {
+): Promise<{ ok: boolean; status: number | null; detail: string; id?: string | null }> {
   const keyVar = ingestKeyVar(ws);
   const key = process.env[keyVar]?.trim();
   if (!key) return { ok: false, status: null, detail: `${keyVar} is not set on this server, so nothing was sent to BHARAG.` };
@@ -413,8 +413,9 @@ export async function ingest(
   doc = { ...doc, title: g.title, content: g.content, metadata: g.metadata };
   try {
     const r = await call<Record<string, unknown>>('/ingest', key, doc);
-    const id = r && typeof r === 'object' ? (r.document_id ?? r.id ?? (r.data as Record<string, unknown> | undefined)?.document_id ?? null) : null;
-    return { ok: true, status: 200, detail: `${id ? `ingested as ${String(id)}` : 'ingested'} (workspace key ${keyVar})` };
+    const d = r && typeof r === 'object' ? ((r.document ?? r.data) as Record<string, unknown> | undefined) : undefined;
+    const id = r && typeof r === 'object' ? (r.document_id ?? r.id ?? d?.document_id ?? d?.id ?? null) : null;
+    return { ok: true, status: 200, id: id === null ? null : String(id), detail: `${id ? `ingested as ${String(id)}` : 'ingested'} (workspace key ${keyVar})` };
   } catch (e) {
     return { ok: false, status: e instanceof BharagError ? e.status || null : null, detail: e instanceof Error ? e.message : String(e) };
   }

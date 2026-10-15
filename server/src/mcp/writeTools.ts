@@ -250,6 +250,147 @@ function documentFor(kind: string, f: Record<string, unknown>, drafter: string):
  * Where a build pattern's Google Doc goes: the folder n8n's
  * `LBP - Create Pattern Doc` wrote into, verbatim (2026-09-24).
  */
+/* ------------------------------------------- a pattern's BHARAG copy */
+
+/**
+ * The fields a pattern's BHARAG document is written from (documentFor). An edit
+ * to any of them makes the copy in BHARAG stale; an edit to only a bookkeeping
+ * field (doc_id, doc_link, the BHARAG id itself) does not.
+ */
+const PATTERN_TEXT_FIELDS = new Set([
+  'pattern_name', 'pattern_id', 'bha_system', 'reusability', 'problem', 'solution', 'context', 'learnings_gotchas',
+  'readiness_gates', 'implementation_checklist', 'integration_points', 'test_coverage', 'routing_logic', 'anti_pattern',
+  'naming_note', 'next_use_case', 'roadmap_context', 'research_production_impact', 'commercial_impact',
+]);
+
+export function touchesPatternText(fields: Record<string, unknown>): boolean {
+  return Object.keys(fields).some((k) => PATTERN_TEXT_FIELDS.has(k));
+}
+
+export interface ReingestResult {
+  ok: boolean;
+  /** The new BHARAG document, where one was made. */
+  new_id: string | null;
+  /** The copy it replaces, and whether it was removed. */
+  old_id: string | null;
+  old_found_by: 'row' | 'search' | null;
+  old_removed: boolean | null;
+  detail: string;
+}
+
+/** The BHARAG copy of a pattern made before ids were kept: found by its own metadata.pattern_id. */
+async function findPatternCopy(patternId: string): Promise<string | null> {
+  for (let page = 0; page < 40; page++) {
+    const r = await bharag.listDocuments('build_patterns', 100, page * 100);
+    const hit = r.documents.find((d) => String((d.metadata ?? {}).pattern_id ?? '') === patternId);
+    if (hit) return hit.id;
+    if (!r.hasMore) return null;
+  }
+  return null;
+}
+
+/**
+ * Sends one pattern to BHARAG again and removes the copy it replaces (2026-10-15,
+ * Destiny — D2). Ingest first, delete the old copy only once the new one is in:
+ * the worst case is two copies for a moment, never none. The old copy is the id
+ * kept on the row, else the document in the workspace whose metadata names this
+ * pattern_id (patterns made before ids were kept). The new id is saved on the
+ * row as `bharag_doc_id`. Never throws: every outcome is in the answer.
+ */
+export async function reingestPattern(rowId: string | number, source: string, deps: ToolDeps): Promise<ReingestResult> {
+  const row = await mirror.readRow('patterns', Number(rowId));
+  if (!row) return { ok: false, new_id: null, old_id: null, old_found_by: null, old_removed: null, detail: `No pattern row ${rowId} is held.` };
+  const f = row.fields as Record<string, unknown>;
+  const patternId = typeof f.pattern_id === 'string' ? f.pattern_id : null;
+  const drafter = typeof f.drafted_by === 'string' && f.drafted_by.trim() ? f.drafted_by.trim() : 'Bays';
+  const doc = documentFor('patterns', f, drafter);
+  if (!doc) return { ok: false, new_id: null, old_id: null, old_found_by: null, old_removed: null, detail: 'The pattern has no text to send.' };
+
+  let oldId: string | null = typeof f.bharag_doc_id === 'string' && f.bharag_doc_id ? f.bharag_doc_id : null;
+  let foundBy: ReingestResult['old_found_by'] = oldId ? 'row' : null;
+  let searchNote = '';
+  if (!oldId && patternId) {
+    try {
+      oldId = await findPatternCopy(patternId);
+      foundBy = oldId ? 'search' : null;
+      if (!oldId) searchNote = ' No earlier copy naming this pattern_id was found in the workspace.';
+    } catch (e) {
+      searchNote = ` The workspace could not be searched for the earlier copy (${e instanceof Error ? e.message : String(e)}), so it was not removed.`;
+    }
+  }
+
+  const r = await bharag.ingest('build_patterns', doc, { kind: 'record', source });
+  if (!r.ok) return { ok: false, new_id: null, old_id: oldId, old_found_by: foundBy, old_removed: false, detail: `The edit is saved, but BHARAG was not updated: ${r.detail}. The old copy is still the one agents read.` };
+  const newId = r.id ?? null;
+
+  let removed: boolean | null = null;
+  let removeNote = '';
+  if (oldId && newId && oldId !== newId) {
+    const d = await bharag.deleteDocument(bharag.ingestKeyVar('build_patterns'), oldId);
+    removed = d.ok || d.status === 404;
+    if (!removed) removeNote = ` The old copy ${oldId} could not be removed (${d.detail}), so BHARAG holds both until it is.`;
+  } else if (oldId && !newId) {
+    removeNote = ` BHARAG did not hand back the new copy's id, so the old copy ${oldId} was left in place rather than risk removing the only one.`;
+  }
+
+  if (newId) {
+    try {
+      await engineWrite.patchRecord('patterns', String(row.id), { bharag_doc_id: newId, bharag_ingested_at: new Date().toISOString() }, ctxFor('reingest_pattern', deps));
+    } catch (e) {
+      removeNote += ` The new id was not saved on the row (${e instanceof Error ? e.message : String(e)}).`;
+    }
+  }
+  const ok = Boolean(newId) && removed !== false;
+  return {
+    ok,
+    new_id: newId,
+    old_id: oldId,
+    old_found_by: foundBy,
+    old_removed: removed,
+    detail: `${r.detail}.${oldId && removed ? ` Replaced ${oldId}.` : ''}${searchNote}${removeNote}`.trim(),
+  };
+}
+
+const reingestPatternTool: ToolDefinition = {
+  name: 'reingest_pattern',
+  description:
+    "Send one build pattern's current text to BHARAG again and remove the copy it replaces, for a pattern edited before edits re-ingested themselves (15 Oct 2026). update_record already does this on its own whenever a pattern's text changes. id or natural_id (BP-…). The new copy goes in first and the old one is removed only once it is in, so BHARAG is never left without one. The old copy is the bharag_doc_id on the row, else the document whose metadata names this pattern_id. dry_run: say which copy would be replaced. Returns {ok, new_id, old_id, old_removed, detail}. Audited on engine_mcp_writes.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', description: 'The row id.' },
+      natural_id: { type: 'string', description: 'The pattern_id, BP-….' },
+      dry_run: { type: 'boolean' },
+      requester_user_id: { type: 'string' },
+    },
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Send a pattern to BHARAG again' },
+  handler: async (args, deps) => {
+    const ctx = ctxFor('reingest_pattern', deps);
+    const dry = b(args, 'dry_run');
+    const audit = await auditOpen({ tool: 'reingest_pattern', args, access: deps.access, kind: 'patterns', requester: s(args, 'requester_user_id'), dry_run: dry });
+    let row: mirror.LookupRow;
+    try {
+      row = await target('patterns', args, ctx);
+    } catch (e) {
+      await auditClose(audit, { outcome: 'refused', detail: e instanceof Error ? e.message : String(e), natural_id: s(args, 'natural_id') });
+      throw e;
+    }
+    if (dry) {
+      const f = row.fields as Record<string, unknown>;
+      const held = typeof f.bharag_doc_id === 'string' ? f.bharag_doc_id : null;
+      let found: string | null = held;
+      if (!found && typeof f.pattern_id === 'string') found = await findPatternCopy(f.pattern_id).catch(() => null);
+      await auditClose(audit, { outcome: 'dry_run', record_id: row.id, natural_id: row.natural_id });
+      return { ok: true, dry_run: true, id: row.id, natural_id: row.natural_id, would_replace: found, found_by: held ? 'row' : found ? 'search' : null, audit_id: audit };
+    }
+    const r = await reingestPattern(row.id, 'mcp:reingest_pattern', deps);
+    await auditClose(audit, { outcome: r.ok ? 'applied' : 'applied_with_errors', detail: r.detail, record_id: row.id, natural_id: row.natural_id, after: r });
+    return { ...r, id: row.id, natural_id: row.natural_id, audit_id: audit };
+  },
+};
+
 export const PATTERN_DOC_FOLDER = '1o_EkaqsC9C1opq1to5mAmt63eUPFn55b';
 
 /* -------------------------------------------------------------- the tools */
@@ -369,6 +510,15 @@ const createRecord: ToolDefinition = {
       else {
         const r = await bharag.ingest(spec.ingest, doc, { kind: 'record', source: `mcp:create_record:${spec.kind}` });
         ingest = { attempted: true, ok: r.ok, detail: r.detail };
+        // A pattern keeps the id of its BHARAG copy (2026-10-15), so an edit can replace it.
+        if (r.ok && r.id && spec.kind === 'patterns') {
+          try {
+            await engineWrite.patchRecord('patterns', String(written.id), { bharag_doc_id: r.id, bharag_ingested_at: new Date().toISOString() }, ctxFor('create_record', deps));
+            row = (await mirror.readRow('patterns', written.id)) ?? row;
+          } catch (e) {
+            ingest.detail += ` (its BHARAG id was not saved on the row: ${e instanceof Error ? e.message : String(e)})`;
+          }
+        }
       }
     }
 
@@ -496,9 +646,32 @@ const updateRecord: ToolDefinition = {
     }
     try {
       const r = await engineWrite.patchRecord(spec.kind, String(row.id), plan.fields, ctx, s(args, 'natural_id'));
+      // A pattern whose text changed is sent to BHARAG again (2026-10-15): after the save,
+      // never able to undo it, and reported apart from it.
+      const reingest = spec.kind === 'patterns' && r.changed && touchesPatternText(plan.fields) ? await reingestPattern(row.id, `mcp:update_record`, deps) : null;
       const after = await mirror.readRow(spec.kind, row.id);
-      await auditClose(audit, { outcome: r.changed ? 'updated' : 'unchanged', record_id: row.id, natural_id: row.natural_id, before: row, after, guard_result: plan.checks });
-      return { ok: true, saved: true, changed: r.changed, kind: spec.kind, id: row.id, natural_id: row.natural_id, before: row.fields, row: after, checks: plan.checks, audit_id: audit };
+      await auditClose(audit, {
+        outcome: r.changed ? 'updated' : 'unchanged',
+        detail: reingest ? `bharag: ${reingest.detail}` : null,
+        record_id: row.id,
+        natural_id: row.natural_id,
+        before: row,
+        after,
+        guard_result: plan.checks,
+      });
+      return {
+        ok: true,
+        saved: true,
+        changed: r.changed,
+        kind: spec.kind,
+        id: row.id,
+        natural_id: row.natural_id,
+        before: row.fields,
+        row: after,
+        checks: plan.checks,
+        ...(reingest ? { reingested_to_bharag: reingest.ok, bharag: reingest } : {}),
+        audit_id: audit,
+      };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       await auditClose(audit, { outcome: 'rejected', detail: message, record_id: row.id, natural_id: row.natural_id, before: row, guard_result: plan.checks });
@@ -650,4 +823,4 @@ const deleteRecord: ToolDefinition = {
   },
 };
 
-export const WRITE_TOOLS: ToolDefinition[] = [listWritableKinds, createRecord, updateRecord, archiveRecord, deleteRecord];
+export const WRITE_TOOLS: ToolDefinition[] = [listWritableKinds, createRecord, updateRecord, archiveRecord, deleteRecord, reingestPatternTool];

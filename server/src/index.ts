@@ -1166,7 +1166,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         // The same function the MCP write tools call (engineWrite.ts): the
         // merge, the status dating and the log line, in one place. `r`
         // carries `changed`, decided by Postgres, beside the whole row.
-        return send(res, 200, await engineWrite.patchRecord(kind, rowId, patch as Record<string, unknown>, ctx, naturalKey));
+        const patched = await engineWrite.patchRecord(kind, rowId, patch as Record<string, unknown>, ctx, naturalKey);
+        // A pattern whose text an n8n PATCH changed is sent to BHARAG again (2026-10-15, D2),
+        // the same as update_record does; its outcome travels in the answer and never fails the write.
+        if (kind === 'patterns' && patched.changed && writeTools.touchesPatternText(patch as Record<string, unknown>)) {
+          const bharag = await writeTools.reingestPattern(rowId, `engine:PATCH ${p}`, { access: 'write' } as never);
+          return send(res, 200, { ...patched, reingested_to_bharag: bharag.ok, bharag });
+        }
+        return send(res, 200, patched);
       } catch (e) {
         throw new HttpError(e instanceof mirror.MirrorError ? e.status : 500, e instanceof Error ? e.message : String(e));
       }
