@@ -477,7 +477,7 @@ export interface StageMove {
   via: 'page' | 'engine';
 }
 
-export const LEAD_STAGES = [1, 2] as const;
+export const LEAD_STAGES = [1, 2, 3] as const;
 
 export interface LeadsData {
   leads: Lead[];
@@ -531,7 +531,7 @@ export async function leads(): Promise<LeadsData> {
   const by_status: Record<string, number> = {};
   for (const s of LEAD_STATUSES) by_status[s] = 0;
   for (const l of rows) by_status[l.status] = (by_status[l.status] ?? 0) + 1;
-  const by_stage: Record<string, number> = { '1': 0, '2': 0 };
+  const by_stage: Record<string, number> = { '1': 0, '2': 0, '3': 0 };
   for (const l of rows) by_stage[String(l.stage)] = (by_stage[String(l.stage)] ?? 0) + 1;
 
   return { leads: rows, summary: { total: rows.length, last_7_days: since(7), last_30_days: since(30), by_status, by_stage } };
@@ -552,18 +552,20 @@ export async function moveStage(
   reason: string | null,
   via: 'page' | 'engine',
 ): Promise<Lead & { intake_2_invite_result?: intake2.InviteOutcome }> {
-  if (!(LEAD_STAGES as readonly number[]).includes(to)) throw new SubmissionError(422, `"${to}" is not a stage. A lead is in stage 1 (Form A, interest only) or stage 2 (serious buyer, follow-up path).`);
+  if (!(LEAD_STAGES as readonly number[]).includes(to)) throw new SubmissionError(422, `"${to}" is not a stage. A lead is in stage 1 (Form A, interest only), stage 2 (serious buyer, site specification) or stage 3 (paying, a placeholder until pricing and checkout are set).`);
   const who = by.trim().slice(0, 120);
   if (!who) throw new SubmissionError(422, 'Say who is moving the lead (by).');
   const why = reason && reason.trim() ? reason.trim().slice(0, 1000) : null;
   const where = key.id ? `id = $1` : `form_a->>'buyer_intake_id' = $1`;
   const val = key.id ?? key.buyer_intake_id;
   if (!val) throw new SubmissionError(422, 'Name the lead by id or buyer_intake_id.');
-  const cur = await query<{ id: string; stage: number }>(`SELECT id, stage FROM engine_vfarm_leads WHERE ${where}`, [val]);
+  const cur = await query<{ id: string; stage: number; intake_2_completed_at: Date | null }>(`SELECT id, stage, intake_2_completed_at FROM engine_vfarm_leads WHERE ${where}`, [val]);
   if (!cur.rows.length) throw new SubmissionError(404, `No lead with that ${key.id ? 'id' : 'buyer_intake_id'}.`);
   if (cur.rows.length > 1) throw new SubmissionError(409, `More than one lead carries that buyer_intake_id: ${cur.rows.map((r) => r.id).join(', ')}.`);
   const row = cur.rows[0];
   if (row.stage === to) throw new SubmissionError(409, `That lead is already in stage ${to}.`);
+  // Stage 3 is paying, which Jason gated behind Intake-2 (14 Oct). A placeholder still keeps the gate.
+  if (to === 3 && !row.intake_2_completed_at) throw new SubmissionError(409, 'Stage 3 is for a buyer whose site specification (Intake-2) is in. This lead has not sent it yet.');
   const move: StageMove = { from: row.stage, to, at: new Date().toISOString(), by: who, reason: why, via };
   await query(
     `UPDATE engine_vfarm_leads SET stage = $2, stage_changed_at = now(), stage_history = stage_history || $3::jsonb WHERE id = $1`,
@@ -573,7 +575,7 @@ export async function moveStage(
   // Stage 2 is Intake-2's trigger (Hardik's contract, 13 Oct). The invite never undoes the move:
   // a refusal or a failed email is the outcome, stored on the lead and returned beside it.
   let invite: intake2.InviteOutcome | null = null;
-  if (to === 2) {
+  if (to === 2 && row.stage === 1) {
     try {
       invite = await intake2.issueInvite(row.id, { by: who });
     } catch (e) {

@@ -624,12 +624,17 @@ export function editVfarmLead(id: string, changes: { status?: VfarmLeadStatus; n
   return api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}`, { method: 'PATCH', body: changes });
 }
 
+/** Clear a lead's Unresponsive mark (2026-10-15). */
+export function clearIntake2Unresponsive(id: string): Promise<{ ok: boolean; message: string }> {
+  return api<{ ok: boolean; message: string }>(`/api/vfarm/leads/${encodeURIComponent(id)}/intake-2/responsive`, { method: 'POST', body: {} });
+}
+
 /** Send a lead's Intake-2 invite, or send it again (2026-10-14). Moving a lead to Stage 2 already sends it. */
 export function sendIntake2Invite(id: string, resend: boolean): Promise<Intake2InviteOutcome> {
   return api<Intake2InviteOutcome>(`/api/vfarm/leads/${encodeURIComponent(id)}/intake-2/invite`, { method: 'POST', body: { resend } });
 }
 
 /** Move a lead between Stage 1 and Stage 2 (2026-10-03, VFIG). The move is appended to its history. */
-export function moveVfarmLeadStage(id: string, stage: 1 | 2, reason: string | null): Promise<VfarmLead> {
+export function moveVfarmLeadStage(id: string, stage: 1 | 2 | 3, reason: string | null): Promise<VfarmLead> {
   return api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}`, { method: 'PATCH', body: { stage, stage_reason: reason } });
 }

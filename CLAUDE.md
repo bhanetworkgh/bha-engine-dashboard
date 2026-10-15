@@ -1303,6 +1303,27 @@ then here, then BUILD_LOG), migration 76.
   Then one post in #vfarm-early-access as Bays, whose outcome is written on the row.
 - **Interest only.** The five request checks (feasibility, pricing, ownership, licensing,
   food safety) are never touched: the answers are evidence for them, not a decision.
+- **Four emails, one n8n workflow** (15 Oct 2026, Destiny): the dashboard sends a `kind`
+  (`invite`, `followup_1`, `followup_2`, `received`) and n8n picks the template. The buyer
+  gets a receipt on submit (`VFINT2-RCV-…`, stored as `intake_2.confirmation_email`),
+  beside the #vfarm-early-access post.
+- **Follow-ups** (`FOLLOW_UP` in `intake2.ts`, the numbers live there and nowhere else):
+  a sweep every 15 minutes, counted from the first invite that went out. Follow-up 1 at 3
+  days, follow-up 2 at 7 (and never sooner than 4 days after follow-up 1), Unresponsive at
+  14 (and never sooner than 7 days after follow-up 2, and only once follow-up 2 went or
+  failed three times). Each step is claimed on the row before it is sent, so two passes
+  never send it twice; a failed send is tried again up to three times. Unresponsive writes
+  `intake_2_invite.unresponsive_at`, one `serious_buyer_spec_intake_unresponsive` event and
+  one post in #vfarm-early-access; a person clears it from the lead
+  (`POST /api/vfarm/leads/:id/intake-2/responsive`). Answering, or leaving Stage 2, stops
+  everything.
+- **Stage 3, paying, is a placeholder** (migration 77). A lead moves there only once its
+  Intake-2 is in (Jason, 14 Oct: no one sees Stripe before Intake-2 and the five checks);
+  nothing takes a payment, and the tab says so, until Jason and Hardik set the price and the
+  Stripe-to-ledger contract. Only the Stage 1 to 2 move sends the invite.
+- **The lead list shows where each Stage 2 lead is**: an `intake-2` column with one tag
+  (No invite yet, Invite sent, Opened, follow-up 1 or 2 sent, Spec received, Unresponsive,
+  Invite failed). Opened is a hint: it is set when the page reads the form.
 - `npm run test:intake2` pins it against a local database with n8n, Google and Slack
   stood in.
 

@@ -12492,3 +12492,26 @@ Decision:   The page is served by this server at dashboard.bhanetwork.org/intake
             Tests: npm run test:intake2, 12 of 12 against local Postgres 16 with n8n, Google and Slack
             stood in. The buyer page was checked at 390 px and 1100 px wide (no sideways scroll, errors
             shown under each question).
+
+## 2026-10-15 08:20 — Intake-2: follow-ups, the buyer's receipt, Stage 3 placeholder, the list tag
+Intent:     Destiny's review of the live Intake-2 (15 Oct): a clear on-screen sign that a prospect was
+            emailed; a confirmation email to the buyer after submitting (the channel post already
+            existed); two follow-up emails before a lead is marked unresponsive; Stage 3 (paying) as a
+            placeholder until Jason and Hardik set pricing and the checkout contract.
+Files:      server/src/intake2.ts (kinds, receipt, follow-up sweep, clearUnresponsive, timer),
+            server/src/earlyAccess.ts (stage 3 and its gate; only 1 to 2 sends the invite),
+            server/src/migrations.ts (77), server/src/index.ts (route, timer start), server/src/timers.ts,
+            src/data/intake2.ts, src/data/index.ts, src/screens/VFarm/Intake2Panel.tsx,
+            src/screens/VFarm/EarlyAccess.tsx, server/test/intake2.test.cjs, CLAUDE.md.
+            n8n vFarm — Intake-2 Invite (bVq6EF3sjn0xtOOg): Check Request takes a kind; Build Invite Email
+            renamed Build Email and holds four templates; Send Invite Email renamed Send Email; sticky note
+            and groups updated; published 48ee41ba.
+Problem:    Renaming the node did not update the code that read it: Confirm Gmail Accepted It still said
+            $('Build Invite Email'), which would have failed every send after the publish. Caught on the
+            re-read before publishing. The first test of the unresponsive gap failed because a send is
+            stamped with the real clock while the test moves a simulated one.
+Fix:        The reference was rewritten to $('Build Email') before publishing. The test puts the send on
+            its own clock.
+Decision:   3, 7 and 14 days (Destiny). Each step waits its own gap after the one before, so a lead
+            picked up late never gets two emails in a row, and a lead is never marked unresponsive on a
+            reminder it was not sent. Stage 3 keeps Jason's gate even as a placeholder. Tests: 15 of 15.

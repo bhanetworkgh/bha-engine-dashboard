@@ -1570,6 +1570,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
    * lead that was in Stage 2 before Intake-2 existed, or a send that failed.
    */
   const invite2 = p.match(/^\/api\/vfarm\/leads\/([^/]+)\/intake-2\/invite$/);
+  const resp2 = p.match(/^\/api\/vfarm\/leads\/([^/]+)\/intake-2\/responsive$/);
+  if (resp2 && method === 'POST') {
+    const body = await readJson(req);
+    try {
+      return send(res, 200, await intake2.clearUnresponsive(decodeURIComponent(resp2[1]), typeof body.by === 'string' ? body.by : 'the dashboard login'));
+    } catch (e) {
+      if (e instanceof intake2.Intake2Error) return send(res, e.status, { ok: false, reason: e.reason, message: e.message });
+      throw e;
+    }
+  }
   if (invite2 && method === 'POST') {
     const body = await readJson(req);
     try {
@@ -2436,6 +2446,7 @@ async function boot(): Promise<void> {
     // A draft eval left running by the last process is not resumed (13 Oct 2026).
     void draftEval.markInterrupted().then((n) => { if (n) console.log(`[draft-eval] ${n} run(s) left running by the last process marked interrupted`); }).catch((e) => console.error(`[draft-eval] interrupted runs not marked: ${(e as Error).message}`));
     decisionWatch.startSweeping();
+    intake2.startSweeping();
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();
   });
