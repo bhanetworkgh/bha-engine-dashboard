@@ -497,9 +497,31 @@ export async function genieData() {
       return { key: s.key, label: s.label, asks: mine.length, answered: mine.filter((a) => a.outcome === 'Answered').length, delivered: mine.filter((a) => a.outcome !== 'Failed').length, external: null };
     });
 
+  // Coding-subagent close-outs (2026-10-15, Destiny — Kaiqi's handoff spec,
+  // genie-subagent-closeout-dashboard.md): one event per incident the subagent
+  // finished, keyed `closeout:{incidentEntityId}`. Their own tab, never an ask.
+  const closeouts = await query<{
+    event_id: string; occurred_at: string; incident_id: string | null; builder_id: string | null; pressed_by: string | null;
+    status: string | null; pr_url: string | null; request_id: string | null; run_id: string | null; note: string | null;
+  }>(
+    `SELECT g.event_id,
+            to_char(g.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS occurred_at,
+            g.payload->'response'->>'incidentEntityId' AS incident_id,
+            g.builder_id, p.fields->>'name' AS pressed_by,
+            coalesce(g.payload->'response'->>'status', g.status) AS status,
+            g.payload->'response'->>'pullRequestUrl' AS pr_url,
+            g.request_id, g.run_id,
+            left(coalesce(g.payload->'response'->>'summary', g.payload->'response'->>'reason', g.payload->'response'->>'message'), 600) AS note
+       FROM engine_genie_events g
+       LEFT JOIN engine_builder_profiles p ON p.natural_id = g.builder_id
+      WHERE g.event_type = 'genie.subagent.closeout'
+      ORDER BY g.occurred_at DESC`,
+  );
+
   const m = meta.rows[0];
   return {
     asks,
+    closeouts: closeouts.rows,
     meta: {
       events: m?.events ?? 0,
       subagent_events: m?.subagent ?? 0,
