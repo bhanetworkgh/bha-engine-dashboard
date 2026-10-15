@@ -31,6 +31,7 @@ import * as airtable_ from './airtable';
 import { LOOPS_BASE_ID, OPEN_LOOPS_BASE_VAR, RETIRED_VAR, SUBMISSIONS_BASE_FROM_ENV, SUBMISSIONS_BASE_ID, SUBMISSIONS_BASE_VAR, WRITEBACK_VAR, airtableConfigured, retired as airtableRetired, writebackEnabled as airtableWritebackEnabled } from './airtable';
 import { IMPORT_GROUPS, finalImport as runFinalImport, isImportGroup } from './finalImport';
 import * as codex from './codex';
+import * as un9d from './un9d';
 import * as codexReject from './codexReject';
 import * as writeTools from './mcp/writeTools';
 import * as loops from './loops';
@@ -699,6 +700,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     if (feed) {
       if (method !== 'POST') throw new HttpError(405, p === '/api/engine/media-doctrine' ? `${feed.hint} GET reads the claims in force.` : feed.hint);
       const body = await readJson(req, 4 * 1024 * 1024);
+      const vfarmRoute = p === '/api/engine/vfarm-snapshot' ? 'snapshot' : p === '/api/engine/vfarm-alerts' ? 'alert' : null;
       try {
         const r = await feed.store(body);
         const dry = r.dry_run === true;
@@ -711,9 +713,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           detail: `${dry ? 'dry run, rolled back: ' : ''}${feed.describe(r)}`,
           ms: Date.now() - t0,
         });
+        // The first real vFarm post of each kind DMs Destiny once (2026-10-15, D3). Never awaited.
+        if (vfarmRoute) void un9d.firstRealData(vfarmRoute, body, dry ? 'dry_run' : 'stored', feed.describe(r));
         return send(res, !dry && Number(r.inserted ?? 1) > 0 ? 201 : 200, { ok: true, ...r });
       } catch (e) {
         if (e instanceof systemFeeds.FeedError) {
+          if (vfarmRoute) void un9d.firstRealData(vfarmRoute, body, 'refused', e.message);
           await mirror.logWrite({ endpoint, kind: feed.kind, method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
           throw new HttpError(e.status, e.message);
         }
