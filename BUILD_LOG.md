@@ -12579,3 +12579,10 @@ Files:      server/src/un9d.ts, server/test/un9d.test.cjs
 Problem:    Test 1 "agreement" failed on four devices ("sim-co2-01 last reading differs" …). The Monitoring Twin read formats times to the whole second (`to_char(... 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`) and the stored rows carry milliseconds, so the same instant compared unequal. A checker bug, not a disagreement in the data.
 Fix:        Compare to the second, and name both values when they really differ. The test pins both directions.
 Decision:   The other Test 1 fail stands and is real: sim-camera-01 has no last_reading_at (the simulator never sends a camera reading). Whether a device with no reading at all fails "observed time" or counts as NOT_WIRED is Hardik's call; the checker keeps failing it until he says.
+
+## 2026-10-15 14:35 — UN9D check proven on the simulator; session close
+Intent:     Re-run check_un9d_acceptance on SIM-TOMATO-01 after 7313ab6 and close the day.
+Files:      none (proof only).
+Problem:    none.
+Fix:        Event 463, audit 2248: Test 2 passes on every condition (6 silent-device incidents, newest INC-VFARM.SENSOR-1791550179181-55DD; 4 of 6 ledgered, newest INC-BAYS.MONITORING-007; all closed on recovery with no overlap; Engine health holds the 2 after its 4 Oct copy, once each, closed). Test 1 passes 7 of 8; the one fail is sim-camera-01 with no last_reading_at. Simulated: NOT_SAFE_TO_CLAIM. Loops updated: GWTH, UN9D, DNQO, 8AQG (audits 2240 to 2243). Raised as loops: LOOP-1792069427988-PDS2 (Bays — Error Handler drops a trigger error's cause text, audit 2244) and LOOP-1792069431410-EC6B (re-ingest patterns edited before today, audit 2245).
+Decision:   The first-real-data DM is deferred until Jegan's first real post; it has not fired in production.
