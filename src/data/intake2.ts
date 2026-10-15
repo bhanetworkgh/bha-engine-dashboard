@@ -324,6 +324,8 @@ export interface Intake2Stored {
   /** Drive folder holding the uploads, when there were any. */
   drive_folder: { id: string; link: string | null } | null;
   digest: string;
+  /** The buyer's receipt email, sent once on submit (15 Oct 2026). */
+  confirmation_email?: Intake2Send | null;
 }
 
 /** The invite, stored in engine_vfarm_leads.intake_2_invite. The link is never stored, only its hash; `link` is added when the dashboard reads it. */
@@ -336,6 +338,12 @@ export interface Intake2Invite {
   sends: Intake2Send[];
   opened_at: string | null;
   drive_folder: { id: string; link: string | null } | null;
+  /** The two follow-up emails (15 Oct 2026): fu1 at 3 days, fu2 at 7. */
+  followups?: Partial<Record<'fu1' | 'fu2', Intake2Send & { attempts?: number; claimed_at?: string }>>;
+  /** Set at 14 days with no answer, after both follow-ups. Cleared by a person. */
+  unresponsive_at?: string | null;
+  unresponsive_alert?: { ts: string | null; error: string | null } | null;
+  unresponsive_cleared?: { at: string; by: string; was: string | null }[];
 }
 
 export interface Intake2Send {

@@ -1,9 +1,33 @@
 import { useState } from 'react';
-import { sendIntake2Invite, type VfarmLead } from '../../data';
-import { Button } from '../../components/ui';
+import { clearIntake2Unresponsive, sendIntake2Invite, type VfarmLead } from '../../data';
+import { Button, Pill } from '../../components/ui';
 import { INTAKE2_FIELDS, INTAKE2_SECTIONS, answerText, type Intake2File } from '../../data/intake2';
 
 const when = (iso: string | null | undefined): string => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : '');
+
+
+/**
+ * Where a lead is in Intake-2, in one word, for the tag on its row (15 Oct 2026, Destiny:
+ * "a very visible indicator on screen that they've been sent an email"). Opened is a hint,
+ * not a fact: it is set when the page reads the form, which a link scanner never does.
+ */
+export function intake2State(lead: VfarmLead): { label: string; tone: 'default' | 'degraded' | 'failing' | 'accent' } | null {
+  const inv = lead.intake_2_invite ?? null;
+  if (lead.intake_2) return { label: 'Spec received', tone: 'accent' };
+  if (!inv) return lead.stage === 2 ? { label: 'No invite yet', tone: 'degraded' } : null;
+  if (inv.unresponsive_at) return { label: 'Unresponsive', tone: 'degraded' };
+  const sends = inv.sends ?? [];
+  if (!sends.some((x) => x.outcome === 'sent')) return { label: 'Invite failed', tone: 'failing' };
+  const fu = inv.followups ?? {};
+  const step = fu.fu2?.outcome === 'sent' ? 'follow-up 2 sent' : fu.fu1?.outcome === 'sent' ? 'follow-up 1 sent' : null;
+  if (inv.opened_at) return { label: step ? `Opened · ${step}` : 'Opened', tone: 'default' };
+  return { label: step ? `Invite sent · ${step}` : 'Invite sent', tone: 'default' };
+}
+
+export function Intake2Tag({ lead }: { lead: VfarmLead }) {
+  const s = intake2State(lead);
+  return s ? <Pill tone={s.tone}>{s.label}</Pill> : null;
+}
 
 /**
  * Intake-2 on a lead (2026-10-14): the invite, every email sent for it, and,
@@ -19,7 +43,19 @@ export function Intake2Panel({ lead, onToast }: { lead: VfarmLead; onToast: (tex
   const sends = inv?.sends ?? [];
   const lastSend = sends[sends.length - 1] ?? null;
   const sent = sends.some((s) => s.outcome === 'sent');
-  if (lead.stage !== 2 && !inv && !done) return null;
+  if (lead.stage === 1 && !inv && !done) return null;
+
+  async function clearUnresponsive() {
+    setBusy(true);
+    try {
+      const r = await clearIntake2Unresponsive(lead.id);
+      onToast(r.message, 'ok');
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : 'That did not save.', 'failing');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function invite(resend: boolean) {
     setBusy(true);
@@ -79,7 +115,31 @@ export function Intake2Panel({ lead, onToast }: { lead: VfarmLead; onToast: (tex
             {done.notified?.ts ? 'Announced in #vfarm-early-access.' : done.notified?.error ? <span className="text-failing">Not announced in Slack: {done.notified.error}.</span> : ''}
           </li>
         )}
-        {!done && lastSend?.outcome === 'sent' && <li>Waiting for the buyer to answer.</li>}
+        {(['fu1', 'fu2'] as const).map((k, i) => {
+          const f = inv?.followups?.[k];
+          if (!f || !f.at) return null;
+          return (
+            <li key={k} className={f.outcome === 'failed' ? 'text-failing' : undefined}>
+              {when(f.at)} — follow-up {i + 1} {f.outcome === 'sent' ? `emailed to ${f.to}` : `did not go (try ${f.attempts ?? 1}): ${f.error}`}
+            </li>
+          );
+        })}
+        {inv?.unresponsive_at && (
+          <li className="flex flex-wrap items-center gap-2 text-ink">
+            <Pill tone="degraded">Unresponsive</Pill> since {when(inv.unresponsive_at)}: no answer 14 days after the invite and two follow-ups.
+            <Button size="sm" variant="ghost" loading={busy} onClick={clearUnresponsive}>
+              Clear unresponsive
+            </Button>
+          </li>
+        )}
+        {!done && !inv?.unresponsive_at && lastSend?.outcome === 'sent' && (
+          <li>Waiting for the buyer to answer. Follow-ups go out at 3 and 7 days after the first invite, and the lead is marked Unresponsive at 14.</li>
+        )}
+        {done?.confirmation_email && (
+          <li className={done.confirmation_email.outcome === 'failed' ? 'text-failing' : undefined}>
+            {done.confirmation_email.outcome === 'sent' ? `Receipt emailed to ${done.confirmation_email.to}.` : `Receipt email did not go: ${done.confirmation_email.error}`}
+          </li>
+        )}
       </ul>
 
       {done && (

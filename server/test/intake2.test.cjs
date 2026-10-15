@@ -74,6 +74,8 @@ const srv = http.createServer((req, res) => {
   const T = Date.now().toString(36).toUpperCase();
   const BUYER = `VFBUYER-FORMA-T${T}`;
   await query(`DELETE FROM meta WHERE key = 'intake2.drive_parent'`);
+  // Leftovers from an earlier failed run must not be swept here.
+  await query(`DELETE FROM engine_vfarm_leads WHERE email LIKE '%@example.org' AND (form_a->>'buyer_intake_id' ~ '^VFBUYER-FORMA-[TU]' OR form_a IS NULL)`);
   const lead = async (o) =>
     (
       await query(
@@ -241,6 +243,53 @@ const srv = http.createServer((req, res) => {
   const retry = await i2.issueInvite(L2, { by: 'test' });
   assert.equal(retry.reason, 'sent', 'a failed send is not an already-sent one');
   ok('a failed email is stored as failed with Gmail’s reason; the move stands; sending again works');
+
+  /* 10b. the receipt went to the buyer on submit, once */
+  const rcv = st.invites.filter((x) => x.kind === 'received');
+  assert.equal(rcv.length, 1);
+  assert.equal(rcv[0].send_id, `VFINT2-RCV-FORMA-T${T}`);
+  assert.equal((await row(L)).intake_2.confirmation_email.outcome, 'sent');
+  assert.equal(st.invites.filter((x) => x.kind === 'invite').length >= 2, true);
+  ok('the buyer gets one receipt email on submit, recorded on the answers');
+
+  /* 10c. stage 3 waits on Intake-2 */
+  await assert.rejects(ea.moveStage({ id: L2 }, 3, 'test', null, 'page'), (e) => e.status === 409);
+  const s3 = await ea.moveStage({ id: L }, 3, 'test', 'site spec in', 'page');
+  assert.equal(s3.stage, 3);
+  assert.equal(s3.intake_2_invite_result, undefined, 'stage 3 sends no invite');
+  ok('Stage 3 is refused until Intake-2 is in, and moving there sends nothing');
+
+  /* 10d. follow-ups at 3 and 7 days, unresponsive at 14, each step spaced, nothing doubled */
+  const first = Date.parse((await row(L2)).intake_2_invite.sends.find((x) => x.outcome === 'sent').at);
+  const at = (d) => new Date(first + d * 86400000 + 60000);
+  const kinds = () => st.invites.filter((x) => x.send_id.includes(`U${T}`)).map((x) => x.kind);
+  let sw = await i2.sweepFollowUps(at(2));
+  assert.deepEqual(kinds().filter((k) => k !== 'invite'), []);
+  sw = await i2.sweepFollowUps(at(3));
+  assert.deepEqual(kinds().filter((k) => k !== 'invite'), ['followup_1']);
+  await i2.sweepFollowUps(at(3.1));
+  assert.deepEqual(kinds().filter((k) => k !== 'invite'), ['followup_1'], 'not sent twice');
+  // A late start: at day 13 with fu2 not yet sent, fu2 goes, and unresponsive waits its own gap.
+  await query(`UPDATE engine_vfarm_leads SET intake_2_invite = jsonb_set(intake_2_invite, '{followups,fu1,at}', to_jsonb($2::text)) WHERE id = $1`, [L2, at(3).toISOString()]);
+  sw = await i2.sweepFollowUps(at(13));
+  assert.deepEqual(kinds().filter((k) => k !== 'invite'), ['followup_1', 'followup_2']);
+  assert.deepEqual(sw.unresponsive, []);
+  // The send is stamped with the real clock; put it on the test's clock.
+  await query(`UPDATE engine_vfarm_leads SET intake_2_invite = jsonb_set(intake_2_invite, '{followups,fu2,at}', to_jsonb($2::text)) WHERE id = $1`, [L2, at(13).toISOString()]);
+  sw = await i2.sweepFollowUps(at(14));
+  assert.deepEqual(sw.unresponsive, [], 'unresponsive waits 7 days after follow-up 2');
+  sw = await i2.sweepFollowUps(at(20.1));
+  assert.deepEqual(sw.unresponsive, [B2]);
+  assert.ok((await row(L2)).intake_2_invite.unresponsive_at);
+  assert.equal(await eventsFor('serious_buyer_spec_intake_unresponsive', B2), 1);
+  assert.match(st.posts[st.posts.length - 1].text, /no answer after 14 days/);
+  sw = await i2.sweepFollowUps(at(21));
+  assert.deepEqual(sw.unresponsive, []);
+  const cleared = await i2.clearUnresponsive(L2, 'test');
+  assert.equal(cleared.ok, true);
+  assert.equal((await row(L2)).intake_2_invite.unresponsive_at, undefined);
+  await assert.rejects(i2.clearUnresponsive(L2, 'test'), (e) => e.status === 409);
+  ok('follow-ups at 3 and 7 days, spaced on a late start, Unresponsive at 14 with one event and one post, clearable');
 
   /* 11. the buyer page's script parses, and carries no lead data */
   const html = page.formPage();

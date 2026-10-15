@@ -41,6 +41,7 @@ import * as google from './google';
 import * as slack from './slack';
 import * as n8n from './n8n';
 import { getMeta, setMeta } from './db';
+import * as timers from './timers';
 import {
   INTAKE2_CONTRACT,
   INTAKE2_FIELDS,
@@ -221,7 +222,9 @@ export async function issueInvite(leadId: string, opts: { by: string; resend?: b
   return { ok: false, reason: 'send_failed', message: `The invite was made but the email did not go: ${send.error}`, invite_id: inviteId, link, send };
 }
 
-async function sendEmail(a: { send_id: string; invite_id: string; to: string; name: string; organisation: string | null; link: string; by: string }): Promise<Intake2Send> {
+export type MailKind = 'invite' | 'followup_1' | 'followup_2' | 'received';
+
+async function sendEmail(a: { kind?: MailKind; send_id: string; invite_id: string; to: string; name: string; organisation: string | null; link: string; by: string }): Promise<Intake2Send> {
   const at = new Date().toISOString();
   const out = (outcome: 'sent' | 'failed', gmail: string | null, error: string | null): Intake2Send => ({ send_id: a.send_id, at, by: a.by, to: a.to, outcome, gmail_message_id: gmail, error });
   const key = process.env.DASHBOARD_INBOUND_KEY?.trim();
@@ -232,7 +235,7 @@ async function sendEmail(a: { send_id: string; invite_id: string; to: string; na
     const res = await fetch(`${n8n.n8nHost()}${INVITE_PATH}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-dashboard-key': key },
-      body: JSON.stringify({ send_id: a.send_id, invite_id: a.invite_id, to: a.to, name: a.name, organisation: a.organisation, link: a.link }),
+      body: JSON.stringify({ kind: a.kind ?? 'invite', send_id: a.send_id, invite_id: a.invite_id, to: a.to, name: a.name, organisation: a.organisation, link: a.link }),
       signal: ctl.signal,
     });
     const text = await res.text();
@@ -511,6 +514,7 @@ export async function submit(token: string, body: Record<string, unknown>, userA
     throw new Intake2Error(409, 'already_submitted', 'This specification was already sent. To change an answer, reply to the invite email and the team will update it.');
   }
   await announce(row, stored).catch((e) => console.error(`[intake-2] alert for ${buyer} failed: ${e instanceof Error ? e.message : String(e)}`));
+  await confirmToBuyer(row, buyer, token).catch((e) => console.error(`[intake-2] confirmation email for ${buyer} failed: ${e instanceof Error ? e.message : String(e)}`));
   return { ok: true, already: false, submission_id: submissionId, submitted_at: now };
 }
 
@@ -557,4 +561,152 @@ export function forPage(inv: Omit<Intake2Invite, 'link'> | null): Omit<Intake2In
     link = `(${SECRET_VAR} is not set, so the link cannot be shown)`;
   }
   return { ...rest, link };
+}
+
+/**
+ * The buyer's own receipt (15 Oct 2026, Destiny: "after filling the intake 2 form, there should be
+ * confirmations also, same channel notification and email"). One email, `VFINT2-RCV-…`, sent once:
+ * the outcome is written on the stored answers, and a failure is kept with Gmail's reason.
+ */
+async function confirmToBuyer(row: Row, buyer: string, token: string): Promise<void> {
+  const email = (row.email ?? '').trim();
+  const send = await sendEmail({ kind: 'received', send_id: `VFINT2-RCV-${suffixOf(buyer)}`, invite_id: inviteIdFor(buyer), to: email, name: row.full_name, organisation: row.organization_name, link: linkFor(token), by: 'intake-2 (on submit)' });
+  await query(`UPDATE engine_vfarm_leads SET intake_2 = jsonb_set(intake_2, '{confirmation_email}', $2::jsonb) WHERE id = $1`, [row.id, JSON.stringify(send)]);
+  events.changed('vfarm_leads', row.id);
+  if (send.outcome !== 'sent') console.error(`[intake-2] receipt to ${email} not sent: ${send.error}`);
+}
+
+/* ------------------------------------------------------------ follow-ups */
+
+/**
+ * Stage 2 follow-ups (15 Oct 2026, Destiny). Counted from the first invite that went out:
+ * a first reminder at 3 days, a second at 7, and Unresponsive at 14, with one post in
+ * #vfarm-early-access. Answering stops all of it; so does leaving Stage 2. A person can
+ * clear Unresponsive from the lead. The numbers are here and nowhere else.
+ */
+export const FOLLOW_UP = { first_days: 3, second_days: 7, unresponsive_days: 14, max_attempts: 3, tick_minutes: 15 } as const;
+const DAY = 86_400_000;
+
+type FollowUpRow = Row & { intake_2_invite: NonNullable<Row['intake_2_invite']> & { followups?: Record<string, Intake2Send & { attempts?: number; claimed_at?: string }>; unresponsive_at?: string | null } };
+
+function firstSentAt(inv: { sends?: Intake2Send[] }): number | null {
+  const s = (inv.sends ?? []).filter((x) => x.outcome === 'sent').map((x) => Date.parse(x.at)).filter(Number.isFinite);
+  return s.length ? Math.min(...s) : null;
+}
+
+/** Claims one follow-up step on one lead, so two passes (or two instances) never send it twice. */
+async function claim(id: string, key: 'fu1' | 'fu2', at: string): Promise<number | null> {
+  const r = await query<{ attempts: string | null }>(
+    `UPDATE engine_vfarm_leads
+        SET intake_2_invite = intake_2_invite || jsonb_build_object('followups',
+              coalesce(intake_2_invite->'followups', '{}'::jsonb) || jsonb_build_object($2::text,
+                jsonb_build_object('claimed_at', $3::text, 'attempts', coalesce((intake_2_invite->'followups'->$2->>'attempts')::int, 0) + 1)))
+      WHERE id = $1
+        AND intake_2_completed_at IS NULL
+        AND (NOT coalesce(intake_2_invite->'followups', '{}'::jsonb) ? $2
+             OR (intake_2_invite->'followups'->$2->>'outcome' = 'failed'
+                 AND coalesce((intake_2_invite->'followups'->$2->>'attempts')::int, 0) < $4))
+      RETURNING intake_2_invite->'followups'->$2->>'attempts' AS attempts`,
+    [id, key, at, FOLLOW_UP.max_attempts],
+  );
+  return r.rows.length ? Number(r.rows[0].attempts) : null;
+}
+
+export interface SweepResult { looked_at: number; sent: string[]; failed: string[]; unresponsive: string[] }
+
+export async function sweepFollowUps(now = new Date()): Promise<SweepResult> {
+  const out: SweepResult = { looked_at: 0, sent: [], failed: [], unresponsive: [] };
+  if (!configured()) return out;
+  const r = await query<FollowUpRow>(
+    `SELECT ${COLS} FROM engine_vfarm_leads
+      WHERE stage = 2 AND intake_2_completed_at IS NULL AND intake_2_invite IS NOT NULL
+        AND (intake_2_invite->>'unresponsive_at') IS NULL`,
+  );
+  for (const row of r.rows) {
+    out.looked_at++;
+    const inv = row.intake_2_invite;
+    const first = firstSentAt(inv);
+    const buyer = row.form_a?.buyer_intake_id;
+    if (first === null || !buyer) continue;
+    const age = now.getTime() - first;
+    const fu: Record<string, Intake2Send & { attempts?: number }> = { ...(inv.followups ?? {}) };
+    const steps: Array<['fu1' | 'fu2', number, MailKind]> = [
+      ['fu1', FOLLOW_UP.first_days, 'followup_1'],
+      ['fu2', FOLLOW_UP.second_days, 'followup_2'],
+    ];
+    for (const [key, days, kind] of steps) {
+      if (age < days * DAY) continue;
+      if (fu[key]?.outcome === 'sent') continue;
+      // Each step waits its own gap after the one before, so a late start never sends two emails in a row.
+      if (key === 'fu2') {
+        const prev = fu.fu1;
+        const prevDone = prev?.outcome === 'sent' || (prev?.outcome === 'failed' && (prev.attempts ?? 0) >= FOLLOW_UP.max_attempts);
+        if (!prevDone || now.getTime() - Date.parse(prev!.at) < (FOLLOW_UP.second_days - FOLLOW_UP.first_days) * DAY) break;
+      }
+      const attempts = await claim(row.id, key, now.toISOString());
+      if (attempts === null) continue;
+      const send = await sendEmail({ kind, send_id: `VFINT2-${key.toUpperCase()}-${suffixOf(buyer)}-${attempts}`, invite_id: inv.invite_id, to: (row.email ?? '').trim(), name: row.full_name, organisation: row.organization_name, link: linkFor(tokenFor(inv.invite_id)), by: 'intake-2 follow-up' });
+      await query(
+        `UPDATE engine_vfarm_leads SET intake_2_invite = jsonb_set(intake_2_invite, ARRAY['followups', $2::text], $3::jsonb) WHERE id = $1`,
+        [row.id, key, JSON.stringify({ ...send, attempts })],
+      );
+      fu[key] = { ...send, attempts };
+      events.changed('vfarm_leads', row.id);
+      (send.outcome === 'sent' ? out.sent : out.failed).push(`${buyer} ${key}`);
+      if (send.outcome !== 'sent') console.error(`[intake-2] ${key} to ${row.email} not sent (attempt ${attempts}): ${send.error}`);
+      break; // one email per lead per pass
+    }
+    // Unresponsive only once the second follow-up has gone, or could not be sent after every try:
+    // a lead is never written off on reminders it was never sent.
+    const fu2Done = fu.fu2?.outcome === 'sent' || (fu.fu2?.outcome === 'failed' && (fu.fu2.attempts ?? 0) >= FOLLOW_UP.max_attempts);
+    const fu2Gap = fu.fu2?.at ? now.getTime() - Date.parse(fu.fu2.at) >= (FOLLOW_UP.unresponsive_days - FOLLOW_UP.second_days) * DAY : false;
+    if (age >= FOLLOW_UP.unresponsive_days * DAY && fu2Done && fu2Gap) {
+      const at = now.toISOString();
+      const u = await query(`UPDATE engine_vfarm_leads SET intake_2_invite = intake_2_invite || jsonb_build_object('unresponsive_at', $2::text) WHERE id = $1 AND (intake_2_invite->>'unresponsive_at') IS NULL AND intake_2_completed_at IS NULL RETURNING id`, [row.id, at]);
+      if (!u.rowCount) continue;
+      out.unresponsive.push(buyer);
+      await engineEvents
+        .record({ event_type: 'serious_buyer_spec_intake_unresponsive', at, subject_id: buyer, lane: 'CAPITAL', actor: 'intake-2 follow-up', source_ref: `${base()}/vfarm?tab=early-access&lead=${row.id}`, detail: { buyer_intake_id: buyer, lead_row_id: row.id, invite_id: inv.invite_id, days_since_invite: Math.floor(age / DAY), followups: Object.fromEntries(Object.entries(fu).map(([k, v]) => [k, v.outcome ?? 'claimed'])) }, dedupe_key: `serious_buyer_spec_intake_unresponsive:${buyer}:${inv.invite_id}:${at.slice(0, 10)}` })
+        .catch((e) => console.error(`[intake-2] unresponsive event for ${buyer}: ${(e as Error).message}`));
+      const text = [`*Intake-2: no answer after ${FOLLOW_UP.unresponsive_days} days*`, `*Name:* ${row.full_name}`, `*Organisation:* ${row.organization_name ?? 'not given'}`, `*Buyer:* ${buyer}`, `The invite and two follow-ups went out with no site specification back, so the lead is marked Unresponsive. It stays in Stage 2; clear it from the lead to start again.`, `Lead: ${base()}/vfarm?tab=early-access&lead=${row.id}`].join('\n');
+      const p = await slack.botCall('chat.postMessage', { channel: ALERT_CHANNEL, text, unfurl_links: false });
+      await query(`UPDATE engine_vfarm_leads SET intake_2_invite = intake_2_invite || jsonb_build_object('unresponsive_alert', $2::jsonb) WHERE id = $1`, [row.id, JSON.stringify(p.ok ? { ts: String(p.ts ?? ''), error: null } : { ts: null, error: String(p.error ?? 'unknown') })]);
+      events.changed('vfarm_leads', row.id);
+      if (!p.ok) console.error(`[intake-2] unresponsive alert for ${buyer} not posted: ${p.error}`);
+    }
+  }
+  return out;
+}
+
+/** A person clears Unresponsive (they replied by email, say). The follow-ups already sent stay on the record. */
+export async function clearUnresponsive(leadId: string, by: string): Promise<{ ok: boolean; message: string }> {
+  const who = (by || '').trim().slice(0, 120) || 'the dashboard login';
+  const r = await query(
+    `UPDATE engine_vfarm_leads
+        SET intake_2_invite = (intake_2_invite - 'unresponsive_at') || jsonb_build_object('unresponsive_cleared',
+              coalesce(intake_2_invite->'unresponsive_cleared', '[]'::jsonb) || jsonb_build_array(jsonb_build_object('at', now(), 'by', $2::text, 'was', intake_2_invite->>'unresponsive_at')))
+      WHERE id::text = $1 AND (intake_2_invite->>'unresponsive_at') IS NOT NULL RETURNING id`,
+    [leadId, who],
+  );
+  if (!r.rowCount) throw new Intake2Error(409, 'not_unresponsive', 'That lead is not marked Unresponsive.');
+  events.changed('vfarm_leads', leadId);
+  return { ok: true, message: 'Unresponsive cleared. No more follow-ups are sent automatically; resend the invite if they need the link again.' };
+}
+
+let timer: NodeJS.Timeout | null = null;
+let busy = false;
+export function startSweeping(): void {
+  if (timer) return;
+  timer = setInterval(() => {
+    timers.beat('intake-2 follow-ups');
+    if (busy) return;
+    busy = true;
+    sweepFollowUps()
+      .then((r) => {
+        if (r.sent.length + r.failed.length + r.unresponsive.length) console.log(`[intake-2] follow-ups: ${r.sent.length} sent, ${r.failed.length} failed, ${r.unresponsive.length} marked unresponsive (of ${r.looked_at})`);
+      })
+      .catch((e) => console.error(`[intake-2] follow-up sweep failed: ${e instanceof Error ? e.message : String(e)}`))
+      .finally(() => (busy = false));
+  }, FOLLOW_UP.tick_minutes * 60_000);
+  timer.unref();
 }
