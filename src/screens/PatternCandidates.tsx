@@ -458,6 +458,13 @@ function CandidateView({
     ['Suggested architect', c.suggested_architect ?? '—'],
     ['Flagged by', c.flagged_by ?? '—'],
     ['Date flagged', c.date_flagged ?? 'undated'],
+    ...(c.origin === 'incident'
+      ? ([
+          ['Captured from', `${c.occurrences ?? 1} failure${(c.occurrences ?? 1) === 1 ? '' : 's'} with no build pattern on record${c.last_seen ? `, last ${c.last_seen.slice(0, 10)}` : ''}`],
+          ['Fault', c.fault_signature ?? '—'],
+          ['Incidents', c.incident_ids ?? 'none recorded'],
+        ] as [string, ReactNode][])
+      : []),
     ...(c.days_in_proposed !== null ? [['Time in proposed', dayText(c.days_in_proposed)] as [string, ReactNode]] : []),
     [
       'Draft runs',

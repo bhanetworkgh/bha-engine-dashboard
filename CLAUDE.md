@@ -2458,6 +2458,42 @@ builds, except T7). `server/src/researchSignals.ts`, migration 68,
   `not_reopened`. `npm run test:research-signals` pins all of it; every test
   that opens a research job starts `server/test/_credit.cjs` first.
 
+**Incident -> pattern capture, the minimal SPEC-CORE.INCIDENTS-002** (2026-10-15,
+Destiny — Jason in #bha-self-healing, 1792079140.605749: "capture + routing only",
+no auto-promotion). `server/src/patternCapture.ts`, migration 79. The repair
+bridge already traces every failure it handles against the build patterns on
+record (`payload.trace.pattern_status` on the result it posts here); until this,
+"No Build Pattern on record for this failure -- a candidate for a new one" died
+as a line on a Slack card.
+
+- **The incident record carries `pattern_refs` and `canonical_id`**, with
+  `pattern_candidate_id` beside them, as columns on `engine_incidents`: the BHARAG
+  ledger still refuses keys it does not know (SOP-ENGINE-CONTRACT-NOTE-001 s.5),
+  so they live on this dashboard's copy and never in the blob. **`canonical_id`
+  is the fault signature, `fault:<workflow> :: <failed step>`**, Logstream's and
+  the research signals' own key, so one fault has one id however often it
+  happens. Engine health's incident panel shows the pattern or the candidate.
+- **`matched`** writes the bridge's pattern ids into `pattern_refs`.
+  **`none_on_record`** in an engine lane (`LANE_TAGS`: Bays, North Star, Research
+  Twin, Genie, vFarm monitoring, CST) writes **one Proposed pattern candidate per
+  fault** (`Origin: incident`, `Fault Signature`, `Canonical ID`, `Error Class`,
+  `Incident IDs`, `Execution IDs`, `Repair IDs`, `Occurrences`, `Last Seen`: new
+  field names), owned by the lane owner (`LANE_OWNERS`) as Suggested Architect,
+  on the Candidates tab beside every other candidate, plus one
+  `pattern_candidate_captured` event. A repeat adds to that candidate, never a
+  second; a declined one is not proposed again; once registered, its pattern id
+  goes onto every incident it came from (`linkRegistered`, called from
+  `candidateActions.register` before the hand-off delete) and onto every later
+  repeat. Tests, the simulator and refused asks are left out by
+  `logstream.excludedReason`.
+- **Nothing is promoted.** A candidate becomes a pattern only through the
+  existing Register path, by a person: draft, review, register or decline.
+- `engine_pattern_captures`, one row per fault, remembers what was decided,
+  because a registered candidate is deleted from the list. Runs after every
+  repair the bridge posts (never awaited, never able to fail that write) and as
+  a ten-minute sweep, which is also the backfill; each repair is handled once.
+  `npm run test:pattern-capture`.
+
 **Decision Watch** (2026-10-11, Destiny — LOOP-1791743584778-5YQA, backlog task
 FJOO; Jason, #bha-coordination: "solved as infra, not as vibes"). The spec is
 `docs/design/decision-watch-v0.md`. `server/src/decisionWatch.ts`, migration 73,

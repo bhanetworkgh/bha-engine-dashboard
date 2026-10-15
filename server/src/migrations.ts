@@ -3234,6 +3234,41 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE engine_vfarm_leads ADD CONSTRAINT engine_vfarm_leads_closed_reason_check CHECK (closed_reason IS NULL OR closed_reason IN ('unresponsive', 'not_a_fit', 'timing', 'price', 'other'))`,
     ],
   },
+  {
+    // 15 Oct 2026 (Jason, #bha-self-healing): the minimal SPEC-CORE.INCIDENTS-002.
+    // pattern_refs and canonical_id on this dashboard's copy of an incident (the
+    // BHARAG ledger still refuses keys it does not know), and one row per fault
+    // the repair bridge found no pattern for. patternCapture.ts.
+    id: 79,
+    name: 'incident pattern_refs and canonical_id; engine_pattern_captures',
+    statements: [
+      `ALTER TABLE engine_incidents ADD COLUMN IF NOT EXISTS pattern_refs jsonb NOT NULL DEFAULT '[]'::jsonb`,
+      `ALTER TABLE engine_incidents ADD COLUMN IF NOT EXISTS canonical_id text`,
+      `ALTER TABLE engine_incidents ADD COLUMN IF NOT EXISTS pattern_candidate_id text`,
+      `CREATE INDEX IF NOT EXISTS engine_incidents_canonical_id ON engine_incidents (canonical_id)`,
+      `CREATE TABLE IF NOT EXISTS engine_pattern_captures (
+         signature text PRIMARY KEY,
+         canonical_id text NOT NULL,
+         lane text,
+         workflow text,
+         failed_node text,
+         error_class text,
+         state text NOT NULL DEFAULT 'new' CHECK (state IN ('new', 'proposed', 'declined', 'registered', 'failed')),
+         candidate_id text,
+         candidate_row_id bigint,
+         pattern_id text,
+         repair_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+         incident_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+         execution_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+         occurrences integer NOT NULL DEFAULT 0,
+         first_seen_at timestamptz,
+         last_seen_at timestamptz,
+         error text,
+         created_at timestamptz NOT NULL DEFAULT now(),
+         updated_at timestamptz NOT NULL DEFAULT now()
+       )`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
