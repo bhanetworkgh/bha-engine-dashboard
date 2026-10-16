@@ -12679,3 +12679,10 @@ Problem:    After #13 merged (00c7aa8), #14 conflicted on the ends of BUILD_LOG.
 Fix:        #14 merged locally into main keeping both sides (both entries in order, all three test scripts), so its own commit is in main.
 Decision:   The only runtime change is Genie's tool scope (two read tools, still read-only); #14 changes no source file. Reviewed the diffs: the answer table lives in the contract and maps the resolver's own fields, so there is no second resolver.
 Tests:      Against a throwaway local PostgreSQL 16 (eg_test): test:eg4n 13/13 on the #13 head; test:se8l-db 9/9 and test:vrfk-http 13/13 on the #14 head. Answered Hardik's SE8L question: a recorded VRFK allowed decision is a sufficient activation signal for now; a real usage signal does not exist yet and is a later step; enabling the watcher still waits on Jason.
+
+## 2026-10-16 07:50 — Session close: Ahad's 14 Oct log rejected, bha-cst deploy path, reminder wording raised
+Intent:     Close the remaining threads of the 16 Oct session.
+Files:      none here (BUILD_LOG only).
+Problem:    Two Decision Watch reminders (DW-1791985832450-IKOZ, DW-1791989874656-W3JQ) say "A reply from you in this thread closes this watch" on multi-part watches (close_on_reply false), where a reply only restarts the wait; IKOZ's three-reminder escalation also lands before the Mon 19 Oct sweep it waits on.
+Fix:        Raised as LOOP-1792136810976-BBGL (audit 2363), not patched at close. Ahad's 14 Oct log U0AC6RFNP3P_1792012336408 rejected on Jason's instruction (audit 2359), review card, two sent-back messages and the builder notice all ok; watch DW-1792106015968-9ZMJ closed (2360). DW-1792077799272-9U99 closed (2352) after Jason confirmed the deploy and branch answers.
+Decision:   bha-cst (srv-db8hepqvcj2c73adpus0) runs on BHA's Render, created 15 Oct 18:11 UTC, auto-deploying from bhanetworkgh/bha_cst main, so Ahad's KMG9 fix needs no hand deploy. It is on the free plan (sleeps when idle, ~1 min wake) while Twilio waits ~15 s for a webhook answer; moving it to starter is raised to Jason, not changed. Hardik's absence drill passed in #bha-builder-sandbox (1792133906.919199).
