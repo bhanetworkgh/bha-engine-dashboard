@@ -3732,6 +3732,14 @@ T0NO-clear claim and an applicable decision. **The claim-key expression in
 2026-10-10. That is why `npm run test:vrfk-db` exists: it runs the SQL against a
 local database whose name ends in `_test` and refuses anything else, because it
 deletes the rows it writes; `npm run test:vrfk` checks the logic.
+`npm run test:vrfk-http` (2026-10-15, same guard) drives the real route and the
+Media Twin data route: 401 without the key, 422 and 404, a dry run that stores
+nothing, 201 then the GET readback with the same event id, an exact repeat and a
+reused `decision_id` with different content both 200 with the stored row, a
+contradicting POST 409, stale and contradicted rows held by Media Twin, and an
+`engine_writes` line for every POST. **Nobody but a holder of
+`DASHBOARD_INBOUND_KEY` can write a decision, and `actor` is not checked**: who
+may write one is an open owner decision, as is 409 for a reused `decision_id`.
 
 **SE8L, doctrine gap observability** (2026-10-09). `server/src/doctrineGap.ts`
 classifies each claim and surface into one of eleven conditions, writes
@@ -3745,6 +3753,18 @@ be a second exception to "the handlers create incidents and the healer closes
 them", and **that authority is pending owner approval**. A failed incident sync
 is logged and never retried. Its thresholds are marked `PROPOSED` in code and are
 **not Canon**. `npm run test:se8l`.
+**Do not switch the watcher on yet** (2026-10-15). `npm run test:se8l-db` runs
+the sweep by hand against a local `_test` database and a BHARAG stand-in and pins
+what it does today: every sweep writes one observation per claim per surface, each
+with a new id, so nothing is deduplicated (14 claims would be about 12,000 rows a
+day); a fail-closed claim counts as an active consumer on `genie_ns`, because
+T0NO's `genie_ns` defaults to true, so the **third sweep, about 11.5 minutes after
+start, opens one `DOCTRINE` incident per claim in force**; the incident carries a
+Logstream signature Logstream does not exclude, so repeats would feed Logstream's
+research and alert thresholds; recovery takes two healthy sweeps. Whether a
+`genie_ns` default should count as an active consumer, whether observations
+should be written only on a change, and whether Logstream should count `DOCTRINE`
+incidents are open decisions (Destiny), ahead of any incident authority.
 The three read tools are in the North Star, Research Twin and Bays scopes in
 `AGENT_KEYS` (Research Twin gained `read_media_doctrine` with them); the n8n
 allow-lists must carry them too.
