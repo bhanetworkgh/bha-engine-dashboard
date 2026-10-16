@@ -227,7 +227,13 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       agent: 'genie',
       env: 'READONLY_SECRETS_GENIE',
       access: 'read',
-      tools: new Set(['read_logstream', 'read_engine_events']),
+      tools: new Set([
+        'read_logstream', 'read_engine_events',
+        // 2026-10-14: EG4N (LOOP-1791557096136-EG4N). "Are we ready?" and "can we say X?" are
+        // answered from the T0NO claim and the current VRFK decision for surface genie_ns, the
+        // same resolver Media Twin and the three agents read, never from raw engine_events rows.
+        'read_media_doctrine', 'read_publication_decision',
+      ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>
 )

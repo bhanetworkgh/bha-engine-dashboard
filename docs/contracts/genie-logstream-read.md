@@ -1,19 +1,23 @@
-# Genie reads Logstream and the engine's events
+# Genie reads Logstream, the engine's events and the vFarm doctrine
 
 For Kaiqi. LOOP-1791653985161-QRTH. Jason's go-time notice of 10 Oct 2026 asks
 that Slack Genie read the same two surfaces Bays, North Star and Research Twin
 read, read-only, so there is one view of incidents and events and not a second
-one built inside Genie.
+one built inside Genie. LOOP-1791557096136-EG4N (14 Oct) adds the doctrine:
+how Genie answers "are we ready?" and "can we say X?" — see
+[The doctrine](#the-doctrine-are-we-ready-and-can-we-say-x-eg4n) below.
 
 ## What you get
 
-One read-only token for Genie. It can call two tools on the dashboard and
+One read-only token for Genie. It can call four tools on the dashboard and
 nothing else:
 
 | Tool | What it answers |
 |---|---|
 | `read_logstream` | Faults that keep coming back, which crossed a threshold, and what was done (a research job opened, an alert posted) |
-| `read_engine_events` | The engine's own events (`engine.event.v1`): counts by type over a window, and the newest events |
+| `read_engine_events` | The engine's own events (`engine.event.v1`): counts by type over a window, and the newest events. **History only, never publication authority** (see the doctrine section) |
+| `read_media_doctrine` | Every vFarm claim in the doctrine in force, resolved to T0NO's seven fields (EG4N) |
+| `read_publication_decision` | The current publication decision for one claim on one surface, re-checked against the doctrine in force (EG4N) |
 
 Any other tool is refused by the server and the refusal is logged. The token
 can never write.
@@ -74,6 +78,103 @@ tables below are a summary.
    or a real fault.
 5. **Keep the token server-side**, in Genie's environment, never in a prompt,
    a log line or a client bundle.
+
+## The doctrine: "are we ready?" and "can we say X?" (EG4N)
+
+Jason, 9 Oct: "write and log a concrete plan for how a ledger-based Slack Genie
+will read from this resolver (which ledger/endpoint), and how it will use
+allowed/hold/needs_evidence when answering 'are we ready?' or 'can we say X?'."
+This is that plan. Genie reads the one resolver Media Twin, North Star, Research
+Twin and Bays read. It keeps no copy, no cache that outlives a turn, and no rule
+of its own about what may be said.
+
+### Where it reads
+
+| Question | Tool | Ledger behind it |
+|---|---|---|
+| What does the doctrine say about this claim? | `read_media_doctrine` | `engine_media_doctrine`, resolved by T0NO (`systemFeeds.doctrineClaims`) |
+| May Genie say it now? | `read_publication_decision` with `surface: "genie_ns"` | `engine_events` rows of type `vfam_claim_publication_decision`, re-checked by VRFK (`publicationDecision.readDecisions`) against the doctrine in force |
+| What was decided, and when? (history) | `read_engine_events` | the same `engine_events` rows, **raw** |
+
+**`read_engine_events` is history, never authority.** It returns stored decision
+rows as they were written. A row written against an older doctrine version still
+says `"decision": "allowed"` there, while `read_publication_decision` reports the
+same claim as `needs_evidence` / `STALE_PUBLICATION_DECISION`. Never answer "can
+we say X?" from `read_engine_events`.
+
+### The identifiers
+
+One claim is `doctrine_id` + `claim_id`, exactly as `read_media_doctrine`
+returns them (e.g. `B93H` + `6.1`). The surface is always `genie_ns`. Find the
+claim first, then ask for its decision:
+
+```
+{ "method": "tools/call", "params": { "name": "read_media_doctrine",
+  "arguments": { "doctrine_id": "B93H", "claim_id": "6.1" } } }
+
+{ "method": "tools/call", "params": { "name": "read_publication_decision",
+  "arguments": { "doctrine_id": "B93H", "claim_id": "6.1", "surface": "genie_ns" } } }
+```
+
+`read_media_doctrine` answers `claims[]`, each with `doctrine_id`,
+`doctrine_version`, `change_id`, `claim_id`, `label`, the seven fields
+(`maturity_state`, `claim_state`, `config_hash`, `cad_provenance`,
+`evidence_publication_status`, `fail_closed { needs_evidence, reason }`,
+`allowed_use { media_twin, vfarm, genie_ns }`), `allowed_wording`,
+`prohibited_wording`, and `warnings[]`. `read_publication_decision` answers
+`decisions[0]` with `decision` (`allowed` | `hold` | `needs_evidence`),
+`applicable`, `reason`, `recorded_decision`, `decision_id`, `decided_at` and
+`doctrine_change_id`. If the claim does not match exactly one claim in force, the
+tool returns an error (`not_found`).
+
+### How Genie answers
+
+Decide from the two reads in this order. The first rule that matches is the answer.
+
+| # | What the reads say | What Genie says |
+|---|---|---|
+| 1 | Either read errored, timed out, was refused, or could not be parsed | **Not ready.** "I could not read the doctrine just now, so I can't say we're ready." Never fall back to memory, a cache or `read_engine_events`. |
+| 2 | No claim matches (`not_found`, or a `warnings` line saying the claim is not held) | **Not ready.** The claim has no approved wording; it is not safe to make. |
+| 3 | `decisions[0].applicable` is `false` (reason `MISSING_PUBLICATION_DECISION`, `STALE_PUBLICATION_DECISION`, `PUBLICATION_DECISION_CONTRADICTS_CURRENT_T0NO`, `MISSING_CLAIM_ID`) | **Not ready.** Name the reason in plain words: no decision has been recorded, the one recorded was for an older doctrine version, or it no longer matches the doctrine. |
+| 4 | `decision` is `needs_evidence` | **Not ready.** Name what is missing from `fail_closed.reason` (e.g. `MISSING_CONFIG_HASH_AND_CAD_PROVENANCE`). |
+| 5 | `decision` is `hold` | **Not ready.** State the blocker from `reason` (e.g. `NOT_ALLOWED_FOR_GENIE_NS`, `NOT_SAFE_TO_CLAIM`). |
+| 6 | `decision` is `allowed`, `applicable` is `true`, and the claim's `fail_closed.needs_evidence` is `false` | The claim may be described, **using its `allowed_wording` and never its `prohibited_wording`**, and only as what it says. |
+
+`allowed_use.genie_ns` alone is never permission. It reads `true` by default on a
+claim that has not cleared, so that Genie may *report* an unresolved claim
+("this is still needs-evidence because …"). It never lets Genie *promote* one.
+Only rule 6 does.
+
+### Three things Genie keeps apart
+
+- **What is observed**: a fact the engine recorded (a reading, an event, a fault).
+  Genie may report it as a fact with its time, from any of the four tools.
+- **What may be said**: rule 6 for that claim on `genie_ns`, and nothing wider
+  than the claim's own wording.
+- **Commercial readiness**: paid access, reservation, subscription, delivery.
+  None of the four tools grants it. The public vFarm surface stays
+  `interest_only_live` with no paid link until the doctrine and Jason say
+  otherwise. Genie never says vFarm is purchasable, reservable or delivering.
+
+### Not in this plan
+
+Genie writes nothing: no publication decision, no doctrine change, no incident.
+Decisions are recorded by their owner through `POST /api/engine/publication-decision`.
+`read_doctrine_gap_summary` is not on Genie's token. It describes gaps across all
+claims for the engine's own monitoring, and it answers no single "can we say X?"
+question.
+
+### How EG4N will be proved
+
+1. Destiny deploys the scope change and confirms `tools/list` on Genie's token
+   names exactly the four tools.
+2. Kaiqi's deployed Genie answers one real "can we say X?" question, which writes
+   one `read_media_doctrine` and one `read_publication_decision` line as
+   `agent token: genie`, and its answer matches the table above for that claim's
+   real state.
+3. With a recorded decision for one claim on `genie_ns`, Genie's answer changes
+   to rule 6. After a newer doctrine version is posted, it changes back to rule 3
+   (`STALE_PUBLICATION_DECISION`), with no change on Genie's side.
 
 ## How we will know it is wired
 
