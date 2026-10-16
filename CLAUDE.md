@@ -2381,6 +2381,20 @@ autopay, no pay wiring, no destructive automated action).
   nothing else** (11 Oct, `READONLY_SECRETS_GENIE`, agent `genie` in `AGENT_KEYS`;
   `docs/contracts/genie-logstream-read.md` is Kaiqi's reference). Wiring the call
   inside Genie is his, and it is not done yet.
+  **EG4N adds the doctrine reads to the same token** (14 Oct,
+  LOOP-1791557096136-EG4N): `read_media_doctrine` and `read_publication_decision`,
+  four tools in all, still read-only. Genie answers "are we ready?" and "can we say
+  X?" for a claim (`doctrine_id` + `claim_id`) on surface `genie_ns` from those two
+  reads in a fixed order: any failed or unparseable read, an unknown claim, a
+  decision that is not `applicable` (missing, stale, contradicted), `needs_evidence`
+  and `hold` are all "not ready"; only `allowed` and `applicable` lets it say the
+  claim, in its `allowed_wording`. **`read_engine_events` is history, never
+  authority**: it returns stored decision rows raw, so a row written against an
+  older doctrine version still reads `allowed` there. Whether to hide those rows
+  from it is an open decision (Destiny). `allowed_use.genie_ns` alone is never
+  permission. Genie writes nothing and does not get `read_doctrine_gap_summary`.
+  The answer table is in the contract; `npm run test:eg4n` pins the token and the
+  resolver's answers against a local `_test` database.
 - **Empty reads are counted, and nothing decides on them** (same day).
   `Bays — Daily Doc Rotator` posts one `empty_read_check` event per run to
   `/api/engine/events` (reads, empty, which channels; a clean run too, so a

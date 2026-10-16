@@ -50,7 +50,8 @@
     "test:t0no": "npm run build:server --silent && node server/test/t0no.test.cjs",
     "test:vrfk": "npm run build:server --silent && node server/test/publication-decision.test.cjs",
     "test:vrfk-db": "npm run build:server --silent && node server/test/publication-decision.db.test.cjs",
-    "test:se8l": "npm run build:server --silent && node server/test/doctrine-gap.test.cjs"
+    "test:se8l": "npm run build:server --silent && node server/test/doctrine-gap.test.cjs",
+    "test:eg4n": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/genie-doctrine.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",
