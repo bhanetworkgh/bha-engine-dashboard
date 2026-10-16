@@ -540,6 +540,12 @@ explicitly for this. Therefore:
   names are bound parameters**, never concatenated: the only things interpolated
   are the table and column names, and both come from this code and from the
   database.
+- **`fields` may arrive as `fields_b64`** (16 Oct 2026, Destiny — LOOP-1792141106249-FZX3) on
+  any `POST /api/engine/:kind` or PATCH: base64 of the UTF-8 JSON of the fields object,
+  decoded before anything else reads the body (`decodeFieldsB64` in `server/src/index.ts`).
+  Render's edge filter refuses a body that reads like a shell command before it reaches this
+  server, so a Codex log that quoted one (Submit Actions run 39814) could not be saved. Both
+  `fields` and `fields_b64` is a 422, as is one that does not decode to a JSON object.
 - **PATCH merges into `fields` and touches nothing else.** A key not sent is
   left exactly as it is and a key sent as `null` is removed — which is the whole
   reason it exists beside POST, a whole-record write that replaces the blob: an
