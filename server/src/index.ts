@@ -104,6 +104,38 @@ async function freshnessAll(): Promise<Record<RecordKind, Freshness>> {
   return Object.fromEntries(pairs) as Record<RecordKind, Freshness>;
 }
 
+
+/**
+ * `fields_b64` on an engine POST or PATCH (16 Oct 2026, Destiny —
+ * LOOP-1792141106249-FZX3). Render's edge filter refuses a request whose body
+ * reads like a shell command before it reaches this server, so a Codex log that
+ * quoted one (Submit Actions run 39814) could not be saved. The same answer as
+ * the guard's `content_b64`: the caller may send `fields` as base64 of its JSON,
+ * which the filter does not read. Decoded here, checked to be an object, and put
+ * back as `fields`, so everything after this line is the ordinary path. Sending
+ * both is refused: two statements of one record would have to disagree somewhere.
+ */
+function decodeFieldsB64(body: Record<string, unknown>): void {
+  if (body.fields_b64 === undefined) return;
+  if (typeof body.fields_b64 !== 'string' || !body.fields_b64.trim()) {
+    throw new HttpError(422, '"fields_b64" must be base64 of the JSON fields object.');
+  }
+  if (body.fields !== undefined) {
+    throw new HttpError(422, 'Send "fields" or "fields_b64", not both.');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(body.fields_b64, 'base64').toString('utf8'));
+  } catch {
+    throw new HttpError(422, '"fields_b64" did not decode to JSON. It must be base64 of the UTF-8 JSON of the fields object.');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new HttpError(422, '"fields_b64" must decode to a JSON object of fields.');
+  }
+  body.fields = parsed;
+  delete body.fields_b64;
+}
+
 function inboundOk(req: IncomingMessage): boolean {
   if (!INBOUND_KEY) return false;
   const given = req.headers['x-dashboard-key'];
@@ -1178,6 +1210,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         rowId = decodeURIComponent(withId![2]);
       }
       const body = await readJson(req, 256 * 1024);
+      decodeFieldsB64(body);
       const patch = body.fields;
       if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
         await mirror.logWrite({ endpoint, kind, method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: '"fields" was missing or not an object', ms: Date.now() - t0 });
@@ -1259,6 +1292,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     if (method !== 'POST') throw new HttpError(405, 'POST to upsert a whole record — the same row twice updates rather than duplicating. GET /api/engine/:kind to read rows back, PATCH /api/engine/:kind/:id to change part of one.');
 
     const body = await readJson(req, 256 * 1024);
+    decodeFieldsB64(body);
     try {
       // The same function the MCP write tools call (engineWrite.ts). The
       // outcome is said plainly so a caller can tell a real change from a repeat.
