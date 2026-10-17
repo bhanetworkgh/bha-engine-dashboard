@@ -2388,6 +2388,17 @@ autopay, no pay wiring, no destructive automated action).
 - **Counted in nothing**: a workflow named `TEST …`, anything simulated (the
   name, or the `simulated` impact tag), and the step `Raise Refused Ask`. The
   rows are still written, with `excluded_reason`.
+- **DOCTRINE incidents are left out of Logstream's thresholds only** (2026-10-17,
+  Jason and Destiny): an incident tagged `doctrine` or from the workflow
+  `T0NO doctrine-gap monitor` (SE8L) never counts toward a research job, an
+  escalation alert or a shared outage here. It is still written down, with
+  `excluded_reason: 'doctrine'`, and shown as left out on the page and in
+  `read_logstream`. That is `logstream.thresholdExcludedReason()`, used by
+  `evaluate()` and `writeRows()` only; the shared `excludedReason()` is
+  unchanged, because Research Signals (T4) and pattern capture read it — a
+  `research_needed` DOCTRINE incident still raises a T4 signal and its job goes
+  through `researchSignals.open()`. `npm run test:logstream`,
+  `npm run test:research-signals`.
 - **All it can do is open a research job and post a Slack message.** It never
   closes, retries, edits or deletes, and never touches pay. A job or alert that
   does not land keeps its trigger at `failed` with the reason and is tried again
@@ -3819,12 +3830,12 @@ what it does today: every sweep writes one observation per claim per surface, ea
 with a new id, so nothing is deduplicated (14 claims would be about 12,000 rows a
 day); a fail-closed claim counts as an active consumer on `genie_ns`, because
 T0NO's `genie_ns` defaults to true, so the **third sweep, about 11.5 minutes after
-start, opens one `DOCTRINE` incident per claim in force**; the incident carries a
-Logstream signature Logstream does not exclude, so repeats would feed Logstream's
-research and alert thresholds; recovery takes two healthy sweeps. Whether a
-`genie_ns` default should count as an active consumer, whether observations
-should be written only on a change, and whether Logstream should count `DOCTRINE`
-incidents are open decisions (Destiny), ahead of any incident authority.
+start, opens one `DOCTRINE` incident per claim in force**; Logstream leaves those
+incidents out of its thresholds (2026-10-17) and shows them as left out, so they
+open no Logstream research job or alert; recovery takes two healthy sweeps.
+Whether a `genie_ns` default should count as an active consumer and whether
+observations should be written only on a change are open decisions (Destiny),
+ahead of any incident authority.
 The three read tools are in the North Star, Research Twin and Bays scopes in
 `AGENT_KEYS` (Research Twin gained `read_media_doctrine` with them); the n8n
 allow-lists must carry them too.

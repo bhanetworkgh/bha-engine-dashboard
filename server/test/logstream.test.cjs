@@ -93,6 +93,39 @@ function replay(logstream) {
   assert.equal(rate(100, 19), 0, 'under 20%');
   assert.equal(rate(15, 3), 1, 'exactly 20% crosses');
   ok('rate rule: 20% with at least 10 runs and 3 failures');
+
+  // DOCTRINE incidents (2026-10-17): left out of Logstream's thresholds, by tag or by the monitor's workflow name.
+  const DOC_WF = logstream.DOCTRINE_GAP_WORKFLOW;
+  assert.equal(DOC_WF, 'T0NO doctrine-gap monitor');
+  const docInc = { workflow: DOC_WF, node: 'genie_ns / B93H:6.1', tags: ['media', 'doctrine', 'genie_ns'] };
+  assert.equal(logstream.thresholdExcludedReason(docInc), 'doctrine');
+  assert.equal(logstream.thresholdExcludedReason({ workflow: 'Some Flow', node: 'x', tags: ['Doctrine'] }), 'doctrine', 'by tag, any case');
+  assert.equal(logstream.thresholdExcludedReason({ workflow: DOC_WF, node: 'x', tags: null }), 'doctrine', 'by workflow, no tags');
+  assert.equal(logstream.thresholdExcludedReason({ workflow: 'T0NO doctrine-gap monitor (copy)', node: 'x' }), null, 'the workflow must match exactly');
+  assert.equal(logstream.thresholdExcludedReason({ workflow: 'Bays — Latest Digest', node: 'Read' }), null);
+  assert.equal(logstream.thresholdExcludedReason({ workflow: 'TEST — x', node: 'y', tags: ['doctrine'] }), 'test', 'an existing reason keeps precedence');
+  assert.equal(logstream.thresholdExcludedReason({ workflow: 'Bays — Front Door', node: 'Raise Refused Ask' }), 'refused_ask');
+  assert.equal(logstream.thresholdExcludedReason({ workflow: 'Bays — Submit Actions', node: 'Raise Refused Click' }), 'refused_click');
+  assert.equal(logstream.thresholdExcludedReason({ workflow: 'Monitoring Twin (simulated farm)', node: 'x', tags: ['simulated', 'doctrine'] }), 'simulator');
+  ok('threshold exclusion: DOCTRINE by tag or exact workflow; test, simulator, refused ask and click keep their own reasons');
+
+  assert.equal(logstream.excludedReason(docInc), null);
+  assert.equal(logstream.excludedReason({ workflow: DOC_WF, node: 'x' }), null);
+  ok('the shared excludedReason still counts a DOCTRINE incident, so Research Signals (T4) and pattern capture are unchanged');
+
+  const at = (h) => new Date(Date.UTC(2026, 9, 17, h)).toISOString();
+  const incs = (workflow, node, n, tags = []) => Array.from({ length: n }, (_, k) => ({ incident_id: `${workflow}|${node}|${k}`, lane_id: 'bays', workflow, node, tags, occurred_at: at(k), execution_id: null }));
+  const kinds = (list) => logstream.evaluate(list, []).map((c) => `${c.kind}:${c.key}`).sort();
+  assert.deepEqual(kinds(incs(DOC_WF, 'genie_ns / D:1', 3, ['media', 'doctrine', 'genie_ns'])), []);
+  assert.deepEqual(kinds(incs(DOC_WF, 'genie_ns / D:1', 5, ['media', 'doctrine', 'genie_ns'])), []);
+  ok('3 or 5 DOCTRINE incidents of one fault cross no Logstream threshold: no research, no escalation');
+  assert.deepEqual(kinds(incs('Ordinary Flow', 'Step', 3)), ['signature_research:Ordinary Flow :: Step']);
+  assert.deepEqual(kinds(incs('Ordinary Flow', 'Step', 5)), ['signature_escalation:Ordinary Flow :: Step', 'signature_research:Ordinary Flow :: Step']);
+  ok('ordinary faults still cross at 3 (research) and 5 (escalation)');
+  const fiveDoctrineFaults = [1, 2, 3, 4, 5].flatMap((c) => incs(DOC_WF, `genie_ns / D:${c}`, 3, ['doctrine']));
+  assert.deepEqual(kinds([...fiveDoctrineFaults, ...incs('Ordinary Flow', 'Step', 3)]), ['signature_research:Ordinary Flow :: Step']);
+  assert.equal(logstream.evaluate(fiveDoctrineFaults, []).some((c) => c.kind === 'shared_outage'), false);
+  ok('mixed: only the ordinary fault crosses, and five DOCTRINE faults never make a shared outage');
 }
 
 /* ---------------------------------------------------------------- part 2 */
@@ -234,6 +267,35 @@ const hook = http.createServer((req, res) => {
   const ex = (await query(`SELECT DISTINCT excluded_reason FROM engine_logstream WHERE incident_id LIKE $1 AND excluded_reason IS NOT NULL ORDER BY 1`, [`INC-LSTEST-${T}-%`])).rows.map((r) => r.excluded_reason);
   assert.deepEqual(ex, ['refused_ask', 'simulator', 'test']);
   ok('trigger: test, simulator and refused-ask incidents are written down and open nothing');
+
+  /* DOCTRINE incidents are written down, shown as left out, and open nothing */
+  {
+    const DOC_NODE = `genie_ns / LS${T}:GAP`;
+    const docIds = [];
+    for (let n = 0; n < 5; n++) docIds.push(await incident(logstream.DOCTRINE_GAP_WORKFLOW, DOC_NODE, { tags: ['media', 'doctrine', 'genie_ns'] }));
+    for (let n = 0; n < 3; n++) docIds.push(await incident(`${WF} doc-tag`, 'Step D', { tags: ['doctrine'] }));
+    const postsBefore = posts.length;
+    const jobsBefore = (await jobs()).length;
+    await logstream.sweep();
+    assert.equal((await triggers(DOC_NODE)).length, 0, 'five DOCTRINE incidents of one fault: no trigger');
+    assert.equal((await triggers(`${WF} doc-tag`)).length, 0, 'three tagged doctrine: no trigger');
+    assert.equal(posts.length, postsBefore, 'no Slack alert');
+    assert.equal((await jobs()).length, jobsBefore, 'no Logstream Research Twin job');
+    const docRows = (await query(`SELECT state, excluded_reason FROM engine_logstream WHERE incident_id = ANY($1) AND state = 'observed'`, [docIds])).rows;
+    assert.equal(docRows.length, 8, 'every DOCTRINE incident is written down');
+    assert.ok(docRows.every((r) => r.excluded_reason === 'doctrine'));
+    const page = await logstream.read();
+    const sigRow = page.signatures.find((s) => s.signature === `${logstream.DOCTRINE_GAP_WORKFLOW} :: ${DOC_NODE}`);
+    assert.ok(sigRow, 'the DOCTRINE fault is listed on the page');
+    assert.equal(sigRow.excluded_reason, 'doctrine');
+    const { readLogstream } = req('mcp/logstreamTools.js');
+    const one = await readLogstream.handler({ signature: `${logstream.DOCTRINE_GAP_WORKFLOW} :: ${DOC_NODE}` }, { access: 'read' });
+    assert.equal(one.ok, true);
+    assert.equal(one.total_incidents, 5);
+    assert.equal(one.counted, 0);
+    assert.ok(one.incidents.every((i) => i.excluded_reason === 'doctrine'));
+    ok('DOCTRINE incidents are written down and shown as left out (doctrine) on the page and in read_logstream, and open no job and no alert');
+  }
 
   /* the rate rule */
   let ex_id = 9_000_000_000_000 + (T % 1_000_000) * 1000;
