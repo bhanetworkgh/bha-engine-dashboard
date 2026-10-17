@@ -109,7 +109,7 @@ const LOCK = 8134207619;
 const SWEEP_MS = 5 * 60_000;
 const ISO = `'YYYY-MM-DD"T"HH24:MI:SS"Z"'`;
 
-export type Excluded = 'test' | 'simulator' | 'refused_ask' | null;
+export type Excluded = 'test' | 'simulator' | 'refused_ask' | 'refused_click' | null;
 
 /** A fault signature: the workflow plus the step that failed. */
 export const signatureOf = (workflow: string | null, node: string | null): string => `${(workflow ?? '').trim() || '(no workflow)'} :: ${(node ?? '').trim() || '(no step)'}`;
@@ -121,6 +121,10 @@ export function excludedReason(i: { workflow: string | null; node: string | null
   if (tags.includes('simulated') || /simulat/i.test(wf)) return 'simulator';
   if (/^\s*test\b/i.test(wf) || tags.includes('test')) return 'test';
   if (/refused ask/i.test(i.node ?? '')) return 'refused_ask';
+  // A review or pay button pressed by someone who may not use it: the guard shows them a
+  // "not allowed" pop-up, changes nothing, and throws on purpose so it is recorded
+  // (Bays — Submit Actions, Raise Refused Click). A guard doing its job, never a fault.
+  if (/refused click/i.test(i.node ?? '')) return 'refused_click';
   return null;
 }
 

@@ -82,6 +82,7 @@ function replay(logstream) {
   assert.equal(logstream.excludedReason({ workflow: 'TEST — Self-healing, North Star lane', node: 'Shape Question' }), 'test');
   assert.equal(logstream.excludedReason({ workflow: 'Monitoring Twin (simulated farm)', node: 'x', tags: ['vfarm', 'simulated'] }), 'simulator');
   assert.equal(logstream.excludedReason({ workflow: 'Bays — Front Door', node: 'Raise Refused Ask' }), 'refused_ask');
+  assert.equal(logstream.excludedReason({ workflow: 'Bays — Submit Actions', node: 'Raise Refused Click' }), 'refused_click', 'a refused review click is a guard doing its job (INC-BAYS.CODEX-031)');
   assert.equal(logstream.excludedReason({ workflow: 'Bays — Latest Digest', node: 'Read' }), null, '"Latest" is not a test');
   ok('exclusions: test, simulator and refused ask, and nothing else');
 
