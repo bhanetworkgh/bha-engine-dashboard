@@ -12758,3 +12758,10 @@ Files:      server/src/mcp/intake2Tools.ts (test_buyer_flow), CLAUDE.md
 Problem:    —
 Fix:        —
 Decision:   One step per call through the functions the page and the buyer's link call, so a test can never pass a gate the real path would refuse. Same guards as test_submit_intake2: Destiny or Jason, @bhanetwork.org leads only, a typed confirm.
+
+## 2026-10-17 20:35 — Buyer flow v2 walked end to end in production
+Intent:     Prove the five stages and the proposal page on the live dashboard with test_buyer_flow.
+Files:      none
+Problem:    The Claude connector kept listing 80 tools after the deploy; test_buyer_flow appeared only after Destiny reconnected it in the Claude app.
+Fix:        Ran on lead 3d9a7f9a (VFBUYER-FORMA-3TH40G): propose on Stage 2 refused (audit 2446); move to 4 refused, no accepted proposal (2447); move to 3 (2448); VFPROP-FORMA-3TH40G-1 made, test, 450000 usd (2449); buyer page opened, says test, no payment shown (2450); question (2451) and call (2452) posted in #vfarm-early-access; accept moved the lead to Stage 4, via buyer (2453); a second accept changed nothing (2454); move to 5 on the sandbox payment (2455); a non-admin refused (2457). Four vfarm_proposal_* events written.
+Decision:   The test lead is left in Stage 5 as a marked test (organisation "BHA internal test - ignore").
