@@ -169,5 +169,37 @@ ok('summary reads one past the cap and reports truncated instead of cutting sile
     Object.assign(bharag, { liveIncidents: real.liveIncidents, openIncident: real.openIncident });
     console.error = real.error;
   }
+
+  // The watcher stays off without its flag: it logs so and starts no timer.
+  {
+    const realSetTimeout = global.setTimeout;
+    const realSetInterval = global.setInterval;
+    const realLog = console.log;
+    const saved = process.env.DOCTRINE_GAP_WATCH_ENABLED;
+    const timers = [];
+    const lines = [];
+    try {
+      for (const value of [undefined, '', 'false', '1', 'yes']) {
+        if (value === undefined) delete process.env.DOCTRINE_GAP_WATCH_ENABLED;
+        else process.env.DOCTRINE_GAP_WATCH_ENABLED = value;
+        global.setTimeout = () => { timers.push(['timeout', value]); return realSetTimeout(() => {}, 0); };
+        global.setInterval = () => { timers.push(['interval', value]); return realSetTimeout(() => {}, 0); };
+        console.log = (line) => lines.push(String(line));
+        gap.startWatching();
+        global.setTimeout = realSetTimeout;
+        global.setInterval = realSetInterval;
+        console.log = realLog;
+      }
+      assert.deepEqual(timers, []);
+      assert.equal(lines.filter((l) => /doctrine gaps: watcher OFF/.test(l)).length, 5);
+      ok('the watcher starts no timer and logs OFF unless DOCTRINE_GAP_WATCH_ENABLED is exactly true');
+    } finally {
+      global.setTimeout = realSetTimeout;
+      global.setInterval = realSetInterval;
+      console.log = realLog;
+      if (saved === undefined) delete process.env.DOCTRINE_GAP_WATCH_ENABLED;
+      else process.env.DOCTRINE_GAP_WATCH_ENABLED = saved;
+    }
+  }
   console.log(`\n${passed} SE8L checks passed.`);
 })().catch((e) => { console.error(e); process.exit(1); });
