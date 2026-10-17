@@ -12737,3 +12737,17 @@ Files:      server/src/stripeLedger.ts (new), server/src/index.ts (webhook route
 Problem:    First run of the test: a session with no client_reference_id was matched to a lead anyway, through its payment intent — "+ 'recorded' - 'unmatched'". The intent lookup was meant only for payment_intent events.
 Fix:        The lookup by intent runs only when the event is not a session. 12 of 12 pass against a local Postgres 16.
 Decision:   Stripe's hosted Checkout, not a page on bhanetwork.org: /vfarm must stay interest_only_live with no payment button, and the hosted page carries no card handling of ours. The server holds no Stripe API key; for the test, sessions are made through the Stripe connector with the lead id and buyer id on them. One webhook secret per mode, no defaults, and a payment sets no stage or entitlement.
+
+## 2026-10-17 19:55 — Stripe rail proven in the sandbox; live webhook set
+Intent:     Prove D4's rail with real Stripe events and deliberate failures, then set up live.
+Files:      none (Stripe and Render configuration)
+Problem:    The live checkout was refused: "No valid payment method types for this Checkout Session. Please ensure that you have activated payment methods compatible with your chosen currency in your dashboard". The live account is not activated (tax details, the BHA bank and Jason's date of birth are still missing).
+Fix:        Sandbox: webhook we_1URbfnGj0X97M0lmmWREvR1A, STRIPE_WEBHOOK_SECRET_TEST on Render. Paid ($1, evt_1URblTGj0X97M0lmbQREHBY6) landed once on lead 3d9a7f9a with a vfarm_payment_recorded event and the alert; a declined card (4000…0002, evt_3URbv5Gj0X97M0lm0vpKNfKU) was recorded as failed on lead 4e168bab; a temporary second endpoint (we_1URboUGj0X97M0lmewVH7w3c, its secret deliberately not on the server) was refused twice as bad_signature with one stripe_webhook_refused alert. Live: webhook we_1URc1qGbAdOr3VUajV5NnfpR and STRIPE_WEBHOOK_SECRET_LIVE on Render; $1 product prod_VSX6Rvo3ZYS8dG. The live run waits on Jason finishing activation.
+Decision:   The live run uses a clean lead (229cf102), because a live event never overwrites a test payment.
+
+## 2026-10-17 20:05 — Buyer flow v2: five stages and the Stage 3 proposal page
+Intent:     Bring the dashboard to the flow Jason locked today (SOP 09cb58a7): Stage 3 the proposal, 4 agreement and deposit, 5 customer, and the proposal page with Accept / Ask / Call.
+Files:      server/src/proposal.ts (new), server/src/earlyAccess.ts, server/src/intake2Page.ts (brandedPage), server/src/index.ts (/proposal/<token>, POST /api/vfarm/leads/:id/proposal), server/src/migrations.ts (81), src/data/leadPipeline.ts, src/data/types.ts, src/data/index.ts, src/screens/VFarm/EarlyAccess.tsx, src/screens/VFarm/index.tsx, server/test/proposal.test.cjs (new), package.json, CLAUDE.md
+Problem:    None in the tests: proposal 6/6, intake2 16/16, stripe-ledger 12/12 against a local Postgres 16. The client could not be type-checked here (the npm registry is unreachable from this workspace), so the Render build is the client's first type check.
+Fix:        —
+Decision:   Every proposal is a test until Canon Lock, not a flag anyone can switch off, because no setup is Canon-Locked and Jason's rule is Canon-Locked setups only. The page takes no payment and shows no payment link (Stage 3 is non-transactional). No email sends the proposal yet: the link is copied from the lead panel, as Form 2's can be.

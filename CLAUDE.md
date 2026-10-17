@@ -1410,6 +1410,27 @@ testing only, no live customer payments). `server/src/stripeLedger.ts`, migratio
 - **Read-back**: `GET /api/engine/vfarm-payments` (`x-dashboard-key`, `?lead_id=`).
   `npm run test:stripe-ledger` pins it against a local database.
 
+**Buyer flow v2: five stages and the Stage 3 proposal page** (2026-10-17, Destiny — Jason in
+#bha-coordination the same day; SOPs 09cb58a7, the flow with its markings, and 66570ea2, Stage 3
+is non-transactional). `server/src/proposal.ts`, migration 81.
+- **Five stages**, `LEAD_STAGES` and `PIPELINE`: 1 Interest, 2 Site specification (Invited /
+  Spec received), 3 Proposal (was the "paying" placeholder, which no lead was in), 4 Agreement
+  & deposit, 5 Customer. **Moving on is gated, moving back is not**: 3 needs Form 2 in (a
+  person moves it once the five checks clear), 4 needs an accepted proposal, 5 a paid
+  `stripe_payment`. The signed agreement is not built, so 5 says so.
+- **The proposal page** is `/proposal/<token>`, built like Form 2: public, no login, the token
+  an HMAC of the proposal id under `INTAKE2_LINK_SECRET` (no new secret), only its sha256
+  stored, a link that opens nothing gets the "not valid" page. Made from the lead panel
+  (`POST /api/vfarm/leads/:id/proposal`) for a lead in Stage 3 only; a new one replaces the old
+  and the old link stops working.
+- **Every proposal is a test until Canon Lock exists** (`test: true`, not settable): the page
+  carries a "Test proposal, not an offer" banner on every view. **No payment and no payment
+  link on it.** Three plain HTML forms: Accept (the lead moves to Stage 4 once, `via: 'buyer'`),
+  Ask a question (text required), Request a call. Each is recorded on `proposal.actions`, one
+  `vfarm_proposal_*` event, and one post in #vfarm-early-access whose outcome is written back.
+  The proposal link is copied from the lead panel; no email sends it yet. CST answering
+  questions and the agreement are not built. `npm run test:proposal`.
+
 **UN9D acceptance and the first real vFarm data** (2026-10-15, Destiny — D3;
 Hardik's two tests of 30 Sep / 1 Oct, locked by Jason 2 Oct). `server/src/un9d.ts`.
 - **The first real post DMs Destiny once.** Every post to `/api/engine/vfarm-snapshot`
