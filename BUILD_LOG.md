@@ -12751,3 +12751,10 @@ Files:      server/src/proposal.ts (new), server/src/earlyAccess.ts, server/src/
 Problem:    None in the tests: proposal 6/6, intake2 16/16, stripe-ledger 12/12 against a local Postgres 16. The client could not be type-checked here (the npm registry is unreachable from this workspace), so the Render build is the client's first type check.
 Fix:        —
 Decision:   Every proposal is a test until Canon Lock, not a flag anyone can switch off, because no setup is Canon-Locked and Jason's rule is Canon-Locked setups only. The page takes no payment and shows no payment link (Stage 3 is non-transactional). No email sends the proposal yet: the link is copied from the lead panel, as Form 2's can be.
+
+## 2026-10-17 20:20 — test_buyer_flow: the whole flow from a tool
+Intent:     Run the Stage 2 to 5 test end to end without the dashboard login (Destiny: "build a tool that lets you do the full test, the moving and filling").
+Files:      server/src/mcp/intake2Tools.ts (test_buyer_flow), CLAUDE.md
+Problem:    —
+Fix:        —
+Decision:   One step per call through the functions the page and the buyer's link call, so a test can never pass a gate the real path would refuse. Same guards as test_submit_intake2: Destiny or Jason, @bhanetwork.org leads only, a typed confirm.
