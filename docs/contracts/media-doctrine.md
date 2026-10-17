@@ -121,7 +121,19 @@ store (`engine_events`), with adapter event type
 - **Scope:** one `doctrine_id` + `claim_id` + `surface` (`media_twin`, `vfarm`
   or `genie_ns`).
 - **Decision:** `allowed`, `hold` or `needs_evidence`.
-- **Retry identity:** `decision_id`, stored as the event `dedupe_key`.
+- **Retry identity:** `decision_id`, stored as the event `dedupe_key`. The same
+  request again answers `200` with the stored decision (`duplicate: true`).
+  The same `decision_id` with anything different — the decision content,
+  `actor`, `source_ref`, an explicitly sent `decided_at`, or a doctrine that has
+  moved since — is refused `409` and nothing is written or changed:
+  `{ "ok": false, "reason": "decision_id_conflict", "message": "…",
+  "decision_id": "…", "stored_event_id": 41, "differs_from_request": ["reason"] }`.
+  A `dry_run` is checked the same way. A decision is never edited in place: to
+  record a new one, post a new `decision_id`. Leaving `decided_at` out is never a
+  difference, because the server fills it from its own clock.
+- **Audit:** every POST is a line on the engine writes log — `inserted`,
+  `unchanged` (an identical retry or a dry run) or `rejected` (any refusal: a
+  missing field, an unknown claim, a contradiction or a conflict).
 - **Evidence binding:** the event carries the doctrine version/change and an
   exact seven-field T0NO snapshot. A caller cannot submit a decision that
   contradicts the current resolver.

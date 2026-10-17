@@ -4,9 +4,11 @@
  * and the Media Twin data route (/api/media-doctrine) read through
  * get_page_data, the same in-process /api router the browser is answered by.
  *
- * It pins today's behaviour and changes none of it. In particular a reused
- * decision_id with different content answers 200 with the stored row; whether
- * that should be a 409 is an open owner decision.
+ * An identical retry is 200 with the stored row. A reused decision_id with any
+ * different content (the decision detail, actor, source_ref, an explicitly sent
+ * decided_at, or a doctrine that has moved) is 409 decision_id_conflict and
+ * changes nothing (2026-10-16). Every refused POST is a rejected line on
+ * engine_writes.
  *
  * Run with:  DATABASE_URL=postgres://…@127.0.0.1:…/name_test npm run test:vrfk-http
  * Refuses anything but a local database whose name ends in _test.
@@ -150,18 +152,30 @@ let server;
     assert.equal(await rows(`DEC-${DOC}-READY`), 1);
     ok('an exact repeat is 200, duplicate, the same id, and still one row');
 
-    const changed = await post(ROUTE, decision('READY', { reason: 'A different reason' }));
-    assert.equal(changed.status, 200);
-    assert.equal(changed.body.duplicate, true);
-    assert.deepEqual(changed.body.differs_from_request, ['reason']);
-    assert.equal(changed.body.decision.reason, 'T0NO_GATE_CLEARED');
+    const storedRow = async () => (await query(`SELECT id, at, actor, source_ref, detail::text AS detail FROM engine_events WHERE dedupe_key = $1`, [`VFAM.claim_publication_decision:DEC-${DOC}-READY`])).rows;
+    const original = await storedRow();
+    const conflictBody = (r, fields) => {
+      assert.equal(r.status, 409);
+      assert.equal(r.body.ok, false);
+      assert.equal(r.body.reason, 'decision_id_conflict');
+      assert.equal(r.body.decision_id, `DEC-${DOC}-READY`);
+      assert.equal(r.body.stored_event_id, first.body.id);
+      if (fields) assert.deepEqual(r.body.differs_from_request, fields);
+      assert.match(r.body.message, /already held with different content/);
+    };
+    conflictBody(await post(ROUTE, decision('READY', { reason: 'A different reason' })), ['reason']);
+    conflictBody(await post(ROUTE, decision('READY', { actor: 'someone else' })), ['actor']);
+    conflictBody(await post(ROUTE, decision('READY', { dry_run: true, reason: 'A different reason' })), ['reason']);
     assert.equal(await rows(`DEC-${DOC}-READY`), 1);
-    ok('a reused decision_id with different content is 200 with the stored row and names the field (today\'s behaviour)');
+    assert.deepEqual(await storedRow(), original);
+    ok('a reused decision_id with different content, actor, or on a dry run is 409 decision_id_conflict; the stored row is unchanged');
 
     const contra = await post(ROUTE, decision('GAP', { decision: 'allowed' }));
     assert.equal(contra.status, 409);
     assert.match(String(contra.body.message ?? contra.body.error ?? JSON.stringify(contra.body)), /contradicts the canonical T0NO result/);
-    ok('a decision that contradicts T0NO is 409 and nothing is stored');
+    assert.equal(contra.body.reason, undefined);
+    assert.equal(await rows(`DEC-${DOC}-GAP`), 0);
+    ok('a decision that contradicts T0NO is 409 with the same body as before, and nothing is stored');
 
     twin = await mediaTwin();
     assert.equal(held(twin.READY), false);
@@ -179,6 +193,13 @@ let server;
     assert.equal(twin.READY.reason, 'STALE_PUBLICATION_DECISION');
     ok('after a newer doctrine version the decision is STALE over GET and Media Twin holds it');
 
+    const moved = await post(ROUTE, decision('READY'));
+    conflictBody(moved, null);
+    assert.ok(moved.body.differs_from_request.includes('doctrine_change_id'));
+    assert.deepEqual(await storedRow(), original);
+    assert.equal((await readback('READY')).reason, 'STALE_PUBLICATION_DECISION');
+    ok('re-posting the old decision_id after the doctrine moved is 409 naming doctrine_change_id, never a fresh authorization');
+
     await query(
       `INSERT INTO engine_events (event_type, at, subject_id, lane, actor, source_ref, detail, dedupe_key) VALUES ('vfam_claim_publication_decision', now(), $1, 'MEDIA', 'test:vrfk-http', 'LOOP-1789929222646-VRFK', $2::jsonb, $3)`,
       [`${DOC}:GAP:media_twin`, JSON.stringify({ event_name: 'VFAM.claim_publication_decision', decision_id: `DEC-${DOC}-FORGED`, doctrine_id: DOC, claim_id: 'GAP', surface: 'media_twin', decision: 'allowed', reason: 'forged', doctrine_change_id: `DOC-${DOC}-v2`, evidence_refs: [] }), `VFAM.claim_publication_decision:DEC-${DOC}-FORGED`],
@@ -189,9 +210,14 @@ let server;
     assert.equal(held(twin.GAP), true);
     ok('a stored allowed row that contradicts T0NO reads PUBLICATION_DECISION_CONTRADICTS_CURRENT_T0NO and Media Twin holds it');
 
-    const logged = (await query(`SELECT outcome, count(*)::int AS n FROM engine_writes WHERE natural_id = $1 GROUP BY outcome ORDER BY outcome`, [`DEC-${DOC}-READY`])).rows;
-    assert.deepEqual(logged, [{ outcome: 'inserted', n: 1 }, { outcome: 'unchanged', n: 3 }]);
-    ok('every POST is on engine_writes: one inserted, and the dry run and two repeats as unchanged');
+    const tally = async (id) => (await query(`SELECT outcome, count(*)::int AS n FROM engine_writes WHERE natural_id = $1 GROUP BY outcome ORDER BY outcome`, [id])).rows;
+    // READY: the 422 for a blank actor, the dry run, the insert, the exact repeat, three conflicts, and the post after the doctrine moved.
+    assert.deepEqual(await tally(`DEC-${DOC}-READY`), [{ outcome: 'inserted', n: 1 }, { outcome: 'rejected', n: 5 }, { outcome: 'unchanged', n: 2 }]);
+    assert.deepEqual(await tally(`DEC-${DOC}-GAP`), [{ outcome: 'rejected', n: 1 }]);
+    assert.deepEqual(await tally(`DEC-${DOC}-NOPE`), [{ outcome: 'rejected', n: 1 }]);
+    const conflictLine = (await query(`SELECT detail FROM engine_writes WHERE natural_id = $1 AND outcome = 'rejected' AND detail LIKE '409 decision_id_conflict%' LIMIT 1`, [`DEC-${DOC}-READY`])).rows[0];
+    assert.ok(conflictLine, 'a conflict is logged with its status and reason');
+    ok('every POST is on engine_writes: inserted, unchanged for the dry run and exact repeat, and rejected for every refusal (422, 404, contradiction, conflict)');
   } finally {
     const ev = await query(`DELETE FROM engine_events WHERE subject_id LIKE $1`, [`${DOC}:%`]);
     const doc = await query(`DELETE FROM engine_media_doctrine WHERE doctrine_id = $1`, [DOC]);
