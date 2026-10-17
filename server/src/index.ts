@@ -55,6 +55,7 @@ import * as google from './google';
 import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, agentTokensConfigured, MCP_SECRET_VAR, MCP_WRITE_TOKEN_VAR, MCP_ONE_URL } from './mcp';
 import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
+import * as stripeLedger from './stripeLedger';
 import * as intake2 from './intake2';
 import * as intake2Page from './intake2Page';
 import * as systemFeeds from './systemFeeds';
@@ -300,6 +301,45 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       });
     }
     throw new HttpError(405, 'GET the form state or POST the answers.');
+  }
+  /**
+   * Stripe's webhook (17 Oct 2026, D4). Public because Stripe holds no key of ours; the
+   * Stripe-Signature over the raw body is the lock, checked before anything is parsed.
+   * 200 for stored, duplicate, unmatched and ignored (Stripe stops retrying); 400 for a
+   * call that is not Stripe's; 500 when the database fails, so Stripe tries again.
+   */
+  if (p === '/api/public/stripe/webhook') {
+    if (method !== 'POST') throw new HttpError(405, 'POST a Stripe event.');
+    const t0 = Date.now();
+    const raw = await readRaw(req, 512 * 1024);
+    const sigHeader = req.headers['stripe-signature'];
+    const v = stripeLedger.verify(raw, Array.isArray(sigHeader) ? sigHeader[0] : sigHeader);
+    if (!v.ok) {
+      void stripeLedger.refused(v.reason, earlyAccess.clientIp(req));
+      void stripeLedger.logCall('rejected', null, `signature: ${v.reason}`, Date.now() - t0);
+      return send(res, v.reason === 'not_configured' ? 503 : 400, { ok: false, reason: v.reason });
+    }
+    let ev: Record<string, unknown>;
+    try {
+      ev = JSON.parse(raw.toString('utf8')) as Record<string, unknown>;
+    } catch {
+      void stripeLedger.logCall('rejected', null, 'signed but not JSON', Date.now() - t0);
+      return send(res, 400, { ok: false, reason: 'not_json' });
+    }
+    if (typeof ev.livemode === 'boolean' && ev.livemode !== (v.mode === 'live')) {
+      void stripeLedger.refused('mode_mismatch', earlyAccess.clientIp(req));
+      void stripeLedger.logCall('rejected', String(ev.id ?? ''), `livemode ${ev.livemode} verified by the ${v.mode} secret`, Date.now() - t0);
+      return send(res, 400, { ok: false, reason: 'mode_mismatch' });
+    }
+    try {
+      const h = await stripeLedger.handle(ev, v.mode);
+      void stripeLedger.logCall(h.outcome === 'duplicate' ? 'unchanged' : h.outcome === 'recorded' ? 'inserted' : h.status >= 400 ? 'rejected' : 'unchanged', h.event_id, `${h.outcome}: ${h.detail}`, Date.now() - t0);
+      return send(res, h.status, { ok: h.status < 400, outcome: h.outcome, event_id: h.event_id });
+    } catch (e) {
+      console.error('[stripe] webhook', e);
+      void stripeLedger.logCall('error', String(ev.id ?? ''), e instanceof Error ? e.message : String(e), Date.now() - t0);
+      return send(res, 500, { ok: false, reason: 'store_failed' });
+    }
   }
   if (p === '/api/public/vfarm-doctrine' && method === 'GET') {
     const origin = earlyAccess.originOf(req);
@@ -950,6 +990,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * The same invite from n8n or a person's tool (14 Oct 2026), by the lead's
      * buyer_intake_id: { buyer_intake_id, by, resend, dry_run }.
      */
+    /** The Stripe ledger's canonical read-back (17 Oct 2026, D4): stored events and each lead's payment. */
+    if (p === '/api/engine/vfarm-payments') {
+      if (method !== 'GET') throw new HttpError(405, 'GET the Stripe ledger.');
+      const r = await stripeLedger.readBack({ lead_id: url.searchParams.get('lead_id'), limit: Number(url.searchParams.get('limit')) || 50 });
+      await mirror.logWrite({ endpoint, kind: 'stripe_events', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `${r.events.length} events, ${r.payments.length} payments`, ms: Date.now() - t0 });
+      return send(res, 200, { ok: true, ...r });
+    }
     if (p === '/api/engine/vfarm-leads/intake-2/invite') {
       if (method !== 'POST') throw new HttpError(405, 'POST { buyer_intake_id, by, resend, dry_run }.');
       const body = (await readJson(req)) as Record<string, unknown>;
@@ -2302,6 +2349,13 @@ const server = createServer((req, res) => {
    * Early Access form: a buyer has no login. The link itself is the lock, and a
    * link that opens nothing gets the same page whatever the reason.
    */
+  /** Where Stripe's hosted Checkout sends a buyer back (17 Oct 2026). Says nothing about any payment. */
+  if (url.pathname === '/checkout/done' || url.pathname === '/checkout/cancelled') {
+    const body = url.pathname === '/checkout/done' ? stripeLedger.donePage() : stripeLedger.cancelledPage();
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(body), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+    res.end(req.method === 'HEAD' ? undefined : body);
+    return;
+  }
   const intakePage = url.pathname.match(/^\/intake\/([A-Za-z0-9_-]{1,80})\/?$/);
   if (intakePage) {
     const html = (status: number, body: string) => {
@@ -2497,6 +2551,10 @@ async function boot(): Promise<void> {
         ? `  google:   ${google.googleMode() === 'oauth' ? 'OAuth refresh token' : 'service account'} — share_doc, grant_drive_access, create_doc and pattern Docs work`
         : `  google:   NOT configured — ${google.notConfiguredMessage()}`,
     );
+    {
+      const sc = stripeLedger.configured();
+      console.log(`  stripe: webhook /api/public/stripe/webhook — sandbox ${sc.test ? 'on' : `off (${stripeLedger.SECRET_VARS.test} not set)`}, live ${sc.live ? 'on' : `off (${stripeLedger.SECRET_VARS.live} not set)`}`);
+    }
     console.log(
       intake2.configured()
         ? '  intake-2: links on — /intake/<token> is public; the Stage 2 move emails the invite through n8n vFarm — Intake-2 Invite'
