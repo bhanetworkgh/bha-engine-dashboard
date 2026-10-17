@@ -43,6 +43,7 @@ import { offersByLead } from './vfarmGates';
 import { FORM_A_QUESTIONS } from '../../src/data/formA';
 import type { Intake2Invite, Intake2Stored } from '../../src/data/intake2';
 import * as intake2 from './intake2';
+import * as proposalMod from './proposal';
 import { CLOSE_REASONS, type LeadActivity } from '../../src/data/leadPipeline';
 
 /* ------------------------------------------------------------------ config */
@@ -467,6 +468,10 @@ export interface Lead {
   intake_2_completed_at: string | null;
   /** The invite and every email sent for it; never the link's hash. */
   intake_2_invite: Omit<Intake2Invite, 'token_sha256'> | null;
+  /** Stage 3's proposal (17 Oct 2026), never its link's hash. */
+  proposal: ReturnType<typeof proposalMod.forPage>;
+  /** What Stripe said about this lead's payment (17 Oct 2026, stripeLedger). */
+  stripe_payment: Record<string, unknown> | null;
   /** The CRM (15 Oct 2026): what happens next and by when, a close with a reason, and the timeline. */
   next_step: string | null;
   next_step_due: string | null;
@@ -482,10 +487,16 @@ export interface StageMove {
   at: string;
   by: string;
   reason: string | null;
-  via: 'page' | 'engine';
+  /** 'buyer' (17 Oct 2026): the buyer accepted their proposal, which moves Stage 3 to 4. */
+  via: 'page' | 'engine' | 'buyer';
 }
 
-export const LEAD_STAGES = [1, 2, 3] as const;
+/**
+ * The five stages of buyer flow v2 (17 Oct 2026, Jason; SOP 09cb58a7): 1 interest, 2 site
+ * specification, 3 proposal, 4 agreement and Stripe deposit, 5 customer. Migration 81 renamed
+ * 3 from the "paying" placeholder; no lead was in it.
+ */
+export const LEAD_STAGES = [1, 2, 3, 4, 5] as const;
 
 export interface LeadsData {
   leads: Lead[];
@@ -506,13 +517,13 @@ export interface LeadsData {
  * up somewhere it should not be.
  */
 export async function leads(): Promise<LeadsData> {
-  const r = await query<Omit<Lead, 'stage_changed_at' | 'pilot_offers' | 'intake_2_completed_at' | 'intake_2_invite' | 'closed_at' | 'next_step_due'> & { closed_at: Date | null; next_step_due: string | Date | null; created_at: Date; notified_at: Date | null; submitted_at: Date | null; stage_changed_at: Date | null; intake_2_completed_at: Date | null; intake_2_invite: Omit<Intake2Invite, 'link'> | null; seq: string }>(
+  const r = await query<Omit<Lead, 'stage_changed_at' | 'pilot_offers' | 'intake_2_completed_at' | 'intake_2_invite' | 'closed_at' | 'next_step_due' | 'proposal'> & { proposal: proposalMod.Proposal | null; closed_at: Date | null; next_step_due: string | Date | null; created_at: Date; notified_at: Date | null; submitted_at: Date | null; stage_changed_at: Date | null; intake_2_completed_at: Date | null; intake_2_invite: Omit<Intake2Invite, 'link'> | null; seq: string }>(
     `SELECT id, full_name, email, organization_name, source_surface, source_page, source_campaign,
             page_contract_version, mechanics_contract_version, claim_state, status, notes,
             notified_at, submitted_at, created_at, user_agent,
             utm_source, utm_medium, utm_campaign, asset_id, source_channel,
             landing_variant, contract_version, form_a, stage, stage_changed_at, stage_history,
-            intake_2, intake_2_completed_at, intake_2_invite,
+            intake_2, intake_2_completed_at, intake_2_invite, proposal, stripe_payment,
             next_step, to_char(next_step_due, 'YYYY-MM-DD') AS next_step_due, closed_at, closed_reason, closed_note, activity,
             row_number() OVER (PARTITION BY email ORDER BY created_at, id) AS seq
        FROM engine_vfarm_leads
@@ -531,6 +542,7 @@ export async function leads(): Promise<LeadsData> {
     stage_history: Array.isArray(row.stage_history) ? row.stage_history : [],
     intake_2_completed_at: iso(row.intake_2_completed_at),
     intake_2_invite: intake2.forPage(row.intake_2_invite),
+    proposal: proposalMod.forPage(row.proposal),
     next_step_due: row.next_step_due ? String(row.next_step_due) : null,
     closed_at: iso(row.closed_at),
     activity: Array.isArray(row.activity) ? row.activity : [],
@@ -543,7 +555,7 @@ export async function leads(): Promise<LeadsData> {
   const by_status: Record<string, number> = {};
   for (const s of LEAD_STATUSES) by_status[s] = 0;
   for (const l of rows) by_status[l.status] = (by_status[l.status] ?? 0) + 1;
-  const by_stage: Record<string, number> = { '1': 0, '2': 0, '3': 0 };
+  const by_stage: Record<string, number> = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };
   for (const l of rows) by_stage[String(l.stage)] = (by_stage[String(l.stage)] ?? 0) + 1;
 
   return { leads: rows, summary: { total: rows.length, last_7_days: since(7), last_30_days: since(30), by_status, by_stage } };
@@ -564,21 +576,31 @@ export async function moveStage(
   reason: string | null,
   via: 'page' | 'engine',
 ): Promise<Lead & { intake_2_invite_result?: intake2.InviteOutcome }> {
-  if (!(LEAD_STAGES as readonly number[]).includes(to)) throw new SubmissionError(422, `"${to}" is not a stage. A lead is in stage 1 (Form A, interest only), stage 2 (serious buyer, site specification) or stage 3 (paying, a placeholder until pricing and checkout are set).`);
+  if (!(LEAD_STAGES as readonly number[]).includes(to)) throw new SubmissionError(422, `"${to}" is not a stage. A lead is in stage 1 (interest), 2 (site specification), 3 (proposal), 4 (agreement and deposit) or 5 (customer).`);
   const who = by.trim().slice(0, 120);
   if (!who) throw new SubmissionError(422, 'Say who is moving the lead (by).');
   const why = reason && reason.trim() ? reason.trim().slice(0, 1000) : null;
   const where = key.id ? `id = $1` : `form_a->>'buyer_intake_id' = $1`;
   const val = key.id ?? key.buyer_intake_id;
   if (!val) throw new SubmissionError(422, 'Name the lead by id or buyer_intake_id.');
-  const cur = await query<{ id: string; stage: number; intake_2_completed_at: Date | null; closed_at: Date | null }>(`SELECT id, stage, intake_2_completed_at, closed_at FROM engine_vfarm_leads WHERE ${where}`, [val]);
+  const cur = await query<{ id: string; stage: number; intake_2_completed_at: Date | null; closed_at: Date | null; accepted: string | null; paid: string | null }>(
+    `SELECT id, stage, intake_2_completed_at, closed_at, proposal->>'accepted_at' AS accepted, stripe_payment->>'state' AS paid FROM engine_vfarm_leads WHERE ${where}`,
+    [val],
+  );
   if (!cur.rows.length) throw new SubmissionError(404, `No lead with that ${key.id ? 'id' : 'buyer_intake_id'}.`);
   if (cur.rows.length > 1) throw new SubmissionError(409, `More than one lead carries that buyer_intake_id: ${cur.rows.map((r) => r.id).join(', ')}.`);
   const row = cur.rows[0];
   if (row.closed_at) throw new SubmissionError(409, 'That lead is closed. Reopen it before moving it.');
   if (row.stage === to) throw new SubmissionError(409, `That lead is already in stage ${to}.`);
-  // Stage 3 is paying, which Jason gated behind Intake-2 (14 Oct). A placeholder still keeps the gate.
-  if (to === 3 && !row.intake_2_completed_at) throw new SubmissionError(409, 'Stage 3 is for a buyer whose site specification (Intake-2) is in. This lead has not sent it yet.');
+  // The gates of buyer flow v2 (17 Oct 2026). Moving back is always allowed; moving on needs
+  // what the stage is for. 3 is the proposal: Form 2 in, and a person moves it once the five
+  // checks clear. 4 only by an accepted proposal (the buyer's Accept moves it itself). 5 only
+  // with a paid Stripe payment on the lead; the signed agreement is not built yet.
+  if (to > row.stage) {
+    if (to >= 3 && !row.intake_2_completed_at) throw new SubmissionError(409, 'Stage 3 is the proposal, for a buyer whose site specification (Form 2) is in and whose five checks have cleared. This lead has not sent Form 2 yet.');
+    if (to >= 4 && !row.accepted) throw new SubmissionError(409, 'Stage 4 is for a buyer who accepted their proposal. This lead has not accepted one.');
+    if (to >= 5 && row.paid !== 'paid') throw new SubmissionError(409, 'Stage 5 is a customer: the agreement and the payment both in. No paid Stripe payment is recorded on this lead.');
+  }
   const move: StageMove = { from: row.stage, to, at: new Date().toISOString(), by: who, reason: why, via };
   await query(
     `UPDATE engine_vfarm_leads SET stage = $2, stage_changed_at = now(), stage_history = stage_history || $3::jsonb WHERE id = $1`,

@@ -3296,6 +3296,19 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE engine_vfarm_leads ADD COLUMN IF NOT EXISTS stripe_payment jsonb`,
     ],
   },
+  {
+    // 17 Oct 2026 (Jason, buyer flow v2, SOP 09cb58a7): five stages. 3 is the proposal (was the
+    // "paying" placeholder, which no lead was ever in), 4 agreement and deposit, 5 customer. The
+    // proposal lives on the lead, its link's hash indexed for the public page.
+    id: 81,
+    name: 'engine_vfarm_leads: stages 4 and 5, proposal',
+    statements: [
+      `ALTER TABLE engine_vfarm_leads DROP CONSTRAINT IF EXISTS engine_vfarm_leads_stage_check`,
+      `ALTER TABLE engine_vfarm_leads ADD CONSTRAINT engine_vfarm_leads_stage_check CHECK (stage IN (1, 2, 3, 4, 5))`,
+      `ALTER TABLE engine_vfarm_leads ADD COLUMN IF NOT EXISTS proposal jsonb`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_vfarm_leads_proposal_token ON engine_vfarm_leads ((proposal->>'token_sha256')) WHERE proposal IS NOT NULL`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
