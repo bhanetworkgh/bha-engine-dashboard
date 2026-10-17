@@ -1383,6 +1383,33 @@ then here, then BUILD_LOG), migration 76.
   question 5 through the link's upload; `dry_run` validates and writes nothing.
 
 
+**The Stripe to ledger rail** (2026-10-17, Destiny — D4, the internal $1 test under
+`VFARM_STRIPE_LEDGER_CONTROLLED_TEST_ACCEPTANCE_V1`; Jason, 17 Oct: wiring and internal
+testing only, no live customer payments). `server/src/stripeLedger.ts`, migration 80.
+- **The checkout page is Stripe's own hosted Checkout.** Nothing on bhanetwork.org links to
+  a payment and `/vfarm` stays `interest_only_live`. A session is made for one lead with
+  `client_reference_id` = the lead's id and `metadata.buyer_intake_id` = its buyer id, and
+  its link goes to that person only. Stripe returns the buyer to `/checkout/done` or
+  `/checkout/cancelled`, which say nothing about any payment.
+- **The webhook is the only way a payment reaches the ledger**: `POST /api/public/stripe/webhook`,
+  public because Stripe holds no key of ours, locked by `Stripe-Signature` over the raw body
+  (five minutes' tolerance). One secret per mode, **`STRIPE_WEBHOOK_SECRET_TEST`** and
+  **`STRIPE_WEBHOOK_SECRET_LIVE`**, no defaults; an event whose `livemode` does not match the
+  secret that verified it is refused. No Stripe API key is held by this server.
+- **One row per Stripe event** in `engine_stripe_events`, keyed on its id: a retry is a 200
+  `duplicate` and changes nothing. The ledger is the lead's own `stripe_payment` (paid,
+  failed, expired or pending, with the session, intent, amount and events). **Paid is never
+  undone** by a later event, a live event never overwrites a test payment, and **a payment
+  sets no stage, entitlement, subscriber or reservation.** Each change is one
+  `vfarm_payment_*` row in `engine_events`.
+- **No silent failures**: a forged or unreadable call is 400 and `stripe_webhook_refused`
+  (one alert an hour in the engine alerts channel); a paid session that names no lead, an
+  unknown lead or the wrong buyer id is stored `unmatched` and alerted; paid, failed and
+  expired post in #vfarm-early-access (`STRIPE_ALERT_CHANNEL`), sandbox posts marked
+  "test only". A database failure is a 500, so Stripe tries again.
+- **Read-back**: `GET /api/engine/vfarm-payments` (`x-dashboard-key`, `?lead_id=`).
+  `npm run test:stripe-ledger` pins it against a local database.
+
 **UN9D acceptance and the first real vFarm data** (2026-10-15, Destiny — D3;
 Hardik's two tests of 30 Sep / 1 Oct, locked by Jason 2 Oct). `server/src/un9d.ts`.
 - **The first real post DMs Destiny once.** Every post to `/api/engine/vfarm-snapshot`

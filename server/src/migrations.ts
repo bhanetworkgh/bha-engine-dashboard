@@ -3269,6 +3269,33 @@ const MIGRATIONS: Migration[] = [
        )`,
     ],
   },
+  {
+    // 17 Oct 2026 (Destiny, D4): the Stripe to ledger rail. One row per Stripe event,
+    // keyed on Stripe's own id so a retried delivery is one row; the lead's own payment
+    // state beside its other records. No stage, entitlement or subscriber column.
+    id: 80,
+    name: 'engine_stripe_events; engine_vfarm_leads.stripe_payment',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_stripe_events (
+         event_id text PRIMARY KEY,
+         type text NOT NULL,
+         livemode boolean NOT NULL,
+         stripe_created_at timestamptz,
+         received_at timestamptz NOT NULL DEFAULT now(),
+         session_id text,
+         payment_intent text,
+         amount bigint,
+         currency text,
+         lead_id text,
+         outcome text CHECK (outcome IS NULL OR outcome IN ('recorded', 'unmatched', 'ignored')),
+         detail text,
+         raw jsonb NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_stripe_events_lead ON engine_stripe_events (lead_id, received_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_stripe_events_intent ON engine_stripe_events (payment_intent)`,
+      `ALTER TABLE engine_vfarm_leads ADD COLUMN IF NOT EXISTS stripe_payment jsonb`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
