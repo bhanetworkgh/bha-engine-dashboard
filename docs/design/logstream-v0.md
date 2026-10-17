@@ -102,7 +102,7 @@ Bays had 7, 10, 1, 2, 14, 18 and 7 incidents in successive weeks. North Star had
 1. **Count per signature, never per lane.** This is the main tuning. Per lane, 5-in-7 is noise. Per signature, it is rare and meaningful.
 2. **Research Twin's 5-in-7 stays as the default for "this needs a person now".** On six weeks of history it would have fired 3 times. All three were real.
 3. **Recommend 3-in-7 per signature as the point where research opens.** It would have fired 7 times in six weeks, 5 of them real. It also matches the rule Jason already approved for the Monitoring Twin on 4 Oct (3 or more in 7 days, one job per pattern), so the engine has one number, not two.
-4. **Leave out** test and simulator incidents, and "refused ask" incidents, which are guards working. Without that, 2 of the 7 firings are false.
+4. **Leave out** test and simulator incidents, and "refused ask" incidents, which are guards working. Without that, 2 of the 7 firings are false. DOCTRINE incidents (SE8L's doctrine-gap monitor) are left out of these thresholds too (2026-10-17), as a Logstream-only exclusion: they are written down and shown as left out, and still reach Research Signals T4.
 5. **The 20% half, tuned from run counts** (added later on 9 Oct). Read from the 30,478 production runs held, 7 Sep to 9 Oct, as failed runs over all runs, per workflow per week, for workflows with at least 5 runs that week (117 workflow-weeks).
    - A plain 20% rule fired in **18** of the 117. **12 of those 18 are one week**, 21 Sep, when the Airtable cap broke everything at once. That is one outage, not twelve patterns.
    - Outside that week it fired 6 times: Research Twin — Agent Delivery in **three separate weeks** (5 of 19, 4 of 14, 4 of 19), the simulator once (test), Research Twin's old agent once (2 of 9) and Bays — Approval Decision once (1 of 5).
@@ -154,7 +154,7 @@ Locked in #bha-north-star-twin on 9 Oct 2026. These replace the proposals in sec
 
 - 3 of the same fault in 7 days: open one Research Twin job for that pattern.
 - 5 of the same fault in 7 days: escalate to a person.
-- Test, simulator and "refused ask" incidents are excluded from both.
+- Test, simulator and "refused ask" incidents are excluded from both. DOCTRINE incidents are excluded from the signature counts (Logstream only, 2026-10-17).
 - A fault signature is the workflow plus the step that failed.
 
 **Workflow-level rate rule, a separate trigger**
@@ -194,7 +194,7 @@ Jason gave the go-ahead on 9 Oct: table, writer and trigger against the locked t
 - **Table.** `engine_logstream`, append-only, one row per state an incident reaches: observed, closed, research opened. The fields are section 5's. `person_confirmed` and `autopay_enabled` are false on every row and nothing sets or reads them.
 - **Writer.** Reads the incidents the dashboard already holds. No workflow was changed.
 - **Trigger.** Section 10's numbers, every five minutes, over the last 7 days. 3 of the same fault opens one Research Twin job. 5 posts one alert in the engine alerts channel. The workflow rate rule opens one job. 5 or more workflows crossing is one outage alert and no per-workflow research.
-- **Left out of counting:** workflows named TEST, anything simulated, and the step "Raise Refused Ask".
+- **Left out of counting:** workflows named TEST, anything simulated, and the step "Raise Refused Ask"; and, from Logstream's thresholds only, DOCTRINE incidents (the `doctrine` impact tag or the workflow `T0NO doctrine-gap monitor`), recorded with `excluded_reason: doctrine`.
 
 Added later the same day:
 
