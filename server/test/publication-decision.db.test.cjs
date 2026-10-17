@@ -81,16 +81,38 @@ const ok = (name) => { passed++; console.log(`  ok  ${name}`); };
     assert.deepEqual(read.counts, { claims: 2, allowed: 1, held: 1 });
     ok('a stored decision reads back as applicable for its own claim and surface only');
 
-    const again = await vrfk.storeDecision(input(a, { reason: 'A different reason' }), claim(a));
-    assert.equal(again.recorded, false);
-    assert.equal(again.duplicate, true);
-    assert.equal(again.id, stored.id);
-    assert.equal(again.decision.reason, 'T0NO_GATE_CLEARED');
-    assert.deepEqual(again.differs_from_request, ['reason']);
+    const key = `VFAM.claim_publication_decision:DEC-${RUN}`;
+    const snapshot = async () => (await query(`SELECT id, at, actor, source_ref, detail::text AS detail FROM engine_events WHERE dedupe_key = $1`, [key])).rows;
+    const decisionEvents = async () => (await query(`SELECT count(*)::int AS n FROM engine_events WHERE event_type = 'vfam_claim_publication_decision' AND subject_id LIKE $1`, [`%${RUN}%`])).rows[0].n;
+    const before = await snapshot();
+    const eventsBefore = await decisionEvents();
+    const conflict = (fields) => (e) => {
+      assert.equal(e.status, 409);
+      assert.equal(e.reason, 'decision_id_conflict');
+      assert.equal(e.details.stored_event_id, stored.id);
+      if (fields) assert.deepEqual(e.details.differs_from_request, fields);
+      return true;
+    };
+    await assert.rejects(vrfk.storeDecision(input(a, { reason: 'A different reason' }), claim(a)), conflict(['reason']));
+    await assert.rejects(vrfk.storeDecision(input(a, { actor: 'someone else' }), claim(a)), conflict(['actor']));
+    await assert.rejects(vrfk.storeDecision(input(a, { source_ref: 'LOOP-OTHER' }), claim(a)), conflict(['source_ref']));
+    await assert.rejects(vrfk.storeDecision(input(a, { decided_at: '2026-10-11T00:00:00.000Z' }), claim(a)), conflict(['decided_at']));
+    await assert.rejects(vrfk.storeDecision(input(a, { dry_run: true, reason: 'A different reason' }), claim(a)), conflict(['reason']));
+    await assert.rejects(vrfk.storeDecision(input(a), claim(a, { change_id: 'CHANGE-2', doctrine_version: 'v0.2' })), conflict(null));
+    ok('a reused decision_id is 409 decision_id_conflict for different content, actor, source_ref, decided_at, on a dry run and after the doctrine moved');
+
     const same = await vrfk.storeDecision(input(a), claim(a));
+    assert.equal(same.duplicate, true);
+    assert.equal(same.id, stored.id);
     assert.deepEqual(same.differs_from_request, []);
-    assert.equal((await query(`SELECT count(*)::int AS n FROM engine_events WHERE dedupe_key = $1`, [`VFAM.claim_publication_decision:DEC-${RUN}`])).rows[0].n, 1);
-    ok('a reused decision_id writes nothing, answers with the stored row, and only a real difference is named');
+    const omitted = await vrfk.storeDecision(input(a, { decided_at: undefined }), claim(a));
+    assert.equal(omitted.duplicate, true);
+    ok('an identical retry, and one that leaves decided_at out, is still the stored row (idempotent)');
+
+    assert.deepEqual(await snapshot(), before);
+    assert.equal(before.length, 1);
+    assert.equal(await decisionEvents(), eventsBefore);
+    ok('after every refusal and retry the stored row is byte-for-byte unchanged and no decision event was added');
 
     await query(
       `INSERT INTO engine_events (event_type, at, subject_id, lane, actor, source_ref, detail, dedupe_key)

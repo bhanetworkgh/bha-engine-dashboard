@@ -3728,10 +3728,17 @@ tool `read_publication_decision`. The server computes the decision from T0NO —
 needs_evidence, then hold (surface not allowed, or `NOT_SAFE_TO_CLAIM`), then
 allowed — and a POST naming a different one is a 409. A read re-checks the newest
 row against the doctrine in force: a missing, stale or contradicting row reads
-`needs_evidence`. `decision_id` is the retry key; **a reused one writes nothing
-and answers with the stored row**, with `duplicate: true` and the fields the retry
-differed on (2026-10-10; it had echoed the request). Whether a different-content
-retry should be a 409 instead is an open owner decision. Media Twin requires a
+`needs_evidence`. `decision_id` is the retry key. **The same request again is 200
+with the stored row** (`duplicate: true`); **the same `decision_id` with anything
+different is 409 `decision_id_conflict`** and writes or changes nothing
+(2026-10-16, Jason: a Rule-1 breach to answer it 200). Compared: the stored decision
+detail (which carries the doctrine change and T0NO snapshot, so a doctrine that
+has moved is a conflict and an old `decision_id` is never a new authorization),
+`actor`, `source_ref`, and `decided_at` only when the caller sent one, because the
+server fills a missing one from its own clock. The body is `{ ok: false, reason,
+message, decision_id, stored_event_id, differs_from_request }`; a `dry_run` is
+checked the same way. Every refused POST — 422, 404, a contradiction, a conflict —
+is a `rejected` line on `engine_writes`. Media Twin requires a
 T0NO-clear claim and an applicable decision. **The claim-key expression in
 `readDecisions` brackets each `->>`**: unbracketed, Postgres reads
 `text ->> 'claim_id'` and refuses the query — proved on PostgreSQL 17.5 on
@@ -3740,12 +3747,13 @@ local database whose name ends in `_test` and refuses anything else, because it
 deletes the rows it writes; `npm run test:vrfk` checks the logic.
 `npm run test:vrfk-http` (2026-10-15, same guard) drives the real route and the
 Media Twin data route: 401 without the key, 422 and 404, a dry run that stores
-nothing, 201 then the GET readback with the same event id, an exact repeat and a
-reused `decision_id` with different content both 200 with the stored row, a
+nothing, 201 then the GET readback with the same event id, an exact repeat 200,
+a reused `decision_id` with different content, actor, on a dry run or after the
+doctrine moved each 409 `decision_id_conflict` with the stored row unchanged, a
 contradicting POST 409, stale and contradicted rows held by Media Twin, and an
-`engine_writes` line for every POST. **Nobody but a holder of
-`DASHBOARD_INBOUND_KEY` can write a decision, and `actor` is not checked**: who
-may write one is an open owner decision, as is 409 for a reused `decision_id`.
+`engine_writes` line for every POST, refusals as `rejected`. **Nobody but a holder
+of `DASHBOARD_INBOUND_KEY` can write a decision, and `actor` is not checked**: who
+may write one is an open owner decision.
 
 **SE8L, doctrine gap observability** (2026-10-09). `server/src/doctrineGap.ts`
 classifies each claim and surface into one of eleven conditions, writes
