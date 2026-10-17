@@ -1430,6 +1430,12 @@ is non-transactional). `server/src/proposal.ts`, migration 81.
   `vfarm_proposal_*` event, and one post in #vfarm-early-access whose outcome is written back.
   The proposal link is copied from the lead panel; no email sends it yet. CST answering
   questions and the agreement are not built. `npm run test:proposal`.
+- **`test_buyer_flow`** (`server/src/mcp/intake2Tools.ts`, write connection, no agent's scope):
+  walks a test lead through the flow one step per call through the real functions: `move`
+  (moveStage with its gates), `propose` (proposal.create), `buyer_open`, `buyer_accept`,
+  `buyer_question`, `buyer_call` (proposal.page and proposal.act on the lead's own link), and
+  `status`. Destiny or Jason only, **only an @bhanetwork.org lead**, confirm
+  `TEST FLOW <buyer_intake_id>`. Audited on `engine_mcp_writes`.
 
 **UN9D acceptance and the first real vFarm data** (2026-10-15, Destiny — D3;
 Hardik's two tests of 30 Sep / 1 Oct, locked by Jason 2 Oct). `server/src/un9d.ts`.
