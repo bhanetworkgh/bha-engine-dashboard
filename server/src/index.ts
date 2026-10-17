@@ -56,6 +56,7 @@ import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, agentTokens
 import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
 import * as stripeLedger from './stripeLedger';
+import * as proposal from './proposal';
 import * as intake2 from './intake2';
 import * as intake2Page from './intake2Page';
 import * as systemFeeds from './systemFeeds';
@@ -1684,6 +1685,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
    * The Early Access CRM's four writes (15 Oct 2026): a note, the next step, close with a
    * reason, reopen. Each lands on the lead's timeline. Behind the cookie like the rest.
    */
+  /** Stage 3's proposal (17 Oct 2026): make or replace it for a lead in Stage 3. Behind the cookie. */
+  const prop = p.match(/^\/api\/vfarm\/leads\/([^/]+)\/proposal$/);
+  if (prop && method === 'POST') {
+    const body = await readJson(req);
+    try {
+      const r = await proposal.create(decodeURIComponent(prop[1]), body, typeof body.by === 'string' ? body.by : 'the dashboard login');
+      return send(res, 200, { ok: true, ...r });
+    } catch (e) {
+      if (e instanceof proposal.ProposalError) return send(res, e.status, { ok: false, reason: e.reason, message: e.message });
+      throw e;
+    }
+  }
   const crm = p.match(/^\/api\/vfarm\/leads\/([^/]+)\/(note|next-step|close|reopen)$/);
   if (crm && method === 'POST') {
     const body = await readJson(req);
@@ -2354,6 +2367,40 @@ const server = createServer((req, res) => {
     const body = url.pathname === '/checkout/done' ? stripeLedger.donePage() : stripeLedger.cancelledPage();
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(body), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
     res.end(req.method === 'HEAD' ? undefined : body);
+    return;
+  }
+  /**
+   * The buyer's Stage 3 proposal page (17 Oct 2026). Public by necessity, like Form 2: the link
+   * is the lock. GET shows it; POST is one of its three plain HTML forms (accept, question,
+   * call). A link that opens nothing gets the same "not valid" page whatever the reason.
+   */
+  const propPage = url.pathname.match(/^\/proposal\/([A-Za-z0-9_-]{1,80})\/?$/);
+  if (propPage) {
+    const html = (status: number, body: string) => {
+      res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(body), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' });
+      res.end(req.method === 'HEAD' ? undefined : body);
+    };
+    const token = propPage[1];
+    const run = async () => {
+      if (req.method === 'POST') {
+        const raw = (await readRaw(req, 16 * 1024)).toString('utf8');
+        const form = new URLSearchParams(raw);
+        const r = await proposal.act(token, form.get('action'), form.get('text')).catch((e: unknown) => {
+          if (e instanceof proposal.ProposalError) return { flash: e.message };
+          throw e;
+        });
+        if (!r) return html(404, proposal.notValid());
+        const pg = await proposal.page(token, r.flash);
+        return pg ? html(200, pg) : html(404, proposal.notValid());
+      }
+      if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, { ok: false, message: 'Method not allowed.' });
+      const pg = await proposal.page(token);
+      return pg ? html(200, pg) : html(404, proposal.notValid());
+    };
+    run().catch((e: unknown) => {
+      console.error('[proposal] page', e);
+      html(500, proposal.notValid());
+    });
     return;
   }
   const intakePage = url.pathname.match(/^\/intake\/([A-Za-z0-9_-]{1,80})\/?$/);

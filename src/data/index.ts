@@ -85,6 +85,7 @@ import type {
   ServerStatus,
   SignInResult,
   VfarmLead,
+  VfarmProposal,
   VfarmLeadStatus,
   VfarmLeadsData,
   VfarmGatesData,
@@ -639,6 +640,10 @@ export const getMediaDoctrine = () => api<DoctrineData>('/api/media-doctrine');
 export function editVfarmLead(id: string, changes: { status?: VfarmLeadStatus; notes?: string | null }): Promise<VfarmLead> {
   return api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}`, { method: 'PATCH', body: changes });
 }
+
+/** Make or replace a lead's Stage 3 proposal (2026-10-17). Price in cents. */
+export const createVfarmProposal = (id: string, body: { setup_name: string; summary: string; inclusions: string[]; price_amount: number; currency: string; timeline: string | null }) =>
+  api<{ ok: boolean; proposal: VfarmProposal; replaced: string | null }>(`/api/vfarm/leads/${encodeURIComponent(id)}/proposal`, { method: 'POST', body });
 
 /** The Early Access CRM (2026-10-15): a note, the next step, close with a reason, reopen. */
 export const addVfarmLeadNote = (id: string, text: string) => api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}/note`, { method: 'POST', body: { text } });
