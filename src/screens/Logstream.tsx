@@ -382,7 +382,7 @@ export default function Logstream() {
         <div className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto pb-8">
           <StatStrip cols={4}>
             <StatCell>
-              <Stat label="Incidents written down" value={data.summary.incidents} hint={`${data.summary.counted} counted · ${data.summary.excluded} left out (test, simulator, refused ask or click)`} size="lg" />
+              <Stat label="Incidents written down" value={data.summary.incidents} hint={`${data.summary.counted} counted · ${data.summary.excluded} left out (test, simulator, refused ask or click, doctrine)`} size="lg" />
             </StatCell>
             <StatCell>
               <Stat label="Counted in the last 7 days" value={data.summary.last_7d} hint={`Held from ${when(data.summary.first_at)}`} />
