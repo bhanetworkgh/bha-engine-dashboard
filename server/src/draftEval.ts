@@ -150,8 +150,9 @@ export class DraftEvalError extends Error {
 const mint = (): string => `DRAFT-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}-${Math.random().toString(36).slice(2, 6).toUpperCase().padEnd(4, 'X')}`;
 
 async function configHash(agentId: string): Promise<string | null> {
-  const a = await n8nMcp.getAgent(agentId);
-  return typeof a.configHash === 'string' ? a.configHash : null;
+  // configHash and every skill hash together (n8nMcp.changeHash): a skill
+  // edited mid-run or after the run is a change, not the config tested.
+  return n8nMcp.changeHash(await n8nMcp.getAgent(agentId));
 }
 
 export interface StartResult {
