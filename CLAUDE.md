@@ -2469,6 +2469,9 @@ autopay, no pay wiring, no destructive automated action).
   older doctrine version still reads `allowed` there. Whether to hide those rows
   from it is an open decision (Destiny). `allowed_use.genie_ns` alone is never
   permission. Genie writes nothing and does not get `read_doctrine_gap_summary`.
+  **The buyer flow and SOP reads are on the same token from 18 Oct** (Engine
+  Surfaces Contract): `read_buyer_flow` and `read_sop`, six tools in all, still
+  read-only, and `test:eg4n` pins the six.
   The answer table is in the contract; `npm run test:eg4n` pins the token and the
   resolver's answers against a local `_test` database.
 - **Empty reads are counted, and nothing decides on them** (same day).
@@ -3951,7 +3954,8 @@ and a reason, keeps its whole text on the audit line first, and reads the id
 again to confirm it is gone. Both audited on `engine_mcp_writes` (kind
 `bharag_sop`).
 **`read_sop`, the whole SOP for an agent** (2026-10-14, Destiny — ZZVU).
-Same file, read only, both connections, in Bays' scope: one SOP's full text by
+Same file, read only, both connections, in Bays' scope (and North Star's,
+Research Twin's and Genie's from 18 Oct 2026): one SOP's full text by
 BHARAG id or exact title, through `sops.doc`. A search returns pieces of a
 document, and on 14 Oct Bays answered a blocked builder from the wrong pieces
 of Destiny's Operator Playbook. A title that matches nothing returns the
