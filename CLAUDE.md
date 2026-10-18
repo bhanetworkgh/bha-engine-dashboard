@@ -1666,7 +1666,10 @@ maturity page shows the draft verdict beside each version. **A skill edit is a
 change** (18 Oct 2026, LOOP-1792328810473-P3UV): n8n's `configHash` does not move
 when a skill is edited, so the hash compared everywhere here is `n8nMcp.changeHash`,
 `cs1:` + sha256 of the configHash and every `skillHashes` entry; draft runs made
-before it carry n8n's plain hash and no longer match. **To change an
+before it carry n8n's plain hash and no longer match. **An Anthropic backup is
+tested with its primary's cases** (18 Oct 2026): `run_draft_eval` takes a backup's
+n8n agent id (`BACKUPS` in `draftEval.ts`), asks that agent's draft, and stores
+the run under the backup's id, so the publish check matches it like any other. **To change an
 agent: edit the draft, `run_draft_eval`, publish only once it reads passed,
 then record the inventory.** `npm run test:draft-eval` pins the pure parts.
 
