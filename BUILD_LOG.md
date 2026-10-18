@@ -12872,3 +12872,10 @@ Files:      server/src/draftEval.ts, server/src/mcp/draftEvalTools.ts, CLAUDE.md
 Problem:    run_draft_eval agent=PjKGbV4ZnH4YOfri answered `unknown_agent` (audit 2557).
 Fix:        BACKUPS maps PjKGbV4ZnH4YOfri → bays, fqeON4jXjenIi3cP → north_star, 7ToBQqHpffX1eUG0 → research_twin. start() resolves a backup id to its primary's case set but calls and stores the backup's own id and name; the busy check is per agent id, so a primary and its backup can run side by side. test:draft-eval 10 passed.
 Decision:   Same cases, same scoring, no new table: a backup is the same agent on a different provider, so the primary's golden set is the right bar.
+
+## 2026-10-18 15:55 — Draft evals on the backups and the RT primary: results
+Intent:     Run the test the backups skipped, now that run_draft_eval takes a backup id (4ed3e72, deploy dep-dbadbc67bikc73egvi8g live 14:22 UTC).
+Files:      none (runs only)
+Problem:    DRAFT-202610181424-JD0X, Bays (Anthropic backup) PjKGbV4ZnH4YOfri: failed, 19 of 20. BAYS-SOP-03 repeat 1 (execution vZIv3UrHPd6T9OYh) wrote nothing and named the existing SOP, correct behaviour, but quoted its id as `811fbabd-…` instead of `811bfabd-a263-47f0-9e77-cc14f27fb740`, so the check /811bfabd|already (logged|captured)|no (need to log|new entry|duplicate)/ did not match. Repeats 2 and 3 quoted it correctly. A real slip, not a bad check: the case is left as it is.
+Fix:        None applied. Passed: DRAFT-202610181424-YIWY North Star backup fqeON4jXjenIi3cP 11/11; DRAFT-202610181424-7VFB Research Twin backup 7ToBQqHpffX1eUG0 9/9; DRAFT-202610181424-SRLR Research Twin primary dDtsExaaXhlFd2dv (6f0da394, published untested at 12:10 UTC) 9/9. All compared with EVAL-202610181140, config hashes equal before and after (cs1:…). Credit $33.27 at start (audits 2559–2562).
+Decision:   The runs came after the publishes, so engine_agent_versions still reads no draft eval before those versions; nothing rewrites those rows, and these runs are the evidence instead. The Bays backup stays published: it answers only when OpenRouter fails, and its one wrong id is named here. A rerun of JD0X is the next check if the backup is changed.
