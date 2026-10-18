@@ -459,6 +459,7 @@ function Reminders() {
 function WatchState({ w }: { w: DecisionWatch }) {
   if (w.status === 'escalated') return <Pill tone="failing">escalated</Pill>;
   if (w.status !== 'watching') return <Pill>{w.status}</Pill>;
+  if (w.snoozed_until) return <Pill>{w.state}</Pill>;
   if (w.problem) return <Pill tone="degraded">{w.state}</Pill>;
   return <Pill tone="accent">{w.state}</Pill>;
 }
@@ -473,9 +474,9 @@ function DecisionWatches() {
     <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
       <div className="shrink-0 space-y-2 px-6 pb-4 md:px-8">
         <p className="text-[12px] text-dim">
-          {data.counts.watching} being watched · {data.counts.answered} answered · {data.counts.moved} moved · {data.counts.escalated} escalated · {data.posted_today} of {data.rule.daily_cap} posts used today
+          {data.counts.watching} being watched{data.counts.snoozed ? ` (${data.counts.snoozed} snoozed)` : ''} · {data.counts.answered} answered · {data.counts.moved} moved · {data.counts.escalated} escalated · {data.posted_today} of {data.rule.daily_cap} posts used today
         </p>
-        <p className="text-[12px] text-faint">{data.rule.in_words} To watch a decision or close a watch, ask Bays in Slack.</p>
+        <p className="text-[12px] text-faint">{data.rule.in_words} To watch, snooze or close a decision, ask Bays in Slack.</p>
       </div>
       {data.watches.length === 0 ? (
         <EmptyState>No decision is being watched yet. Bays opens a watch when a decision is put to a named person in a thread it is in, or when somebody says "Bays, watch this".</EmptyState>
@@ -494,7 +495,7 @@ function DecisionWatches() {
                 header: 'next',
                 className: 'tabular text-dim',
                 title: (w) => w.problem ?? w.close_reason ?? '',
-                cell: (w) => (w.status === 'watching' ? (w.problem ? w.problem : `${w.next_action}${w.next_action_when ? `, ${w.next_action_when}` : ''}`) : (w.close_reason ?? <span className="text-faint">closed</span>)),
+                cell: (w) => (w.status === 'watching' ? (w.problem && !w.snoozed_until ? w.problem : `${w.next_action}${w.next_action_when ? `, ${w.next_action_when}` : ''}`) : (w.close_reason ?? <span className="text-faint">closed</span>)),
               },
               {
                 key: 'where',
