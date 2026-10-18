@@ -1437,6 +1437,22 @@ is non-transactional). `server/src/proposal.ts`, migration 81.
   `status`. Destiny or Jason only, **only an @bhanetwork.org lead**, confirm
   `TEST FLOW <buyer_intake_id>`. Audited on `engine_mcp_writes`.
 
+**The Engine Surfaces Contract for the buyer flow** (2026-10-18, Destiny — Jason in
+#bha-coordination, 1792267743.990519). `docs/contracts/engine-surfaces-buyer-flow.md` is the
+contract, also logged as an SOP in BHARAG so the agents read it with `read_sop`.
+`server/src/leadFlow.ts`.
+- **Every stage move, close and reopen writes one event in the same transaction as the row**:
+  `vfarm_flow_stage_moved`, `vfarm_flow_closed`, `vfarm_flow_reopened`, subject the
+  `buyer_intake_id`, actor `buyer` for a buyer's own action and never a name. Any new path that
+  changes `stage` or `closed_at` must call `leadFlow.record*` too. The names avoid the
+  `VFARM_LEAD_`/`VFARM_BUYER_` customer families on purpose: `BUYER_STATES` do not map onto the
+  five stages and are Jason's to change.
+- **`read_buyer_flow`** (`server/src/mcp/buyerFlowTools.ts`, read only, both connections, in
+  North Star's, Research Twin's, Bays' and Genie's scopes, with `read_sop` added to the three that
+  lacked it): stage, position, Form 2, proposal, payment state and mode, close, per lead by
+  `buyer_intake_id`, and the contract's never-infer rules. It selects no personal field.
+  `npm run test:buyer-flow`.
+
 **UN9D acceptance and the first real vFarm data** (2026-10-15, Destiny — D3;
 Hardik's two tests of 30 Sep / 1 Oct, locked by Jason 2 Oct). `server/src/un9d.ts`.
 - **The first real post DMs Destiny once.** Every post to `/api/engine/vfarm-snapshot`
