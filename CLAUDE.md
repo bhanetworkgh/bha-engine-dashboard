@@ -1803,6 +1803,14 @@ agent did through n8n tools of its own are tools here:
   the upload, which left an orphaned upload for a user it could not DM). The
   permalink comes from files.info. A failure is `ok:false` with `step` and
   Slack's own `error`.
+  **`cc` is a marked copy, never a recipient** (18 Oct 2026, DW-1792267745984-UBCR):
+  "cc Jason" used to put Jason in `recipients`, so he got a DM written to Hardik. `cc`
+  people get the text under "_Copy for you: Bays sent this to …_", and a
+  `requester_user_id` named in `recipients` beside others is moved to cc
+  (`moved_to_cc`). **A failed DM answers `reason: slack_refused` with Slack's own error
+  in `message`** (LOOP-1792263523732-LVEA), and the approval card's line reads
+  `summary` and `results[].error`, so an approved send that Slack refuses never says
+  "the tool gave no reason". `npm run test:bays-tools` and `test:approvals` pin both.
 
 **Bays hears a voice note** (2026-10-07, Destiny — LOOP-1791315402447-834A, Jason's
 ask of 6 Oct). `transcribe_slack_audio`, `server/src/mcp/audioTools.ts`, read
