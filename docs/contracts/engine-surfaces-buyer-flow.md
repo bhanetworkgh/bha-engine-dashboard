@@ -1,6 +1,6 @@
 # Engine Surfaces Contract: the vFarm buyer flow and Stripe
 
-Version 1, 18 Oct 2026 (v0 the same morning named four gaps; v1 closes the two that could be closed). Asked for by Jason in #bha-coordination (thread 1792267743.990519): which fields and states another surface may rely on to know where a lead is in the five-stage flow and what Stripe has actually seen for it, per consumer, and what no surface may work out for itself. No new build: this writes down what the engine holds today and names the gaps.
+Version 1, 18 Oct 2026 (v0 the same morning named four gaps; v1 closes the two that could be closed). Asked for by Jason in #bha-coordination (thread 1792267743.990519): which fields and states another surface may rely on to know where a lead is in the five-stage flow and what Stripe has actually seen for it, per consumer, and what no surface may work out for itself. v0 wrote down what the engine held and named the gaps; v1 (Destiny, the same day) built the stage events and the agents' read, section 7.
 
 ## 1. The one rule
 
@@ -41,7 +41,6 @@ Rules a reader must respect: a payment sets no stage, no entitlement, no subscri
 Events, all in `engine_events`, readable through `read_engine_events`:
 
 - `vfarm_flow_stage_moved` (`from_stage`, `to_stage`, `via`: page, engine or buyer), `vfarm_flow_closed` (`closed_reason`), `vfarm_flow_reopened`. One per change, written in the same transaction as the row, subject the `buyer_intake_id`, actor `buyer` for a buyer's own action and never a buyer's name. From 18 Oct 2026: earlier moves are only in `read_buyer_flow`'s current position and the row's `stage_history`.
-
 - `vfarm_payment_recorded`, `vfarm_payment_failed`, `vfarm_payment_expired`, with `lead_id`, `mode`, `amount`, `session_id`.
 - `vfarm_proposal_made`, `vfarm_proposal_accepted` (with `moved_to_stage_4`), `vfarm_proposal_question`, `vfarm_proposal_call`. All `test: true`.
 - `serious_buyer_spec_intake_invited`, `serious_buyer_spec_intake_completed`, `serious_buyer_spec_intake_unresponsive`.
@@ -70,7 +69,17 @@ Events, all in `engine_events`, readable through `read_engine_events`:
 - Live from test, or test from missing `mode`.
 - An offer from a proposal: every proposal is a test until Canon Lock.
 
-## 7. Gaps
+## 7. Answering common questions
+
+- "Where is buyer X?" `read_buyer_flow` with `buyer_intake_id`. Answer with `stage_name` and `position_label`, and since when.
+- "How many leads are at each stage?" `read_buyer_flow` with no arguments, `counts.by_position`.
+- "Has anyone paid?" `read_buyer_flow`, `counts.payments`. Say test or live every time. A `paid_test` is an internal test, never a sale.
+- "When did X move?" `read_engine_events`, `event_type: vfarm_flow_stage_moved`, `subject_id` the buyer id. Before 18 Oct 2026 there are no move events; say so.
+- "Who are our customers or subscribers?" Stage 5 counts customers by the engine's gate; subscribers come only from `read_engine_events` with `catalog: "vfarm_customers"`, and today none is recorded.
+- "Can we say we have customers / sales in public?" Not from this read. `read_publication_decision` decides what may be said.
+- If a read fails or returns nothing for an id: say you do not know, never fill it in.
+
+## 8. Gaps
 
 Closed on 18 Oct 2026 (v1):
 
