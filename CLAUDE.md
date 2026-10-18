@@ -1662,7 +1662,11 @@ a version change, `publishGate.draftCheck` looks for a finished draft run whose
 config hash is the config now published. Passed is `passed_before_publish`; a
 failed run or none posts one alert in the engine alerts channel at once ("went
 live without a draft eval"). The eval after the publish still runs. The Agent
-maturity page shows the draft verdict beside each version. **To change an
+maturity page shows the draft verdict beside each version. **A skill edit is a
+change** (18 Oct 2026, LOOP-1792328810473-P3UV): n8n's `configHash` does not move
+when a skill is edited, so the hash compared everywhere here is `n8nMcp.changeHash`,
+`cs1:` + sha256 of the configHash and every `skillHashes` entry; draft runs made
+before it carry n8n's plain hash and no longer match. **To change an
 agent: edit the draft, `run_draft_eval`, publish only once it reads passed,
 then record the inventory.** `npm run test:draft-eval` pins the pure parts.
 
