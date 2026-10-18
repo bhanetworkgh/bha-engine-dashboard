@@ -1,6 +1,6 @@
 # Engine Surfaces Contract: the vFarm buyer flow and Stripe
 
-Version 0, 18 Oct 2026. Asked for by Jason in #bha-coordination (thread 1792267743.990519): which fields and states another surface may rely on to know where a lead is in the five-stage flow and what Stripe has actually seen for it, per consumer, and what no surface may work out for itself. No new build: this writes down what the engine holds today and names the gaps.
+Version 1, 18 Oct 2026 (v0 the same morning named four gaps; v1 closes the two that could be closed). Asked for by Jason in #bha-coordination (thread 1792267743.990519): which fields and states another surface may rely on to know where a lead is in the five-stage flow and what Stripe has actually seen for it, per consumer, and what no surface may work out for itself. No new build: this writes down what the engine holds today and names the gaps.
 
 ## 1. The one rule
 
@@ -34,9 +34,13 @@ Rules a reader can rely on: paid is never undone by a later event; a live event 
 
 Rules a reader must respect: a payment sets no stage, no entitlement, no subscriber and no reservation. `mode: "test"` is never a customer payment. The `/checkout/done` page says nothing about a payment, by design.
 
-## 4. Events another surface can read
+## 4. What another surface reads
 
-All in `engine_events`, readable through `read_engine_events`:
+**`read_buyer_flow`** (MCP, read only, in North Star's, Research Twin's, Bays' and Genie's scopes) is the one read of where leads are. Per lead: `buyer_intake_id`, `source_campaign`, `stage` and `stage_name`, `position` (the seven keys above) and `position_since`, `form_2_in_at`, `proposal` (`made_at`, `accepted_at`, `test: true`), `payment` (`state`, `mode`, `amount`, `currency`, `paid_at`) and `closed` (`at`, `reason`). Counts by position and by payment `state_mode` over every lead. The rules in section 6 come back with every answer. It selects no name, email, organisation, form answer, note or proposal text, so none can be returned. With no arguments it lists open leads; `buyer_intake_id` gives one lead, closed or not; `position` narrows.
+
+Events, all in `engine_events`, readable through `read_engine_events`:
+
+- `vfarm_flow_stage_moved` (`from_stage`, `to_stage`, `via`: page, engine or buyer), `vfarm_flow_closed` (`closed_reason`), `vfarm_flow_reopened`. One per change, written in the same transaction as the row, subject the `buyer_intake_id`, actor `buyer` for a buyer's own action and never a buyer's name. From 18 Oct 2026: earlier moves are only in `read_buyer_flow`'s current position and the row's `stage_history`.
 
 - `vfarm_payment_recorded`, `vfarm_payment_failed`, `vfarm_payment_expired`, with `lead_id`, `mode`, `amount`, `session_id`.
 - `vfarm_proposal_made`, `vfarm_proposal_accepted` (with `moved_to_stage_4`), `vfarm_proposal_question`, `vfarm_proposal_call`. All `test: true`.
@@ -45,13 +49,15 @@ All in `engine_events`, readable through `read_engine_events`:
 
 ## 5. Per consumer
 
-**Slack Genie.** Reads `read_engine_events` with its read-only token, including `catalog: "vfarm_customers"` and the payment and proposal events above. It may say that a lead was captured, that Form 2 came in, that a proposal was accepted, and that Stripe recorded a payment, and in which mode. It must not say that a lead is at a stage, or is a customer, or is owed anything, from any of those. A stage is only what the engine's stage read says (gap 1). A test payment is never described as a sale.
+**Slack Genie.** Reads `read_engine_events` with its read-only token, including `catalog: "vfarm_customers"` and the payment and proposal events above. It may say that a lead was captured, that Form 2 came in, that a proposal was accepted, and that Stripe recorded a payment, and in which mode. For where a lead is, it reads `read_buyer_flow`. It must not say that a lead is at a stage, or is a customer, or is owed anything, from any of the events alone. A test payment is never described as a sale.
 
 **Monitoring Twin.** Reads farms and devices only (`vfarm.snapshot.v1`, `vfarm.alert.v1`). It never reads leads or payments, and it never treats a farm reporting as evidence that anyone bought, paid or became a subscriber. The link from a farm to a customer is `config_hash` on a `VFARM_SUBSCRIBER_*` event, not a guess from farm id or name.
 
 **Media and subscriber surfaces.** What may be said in public comes from `read_media_doctrine` and `read_publication_decision`, never from the lead flow. Subscriber state comes from `VFARM_SUBSCRIBER_STATE_CHANGED`, `_DELIVERY` and `_UPGRADED`, which have no writer yet, so today the answer is "none recorded", not "none exist". A stage 5 lead is not a subscriber until that event says so. Customer counts, revenue or "first customer" claims are not made from Stripe or from stages.
 
 **Kiosk and app.** Read `GET /api/public/vfarm-doctrine` only. It answers approved wording, or the safe fallback `interest_only_live` with `paid_subscription_url: null`. No kiosk or app reads a lead, a stage or a payment, and none links to a payment. Form A is the only thing they send.
+
+**Bays, North Star and Research Twin.** Read `read_buyer_flow` and `read_engine_events`, the same as Genie, and this contract with `read_sop`. Never `get_page_data` on `/vfarm` for a stage: it carries names and emails.
 
 **Internal people tools.** The dashboard's Early Access tab and `GET /api/engine/vfarm-payments` (`x-dashboard-key`, `?lead_id=`) are the read-back for people and n8n. Neither is for an agent: both carry names and emails.
 
@@ -64,11 +70,18 @@ All in `engine_events`, readable through `read_engine_events`:
 - Live from test, or test from missing `mode`.
 - An offer from a proposal: every proposal is a test until Canon Lock.
 
-## 7. Gaps, named, not built
+## 7. Gaps
 
-1. **A stage move writes no event.** `moveStage` updates the row and `stage_history` but writes nothing to `engine_events`, and `VFARM_BUYER_STATE_CHANGED` has no writer. So no agent can read a lead's stage today except through the page. The fix is one event per move, written in the same statement, through `engineEvents.record`.
-2. **No agent-scoped stage read.** `get_page_data` on `/vfarm` would return stages, but with names and emails. It is not the read for this and should not be used for it. The read, when built, returns stage, position and payment state by `buyer_intake_id`, without personal fields.
+Closed on 18 Oct 2026 (v1):
+
+1. ~~A stage move writes no event.~~ Every stage move, close and reopen now writes one `vfarm_flow_*` event in the same transaction as the row change, from all four paths that change a stage or a close (`moveStage`, the proposal's Accept, close and reopen, and Form 2 reopening a closed lead). The customer-events family `VFARM_BUYER_STATE_CHANGED` is still not written: its states (`intake_submitted`, `qualified`, `reserved`, `declined`) are Jason's v0 proposal and do not map onto the five stages, so mapping them would be inventing. Retiring or re-cutting that vocabulary is Jason's call.
+2. ~~No agent-scoped stage read.~~ `read_buyer_flow`, section 4.
+
+Still open, and not buildable yet:
+
 3. **Subscriber events have no writer.** They wait on the signed agreement and the config identity.
-4. **The agreement is not built.** Stage 5 currently needs only a paid payment; the signed agreement half of its gate is missing and the stage says so.
+4. **The agreement is not built.** Stage 5 currently needs only a paid payment; the signed agreement half of its gate is missing.
+
+Proved by `npm run test:buyer-flow` against a local database: every move, close, reopen and Accept writes its event, a refused move writes none, no event or read carries a name, email or organisation, and the four agent scopes carry the read.
 
 Any change to a field, value or rule here is a new version of this contract and a BUILD_LOG line.
