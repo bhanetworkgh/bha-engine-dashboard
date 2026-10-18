@@ -12804,3 +12804,10 @@ Fix:        SOP logged in BHARAG with log_sop: "SOP -- Engine Surfaces Contract:
             Bays Nw5igXu4WWrjUMWB: + read_buyer_flow (read_sop already held). Restore 35505429-4795-4a0e-bbba-2e9ef77c7b1e, published 6d6e8238-b11a-4258-a8b7-e41461b77a29, DRAFT-202610181107-W872 passed 20/20.
             All compared with EVAL-202610181015, no regressions; inventory recorded, draft_state passed_before_publish on all three. Spot tests: each agent called read_buyer_flow on its own token, reported 7 leads (6 at Stage 1, 1 at Stage 5) and the three Stripe payments as test mode only, with buyer ids and no names or emails; North Star and Research Twin called read_sop and answered from it.
 Decision:   Genie's read token carries read_buyer_flow and read_sop on the server (boot line: genie, read, 6 tools); calling them from inside Genie is Kaiqi's wiring, not done here.
+
+## 2026-10-18 12:50 — Tidy after D1 and D2
+Intent:     Leave nothing loose behind the snooze and the Engine Surfaces Contract.
+Files:      docs/contracts/genie-logstream-read.md, CLAUDE.md, server/test/sops.test.cjs, BUILD_LOG.md
+Problem:    Kaiqi's Genie reference still said Genie's token holds four tools; CLAUDE.md said read_sop is in Bays' scope only. test:sops failed before running anything: "Cannot find module …/server-dist/dataGovernance.js" (it required server-dist/<file> where the build writes server-dist/server/src/<file>).
+Fix:        Genie reference: six tools, with sections for read_buyer_flow and read_sop. CLAUDE.md: the six-tool token and read_sop's four scopes. test:sops now requires server-dist/server/src/…; 22 checks pass. No server code changed, so nothing deploys differently.
+Decision:   Post-publish eval EVAL-202610181015 on Bays 35505429 flagged BAYS-SOP-01 on one of three repeats (Bays offered to log an SOP already logged). Not rolled back: the case is unrelated to the snooze, passed every repeat in DRAFT-…-OTCO and DRAFT-…-W872, and Bays is already on 6d6e8238, whose own post-publish eval is pending and settles whether the slip repeats.
