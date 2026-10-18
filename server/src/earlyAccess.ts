@@ -36,7 +36,8 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
-import { query } from './pg';
+import { query, withTransaction } from './pg';
+import * as leadFlow from './leadFlow';
 import * as events from './events';
 import * as vfarmCustomerEvents from './vfarmCustomerEvents';
 import { offersByLead } from './vfarmGates';
@@ -583,8 +584,8 @@ export async function moveStage(
   const where = key.id ? `id = $1` : `form_a->>'buyer_intake_id' = $1`;
   const val = key.id ?? key.buyer_intake_id;
   if (!val) throw new SubmissionError(422, 'Name the lead by id or buyer_intake_id.');
-  const cur = await query<{ id: string; stage: number; intake_2_completed_at: Date | null; closed_at: Date | null; accepted: string | null; paid: string | null }>(
-    `SELECT id, stage, intake_2_completed_at, closed_at, proposal->>'accepted_at' AS accepted, stripe_payment->>'state' AS paid FROM engine_vfarm_leads WHERE ${where}`,
+  const cur = await query<{ id: string; buyer: string | null; stage: number; intake_2_completed_at: Date | null; closed_at: Date | null; accepted: string | null; paid: string | null }>(
+    `SELECT id, form_a->>'buyer_intake_id' AS buyer, stage, intake_2_completed_at, closed_at, proposal->>'accepted_at' AS accepted, stripe_payment->>'state' AS paid FROM engine_vfarm_leads WHERE ${where}`,
     [val],
   );
   if (!cur.rows.length) throw new SubmissionError(404, `No lead with that ${key.id ? 'id' : 'buyer_intake_id'}.`);
@@ -602,10 +603,15 @@ export async function moveStage(
     if (to >= 5 && row.paid !== 'paid') throw new SubmissionError(409, 'Stage 5 is a customer: the agreement and the payment both in. No paid Stripe payment is recorded on this lead.');
   }
   const move: StageMove = { from: row.stage, to, at: new Date().toISOString(), by: who, reason: why, via };
-  await query(
-    `UPDATE engine_vfarm_leads SET stage = $2, stage_changed_at = now(), stage_history = stage_history || $3::jsonb WHERE id = $1`,
-    [row.id, to, JSON.stringify([move])],
-  );
+  // The row and its event in one transaction (18 Oct 2026, Engine Surfaces Contract): a move
+  // other surfaces cannot see is the gap the contract named.
+  await withTransaction(async (db) => {
+    await db.query(
+      `UPDATE engine_vfarm_leads SET stage = $2, stage_changed_at = now(), stage_history = stage_history || $3::jsonb WHERE id = $1`,
+      [row.id, to, JSON.stringify([move])],
+    );
+    await leadFlow.recordStageMove(db, { lead_id: String(row.id), buyer_intake_id: row.buyer, from: row.stage, to, at: move.at, by: who, via, reason: why });
+  });
   events.changed('vfarm_leads', row.id);
   // Stage 2 is Intake-2's trigger (Hardik's contract, 13 Oct). The invite never undoes the move:
   // a refusal or a failed email is the outcome, stored on the lead and returned beside it.
@@ -836,12 +842,16 @@ export async function close(id: string, reason: string, note: string | null, by?
   const n = note && note.trim() ? note.trim().slice(0, 2000) : null;
   if (reason === 'other' && !n) throw new SubmissionError(422, 'Other needs a note saying why.');
   const a: LeadActivity = { at: new Date().toISOString(), by: who(by), kind: 'closed', text: n, reason };
-  const r = await query(
-    `UPDATE engine_vfarm_leads SET closed_at = now(), closed_reason = $2, closed_note = $3, next_step = NULL, next_step_due = NULL,
-            activity = activity || $4::jsonb
-      WHERE id::text = $1 AND closed_at IS NULL RETURNING id`,
-    [id, reason, n, JSON.stringify([a])],
-  );
+  const r = await withTransaction(async (db) => {
+    const u = await db.query<{ id: string; buyer: string | null; stage: number }>(
+      `UPDATE engine_vfarm_leads SET closed_at = now(), closed_reason = $2, closed_note = $3, next_step = NULL, next_step_due = NULL,
+              activity = activity || $4::jsonb
+        WHERE id::text = $1 AND closed_at IS NULL RETURNING id::text AS id, form_a->>'buyer_intake_id' AS buyer, stage`,
+      [id, reason, n, JSON.stringify([a])],
+    );
+    if (u.rows.length) await leadFlow.recordClosed(db, { lead_id: u.rows[0].id, buyer_intake_id: u.rows[0].buyer, stage: u.rows[0].stage, reason, by: a.by });
+    return u;
+  });
   if (!r.rows.length) {
     const e = await query(`SELECT 1 FROM engine_vfarm_leads WHERE id::text = $1`, [id]);
     throw new SubmissionError(e.rows.length ? 409 : 404, e.rows.length ? 'That lead is already closed.' : 'No lead with that id.');
@@ -852,11 +862,15 @@ export async function close(id: string, reason: string, note: string | null, by?
 /** Opens a closed lead again in the column its stage puts it in. The close stays on the timeline. */
 export async function reopen(id: string, by?: string): Promise<Lead> {
   const a: LeadActivity = { at: new Date().toISOString(), by: who(by), kind: 'reopened', text: null };
-  const r = await query(
-    `UPDATE engine_vfarm_leads SET closed_at = NULL, closed_reason = NULL, closed_note = NULL, activity = activity || $2::jsonb
-      WHERE id::text = $1 AND closed_at IS NOT NULL RETURNING id`,
-    [id, JSON.stringify([a])],
-  );
+  const r = await withTransaction(async (db) => {
+    const u = await db.query<{ id: string; buyer: string | null; stage: number }>(
+      `UPDATE engine_vfarm_leads SET closed_at = NULL, closed_reason = NULL, closed_note = NULL, activity = activity || $2::jsonb
+        WHERE id::text = $1 AND closed_at IS NOT NULL RETURNING id::text AS id, form_a->>'buyer_intake_id' AS buyer, stage`,
+      [id, JSON.stringify([a])],
+    );
+    if (u.rows.length) await leadFlow.recordReopened(db, { lead_id: u.rows[0].id, buyer_intake_id: u.rows[0].buyer, stage: u.rows[0].stage, by: a.by, why: null });
+    return u;
+  });
   if (!r.rows.length) {
     const e = await query(`SELECT 1 FROM engine_vfarm_leads WHERE id::text = $1`, [id]);
     throw new SubmissionError(e.rows.length ? 409 : 404, e.rows.length ? 'That lead is not closed.' : 'No lead with that id.');

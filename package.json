@@ -13,6 +13,7 @@
     "hash-password": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server-dist/server/src/hash.js",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "test:buyer-flow": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/buyer-flow.test.cjs",
     "test:proposal": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/proposal.test.cjs",
     "test:stripe-ledger": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/stripe-ledger.test.cjs",
     "test:gate": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/write-gate.test.cjs",
