@@ -3568,10 +3568,13 @@ export interface DecisionWatch {
   closed_at: string | null;
   created_at: string | null;
   created_via: string | null;
+  /** Set while a snooze is running: nothing is posted before it (18 Oct 2026). */
+  snoozed_until?: string | null;
+  snoozed_by?: string | null;
 }
 export interface DecisionWatchData {
   rule: { wait_hours: number; max_reminders: number; daily_cap: number; in_words: string };
-  counts: { watching: number; with_a_problem: number; answered: number; moved: number; escalated: number; cancelled: number };
+  counts: { watching: number; snoozed?: number; with_a_problem: number; answered: number; moved: number; escalated: number; cancelled: number };
   posted_today: number;
   watches: DecisionWatch[];
 }

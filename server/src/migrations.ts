@@ -3309,6 +3309,18 @@ const MIGRATIONS: Migration[] = [
       `CREATE UNIQUE INDEX IF NOT EXISTS engine_vfarm_leads_proposal_token ON engine_vfarm_leads ((proposal->>'token_sha256')) WHERE proposal IS NOT NULL`,
     ],
   },
+  {
+    // 18 Oct 2026 (Destiny; Kaiqi asked not to be reminded while heads-down on 31 Oct): a watch
+    // can be snoozed until a date, at most 14 days ahead, and stays open with its history.
+    id: 82,
+    name: 'engine_decision_watches: snoozed_until, snoozed_by, owner_seen_until',
+    statements: [
+      `ALTER TABLE engine_decision_watches ADD COLUMN IF NOT EXISTS snoozed_until timestamptz`,
+      `ALTER TABLE engine_decision_watches ADD COLUMN IF NOT EXISTS snoozed_by text`,
+      // An owner message up to the snooze is the snooze being asked for, not the answer.
+      `ALTER TABLE engine_decision_watches ADD COLUMN IF NOT EXISTS owner_seen_until timestamptz`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
