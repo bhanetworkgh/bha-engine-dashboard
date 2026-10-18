@@ -3967,8 +3967,9 @@ Research Twin's and Genie's from 18 Oct 2026): one SOP's full text by
 BHARAG id or exact title, through `sops.doc`. A search returns pieces of a
 document, and on 14 Oct Bays answered a blocked builder from the wrong pieces
 of Destiny's Operator Playbook. A title that matches nothing returns the
-closest titles with their ids, never a guess; 30,000 characters at most, cut
-and marked. One `read` line per call on `engine_writes`.
+closest titles with their ids, never a guess; 60,000 characters at most, cut
+and marked (30,000 until 18 Oct 2026, when Hardik's 33,223-character playbook
+was cut short in the drills). One `read` line per call on `engine_writes`.
 
 **Build patterns and Commercial are one shape, not two** (decision 2026-09-16,
 Destiny). Both open on the current month, chosen in a picker **to the left of the

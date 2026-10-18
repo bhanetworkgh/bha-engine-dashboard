@@ -92,7 +92,7 @@ answer carries the never-infer rules in `rules`.
 
 `title` (exact, case and punctuation do not matter) or `id` (the BHARAG
 document id). A title that matches nothing returns the closest titles and their
-ids, never a guess. 30,000 characters at most, cut and marked.
+ids, never a guess. 60,000 characters at most, cut and marked.
 
 ## Rules to keep
 
