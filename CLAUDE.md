@@ -2630,6 +2630,19 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
   makes the owner's reply restart the wait like anyone else's, with a history
   line; the watch closes on `close_decision_watch` once every part is answered,
   or when its linked record closes, and keeps reminding until then.
+- **A watch can be snoozed until a date** (18 Oct 2026, Destiny; migration 82). Kaiqi asked
+  not to be reminded while heads-down on 31 Oct, and with no pause Bays cancelled
+  DW-1792249500281-8Y88 and opened DW-1792296192502-322O with a 7-day wait, which filed real
+  work as cancelled and split its history. `snooze_decision_watch` (Bays' scope) and
+  `decisionWatch.snooze` set `snoozed_until`, **at most 14 days ahead** (`RULE.max_snooze_days`),
+  a date the person names (`YYYY-MM-DD` is 00:00 UTC that day; a time must carry its zone).
+  The watch stays open: its thread is still read, a reply still counts, a linked record closing
+  still moves it, and the sweep posts no reminder or escalation before the date; after it the
+  watch carries on as it was. `clear: true` ends one early. Owner, requester, Destiny or Jason
+  only. **An owner message up to the snooze is not the answer** (`owner_seen_until`): the owner
+  asking Bays "snooze this" in the thread would otherwise close the single-part watch it asked
+  to pause. A snooze clears a cap-hold problem. Each change is a history line and one
+  `decision_watch_snoozed` or `_unsnoozed` event. The page shows "snoozed until …".
 - Tools, write connection: `open_decision_watch`, `list_decision_watches`,
   `close_decision_watch` (Bays' scope) and `run_decision_watch` (a person;
   `dry_run` by default). `fixture: true` makes a marked test watch whose posts

@@ -410,6 +410,109 @@ const srv = http.createServer((req, res) => {
   assert.equal((await dw.update(U, JASON, { sop_refs: 'late' })).reason, 'already_closed');
   ok('a watch takes an SOP written after it was opened, logs each change, and its reminder carries it');
 
+  /* 12b. snooze (18 Oct 2026): reminders pause until a date, the watch stays open, a reply still counts */
+  {
+    const D = 30 * 24 * 60; // a month out, so no other check's posts share the day's cap
+    const DAY = 24 * 60;
+    const sth = '1791733400.000001';
+    slack.threads[`${CH}:${sth}`] = [];
+    const s1 = await dw.open({ ...base, thread_ts: sth, created_by: JASON });
+    const S = s1.watch.watch_id;
+    await query(`UPDATE engine_decision_watches SET created_at = $2, quiet_since = $2 WHERE watch_id = $1`, [S, at(D).toISOString()]);
+    // who, and which dates
+    assert.equal((await dw.snooze(S, OTHER, at(D + 3 * DAY), 'not mine', at(D + 5))).reason, 'not_permitted');
+    assert.equal((await dw.snooze(S, OWNER, at(D + 1), null, at(D + 5))).reason, 'not_in_future');
+    assert.equal((await dw.snooze(S, OWNER, at(D + 5 + 14 * DAY + 1), null, at(D + 5))).reason, 'too_long');
+    assert.equal((await dw.snooze(S, OWNER, at(D + 5 + 14 * DAY), null, at(D + 5))).ok, true, 'exactly fourteen days is allowed');
+    // the owner asks for the snooze in the thread itself: that message is not the answer
+    slack.threads[`${CH}:${sth}`].push({ user: OWNER, ts: (at(D + 6).getTime() / 1000 - 3).toFixed(6), text: '@Bays snooze this until the 3rd please' });
+    // the owner snoozes it for three days (a later snooze replaces the first)
+    let sz = await dw.snooze(S, OWNER, at(D + 3 * DAY), 'heads-down on the 10/31 deadline', at(D + 6));
+    assert.equal(sz.ok && sz.changed, true);
+    let held = await row(S);
+    assert.equal(held.status, 'watching', 'a snoozed watch stays open');
+    assert.equal(new Date(held.snoozed_until).getTime(), at(D + 3 * DAY).getTime());
+    assert.equal(held.snoozed_by, OWNER);
+    assert.match(held.history.at(-1).what, /snoozed by U0OWNER0001 until .* \(was .*\): heads-down/);
+    const shown = dw.show(held, at(D + DAY + 10));
+    assert.match(shown.state, /^snoozed until /);
+    assert.equal(shown.next_action_at, at(D + 3 * DAY).toISOString(), 'the next action waits for the snooze');
+    assert.equal(shown.overdue, false);
+    assert.equal(shown.snoozed_until, at(D + 3 * DAY).toISOString());
+    // past its wait but inside the snooze: nothing posted, and a dry run says why
+    const before = slack.posts.length;
+    r = await only(S, at(D + DAY + 10), true);
+    assert.match(r.would[0].action, /snoozed until/);
+    r = await only(S, at(D + DAY + 10));
+    assert.deepEqual(r.reminded, []);
+    assert.deepEqual(r.closed, [], 'the owner asking for the snooze did not close the watch');
+    assert.equal((await row(S)).status, 'watching');
+    assert.equal(slack.posts.length, before, 'nothing is posted while snoozed');
+    assert.equal((await row(S)).reminders_sent, 0);
+    // the snooze ends: reminders carry on as before
+    r = await only(S, at(D + 3 * DAY + 1));
+    assert.deepEqual(r.reminded, [S]);
+    assert.match(slack.posts.at(-1).text, /Reminder 1 of 3/);
+    assert.equal(dw.show(await row(S), at(D + 3 * DAY + 2)).snoozed_until, null, 'a snooze that has run out is not shown');
+    // clear ends a snooze early; clearing nothing changes nothing
+    await dw.snooze(S, JASON, at(D + 5 * DAY), null, at(D + 3 * DAY + 5));
+    sz = await dw.snooze(S, JASON, null, 'back now', at(D + 3 * DAY + 6));
+    assert.equal(sz.ok && sz.changed, true);
+    assert.equal((await row(S)).snoozed_until, null);
+    sz = await dw.snooze(S, JASON, null, null, at(D + 3 * DAY + 7));
+    assert.equal(sz.ok && !sz.changed, true);
+    // a cap hold's problem is cleared by a snooze, so the page does not show a stale one
+    await query(`UPDATE engine_decision_watches SET last_error = 'held: today''s 12 Decision Watch posts are used; tried again on the next pass' WHERE watch_id = $1`, [S]);
+    await dw.snooze(S, OWNER, at(D + 6 * DAY), null, at(D + 3 * DAY + 8));
+    assert.equal((await row(S)).last_error, null);
+    // a reply from the owner still closes a snoozed watch
+    slack.threads[`${CH}:${sth}`].push({ user: OWNER, ts: (at(D + 4 * DAY).getTime() / 1000).toFixed(6), text: 'done' });
+    r = await only(S, at(D + 4 * DAY + 1));
+    assert.deepEqual(r.closed, [S]);
+    assert.equal((await row(S)).status, 'answered');
+    assert.equal((await dw.snooze(S, OWNER, at(D + 5 * DAY), null, at(D + 4 * DAY + 2))).reason, 'already_closed');
+    const sev = await query(`SELECT event_type, count(*)::int AS n FROM engine_events WHERE subject_id = $1 AND event_type LIKE 'decision_watch_%snoozed' GROUP BY 1`, [S]);
+    const sn = Object.fromEntries(sev.rows.map((x) => [x.event_type, x.n]));
+    assert.equal(sn.decision_watch_snoozed, 4);
+    assert.equal(sn.decision_watch_unsnoozed, 1);
+    // the tool: how a date is read, and what it refuses
+    assert.equal(tools.parseUntil('2026-10-30').toISOString(), '2026-10-30T00:00:00.000Z');
+    assert.equal(tools.parseUntil('2026-10-30T09:00:00+01:00').toISOString(), '2026-10-30T08:00:00.000Z');
+    assert.equal(tools.parseUntil('2026-10-30T09:00'), null, 'a time without its zone is not guessed');
+    assert.equal(tools.parseUntil('Oct 30'), null);
+    const deps = { access: 'write', agent: 'bays', dispatch: async () => ({ status: 200, body: {} }), startedAt: '' };
+    const s2 = await dw.open({ ...base, thread_ts: '1791733400.000002', created_by: JASON });
+    slack.threads[`${CH}:1791733400.000002`] = [];
+    const S2 = s2.watch.watch_id;
+    let st = await tools.snoozeDecisionWatch.handler({ watch_id: S2, requester_user_id: OWNER }, deps);
+    assert.equal(st.reason, 'until_required');
+    st = await tools.snoozeDecisionWatch.handler({ watch_id: S2, until: 'next week', requester_user_id: OWNER }, deps);
+    assert.equal(st.reason, 'bad_until');
+    const far = new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10);
+    st = await tools.snoozeDecisionWatch.handler({ watch_id: S2, until: far, requester_user_id: OWNER, dry_run: true }, deps);
+    assert.equal(st.ok, false);
+    assert.equal(st.reason, 'too_long');
+    st = await tools.snoozeDecisionWatch.handler({ watch_id: S2, until: far, requester_user_id: OWNER }, deps);
+    assert.equal(st.reason, 'too_long');
+    assert.match(st.message, /at most 14 days/);
+    const soon = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10);
+    st = await tools.snoozeDecisionWatch.handler({ watch_id: S2, until: soon, reason: 'busy', requester_user_id: OWNER }, deps);
+    assert.equal(st.ok, true);
+    assert.equal(st.snoozed_until, `${soon}T00:00:00.000Z`);
+    assert.match(st.message, /stays open/);
+    st = await tools.snoozeDecisionWatch.handler({ watch_id: S2, until: soon, requester_user_id: OWNER }, deps);
+    assert.equal(st.ok && st.changed, false, 'the same date again changes nothing');
+    st = await tools.snoozeDecisionWatch.handler({ watch_id: S2, clear: true, requester_user_id: OTHER }, deps);
+    assert.equal(st.reason, 'not_permitted');
+    const audit = await query(`SELECT outcome FROM engine_mcp_writes WHERE tool = 'snooze_decision_watch' AND arguments::text LIKE $1 ORDER BY id`, [`%${S2}%`]);
+    assert.deepEqual(audit.rows.map((x) => x.outcome), ['refused', 'refused', 'dry_run', 'refused', 'applied', 'unchanged', 'refused']);
+    const listed = (await dw.read()).watches.find((w) => w.watch_id === S2);
+    assert.match(listed.state, /^snoozed until/);
+    assert.equal((await dw.read()).counts.snoozed >= 1, true);
+    await dw.close(S2, JASON, 'cancelled', 'test');
+    ok('a watch snoozes up to 14 days, stays open, posts nothing until the date, and a reply still closes it');
+  }
+
   /* 13. events */
   const ev = await query(`SELECT event_type, count(*)::int AS n FROM engine_events WHERE subject_id = ANY($1) GROUP BY 1`, [[A, B]]);
   const n = Object.fromEntries(ev.rows.map((x) => [x.event_type, x.n]));
