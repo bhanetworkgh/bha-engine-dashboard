@@ -67,6 +67,9 @@ const assert = require('node:assert/strict');
   await inc('INC-H', { exec: '5005', resolvedAfter: 90, by: 'the ledger (closed upstream by the healer or a person)' });
   // BHARAG moves occurred_at to the close on every status change; first_seen_at keeps the real start.
   await inc('INC-K', { rs: 'manually_resolved', resolvedAfter: 200, occurredAfter: 200, by: 'mcp:write (U0AEW3TBYH1) — fixed' });
+  // A person closed this one as a probe and marked it a test: counted apart, not as their close.
+  await inc('INC-L', { rs: 'manually_resolved', resolvedAfter: 15, by: 'mcp:write (U0AEW3TBYH1) — probe' });
+  await query(`UPDATE engine_incidents SET test_reason = 'my own probe' WHERE natural_id = 'INC-L'`);
   await inc('INC-J', { resolvedAfter: 40, by: 'the ledger (closed upstream by the healer or a person)' });
 
   const retry = (id, status, minutes) => query(`INSERT INTO engine_retry_attempts (natural_id, fields, source, first_seen_at, updated_at) VALUES ($1, $2::jsonb, 'engine', now(), now())`, [id, JSON.stringify({ incident_id: id, status, workflow: 'W', last_attempt_at: at(minutes) })]);
@@ -86,9 +89,9 @@ const assert = require('node:assert/strict');
   assert.equal(w.failed_runs, 2);
   assert.equal(w.failure_rate.pct, 16.7);
 
-  assert.equal(w.incidents, 10);
+  assert.equal(w.incidents, 11);
   assert.equal(w.real_faults, 8, 'A B E F G H J K are real');
-  assert.deepEqual(w.counted_apart, { refused_click: 1, test: 1 });
+  assert.deepEqual(w.counted_apart, { refused_click: 1, test: 1, marked_test: 1 });
   assert.equal(w.real_faults_raised_by_alarm, 1, 'INC-E');
 
   assert.equal(w.automatic_fixes.total, 5, 'A once, G, H by execution id, RUN-7777, I');

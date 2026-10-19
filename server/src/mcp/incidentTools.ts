@@ -17,6 +17,7 @@
  * ones included, like every other write tool.
  */
 import { query } from '../pg';
+import * as events from '../events';
 import * as health from '../health';
 import * as repairs from '../repairs';
 import { auditClose, auditOpen } from './writeTools';
@@ -27,7 +28,7 @@ const MAX = 50;
 export const closeIncidentsTool: ToolDefinition = {
   name: 'close_incidents',
   description:
-    'Close open incidents in the BHARAG incident ledger as manually resolved — the Engine health page\'s own close, through the same function. ids: the incident ids as the page lists them (e.g. INC-BAYS.AGENT-038), at most 50. reason: why they are being closed (required, kept on the audit line). confirm: exactly "CLOSE <n>" where n is the number of ids; without it, or with dry_run true, nothing is changed and the answer says what each id would do (already closed, not held, or would close). Each incident is closed in the ledger first with its own lane key, and marked closed on the dashboard only once the ledger accepts; a refusal comes back per id with BHARAG\'s reason. Returns {closed, failed, skipped, results, note}. Audited on engine_mcp_writes.',
+    'Close open incidents in the BHARAG incident ledger as manually resolved — the Engine health page\'s own close, through the same function. test: true also marks each one closed as a test (see mark_incidents_test). ids: the incident ids as the page lists them (e.g. INC-BAYS.AGENT-038), at most 50. reason: why they are being closed (required, kept on the audit line). confirm: exactly "CLOSE <n>" where n is the number of ids; without it, or with dry_run true, nothing is changed and the answer says what each id would do (already closed, not held, or would close). Each incident is closed in the ledger first with its own lane key, and marked closed on the dashboard only once the ledger accepts; a refusal comes back per id with BHARAG\'s reason. Returns {closed, failed, skipped, results, note}. Audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -35,6 +36,7 @@ export const closeIncidentsTool: ToolDefinition = {
       reason: { type: 'string', description: 'Why these are being closed, e.g. "test noise from the Monitoring Twin simulator".' },
       confirm: { type: 'string', description: 'Exactly "CLOSE <n>", n the number of ids.' },
       requester_user_id: { type: 'string', description: 'Slack id of the person asking, for the audit line.' },
+      test: { type: 'boolean', description: 'true when these are tests, probes or noise rather than real faults: each one closed is also marked a test, with the reason, so the self-healing scorecard counts it apart instead of as a person\'s close.' },
       dry_run: { type: 'boolean' },
     },
     required: ['ids', 'reason'],
@@ -76,6 +78,10 @@ export const closeIncidentsTool: ToolDefinition = {
     try {
       const actor = `mcp:${deps.access}${requester ? ` (${requester})` : ''} — ${reason}`;
       const r = await health.closeIncidents(ids, actor);
+      if (args.test === true) {
+        const closedIds = r.results.filter((x) => x.outcome === 'closed').map((x) => x.id);
+        if (closedIds.length) await markTest(closedIds, reason, actor);
+      }
       const outcome = r.failed ? (r.closed ? 'partial' : 'failed') : 'applied';
       await auditClose(audit, { outcome, detail: r.note.slice(0, 500), natural_id: ids.join(',').slice(0, 200), after: r.results });
       return { ok: r.failed === 0, ...r, audit_id: audit };
@@ -210,4 +216,89 @@ export const actOnPreparedFixTool: ToolDefinition = {
   },
 };
 
-export const INCIDENT_WRITE_TOOLS: ToolDefinition[] = [closeIncidentsTool, retryIncidentTool, actOnPreparedFixTool];
+
+/** Marks incidents as tests on this dashboard's copy. The ledger's blob is never touched. */
+async function markTest(ids: string[], reason: string, by: string): Promise<string[]> {
+  const r = await query<{ natural_id: string }>(
+    `UPDATE engine_incidents SET test_reason = $2, test_marked_by = $3, test_marked_at = now() WHERE natural_id = ANY($1::text[]) RETURNING natural_id`,
+    [ids, reason, by],
+  );
+  return r.rows.map((x) => x.natural_id);
+}
+
+/**
+ * Mark incidents as tests (19 Oct 2026, Destiny — D2.5).
+ *
+ *   mark_incidents_test — write connection only, no agent's scope. Sets (or, with
+ *                         test false, clears) the test mark on incidents this
+ *                         dashboard holds, open or closed, with a reason. The
+ *                         self-healing scorecard counts a marked incident apart
+ *                         from real faults. Nothing is sent to the ledger and the
+ *                         incident's own record is unchanged.
+ */
+export const markIncidentsTestTool: ToolDefinition = {
+  name: 'mark_incidents_test',
+  description:
+    'Mark incidents as tests, probes or noise rather than real faults, or clear that mark. ids: incident ids as Engine health lists them, at most 50. reason: why (required, at least 3 characters, kept on the incident and the audit line). test: true to mark (the default), false to clear. confirm: exactly "MARK <n>" (or "CLEAR <n>") where n is the number of ids; without it, or with dry_run, nothing changes and the answer previews each id. Changes only this dashboard\'s test mark: nothing is sent to the BHARAG ledger and the incident is not closed or reopened. The self-healing scorecard counts a marked incident apart from real faults. Audited on engine_mcp_writes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      ids: { type: 'array', items: { type: 'string' } },
+      reason: { type: 'string' },
+      test: { type: 'boolean', description: 'true marks (default), false clears.' },
+      confirm: { type: 'string', description: 'Exactly "MARK <n>", or "CLEAR <n>" when test is false.' },
+      requester_user_id: { type: 'string' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['ids', 'reason'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Mark incidents as tests' },
+  handler: async (args, deps) => {
+    const ids = Array.isArray(args.ids) ? [...new Set(args.ids.filter((v): v is string => typeof v === 'string' && v.trim() !== '').map((v) => v.trim()))] : [];
+    const reason = typeof args.reason === 'string' ? args.reason.trim().slice(0, 500) : '';
+    const requester = typeof args.requester_user_id === 'string' ? args.requester_user_id.trim() || null : null;
+    const mark = args.test !== false;
+    const word = mark ? 'MARK' : 'CLEAR';
+    const confirmed = typeof args.confirm === 'string' && args.confirm.trim() === `${word} ${ids.length}`;
+    const dry = args.dry_run === true || !confirmed;
+    const audit = await auditOpen({ tool: 'mark_incidents_test', args, access: deps.access, kind: 'incidents', requester, dry_run: dry });
+    if (!ids.length || ids.length > MAX || reason.length < 3) {
+      const message = !ids.length ? 'Send ids: the incident ids to mark.' : ids.length > MAX ? `${ids.length} ids is more than the ${MAX} this marks at once.` : 'Send a reason (at least 3 characters).';
+      await auditClose(audit, { outcome: 'refused', detail: message });
+      return { ok: false, reason: 'bad_argument', message, audit_id: audit };
+    }
+    const held = await query<{ natural_id: string; open_now: boolean | null; test_reason: string | null; wf: string | null; resolved_by: string | null }>(
+      `SELECT natural_id, open_now, test_reason, fields->'payload'->>'workflow_or_scenario' AS wf, resolved_by FROM engine_incidents WHERE natural_id = ANY($1::text[])`,
+      [ids],
+    );
+    const by = new Map(held.rows.map((r) => [r.natural_id, r]));
+    const preview = ids.map((id) => {
+      const r = by.get(id);
+      if (!r) return { id, would: 'skip', why: 'not held on this dashboard' };
+      if (mark && r.test_reason) return { id, would: 'skip', why: `already marked a test: ${r.test_reason}` };
+      if (!mark && !r.test_reason) return { id, would: 'skip', why: 'not marked a test' };
+      return { id, would: mark ? 'mark' : 'clear', workflow: r.wf, open: r.open_now !== false, closed_by: r.resolved_by };
+    });
+    const act = preview.filter((p) => p.would === 'mark' || p.would === 'clear').map((p) => p.id);
+    if (dry) {
+      const note = confirmed ? 'dry_run: nothing changed.' : `Nothing changed. To ${mark ? 'mark' : 'clear'}, call again with confirm "${word} ${ids.length}".`;
+      await auditClose(audit, { outcome: 'dry_run', detail: `${act.length} of ${ids.length} would ${mark ? 'be marked' : 'be cleared'}`, after: preview });
+      return { ok: true, dry_run: true, preview, note, audit_id: audit };
+    }
+    const actor = `mcp:${deps.access}${requester ? ` (${requester})` : ''}`;
+    let done: string[] = [];
+    if (act.length) {
+      if (mark) done = await markTest(act, reason, actor);
+      else {
+        const r = await query<{ natural_id: string }>(`UPDATE engine_incidents SET test_reason = NULL, test_marked_by = $2, test_marked_at = now() WHERE natural_id = ANY($1::text[]) RETURNING natural_id`, [act, `${actor} cleared: ${reason}`]);
+        done = r.rows.map((x) => x.natural_id);
+      }
+      events.changed('incidents');
+    }
+    await auditClose(audit, { outcome: 'applied', detail: `${done.length} ${mark ? 'marked' : 'cleared'}: ${reason}`.slice(0, 500), natural_id: done.join(',').slice(0, 200), after: preview });
+    return { ok: true, [mark ? 'marked' : 'cleared']: done, skipped: preview.filter((p) => p.would === 'skip'), audit_id: audit };
+  },
+};
+
+export const INCIDENT_WRITE_TOOLS: ToolDefinition[] = [closeIncidentsTool, retryIncidentTool, actOnPreparedFixTool, markIncidentsTestTool];

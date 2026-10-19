@@ -3495,8 +3495,8 @@ root cause, the exact change, and a way back. So:
 **The Self-healing tab is the scorecard** (19 Oct 2026, Destiny — D2.5: "If BHA is going to
 be marketing that we have a self-healing system, we need to be able to back everything up with
 numbers"). `?tab=self-healing`, `GET /api/engine-health/self-healing`, `server/src/selfHealing.ts`,
-and the read tool `read_self_healing` (both connections, in no agent's scope yet: adding it to an
-agent is that agent's n8n allow-list too, with a draft eval). Week by week since the healer began
+and the read tool `read_self_healing` (both connections, and in Bays' scope from the same day:
+Bays is where people ask, so a figure it quotes is the page's figure). Week by week since the healer began
 (21 Sep): **production runs** (webhook, trigger, sub-workflow; manual runs, the healer's retries and
 the error handlers' runs are not workload) and how many failed; **real faults** against those
 **counted apart** (`logstream.excludedReason`: tests, the simulator, a guard refusal), with a fault
@@ -3510,6 +3510,14 @@ it); still open; and time to fix as p50/p95, engine and person apart, closes fro
 engine share leaves policy and not-recorded closes out and names them. It also shows how the healer
 routed each failure, from the `self_healer_routed` events `BHA — Self Healer` posts from 19 Oct. A
 read. `npm run test:self-healing`.
+
+**A person can mark an incident a test** (19 Oct 2026, D2.5; migration 83, `test_reason`,
+`test_marked_by`, `test_marked_at` on `engine_incidents`). `close_incidents` takes `test: true`,
+and `mark_incidents_test` (write connection, no agent's scope, `confirm: "MARK <n>"` or
+`"CLEAR <n>"`, a reason) marks or clears incidents already held. Only this dashboard's copy
+changes; nothing goes to the ledger and nothing is closed or reopened. The scorecard counts a
+marked incident apart (`marked_test`), so a probe a person closed is not counted as a person
+fixing a real fault. Logstream does not read the mark yet.
 
 **The healer skips what threw on purpose** (19 Oct 2026, D2.5). `BHA — Self Healer`'s Decide Lane
 routes a guard refusal (`Raise Refused Ask/Click`), a TEST or simulator workflow, and a deliberate
