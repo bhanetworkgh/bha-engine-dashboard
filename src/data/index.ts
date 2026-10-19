@@ -262,6 +262,33 @@ export const resyncHealth = () => api<Resync>('/api/engine-health/resync', { met
  */
 export const getRepairs = () => api<RepairsData>('/api/repairs');
 
+/** The self-healing scorecard (19 Oct 2026, D2.5). Shape is server/src/selfHealing.ts. */
+export interface Share { n: number; of: number; pct: number | null }
+export interface FixTime { n: number; p50_minutes: number | null; p95_minutes: number | null }
+export interface ClosedSplit { engine: number; cleared_itself: number; person: number; policy: number; not_recorded: number }
+export interface SelfHealingWeek {
+  week_start: string; partial: boolean; runs: number; failed_runs: number; failure_rate: Share;
+  incidents: number; real_faults: number; real_faults_raised_by_alarm: number; counted_apart: Record<string, number>;
+  automatic_fixes: { total: number; without_incident: number; by_kind: Record<string, number> };
+  closed_real_faults: ClosedSplit; still_open: number;
+}
+export interface SelfHealingData {
+  generated_at: string;
+  window: { from: string; to: string; weeks: number };
+  totals: {
+    runs: number; failed_runs: number; failure_rate: Share; incidents: number; real_faults: number; counted_apart: number;
+    automatic_fixes: number; automatic_fixes_without_incident: number; closed_real_faults: ClosedSplit; fixed_by_engine_share: Share;
+    still_open: number; time_to_fix: { engine: FixTime; person: FixTime };
+  };
+  weeks: SelfHealingWeek[];
+  healer_routes: { since: string; rows: { route: string | null; kind: string | null; n: number }[]; note: string };
+  open_real_faults: { incident_id: string; workflow: string | null; node: string | null; occurred_at: string }[];
+  recent_fixes: { key: string; kind: string; at: string; incident_id: string | null; workflow: string | null }[];
+  definitions: string[];
+}
+export const getSelfHealing = () => api<SelfHealingData>('/api/engine-health/self-healing');
+
+
 /**
  * Puts one repair back: restores the workflow as it stood before it.
  *
