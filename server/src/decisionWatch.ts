@@ -828,6 +828,34 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
 
 /* ------------------------------------------------------------------ read */
 
+const lagosTime = (d: Date) =>
+  `${d.toLocaleString('en-GB', { timeZone: 'Africa/Lagos', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} Lagos (${d.toISOString().slice(11, 16)} UTC)`;
+
+/**
+ * What moves this watch, in words, built from the row (19 Oct 2026, Destiny). On 18 Oct Bays told
+ * Kaiqi a progress note would reset his watch's clock; the watch was on a different thread, so it
+ * would not. The list handed Bays a channel id and a ts and left the meaning to it. This sentence
+ * is the same rule `sweep` applies and the reminder states, so Bays can quote it instead of guessing.
+ */
+export function movesText(w: WatchRow, due: Date, now = new Date()): string {
+  if (w.status !== 'watching') return `Closed (${w.status}). Nothing moves it any more.`;
+  const owner = w.owner_name || `<@${w.owner_user_id}>`;
+  const ownerReply = w.close_on_reply === false
+    ? `a reply from ${owner} restarts the wait (the decision has more than one part, so it stays open until every part is answered and close_decision_watch is called)`
+    : `a reply from ${owner} closes it`;
+  const parts: string[] = [];
+  if (w.thread_ts && w.thread_link) {
+    parts.push(`This watch is on ${w.thread_link}. Only messages in that thread count: ${ownerReply}; a reply from anyone else restarts the wait. A message anywhere else (another thread, a channel, a DM) does not count.`);
+  } else {
+    parts.push(`This watch has no thread: reminders go to ${owner} by DM, and only a reply in a thread on one of those reminders counts (${ownerReply}).`);
+  }
+  if (w.record_id) parts.push(`It also restarts when ${w.record_kind === 'loops' ? 'loop' : 'backlog task'} ${w.record_id} changes, and closes when it closes.`);
+  if (snoozedAt(w, now)) parts.push(`Snoozed until ${dayWords(new Date(w.snoozed_until as Date))}: nothing is posted before then, but a reply still counts.`);
+  const next = w.reminders_sent >= w.max_reminders ? 'escalation to Jason and Destiny' : `reminder ${w.reminders_sent + 1} of ${w.max_reminders}`;
+  parts.push(due.getTime() <= now.getTime() ? `If nothing moves, ${next} goes on the next pass (within five minutes).` : `If nothing moves, ${next} goes at ${lagosTime(due)}.`);
+  return parts.join(' ');
+}
+
 export function show(w: WatchRow, now = new Date()) {
   const open = w.status === 'watching';
   const snoozed = open && snoozedAt(w, now);
@@ -854,6 +882,7 @@ export function show(w: WatchRow, now = new Date()) {
     next_action_at: open ? due.toISOString() : null,
     next_action: open ? (w.reminders_sent >= w.max_reminders ? 'escalate to Jason and Destiny' : `reminder ${w.reminders_sent + 1} of ${w.max_reminders}`) : null,
     overdue: open && due.getTime() <= now.getTime(),
+    how_it_moves: movesText(w, due, now),
     next_action_when: !open ? null : due.getTime() <= now.getTime() ? 'due now' : `in ${hoursWords((due.getTime() - now.getTime()) / 60_000)}`,
     last_reminder_at: iso(w.last_reminder_at),
     last_checked_at: iso(w.last_checked_at),
