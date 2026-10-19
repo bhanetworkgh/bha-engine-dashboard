@@ -595,6 +595,27 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         throw e;
       }
     }
+    // Restate a settled repair's proof (20 Oct 2026, CODEX-035): the same function as correct_repair_proof.
+    if (p === '/api/engine/repair/proof-correction') {
+      if (method !== 'POST') throw new HttpError(405, 'POST {repair_id, verified_by, reason, by}.');
+      const body = await readJson(req, 64 * 1024);
+      try {
+        const out = await repairs.correctProof({
+          repair_id: String(body.repair_id ?? ''),
+          verified_by: Array.isArray(body.verified_by) ? (body.verified_by as never) : [],
+          reason: String(body.reason ?? ''),
+          by: `engine:${String(body.by ?? 'n8n').slice(0, 80)}`,
+        });
+        await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: out.repair_id, outcome: 'updated', detail: 'proof corrected', ms: Date.now() - t0 });
+        return send(res, 200, { ok: true, ...out });
+      } catch (e) {
+        if (e instanceof repairs.RepairError) {
+          await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          throw new HttpError(e.status, e.message);
+        }
+        throw e;
+      }
+    }
     if (p === '/api/engine/repair' || p === '/api/engine/repairs') {
       if (method !== 'POST') throw new HttpError(405, 'POST. An upsert on repair_id, so the same result twice updates rather than duplicating.');
       const body = await readJson(req, 1024 * 1024);
