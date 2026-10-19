@@ -242,7 +242,7 @@ export function slackText(d: ReportData): string {
   L.push(`• ${n(r.runs_since)} production runs since 21 Sep, ${n(r.failed_since)} failed (${fmtPct(pct(r.failed_since, r.runs_since))}).`);
   L.push('');
   L.push('*2. Self-healing*');
-  L.push(`• ${sh.automatic_fixes_since} automatic fixes since 21 Sep (${sh.automatic_fixes_last_week} last week); ${sh.without_incident_since} were fixed before an incident was ever opened.`);
+  L.push(`• ${sh.automatic_fixes_since} automatic ${sh.automatic_fixes_since === 1 ? 'fix' : 'fixes'} since 21 Sep (${sh.automatic_fixes_last_week} last week); ${sh.without_incident_since} were fixed before an incident was ever opened.`);
   L.push(`• Of the real faults closed with a known closer, the engine closed ${sh.engine_share.n} of ${sh.engine_share.of} (${fmtPct(sh.engine_share.pct)}). This is the figure we are raising.`);
   const tf = sh.time_to_fix;
   if (tf.engine.n || tf.person.n) L.push(`• Time to fix: the engine's median ${tf.engine.p50_minutes === null ? 'n/a' : `${tf.engine.p50_minutes} min`} (${tf.engine.n} timed); a person's median ${tf.person.p50_minutes === null ? 'n/a' : `${Math.round((tf.person.p50_minutes / 60) * 10) / 10} h`} (${tf.person.n} timed).`);
@@ -271,7 +271,7 @@ export function slackText(d: ReportData): string {
   else L.push(`• SOPs: ${lr.sops_total} written, ${lr.sops_since} since 21 Sep. Last week ${lr.sops_last_week} (${fmtChange(change(lr.sops_previous_week, lr.sops_last_week), lr.sops_previous_week, lr.sops_last_week)} on the week before)${lr.sop_note ? `; ${lr.sop_note}` : ''}.`);
   L.push('');
   L.push('*7. Week by week*');
-  for (const w of d.weekly) L.push(`• ${w.label}: ${n(w.runs)} runs, ${fmtPct(w.failure_rate)} failed, ${w.automatic_fixes} automatic fixes, ${w.logs} logs, ${w.loops_closed} loops closed, ${w.patterns} patterns, ${w.sops} SOPs.`);
+  for (const w of d.weekly) L.push(`• ${w.label}: ${n(w.runs)} runs, ${fmtPct(w.failure_rate)} failed, ${w.automatic_fixes} automatic ${w.automatic_fixes === 1 ? 'fix' : 'fixes'}, ${w.logs} logs, ${w.loops_closed} loops closed, ${w.patterns} patterns, ${w.sops} SOPs.`);
   L.push('');
   L.push('Full breakdown on Engine health: https://dashboard.bhanetwork.org/engine-health?tab=self-healing');
   return L.join('\n');
