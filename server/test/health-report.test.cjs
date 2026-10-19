@@ -37,6 +37,27 @@ const assert = require('node:assert/strict');
                VALUES ('LOOP-TEST-HR-1', 'kavin', '{"Status":"Open","Date Raised":"2026-10-13"}', 'engine', now(), now(), now()),
                       ('LOOP-TEST-HR-2', 'kavin', '{"Status":"Closed","Date Raised":"2026-10-13"}', 'engine', now(), now(), now())`).catch((e) => { throw new Error('seed loops: ' + e.message); });
 
+  // The twin review: North Star names one loop three times that never moves, and one that it
+  // named once and that was then closed. Research Twin has one thin ask.
+  const cleanTwins = async () => {
+    await query(`DELETE FROM events WHERE record_id IN (SELECT 'row-' || id FROM engine_loops WHERE natural_id IN ('LOOP-1000000000001-THRA', 'LOOP-1000000000002-THRB'))`);
+    await query(`DELETE FROM engine_loops WHERE natural_id IN ('LOOP-1000000000001-THRA', 'LOOP-1000000000002-THRB')`);
+    await query(`DELETE FROM engine_ns_asks WHERE natural_id LIKE 'NS-TEST-HR-%'`);
+    await query(`DELETE FROM engine_rt_asks WHERE natural_id LIKE 'RT-TEST-HR-%'`);
+  };
+  await cleanTwins();
+  await query(`INSERT INTO engine_loops (natural_id, builder_id, fields, source, first_seen_at, updated_at, created_time)
+               VALUES ('LOOP-1000000000001-THRA', 'ahad', '{"Status":"In Progress","What":"A stuck test loop","Date Raised":"2026-10-01"}', 'engine', now(), '2026-10-01T00:00:00Z', now()),
+                      ('LOOP-1000000000002-THRB', 'hardik', '{"Status":"Closed","What":"A moved test loop","Date Raised":"2026-10-01"}', 'engine', now(), now(), now())`);
+  await query(`INSERT INTO events (kind, record_id, builder, from_status, to_status, via, at)
+               SELECT 'loops', 'row-' || id, 'hardik', 'Open', 'Closed', 'engine', '2026-10-16T09:00:00Z' FROM engine_loops WHERE natural_id = 'LOOP-1000000000002-THRB'`);
+  for (const [i, at, ans] of [[1, '2026-10-13T08:00:00Z', 'Top: LOOP-1000000000001-THRA and LOOP-1000000000002-THRB'], [2, '2026-10-14T08:00:00Z', 'Top: LOOP-1000000000001-THRA'], [3, '2026-10-15T08:00:00Z', 'Top: LOOP-1000000000001-THRA']]) {
+    await query(`INSERT INTO engine_ns_asks (natural_id, fields, source, first_seen_at, updated_at, created_time) VALUES ($1, $2, 'engine', now(), now(), $3)`,
+      [`NS-TEST-HR-${i}`, JSON.stringify({ 'Ask ID': `NS-TEST-HR-${i}`, Outcome: 'Ranking only', Delivered: 'Delivered', 'Asked At': at, Answer: ans }), at]);
+  }
+  await query(`INSERT INTO engine_rt_asks (natural_id, fields, source, first_seen_at, updated_at, created_time) VALUES ('RT-TEST-HR-1', $1, 'engine', now(), now(), '2026-10-14T08:00:00Z')`,
+    [JSON.stringify({ 'Ask ID': 'RT-TEST-HR-1', Outcome: 'Thin', Delivered: 'Delivered', 'Asked At': '2026-10-14T08:00:00Z', Question: 'A thin test question' })]);
+
   const r = await hr.build({ now: '2026-10-19T06:00:00Z' });
   assert.equal(r.ok, true);
   assert.equal(r.data.period.week, '2026-10-12');
@@ -49,7 +70,22 @@ const assert = require('node:assert/strict');
   assert.ok(kl && kl.open >= 1 && kl.closed >= 1);
   assert.match(r.slack_text, /\*4\. Open loops, per person\*/);
   assert.match(r.slack_text, /SOPs: /);
-  assert.match(r.slack_text, /\*7\. Week by week\*\n• 21 to 27 Sep:/);
+  assert.match(r.slack_text, /\*8\. Week by week\*\n• 21 to 27 Sep:/);
+
+  const ns = r.data.twins.north_star;
+  assert.ok(ns.loops_pointed_at >= 2 && ns.loops_moved >= 1 && ns.loops_closed >= 1, 'a loop closed after North Star named it is a hit');
+  const stuck = ns.stuck.find((x) => x.loop_id === 'LOOP-1000000000001-THRA');
+  assert.ok(stuck && stuck.times_named === 3, 'a loop named three times that never moved is listed as stuck');
+  assert.ok(!ns.stuck.some((x) => x.loop_id === 'LOOP-1000000000002-THRB'), 'a moved loop is never stuck');
+  assert.ok(r.data.twins.research_twin.misses.some((m) => m.question === 'A thin test question'), 'a thin Research Twin answer is a miss');
+  assert.match(r.slack_text, /\*6\. Twin review: hits and misses\*/);
+  assert.match(r.slack_text, /LOOP-1000000000001-THRA \(Ahad, In Progress, named 3 times\)/);
+  const doc = hr.twinCritiqueDoc(r.data);
+  assert.equal(doc.title, 'Twin Critique: week of 12 to 18 Oct 2026');
+  assert.match(doc.content, /\*\*North Star\*\* pointed people at/);
+  const dry = await hr.fileTwinCritique({ now: '2026-10-19T06:00:00Z', dry_run: true });
+  assert.equal(dry.ok, true); assert.equal(dry.filed, false); assert.equal(dry.dry_run, true);
+  await cleanTwins();
   assert.doesNotMatch(r.slack_text, /Open incidents/i, 'the report does not list open incidents');
   assert.ok(r.slack_text.length < 12000, 'fits one Slack message');
 

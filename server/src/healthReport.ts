@@ -10,10 +10,12 @@
  * self-healer began (21 Sep 2026). Every figure carries what it is counted out of, and a figure
  * the rows cannot support says so instead of printing a nought.
  */
-import { nowIso } from './db';
+import { getMeta, nowIso, setMeta } from './db';
+import * as bharag from './bharag';
 import { query } from './pg';
 import * as selfHealing from './selfHealing';
 import * as sops from './sops';
+import { genieOutcome } from './systemFeeds';
 
 const SINCE = selfHealing.HEALER_SINCE; // 2026-09-21, a Monday
 const DAY = 86_400_000;
@@ -61,6 +63,115 @@ function duration(sec: number | null): string {
   if (sec < 5400) return `${Math.round(sec / 60)} min`;
   return `${Math.round((sec / 3600) * 10) / 10} h`;
 }
+
+const clip = (s: string | null | undefined, max: number) => {
+  const t = (s ?? '').replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+};
+
+/**
+ * The twin review (19 Oct 2026, LOOP-1792016378151-RYHY; Jason, 14 Oct: Bays' critiques of the
+ * twins should be continuous and leave a record). Last week only. North Star is the one twin whose
+ * answers can be checked against the loop board: every loop id its answers named, and whether that
+ * loop's status then changed (the dashboard's own status record, never a mirror line) before the
+ * week ended. Research Twin and Genie are judged on their own recorded outcomes; nothing here
+ * grades an answer's content.
+ */
+export async function twinReview(last: string, end: string) {
+  const [nsOut, nsLoops, nsStuck, rtOut, rtMiss, genie] = await Promise.all([
+    query<{ outcome: string; n: number }>(
+      `SELECT coalesce(nullif(fields->>'Outcome', ''), 'No outcome') AS outcome, count(*)::int AS n FROM engine_ns_asks
+        WHERE coalesce(nullif(fields->>'Asked At', ''), created_time)::timestamptz >= $1::date
+          AND coalesce(nullif(fields->>'Asked At', ''), created_time)::timestamptz < $2::date GROUP BY 1 ORDER BY 2 DESC`,
+      [last, end],
+    ),
+    query<{ named: number; held: number; moved: number; closed: number }>(
+      `${NS_NAMED}
+       SELECT count(*)::int AS named, count(st)::int AS held, count(*) FILTER (WHERE moved)::int AS moved,
+              count(*) FILTER (WHERE moved AND st = 'Closed')::int AS closed FROM x`,
+      [last, end],
+    ),
+    query<{ loop_id: string; times: number; b: string | null; st: string | null; what: string | null }>(
+      `${NS_NAMED}
+       SELECT loop_id, times, b, st, what FROM x WHERE NOT moved AND st IS DISTINCT FROM 'Closed' AND times >= 3
+        ORDER BY times DESC, loop_id LIMIT 5`,
+      [last, end],
+    ),
+    query<{ outcome: string; delivered: string; n: number }>(
+      `SELECT coalesce(nullif(fields->>'Outcome', ''), 'No outcome') AS outcome, coalesce(nullif(fields->>'Delivered', ''), 'Not recorded') AS delivered, count(*)::int AS n
+         FROM engine_rt_asks
+        WHERE coalesce(nullif(fields->>'Asked At', ''), created_time)::timestamptz >= $1::date
+          AND coalesce(nullif(fields->>'Asked At', ''), created_time)::timestamptz < $2::date GROUP BY 1, 2`,
+      [last, end],
+    ),
+    query<{ id: string | null; outcome: string; delivered: string; q: string | null }>(
+      `SELECT fields->>'Ask ID' AS id, coalesce(nullif(fields->>'Outcome', ''), 'No outcome') AS outcome, coalesce(nullif(fields->>'Delivered', ''), 'Not recorded') AS delivered, fields->>'Question' AS q
+         FROM engine_rt_asks
+        WHERE coalesce(nullif(fields->>'Asked At', ''), created_time)::timestamptz >= $1::date
+          AND coalesce(nullif(fields->>'Asked At', ''), created_time)::timestamptz < $2::date
+          AND (fields->>'Outcome' NOT IN ('Answered', 'Refused (not its lane)') OR fields->>'Delivered' NOT IN ('Delivered', 'Self-delivered'))
+        ORDER BY coalesce(nullif(fields->>'Asked At', ''), created_time) DESC LIMIT 5`,
+      [last, end],
+    ),
+    query<{ event_type: string; status: string | null; q: string | null }>(
+      `SELECT DISTINCT ON (request_id) event_type, status, question AS q FROM engine_genie_events
+        WHERE request_id IS NOT NULL AND event_type NOT LIKE 'genie.subagent.%' AND occurred_at >= $1::date AND occurred_at < $2::date
+        ORDER BY request_id, occurred_at DESC`,
+      [last, end],
+    ),
+  ]);
+  const nsTotal = nsOut.rows.reduce((a, r) => a + r.n, 0);
+  const l = nsLoops.rows[0] ?? { named: 0, held: 0, moved: 0, closed: 0 };
+  const rtTotal = rtOut.rows.reduce((a, r) => a + r.n, 0);
+  const rtCount = (f: (r: { outcome: string; delivered: string }) => boolean) => rtOut.rows.filter(f).reduce((a, r) => a + r.n, 0);
+  const gOut = genie.rows.map((r) => genieOutcome(r.event_type, r.status));
+  const gCount = (o: string) => gOut.filter((x) => x === o).length;
+  return {
+    north_star: {
+      asks: nsTotal,
+      outcomes: nsOut.rows,
+      loops_pointed_at: l.named,
+      loops_held: l.held,
+      loops_moved: l.moved,
+      loops_closed: l.closed,
+      hit_rate: pct(l.moved, l.named),
+      stuck: nsStuck.rows.map((r) => ({ loop_id: r.loop_id, times_named: r.times, builder: r.b, status: r.st, what: clip(r.what, 90) })),
+    },
+    research_twin: {
+      asks: rtTotal,
+      answered: rtCount((r) => r.outcome === 'Answered'),
+      thin: rtCount((r) => r.outcome === 'Thin'),
+      needs_human: rtCount((r) => r.outcome === 'Needs human'),
+      refused: rtCount((r) => r.outcome === 'Refused (not its lane)'),
+      failed: rtCount((r) => r.outcome === 'Failed'),
+      not_delivered: rtCount((r) => r.delivered === 'Not delivered'),
+      misses: rtMiss.rows.map((r) => ({ ask_id: r.id, outcome: r.outcome, delivered: r.delivered, question: clip(r.q, 110) })),
+    },
+    genie: {
+      asks: gOut.length,
+      answered: gCount('Answered'),
+      incomplete: gCount('Incomplete'),
+      failed: gCount('Failed'),
+      misses: genie.rows.filter((r) => genieOutcome(r.event_type, r.status) !== 'Answered').slice(0, 5).map((r) => ({ outcome: genieOutcome(r.event_type, r.status), question: clip(r.q, 110) })),
+    },
+  };
+}
+
+/** Every loop id North Star's answers named last week, with whether its status then changed. */
+const NS_NAMED = `
+  WITH asks AS (
+    SELECT coalesce(nullif(fields->>'Asked At', ''), created_time)::timestamptz AS t, fields->>'Answer' AS ans FROM engine_ns_asks
+     WHERE coalesce(nullif(fields->>'Asked At', ''), created_time)::timestamptz >= $1::date
+       AND coalesce(nullif(fields->>'Asked At', ''), created_time)::timestamptz < $2::date),
+  named AS (SELECT m[1] AS loop_id, min(t) AS first_named, count(*)::int AS times
+              FROM asks, regexp_matches(coalesce(ans, ''), '(LOOP-[0-9]+-[A-Z0-9]{4})', 'g') AS m GROUP BY 1),
+  cur AS (SELECT DISTINCT ON (natural_id) natural_id, fields->>'Status' AS st, fields->>'What' AS what, builder_id AS b
+            FROM engine_loops WHERE natural_id IS NOT NULL ORDER BY natural_id, updated_at DESC),
+  x AS (SELECT named.loop_id, named.times, cur.st, cur.b, cur.what,
+               EXISTS (SELECT 1 FROM events e JOIN engine_loops el ON e.record_id = 'row-' || el.id
+                        WHERE el.natural_id = named.loop_id AND e.kind = 'loops' AND e.via <> 'mirror'
+                          AND e.at::timestamptz > named.first_named AND e.at::timestamptz < $2::date) AS moved
+          FROM named LEFT JOIN cur ON cur.natural_id = named.loop_id)`;
 
 export async function buildData(opts: { now?: string } = {}) {
   const now = opts.now ?? nowIso();
@@ -137,6 +248,7 @@ export async function buildData(opts: { now?: string } = {}) {
   ]);
 
   // Names: a builder id is one of the seven names, or a Slack id with a Builder Profile.
+  const twins = await twinReview(last, end);
   const prof = await query<{ id: string; name: string | null }>(`SELECT natural_id AS id, fields->>'name' AS name FROM engine_builder_profiles WHERE natural_id IS NOT NULL`);
   const nameOf = (b: string) => (/^U[A-Z0-9]{6,}$/.test(b) ? prof.rows.find((p) => p.id === b)?.name ?? b : cap(b));
 
@@ -190,6 +302,7 @@ export async function buildData(opts: { now?: string } = {}) {
     logs: codex.rows.map((r) => ({ builder: nameOf(r.b), submitted: r.submitted, approved: r.approved, approval_rate: pct(r.approved, r.submitted), rejected: r.rejected, waiting: r.waiting, last_week: r.wk, last_week_approved: r.wk_approved })),
     loops: loops.rows.map((r) => ({ builder: nameOf(r.b), open: r.open, closed: r.closed, close_rate: pct(r.closed, r.open + r.closed), raised_since: r.raised, closed_of_raised_since: r.raised_closed, closed_last_week: loopsClosedWeek.rows.find((x) => x.b === r.b)?.n ?? 0 })),
     agents: ['Bays', 'North Star', 'Research Twin'].map((a) => ({ agent: a, since: agentLine(a, false), last_week: agentLine(a, true) })),
+    twins,
     learned: {
       patterns_total: patTotal, patterns_since: patSince, patterns_before: patBefore,
       patterns_last_week: patWeek(last), patterns_previous_week: patWeek(prev),
@@ -221,10 +334,84 @@ const DEFINITIONS = [
   'A real fault is an incident that is not a test, the simulator, a guard refusing a request on purpose, or marked a test by a person with a reason.',
   'A log is approved when Jason Status is Approved or Input Added. Logs are counted by when they were submitted.',
   'Open loops are counted once per loop id (the newest copy). Close rate is closed over open plus closed. Loops closed in a week are dated by the dashboard’s own status record.',
+  'The twin review covers last week only. North Star is checked against the loop board: a loop it named counts as moved when its status changed afterwards. Research Twin and Genie are judged on their own recorded outcomes.',
   'An agent reply is delivered when it reached the person; scheduled runs that post nothing are not counted as owed. Completed means answered (for North Star, a ranking it was asked for also counts).',
 ];
 
 type ReportData = Awaited<ReturnType<typeof buildData>>['data'];
+
+type Twins = Awaited<ReturnType<typeof twinReview>>;
+
+/** The twin review in words, for the Slack post (`*bold*`) and the BHARAG document (`**bold**`). */
+export function twinLines(t: Twins, style: 'slack' | 'md'): string[] {
+  const b = (x: string) => (style === 'slack' ? `*${x}*` : `**${x}**`);
+  const L: string[] = [];
+  const ns = t.north_star;
+  if (!ns.asks) L.push(`• ${b('North Star')}: no asks recorded last week.`);
+  else {
+    L.push(`• ${b('North Star')} pointed people at ${n(ns.loops_pointed_at)} loops across ${n(ns.asks)} answers and rankings. ${n(ns.loops_moved)} of them moved afterwards (${fmtPct(ns.hit_rate)}), ${n(ns.loops_closed)} to closed. A loop counts as moved when its status changed after North Star first named it.`);
+    if (ns.stuck.length) {
+      L.push(`• Named again and again, still not moving:`);
+      for (const s of ns.stuck) L.push(`    ◦ ${s.loop_id} (${s.builder ? cap(s.builder) : 'no owner'}, ${s.status ?? 'not held'}, named ${s.times_named} times): ${s.what}`);
+    }
+  }
+  const rt = t.research_twin;
+  if (!rt.asks) L.push(`• ${b('Research Twin')}: no asks recorded last week.`);
+  else {
+    const parts = [`${rt.answered} answered`];
+    if (rt.thin) parts.push(`${rt.thin} thin`);
+    if (rt.needs_human) parts.push(`${rt.needs_human} needing a person`);
+    if (rt.failed) parts.push(`${rt.failed} failed`);
+    if (rt.refused) parts.push(`${rt.refused} turned away as not its lane`);
+    L.push(`• ${b('Research Twin')}: ${rt.asks} asks; ${parts.join(', ')}${rt.not_delivered ? `; ${rt.not_delivered} never reached the person` : ''}.`);
+    for (const m of rt.misses) L.push(`    ◦ ${m.outcome}${m.delivered === 'Not delivered' ? ', not delivered' : ''}: "${m.question}"`);
+  }
+  const g = t.genie;
+  if (!g.asks) L.push(`• ${b('Genie')}: no asks recorded last week.`);
+  else {
+    L.push(`• ${b('Genie')}: ${g.asks} asks; ${g.answered} answered${g.incomplete ? `, ${g.incomplete} stopped before its own check was satisfied` : ''}${g.failed ? `, ${g.failed} failed` : ''}.`);
+    for (const m of g.misses) L.push(`    ◦ ${m.outcome}: "${m.question}"`);
+  }
+  return L;
+}
+
+/** The week's twin review as one BHARAG document, so critiques build up and can be searched. */
+export function twinCritiqueDoc(d: ReportData) {
+  const title = `Twin Critique: week of ${d.period.label} ${d.period.week.slice(0, 4)}`;
+  const content = [
+    `# ${title}`,
+    '',
+    `Weekly review of BHA's twins (North Star, Research Twin, Genie), written by the BHA Engine Dashboard from the engine's own records for ${d.period.week} to ${addDays(d.period.week, 6)} (UTC). Posted with the weekly Engine Health Report.`,
+    '',
+    ...twinLines(d.twins, 'md'),
+    '',
+    '## How it is judged',
+    '- North Star: every loop id its answers named last week, and whether that loop\'s status changed after it was first named, before the week ended. A loop named often that does not move is either blocked or being ranked without effect.',
+    '- Research Twin and Genie: their own recorded outcome and delivery for each ask. Nothing here grades what an answer said.',
+  ].join('\n');
+  return { title, content };
+}
+
+/**
+ * Files the week's critique in BHARAG's codex workspace, where Bays searches. Once per week:
+ * the document id is kept in `meta` and a repeat answers with it instead of filing twice.
+ */
+export async function fileTwinCritique(opts: { now?: string; dry_run?: boolean } = {}) {
+  const { data } = await buildData({ now: opts.now });
+  const doc = twinCritiqueDoc(data);
+  const key = `twin_critique.${data.period.week}`;
+  const held = await getMeta(key);
+  if (held) return { ok: true, filed: false, already: true, week: data.period.week, title: doc.title, bharag_id: held, detail: `already filed for this week as ${held}` };
+  if (opts.dry_run) return { ok: true, filed: false, dry_run: true, week: data.period.week, title: doc.title, content: doc.content, detail: `would file into ${bharag.ingestKeyVar('codex')}` };
+  const r = await bharag.ingest('codex', {
+    title: doc.title, content: doc.content, source_type: 'twin_critique', content_type: 'text',
+    project_tags: ['twin-critique', 'north-star', 'research-twin', 'genie'],
+    metadata: { doc_type: 'twin_critique', week_start: data.period.week, loop: 'LOOP-1792016378151-RYHY' },
+  }, { source: 'dashboard:twin_critique' });
+  if (!r.ok) return { ok: false, filed: false, week: data.period.week, title: doc.title, detail: r.detail };
+  await setMeta(key, r.id ?? 'ingested (no id returned)');
+  return { ok: true, filed: true, week: data.period.week, title: doc.title, bharag_id: r.id ?? null, detail: r.detail };
+}
 
 export function slackText(d: ReportData): string {
   const r = d.reliability;
@@ -264,13 +451,16 @@ export function slackText(d: ReportData): string {
     L.push(`• ${a.agent}: ${n(s.asks)} asks since 21 Sep; ${fmtPct(pct(s.delivered, s.owed))} delivered (${n(s.delivered)} of ${n(s.owed)}), ${fmtPct(pct(s.done, s.asks))} completed, median reply ${duration(s.p50)}. Last week: ${n(w.asks)} asks, ${fmtPct(pct(w.delivered, w.owed))} delivered, ${fmtPct(pct(w.done, w.asks))} completed.`);
   }
   L.push('');
-  L.push('*6. What the engine has learned*');
+  L.push('*6. Twin review: hits and misses*');
+  L.push(...twinLines(d.twins, 'slack'));
+  L.push('');
+  L.push('*7. What the engine has learned*');
   const lr = d.learned;
   L.push(`• Build patterns: ${n(lr.patterns_total)} on record. ${n(lr.patterns_since)} added since 21 Sep, ${fmtPct(pct(lr.patterns_since, lr.patterns_before))} on top of the ${n(lr.patterns_before)} held before. Last week ${lr.patterns_last_week} (${fmtChange(change(lr.patterns_previous_week, lr.patterns_last_week), lr.patterns_previous_week, lr.patterns_last_week)} on the week before).`);
   if (lr.sop_note && !lr.sops_total) L.push(`• SOPs: ${lr.sop_note}.`);
   else L.push(`• SOPs: ${lr.sops_total} written, ${lr.sops_since} since 21 Sep. Last week ${lr.sops_last_week} (${fmtChange(change(lr.sops_previous_week, lr.sops_last_week), lr.sops_previous_week, lr.sops_last_week)} on the week before)${lr.sop_note ? `; ${lr.sop_note}` : ''}.`);
   L.push('');
-  L.push('*7. Week by week*');
+  L.push('*8. Week by week*');
   for (const w of d.weekly) L.push(`• ${w.label}: ${n(w.runs)} runs, ${fmtPct(w.failure_rate)} failed, ${w.automatic_fixes} automatic ${w.automatic_fixes === 1 ? 'fix' : 'fixes'}, ${w.logs} logs, ${w.loops_closed} loops closed, ${w.patterns} patterns, ${w.sops} SOPs.`);
   L.push('');
   L.push('Full breakdown on Engine health: https://dashboard.bhanetwork.org/engine-health?tab=self-healing');
