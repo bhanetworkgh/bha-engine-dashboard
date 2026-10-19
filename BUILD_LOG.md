@@ -12980,3 +12980,7 @@ Fix:        Codex: a quote with the team's approval rate since 21 Sep and last w
 Intent:     Post today's report into #all-bayshorizonnetwork and file the first Twin Critique (production run 42351).
 Problem:    The report posted (C0A90TS44T1 1792397120.154189, event recorded); File Twin Critique answered ok:false and Check Filed failed the run, verbatim: "source_type: Invalid option: expected one of "slack"|"loom"|"otter"|"gdrive"|"github"|"logstream"|"manual"; content_type: Invalid option: expected one of "code"|"transcript"|"doc"|"decision"|"narration"|"chat" (VALIDATION_ERROR)". The dry runs never reach BHARAG, so the test runs could not see it.
 Fix:        source_type manual, content_type doc; the critique stays marked by metadata.doc_type twin_critique. Filed again by a one-off call to the route, not by re-running the report.
+
+## 2026-10-19 09:10 — D5 closed: first Twin Critique filed, LOOP-RYHY closed
+Fix:        One-off sandbox workflow pygziF2nn5hv52y2 (archived after) called POST /api/engine/health-report/twin-critique once: run 42371, ok, filed as BHARAG d0e12c40-337d-4651-9af5-bbb4ee2bea55 (BHARAG_SOPS_KEY). meta twin_critique.2026-10-12 now holds it, so a repeat files nothing.
+Decision:   INC-BAYS.AGENT-064 (the alert from run 42351's refusal) closed with the reason and the proof (audit 2622). LOOP-1792016378151-RYHY closed with a Resolution naming the post, the document and the commits (audit 2623). Workflow zSpMkCukUzlxubmh published 0abf2faa; next scheduled run Mon 26 Oct 07:00 Lagos.
