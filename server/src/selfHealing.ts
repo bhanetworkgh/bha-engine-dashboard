@@ -21,6 +21,10 @@
  *                  never re-run hours late), or not recorded (closed before
  *                  2 Oct, when nothing wrote who closed what).
  *   time to fix    p50 and p95 from the fault to its close, engine and person
+ *                  (the fault's time is the earlier of the ledger's occurred_at and
+ *                  when this database first saw it: BHARAG moves occurred_at to the
+ *                  close on every status change, so read alone a closed incident
+ *                  looks fixed the instant it happened),
  *                  apart, only for closes on or after 2 Oct 2026.
  *
  * It reads and writes nothing. Every figure carries its denominator and says
@@ -128,7 +132,7 @@ export async function scorecard(opts: { weeks?: number } = {}) {
               fields->'payload'->>'failed_node_or_component' AS node,
               CASE WHEN jsonb_typeof(fields->'payload'->'impact_tags') = 'array' THEN ARRAY(SELECT jsonb_array_elements_text(fields->'payload'->'impact_tags')) END AS tags,
               nullif(fields->'payload'->>'execution_id', '') AS execution_id,
-              to_char(coalesce(nullif(fields->>'occurred_at', ''), first_seen_at)::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS occurred_at,
+              to_char(LEAST(nullif(fields->>'occurred_at', '')::timestamptz, nullif(first_seen_at, '')::timestamptz) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS occurred_at,
               open_now, fields->>'resolution_status' AS resolution_status,
               to_char(resolved_at::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS resolved_at, resolved_by
          FROM engine_incidents WHERE natural_id IS NOT NULL`,
