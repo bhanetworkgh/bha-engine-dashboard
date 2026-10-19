@@ -57,7 +57,8 @@
     "test:eg4n": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/genie-doctrine.test.cjs",
     "test:se8l-db": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/doctrine-gap.db.test.cjs",
     "test:vrfk-http": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/publication-decision.http.test.cjs",
-    "test:self-healing": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/self-healing.test.cjs"
+    "test:self-healing": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/self-healing.test.cjs",
+    "test:health-report": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/health-report.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",

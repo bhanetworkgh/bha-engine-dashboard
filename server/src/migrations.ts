@@ -3331,6 +3331,21 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE engine_incidents ADD COLUMN IF NOT EXISTS test_marked_by text`,
       `ALTER TABLE engine_incidents ADD COLUMN IF NOT EXISTS test_marked_at timestamptz`,
     ],
+  },  {
+    // 19 Oct 2026 (Destiny, D2.5): the five incidents a person closed whose own close reason says
+    // they were a test, a drill or a guard doing its job, and which no existing rule already
+    // counts apart. Read one by one from the 44 person closes, never matched by words in code.
+    // Done here because the session that made mark_incidents_test could not reach it yet; any
+    // later mark or clear goes through that tool.
+    id: 84,
+    name: 'engine_incidents: mark five closed tests and drills',
+    statements: [
+      `UPDATE engine_incidents SET test_reason = 'a pinned test run of Bays — Approval Decision while the approval gate was built (4 Oct); no real request failed', test_marked_by = 'migration 84 (Destiny, 19 Oct 2026, from the incident''s own close reason)', test_marked_at = now() WHERE natural_id = 'INC-BAYS.AGENT-043' AND test_reason IS NULL`,
+      `UPDATE engine_incidents SET test_reason = 'a deliberate guard test: a DM to a made-up user id, approved by Destiny, failed channel_not_found as designed (11 Oct)', test_marked_by = 'migration 84 (Destiny, 19 Oct 2026, from the incident''s own close reason)', test_marked_at = now() WHERE natural_id = 'INC-BAYS.AGENT-050' AND test_reason IS NULL`,
+      `UPDATE engine_incidents SET test_reason = 'the send-back guard correctly refused Jason answering a send-back meant for Ahad; a guard doing its job, not a fault', test_marked_by = 'migration 84 (Destiny, 19 Oct 2026, from the incident''s own close reason)', test_marked_at = now() WHERE natural_id = 'INC-BAYS.CODEX-030' AND test_reason IS NULL`,
+      `UPDATE engine_incidents SET test_reason = 'raised by the 8 Oct protected-repair drill (LOOP-1790805930203-SNI2), which broke the workflow on purpose', test_marked_by = 'migration 84 (Destiny, 19 Oct 2026, from the incident''s own close reason)', test_marked_at = now() WHERE natural_id = 'INC-NS.AGENT-065' AND test_reason IS NULL`,
+      `UPDATE engine_incidents SET test_reason = 'raised by the 8 Oct protected-repair drill (LOOP-1790805930203-SNI2), which broke the workflow on purpose', test_marked_by = 'migration 84 (Destiny, 19 Oct 2026, from the incident''s own close reason)', test_marked_at = now() WHERE natural_id = 'INC-NS.AGENT-066' AND test_reason IS NULL`,
+    ],
   },
 ];
 
