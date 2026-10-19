@@ -579,6 +579,22 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         throw e;
       }
     }
+    // Where n8n posted a repair's #bha-self-healing card (20 Oct 2026), so the settle can reply in its thread.
+    if (p === '/api/engine/repair/report-link') {
+      if (method !== 'POST') throw new HttpError(405, 'POST {repair_id, channel, ts}.');
+      const body = await readJson(req, 16 * 1024);
+      try {
+        const out = await repairs.recordReportLink(body);
+        await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: out.repair_id, outcome: 'updated', detail: `report card ${out.report_link.channel}/${out.report_link.ts}`, ms: Date.now() - t0 });
+        return send(res, 200, { ok: true, ...out });
+      } catch (e) {
+        if (e instanceof repairs.RepairError) {
+          await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          throw new HttpError(e.status, e.message);
+        }
+        throw e;
+      }
+    }
     if (p === '/api/engine/repair' || p === '/api/engine/repairs') {
       if (method !== 'POST') throw new HttpError(405, 'POST. An upsert on repair_id, so the same result twice updates rather than duplicating.');
       const body = await readJson(req, 1024 * 1024);
@@ -597,7 +613,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         // A failure with no build pattern on record becomes a pattern candidate (15 Oct 2026). Never awaited:
         // the capture cannot fail the bridge's own write, and the sweep picks up anything it misses.
         void patternCapture.fromRepair(result.repair_id);
-        // A fix that was awaiting proof has settled (20 Oct 2026): Bays tells Destiny. Never awaited,
+        // A fix that was awaiting proof has settled (20 Oct 2026): Bays answers in the repair card's thread. Never awaited,
         // so Slack cannot fail the bridge's write; notifySettled records where the notice went.
         if (result.settled) void repairs.notifySettled(result.repair_id).catch((e) => console.error(`repairs: settle notice for ${result.repair_id} failed`, e));
         return send(res, result.inserted ? 201 : 200, { ok: true, repair_id: result.repair_id, outcome: result.outcome, stored: result.inserted ? 'inserted' : 'updated' });
