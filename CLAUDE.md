@@ -2437,6 +2437,13 @@ autopay, no pay wiring, no destructive automated action).
   closes, retries, edits or deletes, and never touches pay. A job or alert that
   does not land keeps its trigger at `failed` with the reason and is tried again
   on every pass.
+- **An incident is dated by when it happened, not by its close** (20 Oct 2026, LOOP-1792388413323-4E0U).
+  BHARAG moves `occurred_at` to the time of each status change, so a closed incident's own `occurred_at`
+  is its close. Every Logstream query, and research signals' T4, reads `logstream.INCIDENT_AT`: the
+  earlier of `occurred_at` and `first_seen_at`, as the self-healing scorecard does. Migration 85
+  corrected the rows already written with the close date (118 on 20 Oct): `occurred_at` moved back,
+  time to recovery worked out again from the same close, the 7- and 30-day counts counted again, and
+  each row says so in `audit.date_corrected` with the date it held before.
 - **GNER stays a candidate; no runtime decision depends on it; empty reads are
   not recorded.** These are v0 numbers: the re-tune is due about 9 Nov 2026
   (LOOP-1791558515351-4DR6).

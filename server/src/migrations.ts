@@ -3346,6 +3346,44 @@ const MIGRATIONS: Migration[] = [
       `UPDATE engine_incidents SET test_reason = 'raised by the 8 Oct protected-repair drill (LOOP-1790805930203-SNI2), which broke the workflow on purpose', test_marked_by = 'migration 84 (Destiny, 19 Oct 2026, from the incident''s own close reason)', test_marked_at = now() WHERE natural_id = 'INC-NS.AGENT-065' AND test_reason IS NULL`,
       `UPDATE engine_incidents SET test_reason = 'raised by the 8 Oct protected-repair drill (LOOP-1790805930203-SNI2), which broke the workflow on purpose', test_marked_by = 'migration 84 (Destiny, 19 Oct 2026, from the incident''s own close reason)', test_marked_at = now() WHERE natural_id = 'INC-NS.AGENT-066' AND test_reason IS NULL`,
     ],
+  },  {
+    // 20 Oct 2026 (Destiny, LOOP-1792388413323-4E0U): Logstream dated a closed incident by its close,
+    // because BHARAG moves occurred_at to each status change. The writer now reads the earlier of
+    // occurred_at and first_seen_at (logstream.INCIDENT_AT). Rows already written with the close date
+    // are corrected once here: occurred_at moves back, time to recovery is worked out again from the
+    // same close (old date + old seconds), and the 7- and 30-day counts are counted again. Each
+    // corrected row says so in audit.date_corrected, with the date it held before. 118 rows on 20 Oct.
+    id: 85,
+    name: 'engine_logstream: date rows by when the incident happened, not its close',
+    statements: [
+      `WITH inc AS (
+         SELECT natural_id,
+                coalesce(fields->'payload'->>'workflow_or_scenario', '') AS wf,
+                coalesce(fields->'payload'->>'failed_node_or_component', '') AS node,
+                LEAST(CASE WHEN fields->>'occurred_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN (fields->>'occurred_at')::timestamptz END,
+                      CASE WHEN first_seen_at ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN first_seen_at::timestamptz END) AS at
+           FROM engine_incidents WHERE natural_id IS NOT NULL),
+       fix AS (
+         SELECT l.id, l.occurred_at AS old_at, i.at AS new_at,
+                (SELECT count(*) FROM inc o WHERE o.wf = i.wf AND o.node = i.node AND o.at <= i.at AND o.at > i.at - interval '7 days') AS f7,
+                (SELECT count(*) FROM inc o WHERE o.wf = i.wf AND o.node = i.node AND o.at <= i.at AND o.at > i.at - interval '30 days') AS f30
+           FROM engine_logstream l JOIN inc i ON i.natural_id = l.incident_id
+          WHERE i.at IS NOT NULL AND l.occurred_at > i.at + interval '1 minute')
+       UPDATE engine_logstream l
+          SET occurred_at = f.new_at,
+              objective_outcomes = l.objective_outcomes
+                || jsonb_build_object('incident_frequency_7d', f.f7, 'incident_frequency_30d', f.f30)
+                || CASE WHEN jsonb_typeof(l.objective_outcomes->'time_to_recovery_seconds') = 'number'
+                        THEN jsonb_build_object('time_to_recovery_seconds',
+                               GREATEST(0, round(extract(epoch FROM (f.old_at + ((l.objective_outcomes->>'time_to_recovery_seconds')::numeric * interval '1 second')) - f.new_at)))::bigint)
+                        ELSE '{}'::jsonb END,
+              audit = l.audit || jsonb_build_object('date_corrected', jsonb_build_object(
+                'from', to_char(f.old_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                'to', to_char(f.new_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                'at', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                'reason', 'dated by the incident''s close: BHARAG moves occurred_at on each status change (LOOP-1792388413323-4E0U)'))
+         FROM fix f WHERE f.id = l.id`,
+    ],
   },
 ];
 
