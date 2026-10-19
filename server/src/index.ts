@@ -42,6 +42,7 @@ import * as paySync from './paySync';
 import * as executions from './executions';
 import * as health from './health';
 import * as selfHealing from './selfHealing';
+import * as healthReport from './healthReport';
 import * as repairs from './repairs';
 import * as recovery from './recovery';
 import * as scorecard from './scorecard';
@@ -1075,6 +1076,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       const r = await researchSignals.read({ held_only: !all, limit: 200 });
       await mirror.logWrite({ endpoint, kind: 'research_signals', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `${all ? 'all' : 'waiting'}: ${(r.signals as unknown[]).length} signal(s)`, ms: Date.now() - t0 });
       return send(res, 200, { ok: true, ...r });
+    }
+
+    /**
+     * The weekly engine health report (19 Oct 2026, D2.7). GET, read only: n8n's
+     * `Engine — Weekly Health Report` asks for it every Monday and posts `slack_text`
+     * as Bays. `now` may move the report back to an earlier week, for a rerun.
+     */
+    if (p === '/api/engine/health-report') {
+      if (method !== 'GET') throw new HttpError(405, 'GET the report. Posting it is the n8n workflow\'s job.');
+      const at = new URL(req.url ?? '', 'http://x').searchParams.get('now');
+      const nowParam = at && !Number.isNaN(Date.parse(at)) ? new Date(at).toISOString() : undefined;
+      const r = await healthReport.build({ now: nowParam });
+      await mirror.logWrite({ endpoint, kind: 'health_report', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `week of ${r.data.period.label}: ${r.slack_text.length} chars`, ms: Date.now() - t0 });
+      return send(res, 200, r);
     }
 
     if (p === '/api/engine/recovery/plan') {

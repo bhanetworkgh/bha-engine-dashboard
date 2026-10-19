@@ -513,6 +513,19 @@ const srv = http.createServer((req, res) => {
     ok('a watch snoozes up to 14 days, stays open, posts nothing until the date, and a reply still closes it');
   }
 
+  /* 12c. the reminder says what really closes the watch (19 Oct 2026, LOOP-1792136810976-BBGL) */
+  {
+    const base = { watch_id: 'DW-TEST-TEXT', owner_user_id: HARDIK, decision: 'Pick the card rail', quiet_since: new Date(Date.now() - 26 * 3600_000).toISOString(), max_reminders: 3, thread_ts: '1.2', sop_refs: null, ns_refs: null, record_id: null, record_kind: null, next_step: null, fixture: false };
+    const single = dw.reminderText({ ...base, close_on_reply: true }, 1, new Date());
+    assert.match(single, /A reply from you in this thread closes this watch\./);
+    const multi = dw.reminderText({ ...base, close_on_reply: false, record_id: 'LOOP-1', record_kind: 'loops' }, 2, new Date());
+    assert.doesNotMatch(multi, /closes this watch/);
+    assert.match(multi, /more than one part, so a reply from you in this thread restarts the wait/);
+    assert.match(multi, /or the tracked item closes/);
+    assert.match(multi, /snooze it until then/);
+    ok('a multi-part watch\'s reminder says a reply restarts the wait; a single-part one says it closes');
+  }
+
   /* 13. events */
   const ev = await query(`SELECT event_type, count(*)::int AS n FROM engine_events WHERE subject_id = ANY($1) GROUP BY 1`, [[A, B]]);
   const n = Object.fromEntries(ev.rows.map((x) => [x.event_type, x.n]));
