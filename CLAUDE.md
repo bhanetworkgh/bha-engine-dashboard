@@ -3521,6 +3521,14 @@ reason; both refused is logged loudly. Each settle is one `repair_settled_notifi
 The n8n workflow's **Post Quietly?** skips a follow-up report's own card, so the settle is said once, in the
 thread. Never awaited by the bridge's write. `npm run test:repair-settle`.
 
+**A repair's proof can be corrected** (20 Oct 2026, Destiny — INC-BAYS.CODEX-035). `correct_repair_proof`
+(`server/src/mcp/incidentTools.ts`, write connection, no agent's scope) calls `repairs.correctProof`: it
+replaces `verified_by` with the real evidence, appends a dated "Proof corrected" line to `change_summary`,
+and keeps the old proof in `payload.proof_corrections`. **It never changes the outcome.** Built because the
+bridge settled REP-YTpezWSOIN6TNYcX-43048 on execution 43198, a run that never reached the changed step;
+the bridge itself no longer counts such a run (bha-repair-bridge fc70807: a later run proves a fix only if
+it ran a changed node). Audited on `engine_mcp_writes`. `npm run test:repair-settle` check 8.
+
 **The Self-healing tab is the scorecard** (19 Oct 2026, Destiny — D2.5: "If BHA is going to
 be marketing that we have a self-healing system, we need to be able to back everything up with
 numbers"). `?tab=self-healing`, `GET /api/engine-health/self-healing`, `server/src/selfHealing.ts`,
