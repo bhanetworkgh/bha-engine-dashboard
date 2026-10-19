@@ -58,6 +58,7 @@ export interface IncidentRow {
   resolution_status: string | null;
   resolved_at: string | null;
   resolved_by: string | null;
+  test_reason?: string | null;
 }
 
 /** How a closed incident closed. `engineIds` are incidents an automatic fix is recorded against. */
@@ -134,7 +135,7 @@ export async function scorecard(opts: { weeks?: number } = {}) {
               nullif(fields->'payload'->>'execution_id', '') AS execution_id,
               to_char(LEAST(nullif(fields->>'occurred_at', '')::timestamptz, nullif(first_seen_at, '')::timestamptz) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS occurred_at,
               open_now, fields->>'resolution_status' AS resolution_status,
-              to_char(resolved_at::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS resolved_at, resolved_by
+              to_char(resolved_at::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS resolved_at, resolved_by, test_reason
          FROM engine_incidents WHERE natural_id IS NOT NULL`,
     ),
     query<{ key: string; at: string; workflow: string | null; execution_id: string | null }>(
@@ -172,7 +173,7 @@ export async function scorecard(opts: { weeks?: number } = {}) {
   const engineIds = new Set(fixes.map((f) => f.incident_id).filter((x): x is string => Boolean(x)));
 
   const classified = inc.rows.map((i) => {
-    const apart = excludedReason({ workflow: i.workflow, node: i.node, tags: i.tags });
+    const apart = i.test_reason ? 'marked_test' : excludedReason({ workflow: i.workflow, node: i.node, tags: i.tags });
     return { ...i, apart, alarm: !apart && ALARM_NODE.test(i.node ?? ''), closer: closerOf(i, engineIds), week: weekStart(i.occurred_at) };
   });
 
@@ -241,7 +242,7 @@ export async function scorecard(opts: { weeks?: number } = {}) {
     recent_fixes: fixW.sort((a, b) => b.at.localeCompare(a.at)).slice(0, 20),
     definitions: [
       'Runs are production runs: webhook, trigger and sub-workflow runs. Manual test runs, the healer’s own retries and the error handlers’ runs are left out. Failed means error or crashed.',
-      'A real fault is an incident that is not a test, not the simulator and not a guard refusing a request on purpose (those are counted apart). A fault raised by an alarm step (Raise, Assert, Stop On) is a real fault: the alarm is reporting something that failed upstream.',
+      'A real fault is an incident that is not a test, not the simulator, not a guard refusing a request on purpose, and not marked a test by a person with a reason (mark_incidents_test, or close_incidents with test true); those are counted apart. A fault raised by an alarm step (Raise, Assert, Stop On) is a real fault: the alarm is reporting something that failed upstream.',
       'An automatic fix is a healer retry that recovered (including runs that never opened an incident), a Claude Code repair still standing, a recovery-watcher re-run, or a polling one-off the watcher closed. Each incident counts once, in the week of its first fix.',
       'Fixed by the engine share = (closed by the engine + cleared on its own) ÷ (those + closed by a person). Closed by policy (a chat not re-run hours late) and closes not recorded (before 2 Oct 2026) are left out of it, and named.',
       'Time to fix is p50 and p95 from the fault to its close, only for closes on or after 2 Oct 2026; never a mean.',
