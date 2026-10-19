@@ -2678,6 +2678,10 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
   makes the owner's reply restart the wait like anyone else's, with a history
   line; the watch closes on `close_decision_watch` once every part is answered,
   or when its linked record closes, and keeps reminding until then.
+- **The reminder says what really closes the watch** (19 Oct 2026, LOOP-1792136810976-BBGL): a
+  single-part watch says a reply closes it; a multi-part one (`close_on_reply` false) says a reply
+  restarts the wait, that it closes once every part is answered or the tracked item closes, and that a
+  watch waiting on a date can be snoozed until then. `test:decision-watch` pins both.
 - **A watch can be snoozed until a date** (18 Oct 2026, Destiny; migration 82). Kaiqi asked
   not to be reminded while heads-down on 31 Oct, and with no pause Bays cancelled
   DW-1792249500281-8Y88 and opened DW-1792296192502-322O with a 7-day wait, which filed real
@@ -3517,7 +3521,8 @@ and `mark_incidents_test` (write connection, no agent's scope, `confirm: "MARK <
 `"CLEAR <n>"`, a reason) marks or clears incidents already held. Only this dashboard's copy
 changes; nothing goes to the ledger and nothing is closed or reopened. The scorecard counts a
 marked incident apart (`marked_test`), so a probe a person closed is not counted as a person
-fixing a real fault. Logstream does not read the mark yet.
+fixing a real fault. Logstream does not read the mark yet. Migration 84 marked five past closes from their own close reasons
+(INC-BAYS.AGENT-043, AGENT-050, CODEX-030, INC-NS.AGENT-065, AGENT-066).
 
 **The healer skips what threw on purpose** (19 Oct 2026, D2.5). `BHA — Self Healer`'s Decide Lane
 routes a guard refusal (`Raise Refused Ask/Click`), a TEST or simulator workflow, and a deliberate
@@ -3525,6 +3530,20 @@ alarm step (`Raise …`, `Assert …`, `Stop On …`) to skip: the error handler
 and opens its incident, but a retry repeats the alarm and Claude Code editing it would silence it
 rather than fix the fault upstream. A person's Retry now is never skipped for this. Record Route
 posts every route to `/api/engine/events` (`self_healer_routed`), so skips are counted, not lost.
+
+**The weekly engine health report** (19 Oct 2026, Destiny — D2.7). `server/src/healthReport.ts`
+computes it and nothing else does; `GET /api/engine/health-report` (`x-dashboard-key`, logged as
+`read`, `?now=` for a rerun of an earlier week) returns the data and `slack_text`. n8n's
+`Engine — Weekly Health Report` (`zSpMkCukUzlxubmh`, folder Engine Self-Healing, Lagos time) asks
+for it every Monday at 07:00 and posts it as Bays in #all-bayshorizonnetwork (`C0A90TS44T1`); its
+manual trigger posts the same report only to Destiny, marked TEST. Slack's `ok` is read, a refusal
+fails the run into `Bays — Error Handler`, and a posted report is one `engine_health_report_posted`
+event. The report covers the last full week (Monday to Sunday, UTC) against every week since 21 Sep:
+reliability with the dated drop in failure rate, self-healing, Codex logs per person (submitted,
+approved, approval rate, rejected, waiting), open loops per person (open, closed, close rate, closed
+last week), the three agents (asks, delivered, completed, median reply), build patterns and SOPs
+with their growth, and a week-by-week line. It lists no open incidents. SOPs are read from BHARAG,
+and a read that fails says so instead of printing nought. `npm run test:health-report`.
 
 **The Recovery tab is "Waiting on a dependency"** (2026-09-23, Destiny). The
 watcher's switch at the top — on or off, who flipped it last, and a sentence

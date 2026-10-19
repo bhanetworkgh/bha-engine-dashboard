@@ -546,7 +546,14 @@ export function reminderText(w: WatchRow, n: number, now: Date): string {
   if (w.ns_refs) lines.push(`*North Star:* ${w.ns_refs}`);
   if (w.record_id) lines.push(`*Tracked as:* ${w.record_kind === 'loops' ? 'loop' : 'backlog task'} \`${w.record_id}\``);
   lines.push(`*Next logged step:* ${w.next_step || 'reply here with the decision, or say what is blocking it.'}`);
-  lines.push(`_Reminder ${n} of ${w.max_reminders}. No movement for ${quiet}. A reply from you ${w.thread_ts ? 'in this thread' : 'in a thread on this message'} closes this watch (\`${w.watch_id}\`)._`);
+  // 19 Oct 2026 (LOOP-1792136810976-BBGL): the closing line says what really closes this watch. On a
+  // decision with more than one part (close_on_reply false) a reply restarts the wait, so telling the
+  // owner it closes the watch was wrong (DW-1791985832450-IKOZ and DW-1791989874656-W3JQ, 16 Oct).
+  const where = w.thread_ts ? 'in this thread' : 'in a thread on this message';
+  const closes = w.close_on_reply === false
+    ? `This decision has more than one part, so a reply from you ${where} restarts the wait; the watch closes once every part is answered${w.record_id ? ' or the tracked item closes' : ''}. Waiting on a date? Ask Bays to snooze it until then.`
+    : `A reply from you ${where} closes this watch.`;
+  lines.push(`_Reminder ${n} of ${w.max_reminders}. No movement for ${quiet}. ${closes} (\`${w.watch_id}\`)_`);
   return lines.join('\n');
 }
 
