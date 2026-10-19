@@ -12952,3 +12952,10 @@ Files:      server/src/healthReport.ts (twinReview, twinLines, twinCritiqueDoc, 
 Problem:    The report counted asks per agent but judged nothing, and Genie was missing. First draft of the loop check joined events on the Airtable record id and found 3 moved loops of 140; events.record_id for loops is `row-<id>`, so the join was wrong, not the board.
 Fix:        North Star: loop ids named in last week's answers, moved = a non-mirror status event after first named and before week end. Live for 12 to 18 Oct: 140 named, 21 moved (15%), 14 closed; the six named 7 to 9 times never moved. Research Twin and Genie by recorded outcome, misses named. BHARAG doc once a week, id in meta.
 Decision:   Bays' ad-hoc critique tool (log_twin_critique) left out of v0: it is an agent change and needs a draft eval; the weekly document already gives Bays a searchable shelf.
+
+## 2026-10-19 08:16 — D5 live: Weekly Health Report workflow files the twin critique, posts as one message
+Intent:     Wire the twin review into `Engine — Weekly Health Report` (zSpMkCukUzlxubmh) and prove it before today's report is reposted.
+Files:      n8n only. Restore point 306155b0-585c-43d0-807c-cb4f8effae94; published 49ba8e78-d87b-441a-b6ac-539e3a14a873.
+Problem:    Test run 42323: Slack's reply held only the report's tail ("• *Research Twin*: 34 asks…"). At ~5,300 characters the text was being split across several messages.
+Fix:        Post To Slack sends one mrkdwn section block per paragraph (each under 3,000) with the text as fallback; test run 42326 posted one message of 11 blocks (ts 1792394061.299419). Added File Twin Critique (POST /api/engine/health-report/twin-critique, dry_run on a test run) and Check Filed (throws unless ok). 42326's dry run: "Twin Critique: week of 12 to 18 Oct 2026", would file into BHARAG_SOPS_KEY. Group 4 and the sticky note updated.
+Decision:   Today's report is reposted once Destiny has deleted the 07:00 post: a production run of the schedule trigger, which also files the first critique for real.
