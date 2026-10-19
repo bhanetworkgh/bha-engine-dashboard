@@ -10,7 +10,8 @@
  *   - a standing repair is matched to its incident by execution id; a reverted one is not a fix;
  *   - a close the ledger did upstream counts as the engine's only where a fix is recorded;
  *   - policy closes stay out of the engine share and are named;
- *   - time to fix is p50/p95, engine and person apart.
+ *   - time to fix is p50/p95, engine and person apart, from the earlier of occurred_at and
+ *     first seen (BHARAG moves occurred_at to the close).
  *
  * Run with:  npm run test:self-healing   (local DATABASE_URL only; it empties the tables it reads)
  */
@@ -49,11 +50,11 @@ const assert = require('node:assert/strict');
   await run('retry', 'error');
   await run('error', 'success');
 
-  async function inc(id, { wf = 'Bays — Agent Delivery', node = 'Build Card', exec = null, rs = 'open', open = false, resolvedAfter = null, by = null }) {
+  async function inc(id, { wf = 'Bays — Agent Delivery', node = 'Build Card', exec = null, rs = 'open', open = false, resolvedAfter = null, by = null, occurredAfter = 0 }) {
     await query(
       `INSERT INTO engine_incidents (natural_id, fields, source, first_seen_at, updated_at, open_now, resolved_at, resolved_by)
        VALUES ($1, $2::jsonb, 'engine', $3, now(), $4, $5, $6)`,
-      [id, JSON.stringify({ entity_id: id, occurred_at: at(0), resolution_status: rs, payload: { workflow_or_scenario: wf, failed_node_or_component: node, execution_id: exec } }), at(0), open, resolvedAfter === null ? null : at(resolvedAfter), by],
+      [id, JSON.stringify({ entity_id: id, occurred_at: at(occurredAfter), resolution_status: rs, payload: { workflow_or_scenario: wf, failed_node_or_component: node, execution_id: exec } }), at(0), open, resolvedAfter === null ? null : at(resolvedAfter), by],
     );
   }
   await inc('INC-A', { rs: 'self_healed', resolvedAfter: 30, by: 'the ledger' });
@@ -64,6 +65,8 @@ const assert = require('node:assert/strict');
   await inc('INC-F', { rs: 'wont_fix', resolvedAfter: 10, by: 'recovery:chat_not_rerun' });
   await inc('INC-G', { resolvedAfter: 60, by: 'the ledger (closed upstream by the healer or a person)' });
   await inc('INC-H', { exec: '5005', resolvedAfter: 90, by: 'the ledger (closed upstream by the healer or a person)' });
+  // BHARAG moves occurred_at to the close on every status change; first_seen_at keeps the real start.
+  await inc('INC-K', { rs: 'manually_resolved', resolvedAfter: 200, occurredAfter: 200, by: 'mcp:write (U0AEW3TBYH1) — fixed' });
   await inc('INC-J', { resolvedAfter: 40, by: 'the ledger (closed upstream by the healer or a person)' });
 
   const retry = (id, status, minutes) => query(`INSERT INTO engine_retry_attempts (natural_id, fields, source, first_seen_at, updated_at) VALUES ($1, $2::jsonb, 'engine', now(), now())`, [id, JSON.stringify({ incident_id: id, status, workflow: 'W', last_attempt_at: at(minutes) })]);
@@ -83,8 +86,8 @@ const assert = require('node:assert/strict');
   assert.equal(w.failed_runs, 2);
   assert.equal(w.failure_rate.pct, 16.7);
 
-  assert.equal(w.incidents, 9);
-  assert.equal(w.real_faults, 7, 'A B E F G H J are real');
+  assert.equal(w.incidents, 10);
+  assert.equal(w.real_faults, 8, 'A B E F G H J K are real');
   assert.deepEqual(w.counted_apart, { refused_click: 1, test: 1 });
   assert.equal(w.real_faults_raised_by_alarm, 1, 'INC-E');
 
@@ -93,14 +96,15 @@ const assert = require('node:assert/strict');
   assert.ok(!s.recent_fixes.some((f) => f.key === 'EXEC-6006'), 'a reverted repair is not a fix');
   assert.ok(s.recent_fixes.some((f) => f.key === 'INC-H' && f.kind === 'repair_standing'), 'the standing repair is matched to its incident');
 
-  assert.deepEqual(w.closed_real_faults, { engine: 3, cleared_itself: 0, person: 1, policy: 1, not_recorded: 1 }, 'J closed upstream with no fix recorded is not recorded');
+  assert.deepEqual(w.closed_real_faults, { engine: 3, cleared_itself: 0, person: 2, policy: 1, not_recorded: 1 }, 'J closed upstream with no fix recorded is not recorded');
   assert.equal(w.still_open, 1);
 
-  assert.deepEqual(s.totals.fixed_by_engine_share, { n: 3, of: 4, pct: 75 });
+  assert.deepEqual(s.totals.fixed_by_engine_share, { n: 3, of: 5, pct: 60 });
   assert.equal(s.totals.time_to_fix.engine.n, 3);
   assert.equal(s.totals.time_to_fix.engine.p50_minutes, 60);
   assert.equal(s.totals.time_to_fix.engine.p95_minutes, 90);
   assert.equal(s.totals.time_to_fix.person.p50_minutes, 120);
+  assert.equal(s.totals.time_to_fix.person.p95_minutes, 200, 'K is timed from first seen, not from the moved occurred_at');
   assert.equal(s.open_real_faults[0].incident_id, 'INC-E');
   assert.match(s.healer_routes.note, /19 Oct 2026/);
 
