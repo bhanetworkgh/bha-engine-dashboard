@@ -418,7 +418,7 @@ export async function fileTwinCritique(opts: { now?: string; dry_run?: boolean }
   if (held) return { ok: true, filed: false, already: true, week: data.period.week, title: doc.title, bharag_id: held, detail: `already filed for this week as ${held}` };
   if (opts.dry_run) return { ok: true, filed: false, dry_run: true, week: data.period.week, title: doc.title, content: doc.content, detail: `would file into ${bharag.ingestKeyVar('codex')}` };
   const r = await bharag.ingest('codex', {
-    title: doc.title, content: doc.content, source_type: 'twin_critique', content_type: 'text',
+    title: doc.title, content: doc.content, source_type: 'manual', content_type: 'doc',
     project_tags: ['twin-critique', 'north-star', 'research-twin', 'genie'],
     metadata: { doc_type: 'twin_critique', week_start: data.period.week, loop: 'LOOP-1792016378151-RYHY' },
   }, { source: 'dashboard:twin_critique' });

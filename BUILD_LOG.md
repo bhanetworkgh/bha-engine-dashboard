@@ -12975,3 +12975,8 @@ Intent:     Destiny's final changes to the Slack layout before today's post.
 Files:      server/src/healthReport.ts (sentence(), the closed-since count per builder, the Codex and loop parts of slackBlocks), server/test/health-report.test.cjs.
 Problem:    The Codex part gave no approval rate per builder; the loop part gave no open share and no weekly pace; the stuck loops' descriptions were cut mid-word ("using …", "the ex…").
 Fix:        Codex: a quote with the team's approval rate since 21 Sep and last week, and each builder's rate in bold with last week's. Loops: open and closed as shares of all loops, closed last week and the average a week since 21 Sep (dated closes from the status record), the same per builder. Descriptions and misses: the text up to its last full stop within 260 (220) characters, else whole words and an ellipsis, never part of a word.
+
+## 2026-10-19 09:08 — Twin critique refused by BHARAG on the first real filing
+Intent:     Post today's report into #all-bayshorizonnetwork and file the first Twin Critique (production run 42351).
+Problem:    The report posted (C0A90TS44T1 1792397120.154189, event recorded); File Twin Critique answered ok:false and Check Filed failed the run, verbatim: "source_type: Invalid option: expected one of "slack"|"loom"|"otter"|"gdrive"|"github"|"logstream"|"manual"; content_type: Invalid option: expected one of "code"|"transcript"|"doc"|"decision"|"narration"|"chat" (VALIDATION_ERROR)". The dry runs never reach BHARAG, so the test runs could not see it.
+Fix:        source_type manual, content_type doc; the critique stays marked by metadata.doc_type twin_critique. Filed again by a one-off call to the route, not by re-running the report.

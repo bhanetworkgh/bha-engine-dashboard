@@ -3552,7 +3552,7 @@ named, and whether that loop's status changed (the status record, never a mirror
 was first named and before the week ended; a loop named three or more times that never moved is
 listed. Research Twin and Genie are judged on their own recorded outcome and delivery; nothing
 grades what an answer said. The same review is filed once a week into BHARAG's codex workspace
-(where Bays searches) as `Twin Critique: week of …`, `source_type` `twin_critique`, through the
+(where Bays searches) as `Twin Critique: week of …` (`source_type` `manual`, `content_type` `doc`, BHARAG's own vocabulary; `metadata.doc_type` `twin_critique`), through the
 write guard: `POST /api/engine/health-report/twin-critique` (`x-dashboard-key`, `dry_run`, `now`),
 which n8n calls after the scheduled post lands. The document id is kept in `meta`
 `twin_critique.<week>`, so a repeat files nothing.
