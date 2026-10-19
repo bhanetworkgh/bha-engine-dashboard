@@ -64,10 +64,21 @@ function duration(sec: number | null): string {
   return `${Math.round((sec / 3600) * 10) / 10} h`;
 }
 
-const clip = (s: string | null | undefined, max: number) => {
+/**
+ * The first sentence of a text, never cut mid-word (19 Oct 2026, Destiny: the report cut loop
+ * descriptions off in the middle of a word). Up to the first full stop within `max`; with none,
+ * the words that fit, then an ellipsis.
+ */
+export function sentence(s: string | null | undefined, max: number): string {
   const t = (s ?? '').replace(/\s+/g, ' ').trim();
-  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
-};
+  if (t.length <= max) return t;
+  const head = t.slice(0, max);
+  const stop = head.search(/[.!?](\s|$)(?![\s\S]*[.!?](\s|$))/);
+  if (stop >= 40) return head.slice(0, stop + 1);
+  const space = head.lastIndexOf(' ');
+  return `${head.slice(0, space > 40 ? space : max).replace(/[,;:\-–—\s]+$/, '')}…`;
+}
+
 
 /**
  * The twin review (19 Oct 2026, LOOP-1792016378151-RYHY; Jason, 14 Oct: Bays' critiques of the
@@ -135,7 +146,7 @@ export async function twinReview(last: string, end: string) {
       loops_moved: l.moved,
       loops_closed: l.closed,
       hit_rate: pct(l.moved, l.named),
-      stuck: nsStuck.rows.map((r) => ({ loop_id: r.loop_id, times_named: r.times, builder: r.b, status: r.st, what: clip(r.what, 90) })),
+      stuck: nsStuck.rows.map((r) => ({ loop_id: r.loop_id, times_named: r.times, builder: r.b, status: r.st, what: sentence(r.what, 260) })),
     },
     research_twin: {
       asks: rtTotal,
@@ -145,14 +156,14 @@ export async function twinReview(last: string, end: string) {
       refused: rtCount((r) => r.outcome === 'Refused (not its lane)'),
       failed: rtCount((r) => r.outcome === 'Failed'),
       not_delivered: rtCount((r) => r.delivered === 'Not delivered'),
-      misses: rtMiss.rows.map((r) => ({ ask_id: r.id, outcome: r.outcome, delivered: r.delivered, question: clip(r.q, 110) })),
+      misses: rtMiss.rows.map((r) => ({ ask_id: r.id, outcome: r.outcome, delivered: r.delivered, question: sentence(r.q, 220) })),
     },
     genie: {
       asks: gOut.length,
       answered: gCount('Answered'),
       incomplete: gCount('Incomplete'),
       failed: gCount('Failed'),
-      misses: genie.rows.filter((r) => genieOutcome(r.event_type, r.status) !== 'Answered').slice(0, 5).map((r) => ({ outcome: genieOutcome(r.event_type, r.status), question: clip(r.q, 110) })),
+      misses: genie.rows.filter((r) => genieOutcome(r.event_type, r.status) !== 'Answered').slice(0, 5).map((r) => ({ outcome: genieOutcome(r.event_type, r.status), question: sentence(r.q, 220) })),
     },
   };
 }
@@ -213,10 +224,13 @@ export async function buildData(opts: { now?: string } = {}) {
          FROM l GROUP BY 1 ORDER BY open DESC, b`,
       [SINCE],
     ),
-    query<{ b: string; n: number }>(
-      `SELECT coalesce(builder, 'unassigned') AS b, count(DISTINCT record_id)::int AS n FROM events
-        WHERE kind = 'loops' AND lower(to_status) = 'closed' AND via <> 'mirror' AND at::timestamptz >= $1::date AND at::timestamptz < $2::date GROUP BY 1`,
-      [last, end],
+    query<{ b: string; n: number; since: number }>(
+      `SELECT coalesce(builder, 'unassigned') AS b,
+              count(DISTINCT record_id) FILTER (WHERE at::timestamptz >= $2::date)::int AS n,
+              count(DISTINCT record_id)::int AS since
+         FROM events
+        WHERE kind = 'loops' AND lower(to_status) = 'closed' AND via <> 'mirror' AND at::timestamptz >= $1::date AND at::timestamptz < $3::date GROUP BY 1`,
+      [SINCE, last, end],
     ),
     query<{ week: string; n: number }>(
       `SELECT to_char(date_trunc('week', at::timestamptz AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS week, count(DISTINCT record_id)::int AS n FROM events
@@ -300,7 +314,7 @@ export async function buildData(opts: { now?: string } = {}) {
       time_to_fix: card.totals.time_to_fix,
     },
     logs: codex.rows.map((r) => ({ builder: nameOf(r.b), submitted: r.submitted, approved: r.approved, approval_rate: pct(r.approved, r.submitted), rejected: r.rejected, waiting: r.waiting, last_week: r.wk, last_week_approved: r.wk_approved })),
-    loops: loops.rows.map((r) => ({ builder: nameOf(r.b), open: r.open, closed: r.closed, close_rate: pct(r.closed, r.open + r.closed), raised_since: r.raised, closed_of_raised_since: r.raised_closed, closed_last_week: loopsClosedWeek.rows.find((x) => x.b === r.b)?.n ?? 0 })),
+    loops: loops.rows.map((r) => ({ builder: nameOf(r.b), open: r.open, closed: r.closed, close_rate: pct(r.closed, r.open + r.closed), raised_since: r.raised, closed_of_raised_since: r.raised_closed, closed_last_week: loopsClosedWeek.rows.find((x) => x.b === r.b)?.n ?? 0, closed_since_dated: loopsClosedWeek.rows.find((x) => x.b === r.b)?.since ?? 0, closed_per_week: Math.round(((loopsClosedWeek.rows.find((x) => x.b === r.b)?.since ?? 0) / Math.max(1, weeks.length)) * 10) / 10 })),
     agents: ['Bays', 'North Star', 'Research Twin'].map((a) => ({ agent: a, since: agentLine(a, false), last_week: agentLine(a, true) })),
     twins,
     learned: {
@@ -472,24 +486,31 @@ export function slackBlocks(d: ReportData, opts: { test?: boolean } = {}): Recor
   X.push(DIV);
 
   const tl = d.logs.reduce((a, b) => ({ s: a.s + b.submitted, ap: a.ap + b.approved }), { s: 0, ap: 0 });
+  const tlw = d.logs.reduce((a, b) => ({ s: a.s + b.last_week, ap: a.ap + b.last_week_approved }), { s: 0, ap: 0 });
   X.push(head('📝 Builder logs (Codex)'));
   X.push(rich(
-    rsec(I_(`${tl.ap} of ${tl.s} approved since 21 Sep (${fmtPct(pct(tl.ap, tl.s))})`), tx('\n')),
+    rquote(B_(`${fmtPct(pct(tl.ap, tl.s))} approved`), tx(` since 21 Sep (${tl.ap} of ${tl.s} logs)  ·  `), B_(`${fmtPct(pct(tlw.ap, tlw.s))} approved`), tx(` last week (${tlw.ap} of ${tlw.s})`)),
     rlist(d.logs.map((b) => [
-      B_(b.builder), tx(`  ${b.approved} of ${b.submitted} approved`),
+      B_(b.builder), tx('  '), B_(fmtPct(b.approval_rate)), tx(` approved, ${b.approved} of ${b.submitted}`),
       ...(b.rejected ? [tx(`, ${b.rejected} rejected`)] : []), ...(b.waiting ? [tx(`, ${b.waiting} waiting`)] : []),
-      I_(`  ·  last week ${b.last_week} in, ${b.last_week_approved} approved`),
+      I_(`  ·  last week ${b.last_week_approved} of ${b.last_week} approved${b.last_week ? ` (${fmtPct(pct(b.last_week_approved, b.last_week))})` : ''}`),
     ])),
   ));
   X.push(DIV);
 
   const tlo = d.loops.reduce((a, b) => ({ o: a.o + b.open, c: a.c + b.closed, w: a.w + b.closed_last_week }), { o: 0, c: 0, w: 0 });
+  const tloAll = tlo.o + tlo.c;
+  const tlSince = d.loops.reduce((a, b) => a + b.closed_since_dated, 0);
+  const perWeek = Math.round((tlSince / Math.max(1, d.period.weeks.length)) * 10) / 10;
   X.push(head('🔁 Open loops'));
   X.push(rich(
-    rsec(I_(`${n(tlo.o)} open, ${n(tlo.c)} closed (${fmtPct(pct(tlo.c, tlo.o + tlo.c))}), ${tlo.w} closed last week`), tx('\n')),
+    rquote(
+      B_(`${n(tlo.o)} open (${fmtPct(pct(tlo.o, tloAll))})`), tx('  ·  '), B_(`${n(tlo.c)} closed (${fmtPct(pct(tlo.c, tloAll))})`), tx(` of ${n(tloAll)} loops\n`),
+      B_(`${tlo.w} closed last week`), tx(`  ·  ${perWeek} a week on average since 21 Sep`),
+    ),
     rlist(d.loops.map((b) => [
-      B_(b.builder), tx(`  ${n(b.open)} open, ${fmtPct(b.close_rate)} closed`),
-      I_(`  ·  ${b.closed_last_week} closed last week, ${b.closed_of_raised_since} of ${b.raised_since} raised since 21 Sep`),
+      B_(b.builder), tx(`  ${n(b.open)} open (${fmtPct(pct(b.open, b.open + b.closed))}), ${n(b.closed)} closed (${fmtPct(b.close_rate)})`),
+      I_(`  ·  ${b.closed_last_week} closed last week, ${b.closed_per_week} a week on average`),
     ])),
   ));
   X.push(DIV);
@@ -517,11 +538,11 @@ export function slackBlocks(d: ReportData, opts: { test?: boolean } = {}): Recor
     twinEls.push(rsec(tx('\n'), B_('North Star keeps naming these, and they are not moving:')));
     for (const st of ns.stuck) {
       twinEls.push(rlist([[B_(st.builder ? cap(st.builder) : 'No owner'), tx(`, named ${st.times_named}×  `), C_(st.loop_id)]]));
-      twinEls.push(rlist([[I_(clip(st.what, 90))]], 1));
+      twinEls.push(rlist([[I_(st.what)]], 1));
     }
   }
-  const misses: RT[][] = rt.misses.map((m) => [B_(`Research Twin, ${m.delivered === 'Not delivered' ? 'not delivered' : m.outcome.toLowerCase()}: `), I_(clip(m.question, 100))])
-    .concat(g.misses.map((m) => [B_(`Genie, ${m.outcome.toLowerCase()}: `), I_(clip(m.question, 100))]));
+  const misses: RT[][] = rt.misses.map((m) => [B_(`Research Twin, ${m.delivered === 'Not delivered' ? 'not delivered' : m.outcome.toLowerCase()}: `), I_(m.question)])
+    .concat(g.misses.map((m) => [B_(`Genie, ${m.outcome.toLowerCase()}: `), I_(m.question)]));
   if (misses.length) {
     twinEls.push(rsec(tx('\n'), B_('Misses to look at:')));
     twinEls.push(rlist(misses));

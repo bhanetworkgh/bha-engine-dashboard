@@ -12969,3 +12969,9 @@ Fix:        A header, a context line, a four-figure grid, then one titled part p
 Intent:     Destiny on the 08:22 test: use rich text lists, italics, styling, backdrops where useful, and proper spacing.
 Files:      server/src/healthReport.ts (slackBlocks rewritten).
 Fix:        A header per part (with an emoji), each part one rich_text block of bulleted lists: bold names, italic notes, loop ids in code, stuck loops with an indented italic description. The headline is a rich_text_quote and the week-by-week figures are a padded table in rich_text_preformatted, both drawn on Slack's grey backdrop. Dividers between parts, italic context lines, a primary "Open Engine health" button.
+
+## 2026-10-19 09:10 — Health report: rates per builder, loop rates and pace, no mid-word cuts
+Intent:     Destiny's final changes to the Slack layout before today's post.
+Files:      server/src/healthReport.ts (sentence(), the closed-since count per builder, the Codex and loop parts of slackBlocks), server/test/health-report.test.cjs.
+Problem:    The Codex part gave no approval rate per builder; the loop part gave no open share and no weekly pace; the stuck loops' descriptions were cut mid-word ("using …", "the ex…").
+Fix:        Codex: a quote with the team's approval rate since 21 Sep and last week, and each builder's rate in bold with last week's. Loops: open and closed as shares of all loops, closed last week and the average a week since 21 Sep (dated closes from the status record), the same per builder. Descriptions and misses: the text up to its last full stop within 260 (220) characters, else whole words and an ellipsis, never part of a word.

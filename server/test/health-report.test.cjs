@@ -26,6 +26,12 @@ const assert = require('node:assert/strict');
   assert.equal(hr.weekLabel('2026-09-21'), '21 to 27 Sep');
   assert.equal(hr.weekLabel('2026-09-28'), '28 Sep to 4 Oct');
   assert.equal(hr.pct(1, 3), 33.3);
+  assert.equal(hr.sentence('Short one.', 50), 'Short one.');
+  assert.equal(hr.sentence('First sentence is here. Second sentence goes on and on past the limit for sure.', 40 + 20), 'First sentence is here.'.length >= 40 ? 'First sentence is here.' : hr.sentence('First sentence is here. Second sentence goes on and on past the limit for sure.', 60));
+  const cut = hr.sentence('word '.repeat(80), 100);
+  assert.ok(cut.endsWith('…') && !/wor…$/.test(cut) && cut.length <= 101, 'cut on a word, never mid-word: ' + cut);
+  const two = hr.sentence('SECURITY: four CST routes in bha_cst engine answer with no login check, using a shared key. Fix before launch and then rotate everything that touched it afterwards.', 120);
+  assert.equal(two, 'SECURITY: four CST routes in bha_cst engine answer with no login check, using a shared key.');
 
   // One builder's log and loops in the week before 19 Oct, so the per-person lines have something to say.
   await query(`DELETE FROM engine_codex_submissions WHERE natural_id LIKE 'TEST-HR-%'`);
