@@ -12997,3 +12997,11 @@ Files:      server/src/decisionWatch.ts, server/src/mcp/decisionWatchTools.ts, s
 Problem:    list_decision_watches handed back channel_id, thread_ts and quiet_since and left the meaning to the model.
 Fix:        movesText() builds one sentence per watch from the row (thread link, only that thread counts, what the owner's reply does, linked record, snooze, next reminder in Lagos and UTC), returned as how_it_moves by show(), so the page and the tool both carry it. The tool description tells Bays to quote it and never infer it.
 Decision:   A code-built sentence rather than a prompt rule, because it is the same rule sweep() applies and cannot drift from it. test:decision-watch 12d pins it (19 checks pass).
+
+## 2026-10-19 10:15 — Bays: take IDs from the record, quote how_it_moves
+Intent:     Stop the two slips in Kaiqi's thread of 18 Oct: a recap for Jason that mixed up two of Kaiqi's items, and telling Kaiqi a note in another thread would reset his watch.
+Files:      n8n Agent Bays (Nw5igXu4WWrjUMWB) instructions only, section 1; no repo code.
+Problem:    Both came from Bays answering from what it remembered of a long thread instead of the record.
+Fix:        Two bullets added under section 1: take a loop, log, task or watch's ID and title from find_records / list_decision_watches in a summary; read a watch's how_it_moves line (c5f1db2) and say it as written before saying what a watch will do. Saved draft diffed against the intended text: identical bar a trailing newline. Validated; spot tests: Kaiqi's question answered by quoting how_it_moves (execution D2smhuVAt0UuM6No), a loop-count question unchanged (rL4ZHsbwHgYSNNL2).
+Decision:   Restore point 06486b0e-daa7-406e-ad5a-4d40099b3789. DRAFT-202610190843-20QM passed 20 of 20 against EVAL-202610190400, config cs1:b34faae5 before and after. Published da442c6a-0c81-4251-b9bd-10f10f2a9fa8; inventory recorded (audit 2639), so the publish check matches the draft run and asks for the post-publish eval.
+Also:       Bays posted the correction in Kaiqi's thread (1792399536.844179, audit 2626). SOP 96f96ab4 replaced by a7d5247f "SOP -- Builders Check Both Log Notifications Before Signing Off" (audits 2628, 2629).
