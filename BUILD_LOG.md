@@ -13008,3 +13008,10 @@ Also:       Bays posted the correction in Kaiqi's thread (1792399536.844179, aud
 
 ## 2026-10-19 10:40 — Correction to the 09:55 entry
 Problem:    The 09:55 entry calls JSUX's thread (1792332426.914229) "his Codex log thread". It is the thread where LOOP-1792332426662-DO7O was raised; Kaiqi's progress note was in another thread (1792248483.853519). The fix and its reasoning are unchanged.
+
+## 2026-10-19 20:05 — Bays DMs Destiny when a fix awaiting proof settles
+Intent:     Destiny, on INC-BAYS.CODEX-035: wait for the repair bridge to settle REP-YTpezWSOIN6TNYcX-43048 rather than close it by hand, but be told by Bays in Slack when it does, not by a Claude check.
+Files:      server/src/repairs.ts, server/src/index.ts, server/test/repair-settle.test.cjs, package.json, CLAUDE.md
+Problem:    A `repaired_pending` row is settled by the bridge's second report under the same repair_id, and that second report only updated the row. Nothing told a person the fix had held, or that it had not.
+Fix:        repairs.store reads the row's outcome before the upsert and returns prior_outcome and settled (pending -> anything else). POST /api/engine/repair then calls repairs.notifySettled, never awaited: one Bays DM to Destiny (REPAIR_SETTLE_NOTIFY_USER) naming the repair, workflow and step, the failed run, the new outcome, any proof the report carries, what a person must do when it did not hold, and the incident's state on the board. A refused DM goes to #bha-engine-alerts (REPAIR_SETTLE_FALLBACK_CHANNEL) with Slack's reason; both refused is logged and recorded. Each settle writes one repair_settled_notified event with where it went.
+Decision:   The incident is described as the board shows it, with "the board reads the ledger every 3 minutes", rather than claiming a close the dashboard has not yet read. test:repair-settle: 6 checks pass on a local Postgres 16, test:self-healing passes.

@@ -3501,6 +3501,12 @@ root cause, the exact change, and a way back. So:
   healthy tone. Colour marks only what needs somebody: needing a person, and not
   repaired.
 
+**A settled fix is announced** (20 Oct 2026, Destiny). When the bridge's second report turns a
+`repaired_pending` row into anything else, `repairs.notifySettled` has Bays DM Destiny the outcome, the
+proof, the incident's state and, when it did not hold, what a person must do; a refused DM goes to
+#bha-engine-alerts with Slack's reason, and each settle is one `repair_settled_notified` event. Never
+awaited by the bridge's write. `npm run test:repair-settle`.
+
 **The Self-healing tab is the scorecard** (19 Oct 2026, Destiny — D2.5: "If BHA is going to
 be marketing that we have a self-healing system, we need to be able to back everything up with
 numbers"). `?tab=self-healing`, `GET /api/engine-health/self-healing`, `server/src/selfHealing.ts`,
