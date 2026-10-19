@@ -3527,7 +3527,9 @@ replaces `verified_by` with the real evidence, appends a dated "Proof corrected"
 and keeps the old proof in `payload.proof_corrections`. **It never changes the outcome.** Built because the
 bridge settled REP-YTpezWSOIN6TNYcX-43048 on execution 43198, a run that never reached the changed step;
 the bridge itself no longer counts such a run (bha-repair-bridge fc70807: a later run proves a fix only if
-it ran a changed node). Audited on `engine_mcp_writes`. `npm run test:repair-settle` check 8.
+it ran a changed node). Audited on `engine_mcp_writes`. The same function answers
+`POST /api/engine/repair/proof-correction` (`x-dashboard-key`, logged on `engine_writes`), for when the
+connector's tool list has not picked the tool up. `npm run test:repair-settle` check 8.
 
 **The Self-healing tab is the scorecard** (19 Oct 2026, Destiny — D2.5: "If BHA is going to
 be marketing that we have a self-healing system, we need to be able to back everything up with
