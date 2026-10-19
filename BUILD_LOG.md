@@ -13021,3 +13021,17 @@ Intent:     D3 (LOOP-GCJU): before the rack snapshot sender lands, settle the co
 Files:      server/src/monitoringTwin.ts, server/src/un9d.ts, src/screens/VFarm/Live.tsx, server/test/un9d.test.cjs, docs/contracts/vfarm.md, CLAUDE.md
 Fix:        monitoringTwin.freshness takes vFarm's status and last_seen_at: offline is OFFLINE (aged from the last report); online with no reading ever is LIVE by presence; a device that reads is still aged on its readings (90 s stale, 900 s offline, Jason's IMFX thresholds), so a sensor whose readings stop is caught whatever its heartbeat says; unknown or no status is the old reading rule. The offline incident's detail says which rule raised it. UN9D's observed_time accepts last_seen_at for a device that never reads. The vFarm page's reporting() follows the same rule.
 Decision:   Destiny approved status for online/offline with sensor silence still read from last_reading_at. test:un9d 7 checks (9 freshness cases), test:monitoring-recurrence 6, test:twin-envelope 8, on a local Postgres 16.
+
+## 2026-10-20 21:40 — The settle is answered in the repair card's thread, not a DM
+Intent:     Destiny: "rather than dm me, let it notify the proof inside the thread on the self healing channel".
+Files:      server/src/repairs.ts, server/src/index.ts, server/test/repair-settle.test.cjs, CLAUDE.md
+Problem:    The settle notice was a DM, and n8n's BHA — Self Healer Reports posted a second top-level card for the
+            follow-up report, so a settle was said twice and neither landed under the card it settles. Nothing
+            recorded which Slack message the first card was.
+Fix:        POST /api/engine/repair/report-link stores the card's channel and ts as payload.report_link (only that
+            key); store() keeps it through later whole-record reports. notifySettled replies in that thread as Bays,
+            tagging Destiny; no link or a refused reply posts in the channel with the reason. n8n: Pick Report Link
+            and Save Report Link (group "5. Remember the card") save the link after a repaired_pending card posts,
+            and Post Quietly? now also skips a follow_up report's card. Restore point for n8n: version e07b659c.
+Decision:   The dashboard, not n8n, posts the settle, because it already holds the row, the incident and the proof
+            and is where the settle is detected. test:repair-settle: 7 checks pass.

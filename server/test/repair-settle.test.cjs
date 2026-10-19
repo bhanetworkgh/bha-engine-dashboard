@@ -3,13 +3,14 @@
  *
  * The repair bridge reports `repaired_pending` when it changed a workflow whose failed run was
  * called by another workflow; a second report under the same repair_id settles it. That second
- * report must reach Destiny as a Bays DM, never only a quiet row change. This pins:
- *   - the first report (pending) is not a settle and sends nothing;
- *   - a repeat of the pending report is not a settle either;
- *   - the settle (pending -> repaired) is flagged settled, and the notice is a DM to Destiny
- *     naming the repair, the workflow, the failed run, the incident and the proof;
- *   - a refused DM falls back to #bha-engine-alerts with Slack's reason;
- *   - both refused is recorded as posted: null with both reasons, never silent;
+ * report must be answered in the repair card's own thread in #bha-self-healing, never only a
+ * quiet row change. This pins:
+ *   - the first report (pending) is not a settle, nor is a repeat of it;
+ *   - n8n's report link is validated, refused for an unknown repair, and survives later reports;
+ *   - the settle is a reply in the card's thread tagging Destiny, naming the repair, the
+ *     workflow, the failed run, the incident and the proof;
+ *   - a refused thread reply, or no card recorded, posts in the channel with the reason;
+ *   - both refused is recorded as posted: null with the reasons, never silent;
  *   - every settle writes one repair_settled_notified event.
  *
  * Run with:  npm run test:repair-settle   (local DATABASE_URL only)
@@ -25,10 +26,10 @@ const server = http.createServer((req, res) => {
   req.on('end', () => {
     const b = JSON.parse(body || '{}');
     posts.push(b);
-    const isDm = String(b.channel).startsWith('U');
-    const no = (isDm && refuse.has('dm')) || (!isDm && refuse.has('channel'));
+    const isThread = Boolean(b.thread_ts);
+    const no = (isThread && refuse.has('thread')) || (!isThread && refuse.has('channel'));
     res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify(no ? { ok: false, error: isDm ? 'cannot_dm_bot' : 'not_in_channel' } : { ok: true, ts: '1.2' }));
+    res.end(JSON.stringify(no ? { ok: false, error: isThread ? 'thread_not_found' : 'not_in_channel' } : { ok: true, ts: '1.2' }));
   });
 });
 
@@ -68,53 +69,80 @@ const server = http.createServer((req, res) => {
   r = await repairs.store(base('a', 'repaired_pending'));
   assert.equal(r.settled, false, 'a repeated pending report is not a settle');
 
-  // 3. The settle: pending -> repaired.
+  // 3. n8n records the card: validated, refused for an unknown repair, kept through later reports.
+  const CH = 'C0TESTSELF1';
+  await assert.rejects(repairs.recordReportLink({ repair_id: rid('a'), channel: 'U0AEW3TBYH1', ts: '1792451761.123456' }), /channel id/);
+  await assert.rejects(repairs.recordReportLink({ repair_id: rid('a'), channel: CH, ts: 'yesterday' }), /message ts/);
+  await assert.rejects(repairs.recordReportLink({ repair_id: rid('zz'), channel: CH, ts: '1792451761.123456' }), (e) => e.status === 404);
+  const linked = await repairs.recordReportLink({ repair_id: rid('a'), channel: CH, ts: '1792451761.123456' });
+  assert.equal(linked.report_link.ts, '1792451761.123456');
+  await repairs.store(base('a', 'repaired_pending', { trace: { pattern_status: 'none_on_record' } })); // n8n's trace re-post
+  let held = await query(`SELECT payload->'report_link'->>'ts' AS ts, payload->'trace'->>'pattern_status' AS ps FROM engine_repairs WHERE repair_id = $1`, [rid('a')]);
+  assert.deepEqual(held.rows[0], { ts: '1792451761.123456', ps: 'none_on_record' }, 'the link survives a whole-record re-post');
+
+  // 4. The settle: pending -> repaired, answered in the card's thread.
   r = await repairs.store(base('a', 'repaired', { proof_execution_id: '43120' }));
   assert.equal(r.prior_outcome, 'repaired_pending');
   assert.equal(r.settled, true, 'pending -> repaired is a settle');
+  held = await query(`SELECT payload->'report_link'->>'ts' AS ts FROM engine_repairs WHERE repair_id = $1`, [rid('a')]);
+  assert.equal(held.rows[0].ts, '1792451761.123456', 'the link survives the settle report');
   posts.length = 0;
   let n = await repairs.notifySettled(r.repair_id);
-  assert.deepEqual(n, { posted: 'dm', error: null });
+  assert.deepEqual(n, { posted: 'thread', error: null });
   assert.equal(posts.length, 1);
-  assert.equal(posts[0].channel, 'U0AEW3TBYH1', 'the notice is a DM to Destiny');
+  assert.equal(posts[0].channel, CH);
+  assert.equal(posts[0].thread_ts, '1792451761.123456', 'the notice is a reply in the card\'s thread');
   const t = posts[0].text;
+  assert.ok(t.startsWith('<@U0AEW3TBYH1>'), 'it tags Destiny');
   for (const want of ['Self-heal repair settled: proved', rid('a'), 'Bays — Submit Actions', 'Check Logstream Posted', `failed run ${exec('a')}`, '*Repaired*', 'Proof: execution 43120', `INC-TEST-${T} still shows open`]) {
     assert.ok(t.includes(want), `the notice says "${want}"\n${t}`);
   }
 
-  // 4. A settle to needs_human carries the person's action; a refused DM falls back to the channel.
+  // 5. A refused thread reply posts in the channel with Slack's reason; a needs_human settle says what to do.
   await repairs.store(base('b', 'repaired_pending'));
+  await repairs.recordReportLink({ repair_id: rid('b'), channel: CH, ts: '1792451762.000100' });
   r = await repairs.store(base('b', 'needs_human', { human_action: 'Re-run the failed log by hand.' }));
   assert.equal(r.settled, true);
-  refuse = new Set(['dm']);
+  refuse = new Set(['thread']);
   posts.length = 0;
   n = await repairs.notifySettled(r.repair_id);
   assert.deepEqual(n, { posted: 'channel', error: null });
-  assert.equal(posts.length, 2, 'one refused DM, then one channel post');
-  assert.equal(posts[1].channel, 'C0ASVQQ8CH3');
-  assert.ok(posts[1].text.includes('the DM was refused') && posts[1].text.includes('cannot_dm_bot'), 'the fallback names Slack\'s reason');
+  assert.equal(posts.length, 2, 'one refused thread reply, then one channel post');
+  assert.equal(posts[1].channel, CH);
+  assert.equal(posts[1].thread_ts, undefined);
+  assert.ok(posts[1].text.includes('thread was refused') && posts[1].text.includes('thread_not_found'), 'the fallback names Slack\'s reason');
   assert.ok(posts[1].text.includes('What a person needs to do: Re-run the failed log by hand.'));
   assert.ok(posts[1].text.includes('No incident on the board matches'), 'no matching incident is said plainly');
 
-  // 5. Both refused: nothing posted, both reasons kept, and the event says so.
+  // 6. No card recorded: posted in #bha-self-healing saying so. Both refused: nothing posted, reasons kept.
   await repairs.store(base('c', 'repaired_pending'));
   r = await repairs.store(base('c', 'not_repaired'));
-  refuse = new Set(['dm', 'channel']);
+  refuse = new Set();
+  posts.length = 0;
+  n = await repairs.notifySettled(r.repair_id);
+  assert.deepEqual(n, { posted: 'channel', error: null });
+  assert.equal(posts[0].channel, 'C0C3AGDQWDS');
+  assert.ok(posts[0].text.includes('was not recorded'));
+  await repairs.store(base('d', 'repaired_pending'));
+  await repairs.recordReportLink({ repair_id: rid('d'), channel: CH, ts: '1792451763.000100' });
+  r = await repairs.store(base('d', 'not_repaired'));
+  refuse = new Set(['thread', 'channel']);
   n = await repairs.notifySettled(r.repair_id);
   assert.equal(n.posted, null);
-  assert.ok(n.error.includes('cannot_dm_bot') && n.error.includes('not_in_channel'));
+  assert.ok(n.error.includes('thread_not_found') && n.error.includes('not_in_channel'));
 
-  // 6. One event per settle, saying where each went.
-  const ev = await query(`SELECT subject_id, detail FROM engine_events WHERE event_type = 'repair_settled_notified' AND subject_id = ANY($1) ORDER BY id`, [[rid('a'), rid('b'), rid('c')]]);
-  assert.deepEqual(ev.rows.map((x) => [x.subject_id, x.detail.posted]), [[rid('a'), 'dm'], [rid('b'), 'channel'], [rid('c'), null]]);
+  // 7. One event per settle, saying where each went.
+  const ev = await query(`SELECT subject_id, detail FROM engine_events WHERE event_type = 'repair_settled_notified' AND subject_id = ANY($1) ORDER BY id`, [[rid('a'), rid('b'), rid('c'), rid('d')]]);
+  assert.deepEqual(ev.rows.map((x) => [x.subject_id, x.detail.posted]), [[rid('a'), 'thread'], [rid('b'), 'channel'], [rid('c'), 'channel'], [rid('d'), null]]);
   assert.equal(ev.rows[0].detail.incident_id, `INC-TEST-${T}`);
+  assert.equal(ev.rows[0].detail.thread_ts, '1792451761.123456');
 
-  await query(`DELETE FROM engine_repairs WHERE repair_id = ANY($1)`, [[rid('a'), rid('b'), rid('c')]]);
+  await query(`DELETE FROM engine_repairs WHERE repair_id = ANY($1)`, [[rid('a'), rid('b'), rid('c'), rid('d')]]);
   await query(`DELETE FROM engine_incidents WHERE natural_id = $1`, [`INC-TEST-${T}`]);
-  await query(`DELETE FROM engine_events WHERE event_type = 'repair_settled_notified' AND subject_id = ANY($1)`, [[rid('a'), rid('b'), rid('c')]]);
+  await query(`DELETE FROM engine_events WHERE event_type = 'repair_settled_notified' AND subject_id = ANY($1)`, [[rid('a'), rid('b'), rid('c'), rid('d')]]);
   await closePool();
   server.close();
-  console.log('test:repair-settle: 6 checks passed');
+  console.log('test:repair-settle: 7 checks passed');
 })().catch((e) => {
   console.error(e);
   process.exit(1);

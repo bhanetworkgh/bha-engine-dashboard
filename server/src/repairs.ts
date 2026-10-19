@@ -145,8 +145,13 @@ export async function store(payload: Record<string, unknown>, db: Queryable = { 
 
   const autoReverted = payload.auto_reverted === true && instant(payload.reverted_at) !== null;
   const nodesChanged = Array.isArray(payload.nodes_changed) ? payload.nodes_changed.filter((n) => typeof n === 'string').slice(0, 200) : [];
-  const before = await db.query<{ outcome: string }>(`SELECT outcome FROM engine_repairs WHERE repair_id = $1`, [repairId]);
+  const before = await db.query<{ outcome: string; report_link: unknown }>(`SELECT outcome, payload->'report_link' AS report_link FROM engine_repairs WHERE repair_id = $1`, [repairId]);
   const priorOutcome = before.rows[0]?.outcome ?? null;
+  // The #bha-self-healing card's address (20 Oct 2026) is written onto the row by n8n after the
+  // card posts, not by the bridge, so a later report (the trace re-post, the settle) never carries
+  // it. Keep it, or the settle could not find the thread to answer in.
+  const priorLink = before.rows[0]?.report_link;
+  if (priorLink && typeof priorLink === 'object' && payload.report_link === undefined) payload = { ...payload, report_link: priorLink };
 
   const r = await db.query<{ inserted: boolean }>(
     `INSERT INTO engine_repairs (
@@ -213,10 +218,42 @@ export async function store(payload: Record<string, unknown>, db: Queryable = { 
 
 /* ------------------------------------------- a settled fix is announced (20 Oct 2026) */
 
-/** Who hears that a fix awaiting proof has settled: the Engine Steward. */
+/** Who is tagged on the settle reply: the Engine Steward. */
 export const SETTLE_NOTIFY_USER = process.env.REPAIR_SETTLE_NOTIFY_USER || 'U0AEW3TBYH1';
-/** Where the notice goes if the DM is refused: #bha-engine-alerts. */
-export const SETTLE_FALLBACK_CHANNEL = process.env.REPAIR_SETTLE_FALLBACK_CHANNEL || 'C0ASVQQ8CH3';
+/** #bha-self-healing, where n8n posts the repair card. The settle answers in that card's thread. */
+export const REPORT_CHANNEL = process.env.REPAIR_REPORT_CHANNEL || 'C0C3AGDQWDS';
+
+export interface ReportLink { channel: string; ts: string; recorded_at: string }
+
+/**
+ * Records where n8n posted a repair's card (`BHA — Self Healer Reports`, after Slack answers
+ * ok), so the settle can reply in that card's thread. Only the link moves; nothing else on the
+ * row is touched. A repair this dashboard does not hold yet is a 404, which n8n retries: the
+ * bridge reports here and to n8n at the same moment.
+ */
+export async function recordReportLink(body: Record<string, unknown>, db: Queryable = { query }): Promise<{ repair_id: string; report_link: ReportLink }> {
+  const repairId = text(body.repair_id, 120);
+  const channel = text(body.channel, 40);
+  const ts = text(body.ts, 40);
+  if (!repairId) throw new RepairError('"repair_id" is required.', 422);
+  if (!channel || !/^[CG][A-Z0-9]{6,}$/.test(channel)) throw new RepairError('"channel" must be a Slack channel id (C… or G…).', 422);
+  if (!ts || !/^\d{9,}\.\d{1,9}$/.test(ts)) throw new RepairError('"ts" must be the Slack message ts, like 1792451761.123456.', 422);
+  const link: ReportLink = { channel, ts, recorded_at: new Date().toISOString() };
+  const r = await db.query<{ repair_id: string }>(
+    `UPDATE engine_repairs SET payload = payload || jsonb_build_object('report_link', $2::jsonb) WHERE repair_id = $1 RETURNING repair_id`,
+    [repairId, JSON.stringify(link)],
+  );
+  if (!r.rows[0]) throw new RepairError(`No repair ${repairId} is held yet.`, 404);
+  events.changed('repairs', repairId, db);
+  return { repair_id: repairId, report_link: link };
+}
+
+function linkOf(payload: unknown): ReportLink | null {
+  const l = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).report_link : null;
+  if (!l || typeof l !== 'object') return null;
+  const { channel, ts } = l as Record<string, unknown>;
+  return typeof channel === 'string' && typeof ts === 'string' && channel && ts ? (l as ReportLink) : null;
+}
 
 const SETTLE_WORDS: Record<string, string> = {
   repaired: 'proved: the next real run went through',
@@ -273,12 +310,14 @@ function proofOf(payload: unknown): string | null {
 }
 
 /**
- * Tells Destiny, as Bays, that a fix awaiting proof has settled. Called once per settle, never
- * awaited by the bridge's write. A refused DM goes to #bha-engine-alerts with Slack's reason; if
- * that is refused too it is logged loudly. Either way one `repair_settled_notified` event says
- * where it went, or that it went nowhere.
+ * Answers the repair's own card in #bha-self-healing, as Bays, when a fix awaiting proof settles:
+ * a reply in the card's thread tagging Destiny, with the outcome, the proof, the incident and,
+ * when it did not hold, what a person must do. Called once per settle, never awaited by the
+ * bridge's write. With no card recorded, or a reply Slack refuses, it posts in the channel itself
+ * and says why; if that is refused too it is logged loudly. One `repair_settled_notified` event
+ * says where it went, or that it went nowhere.
  */
-export async function notifySettled(repairId: string): Promise<{ posted: 'dm' | 'channel' | null; error: string | null }> {
+export async function notifySettled(repairId: string): Promise<{ posted: 'thread' | 'channel' | null; error: string | null }> {
   const row = await query<{ repair_id: string; outcome: string; workflow_name: string | null; failed_node: string | null; execution_id: string | null; finished_at: string | null; human_action: string | null; payload: unknown }>(
     `SELECT repair_id, outcome, workflow_name, failed_node, execution_id, finished_at::text AS finished_at, human_action, payload FROM engine_repairs WHERE repair_id = $1`,
     [repairId],
@@ -291,16 +330,23 @@ export async function notifySettled(repairId: string): Promise<{ posted: 'dm' | 
         [r.execution_id],
       )
     : { rows: [] as { id: string; open: boolean }[] };
-  const textBody = settleText({ ...r, proof: proofOf(r.payload) }, inc.rows[0] ?? null);
+  const textBody = `<@${SETTLE_NOTIFY_USER}> ${settleText({ ...r, proof: proofOf(r.payload) }, inc.rows[0] ?? null)}`;
+  const link = linkOf(r.payload);
 
-  let posted: 'dm' | 'channel' | null = null;
+  let posted: 'thread' | 'channel' | null = null;
   let error: string | null = null;
-  const d = await slack.dm(SETTLE_NOTIFY_USER, textBody);
-  if (d.ok) posted = 'dm';
-  else {
-    const c = await slack.botCall('chat.postMessage', { channel: SETTLE_FALLBACK_CHANNEL, text: `<@${SETTLE_NOTIFY_USER}> (the DM was refused: ${d.detail})\n${textBody}`, unfurl_links: false });
+  let why: string;
+  if (link) {
+    const t = await slack.botCall('chat.postMessage', { channel: link.channel, thread_ts: link.ts, text: textBody, unfurl_links: false });
+    if (t.ok) posted = 'thread';
+    why = `the reply in the repair card's thread was refused: ${t.error ?? `HTTP ${t.http_status}`}`;
+  } else {
+    why = 'the repair card was not recorded, so there was no thread to answer in';
+  }
+  if (!posted) {
+    const c = await slack.botCall('chat.postMessage', { channel: link?.channel ?? REPORT_CHANNEL, text: `_Posted here because ${why}._\n${textBody}`, unfurl_links: false });
     if (c.ok) posted = 'channel';
-    else error = `DM refused (${d.detail}); #bha-engine-alerts refused too (${c.error ?? `HTTP ${c.http_status}`})`;
+    else error = `${why}; the channel post was refused too (${c.error ?? `HTTP ${c.http_status}`})`;
   }
   if (error) console.error(`repairs: settle notice for ${repairId} was not posted anywhere: ${error}`);
   try {
@@ -309,7 +355,7 @@ export async function notifySettled(repairId: string): Promise<{ posted: 'dm' | 
       subject_id: repairId,
       actor: 'repairs',
       source_ref: r.workflow_name ?? undefined,
-      detail: { outcome: r.outcome, execution_id: r.execution_id, incident_id: inc.rows[0]?.id ?? null, incident_open: inc.rows[0]?.open ?? null, posted, error },
+      detail: { outcome: r.outcome, execution_id: r.execution_id, incident_id: inc.rows[0]?.id ?? null, incident_open: inc.rows[0]?.open ?? null, posted, thread_ts: posted === 'thread' ? link?.ts ?? null : null, fallback_reason: posted === 'thread' ? null : why, error },
       dedupe_key: `repair_settled_notified:${repairId}:${r.outcome}`,
     });
   } catch (e) {
