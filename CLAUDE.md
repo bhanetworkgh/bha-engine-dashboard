@@ -2682,6 +2682,11 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
   single-part watch says a reply closes it; a multi-part one (`close_on_reply` false) says a reply
   restarts the wait, that it closes once every part is answered or the tracked item closes, and that a
   watch waiting on a date can be snoozed until then. `test:decision-watch` pins both.
+- **Every watch says what moves it, in words** (19 Oct 2026, Destiny). `show()` gives each watch
+  `how_it_moves` (`movesText`): the thread it is on, that only messages there count, what an owner's
+  reply does (closes it, or restarts the wait on a multi-part watch), the linked record, a snooze, and
+  when the next reminder goes in Lagos and UTC. `list_decision_watches` tells Bays to quote it. On 18
+  Oct Bays told Kaiqi a progress note in another thread would reset his watch, which it would not.
 - **A watch can be snoozed until a date** (18 Oct 2026, Destiny; migration 82). Kaiqi asked
   not to be reminded while heads-down on 31 Oct, and with no pause Bays cancelled
   DW-1792249500281-8Y88 and opened DW-1792296192502-322O with a 7-day wait, which filed real

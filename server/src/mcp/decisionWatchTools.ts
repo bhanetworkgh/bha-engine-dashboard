@@ -180,7 +180,7 @@ export const openDecisionWatch: ToolDefinition = {
 export const listDecisionWatches: ToolDefinition = {
   name: 'list_decision_watches',
   description:
-    'List the decisions being watched: open ones first (soonest reminder first), then the closed ones. status is watching, answered (the owner replied), moved (the linked loop or task was closed), escalated (the reminders ran out and Jason and Destiny were told) or cancelled. "problem" is why a watch could not be checked or posted, e.g. a thread no bot can read. Filter with owner_user_id or open_only. Use it to answer "what is Bays watching" or "what am I being waited on for".',
+    'List the decisions being watched: open ones first (soonest reminder first), then the closed ones. status is watching, answered (the owner replied), moved (the linked loop or task was closed), escalated (the reminders ran out and Jason and Destiny were told) or cancelled. "problem" is why a watch could not be checked or posted, e.g. a thread no bot can read. Filter with owner_user_id or open_only. Use it to answer "what is Bays watching" or "what am I being waited on for". Each watch carries how_it_moves: where a reply counts, what it does, and when the next reminder goes. Before telling anyone what a watch will do (whether a message resets it, closes it, or when it will nudge), read that line and say it as written; never work it out from the thread you are in, because the watch may be on a different thread.',
   inputSchema: {
     type: 'object',
     properties: {

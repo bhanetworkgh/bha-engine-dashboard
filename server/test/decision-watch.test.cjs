@@ -526,6 +526,28 @@ const srv = http.createServer((req, res) => {
     ok('a multi-part watch\'s reminder says a reply restarts the wait; a single-part one says it closes');
   }
 
+  /* 12d. every listed watch says, in words, where a reply counts (19 Oct 2026, Kaiqi's JSUX) */
+  {
+    const now = new Date('2026-10-19T08:00:00Z');
+    const row = { watch_id: 'DW-TEST-MOVES', status: 'watching', owner_user_id: HARDIK, owner_name: 'Kaiqi', decision: 'x', quiet_since: new Date('2026-10-18T14:42:00Z'), wait_minutes: 1440, max_reminders: 3, reminders_sent: 0, thread_ts: '1792332426.914229', channel_id: 'C1', thread_link: 'https://bayshorizonnetwork.slack.com/archives/C1/p1792332426914229', record_id: null, record_kind: null, snoozed_until: null, close_on_reply: false, last_error: null, history: [] };
+    const multi = dw.show(row, now).how_it_moves;
+    assert.match(multi, /This watch is on https:\/\/bayshorizonnetwork\.slack\.com\/archives\/C1\/p1792332426914229\. Only messages in that thread count/);
+    assert.match(multi, /a reply from Kaiqi restarts the wait \(the decision has more than one part/);
+    assert.match(multi, /A message anywhere else \(another thread, a channel, a DM\) does not count\./);
+    assert.match(multi, /reminder 1 of 3 goes at Mon 19 Oct, 15:42 Lagos \(14:42 UTC\)/);
+    const single = dw.show({ ...row, close_on_reply: true, record_id: 'LOOP-9', record_kind: 'loops' }, now).how_it_moves;
+    assert.match(single, /a reply from Kaiqi closes it;/);
+    assert.match(single, /restarts when loop LOOP-9 changes, and closes when it closes/);
+    const dm = dw.show({ ...row, thread_ts: null, thread_link: null, channel_id: null }, now).how_it_moves;
+    assert.match(dm, /no thread: reminders go to Kaiqi by DM/);
+    const snoozed = dw.show({ ...row, snoozed_until: new Date('2026-10-25T00:00:00Z') }, now).how_it_moves;
+    assert.match(snoozed, /Snoozed until .*a reply still counts/);
+    assert.equal(dw.show({ ...row, status: 'answered' }, now).how_it_moves, 'Closed (answered). Nothing moves it any more.');
+    const listed = (await dw.read()).watches;
+    assert.ok(listed.length && listed.every((w) => typeof w.how_it_moves === 'string' && w.how_it_moves.length > 20));
+    ok('every listed watch says where a reply counts, what it does, and when the next reminder goes');
+  }
+
   /* 13. events */
   const ev = await query(`SELECT event_type, count(*)::int AS n FROM engine_events WHERE subject_id = ANY($1) GROUP BY 1`, [[A, B]]);
   const n = Object.fromEntries(ev.rows.map((x) => [x.event_type, x.n]));
