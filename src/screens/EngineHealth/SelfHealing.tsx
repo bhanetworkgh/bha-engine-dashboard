@@ -1,5 +1,5 @@
 import { useData } from '../../app/useData';
-import { getSelfHealing, type FixTime, type Share } from '../../data';
+import { getSelfHealing, type FixTime, type HealShare } from '../../data';
 import { Card, CardHeader, EmptyState, FigureCell, LoadFailed, Loading, RecordId, StatStrip, TableFrame, Th } from '../../components/ui';
 import { when } from './parts';
 import { HEALTH_KINDS } from './kinds';
@@ -14,7 +14,7 @@ import { HEALTH_KINDS } from './kinds';
  * marks only what needs a person: a real fault still open.
  */
 
-const ratio = (s: Share) => (s.of ? `${s.n} of ${s.of}` : 'none to count');
+const ratio = (s: HealShare) => (s.of ? `${s.n} of ${s.of}` : 'none to count');
 const mins = (m: number | null) => (m === null ? '—' : m < 90 ? `${Math.round(m)} min` : m < 48 * 60 ? `${Math.round((m / 60) * 10) / 10} h` : `${Math.round((m / 1440) * 10) / 10} d`);
 const fixLine = (t: FixTime) => (t.n ? `p50 ${mins(t.p50_minutes)}, p95 ${mins(t.p95_minutes)}, over ${t.n}` : 'no trusted close yet');
 const KIND: Record<string, string> = {
