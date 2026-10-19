@@ -41,6 +41,7 @@ import * as events from './events';
 import * as paySync from './paySync';
 import * as executions from './executions';
 import * as health from './health';
+import * as selfHealing from './selfHealing';
 import * as repairs from './repairs';
 import * as recovery from './recovery';
 import * as scorecard from './scorecard';
@@ -1578,6 +1579,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await pay.metrics(mon || null));
       }
       /** One lane, or all three when `lane` is absent. */
+      /** The self-healing scorecard (19 Oct 2026, D2.5). The tab and read_self_healing share it. */
+      case '/api/engine-health/self-healing':
+        return send(res, 200, await selfHealing.scorecard({ weeks: Number(url.searchParams.get('weeks')) || undefined }));
       case '/api/engine-health/metrics': {
         const lane = url.searchParams.get('lane');
         if (lane && !health.LANE_KEYS.includes(lane)) throw new HttpError(404, `"${lane}" is not a lane this engine reports on. One of: ${health.LANE_KEYS.join(', ')}.`);

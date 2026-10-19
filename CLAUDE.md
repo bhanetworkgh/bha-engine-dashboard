@@ -3492,6 +3492,32 @@ root cause, the exact change, and a way back. So:
   healthy tone. Colour marks only what needs somebody: needing a person, and not
   repaired.
 
+**The Self-healing tab is the scorecard** (19 Oct 2026, Destiny — D2.5: "If BHA is going to
+be marketing that we have a self-healing system, we need to be able to back everything up with
+numbers"). `?tab=self-healing`, `GET /api/engine-health/self-healing`, `server/src/selfHealing.ts`,
+and the read tool `read_self_healing` (both connections, in no agent's scope yet: adding it to an
+agent is that agent's n8n allow-list too, with a draft eval). Week by week since the healer began
+(21 Sep): **production runs** (webhook, trigger, sub-workflow; manual runs, the healer's retries and
+the error handlers' runs are not workload) and how many failed; **real faults** against those
+**counted apart** (`logstream.excludedReason`: tests, the simulator, a guard refusal), with a fault
+raised by an alarm step counted as real, because the alarm reports something that failed upstream;
+**every automatic fix**, counted once per incident wherever it was recorded (a healer retry that
+recovered, including `RUN-…` rows that never opened an incident; a repair still standing, matched
+to its incident by execution id; a recovery-watcher re-run; a polling one-off closed by itself);
+**how each real fault closed** (engine, cleared on its own, person, policy, or not recorded before
+2 Oct, and a close the ledger did upstream is the engine's only where a fix is recorded against
+it); still open; and time to fix as p50/p95, engine and person apart, closes from 2 Oct only. The
+engine share leaves policy and not-recorded closes out and names them. It also shows how the healer
+routed each failure, from the `self_healer_routed` events `BHA — Self Healer` posts from 19 Oct. A
+read. `npm run test:self-healing`.
+
+**The healer skips what threw on purpose** (19 Oct 2026, D2.5). `BHA — Self Healer`'s Decide Lane
+routes a guard refusal (`Raise Refused Ask/Click`), a TEST or simulator workflow, and a deliberate
+alarm step (`Raise …`, `Assert …`, `Stop On …`) to skip: the error handler still raises each one
+and opens its incident, but a retry repeats the alarm and Claude Code editing it would silence it
+rather than fix the fault upstream. A person's Retry now is never skipped for this. Record Route
+posts every route to `/api/engine/events` (`self_healer_routed`), so skips are counted, not lost.
+
 **The Recovery tab is "Waiting on a dependency"** (2026-09-23, Destiny). The
 watcher's switch at the top — on or off, who flipped it last, and a sentence
 where `RECOVERY_ENABLED=false` overrides it rather than a button that silently
