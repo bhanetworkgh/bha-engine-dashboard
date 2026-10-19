@@ -1083,6 +1083,21 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * `Engine — Weekly Health Report` asks for it every Monday and posts `slack_text`
      * as Bays. `now` may move the report back to an earlier week, for a rerun.
      */
+    /**
+     * The week's twin critique into BHARAG (19 Oct 2026, LOOP-RYHY). POST, once a week: n8n
+     * calls it after the report has posted. A repeat answers with the document already filed.
+     */
+    if (p === '/api/engine/health-report/twin-critique') {
+      if (method !== 'POST') throw new HttpError(405, 'POST to file the week\'s twin critique.');
+      const qs = new URL(req.url ?? '', 'http://x').searchParams;
+      const at = qs.get('now');
+      const nowParam = at && !Number.isNaN(Date.parse(at)) ? new Date(at).toISOString() : undefined;
+      const dry = qs.get('dry_run') === 'true' || qs.get('dry_run') === '1';
+      const r = await healthReport.fileTwinCritique({ now: nowParam, dry_run: dry });
+      await mirror.logWrite({ endpoint, kind: 'health_report', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: r.ok ? (r.filed ? 'inserted' : 'unchanged') : 'error', detail: `twin critique ${r.week}: ${r.detail}`, ms: Date.now() - t0 });
+      return send(res, r.ok ? 200 : 502, r);
+    }
+
     if (p === '/api/engine/health-report') {
       if (method !== 'GET') throw new HttpError(405, 'GET the report. Posting it is the n8n workflow\'s job.');
       const at = new URL(req.url ?? '', 'http://x').searchParams.get('now');
