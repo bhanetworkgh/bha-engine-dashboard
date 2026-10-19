@@ -24,7 +24,7 @@ const KIND: Record<string, string> = {
   one_off_closed: 'one-off closed',
   incident_self_healed: 'closed self-healed',
 };
-const APART: Record<string, string> = { test: 'test', simulator: 'simulator', refused_ask: 'refused ask', refused_click: 'refused click' };
+const APART: Record<string, string> = { test: 'test', simulator: 'simulator', refused_ask: 'refused ask', refused_click: 'refused click', marked_test: 'marked a test' };
 
 export function SelfHealing() {
   const { status, data, error } = useData(getSelfHealing, [], { kinds: HEALTH_KINDS });

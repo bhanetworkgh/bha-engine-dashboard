@@ -3320,6 +3320,17 @@ const MIGRATIONS: Migration[] = [
       // An owner message up to the snooze is the snooze being asked for, not the answer.
       `ALTER TABLE engine_decision_watches ADD COLUMN IF NOT EXISTS owner_seen_until timestamptz`,
     ],
+  },  {
+    // 19 Oct 2026 (Destiny, D2.5): an incident a person closes as a test, a probe or noise is
+    // marked so, with the reason, and the self-healing scorecard counts it apart from real
+    // faults instead of as a person's close. Null is a real incident.
+    id: 83,
+    name: 'engine_incidents: test_reason, test_marked_by, test_marked_at',
+    statements: [
+      `ALTER TABLE engine_incidents ADD COLUMN IF NOT EXISTS test_reason text`,
+      `ALTER TABLE engine_incidents ADD COLUMN IF NOT EXISTS test_marked_by text`,
+      `ALTER TABLE engine_incidents ADD COLUMN IF NOT EXISTS test_marked_at timestamptz`,
+    ],
   },
 ];
 

@@ -229,6 +229,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'read_sop',
         // 2026-10-18: the Engine Surfaces Contract's read (see North Star's entry).
         'read_buyer_flow',
+        // 2026-10-19: the self-healing scorecard, so a figure Bays quotes is the page's figure.
+        'read_self_healing',
       ]),
     },
     {
