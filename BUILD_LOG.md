@@ -12959,3 +12959,8 @@ Files:      n8n only. Restore point 306155b0-585c-43d0-807c-cb4f8effae94; publis
 Problem:    Test run 42323: Slack's reply held only the report's tail ("• *Research Twin*: 34 asks…"). At ~5,300 characters the text was being split across several messages.
 Fix:        Post To Slack sends one mrkdwn section block per paragraph (each under 3,000) with the text as fallback; test run 42326 posted one message of 11 blocks (ts 1792394061.299419). Added File Twin Critique (POST /api/engine/health-report/twin-critique, dry_run on a test run) and Check Filed (throws unless ok). 42326's dry run: "Twin Critique: week of 12 to 18 Oct 2026", would file into BHARAG_SOPS_KEY. Group 4 and the sticky note updated.
 Decision:   Today's report is reposted once Destiny has deleted the 07:00 post: a production run of the schedule trigger, which also files the first critique for real.
+
+## 2026-10-19 08:30 — Health report as real Block Kit
+Intent:     Destiny: the test copies "look like absolute trash". The 08:16 change only cut slack_text into mrkdwn sections, so the bullets, indents and long loop ids rendered as walls of text.
+Files:      server/src/healthReport.ts (slackBlocks; the report returns slack_blocks and slack_blocks_test), server/test/health-report.test.cjs.
+Fix:        A header, a context line, a four-figure grid, then one titled part per section with per-person two-column fields, dividers between parts, the twin review as a three-twin grid with the stuck loops and misses listed under it, and an "Open Engine health" button. Within Slack's limits (50 blocks, 10 fields of 2,000, 3,000 per section), pinned by the test.
