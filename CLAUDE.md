@@ -2093,6 +2093,20 @@ holds each failed run's input and the healer resumes it from the failed step.
 - **The off switch** is a toggle on Engine health stored in `meta`
   (`recovery.enabled`), **on by default**, every flip a `record_writes` line
   with who made it; `RECOVERY_ENABLED=false` on the service overrides it.
+- **A polling trigger's one-off error closes itself** (19 Oct 2026, Destiny —
+  INC-BAYS.AGENT-055 and -063, each one failed Google Sheets poll of Form A,
+  each closed by hand). A `UPSTREAM_5XX` or `NETWORK_TIMEOUT` on a step whose
+  name says `(polling)`, with no execution id (a poll that fails carries none,
+  so nothing can be resumed and the next poll simply runs), is closed
+  `self_healed` once `ONE_OFF_QUIET_MS` (30 minutes) has passed **and no other
+  incident of the same workflow and step falls within 30 minutes either side
+  of it**, open or already closed. A repeat is not a one-off: both stay open
+  for a person, each already alerted by its own handler run, and the Recovery
+  tab's passed-over list says so and names the other ids; a younger one says
+  when it will close. Every tick, whatever is waiting, and only from a lane
+  read live that tick. The close is the watcher's own `closeLedger` (open →
+  retrying → self_healed, mirrored, a `record_writes` line, actor `recovery`)
+  and one `polling_one_off_closed` event. `npm run test:recovery` pins it.
 - **`GET /api/engine/recovery/plan`** (`x-dashboard-key`, logged as `read`)
   answers what the next tick would do — waiting and replaying rows, what was
   passed over and why, the last probe — **calling nothing**.
