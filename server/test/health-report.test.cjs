@@ -80,6 +80,14 @@ const assert = require('node:assert/strict');
   assert.ok(r.data.twins.research_twin.misses.some((m) => m.question === 'A thin test question'), 'a thin Research Twin answer is a miss');
   assert.match(r.slack_text, /\*6\. Twin review: hits and misses\*/);
   assert.match(r.slack_text, /LOOP-1000000000001-THRA \(Ahad, In Progress, named 3 times\)/);
+  assert.ok(Array.isArray(r.slack_blocks) && r.slack_blocks.length <= 50, 'at most 50 blocks');
+  assert.equal(r.slack_blocks[0].type, 'header');
+  assert.equal(r.slack_blocks_test[0].type, 'context', 'a test copy says so first');
+  for (const b of r.slack_blocks) {
+    if (b.fields) { assert.ok(b.fields.length <= 10); for (const f of b.fields) assert.ok(f.text.length <= 2000); }
+    if (b.text && b.type === 'section') assert.ok(b.text.text.length <= 3000);
+  }
+  assert.ok(JSON.stringify(r.slack_blocks).includes('LOOP-1000000000001-THRA'), 'stuck loops are in the blocks');
   const doc = hr.twinCritiqueDoc(r.data);
   assert.equal(doc.title, 'Twin Critique: week of 12 to 18 Oct 2026');
   assert.match(doc.content, /\*\*North Star\*\* pointed people at/);
