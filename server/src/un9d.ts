@@ -160,7 +160,11 @@ export function test1(farm: { snapshot_at: string; synthetic: boolean } , device
   conds.push(C('identity', 'Every device has an id and a farm', 'pass', `All ${live.length} device(s) carry device_id and farm_id (the route refuses one without).`));
   each('placement', 'Every device says where it sits', 'place', 'place');
   each('signal_type', 'Every device says what it measures', 'device_type', 'device_type');
-  each('observed_time', 'Every device carries when it last read', 'last_reading_at', 'last_reading_at');
+  // A presence-only device (a camera) never has a reading time, so its last report counts (20 Oct 2026).
+  {
+    const m = live.filter((d) => !d.last_reading_at && !d.last_seen_at).map((d) => d.device_id);
+    conds.push(C('observed_time', 'Every device carries when it last reported', m.length ? 'fail' : 'pass', m.length ? `${m.length} of ${live.length} device(s) have no last_reading_at or last_seen_at: ${m.slice(0, 5).join(', ')}.` : `All ${live.length} device(s) carry a last_reading_at, or a last_seen_at where they never read.`));
+  }
   conds.push(C('received_time', 'The dashboard knows when it received the state', farm.snapshot_at ? 'pass' : 'fail', farm.snapshot_at ? `Last snapshot received ${farm.snapshot_at}.` : 'No snapshot time is held.'));
   conds.push(C('evidence_flag', 'The data says whether it is real evidence', 'pass', farm.synthetic ? 'The farm is marked synthetic: simulated, not evidence about any rack.' : 'The farm carries no synthetic flag: it is vFarm data, counted as evidence.'));
 

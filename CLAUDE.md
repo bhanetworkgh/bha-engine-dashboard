@@ -3748,8 +3748,12 @@ under `/api/engine` with the same `x-dashboard-key`, each logged on
 - `dry_run: true` on any of them runs every check and write and rolls back, so
   a payload can be proved without a test row on a live page.
 
-**Reporting is `last_reading_at` in the last 15 minutes**, never vFarm's
-`devices.status`, which nothing in vFarm keeps current. Before the first push,
+**Online and offline follow vFarm's `devices.status`** (20 Oct 2026, Destiny, from Jegan's
+handover of 19 Oct: vFarm keeps it current with a 180 s presence backstop, and cameras never
+stamp `last_reading_at`). Offline is not reporting; online is reporting unless the device reads
+and its last reading is over 15 minutes old; with no status it is `last_reading_at` in the last
+15 minutes, as before. The Monitoring Twin's `freshness` and UN9D's `observed_time` follow the
+same rule (`npm run test:un9d`). Before the first push,
 each tab says what is missing and who wires it, and draws nothing.
 The contracts handed to the builders are `docs/contracts/genie-events.md`
 (Kaiqi) and `docs/contracts/vfarm.md` (Jegan and Kavin).
