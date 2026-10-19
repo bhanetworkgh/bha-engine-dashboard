@@ -13035,3 +13035,29 @@ Fix:        POST /api/engine/repair/report-link stores the card's channel and ts
             and Post Quietly? now also skips a follow_up report's card. Restore point for n8n: version e07b659c.
 Decision:   The dashboard, not n8n, posts the settle, because it already holds the row, the incident and the proof
             and is where the settle is detected. test:repair-settle: 7 checks pass.
+
+## 2026-10-20 22:10 — Logstream dates a closed incident by when it happened (LOOP-1792388413323-4E0U)
+Intent:     Logstream read coalesce(occurred_at, first_seen_at); BHARAG moves occurred_at to each status change,
+            so every closed incident was dated by its close.
+Files:      server/src/logstream.ts, server/src/researchSignals.ts, server/src/migrations.ts (85),
+            server/test/logstream.test.cjs, CLAUDE.md
+Problem:    Live before the fix: 44 of 135 incidents had occurred_at later than first_seen_at, all closed; 118 of
+            410 engine_logstream rows held a date later than the incident's first sighting. Closed rows: median
+            time to recovery 1,906 s, and 50 of 133 under a minute. 7-day counts per fault: unchanged (21 in the
+            window either way; Bays — Agent Delivery :: Raise If Agent Failed at 6 both ways).
+Fix:        logstream.INCIDENT_AT = LEAST(occurred_at, first_seen_at), each parsed only when ISO, used by the writer,
+            the trigger's window and research signals T4. Migration 85 corrects the written rows once, keeping the
+            old date in audit.date_corrected and re-deriving time to recovery from the same close.
+Decision:   Correct the rows rather than leave wrong history: the old value is kept on each row, so nothing is
+            lost. test:logstream 20 checks (one new), test:research-signals 15, test:self-healing pass.
+
+## 2026-10-20 22:10 — Research Twin's Web_Search and Bays' Deep_Think get the Anthropic backup (LOOP-1792401902809-A0JY)
+Intent:     The two agent tools that still went straight to OpenRouter (the 18 Oct BUILD_LOG limit).
+Files:      none in this repo (n8n only).
+Fix:        Two n8n workflows: Research Twin — Web Search (pvsuwhqOtoHPJddZ) and Bays — Deep Think (RQ9WLeWRRtxk4GMn).
+            OpenRouter first with the old request; on an error or no answer text, Anthropic directly (web search:
+            claude-sonnet-5 with Anthropic's web_search tool; Deep Think: claude-opus-5-5, adaptive thinking at high
+            effort), one ai_provider_fallback event per switch, a throw if both fail. Each agent's tool (primaries
+            and both Anthropic backups) is now the workflow; Bays' Deep Think skill reads `analysis` and names the model.
+Decision:   Test 43194: both paths of both tools answered; the two forced-backup runs wrote ai_provider_fallback
+            events with detail.forced_test = true.
