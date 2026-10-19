@@ -13061,3 +13061,10 @@ Fix:        Two n8n workflows: Research Twin — Web Search (pvsuwhqOtoHPJddZ) a
             and both Anthropic backups) is now the workflow; Bays' Deep Think skill reads `analysis` and names the model.
 Decision:   Test 43194: both paths of both tools answered; the two forced-backup runs wrote ai_provider_fallback
             events with detail.forced_test = true.
+
+## 2026-10-20 21:50 — Correct a repair's proof (CODEX-035)
+Intent:     Close INC-BAYS.CODEX-035 honestly. REP-YTpezWSOIN6TNYcX-43048 settled "repaired" citing execution 43198 (Ahad's log), which stopped at "Filter - Layer 0 Failed" and never ran the fixed "Build Layer 2 Payload".
+Files:      server/src/repairs.ts (correctProof), server/src/mcp/incidentTools.ts (correct_repair_proof), server/test/repair-settle.test.cjs (check 8), CLAUDE.md
+Problem:    No way to restate a settled repair's evidence without reposting the whole 700 KB record.
+Fix:        correct_repair_proof replaces verified_by, appends a dated "Proof corrected" line, keeps the old proof in payload.proof_corrections, never touches the outcome. Bridge side fixed the same day (bha-repair-bridge fc70807): a later run counts only if it ran a changed node.
+Decision:   A correction restates evidence; it does not re-decide a repair, so outcome is out of reach of the tool.

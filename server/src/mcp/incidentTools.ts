@@ -301,4 +301,52 @@ export const markIncidentsTestTool: ToolDefinition = {
   },
 };
 
-export const INCIDENT_WRITE_TOOLS: ToolDefinition[] = [closeIncidentsTool, retryIncidentTool, actOnPreparedFixTool, markIncidentsTestTool];
+/**
+ * correct_repair_proof — write connection only, no agent's scope (20 Oct 2026, Destiny —
+ * INC-BAYS.CODEX-035). repairs.correctProof: replaces what a repair names as its proof, appends
+ * the dated correction to its change summary, keeps the old proof. Never changes the outcome.
+ */
+export const correctRepairProofTool: ToolDefinition = {
+  name: 'correct_repair_proof',
+  description:
+    'Correct what a repair record names as its proof, when the run it cited did not really prove the fix (for example a later run that never reached the changed step). repair_id: as the Repairs tab lists it. verified_by: the real evidence, each {execution_id?, evidence} (may be empty when nothing proves it yet). reason: the correction a reader sees, at least 10 characters. Appends a dated "Proof corrected" line to the change summary and keeps the old proof in payload.proof_corrections. Never changes the outcome. dry_run returns the row as held and writes nothing. Audited on engine_mcp_writes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      repair_id: { type: 'string' },
+      verified_by: { type: 'array', items: { type: 'object', properties: { execution_id: { type: 'string' }, evidence: { type: 'string' } }, required: ['evidence'] } },
+      reason: { type: 'string' },
+      requester_user_id: { type: 'string' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['repair_id', 'verified_by', 'reason'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false, title: 'Correct a repair record’s proof' },
+  handler: async (args, deps) => {
+    const id = typeof args.repair_id === 'string' ? args.repair_id.trim() : '';
+    const reason = typeof args.reason === 'string' ? args.reason.trim() : '';
+    const requester = typeof args.requester_user_id === 'string' ? args.requester_user_id.trim() || null : null;
+    const dry = args.dry_run === true;
+    const audit = await auditOpen({ tool: 'correct_repair_proof', args, access: deps.access, kind: 'repairs', requester, dry_run: dry });
+    try {
+      if (dry) {
+        const held = await query<{ outcome: string; vb: unknown }>(`SELECT outcome, payload->'verified_by' AS vb FROM engine_repairs WHERE repair_id = $1`, [id]);
+        const row = held.rows[0] ?? null;
+        await auditClose(audit, { outcome: 'dry_run', detail: row ? 'would correct' : 'no such repair', natural_id: id, after: row });
+        return { ok: Boolean(row), dry_run: true, repair_id: id, held: row, audit_id: audit };
+      }
+      const by = `mcp:${deps.access}${requester ? ` (${requester})` : ''}`;
+      const r = await repairs.correctProof({ repair_id: id, verified_by: Array.isArray(args.verified_by) ? (args.verified_by as never) : [], reason, by });
+      await auditClose(audit, { outcome: 'applied', detail: reason.slice(0, 500), natural_id: id, before: { verified_by: r.previous_verified_by }, after: { verified_by: r.verified_by } });
+      return { ok: true, ...r, audit_id: audit };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      const refused = e instanceof repairs.RepairError;
+      await auditClose(audit, { outcome: refused ? 'refused' : 'failed', detail: message });
+      return { ok: false, reason: refused ? 'refused' : 'error', message, audit_id: audit };
+    }
+  },
+};
+
+export const INCIDENT_WRITE_TOOLS: ToolDefinition[] = [closeIncidentsTool, retryIncidentTool, actOnPreparedFixTool, markIncidentsTestTool, correctRepairProofTool];

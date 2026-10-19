@@ -137,12 +137,24 @@ const server = http.createServer((req, res) => {
   assert.equal(ev.rows[0].detail.incident_id, `INC-TEST-${T}`);
   assert.equal(ev.rows[0].detail.thread_ts, '1792451761.123456');
 
+  // 8. A proof correction replaces verified_by, appends a dated line, keeps the old proof, leaves the outcome.
+  const before = (await query(`SELECT outcome, payload->'verified_by' AS vb FROM engine_repairs WHERE repair_id = $1`, [rid('a')])).rows[0];
+  const c = await repairs.correctProof({ repair_id: rid('a'), verified_by: [{ evidence: 'manual repost through the fixed step, ok:true' }], reason: 'The cited run never reached the changed step.', by: 'test' });
+  assert.equal(c.outcome, before.outcome, 'outcome untouched');
+  const after = (await query(`SELECT outcome, change_summary, payload FROM engine_repairs WHERE repair_id = $1`, [rid('a')])).rows[0];
+  assert.equal(after.outcome, before.outcome);
+  assert.deepEqual(after.payload.verified_by, [{ execution_id: null, evidence: 'manual repost through the fixed step, ok:true' }]);
+  assert.ok(after.change_summary.includes('Proof corrected') && after.payload.change_summary === after.change_summary);
+  assert.deepEqual(after.payload.proof_corrections[0].previous_verified_by, before.vb);
+  await assert.rejects(repairs.correctProof({ repair_id: 'REP-none', verified_by: [], reason: 'a long enough reason', by: 'test' }), /No repair/);
+  await assert.rejects(repairs.correctProof({ repair_id: rid('a'), verified_by: [], reason: 'short', by: 'test' }), /reason/);
+
   await query(`DELETE FROM engine_repairs WHERE repair_id = ANY($1)`, [[rid('a'), rid('b'), rid('c'), rid('d')]]);
   await query(`DELETE FROM engine_incidents WHERE natural_id = $1`, [`INC-TEST-${T}`]);
   await query(`DELETE FROM engine_events WHERE event_type = 'repair_settled_notified' AND subject_id = ANY($1)`, [[rid('a'), rid('b'), rid('c'), rid('d')]]);
   await closePool();
   server.close();
-  console.log('test:repair-settle: 7 checks passed');
+  console.log('test:repair-settle: 8 checks passed');
 })().catch((e) => {
   console.error(e);
   process.exit(1);
