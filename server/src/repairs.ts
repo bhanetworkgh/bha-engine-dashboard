@@ -248,6 +248,48 @@ export async function recordReportLink(body: Record<string, unknown>, db: Querya
   return { repair_id: repairId, report_link: link };
 }
 
+/**
+ * Corrects what a settled repair names as its proof (20 Oct 2026, Destiny — INC-BAYS.CODEX-035).
+ * The bridge settled REP-YTpezWSOIN6TNYcX-43048 as repaired on execution 43198, which succeeded
+ * but never ran the changed step; the bridge no longer counts such a run (bha-repair-bridge
+ * fc70807). This replaces `verified_by` with what really shows the fix works, appends a dated
+ * correction to `change_summary`, and keeps the old proof in `payload.proof_corrections`, so the
+ * record says what changed and nothing is lost. The outcome is never touched: a correction
+ * restates the evidence, it does not re-decide the repair.
+ */
+export async function correctProof(
+  body: { repair_id: string; verified_by: Array<{ execution_id?: string; evidence: string }>; reason: string; by: string },
+  db: Queryable = { query },
+): Promise<{ repair_id: string; outcome: string; previous_verified_by: unknown; verified_by: unknown; change_summary: string }> {
+  const repairId = text(body.repair_id, 120);
+  const reason = text(body.reason, 1000);
+  if (!repairId) throw new RepairError('"repair_id" is required.', 422);
+  if (!reason || reason.length < 10) throw new RepairError('"reason" is required (at least 10 characters): it is the correction a reader sees.', 422);
+  const proof = (Array.isArray(body.verified_by) ? body.verified_by : [])
+    .map((v) => ({ execution_id: text(v?.execution_id, 60) ?? null, evidence: text(v?.evidence, 500) ?? '' }))
+    .filter((v) => v.evidence.length >= 3);
+  const held = await db.query<{ outcome: string; change_summary: string | null; vb: unknown }>(
+    `SELECT outcome, change_summary, payload->'verified_by' AS vb FROM engine_repairs WHERE repair_id = $1`,
+    [repairId],
+  );
+  const row = held.rows[0];
+  if (!row) throw new RepairError(`No repair ${repairId} is held.`, 404);
+  const at = new Date().toISOString();
+  const line = `Proof corrected ${at.slice(0, 10)} by ${body.by}: ${reason}`;
+  const summary = `${row.change_summary ?? ''}\n\n${line}`.trim();
+  const correction = { at, by: body.by, reason, previous_verified_by: row.vb ?? null, verified_by: proof };
+  await db.query(
+    `UPDATE engine_repairs
+        SET change_summary = $2,
+            payload = jsonb_set(payload || jsonb_build_object('verified_by', $3::jsonb, 'change_summary', $2::text),
+                                '{proof_corrections}', COALESCE(payload->'proof_corrections', '[]'::jsonb) || $4::jsonb)
+      WHERE repair_id = $1`,
+    [repairId, summary, JSON.stringify(proof), JSON.stringify([correction])],
+  );
+  events.changed('repairs', repairId, db);
+  return { repair_id: repairId, outcome: row.outcome, previous_verified_by: row.vb ?? null, verified_by: proof, change_summary: summary };
+}
+
 function linkOf(payload: unknown): ReportLink | null {
   const l = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).report_link : null;
   if (!l || typeof l !== 'object') return null;
