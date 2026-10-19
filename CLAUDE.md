@@ -3501,11 +3501,18 @@ root cause, the exact change, and a way back. So:
   healthy tone. Colour marks only what needs somebody: needing a person, and not
   repaired.
 
-**A settled fix is announced** (20 Oct 2026, Destiny). When the bridge's second report turns a
-`repaired_pending` row into anything else, `repairs.notifySettled` has Bays DM Destiny the outcome, the
-proof, the incident's state and, when it did not hold, what a person must do; a refused DM goes to
-#bha-engine-alerts with Slack's reason, and each settle is one `repair_settled_notified` event. Never
-awaited by the bridge's write. `npm run test:repair-settle`.
+**A settled fix is answered in its own card's thread** (20 Oct 2026, Destiny: "rather than dm me, let it
+notify the proof inside the thread on the self healing channel"). n8n's `BHA — Self Healer Reports` posts
+each repair card in #bha-self-healing; for a `repaired_pending` card it then calls
+`POST /api/engine/repair/report-link` (`x-dashboard-key`, `{repair_id, channel, ts}`, retried; a 404 means the
+bridge's own report has not landed yet), which writes `payload.report_link` and nothing else. `repairs.store`
+keeps that link through every later whole-record report (the trace re-post, the settle), because neither
+carries it. When the bridge's second report turns the row into anything else, `repairs.notifySettled` replies
+in that card's thread as Bays, tagging Destiny, with the outcome, the proof, the incident's state and, when it
+did not hold, what a person must do. No link, or a reply Slack refuses, posts in the channel itself with the
+reason; both refused is logged loudly. Each settle is one `repair_settled_notified` event naming where it went.
+The n8n workflow's **Post Quietly?** skips a follow-up report's own card, so the settle is said once, in the
+thread. Never awaited by the bridge's write. `npm run test:repair-settle`.
 
 **The Self-healing tab is the scorecard** (19 Oct 2026, Destiny — D2.5: "If BHA is going to
 be marketing that we have a self-healing system, we need to be able to back everything up with
