@@ -3545,6 +3545,18 @@ last week), the three agents (asks, delivered, completed, median reply), build p
 with their growth, and a week-by-week line. It lists no open incidents. SOPs are read from BHARAG,
 and a read that fails says so instead of printing nought. `npm run test:health-report`.
 
+**The report reviews the twins too** (19 Oct 2026, Destiny — LOOP-1792016378151-RYHY, Jason's ask
+of 14 Oct for a standing record of the twins' hits and misses). Section 6, *Twin review*, covers
+the last week only. North Star is checked against the loop board: every loop id its answers
+named, and whether that loop's status changed (the status record, never a mirror line) after it
+was first named and before the week ended; a loop named three or more times that never moved is
+listed. Research Twin and Genie are judged on their own recorded outcome and delivery; nothing
+grades what an answer said. The same review is filed once a week into BHARAG's codex workspace
+(where Bays searches) as `Twin Critique: week of …`, `source_type` `twin_critique`, through the
+write guard: `POST /api/engine/health-report/twin-critique` (`x-dashboard-key`, `dry_run`, `now`),
+which n8n calls after the scheduled post lands. The document id is kept in `meta`
+`twin_critique.<week>`, so a repeat files nothing.
+
 **The Recovery tab is "Waiting on a dependency"** (2026-09-23, Destiny). The
 watcher's switch at the top — on or off, who flipped it last, and a sentence
 where `RECOVERY_ENABLED=false` overrides it rather than a button that silently
