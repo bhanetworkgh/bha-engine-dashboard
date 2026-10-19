@@ -12964,3 +12964,8 @@ Decision:   Today's report is reposted once Destiny has deleted the 07:00 post: 
 Intent:     Destiny: the test copies "look like absolute trash". The 08:16 change only cut slack_text into mrkdwn sections, so the bullets, indents and long loop ids rendered as walls of text.
 Files:      server/src/healthReport.ts (slackBlocks; the report returns slack_blocks and slack_blocks_test), server/test/health-report.test.cjs.
 Fix:        A header, a context line, a four-figure grid, then one titled part per section with per-person two-column fields, dividers between parts, the twin review as a three-twin grid with the stuck loops and misses listed under it, and an "Open Engine health" button. Within Slack's limits (50 blocks, 10 fields of 2,000, 3,000 per section), pinned by the test.
+
+## 2026-10-19 08:35 — Health report layout: rich text lists, quote and table backdrops
+Intent:     Destiny on the 08:22 test: use rich text lists, italics, styling, backdrops where useful, and proper spacing.
+Files:      server/src/healthReport.ts (slackBlocks rewritten).
+Fix:        A header per part (with an emoji), each part one rich_text block of bulleted lists: bold names, italic notes, loop ids in code, stuck loops with an indented italic description. The headline is a rich_text_quote and the week-by-week figures are a padded table in rich_text_preformatted, both drawn on Slack's grey backdrop. Dividers between parts, italic context lines, a primary "Open Engine health" button.

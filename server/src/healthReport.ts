@@ -414,87 +414,140 @@ export async function fileTwinCritique(opts: { now?: string; dry_run?: boolean }
 }
 
 /**
- * The report as real Block Kit (19 Oct 2026, Destiny: the text cut into sections "looks like
- * trash"). A header, a figures grid, then one section per part with per-person fields, dividers
- * between parts and a button to Engine health. `slack_text` stays as the notification fallback.
- * Slack's limits: 50 blocks, 10 fields of 2,000 characters, 3,000 per section text.
+ * The report as Block Kit rich text (19 Oct 2026, Destiny: use rich text lists, italics, styling,
+ * backdrops and proper spacing). One header per part, each part a rich_text block of real
+ * bulleted lists with bold names, italic notes and loop ids in code; the headline in a quote and
+ * the week-by-week table in a preformatted block, both of which Slack draws on a grey backdrop.
+ * Slack's limit is 50 blocks; `slack_text` stays as the notification fallback.
  */
+type RT = { type: 'text'; text: string; style?: { bold?: boolean; italic?: boolean; code?: boolean } } | { type: 'emoji'; name: string } | { type: 'link'; url: string; text?: string; style?: { bold?: boolean } };
+const tx = (text: string, style?: { bold?: boolean; italic?: boolean; code?: boolean }): RT => (style ? { type: 'text', text, style } : { type: 'text', text });
+const B_ = (text: string) => tx(text, { bold: true });
+const I_ = (text: string) => tx(text, { italic: true });
+const C_ = (text: string) => tx(text, { code: true });
+const rsec = (...elements: RT[]) => ({ type: 'rich_text_section', elements });
+const rlist = (items: RT[][], indent = 0) => ({ type: 'rich_text_list', style: 'bullet', indent, elements: items.map((e) => rsec(...e)) });
+const rquote = (...elements: RT[]) => ({ type: 'rich_text_quote', elements });
+const rpre = (text: string) => ({ type: 'rich_text_preformatted', elements: [tx(text)] });
+const rich = (...elements: Record<string, unknown>[]) => ({ type: 'rich_text', elements });
+const head = (text: string) => ({ type: 'header', text: { type: 'plain_text', text, emoji: true } });
+const ctx = (text: string) => ({ type: 'context', elements: [{ type: 'mrkdwn', text }] });
+const DIV = { type: 'divider' };
+const pad = (s: string, w: number) => (s.length >= w ? s : s + ' '.repeat(w - s.length));
+const lpad = (s: string, w: number) => (s.length >= w ? s : ' '.repeat(w - s.length) + s);
+
 export function slackBlocks(d: ReportData, opts: { test?: boolean } = {}): Record<string, unknown>[] {
   const r = d.reliability;
   const sh = d.self_healing;
-  const md = (text: string) => ({ type: 'mrkdwn', text: text.slice(0, 2000) });
-  const section = (text: string) => ({ type: 'section', text: { type: 'mrkdwn', text: text.slice(0, 3000) } });
-  const fields = (f: string[]) => ({ type: 'section', fields: f.slice(0, 10).map(md) });
-  const context = (text: string) => ({ type: 'context', elements: [md(text)] });
-  const divider = { type: 'divider' };
-  const title = (t: string) => section(`*${t}*`);
-  const B: Record<string, unknown>[] = [];
-
-  if (opts.test) B.push(context(':test_tube: TEST, sent only to you.'));
-  B.push({ type: 'header', text: { type: 'plain_text', text: `BHA Engine Health Report · ${d.period.label}`, emoji: true } });
-  B.push(context(`From the BHA Engine Dashboard. Every figure is read from the engine's own records. Weeks run Monday to Sunday (UTC), compared with every week since the self-healer went live on 21 Sep.`));
-  B.push(fields([
-    `*Failure rate*\n${fmtPct(r.last_week?.rate ?? null)} last week\n_was ${fmtPct(r.first_week?.rate ?? null)} in the week of ${r.first_week?.label ?? 'n/a'}_`,
-    `*Drop since the first week*\n${fmtPct(r.reduction_since_first_week)} lower failure rate\n_${fmtPct(r.failed_runs_reduction_since_first_week)} fewer failed runs a week_`,
-    `*Production runs*\n${n(r.last_week?.runs ?? 0)} last week\n_${n(r.runs_since)} since 21 Sep, ${n(r.failed_since)} failed_`,
-    `*Automatic fixes*\n${sh.automatic_fixes_last_week} last week\n_${sh.automatic_fixes_since} since 21 Sep, ${sh.without_incident_since} before an incident opened_`,
-  ]));
-  B.push(divider);
-
-  B.push(title('Self-healing'));
   const tf = sh.time_to_fix;
-  B.push(fields([
-    `*Closed by the engine*\n${sh.engine_share.n} of ${sh.engine_share.of} real faults (${fmtPct(sh.engine_share.pct)})\n_the figure we are raising_`,
-    `*Time to fix (median)*\nEngine ${tf.engine.p50_minutes === null ? 'n/a' : `${tf.engine.p50_minutes} min`} (${tf.engine.n} timed)\nPerson ${tf.person.p50_minutes === null ? 'n/a' : `${Math.round((tf.person.p50_minutes / 60) * 10) / 10} h`} (${tf.person.n} timed)`,
-  ]));
-  B.push(divider);
+  const X: Record<string, unknown>[] = [];
+
+  if (opts.test) X.push(ctx(':test_tube: *TEST*, sent only to you.'));
+  X.push(head(`📊 BHA Engine Health Report · ${d.period.label}`));
+  X.push(ctx(`_From the BHA Engine Dashboard. Every figure is read from the engine's own records. Weeks run Monday to Sunday (UTC), compared with every week since the self-healer went live on 21 Sep._`));
+  if (r.first_week && r.last_week) {
+    X.push(rich(rquote(
+      B_(`Failure rate down ${fmtPct(r.reduction_since_first_week)}`),
+      tx(` in ${d.period.weeks.length - 1} weeks: ${fmtPct(r.first_week.rate)} in the week of ${r.first_week.label}, `),
+      B_(`${fmtPct(r.last_week.rate)}`),
+      tx(' last week.'),
+    )));
+  }
+  X.push(DIV);
+
+  X.push(head('🛡️ Reliability'));
+  X.push(rich(rlist([
+    r.last_week ? [B_('Last week: '), tx(`${n(r.last_week.failed)} failed of ${n(r.last_week.runs)} production runs (${fmtPct(r.last_week.rate)})`)] : [tx('Last week: not recorded')],
+    r.previous_week ? [B_('Week before: '), tx(`${n(r.previous_week.failed)} of ${n(r.previous_week.runs)} (${fmtPct(r.previous_week.rate)})`)] : [tx('Week before: not recorded')],
+    [B_('Since 21 Sep: '), tx(`${n(r.failed_since)} failed of ${n(r.runs_since)} runs (${fmtPct(pct(r.failed_since, r.runs_since))}), `), I_(`${fmtPct(r.failed_runs_reduction_since_first_week)} fewer failed runs a week than the first week`)],
+  ])));
+  X.push(DIV);
+
+  X.push(head('🩺 Self-healing'));
+  X.push(rich(rlist([
+    [B_(`${sh.automatic_fixes_last_week} automatic ${sh.automatic_fixes_last_week === 1 ? 'fix' : 'fixes'}`), tx(' last week, '), tx(`${sh.automatic_fixes_since} since 21 Sep`), I_(` (${sh.without_incident_since} before an incident was even opened)`)],
+    [B_('Closed by the engine: '), tx(`${sh.engine_share.n} of ${sh.engine_share.of} real faults (${fmtPct(sh.engine_share.pct)}) `), I_('the figure we are raising')],
+    [B_('Time to fix: '), tx(`engine ${tf.engine.p50_minutes === null ? 'n/a' : `${tf.engine.p50_minutes} min`}`), I_(` (${tf.engine.n} timed)`), tx(`, a person ${tf.person.p50_minutes === null ? 'n/a' : `${Math.round((tf.person.p50_minutes / 60) * 10) / 10} h`}`), I_(` (${tf.person.n} timed, medians)`)],
+  ])));
+  X.push(DIV);
 
   const tl = d.logs.reduce((a, b) => ({ s: a.s + b.submitted, ap: a.ap + b.approved }), { s: 0, ap: 0 });
-  B.push(title(`Builder logs (Codex) · ${tl.ap} of ${tl.s} approved since 21 Sep (${fmtPct(pct(tl.ap, tl.s))})`));
-  B.push(fields(d.logs.map((b) => `*${b.builder}*\n${b.approved} of ${b.submitted} approved${b.rejected ? ` · ${b.rejected} rejected` : ''}${b.waiting ? ` · ${b.waiting} waiting` : ''}\n_last week: ${b.last_week} in, ${b.last_week_approved} approved_`)));
-  B.push(divider);
+  X.push(head('📝 Builder logs (Codex)'));
+  X.push(rich(
+    rsec(I_(`${tl.ap} of ${tl.s} approved since 21 Sep (${fmtPct(pct(tl.ap, tl.s))})`), tx('\n')),
+    rlist(d.logs.map((b) => [
+      B_(b.builder), tx(`  ${b.approved} of ${b.submitted} approved`),
+      ...(b.rejected ? [tx(`, ${b.rejected} rejected`)] : []), ...(b.waiting ? [tx(`, ${b.waiting} waiting`)] : []),
+      I_(`  ·  last week ${b.last_week} in, ${b.last_week_approved} approved`),
+    ])),
+  ));
+  X.push(DIV);
 
   const tlo = d.loops.reduce((a, b) => ({ o: a.o + b.open, c: a.c + b.closed, w: a.w + b.closed_last_week }), { o: 0, c: 0, w: 0 });
-  B.push(title(`Open loops · ${n(tlo.o)} open, ${n(tlo.c)} closed (${fmtPct(pct(tlo.c, tlo.o + tlo.c))}), ${tlo.w} closed last week`));
-  B.push(fields(d.loops.map((b) => `*${b.builder}*\n${n(b.open)} open · ${fmtPct(b.close_rate)} closed\n_${b.closed_last_week} closed last week_`)));
-  B.push(divider);
+  X.push(head('🔁 Open loops'));
+  X.push(rich(
+    rsec(I_(`${n(tlo.o)} open, ${n(tlo.c)} closed (${fmtPct(pct(tlo.c, tlo.o + tlo.c))}), ${tlo.w} closed last week`), tx('\n')),
+    rlist(d.loops.map((b) => [
+      B_(b.builder), tx(`  ${n(b.open)} open, ${fmtPct(b.close_rate)} closed`),
+      I_(`  ·  ${b.closed_last_week} closed last week, ${b.closed_of_raised_since} of ${b.raised_since} raised since 21 Sep`),
+    ])),
+  ));
+  X.push(DIV);
 
-  B.push(title('The agents · last week'));
-  B.push(fields(d.agents.map((a) => {
+  X.push(head('🤖 The agents · last week'));
+  X.push(rich(rlist(d.agents.map((a) => {
     const w = a.last_week;
-    return `*${a.agent}*\n${n(w.asks)} asks · ${fmtPct(pct(w.delivered, w.owed))} delivered\n_${fmtPct(pct(w.done, w.asks))} completed · median reply ${duration(w.p50)}_`;
-  })));
-  B.push(divider);
+    return [B_(a.agent), tx(`  ${n(w.asks)} asks, ${fmtPct(pct(w.delivered, w.owed))} delivered, ${fmtPct(pct(w.done, w.asks))} completed`), I_(`  ·  median reply ${duration(w.p50)}`)];
+  }))));
+  X.push(DIV);
 
   const t = d.twins;
   const ns = t.north_star;
-  B.push(title('Twin review · hits and misses'));
-  B.push(fields([
-    `*North Star*\n${n(ns.loops_moved)} of ${n(ns.loops_pointed_at)} loops it named moved (${fmtPct(ns.hit_rate)})\n_${n(ns.loops_closed)} closed · ${n(ns.asks)} answers and rankings_`,
-    `*Research Twin*\n${t.research_twin.answered} of ${t.research_twin.asks} answered\n_${[t.research_twin.thin && `${t.research_twin.thin} thin`, t.research_twin.needs_human && `${t.research_twin.needs_human} needs a person`, t.research_twin.not_delivered && `${t.research_twin.not_delivered} not delivered`].filter(Boolean).join(' · ') || 'no misses'}_`,
-    `*Genie*\n${t.genie.answered} of ${t.genie.asks} answered\n_${[t.genie.incomplete && `${t.genie.incomplete} incomplete`, t.genie.failed && `${t.genie.failed} failed`].filter(Boolean).join(' · ') || 'no misses'}_`,
-  ]));
+  const rt = t.research_twin;
+  const g = t.genie;
+  X.push(head('🎯 Twin review · hits and misses'));
+  const twinEls: Record<string, unknown>[] = [
+    rlist([
+      [B_('North Star'), tx(`  ${n(ns.loops_moved)} of the ${n(ns.loops_pointed_at)} loops it named moved (${fmtPct(ns.hit_rate)}), ${n(ns.loops_closed)} closed`), I_(`  ·  ${n(ns.asks)} answers and rankings`)],
+      [B_('Research Twin'), tx(`  ${rt.answered} of ${rt.asks} answered`), I_(`  ·  ${[rt.thin && `${rt.thin} thin`, rt.needs_human && `${rt.needs_human} needs a person`, rt.not_delivered && `${rt.not_delivered} not delivered`, rt.refused && `${rt.refused} not its lane`].filter(Boolean).join(', ') || 'no misses'}`)],
+      [B_('Genie'), tx(`  ${g.answered} of ${g.asks} answered`), I_(`  ·  ${[g.incomplete && `${g.incomplete} incomplete`, g.failed && `${g.failed} failed`].filter(Boolean).join(', ') || 'no misses'}`)],
+    ]),
+  ];
   if (ns.stuck.length) {
-    B.push(section(`*North Star keeps naming these, and they are not moving:*\n${ns.stuck.map((s) => `• *${s.builder ? cap(s.builder) : 'No owner'}*, named ${s.times_named}× · \`${s.loop_id}\`\n   ${clip(s.what, 80)}`).join('\n')}`));
+    twinEls.push(rsec(tx('\n'), B_('North Star keeps naming these, and they are not moving:')));
+    for (const st of ns.stuck) {
+      twinEls.push(rlist([[B_(st.builder ? cap(st.builder) : 'No owner'), tx(`, named ${st.times_named}×  `), C_(st.loop_id)]]));
+      twinEls.push(rlist([[I_(clip(st.what, 90))]], 1));
+    }
   }
-  const misses = t.research_twin.misses.map((m) => `• Research Twin, ${m.delivered === 'Not delivered' ? 'not delivered' : m.outcome.toLowerCase()}: ${clip(m.question, 90)}`)
-    .concat(t.genie.misses.map((m) => `• Genie, ${m.outcome.toLowerCase()}: ${clip(m.question, 90)}`));
-  if (misses.length) B.push(section(`*Misses to look at:*\n${misses.join('\n')}`));
-  B.push(context('A loop counts as moved when its status changed after North Star first named it. Each week\'s review is also saved in BHARAG as a Twin Critique.'));
-  B.push(divider);
+  const misses: RT[][] = rt.misses.map((m) => [B_(`Research Twin, ${m.delivered === 'Not delivered' ? 'not delivered' : m.outcome.toLowerCase()}: `), I_(clip(m.question, 100))])
+    .concat(g.misses.map((m) => [B_(`Genie, ${m.outcome.toLowerCase()}: `), I_(clip(m.question, 100))]));
+  if (misses.length) {
+    twinEls.push(rsec(tx('\n'), B_('Misses to look at:')));
+    twinEls.push(rlist(misses));
+  }
+  X.push(rich(...twinEls));
+  X.push(ctx(`_A loop counts as moved when its status changed after North Star first named it. Each week's review is saved in BHARAG as a Twin Critique._`));
+  X.push(DIV);
 
   const lr = d.learned;
-  B.push(title('What the engine has learned'));
-  B.push(fields([
-    `*Build patterns*\n${n(lr.patterns_total)} on record · ${lr.patterns_last_week} last week\n_${n(lr.patterns_since)} added since 21 Sep_`,
-    lr.sop_note && !lr.sops_total ? `*SOPs*\n${lr.sop_note}` : `*SOPs*\n${n(lr.sops_total)} written · ${lr.sops_last_week} last week\n_${n(lr.sops_since)} since 21 Sep${lr.sop_note ? `; ${lr.sop_note}` : ''}_`,
-  ]));
-  B.push(divider);
+  X.push(head('🧠 What the engine has learned'));
+  X.push(rich(rlist([
+    [B_('Build patterns'), tx(`  ${n(lr.patterns_total)} on record, ${lr.patterns_last_week} added last week`), I_(`  ·  ${n(lr.patterns_since)} since 21 Sep`)],
+    lr.sop_note && !lr.sops_total ? [B_('SOPs'), I_(`  ${lr.sop_note}`)] : [B_('SOPs'), tx(`  ${n(lr.sops_total)} written, ${lr.sops_last_week} last week`), I_(`  ·  ${n(lr.sops_since)} since 21 Sep${lr.sop_note ? `; ${lr.sop_note}` : ''}`)],
+  ])));
+  X.push(DIV);
 
-  B.push(title('Week by week'));
-  B.push(fields(d.weekly.map((w) => `*${w.label}*\n${fmtPct(w.failure_rate)} failed of ${n(w.runs)} runs\n_${w.automatic_fixes} auto ${w.automatic_fixes === 1 ? 'fix' : 'fixes'} · ${w.logs} logs · ${w.loops_closed} loops closed · ${w.patterns} patterns · ${w.sops} SOPs_`)));
-  B.push({ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open Engine health', emoji: true }, url: 'https://dashboard.bhanetwork.org/engine-health?tab=self-healing' }] });
-  return B.slice(0, 50);
+  X.push(head('📅 Week by week'));
+  const rows = [['Week', 'Runs', 'Failed', 'Fixes', 'Logs', 'Closed', 'Patterns', 'SOPs']].concat(
+    d.weekly.map((w) => [w.label, n(w.runs), fmtPct(w.failure_rate), String(w.automatic_fixes), String(w.logs), String(w.loops_closed), String(w.patterns), String(w.sops)]),
+  );
+  const widths = rows[0].map((_, i) => Math.max(...rows.map((row) => row[i].length)));
+  const table = rows.map((row) => row.map((c, i) => (i === 0 ? pad(c, widths[i]) : lpad(c, widths[i]))).join('  ')).join('\n');
+  X.push(rich(rpre(table)));
+  X.push(ctx('_Closed is loops closed that week. Fixes are automatic fixes._'));
+  X.push({ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open Engine health', emoji: true }, url: 'https://dashboard.bhanetwork.org/engine-health?tab=self-healing', style: 'primary' }] });
+  return X.slice(0, 50);
 }
 
 export function slackText(d: ReportData): string {
