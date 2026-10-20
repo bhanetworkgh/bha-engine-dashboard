@@ -3980,16 +3980,25 @@ is logged and never retried. Its thresholds are marked `PROPOSED` in code and ar
 **not Canon**. `npm run test:se8l`.
 **Do not switch the watcher on yet** (2026-10-15). `npm run test:se8l-db` runs
 the sweep by hand against a local `_test` database and a BHARAG stand-in and pins
-what it does today: every sweep writes one observation per claim per surface, each
+what it does: every sweep writes one observation per claim per surface, each
 with a new id, so nothing is deduplicated (14 claims would be about 12,000 rows a
-day); a fail-closed claim counts as an active consumer on `genie_ns`, because
-T0NO's `genie_ns` defaults to true, so the **third sweep, about 11.5 minutes after
-start, opens one `DOCTRINE` incident per claim in force**; the incident carries a
-Logstream signature Logstream does not exclude, so repeats would feed Logstream's
-research and alert thresholds; recovery takes two healthy sweeps. Whether a
-`genie_ns` default should count as an active consumer, whether observations
-should be written only on a change, and whether Logstream should count `DOCTRINE`
-incidents are open decisions (Destiny), ahead of any incident authority.
+day); the incident carries a Logstream signature Logstream does not exclude, so
+repeats would feed Logstream's research and alert thresholds; recovery takes two
+healthy sweeps.
+**The sweep asserts no active consumer** (2026-10-17, Destiny and Jason).
+`allowed_use` says a surface *may* use a claim, not that anything does, and T0NO
+defaults `genie_ns` to true on an unresolved claim, so the sweep read every claim
+as in use and would have opened one `DOCTRINE` incident per claim in force about
+11.5 minutes after start. Nothing in the engine records real use of a claim (no
+consumer registry, no "claim used" event; an MCP read or a recorded decision is
+not use), so `sweepCanonical` passes `active_consumer: false`: `needs_evidence`
+and `stale_evidence` never open an incident from the sweep. A decision that
+contradicts the doctrine in force still opens one at once, and a resolver
+failure still opens one on the second sweep. Escalation on a gap comes back only
+with an approved consumer-usage contract that records actual use; until then it
+is guidance and observations only. Still open (Destiny): whether observations
+should be written only on a change, and whether Logstream should count
+`DOCTRINE` incidents, both ahead of any incident authority.
 The three read tools are in the North Star, Research Twin and Bays scopes in
 `AGENT_KEYS` (Research Twin gained `read_media_doctrine` with them); the n8n
 allow-lists must carry them too.
