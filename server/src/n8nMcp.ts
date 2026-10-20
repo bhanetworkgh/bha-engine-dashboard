@@ -27,6 +27,28 @@
  * caller is told which variable is missing.
  */
 
+import { createHash } from 'node:crypto';
+
+/**
+ * The hash a change is judged by (18 Oct 2026, Destiny — LOOP-1792328810473-P3UV).
+ * n8n's `configHash` does not move when a skill is edited (`skill.upsert` left
+ * Bays at 62493349… twice on 18 Oct), so a skill changed after a passing draft
+ * eval, or during one, would have matched as tested. This folds every
+ * `skillHashes` entry, sorted by skill id, into one sha256 beside the
+ * configHash: `cs1:<hex>`. The draft eval's before/after check, its stored
+ * hashes and the inventory's `config_hash` all use it, so the publish check
+ * compares like with like. A result with no `skillHashes` (an older slim
+ * result) keeps n8n's own hash, which is what was compared before.
+ */
+export function changeHash(result: Dict): string | null {
+  const base = typeof result.configHash === 'string' && result.configHash ? result.configHash : null;
+  if (!base) return null;
+  const sh = result.skillHashes;
+  if (!sh || typeof sh !== 'object' || Array.isArray(sh)) return base;
+  const pairs = Object.keys(sh as Dict).sort().map((k) => `${k}=${String((sh as Dict)[k])}`);
+  return 'cs1:' + createHash('sha256').update(`${base}\n${pairs.join('\n')}`).digest('hex');
+}
+
 const URL_ = (process.env.N8N_MCP_URL || `${process.env.N8N_BASE_URL || 'https://bayshorizonnetwork.app.n8n.cloud'}/mcp-server/http`).replace(/\/+$/, '');
 const TOKEN = process.env.N8N_MCP_TOKEN?.trim() || null;
 const TIMEOUT_MS = Math.max(1000, Number(process.env.N8N_MCP_TIMEOUT_MS) || 45_000);
