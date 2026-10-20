@@ -56,6 +56,7 @@
     "test:se8l": "npm run build:server --silent && node server/test/doctrine-gap.test.cjs",
     "test:eg4n": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/genie-doctrine.test.cjs",
     "test:se8l-db": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/doctrine-gap.db.test.cjs",
+    "test:qndm-drill": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/doctrine-drill.db.test.cjs",
     "test:se8l-writes": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/doctrine-gap-writes.db.test.cjs",
     "test:se8l-resolver":"npm run build:server --silent && node server/test/doctrine-gap-resolver.test.cjs",
     "test:se8l-resolver-db": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/doctrine-gap-resolver.db.test.cjs",
