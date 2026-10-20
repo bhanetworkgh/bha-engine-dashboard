@@ -209,6 +209,46 @@ export function policyFor(current: DoctrineGapObservation, history: DoctrineGapO
   return { incident: false, guidance: true, aggregate: true, recover: false, reason: 'GUIDANCE_ONLY' };
 }
 
+/**
+ * Write only on a change of state (Jason's third condition before the watcher may go ON, 16 and
+ * 20 Oct 2026; LOOP-1792472755186-M4CV). Every sweep reads every claim on every surface, and writing
+ * each reading made about 12,000 identical rows a day for 14 claims. A reading is written when:
+ *   - it is the first for its key, or any state field differs from the last one written;
+ *   - an alarm is open on its key (recovery needs two healthy reads in a row, and the open alarm's
+ *     history should show every reading while it is open);
+ *   - it counts toward opening one (a resolver failure, or needs_evidence / stale_evidence on an
+ *     active consumer), because policyFor counts written rows;
+ *   - policyFor says it opens an incident (a close happens only on an open alarm, covered above);
+ *   - the last one written for its key is WRITE_RULE.restate_hours old, so a claim nothing changed still
+ *     appears once a day and the summary never reads as "nothing checked".
+ * Otherwise nothing is written. The policy itself (policyFor) is unchanged.
+ */
+export const WRITE_RULE = { status: 'state_change_only', restate_hours: 24 } as const;
+export const STATE_FIELDS = ['condition', 'reason', 'evidence_state', 'severity', 'publication_decision', 't0no_fail_closed', 'config_hash_held', 'cad_provenance_held', 'active_consumer', 'attempted_public_use', 'requested_use'] as const;
+export type WriteReason = 'first' | 'changed' | 'alarm_open' | 'counting' | 'acting' | 'daily_restatement';
+export interface WriteDecision { write: boolean; reason: WriteReason | 'unchanged'; changed: string[] }
+
+/** Pure: which state fields differ between two readings of one key. */
+export function changedFields(a: DoctrineGapObservation, b: DoctrineGapObservation): string[] {
+  return STATE_FIELDS.filter((f) => (a[f] ?? null) !== (b[f] ?? null));
+}
+
+/** Pure: whether this reading is written. `last` is the newest one written for the key, at any age. */
+export function writeDecision(current: DoctrineGapObservation, last: DoctrineGapObservation | null, ctx: { alarmOpen: boolean; policy: DoctrineGapPolicy; now?: number }): WriteDecision {
+  if (!last) return { write: true, reason: 'first', changed: [] };
+  const changed = changedFields(current, last);
+  if (changed.length) return { write: true, reason: 'changed', changed };
+  if (ctx.alarmOpen) return { write: true, reason: 'alarm_open', changed };
+  // Only an open is an action with no alarm open: policyFor says recover on every second-or-later
+  // healthy read, but a close acts only on an open alarm, which alarm_open has already written.
+  if (ctx.policy.incident) return { write: true, reason: 'acting', changed };
+  const counting = current.condition === 'resolver_unavailable' || ((current.condition === 'needs_evidence' || current.condition === 'stale_evidence') && current.active_consumer);
+  if (counting) return { write: true, reason: 'counting', changed };
+  const age = (ctx.now ?? Date.now()) - Date.parse(last.observed_at);
+  if (!(age < WRITE_RULE.restate_hours * 3_600_000)) return { write: true, reason: 'daily_restatement', changed };
+  return { write: false, reason: 'unchanged', changed };
+}
+
 export function guidanceFor(o: DoctrineGapObservation): DoctrineGapGuidance {
   if (o.condition === 'healthy') return { action: 'NONE', owner: null, next_action: null, card_recommendation: 'none', closure_condition: 'Evidence remains verified.' };
   if (o.condition === 'resolver_unavailable' || o.condition === 'unauthorized_read' || o.condition === 'malformed_response')
@@ -242,6 +282,12 @@ async function history(recoveryKey: string, hours = 24): Promise<DoctrineGapObse
   return r.rows.map((x) => x.detail);
 }
 
+/** The newest observation written for a key, at any age: what a new reading is compared with. */
+async function lastObservation(recoveryKey: string): Promise<DoctrineGapObservation | null> {
+  const r = await query<EventRow>(`SELECT event_type, at, detail FROM engine_events WHERE event_type = $1 AND detail->>'recovery_key' = $2 ORDER BY at DESC, id DESC LIMIT 1`, [OBSERVED_EVENT, recoveryKey]);
+  return r.rows[0]?.detail ?? null;
+}
+
 async function latestMarker(recoveryKey: string): Promise<EventRow | null> {
   const r = await query<EventRow>(`SELECT event_type, at, detail FROM engine_events WHERE event_type IN ($1, $2) AND detail->>'recovery_key' = $3 ORDER BY at DESC, id DESC LIMIT 1`, [OPENED_EVENT, RECOVERED_EVENT, recoveryKey]);
   return r.rows[0] ?? null;
@@ -262,14 +308,17 @@ function incidentBody(o: DoctrineGapObservation) {
   };
 }
 
-/** Record one observation and synchronize only the existing BHARAG lifecycle. */
+/** Record one observation when its state calls for it (WRITE_RULE) and synchronize only the existing BHARAG lifecycle. */
 export async function observe(input: DoctrineGapInput) {
-  const o = classify(input);
-  const before = await history(o.recovery_key);
-  await engineEvents.record(observationEvent(o));
-  const policy = policyFor(o, before);
-  const marker = await latestMarker(o.recovery_key);
+  const classified = classify(input);
+  const before = await history(classified.recovery_key);
+  const policy = policyFor(classified, before);
+  const marker = await latestMarker(classified.recovery_key);
   const openMarker = marker?.event_type === OPENED_EVENT ? marker : null;
+  const write = writeDecision(classified, await lastObservation(classified.recovery_key), { alarmOpen: Boolean(openMarker), policy });
+  // write_reason is a new field on the stored observation, never a rename; a reading not written keeps none.
+  const o: DoctrineGapObservation & { write_reason?: WriteReason } = write.write ? { ...classified, write_reason: write.reason as WriteReason } : classified;
+  if (write.write) await engineEvents.record(observationEvent(o));
   let incident: { action: string; ledger_id: string | null; error: string | null } = { action: 'none', ledger_id: null, error: null };
   try {
     if (policy.incident && !openMarker) {
@@ -290,7 +339,7 @@ export async function observe(input: DoctrineGapInput) {
     // The sweep discards its results, so without this line a failed open or close would be silent.
     console.error(`[doctrine-gap] incident sync failed for ${o.recovery_key} (${o.condition}, ${policy.reason}): ${incident.error}`);
   }
-  return { observation: o, policy, guidance: guidanceFor(o), incident };
+  return { observation: o, written: write.write, write_reason: write.reason, policy, guidance: guidanceFor(o), incident };
 }
 
 /** The newest observations summary() reads in one window; one more is fetched to tell a full window from a cut one. */
@@ -309,6 +358,8 @@ export async function summary(hours = 24) {
   const groups = aggregateObservations(observations);
   return {
     schema: SUMMARY_SCHEMA, read_at: new Date().toISOString(), window_hours: safeHours, policy: { status: 'PROPOSED', ...PROPOSED_POLICY },
+    // Counts are readings written, not sweeps run: an unchanged claim is written once a day (WRITE_RULE).
+    write_rule: WRITE_RULE,
     counts: { observations: observations.length, groups: groups.length, limit: SUMMARY_LIMIT, truncated },
     note: truncated ? `More than ${SUMMARY_LIMIT} observations in the last ${safeHours} hours; only the newest ${SUMMARY_LIMIT} were read, so every count here is a floor. Ask for fewer hours to see the rest.` : null,
     groups,
