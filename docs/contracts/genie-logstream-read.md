@@ -9,8 +9,9 @@ how Genie answers "are we ready?" and "can we say X?" — see
 
 ## What you get
 
-One read-only token for Genie. It can call four tools on the dashboard and
-nothing else:
+One read-only token for Genie. It can call six tools on the dashboard and
+nothing else (four until 18 Oct 2026, when the buyer flow read and the SOP read
+were added for the Engine Surfaces Contract):
 
 | Tool | What it answers |
 |---|---|
@@ -18,6 +19,8 @@ nothing else:
 | `read_engine_events` | The engine's own events (`engine.event.v1`): counts by type over a window, and the newest events. **History only, never publication authority** (see the doctrine section) |
 | `read_media_doctrine` | Every vFarm claim in the doctrine in force, resolved to T0NO's seven fields (EG4N) |
 | `read_publication_decision` | The current publication decision for one claim on one surface, re-checked against the doctrine in force (EG4N) |
+| `read_buyer_flow` | Where each vFarm buyer lead is in the five-stage flow and what Stripe has seen for it, by `buyer_intake_id`, with no name or email (18 Oct) |
+| `read_sop` | One SOP's whole text, by BHARAG id or exact title (18 Oct) |
 
 Any other tool is refused by the server and the refusal is logged. The token
 can never write.
@@ -64,6 +67,32 @@ tables below are a summary.
 | `lane` | One lane, e.g. `GENIE`, `BAYS`, `MEDIA` |
 | `limit` | Newest events to return. 50 by default, 200 at most |
 | `catalog` | `vfarm_customers` returns the vFarm customer state catalog (counts only, never a name or an email) |
+
+
+### `read_buyer_flow` (18 Oct 2026)
+
+The one read of where a vFarm buyer is. The contract is the SOP
+"SOP -- Engine Surfaces Contract: vFarm buyer flow and Stripe" (read it with
+`read_sop`) and `docs/contracts/engine-surfaces-buyer-flow.md`.
+
+| Argument | Use |
+|---|---|
+| (none) | Counts by position and by payment `state_mode` over every lead, and the open leads newest first |
+| `buyer_intake_id` | One lead, closed or not, e.g. `VFBUYER-FORMA-1A2B3C` |
+| `position` | `interest`, `invited`, `spec`, `proposal`, `agreement`, `customer` or `closed` |
+| `include_closed` | Include closed leads in the list (counts always include them) |
+| `limit` | 50 by default, 200 at most |
+
+Show `stage_name` and `position_label` as written. Say test or live for every
+payment: a test payment is never a sale. Never work a stage out from a Slack
+thread or an event on its own; if this read fails, say you do not know. The
+answer carries the never-infer rules in `rules`.
+
+### `read_sop` (18 Oct 2026)
+
+`title` (exact, case and punctuation do not matter) or `id` (the BHARAG
+document id). A title that matches nothing returns the closest titles and their
+ids, never a guess. 60,000 characters at most, cut and marked.
 
 ## Rules to keep
 
