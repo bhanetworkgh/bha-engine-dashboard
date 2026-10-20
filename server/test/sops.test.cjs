@@ -21,7 +21,7 @@ const http = require('node:http');
 const path = require('node:path');
 
 const DIST = process.env.SERVER_DIST || path.join(__dirname, '../../server-dist');
-require.cache[require.resolve(path.join(DIST, 'dataGovernance.js'))] = {
+require.cache[require.resolve(path.join(DIST, 'server/src/dataGovernance.js'))] = {
   id: 'dataGovernance', filename: 'dataGovernance', loaded: true,
   exports: { guard: async () => ({ allow: true }) },
 };
@@ -49,7 +49,7 @@ const srv = http.createServer((req,res) => {
 srv.listen(0, async () => {
   process.env.BHARAG_API_URL = `http://127.0.0.1:${srv.address().port}/api/v1`;
   delete process.env.BHARAG_CODEX_KEY;
-  let sops = require(path.join(DIST, 'sops.js'));
+  let sops = require(path.join(DIST, 'server/src/sops.js'));
   const none = await sops.read({fresh:true});
   assert.equal(none.ok, false); assert.match(none.error, /Neither BHARAG_SOPS_KEY nor BHARAG_CODEX_KEY is set/);
   process.env.BHARAG_CODEX_KEY = 'ws-key';

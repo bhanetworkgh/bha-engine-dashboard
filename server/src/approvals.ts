@@ -375,7 +375,7 @@ async function ephemeral(channel: string | null | undefined, user: string, threa
   if (!r.ok) console.error(`approvals: could not tell ${user} "${text.slice(0, 60)}…": ${String(r.error)}`);
 }
 
-function resultLine(result: Record<string, unknown>): string {
+export function resultLine(result: Record<string, unknown>): string {
   const link = typeof result.link === 'string' ? ` ${result.link}` : '';
   if (result.ok === true) {
     if (result.deleted === true) return `Deleted \`${String(result.natural_id ?? result.id)}\` (${String(result.kind)}). The whole row is kept in record_deletions.`;
@@ -384,7 +384,11 @@ function resultLine(result: Record<string, unknown>): string {
     if (typeof result.permission_id === 'string') return `Anyone with the link can now read it.${link}`;
     return 'Done.';
   }
-  return String(result.message ?? result.reason ?? 'it failed, and the tool gave no reason');
+  // 18 Oct 2026 (LOOP-1792263523732-LVEA): send_nudge's failures carried their reason in
+  // summary and results[].error, not message, so the card said "no reason" over channel_not_found.
+  const lines = Array.isArray(result.results) ? (result.results as Array<Record<string, unknown>>).filter((r) => r && r.ok === false && r.error) : [];
+  const fromResults = lines.length ? lines.map((r) => `${String(r.recipient ?? r.user_id ?? '')}: ${String(r.error)}`).join('; ') : '';
+  return String(result.message ?? result.summary ?? (fromResults || null) ?? result.error ?? result.reason ?? 'it failed, and the tool gave no reason');
 }
 
 /**

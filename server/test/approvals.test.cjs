@@ -520,6 +520,15 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.addr
     ok('an unknown approval id is a 404');
   }
 
+  {
+    // 18 Oct 2026 (LOOP-1792263523732-LVEA): an approved send_nudge that Slack refused said
+    // "the tool gave no reason" over channel_not_found. The card reads summary and results too.
+    const line = approvals.resultLine({ ok: false, results: [{ ok: false, recipient: '<@U0GUARDTEST1>', error: 'channel_not_found' }], summary: "Couldn't send to <@U0GUARDTEST1>: channel_not_found." });
+    assert.match(line, /channel_not_found/);
+    assert.match(approvals.resultLine({ ok: false, results: [{ ok: false, recipient: '<@U1>', error: 'not_in_channel' }] }), /<@U1>: not_in_channel/);
+    ok("an approved action that fails says Slack's own error on the card");
+  }
+
   await query(`DELETE FROM engine_approvals WHERE target LIKE $1 OR target LIKE $2`, [`%${T}%`, `lane_backlog %`]);
   console.log(`\n${passed} checks passed.`);
   slack.close();

@@ -155,3 +155,138 @@ export const testSubmitIntake2Tool: ToolDefinition = {
 };
 
 export const INTAKE2_WRITE_TOOLS: ToolDefinition[] = [testSubmitIntake2Tool];
+
+/**
+ * Walk a TEST lead through buyer flow v2 from here (2026-10-17, Destiny: "build a tool that lets
+ * you do the full test, the moving and filling").
+ *
+ *   test_buyer_flow — write connection only, in no agent's scope. One step per call, each through
+ *                     the same function the dashboard or the buyer's page calls, so the test is the
+ *                     real path: `move` is earlyAccess.moveStage with its gates, `propose` is
+ *                     proposal.create, and `buyer_open` / `buyer_accept` / `buyer_question` /
+ *                     `buyer_call` are proposal.page and proposal.act on the lead's own proposal
+ *                     link (worked out here, never sent back in full). `status` reads.
+ *
+ * Guards as test_submit_intake2: Destiny or Jason only; **only a lead whose email is an
+ * @bhanetwork.org address**; every step but status and dry_run needs confirm exactly
+ * "TEST FLOW <buyer_intake_id>". Audited on engine_mcp_writes, refusals included.
+ */
+import * as earlyAccess from '../earlyAccess';
+import * as proposalMod from '../proposal';
+
+type FlowStep = 'status' | 'move' | 'propose' | 'buyer_open' | 'buyer_accept' | 'buyer_question' | 'buyer_call';
+const FLOW_STEPS: FlowStep[] = ['status', 'move', 'propose', 'buyer_open', 'buyer_accept', 'buyer_question', 'buyer_call'];
+
+async function flowState(id: string): Promise<Record<string, unknown>> {
+  const r = await query<{ stage: number; closed_at: Date | null; form2: boolean; proposal: proposalMod.Proposal | null; pay: Record<string, unknown> | null; history: unknown }>(
+    `SELECT stage, closed_at, intake_2 IS NOT NULL AS form2, proposal, stripe_payment AS pay, stage_history AS history FROM engine_vfarm_leads WHERE id::text = $1`,
+    [id],
+  );
+  const row = r.rows[0];
+  if (!row) return { found: false };
+  const p = row.proposal;
+  return {
+    stage: row.stage,
+    closed: !!row.closed_at,
+    form_2_in: row.form2,
+    proposal: p ? { proposal_id: p.proposal_id, test: p.test, setup_name: p.setup_name, price_amount: p.price_amount, currency: p.currency, opened_at: p.opened_at, accepted_at: p.accepted_at, actions: p.actions.map((a) => ({ kind: a.kind, at: a.at, text: a.text, posted: !!a.notified?.ts, post_error: a.notified?.error ?? null })) } : null,
+    stripe_payment: row.pay ? { state: row.pay.state, mode: row.pay.mode, amount: row.pay.amount, currency: row.pay.currency } : null,
+    last_moves: Array.isArray(row.history) ? (row.history as unknown[]).slice(-3) : [],
+  };
+}
+
+export const testBuyerFlowTool: ToolDefinition = {
+  name: 'test_buyer_flow',
+  description:
+    'Walk a TEST lead through vFarm buyer flow v2, one step per call, through the real functions: move (to stage 1-5, with the dashboard\'s own gates: 3 needs Form 2, 4 an accepted proposal, 5 a paid payment), propose (make or replace the Stage 3 proposal, always a test), buyer_open (open the buyer\'s proposal page as they would), buyer_accept, buyer_question (needs text), buyer_call (text optional) — the buyer\'s own page actions on their own link — and status. Only Destiny or Jason; only a lead whose email is @bhanetwork.org. Every step but status needs confirm exactly "TEST FLOW <buyer_intake_id>". dry_run says what would run and changes nothing. Audited on engine_mcp_writes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      lead: { type: 'string', description: 'The lead row id, or its buyer_intake_id (VFBUYER-…).' },
+      step: { type: 'string', enum: FLOW_STEPS },
+      requester_user_id: { type: 'string', description: 'Destiny or Jason.' },
+      confirm: { type: 'string', description: 'Exactly "TEST FLOW <buyer_intake_id>".' },
+      to_stage: { type: 'number', description: 'move: the stage to move to, 1 to 5.' },
+      reason: { type: 'string', description: 'move: why (for example "five checks cleared").' },
+      proposal: {
+        type: 'object',
+        description: 'propose: setup_name, summary, inclusions (array), price_amount (cents), currency, timeline.',
+        properties: {
+          setup_name: { type: 'string' },
+          summary: { type: 'string' },
+          inclusions: { type: 'array', items: { type: 'string' } },
+          price_amount: { type: 'number' },
+          currency: { type: 'string' },
+          timeline: { type: 'string' },
+        },
+      },
+      text: { type: 'string', description: 'buyer_question / buyer_call: what the buyer writes.' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['lead', 'step', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Walk a test lead through the buyer flow' },
+  handler: async (args, deps) => {
+    const requester = typeof args.requester_user_id === 'string' ? args.requester_user_id.trim() : null;
+    const step = String(args.step ?? '') as FlowStep;
+    const dry = args.dry_run === true || step === 'status';
+    const audit = await auditOpen({ tool: 'test_buyer_flow', args, access: deps.access, kind: 'vfarm_leads', requester, dry_run: dry });
+    const refuse = async (reason: string, message: string, extra: Record<string, unknown> = {}) => {
+      await auditClose(audit, { outcome: 'refused', detail: `${reason}: ${message}`, guard_result: { reason } });
+      return { ok: false, reason, message: `${message} Nothing changed.`, ...extra, audit_id: audit };
+    };
+    if (!requester || !ADMIN_IDS.includes(requester)) return refuse('not_permitted', 'Only Destiny or Jason can run a test buyer flow.');
+    if (!FLOW_STEPS.includes(step)) return refuse('bad_step', `step is one of ${FLOW_STEPS.join(', ')}.`);
+    const ref = typeof args.lead === 'string' ? args.lead.trim() : '';
+    const r = await query<{ id: string; email: string | null; buyer: string | null; name: string }>(
+      `SELECT id::text, email, form_a->>'buyer_intake_id' AS buyer, full_name AS name FROM engine_vfarm_leads WHERE id::text = $1 OR form_a->>'buyer_intake_id' = $1`,
+      [ref],
+    );
+    if (r.rows.length !== 1) return refuse('not_found', r.rows.length ? `"${ref}" names ${r.rows.length} leads.` : `No lead "${ref}" is held.`);
+    const lead = r.rows[0];
+    if (!/@bhanetwork\.org$/i.test(lead.email ?? '')) return refuse('not_a_test_lead', "This lead's email is not an @bhanetwork.org address, so it may be a real buyer. Run the test flow only on a team test lead.");
+    const before = await flowState(lead.id);
+    if (dry) {
+      await auditClose(audit, { outcome: 'dry_run', record_id: lead.id, natural_id: lead.buyer, before });
+      return { ok: true, dry_run: true, step, lead: lead.id, buyer_intake_id: lead.buyer, state: before, audit_id: audit };
+    }
+    if (args.confirm !== `TEST FLOW ${lead.buyer ?? lead.id}`) return refuse('confirm_required', `Send confirm: "TEST FLOW ${lead.buyer ?? lead.id}".`);
+    const who = requester === ADMIN_IDS[0] ? 'Destiny (test_buyer_flow)' : 'Jason (test_buyer_flow)';
+    try {
+      let detail: Record<string, unknown> = {};
+      if (step === 'move') {
+        const to = Number(args.to_stage);
+        await earlyAccess.moveStage({ id: lead.id }, to, who, typeof args.reason === 'string' ? args.reason : null, 'engine');
+        detail = { moved_to: to };
+      } else if (step === 'propose') {
+        const made = await proposalMod.create(lead.id, (args.proposal ?? {}) as proposalMod.ProposalInput, who);
+        detail = { proposal_id: made.proposal?.proposal_id, replaced: made.replaced, link_made: !!made.proposal?.link && made.proposal.link.startsWith('http') };
+      } else {
+        const st = before.proposal as { proposal_id: string } | null;
+        if (!st) return refuse('no_proposal', 'This lead has no proposal yet. Run step propose first.');
+        const token = proposalMod.tokenFor(st.proposal_id);
+        if (step === 'buyer_open') {
+          const html = await proposalMod.page(token);
+          if (!html) return refuse('link_opens_nothing', 'The proposal link opened nothing (closed lead or replaced proposal).');
+          detail = { page_opened: true, says_test: html.includes('Test proposal'), shows_payment: /stripe|checkout/i.test(html), bytes: html.length };
+        } else {
+          const kind = step === 'buyer_accept' ? 'accept' : step === 'buyer_question' ? 'question' : 'call';
+          const out = await proposalMod.act(token, kind, typeof args.text === 'string' ? args.text : null);
+          if (!out) return refuse('link_opens_nothing', 'The proposal link opened nothing.');
+          detail = { buyer_saw: out.flash };
+        }
+      }
+      const after = await flowState(lead.id);
+      await auditClose(audit, { outcome: 'applied', record_id: lead.id, natural_id: lead.buyer, before, after: { ...detail, state: after } });
+      return { ok: true, step, lead: lead.id, buyer_intake_id: lead.buyer, ...detail, state: after, audit_id: audit };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      const status = (e as { status?: number }).status;
+      await auditClose(audit, { outcome: status && status < 500 ? 'refused' : 'error', detail: message, record_id: lead.id, natural_id: lead.buyer });
+      return { ok: false, step, reason: status && status < 500 ? 'refused_by_the_flow' : 'error', message, state: before, audit_id: audit };
+    }
+  },
+};
+
+INTAKE2_WRITE_TOOLS.push(testBuyerFlowTool);

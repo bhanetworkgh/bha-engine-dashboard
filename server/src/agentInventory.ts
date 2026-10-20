@@ -26,6 +26,7 @@
  */
 import * as publishGate from './publishGate';
 import { createHash } from 'node:crypto';
+import { changeHash } from './n8nMcp';
 import { nowIso } from './db';
 import { query } from './pg';
 import { mcpWriteToolNames } from './mcp/tools';
@@ -255,14 +256,14 @@ export function derive(result: Dict, opts: { owner?: string | null; recordedBy?:
     const bd = dict(b);
     rawSkills[id] = { name: bd.name, description: bd.description, allowedTools: bd.allowedTools };
   }
-  const raw: Dict = { agent, configHash: result.configHash ?? null, config: rawConfig, skills: rawSkills, tasks: result.tasks ?? [], instructions_chars: typeof config.instructions === 'string' ? config.instructions.length : digest.chars, instructions_sha256: typeof config.instructions === 'string' ? createHash('sha256').update(config.instructions).digest('hex') : digest.sha256, slim: typeof config.instructions !== 'string' && digest.sha256 !== null };
+  const raw: Dict = { agent, configHash: result.configHash ?? null, skillHashes: result.skillHashes ?? null, config: rawConfig, skills: rawSkills, tasks: result.tasks ?? [], instructions_chars: typeof config.instructions === 'string' ? config.instructions.length : digest.chars, instructions_sha256: typeof config.instructions === 'string' ? createHash('sha256').update(config.instructions).digest('hex') : digest.sha256, slim: typeof config.instructions !== 'string' && digest.sha256 !== null };
 
   return {
     agent_id: agentId,
     name,
     published: typeof agent.published === 'boolean' ? agent.published : null,
     active_version_id: str(agent.activeVersionId),
-    config_hash: str(result.configHash),
+    config_hash: changeHash(result),
     model: str(config.model),
     reasoning: str(cfg.reasoning),
     max_iterations: typeof cfg.maxIterations === 'number' ? cfg.maxIterations : null,

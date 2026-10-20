@@ -25,6 +25,7 @@ import * as mirror from '../mirror';
 import * as logstream from '../logstream';
 import * as researchSignals from '../researchSignals';
 import * as vfarmCustomers from '../vfarmCustomerEvents';
+import * as selfHealing from '../selfHealing';
 import type { ToolDefinition } from './tools';
 
 const DEFAULT_CHARS = 20_000;
@@ -251,4 +252,27 @@ export const readEngineEvents: ToolDefinition = {
   },
 };
 
-export const LOGSTREAM_READ_TOOLS: ToolDefinition[] = [readLogstream, readEngineEvents];
+
+/**
+ * The self-healing scorecard (19 Oct 2026, Destiny — D2.5). The Engine health
+ * tab's own read, so a figure quoted from here is the figure on the page.
+ */
+export const readSelfHealing: ToolDefinition = {
+  name: 'read_self_healing',
+  description:
+    'The self-healing scorecard: week by week since the healer began (21 Sep 2026), production runs and how many failed (with the failure rate and its denominator); incidents split into real faults and those counted apart (tests, the simulator, a guard refusing a request on purpose); every automatic fix (a healer retry that recovered, including runs that never opened an incident; a Claude Code repair still standing; a recovery-watcher re-run; a polling one-off closed by itself), counted once per incident; how each real fault closed (by the engine, cleared on its own, by a person, by policy, or not recorded before 2 Oct 2026); what is still open; and time to fix as p50 and p95, engine and person apart, only for closes on or after 2 Oct 2026. It also returns how the healer routed every failure it was handed (from 19 Oct 2026) and the definitions behind every figure. Use it for "how well does the engine heal itself", "how many failures did it fix without a person", and any number quoted outside BHA: quote the denominator and the definition with it. weeks narrows or widens the window (at most 26). Read only.',
+  inputSchema: {
+    type: 'object',
+    properties: { weeks: { type: 'number', description: 'How many weeks back, including the current one. Default: every week since the healer began; at most 26.' } },
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Self-healing scorecard' },
+  handler: async (args, deps) => {
+    const t0 = Date.now();
+    const out = await selfHealing.scorecard({ weeks: typeof args.weeks === 'number' ? args.weeks : undefined });
+    await mirror.logWrite({ endpoint: 'mcp:read_self_healing', kind: 'self_healing', method: 'MCP', key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET', outcome: 'read', detail: `${out.window.weeks} weeks from ${out.window.from}`, ms: Date.now() - t0 });
+    return { ok: true, ...out };
+  },
+};
+
+export const LOGSTREAM_READ_TOOLS: ToolDefinition[] = [readLogstream, readEngineEvents, readSelfHealing];
