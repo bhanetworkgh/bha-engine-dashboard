@@ -293,7 +293,16 @@ async function latestMarker(recoveryKey: string): Promise<EventRow | null> {
   return r.rows[0] ?? null;
 }
 
+/**
+ * The QNDM drill's doctrine (2026-10-20, Jason's approval in the M4CV thread; doctrineDrill.ts).
+ * An incident it opens is tagged `drill` and asks for no research, so the drill never opens a
+ * real Research Twin job (T4 reads research_needed). It is still a DOCTRINE incident everywhere
+ * else: Logstream records it and leaves it out of its counts, and the drill marks it a test.
+ */
+export const DRILL_DOCTRINE_ID = 'QNDM-DRILL';
+
 function incidentBody(o: DoctrineGapObservation) {
+  const drill = o.doctrine_id === DRILL_DOCTRINE_ID;
   return {
     type: 'INC' as const,
     subsystem: 'DOCTRINE', source: 'bays', severity: o.severity,
@@ -301,8 +310,8 @@ function incidentBody(o: DoctrineGapObservation) {
     payload: {
       lane: 'bays', workflow_or_scenario: 'T0NO doctrine-gap monitor', failed_node_or_component: `${o.surface} / ${o.doctrine_id}:${o.claim_id}`,
       error_class: o.condition.toUpperCase(), error_message: `${o.reason}. Evidence=${o.evidence_state}. ${guidanceFor(o).next_action ?? ''}`.slice(0, 1000), error_message_original_bytes: null,
-      execution_id: o.recovery_key, impact_tags: ['media', 'doctrine', o.surface], retry_policy: { retryable: false, max_retries: 0, retry_interval: '5m', retries_attempted: 0 },
-      self_healing_strategy: 'The doctrine-gap monitor closes only after two consecutive healthy canonical reads. It never changes doctrine, publication state, cards or loops.', research_needed: true, research_id: null,
+      execution_id: o.recovery_key, impact_tags: drill ? ['media', 'doctrine', o.surface, 'drill'] : ['media', 'doctrine', o.surface], retry_policy: { retryable: false, max_retries: 0, retry_interval: '5m', retries_attempted: 0 },
+      self_healing_strategy: 'The doctrine-gap monitor closes only after two consecutive healthy canonical reads. It never changes doctrine, publication state, cards or loops.', research_needed: !drill, research_id: null,
       commercial_hint: o.requested_use === 'paid' ? 'Commercial/public claim remains blocked.' : null, resolved_at: null, resolved_by: null,
     },
   };
