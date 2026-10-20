@@ -22,6 +22,7 @@
 import { createHash, createHmac } from 'node:crypto';
 import { query, withTransaction } from './pg';
 import * as engineEvents from './engineEvents';
+import * as leadFlow from './leadFlow';
 import * as events from './events';
 import * as slack from './slack';
 import * as intake2 from './intake2';
@@ -241,6 +242,7 @@ export async function act(token: string, actionRaw: unknown, textRaw: unknown): 
       params.push(JSON.stringify([{ from: 3, to: 4, at, by: `${f.full_name} (accepted the proposal)`, reason: `Accepted ${row.proposal.proposal_id}`, via: 'buyer' }]));
     }
     await db.query(`UPDATE engine_vfarm_leads SET proposal = $2::jsonb${stageSql} WHERE id::text = $1`, params);
+    if (stageSql) await leadFlow.recordStageMove(db, { lead_id: f.id, buyer_intake_id: f.buyer ?? null, from: 3, to: 4, at, by: 'buyer', via: 'buyer', reason: `Accepted ${row.proposal.proposal_id}` });
     await engineEvents.record(
       { event_type: `vfarm_proposal_${kind}`, at, subject_id: f.buyer ?? f.id, lane: 'VFARM', actor: 'buyer', detail: { lead_id: f.id, proposal_id: row.proposal.proposal_id, test: true, moved_to_stage_4: kind === 'accepted' && row.stage === 3 }, dedupe_key: kind === 'accepted' ? `proposal-accepted:${row.proposal.proposal_id}` : null },
       db,

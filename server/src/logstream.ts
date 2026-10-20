@@ -69,6 +69,17 @@ import * as timers from './timers';
 import * as n8n from './n8n';
 import * as researchSignals from './researchSignals';
 
+/**
+ * When an incident happened (20 Oct 2026, LOOP-1792388413323-4E0U). BHARAG moves `occurred_at` to the
+ * time of each status change, so a closed incident's own `occurred_at` is its close, and reading it
+ * dated every closed incident by its close: time to recovery near nought, and the 7-day windows
+ * counting it on the wrong day. The earlier of `occurred_at` and `first_seen_at` (the first poll
+ * that saw it) is when it happened. The self-healing scorecard reads it the same way (569e12d).
+ * Every query here, and research signals' T4, reads this one expression.
+ */
+export const INCIDENT_AT = `LEAST(CASE WHEN fields->>'occurred_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN (fields->>'occurred_at')::timestamptz END,
+             CASE WHEN first_seen_at ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN first_seen_at::timestamptz END)`;
+
 export const RULE = {
   window_days: 7,
   research_at: 3,
@@ -254,7 +265,7 @@ export async function writeRows(): Promise<{ observed: number; closed: number; p
        SELECT natural_id AS incident_id, lane_id, fields->'payload'->>'workflow_or_scenario' AS workflow, fields->'payload'->>'failed_node_or_component' AS node,
               fields->'payload'->>'error_class' AS error_class,
               CASE WHEN jsonb_typeof(fields->'payload'->'impact_tags') = 'array' THEN ARRAY(SELECT jsonb_array_elements_text(fields->'payload'->'impact_tags')) END AS tags,
-              coalesce(nullif(fields->>'occurred_at', ''), first_seen_at)::timestamptz AS at, open_now, resolved_at, resolved_by
+              ${INCIDENT_AT} AS at, open_now, resolved_at, resolved_by
          FROM engine_incidents WHERE natural_id IS NOT NULL)
      SELECT i.incident_id, i.lane_id, i.workflow, i.node, i.error_class, i.tags, to_char(i.at AT TIME ZONE 'UTC', ${ISO}) AS occurred_at, i.open_now, i.resolved_at, i.resolved_by,
             (SELECT count(*)::int FROM inc o WHERE o.workflow IS NOT DISTINCT FROM i.workflow AND o.node IS NOT DISTINCT FROM i.node AND o.at <= i.at AND o.at > i.at - interval '7 days') AS f7,
@@ -378,10 +389,10 @@ async function windowIncidents(): Promise<Incident[]> {
   const r = await query<Incident>(
     `SELECT natural_id AS incident_id, lane_id, fields->'payload'->>'workflow_or_scenario' AS workflow, fields->'payload'->>'failed_node_or_component' AS node,
             CASE WHEN jsonb_typeof(fields->'payload'->'impact_tags') = 'array' THEN ARRAY(SELECT jsonb_array_elements_text(fields->'payload'->'impact_tags')) END AS tags,
-            to_char(coalesce(nullif(fields->>'occurred_at', ''), first_seen_at)::timestamptz AT TIME ZONE 'UTC', ${ISO}) AS occurred_at,
+            to_char(${INCIDENT_AT} AT TIME ZONE 'UTC', ${ISO}) AS occurred_at,
             fields->'payload'->>'execution_id' AS execution_id
        FROM engine_incidents
-      WHERE natural_id IS NOT NULL AND coalesce(nullif(fields->>'occurred_at', ''), first_seen_at)::timestamptz > now() - ($1 || ' days')::interval`,
+      WHERE natural_id IS NOT NULL AND ${INCIDENT_AT} > now() - ($1 || ' days')::interval`,
     [String(RULE.window_days)],
   );
   return r.rows;

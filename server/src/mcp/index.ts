@@ -168,6 +168,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'read_engine_events',
         // 2026-10-11: what the cabinet is doing, its cycle boundary and the evidence rules (IMFX).
         'read_monitoring_twin',
+        // 2026-10-18: the Engine Surfaces Contract. Where a vFarm lead is and what Stripe has seen,
+        // with no personal field, and any SOP read whole (the contract is one).
+        'read_buyer_flow', 'read_sop',
       ]),
     },
     {
@@ -183,6 +186,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-11: the crop cycle's real boundary and what Coimbatore data may be used for (IMFX),
         // so a finding never infers a stage the cabinet does not run.
         'read_monitoring_twin', 'read_media_doctrine',
+        // 2026-10-18: the Engine Surfaces Contract. Where a vFarm lead is and what Stripe has seen,
+        // with no personal field, and any SOP read whole (the contract is one).
+        'read_buyer_flow', 'read_sop',
       ]),
     },
     {
@@ -215,9 +221,16 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'open_decision_watch', 'list_decision_watches', 'close_decision_watch',
         // 2026-10-11: attach an SOP written after the watch was opened (Jason, 1791746835.121559).
         'update_decision_watch',
+        // 2026-10-18: pause a watch's reminders until a date the person names, at most 14 days,
+        // instead of cancelling it and opening a new one (Kaiqi, #workflow-logs-kaiqi).
+        'snooze_decision_watch',
         // 2026-10-14: read an SOP whole after a search finds it, so a blocked builder is walked
         // through the right section of an Operator Playbook (ZZVU).
         'read_sop',
+        // 2026-10-18: the Engine Surfaces Contract's read (see North Star's entry).
+        'read_buyer_flow',
+        // 2026-10-19: the self-healing scorecard, so a figure Bays quotes is the page's figure.
+        'read_self_healing',
       ]),
     },
     {
@@ -233,6 +246,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // answered from the T0NO claim and the current VRFK decision for surface genie_ns, the
         // same resolver Media Twin and the three agents read, never from raw engine_events rows.
         'read_media_doctrine', 'read_publication_decision',
+        // 2026-10-18: the Engine Surfaces Contract. Genie answers "where is this buyer" and "has
+        // Stripe seen a payment" from the engine's read, never its own, and reads SOPs whole.
+        'read_buyer_flow', 'read_sop',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>

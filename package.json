@@ -13,6 +13,7 @@
     "hash-password": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server-dist/server/src/hash.js",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "test:buyer-flow": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/buyer-flow.test.cjs",
     "test:proposal": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/proposal.test.cjs",
     "test:stripe-ledger": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/stripe-ledger.test.cjs",
     "test:gate": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/write-gate.test.cjs",
@@ -55,7 +56,10 @@
     "test:se8l": "npm run build:server --silent && node server/test/doctrine-gap.test.cjs",
     "test:eg4n": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/genie-doctrine.test.cjs",
     "test:se8l-db": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/doctrine-gap.db.test.cjs",
-    "test:vrfk-http": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/publication-decision.http.test.cjs"
+    "test:vrfk-http": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/publication-decision.http.test.cjs",
+    "test:self-healing": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/self-healing.test.cjs",
+    "test:health-report": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/health-report.test.cjs",
+    "test:repair-settle": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/repair-settle.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",
