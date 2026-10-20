@@ -19,6 +19,8 @@ export const RECOVERED_EVENT = 'doctrine_gap_recovered';
 export const SCHEMA = 'doctrine.gap.observation.v1';
 export const SUMMARY_SCHEMA = 'doctrine.gap.summary.v1';
 export const WATCH_FLAG = 'DOCTRINE_GAP_WATCH_ENABLED';
+/** The surface a resolver failure, and its recovery, is filed under; with no claim, make() keys it MEDIA_DOCTRINE:RESOLVER. */
+export const RESOLVER_SURFACE: publicationDecision.PublicationSurface = 'genie_ns';
 
 /** Proposed by SE8L; not doctrine and not silently represented as Canon. */
 export const PROPOSED_POLICY = {
@@ -60,6 +62,8 @@ export interface DoctrineGapInput {
   claim?: publicationDecision.ResolvedClaim | null;
   publication?: publicationDecision.DecisionRead | null;
   resolver_error?: { status?: number | null; message: string } | null;
+  /** The canonical read answered, with this many claims. A fact about the resolver only, never about doctrine or a claim. */
+  resolver_ok?: { claims: number } | null;
   active_consumer?: boolean;
   attempted_public_use?: boolean;
   requires_mechanical_provenance?: boolean;
@@ -147,6 +151,10 @@ export function classify(input: DoctrineGapInput): DoctrineGapObservation {
     if (status === 401 || status === 403) return make(input, 'unauthorized_read', 'failed', 'critical', `RESOLVER_AUTH_${status}`, 'Destiny / Engine runtime');
     return make(input, 'resolver_unavailable', 'failed', 'warning', input.resolver_error.message || 'RESOLVER_UNAVAILABLE', 'Destiny / Engine runtime');
   }
+  // Healthy here means the resolver answered: the claim is dropped so the key is the resolver's, and
+  // a read that returned no claims says so rather than reading as doctrine in good order.
+  if (input.resolver_ok)
+    return make({ ...input, claim: null }, 'healthy', 'verified', 'info', input.resolver_ok.claims > 0 ? 'RESOLVER_READ_OK' : 'RESOLVER_READ_OK_NO_CLAIMS', 'NONE');
   const c = input.claim;
   if (!c || !c.fail_closed || !c.allowed_use || !c.cad_provenance || !c.maturity_state || !c.claim_state || !c.evidence_publication_status)
     return make(input, 'malformed_response', 'failed', 'critical', 'MALFORMED_T0NO_RESPONSE', 'Destiny / Engine runtime');
@@ -309,6 +317,7 @@ export async function summary(hours = 24) {
 
 export async function sweepCanonical() {
   const results: unknown[] = [];
+  let claimsRead: number | null = null;
   try {
     const doctrine = await systemFeeds.doctrineClaims({});
     for (const surface of publicationDecision.SURFACES) {
@@ -325,8 +334,17 @@ export async function sweepCanonical() {
         results.push(await observe({ surface, claim, publication: publications.decisions[i] ?? null, active_consumer: false, attempted_public_use: false, requires_mechanical_provenance: false, requested_use: 'internal' }));
       }
     }
+    claimsRead = doctrine.claims.length;
   } catch (e) {
-    results.push(await observe({ surface: 'genie_ns', resolver_error: { message: e instanceof Error ? e.message : String(e) }, active_consumer: true }));
+    results.push(await observe({ surface: RESOLVER_SURFACE, resolver_error: { message: e instanceof Error ? e.message : String(e) }, active_consumer: true }));
+  }
+  // A resolver incident closes only on healthy reads under its own key, and claim reads never carry it,
+  // so while one is open every fully successful sweep says the resolver answered. observe() still
+  // requires two in a row. Outside the catch: a failure here is not a resolver failure.
+  if (claimsRead !== null) {
+    const resolverKey = classify({ surface: RESOLVER_SURFACE, resolver_ok: { claims: claimsRead } }).recovery_key;
+    if ((await latestMarker(resolverKey))?.event_type === OPENED_EVENT)
+      results.push(await observe({ surface: RESOLVER_SURFACE, resolver_ok: { claims: claimsRead }, active_consumer: false }));
   }
   return results;
 }

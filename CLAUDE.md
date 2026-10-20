@@ -4003,6 +4003,22 @@ The three read tools are in the North Star, Research Twin and Bays scopes in
 `AGENT_KEYS` (Research Twin gained `read_media_doctrine` with them); the n8n
 allow-lists must carry them too.
 
+**A resolver incident can close** (2026-10-17). A failed doctrine read is filed
+under `doctrine:genie_ns:MEDIA_DOCTRINE:RESOLVER` (`RESOLVER_SURFACE`), and claim
+reads never carry that key, so the incident it opened could never recover. Now,
+while that key's latest marker is an open incident, every sweep that finishes
+every surface and claim writes one `resolver_ok` reading under the same key —
+`RESOLVER_READ_OK`, or `RESOLVER_READ_OK_NO_CLAIMS` when the read returned
+nothing — and the existing two-healthy-reads rule closes it. It says the resolver
+answered, never that doctrine or a claim is healthy. Nothing is written when no
+resolver incident is open, a partial failure writes the failure and no reading,
+and `policyFor` is unchanged. **Open (owner):** whether "2 failures" means 2 in a
+row (today it is 2 within 24 hours, healthy reads between or not); whether a read
+with no claims should recover a resolver incident (it does here) and whether no
+doctrine is a gap of its own; SE8L's incident authority; and two watcher
+processes recovering one key at once (not guarded; production runs one).
+`npm run test:se8l-resolver`, `npm run test:se8l-resolver-db`.
+
 ### Media Twin, Genie and vFarm
 **Three single centred "coming soon" pages, and nothing else** (decisions
 2026-09-14 and 2026-09-16, Destiny). **Media Twin and Genie are systems in the
