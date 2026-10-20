@@ -77,6 +77,8 @@ const bharag = http.createServer((req, res) => {
   const { query, closePool } = require(`${DIST}/pg.js`);
   const feeds = require(`${DIST}/systemFeeds.js`);
   const drill = require(`${DIST}/doctrineDrill.js`);
+  const logstream = require(`${DIST}/logstream.js`);
+  const heldIncident = async (id) => (await query(`SELECT natural_id, open_now, resolved_by, fields->'payload'->>'workflow_or_scenario' AS workflow, fields->'payload'->>'failed_node_or_component' AS node, ARRAY(SELECT jsonb_array_elements_text(fields->'payload'->'impact_tags')) AS tags FROM engine_incidents WHERE natural_id = $1`, [id])).rows[0];
   const { runDoctrineDrillTool } = require(`${DIST}/mcp/doctrineDrillTools.js`);
 
   let passed = 0;
@@ -140,7 +142,12 @@ const bharag = http.createServer((req, res) => {
     assert.equal(inc.payload.research_needed, false, 'a drill incident must not open a real Research Twin job');
     assert.ok(inc.payload.impact_tags.includes('drill'));
     assert.equal(inc.payload.workflow_or_scenario, 'T0NO doctrine-gap monitor');
-    ok('break + sweep 3: one critical DOCTRINE incident, tagged drill, asking for no research; one row written');
+    const ledgerId = g(s).ledger_id;
+    let h = await heldIncident(ledgerId);
+    assert.ok(h, 'Engine health holds the incident the moment it opens');
+    assert.equal(h.open_now, true);
+    assert.equal(logstream.thresholdExcludedReason(h), 'doctrine', 'Logstream keeps it out of its counts as a DOCTRINE incident');
+    ok('break + sweep 3: one critical DOCTRINE incident, tagged drill, asking for no research; one row written; Engine health holds it open, Logstream leaves it out of its counts');
 
     s = (await tool({ step: 'sweep' })).result;
     assert.equal(g(s).write_reason, 'alarm_open');
@@ -161,7 +168,10 @@ const bharag = http.createServer((req, res) => {
     assert.equal(g(s).incident, 'closed_after_two_healthy_reads');
     assert.equal(g(s).write_reason, 'alarm_open');
     assert.deepEqual(statusPosts(), ['retrying', 'self_healed']);
-    ok('sweep 6: the second healthy read closes it, retrying then self_healed');
+    h = await heldIncident(ledgerId);
+    assert.equal(h.open_now, false);
+    assert.equal(h.resolved_by, 'doctrine-gap-monitor (two healthy reads)');
+    ok('sweep 6: the second healthy read closes it, retrying then self_healed, and Engine health marks its copy closed');
 
     s = (await tool({ step: 'sweep' })).result;
     assert.equal(s.written, 0);
@@ -193,6 +203,7 @@ const bharag = http.createServer((req, res) => {
   } finally {
     await query(`DELETE FROM engine_events WHERE detail->>'doctrine_id' IN ($1, $2) OR subject_id LIKE $3`, [REAL, drill.DOCTRINE_ID, `%${drill.DOCTRINE_ID}%`]);
     await query(`DELETE FROM engine_media_doctrine WHERE doctrine_id IN ($1, $2)`, [REAL, drill.DOCTRINE_ID]);
+    await query(`DELETE FROM engine_incidents WHERE natural_id LIKE 'INC-QNDM-TEST-%'`);
     await query(`DELETE FROM engine_mcp_writes WHERE tool = 'run_doctrine_drill' AND (arguments->>'run' = $1 OR arguments->>'run' IS NULL)`, [RUN]);
     await closePool();
     bharag.close();
