@@ -1291,7 +1291,10 @@ export async function doctrineData() {
             to_char(changed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS changed_at,
             to_char(received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at
        FROM engine_media_doctrine
-      ORDER BY changed_at DESC, received_at DESC`,
+      -- The table's own columns, not the to_char aliases above: by the alias the sort is by text to
+      -- the second, so two changes to one doctrine in the same second could put either in force
+      -- (found 20 Oct 2026 by the QNDM drill test, where retire followed create within a second).
+      ORDER BY engine_media_doctrine.changed_at DESC, engine_media_doctrine.received_at DESC`,
   );
   const changes = r.rows;
   // The version in force per doctrine is its newest change; a retired one is kept and said to be retired.
