@@ -4045,6 +4045,17 @@ The three read tools are in the North Star, Research Twin and Bays scopes in
 `AGENT_KEYS` (Research Twin gained `read_media_doctrine` with them); the n8n
 allow-lists must carry them too.
 
+**The QNDM drill, run 20 Oct 2026** (Jason's approval in the M4CV thread). `server/src/doctrineDrill.ts`,
+`run_doctrine_drill` (write connection, no agent's scope, Destiny or Jason, confirm "DRILL QNDM") and the same
+handler at `POST /api/engine/doctrine-drill` (`x-dashboard-key`), which n8n's unpublished
+`Engine — QNDM Drill Runner` (7zI8sAOkD5baWBk6) calls when the connector has not picked the tool up. Steps:
+status, create, record_decision, break (one contradicting decision on `QNDM-DRILL` only), sweep (sweepCanonical
+once, by hand; the timer stays off), retire. A drill incident is tagged `drill` and asks for no research, so it
+opens no real Research Twin job. **Two things it found, both fixed:** BHARAG refused `DOCTRINE` alarms until the
+subsystem was registered for the Bays engine (done by Destiny, 20 Oct), and an alarm shorter than the
+three-minute ledger poll never reached Engine health, so `observe()` now copies it at open and close as the
+Monitoring Twin does. `npm run test:qndm-drill`.
+
 **A resolver incident can close** (2026-10-17). A failed doctrine read is filed
 under `doctrine:genie_ns:MEDIA_DOCTRINE:RESOLVER` (`RESOLVER_SURFACE`), and claim
 reads never carry that key, so the incident it opened could never recover. Now,
