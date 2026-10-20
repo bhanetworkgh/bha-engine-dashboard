@@ -37,6 +37,29 @@ const currentUnavailable = at({ ...unavailable, observation_id: 'new' }, '2026-1
 assert.equal(gap.policyFor(currentUnavailable, [priorUnavailable], Date.parse('2026-10-10T00:01:00.000Z')).incident, true);
 ok('resolver failure incidents on the second consecutive observation');
 
+{
+  // State-change-only writes (LOOP-1792472755186-M4CV): writeDecision, pure.
+  const quiet = { incident: false, guidance: true, aggregate: true, recover: false, reason: 'OBSERVE_AND_GUIDE' };
+  const t0 = '2026-10-20T00:00:00.000Z';
+  const ne = at(gap.classify({ surface: 'vfarm', claim: claim({ fail_closed: { needs_evidence: true, reason: 'NEEDS_EVIDENCE' } }), active_consumer: false }), t0);
+  const now = Date.parse(t0) + 5 * 60_000;
+  assert.deepEqual(gap.writeDecision(ne, null, { alarmOpen: false, policy: quiet, now }), { write: true, reason: 'first', changed: [] });
+  assert.equal(gap.writeDecision(at(ne, '2026-10-20T00:05:00.000Z'), ne, { alarmOpen: false, policy: quiet, now }).write, false);
+  const changed = gap.writeDecision(at({ ...ne, condition: 'healthy', reason: 'T0NO_AND_VRFK_CLEAR' }, '2026-10-20T00:05:00.000Z'), ne, { alarmOpen: false, policy: quiet, now });
+  assert.deepEqual([changed.write, changed.reason, changed.changed], [true, 'changed', ['condition', 'reason']]);
+  assert.equal(gap.writeDecision(ne, ne, { alarmOpen: true, policy: quiet, now }).reason, 'alarm_open');
+  assert.equal(gap.writeDecision(ne, ne, { alarmOpen: false, policy: { ...quiet, incident: true }, now }).reason, 'acting');
+  assert.equal(gap.writeDecision(ne, ne, { alarmOpen: false, policy: { ...quiet, recover: true }, now }).write, false, 'recover with no alarm open acts on nothing');
+  const active = { ...ne, active_consumer: true };
+  assert.equal(gap.writeDecision(active, active, { alarmOpen: false, policy: quiet, now }).reason, 'counting');
+  const down = at(gap.classify({ surface: 'genie_ns', resolver_error: { message: 'down' } }), t0);
+  assert.equal(gap.writeDecision(down, down, { alarmOpen: false, policy: quiet, now }).reason, 'counting');
+  assert.equal(gap.writeDecision(ne, ne, { alarmOpen: false, policy: quiet, now: Date.parse(t0) + 24 * 3_600_000 - 1 }).write, false);
+  assert.equal(gap.writeDecision(ne, ne, { alarmOpen: false, policy: quiet, now: Date.parse(t0) + 24 * 3_600_000 }).reason, 'daily_restatement');
+  assert.deepEqual(gap.WRITE_RULE, { status: 'state_change_only', restate_hours: 24 });
+  ok('writeDecision writes the first reading, a change, an open alarm, an incident action, a counted failure and a 24-hour restatement, and nothing else (not a recover with no alarm open)');
+}
+
 const unauthorized = gap.classify({ surface: 'genie_ns', resolver_error: { status: 401, message: 'unauthorized' }, active_consumer: true });
 assert.equal(unauthorized.condition, 'unauthorized_read');
 assert.equal(gap.policyFor(unauthorized, []).incident, true);
