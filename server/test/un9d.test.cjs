@@ -49,6 +49,28 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   assert.equal(t.conditions.find((c) => c.id === 'agreement').verdict, 'fail');
   ok('test 1: placement, stale-shown-as-live and disagreement each fail; a silent feed shown as NO_FEED passes');
 
+  // A camera reports presence and never a reading (20 Oct 2026): it has a last report, so observed_time passes.
+  t = un9d.test1(fresh, [dev('cam', { last_reading_at: null })], { feed_silent: false, devices: [dev('cam', { last_reading_at: null })] }, now);
+  assert.equal(t.conditions.find((c) => c.id === 'observed_time').verdict, 'pass');
+  t = un9d.test1(fresh, [dev('ghost', { last_reading_at: null, last_seen_at: null })], { feed_silent: false, devices: [dev('ghost', { last_reading_at: null, last_seen_at: null })] }, now);
+  assert.equal(t.conditions.find((c) => c.id === 'observed_time').verdict, 'fail');
+  ok('test 1: a presence-only device passes observed_time on its last report; one with neither time fails');
+
+  // Device state follows vFarm's status where it is sent (20 Oct 2026).
+  const twin = req('monitoringTwin.js');
+  const snap = '2026-10-15T12:00:00.000Z';
+  const fr = (r, st, seen) => twin.freshness(r, snap, st, seen).state;
+  assert.equal(fr(null, 'online', '2026-10-15T11:59:50Z'), 'LIVE', 'an online camera with no reading is live by presence');
+  assert.equal(fr(null, null, null), 'NOT_WIRED', 'no status and no reading is not wired, as before');
+  assert.equal(fr(null, 'unknown', null), 'NOT_WIRED');
+  assert.equal(fr('2026-10-15T11:59:50Z', 'offline', '2026-10-15T11:56:00Z'), 'OFFLINE', 'vFarm saying offline wins over a recent reading');
+  assert.equal(twin.freshness('2026-10-15T11:59:50Z', snap, 'offline', '2026-10-15T11:56:00Z').age_s, 240, 'offline is aged from the last report');
+  assert.equal(fr('2026-10-15T11:59:00Z', 'online', snap), 'LIVE');
+  assert.equal(fr('2026-10-15T11:55:00Z', 'online', snap), 'STALE', 'a sensor whose readings slow is stale whatever its heartbeat');
+  assert.equal(fr('2026-10-15T11:40:00Z', 'online', snap), 'OFFLINE', 'a sensor that stopped reading for 20 min is offline whatever its heartbeat');
+  assert.equal(fr('2026-10-15T11:59:00Z', null, null), 'LIVE', 'no status: the reading rule alone, unchanged');
+  ok('freshness: offline from status, an online camera live by presence, a reading sensor still aged on its readings');
+
   assert.equal(un9d.test2([], []).verdict, 'not_yet_possible');
   const inc = (id, dev, o, c, l) => ({ incident_id: id, device_id: dev, kind: 'offline', opened_at: o, closed_at: c, ledger_id: l, ledger_state: l ? (c ? 'closed' : 'open') : 'pending' });
   const good = [inc('I1', 'a', '2026-10-10T00:00:00.000Z', '2026-10-10T00:20:00.000Z', 'L1')];

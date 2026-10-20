@@ -40,6 +40,8 @@ import { query, withTransaction, type Queryable } from './pg';
 import * as events from './events';
 import * as mirror from './mirror';
 import { N8N_API_VAR, n8nConfigured, n8nHost, replaceWorkflow, workflow, N8nError } from './n8n';
+import * as slack from './slack';
+import * as engineEvents from './engineEvents';
 
 /**
  * The outcomes the bridge reports. Every one of them reports; silence is the one thing it may not do.
@@ -110,6 +112,13 @@ export interface StoreResult {
   repair_id: string;
   outcome: Outcome;
   inserted: boolean;
+  /** What the row said before this report, or null when it is new. */
+  prior_outcome: string | null;
+  /**
+   * 20 Oct 2026: a fix that was awaiting proof (`repaired_pending`) has just been settled by the
+   * bridge's second report. The caller tells Destiny (notifySettled), so a settle is never silent.
+   */
+  settled: boolean;
 }
 
 /**
@@ -136,6 +145,13 @@ export async function store(payload: Record<string, unknown>, db: Queryable = { 
 
   const autoReverted = payload.auto_reverted === true && instant(payload.reverted_at) !== null;
   const nodesChanged = Array.isArray(payload.nodes_changed) ? payload.nodes_changed.filter((n) => typeof n === 'string').slice(0, 200) : [];
+  const before = await db.query<{ outcome: string; report_link: unknown }>(`SELECT outcome, payload->'report_link' AS report_link FROM engine_repairs WHERE repair_id = $1`, [repairId]);
+  const priorOutcome = before.rows[0]?.outcome ?? null;
+  // The #bha-self-healing card's address (20 Oct 2026) is written onto the row by n8n after the
+  // card posts, not by the bridge, so a later report (the trace re-post, the settle) never carries
+  // it. Keep it, or the settle could not find the thread to answer in.
+  const priorLink = before.rows[0]?.report_link;
+  if (priorLink && typeof priorLink === 'object' && payload.report_link === undefined) payload = { ...payload, report_link: priorLink };
 
   const r = await db.query<{ inserted: boolean }>(
     `INSERT INTO engine_repairs (
@@ -191,7 +207,203 @@ export async function store(payload: Record<string, unknown>, db: Queryable = { 
   );
 
   events.changed('repairs', repairId, db);
-  return { repair_id: repairId, outcome, inserted: Boolean(r.rows[0]?.inserted) };
+  return {
+    repair_id: repairId,
+    outcome,
+    inserted: Boolean(r.rows[0]?.inserted),
+    prior_outcome: priorOutcome,
+    settled: priorOutcome === 'repaired_pending' && outcome !== 'repaired_pending',
+  };
+}
+
+/* ------------------------------------------- a settled fix is announced (20 Oct 2026) */
+
+/** Who is tagged on the settle reply: the Engine Steward. */
+export const SETTLE_NOTIFY_USER = process.env.REPAIR_SETTLE_NOTIFY_USER || 'U0AEW3TBYH1';
+/** #bha-self-healing, where n8n posts the repair card. The settle answers in that card's thread. */
+export const REPORT_CHANNEL = process.env.REPAIR_REPORT_CHANNEL || 'C0C3AGDQWDS';
+
+export interface ReportLink { channel: string; ts: string; recorded_at: string }
+
+/**
+ * Records where n8n posted a repair's card (`BHA — Self Healer Reports`, after Slack answers
+ * ok), so the settle can reply in that card's thread. Only the link moves; nothing else on the
+ * row is touched. A repair this dashboard does not hold yet is a 404, which n8n retries: the
+ * bridge reports here and to n8n at the same moment.
+ */
+export async function recordReportLink(body: Record<string, unknown>, db: Queryable = { query }): Promise<{ repair_id: string; report_link: ReportLink }> {
+  const repairId = text(body.repair_id, 120);
+  const channel = text(body.channel, 40);
+  const ts = text(body.ts, 40);
+  if (!repairId) throw new RepairError('"repair_id" is required.', 422);
+  if (!channel || !/^[CG][A-Z0-9]{6,}$/.test(channel)) throw new RepairError('"channel" must be a Slack channel id (C… or G…).', 422);
+  if (!ts || !/^\d{9,}\.\d{1,9}$/.test(ts)) throw new RepairError('"ts" must be the Slack message ts, like 1792451761.123456.', 422);
+  const link: ReportLink = { channel, ts, recorded_at: new Date().toISOString() };
+  const r = await db.query<{ repair_id: string }>(
+    `UPDATE engine_repairs SET payload = payload || jsonb_build_object('report_link', $2::jsonb) WHERE repair_id = $1 RETURNING repair_id`,
+    [repairId, JSON.stringify(link)],
+  );
+  if (!r.rows[0]) throw new RepairError(`No repair ${repairId} is held yet.`, 404);
+  events.changed('repairs', repairId, db);
+  return { repair_id: repairId, report_link: link };
+}
+
+/**
+ * Corrects what a settled repair names as its proof (20 Oct 2026, Destiny — INC-BAYS.CODEX-035).
+ * The bridge settled REP-YTpezWSOIN6TNYcX-43048 as repaired on execution 43198, which succeeded
+ * but never ran the changed step; the bridge no longer counts such a run (bha-repair-bridge
+ * fc70807). This replaces `verified_by` with what really shows the fix works, appends a dated
+ * correction to `change_summary`, and keeps the old proof in `payload.proof_corrections`, so the
+ * record says what changed and nothing is lost. The outcome is never touched: a correction
+ * restates the evidence, it does not re-decide the repair.
+ */
+export async function correctProof(
+  body: { repair_id: string; verified_by: Array<{ execution_id?: string; evidence: string }>; reason: string; by: string },
+  db: Queryable = { query },
+): Promise<{ repair_id: string; outcome: string; previous_verified_by: unknown; verified_by: unknown; change_summary: string }> {
+  const repairId = text(body.repair_id, 120);
+  const reason = text(body.reason, 1000);
+  if (!repairId) throw new RepairError('"repair_id" is required.', 422);
+  if (!reason || reason.length < 10) throw new RepairError('"reason" is required (at least 10 characters): it is the correction a reader sees.', 422);
+  const proof = (Array.isArray(body.verified_by) ? body.verified_by : [])
+    .map((v) => ({ execution_id: text(v?.execution_id, 60) ?? null, evidence: text(v?.evidence, 500) ?? '' }))
+    .filter((v) => v.evidence.length >= 3);
+  const held = await db.query<{ outcome: string; change_summary: string | null; vb: unknown }>(
+    `SELECT outcome, change_summary, payload->'verified_by' AS vb FROM engine_repairs WHERE repair_id = $1`,
+    [repairId],
+  );
+  const row = held.rows[0];
+  if (!row) throw new RepairError(`No repair ${repairId} is held.`, 404);
+  const at = new Date().toISOString();
+  const line = `Proof corrected ${at.slice(0, 10)} by ${body.by}: ${reason}`;
+  const summary = `${row.change_summary ?? ''}\n\n${line}`.trim();
+  const correction = { at, by: body.by, reason, previous_verified_by: row.vb ?? null, verified_by: proof };
+  await db.query(
+    `UPDATE engine_repairs
+        SET change_summary = $2,
+            payload = jsonb_set(payload || jsonb_build_object('verified_by', $3::jsonb, 'change_summary', $2::text),
+                                '{proof_corrections}', COALESCE(payload->'proof_corrections', '[]'::jsonb) || $4::jsonb)
+      WHERE repair_id = $1`,
+    [repairId, summary, JSON.stringify(proof), JSON.stringify([correction])],
+  );
+  events.changed('repairs', repairId, db);
+  return { repair_id: repairId, outcome: row.outcome, previous_verified_by: row.vb ?? null, verified_by: proof, change_summary: summary };
+}
+
+function linkOf(payload: unknown): ReportLink | null {
+  const l = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).report_link : null;
+  if (!l || typeof l !== 'object') return null;
+  const { channel, ts } = l as Record<string, unknown>;
+  return typeof channel === 'string' && typeof ts === 'string' && channel && ts ? (l as ReportLink) : null;
+}
+
+const SETTLE_WORDS: Record<string, string> = {
+  repaired: 'proved: the next real run went through',
+  not_repaired: 'not proved: the fix did not hold on the next real run',
+  needs_human: 'needs a person',
+  error: 'the bridge hit an error settling it',
+  skipped: 'settled as skipped',
+};
+
+/**
+ * The text of the settle notice, from the stored row and its incident. Pure, so it is tested
+ * without Slack. Says what the incident shows now, and that the board reads the ledger every
+ * 3 minutes, rather than claiming a close it has not seen.
+ */
+export function settleText(r: {
+  repair_id: string;
+  outcome: string;
+  workflow_name: string | null;
+  failed_node: string | null;
+  execution_id: string | null;
+  finished_at: string | null;
+  human_action: string | null;
+  proof: string | null;
+}, incident: { id: string; open: boolean } | null): string {
+  const what = SETTLE_WORDS[r.outcome] ?? `settled as ${r.outcome}`;
+  const where = `${r.workflow_name ?? 'unnamed workflow'}${r.failed_node ? ` at \`${r.failed_node}\`` : ''}`;
+  const lines = [
+    `*Self-heal repair settled: ${what}*`,
+    `Repair \`${r.repair_id}\` on ${where}${r.execution_id ? ` (failed run ${r.execution_id})` : ''} was awaiting proof and is now *${OUTCOME_LABEL[r.outcome] ?? r.outcome}*.`,
+  ];
+  if (r.proof) lines.push(`Proof: ${r.proof}`);
+  if (r.outcome !== 'repaired' && r.human_action) lines.push(`What a person needs to do: ${r.human_action}`);
+  if (incident) {
+    lines.push(incident.open
+      ? `Incident ${incident.id} still shows open here; the board reads the ledger every 3 minutes${r.outcome === 'repaired' ? ', so it should close on the next read' : ''}.`
+      : `Incident ${incident.id} is closed.`);
+  } else {
+    lines.push('No incident on the board matches this repair\'s failed run.');
+  }
+  lines.push('Repairs: https://dashboard.bhanetwork.org/engine-health?tab=repairs');
+  return lines.join('\n');
+}
+
+/** The proof the bridge's second report carries, if it names one. Read loosely: the bridge may add fields first. */
+function proofOf(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const p = payload as Record<string, unknown>;
+  for (const k of ['proof', 'proved_by', 'proof_execution_id', 'verified_execution_id', 'next_execution_id', 'settled_by_execution_id']) {
+    const v = p[k];
+    if (typeof v === 'string' && v.trim()) return k.endsWith('execution_id') ? `execution ${v.trim()}` : v.trim().slice(0, 600);
+    if (typeof v === 'number') return `execution ${v}`;
+  }
+  return null;
+}
+
+/**
+ * Answers the repair's own card in #bha-self-healing, as Bays, when a fix awaiting proof settles:
+ * a reply in the card's thread tagging Destiny, with the outcome, the proof, the incident and,
+ * when it did not hold, what a person must do. Called once per settle, never awaited by the
+ * bridge's write. With no card recorded, or a reply Slack refuses, it posts in the channel itself
+ * and says why; if that is refused too it is logged loudly. One `repair_settled_notified` event
+ * says where it went, or that it went nowhere.
+ */
+export async function notifySettled(repairId: string): Promise<{ posted: 'thread' | 'channel' | null; error: string | null }> {
+  const row = await query<{ repair_id: string; outcome: string; workflow_name: string | null; failed_node: string | null; execution_id: string | null; finished_at: string | null; human_action: string | null; payload: unknown }>(
+    `SELECT repair_id, outcome, workflow_name, failed_node, execution_id, finished_at::text AS finished_at, human_action, payload FROM engine_repairs WHERE repair_id = $1`,
+    [repairId],
+  );
+  const r = row.rows[0];
+  if (!r) return { posted: null, error: `repair ${repairId} is not stored` };
+  const inc = r.execution_id
+    ? await query<{ id: string; open: boolean }>(
+        `SELECT natural_id AS id, open_now AS open FROM engine_incidents WHERE nullif(fields->'payload'->>'execution_id', '') = $1 ORDER BY first_seen_at DESC NULLS LAST LIMIT 1`,
+        [r.execution_id],
+      )
+    : { rows: [] as { id: string; open: boolean }[] };
+  const textBody = `<@${SETTLE_NOTIFY_USER}> ${settleText({ ...r, proof: proofOf(r.payload) }, inc.rows[0] ?? null)}`;
+  const link = linkOf(r.payload);
+
+  let posted: 'thread' | 'channel' | null = null;
+  let error: string | null = null;
+  let why: string;
+  if (link) {
+    const t = await slack.botCall('chat.postMessage', { channel: link.channel, thread_ts: link.ts, text: textBody, unfurl_links: false });
+    if (t.ok) posted = 'thread';
+    why = `the reply in the repair card's thread was refused: ${t.error ?? `HTTP ${t.http_status}`}`;
+  } else {
+    why = 'the repair card was not recorded, so there was no thread to answer in';
+  }
+  if (!posted) {
+    const c = await slack.botCall('chat.postMessage', { channel: link?.channel ?? REPORT_CHANNEL, text: `_Posted here because ${why}._\n${textBody}`, unfurl_links: false });
+    if (c.ok) posted = 'channel';
+    else error = `${why}; the channel post was refused too (${c.error ?? `HTTP ${c.http_status}`})`;
+  }
+  if (error) console.error(`repairs: settle notice for ${repairId} was not posted anywhere: ${error}`);
+  try {
+    await engineEvents.record({
+      event_type: 'repair_settled_notified',
+      subject_id: repairId,
+      actor: 'repairs',
+      source_ref: r.workflow_name ?? undefined,
+      detail: { outcome: r.outcome, execution_id: r.execution_id, incident_id: inc.rows[0]?.id ?? null, incident_open: inc.rows[0]?.open ?? null, posted, thread_ts: posted === 'thread' ? link?.ts ?? null : null, fallback_reason: posted === 'thread' ? null : why, error },
+      dedupe_key: `repair_settled_notified:${repairId}:${r.outcome}`,
+    });
+  } catch (e) {
+    console.error(`repairs: could not record repair_settled_notified for ${repairId}`, e);
+  }
+  return { posted, error };
 }
 
 /* ---------------------------------------------------------------- the read */

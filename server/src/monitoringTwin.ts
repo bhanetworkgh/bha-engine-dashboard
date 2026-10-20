@@ -11,7 +11,9 @@
  * and every screen show the same truth (Jason, point 4 of the memo).
  *
  * What it decides, per device, on every snapshot and once a minute:
- *   - **freshness**, with Jason's locked thresholds (IMFX, 2026-10-01): a reading
+ *   - **freshness**: online and offline from vFarm's own `devices.status` when it is sent
+ *     (20 Oct 2026, see `freshness`), and for a device that reads, Jason's locked thresholds
+ *     (IMFX, 2026-10-01): a reading
  *     at most 90 s old when vFarm looked is LIVE, at most 900 s STALE, older
  *     OFFLINE; a device that has never read is NOT_WIRED; a device vFarm stopped
  *     listing is GONE. The age is measured at the snapshot, not now, because a
@@ -221,9 +223,30 @@ export async function storeCycle(body: Obj) {
 export type DeviceState = 'LIVE' | 'STALE' | 'OFFLINE' | 'NOT_WIRED' | 'NO_FEED' | 'GONE';
 
 /** Freshness at the moment vFarm looked. Pure, so it can be tested without a database. */
-export function freshness(lastReadingAt: string | null, snapshotAt: string): { state: DeviceState; age_s: number | null } {
-  if (!lastReadingAt) return { state: 'NOT_WIRED', age_s: null };
-  const age = Math.max(0, Math.round((Date.parse(snapshotAt) - Date.parse(lastReadingAt)) / 1000));
+/**
+ * A device's state when vFarm last looked.
+ *
+ * **Online and offline come from vFarm's own `devices.status`** when the snapshot sends it
+ * (20 Oct 2026, Destiny, from Jegan's handover of 19 Oct): vFarm keeps that column current
+ * (ingest, heartbeat and MQTT presence set `online`; its API's presence backstop flips it to
+ * `offline` after 180 s), and `last_reading_at` is written only by the sensor ingest path, so
+ * a camera never has one. So: `offline` is OFFLINE; `online` with no reading ever is LIVE by
+ * presence (a camera, a gateway), aged from `last_seen_at`. **A device that has read still
+ * goes STALE and OFFLINE on the age of its last reading** (90 s and 900 s, Jason's IMFX
+ * thresholds): a sensor whose readings stopped is not reporting, whatever its heartbeat says.
+ * `unknown`, or no status at all (an older sender, the simulator), is the reading rule alone.
+ */
+export function freshness(
+  lastReadingAt: string | null,
+  snapshotAt: string,
+  status: string | null = null,
+  lastSeenAt: string | null = null,
+): { state: DeviceState; age_s: number | null } {
+  const ageOf = (iso: string | null) => (iso ? Math.max(0, Math.round((Date.parse(snapshotAt) - Date.parse(iso)) / 1000)) : null);
+  const st = (status ?? '').trim().toLowerCase();
+  if (st === 'offline') return { state: 'OFFLINE', age_s: ageOf(lastSeenAt ?? lastReadingAt) };
+  if (!lastReadingAt) return st === 'online' ? { state: 'LIVE', age_s: ageOf(lastSeenAt) } : { state: 'NOT_WIRED', age_s: null };
+  const age = ageOf(lastReadingAt) as number;
   if (age <= THRESHOLDS.stale_s) return { state: 'LIVE', age_s: age };
   if (age <= THRESHOLDS.offline_s) return { state: 'STALE', age_s: age };
   return { state: 'OFFLINE', age_s: age };
@@ -300,8 +323,9 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
               coalesce((fields->>'synthetic')::boolean, false) AS synthetic
          FROM engine_vfarm_farms`,
     );
-    const devices = await db.query<{ device_id: string; farm_id: string; last_reading_at: string | null; latest: unknown; gone: boolean }>(
-      `SELECT device_id, farm_id, to_char(last_reading_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS last_reading_at, latest, gone_at IS NOT NULL AS gone
+    const devices = await db.query<{ device_id: string; farm_id: string; last_reading_at: string | null; last_seen_at: string | null; status: string | null; latest: unknown; gone: boolean }>(
+      `SELECT device_id, farm_id, to_char(last_reading_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS last_reading_at,
+              to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS last_seen_at, status, latest, gone_at IS NOT NULL AS gone
          FROM engine_vfarm_devices`,
     );
     const cycles = await db.query<{ farm_id: string; transplanted_at: string; time_scale: number; content: { stages: Stage[] } }>(
@@ -331,13 +355,13 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
         if (d.gone) state = 'GONE';
         else if (feedSilent) state = 'NO_FEED';
         else {
-          const fr = freshness(d.last_reading_at, f.snapshot_at);
+          const fr = freshness(d.last_reading_at, f.snapshot_at, d.status, d.last_seen_at);
           state = fr.state;
           age = fr.age_s;
         }
         const checks = state === 'LIVE' || state === 'STALE' ? checkReadings(d.latest, st?.stage?.targets ?? null) : [];
         if (state === 'OFFLINE') {
-          faults.push({ farm_id: f.farm_id, device_id: d.device_id, kind: 'offline', metric: null, severity: 'warning', detail: `No reading for ${Math.round((age ?? 0) / 60)} min when vFarm last looked (offline after ${THRESHOLDS.offline_s / 60} min).`, value: age, min: null, max: THRESHOLDS.offline_s, stage: st?.stage?.stage ?? null, synthetic: f.synthetic });
+          faults.push({ farm_id: f.farm_id, device_id: d.device_id, kind: 'offline', metric: null, severity: 'warning', detail: (d.status ?? '').trim().toLowerCase() === 'offline' ? `vFarm reports it offline${age !== null ? ` (last seen ${Math.round(age / 60)} min before vFarm looked)` : ''}.` : `No reading for ${Math.round((age ?? 0) / 60)} min when vFarm last looked (offline after ${THRESHOLDS.offline_s / 60} min).`, value: age, min: null, max: THRESHOLDS.offline_s, stage: st?.stage?.stage ?? null, synthetic: f.synthetic });
         }
         for (const c of checks.filter((x) => !x.ok)) {
           faults.push({ farm_id: f.farm_id, device_id: d.device_id, kind: 'out_of_range', metric: c.metric, severity: 'warning', detail: `${c.metric} ${c.value}${c.unit ? ` ${c.unit}` : ''} is outside ${c.min ?? '−∞'}–${c.max ?? '∞'} for the ${st?.stage?.stage ?? '?'} stage.`, value: c.value, min: c.min, max: c.max, stage: st?.stage?.stage ?? null, synthetic: f.synthetic });

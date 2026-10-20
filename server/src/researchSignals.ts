@@ -368,7 +368,7 @@ async function detectIncidents(): Promise<Signal[]> {
             fields->'payload'->>'error_class' AS error_class, coalesce(fields->'payload'->>'error_summary', fields->>'summary') AS summary
        FROM engine_incidents
       WHERE natural_id IS NOT NULL AND lower(coalesce(fields->'payload'->>'research_needed', '')) IN ('true', 'yes', '1')
-        AND CASE WHEN coalesce(nullif(fields->>'occurred_at', ''), first_seen_at) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN coalesce(nullif(fields->>'occurred_at', ''), first_seen_at)::timestamptz END > now() - interval '7 days'
+        AND ${logstream.INCIDENT_AT} > now() - interval '7 days'
       ORDER BY 1`,
   );
   for (const i of flagged.rows) {

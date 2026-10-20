@@ -41,6 +41,8 @@ import * as events from './events';
 import * as paySync from './paySync';
 import * as executions from './executions';
 import * as health from './health';
+import * as selfHealing from './selfHealing';
+import * as healthReport from './healthReport';
 import * as repairs from './repairs';
 import * as recovery from './recovery';
 import * as scorecard from './scorecard';
@@ -577,6 +579,43 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         throw e;
       }
     }
+    // Where n8n posted a repair's #bha-self-healing card (20 Oct 2026), so the settle can reply in its thread.
+    if (p === '/api/engine/repair/report-link') {
+      if (method !== 'POST') throw new HttpError(405, 'POST {repair_id, channel, ts}.');
+      const body = await readJson(req, 16 * 1024);
+      try {
+        const out = await repairs.recordReportLink(body);
+        await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: out.repair_id, outcome: 'updated', detail: `report card ${out.report_link.channel}/${out.report_link.ts}`, ms: Date.now() - t0 });
+        return send(res, 200, { ok: true, ...out });
+      } catch (e) {
+        if (e instanceof repairs.RepairError) {
+          await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          throw new HttpError(e.status, e.message);
+        }
+        throw e;
+      }
+    }
+    // Restate a settled repair's proof (20 Oct 2026, CODEX-035): the same function as correct_repair_proof.
+    if (p === '/api/engine/repair/proof-correction') {
+      if (method !== 'POST') throw new HttpError(405, 'POST {repair_id, verified_by, reason, by}.');
+      const body = await readJson(req, 64 * 1024);
+      try {
+        const out = await repairs.correctProof({
+          repair_id: String(body.repair_id ?? ''),
+          verified_by: Array.isArray(body.verified_by) ? (body.verified_by as never) : [],
+          reason: String(body.reason ?? ''),
+          by: `engine:${String(body.by ?? 'n8n').slice(0, 80)}`,
+        });
+        await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: out.repair_id, outcome: 'updated', detail: 'proof corrected', ms: Date.now() - t0 });
+        return send(res, 200, { ok: true, ...out });
+      } catch (e) {
+        if (e instanceof repairs.RepairError) {
+          await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          throw new HttpError(e.status, e.message);
+        }
+        throw e;
+      }
+    }
     if (p === '/api/engine/repair' || p === '/api/engine/repairs') {
       if (method !== 'POST') throw new HttpError(405, 'POST. An upsert on repair_id, so the same result twice updates rather than duplicating.');
       const body = await readJson(req, 1024 * 1024);
@@ -595,6 +634,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         // A failure with no build pattern on record becomes a pattern candidate (15 Oct 2026). Never awaited:
         // the capture cannot fail the bridge's own write, and the sweep picks up anything it misses.
         void patternCapture.fromRepair(result.repair_id);
+        // A fix that was awaiting proof has settled (20 Oct 2026): Bays answers in the repair card's thread. Never awaited,
+        // so Slack cannot fail the bridge's write; notifySettled records where the notice went.
+        if (result.settled) void repairs.notifySettled(result.repair_id).catch((e) => console.error(`repairs: settle notice for ${result.repair_id} failed`, e));
         return send(res, result.inserted ? 201 : 200, { ok: true, repair_id: result.repair_id, outcome: result.outcome, stored: result.inserted ? 'inserted' : 'updated' });
       } catch (e) {
         if (e instanceof repairs.RepairError) {
@@ -1074,6 +1116,35 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       const r = await researchSignals.read({ held_only: !all, limit: 200 });
       await mirror.logWrite({ endpoint, kind: 'research_signals', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `${all ? 'all' : 'waiting'}: ${(r.signals as unknown[]).length} signal(s)`, ms: Date.now() - t0 });
       return send(res, 200, { ok: true, ...r });
+    }
+
+    /**
+     * The weekly engine health report (19 Oct 2026, D2.7). GET, read only: n8n's
+     * `Engine — Weekly Health Report` asks for it every Monday and posts `slack_text`
+     * as Bays. `now` may move the report back to an earlier week, for a rerun.
+     */
+    /**
+     * The week's twin critique into BHARAG (19 Oct 2026, LOOP-RYHY). POST, once a week: n8n
+     * calls it after the report has posted. A repeat answers with the document already filed.
+     */
+    if (p === '/api/engine/health-report/twin-critique') {
+      if (method !== 'POST') throw new HttpError(405, 'POST to file the week\'s twin critique.');
+      const qs = new URL(req.url ?? '', 'http://x').searchParams;
+      const at = qs.get('now');
+      const nowParam = at && !Number.isNaN(Date.parse(at)) ? new Date(at).toISOString() : undefined;
+      const dry = qs.get('dry_run') === 'true' || qs.get('dry_run') === '1';
+      const r = await healthReport.fileTwinCritique({ now: nowParam, dry_run: dry });
+      await mirror.logWrite({ endpoint, kind: 'health_report', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: r.ok ? (r.filed ? 'inserted' : 'unchanged') : 'error', detail: `twin critique ${r.week}: ${r.detail}`, ms: Date.now() - t0 });
+      return send(res, r.ok ? 200 : 502, r);
+    }
+
+    if (p === '/api/engine/health-report') {
+      if (method !== 'GET') throw new HttpError(405, 'GET the report. Posting it is the n8n workflow\'s job.');
+      const at = new URL(req.url ?? '', 'http://x').searchParams.get('now');
+      const nowParam = at && !Number.isNaN(Date.parse(at)) ? new Date(at).toISOString() : undefined;
+      const r = await healthReport.build({ now: nowParam });
+      await mirror.logWrite({ endpoint, kind: 'health_report', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `week of ${r.data.period.label}: ${r.slack_text.length} chars`, ms: Date.now() - t0 });
+      return send(res, 200, r);
     }
 
     if (p === '/api/engine/recovery/plan') {
@@ -1578,6 +1649,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await pay.metrics(mon || null));
       }
       /** One lane, or all three when `lane` is absent. */
+      /** The self-healing scorecard (19 Oct 2026, D2.5). The tab and read_self_healing share it. */
+      case '/api/engine-health/self-healing':
+        return send(res, 200, await selfHealing.scorecard({ weeks: Number(url.searchParams.get('weeks')) || undefined }));
       case '/api/engine-health/metrics': {
         const lane = url.searchParams.get('lane');
         if (lane && !health.LANE_KEYS.includes(lane)) throw new HttpError(404, `"${lane}" is not a lane this engine reports on. One of: ${health.LANE_KEYS.join(', ')}.`);
