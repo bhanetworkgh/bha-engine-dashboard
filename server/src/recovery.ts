@@ -36,6 +36,7 @@
 import { getMeta, nowIso, setMeta } from './db';
 import { query } from './pg';
 import * as events from './events';
+import * as engineEvents from './engineEvents';
 import * as bharag from './bharag';
 import * as mirror from './mirror';
 import * as n8n from './n8n';
@@ -68,6 +69,14 @@ export function setGapForTests(ms: number): void {
 const YOUNG_MS = 30 * 60_000;
 /** A re-run the healer has said nothing about after this long is given up on, and says so. */
 const GIVE_UP_MS = 45 * 60_000;
+/**
+ * A polling trigger's one-off 5xx or timeout closes itself once this long has
+ * passed with no other failure of the same workflow and step on either side of
+ * it (19 Oct 2026, Destiny).
+ */
+export const ONE_OFF_QUIET_MS = 30 * 60_000;
+/** How the error handler names a polling trigger's failed step: "Trigger (polling)". */
+const POLL_NODE = /\(polling\)/i;
 
 export const DEPENDENCIES: RecoveryDependency[] = ['openrouter', 'slack', 'google', 'bharag'];
 export const DEPENDENCY_LABEL: Record<RecoveryDependency, string> = { openrouter: 'OpenRouter', slack: 'Slack', google: 'Google', bharag: 'BHARAG' };
@@ -405,6 +414,101 @@ async function refresh(): Promise<IncidentRead> {
   return read;
 }
 
+/* ------------------------------------------------- one-off polling errors */
+
+/**
+ * A polling trigger (a Google Sheets trigger asking every minute, say) that
+ * gets one server error or timeout raises an incident with no execution id, so
+ * there is nothing to resume and nothing the healer can do: the next poll
+ * simply runs. Those sat open until a person closed them by hand (INC-BAYS.AGENT-055
+ * on 14 Oct, INC-BAYS.AGENT-063 on 18 Oct, both one failed poll of Form A).
+ *
+ * So: a 5xx or timeout on a step whose name says `(polling)`, carrying no
+ * execution id, is closed `self_healed` once it is {@link ONE_OFF_QUIET_MS}
+ * old **and no other incident of the same workflow and step falls within that
+ * window on either side of it**. A repeat is not a one-off: both stay open
+ * for a person, each already alerted by its own error handler run, and the
+ * Recovery tab says why. Only closed from a lane whose live ledger read
+ * answered this tick, never from the mirror. Each close is a `record_writes`
+ * line (actor `recovery`) and one `polling_one_off_closed` event.
+ */
+function isOneOffCandidate(inc: OpenIncident): boolean {
+  return !inc.execution_id && POLL_NODE.test(inc.failed_node ?? '') && CLASS_BY_HOST.has(inc.error_class ?? '');
+}
+
+async function repeatsOf(inc: OpenIncident, read: IncidentRead, t: number): Promise<string[]> {
+  const near = (at: string | null): boolean => {
+    const u = at ? Date.parse(at) : NaN;
+    return Number.isFinite(u) && Math.abs(u - t) <= ONE_OFF_QUIET_MS;
+  };
+  const out = new Set<string>();
+  for (const o of read.incidents) {
+    if (o.incident_id !== inc.incident_id && o.workflow === inc.workflow && o.failed_node === inc.failed_node && near(o.failed_at)) out.add(o.incident_id);
+  }
+  // Closed ones too: a repeat a person already closed is still a repeat.
+  const held = await query<{ natural_id: string; at: string | null }>(
+    `SELECT natural_id, coalesce(fields->>'occurred_at', fields->'payload'->>'timestamp') AS at FROM engine_incidents
+      WHERE natural_id <> $1 AND fields->'payload'->>'workflow_or_scenario' = $2 AND fields->'payload'->>'failed_node_or_component' = $3`,
+    [inc.incident_id, inc.workflow ?? '', inc.failed_node ?? ''],
+  );
+  for (const r of held.rows) if (near(r.at)) out.add(r.natural_id);
+  return [...out].sort();
+}
+
+/** Called every tick, whatever is waiting. Returns the ids it closed. */
+async function settleOneOffs(read: IncidentRead): Promise<string[]> {
+  const closed: string[] = [];
+  const reasons = new Map<string, string>();
+  const now = Date.now();
+  for (const inc of read.incidents) {
+    if (!isOneOffCandidate(inc)) continue;
+    if (!inc.lane || !read.live.has(inc.lane)) {
+      reasons.set(inc.incident_id, 'A one-off polling error, but its lane was not read live this tick, so it is not closed from the copy held here.');
+      continue;
+    }
+    const t = inc.failed_at ? Date.parse(inc.failed_at) : NaN;
+    if (!Number.isFinite(t)) {
+      reasons.set(inc.incident_id, 'A polling error with no failure time, so whether it repeated cannot be told. Left for a person.');
+      continue;
+    }
+    if (now - t < ONE_OFF_QUIET_MS) {
+      reasons.set(inc.incident_id, `A one-off polling error. It closes itself at ${new Date(t + ONE_OFF_QUIET_MS).toISOString()} if the same step does not fail again before then.`);
+      continue;
+    }
+    const reps = await repeatsOf(inc, read, t);
+    if (reps.length) {
+      reasons.set(inc.incident_id, `Not a one-off: the same step failed again within 30 minutes (${reps.slice(0, 5).join(', ')}${reps.length > 5 ? ', …' : ''}). Left open for a person.`);
+      continue;
+    }
+    const by = 'recovery (one-off polling error: no repeat of the same step within 30 minutes)';
+    const r = await closeLedger({ incident_id: inc.incident_id, lane: inc.lane }, inc.status, 'self_healed', by);
+    if (!r.ok) {
+      reasons.set(inc.incident_id, `A one-off polling error, but the ledger refused the close: ${r.reason ?? 'no reason given'}. Tried again next tick.`);
+      continue;
+    }
+    closed.push(inc.incident_id);
+    console.log(`recovery: ${inc.incident_id} (${inc.workflow ?? 'unnamed workflow'} :: ${inc.failed_node}) closed as a one-off polling error`);
+    try {
+      await engineEvents.record({
+        event_type: 'polling_one_off_closed',
+        subject_id: inc.incident_id,
+        lane: inc.lane,
+        actor: 'recovery',
+        source_ref: inc.workflow ?? undefined,
+        detail: { workflow: inc.workflow, failed_node: inc.failed_node, error_class: inc.error_class, failed_at: inc.failed_at, ledger_state: r.state, quiet_minutes: ONE_OFF_QUIET_MS / 60_000 },
+        dedupe_key: `polling_one_off_closed:${inc.incident_id}`,
+      });
+    } catch (e) {
+      console.error(`recovery: could not record polling_one_off_closed for ${inc.incident_id}`, e);
+    }
+  }
+  // The Recovery tab's "passed over" list says what happens to each instead of
+  // "no execution id", and stops listing the ones just closed.
+  const gone = new Set(closed);
+  lastSkipped = lastSkipped.filter((x) => !gone.has(x.incident_id)).map((x) => (reasons.has(x.incident_id) ? { ...x, reason: reasons.get(x.incident_id)! } : x));
+  return closed;
+}
+
 /* ------------------------------------------------------------ the probe */
 
 async function postN8n(path: string, body: unknown, timeoutMs: number): Promise<{ status: number; text: string }> {
@@ -491,7 +595,7 @@ async function lastProbe(): Promise<RecoveryProbe | null> {
  * Healer Reports takes; `wont_fix` falls back to `manually_resolved` where the
  * ledger refuses it. Mirrored and logged the way a person's close is.
  */
-async function closeLedger(row: HeldRow, ledgerStatus: string | null, state: bharag.LedgerTerminal, resolvedBy: string): Promise<{ ok: boolean; state: string; reason: string | null }> {
+async function closeLedger(row: Pick<HeldRow, 'incident_id' | 'lane'>, ledgerStatus: string | null, state: bharag.LedgerTerminal, resolvedBy: string): Promise<{ ok: boolean; state: string; reason: string | null }> {
   const lane = row.lane ?? '';
   const at = nowIso();
   let landed: string = state;
@@ -524,7 +628,7 @@ async function closeLedger(row: HeldRow, ledgerStatus: string | null, state: bha
   return { ok: true, state: landed, reason };
 }
 
-async function logLedger(row: HeldRow, ok: 'ok' | 'failed', status: string, reason: string | null, http: number | null, target: string, resolvedBy: string): Promise<void> {
+async function logLedger(row: Pick<HeldRow, 'incident_id' | 'lane'>, ok: 'ok' | 'failed', status: string, reason: string | null, http: number | null, target: string, resolvedBy: string): Promise<void> {
   await query(
     `INSERT INTO record_writes (kind, record_id, natural_id, state, status, reason, http, action, detail, actor, at)
      VALUES ('incidents', $1, $1, $2, $3, $4, $5, 'close', $6, 'recovery', $7)`,
@@ -770,10 +874,12 @@ async function tick(): Promise<TickResult> {
   await settle();
   await finishBatches();
   const read = await refresh();
+  const oneOffs = await settleOneOffs(read);
+  const oneOffNote = oneOffs.length ? `; closed ${oneOffs.length} one-off polling error(s)` : '';
 
   const waiting = await query<HeldRow>(`SELECT ${COLS} FROM engine_recovery WHERE status = 'waiting' AND batch_id IS NULL ORDER BY failed_at NULLS LAST, first_seen_at`);
   await setMeta(TICK_KEY, at);
-  if (!waiting.rows.length) return { ran: true, at, note: 'nothing waiting — no probe' };
+  if (!waiting.rows.length) return { ran: true, at, note: `nothing waiting — no probe${oneOffNote}` };
 
   const p = await probe(read);
   const notes: string[] = [];
@@ -804,7 +910,7 @@ async function tick(): Promise<TickResult> {
     notes.push(`${dep}: batch ${id} of ${rows.length}`);
   }
   await finishBatches();
-  return { ran: true, at, note: notes.join('; ') };
+  return { ran: true, at, note: notes.join('; ') + oneOffNote };
 }
 
 let timer: NodeJS.Timeout | null = null;

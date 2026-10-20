@@ -21,6 +21,18 @@
  *
  * It reads, asks for a run and posts. It never publishes, never rolls back
  * and never edits an agent: the rollback is a person's, with the id in hand.
+ *
+ * 18 Oct 2026 (Destiny: "they are annoying, and the yellow label makes it feel
+ * like error notifications"). Three rules cut the noise without hiding a fault:
+ *   - An Anthropic backup (draftEval.BACKUPS) gets no after-publish run: the
+ *     runner tests only the three main agents, so its verdict could only ever
+ *     be "no eval". A backup is judged by its draft eval alone.
+ *   - A version whose own config passed a draft eval and gets no after-publish
+ *     run (the four-a-day cap, or a runner that did not finish) is settled as
+ *     `covered_by_draft_eval`, silently. The cap itself posts nothing.
+ *   - Only a failure is red and tags anyone: a failed draft eval that was
+ *     published anyway, or a regression after a publish. Everything else is a
+ *     plain note with no mention, a title line and the detail in small text.
  */
 import * as draftEval from './draftEval';
 import * as engineEvents from './engineEvents';
@@ -31,6 +43,27 @@ import * as slack from './slack';
 import * as timers from './timers';
 
 export const RULE = { settle_seconds: 180, no_eval_minutes: 90, max_runs_per_day: 4, tick_seconds: 120 } as const;
+
+/** A backup agent is tested by its draft eval only (see the header). */
+export function isBackup(agentId: string): boolean {
+  return Object.prototype.hasOwnProperty.call(draftEval.BACKUPS, agentId);
+}
+
+/**
+ * One message for the engine alerts channel. `failure` is red and tags the
+ * people in QUOTA_ALERT_MENTIONS; `note` is neutral and tags nobody. The title
+ * is one bold line; the detail sits under it in Slack's small grey context text.
+ * Returned as a JSON string so a retry posts exactly what was first sent.
+ */
+export function message(kind: 'failure' | 'note', title: string, detail: string[]): string {
+  const icon = kind === 'failure' ? ':red_circle:' : ':information_source:';
+  const who = kind === 'failure' ? quota.mentions() : '';
+  const head = `${icon} *${title}*${who ? ` ${who}` : ''}`;
+  const lines = detail.filter(Boolean);
+  const blocks: unknown[] = [{ type: 'section', text: { type: 'mrkdwn', text: head } }];
+  if (lines.length) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: lines.join('\n').slice(0, 2900) }] });
+  return JSON.stringify({ text: `${head}\n${lines.join('\n')}`, blocks });
+}
 const RUN_PATH = process.env.AGENT_EVALS_RUN_PATH?.trim() || '/webhook/agent-evals-run';
 
 export function evalKey(name: string): string | null {
@@ -61,6 +94,9 @@ export async function onVersionChange(input: { agent_id: string; name: string; f
       dedupe_key: `agent_version:${r.rows[0].id}`,
     });
     await draftCheck(r.rows[0].id, input);
+    if (isBackup(input.agent_id)) {
+      await query(`UPDATE engine_agent_versions SET eval_state = 'not_applicable', eval_detail = $2, settled_at = now() WHERE id = $1`, [r.rows[0].id, BACKUP_DETAIL]);
+    }
   } catch (e) {
     console.error(`[publish-check] ${input.name}: the version change was not recorded: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -73,6 +109,8 @@ export async function onVersionChange(input: { agent_id: string; name: string; f
  * publish". No such run, or a failing one, is said in the engine alerts
  * channel at once. The eval after the publish still runs either way.
  */
+const BACKUP_DETAIL = 'an Anthropic backup: the eval runner tests only the main agents, so this version is judged by its draft eval';
+
 async function draftCheck(versionRowId: string, input: { agent_id: string; name: string; to: string | null; from: string | null; config_hash: string | null }): Promise<void> {
   const v = await draftEval.verdictFor(input.agent_id, input.config_hash);
   const to = (input.to ?? '').slice(0, 8);
@@ -85,11 +123,18 @@ async function draftCheck(versionRowId: string, input: { agent_id: string; name:
   } else if (v) {
     state = 'failed_before_publish';
     detail = `${v.run_id}: ${v.detail ?? 'failed'}`;
-    alert = `:rotating_light: *${input.name} was published on version \`${to}\` although its draft eval failed.* ${quota.mentions()}\n${detail}\n${input.from ? `To roll back, publish version \`${input.from}\` again.` : 'No earlier version is on record to roll back to.'} Nothing has been changed for you.`;
+    alert = message('failure', `${input.name} was published although its pre-publish test failed`, [
+      `Version \`${to}\`. Test ${detail}.`,
+      input.from ? `To undo, publish version \`${input.from}\` again in n8n.` : 'No earlier version is on record to go back to.',
+      'Nothing was changed automatically.',
+    ]);
   } else {
     state = 'none';
     detail = input.config_hash ? `no finished draft eval matches config ${input.config_hash.slice(0, 12)}` : 'the inventory carried no config hash, so no draft eval can be matched';
-    alert = `:warning: *${input.name} went live on version \`${to}\` without a draft eval behind it.* ${quota.mentions()}\nNo finished draft eval tested this exact config before the publish (run_draft_eval). The eval after the publish still runs.`;
+    alert = message('note', `${input.name} was published without a pre-publish test`, [
+      `Version \`${to}\`. No test run (run_draft_eval) checked this exact setup before it went live.`,
+      isBackup(input.agent_id) ? 'Run one now to cover it; backups get no test after publishing.' : 'The usual test after publishing still runs.',
+    ]);
   }
   let alertState: string | null = null;
   let alertDetail: string | null = null;
@@ -104,11 +149,18 @@ async function draftCheck(versionRowId: string, input: { agent_id: string; name:
     .catch((e) => console.error(`[publish-check] draft event not recorded: ${e instanceof Error ? e.message : String(e)}`));
 }
 
-async function post(text: string): Promise<{ ok: true; ts: string } | { ok: false; error: string }> {
+/** Posts a message() string; a plain string (an alert stored before 18 Oct) is posted as text. */
+async function post(stored: string): Promise<{ ok: true; ts: string } | { ok: false; error: string }> {
   const channel = quota.channelId();
   if (!channel) return { ok: false, error: `${quota.CHANNEL_VAR} is not set` };
   if (!slack.slackConfigured()) return { ok: false, error: `${slack.SLACK_TOKEN_VAR} is not set` };
-  const r = await slack.botCall('chat.postMessage', { channel, text, unfurl_links: false, unfurl_media: false });
+  let text = stored;
+  let blocks: unknown[] | undefined;
+  try {
+    const m = JSON.parse(stored);
+    if (m && typeof m.text === 'string' && Array.isArray(m.blocks)) ({ text, blocks } = m);
+  } catch { /* plain text */ }
+  const r = await slack.botCall('chat.postMessage', { channel, text, ...(blocks ? { blocks } : {}), unfurl_links: false, unfurl_media: false });
   return r.ok && typeof r.ts === 'string' ? { ok: true, ts: r.ts } : { ok: false, error: String(r.error ?? 'unknown error') };
 }
 
@@ -130,7 +182,7 @@ async function askForRun(reason: string): Promise<{ ok: boolean; error?: string 
 
 interface VRow {
   id: string; agent_id: string; name: string; version_id: string; previous_version_id: string | null; is_rollback: boolean;
-  seen_at: string; eval_state: string; requested_at: string | null; alert_state: string | null;
+  seen_at: string; eval_state: string; requested_at: string | null; alert_state: string | null; config_hash: string | null;
 }
 
 /** Per agent, the failed case ids of one run. */
@@ -150,10 +202,17 @@ const FINISHED = `WITH runs AS (
 
 export async function sweep(now = new Date()): Promise<{ asked: boolean; settled: number; alerts: number; failed: number }> {
   const out = { asked: false, settled: 0, alerts: 0, failed: 0 };
-  const open = (await query<VRow>(`SELECT id::text, agent_id, name, version_id, previous_version_id, is_rollback, seen_at, eval_state, requested_at, alert_state FROM engine_agent_versions WHERE eval_state IN ('pending', 'requested') OR alert_state = 'failed' ORDER BY id`)).rows;
+  const open = (await query<VRow>(`SELECT id::text, agent_id, name, version_id, previous_version_id, is_rollback, seen_at, eval_state, requested_at, alert_state, config_hash FROM engine_agent_versions WHERE eval_state IN ('pending', 'requested') OR alert_state = 'failed' ORDER BY id`)).rows;
   if (!open.length) {
     const draftStuck = await query<{ n: string }>(`SELECT count(*)::text AS n FROM engine_agent_versions WHERE draft_alert_state = 'failed'`);
     if (draftStuck.rows[0]?.n === '0') return out;
+  }
+
+  // A backup recorded before 18 Oct is settled the same way a new one is.
+  for (const v of open.filter((x) => isBackup(x.agent_id) && (x.eval_state === 'pending' || x.eval_state === 'requested'))) {
+    await query(`UPDATE engine_agent_versions SET eval_state = 'not_applicable', eval_detail = $2, settled_at = $3 WHERE id = $1`, [v.id, BACKUP_DETAIL, now.toISOString()]);
+    v.eval_state = 'not_applicable';
+    out.settled++;
   }
 
   // 2. ask for one run for everything that has settled.
@@ -192,15 +251,39 @@ export async function sweep(now = new Date()): Promise<{ asked: boolean; settled
       } else if (regressed.length) {
         state = 'failed';
         detail = `${run}: ${regressed.join(', ')} failed and passed in ${before.rows[0]?.run_id ?? 'no earlier run'}${known.length ? `; already failing before: ${known.join(', ')}` : ''}`;
-        alert = `:rotating_light: *${v.name} went live on version \`${v.version_id.slice(0, 8)}\` and the eval run after it failed.* ${quota.mentions()}\n${run}: ${regressed.join(', ')} failed${prior ? ` and passed in ${before.rows[0].run_id}` : ''}.${known.length ? ` Already failing before the change: ${known.join(', ')}.` : ''}\n${v.previous_version_id ? `To roll back, publish version \`${v.previous_version_id}\` again.` : 'No earlier version is on record to roll back to.'} If the check is wrong and the agent is right, fix the check with a new row in agent_eval_set. Nothing has been changed for you.`;
+        alert = message('failure', `${v.name}: tests failed after publishing version \`${v.version_id.slice(0, 8)}\``, [
+          `${run}: ${regressed.join(', ')} failed${prior ? `, and passed in ${before.rows[0].run_id}` : ''}.${known.length ? ` Already failing before the change: ${known.join(', ')}.` : ''}`,
+          v.previous_version_id ? `To undo, publish version \`${v.previous_version_id}\` again in n8n.` : 'No earlier version is on record to go back to.',
+          'If the test is wrong rather than the agent, add a corrected row for that case in agent_eval_set. Nothing was changed automatically.',
+        ]);
       } else {
         state = 'passed';
         detail = `${run}: ${now_.cases - now_.failed.length} of ${now_.cases} cases passed${known.length ? `; ${known.join(', ')} failed and were already failing before the change` : ''}`;
       }
     } else if (now.getTime() - new Date(v.seen_at).getTime() > RULE.no_eval_minutes * 60_000) {
-      state = 'no_eval';
-      detail = `no eval run finished within ${RULE.no_eval_minutes} minutes of the change`;
-      alert = `:warning: *${v.name} is live on version \`${v.version_id.slice(0, 8)}\` with no eval run behind it.* ${quota.mentions()}\nNo run of Agent Evals — Runner started and finished in the ${RULE.no_eval_minutes} minutes after the change was recorded. Run it by hand.`;
+      let draft = await draftEval.verdictFor(v.agent_id, v.config_hash).catch(() => null);
+      // A version recorded before 18 Oct carries n8n's plain hash, which no draft run made since
+      // can match (they carry cs1:). For those only, a passing draft run of this same agent that
+      // started after the version was recorded covers it: nothing newer was published meanwhile,
+      // or this row would have been superseded.
+      if (!draft && v.config_hash && !v.config_hash.startsWith('cs1:')) {
+        const late = await query<{ run_id: string; state: string; detail: string | null }>(
+          `SELECT run_id, state, detail FROM engine_draft_eval_runs WHERE agent_id = $1 AND state = 'passed' AND started_at > $2::timestamptz ORDER BY finished_at DESC LIMIT 1`,
+          [v.agent_id, v.seen_at],
+        ).catch(() => null);
+        draft = late?.rows[0] ?? null;
+      }
+      if (draft?.state === 'passed') {
+        state = 'covered_by_draft_eval';
+        detail = `no eval run finished within ${RULE.no_eval_minutes} minutes; this exact config passed ${draft.run_id} before the publish`;
+      } else {
+        state = 'no_eval';
+        detail = `no eval run finished within ${RULE.no_eval_minutes} minutes of the change`;
+        alert = message('note', `${v.name}: no test ran after publishing version \`${v.version_id.slice(0, 8)}\``, [
+          `No run of Agent Evals — Runner finished in the ${RULE.no_eval_minutes} minutes after the change, and no pre-publish test covers this setup.`,
+          'Run run_draft_eval on it, or start the runner by hand, if this version needs checking.',
+        ]);
+      }
     }
     if (!state) continue;
     out.settled++;

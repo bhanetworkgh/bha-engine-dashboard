@@ -8,6 +8,8 @@
  *   `close_decision_watch`  — the requester, the owner, Destiny or Jason.
  *   `update_decision_watch` — attach an SOP or North Star reference to a watch
  *                             opened before the rule existed (in Bays' scope).
+ *   `snooze_decision_watch` — pause its reminders until a date, at most 14 days
+ *                             ahead; the watch stays open (in Bays' scope).
  *   `run_decision_watch`    — the sweep on demand, for a person on the
  *                             connector. In no agent's scope.
  *
@@ -178,7 +180,7 @@ export const openDecisionWatch: ToolDefinition = {
 export const listDecisionWatches: ToolDefinition = {
   name: 'list_decision_watches',
   description:
-    'List the decisions being watched: open ones first (soonest reminder first), then the closed ones. status is watching, answered (the owner replied), moved (the linked loop or task was closed), escalated (the reminders ran out and Jason and Destiny were told) or cancelled. "problem" is why a watch could not be checked or posted, e.g. a thread no bot can read. Filter with owner_user_id or open_only. Use it to answer "what is Bays watching" or "what am I being waited on for".',
+    'List the decisions being watched: open ones first (soonest reminder first), then the closed ones. status is watching, answered (the owner replied), moved (the linked loop or task was closed), escalated (the reminders ran out and Jason and Destiny were told) or cancelled. "problem" is why a watch could not be checked or posted, e.g. a thread no bot can read. Filter with owner_user_id or open_only. Use it to answer "what is Bays watching" or "what am I being waited on for". Each watch carries how_it_moves: where a reply counts, what it does, and when the next reminder goes. Before telling anyone what a watch will do (whether a message resets it, closes it, or when it will nudge), read that line and say it as written; never work it out from the thread you are in, because the watch may be on a different thread.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -277,6 +279,76 @@ export const updateDecisionWatch: ToolDefinition = {
     }),
 };
 
+/** A date to snooze until: an ISO time with its zone, or a bare day (YYYY-MM-DD, read as 00:00 UTC that day). */
+export function parseUntil(raw: string): Date | null {
+  const v = raw.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return new Date(`${v}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/.test(v)) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export const snoozeDecisionWatch: ToolDefinition = {
+  name: 'snooze_decision_watch',
+  description:
+    `Pause a watch's reminders until a date, by its watch_id (DW-…). Use it when the person a watch is waiting on, whoever asked for it, Destiny or Jason asks not to be reminded for a while ("snooze it until the 30th", "don't remind me till after 10/31"). Never cancel a watch and open a new one to get a longer wait: that loses its history. The watch stays open: its thread is still read, the owner's reply still counts, a linked loop closing still closes it, and nothing is posted until the date; after it, reminders carry on as before. until is the date the person named: a day as YYYY-MM-DD (read as 00:00 UTC that day) or an ISO time with its zone. At most ${dw.RULE.max_snooze_days} days from now; a later date is refused (too_long) and the answer says the latest date allowed, so ask the person to pick one. Ask the person for the date when they did not name one; never pick it for them. A snooze already running is replaced by the new date. clear: true ends a snooze early. Only the watch's owner, the person who asked for it, Destiny or Jason may snooze it. Returns {ok, snoozed_until, watch}. Audited on engine_mcp_writes.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      watch_id: { type: 'string', description: 'DW-…' },
+      until: { type: 'string', description: 'The date the person named: YYYY-MM-DD, or an ISO time with its zone (e.g. 2026-10-30T09:00:00+01:00). Required unless clear is true.' },
+      clear: { type: 'boolean', description: 'true ends a running snooze now.' },
+      reason: { type: 'string', description: 'Optional. Why, in the person\'s words.' },
+      requester_user_id: { type: 'string', description: 'Slack id of the person asking. Required.' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['watch_id', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { ...WRITE, title: 'Snooze a watched decision until a date' },
+  handler: (args, deps) =>
+    audited('snooze_decision_watch', args, deps, async () => {
+      const id = str(args, 'watch_id');
+      const refuse = (reason: string, message: string) => ({ outcome: 'refused', detail: reason, target: id || null, answer: { ok: false, reason, message: `${message} Nothing was changed.` } });
+      const requester = bare(str(args, 'requester_user_id'));
+      if (!USER_RE.test(requester)) return refuse('requester_required', '"requester_user_id" must be the Slack id (U…) of the person asking.');
+      const clear = args.clear === true;
+      const raw = str(args, 'until');
+      if (clear && raw) return refuse('until_and_clear', 'Send until to snooze, or clear: true to end a snooze, not both.');
+      if (!clear && !raw) return refuse('until_required', 'Say until when: a day as YYYY-MM-DD, or an ISO time with its zone. Ask the person for the date if they did not name one.');
+      const until = clear ? null : parseUntil(raw);
+      if (!clear && !until) return refuse('bad_until', `"${raw.slice(0, 60)}" is not a date this can read. Send YYYY-MM-DD, or an ISO time with its zone.`);
+      const reason = str(args, 'reason') || null;
+      if (args.dry_run === true) {
+        const now = Date.now();
+        const latest = new Date(now + dw.RULE.max_snooze_days * 86_400_000);
+        const problem = until && until.getTime() <= now ? 'not_in_future' : until && until.getTime() > latest.getTime() ? 'too_long' : null;
+        return { outcome: 'dry_run', detail: problem, target: id, answer: { ok: !problem, dry_run: true, would_snooze: { watch_id: id, until: until ? until.toISOString() : null, clear }, ...(problem ? { reason: problem, latest_allowed: latest.toISOString() } : {}) } };
+      }
+      const r = await dw.snooze(id, requester, until, reason);
+      if (!r.ok) return refuse(r.reason, r.message);
+      const shown = dw.show(r.watch);
+      return {
+        outcome: r.changed ? 'applied' : 'unchanged',
+        detail: r.changed ? `${id} ${until ? `snoozed until ${until.toISOString()}` : 'snooze ended'} by ${requester}${deps.agent ? ` through ${deps.agent}` : ''}` : `${id}: already ${until ? 'snoozed until that date' : 'not snoozed'}`,
+        target: id,
+        answer: {
+          ok: true,
+          watch_id: id,
+          changed: r.changed,
+          snoozed_until: r.snoozed_until ? r.snoozed_until.toISOString() : null,
+          next_action_at: shown.next_action_at,
+          watch: shown,
+          message: until
+            ? `${id} is snoozed until ${until.toISOString()}. It stays open: a reply in the thread still counts, and nothing is posted before that date. After it, reminders carry on as before. Say this plainly to the person.`
+            : r.changed
+              ? `${id}'s snooze is over. It is watching again, with its reminders as before.`
+              : `${id} was not snoozed; nothing was changed.`,
+        },
+      };
+    }),
+};
+
 export const runDecisionWatch: ToolDefinition = {
   name: 'run_decision_watch',
   description:
@@ -300,4 +372,4 @@ export const runDecisionWatch: ToolDefinition = {
   },
 };
 
-export const DECISION_WATCH_WRITE_TOOLS: ToolDefinition[] = [openDecisionWatch, listDecisionWatches, closeDecisionWatch, updateDecisionWatch, runDecisionWatch];
+export const DECISION_WATCH_WRITE_TOOLS: ToolDefinition[] = [openDecisionWatch, listDecisionWatches, closeDecisionWatch, updateDecisionWatch, snoozeDecisionWatch, runDecisionWatch];
