@@ -13148,7 +13148,8 @@ Decision:   Run 2 (20261020b) is the clean record. Check 1 after the break opene
 
 ## 2026-10-20 18:05 — vFarm monitoring contract: Jason accepts conditions 6 and 7
 Intent:     Bring the contract in step with Jason's reply in #bha-codex-logs (1792510897.480169): "Both are accepted as doctrine."
-Files:      docs/contracts/vfarm-monitoring.md, CLAUDE.md; BHARAG SOP 95437816 (the contract's copy)
+Files:      docs/contracts/vfarm-monitoring.md, CLAUDE.md; BHARAG SOP 95437816 replaced by 7059c100 (same title; old text on audit line 2813)
 Problem:    The contract and the SOP still marked condition 6 (one vfarm.alert.v1 frame from the rack has landed) and condition 7 (cabinet_id and config_hash sent, burn-in passed, before a buyer sees the rack) as PROPOSED, which now contradicts the doctrine the agents read.
 Fix:        Both marked "Accepted by Jason, 20 Oct 2026". Section 1 gains ENGINE_SNAPSHOT_READ_TIMEOUT_MS (bhavfarm PR #73, the re-applied sender with the slow lookup fixed). Condition 6 is still not checked by check_un9d_acceptance; that stays named.
 Decision:   Wording kept to what Jason said; no reading added about racks monitored before identity is sent.
+The status line is updated too: the two keys are in vfarm/app/env now, the sender was reverted (bhavfarm #72) and comes back in #73.
