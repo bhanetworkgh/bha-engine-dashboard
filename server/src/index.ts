@@ -44,6 +44,7 @@ import * as health from './health';
 import * as selfHealing from './selfHealing';
 import * as healthReport from './healthReport';
 import * as repairs from './repairs';
+import * as doctrineDrillTools from './mcp/doctrineDrillTools';
 import * as recovery from './recovery';
 import * as scorecard from './scorecard';
 import * as pay from './pay';
@@ -615,6 +616,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         }
         throw e;
       }
+    }
+    // The QNDM drill's steps, the same handler as run_doctrine_drill (2026-10-20), for when the
+    // connector's tool list has not picked the tool up. Same guards: Destiny or Jason, confirm
+    // "DRILL QNDM", drill doctrine only; audited on engine_mcp_writes and logged here.
+    if (p === '/api/engine/doctrine-drill') {
+      if (method !== 'POST') throw new HttpError(405, 'POST {step, run, label, confirm, requester_user_id}.');
+      const body = await readJson(req, 16 * 1024);
+      const out = (await doctrineDrillTools.runDoctrineDrillTool.handler(body as Record<string, unknown>, { access: 'write' } as never)) as { ok: boolean; step?: string; reason?: string; message?: string };
+      await mirror.logWrite({ endpoint, kind: 'doctrine_drill', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: 'QNDM-DRILL', outcome: out.ok ? 'updated' : 'rejected', detail: `${String(body.step ?? '')}${out.ok ? '' : `: ${out.reason} ${out.message ?? ''}`}`.slice(0, 400), ms: Date.now() - t0 });
+      return send(res, out.ok ? 200 : 422, out);
     }
     if (p === '/api/engine/repair' || p === '/api/engine/repairs') {
       if (method !== 'POST') throw new HttpError(405, 'POST. An upsert on repair_id, so the same result twice updates rather than duplicating.');
