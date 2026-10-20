@@ -260,6 +260,18 @@ const run = (args) => recordAgentInventory.handler(args, deps);
   assert.deepEqual(violations, [], 'the n8n stand-in objected to a request');
   ok('every request went to the one address, as a POST with the Bearer token, redirects refused, the agreed protocol version and the session id');
 
+  // LOOP-1792328810473-P3UV: a skill edit is a change even when n8n's configHash stays put.
+  {
+    const base = { configHash: 'abc', skillHashes: { s2: 'h2', s1: 'h1' } };
+    const h = n8nMcp.changeHash(base);
+    assert.match(h, /^cs1:[0-9a-f]{64}$/);
+    assert.equal(n8nMcp.changeHash({ configHash: 'abc', skillHashes: { s1: 'h1', s2: 'h2' } }), h, 'order of skills does not matter');
+    assert.notEqual(n8nMcp.changeHash({ configHash: 'abc', skillHashes: { s1: 'h1', s2: 'CHANGED' } }), h, 'a skill edit changes the hash');
+    assert.notEqual(n8nMcp.changeHash({ configHash: 'abd', skillHashes: { s1: 'h1', s2: 'h2' } }), h, 'a config edit changes the hash');
+    assert.equal(n8nMcp.changeHash({ configHash: 'abc' }), 'abc', 'no skillHashes keeps n8n\'s own hash');
+    assert.equal(n8nMcp.changeHash({}), null);
+    ok('changeHash folds skill hashes into the config hash');
+  }
   console.log(`\n${passed} checks passed.`);
 })().catch((e) => {
   console.error(e);

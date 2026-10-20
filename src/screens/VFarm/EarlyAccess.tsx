@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
   addVfarmLeadNote,
   clearIntake2Unresponsive,
+  createVfarmProposal,
   closeVfarmLead,
   moveVfarmLeadStage,
   reopenVfarmLead,
@@ -22,7 +23,8 @@ import { FollowUpTracker, Form2Answers, followUpLine } from './Intake2Panel';
  *
  * The columns lead with his stage numbers: Stage 1 · Interest (filled in Form A), Stage 2 ·
  * Invited (Jason cleared them and Form 2 went out), Stage 2 · Spec received (they sent Form 2
- * back), Stage 3 · Paying (a placeholder) and Closed. Form 2 is the buyer's site specification,
+ * back), Stage 3 · Proposal, Stage 4 · Agreement & deposit, Stage 5 · Customer and Closed
+ * (buyer flow v2, 17 Oct 2026). Form 2 is the buyer's site specification,
  * Intake-2 in the code; on screen it is Form 2 everywhere.
  *
  * A lead's page reads top to bottom: where they are and the one thing to do next, the follow-up
@@ -171,7 +173,7 @@ function Board({ byCol, onOpen }: { byCol: Map<PipelineKey, VfarmLead[]>; onOpen
   return (
     // The board scrolls sideways inside its own frame; the page body never does.
     <div className="overflow-x-auto px-6 md:px-8">
-      <div className="grid min-w-[1040px] grid-cols-5 gap-3">
+      <div className="grid min-w-[1400px] grid-cols-7 gap-3">
         {PIPELINE.map((c) => {
           const list = byCol.get(c.key)!;
           return (
@@ -512,10 +514,10 @@ function NextUp({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdated: (l: 
             )}
           </li>
         </ul>
-        <p className="mt-2 text-[12.5px] text-dim">Next: BHA reviews it. Nothing here confirms feasibility, pricing or anything else; their answers are information, not a decision.</p>
+        <p className="mt-2 text-[12.5px] text-dim">Next: Jason and Hardik run the five checks (feasibility, pricing, ownership, licensing, food safety) against these answers. Only when all five clear does the lead move on to a proposal. Their answers are information, not a decision.</p>
         <div className="mt-3">
-          <Button variant="primary" size="sm" loading={busy === 'fwd'} onClick={() => run('fwd', () => moveVfarmLeadStage(lead.id, 3, null), 'Moved to Stage 3.')}>
-            Move to Stage 3 · Paying
+          <Button variant="primary" size="sm" loading={busy === 'fwd'} onClick={() => run('fwd', () => moveVfarmLeadStage(lead.id, 3, 'The five checks cleared'), 'Moved to Stage 3.')}>
+            Five checks cleared: move to Stage 3 · Proposal
           </Button>
         </div>
         {closeControl}
@@ -523,17 +525,166 @@ function NextUp({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdated: (l: 
     );
   }
 
-  // paying
+  if (col === 'proposal') {
+    return (
+      <Section title="Stage 3 · Proposal">
+        <ProposalPanel lead={lead} onUpdated={onUpdated} onToast={onToast} />
+        <div className="mt-3">
+          <Button size="sm" variant="ghost" loading={busy === 'back'} onClick={() => run('back', () => moveVfarmLeadStage(lead.id, 2, null), 'Back to Stage 2.')}>
+            Back to Stage 2
+          </Button>
+        </div>
+        {closeControl}
+      </Section>
+    );
+  }
+
+  const pay = lead.stripe_payment;
+  const payLine = !pay
+    ? 'No payment recorded.'
+    : `${pay.mode === 'test' ? 'Stripe sandbox (test): ' : ''}${pay.state === 'paid' ? 'paid' : pay.state}${pay.amount != null ? `, ${(pay.amount / 100).toFixed(2)} ${(pay.currency ?? '').toUpperCase()}` : ''}${pay.paid_at ? ` on ${day(pay.paid_at)}` : ''}${pay.failure ? `. ${pay.failure}` : ''}`;
+
+  if (col === 'agreement') {
+    return (
+      <Section title="Stage 4 · Agreement & deposit">
+        <p className="text-[13px] text-ink">They accepted {lead.proposal?.proposal_id ?? 'their proposal'}{lead.proposal?.accepted_at ? ` on ${day(lead.proposal.accepted_at)}` : ''}.</p>
+        <ul className="mt-1 space-y-0.5 text-[12.5px] text-dim">
+          <li>Agreement: Jason&rsquo;s templates, not written yet. Nothing is sent from here until they are.</li>
+          <li>Their own Stripe link: made for this lead only. Payment: {pay?.state === 'failed' ? <span className="text-failing">{payLine}</span> : payLine}</li>
+        </ul>
+        <p className="mt-2 text-[12px] text-faint">Stage 4 stays future-state for real buyers until Stripe acceptance, one real Form 2 lead and Canon Lock are proven.</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button variant="primary" size="sm" disabled={pay?.state !== 'paid'} loading={busy === 'fwd'} onClick={() => run('fwd', () => moveVfarmLeadStage(lead.id, 5, 'Agreement and payment in'), 'Moved to Stage 5.')}>
+            Agreement and payment in: move to Stage 5
+          </Button>
+          <Button size="sm" variant="ghost" loading={busy === 'back'} onClick={() => run('back', () => moveVfarmLeadStage(lead.id, 3, null), 'Back to Stage 3.')}>
+            Back to Stage 3
+          </Button>
+        </div>
+        {closeControl}
+      </Section>
+    );
+  }
+
+  // customer
   return (
-    <Section title="Stage 3 · Paying">
-      <p className="text-[13px] text-ink">A placeholder. No payment is taken here until Jason and Hardik set the price and the checkout.</p>
+    <Section title="Stage 5 · Customer">
+      <p className="text-[13px] text-ink">A vFarm customer: the agreement and the payment are both in.</p>
+      <p className="mt-1 text-[12.5px] text-dim">Payment: {payLine}</p>
+      <p className="mt-1 text-[12px] text-faint">Onboarding driven by Engine status is future-state.</p>
       <div className="mt-3">
-        <Button size="sm" variant="ghost" loading={busy === 'back'} onClick={() => run('back', () => moveVfarmLeadStage(lead.id, 2, null), 'Back to Stage 2.')}>
-          Back to Stage 2
+        <Button size="sm" variant="ghost" loading={busy === 'back'} onClick={() => run('back', () => moveVfarmLeadStage(lead.id, 4, null), 'Back to Stage 4.')}>
+          Back to Stage 4
         </Button>
       </div>
       {closeControl}
     </Section>
+  );
+}
+
+/** Stage 3: make the proposal, then follow what the buyer did with it. Every proposal is a test until Canon Lock. */
+function ProposalPanel({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdated: (l: VfarmLead) => void; onToast: (t: string, tone: 'ok' | 'failing') => void }) {
+  const p = lead.proposal ?? null;
+  const [editing, setEditing] = useState(!p);
+  const [name, setName] = useState(p?.setup_name ?? '');
+  const [summary, setSummary] = useState(p?.summary ?? '');
+  const [inc, setInc] = useState((p?.inclusions ?? []).join('\n'));
+  const [price, setPrice] = useState(p ? String(p.price_amount / 100) : '');
+  const [cur, setCur] = useState(p?.currency ?? 'usd');
+  const [timeline, setTimeline] = useState(p?.timeline ?? '');
+  const [busy, setBusy] = useState(false);
+  const money = (c: number, k: string) => `${(c / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })} ${k.toUpperCase()}`;
+
+  async function save() {
+    const cents = Math.round(Number(price) * 100);
+    setBusy(true);
+    try {
+      const r = await createVfarmProposal(lead.id, { setup_name: name, summary, inclusions: inc.split('\n').map((s) => s.trim()).filter(Boolean), price_amount: cents, currency: cur, timeline: timeline.trim() || null });
+      onUpdated({ ...lead, proposal: r.proposal });
+      setEditing(false);
+      onToast(r.replaced ? `Proposal replaced. ${r.replaced}'s link no longer works.` : 'Proposal made. Copy their link and send it to them.', 'ok');
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : 'That did not save.', 'failing');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <p className="rounded-[10px] bg-hover px-3 py-2 text-[12.5px] text-ink">
+        Every proposal is marked <strong>test</strong> until Canon Lock exists: the buyer&rsquo;s page says so on every view, and it is not an offer. Stage 3 takes no payment.
+      </p>
+      {p && !editing && (
+        <div className="mt-3 space-y-1 text-[12.5px]">
+          <div className="text-[14px] font-semibold text-ink">{p.setup_name} · {money(p.price_amount, p.currency)}</div>
+          <p className="whitespace-pre-wrap text-dim">{p.summary}</p>
+          {p.inclusions.length > 0 && (
+            <ul className="list-disc pl-5 text-dim">
+              {p.inclusions.map((i) => (
+                <li key={i}>{i}</li>
+              ))}
+            </ul>
+          )}
+          {p.timeline && <p className="text-dim">{p.timeline}</p>}
+          <p className="text-faint">
+            {p.proposal_id} · made {day(p.created_at)} by {p.created_by} · {p.opened_at ? `opened ${day(p.opened_at)}` : 'not opened yet'}
+            {p.accepted_at ? ` · accepted ${day(p.accepted_at)}` : ''}
+          </p>
+          {p.actions.length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {p.actions
+                .slice()
+                .reverse()
+                .map((a) => (
+                  <li key={a.at} className="text-ink">
+                    {a.kind === 'accepted' ? 'Accepted' : a.kind === 'question' ? 'Asked' : 'Asked for a call'} · {stamp(a.at)}
+                    {a.text ? <span className="whitespace-pre-wrap text-dim">: {a.text}</span> : null}
+                    {a.notified?.error ? <span className="text-failing"> · not posted in Slack: {a.notified.error}</span> : null}
+                  </li>
+                ))}
+            </ul>
+          )}
+          <div className="flex flex-wrap gap-2 pt-2">
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={async () => {
+                const ok = await copy(p.link);
+                onToast(ok ? 'Their proposal link is copied. It is theirs alone: do not share it.' : 'Could not copy the link.', ok ? 'ok' : 'failing');
+              }}
+            >
+              Copy their proposal link
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+              Replace the proposal
+            </Button>
+          </div>
+        </div>
+      )}
+      {editing && (
+        <div className="mt-3 grid gap-2 text-[12.5px]">
+          <input className="input" placeholder="Setup name (for example: 1 rack, leafy greens, office lobby)" value={name} onChange={(e) => setName(e.target.value)} />
+          <textarea className="input min-h-[72px] py-2" placeholder="What the setup is and why it fits their site" value={summary} onChange={(e) => setSummary(e.target.value)} />
+          <textarea className="input min-h-[56px] py-2" placeholder="What is included, one per line (optional)" value={inc} onChange={(e) => setInc(e.target.value)} />
+          <div className="flex flex-wrap gap-2">
+            <input className="input w-40" inputMode="decimal" placeholder="Price, e.g. 4500" value={price} onChange={(e) => setPrice(e.target.value)} />
+            <input className="input w-20" placeholder="usd" value={cur} onChange={(e) => setCur(e.target.value)} />
+            <input className="input min-w-[200px] flex-1" placeholder="Timeline (optional), e.g. installed within 6 weeks of the deposit" value={timeline} onChange={(e) => setTimeline(e.target.value)} />
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="primary" loading={busy} disabled={!name.trim() || !summary.trim() || !Number(price)} onClick={save}>
+              {p ? 'Replace the proposal' : 'Make the test proposal'}
+            </Button>
+            {p && (
+              <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+                Cancel
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -605,7 +756,7 @@ interface Moment {
 }
 
 function moments(l: VfarmLead): Moment[] {
-  const name = (n: number) => (n === 1 ? 'Stage 1' : n === 2 ? 'Stage 2' : 'Stage 3');
+  const name = (n: number) => `Stage ${n}`;
   const m: Moment[] = [{ at: l.form_a?.submitted_at && /^\d{4}-/.test(l.form_a.submitted_at) ? l.form_a.submitted_at : l.created_at, what: l.form_a ? 'Filled in Form A' : 'Signed up on the old public form' }];
   for (const s of l.stage_history ?? []) m.push({ at: s.at, what: `Moved from ${name(s.from)} to ${name(s.to)}${s.reason ? `: ${s.reason}` : ''}`, who: s.via === 'engine' ? `${s.by} (n8n)` : s.by });
   const inv = l.intake_2_invite;
@@ -618,6 +769,12 @@ function moments(l: VfarmLead): Moment[] {
   if (inv?.unresponsive_at) m.push({ at: inv.unresponsive_at, what: 'Marked unresponsive: no answer 14 days after Form 2', tone: 'degraded' });
   for (const c of inv?.unresponsive_cleared ?? []) m.push({ at: c.at, what: 'Unresponsive cleared', who: c.by });
   if (l.intake_2) m.push({ at: l.intake_2.submitted_at, what: 'Sent Form 2 back' });
+  if (l.proposal) {
+    m.push({ at: l.proposal.created_at, what: `Proposal ${l.proposal.proposal_id} made (test)`, who: l.proposal.created_by });
+    if (l.proposal.opened_at) m.push({ at: l.proposal.opened_at, what: 'Opened their proposal' });
+    for (const a of l.proposal.actions) m.push({ at: a.at, what: a.kind === 'accepted' ? 'Accepted the proposal' : a.kind === 'question' ? `Asked a question: ${a.text ?? ''}` : `Asked for a call${a.text ? `: ${a.text}` : ''}` });
+  }
+  if (l.stripe_payment?.updated_at) m.push({ at: l.stripe_payment.updated_at, what: `Stripe${l.stripe_payment.mode === 'test' ? ' (sandbox)' : ''}: ${l.stripe_payment.state}`, tone: l.stripe_payment.state === 'failed' ? 'failing' : undefined });
   for (const a of l.activity ?? []) {
     if (a.kind === 'next_step') continue;
     const what = a.kind === 'note' ? <span className="whitespace-pre-wrap text-ink">{a.text}</span> : a.kind === 'closed' ? `Closed: ${closeReasonLabel(a.reason)}${a.text ? `. ${a.text}` : ''}` : `Reopened${a.text ? `. ${a.text}` : ''}`;

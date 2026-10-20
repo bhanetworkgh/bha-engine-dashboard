@@ -3269,6 +3269,122 @@ const MIGRATIONS: Migration[] = [
        )`,
     ],
   },
+  {
+    // 17 Oct 2026 (Destiny, D4): the Stripe to ledger rail. One row per Stripe event,
+    // keyed on Stripe's own id so a retried delivery is one row; the lead's own payment
+    // state beside its other records. No stage, entitlement or subscriber column.
+    id: 80,
+    name: 'engine_stripe_events; engine_vfarm_leads.stripe_payment',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_stripe_events (
+         event_id text PRIMARY KEY,
+         type text NOT NULL,
+         livemode boolean NOT NULL,
+         stripe_created_at timestamptz,
+         received_at timestamptz NOT NULL DEFAULT now(),
+         session_id text,
+         payment_intent text,
+         amount bigint,
+         currency text,
+         lead_id text,
+         outcome text CHECK (outcome IS NULL OR outcome IN ('recorded', 'unmatched', 'ignored')),
+         detail text,
+         raw jsonb NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_stripe_events_lead ON engine_stripe_events (lead_id, received_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_stripe_events_intent ON engine_stripe_events (payment_intent)`,
+      `ALTER TABLE engine_vfarm_leads ADD COLUMN IF NOT EXISTS stripe_payment jsonb`,
+    ],
+  },
+  {
+    // 17 Oct 2026 (Jason, buyer flow v2, SOP 09cb58a7): five stages. 3 is the proposal (was the
+    // "paying" placeholder, which no lead was ever in), 4 agreement and deposit, 5 customer. The
+    // proposal lives on the lead, its link's hash indexed for the public page.
+    id: 81,
+    name: 'engine_vfarm_leads: stages 4 and 5, proposal',
+    statements: [
+      `ALTER TABLE engine_vfarm_leads DROP CONSTRAINT IF EXISTS engine_vfarm_leads_stage_check`,
+      `ALTER TABLE engine_vfarm_leads ADD CONSTRAINT engine_vfarm_leads_stage_check CHECK (stage IN (1, 2, 3, 4, 5))`,
+      `ALTER TABLE engine_vfarm_leads ADD COLUMN IF NOT EXISTS proposal jsonb`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_vfarm_leads_proposal_token ON engine_vfarm_leads ((proposal->>'token_sha256')) WHERE proposal IS NOT NULL`,
+    ],
+  },
+  {
+    // 18 Oct 2026 (Destiny; Kaiqi asked not to be reminded while heads-down on 31 Oct): a watch
+    // can be snoozed until a date, at most 14 days ahead, and stays open with its history.
+    id: 82,
+    name: 'engine_decision_watches: snoozed_until, snoozed_by, owner_seen_until',
+    statements: [
+      `ALTER TABLE engine_decision_watches ADD COLUMN IF NOT EXISTS snoozed_until timestamptz`,
+      `ALTER TABLE engine_decision_watches ADD COLUMN IF NOT EXISTS snoozed_by text`,
+      // An owner message up to the snooze is the snooze being asked for, not the answer.
+      `ALTER TABLE engine_decision_watches ADD COLUMN IF NOT EXISTS owner_seen_until timestamptz`,
+    ],
+  },  {
+    // 19 Oct 2026 (Destiny, D2.5): an incident a person closes as a test, a probe or noise is
+    // marked so, with the reason, and the self-healing scorecard counts it apart from real
+    // faults instead of as a person's close. Null is a real incident.
+    id: 83,
+    name: 'engine_incidents: test_reason, test_marked_by, test_marked_at',
+    statements: [
+      `ALTER TABLE engine_incidents ADD COLUMN IF NOT EXISTS test_reason text`,
+      `ALTER TABLE engine_incidents ADD COLUMN IF NOT EXISTS test_marked_by text`,
+      `ALTER TABLE engine_incidents ADD COLUMN IF NOT EXISTS test_marked_at timestamptz`,
+    ],
+  },  {
+    // 19 Oct 2026 (Destiny, D2.5): the five incidents a person closed whose own close reason says
+    // they were a test, a drill or a guard doing its job, and which no existing rule already
+    // counts apart. Read one by one from the 44 person closes, never matched by words in code.
+    // Done here because the session that made mark_incidents_test could not reach it yet; any
+    // later mark or clear goes through that tool.
+    id: 84,
+    name: 'engine_incidents: mark five closed tests and drills',
+    statements: [
+      `UPDATE engine_incidents SET test_reason = 'a pinned test run of Bays — Approval Decision while the approval gate was built (4 Oct); no real request failed', test_marked_by = 'migration 84 (Destiny, 19 Oct 2026, from the incident''s own close reason)', test_marked_at = now() WHERE natural_id = 'INC-BAYS.AGENT-043' AND test_reason IS NULL`,
+      `UPDATE engine_incidents SET test_reason = 'a deliberate guard test: a DM to a made-up user id, approved by Destiny, failed channel_not_found as designed (11 Oct)', test_marked_by = 'migration 84 (Destiny, 19 Oct 2026, from the incident''s own close reason)', test_marked_at = now() WHERE natural_id = 'INC-BAYS.AGENT-050' AND test_reason IS NULL`,
+      `UPDATE engine_incidents SET test_reason = 'the send-back guard correctly refused Jason answering a send-back meant for Ahad; a guard doing its job, not a fault', test_marked_by = 'migration 84 (Destiny, 19 Oct 2026, from the incident''s own close reason)', test_marked_at = now() WHERE natural_id = 'INC-BAYS.CODEX-030' AND test_reason IS NULL`,
+      `UPDATE engine_incidents SET test_reason = 'raised by the 8 Oct protected-repair drill (LOOP-1790805930203-SNI2), which broke the workflow on purpose', test_marked_by = 'migration 84 (Destiny, 19 Oct 2026, from the incident''s own close reason)', test_marked_at = now() WHERE natural_id = 'INC-NS.AGENT-065' AND test_reason IS NULL`,
+      `UPDATE engine_incidents SET test_reason = 'raised by the 8 Oct protected-repair drill (LOOP-1790805930203-SNI2), which broke the workflow on purpose', test_marked_by = 'migration 84 (Destiny, 19 Oct 2026, from the incident''s own close reason)', test_marked_at = now() WHERE natural_id = 'INC-NS.AGENT-066' AND test_reason IS NULL`,
+    ],
+  },  {
+    // 20 Oct 2026 (Destiny, LOOP-1792388413323-4E0U): Logstream dated a closed incident by its close,
+    // because BHARAG moves occurred_at to each status change. The writer now reads the earlier of
+    // occurred_at and first_seen_at (logstream.INCIDENT_AT). Rows already written with the close date
+    // are corrected once here: occurred_at moves back, time to recovery is worked out again from the
+    // same close (old date + old seconds), and the 7- and 30-day counts are counted again. Each
+    // corrected row says so in audit.date_corrected, with the date it held before. 118 rows on 20 Oct.
+    id: 85,
+    name: 'engine_logstream: date rows by when the incident happened, not its close',
+    statements: [
+      `WITH inc AS (
+         SELECT natural_id,
+                coalesce(fields->'payload'->>'workflow_or_scenario', '') AS wf,
+                coalesce(fields->'payload'->>'failed_node_or_component', '') AS node,
+                LEAST(CASE WHEN fields->>'occurred_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN (fields->>'occurred_at')::timestamptz END,
+                      CASE WHEN first_seen_at ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN first_seen_at::timestamptz END) AS at
+           FROM engine_incidents WHERE natural_id IS NOT NULL),
+       fix AS (
+         SELECT l.id, l.occurred_at AS old_at, i.at AS new_at,
+                (SELECT count(*) FROM inc o WHERE o.wf = i.wf AND o.node = i.node AND o.at <= i.at AND o.at > i.at - interval '7 days') AS f7,
+                (SELECT count(*) FROM inc o WHERE o.wf = i.wf AND o.node = i.node AND o.at <= i.at AND o.at > i.at - interval '30 days') AS f30
+           FROM engine_logstream l JOIN inc i ON i.natural_id = l.incident_id
+          WHERE i.at IS NOT NULL AND l.occurred_at > i.at + interval '1 minute')
+       UPDATE engine_logstream l
+          SET occurred_at = f.new_at,
+              objective_outcomes = l.objective_outcomes
+                || jsonb_build_object('incident_frequency_7d', f.f7, 'incident_frequency_30d', f.f30)
+                || CASE WHEN jsonb_typeof(l.objective_outcomes->'time_to_recovery_seconds') = 'number'
+                        THEN jsonb_build_object('time_to_recovery_seconds',
+                               GREATEST(0, round(extract(epoch FROM (f.old_at + ((l.objective_outcomes->>'time_to_recovery_seconds')::numeric * interval '1 second')) - f.new_at)))::bigint)
+                        ELSE '{}'::jsonb END,
+              audit = l.audit || jsonb_build_object('date_corrected', jsonb_build_object(
+                'from', to_char(f.old_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                'to', to_char(f.new_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                'at', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                'reason', 'dated by the incident''s close: BHARAG moves occurred_at on each status change (LOOP-1792388413323-4E0U)'))
+         FROM fix f WHERE f.id = l.id`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

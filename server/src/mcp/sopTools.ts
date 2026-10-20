@@ -163,7 +163,7 @@ export const deleteSopTool: ToolDefinition = {
  * read. A title that matches nothing returns the closest titles with their ids, never a guess.
  * One `read` line per call on engine_writes.
  */
-const MAX_SOP_CHARS = 30000;
+const MAX_SOP_CHARS = 60000;
 const normTitle = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
 export const readSopTool: ToolDefinition = {

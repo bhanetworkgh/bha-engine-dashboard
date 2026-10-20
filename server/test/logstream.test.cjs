@@ -82,6 +82,7 @@ function replay(logstream) {
   assert.equal(logstream.excludedReason({ workflow: 'TEST — Self-healing, North Star lane', node: 'Shape Question' }), 'test');
   assert.equal(logstream.excludedReason({ workflow: 'Monitoring Twin (simulated farm)', node: 'x', tags: ['vfarm', 'simulated'] }), 'simulator');
   assert.equal(logstream.excludedReason({ workflow: 'Bays — Front Door', node: 'Raise Refused Ask' }), 'refused_ask');
+  assert.equal(logstream.excludedReason({ workflow: 'Bays — Submit Actions', node: 'Raise Refused Click' }), 'refused_click', 'a refused review click is a guard doing its job (INC-BAYS.CODEX-031)');
   assert.equal(logstream.excludedReason({ workflow: 'Bays — Latest Digest', node: 'Read' }), null, '"Latest" is not a test');
   ok('exclusions: test, simulator and refused ask, and nothing else');
 
@@ -152,13 +153,16 @@ const hook = http.createServer((req, res) => {
   await query(`DELETE FROM engine_incidents WHERE natural_id LIKE 'INC-LSTEST-%'`);
   await query(`DELETE FROM engine_execution_runs WHERE workflow_id LIKE 'lstest-%'`);
   let seq = 0;
-  const incident = async (workflow, node, { minsAgo = 60, tags = [], open = true } = {}) => {
+  const incident = async (workflow, node, { minsAgo = 60, tags = [], open = true, movedToClose = false } = {}) => {
     const id = `INC-LSTEST-${T}-${++seq}`;
     const at = new Date(Date.now() - minsAgo * 60_000).toISOString();
+    // movedToClose: BHARAG moves occurred_at to the time of each status change, so a closed incident's
+    // own occurred_at reads as its close; only first_seen_at still says when it happened.
+    const occ = movedToClose ? new Date().toISOString() : at;
     await query(
       `INSERT INTO engine_incidents (natural_id, lane_id, fields, source, first_seen_at, updated_at, open_now, resolved_at, resolved_by)
        VALUES ($1, 'bays', $2::jsonb, 'engine', $3, $3, $4, $5, $6)`,
-      [id, JSON.stringify({ entity_id: id, occurred_at: at, payload: { workflow_or_scenario: workflow, failed_node_or_component: node, error_class: 'UNKNOWN', impact_tags: tags } }), at, open, open ? null : new Date().toISOString(), open ? null : 'test'],
+      [id, JSON.stringify({ entity_id: id, occurred_at: occ, payload: { workflow_or_scenario: workflow, failed_node_or_component: node, error_class: 'UNKNOWN', impact_tags: tags } }), at, open, open ? null : new Date().toISOString(), open ? null : 'test'],
     );
     return id;
   };
@@ -182,6 +186,16 @@ const hook = http.createServer((req, res) => {
   w = await logstream.sweep();
   assert.equal(w.rows_written, 0);
   ok('writer: a second pass writes nothing');
+
+  /* a closed incident is dated by when it happened, not by its close (LOOP-1792388413323-4E0U) */
+  const m1 = await incident(WF, 'Step M', { minsAgo: 120, open: false, movedToClose: true });
+  await logstream.sweep();
+  const mrows = (await query(`SELECT state, occurred_at, objective_outcomes FROM engine_logstream WHERE incident_id = $1 ORDER BY id`, [m1])).rows;
+  const mObserved = mrows.find((r) => r.state === 'observed');
+  const mClosed = mrows.find((r) => r.state === 'closed');
+  assert.ok(Math.abs(new Date(mObserved.occurred_at).getTime() - (Date.now() - 120 * 60_000)) < 5 * 60_000, 'dated by first_seen_at, two hours ago');
+  assert.ok(mClosed.objective_outcomes.time_to_recovery_seconds > 110 * 60, `about two hours to recover, not nought: ${mClosed.objective_outcomes.time_to_recovery_seconds}`);
+  ok('writer: an incident whose occurred_at moved to its close is dated by when it happened');
 
   /* three opens one job */
   const a3 = await incident(WF, 'Step A', { minsAgo: 100 });
