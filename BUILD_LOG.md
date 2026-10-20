@@ -13068,3 +13068,10 @@ Files:      server/src/repairs.ts (correctProof), server/src/mcp/incidentTools.t
 Problem:    No way to restate a settled repair's evidence without reposting the whole 700 KB record.
 Fix:        correct_repair_proof replaces verified_by, appends a dated "Proof corrected" line, keeps the old proof in payload.proof_corrections, never touches the outcome. Bridge side fixed the same day (bha-repair-bridge fc70807): a later run counts only if it ran a changed node.
 Decision:   A correction restates evidence; it does not re-decide a repair, so outcome is out of reach of the tool.
+
+## 2026-10-20 03:39 UTC — Q1EI: remove the empty Public file that collides with public/ on macOS
+Intent:     Stop every macOS checkout showing " D Public" on every branch.
+Files:      Public (deleted), BUILD_LOG.md
+Problem:    The repo tracked both a file "Public" (1 byte, one newline; d8652d3 "Create Public Folder", 2026-09-07, made in the GitHub web editor, which cannot create an empty folder) and the directory "public/" (logo.svg, logo-mark.svg, robots.txt). On a case-insensitive macOS disk they are one name, so the directory is checked out, the file never can be, and git reports it deleted. Linux and Render are case-sensitive and checked out both.
+Fix:        git rm --cached -- Public (index only; a plain git rm on macOS would resolve the name to public/). public/ is untouched, tree 58c2ed37.
+Decision:   Nothing references "Public": Vite uses its default publicDir public/, which supplies /logo.svg, /logo-mark.svg and /robots.txt, and Render runs npm ci && npm run build. No config, rename or test added.
