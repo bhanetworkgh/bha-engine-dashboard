@@ -105,12 +105,24 @@ ok('HTTP, MCP and Media Twin consume the one canonical read resolver');
     // jsonb hands keys back in its own order, nested objects included: reverse every level.
     const reorder = (v) => (Array.isArray(v) ? v.map(reorder) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).reverse().map((k) => [k, reorder(v[k])])) : v);
     const fromJsonb = reorder(first);
+    // The held row as pg returns it: timestamptz comes back as a Date, actor and source_ref as columns.
+    let heldRows = [{ id: '41', at: new Date(AT), actor: 'Hardik', source_ref: 'LOOP-1789929222646-VRFK', detail: fromJsonb }];
+    const sqlSeen = [];
     events.record = async () => ({ recorded: false, id: null });
     pg.query = async (sql, params) => {
-      assert.match(sql, /WHERE dedupe_key = \$1/);
+      sqlSeen.push(sql);
+      assert.match(sql, /^SELECT id, at, actor, source_ref, detail FROM engine_events WHERE dedupe_key = \$1$/);
       assert.equal(params[0], 'VFAM.claim_publication_decision:DECISION-1');
-      return { rows: [{ id: '41', detail: fromJsonb }], rowCount: 1 };
+      return { rows: heldRows, rowCount: heldRows.length };
     };
+    const conflict = (fields) => (e) => {
+      assert.equal(e.status, 409);
+      assert.equal(e.reason, 'decision_id_conflict');
+      assert.deepEqual(e.details, { decision_id: 'DECISION-1', stored_event_id: 41, differs_from_request: fields });
+      assert.match(e.message, /is already held with different content .* post a new decision_id/);
+      return true;
+    };
+
     const same = await vrfk.storeDecision(input(), claim());
     assert.equal(same.recorded, false);
     assert.equal(same.duplicate, true);
@@ -118,10 +130,40 @@ ok('HTTP, MCP and Media Twin consume the one canonical read resolver');
     assert.deepEqual(same.differs_from_request, []);
     ok('identical retry answers with the stored row and no differing fields, whatever order jsonb keys come back in');
 
-    const changed = await vrfk.storeDecision(input({ reason: 'A different reason', evidence_refs: ['EVIDENCE-2'] }), claim());
-    assert.equal(changed.decision.reason, first.reason);
-    assert.deepEqual(changed.differs_from_request, ['evidence_refs', 'reason']);
-    ok('retry with different content answers with what is stored, never the request, and names the fields it tried to change');
+    const omitted = await vrfk.storeDecision(input({ decided_at: undefined }), claim());
+    assert.equal(omitted.duplicate, true);
+    ok('a retry that leaves decided_at out is identical: the server clock is never compared');
+
+    await assert.rejects(vrfk.storeDecision(input({ reason: 'A different reason', evidence_refs: ['EVIDENCE-2'] }), claim()), conflict(['evidence_refs', 'reason']));
+    ok('reused decision_id with different content is 409 decision_id_conflict naming the fields');
+
+    await assert.rejects(vrfk.storeDecision(input({ actor: 'Somebody else' }), claim()), conflict(['actor']));
+    await assert.rejects(vrfk.storeDecision(input({ source_ref: 'LOOP-OTHER' }), claim()), conflict(['source_ref']));
+    await assert.rejects(vrfk.storeDecision(input({ decided_at: '2026-10-11T00:00:00.000Z' }), claim()), conflict(['decided_at']));
+    ok('a different actor, source_ref or explicitly sent decided_at is each a conflict');
+
+    await assert.rejects(vrfk.storeDecision(input(), claim({ change_id: 'CHANGE-2', doctrine_version: 'v0.2' })), (e) => {
+      assert.equal(e.status, 409);
+      assert.equal(e.reason, 'decision_id_conflict');
+      for (const f of ['doctrine_change_id', 'doctrine_version', 'evidence_refs']) assert.ok(e.details.differs_from_request.includes(f), `names ${f}`);
+      return true;
+    });
+    ok('the same request after the doctrine moved is a conflict: an old decision_id is never a new authorization');
+
+    events.record = async () => { throw new Error('a dry run must never record'); };
+    const dryHeld = await vrfk.storeDecision(input({ dry_run: true }), claim());
+    assert.equal(dryHeld.dry_run, true);
+    assert.equal(dryHeld.duplicate, true);
+    assert.equal(dryHeld.id, 41);
+    await assert.rejects(vrfk.storeDecision(input({ dry_run: true, reason: 'A different reason' }), claim()), conflict(['reason']));
+    heldRows = [];
+    const dryFree = await vrfk.storeDecision(input({ dry_run: true }), claim());
+    assert.equal(dryFree.dry_run, true);
+    assert.equal(dryFree.id, null);
+    ok('a dry run checks a held decision_id the same way (identical, or 409) and never records');
+
+    assert.ok(sqlSeen.length > 0 && sqlSeen.every((s) => /^SELECT /.test(s)), 'only reads, never an update');
+    ok('no path above changes a stored row: every query was a SELECT');
 
     events.record = async () => ({ recorded: true, id: 42 });
     const fresh = await vrfk.storeDecision(input(), claim());
