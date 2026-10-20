@@ -120,7 +120,7 @@ const LOCK = 8134207619;
 const SWEEP_MS = 5 * 60_000;
 const ISO = `'YYYY-MM-DD"T"HH24:MI:SS"Z"'`;
 
-export type Excluded = 'test' | 'simulator' | 'refused_ask' | 'refused_click' | null;
+export type Excluded = 'test' | 'simulator' | 'refused_ask' | 'refused_click' | 'doctrine' | null;
 
 /** A fault signature: the workflow plus the step that failed. */
 export const signatureOf = (workflow: string | null, node: string | null): string => `${(workflow ?? '').trim() || '(no workflow)'} :: ${(node ?? '').trim() || '(no step)'}`;
@@ -136,6 +136,25 @@ export function excludedReason(i: { workflow: string | null; node: string | null
   // "not allowed" pop-up, changes nothing, and throws on purpose so it is recorded
   // (Bays — Submit Actions, Raise Refused Click). A guard doing its job, never a fault.
   if (/refused click/i.test(i.node ?? '')) return 'refused_click';
+  return null;
+}
+
+/** The workflow name SE8L's doctrine-gap monitor writes on its incidents (doctrineGap.ts, incidentBody). */
+export const DOCTRINE_GAP_WORKFLOW = 'T0NO doctrine-gap monitor';
+
+/**
+ * Why an incident is left out of Logstream's own thresholds: everything
+ * excludedReason leaves out, and DOCTRINE incidents (2026-10-17, Jason and
+ * Destiny). A DOCTRINE incident is written down and shown as left out, but it
+ * never counts toward a research job, an escalation alert or a shared outage
+ * here. Logstream only: excludedReason itself is unchanged, because Research
+ * Signals (T4) and pattern capture read it and must keep seeing these.
+ */
+export function thresholdExcludedReason(i: { workflow: string | null; node: string | null; tags?: string[] | null }): Excluded {
+  const shared = excludedReason(i);
+  if (shared) return shared;
+  const tags = (i.tags ?? []).map((t) => String(t).toLowerCase());
+  if (tags.includes('doctrine') || (i.workflow ?? '').trim() === DOCTRINE_GAP_WORKFLOW) return 'doctrine';
   return null;
 }
 
@@ -179,7 +198,7 @@ export function evaluate(incidents: Incident[], runs: WorkflowRuns[]): Crossing[
   const out: Crossing[] = [];
   const bySig = new Map<string, Incident[]>();
   for (const i of incidents) {
-    if (excludedReason(i)) continue;
+    if (thresholdExcludedReason(i)) continue;
     const k = signatureOf(i.workflow, i.node);
     bySig.set(k, [...(bySig.get(k) ?? []), i]);
   }
@@ -267,7 +286,7 @@ export async function writeRows(): Promise<{ observed: number; closed: number; p
   if (!src.rows.length) return out;
   const links = await linkedLanes();
   for (const s of src.rows) {
-    const excluded = excludedReason(s);
+    const excluded = thresholdExcludedReason(s);
     const lane = s.lane_id ? (WORK_LANE[s.lane_id] ?? s.lane_id) : null;
     const linked = lane ? (links.get(lane) ?? []) : [];
     const states: ('observed' | 'closed' | 'patterns_evaluated')[] = [];
