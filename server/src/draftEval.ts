@@ -51,6 +51,18 @@ export const AGENTS: Record<string, { id: string; name: string }> = {
   north_star: { id: '8NQRXadH0OrKe5XV', name: 'North Star (Agent)' },
   research_twin: { id: 'dDtsExaaXhlFd2dv', name: 'Research Twin (Agent)' },
 };
+/**
+ * The Anthropic backups (18 Oct 2026, Destiny): exact copies of the three
+ * primaries on Anthropic, called only when OpenRouter fails. They answer the
+ * primary's cases, so a backup is tested with its primary's case set; the run
+ * stores the backup's own agent id and name, which is what the publish check
+ * matches on.
+ */
+export const BACKUPS: Record<string, { key: string; name: string }> = {
+  PjKGbV4ZnH4YOfri: { key: 'bays', name: 'Bays (Anthropic backup)' },
+  fqeON4jXjenIi3cP: { key: 'north_star', name: 'North Star (Anthropic backup)' },
+  '7ToBQqHpffX1eUG0': { key: 'research_twin', name: 'Research Twin (Anthropic backup)' },
+};
 const EVAL_TABLE = process.env.AGENT_EVAL_SET_TABLE_ID?.trim() || 'Uj5kCvQBixzY3MqU';
 const EVAL_PROJECT = process.env.AGENT_EVAL_SET_PROJECT_ID?.trim() || 'HjupolvfBya6b0ox';
 const CREDIT_ERROR = /(exceed your available credits|insufficient credits|payment required|requires more credits)/i;
@@ -150,8 +162,9 @@ export class DraftEvalError extends Error {
 const mint = (): string => `DRAFT-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}-${Math.random().toString(36).slice(2, 6).toUpperCase().padEnd(4, 'X')}`;
 
 async function configHash(agentId: string): Promise<string | null> {
-  const a = await n8nMcp.getAgent(agentId);
-  return typeof a.configHash === 'string' ? a.configHash : null;
+  // configHash and every skill hash together (n8nMcp.changeHash): a skill
+  // edited mid-run or after the run is a change, not the config tested.
+  return n8nMcp.changeHash(await n8nMcp.getAgent(agentId));
 }
 
 export interface StartResult {
@@ -172,11 +185,12 @@ export interface StartResult {
  * with nothing recorded and nothing asked.
  */
 export async function start(input: { agent: string; requested_by: string | null; dry_run?: boolean }): Promise<StartResult> {
-  const agent = agentKeyFor(input.agent);
-  if (!agent) throw new DraftEvalError(`"${input.agent}" is not an agent this can test. One of: ${Object.keys(AGENTS).join(', ')}.`, 'unknown_agent');
-  const a = AGENTS[agent];
+  const backup = BACKUPS[String(input.agent || '').trim()];
+  const agent = backup ? backup.key : agentKeyFor(input.agent);
+  if (!agent) throw new DraftEvalError(`"${input.agent}" is not an agent this can test. One of: ${Object.keys(AGENTS).join(', ')}, or a backup's id (${Object.keys(BACKUPS).join(', ')}).`, 'unknown_agent');
+  const a = backup ? { id: String(input.agent).trim(), name: backup.name } : AGENTS[agent];
   if (!n8nMcp.n8nMcpConfigured()) throw new DraftEvalError(`${n8nMcp.N8N_MCP_VAR} is not set on this server, so the draft cannot be asked.`, 'not_configured');
-  const busy = await query<{ run_id: string }>(`SELECT run_id FROM engine_draft_eval_runs WHERE agent = $1 AND state = 'running' LIMIT 1`, [agent]);
+  const busy = await query<{ run_id: string }>(`SELECT run_id FROM engine_draft_eval_runs WHERE agent_id = $1 AND state = 'running' LIMIT 1`, [a.id]);
   if (busy.rows[0]) throw new DraftEvalError(`A draft eval is already running for ${a.name} (${busy.rows[0].run_id}). One at a time per agent.`, 'already_running');
   let rows: Dict[];
   try {

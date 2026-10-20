@@ -80,6 +80,19 @@ const HEADER = (title: string, lead: string) => `<header><div class="wrap">
 <h1>${esc(title)}</h1><p>${lead}</p></div></header>`;
 
 /** For a link that does not open anything. Says nothing about why. */
+/**
+ * The same branded page for another buyer surface (17 Oct 2026: the Stage 3 proposal page).
+ * `kicker` replaces "Site & deployment specification" in the header; `body` is trusted HTML
+ * the caller has already escaped.
+ */
+export function brandedPage(kicker: string, title: string, lead: string, body: string): string {
+  const header = `<header><div class="wrap">
+<div class="brand"><img src="https://bhanetwork.org/icon-192.png" alt="BHA"><span>vFarm · ${esc(kicker)}</span></div>
+<h1>${esc(title)}</h1><p>${lead}</p></div></header>`;
+  return shell(title, `${header}<main><div class="wrap">${body}</div></main>`);
+}
+export const escapeHtml = esc;
+
 export function notValidPage(): string {
   return shell(
     'Link not valid · vFarm',

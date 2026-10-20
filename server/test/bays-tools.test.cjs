@@ -523,6 +523,27 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(`http:
       assert.deepEqual(audit.rows.map((x) => x.outcome), ['applied', 'applied', 'refused', 'refused', 'dry_run']);
       assert.ok(audit.rows.every((x) => x.kind === 'slack'));
       step('send_nudge: link not doubled; zero valid / empty text / dry run send nothing; every call audited');
+
+      // 18 Oct 2026 (DW-…-UBCR): "cc Jason" is a marked copy, never a DM written to someone else.
+      const n2 = seen.dms.length;
+      const cc = await call('send_nudge', { recipients: ['U0BKT6MAW2Y', 'U0A9V97949F'], text: 'Could you weigh in, <@U0BKT6MAW2Y>?', requester_user_id: 'U0A9V97949F' });
+      assert.equal(cc.ok, true);
+      assert.deepEqual(cc.moved_to_cc, ['U0A9V97949F'], 'the requester among recipients is moved to cc');
+      assert.deepEqual(cc.results.map((x) => [x.user_id, x.role]), [['U0BKT6MAW2Y', 'recipient'], ['U0A9V97949F', 'cc']]);
+      const ccPosts = seen.dms.slice(n2);
+      assert.equal(ccPosts[0].text, 'Could you weigh in, <@U0BKT6MAW2Y>?');
+      assert.equal(ccPosts[1].channel, 'U0A9V97949F');
+      assert.match(ccPosts[1].text, /^_Copy for you: Bays sent this to <@U0BKT6MAW2Y>\._\n\nCould you weigh in/);
+      const explicit = await call('send_nudge', { recipients: 'U0BKT6MAW2Y', cc: '<@U0AEW3TBYH1>', text: 'Ping.' });
+      assert.deepEqual(explicit.results.map((x) => x.role), ['recipient', 'cc']);
+      assert.match(seen.dms.at(-1).text, /^_Copy for you: Bays sent this to <@U0BKT6MAW2Y>\._/);
+      const alone = await call('send_nudge', { recipients: ['U0AEW3TBYH1'], text: 'Just me.', requester_user_id: 'U0AEW3TBYH1' });
+      assert.equal(alone.moved_to_cc, undefined, 'a requester nudging only themselves is not moved');
+      assert.equal(seen.dms.at(-1).text, 'Just me.');
+      const refused = await call('send_nudge', { recipients: ['UNOSUCH01'], text: 'Hello.' });
+      assert.equal(refused.reason, 'slack_refused');
+      assert.match(refused.message, /<@UNOSUCH01>: channel_not_found/, "a failure carries Slack's own error in message");
+      step('send_nudge: cc is a marked copy; the requester is moved to cc; a failure says slack_refused with Slack\'s error');
     }
 
     /* ---- post_file ---- */

@@ -85,6 +85,7 @@ import type {
   ServerStatus,
   SignInResult,
   VfarmLead,
+  VfarmProposal,
   VfarmLeadStatus,
   VfarmLeadsData,
   VfarmGatesData,
@@ -260,6 +261,33 @@ export const resyncHealth = () => api<Resync>('/api/engine-health/resync', { met
  * record pages already learned once.
  */
 export const getRepairs = () => api<RepairsData>('/api/repairs');
+
+/** The self-healing scorecard (19 Oct 2026, D2.5). Shape is server/src/selfHealing.ts. */
+export interface HealShare { n: number; of: number; pct: number | null }
+export interface FixTime { n: number; p50_minutes: number | null; p95_minutes: number | null }
+export interface ClosedSplit { engine: number; cleared_itself: number; person: number; policy: number; not_recorded: number }
+export interface SelfHealingWeek {
+  week_start: string; partial: boolean; runs: number; failed_runs: number; failure_rate: HealShare;
+  incidents: number; real_faults: number; real_faults_raised_by_alarm: number; counted_apart: Record<string, number>;
+  automatic_fixes: { total: number; without_incident: number; by_kind: Record<string, number> };
+  closed_real_faults: ClosedSplit; still_open: number;
+}
+export interface SelfHealingData {
+  generated_at: string;
+  window: { from: string; to: string; weeks: number };
+  totals: {
+    runs: number; failed_runs: number; failure_rate: HealShare; incidents: number; real_faults: number; counted_apart: number;
+    automatic_fixes: number; automatic_fixes_without_incident: number; closed_real_faults: ClosedSplit; fixed_by_engine_share: HealShare;
+    still_open: number; time_to_fix: { engine: FixTime; person: FixTime };
+  };
+  weeks: SelfHealingWeek[];
+  healer_routes: { since: string; rows: { route: string | null; kind: string | null; n: number }[]; note: string };
+  open_real_faults: { incident_id: string; workflow: string | null; node: string | null; occurred_at: string }[];
+  recent_fixes: { key: string; kind: string; at: string; incident_id: string | null; workflow: string | null }[];
+  definitions: string[];
+}
+export const getSelfHealing = () => api<SelfHealingData>('/api/engine-health/self-healing');
+
 
 /**
  * Puts one repair back: restores the workflow as it stood before it.
@@ -640,6 +668,10 @@ export function editVfarmLead(id: string, changes: { status?: VfarmLeadStatus; n
   return api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}`, { method: 'PATCH', body: changes });
 }
 
+/** Make or replace a lead's Stage 3 proposal (2026-10-17). Price in cents. */
+export const createVfarmProposal = (id: string, body: { setup_name: string; summary: string; inclusions: string[]; price_amount: number; currency: string; timeline: string | null }) =>
+  api<{ ok: boolean; proposal: VfarmProposal; replaced: string | null }>(`/api/vfarm/leads/${encodeURIComponent(id)}/proposal`, { method: 'POST', body });
+
 /** The Early Access CRM (2026-10-15): a note, the next step, close with a reason, reopen. */
 export const addVfarmLeadNote = (id: string, text: string) => api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}/note`, { method: 'POST', body: { text } });
 export const setVfarmLeadNextStep = (id: string, step: string | null, due: string | null) =>
@@ -659,6 +691,6 @@ export function sendIntake2Invite(id: string, resend: boolean): Promise<Intake2I
 }
 
 /** Move a lead between Stage 1 and Stage 2 (2026-10-03, VFIG). The move is appended to its history. */
-export function moveVfarmLeadStage(id: string, stage: 1 | 2 | 3, reason: string | null): Promise<VfarmLead> {
+export function moveVfarmLeadStage(id: string, stage: 1 | 2 | 3 | 4 | 5, reason: string | null): Promise<VfarmLead> {
   return api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}`, { method: 'PATCH', body: { stage, stage_reason: reason } });
 }
