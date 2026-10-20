@@ -763,11 +763,21 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       const doctrineId = method === 'GET' ? url.searchParams.get('doctrine_id') : str(body?.doctrine_id, 100);
       const claimId = method === 'GET' ? url.searchParams.get('claim_id') : str(body?.claim_id, 200);
       const surfaceRaw = method === 'GET' ? url.searchParams.get('surface') : str(body?.surface, 40);
+      // A refused POST is a refused write: it is logged as rejected, like every engine write
+      // (logWrite never throws, so a failed log line cannot change the answer). A refusal that
+      // carries a reason is answered with it and its details; the rest as before.
+      const refuse = async (status: number, message: string, reason: string | null = null, details: Record<string, unknown> | null = null): Promise<void> => {
+        if (method === 'POST') {
+          await mirror.logWrite({ endpoint, kind: 'engine_events', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: str(body?.decision_id, 200), outcome: 'rejected', detail: `${status}${reason ? ` ${reason}` : ''}: ${message}`.slice(0, 300), ms: Date.now() - t0 });
+        }
+        if (reason) return send(res, status, { ok: false, reason, message, ...(details ?? {}) });
+        throw new HttpError(status, message);
+      };
       if (!doctrineId || !claimId || !publicationDecision.SURFACES.includes(surfaceRaw as publicationDecision.PublicationSurface))
-        throw new HttpError(422, `doctrine_id, claim_id and surface (${publicationDecision.SURFACES.join(', ')}) are required.`);
+        return refuse(422, `doctrine_id, claim_id and surface (${publicationDecision.SURFACES.join(', ')}) are required.`);
       const doctrine = await systemFeeds.doctrineClaims({ doctrine_id: doctrineId, claim_id: claimId });
       if (doctrine.claims.length !== 1)
-        throw new HttpError(404, `Exactly one current doctrine claim must match ${doctrineId}:${claimId}; found ${doctrine.claims.length}.`);
+        return refuse(404, `Exactly one current doctrine claim must match ${doctrineId}:${claimId}; found ${doctrine.claims.length}.`);
       const claim = doctrine.claims[0] as publicationDecision.ResolvedClaim;
       try {
         if (method === 'GET') {
@@ -779,7 +789,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         await mirror.logWrite({ endpoint, kind: 'engine_events', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: result.decision.decision_id, outcome: result.dry_run ? 'unchanged' : result.recorded ? 'inserted' : 'unchanged', detail: `${publicationDecision.EVENT_NAME} ${result.decision.decision} for ${claim.doctrine_id}:${claim.claim_id}:${surfaceRaw}${result.dry_run ? ' (dry run)' : ''}`, ms: Date.now() - t0 });
         return send(res, result.recorded ? 201 : 200, { ok: true, event_shape: engineEvents.EVENT_SHAPE, ...result });
       } catch (e) {
-        if (e instanceof publicationDecision.PublicationDecisionError) throw new HttpError(e.status, e.message);
+        if (e instanceof publicationDecision.PublicationDecisionError) return refuse(e.status, e.message, e.reason, e.details);
         throw e;
       }
     }

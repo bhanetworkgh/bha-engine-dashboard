@@ -74,7 +74,8 @@ export interface DecisionRead {
 }
 
 export class PublicationDecisionError extends Error {
-  constructor(public status: number, message: string) {
+  /** `reason` and `details`, when set, are sent to the caller beside the message. */
+  constructor(public status: number, message: string, public reason: string | null = null, public details: Record<string, unknown> | null = null) {
     super(message);
   }
 }
@@ -174,19 +175,69 @@ const canonicalJson = (v: unknown): string =>
       : typeof v === 'object' ? `{${Object.keys(v as Record<string, unknown>).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson((v as Record<string, unknown>)[k])}`).join(',')}}`
         : JSON.stringify(v);
 
+/** The event already held under a decision_id, with the columns a retry is compared on. */
+export interface HeldDecision {
+  id: string | number;
+  at: string | Date;
+  actor: string | null;
+  source_ref: string | null;
+  detail: StoredDecisionDetail;
+}
+
+/**
+ * Every field on which a retry differs from the decision already held under its
+ * decision_id: the stored detail (which carries the doctrine change and the T0NO
+ * snapshot, so a doctrine that has moved is a difference), the actor, the
+ * source_ref, and decided_at only when the caller sent one. Left out, decided_at
+ * is the server's clock, and comparing that would make every retry a conflict.
+ */
+export function conflictingFields(stored: HeldDecision, prepared: ReturnType<typeof prepareDecision>, decidedAtSent: boolean): string[] {
+  const keys = [...new Set([...Object.keys(stored.detail), ...Object.keys(prepared.detail)])] as Array<keyof StoredDecisionDetail>;
+  const out: string[] = keys.filter((k) => canonicalJson(stored.detail[k]) !== canonicalJson(prepared.detail[k]));
+  if ((stored.actor ?? null) !== prepared.actor) out.push('actor');
+  if ((stored.source_ref ?? null) !== prepared.source_ref) out.push('source_ref');
+  if (decidedAtSent && new Date(stored.at).toISOString() !== prepared.at) out.push('decided_at');
+  return out.sort();
+}
+
+async function heldDecision(dedupeKey: string): Promise<HeldDecision | null> {
+  const r = await query<HeldDecision>(`SELECT id, at, actor, source_ref, detail FROM engine_events WHERE dedupe_key = $1`, [dedupeKey]);
+  return r.rows[0] ?? null;
+}
+
+/**
+ * A decision_id already held: the same decision again is answered with the
+ * stored row; anything else is refused 409 and nothing is written or changed.
+ * A decision is never edited in place, and an old decision_id is never a new
+ * authorization.
+ */
+function answerHeld(stored: HeldDecision, prepared: ReturnType<typeof prepareDecision>, decidedAtSent: boolean, dry_run: boolean) {
+  const differs = conflictingFields(stored, prepared, decidedAtSent);
+  if (differs.length)
+    throw new PublicationDecisionError(
+      409,
+      `decision_id "${prepared.detail.decision_id}" is already held with different content (${differs.join(', ')}). A decision is never edited in place — post a new decision_id.`,
+      'decision_id_conflict',
+      { decision_id: prepared.detail.decision_id, stored_event_id: Number(stored.id), differs_from_request: differs },
+    );
+  return { dry_run, recorded: false, id: Number(stored.id), duplicate: true, differs_from_request: [] as string[], decision: stored.detail };
+}
+
 export async function storeDecision(body: Record<string, unknown>, claim: ResolvedClaim) {
   const prepared = prepareDecision(body, claim);
-  if (body.dry_run === true) return { dry_run: true, recorded: false, id: null, decision: prepared.detail };
+  const decidedAtSent = body.decided_at !== undefined && body.decided_at !== null && body.decided_at !== '';
+  if (body.dry_run === true) {
+    // A dry run writes nothing, and says what a real post would: a held decision_id is checked the same way.
+    const held = await heldDecision(prepared.event.dedupe_key);
+    if (held) return answerHeld(held, prepared, decidedAtSent, true);
+    return { dry_run: true, recorded: false, id: null, decision: prepared.detail };
+  }
   const saved = await record(prepared.event);
   if (saved.recorded) return { dry_run: false, ...saved, duplicate: false, differs_from_request: [] as string[], decision: prepared.detail };
-  // The decision_id was already held, so nothing was written: answer with the row that is
-  // stored, never the one just prepared, and name every field the retry tried to change.
-  const held = await query<{ id: string; detail: StoredDecisionDetail }>(`SELECT id, detail FROM engine_events WHERE dedupe_key = $1`, [prepared.event.dedupe_key]);
-  const stored = held.rows[0];
-  if (!stored) throw new PublicationDecisionError(500, `decision_id "${prepared.detail.decision_id}" was refused as a duplicate but no stored row carries it.`);
-  const keys = [...new Set([...Object.keys(stored.detail), ...Object.keys(prepared.detail)])] as Array<keyof StoredDecisionDetail>;
-  const differs_from_request = keys.filter((k) => canonicalJson(stored.detail[k]) !== canonicalJson(prepared.detail[k])).sort();
-  return { dry_run: false, recorded: false, id: Number(stored.id), duplicate: true, differs_from_request, decision: stored.detail };
+  // The decision_id was already held, so nothing was written.
+  const held = await heldDecision(prepared.event.dedupe_key);
+  if (!held) throw new PublicationDecisionError(500, `decision_id "${prepared.detail.decision_id}" was refused as a duplicate but no stored row carries it.`);
+  return answerHeld(held, prepared, decidedAtSent, false);
 }
 
 export function resolveDecision(claim: ResolvedClaim, surface: PublicationSurface, row: DecisionEventRow | null): DecisionRead {
