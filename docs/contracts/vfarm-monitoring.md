@@ -31,8 +31,10 @@ the API:
 
 On the dashboard side there is only `DASHBOARD_INBOUND_KEY`. It is already set on Render.
 
-**As of 20 Oct 2026 the two `ENGINE_DASHBOARD_*` values are not in `vfarm/app/env`, so no
-rack is monitored yet.** Jegan is adding them.
+**As of 20 Oct 2026 the two `ENGINE_DASHBOARD_*` values are in `vfarm/app/env`, but the
+sender was reverted from production (bhavfarm PR #72) after its devices query hung on the
+4.8M-row readings table. PR #73 brings it back with that lookup fixed. No rack is monitored
+yet.**
 
 ## 2. The two pushes
 
