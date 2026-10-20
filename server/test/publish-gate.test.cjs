@@ -52,6 +52,8 @@ const srv = http.createServer((req, res) => {
       JSON.stringify({ 'Result ID': `${run}:${caseId}`, 'Run ID': run, 'Case ID': caseId, Agent: 'north_star', Passed: pass, 'Run At': when.toISOString(), 'Run Size': 2 }),
       when.toISOString(),
     ]);
+  const reds = () => seen.posts.filter((p) => p.text.startsWith(':red_circle:'));
+  const notes = () => seen.posts.filter((p) => p.text.startsWith(':information_source:'));
   const row = async (v) => (await query(`SELECT * FROM engine_agent_versions WHERE agent_id = $1 AND version_id = $2 ORDER BY id DESC LIMIT 1`, [A, v])).rows[0];
   await query(`UPDATE engine_agent_versions SET eval_state = 'superseded' WHERE eval_state IN ('pending', 'requested')`);
   await query(`UPDATE engine_agent_versions SET requested_at = NULL`);
@@ -64,6 +66,9 @@ const srv = http.createServer((req, res) => {
   await gate.onVersionChange({ agent_id: A, name: 'North Star test', from: 'v1', to: 'v2', config_hash: 'h2' });
   await query(`UPDATE engine_agent_versions SET seen_at = $2 WHERE agent_id = $1`, [A, at(0).toISOString()]);
   assert.equal((await row('v2')).eval_state, 'pending');
+  assert.equal(notes().length, 1, 'no draft eval: one note');
+  assert.ok(!notes()[0].text.includes('<@'), 'a note tags nobody');
+  assert.equal(notes()[0].blocks[1].type, 'context', 'detail sits in small context text');
   let r = await gate.sweep(at(1));
   assert.equal(seen.runs.length, 0, 'not asked before it has settled');
   r = await gate.sweep(at(4));
@@ -88,10 +93,11 @@ const srv = http.createServer((req, res) => {
   r = await gate.sweep(at(33));
   v2 = await row('v2');
   assert.equal(v2.alert_state, 'posted');
-  assert.equal(seen.posts.length, 1);
-  assert.match(seen.posts[0].text, /publish version `v1` again/);
+  assert.equal(reds().length, 1);
+  assert.match(reds()[0].text, /publish version `v1` again/);
+  assert.match(reds()[0].text, /tests failed after publishing/);
   await gate.sweep(at(35));
-  assert.equal(seen.posts.length, 1, 'one alert per change');
+  assert.equal(reds().length, 1, 'one alert per change');
   ok('a case that passed before and fails after is a regression: one alert naming the version to publish again, retried until it posts');
 
   // rolling back to v1 is recorded as a rollback; the same failure is then known, not a regression
@@ -108,7 +114,7 @@ const srv = http.createServer((req, res) => {
   const v1 = await row('v1');
   assert.equal(v1.eval_state, 'passed');
   assert.match(v1.eval_detail, /already failing before/);
-  assert.equal(seen.posts.length, 1);
+  assert.equal(reds().length, 1);
   ok('a rollback is recorded as one, and a case already failing before the change is not called a regression');
 
   // no run at all
@@ -119,9 +125,39 @@ const srv = http.createServer((req, res) => {
   assert.equal((await row('v3')).eval_state, 'requested');
   await gate.sweep(at(195));
   assert.equal((await row('v3')).eval_state, 'no_eval');
-  assert.equal(seen.posts.length, 2);
-  assert.match(seen.posts[1].text, /no eval run behind it/);
-  ok('a change with no finished eval run within 90 minutes is said');
+  assert.match(notes()[notes().length - 1].text, /no test ran after publishing version `v3`/);
+  assert.equal(reds().length, 1, 'no eval is a note, not a failure');
+  ok('a change with no finished eval run within 90 minutes is a note, not red');
+
+  // v4: its exact config passed a draft eval, and no run follows: settled silently
+  const D = `DRAFT-T${T}`;
+  await query(`INSERT INTO engine_draft_eval_runs (run_id, agent, agent_id, agent_name, state, detail, cases, results_expected, results_done, config_hash_before, config_hash_after, requested_by, finished_at) VALUES ($1, 'north_star', $2, 'North Star test', 'passed', '2 of 2 cases passed', 2, 2, 2, 'h4', 'h4', 'test', now())`, [D, A]);
+  const before4 = seen.posts.length;
+  await gate.onVersionChange({ agent_id: A, name: 'North Star test', from: 'v3', to: 'v4', config_hash: 'h4' });
+  await query(`UPDATE engine_agent_versions SET seen_at = $2 WHERE agent_id = $1 AND version_id = 'v4'`, [A, at(200).toISOString()]);
+  assert.equal((await row('v4')).draft_state, 'passed_before_publish');
+  await gate.sweep(at(204));
+  await gate.sweep(at(295));
+  assert.equal((await row('v4')).eval_state, 'covered_by_draft_eval');
+  assert.equal(seen.posts.length, before4, 'nothing posted for a version its draft eval covers');
+  ok('a version whose exact config passed a draft eval, with no run after, is settled with no post');
+
+  // a backup: no after-publish run is asked for and nothing is posted after the draft check
+  const B = 'PjKGbV4ZnH4YOfri';
+  await query(`DELETE FROM engine_agent_versions WHERE agent_id = $1 AND version_id LIKE 'vb%'`, [B]);
+  const runsBefore = seen.runs.length;
+  await gate.onVersionChange({ agent_id: B, name: 'Bays (Anthropic backup)', from: 'vb1', to: 'vb2', config_hash: 'hb2' });
+  const b = (await query(`SELECT * FROM engine_agent_versions WHERE agent_id = $1 AND version_id = 'vb2'`, [B])).rows[0];
+  assert.equal(b.eval_state, 'not_applicable');
+  assert.match(notes()[notes().length - 1].text, /backups get no test after publishing/);
+  const postsB = seen.posts.length;
+  await gate.sweep(at(300));
+  await gate.sweep(at(400));
+  assert.equal(seen.runs.length, runsBefore, 'no eval run asked for a backup');
+  assert.equal(seen.posts.length, postsB, 'nothing more posted for a backup');
+  await query(`DELETE FROM engine_agent_versions WHERE agent_id = $1 AND version_id LIKE 'vb%'`, [B]);
+  await query(`DELETE FROM engine_draft_eval_runs WHERE run_id = $1`, [D]);
+  ok('a backup is judged by its draft eval only: no run asked for, no "no eval" post');
 
   await query(`DELETE FROM engine_eval_runs WHERE natural_id LIKE $1`, [`EVAL-T${T}%`]);
   await query(`DELETE FROM engine_agent_versions WHERE agent_id = $1`, [A]);

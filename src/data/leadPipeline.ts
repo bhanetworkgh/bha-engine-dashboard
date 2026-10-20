@@ -9,13 +9,18 @@
  *
  * 15 Oct 2026 (Destiny): the columns lead with his own stage numbers, and the days-in-column
  * limits are gone; the follow-up tracker is what says whether a lead needs somebody.
+ *
+ * 17 Oct 2026 (Jason, buyer flow v2, SOP 09cb58a7): five stages. Stage 3 is the proposal (was
+ * the "paying" placeholder), 4 the agreement and Stripe deposit, 5 the customer.
  */
 
 export const PIPELINE = [
   { key: 'interest', stage: 'Stage 1', label: 'Interest', hint: 'Filled in Form A. Waiting on Jason to clear them.' },
   { key: 'invited', stage: 'Stage 2', label: 'Invited', hint: 'Cleared by Jason and sent Form 2. Waiting on their answers.' },
-  { key: 'spec', stage: 'Stage 2', label: 'Spec received', hint: 'Sent Form 2 back. BHA reviews it.' },
-  { key: 'paying', stage: 'Stage 3', label: 'Paying', hint: 'A placeholder until pricing and checkout are set.' },
+  { key: 'spec', stage: 'Stage 2', label: 'Spec received', hint: 'Sent Form 2 back. Jason and Hardik run the five checks.' },
+  { key: 'proposal', stage: 'Stage 3', label: 'Proposal', hint: 'Shown the setup that fits and its price. They accept, ask or ask for a call.' },
+  { key: 'agreement', stage: 'Stage 4', label: 'Agreement & deposit', hint: 'Accepted. The agreement and their own Stripe link go out.' },
+  { key: 'customer', stage: 'Stage 5', label: 'Customer', hint: 'Agreement and payment both in.' },
   { key: 'closed', stage: '', label: 'Closed', hint: 'Ended, with a reason.' },
 ] as const;
 
@@ -54,7 +59,9 @@ export interface PipelineFacts {
 /** Which column a lead is in, and since when. */
 export function pipelineOf(l: PipelineFacts): { key: PipelineKey; since: string } {
   if (l.closed_at) return { key: 'closed', since: l.closed_at };
-  if (l.stage === 3) return { key: 'paying', since: l.stage_changed_at ?? l.created_at };
+  if (l.stage === 5) return { key: 'customer', since: l.stage_changed_at ?? l.created_at };
+  if (l.stage === 4) return { key: 'agreement', since: l.stage_changed_at ?? l.created_at };
+  if (l.stage === 3) return { key: 'proposal', since: l.stage_changed_at ?? l.created_at };
   if (l.stage === 2 && l.intake_2_completed_at) return { key: 'spec', since: l.intake_2_completed_at };
   if (l.stage === 2) return { key: 'invited', since: l.stage_changed_at ?? l.created_at };
   return { key: 'interest', since: l.stage_changed_at ?? l.created_at };

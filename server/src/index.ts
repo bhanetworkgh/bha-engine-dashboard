@@ -41,6 +41,8 @@ import * as events from './events';
 import * as paySync from './paySync';
 import * as executions from './executions';
 import * as health from './health';
+import * as selfHealing from './selfHealing';
+import * as healthReport from './healthReport';
 import * as repairs from './repairs';
 import * as recovery from './recovery';
 import * as scorecard from './scorecard';
@@ -55,6 +57,8 @@ import * as google from './google';
 import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, agentTokensConfigured, MCP_SECRET_VAR, MCP_WRITE_TOKEN_VAR, MCP_ONE_URL } from './mcp';
 import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
+import * as stripeLedger from './stripeLedger';
+import * as proposal from './proposal';
 import * as intake2 from './intake2';
 import * as intake2Page from './intake2Page';
 import * as systemFeeds from './systemFeeds';
@@ -301,6 +305,45 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     }
     throw new HttpError(405, 'GET the form state or POST the answers.');
   }
+  /**
+   * Stripe's webhook (17 Oct 2026, D4). Public because Stripe holds no key of ours; the
+   * Stripe-Signature over the raw body is the lock, checked before anything is parsed.
+   * 200 for stored, duplicate, unmatched and ignored (Stripe stops retrying); 400 for a
+   * call that is not Stripe's; 500 when the database fails, so Stripe tries again.
+   */
+  if (p === '/api/public/stripe/webhook') {
+    if (method !== 'POST') throw new HttpError(405, 'POST a Stripe event.');
+    const t0 = Date.now();
+    const raw = await readRaw(req, 512 * 1024);
+    const sigHeader = req.headers['stripe-signature'];
+    const v = stripeLedger.verify(raw, Array.isArray(sigHeader) ? sigHeader[0] : sigHeader);
+    if (!v.ok) {
+      void stripeLedger.refused(v.reason, earlyAccess.clientIp(req));
+      void stripeLedger.logCall('rejected', null, `signature: ${v.reason}`, Date.now() - t0);
+      return send(res, v.reason === 'not_configured' ? 503 : 400, { ok: false, reason: v.reason });
+    }
+    let ev: Record<string, unknown>;
+    try {
+      ev = JSON.parse(raw.toString('utf8')) as Record<string, unknown>;
+    } catch {
+      void stripeLedger.logCall('rejected', null, 'signed but not JSON', Date.now() - t0);
+      return send(res, 400, { ok: false, reason: 'not_json' });
+    }
+    if (typeof ev.livemode === 'boolean' && ev.livemode !== (v.mode === 'live')) {
+      void stripeLedger.refused('mode_mismatch', earlyAccess.clientIp(req));
+      void stripeLedger.logCall('rejected', String(ev.id ?? ''), `livemode ${ev.livemode} verified by the ${v.mode} secret`, Date.now() - t0);
+      return send(res, 400, { ok: false, reason: 'mode_mismatch' });
+    }
+    try {
+      const h = await stripeLedger.handle(ev, v.mode);
+      void stripeLedger.logCall(h.outcome === 'duplicate' ? 'unchanged' : h.outcome === 'recorded' ? 'inserted' : h.status >= 400 ? 'rejected' : 'unchanged', h.event_id, `${h.outcome}: ${h.detail}`, Date.now() - t0);
+      return send(res, h.status, { ok: h.status < 400, outcome: h.outcome, event_id: h.event_id });
+    } catch (e) {
+      console.error('[stripe] webhook', e);
+      void stripeLedger.logCall('error', String(ev.id ?? ''), e instanceof Error ? e.message : String(e), Date.now() - t0);
+      return send(res, 500, { ok: false, reason: 'store_failed' });
+    }
+  }
   if (p === '/api/public/vfarm-doctrine' && method === 'GET') {
     const origin = earlyAccess.originOf(req);
     const cors = earlyAccess.corsHeaders(origin);
@@ -536,6 +579,43 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         throw e;
       }
     }
+    // Where n8n posted a repair's #bha-self-healing card (20 Oct 2026), so the settle can reply in its thread.
+    if (p === '/api/engine/repair/report-link') {
+      if (method !== 'POST') throw new HttpError(405, 'POST {repair_id, channel, ts}.');
+      const body = await readJson(req, 16 * 1024);
+      try {
+        const out = await repairs.recordReportLink(body);
+        await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: out.repair_id, outcome: 'updated', detail: `report card ${out.report_link.channel}/${out.report_link.ts}`, ms: Date.now() - t0 });
+        return send(res, 200, { ok: true, ...out });
+      } catch (e) {
+        if (e instanceof repairs.RepairError) {
+          await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          throw new HttpError(e.status, e.message);
+        }
+        throw e;
+      }
+    }
+    // Restate a settled repair's proof (20 Oct 2026, CODEX-035): the same function as correct_repair_proof.
+    if (p === '/api/engine/repair/proof-correction') {
+      if (method !== 'POST') throw new HttpError(405, 'POST {repair_id, verified_by, reason, by}.');
+      const body = await readJson(req, 64 * 1024);
+      try {
+        const out = await repairs.correctProof({
+          repair_id: String(body.repair_id ?? ''),
+          verified_by: Array.isArray(body.verified_by) ? (body.verified_by as never) : [],
+          reason: String(body.reason ?? ''),
+          by: `engine:${String(body.by ?? 'n8n').slice(0, 80)}`,
+        });
+        await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: out.repair_id, outcome: 'updated', detail: 'proof corrected', ms: Date.now() - t0 });
+        return send(res, 200, { ok: true, ...out });
+      } catch (e) {
+        if (e instanceof repairs.RepairError) {
+          await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          throw new HttpError(e.status, e.message);
+        }
+        throw e;
+      }
+    }
     if (p === '/api/engine/repair' || p === '/api/engine/repairs') {
       if (method !== 'POST') throw new HttpError(405, 'POST. An upsert on repair_id, so the same result twice updates rather than duplicating.');
       const body = await readJson(req, 1024 * 1024);
@@ -554,6 +634,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         // A failure with no build pattern on record becomes a pattern candidate (15 Oct 2026). Never awaited:
         // the capture cannot fail the bridge's own write, and the sweep picks up anything it misses.
         void patternCapture.fromRepair(result.repair_id);
+        // A fix that was awaiting proof has settled (20 Oct 2026): Bays answers in the repair card's thread. Never awaited,
+        // so Slack cannot fail the bridge's write; notifySettled records where the notice went.
+        if (result.settled) void repairs.notifySettled(result.repair_id).catch((e) => console.error(`repairs: settle notice for ${result.repair_id} failed`, e));
         return send(res, result.inserted ? 201 : 200, { ok: true, repair_id: result.repair_id, outcome: result.outcome, stored: result.inserted ? 'inserted' : 'updated' });
       } catch (e) {
         if (e instanceof repairs.RepairError) {
@@ -960,6 +1043,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * The same invite from n8n or a person's tool (14 Oct 2026), by the lead's
      * buyer_intake_id: { buyer_intake_id, by, resend, dry_run }.
      */
+    /** The Stripe ledger's canonical read-back (17 Oct 2026, D4): stored events and each lead's payment. */
+    if (p === '/api/engine/vfarm-payments') {
+      if (method !== 'GET') throw new HttpError(405, 'GET the Stripe ledger.');
+      const r = await stripeLedger.readBack({ lead_id: url.searchParams.get('lead_id'), limit: Number(url.searchParams.get('limit')) || 50 });
+      await mirror.logWrite({ endpoint, kind: 'stripe_events', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `${r.events.length} events, ${r.payments.length} payments`, ms: Date.now() - t0 });
+      return send(res, 200, { ok: true, ...r });
+    }
     if (p === '/api/engine/vfarm-leads/intake-2/invite') {
       if (method !== 'POST') throw new HttpError(405, 'POST { buyer_intake_id, by, resend, dry_run }.');
       const body = (await readJson(req)) as Record<string, unknown>;
@@ -1036,6 +1126,35 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       const r = await researchSignals.read({ held_only: !all, limit: 200 });
       await mirror.logWrite({ endpoint, kind: 'research_signals', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `${all ? 'all' : 'waiting'}: ${(r.signals as unknown[]).length} signal(s)`, ms: Date.now() - t0 });
       return send(res, 200, { ok: true, ...r });
+    }
+
+    /**
+     * The weekly engine health report (19 Oct 2026, D2.7). GET, read only: n8n's
+     * `Engine — Weekly Health Report` asks for it every Monday and posts `slack_text`
+     * as Bays. `now` may move the report back to an earlier week, for a rerun.
+     */
+    /**
+     * The week's twin critique into BHARAG (19 Oct 2026, LOOP-RYHY). POST, once a week: n8n
+     * calls it after the report has posted. A repeat answers with the document already filed.
+     */
+    if (p === '/api/engine/health-report/twin-critique') {
+      if (method !== 'POST') throw new HttpError(405, 'POST to file the week\'s twin critique.');
+      const qs = new URL(req.url ?? '', 'http://x').searchParams;
+      const at = qs.get('now');
+      const nowParam = at && !Number.isNaN(Date.parse(at)) ? new Date(at).toISOString() : undefined;
+      const dry = qs.get('dry_run') === 'true' || qs.get('dry_run') === '1';
+      const r = await healthReport.fileTwinCritique({ now: nowParam, dry_run: dry });
+      await mirror.logWrite({ endpoint, kind: 'health_report', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: r.ok ? (r.filed ? 'inserted' : 'unchanged') : 'error', detail: `twin critique ${r.week}: ${r.detail}`, ms: Date.now() - t0 });
+      return send(res, r.ok ? 200 : 502, r);
+    }
+
+    if (p === '/api/engine/health-report') {
+      if (method !== 'GET') throw new HttpError(405, 'GET the report. Posting it is the n8n workflow\'s job.');
+      const at = new URL(req.url ?? '', 'http://x').searchParams.get('now');
+      const nowParam = at && !Number.isNaN(Date.parse(at)) ? new Date(at).toISOString() : undefined;
+      const r = await healthReport.build({ now: nowParam });
+      await mirror.logWrite({ endpoint, kind: 'health_report', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `week of ${r.data.period.label}: ${r.slack_text.length} chars`, ms: Date.now() - t0 });
+      return send(res, 200, r);
     }
 
     if (p === '/api/engine/recovery/plan') {
@@ -1540,6 +1659,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await pay.metrics(mon || null));
       }
       /** One lane, or all three when `lane` is absent. */
+      /** The self-healing scorecard (19 Oct 2026, D2.5). The tab and read_self_healing share it. */
+      case '/api/engine-health/self-healing':
+        return send(res, 200, await selfHealing.scorecard({ weeks: Number(url.searchParams.get('weeks')) || undefined }));
       case '/api/engine-health/metrics': {
         const lane = url.searchParams.get('lane');
         if (lane && !health.LANE_KEYS.includes(lane)) throw new HttpError(404, `"${lane}" is not a lane this engine reports on. One of: ${health.LANE_KEYS.join(', ')}.`);
@@ -1647,6 +1769,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
    * The Early Access CRM's four writes (15 Oct 2026): a note, the next step, close with a
    * reason, reopen. Each lands on the lead's timeline. Behind the cookie like the rest.
    */
+  /** Stage 3's proposal (17 Oct 2026): make or replace it for a lead in Stage 3. Behind the cookie. */
+  const prop = p.match(/^\/api\/vfarm\/leads\/([^/]+)\/proposal$/);
+  if (prop && method === 'POST') {
+    const body = await readJson(req);
+    try {
+      const r = await proposal.create(decodeURIComponent(prop[1]), body, typeof body.by === 'string' ? body.by : 'the dashboard login');
+      return send(res, 200, { ok: true, ...r });
+    } catch (e) {
+      if (e instanceof proposal.ProposalError) return send(res, e.status, { ok: false, reason: e.reason, message: e.message });
+      throw e;
+    }
+  }
   const crm = p.match(/^\/api\/vfarm\/leads\/([^/]+)\/(note|next-step|close|reopen)$/);
   if (crm && method === 'POST') {
     const body = await readJson(req);
@@ -2312,6 +2446,47 @@ const server = createServer((req, res) => {
    * Early Access form: a buyer has no login. The link itself is the lock, and a
    * link that opens nothing gets the same page whatever the reason.
    */
+  /** Where Stripe's hosted Checkout sends a buyer back (17 Oct 2026). Says nothing about any payment. */
+  if (url.pathname === '/checkout/done' || url.pathname === '/checkout/cancelled') {
+    const body = url.pathname === '/checkout/done' ? stripeLedger.donePage() : stripeLedger.cancelledPage();
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(body), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+    res.end(req.method === 'HEAD' ? undefined : body);
+    return;
+  }
+  /**
+   * The buyer's Stage 3 proposal page (17 Oct 2026). Public by necessity, like Form 2: the link
+   * is the lock. GET shows it; POST is one of its three plain HTML forms (accept, question,
+   * call). A link that opens nothing gets the same "not valid" page whatever the reason.
+   */
+  const propPage = url.pathname.match(/^\/proposal\/([A-Za-z0-9_-]{1,80})\/?$/);
+  if (propPage) {
+    const html = (status: number, body: string) => {
+      res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(body), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' });
+      res.end(req.method === 'HEAD' ? undefined : body);
+    };
+    const token = propPage[1];
+    const run = async () => {
+      if (req.method === 'POST') {
+        const raw = (await readRaw(req, 16 * 1024)).toString('utf8');
+        const form = new URLSearchParams(raw);
+        const r = await proposal.act(token, form.get('action'), form.get('text')).catch((e: unknown) => {
+          if (e instanceof proposal.ProposalError) return { flash: e.message };
+          throw e;
+        });
+        if (!r) return html(404, proposal.notValid());
+        const pg = await proposal.page(token, r.flash);
+        return pg ? html(200, pg) : html(404, proposal.notValid());
+      }
+      if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, { ok: false, message: 'Method not allowed.' });
+      const pg = await proposal.page(token);
+      return pg ? html(200, pg) : html(404, proposal.notValid());
+    };
+    run().catch((e: unknown) => {
+      console.error('[proposal] page', e);
+      html(500, proposal.notValid());
+    });
+    return;
+  }
   const intakePage = url.pathname.match(/^\/intake\/([A-Za-z0-9_-]{1,80})\/?$/);
   if (intakePage) {
     const html = (status: number, body: string) => {
@@ -2507,6 +2682,10 @@ async function boot(): Promise<void> {
         ? `  google:   ${google.googleMode() === 'oauth' ? 'OAuth refresh token' : 'service account'} — share_doc, grant_drive_access, create_doc and pattern Docs work`
         : `  google:   NOT configured — ${google.notConfiguredMessage()}`,
     );
+    {
+      const sc = stripeLedger.configured();
+      console.log(`  stripe: webhook /api/public/stripe/webhook — sandbox ${sc.test ? 'on' : `off (${stripeLedger.SECRET_VARS.test} not set)`}, live ${sc.live ? 'on' : `off (${stripeLedger.SECRET_VARS.live} not set)`}`);
+    }
     console.log(
       intake2.configured()
         ? '  intake-2: links on — /intake/<token> is public; the Stage 2 move emails the invite through n8n vFarm — Intake-2 Invite'

@@ -113,14 +113,14 @@ export function nudgeText(text: string, link: string): string {
   return body && l && !body.includes(l) ? `${body}\n\n${l}` : body;
 }
 
-type NudgeLine = { recipient: string; user_id: string; ok: boolean; ts: string; channel: string; error: string };
+type NudgeLine = { recipient: string; user_id: string; role?: 'recipient' | 'cc'; ok: boolean; ts: string; channel: string; error: string };
 
 /** `SNG - Format Result`: one line per recipient, sent first-named first, the invalid ones after. */
 function summarise(results: NudgeLine[]): string {
   const sent = results.filter((r) => r.ok);
   const failed = results.filter((r) => !r.ok);
   const parts: string[] = [];
-  if (sent.length) parts.push(`Sent to ${sent.map((r) => `${r.recipient} (ts ${r.ts})`).join(', ')}.`);
+  if (sent.length) parts.push(`Sent to ${sent.map((r) => `${r.recipient}${r.role === 'cc' ? ' (copy)' : ''} (ts ${r.ts})`).join(', ')}.`);
   if (failed.length) parts.push(`Couldn't send to ${failed.map((r) => `${r.recipient}: ${r.error}`).join('; ')}.`);
   return parts.join(' ');
 }
@@ -128,7 +128,7 @@ function summarise(results: NudgeLine[]): string {
 export const sendNudge: ToolDefinition = {
   name: 'send_nudge',
   description:
-    'DM every person named, one Slack DM each — the person being nudged AND everyone cc\'d. recipients: user ids (U…/W…) or <@U…> mentions, as an array or one string separated by spaces or commas. Anything that is not a Slack user id comes back as not_a_slack_user_id, never dropped. thread_link is appended to the text unless already in it. Returns {ok (every recipient sent), sent_count, failed_count, results: [{recipient, user_id, ok, ts, error}], summary}. Empty text or no valid recipient: ok:false and nothing is sent. A DM to someone with no Builder Profile is not sent on an agent token: a person is asked in Slack first and the answer is ok:false, reason awaiting_approval (say so, do not retry). As the Bays bot; audited on engine_mcp_writes.',
+    'DM each person being nudged, one Slack DM each, and send a marked copy to everyone cc\'d. recipients: only the people the message is written to (U…/W… ids or <@U…> mentions, an array or one string separated by spaces or commas). cc: people who should see it but are not being asked anything (e.g. "cc Jason"); each gets the same text under a line saying who it was sent to, so a message written to Hardik never lands in Jason\'s DM looking like it was meant for him. Pass requester_user_id: if the person asking is also in recipients beside others, they are moved to cc and the answer says so (moved_to_cc). Anything that is not a Slack user id comes back as not_a_slack_user_id, never dropped. thread_link is appended to the text unless already in it. Returns {ok (every DM sent), sent_count, failed_count, results: [{recipient, user_id, role, ok, ts, error}], summary}; when any DM fails, reason is slack_refused and message carries Slack\'s own error for each. Empty text or no valid recipient: ok:false and nothing is sent. A DM to someone with no Builder Profile is not sent on an agent token: a person is asked in Slack first and the answer is ok:false, reason awaiting_approval (say so, do not retry). As the Bays bot; audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -138,6 +138,10 @@ export const sendNudge: ToolDefinition = {
       },
       text: { type: 'string', description: 'The message. Slack mrkdwn.' },
       thread_link: { type: 'string', description: 'Optional permalink to the thread this is about; appended after a blank line unless the text already has it.' },
+      cc: {
+        description: 'People to copy, not ask: Slack user ids or <@U…> mentions, an array or one string. Each gets the text under "Copy for you: Bays sent this to …".',
+        anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }],
+      },
       ...DRY,
       ...REQUESTER,
     },
@@ -147,9 +151,20 @@ export const sendNudge: ToolDefinition = {
   annotations: { ...WRITE_ANNOTATIONS, title: 'DM each person named, one message each' },
   handler: (args, deps) =>
     audited('send_nudge', args, deps, async () => {
-      const { valid, invalid, total } = parseRecipients(args.recipients);
+      const parsed = parseRecipients(args.recipients);
+      const ccParsed = args.cc === undefined || args.cc === null || args.cc === '' ? { valid: [] as string[], invalid: [] as string[], total: 0 } : parseRecipients(args.cc);
+      const requester = str(args, 'requester_user_id').toUpperCase();
+      // 18 Oct 2026 (DW-1792267745984-UBCR): "cc Jason" used to mean Jason in recipients, so he
+      // got a DM written to Hardik. The person asking is never a recipient beside others: they
+      // are copied, and the answer says so.
+      const movedToCc = requester && parsed.valid.includes(requester) && parsed.valid.length > 1 ? [requester] : [];
+      const valid = parsed.valid.filter((u) => !movedToCc.includes(u));
+      const ccIds = [...new Set([...ccParsed.valid, ...movedToCc])].filter((u) => !valid.includes(u));
+      const invalid = [...parsed.invalid, ...ccParsed.invalid];
+      const total = parsed.total + ccParsed.total;
       const body = typeof args.text === 'string' ? args.text.trim() : '';
       const text = nudgeText(body, str(args, 'thread_link'));
+      const ccText = `_Copy for you: Bays sent this to ${valid.map((u) => `<@${u}>`).join(', ')}._\n\n${text}`;
       const invalidLines: NudgeLine[] = invalid.map((x) => ({ recipient: x, user_id: '', ok: false, ts: '', channel: '', error: 'not_a_slack_user_id' }));
 
       if (!body || !valid.length) {
@@ -162,7 +177,7 @@ export const sendNudge: ToolDefinition = {
           answer: { ok: false, reason: !body ? 'no_message_text' : 'no_valid_recipients', sent_count: 0, failed_count: invalidLines.length, results: invalidLines, summary },
         };
       }
-      const unknown = await unknownRecipients(valid);
+      const unknown = await unknownRecipients([...valid, ...ccIds]);
       if (args.dry_run === true) {
         return {
           outcome: 'dry_run',
@@ -172,12 +187,14 @@ export const sendNudge: ToolDefinition = {
             ok: invalid.length === 0,
             dry_run: true,
             would_send_to: valid,
+            would_copy: ccIds,
+            moved_to_cc: movedToCc,
             not_in_builder_profiles: unknown,
             would_wait_for_approval: unknown.length > 0 && approvals.needsApproval(),
             not_a_slack_user_id: invalid,
             text,
             slack_configured: slack.slackConfigured(),
-            summary: `Would send ${valid.length} DM${valid.length === 1 ? '' : 's'}${invalid.length ? `; ${invalid.length} recipient${invalid.length === 1 ? ' is' : 's are'} not a Slack user id` : ''}.`,
+            summary: `Would send ${valid.length} DM${valid.length === 1 ? '' : 's'}${ccIds.length ? ` and ${ccIds.length} marked cop${ccIds.length === 1 ? 'y' : 'ies'}` : ''}${invalid.length ? `; ${invalid.length} recipient${invalid.length === 1 ? ' is' : 's are'} not a Slack user id` : ''}.`,
           },
         };
       }
@@ -186,8 +203,8 @@ export const sendNudge: ToolDefinition = {
         const asked = approvals.pendingAnswer(
           await approvals.request({
             tool: 'send_nudge',
-            args: { ...args, destination: valid.join(',') },
-            target: valid.join(','),
+            args: { ...args, destination: [...valid, ...ccIds].join(',') },
+            target: [...valid, ...ccIds].join(','),
             summary: `send a DM as Bays to ${unknown.map((u) => `<@${u}>`).join(', ')}, who ${unknown.length === 1 ? 'has' : 'have'} no Builder Profile${valid.length > unknown.length ? ` (and to ${valid.length - unknown.length} known team member${valid.length - unknown.length === 1 ? '' : 's'})` : ''}. Message: "${text.slice(0, 400)}"`,
           }),
         );
@@ -196,11 +213,13 @@ export const sendNudge: ToolDefinition = {
 
       // One post per recipient, in order. A refusal for one never stops the rest.
       const results: NudgeLine[] = [];
-      for (const u of valid) {
-        const r = await slack.botCall('chat.postMessage', { channel: u, text, unfurl_links: false });
+      const sends: Array<[string, 'recipient' | 'cc']> = [...valid.map((u) => [u, 'recipient'] as [string, 'recipient']), ...ccIds.map((u) => [u, 'cc'] as [string, 'cc'])];
+      for (const [u, role] of sends) {
+        const r = await slack.botCall('chat.postMessage', { channel: u, text: role === 'cc' ? ccText : text, unfurl_links: false });
         results.push({
           recipient: `<@${u}>`,
           user_id: u,
+          role,
           ok: r.ok,
           ts: r.ok ? String(r.ts ?? '') : '',
           channel: r.ok ? String(r.channel ?? '') : '',
@@ -214,7 +233,15 @@ export const sendNudge: ToolDefinition = {
         outcome: sent ? 'applied' : 'failed',
         detail: `${sent} sent, ${failed} failed${failed ? `: ${results.filter((r) => !r.ok).map((r) => `${r.user_id || r.recipient} ${r.error}`).join('; ')}` : ''}`,
         target: valid.join(','),
-        answer: { ok: failed === 0, sent_count: sent, failed_count: failed, results, summary: summarise(results) },
+        answer: {
+          ok: failed === 0,
+          ...(failed ? { reason: 'slack_refused', message: summarise(results) } : {}),
+          sent_count: sent,
+          failed_count: failed,
+          ...(movedToCc.length ? { moved_to_cc: movedToCc, note: `${movedToCc.map((u) => `<@${u}>`).join(', ')} asked for this nudge, so they got a marked copy rather than a DM written to someone else.` } : {}),
+          results,
+          summary: summarise(results),
+        },
       };
     }),
 };
