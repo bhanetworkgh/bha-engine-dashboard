@@ -5,8 +5,12 @@
  * anybody has approved — the thresholds are PROPOSED and the watcher stays off.
  *
  * What this pins:
- *   - every sweep writes one doctrine_gap_observed row per claim per surface,
- *     each with its own id, so repeated observations are never deduplicated;
+ *   - the first sweep writes one doctrine_gap_observed row per claim per surface,
+ *     each with its own id, and a sweep that changes nothing writes nothing
+ *     (state-change-only writes, 20 Oct 2026, LOOP-1792472755186-M4CV; until
+ *     then every sweep wrote every reading);
+ *   - while an alarm is open every reading on its key is written, so recovery
+ *     still sees two healthy reads in a row, and once it closes they stop;
  *   - the sweep asserts no active consumer (2026-10-17): allowed_use is
  *     eligibility, not use, so an unresolved claim on all three surfaces opens
  *     no incident, however many sweeps see it;
@@ -105,7 +109,8 @@ const bharag = http.createServer((req, res) => {
 
     for (let i = 0; i < 3; i++) await sweep();
     o = await observed();
-    assert.deepEqual(o, { n: 12, d: 12 });
+    assert.deepEqual(o, { n: 3, d: 3 }, 'three more sweeps of an unchanged claim write nothing');
+    ok('three more sweeps that change nothing write nothing (it wrote 12 before state-change-only writes)');
     assert.equal(opens().length, 0, 'four sweeps of an unresolved claim open nothing');
     const asserted = (await query(`SELECT count(*)::int AS n FROM engine_events WHERE event_type = 'doctrine_gap_observed' AND detail->>'doctrine_id' = $1 AND detail->>'active_consumer' = 'true'`, [DOC])).rows[0].n;
     assert.equal(asserted, 0);
@@ -160,8 +165,14 @@ const bharag = http.createServer((req, res) => {
     assert.deepEqual(statusPosts(), ['retrying', 'self_healed']);
     assert.equal(opens().length, 1);
     o = await observed();
-    assert.deepEqual(o, { n: 27, d: 27 });
-    ok('a further healthy sweep does nothing to the ledger; nine sweeps wrote 27 observations for one claim');
+    assert.deepEqual(o, { n: 9, d: 9 });
+    const reasons = (await query(`SELECT detail->>'surface' AS s, string_agg(detail->>'write_reason', ',' ORDER BY at, id) AS r FROM engine_events WHERE event_type = 'doctrine_gap_observed' AND detail->>'doctrine_id' = $1 GROUP BY 1 ORDER BY 1`, [DOC])).rows;
+    assert.deepEqual(reasons, [
+      { s: 'genie_ns', r: 'first,changed,alarm_open,changed,alarm_open' },
+      { s: 'media_twin', r: 'first,changed' },
+      { s: 'vfarm', r: 'first,changed' },
+    ]);
+    ok('a further healthy sweep does nothing to the ledger; nine sweeps wrote 9 observations for one claim (27 before), each naming why: first, changed, or alarm_open while the incident was open');
 
     // The resolver cannot be read: the explicit resolver-failure path, unchanged.
     const realClaims = feeds.doctrineClaims;

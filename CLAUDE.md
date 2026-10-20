@@ -3999,9 +3999,8 @@ is logged and never retried. Its thresholds are marked `PROPOSED` in code and ar
 **not Canon**. `npm run test:se8l`.
 **Do not switch the watcher on yet** (2026-10-15). `npm run test:se8l-db` runs
 the sweep by hand against a local `_test` database and a BHARAG stand-in and pins
-what it does: every sweep writes one observation per claim per surface, each
-with a new id, so nothing is deduplicated (14 claims would be about 12,000 rows a
-day); recovery takes two healthy sweeps.
+what it does; recovery takes two healthy sweeps. Until 20 Oct every sweep wrote
+one observation per claim per surface (14 claims, about 12,000 rows a day).
 **The sweep asserts no active consumer** (2026-10-17, Destiny and Jason).
 `allowed_use` says a surface *may* use a claim, not that anything does, and T0NO
 defaults `genie_ns` to true on an unresolved claim, so the sweep read every claim
@@ -4014,9 +4013,24 @@ contradicts the doctrine in force still opens one at once, and a resolver
 failure still opens one on the second sweep. Escalation on a gap comes back only
 with an approved consumer-usage contract that records actual use; until then it
 is guidance and observations only. Logstream leaves `DOCTRINE` incidents out of
-its thresholds (2026-10-17, below under Logstream). **Still not built**: writing
-an observation only when its state changes, the third of Jason's three conditions
-(20 Oct 2026, merged with #15 to #19); the watcher stays off until it is.
+its thresholds (2026-10-17, below under Logstream).
+**An observation is written only when its state changes** (2026-10-20, Destiny —
+LOOP-1792472755186-M4CV, the third of Jason's three conditions). `observe()` asks
+`writeDecision` (pure, `WRITE_RULE` in `doctrineGap.ts`, the numbers there and
+nowhere else) before it writes, comparing the reading with the newest one written
+for its key on `STATE_FIELDS`. It writes the first reading, any change, every
+reading while an alarm is open on the key (recovery's two healthy reads), every
+reading that counts toward opening one (a resolver failure; needs_evidence or
+stale_evidence on an active consumer), a reading that opens an incident, and an
+unchanged one once its last row is 24 hours old, so the summary never reads as
+"nothing checked". Nothing else is written: 14 claims are about 42 rows a day,
+plus one per real change. `policyFor` is unchanged. Each written row carries
+`write_reason` (a new field); `summary()` returns `write_rule`, and its counts are
+rows written, not sweeps run. `npm run test:se8l-writes` proves it on 14 claims
+(rows per sweep, the projection, the restatement, an alarm opened and closed) and
+fails if an unchanged reading is written twice inside 24 hours with no alarm open.
+**The watcher is still off**: Jason asked for the metrics snapshot and a written
+QNDM drill proposal, which he approves or declines, before it is switched on.
 The three read tools are in the North Star, Research Twin and Bays scopes in
 `AGENT_KEYS` (Research Twin gained `read_media_doctrine` with them); the n8n
 allow-lists must carry them too.
