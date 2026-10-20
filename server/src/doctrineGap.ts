@@ -10,6 +10,8 @@ import { createHash } from 'node:crypto';
 import { query } from './pg';
 import * as bharag from './bharag';
 import * as engineEvents from './engineEvents';
+import * as events from './events';
+import * as mirror from './mirror';
 import * as publicationDecision from './publicationDecision';
 import * as systemFeeds from './systemFeeds';
 
@@ -317,6 +319,40 @@ function incidentBody(o: DoctrineGapObservation) {
   };
 }
 
+/**
+ * Engine health's copy of a doctrine-gap incident (2026-10-20, found by the QNDM drill). Engine health
+ * reads the ledger every three minutes and only what is open at that moment, so the drill's incident,
+ * open for under a minute, was in the ledger and on no page. The Monitoring Twin met the same gap on
+ * 4 Oct and copies its incidents at open and close (monitoringTwin.copyToHealth); this is the same
+ * copy, through the same mirror.upsert the ledger poll uses, so Engine health and Logstream hold every
+ * doctrine incident under its ledger id. Never throws: a copy that fails is logged, and the poll still
+ * catches any incident open long enough to be read.
+ */
+async function copyToHealth(o: DoctrineGapObservation, ledgerId: string, raw: unknown): Promise<void> {
+  try {
+    const res = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+    const inc = (res.incident && typeof res.incident === 'object' ? res.incident : res) as Record<string, unknown>;
+    const fields = { ...incidentBody(o), resolution_status: 'open', created_at: o.observed_at, ...inc, entity_id: ledgerId };
+    await mirror.upsert('incidents', { fields, lane_id: 'bays' }, 'engine');
+    await query(`UPDATE engine_incidents SET open_now = true, last_seen_open = $2 WHERE natural_id = $1`, [ledgerId, new Date().toISOString()]);
+    events.changed('incidents');
+  } catch (e) {
+    console.error(`[doctrine-gap] Engine health copy of ${ledgerId} (${o.recovery_key}) was not written: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+async function closeOnHealth(ledgerId: string, at: string): Promise<void> {
+  try {
+    await query(
+      `UPDATE engine_incidents SET open_now = false, resolved_at = COALESCE(resolved_at, $2), resolved_by = COALESCE(resolved_by, $3) WHERE natural_id = $1`,
+      [ledgerId, at, 'doctrine-gap-monitor (two healthy reads)'],
+    );
+    events.changed('incidents');
+  } catch (e) {
+    console.error(`[doctrine-gap] Engine health copy of ${ledgerId} was not marked closed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 /** Record one observation when its state calls for it (WRITE_RULE) and synchronize only the existing BHARAG lifecycle. */
 export async function observe(input: DoctrineGapInput) {
   const classified = classify(input);
@@ -333,13 +369,16 @@ export async function observe(input: DoctrineGapInput) {
     if (policy.incident && !openMarker) {
       const live = await bharag.liveIncidents('bays');
       const existing = live.find((x) => x.payload?.execution_id === o.recovery_key);
-      const ledger_id = existing?.entity_id ?? (await bharag.openIncident('bays', incidentBody(o))).id;
+      const opened = existing ? null : await bharag.openIncident('bays', incidentBody(o));
+      const ledger_id = existing?.entity_id ?? opened!.id;
+      await copyToHealth(o, ledger_id, opened?.raw ?? existing ?? null);
       await engineEvents.record({ event_type: OPENED_EVENT, at: o.observed_at, subject_id: o.recovery_key, lane: 'MEDIA', actor: 'doctrine-gap-monitor', source_ref: 'LOOP-1791557096370-SE8L', detail: { ...o, ledger_id, policy_reason: policy.reason }, dedupe_key: `${OPENED_EVENT}:${o.recovery_key}:${ledger_id}` });
       incident = { action: existing ? 'linked_existing' : 'opened', ledger_id, error: null };
     } else if (policy.recover && openMarker?.detail.ledger_id) {
       const ledger_id = openMarker.detail.ledger_id;
       await bharag.markRetrying('bays', ledger_id);
       await bharag.closeIncident('bays', ledger_id, 'doctrine-gap-monitor', o.observed_at, 'self_healed');
+      await closeOnHealth(ledger_id, o.observed_at);
       await engineEvents.record({ event_type: RECOVERED_EVENT, at: o.observed_at, subject_id: o.recovery_key, lane: 'MEDIA', actor: 'doctrine-gap-monitor', source_ref: 'LOOP-1791557096370-SE8L', detail: { ...o, ledger_id, policy_reason: policy.reason }, dedupe_key: `${RECOVERED_EVENT}:${o.recovery_key}:${ledger_id}:${o.observation_id}` });
       incident = { action: 'closed_after_two_healthy_reads', ledger_id, error: null };
     }
