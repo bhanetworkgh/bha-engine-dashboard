@@ -11,10 +11,12 @@ import { Card, CardHeader, EmptyState, FigureCell, Pagination, Pill, RecordId, S
  *   - `vfarm.alert.v1` to `/api/engine/vfarm-alerts` — the envelope vFarm
  *     already sends to any alert webhook, one post per fire.
  *
- * **Reporting is worked out from `last_reading_at`, never from vFarm's own
- * `status` column**, which nothing in vFarm keeps up to date (its user-ui says
- * so). A device is reporting if it sent a reading in the last fifteen minutes;
- * the window is printed wherever the figure is.
+ * **Reporting follows vFarm's own `status` where it is sent** (20 Oct 2026):
+ * vFarm keeps it current (presence sets online, a 180 s backstop sets
+ * offline), and a camera never stamps `last_reading_at`. Offline is not
+ * reporting; online is reporting unless the device reads and its last reading
+ * is over fifteen minutes old. With no status, it is a reading in the last
+ * fifteen minutes; the window is printed wherever the figure is.
  *
  * **Before the first snapshot every tab says so**, names who wires it, and
  * draws nothing: a device list of nought and "nobody has sent one" look the
@@ -23,7 +25,13 @@ import { Card, CardHeader, EmptyState, FigureCell, Pagination, Pill, RecordId, S
 
 export const REPORTING_MINUTES = 15;
 const when = (iso: string | null) => (iso ? iso.slice(0, 16).replace('T', ' ') : '—');
-export const reporting = (d: VfarmDevice, now = Date.now()) => !d.gone_at && !!d.last_reading_at && now - Date.parse(d.last_reading_at) < REPORTING_MINUTES * 60_000;
+export const reporting = (d: VfarmDevice, now = Date.now()) => {
+  if (d.gone_at) return false;
+  const st = (d.status ?? '').trim().toLowerCase();
+  if (st === 'offline') return false;
+  if (!d.last_reading_at) return st === 'online';
+  return now - Date.parse(d.last_reading_at) < REPORTING_MINUTES * 60_000;
+};
 
 function Waiting({ children }: { children: ReactNode }) {
   return (

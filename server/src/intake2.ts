@@ -36,6 +36,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { query, withTransaction } from './pg';
 import * as engineEvents from './engineEvents';
+import * as leadFlow from './leadFlow';
 import * as events from './events';
 import * as google from './google';
 import * as slack from './slack';
@@ -484,12 +485,13 @@ export async function submit(token: string, body: Record<string, unknown>, userA
     if (!u.rowCount) return false;
     // A buyer answering after somebody closed the lead is good news, not a mistake: the lead
     // opens again, and the timeline says why (15 Oct 2026, the CRM).
-    await db.query(
+    const re = await db.query<{ stage: number }>(
       `UPDATE engine_vfarm_leads SET closed_at = NULL, closed_reason = NULL, closed_note = NULL,
               activity = activity || jsonb_build_array(jsonb_build_object('at', $2::text, 'by', 'the buyer (Intake-2 link)', 'kind', 'reopened', 'text', 'They sent their site specification after the lead was closed.'))
-        WHERE id = $1 AND closed_at IS NOT NULL`,
+        WHERE id = $1 AND closed_at IS NOT NULL RETURNING stage`,
       [row.id, now],
     );
+    if (re.rows.length) await leadFlow.recordReopened(db, { lead_id: String(row.id), buyer_intake_id: buyer, stage: re.rows[0].stage, by: 'buyer', why: 'Sent Form 2 after the lead was closed.' });
     await engineEvents.record(
       {
         event_type: COMPLETED_EVENT,
