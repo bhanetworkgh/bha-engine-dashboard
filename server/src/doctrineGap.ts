@@ -315,7 +315,14 @@ export async function sweepCanonical() {
       const publications = await publicationDecision.readDecisions(doctrine.claims as publicationDecision.ResolvedClaim[], surface);
       for (let i = 0; i < doctrine.claims.length; i++) {
         const claim = doctrine.claims[i] as publicationDecision.ResolvedClaim;
-        results.push(await observe({ surface, claim, publication: publications.decisions[i] ?? null, active_consumer: claim.allowed_use[surface], attempted_public_use: false, requires_mechanical_provenance: false, requested_use: 'internal' }));
+        // Fail closed on the consumer (2026-10-17, Destiny and Jason): allowed_use says a surface MAY
+        // use a claim, not that anything does, and T0NO defaults genie_ns to true on an unresolved
+        // claim, so reading it as an active consumer made every claim escalate. Nothing in the engine
+        // records real use of a claim yet, so the sweep asserts none, and needs_evidence and
+        // stale_evidence never open an incident from here. Contradictions (immediate) and resolver
+        // failures (below) still do. Escalation on a gap returns only with an approved
+        // consumer-usage contract that records actual use.
+        results.push(await observe({ surface, claim, publication: publications.decisions[i] ?? null, active_consumer: false, attempted_public_use: false, requires_mechanical_provenance: false, requested_use: 'internal' }));
       }
     }
   } catch (e) {
