@@ -56,6 +56,8 @@ export const RULE = {
   tick_seconds: 300,
   /** Watches looked at in one pass, oldest check first. */
   per_pass: 40,
+  /** Longest a watch can be snoozed, from now (18 Oct 2026, Destiny). */
+  max_snooze_days: 14,
 } as const;
 
 /** Destiny and Jason: who an escalation names, and who may close anybody's watch. */
@@ -101,6 +103,15 @@ export interface WatchRow {
   fixture: boolean;
   /** False for a decision with more than one part: the owner replying restarts the wait instead of closing the watch (14 Oct 2026). */
   close_on_reply: boolean;
+  /** No reminder or escalation is posted before this; the watch stays open and replies still count (18 Oct 2026, migration 82). */
+  snoozed_until: Date | null;
+  snoozed_by: string | null;
+  /**
+   * An owner message at or before this is not an answer. Set when a snooze is asked for: the
+   * owner asking Bays "snooze this" in the thread is a message from the owner, and on a
+   * single-part watch it would otherwise close the watch it asked to pause (18 Oct 2026).
+   */
+  owner_seen_until: Date | null;
   history: Array<{ at: string; what: string; post?: string }>;
 }
 
@@ -366,6 +377,62 @@ export async function update(watchId: string, by: string, changes: Partial<Recor
   return { ok: true, watch: r.rows[0], changed, flipped: flip };
 }
 
+/* ---------------------------------------------------------------- snooze */
+
+export type SnoozeResult =
+  | { ok: true; watch: WatchRow; snoozed_until: Date | null; changed: boolean }
+  | { ok: false; reason: string; message: string };
+
+const dayWords = (d: Date) => d.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+
+/**
+ * Pauses a watch's reminders until a date (18 Oct 2026, Destiny — Kaiqi in
+ * #workflow-logs-kaiqi asked not to be reminded while heads-down on 31 Oct, and
+ * the only way Bays had was to cancel the watch and open a new one with a
+ * longer wait, which lost its history and filed real work as "cancelled").
+ * The watch stays open: the thread is still read, the owner's reply still
+ * closes it, and a linked record closing still moves it. Nothing is posted
+ * before `until`; after it the watch carries on as it was, so a watch already
+ * quiet past its wait reminds on the next pass. At most `RULE.max_snooze_days`
+ * from now. `until` null ends a snooze early. The owner, whoever asked for the
+ * watch, Destiny or Jason may.
+ */
+export async function snooze(watchId: string, by: string, until: Date | null, reason: string | null, now = new Date()): Promise<SnoozeResult> {
+  const found = await query<WatchRow>(`SELECT * FROM engine_decision_watches WHERE watch_id = $1`, [watchId]);
+  const w = found.rows[0];
+  if (!w) return { ok: false, reason: 'not_found', message: `No watch has the id "${watchId}". Use list_decision_watches to find it.` };
+  if (w.status !== 'watching') return { ok: false, reason: 'already_closed', message: `${watchId} is ${w.status}, so it posts nothing and there is nothing to snooze.` };
+  const may = by === w.created_by || by === w.owner_user_id || (APPROVERS as readonly string[]).includes(by);
+  if (!may) return { ok: false, reason: 'not_permitted', message: `${watchId} can be snoozed by its owner <@${w.owner_user_id}>, by the person who asked for it, or by Destiny or Jason.` };
+  const latest = new Date(now.getTime() + RULE.max_snooze_days * 86_400_000);
+  if (until) {
+    if (Number.isNaN(until.getTime())) return { ok: false, reason: 'bad_until', message: 'The snooze date could not be read.' };
+    if (until.getTime() <= now.getTime()) return { ok: false, reason: 'not_in_future', message: `${dayWords(until)} has already passed. Give a date after now.` };
+    if (until.getTime() > latest.getTime()) return { ok: false, reason: 'too_long', message: `A watch can be snoozed for at most ${RULE.max_snooze_days} days, so the latest date now is ${dayWords(latest)}.` };
+  }
+  const was = w.snoozed_until && new Date(w.snoozed_until).getTime() > now.getTime() ? new Date(w.snoozed_until) : null;
+  if (!until && !was) return { ok: true, watch: w, snoozed_until: null, changed: false };
+  if (until && was && was.getTime() === until.getTime()) return { ok: true, watch: w, snoozed_until: until, changed: false };
+  const why = reason?.trim() ? `: ${clip(reason.trim(), 300)}` : '';
+  const line = until ? `snoozed by ${by} until ${dayWords(until)}${was ? ` (was ${dayWords(was)})` : ''}${why}` : `snooze ended early by ${by}${why}`;
+  const r = await query<WatchRow>(
+    `UPDATE engine_decision_watches
+        SET snoozed_until = $2, snoozed_by = $3, history = history || $4::jsonb, owner_seen_until = $5,
+            last_error = CASE WHEN last_error LIKE 'held:%' THEN NULL ELSE last_error END
+      WHERE watch_id = $1 AND status = 'watching'
+      RETURNING *`,
+    [watchId, until ? until.toISOString() : null, until ? by : null, JSON.stringify([{ at: now.toISOString(), what: line }]), now.toISOString()],
+  );
+  if (!r.rows[0]) return { ok: false, reason: 'already_closed', message: `${watchId} closed while it was being snoozed. Nothing was changed.` };
+  await event(until ? 'decision_watch_snoozed' : 'decision_watch_unsnoozed', r.rows[0], `dw:${watchId}:snooze:${now.getTime()}`, { by, until: until ? until.toISOString() : null, was: was ? was.toISOString() : null, reason: reason?.trim() || null });
+  return { ok: true, watch: r.rows[0], snoozed_until: until, changed: true };
+}
+
+/** True while a snooze is still running. */
+export function snoozedAt(w: Pick<WatchRow, 'snoozed_until'>, now: Date): boolean {
+  return Boolean(w.snoozed_until && new Date(w.snoozed_until).getTime() > now.getTime());
+}
+
 /* ------------------------------------------------------------ Slack side */
 
 interface Msg {
@@ -479,7 +546,14 @@ export function reminderText(w: WatchRow, n: number, now: Date): string {
   if (w.ns_refs) lines.push(`*North Star:* ${w.ns_refs}`);
   if (w.record_id) lines.push(`*Tracked as:* ${w.record_kind === 'loops' ? 'loop' : 'backlog task'} \`${w.record_id}\``);
   lines.push(`*Next logged step:* ${w.next_step || 'reply here with the decision, or say what is blocking it.'}`);
-  lines.push(`_Reminder ${n} of ${w.max_reminders}. No movement for ${quiet}. A reply from you ${w.thread_ts ? 'in this thread' : 'in a thread on this message'} closes this watch (\`${w.watch_id}\`)._`);
+  // 19 Oct 2026 (LOOP-1792136810976-BBGL): the closing line says what really closes this watch. On a
+  // decision with more than one part (close_on_reply false) a reply restarts the wait, so telling the
+  // owner it closes the watch was wrong (DW-1791985832450-IKOZ and DW-1791989874656-W3JQ, 16 Oct).
+  const where = w.thread_ts ? 'in this thread' : 'in a thread on this message';
+  const closes = w.close_on_reply === false
+    ? `This decision has more than one part, so a reply from you ${where} restarts the wait; the watch closes once every part is answered${w.record_id ? ' or the tracked item closes' : ''}. Waiting on a date? Ask Bays to snooze it until then.`
+    : `A reply from you ${where} closes this watch.`;
+  lines.push(`_Reminder ${n} of ${w.max_reminders}. No movement for ${quiet}. ${closes} (\`${w.watch_id}\`)_`);
   return lines.join('\n');
 }
 
@@ -648,7 +722,9 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
           readOk = false;
         }
         const human = (read.ok ? read.messages : []).filter((m) => m.user && !m.bot_id && (!m.subtype || m.subtype === 'thread_broadcast') && m.ts && Number(m.ts) > Number(oldest));
-        const fromOwner = human.filter((m) => m.user === w.owner_user_id).sort((a, b) => Number(b.ts) - Number(a.ts))[0];
+        // An owner message up to a snooze is the snooze being asked for, never the answer.
+        const ownerFloor = w.owner_seen_until ? Math.max(Number(oldest), new Date(w.owner_seen_until).getTime() / 1000) : Number(oldest);
+        const fromOwner = human.filter((m) => m.user === w.owner_user_id && Number(m.ts) > ownerFloor).sort((a, b) => Number(b.ts) - Number(a.ts))[0];
         if (fromOwner && w.close_on_reply !== false) {
           const why = `${w.owner_name || 'the owner'} replied ${w.thread_ts ? 'in the thread' : 'under the reminder'} (${permalink(place.channel, fromOwner.ts as string)})`;
           if (opts.dry) would(w, `close as answered: ${why}`);
@@ -672,7 +748,13 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
         }
       } else if (!opts.dry && !place) await note(w, { checked: now });
 
-      // 3. Quiet past the wait.
+      // 3. Snoozed: the thread was still read above, so a reply still counts, but nothing is posted.
+      if (snoozedAt(w, now)) {
+        if (opts.dry) would(w, `nothing: snoozed until ${new Date(w.snoozed_until as Date).toISOString()}`);
+        continue;
+      }
+
+      // 4. Quiet past the wait.
       if (quietSince.getTime() + w.wait_minutes * 60_000 > now.getTime()) {
         if (opts.dry) would(w, `nothing: not due until ${new Date(quietSince.getTime() + w.wait_minutes * 60_000).toISOString()}`);
         continue;
@@ -746,13 +828,43 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
 
 /* ------------------------------------------------------------------ read */
 
+const lagosTime = (d: Date) =>
+  `${d.toLocaleString('en-GB', { timeZone: 'Africa/Lagos', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} Lagos (${d.toISOString().slice(11, 16)} UTC)`;
+
+/**
+ * What moves this watch, in words, built from the row (19 Oct 2026, Destiny). On 18 Oct Bays told
+ * Kaiqi a progress note would reset his watch's clock; the watch was on a different thread, so it
+ * would not. The list handed Bays a channel id and a ts and left the meaning to it. This sentence
+ * is the same rule `sweep` applies and the reminder states, so Bays can quote it instead of guessing.
+ */
+export function movesText(w: WatchRow, due: Date, now = new Date()): string {
+  if (w.status !== 'watching') return `Closed (${w.status}). Nothing moves it any more.`;
+  const owner = w.owner_name || `<@${w.owner_user_id}>`;
+  const ownerReply = w.close_on_reply === false
+    ? `a reply from ${owner} restarts the wait (the decision has more than one part, so it stays open until every part is answered and close_decision_watch is called)`
+    : `a reply from ${owner} closes it`;
+  const parts: string[] = [];
+  if (w.thread_ts && w.thread_link) {
+    parts.push(`This watch is on ${w.thread_link}. Only messages in that thread count: ${ownerReply}; a reply from anyone else restarts the wait. A message anywhere else (another thread, a channel, a DM) does not count.`);
+  } else {
+    parts.push(`This watch has no thread: reminders go to ${owner} by DM, and only a reply in a thread on one of those reminders counts (${ownerReply}).`);
+  }
+  if (w.record_id) parts.push(`It also restarts when ${w.record_kind === 'loops' ? 'loop' : 'backlog task'} ${w.record_id} changes, and closes when it closes.`);
+  if (snoozedAt(w, now)) parts.push(`Snoozed until ${dayWords(new Date(w.snoozed_until as Date))}: nothing is posted before then, but a reply still counts.`);
+  const next = w.reminders_sent >= w.max_reminders ? 'escalation to Jason and Destiny' : `reminder ${w.reminders_sent + 1} of ${w.max_reminders}`;
+  parts.push(due.getTime() <= now.getTime() ? `If nothing moves, ${next} goes on the next pass (within five minutes).` : `If nothing moves, ${next} goes at ${lagosTime(due)}.`);
+  return parts.join(' ');
+}
+
 export function show(w: WatchRow, now = new Date()) {
-  const due = dueAt(w);
   const open = w.status === 'watching';
+  const snoozed = open && snoozedAt(w, now);
+  // A snoozed watch acts no sooner than the snooze ends, and no sooner than its own wait.
+  const due = snoozed ? new Date(Math.max(dueAt(w).getTime(), new Date(w.snoozed_until as Date).getTime())) : dueAt(w);
   return {
     watch_id: w.watch_id,
     status: w.status,
-    state: !open ? w.status : w.last_error ? 'watching, with a problem' : w.reminders_sent >= w.max_reminders ? 'last reminder sent, escalates next' : w.reminders_sent ? `reminded ${w.reminders_sent} of ${w.max_reminders}` : 'watching',
+    state: !open ? w.status : snoozed ? `snoozed until ${dayWords(new Date(w.snoozed_until as Date))}` : w.last_error ? 'watching, with a problem' : w.reminders_sent >= w.max_reminders ? 'last reminder sent, escalates next' : w.reminders_sent ? `reminded ${w.reminders_sent} of ${w.max_reminders}` : 'watching',
     decision: w.decision,
     owner_user_id: w.owner_user_id,
     owner_name: w.owner_name,
@@ -770,6 +882,7 @@ export function show(w: WatchRow, now = new Date()) {
     next_action_at: open ? due.toISOString() : null,
     next_action: open ? (w.reminders_sent >= w.max_reminders ? 'escalate to Jason and Destiny' : `reminder ${w.reminders_sent + 1} of ${w.max_reminders}`) : null,
     overdue: open && due.getTime() <= now.getTime(),
+    how_it_moves: movesText(w, due, now),
     next_action_when: !open ? null : due.getTime() <= now.getTime() ? 'due now' : `in ${hoursWords((due.getTime() - now.getTime()) / 60_000)}`,
     last_reminder_at: iso(w.last_reminder_at),
     last_checked_at: iso(w.last_checked_at),
@@ -782,6 +895,8 @@ export function show(w: WatchRow, now = new Date()) {
     created_via: w.created_via,
     fixture: w.fixture,
     closes_on_owner_reply: w.close_on_reply !== false,
+    snoozed_until: snoozed ? iso(w.snoozed_until) : null,
+    snoozed_by: snoozed ? w.snoozed_by : null,
     history: w.history ?? [],
   };
 }
@@ -799,9 +914,9 @@ export async function read(opts: { fixtures?: boolean; limit?: number } = {}) {
       wait_hours: RULE.wait_hours,
       max_reminders: RULE.max_reminders,
       daily_cap: RULE.daily_cap,
-      in_words: `A watch waits ${RULE.wait_hours} hours for movement (the owner replying, anyone else replying, or the linked loop or task changing). Quiet past that, Bays posts a reminder in the thread, up to ${RULE.max_reminders}. After the last one and another quiet wait, one escalation names Jason and Destiny and the watch stops. At most ${RULE.daily_cap} posts a day across all watches. A thread that could not be read is never reminded on.`,
+      in_words: `A watch waits ${RULE.wait_hours} hours for movement (the owner replying, anyone else replying, or the linked loop or task changing). Quiet past that, Bays posts a reminder in the thread, up to ${RULE.max_reminders}. After the last one and another quiet wait, one escalation names Jason and Destiny and the watch stops. At most ${RULE.daily_cap} posts a day across all watches. A thread that could not be read is never reminded on. A watch can be snoozed for up to ${RULE.max_snooze_days} days by its owner, whoever asked for it, Destiny or Jason: it stays open, a reply still counts, and nothing is posted until the date.`,
     },
-    counts: { watching: open.length, with_a_problem: open.filter((w) => w.problem).length, answered: count('answered'), moved: count('moved'), escalated: count('escalated'), cancelled: count('cancelled') },
+    counts: { watching: open.length, snoozed: open.filter((w) => w.snoozed_until).length, with_a_problem: open.filter((w) => w.problem).length, answered: count('answered'), moved: count('moved'), escalated: count('escalated'), cancelled: count('cancelled') },
     posted_today: await postedToday(now),
     watches: [...open, ...closed],
   };

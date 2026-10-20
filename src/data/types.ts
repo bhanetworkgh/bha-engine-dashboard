@@ -3169,7 +3169,7 @@ export interface VfarmLead {
   stage: number;
   stage_changed_at: string | null;
   /** Every move between stages, oldest first, never rewritten. */
-  stage_history: { from: number; to: number; at: string; by: string; reason: string | null; via: 'page' | 'engine' }[];
+  stage_history: { from: number; to: number; at: string; by: string; reason: string | null; via: 'page' | 'engine' | 'buyer' }[];
   /** The 5-rack pilot offers this lead is tied to (2026-10-09, 7S0O). Internal only. Absent on an optimistic copy. */
   pilot_offers?: { id: string; status: string }[];
   /** Intake-2's answers once the buyer sent them, keyed by the contract's labels (2026-10-14). */
@@ -3186,6 +3186,39 @@ export interface VfarmLead {
   activity?: LeadActivity[];
   /** Only on the answer to a stage move: what happened to the Intake-2 invite the move triggered. */
   intake_2_invite_result?: Intake2InviteOutcome;
+  /** Stage 3's proposal (2026-10-17). Always a test until Canon Lock exists. */
+  proposal?: VfarmProposal | null;
+  /** What Stripe said about this lead's payment (2026-10-17). */
+  stripe_payment?: VfarmStripePayment | null;
+}
+
+export interface VfarmProposal {
+  proposal_id: string;
+  test: true;
+  setup_name: string;
+  summary: string;
+  inclusions: string[];
+  price_amount: number;
+  currency: string;
+  timeline: string | null;
+  created_at: string;
+  created_by: string;
+  opened_at: string | null;
+  accepted_at: string | null;
+  actions: { kind: 'accepted' | 'question' | 'call'; at: string; text: string | null; notified: { ts: string | null; error: string | null } | null }[];
+  link: string;
+}
+
+export interface VfarmStripePayment {
+  state: 'paid' | 'failed' | 'expired' | 'pending';
+  mode: 'test' | 'live';
+  amount: number | null;
+  currency: string | null;
+  session_id: string | null;
+  payment_intent: string | null;
+  paid_at: string | null;
+  failure: string | null;
+  updated_at: string;
 }
 
 /** What sending (or resending) an Intake-2 invite did. */
@@ -3535,10 +3568,13 @@ export interface DecisionWatch {
   closed_at: string | null;
   created_at: string | null;
   created_via: string | null;
+  /** Set while a snooze is running: nothing is posted before it (18 Oct 2026). */
+  snoozed_until?: string | null;
+  snoozed_by?: string | null;
 }
 export interface DecisionWatchData {
   rule: { wait_hours: number; max_reminders: number; daily_cap: number; in_words: string };
-  counts: { watching: number; with_a_problem: number; answered: number; moved: number; escalated: number; cancelled: number };
+  counts: { watching: number; snoozed?: number; with_a_problem: number; answered: number; moved: number; escalated: number; cancelled: number };
   posted_today: number;
   watches: DecisionWatch[];
 }

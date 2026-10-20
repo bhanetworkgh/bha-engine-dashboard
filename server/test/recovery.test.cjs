@@ -14,7 +14,11 @@
  *     and closed self_healed;
  *   - an old Exhausted retry row is not read as this re-run's answer;
  *   - exactly one summary per batch, however many ticks follow;
- *   - the plan calls nothing.
+ *   - the plan calls nothing;
+ *   - a polling trigger's one-off 5xx (no execution id) closes itself
+ *     self_healed once 30 minutes have passed with no repeat; a younger one
+ *     waits and says when it will close; two of the same step inside 30
+ *     minutes both stay open for a person (19 Oct 2026).
  *
  * Run with:  npm run test:recovery   (needs DATABASE_URL; migrations are applied here)
  */
@@ -46,6 +50,10 @@ inc('young', 'NETWORK_TIMEOUT', 'TEST — Recovery E', 'Call', '9105', 5 * 60_00
 inc('done', 'BILLING_QUOTA', 'TEST — Recovery F', 'Model', '9104', 2.5 * hour);
 inc('host', 'UPSTREAM_5XX', 'TEST — Recovery G', 'Ask OpenRouter', '9106', 1.5 * hour);
 inc('other', 'SCHEMA_VALIDATION', 'TEST — Recovery H', 'Parse', '9107', 2 * hour);
+inc('poll', 'UPSTREAM_5XX', 'TEST — Poll A', 'Trigger (polling)', undefined, 2 * hour);
+inc('pollyoung', 'UPSTREAM_5XX', 'TEST — Poll B', 'Trigger (polling)', undefined, 5 * 60_000);
+inc('rep1', 'NETWORK_TIMEOUT', 'TEST — Poll C', 'Trigger (polling)', undefined, 2 * hour);
+inc('rep2', 'UPSTREAM_5XX', 'TEST — Poll C', 'Trigger (polling)', undefined, 1.75 * hour);
 
 const execs = {
   9100: { id: '9100', workflowId: 'wfA', status: 'error', workflowData: { nodes: [{ name: 'Model', credentials: { openRouterApi: { name: 'OR' } } }] } },
@@ -159,6 +167,26 @@ const server = http.createServer((req, res) => {
     assert.deepEqual(posts('done'), ['retrying', 'self_healed']);
     for (const c of calls.filter((c) => c.path.endsWith('/status'))) assert.ok(Object.keys(c.body).every((k) => ['resolution_status', 'payload_patch'].includes(k)), 'nothing else at the top level');
 
+    // One-off polling errors.
+    assert.deepEqual(posts('poll'), ['retrying', 'self_healed'], 'a lone polling 5xx past 30 minutes closes itself self_healed');
+    assert.deepEqual(posts('pollyoung'), [], 'a polling error under 30 minutes old is left open');
+    assert.deepEqual(posts('rep1'), [], 'a repeated polling error is not a one-off');
+    assert.deepEqual(posts('rep2'), [], 'nor is its repeat');
+    const skip = Object.fromEntries((await recovery.plan()).skipped.map((x) => [x.incident_id, x.reason]));
+    assert.equal(skip[id('poll')], undefined, 'a closed one-off leaves the passed-over list');
+    assert.match(skip[id('pollyoung')], /closes itself at/, 'the young one says when it will close');
+    assert.match(skip[id('rep1')], new RegExp(`Not a one-off.*${id('rep2')}`), 'the repeat is named');
+    assert.match(skip[id('rep2')], new RegExp(`Not a one-off.*${id('rep1')}`), 'both ways round');
+    const ev = await query(`SELECT actor, lane, detail FROM engine_events WHERE event_type = 'polling_one_off_closed' AND subject_id = $1`, [id('poll')]);
+    assert.equal(ev.rows.length, 1, 'one polling_one_off_closed event');
+    assert.equal(ev.rows[0].actor, 'recovery');
+    assert.equal(ev.rows[0].detail.ledger_state, 'self_healed');
+    const logged = await query(`SELECT actor, state FROM record_writes WHERE kind = 'incidents' AND record_id = $1`, [id('poll')]);
+    assert.deepEqual(logged.rows, [{ actor: 'recovery', state: 'ok' }], 'the close is a record_writes line');
+    const before1 = calls.length;
+    await recovery.runTick();
+    assert.equal(calls.slice(before1).filter((c) => c.path === `/api/v1/incidents/${id('poll')}/status`).length, 0, 'a closed one-off is not closed twice');
+
     assert.equal(calls.filter((c) => c.path === '/webhook/engine-recovery-summary').length, 0, 'no summary while two are replaying');
     const plan = await recovery.plan();
     assert.equal(plan.replaying.length, 2);
@@ -209,6 +237,7 @@ const server = http.createServer((req, res) => {
   } finally {
     await query(`DELETE FROM engine_recovery WHERE incident_id LIKE 'INC-TEST-%'`).catch(() => {});
     await query(`DELETE FROM engine_retry_attempts WHERE natural_id LIKE 'INC-TEST-%'`).catch(() => {});
+    await query(`DELETE FROM engine_events WHERE event_type = 'polling_one_off_closed' AND subject_id LIKE 'INC-TEST-%'`).catch(() => {});
     await closePool();
     server.close();
   }

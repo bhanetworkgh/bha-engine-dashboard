@@ -1383,6 +1383,76 @@ then here, then BUILD_LOG), migration 76.
   question 5 through the link's upload; `dry_run` validates and writes nothing.
 
 
+**The Stripe to ledger rail** (2026-10-17, Destiny — D4, the internal $1 test under
+`VFARM_STRIPE_LEDGER_CONTROLLED_TEST_ACCEPTANCE_V1`; Jason, 17 Oct: wiring and internal
+testing only, no live customer payments). `server/src/stripeLedger.ts`, migration 80.
+- **The checkout page is Stripe's own hosted Checkout.** Nothing on bhanetwork.org links to
+  a payment and `/vfarm` stays `interest_only_live`. A session is made for one lead with
+  `client_reference_id` = the lead's id and `metadata.buyer_intake_id` = its buyer id, and
+  its link goes to that person only. Stripe returns the buyer to `/checkout/done` or
+  `/checkout/cancelled`, which say nothing about any payment.
+- **The webhook is the only way a payment reaches the ledger**: `POST /api/public/stripe/webhook`,
+  public because Stripe holds no key of ours, locked by `Stripe-Signature` over the raw body
+  (five minutes' tolerance). One secret per mode, **`STRIPE_WEBHOOK_SECRET_TEST`** and
+  **`STRIPE_WEBHOOK_SECRET_LIVE`**, no defaults; an event whose `livemode` does not match the
+  secret that verified it is refused. No Stripe API key is held by this server.
+- **One row per Stripe event** in `engine_stripe_events`, keyed on its id: a retry is a 200
+  `duplicate` and changes nothing. The ledger is the lead's own `stripe_payment` (paid,
+  failed, expired or pending, with the session, intent, amount and events). **Paid is never
+  undone** by a later event, a live event never overwrites a test payment, and **a payment
+  sets no stage, entitlement, subscriber or reservation.** Each change is one
+  `vfarm_payment_*` row in `engine_events`.
+- **No silent failures**: a forged or unreadable call is 400 and `stripe_webhook_refused`
+  (one alert an hour in the engine alerts channel); a paid session that names no lead, an
+  unknown lead or the wrong buyer id is stored `unmatched` and alerted; paid, failed and
+  expired post in #vfarm-early-access (`STRIPE_ALERT_CHANNEL`), sandbox posts marked
+  "test only". A database failure is a 500, so Stripe tries again.
+- **Read-back**: `GET /api/engine/vfarm-payments` (`x-dashboard-key`, `?lead_id=`).
+  `npm run test:stripe-ledger` pins it against a local database.
+
+**Buyer flow v2: five stages and the Stage 3 proposal page** (2026-10-17, Destiny — Jason in
+#bha-coordination the same day; SOPs 09cb58a7, the flow with its markings, and 66570ea2, Stage 3
+is non-transactional). `server/src/proposal.ts`, migration 81.
+- **Five stages**, `LEAD_STAGES` and `PIPELINE`: 1 Interest, 2 Site specification (Invited /
+  Spec received), 3 Proposal (was the "paying" placeholder, which no lead was in), 4 Agreement
+  & deposit, 5 Customer. **Moving on is gated, moving back is not**: 3 needs Form 2 in (a
+  person moves it once the five checks clear), 4 needs an accepted proposal, 5 a paid
+  `stripe_payment`. The signed agreement is not built, so 5 says so.
+- **The proposal page** is `/proposal/<token>`, built like Form 2: public, no login, the token
+  an HMAC of the proposal id under `INTAKE2_LINK_SECRET` (no new secret), only its sha256
+  stored, a link that opens nothing gets the "not valid" page. Made from the lead panel
+  (`POST /api/vfarm/leads/:id/proposal`) for a lead in Stage 3 only; a new one replaces the old
+  and the old link stops working.
+- **Every proposal is a test until Canon Lock exists** (`test: true`, not settable): the page
+  carries a "Test proposal, not an offer" banner on every view. **No payment and no payment
+  link on it.** Three plain HTML forms: Accept (the lead moves to Stage 4 once, `via: 'buyer'`),
+  Ask a question (text required), Request a call. Each is recorded on `proposal.actions`, one
+  `vfarm_proposal_*` event, and one post in #vfarm-early-access whose outcome is written back.
+  The proposal link is copied from the lead panel; no email sends it yet. CST answering
+  questions and the agreement are not built. `npm run test:proposal`.
+- **`test_buyer_flow`** (`server/src/mcp/intake2Tools.ts`, write connection, no agent's scope):
+  walks a test lead through the flow one step per call through the real functions: `move`
+  (moveStage with its gates), `propose` (proposal.create), `buyer_open`, `buyer_accept`,
+  `buyer_question`, `buyer_call` (proposal.page and proposal.act on the lead's own link), and
+  `status`. Destiny or Jason only, **only an @bhanetwork.org lead**, confirm
+  `TEST FLOW <buyer_intake_id>`. Audited on `engine_mcp_writes`.
+
+**The Engine Surfaces Contract for the buyer flow** (2026-10-18, Destiny — Jason in
+#bha-coordination, 1792267743.990519). `docs/contracts/engine-surfaces-buyer-flow.md` is the
+contract, also logged as an SOP in BHARAG so the agents read it with `read_sop`.
+`server/src/leadFlow.ts`.
+- **Every stage move, close and reopen writes one event in the same transaction as the row**:
+  `vfarm_flow_stage_moved`, `vfarm_flow_closed`, `vfarm_flow_reopened`, subject the
+  `buyer_intake_id`, actor `buyer` for a buyer's own action and never a name. Any new path that
+  changes `stage` or `closed_at` must call `leadFlow.record*` too. The names avoid the
+  `VFARM_LEAD_`/`VFARM_BUYER_` customer families on purpose: `BUYER_STATES` do not map onto the
+  five stages and are Jason's to change.
+- **`read_buyer_flow`** (`server/src/mcp/buyerFlowTools.ts`, read only, both connections, in
+  North Star's, Research Twin's, Bays' and Genie's scopes, with `read_sop` added to the three that
+  lacked it): stage, position, Form 2, proposal, payment state and mode, close, per lead by
+  `buyer_intake_id`, and the contract's never-infer rules. It selects no personal field.
+  `npm run test:buyer-flow`.
+
 **UN9D acceptance and the first real vFarm data** (2026-10-15, Destiny — D3;
 Hardik's two tests of 30 Sep / 1 Oct, locked by Jason 2 Oct). `server/src/un9d.ts`.
 - **The first real post DMs Destiny once.** Every post to `/api/engine/vfarm-snapshot`
@@ -1592,7 +1662,14 @@ a version change, `publishGate.draftCheck` looks for a finished draft run whose
 config hash is the config now published. Passed is `passed_before_publish`; a
 failed run or none posts one alert in the engine alerts channel at once ("went
 live without a draft eval"). The eval after the publish still runs. The Agent
-maturity page shows the draft verdict beside each version. **To change an
+maturity page shows the draft verdict beside each version. **A skill edit is a
+change** (18 Oct 2026, LOOP-1792328810473-P3UV): n8n's `configHash` does not move
+when a skill is edited, so the hash compared everywhere here is `n8nMcp.changeHash`,
+`cs1:` + sha256 of the configHash and every `skillHashes` entry; draft runs made
+before it carry n8n's plain hash and no longer match. **An Anthropic backup is
+tested with its primary's cases** (18 Oct 2026): `run_draft_eval` takes a backup's
+n8n agent id (`BACKUPS` in `draftEval.ts`), asks that agent's draft, and stores
+the run under the backup's id, so the publish check matches it like any other. **To change an
 agent: edit the draft, `run_draft_eval`, publish only once it reads passed,
 then record the inventory.** `npm run test:draft-eval` pins the pure parts.
 
@@ -1733,6 +1810,14 @@ agent did through n8n tools of its own are tools here:
   the upload, which left an orphaned upload for a user it could not DM). The
   permalink comes from files.info. A failure is `ok:false` with `step` and
   Slack's own `error`.
+  **`cc` is a marked copy, never a recipient** (18 Oct 2026, DW-1792267745984-UBCR):
+  "cc Jason" used to put Jason in `recipients`, so he got a DM written to Hardik. `cc`
+  people get the text under "_Copy for you: Bays sent this to …_", and a
+  `requester_user_id` named in `recipients` beside others is moved to cc
+  (`moved_to_cc`). **A failed DM answers `reason: slack_refused` with Slack's own error
+  in `message`** (LOOP-1792263523732-LVEA), and the approval card's line reads
+  `summary` and `results[].error`, so an approved send that Slack refuses never says
+  "the tool gave no reason". `npm run test:bays-tools` and `test:approvals` pin both.
 
 **Bays hears a voice note** (2026-10-07, Destiny — LOOP-1791315402447-834A, Jason's
 ask of 6 Oct). `transcribe_slack_audio`, `server/src/mcp/audioTools.ts`, read
@@ -2008,6 +2093,20 @@ holds each failed run's input and the healer resumes it from the failed step.
 - **The off switch** is a toggle on Engine health stored in `meta`
   (`recovery.enabled`), **on by default**, every flip a `record_writes` line
   with who made it; `RECOVERY_ENABLED=false` on the service overrides it.
+- **A polling trigger's one-off error closes itself** (19 Oct 2026, Destiny —
+  INC-BAYS.AGENT-055 and -063, each one failed Google Sheets poll of Form A,
+  each closed by hand). A `UPSTREAM_5XX` or `NETWORK_TIMEOUT` on a step whose
+  name says `(polling)`, with no execution id (a poll that fails carries none,
+  so nothing can be resumed and the next poll simply runs), is closed
+  `self_healed` once `ONE_OFF_QUIET_MS` (30 minutes) has passed **and no other
+  incident of the same workflow and step falls within 30 minutes either side
+  of it**, open or already closed. A repeat is not a one-off: both stay open
+  for a person, each already alerted by its own handler run, and the Recovery
+  tab's passed-over list says so and names the other ids; a younger one says
+  when it will close. Every tick, whatever is waiting, and only from a lane
+  read live that tick. The close is the watcher's own `closeLedger` (open →
+  retrying → self_healed, mirrored, a `record_writes` line, actor `recovery`)
+  and one `polling_one_off_closed` event. `npm run test:recovery` pins it.
 - **`GET /api/engine/recovery/plan`** (`x-dashboard-key`, logged as `read`)
   answers what the next tick would do — waiting and replaying rows, what was
   passed over and why, the last probe — **calling nothing**.
@@ -2338,6 +2437,13 @@ autopay, no pay wiring, no destructive automated action).
   closes, retries, edits or deletes, and never touches pay. A job or alert that
   does not land keeps its trigger at `failed` with the reason and is tried again
   on every pass.
+- **An incident is dated by when it happened, not by its close** (20 Oct 2026, LOOP-1792388413323-4E0U).
+  BHARAG moves `occurred_at` to the time of each status change, so a closed incident's own `occurred_at`
+  is its close. Every Logstream query, and research signals' T4, reads `logstream.INCIDENT_AT`: the
+  earlier of `occurred_at` and `first_seen_at`, as the self-healing scorecard does. Migration 85
+  corrected the rows already written with the close date (118 on 20 Oct): `occurred_at` moved back,
+  time to recovery worked out again from the same close, the 7- and 30-day counts counted again, and
+  each row says so in `audit.date_corrected` with the date it held before.
 - **GNER stays a candidate; no runtime decision depends on it; empty reads are
   not recorded.** These are v0 numbers: the re-tune is due about 9 Nov 2026
   (LOOP-1791558515351-4DR6).
@@ -2399,6 +2505,9 @@ autopay, no pay wiring, no destructive automated action).
   older doctrine version still reads `allowed` there. Whether to hide those rows
   from it is an open decision (Destiny). `allowed_use.genie_ns` alone is never
   permission. Genie writes nothing and does not get `read_doctrine_gap_summary`.
+  **The buyer flow and SOP reads are on the same token from 18 Oct** (Engine
+  Surfaces Contract): `read_buyer_flow` and `read_sop`, six tools in all, still
+  read-only, and `test:eg4n` pins the six.
   The answer table is in the contract; `npm run test:eg4n` pins the token and the
   resolver's answers against a local `_test` database.
 - **Empty reads are counted, and nothing decides on them** (same day).
@@ -2576,6 +2685,28 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
   makes the owner's reply restart the wait like anyone else's, with a history
   line; the watch closes on `close_decision_watch` once every part is answered,
   or when its linked record closes, and keeps reminding until then.
+- **The reminder says what really closes the watch** (19 Oct 2026, LOOP-1792136810976-BBGL): a
+  single-part watch says a reply closes it; a multi-part one (`close_on_reply` false) says a reply
+  restarts the wait, that it closes once every part is answered or the tracked item closes, and that a
+  watch waiting on a date can be snoozed until then. `test:decision-watch` pins both.
+- **Every watch says what moves it, in words** (19 Oct 2026, Destiny). `show()` gives each watch
+  `how_it_moves` (`movesText`): the thread it is on, that only messages there count, what an owner's
+  reply does (closes it, or restarts the wait on a multi-part watch), the linked record, a snooze, and
+  when the next reminder goes in Lagos and UTC. `list_decision_watches` tells Bays to quote it. On 18
+  Oct Bays told Kaiqi a progress note in another thread would reset his watch, which it would not.
+- **A watch can be snoozed until a date** (18 Oct 2026, Destiny; migration 82). Kaiqi asked
+  not to be reminded while heads-down on 31 Oct, and with no pause Bays cancelled
+  DW-1792249500281-8Y88 and opened DW-1792296192502-322O with a 7-day wait, which filed real
+  work as cancelled and split its history. `snooze_decision_watch` (Bays' scope) and
+  `decisionWatch.snooze` set `snoozed_until`, **at most 14 days ahead** (`RULE.max_snooze_days`),
+  a date the person names (`YYYY-MM-DD` is 00:00 UTC that day; a time must carry its zone).
+  The watch stays open: its thread is still read, a reply still counts, a linked record closing
+  still moves it, and the sweep posts no reminder or escalation before the date; after it the
+  watch carries on as it was. `clear: true` ends one early. Owner, requester, Destiny or Jason
+  only. **An owner message up to the snooze is not the answer** (`owner_seen_until`): the owner
+  asking Bays "snooze this" in the thread would otherwise close the single-part watch it asked
+  to pause. A snooze clears a cap-hold problem. Each change is a history line and one
+  `decision_watch_snoozed` or `_unsnoozed` event. The page shows "snoozed until …".
 - Tools, write connection: `open_decision_watch`, `list_decision_watches`,
   `close_decision_watch` (Bays' scope) and `run_decision_watch` (a person;
   `dry_run` by default). `fixture: true` makes a marked test watch whose posts
@@ -3377,6 +3508,90 @@ root cause, the exact change, and a way back. So:
   healthy tone. Colour marks only what needs somebody: needing a person, and not
   repaired.
 
+**A settled fix is answered in its own card's thread** (20 Oct 2026, Destiny: "rather than dm me, let it
+notify the proof inside the thread on the self healing channel"). n8n's `BHA — Self Healer Reports` posts
+each repair card in #bha-self-healing; for a `repaired_pending` card it then calls
+`POST /api/engine/repair/report-link` (`x-dashboard-key`, `{repair_id, channel, ts}`, retried; a 404 means the
+bridge's own report has not landed yet), which writes `payload.report_link` and nothing else. `repairs.store`
+keeps that link through every later whole-record report (the trace re-post, the settle), because neither
+carries it. When the bridge's second report turns the row into anything else, `repairs.notifySettled` replies
+in that card's thread as Bays, tagging Destiny, with the outcome, the proof, the incident's state and, when it
+did not hold, what a person must do. No link, or a reply Slack refuses, posts in the channel itself with the
+reason; both refused is logged loudly. Each settle is one `repair_settled_notified` event naming where it went.
+The n8n workflow's **Post Quietly?** skips a follow-up report's own card, so the settle is said once, in the
+thread. Never awaited by the bridge's write. `npm run test:repair-settle`.
+
+**A repair's proof can be corrected** (20 Oct 2026, Destiny — INC-BAYS.CODEX-035). `correct_repair_proof`
+(`server/src/mcp/incidentTools.ts`, write connection, no agent's scope) calls `repairs.correctProof`: it
+replaces `verified_by` with the real evidence, appends a dated "Proof corrected" line to `change_summary`,
+and keeps the old proof in `payload.proof_corrections`. **It never changes the outcome.** Built because the
+bridge settled REP-YTpezWSOIN6TNYcX-43048 on execution 43198, a run that never reached the changed step;
+the bridge itself no longer counts such a run (bha-repair-bridge fc70807: a later run proves a fix only if
+it ran a changed node). Audited on `engine_mcp_writes`. The same function answers
+`POST /api/engine/repair/proof-correction` (`x-dashboard-key`, logged on `engine_writes`), for when the
+connector's tool list has not picked the tool up. `npm run test:repair-settle` check 8.
+
+**The Self-healing tab is the scorecard** (19 Oct 2026, Destiny — D2.5: "If BHA is going to
+be marketing that we have a self-healing system, we need to be able to back everything up with
+numbers"). `?tab=self-healing`, `GET /api/engine-health/self-healing`, `server/src/selfHealing.ts`,
+and the read tool `read_self_healing` (both connections, and in Bays' scope from the same day:
+Bays is where people ask, so a figure it quotes is the page's figure). Week by week since the healer began
+(21 Sep): **production runs** (webhook, trigger, sub-workflow; manual runs, the healer's retries and
+the error handlers' runs are not workload) and how many failed; **real faults** against those
+**counted apart** (`logstream.excludedReason`: tests, the simulator, a guard refusal), with a fault
+raised by an alarm step counted as real, because the alarm reports something that failed upstream;
+**every automatic fix**, counted once per incident wherever it was recorded (a healer retry that
+recovered, including `RUN-…` rows that never opened an incident; a repair still standing, matched
+to its incident by execution id; a recovery-watcher re-run; a polling one-off closed by itself);
+**how each real fault closed** (engine, cleared on its own, person, policy, or not recorded before
+2 Oct, and a close the ledger did upstream is the engine's only where a fix is recorded against
+it); still open; and time to fix as p50/p95, engine and person apart, closes from 2 Oct only. The
+engine share leaves policy and not-recorded closes out and names them. It also shows how the healer
+routed each failure, from the `self_healer_routed` events `BHA — Self Healer` posts from 19 Oct. A
+read. `npm run test:self-healing`.
+
+**A person can mark an incident a test** (19 Oct 2026, D2.5; migration 83, `test_reason`,
+`test_marked_by`, `test_marked_at` on `engine_incidents`). `close_incidents` takes `test: true`,
+and `mark_incidents_test` (write connection, no agent's scope, `confirm: "MARK <n>"` or
+`"CLEAR <n>"`, a reason) marks or clears incidents already held. Only this dashboard's copy
+changes; nothing goes to the ledger and nothing is closed or reopened. The scorecard counts a
+marked incident apart (`marked_test`), so a probe a person closed is not counted as a person
+fixing a real fault. Logstream does not read the mark yet. Migration 84 marked five past closes from their own close reasons
+(INC-BAYS.AGENT-043, AGENT-050, CODEX-030, INC-NS.AGENT-065, AGENT-066).
+
+**The healer skips what threw on purpose** (19 Oct 2026, D2.5). `BHA — Self Healer`'s Decide Lane
+routes a guard refusal (`Raise Refused Ask/Click`), a TEST or simulator workflow, and a deliberate
+alarm step (`Raise …`, `Assert …`, `Stop On …`) to skip: the error handler still raises each one
+and opens its incident, but a retry repeats the alarm and Claude Code editing it would silence it
+rather than fix the fault upstream. A person's Retry now is never skipped for this. Record Route
+posts every route to `/api/engine/events` (`self_healer_routed`), so skips are counted, not lost.
+
+**The weekly engine health report** (19 Oct 2026, Destiny — D2.7). `server/src/healthReport.ts`
+computes it and nothing else does; `GET /api/engine/health-report` (`x-dashboard-key`, logged as
+`read`, `?now=` for a rerun of an earlier week) returns the data and `slack_text`. n8n's
+`Engine — Weekly Health Report` (`zSpMkCukUzlxubmh`, folder Engine Self-Healing, Lagos time) asks
+for it every Monday at 07:00 and posts it as Bays in #all-bayshorizonnetwork (`C0A90TS44T1`); its
+manual trigger posts the same report only to Destiny, marked TEST. Slack's `ok` is read, a refusal
+fails the run into `Bays — Error Handler`, and a posted report is one `engine_health_report_posted`
+event. The report covers the last full week (Monday to Sunday, UTC) against every week since 21 Sep:
+reliability with the dated drop in failure rate, self-healing, Codex logs per person (submitted,
+approved, approval rate, rejected, waiting), open loops per person (open, closed, close rate, closed
+last week), the three agents (asks, delivered, completed, median reply), build patterns and SOPs
+with their growth, and a week-by-week line. It lists no open incidents. SOPs are read from BHARAG,
+and a read that fails says so instead of printing nought. `npm run test:health-report`.
+
+**The report reviews the twins too** (19 Oct 2026, Destiny — LOOP-1792016378151-RYHY, Jason's ask
+of 14 Oct for a standing record of the twins' hits and misses). Section 6, *Twin review*, covers
+the last week only. North Star is checked against the loop board: every loop id its answers
+named, and whether that loop's status changed (the status record, never a mirror line) after it
+was first named and before the week ended; a loop named three or more times that never moved is
+listed. Research Twin and Genie are judged on their own recorded outcome and delivery; nothing
+grades what an answer said. The same review is filed once a week into BHARAG's codex workspace
+(where Bays searches) as `Twin Critique: week of …` (`source_type` `manual`, `content_type` `doc`, BHARAG's own vocabulary; `metadata.doc_type` `twin_critique`), through the
+write guard: `POST /api/engine/health-report/twin-critique` (`x-dashboard-key`, `dry_run`, `now`),
+which n8n calls after the scheduled post lands. The document id is kept in `meta`
+`twin_critique.<week>`, so a repeat files nothing.
+
 **The Recovery tab is "Waiting on a dependency"** (2026-09-23, Destiny). The
 watcher's switch at the top — on or off, who flipped it last, and a sentence
 where `RECOVERY_ENABLED=false` overrides it rather than a button that silently
@@ -3557,8 +3772,12 @@ under `/api/engine` with the same `x-dashboard-key`, each logged on
 - `dry_run: true` on any of them runs every check and write and rolls back, so
   a payload can be proved without a test row on a live page.
 
-**Reporting is `last_reading_at` in the last 15 minutes**, never vFarm's
-`devices.status`, which nothing in vFarm keeps current. Before the first push,
+**Online and offline follow vFarm's `devices.status`** (20 Oct 2026, Destiny, from Jegan's
+handover of 19 Oct: vFarm keeps it current with a 180 s presence backstop, and cameras never
+stamp `last_reading_at`). Offline is not reporting; online is reporting unless the device reads
+and its last reading is over 15 minutes old; with no status it is `last_reading_at` in the last
+15 minutes, as before. The Monitoring Twin's `freshness` and UN9D's `observed_time` follow the
+same rule (`npm run test:un9d`). Before the first push,
 each tab says what is missing and who wires it, and draws nothing.
 The contracts handed to the builders are `docs/contracts/genie-events.md`
 (Kaiqi) and `docs/contracts/vfarm.md` (Jegan and Kavin).
@@ -3876,12 +4095,14 @@ and a reason, keeps its whole text on the audit line first, and reads the id
 again to confirm it is gone. Both audited on `engine_mcp_writes` (kind
 `bharag_sop`).
 **`read_sop`, the whole SOP for an agent** (2026-10-14, Destiny — ZZVU).
-Same file, read only, both connections, in Bays' scope: one SOP's full text by
+Same file, read only, both connections, in Bays' scope (and North Star's,
+Research Twin's and Genie's from 18 Oct 2026): one SOP's full text by
 BHARAG id or exact title, through `sops.doc`. A search returns pieces of a
 document, and on 14 Oct Bays answered a blocked builder from the wrong pieces
 of Destiny's Operator Playbook. A title that matches nothing returns the
-closest titles with their ids, never a guess; 30,000 characters at most, cut
-and marked. One `read` line per call on `engine_writes`.
+closest titles with their ids, never a guess; 60,000 characters at most, cut
+and marked (30,000 until 18 Oct 2026, when Hardik's 33,223-character playbook
+was cut short in the drills). One `read` line per call on `engine_writes`.
 
 **Build patterns and Commercial are one shape, not two** (decision 2026-09-16,
 Destiny). Both open on the current month, chosen in a picker **to the left of the

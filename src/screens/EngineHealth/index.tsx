@@ -5,6 +5,7 @@ import { getEngineHealth, resyncHealth, type HealthData } from '../../data';
 import { useReplayKey, LoadFailed, Loading, PageHeader, ResyncButton, Tabs, Toast, useResync, useToast } from '../../components/ui';
 import LaneView from './LaneView';
 import McpWrites from './McpWrites';
+import { SelfHealing } from './SelfHealing';
 import Approvals from './Approvals';
 import Recovery from './Recovery';
 import Repairs from './Repairs';
@@ -43,7 +44,7 @@ import { HEALTH_KINDS } from './kinds';
  * repaired, or waiting on a person, and those two tabs are where the last two
  * of those are read.
  */
-const TABS = ['All systems', 'Bays', 'North Star', 'Research Twin', 'Genie', 'Retries', 'Repairs', 'Recovery', 'MCP writes', 'Approvals'] as const;
+const TABS = ['All systems', 'Bays', 'North Star', 'Research Twin', 'Genie', 'Self-healing', 'Retries', 'Repairs', 'Recovery', 'MCP writes', 'Approvals'] as const;
 type Tab = (typeof TABS)[number];
 
 /** Which lane each tab reads. All systems and Retries read every lane. */
@@ -58,7 +59,7 @@ export default function EngineHealth() {
   // `?incident=<id>` opens an incident on All systems, `?tab=retries` lands on
   // Retries — Home's "What broke" links here (2026-09-23).
   const [params] = useSearchParams();
-  const [tab, setTab] = useState<Tab>(() => (params.get('tab') === 'retries' ? 'Retries' : params.get('tab') === 'repairs' ? 'Repairs' : params.get('tab') === 'recovery' ? 'Recovery' : params.get('tab') === 'mcp-writes' ? 'MCP writes' : params.get('tab') === 'approvals' ? 'Approvals' : 'All systems'));
+  const [tab, setTab] = useState<Tab>(() => (params.get('tab') === 'self-healing' ? 'Self-healing' : params.get('tab') === 'retries' ? 'Retries' : params.get('tab') === 'repairs' ? 'Repairs' : params.get('tab') === 'recovery' ? 'Recovery' : params.get('tab') === 'mcp-writes' ? 'MCP writes' : params.get('tab') === 'approvals' ? 'Approvals' : 'All systems'));
   /* Switching any of these re-runs the page's count-ups and bars (27 Sep 2026). */
   useReplayKey(`${tab}`);
   const [tick, setTick] = useState(0);
@@ -107,7 +108,9 @@ export default function EngineHealth() {
         }
       />
 
-      {tab === 'Approvals' ? (
+      {tab === 'Self-healing' ? (
+        <SelfHealing />
+      ) : tab === 'Approvals' ? (
         <Approvals />
       ) : tab === 'MCP writes' ? (
         <McpWrites />
