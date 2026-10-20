@@ -1481,7 +1481,7 @@ Hardik's two tests of 30 Sep / 1 Oct, locked by Jason 2 Oct). `server/src/un9d.t
 1792503936.931709). `docs/contracts/vfarm-monitoring.md`, also SOP 95437816 in BHARAG: the
 exact ENV (`ENGINE_DASHBOARD_URL`/`KEY` in `vfarm/app/env`), the two pushes, the freshness
 thresholds, and the seven lines a rack must meet to count as monitored (real, feed live, UN9D
-Test 1 and 2 pass, every placed device accounted for, and two PROPOSED ones: an alert frame
+Test 1 and 2 pass, every placed device accounted for, and two Jason accepted as doctrine the same day: an alert frame
 landed and the identity fields sent with burn-in passed). P1.0 is one rack; Pilot House is
 judged rack by rack. No kiosk, phone app or Media Twin view goes to a buyer before it. Its
 numbers are the code's; change them in the code and the contract together. The self-heal
