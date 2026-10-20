@@ -104,8 +104,8 @@ let server;
   const ok = (name) => { passed++; console.log(`  ok  ${name}`); };
   try {
     // 1. Genie's tool list, exactly.
-    assert.deepEqual(await listOf(TOKENS.genie), ['read_engine_events', 'read_logstream', 'read_media_doctrine', 'read_publication_decision']);
-    ok("Genie's token lists exactly read_logstream, read_engine_events, read_media_doctrine and read_publication_decision");
+    assert.deepEqual(await listOf(TOKENS.genie), ['read_buyer_flow', 'read_engine_events', 'read_logstream', 'read_media_doctrine', 'read_publication_decision', 'read_sop']);
+    ok("Genie's token lists exactly read_logstream, read_engine_events, read_media_doctrine, read_publication_decision, read_buyer_flow and read_sop");
 
     // 2. Refusals: an unrelated read, the gap summary it was not given, and writes.
     for (const name of ['find_records', 'read_doctrine_gap_summary']) {
@@ -198,8 +198,8 @@ let server;
     }
     ok('North Star, Research Twin and Bays still list read_media_doctrine, read_publication_decision and read_doctrine_gap_summary');
 
-    assert.match(log, /genie \(READONLY_SECRETS_GENIE, read, 4 tools\)/);
-    ok('the boot line names genie as read, 4 tools');
+    assert.match(log, /genie \(READONLY_SECRETS_GENIE, read, 6 tools\)/);
+    ok('the boot line names genie as read, 6 tools');
   } finally {
     const ev = await query(`DELETE FROM engine_events WHERE subject_id LIKE $1`, [`${DOC}:%`]);
     const doc = await query(`DELETE FROM engine_media_doctrine WHERE doctrine_id = $1`, [DOC]);

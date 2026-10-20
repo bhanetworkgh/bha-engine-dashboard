@@ -60,7 +60,8 @@ Where each field comes from:
 |---|---|
 | `farms[]` | `farms` plus the same counts `GET /api/v1/farms/{id}/health` computes. `status` is that route's `healthy` / `warning` / `critical` / `neutral`. |
 | `devices[]` | `devices`, **placed or not**. `place` is the breadcrumb (zone / location / sub-location names). `latest` is the latest `sensor_readings.values` for that device. |
-| `last_reading_at` | `devices.last_reading_at`. **This is what the dashboard uses to decide "reporting"** (a reading in the last 15 minutes), because nothing keeps `devices.status` up to date. Please make sure it is right. |
+| `status` | `devices.status`, as stored (`online`, `offline`, `unknown`). **From 20 Oct 2026 this is what the dashboard uses for online and offline**: vFarm keeps it current (ingest, heartbeat and MQTT presence set `online`; the API's presence backstop sets `offline` after 180 s). |
+| `last_reading_at` | `devices.last_reading_at`, written only by the sensor ingest path, so a camera has none. A device that reads still goes stale after 90 s and offline after 15 minutes without a reading, whatever its status; a device that never reads (a camera) is judged on `status` and `last_seen_at` alone. |
 | `open_alerts[]` | `alerts.alert_state` where `cleared_at IS NULL`, joined for names. `id` is the alert_state id. |
 | `alert_pipeline` | The same object `GET /api/v1/alerts/threshold/health` returns. |
 

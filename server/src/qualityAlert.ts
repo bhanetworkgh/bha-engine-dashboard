@@ -57,16 +57,23 @@ async function latestFinishedRun(): Promise<{ run: string; cases: { id: string; 
   return { run, cases: c.rows.map((x) => ({ id: x.id, ok: x.ok })), at: c.rows.reduce<string | null>((m, x) => (x.at && (!m || x.at > m) ? x.at : m), null) };
 }
 
-async function last24h(table: string): Promise<{ asks: number; delivered: number; weak: number }> {
-  const r = await query<{ asks: string; delivered: string; weak: string }>(
+/**
+ * Delivered counts the twins' own posts too (19 Oct 2026, Destiny): the weekly Watched Clients
+ * reports post their own file, `Self-delivered`, which CLAUDE.md calls a correct outcome, and four
+ * of them alone read as "Research Twin delivered 0 of 4". A scheduled run that posts nothing is not
+ * owed a delivery and is left out of the base, the rule the health report and the Bays page use.
+ */
+async function last24h(table: string): Promise<{ asks: number; owed: number; delivered: number; weak: number }> {
+  const r = await query<{ asks: string; owed: string; delivered: string; weak: string }>(
     `SELECT count(*)::text AS asks,
-            count(*) FILTER (WHERE fields->>'Delivered' = 'Delivered')::text AS delivered,
+            count(*) FILTER (WHERE coalesce(fields->>'Delivered', '') <> 'Nothing posted')::text AS owed,
+            count(*) FILTER (WHERE fields->>'Delivered' IN ('Delivered', 'Self-delivered'))::text AS delivered,
             count(*) FILTER (WHERE fields->>'Outcome' IN ('Thin', 'Failed'))::text AS weak
        FROM ${table}
       WHERE created_time >= to_char((now() - interval '24 hours') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
   );
   const x = r.rows[0];
-  return { asks: Number(x?.asks ?? 0), delivered: Number(x?.delivered ?? 0), weak: Number(x?.weak ?? 0) };
+  return { asks: Number(x?.asks ?? 0), owed: Number(x?.owed ?? 0), delivered: Number(x?.delivered ?? 0), weak: Number(x?.weak ?? 0) };
 }
 
 /** Every signal true right now, each with the key that says whether it was already announced. */
@@ -94,8 +101,8 @@ export async function signals(): Promise<Signal[]> {
   ];
   for (const [name, table, graded] of agents) {
     const m = await last24h(table);
-    if (m.asks >= DELIVERY_MIN_ASKS && m.delivered / m.asks < DELIVERY_FLOOR) {
-      out.push({ key: `delivery:${name}:${day}`, kind: 'delivery', text: `:warning: *${name} delivered ${m.delivered} of ${m.asks} answers in the last 24 hours* (under ${DELIVERY_FLOOR * 100}%). An answer that did not reach the person is the failure that looks like silence.` });
+    if (m.owed >= DELIVERY_MIN_ASKS && m.delivered / m.owed < DELIVERY_FLOOR) {
+      out.push({ key: `delivery:${name}:${day}`, kind: 'delivery', text: `:warning: *${name} delivered ${m.delivered} of ${m.owed} answers in the last 24 hours* (under ${DELIVERY_FLOOR * 100}%). An answer that did not reach the person is the failure that looks like silence.` });
     }
     if (graded && m.asks >= THIN_MIN_ASKS && m.weak / m.asks > THIN_CEILING) {
       out.push({ key: `thin:${name}:${day}`, kind: 'thin', text: `:warning: *${name} answered Thin or Failed on ${m.weak} of ${m.asks} asks in the last 24 hours* (over ${THIN_CEILING * 100}%). Its tools or its evidence may be degraded.` });

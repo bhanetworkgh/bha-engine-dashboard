@@ -47,6 +47,7 @@ import { INTAKE2_WRITE_TOOLS } from './intake2Tools';
 import { UN9D_WRITE_TOOLS } from './un9dTools';
 import { DRAFT_EVAL_WRITE_TOOLS } from './draftEvalTools';
 import { SOP_READ_TOOLS, SOP_WRITE_TOOLS } from './sopTools';
+import { BUYER_FLOW_READ_TOOLS } from './buyerFlowTools';
 import { INVENTORY_WRITE_TOOLS } from './inventoryTools';
 import { VFARM_GATE_READ_TOOLS, VFARM_GATE_WRITE_TOOLS } from './vfarmGateTools';
 import { findRecords, READABLE_KINDS } from './findRecords';
@@ -991,6 +992,7 @@ export const TOOLS: ToolDefinition[] = [
   ...VFARM_GATE_READ_TOOLS,
   // 2026-10-14: one SOP's whole text, after a search found it (ZZVU operator playbooks).
   ...SOP_READ_TOOLS,
+  ...BUYER_FLOW_READ_TOOLS,
   // The one that is not a read.
   resyncTool,
 ];
