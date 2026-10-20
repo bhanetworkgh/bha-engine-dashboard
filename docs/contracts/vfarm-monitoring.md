@@ -10,8 +10,8 @@ part that decides whether a rack is monitored.
 
 Every number below comes from code that is running now (`server/src/monitoringTwin.ts`,
 `server/src/un9d.ts`, `vfarm/backend/workers/engine_snapshot.py`,
-`vfarm/backend/api/app/alerts_pipeline/engine_copy.py`). A line marked **PROPOSED** is new
-and is Jason's to accept or change.
+`vfarm/backend/api/app/alerts_pipeline/engine_copy.py`). Lines 6 and 7 of section 4 were
+proposed on 20 Oct 2026 and accepted by Jason as doctrine the same day.
 
 ## 1. The exact ENV
 
@@ -27,6 +27,7 @@ the API:
 | `REDIS_URL` | optional | The alert pipeline's health is not read. |
 | `ENGINE_SNAPSHOT_FARMS` | optional, comma-separated farm uuids or codes | Every active farm is sent. |
 | `ENGINE_SNAPSHOT_TIMEOUT_S` | optional, default 15 | |
+| `ENGINE_SNAPSHOT_READ_TIMEOUT_MS` | optional, default 60000 (bhavfarm PR #73) | A read slower than this fails that tick in the log instead of holding the database. |
 
 On the dashboard side there is only `DASHBOARD_INBOUND_KEY`. It is already set on Render.
 
@@ -91,10 +92,10 @@ condition as `pass`, `fail` or `not_yet_possible`.
    with its incident open. No placed device is STALE for more than 900 s without an incident.
 6. **Alerts reach the dashboard.** At least one `vfarm.alert.v1` frame from this farm has
    landed on `/api/engine/vfarm-alerts`. A real fire, or the clear that follows one, both
-   count. **PROPOSED:** this is not checked by `check_un9d_acceptance` today.
+   count. **Accepted by Jason, 20 Oct 2026.** Not checked by `check_un9d_acceptance` yet.
 7. **It knows which cabinet and which spec it is.** `cabinet_id` and `config_hash` are sent,
-   and `burn_in_state` is `passed`. **PROPOSED:** these are optional on the wire today and
-   become required before a buyer sees the rack.
+   and `burn_in_state` is `passed`. **Accepted by Jason, 20 Oct 2026:** no rack goes in front
+   of a buyer without them. They are still optional on the wire.
 
 **P1.0** is one rack and must meet all seven. **Pilot House** is judged one rack at a time:
 each of the five racks is its own farm or cabinet, and the house is monitored only when every
