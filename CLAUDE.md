@@ -3958,10 +3958,17 @@ tool `read_publication_decision`. The server computes the decision from T0NO —
 needs_evidence, then hold (surface not allowed, or `NOT_SAFE_TO_CLAIM`), then
 allowed — and a POST naming a different one is a 409. A read re-checks the newest
 row against the doctrine in force: a missing, stale or contradicting row reads
-`needs_evidence`. `decision_id` is the retry key; **a reused one writes nothing
-and answers with the stored row**, with `duplicate: true` and the fields the retry
-differed on (2026-10-10; it had echoed the request). Whether a different-content
-retry should be a 409 instead is an open owner decision. Media Twin requires a
+`needs_evidence`. `decision_id` is the retry key. **The same request again is 200
+with the stored row** (`duplicate: true`); **the same `decision_id` with anything
+different is 409 `decision_id_conflict`** and writes or changes nothing
+(2026-10-16, Jason: a Rule-1 breach to answer it 200). Compared: the stored decision
+detail (which carries the doctrine change and T0NO snapshot, so a doctrine that
+has moved is a conflict and an old `decision_id` is never a new authorization),
+`actor`, `source_ref`, and `decided_at` only when the caller sent one, because the
+server fills a missing one from its own clock. The body is `{ ok: false, reason,
+message, decision_id, stored_event_id, differs_from_request }`; a `dry_run` is
+checked the same way. Every refused POST — 422, 404, a contradiction, a conflict —
+is a `rejected` line on `engine_writes`. Media Twin requires a
 T0NO-clear claim and an applicable decision. **The claim-key expression in
 `readDecisions` brackets each `->>`**: unbracketed, Postgres reads
 `text ->> 'claim_id'` and refuses the query — proved on PostgreSQL 17.5 on
@@ -3970,12 +3977,13 @@ local database whose name ends in `_test` and refuses anything else, because it
 deletes the rows it writes; `npm run test:vrfk` checks the logic.
 `npm run test:vrfk-http` (2026-10-15, same guard) drives the real route and the
 Media Twin data route: 401 without the key, 422 and 404, a dry run that stores
-nothing, 201 then the GET readback with the same event id, an exact repeat and a
-reused `decision_id` with different content both 200 with the stored row, a
+nothing, 201 then the GET readback with the same event id, an exact repeat 200,
+a reused `decision_id` with different content, actor, on a dry run or after the
+doctrine moved each 409 `decision_id_conflict` with the stored row unchanged, a
 contradicting POST 409, stale and contradicted rows held by Media Twin, and an
-`engine_writes` line for every POST. **Nobody but a holder of
-`DASHBOARD_INBOUND_KEY` can write a decision, and `actor` is not checked**: who
-may write one is an open owner decision, as is 409 for a reused `decision_id`.
+`engine_writes` line for every POST, refusals as `rejected`. **Nobody but a holder
+of `DASHBOARD_INBOUND_KEY` can write a decision, and `actor` is not checked**: who
+may write one is an open owner decision.
 
 **SE8L, doctrine gap observability** (2026-10-09). `server/src/doctrineGap.ts`
 classifies each claim and surface into one of eleven conditions, writes
@@ -3993,9 +4001,7 @@ is logged and never retried. Its thresholds are marked `PROPOSED` in code and ar
 the sweep by hand against a local `_test` database and a BHARAG stand-in and pins
 what it does: every sweep writes one observation per claim per surface, each
 with a new id, so nothing is deduplicated (14 claims would be about 12,000 rows a
-day); the incident carries a Logstream signature Logstream does not exclude, so
-repeats would feed Logstream's research and alert thresholds; recovery takes two
-healthy sweeps.
+day); recovery takes two healthy sweeps.
 **The sweep asserts no active consumer** (2026-10-17, Destiny and Jason).
 `allowed_use` says a surface *may* use a claim, not that anything does, and T0NO
 defaults `genie_ns` to true on an unresolved claim, so the sweep read every claim
@@ -4007,17 +4013,10 @@ and `stale_evidence` never open an incident from the sweep. A decision that
 contradicts the doctrine in force still opens one at once, and a resolver
 failure still opens one on the second sweep. Escalation on a gap comes back only
 with an approved consumer-usage contract that records actual use; until then it
-is guidance and observations only. Still open (Destiny): whether observations
-should be written only on a change, and whether Logstream should count
-`DOCTRINE` incidents, both ahead of any incident authority.
-day); a fail-closed claim counts as an active consumer on `genie_ns`, because
-T0NO's `genie_ns` defaults to true, so the **third sweep, about 11.5 minutes after
-start, opens one `DOCTRINE` incident per claim in force**; Logstream leaves those
-incidents out of its thresholds (2026-10-17) and shows them as left out, so they
-open no Logstream research job or alert; recovery takes two healthy sweeps.
-Whether a `genie_ns` default should count as an active consumer and whether
-observations should be written only on a change are open decisions (Destiny),
-ahead of any incident authority.
+is guidance and observations only. Logstream leaves `DOCTRINE` incidents out of
+its thresholds (2026-10-17, below under Logstream). **Still not built**: writing
+an observation only when its state changes, the third of Jason's three conditions
+(20 Oct 2026, merged with #15 to #19); the watcher stays off until it is.
 The three read tools are in the North Star, Research Twin and Bays scopes in
 `AGENT_KEYS` (Research Twin gained `read_media_doctrine` with them); the n8n
 allow-lists must carry them too.
