@@ -220,6 +220,15 @@ export async function storeCycle(body: Obj) {
 
 /* ------------------------------------------------------------- judgement */
 
+/**
+ * The other farms holding a device of the same name, as `[{farm_id, name}]`, or null (21 Oct 2026).
+ * A device is one row per farm and name (migration 86); the tag says a name is shared, so two
+ * devices that read alike are never taken for one. Gone devices are not counted.
+ */
+export const SHARED_WITH = `(SELECT json_agg(json_build_object('farm_id', o.farm_id, 'name', fo.name) ORDER BY o.farm_id)
+     FROM engine_vfarm_devices o LEFT JOIN engine_vfarm_farms fo ON fo.farm_id = o.farm_id
+    WHERE o.device_id = d.device_id AND o.farm_id <> d.farm_id AND o.gone_at IS NULL)`;
+
 export type DeviceState = 'LIVE' | 'STALE' | 'OFFLINE' | 'NOT_WIRED' | 'NO_FEED' | 'GONE';
 
 /** Freshness at the moment vFarm looked. Pure, so it can be tested without a database. */
@@ -382,7 +391,7 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
         await db.query(
           `INSERT INTO engine_monitoring_device_state (device_id, farm_id, state, since, age_s, checks, evaluated_at)
            VALUES ($1,$2,$3, now(), $4, $5, now())
-           ON CONFLICT (device_id) DO UPDATE SET farm_id = EXCLUDED.farm_id,
+           ON CONFLICT (farm_id, device_id) DO UPDATE SET
              since = CASE WHEN engine_monitoring_device_state.state = EXCLUDED.state THEN engine_monitoring_device_state.since ELSE now() END,
              state = EXCLUDED.state, age_s = EXCLUDED.age_s, checks = EXCLUDED.checks, evaluated_at = now()`,
           [d.device_id, f.farm_id, state, age, JSON.stringify(checks)],
@@ -741,10 +750,11 @@ export async function monitoringData(db: Queryable = { query }) {
     db.query<{ farm_id: string; name: string | null; code: string | null; snapshot_at: string; synthetic: boolean; fields: unknown }>(
       `SELECT farm_id, name, code, ${ISO('snapshot_at')} AS snapshot_at, coalesce((fields->>'synthetic')::boolean, false) AS synthetic, fields FROM engine_vfarm_farms ORDER BY synthetic, name NULLS LAST`,
     ),
-    db.query<{ device_id: string; farm_id: string; place: string | null; device_type: string | null; model: string | null; latest: unknown; fields: unknown; last_reading_at: string | null; last_seen_at: string | null; state: string | null; since: string | null; age_s: number | null; checks: Check[] | null; evaluated_at: string | null }>(
+    db.query<{ device_id: string; farm_id: string; place: string | null; device_type: string | null; model: string | null; latest: unknown; fields: unknown; last_reading_at: string | null; last_seen_at: string | null; state: string | null; since: string | null; age_s: number | null; checks: Check[] | null; evaluated_at: string | null; name_shared_with: Array<{ farm_id: string; name: string | null }> | null }>(
       `SELECT d.device_id, d.farm_id, d.place, d.device_type, d.model, d.latest, d.fields, ${ISO('d.last_reading_at')} AS last_reading_at, ${ISO('d.last_seen_at')} AS last_seen_at,
-              s.state, ${ISO('s.since')} AS since, s.age_s, s.checks, ${ISO('s.evaluated_at')} AS evaluated_at
-         FROM engine_vfarm_devices d LEFT JOIN engine_monitoring_device_state s ON s.device_id = d.device_id
+              s.state, ${ISO('s.since')} AS since, s.age_s, s.checks, ${ISO('s.evaluated_at')} AS evaluated_at,
+              ${SHARED_WITH} AS name_shared_with
+         FROM engine_vfarm_devices d LEFT JOIN engine_monitoring_device_state s ON s.farm_id = d.farm_id AND s.device_id = d.device_id
         ORDER BY d.farm_id, d.device_id`,
     ),
     db.query<{ farm_id: string; profile_id: string; profile_version: number; transplanted_at: string; time_scale: number; synthetic: boolean; note: string | null; content: { crop: string; stages: Stage[]; day0?: string; reference_only_stages?: Array<{ stage: string; where: string; note: string | null }> } }>(
@@ -858,6 +868,7 @@ export async function monitoringData(db: Queryable = { query }) {
         place: d.place,
         device_type: d.device_type,
         model: d.model,
+        name_shared_with: d.name_shared_with ?? [],
         latest: d.latest,
         last_reading_at: d.last_reading_at,
         last_seen_at: d.last_seen_at,

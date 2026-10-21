@@ -28,7 +28,7 @@
  */
 import { query, withTransaction } from './pg';
 import * as events from './events';
-import { BURN_IN_STATES, burnInState } from './monitoringTwin';
+import { BURN_IN_STATES, burnInState, SHARED_WITH } from './monitoringTwin';
 import { evidenceBlock } from './evidenceRules';
 
 export class FeedError extends Error {
@@ -325,7 +325,7 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
       await db.query(
         `INSERT INTO engine_vfarm_devices (device_id, farm_id, place, device_type, model, status, health_score, last_seen_at, last_reading_at, latest, fields, snapshot_at, gone_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NULL, now())
-         ON CONFLICT (device_id) DO UPDATE SET farm_id = EXCLUDED.farm_id, place = EXCLUDED.place, device_type = EXCLUDED.device_type, model = EXCLUDED.model,
+         ON CONFLICT (farm_id, device_id) DO UPDATE SET place = EXCLUDED.place, device_type = EXCLUDED.device_type, model = EXCLUDED.model,
            status = EXCLUDED.status, health_score = EXCLUDED.health_score, last_seen_at = EXCLUDED.last_seen_at, last_reading_at = EXCLUDED.last_reading_at,
            latest = EXCLUDED.latest, fields = EXCLUDED.fields, snapshot_at = EXCLUDED.snapshot_at, gone_at = NULL, updated_at = now()`,
         [
@@ -346,8 +346,10 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
     }
     const gone = await db.query(
       `UPDATE engine_vfarm_devices SET gone_at = $3, updated_at = now()
-        WHERE farm_id = ANY($1::text[]) AND gone_at IS NULL AND NOT (device_id = ANY($2::text[]))`,
-      [farmIds, devs.map((x) => x.id), takenAt],
+        WHERE farm_id = ANY($1::text[]) AND gone_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM unnest($2::text[], $4::text[]) AS x(farm_id, device_id)
+                           WHERE x.farm_id = engine_vfarm_devices.farm_id AND x.device_id = engine_vfarm_devices.device_id)`,
+      [farmIds, devs.map((x) => x.farmId), takenAt, devs.map((x) => x.id)],
     );
     for (const { id, a } of opens) {
       await db.query(
@@ -547,13 +549,13 @@ export async function genieData() {
 /** Simulated farms (the Monitoring Twin's test rack) are never shown as vFarm's own; they are counted and named on the Monitoring Twin page instead. */
 const REAL_FARM = `NOT coalesce((fields->>'synthetic')::boolean, false)`;
 const SIM_FARM_IDS = `(SELECT farm_id FROM engine_vfarm_farms WHERE coalesce((fields->>'synthetic')::boolean, false))`;
-
 export async function vfarmData() {
   const [farms, devices, open, closed, fired, snaps] = await Promise.all([
     query(`SELECT farm_id, code, name, status, device_count, online_count, offline_count, unhealthy_count,
                   to_char(snapshot_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS snapshot_at
              FROM engine_vfarm_farms WHERE ${REAL_FARM} ORDER BY name NULLS LAST, farm_id`),
     query(`SELECT d.device_id, d.farm_id, f.name AS farm_name, d.place, d.device_type, d.model, d.status, d.health_score, d.latest,
+                  ${SHARED_WITH} AS name_shared_with,
                   to_char(d.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_seen_at,
                   to_char(d.last_reading_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_reading_at,
                   to_char(d.gone_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS gone_at
