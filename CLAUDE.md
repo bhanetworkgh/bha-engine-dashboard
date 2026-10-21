@@ -3824,7 +3824,11 @@ handover of 19 Oct: vFarm keeps it current with a 180 s presence backstop, and c
 stamp `last_reading_at`). Offline is not reporting; online is reporting unless the device reads
 and its last reading is over 15 minutes old; with no status it is `last_reading_at` in the last
 15 minutes, as before. The Monitoring Twin's `freshness` and UN9D's `observed_time` follow the
-same rule (`npm run test:un9d`). Before the first push,
+same rule (`npm run test:un9d`). **A switch, pump, valve or light is judged on presence** (21 Oct 2026,
+Destiny): online is LIVE aged from `last_seen_at` whatever its last reading, because these report only
+when they change state (`REPORTS_ON_CHANGE`). **A device is one row per farm and name** (migration 86):
+two farms may send the same device names without overwriting each other, and each device carries
+`name_shared_with`, the other farms holding that name. Before the first push,
 each tab says what is missing and who wires it, and draws nothing.
 The contracts handed to the builders are `docs/contracts/genie-events.md`
 (Kaiqi) and `docs/contracts/vfarm.md` (Jegan and Kavin).
