@@ -3587,6 +3587,26 @@ and opens its incident, but a retry repeats the alarm and Claude Code editing it
 rather than fix the fault upstream. A person's Retry now is never skipped for this. Record Route
 posts every route to `/api/engine/events` (`self_healer_routed`), so skips are counted, not lost.
 
+**The log form tells a builder what to fix, and that is provable from here** (21 Oct 2026, Destiny —
+INC-BAYS.CODEX-036: Kavin swapped Session URL and Description, the title reached the Loom scraper).
+In `Bays — Submit Actions`, a submission whose Session URL is not a full otter.ai or loom.com link (or
+whose Description is empty) never reaches the scraper: `Delete Original Form 2` (continues on error,
+so a form already gone still lets the note go) and `Send Validation Error to Builder` post a normal
+message in the builder's log channel tagging them ("needs a fix", the field and what to do), and
+`Assert Builder Told of Fix` fails the run if Slack refused it. **`test_submit_log`**
+(`server/src/submitLogTest.ts`, `server/src/mcp/submitLogTestTools.ts`, write connection, no agent's
+scope, Destiny or Jason, confirm `TEST SUBMIT LOG`) proves it without anyone posting in Slack: it calls
+n8n's `Engine — Submit Log Field Check Runner` (jENz4iq1Br6TRlEz, Engine Evals,
+`POST /webhook/submit-log-field-check`, x-dashboard-key), which builds one deliberately broken
+submission (`swapped`, `not_a_link`, `missing_description`) shaped as Bays — Front Door hands it over
+and runs Submit Actions the Front Door's way, refusing anything that would pass the check; then the
+run is read back from n8n (`n8n.recentExecutions`, `executionDetail`) and judged node by node
+(`judge`): refused by the check, note posted with Slack ok, the note says what to fix, the assert ran,
+and nothing past the check ran. The note is a real post in the channel given. It does not prove the
+Front Door's signature check. `POST /api/engine/submit-log-test` is the same handler, for when the
+connector has not picked the tool up. Audited on `engine_mcp_writes` (kind `codex_test`).
+`npm run test:submit-log`.
+
 **The weekly engine health report** (19 Oct 2026, Destiny — D2.7). `server/src/healthReport.ts`
 computes it and nothing else does; `GET /api/engine/health-report` (`x-dashboard-key`, logged as
 `read`, `?now=` for a rerun of an earlier week) returns the data and `slack_text`. n8n's

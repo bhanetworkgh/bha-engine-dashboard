@@ -155,6 +155,17 @@ export async function execution(id: string): Promise<N8nExecution | null> {
 }
 
 /**
+ * One workflow's newest executions, newest first (2026-10-21, for test_submit_log: the run a
+ * test started is found by its start time, because a sub-workflow's execution id is not
+ * handed back to its caller). At most `limit`, 1 to 50.
+ */
+export async function recentExecutions(workflowId: string, limit = 10): Promise<N8nExecution[]> {
+  const n = Math.max(1, Math.min(50, Math.floor(limit)));
+  const page = await call<{ data?: N8nExecution[] }>(`/executions?workflowId=${encodeURIComponent(workflowId)}&limit=${n}`);
+  return Array.isArray(page.data) ? page.data : [];
+}
+
+/**
  * One execution with its data, for the recovery watcher (2026-09-23).
  *
  * `includeData=true` carries `workflowData` — the workflow exactly as it ran,
