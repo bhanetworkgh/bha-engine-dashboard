@@ -305,7 +305,7 @@ export async function check(farmId: string, opts: { record?: boolean; actor?: st
   const devices = await query<Device>(
     `SELECT d.device_id, d.place, d.device_type, ${ISO('d.last_reading_at')} AS last_reading_at, ${ISO('d.last_seen_at')} AS last_seen_at, ${ISO('d.snapshot_at')} AS snapshot_at,
             d.gone_at IS NOT NULL AS gone, s.state
-       FROM engine_vfarm_devices d LEFT JOIN engine_monitoring_device_state s ON s.device_id = d.device_id WHERE d.farm_id = $1 ORDER BY d.device_id`,
+       FROM engine_vfarm_devices d LEFT JOIN engine_monitoring_device_state s ON s.farm_id = d.farm_id AND s.device_id = d.device_id WHERE d.farm_id = $1 ORDER BY d.device_id`,
     [farmId],
   );
   const incidents = await query<Incident>(

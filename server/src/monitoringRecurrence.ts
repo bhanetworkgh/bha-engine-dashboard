@@ -131,7 +131,7 @@ async function patterns(): Promise<Pattern[]> {
             to_char(max(i.opened_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_at
        FROM engine_monitoring_incidents i
        LEFT JOIN engine_vfarm_farms f ON f.farm_id = i.farm_id
-       LEFT JOIN engine_vfarm_devices d ON d.device_id = i.device_id
+       LEFT JOIN engine_vfarm_devices d ON d.farm_id = i.farm_id AND d.device_id = i.device_id
       WHERE i.opened_at > now() - ($1 || ' days')::interval
         AND NOT EXISTS (SELECT 1 FROM engine_retry_attempts ra WHERE i.ledger_id IS NOT NULL AND ra.natural_id = i.ledger_id AND ra.fields->>'status' = 'Recovered')
         AND NOT EXISTS (SELECT 1 FROM engine_recovery rc WHERE i.ledger_id IS NOT NULL AND rc.incident_id = i.ledger_id AND rc.status IN ('recovered', 'already_done'))

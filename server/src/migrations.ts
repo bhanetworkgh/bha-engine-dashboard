@@ -3385,6 +3385,23 @@ const MIGRATIONS: Migration[] = [
          FROM fix f WHERE f.id = l.id`,
     ],
   },
+  {
+    // 21 Oct 2026, Destiny. A vFarm device was held by its name alone, so two farms sending
+    // the same device names overwrote each other: on 21 Oct a one-off snapshot from "Vfarm_01"
+    // (9598b09c) used the real rack's names, and the rack's devices sat under that farm until
+    // the rack's next snapshot took them back. A device is now one row per farm and name, and so
+    // is the Monitoring Twin's judgement of it. Nothing is deleted.
+    id: 86,
+    name: 'engine_vfarm_devices, engine_monitoring_device_state: one row per farm and device',
+    statements: [
+      `UPDATE engine_vfarm_devices SET farm_id = '' WHERE farm_id IS NULL`,
+      `ALTER TABLE engine_vfarm_devices ALTER COLUMN farm_id SET NOT NULL`,
+      `ALTER TABLE engine_vfarm_devices DROP CONSTRAINT engine_vfarm_devices_pkey`,
+      `ALTER TABLE engine_vfarm_devices ADD PRIMARY KEY (farm_id, device_id)`,
+      `ALTER TABLE engine_monitoring_device_state DROP CONSTRAINT engine_monitoring_device_state_pkey`,
+      `ALTER TABLE engine_monitoring_device_state ADD PRIMARY KEY (farm_id, device_id)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
