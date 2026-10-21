@@ -33,6 +33,10 @@ s = ev.evidenceStatus(farm({ synthetic: true }));
 assert.equal(s.state, 'simulated'); assert.equal(s.reportable, false); assert.match(s.instruction, /Never report/);
 ok('a simulated farm is never reportable as the rack');
 
+s = ev.evidenceStatus(farm({ devices: [{ device_id: 'a', state: 'OFFLINE' }, { device_id: 'b', state: 'NOT_WIRED' }] }));
+assert.equal(s.state, 'degraded'); assert.equal(s.reportable, false); assert.match(s.fallback, /none of its 2 devices is reporting/);
+ok('a feed arriving with every device down is degraded and says no current readings');
+
 s = ev.noRealFarm();
 assert.equal(s.state, 'absent'); assert.equal(s.degraded, true);
 ok('no real farm held is absent, never "no problems"');
