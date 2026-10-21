@@ -244,7 +244,7 @@ export async function recent(): Promise<{ rule: string; not_built: string; patte
   );
   return {
     rule: `The same subsystem, place (farm) and incident class ${RULE.min_incidents} or more times in ${RULE.window_days} days opens one Research Twin job for the pattern, never one per incident (Canon v1, 4 Oct 2026). Incidents the healer or the recovery watcher already closed are not counted. No snapshot carries a subsystem per device yet, so every pattern is ${DEFAULT_SUBSYSTEM}. A simulated farm's pattern is recorded and opens no job.`,
-    not_built: 'A reading out of a range whose source is not yet confirmed (pH, EC, CO2 in tomato profile v1) does not open a job automatically: the profile has no confirmed flag to decide that from.',
+    not_built: 'A reading outside a range whose source says it is not yet confirmed (pH, EC and CO2 in the tomato profile) opens one Research Twin question per farm, stage and metric (rangeDoubt.ts, 21 Oct 2026); it fires only on a real farm with a crop cycle set. Not built: the camera and vision doubts (low confidence, a person disagreeing with the model, a failed eval, validator refusals, counts jumping), which wait on the camera signals (F0UG).',
     patterns: r.rows,
   };
 }

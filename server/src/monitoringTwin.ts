@@ -50,6 +50,7 @@ import { query, withTransaction, type Queryable } from './pg';
 import * as events from './events';
 import * as bharag from './bharag';
 import * as recurrence from './monitoringRecurrence';
+import * as rangeDoubt from './rangeDoubt';
 import * as mirror from './mirror';
 import * as timers from './timers';
 import { evidenceBlock } from './evidenceRules';
@@ -614,7 +615,8 @@ export async function afterSnapshot() {
     const ledger = await syncLedger();
     // After the ledger, so a job's context can carry each incident's ledger id.
     const recurring = await recurrence.sweep();
-    return { ...judged, ledger, recurring };
+    const range_doubt = await rangeDoubt.sweep();
+    return { ...judged, ledger, recurring, range_doubt };
   } catch (e) {
     console.error(`[monitoring-twin] evaluation after a snapshot failed: ${(e as Error).message}`);
     return null;
@@ -630,6 +632,7 @@ export function startWatching() {
     evaluate('tick')
       .then(() => syncLedger())
       .then(() => recurrence.sweep())
+      .then(() => rangeDoubt.sweep())
       .catch((e) => console.error(`[monitoring-twin] minute check failed: ${(e as Error).message}`))
       .finally(() => {
         running = false;
@@ -746,6 +749,12 @@ export function retryEnvelope(
 
 export async function monitoringData(db: Queryable = { query }) {
   const now = Date.now();
+  // Reading history (migration 87): how much each farm has, and from when. Read on its own so a
+  // missing table (a database not yet migrated) costs the history line, never the twin's answer.
+  const history = await db
+    .query<{ farm_id: string; readings: string; since: string | null; latest: string | null }>(`SELECT farm_id, count(*)::text AS readings, ${ISO('min(read_at)')} AS since, ${ISO('max(read_at)')} AS latest FROM engine_vfarm_readings GROUP BY farm_id`)
+    .then((r) => new Map(r.rows.map((x) => [x.farm_id, x])))
+    .catch(() => null);
   const [farms, devices, cycles, profiles, incidents, watch] = await Promise.all([
     db.query<{ farm_id: string; name: string | null; code: string | null; snapshot_at: string; synthetic: boolean; fields: unknown }>(
       `SELECT farm_id, name, code, ${ISO('snapshot_at')} AS snapshot_at, coalesce((fields->>'synthetic')::boolean, false) AS synthetic, fields FROM engine_vfarm_farms ORDER BY synthetic, name NULLS LAST`,
@@ -862,6 +871,9 @@ export async function monitoringData(db: Queryable = { query }) {
         note: `Share of the observed time (the last ${UPTIME_WINDOW_H} h, or since the twin started watching this farm if later, less any time the feed was silent) with no device OFFLINE.`,
       },
       state_counts: counts,
+      reading_history: history
+        ? { readings_held: Number(history.get(f.farm_id)?.readings ?? 0), since: history.get(f.farm_id)?.since ?? null, latest: history.get(f.farm_id)?.latest ?? null, note: 'Every sensor reading a snapshot carries, stored once per device, metric and reading time, from 21 Oct 2026 (migration 87). Nothing before that was kept: the devices table held the latest value only.' }
+        : { readings_held: null, since: null, latest: null, note: 'The reading history could not be read.' },
       devices: devs.map((d) => ({
         device_id: d.device_id,
         ...(({ sources, ...id }) => ({ ...id, identity_sources: sources }))(identityOf(d.fields, f.fields)),

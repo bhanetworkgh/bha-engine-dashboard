@@ -28,7 +28,7 @@
  */
 import { query, withTransaction } from './pg';
 import * as events from './events';
-import { BURN_IN_STATES, burnInState, SHARED_WITH } from './monitoringTwin';
+import { BURN_IN_STATES, burnInState, SHARED_WITH, readingValue } from './monitoringTwin';
 import { evidenceBlock } from './evidenceRules';
 
 export class FeedError extends Error {
@@ -228,6 +228,22 @@ export async function storeVfarmAlert(body: Obj): Promise<AlertStoreResult & { d
   });
 }
 
+/**
+ * The metrics of one device's latest reading as history rows (migration 87). A metric whose value
+ * is not a number is left out, and so is a reading with no time: a row must say when it was read.
+ * Pure.
+ */
+export function readingRows(latest: unknown, readAt: string | null): Array<{ metric: string; value: number; unit: string | null; status: string | null; read_at: string }> {
+  if (!readAt || !isObj(latest)) return [];
+  const out: Array<{ metric: string; value: number; unit: string | null; status: string | null; read_at: string }> = [];
+  for (const [metric, raw] of Object.entries(latest)) {
+    const value = readingValue(raw);
+    if (value === null) continue;
+    out.push({ metric, value, unit: isObj(raw) ? str(raw.unit) : null, status: isObj(raw) ? str(raw.status) : null, read_at: readAt });
+  }
+  return out;
+}
+
 /* ---------------------------------------------------------- vFarm snapshot */
 
 export interface SnapshotStoreResult {
@@ -343,6 +359,17 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
           takenAt,
         ],
       );
+      // History (migration 87): each metric of the reading, once per reading time.
+      const rows = readingRows(d.latest, iso(d.last_reading_at));
+      if (rows.length) {
+        await db.query(
+          `INSERT INTO engine_vfarm_readings (farm_id, device_id, metric, value, unit, status, read_at, synthetic)
+           SELECT $1, $2, x.metric, x.value, x.unit, x.status, $3, $4
+             FROM unnest($5::text[], $6::float8[], $7::text[], $8::text[]) AS x(metric, value, unit, status)
+           ON CONFLICT (farm_id, device_id, metric, read_at) DO NOTHING`,
+          [farmId, id, rows[0].read_at, synthetic, rows.map((r) => r.metric), rows.map((r) => r.value), rows.map((r) => r.unit), rows.map((r) => r.status)],
+        );
+      }
     }
     const gone = await db.query(
       `UPDATE engine_vfarm_devices SET gone_at = $3, updated_at = now()
