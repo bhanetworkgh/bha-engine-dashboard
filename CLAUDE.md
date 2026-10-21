@@ -1294,7 +1294,11 @@ the cabinet; a stage is never both). Migration 69 adds
 fruit set 10 to 44, harvest 45 to 85, from entry at first flower, nursery and
 vegetative reference only. `read_monitoring_twin` is in North Star's and
 Research Twin's scope, and `read_media_doctrine` in Research Twin's, from the
-same day. Uptime was already counted only from the twin's own offline and
+same day. **The vFarm read follows BP-INFRA-002** (21 Oct 2026, Destiny — LOOP-8AQG,
+`server/src/vfarmEvidence.ts`): every farm carries `evidence_status` (live, degraded, absent or
+simulated, `reportable_devices`, an instruction and a fallback sentence, the open incidents that
+record why), and a read that fails answers `ok: false, degraded: true, raise: true` with the
+error and one `vfarm_read_degraded` event, never an empty success. `npm run test:vfarm-evidence`. Uptime was already counted only from the twin's own offline and
 feed-silent incidents at 90 s and 900 s; nothing was changed there.
 
 **CAPITAL is a lane** (2026-10-11, Destiny — LOOP-1791470987539-CAFQ; Jason, 8
@@ -1532,10 +1536,15 @@ ledger id in the context. **A simulated farm's pattern is recorded and opens
 no job** (`not_opened_simulated`). A job that cannot be written is `failed`
 with the reason and retried every pass. Each detection is one
 `monitoring_recurrence_detected` row in `engine_events`. The Monitoring Twin
-read (`recurrence`) shows the rule and the last 30 days of patterns. **Not
-built**: a job when a reading is out of a range whose source is unconfirmed
-(pH, EC, CO2 in tomato profile v1) — the profile has no confirmed flag to
-decide it from. `npm run test:monitoring-recurrence` pins it.
+read (`recurrence`) shows the rule and the last 30 days of patterns. **A reading outside a range nobody has confirmed asks Research Twin a question** (21 Oct 2026,
+Destiny — LOOP-1792470655993-NJP4, the sensor side). `server/src/rangeDoubt.ts`, after every
+judging pass: an open `out_of_range` incident on a real farm whose stage target is unconfirmed
+(an explicit `confirmed` on the target wins; otherwise no source, or a source or note saying
+"to be confirmed", "not yet tied", `OWNER_THRESHOLD_REQUIRED` and the like) opens one question
+through `researchSignals.open()`, key `range:<farm>:<stage>:<metric>`, the incident as ref, so a
+repeat adds a line and never a second job. The incident stays open as before. Fires only on a
+real farm with a crop cycle set (none yet on 21 Oct). Jegan's five vision doubts wait on the
+camera signals (F0UG). `npm run test:monitoring-recurrence`, `npm run test:range-doubt`.
 
 **Engine health holds every monitoring incident the ledger took** (2026-10-04,
 Destiny — the downstream reader for UN9D path 2). The three-minute ledger poll
@@ -3830,7 +3839,10 @@ and its last reading is over 15 minutes old; with no status it is `last_reading_
 15 minutes, as before. The Monitoring Twin's `freshness` and UN9D's `observed_time` follow the
 same rule (`npm run test:un9d`). **A switch, pump, valve or light is judged on presence** (21 Oct 2026,
 Destiny): online is LIVE aged from `last_seen_at` whatever its last reading, because these report only
-when they change state (`REPORTS_ON_CHANGE`). **A device is one row per farm and name** (migration 86):
+when they change state (`REPORTS_ON_CHANGE`). **Every sensor reading is kept as history** (21 Oct 2026, Destiny — LOOP-3ASC sensor side,
+DNQO's traces; migration 87, `engine_vfarm_readings`): one row per farm, device, metric and
+reading time, written with the snapshot (`readingRows`), a repeat stored once. The twin's read
+carries `reading_history` per farm. `npm run test:vfarm-readings`. **A device is one row per farm and name** (migration 86):
 two farms may send the same device names without overwriting each other, and each device carries
 `name_shared_with`, the other farms holding that name. Before the first push,
 each tab says what is missing and who wires it, and draws nothing.

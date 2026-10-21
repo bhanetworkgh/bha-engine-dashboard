@@ -3402,6 +3402,30 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE engine_monitoring_device_state ADD PRIMARY KEY (farm_id, device_id)`,
     ],
   },
+  {
+    // 21 Oct 2026, Destiny (LOOP-3ASC, the sensor side; DNQO's sensor traces). The devices table
+    // holds each sensor's latest reading only, so nothing could show a reading over time and
+    // Jegan's sensor captures had nowhere to land. One row per farm, device, metric and the time
+    // vFarm says the reading was taken: a reading repeated across snapshots is stored once.
+    id: 87,
+    name: 'engine_vfarm_readings: every sensor reading a snapshot carries, kept as history',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_vfarm_readings (
+         id          bigserial PRIMARY KEY,
+         farm_id     text NOT NULL,
+         device_id   text NOT NULL,
+         metric      text NOT NULL,
+         value       double precision NOT NULL,
+         unit        text,
+         status      text,
+         read_at     timestamptz NOT NULL,
+         received_at timestamptz NOT NULL DEFAULT now(),
+         synthetic   boolean NOT NULL DEFAULT false,
+         UNIQUE (farm_id, device_id, metric, read_at)
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_vfarm_readings_series ON engine_vfarm_readings (farm_id, device_id, metric, read_at DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
