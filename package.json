@@ -35,6 +35,7 @@
     "test:un9d": "node --no-warnings=ExperimentalWarning server/test/un9d.test.cjs",
     "test:vfarm-evidence": "node --no-warnings=ExperimentalWarning server/test/vfarm-evidence.test.cjs",
     "test:range-doubt": "node --no-warnings=ExperimentalWarning server/test/range-doubt.test.cjs",
+    "test:monitoring-owner": "node --no-warnings=ExperimentalWarning server/test/monitoring-judge-owner.test.cjs",
     "test:vfarm-readings": "node --no-warnings=ExperimentalWarning server/test/vfarm-readings.test.cjs",
     "test:pattern-reingest": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/pattern-reingest.test.cjs",
     "test:move-loop": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/move-loop.test.cjs",
