@@ -24,6 +24,8 @@ import * as systemFeeds from '../systemFeeds';
 import * as publicationDecision from '../publicationDecision';
 import * as doctrineGap from '../doctrineGap';
 import * as monitoringTwin from '../monitoringTwin';
+import * as vfarmEvidence from '../vfarmEvidence';
+import * as engineEvents from '../engineEvents';
 import * as approvals from '../approvals';
 import { currentAgent } from './caller';
 import { WRITE_TOOLS } from './writeTools';
@@ -928,7 +930,7 @@ const readDoctrineGapSummary: ToolDefinition = {
 const readMonitoringTwin: ToolDefinition = {
   name: 'read_monitoring_twin',
   description:
-    'The Monitoring Twin’s judgement of every vFarm farm, the same answer the Monitoring Twin page and GET /api/engine/monitoring-twin give: for each farm, whether its feed is arriving, the crop cycle and stage it is in with that stage’s target ranges (a versioned crop profile), uptime over the last 24 h (share of observed time with no device OFFLINE), every device’s state (LIVE ≤90 s, STALE ≤900 s, OFFLINE, NOT_WIRED, NO_FEED, GONE) with its readings checked against the stage targets, and the open and recent INC-VFARM incidents. Each farm also carries the twin envelope: farm_id, cabinet_id, config_hash, burn_in_state (not_started, burn_in, passed), worker_health (healthy or unhealthy, vFarm’s alert worker) and retry_envelope (how many incidents are self_healed, retrying, needs_human); each device carries cabinet_id, config_hash and burn_in_state, and each incident its own retry_envelope. cabinet_id, config_hash and burn_in_state are null with source "not sent by vFarm yet" until vFarm sends them: say not sent, never guess. Simulated farms are marked synthetic: never describe them as the real rack. A device that is not LIVE has no current reading to quote. Each cycle says where day 0 is (day0, day0_means) and which stages are reference_only_stages: stages that happen at the supplier and that the cabinet never runs, so never infer or report them as cabinet stages. evidence carries the rules in force: Coimbatore and crop-profile figures are an agronomy reference and never cabinet proof; a claim about a cabinet needs cabinet_telemetry from a real farm. Research Twin: read this before writing a finding about a vFarm cabinet’s crop stage, timing, uptime or yield.',
+    'The Monitoring Twin’s judgement of every vFarm farm, the same answer the Monitoring Twin page and GET /api/engine/monitoring-twin give: for each farm, whether its feed is arriving, the crop cycle and stage it is in with that stage’s target ranges (a versioned crop profile), uptime over the last 24 h (share of observed time with no device OFFLINE), every device’s state (LIVE ≤90 s, STALE ≤900 s, OFFLINE, NOT_WIRED, NO_FEED, GONE) with its readings checked against the stage targets, and the open and recent INC-VFARM incidents. Each farm also carries the twin envelope: farm_id, cabinet_id, config_hash, burn_in_state (not_started, burn_in, passed), worker_health (healthy or unhealthy, vFarm’s alert worker) and retry_envelope (how many incidents are self_healed, retrying, needs_human); each device carries cabinet_id, config_hash and burn_in_state, and each incident its own retry_envelope. cabinet_id, config_hash and burn_in_state are null with source "not sent by vFarm yet" until vFarm sends them: say not sent, never guess. Simulated farms are marked synthetic: never describe them as the real rack. A device that is not LIVE has no current reading to quote. Each cycle says where day 0 is (day0, day0_means) and which stages are reference_only_stages: stages that happen at the supplier and that the cabinet never runs, so never infer or report them as cabinet stages. evidence carries the rules in force: Coimbatore and crop-profile figures are an agronomy reference and never cabinet proof; a claim about a cabinet needs cabinet_telemetry from a real farm. Research Twin: read this before writing a finding about a vFarm cabinet’s crop stage, timing, uptime or yield. Every farm carries evidence_status (BP-INFRA-002): live, degraded, absent or simulated, which devices may be reported (reportable_devices), an instruction and a fallback sentence. Follow the instruction: a silent feed, a device that is not LIVE or a simulated farm is never reported as a reading, a healthy rack or an empty one. A read that fails answers ok:false, degraded:true with the error: that means the dashboard could not look, never that there is nothing there.',
   inputSchema: {
     type: 'object',
     properties: { farm_id: { type: 'string', description: 'Only this farm.' } },
@@ -937,9 +939,26 @@ const readMonitoringTwin: ToolDefinition = {
   annotations: { ...READS_DB, title: 'What the Monitoring Twin sees on every vFarm farm' },
   handler: async (args, deps) => {
     const t0 = Date.now();
-    const out = await monitoringTwin.monitoringData();
     const id = typeof args.farm_id === 'string' && args.farm_id.trim() ? args.farm_id.trim() : null;
-    const farms = id ? out.farms.filter((f) => f.farm_id === id) : out.farms;
+    let out: Awaited<ReturnType<typeof monitoringTwin.monitoringData>>;
+    try {
+      out = await monitoringTwin.monitoringData();
+    } catch (e) {
+      // BP-INFRA-002: a failed read is "could not look", raised, never an empty success.
+      const error = e instanceof Error ? e.message : String(e);
+      await engineEvents.record({ event_type: 'vfarm_read_degraded', subject_id: id ?? 'all_farms', lane: 'VFARM_HARDWARE', actor: `mcp:${deps.access}`, detail: { tool: 'read_monitoring_twin', error } }).catch(() => undefined);
+      await mirror.logWrite({ endpoint: 'mcp:read_monitoring_twin', kind: 'monitoring_twin', method: 'MCP', key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET', outcome: 'error', detail: error, ms: Date.now() - t0 }).catch(() => undefined);
+      return {
+        ok: false,
+        degraded: true,
+        raise: true,
+        error,
+        instruction: 'The dashboard could not read the Monitoring Twin. This says nothing about the rack: do not report any reading, health, uptime or incident count, and do not say there are none. Say the vFarm read failed and give the error.',
+        fallback: 'I could not read the vFarm monitoring data just now, so I cannot say how the rack is doing.',
+      };
+    }
+    const farms = (id ? out.farms.filter((f) => f.farm_id === id) : out.farms).map((f) => ({ ...f, evidence_status: vfarmEvidence.evidenceStatus(f) }));
+    const real = farms.filter((f) => !f.synthetic);
     await mirror.logWrite({
       endpoint: 'mcp:read_monitoring_twin',
       kind: 'monitoring_twin',
@@ -949,7 +968,13 @@ const readMonitoringTwin: ToolDefinition = {
       detail: `${farms.length} farm(s)${id ? ` (farm_id ${id})` : ''}`,
       ms: Date.now() - t0,
     });
-    return { ...out, farms, warnings: id && farms.length === 0 ? [`No farm "${id}" is held. Farms: ${out.farms.map((f) => f.farm_id).join(', ') || 'none yet'}.`] : [] };
+    return {
+      ok: true,
+      ...out,
+      farms,
+      evidence_status: real.length ? { degraded: real.some((f) => f.evidence_status.degraded), by_farm: real.map((f) => ({ farm_id: f.farm_id, state: f.evidence_status.state })) } : vfarmEvidence.noRealFarm(),
+      warnings: id && farms.length === 0 ? [`No farm "${id}" is held. Farms: ${out.farms.map((f) => f.farm_id).join(', ') || 'none yet'}.`] : [],
+    };
   },
 };
 
