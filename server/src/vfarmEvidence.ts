@@ -75,7 +75,9 @@ export function evidenceStatus(f: FarmLike): EvidenceStatus {
       state: 'degraded', degraded: true, reportable: live.length > 0, reportable_devices: live, not_reportable_devices: notLive,
       reasons: [`${notLive.length} of ${f.devices.length} device(s) are not LIVE.`], incidents,
       instruction: 'Report readings only from the devices named in reportable_devices. For every other device say it is not reporting, with its state; never quote its last value as current and never read its silence as a healthy or empty reading.',
-      fallback: `${label} is reporting, but ${notLive.length} of its ${f.devices.length} devices are not, so I can only speak for ${live.length}.`,
+      fallback: live.length
+        ? `${label} is reporting, but ${notLive.length} of its ${f.devices.length} devices are not, so I can only speak for ${live.length}.`
+        : `${label}'s feed is arriving, but none of its ${f.devices.length} devices is reporting, so I have no current readings for it.`,
     };
   }
   return {
