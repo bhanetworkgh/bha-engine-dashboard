@@ -117,11 +117,20 @@ const ok = (name) => (passed++, console.log(`  ok  ${name}`));
   // 3. Left out: the simulator, and a repair with no engine lane.
   res = await capture.fromRepair(await repair(3, { workflow: `Engine — Monitoring Twin Simulator PCTEST ${T}` }));
   assert.equal(res.result, 'excluded');
+  // Deliberate alarms (LOOP-6E0K): a guard doing its job is never proposed as a pattern.
+  res = await capture.fromRepair(await repair(20, { node: 'Raise If Agent Failed' }));
+  assert.equal(res.result, 'excluded');
+  assert.equal(res.detail, 'deliberate_alarm');
+  res = await capture.fromRepair(await repair(21, { node: 'Stop On Credit Error' }));
+  assert.equal(res.detail, 'deliberate_alarm');
+  assert.equal(capture.deliberateAlarm('Bays — Scheduled Run Watch', 'Compare Against Schedule'), 'deliberate_alarm');
+  assert.equal(capture.deliberateAlarm('Bays — Callback Receiver', 'Assert Answer Slack OK'), null, 'an Assert step still counts: it found msg_blocks_too_long');
+  assert.equal(capture.deliberateAlarm('Bays — Agent Delivery', 'Check Ledger Write'), null);
   res = await capture.fromRepair(await repair(4, { lane: null, node: 'Other Step' }));
   assert.equal(res.result, 'not_a_critical_lane');
   const n = await query(`SELECT count(*)::int AS n FROM engine_pattern_candidates WHERE fields->>'Fault Signature' LIKE $1`, [`%PCTEST%`]);
   assert.equal(n.rows[0].n, 1);
-  ok('the simulator and a repair with no engine lane write no candidate');
+  ok('the simulator, deliberate alarms (Raise If…, Stop On…, Scheduled Run Watch) and a repair with no engine lane write no candidate');
 
   // 4. A matched trace writes pattern_refs.
   const i5 = await incident(5);
