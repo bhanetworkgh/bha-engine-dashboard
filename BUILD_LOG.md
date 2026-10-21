@@ -13174,3 +13174,19 @@ Files:      none (n8n credentials Scraper Login — Otter / — Loom updated by 
 Problem:    The leaked scraper password was still the one in use, so every run saved before 21 Oct held a working password in plain text.
 Fix:        Destiny changed the Otter and Loom passwords, so the copies in old run history no longer work, and sent Kavin the note asking him to resubmit his 20 Oct log (Otter link in Session URL).
 Decision:   Kavin's resubmission is the production proof of Kick Off Scrape · Otter and of the bridge's fix for INC-BAYS.CODEX-036; checked at session close.
+
+## 2026-10-21 07:30 — D2: a TEST repair is never an automatic fix on the scorecard
+Intent:     The self-healing scorecard is the figure BHA quotes; make it count only real fixes.
+Files:      server/src/selfHealing.ts (fixApartReason; fixes split into counted and counted apart; automatic_fixes.counted_apart per week, totals.automatic_fixes_counted_apart; definition line), server/test/self-healing.test.cjs, CLAUDE.md
+Problem:    read_self_healing counted REP-TEST-SETTLE-1792444500 (workflow "TEST — settle thread check", the 20 Oct settle-thread check) as a repair standing, so the week of 19 Oct read 4 automatic fixes where 3 are real. Incidents already left tests out (excludedReason, marked_test); the fix sources did not.
+Fix:        fixApartReason: a REP-TEST… id, a fix whose own workflow excludedReason leaves out (test, simulator, guard refusal), or a fix on an incident counted apart is counted apart and never in automatic_fixes or recent_fixes. The test adds a TEST repair row and a repair on a TEST workflow and asserts both are counted apart (2), and that no test fix appears in recent_fixes.
+Proof:      test:self-healing and test:health-report pass against a local PostgreSQL 16.
+Decision:   The weekly health report reads the same scorecard, so it is corrected with it. Nothing about old rows changes.
+
+## 2026-10-21 07:30 — D4 / LOOP-6E0K: deliberate alarms are not proposed as patterns
+Intent:     Stop incident-to-pattern capture proposing a candidate every time a guard does its job.
+Files:      server/src/patternCapture.ts (deliberateAlarm, used beside logstream.excludedReason), server/test/pattern-capture.test.cjs, CLAUDE.md
+Problem:    4 of the first 15 incident candidates were deliberate alarms, all declined in the 17 Oct review: Agent Evals — Runner :: Stop On Credit Error, Bays — Scheduled Run Watch :: Compare Against Schedule, Bays — Approval Decision :: Raise If It Did Not Land, Bays — Agent Delivery :: Raise If Agent Failed (and North Star's Raise If Anything Failed).
+Fix:        deliberateAlarm(workflow, node): a node starting "Raise If" or "Stop On", or any node in Bays — Scheduled Run Watch, is result 'excluded', detail 'deliberate_alarm'; the incident is still stamped with its canonical id. Assert steps are left in on purpose: Assert Answer Slack OK and Pat Assert Slack OK led to the registered msg_blocks_too_long pattern.
+Proof:      test:pattern-capture 7 checks (Raise If and Stop On repairs excluded with that reason; Scheduled Run Watch named; an Assert step and Check Ledger Write still not alarms), logstream 26, research-signals 17 pass locally.
+Decision:   Capture only. Logstream, research signals (T4) and the self-healing scorecard keep counting these faults, because the failure the alarm reports is real. The loop asked "leave out by name, or keep capturing for an architect to decline": leave out by name, since every one was declined.

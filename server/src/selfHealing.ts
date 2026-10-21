@@ -100,6 +100,19 @@ export interface AutoFix {
   workflow: string | null;
 }
 
+/**
+ * Why a fix is left out of the automatic-fix count: its own workflow is a test, the simulator or a
+ * guard refusal (the incident rule, excludedReason), its repair id is a TEST row, or the incident it
+ * fixed is counted apart. Null means it is a real automatic fix.
+ */
+export function fixApartReason(f: AutoFix, apartIncident: Map<string, string | null>): string | null {
+  if (/^REP-TEST\b/i.test(f.key)) return 'test';
+  const own = excludedReason({ workflow: f.workflow, node: null });
+  if (own) return own;
+  if (f.incident_id && apartIncident.get(f.incident_id)) return apartIncident.get(f.incident_id)!;
+  return null;
+}
+
 /** One fix per incident (or per run where no incident was opened), earliest kind kept. */
 export function dedupeFixes(fixes: AutoFix[], incidentByExec: Map<string, string>): AutoFix[] {
   const out = new Map<string, AutoFix>();
@@ -169,11 +182,18 @@ export async function scorecard(opts: { weeks?: number } = {}) {
     ...oneOffs.rows.map((r) => ({ key: r.subject_id, kind: 'one_off_closed' as const, at: new Date(r.at).toISOString(), incident_id: r.subject_id, workflow: r.workflow })),
     ...inc.rows.filter((i) => String(i.resolution_status).toLowerCase() === 'self_healed').map((i) => ({ key: i.incident_id, kind: 'incident_self_healed' as const, at: i.resolved_at ?? i.occurred_at, incident_id: i.incident_id, workflow: i.workflow })),
   ];
-  const fixes = dedupeFixes(raw, incidentByExec);
+  const allFixes = dedupeFixes(raw, incidentByExec);
+  // A fix on a test, the simulator, a guard refusal or an incident a person marked a test is
+  // not an automatic fix of a real fault: counted apart, never in the figure we quote
+  // (21 Oct 2026, D2: REP-TEST-SETTLE-1792444500 had been counted as a real fix).
+  const apartIncident = new Map(inc.rows.map((i) => [i.incident_id, i.test_reason ? 'marked_test' : excludedReason({ workflow: i.workflow, node: i.node, tags: i.tags })]));
+  const fixApart = (f: AutoFix): string | null => fixApartReason(f, apartIncident);
+  const fixes = allFixes.filter((f) => !fixApart(f));
+  const fixesApart = allFixes.filter((f) => fixApart(f));
   const engineIds = new Set(fixes.map((f) => f.incident_id).filter((x): x is string => Boolean(x)));
 
   const classified = inc.rows.map((i) => {
-    const apart = i.test_reason ? 'marked_test' : excludedReason({ workflow: i.workflow, node: i.node, tags: i.tags });
+    const apart = apartIncident.get(i.incident_id) ?? null;
     return { ...i, apart, alarm: !apart && ALARM_NODE.test(i.node ?? ''), closer: closerOf(i, engineIds), week: weekStart(i.occurred_at) };
   });
 
@@ -199,7 +219,7 @@ export async function scorecard(opts: { weeks?: number } = {}) {
       real_faults: real.length,
       real_faults_raised_by_alarm: real.filter((i) => i.alarm).length,
       counted_apart: apart,
-      automatic_fixes: { total: wf.length, without_incident: wf.filter((f) => !f.incident_id).length, by_kind: byKind },
+      automatic_fixes: { total: wf.length, without_incident: wf.filter((f) => !f.incident_id).length, by_kind: byKind, counted_apart: fixesApart.filter((f) => weekStart(f.at) === w).length },
       closed_real_faults: closed,
       still_open: real.filter((i) => i.open_now).length,
     };
@@ -231,6 +251,7 @@ export async function scorecard(opts: { weeks?: number } = {}) {
       counted_apart: window.length - realW.length,
       automatic_fixes: fixW.length,
       automatic_fixes_without_incident: fixW.filter((f) => !f.incident_id).length,
+      automatic_fixes_counted_apart: fixesApart.filter((f) => weekStart(f.at) >= from).length,
       closed_real_faults: closedW,
       fixed_by_engine_share: pct(closedW.engine + closedW.cleared_itself, decided),
       still_open: realW.filter((i) => i.open_now).length,
@@ -243,7 +264,7 @@ export async function scorecard(opts: { weeks?: number } = {}) {
     definitions: [
       'Runs are production runs: webhook, trigger and sub-workflow runs. Manual test runs, the healer’s own retries and the error handlers’ runs are left out. Failed means error or crashed.',
       'A real fault is an incident that is not a test, not the simulator, not a guard refusing a request on purpose, and not marked a test by a person with a reason (mark_incidents_test, or close_incidents with test true); those are counted apart. A fault raised by an alarm step (Raise, Assert, Stop On) is a real fault: the alarm is reporting something that failed upstream.',
-      'An automatic fix is a healer retry that recovered (including runs that never opened an incident), a Claude Code repair still standing, a recovery-watcher re-run, or a polling one-off the watcher closed. Each incident counts once, in the week of its first fix.',
+      'An automatic fix is a healer retry that recovered (including runs that never opened an incident), a Claude Code repair still standing, a recovery-watcher re-run, or a polling one-off the watcher closed. Each incident counts once, in the week of its first fix. A fix on a test, the simulator, a guard refusal or an incident marked a test is counted apart (automatic_fixes_counted_apart), never as a real fix.',
       'Fixed by the engine share = (closed by the engine + cleared on its own) ÷ (those + closed by a person). Closed by policy (a chat not re-run hours late) and closes not recorded (before 2 Oct 2026) are left out of it, and named.',
       'Time to fix is p50 and p95 from the fault to its close, only for closes on or after 2 Oct 2026; never a mean.',
     ],
