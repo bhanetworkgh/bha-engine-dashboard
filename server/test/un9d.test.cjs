@@ -71,6 +71,19 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   assert.equal(fr('2026-10-15T11:59:00Z', null, null), 'LIVE', 'no status: the reading rule alone, unchanged');
   ok('freshness: offline from status, an online camera live by presence, a reading sensor still aged on its readings');
 
+  // A relay reports only when it switches (21 Oct 2026): online with an old reading is live on presence.
+  const frT = (r, st, seen, type) => twin.freshness(r, snap, st, seen, type);
+  assert.equal(frT('2026-09-08T10:16:27Z', 'online', '2026-10-15T11:59:40Z', 'relay_controller').state, 'LIVE', 'an online relay that last switched in September is live');
+  assert.equal(frT('2026-09-08T10:16:27Z', 'online', '2026-10-15T11:59:40Z', 'relay_controller').age_s, 20, 'and is aged from its last report');
+  for (const type of ['pump', 'valve', 'light']) assert.equal(frT('2026-09-01T00:00:00Z', 'online', snap, type).state, 'LIVE', `${type} is judged on presence`);
+  assert.equal(frT('2026-09-08T10:16:27Z', 'offline', '2026-10-13T19:51:18Z', 'relay_controller').state, 'OFFLINE', 'vFarm saying offline still wins for a relay');
+  assert.equal(frT('2026-09-08T10:16:27Z', null, null, 'relay_controller').state, 'OFFLINE', 'no status: the reading rule alone, unchanged');
+  assert.equal(frT('2026-10-15T11:40:00Z', 'online', snap, 'ph_sensor').state, 'OFFLINE', 'a sensor is still aged on its readings');
+  // UN9D's stale-shown-as-live check uses the same rule, so a live relay with an old switch is not a failure.
+  t = un9d.test1(fresh, [dev('relay', { device_type: 'relay_controller', last_reading_at: '2026-09-08T10:16:27Z' })], { feed_silent: false, devices: [dev('relay', { state: 'LIVE', device_type: 'relay_controller', last_reading_at: '2026-09-08T10:16:27Z' })] }, now);
+  assert.equal(t.conditions.find((c) => c.id === 'freshness').verdict, 'pass', 'a live relay with an old switch is not stale shown as live');
+  ok('freshness: a relay, pump, valve or light is live on vFarm presence; offline and no-status rules unchanged');
+
   assert.equal(un9d.test2([], []).verdict, 'not_yet_possible');
   const inc = (id, dev, o, c, l) => ({ incident_id: id, device_id: dev, kind: 'offline', opened_at: o, closed_at: c, ledger_id: l, ledger_state: l ? (c ? 'closed' : 'open') : 'pending' });
   const good = [inc('I1', 'a', '2026-10-10T00:00:00.000Z', '2026-10-10T00:20:00.000Z', 'L1')];
