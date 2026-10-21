@@ -145,7 +145,7 @@ interface Incident { incident_id: string; device_id: string | null; kind: string
 interface HealthRow { natural_id: string; resolved_at: string | null; status: string | null }
 
 /** Test 1, from the stored rows and the Monitoring Twin's own read of the same farm. Pure. */
-export function test1(farm: { snapshot_at: string; synthetic: boolean } , devices: Device[], read: { feed_silent: boolean; devices: Array<{ device_id: string; state: string | null; last_reading_at: string | null }> } | null, now: number): TestResult {
+export function test1(farm: { snapshot_at: string; synthetic: boolean } , devices: Device[], read: { feed_silent: boolean; devices: Array<{ device_id: string; state: string | null; last_reading_at: string | null; last_seen_at?: string | null; device_type?: string | null }> } | null, now: number): TestResult {
   const live = devices.filter((d) => !d.gone);
   const conds: Condition[] = [];
   if (!live.length) {
@@ -176,7 +176,10 @@ export function test1(farm: { snapshot_at: string; synthetic: boolean } , device
     conds.push(C('agreement', 'The dashboard and the feed agree', 'not_yet_possible', 'The Monitoring Twin read has no entry for this farm.'));
   } else {
     const liveWrong = feedSilent ? read.devices.filter((d) => d.state === 'LIVE').map((d) => d.device_id) : [];
-    const ageWrong = read.devices.filter((d) => d.state === 'LIVE' && d.last_reading_at && (now - Date.parse(d.last_reading_at)) / 1000 > monitoringTwin.THRESHOLDS.offline_s + monitoringTwin.THRESHOLDS.feed_silent_s).map((d) => d.device_id);
+    // A switch, pump, valve or light is live on presence (monitoringTwin.reportsOnChange), so its age is its last report.
+    const judgedAt = (d: { last_reading_at: string | null; last_seen_at?: string | null; device_type?: string | null }) =>
+      monitoringTwin.reportsOnChange(d.device_type) ? d.last_seen_at ?? d.last_reading_at : d.last_reading_at;
+    const ageWrong = read.devices.filter((d) => { const at = judgedAt(d); return d.state === 'LIVE' && !!at && (now - Date.parse(at)) / 1000 > monitoringTwin.THRESHOLDS.offline_s + monitoringTwin.THRESHOLDS.feed_silent_s; }).map((d) => d.device_id);
     const wrong = [...new Set([...liveWrong, ...ageWrong])];
     conds.push(
       C(
@@ -313,7 +316,7 @@ export async function check(farmId: string, opts: { record?: boolean; actor?: st
   const health = ids.length
     ? await query<HealthRow>(`SELECT natural_id, resolved_at::text AS resolved_at, fields->>'resolution_status' AS status FROM engine_incidents WHERE natural_id = ANY($1::text[])`, [ids])
     : { rows: [] as HealthRow[] };
-  const twin = (await monitoringTwin.monitoringData()) as unknown as { farms: Array<{ farm_id: string; feed: { silent: boolean }; devices: Array<{ device_id: string; state: string | null; last_reading_at: string | null }> }> };
+  const twin = (await monitoringTwin.monitoringData()) as unknown as { farms: Array<{ farm_id: string; feed: { silent: boolean }; devices: Array<{ device_id: string; state: string | null; last_reading_at: string | null; last_seen_at: string | null; device_type: string | null }> }> };
   const mine = twin.farms.find((x) => x.farm_id === farmId) ?? null;
   const t1 = test1(f, devices.rows, mine ? { feed_silent: mine.feed.silent, devices: mine.devices } : null, now);
   const t2 = test2(incidents.rows, health.rows);

@@ -235,16 +235,29 @@ export type DeviceState = 'LIVE' | 'STALE' | 'OFFLINE' | 'NOT_WIRED' | 'NO_FEED'
  * goes STALE and OFFLINE on the age of its last reading** (90 s and 900 s, Jason's IMFX
  * thresholds): a sensor whose readings stopped is not reporting, whatever its heartbeat says.
  * `unknown`, or no status at all (an older sender, the simulator), is the reading rule alone.
+ *
+ * **A switch, pump, valve or light is judged on presence, not on its last reading** (21 Oct
+ * 2026, Destiny). These report a reading only when they change state, so a relay that last
+ * switched on 8 Sep and has sat in position since carries an 8 Sep reading while vFarm sees it
+ * every few minutes. On the first real rack snapshot (21 Oct) that opened eight false OFFLINE
+ * incidents. When vFarm says such a device is `online`, it is LIVE, aged from `last_seen_at`,
+ * exactly as a camera is; `offline` still wins, and with no status the reading rule is unchanged.
  */
+export const REPORTS_ON_CHANGE: readonly string[] = ['relay_controller', 'relay', 'pump', 'valve', 'light', 'actuator'];
+export const reportsOnChange = (deviceType: string | null | undefined) =>
+  REPORTS_ON_CHANGE.includes((deviceType ?? '').trim().toLowerCase());
+
 export function freshness(
   lastReadingAt: string | null,
   snapshotAt: string,
   status: string | null = null,
   lastSeenAt: string | null = null,
+  deviceType: string | null = null,
 ): { state: DeviceState; age_s: number | null } {
   const ageOf = (iso: string | null) => (iso ? Math.max(0, Math.round((Date.parse(snapshotAt) - Date.parse(iso)) / 1000)) : null);
   const st = (status ?? '').trim().toLowerCase();
   if (st === 'offline') return { state: 'OFFLINE', age_s: ageOf(lastSeenAt ?? lastReadingAt) };
+  if (st === 'online' && reportsOnChange(deviceType)) return { state: 'LIVE', age_s: ageOf(lastSeenAt ?? lastReadingAt) };
   if (!lastReadingAt) return st === 'online' ? { state: 'LIVE', age_s: ageOf(lastSeenAt) } : { state: 'NOT_WIRED', age_s: null };
   const age = ageOf(lastReadingAt) as number;
   if (age <= THRESHOLDS.stale_s) return { state: 'LIVE', age_s: age };
@@ -323,8 +336,8 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
               coalesce((fields->>'synthetic')::boolean, false) AS synthetic
          FROM engine_vfarm_farms`,
     );
-    const devices = await db.query<{ device_id: string; farm_id: string; last_reading_at: string | null; last_seen_at: string | null; status: string | null; latest: unknown; gone: boolean }>(
-      `SELECT device_id, farm_id, to_char(last_reading_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS last_reading_at,
+    const devices = await db.query<{ device_id: string; farm_id: string; device_type: string | null; last_reading_at: string | null; last_seen_at: string | null; status: string | null; latest: unknown; gone: boolean }>(
+      `SELECT device_id, farm_id, device_type, to_char(last_reading_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS last_reading_at,
               to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS last_seen_at, status, latest, gone_at IS NOT NULL AS gone
          FROM engine_vfarm_devices`,
     );
@@ -355,7 +368,7 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
         if (d.gone) state = 'GONE';
         else if (feedSilent) state = 'NO_FEED';
         else {
-          const fr = freshness(d.last_reading_at, f.snapshot_at, d.status, d.last_seen_at);
+          const fr = freshness(d.last_reading_at, f.snapshot_at, d.status, d.last_seen_at, d.device_type);
           state = fr.state;
           age = fr.age_s;
         }
