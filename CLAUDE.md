@@ -1546,6 +1546,8 @@ repeat adds a line and never a second job. The incident stays open as before. Fi
 real farm with a crop cycle set (none yet on 21 Oct). Jegan's five vision doubts wait on the
 camera signals (F0UG). `npm run test:monitoring-recurrence`, `npm run test:range-doubt`.
 
+**Only the newest server instance judges** (21 Oct 2026, Destiny — LOOP-1792602989664-YRKG). During a deploy the old instance once ran a pass under the old rule after the new one had, reopening 8 relay incidents. `evaluate()` claims `meta` `monitoring.judge_owner` under its advisory lock: a later-started instance takes over, an older one stands down (`skipped`), and an owner silent for 3 minutes (`OWNER_STALE_MS`) gives way. `npm run test:monitoring-owner` proves it with two processes.
+
 **Engine health holds every monitoring incident the ledger took** (2026-10-04,
 Destiny — the downstream reader for UN9D path 2). The three-minute ledger poll
 reads only what is live at that moment, so an incident that opened and cleared

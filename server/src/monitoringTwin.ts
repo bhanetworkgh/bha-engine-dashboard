@@ -46,6 +46,7 @@
  * last refusal word for word; a send that fails is retried on the next pass
  * and is never folded into success.
  */
+import { hostname } from 'node:os';
 import { query, withTransaction, type Queryable } from './pg';
 import * as events from './events';
 import * as bharag from './bharag';
@@ -331,6 +332,40 @@ const faultKey = (f: { farm_id: string; device_id: string | null; kind: string; 
 let running = false;
 
 /**
+ * Which server instance judges (21 Oct 2026, Destiny — LOOP-1792602989664-YRKG).
+ * During a Render deploy the old and new instances overlap for a few seconds.
+ * The advisory lock below stops two passes running at once, but not the old
+ * instance running one more pass, after the new one, under the old rules: at
+ * 14:28:02 UTC on 21 Oct that reopened 8 relay incidents the new instance had
+ * closed at 14:28:08. So the newest-started instance owns judging, and an older
+ * one stands down. An owner that has not judged for OWNER_STALE_MS gives way,
+ * so a new instance that started and then died never leaves judging switched
+ * off. Decided under the advisory lock, so two instances cannot both claim.
+ */
+export const OWNER_KEY = 'monitoring.judge_owner';
+export const OWNER_STALE_MS = 3 * 60_000;
+const STARTED_AT = Date.now();
+const INSTANCE = `${process.env.RENDER_INSTANCE_ID || hostname()}:${process.pid}:${STARTED_AT}`;
+
+export interface JudgeOwner {
+  instance: string;
+  started_at: number;
+  last_pass_at: number;
+}
+
+/** Pure. Whether this instance may judge, given the owner on record. */
+export function mayJudge(stored: JudgeOwner | null, me: { instance: string; started_at: number }, now: number): { judge: boolean; reason: string } {
+  if (!stored) return { judge: true, reason: 'no owner on record' };
+  if (stored.instance === me.instance) return { judge: true, reason: 'this instance is the owner' };
+  if (me.started_at > stored.started_at) return { judge: true, reason: `this instance started after the owner ${stored.instance}` };
+  if (me.started_at === stored.started_at && me.instance > stored.instance) return { judge: true, reason: 'same start time, taken by instance id' };
+  if (now - stored.last_pass_at > OWNER_STALE_MS) return { judge: true, reason: `the owner ${stored.instance} has not judged for ${Math.round((now - stored.last_pass_at) / 1000)} s` };
+  return { judge: false, reason: `a newer instance (${stored.instance}, started ${new Date(stored.started_at).toISOString()}) owns judging; this one stands down` };
+}
+
+let lastStandDownLog = 0;
+
+/**
  * One pass over every farm vFarm has sent: judge each device, write its state,
  * open an incident for each new fault and close each cleared one. Safe to call
  * from the snapshot route and the minute tick at once: the second caller waits
@@ -341,6 +376,26 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
   const nowIso = new Date(now).toISOString();
   return withTransaction(async (db) => {
     await db.query(`SELECT pg_advisory_xact_lock(8134207612)`);
+    const ownerRow = await db.query<{ value: string }>(`SELECT value FROM meta WHERE key = $1`, [OWNER_KEY]);
+    let stored: JudgeOwner | null = null;
+    try {
+      stored = ownerRow.rows[0] ? (JSON.parse(ownerRow.rows[0].value) as JudgeOwner) : null;
+    } catch {
+      stored = null;
+    }
+    const may = mayJudge(stored, { instance: INSTANCE, started_at: STARTED_AT }, now);
+    if (!may.judge) {
+      if (now - lastStandDownLog > 10 * 60_000) {
+        lastStandDownLog = now;
+        console.log(`[monitoring-twin] not judging (${trigger}): ${may.reason}`);
+      }
+      return { evaluated_at: nowIso, trigger, farms: 0, devices: 0, faults: 0, opened: 0, closed: 0, skipped: may.reason };
+    }
+    await db.query(
+      `INSERT INTO meta (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [OWNER_KEY, JSON.stringify({ instance: INSTANCE, started_at: STARTED_AT, last_pass_at: now } satisfies JudgeOwner)],
+    );
+    if (!stored || stored.instance !== INSTANCE) console.log(`[monitoring-twin] this instance (${INSTANCE}) now judges: ${may.reason}`);
     const farms = await db.query<{ farm_id: string; name: string | null; snapshot_at: string; synthetic: boolean }>(
       `SELECT farm_id, name, to_char(snapshot_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS snapshot_at,
               coalesce((fields->>'synthetic')::boolean, false) AS synthetic
@@ -426,7 +481,7 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
       closed++;
     }
     if (opened || closed) events.changed('monitoring_twin', null, db);
-    return { evaluated_at: nowIso, trigger, farms: farms.rows.length, devices: judged, faults: faults.length, opened, closed };
+    return { evaluated_at: nowIso, trigger, farms: farms.rows.length, devices: judged, faults: faults.length, opened, closed, skipped: null as string | null };
   });
 }
 
