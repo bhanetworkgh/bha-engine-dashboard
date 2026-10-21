@@ -84,6 +84,20 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   assert.equal(t.conditions.find((c) => c.id === 'freshness').verdict, 'pass', 'a live relay with an old switch is not stale shown as live');
   ok('freshness: a relay, pump, valve or light is live on vFarm presence; offline and no-status rules unchanged');
 
+  // Contract condition 6: an alert frame from this farm has landed.
+  let c6 = un9d.condition6([], 0);
+  assert.equal(c6.verdict, 'not_yet_possible');
+  c6 = un9d.condition6([], 2);
+  assert.equal(c6.verdict, 'not_yet_possible');
+  assert.match(c6.conditions[0].reason, /2 alert frames with no farm/);
+  c6 = un9d.condition6([{ kind: 'single', fired_at: '2026-10-21T09:07:32.469Z', received_at: '2026-10-21T09:07:33.000Z' }, { kind: 'clear', fired_at: '2026-10-21T09:17:40.000Z', received_at: '2026-10-21T09:17:41.000Z' }], 0);
+  assert.equal(c6.verdict, 'pass');
+  assert.match(c6.conditions[0].reason, /1 fired, 1 cleared/);
+  assert.match(c6.conditions[0].reason, /2026-10-21T09:17:41/);
+  assert.equal(un9d.condition6([{ kind: 'clear', fired_at: 'x', received_at: 'y' }], 0).verdict, 'pass');
+  assert.equal(un9d.rollUp([{ id: 'a', condition: '', verdict: 'pass', reason: '' }, ...un9d.condition6([], 0).conditions]), 'not_yet_possible');
+  ok('condition 6: none is not yet possible, a fire or a clear passes, unplaced frames are named and never credited');
+
   assert.equal(un9d.test2([], []).verdict, 'not_yet_possible');
   const inc = (id, dev, o, c, l) => ({ incident_id: id, device_id: dev, kind: 'offline', opened_at: o, closed_at: c, ledger_id: l, ledger_state: l ? (c ? 'closed' : 'open') : 'pending' });
   const good = [inc('I1', 'a', '2026-10-10T00:00:00.000Z', '2026-10-10T00:20:00.000Z', 'L1')];

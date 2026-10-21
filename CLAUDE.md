@@ -1470,7 +1470,11 @@ Hardik's two tests of 30 Sep / 1 Oct, locked by Jason 2 Oct). `server/src/un9d.t
   incident, it has one ledger id, it recovered with no two open at once for one device
   and no ledger id reused, and Engine health holds it once, open or closed as the twin
   says; incidents before the 4 Oct copy into Engine health are not judged on that
-  condition). Each condition is `pass`, `fail` or `not_yet_possible` with the reason; a
+  condition). **Contract condition 6 is checked too** (21 Oct 2026, Destiny): `contract.conditions`
+  holds `alert_frame_landed`, passed by any `vfarm.alert.v1` frame (fire or clear) stored with
+  this farm's `farm_id`; a frame with no farm is counted in the reason and credited to no rack.
+  `verdict` stays the two UN9D tests; `contract.verdict_with_tests` adds condition 6. Conditions
+  1, 2, 5 and 7 are not checked here, and the answer says so. Each condition is `pass`, `fail` or `not_yet_possible` with the reason; a
   test passes only when every condition does. "Agree" compares the dashboard with what
   vFarm sent; nothing here reads vFarm's own database, and the answer says so. A
   simulated farm is labelled and its result is NOT_SAFE_TO_CLAIM. The result is one

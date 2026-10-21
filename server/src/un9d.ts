@@ -284,6 +284,24 @@ export function test2(incidents: Incident[], health: HealthRow[]): TestResult {
   return { test: 'Test 2: silent device to incident and back', verdict: rollUp(conds), conditions: conds };
 }
 
+/**
+ * Monitoring contract condition 6 (docs/contracts/vfarm-monitoring.md, accepted by Jason
+ * 20 Oct 2026): at least one `vfarm.alert.v1` frame from this farm has landed. A fire or the
+ * clear that follows one both count. Only a frame carrying this farm's own `farm_id` counts:
+ * a frame with no farm on it cannot be placed on any rack, so it is named and never credited.
+ * None yet is `not_yet_possible`, never `fail`: nothing is wrong until a rule should have fired. Pure.
+ */
+export function condition6(alerts: Array<{ kind: string | null; fired_at: string; received_at: string }>, unplaced: number): TestResult {
+  const fires = alerts.filter((a) => a.kind !== 'clear').length;
+  const clears = alerts.length - fires;
+  const newest = alerts.reduce<string | null>((m, a) => (!m || a.received_at > m ? a.received_at : m), null);
+  const note = unplaced ? ` ${unplaced} alert frame${unplaced === 1 ? '' : 's'} with no farm on ${unplaced === 1 ? 'it' : 'them'} ${unplaced === 1 ? 'is' : 'are'} held and not counted for any rack.` : '';
+  const c = alerts.length
+    ? C('alert_frame_landed', 'At least one alert frame from this farm has landed', 'pass', `${alerts.length} frame${alerts.length === 1 ? '' : 's'} from this farm held (${fires} fired, ${clears} cleared); newest received ${newest}.${note}`)
+    : C('alert_frame_landed', 'At least one alert frame from this farm has landed', 'not_yet_possible', `No alert frame carrying this farm's id has landed yet. A real fire, or the clear after one, will meet it.${note}`);
+  return { test: 'Contract condition 6: alerts reach the dashboard', verdict: c.verdict, conditions: [c] };
+}
+
 export class CheckError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -321,12 +339,24 @@ export async function check(farmId: string, opts: { record?: boolean; actor?: st
   const t1 = test1(f, devices.rows, mine ? { feed_silent: mine.feed.silent, devices: mine.devices } : null, now);
   const t2 = test2(incidents.rows, health.rows);
   const both = rollUp([...t1.conditions, ...t2.conditions]);
+  const alerts = await query<{ kind: string | null; fired_at: string; received_at: string }>(
+    `SELECT kind, ${ISO('fired_at')} AS fired_at, ${ISO('received_at')} AS received_at FROM engine_vfarm_alert_events WHERE farm_id = $1`,
+    [farmId],
+  );
+  const unplaced = await query<{ n: number }>(`SELECT count(*)::int AS n FROM engine_vfarm_alert_events WHERE farm_id IS NULL`);
+  const c6 = condition6(alerts.rows, unplaced.rows[0]?.n ?? 0);
+  const monitored = rollUp([...t1.conditions, ...t2.conditions, ...c6.conditions]);
   const result = {
     farm_id: farmId,
     simulated: f.synthetic,
     checked_at: new Date(now).toISOString(),
     verdict: both,
     tests: [t1, t2],
+    contract: {
+      rule: 'vFarm monitoring contract (SOP 7059c100). This check answers UN9D Tests 1 and 2 (conditions 3 and 4) and condition 6. Conditions 1, 2, 5 and 7 are not checked here yet, so this is never a full "monitored" verdict.',
+      conditions: [c6],
+      verdict_with_tests: monitored,
+    },
     claim: f.synthetic
       ? 'Simulated farm: this proves the dashboard path, not any rack. NOT_SAFE_TO_CLAIM until both tests pass on a real farm.'
       : both === 'pass'
@@ -342,7 +372,7 @@ export async function check(farmId: string, opts: { record?: boolean; actor?: st
       subject_id: farmId,
       lane: 'VFARM_HARDWARE',
       actor: opts.actor ?? 'dashboard',
-      detail: { simulated: f.synthetic, verdict: both, test1: t1.verdict, test2: t2.verdict, conditions: [...t1.conditions, ...t2.conditions].map((c) => ({ id: c.id, verdict: c.verdict })) },
+      detail: { simulated: f.synthetic, verdict: both, test1: t1.verdict, test2: t2.verdict, condition6: c6.verdict, verdict_with_condition6: monitored, conditions: [...t1.conditions, ...t2.conditions, ...c6.conditions].map((c) => ({ id: c.id, verdict: c.verdict })) },
     });
     result.recorded = ev.recorded;
     result.event_id = ev.id;
