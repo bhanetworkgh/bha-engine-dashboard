@@ -94,7 +94,9 @@ condition as `pass`, `fail` or `not_yet_possible`.
    with its incident open. No placed device is STALE for more than 900 s without an incident.
 6. **Alerts reach the dashboard.** At least one `vfarm.alert.v1` frame from this farm has
    landed on `/api/engine/vfarm-alerts`. A real fire, or the clear that follows one, both
-   count. **Accepted by Jason, 20 Oct 2026.** Not checked by `check_un9d_acceptance` yet.
+   count. **Accepted by Jason, 20 Oct 2026.** Checked by `check_un9d_acceptance` from 21 Oct 2026
+   (`contract.conditions`, id `alert_frame_landed`): only a frame carrying the farm's own `farm_id`
+   counts, a frame with no farm is named and never credited, and none yet is `not_yet_possible`.
 7. **It knows which cabinet and which spec it is.** `cabinet_id` and `config_hash` are sent,
    and `burn_in_state` is `passed`. **Accepted by Jason, 20 Oct 2026:** no rack goes in front
    of a buyer without them. They are still optional on the wire.
