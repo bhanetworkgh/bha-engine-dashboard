@@ -76,7 +76,7 @@ const assert = require('node:assert/strict');
   await retry('INC-G', 'Recovered', 55);
   await retry('RUN-7777', 'Recovered', 200);
   await retry('INC-B', 'Exhausted', 100);
-  await query(`INSERT INTO engine_repairs (repair_id, outcome, execution_id, workflow_name, version_after, finished_at) VALUES ('R1', 'repaired', '5005', 'W', 'v2', $1), ('R2', 'repaired', '6006', 'W', 'v3', $1), ('R3', 'needs_human', '6007', 'W', null, $1)`, [at(80)]);
+  await query(`INSERT INTO engine_repairs (repair_id, outcome, execution_id, workflow_name, version_after, finished_at) VALUES ('R1', 'repaired', '5005', 'W', 'v2', $1), ('R2', 'repaired', '6006', 'W', 'v3', $1), ('R3', 'needs_human', '6007', 'W', null, $1), ('REP-TEST-SETTLE-1', 'repaired', null, 'TEST — settle thread check', 'v9', $1), ('R4', 'repaired', '6008', 'TEST — Self-healing, Bays lane', 'v4', $1)`, [at(80)]);
   await query(`UPDATE engine_repairs SET reverted_at = $1 WHERE repair_id = 'R2'`, [at(85)]);
   await query(`INSERT INTO engine_recovery (incident_id, dependency, status, first_seen_at, updated_at) VALUES ('INC-A', 'openrouter', 'recovered', now(), $1)`, [at(25)]);
   await engineEvents.record({ event_type: 'polling_one_off_closed', at: at(300), subject_id: 'INC-I', lane: 'BAYS', actor: 'recovery', detail: { workflow: 'Form A' }, dedupe_key: 'test-one-off-I' });
@@ -96,6 +96,9 @@ const assert = require('node:assert/strict');
 
   assert.equal(w.automatic_fixes.total, 5, 'A once, G, H by execution id, RUN-7777, I');
   assert.equal(w.automatic_fixes.without_incident, 1, 'RUN-7777');
+  assert.equal(w.automatic_fixes.counted_apart, 2, 'a TEST repair row and a repair on a TEST workflow are counted apart, never as fixes');
+  assert.equal(s.totals.automatic_fixes_counted_apart, 2);
+  assert.ok(!s.recent_fixes.some((f) => /TEST/i.test(f.key) || /^TEST/i.test(f.workflow || '')), 'no test fix in recent_fixes');
   assert.ok(!s.recent_fixes.some((f) => f.key === 'EXEC-6006'), 'a reverted repair is not a fix');
   assert.ok(s.recent_fixes.some((f) => f.key === 'INC-H' && f.kind === 'repair_standing'), 'the standing repair is matched to its incident');
 

@@ -2635,7 +2635,11 @@ as a line on a Slack card.
   goes onto every incident it came from (`linkRegistered`, called from
   `candidateActions.register` before the hand-off delete) and onto every later
   repeat. Tests, the simulator and refused asks are left out by
-  `logstream.excludedReason`.
+  `logstream.excludedReason`, and **deliberate alarms** by `deliberateAlarm` (21 Oct 2026,
+  LOOP-6E0K: `Raise If …`, `Stop On …` and anything in `Bays — Scheduled Run Watch`; 4 of the
+  first 15 candidates were these and all were declined). `Assert …` steps still count: two of
+  them led to the registered msg_blocks_too_long pattern. Capture only; Logstream, research
+  signals and the scorecard still count the fault the alarm reported.
 - **Nothing is promoted.** A candidate becomes a pattern only through the
   existing Register path, by a person: draft, review, register or decline.
 - `engine_pattern_captures`, one row per fault, remembers what was decided,
@@ -3563,7 +3567,9 @@ the error handlers' runs are not workload) and how many failed; **real faults** 
 raised by an alarm step counted as real, because the alarm reports something that failed upstream;
 **every automatic fix**, counted once per incident wherever it was recorded (a healer retry that
 recovered, including `RUN-…` rows that never opened an incident; a repair still standing, matched
-to its incident by execution id; a recovery-watcher re-run; a polling one-off closed by itself);
+to its incident by execution id, **never a TEST repair** (21 Oct 2026, D2: `fixApartReason` counts a
+fix on a test or simulator workflow, a `REP-TEST…` row or an incident counted apart as
+`automatic_fixes_counted_apart`, after REP-TEST-SETTLE-1792444500 inflated a week from 1 to 2); a recovery-watcher re-run; a polling one-off closed by itself);
 **how each real fault closed** (engine, cleared on its own, person, policy, or not recorded before
 2 Oct, and a close the ledger did upstream is the engine's only where a fix is recorded against
 it); still open; and time to fix as p50/p95, engine and person apart, closes from 2 Oct only. The

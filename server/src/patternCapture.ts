@@ -25,7 +25,8 @@
  *   existing Register flow, by a person; this only captures and routes.
  *
  * Tests, the monitoring simulator and a guard's refused ask are left out, by
- * Logstream's own rule (`logstream.excludedReason`). The BHARAG ledger itself
+ * Logstream's own rule (`logstream.excludedReason`), and so are deliberate alarm
+ * steps (`deliberateAlarm`: Raise If…, Stop On…, Bays — Scheduled Run Watch). The BHARAG ledger itself
  * still refuses keys it does not know (SOP-ENGINE-CONTRACT-NOTE-001 section 5),
  * so both fields live on this dashboard's copy of the incident.
  *
@@ -65,6 +66,23 @@ const firstSentence = (s: string): string => {
   const m = s.match(/^[\s\S]*?[.!?](\s|$)/);
   return (m ? m[0] : s).trim();
 };
+
+/**
+ * A step built to fail on purpose so a person is told (LOOP-1792263517889-6E0K, 21 Oct 2026): a
+ * `Raise If …` step, a `Stop On …` step, and anything in `Bays — Scheduled Run Watch`, whose whole
+ * job is to raise when scheduled runs went wrong. Each one is a guard doing its job, not a reusable
+ * fault: 4 of the first 15 incident candidates were these, and all were declined in the 17 Oct review.
+ * `Assert …` steps are NOT on the list: they check a Slack or ledger answer, and two of them led to the
+ * registered msg_blocks_too_long pattern. Pattern capture only; Logstream, research signals and the
+ * self-healing scorecard still count these faults, because the failure the alarm reports is real.
+ */
+export function deliberateAlarm(workflow: string | null, node: string | null): string | null {
+  const n = str(node);
+  if (/^raise if\b/i.test(n)) return 'deliberate_alarm';
+  if (/^stop on\b/i.test(n)) return 'deliberate_alarm';
+  if (/^bays\s*[—-]\s*scheduled run watch$/i.test(str(workflow))) return 'deliberate_alarm';
+  return null;
+}
 
 export function canonicalId(workflow: string | null, node: string | null): string {
   return `fault:${logstream.signatureOf(workflow, node)}`;
@@ -287,7 +305,7 @@ async function handle(repairId: string): Promise<CaptureResult> {
     return { repair_id: repairId, result: 'traced_other', signature: sig, detail: trace.pattern_status };
   }
 
-  const excluded = logstream.excludedReason({ workflow: r.workflow_name, node: r.failed_node });
+  const excluded = logstream.excludedReason({ workflow: r.workflow_name, node: r.failed_node }) ?? deliberateAlarm(r.workflow_name, r.failed_node);
   if (excluded) {
     await stampIncidents(incidents, canonical, [], null);
     return { repair_id: repairId, result: 'excluded', signature: sig, detail: excluded };
