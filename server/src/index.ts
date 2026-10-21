@@ -45,6 +45,7 @@ import * as selfHealing from './selfHealing';
 import * as healthReport from './healthReport';
 import * as repairs from './repairs';
 import * as doctrineDrillTools from './mcp/doctrineDrillTools';
+import * as submitLogTestTools from './mcp/submitLogTestTools';
 import * as recovery from './recovery';
 import * as scorecard from './scorecard';
 import * as pay from './pay';
@@ -625,6 +626,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       const body = await readJson(req, 16 * 1024);
       const out = (await doctrineDrillTools.runDoctrineDrillTool.handler(body as Record<string, unknown>, { access: 'write' } as never)) as { ok: boolean; step?: string; reason?: string; message?: string };
       await mirror.logWrite({ endpoint, kind: 'doctrine_drill', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: 'QNDM-DRILL', outcome: out.ok ? 'updated' : 'rejected', detail: `${String(body.step ?? '')}${out.ok ? '' : `: ${out.reason} ${out.message ?? ''}`}`.slice(0, 400), ms: Date.now() - t0 });
+      return send(res, out.ok ? 200 : 422, out);
+    }
+    // The log form's field check, the same handler as test_submit_log (2026-10-21), for when the
+    // connector's tool list has not picked the tool up. Same guards: Destiny or Jason, confirm
+    // "TEST SUBMIT LOG", a broken submission only; audited on engine_mcp_writes and logged here.
+    if (p === '/api/engine/submit-log-test') {
+      if (method !== 'POST') throw new HttpError(405, 'POST {case, channel_id, run, confirm, requester_user_id, dry_run}.');
+      const body = await readJson(req, 16 * 1024);
+      const out = (await submitLogTestTools.testSubmitLogTool.handler(body as Record<string, unknown>, { access: 'write' } as never)) as { ok: boolean; reason?: string; message?: string; execution_id?: string | null };
+      await mirror.logWrite({ endpoint, kind: 'codex_test', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: out.execution_id ?? null, outcome: out.ok ? 'updated' : 'rejected', detail: `${String(body.case ?? 'swapped')}${out.ok ? ' passed' : `: ${out.reason ?? 'failed'} ${out.message ?? ''}`}`.slice(0, 400), ms: Date.now() - t0 });
       return send(res, out.ok ? 200 : 422, out);
     }
     if (p === '/api/engine/repair' || p === '/api/engine/repairs') {
