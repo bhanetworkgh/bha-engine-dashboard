@@ -227,6 +227,13 @@ export async function fileMeta(fileId: string): Promise<{ id: string; name: stri
   return { id: b.id, name: b.name, mimeType: b.mimeType, webViewLink: b.webViewLink ?? null };
 }
 
+/** A file's parent folders, for "is this file in that folder" (2026-10-22, the Media Twin post log). */
+export async function fileParents(fileId: string): Promise<{ id: string; name: string; parents: string[]; trashed: boolean }> {
+  const r = await authed('read the file\'s folders (drive files.get)', `${DRIVE}/files/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=id,name,parents,trashed`);
+  const b = r.body as { id: string; name: string; parents?: string[]; trashed?: boolean };
+  return { id: b.id, name: b.name, parents: b.parents ?? [], trashed: b.trashed === true };
+}
+
 export interface DrivePermission {
   id: string;
   /** user, group, domain or anyone. */
