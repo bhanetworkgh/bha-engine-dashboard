@@ -13283,3 +13283,10 @@ Files:      server/src/codexGap.ts (new), server/src/mcp/codexGapTools.ts (new),
 Problem:    The test's seed rows were refused: 'null value in column "builder_id"' and then 'null value in column "first_seen_at"' on engine_codex_submissions (both NOT NULL); the seed now fills both.
 Fix:        Hourly: regular loggers (5 of the last 14 days) with no submission for 30 hours get one Bays DM, Destiny a one-line copy. The claim is an engine event keyed on builder + newest log, written before the DM; a refused DM deletes it and retries. 6 checks pass on a local _test database.
 Decision:   Hours, not a calendar day: Kaiqi logs at 04:00 Lagos and Jegan and Kavin in India's evening, so a Lagos "today" would flag people who logged. Layer 0 holds count as submitted, because a parked log was sent. Jason is never flagged; he reviews.
+
+## 2026-10-22 19:05 — Buyer flow walkthrough (5SWD) and the proposal page's promise
+Intent:     Walk the vFarm buyer flow as the buyer on test lead VFBUYER-FORMA-1TZS4DO and log every step as pass, break or feels wrong (Jason, 22 Oct; DW-1792600819415-E5QW).
+Files:      docs/walkthroughs/buyer-flow-2026-10-22.md (new), server/src/proposal.ts.
+Problem:    No browser was connected ("Browser extension is not connected"), so the walk ran through the engine's own buyer-side functions (test_buyer_flow, test_submit_intake2), audits 2980-2991. Break found: after Accept the page said "We will email you the agreement and your payment link" while nothing sends either and the charge gate says No.
+Fix:        All four buyer-facing lines on the proposal page now say "We will contact you by email about the next steps." proposal.test.cjs: 6 passed.
+Decision:   The deposit step was not walked: real buyers cannot be charged, and the rail was already proven on 21 Oct. The Stage 5 test-payment gate is left as it is; it is Jason's call.
