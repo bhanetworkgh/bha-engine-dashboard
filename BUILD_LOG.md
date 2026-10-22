@@ -13290,3 +13290,10 @@ Files:      docs/walkthroughs/buyer-flow-2026-10-22.md (new), server/src/proposa
 Problem:    No browser was connected ("Browser extension is not connected"), so the walk ran through the engine's own buyer-side functions (test_buyer_flow, test_submit_intake2), audits 2980-2991. Break found: after Accept the page said "We will email you the agreement and your payment link" while nothing sends either and the charge gate says No.
 Fix:        All four buyer-facing lines on the proposal page now say "We will contact you by email about the next steps." proposal.test.cjs: 6 passed.
 Decision:   The deposit step was not walked: real buyers cannot be charged, and the rail was already proven on 21 Oct. The Stage 5 test-payment gate is left as it is; it is Jason's call.
+
+## 2026-10-22 19:10 — Answer contract transcript from the live records
+Intent:     Jason asked for a transcript of the three questions answered from the live records under the answer contract.
+Files:      docs/walkthroughs/answer-contract-transcript-2026-10-22.md (new). n8n: "Engine — Answer Contract Transcript Runner" (M6gSoU0R2XnRCnXa, Engine Evals, unpublished).
+Problem:    Genie's read-only key has made no engine reads in 14 days (engine_writes), so a Genie transcript could not come from the records; Genie's wiring is Kaiqi's code and was not touched. n8n call_agent from the connector answered 502 three times ("origin_bad_gateway", zone api.anthropic.com) although the agent did run underneath.
+Fix:        A one-node runner (chat trigger, Message an Agent to North Star (Agent) 8NQRXadH0OrKe5XV, a code node that raises on no answer), executed manually: execution 46890. North Star read the SOP, read_buyer_flow (charge_gate), read_monitoring_twin, read_engine_events and find_records, and answered No / Vfarm_01 degraded (feed silent since 21 Oct 06:36) / No, with sources.
+Decision:   North Star rather than Bays: it is read-only and holds all three reads, so the transcript writes nothing. Its line that the two charge records "do not have a home" is half stale (the home exists since 18:30, the records do not); the No it gives is correct.
