@@ -2783,6 +2783,17 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
 - The Bays page's fourth tab, Decision watch (`GET /api/bays/decision-watches`).
   A read. `npm run test:decision-watch`.
 
+**The missing Codex log check** (2026-10-22, Destiny — DW-1792516757092-9EP8; Jason, 20 Oct: a
+standing mechanism, not a reminder, after Kavin's 20 Oct log broke on submission and nothing said so).
+`server/src/codexGap.ts`, a timer every hour, its numbers in `RULE` and nowhere else. A builder who
+logged on 5 or more of the last 14 days, and whose newest submission (a builder-table row or a Layer 0
+hold) is over 30 hours old, gets **one DM as Bays** and Destiny one line; measured in hours because the
+builders are in four time zones. Jason is never flagged. **One note per gap**: the claim is a
+`codex_log_gap_flagged` event keyed on the builder and their newest log, written before the DM; a DM
+Slack refuses deletes the claim so the next pass retries, and a new log resets it.
+`run_codex_gap_check` (write connection, no agent's scope, `dry_run` by default) runs it on demand.
+It changes no log, loop or pay row. `npm run test:codex-gap`.
+
 **The credit-out alert** (2026-10-10, Destiny). `server/src/creditOut.ts`, a
 check every minute, no table of its own (its state is `meta`
 `credit_out.state`). On 10 Oct the OpenRouter credit ran out between two of

@@ -39,6 +39,7 @@
     "test:vfarm-readings": "node --no-warnings=ExperimentalWarning server/test/vfarm-readings.test.cjs",
     "test:media-post-log": "node --no-warnings=ExperimentalWarning server/test/media-post-log.test.cjs",
     "test:audit-token": "node --no-warnings=ExperimentalWarning server/test/audit-token.test.cjs",
+    "test:codex-gap": "node --no-warnings=ExperimentalWarning server/test/codex-gap.test.cjs",
     "test:charge-gate": "node --no-warnings=ExperimentalWarning server/test/charge-gate.test.cjs",
     "test:pattern-reingest": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/pattern-reingest.test.cjs",
     "test:move-loop": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/move-loop.test.cjs",
