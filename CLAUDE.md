@@ -2551,6 +2551,11 @@ autopay, no pay wiring, no destructive automated action).
   **The buyer flow and SOP reads are on the same token from 18 Oct** (Engine
   Surfaces Contract): `read_buyer_flow` and `read_sop`, six tools in all, still
   read-only, and `test:eg4n` pins the six.
+  **`read_monitoring_twin` and `get_vfarm_gates` join it on 22 Oct** (Jason on the 22 Oct log):
+  eight tools, still read-only, so Genie answers "is this rack live or simulated" from
+  `evidence_status` and "is Pilot 1 ready" from the gate records. What Genie may and must not
+  say on payments, rack evidence and Pilot 1 is `docs/contracts/genie-answer-contract.md`, also
+  the SOP "SOP -- Genie Answer Contract: Payments, Rack Evidence and Pilot 1 Readiness".
   The answer table is in the contract; `npm run test:eg4n` pins the token and the
   resolver's answers against a local `_test` database.
 - **Empty reads are counted, and nothing decides on them** (same day).
