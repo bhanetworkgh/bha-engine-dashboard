@@ -188,9 +188,9 @@ function proposalBody(f: Found, flash: string | null): string {
 <p style="white-space:pre-wrap">${esc(p.summary)}</p>${inc}
 <p style="font-size:18px;margin:14px 0 0"><strong>${esc(money(p.price_amount, p.currency))}</strong></p>
 ${p.timeline ? `<p class="status">${esc(p.timeline)}</p>` : ''}</section>`;
-  const note = `<p class="note">This is a proposal, not a purchase. Nothing is charged on this page. If you accept, we send you the agreement and your own secure payment link by email.</p>`;
+  const note = `<p class="note">This is a proposal, not a purchase. Nothing is charged on this page. If you accept, we will contact you by email about the next steps.</p>`;
   const done = p.accepted_at
-    ? `<div class="done"><h2>Accepted</h2><p>Thank you. You accepted this proposal on ${esc(p.accepted_at.slice(0, 10))}. We will email you the agreement and your payment link. You can still send us a question below.</p></div>`
+    ? `<div class="done"><h2>Accepted</h2><p>Thank you. You accepted this proposal on ${esc(p.accepted_at.slice(0, 10))}. We will contact you by email about the next steps. You can still send us a question below.</p></div>`
     : `<form method="post" style="margin:0 0 18px"><input type="hidden" name="action" value="accept"><button class="btn" type="submit">Accept this proposal</button></form>`;
   const ask = `<section class="card"><h2>Ask a question</h2>
 <form method="post"><input type="hidden" name="action" value="question"><textarea name="text" required minlength="3" maxlength="2000" placeholder="What would you like to know?"></textarea>
@@ -225,7 +225,7 @@ export async function act(token: string, actionRaw: unknown, textRaw: unknown): 
   if (!kind) throw new ProposalError(422, 'action', 'Choose accept, a question or a call.');
   const text = clean(textRaw, kind === 'question' ? 2000 : 1000) || null;
   if (kind === 'question' && (!text || text.length < 3)) return { flash: 'Write your question first (at least 3 characters).' };
-  if (kind === 'accepted' && f.proposal.accepted_at) return { flash: 'You have already accepted this proposal. We will be in touch with the agreement and payment link.' };
+  if (kind === 'accepted' && f.proposal.accepted_at) return { flash: 'You have already accepted this proposal. We will contact you by email about the next steps.' };
 
   const at = new Date().toISOString();
   const moved = await withTransaction(async (db) => {
@@ -275,7 +275,7 @@ export async function act(token: string, actionRaw: unknown, textRaw: unknown): 
   return {
     flash:
       kind === 'accepted'
-        ? 'Thank you, you accepted the proposal. We will email you the agreement and your payment link.'
+        ? 'Thank you, you accepted the proposal. We will contact you by email about the next steps.'
         : kind === 'question'
           ? 'Thank you, your question is with us. We will answer by email.'
           : 'Thank you, we will get in touch to arrange a call.',
