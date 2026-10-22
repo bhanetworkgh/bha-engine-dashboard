@@ -873,6 +873,13 @@ reasonable about.
   sends. Accepted as the path (`/mcp/<token>`) or as `Authorization: Bearer` on
   `/mcp/agent`; agent tokens are checked before the shared secrets, which keep
   working for Claude's connector as agent null.
+  **A person can have a look-only key too** (22 Oct 2026, Destiny):
+  `READONLY_SECRETS_HARDIK_AUDIT`, agent `hardik_audit`, read, ten tools
+  (`query_postgres`, `describe_schema`, `get_health`, `search_logs`, `list_pages`,
+  `get_page_structure`, `get_page_data`, `read_buyer_flow`, `read_engine_events`,
+  `read_sop`), for Hardik's independent audit of the Stripe to ledger path from his
+  own Claude or Codex. The shared URL carries the write tools in production, which
+  is why an auditor gets this instead. `npm run test:audit-token`.
 - **A session id is issued on initialize and accepted forever after.** It comes
   back in `Mcp-Session-Id` and the client sends it on every later request.
   Nothing per-session is kept — every tool reads the same source tree and the

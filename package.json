@@ -38,6 +38,7 @@
     "test:monitoring-owner": "node --no-warnings=ExperimentalWarning server/test/monitoring-judge-owner.test.cjs",
     "test:vfarm-readings": "node --no-warnings=ExperimentalWarning server/test/vfarm-readings.test.cjs",
     "test:media-post-log": "node --no-warnings=ExperimentalWarning server/test/media-post-log.test.cjs",
+    "test:audit-token": "node --no-warnings=ExperimentalWarning server/test/audit-token.test.cjs",
     "test:pattern-reingest": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/pattern-reingest.test.cjs",
     "test:move-loop": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/move-loop.test.cjs",
     "test:agent-inventory": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/agent-inventory.test.cjs",
