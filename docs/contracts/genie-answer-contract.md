@@ -23,7 +23,8 @@ Why, from the records:
 
 How Genie answers:
 - Read read_buyer_flow. Quote counts.payments with the mode every time ("1 live internal test payment, 1 test-mode payment, 2 expired test checkouts").
-- Say yes only when a record of Hardik's green acceptance pass AND Jason's approval of a live offer exists in the engine. Until then: "No. The rail works in a controlled internal test; real buyers can't be charged until Hardik's acceptance pass is green and Jason approves a live offer."
+- The two records live in the engine's charge gate (from 22 Oct 2026), and read_buyer_flow carries it as charge_gate. Say yes only when charge_gate.can_charge_live is true: Hardik's newest acceptance pass is green AND Jason's newest offer approval is approved, each recorded from that person's own Slack message. Quote charge_gate.answer. If charge_gate.ok is false, say you do not know and treat it as no.
+- Until then: "No. The rail works in a controlled internal test; real buyers can't be charged until Hardik's acceptance pass is green and Jason approves a live offer."
 
 Must never say:
 - "We're taking payments", "buyers can pay", "deposits are open", or give a checkout or payment link.
@@ -72,4 +73,4 @@ Must never say:
 
 ## 4. When a record changes
 
-This contract follows the records, not today's facts. Section 3 moves by itself: when a real Stage 1 record exists, get_vfarm_gates shows it and Genie reports it. Section 1 does not yet: the engine has no record type for Hardik's acceptance pass or Jason's live-offer approval, so "can we charge" stays No until those two are recorded and this SOP is updated to name where they live. A new evidence state or a new rail is added here as a new section, with its read, its answer, and its never-say list, before any agent talks about it.
+This contract follows the records, not today's facts. Section 3 moves by itself: when a real Stage 1 record exists, get_vfarm_gates shows it and Genie reports it. Section 1 moves by itself too, from 22 Oct 2026: Hardik's acceptance pass and Jason's live-offer approval are records in the engine's charge gate (record_charge_gate; only Hardik's or Jason's own Slack message counts, and no agent can record one), and read_buyer_flow's charge_gate says yes only while both hold. A new evidence state or a new rail is added here as a new section, with its read, its answer, and its never-say list, before any agent talks about it.

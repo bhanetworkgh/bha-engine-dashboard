@@ -3464,6 +3464,34 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_media_post_log_created ON engine_media_post_log (created_at DESC)`,
     ],
   },
+  {
+    // 2026-10-22, Destiny (Jason on the 22 Oct log): the two records "can we charge real buyers"
+    // waits on, Hardik's acceptance pass and Jason's live-offer approval. Append-only; the rules
+    // are in chargeGate.ts. The CHECKs hold the owners and verdicts even if a second writer appears.
+    id: 89,
+    name: 'engine_charge_gate: Hardik\'s acceptance pass and Jason\'s live-offer approval',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_charge_gate (
+         gate_id          text PRIMARY KEY,
+         kind             text NOT NULL CHECK (kind IN ('acceptance_pass', 'offer_approval')),
+         rail             text NOT NULL,
+         verdict          text NOT NULL,
+         decided_by       text NOT NULL,
+         evidence_link    text NOT NULL,
+         evidence_channel text NOT NULL,
+         evidence_ts      text NOT NULL,
+         scope            text,
+         notes            text,
+         recorded_by      text NOT NULL,
+         via              text NOT NULL,
+         test             boolean NOT NULL DEFAULT false,
+         created_at       timestamptz NOT NULL DEFAULT now(),
+         CHECK ((kind = 'acceptance_pass' AND decided_by = 'U0BKT6MAW2Y' AND verdict IN ('green', 'red'))
+             OR (kind = 'offer_approval' AND decided_by = 'U0A9V97949F' AND verdict IN ('approved', 'withdrawn')))
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_charge_gate_latest ON engine_charge_gate (rail, kind, created_at DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

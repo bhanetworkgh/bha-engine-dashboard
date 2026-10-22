@@ -55,6 +55,7 @@ import { BUYER_FLOW_READ_TOOLS } from './buyerFlowTools';
 import { INVENTORY_WRITE_TOOLS } from './inventoryTools';
 import { VFARM_GATE_READ_TOOLS, VFARM_GATE_WRITE_TOOLS } from './vfarmGateTools';
 import { MEDIA_POST_LOG_READ_TOOLS, MEDIA_POST_LOG_WRITE_TOOLS } from './mediaPostLogTools';
+import { CHARGE_GATE_READ_TOOLS, CHARGE_GATE_WRITE_TOOLS } from './chargeGateTools';
 import { findRecords, READABLE_KINDS } from './findRecords';
 import * as mirror from '../mirror';
 import * as n8n from '../n8n';
@@ -1023,6 +1024,7 @@ export const TOOLS: ToolDefinition[] = [
   ...BUYER_FLOW_READ_TOOLS,
   // 2026-10-22: the Media Twin post log (H58Q, Jason's SOURCE_TO_TARGET_LOG).
   ...MEDIA_POST_LOG_READ_TOOLS,
+  ...CHARGE_GATE_READ_TOOLS,
   // The one that is not a read.
   resyncTool,
 ];
@@ -1034,7 +1036,7 @@ export const TOOLS: ToolDefinition[] = [
  * tool a client can see is a tool a model will try.
  */
 function toolsFor(access: 'read' | 'write'): ToolDefinition[] {
-  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...REMINDER_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS, ...LANE_WRITE_TOOLS, ...INCIDENT_WRITE_TOOLS, ...INVENTORY_WRITE_TOOLS, ...VFARM_GATE_WRITE_TOOLS, ...LOOP_WRITE_TOOLS, ...CODEX_WRITE_TOOLS, ...INTAKE2_WRITE_TOOLS, ...UN9D_WRITE_TOOLS, ...SOP_WRITE_TOOLS, ...SIGNAL_WRITE_TOOLS, ...DECISION_WATCH_WRITE_TOOLS, ...DRAFT_EVAL_WRITE_TOOLS, ...DOCTRINE_DRILL_WRITE_TOOLS, ...SUBMIT_LOG_TEST_WRITE_TOOLS, ...MEDIA_POST_LOG_WRITE_TOOLS] : TOOLS;
+  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...REMINDER_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS, ...LANE_WRITE_TOOLS, ...INCIDENT_WRITE_TOOLS, ...INVENTORY_WRITE_TOOLS, ...VFARM_GATE_WRITE_TOOLS, ...LOOP_WRITE_TOOLS, ...CODEX_WRITE_TOOLS, ...INTAKE2_WRITE_TOOLS, ...UN9D_WRITE_TOOLS, ...SOP_WRITE_TOOLS, ...SIGNAL_WRITE_TOOLS, ...DECISION_WATCH_WRITE_TOOLS, ...DRAFT_EVAL_WRITE_TOOLS, ...DOCTRINE_DRILL_WRITE_TOOLS, ...SUBMIT_LOG_TEST_WRITE_TOOLS, ...MEDIA_POST_LOG_WRITE_TOOLS, ...CHARGE_GATE_WRITE_TOOLS] : TOOLS;
 }
 
 /**
