@@ -2770,11 +2770,20 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
   a date the person names (`YYYY-MM-DD` is 00:00 UTC that day; a time must carry its zone).
   The watch stays open: its thread is still read, a reply still counts, a linked record closing
   still moves it, and the sweep posts no reminder or escalation before the date; after it the
-  watch carries on as it was. `clear: true` ends one early. Owner, requester, Destiny or Jason
+  full wait starts again (22 Oct 2026, below). `clear: true` ends one early. Owner, requester, Destiny or Jason
   only. **An owner message up to the snooze is not the answer** (`owner_seen_until`): the owner
   asking Bays "snooze this" in the thread would otherwise close the single-part watch it asked
   to pause. A snooze clears a cap-hold problem. Each change is a history line and one
   `decision_watch_snoozed` or `_unsnoozed` event. The page shows "snoozed until …".
+- **Lifting a pause never reminds at once, and a person is nudged once per 12 hours** (22 Oct
+  2026, Jason in #workflow-logs-destiny 1792680780.486439). Bays cleared a snooze on Kaiqi's
+  DW-…-56PS and it fired at once, beside a new watch on the same ask in another thread. Now the
+  wait counts from the later of the last movement and the snooze's end (`waitFrom`), so a snooze
+  running out gives a full wait first, and clearing one sets `quiet_since` to now. Across all of
+  one person's watches, at most one reminder per `RULE.owner_gap_hours` (12): a second due watch is
+  held (`held_owner`) and goes on a later pass; escalations are not held. `open()` returns the
+  owner's other open watches (`others`, `owner_other_open` on the tool) and the tool tells Bays to
+  keep one watch when two are the same ask. `test:decision-watch` check 12e.
 - Tools, write connection: `open_decision_watch`, `list_decision_watches`,
   `close_decision_watch` (Bays' scope) and `run_decision_watch` (a person;
   `dry_run` by default). `fixture: true` makes a marked test watch whose posts
