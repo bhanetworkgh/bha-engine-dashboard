@@ -1,6 +1,6 @@
 SOP -- Genie Answer Contract: Payments, Rack Evidence and Pilot 1 Readiness
 
-Owner: Destiny Arupi (Engine Steward). 22 Oct 2026. Asked for by Jason on the 22 Oct log (#workflow-logs-destiny, 1792680780.486439): for every new evidence state or rail, an explicit contract for what Genie may say and must not say. Implements SOP 19597105 (Contract Every New Evidence State or Rail into a BHARAG Genie Pattern). The same answers bind Bays, North Star and Research Twin when they are asked these questions.
+Owner: Destiny Arupi (Engine Steward). 22 Oct 2026. Asked for by Jason on the 22 Oct log (#workflow-logs-destiny, 1792680780.486439): for every new evidence state or rail, an explicit contract for what Genie may say and must not say. Implements SOP 19597105 (Contract Every New Evidence State or Rail into a BHARAG Genie Pattern). The same answers bind Bays, North Star and Research Twin when they are asked these questions. Revised the same day (Jason, 1792686055.908889) to name the charge gate and restate both hard gates; supersedes the first version, cc5e8758-0770-4435-86b5-e90ad23d4262.
 
 Patterns, in BHARAG's build patterns from 22 Oct 2026: BP-GENIE-1792684821709-OXJ1 (can we charge money right now), BP-GENIE-1792684830549-AER2 (is this rack live or simulated), BP-GENIE-1792684839870-7A79 (is Pilot 1 ready), and BP-VFARM-1792684852004-3UIY (buyer-flow walkthrough: walk it as the buyer before automating).
 
@@ -19,7 +19,7 @@ The answer today is: No. The payment path is built and proven in a controlled in
 
 Why, from the records:
 - The rail: Stripe's hosted Checkout to a signed webhook to the lead's ledger record. One live $1 internal test payment (VFBUYER-FORMA-RU0W2P, 21 Oct 2026) went through end to end.
-- Jason's gate (SOP 51271e1c, SOP f4a6f675, Buyer Flow v2 SOP): no real external buyer pays until (a) Hardik's payment-path acceptance pass is green, and (b) Jason explicitly approves a live offer on this rail. Neither has a record yet, so the answer is no.
+- Jason's hard gate (SOP 51271e1c, SOP f4a6f675, Buyer Flow v2 SOP, restated 22 Oct): no real buyer gets charged until (a) Hardik's acceptance pass is recorded as green in the engine, and (b) Jason has explicitly approved a live offer in a first-class record. Both are rows in the engine's charge gate; neither is recorded yet, so the answer is no.
 
 How Genie answers:
 - Read read_buyer_flow. Quote counts.payments with the mode every time ("1 live internal test payment, 1 test-mode payment, 2 expired test checkouts").
@@ -58,6 +58,7 @@ The answer today is: No. Pilot 1 has not started its gates.
 Why, from the records:
 - Stage 1 lab validation: get_vfarm_gates holds no real Stage 1 record (fixtures do not count). Stage 2 and the 5-rack offer are locked behind it by the engine.
 - The Pilot 1 go/no-go criteria (four gates: release the design package, receive the unit, ship, run and expand) are written as a proposal on LOOP-FVA9 and are not yet accepted by Jason. Until they are logged as an SOP, they are a draft, not a rule.
+- Jason's hard gate (restated 22 Oct): "Pilot 1 ready" stays No until there is an actual Stage 1 record for Client 2 AND Jason has signed off FVA9 as a real SOP, not a proposal. Both, not either.
 
 How Genie answers:
 - Read get_vfarm_gates. Report the pipeline as the read gives it ("Stage 1: no record yet; Stage 2: locked until Stage 1 passes; offer: cannot be offered until Stage 2 is tied to it"). Leave fixtures out.
