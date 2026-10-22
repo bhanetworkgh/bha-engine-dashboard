@@ -82,6 +82,10 @@ const srv = http.createServer((req, res) => {
   // Their posts must not count against this run's daily cap either (the cap is read from history).
   await query(`UPDATE engine_decision_watches SET status = 'cancelled', history = '[]'::jsonb`);
   await query(`DELETE FROM engine_events WHERE event_type LIKE 'decision_watch_%'`);
+  // Most checks below put several watches on one OWNER close together in time; the one-reminder-
+  // per-person spacing (22 Oct 2026) has its own check (12e), so it is switched off until then.
+  const OWNER_GAP = dw.RULE.owner_gap_hours;
+  dw.RULE.owner_gap_hours = 0;
 
   /* 1. open, and a second ask for the same thread and owner */
   const base = { decision: 'Confirm whether the decision watch method is right, or propose adjustments.', owner_user_id: OWNER, channel_id: CH, thread_ts: '1791733223.226019', sop_refs: 'SOP -- Bays Enforces SOPs (BHARAG 9528e006)', next_step: 'Reply with the method.', created_by: JASON, created_via: 'bays' };
@@ -436,7 +440,7 @@ const srv = http.createServer((req, res) => {
     assert.match(held.history.at(-1).what, /snoozed by U0OWNER0001 until .* \(was .*\): heads-down/);
     const shown = dw.show(held, at(D + DAY + 10));
     assert.match(shown.state, /^snoozed until /);
-    assert.equal(shown.next_action_at, at(D + 3 * DAY).toISOString(), 'the next action waits for the snooze');
+    assert.equal(shown.next_action_at, at(D + 4 * DAY).toISOString(), 'the next action is a full wait after the snooze ends');
     assert.equal(shown.overdue, false);
     assert.equal(shown.snoozed_until, at(D + 3 * DAY).toISOString());
     // past its wait but inside the snooze: nothing posted, and a dry run says why
@@ -449,28 +453,38 @@ const srv = http.createServer((req, res) => {
     assert.equal((await row(S)).status, 'watching');
     assert.equal(slack.posts.length, before, 'nothing is posted while snoozed');
     assert.equal((await row(S)).reminders_sent, 0);
-    // the snooze ends: reminders carry on as before
+    // the snooze ends: nothing goes the moment it lifts (22 Oct 2026); a full wait later, reminder 1
+    r = await only(S, at(D + 3 * DAY + 1), true);
+    assert.match(r.would[0].action, /not due until/);
     r = await only(S, at(D + 3 * DAY + 1));
+    assert.deepEqual(r.reminded, [], 'no reminder the moment a snooze runs out');
+    assert.equal(slack.posts.length, before);
+    r = await only(S, at(D + 4 * DAY + 1));
     assert.deepEqual(r.reminded, [S]);
     assert.match(slack.posts.at(-1).text, /Reminder 1 of 3/);
-    assert.equal(dw.show(await row(S), at(D + 3 * DAY + 2)).snoozed_until, null, 'a snooze that has run out is not shown');
-    // clear ends a snooze early; clearing nothing changes nothing
-    await dw.snooze(S, JASON, at(D + 5 * DAY), null, at(D + 3 * DAY + 5));
-    sz = await dw.snooze(S, JASON, null, 'back now', at(D + 3 * DAY + 6));
+    assert.equal(dw.show(await row(S), at(D + 4 * DAY + 2)).snoozed_until, null, 'a snooze that has run out is not shown');
+    // clear ends a snooze early and the wait restarts from then; clearing nothing changes nothing
+    await dw.snooze(S, JASON, at(D + 7 * DAY), null, at(D + 6 * DAY));
+    sz = await dw.snooze(S, JASON, null, 'back now', at(D + 6 * DAY + 6));
     assert.equal(sz.ok && sz.changed, true);
-    assert.equal((await row(S)).snoozed_until, null);
-    sz = await dw.snooze(S, JASON, null, null, at(D + 3 * DAY + 7));
+    const cleared = await row(S);
+    assert.equal(cleared.snoozed_until, null);
+    assert.equal(new Date(cleared.quiet_since).getTime(), at(D + 6 * DAY + 6).getTime(), 'clearing restarts the wait from now');
+    assert.match(cleared.history.at(-1).what, /the wait starts again from now/);
+    r = await only(S, at(D + 6 * DAY + 7));
+    assert.deepEqual(r.reminded, [], 'clearing a snooze never reminds on the spot');
+    sz = await dw.snooze(S, JASON, null, null, at(D + 6 * DAY + 8));
     assert.equal(sz.ok && !sz.changed, true);
     // a cap hold's problem is cleared by a snooze, so the page does not show a stale one
     await query(`UPDATE engine_decision_watches SET last_error = 'held: today''s 12 Decision Watch posts are used; tried again on the next pass' WHERE watch_id = $1`, [S]);
-    await dw.snooze(S, OWNER, at(D + 6 * DAY), null, at(D + 3 * DAY + 8));
+    await dw.snooze(S, OWNER, at(D + 9 * DAY), null, at(D + 6 * DAY + 9));
     assert.equal((await row(S)).last_error, null);
     // a reply from the owner still closes a snoozed watch
-    slack.threads[`${CH}:${sth}`].push({ user: OWNER, ts: (at(D + 4 * DAY).getTime() / 1000).toFixed(6), text: 'done' });
-    r = await only(S, at(D + 4 * DAY + 1));
+    slack.threads[`${CH}:${sth}`].push({ user: OWNER, ts: (at(D + 7 * DAY).getTime() / 1000).toFixed(6), text: 'done' });
+    r = await only(S, at(D + 7 * DAY + 1));
     assert.deepEqual(r.closed, [S]);
     assert.equal((await row(S)).status, 'answered');
-    assert.equal((await dw.snooze(S, OWNER, at(D + 5 * DAY), null, at(D + 4 * DAY + 2))).reason, 'already_closed');
+    assert.equal((await dw.snooze(S, OWNER, at(D + 8 * DAY), null, at(D + 7 * DAY + 2))).reason, 'already_closed');
     const sev = await query(`SELECT event_type, count(*)::int AS n FROM engine_events WHERE subject_id = $1 AND event_type LIKE 'decision_watch_%snoozed' GROUP BY 1`, [S]);
     const sn = Object.fromEntries(sev.rows.map((x) => [x.event_type, x.n]));
     assert.equal(sn.decision_watch_snoozed, 4);
@@ -546,6 +560,51 @@ const srv = http.createServer((req, res) => {
     const listed = (await dw.read()).watches;
     assert.ok(listed.length && listed.every((w) => typeof w.how_it_moves === 'string' && w.how_it_moves.length > 20));
     ok('every listed watch says where a reply counts, what it does, and when the next reminder goes');
+  }
+
+  /* 12e. one reminder per person, and the owner's other watches are named on open (22 Oct 2026, Jason:
+     an unsnoozed watch nudged Kaiqi at once, on top of a new watch on the same ask in another thread) */
+  {
+    dw.RULE.owner_gap_hours = OWNER_GAP;
+    const E = 60 * 24 * 60; // two months out, clear of every other check
+    const P = `U0PAIR${String(T).slice(-6)}`; // one per run, so an earlier run's reminders never count
+    slack.threads[`${CH}:1791733500.000003`] = [];
+    const th1 = '1791733500.000001';
+    const th2 = '1791733500.000002';
+    slack.threads[`${CH}:${th1}`] = [];
+    slack.threads[`${CH}:${th2}`] = [];
+    const w1 = await dw.open({ ...base, owner_user_id: P, thread_ts: th1, decision: 'Wire Genie to the Engine Surfaces Contract.' });
+    assert.deepEqual(w1.others, [], 'nobody else is watching this person yet');
+    const w2 = await dw.open({ ...base, owner_user_id: P, thread_ts: th2, decision: 'Register the six new MCP tools in Genie.' });
+    assert.equal(w2.others.length, 1);
+    assert.equal(w2.others[0].watch_id, w1.watch.watch_id, 'opening a second watch on a person names the first');
+    for (const w of [w1, w2]) await query(`UPDATE engine_decision_watches SET created_at = $2, quiet_since = $2 WHERE watch_id = $1`, [w.watch.watch_id, at(E).toISOString()]);
+    // both due in the same pass: one reminder, the other held
+    const before = slack.posts.length;
+    let rr = await dw.sweep(at(E + 24 * 60 + 5));
+    const fromPair = [...rr.reminded].filter((id) => [w1.watch.watch_id, w2.watch.watch_id].includes(id));
+    assert.equal(fromPair.length, 1, 'one reminder per person per pass');
+    assert.equal(rr.held_owner.filter((id) => [w1.watch.watch_id, w2.watch.watch_id].includes(id)).length, 1);
+    assert.equal(slack.posts.length, before + 1);
+    // inside the gap, the other is still held, and a dry run says why
+    const heldId = [w1.watch.watch_id, w2.watch.watch_id].find((id) => id !== fromPair[0]);
+    rr = await only(heldId, at(E + 24 * 60 + 6 * 60), true);
+    assert.match(rr.would.at(-1).action, /one reminder per person per 12 hours/);
+    rr = await only(heldId, at(E + 24 * 60 + 6 * 60));
+    assert.deepEqual(rr.reminded, []);
+    // once the gap has passed, it goes
+    rr = await only(heldId, at(E + 24 * 60 + 12 * 60 + 10));
+    assert.deepEqual(rr.reminded, [heldId]);
+    // the tool hands owner_other_open back and says to keep one
+    await query(`INSERT INTO engine_builder_profiles (airtable_record_id, natural_id, fields, source, first_seen_at, updated_at, created_time) VALUES ($1, $1, $2::jsonb, 'engine', $3, $3, $3) ON CONFLICT DO NOTHING`, [P, JSON.stringify({ user_id: P, name: 'Pair Test' }), at(0).toISOString()]);
+    const t3 = await tools.openDecisionWatch.handler({ decision: 'A third ask of the same person', owner_user_id: P, requester_user_id: JASON, channel_id: CH, thread_ts: '1791733500.000003' }, { access: 'write', agent: null, dispatch: async () => ({ status: 200, body: {} }), startedAt: '' });
+    assert.equal(t3.ok, true, JSON.stringify(t3));
+    assert.equal(t3.owner_other_open.length, 2);
+    assert.match(t3.message, /2 other open watches \(owner_other_open\): if one is the same ask, keep one, not both/);
+    await dw.close(t3.watch_id, JASON, 'cancelled', 'test');
+    for (const w of [w1, w2]) await dw.close(w.watch.watch_id, JASON, 'cancelled', 'test');
+    await query(`DELETE FROM engine_builder_profiles WHERE natural_id = $1`, [P]);
+    ok('a person gets one reminder per 12 hours across all their watches, and opening another names the ones already open');
   }
 
   /* 13. events */
