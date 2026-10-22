@@ -72,4 +72,4 @@ Must never say:
 
 ## 4. When a record changes
 
-This contract follows the records, not today's facts. When Hardik's acceptance pass is recorded and Jason approves a live offer, section 1's answer changes by itself because Genie reads the ledger and the gate. When a real Stage 1 record exists, section 3 reads it. A new evidence state or a new rail is added here as a new section, with its read, its answer, and its never-say list, before any agent talks about it.
+This contract follows the records, not today's facts. Section 3 moves by itself: when a real Stage 1 record exists, get_vfarm_gates shows it and Genie reports it. Section 1 does not yet: the engine has no record type for Hardik's acceptance pass or Jason's live-offer approval, so "can we charge" stays No until those two are recorded and this SOP is updated to name where they live. A new evidence state or a new rail is added here as a new section, with its read, its answer, and its never-say list, before any agent talks about it.
