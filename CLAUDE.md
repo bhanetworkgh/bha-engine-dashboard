@@ -3986,8 +3986,32 @@ it, OWLG's own rule. The page shows the version in force per doctrine (its
 newest change) and every change, newest first; maturity states are drawn
 neutral, because NOT_SAFE_TO_CLAIM is a rule doing its job, not a fault. Home's
 Media Twin tile counts doctrines tracked once the first record lands. Media
-Twin's own output (posts, clips, the weekly platform report) is not on the page
-and it says so.
+Twin's clips and weekly platform report are not on the page and it says so.
+
+**Media Twin's second tab is Posts: the post log** (2026-10-22, Destiny — H58Q,
+Jason's SOURCE_TO_TARGET_LOG). `server/src/mediaPostLog.ts`, migration 88,
+`engine_media_post_log`, contract `docs/contracts/media-post-log.md` (also an SOP
+in BHARAG). One row per post of one picture to one place: source, picture and
+version, the Drive file, platform, classification, claim state, Jason's approval,
+the tracked link, the result, the live post's link or id, and the read-back.
+**Pictures come only from the "Approved vFarm renders" folder**
+(`APPROVED_RENDERS_FOLDER`, the one bhanetwork.org and /vfarm pull from): a post is
+queued or published only from a file there, checked in Drive on every such write
+(`google.fileParents`), and refused `drive_unchecked` when Drive cannot say.
+`check()` is pure and holds Jason's rules: CONCEPTUAL and `verified_current_p1_0`
+false only, manual only (the table's own CHECKs refuse both too), approval for
+publication is Jason's alone, queued or published needs that approval, the file in
+the folder and, for a social platform, the /vfarm link with `utm_source` = the
+platform; published needs the live post's own link or id; asset, version, source
+and platform are fixed once logged; a published row never goes back. A read-back
+update on a post already out is not re-judged. Three doors, one function:
+`write_media_post_log` / `read_media_post_log` (read on both connections, write on
+the write connection; **in no agent's scope yet**: adding one is the server list
+and that agent's n8n allow-list together), `GET/POST /api/engine/media-post-log`
+(`x-dashboard-key`, a refusal is a `rejected` line on `engine_writes`), and the
+page's `GET /api/media-post-log`. Each write is one `media_post_logged` or
+`media_post_updated` event, lane MEDIA. `npm run test:media-post-log` (14 checks;
+part 2 needs a local `_test` database).
 
 **T0NO, the doctrine read resolved to seven fields** (2026-10-09). `t0noPrimitive`
 (`server/src/systemFeeds.ts`) turns each claim in force into `maturity_state`,

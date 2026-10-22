@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useData } from '../../app/useData';
-import { getMediaDoctrine, type DoctrineChange, type DoctrineData } from '../../data';
+import { getMediaDoctrine, getMediaPostLog, type DoctrineChange, type DoctrineData, type MediaPostLogData } from '../../data';
 import {
   Card,
   CardHeader,
@@ -33,11 +33,13 @@ import {
  * its job, not a fault, so it is drawn neutral like every other state; colour
  * is kept for a genuinely bad state, and a doctrine has none of those.
  *
- * Media Twin's own output — posts, clips, the weekly platform report — is not
- * here yet, and the page does not pretend it is.
+ * Its second tab is **Posts** (2026-10-22, H58Q): the post log Jason asked for,
+ * one row per post of one picture to one place, read from engine_media_post_log
+ * (server/src/mediaPostLog.ts holds the rules). Clips and the weekly platform
+ * report are not here yet, and the page does not pretend they are.
  */
 
-const TABS = ['Doctrine'] as const;
+const TABS = ['Doctrine', 'Posts'] as const;
 type Tab = (typeof TABS)[number];
 
 const when = (iso: string | null) => (iso ? iso.slice(0, 16).replace('T', ' ') : '—');
@@ -48,15 +50,26 @@ export default function MediaTwin() {
   const [tab, setTab] = useState<Tab>('Doctrine');
   useReplayKey(tab);
   const { status, data, error } = useData(getMediaDoctrine, [], { kinds: ['media_doctrine'] });
+  const posts = useData(getMediaPostLog, [], { kinds: ['media_post_log'] });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
         title="Media Twin"
         subtitle="What vFarm may publicly claim, as Hardik's doctrine sets it"
-        below={<Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Doctrine: data?.summary.doctrines_in_force ? { n: data.summary.doctrines_in_force } : undefined }} />}
+        below={<Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Doctrine: data?.summary.doctrines_in_force ? { n: data.summary.doctrines_in_force } : undefined, Posts: posts.data?.counts.rows ? { n: posts.data.counts.rows } : undefined }} />}
       />
-      {status === 'loading' && !data ? (
+      {tab === 'Posts' ? (
+        posts.status === 'loading' && !posts.data ? (
+          <Loading />
+        ) : posts.status === 'error' && !posts.data ? (
+          <LoadFailed error={posts.error} />
+        ) : !posts.data ? (
+          <Loading />
+        ) : (
+          <Posts data={posts.data} />
+        )
+      ) : status === 'loading' && !data ? (
         <Loading />
       ) : status === 'error' && !data ? (
         <LoadFailed error={error} />
@@ -273,5 +286,103 @@ function ChangeRow({ c, open, onToggle }: { c: DoctrineChange; open: boolean; on
         </tr>
       )}
     </>
+  );
+}
+
+function Posts({ data }: { data: MediaPostLogData }) {
+  const c = data.counts;
+  const paged = usePaged(data.rows, 'all');
+  return (
+    <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-6 pb-6 md:px-8">
+      <p className="text-[12px] text-dim">
+        One row per post of one vFarm picture to one place. Pictures come only from the{' '}
+        <a className="link" href={data.approved_renders_folder.url} target="_blank" rel="noreferrer">
+          Approved vFarm renders folder ↗
+        </a>
+        , the one place bhanetwork.org and /vfarm pull from.
+      </p>
+      <StatStrip cols={4} flush>
+        <FigureCell label="Posts logged" value={c.rows} caption={c.test_rows ? `${c.test_rows} test row${c.test_rows === 1 ? '' : 's'} left out` : 'no test rows'} note="Every row a person or a pipeline logged, tests left out." />
+        <FigureCell label="Published" value={c.published} caption={`of ${c.rows}`} note="Live on a platform, with the post's own link or id." />
+        <FigureCell label="Queued" value={c.queued} caption={`of ${c.rows}`} note="Approved by Jason and waiting to go out by hand." />
+        <FigureCell label="Awaiting approval" value={c.awaiting_approval} caption={`of ${c.rows}`} note="Jason has not decided on the picture yet." />
+      </StatStrip>
+      {data.rows.length === 0 ? (
+        <EmptyState>
+          No post has been logged yet. A post is logged through <code>write_media_post_log</code> or <code>POST /api/engine/media-post-log</code>, and only
+          once Jason has approved its picture can it be queued or published. Nothing has gone out from here.
+        </EmptyState>
+      ) : (
+        <>
+          <Card className="pb-3">
+            <CardHeader title="Every post" right={<span className="tabular text-[11.5px] text-faint">newest first</span>} />
+            <TableFrame flat grow={false} label="Media Twin posts">
+              <thead>
+                <tr>
+                  <Th>logged (UTC)</Th>
+                  <Th>picture</Th>
+                  <Th>platform</Th>
+                  <Th>claim</Th>
+                  <Th>approval</Th>
+                  <Th>result</Th>
+                  <Th>live post</Th>
+                  <Th>read back</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {paged.rows.map((r) => (
+                  <tr key={r.log_id}>
+                    <td className="td tabular whitespace-nowrap text-faint">{when(r.created_at)}</td>
+                    <td className="td">
+                      <span className="font-medium text-ink">{r.asset_id}</span> <span className="text-dim">{r.asset_version}</span>
+                      {r.test && (
+                        <>
+                          {' '}
+                          <Pill>test</Pill>
+                        </>
+                      )}
+                      <div className="text-[11px] text-faint">
+                        <RecordId>{r.log_id}</RecordId> · from {r.source_id}
+                      </div>
+                    </td>
+                    <td className="td text-dim">{r.platform}</td>
+                    <td className="td text-dim">
+                      {r.classification.toLowerCase()} · {r.claim_state}
+                    </td>
+                    <td className="td">
+                      <Pill>{r.approval === 'APPROVE_FOR_EA_PUBLICATION' ? 'approved' : r.approval.toLowerCase()}</Pill>
+                    </td>
+                    <td className="td">
+                      <Pill>{r.publish_result.replace(/_/g, ' ')}</Pill>
+                    </td>
+                    <td className="td td-clip" style={{ maxWidth: '24ch' }}>
+                      {r.target_url ? (
+                        <a className="link" href={r.target_url} target="_blank" rel="noreferrer">
+                          open ↗
+                        </a>
+                      ) : (
+                        <span className="text-dim">{r.target_id ?? '—'}</span>
+                      )}
+                    </td>
+                    <td className={`td ${r.read_back === 'error' ? 'text-failing' : 'text-dim'}`} title={r.read_back_detail ?? undefined}>
+                      {r.read_back.replace(/_/g, ' ')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </TableFrame>
+          </Card>
+          <Pagination paged={paged} unit="posts" />
+        </>
+      )}
+      <Card className="pb-3">
+        <CardHeader title="The rules every post is held to" right={<span className="tabular text-[11.5px] text-faint">{data.schema}</span>} />
+        <ul className="list-disc space-y-1 px-8 pb-3 text-[12px] text-dim">
+          {data.rules.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      </Card>
+    </div>
   );
 }

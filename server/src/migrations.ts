@@ -3426,6 +3426,44 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_vfarm_readings_series ON engine_vfarm_readings (farm_id, device_id, metric, read_at DESC)`,
     ],
   },
+  {
+    // 2026-10-22, Destiny (H58Q): Jason's SOURCE_TO_TARGET_LOG. One row per post of one
+    // picture to one place. The rules are in mediaPostLog.ts; the table only holds them.
+    id: 88,
+    name: 'engine_media_post_log: which vFarm picture went where, and whether it was allowed to',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_media_post_log (
+         log_id                text PRIMARY KEY,
+         asset_id              text NOT NULL,
+         asset_version         text NOT NULL,
+         asset_file_id         text,
+         source_id             text NOT NULL,
+         platform              text NOT NULL,
+         classification        text NOT NULL DEFAULT 'CONCEPTUAL',
+         verified_current_p1_0 boolean NOT NULL DEFAULT false CHECK (verified_current_p1_0 = false),
+         claim_state           text NOT NULL,
+         approval              text NOT NULL DEFAULT 'pending',
+         approved_by           text,
+         approved_at           timestamptz,
+         manual_only           boolean NOT NULL DEFAULT true CHECK (manual_only = true),
+         automation_enabled    boolean NOT NULL DEFAULT false CHECK (automation_enabled = false),
+         utm_url               text,
+         publish_result        text NOT NULL DEFAULT 'not_published',
+         target_url            text,
+         target_id             text,
+         read_back             text NOT NULL DEFAULT 'not_checked',
+         read_back_detail      text,
+         loop_id               text,
+         notes                 text,
+         logged_by             text NOT NULL,
+         test                  boolean NOT NULL DEFAULT false,
+         created_at            timestamptz NOT NULL DEFAULT now(),
+         updated_at            timestamptz NOT NULL DEFAULT now()
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_media_post_log_asset ON engine_media_post_log (asset_id, asset_version)`,
+      `CREATE INDEX IF NOT EXISTS engine_media_post_log_created ON engine_media_post_log (created_at DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

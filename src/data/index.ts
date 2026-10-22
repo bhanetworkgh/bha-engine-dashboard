@@ -659,6 +659,41 @@ export const getMonitoringTwin = () => api<MonitoringTwinData>('/api/monitoring-
 export const getCsTwin = () => api<CstData>('/api/cs-twin');
 /** Hardik's doctrine and contract changes, for the Media Twin page (2026-09-30). */
 export const getMediaDoctrine = () => api<DoctrineData>('/api/media-doctrine');
+/** The Media Twin post log (2026-10-22, H58Q): which vFarm picture went where. */
+export interface MediaPost {
+  log_id: string;
+  asset_id: string;
+  asset_version: string;
+  asset_file_id: string | null;
+  source_id: string;
+  platform: string;
+  classification: string;
+  verified_current_p1_0: boolean;
+  claim_state: string;
+  approval: string;
+  approved_by: string | null;
+  approved_at: string | null;
+  utm_url: string | null;
+  publish_result: string;
+  target_url: string | null;
+  target_id: string | null;
+  read_back: string;
+  read_back_detail: string | null;
+  loop_id: string | null;
+  notes: string | null;
+  logged_by: string;
+  test: boolean;
+  created_at: string;
+  updated_at: string;
+}
+export interface MediaPostLogData {
+  schema: string;
+  approved_renders_folder: { id: string; url: string };
+  counts: { rows: number; published: number; queued: number; awaiting_approval: number; test_rows: number };
+  rows: MediaPost[];
+  rules: string[];
+}
+export const getMediaPostLog = () => api<MediaPostLogData>('/api/media-post-log');
 
 /**
  * A lead's status, or its notes, or both. Nothing else about a lead is

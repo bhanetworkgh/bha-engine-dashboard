@@ -87,6 +87,7 @@ import * as creditOut from './creditOut';
 import * as engineEvents from './engineEvents';
 import * as vfarmGates from './vfarmGates';
 import * as vfarmGateAuto from './vfarmGateAuto';
+import * as mediaPostLog from './mediaPostLog';
 import * as publicationDecision from './publicationDecision';
 import * as doctrineGap from './doctrineGap';
 import * as approvals from './approvals';
@@ -779,6 +780,41 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * GET reads the latest exact claim+surface event and re-validates it
      * against current doctrine, so stale or contradictory rows fail closed.
      */
+    /**
+     * The Media Twin post log (2026-10-22, Destiny — H58Q, Jason's SOURCE_TO_TARGET_LOG).
+     * GET reads (?asset_id, ?platform, ?log_id, ?include_test=1). POST logs or updates one
+     * post: { log_id?, fields, requester_user_id, test?, dry_run? }. Every rule is in
+     * mediaPostLog.ts; a refusal is 422 (or 503 when Drive cannot say) with its reason,
+     * writes nothing, and is a `rejected` line on engine_writes.
+     */
+    if (p === '/api/engine/media-post-log') {
+      if (method === 'GET') {
+        const r = await mediaPostLog.read({ asset_id: url.searchParams.get('asset_id'), platform: url.searchParams.get('platform'), log_id: url.searchParams.get('log_id'), include_test: url.searchParams.get('include_test') === '1' });
+        await mirror.logWrite({ endpoint, kind: 'media_post_log', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `${r.rows.length} row(s)`, ms: Date.now() - t0 });
+        return send(res, 200, { ok: true, ...r });
+      }
+      if (method !== 'POST') throw new HttpError(405, 'GET reads the post log; POST { log_id?, fields, requester_user_id, test?, dry_run? } logs or updates one post.');
+      const body = await readJson(req, 256 * 1024);
+      try {
+        const r = await mediaPostLog.write({
+          log_id: str(body?.log_id, 40) || null,
+          fields: (body?.fields ?? {}) as Record<string, unknown>,
+          by: str(body?.requester_user_id, 40),
+          via: 'http',
+          test: body?.test === true,
+          dry_run: body?.dry_run === true,
+          inApprovedFolder: mediaPostLog.inApprovedFolder,
+        });
+        await mirror.logWrite({ endpoint, kind: 'media_post_log', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: r.row.log_id, outcome: r.dry_run || !r.written ? 'unchanged' : r.created ? 'inserted' : 'updated', detail: r.message, ms: Date.now() - t0 });
+        return send(res, r.written && r.created ? 201 : 200, r);
+      } catch (e) {
+        if (e instanceof mediaPostLog.MediaPostLogError) {
+          await mirror.logWrite({ endpoint, kind: 'media_post_log', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: str(body?.log_id, 40) || null, outcome: 'rejected', detail: `${e.status} ${e.reason}: ${e.message}`.slice(0, 300), ms: Date.now() - t0 });
+          return send(res, e.status, { ok: false, reason: e.reason, message: `${e.message} Nothing was written.`, ...e.extra });
+        }
+        throw e;
+      }
+    }
     if (p === '/api/engine/publication-decision') {
       const body = method === 'POST' ? await readJson(req, 64 * 1024) : null;
       if (method !== 'GET' && method !== 'POST') throw new HttpError(405, 'GET or POST only.');
@@ -1658,6 +1694,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       case '/api/cs-twin':
         return send(res, 200, await systemFeeds.cstData());
       /** Hardik's doctrine and contract changes, as posted (2026-09-30). */
+      /** The Media Twin post log, for the page's Posts tab (2026-10-22, H58Q). A read; tests left out. */
+      case '/api/media-post-log':
+        return send(res, 200, await mediaPostLog.read({ limit: 500 }));
       case '/api/media-doctrine': {
         // Media Twin renders the history and consumes the exact same resolved
         // T0NO gate as HTTP/MCP readers. The history remains presentation;
