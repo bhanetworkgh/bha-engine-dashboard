@@ -263,6 +263,11 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-18: the Engine Surfaces Contract. Genie answers "where is this buyer" and "has
         // Stripe seen a payment" from the engine's read, never its own, and reads SOPs whole.
         'read_buyer_flow', 'read_sop',
+        // 2026-10-22: Jason's ask on the 22 Oct log (C0AFPJ5S1C1 1792680780.486439): Genie answers
+        // "is this rack live or simulated" from each farm's evidence_status, and "is Pilot 1 ready"
+        // from the gate records, never on its own. Both reads; the answer contract is the SOP
+        // "SOP -- Genie Answer Contract: Payments, Rack Evidence and Pilot 1 Readiness".
+        'read_monitoring_twin', 'get_vfarm_gates',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>
