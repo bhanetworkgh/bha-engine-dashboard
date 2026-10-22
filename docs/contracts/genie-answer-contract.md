@@ -2,7 +2,7 @@ SOP -- Genie Answer Contract: Payments, Rack Evidence and Pilot 1 Readiness
 
 Owner: Destiny Arupi (Engine Steward). 22 Oct 2026. Asked for by Jason on the 22 Oct log (#workflow-logs-destiny, 1792680780.486439): for every new evidence state or rail, an explicit contract for what Genie may say and must not say. Implements SOP 19597105 (Contract Every New Evidence State or Rail into a BHARAG Genie Pattern). The same answers bind Bays, North Star and Research Twin when they are asked these questions.
 
-Patterns: BP-GENIE (can we charge money), BP-GENIE (is this rack live or simulated), BP-GENIE (is Pilot 1 ready), and BP-VFARM (buyer-flow walkthrough), all registered in BHARAG's build patterns on 22 Oct 2026.
+Patterns, in BHARAG's build patterns from 22 Oct 2026: BP-GENIE-1792684821709-OXJ1 (can we charge money right now), BP-GENIE-1792684830549-AER2 (is this rack live or simulated), BP-GENIE-1792684839870-7A79 (is Pilot 1 ready), and BP-VFARM-1792684852004-3UIY (buyer-flow walkthrough: walk it as the buyer before automating).
 
 ## 0. Rules that hold for all three answers
 
