@@ -1421,6 +1421,22 @@ testing only, no live customer payments). `server/src/stripeLedger.ts`, migratio
 - **Read-back**: `GET /api/engine/vfarm-payments` (`x-dashboard-key`, `?lead_id=`).
   `npm run test:stripe-ledger` pins it against a local database.
 
+**The charge gate: the two records "can we charge real buyers" waits on** (2026-10-22, Destiny —
+Jason on the 22 Oct log, #workflow-logs-destiny 1792686055.908889). `server/src/chargeGate.ts`,
+migration 89, `engine_charge_gate`, append-only. Two kinds: Hardik's `acceptance_pass` on the payment
+path (green or red) and Jason's `offer_approval` of a live offer (approved or withdrawn, an approval
+naming its `scope` in Jason's words). **Real buyers may be charged only while the newest pass is green
+AND the newest offer is approved**; nothing recorded is no, a test row never counts, and a change of
+mind is a new row, never an edit. **Who decides is in code and in the table's CHECK**: the pass is
+Hardik's (`U0BKT6MAW2Y`), the offer Jason's (`U0A9V97949F`); the recorder is that person or Destiny;
+`evidence_link` is that person's own Slack message, and Slack must confirm they posted it (Bays, then
+North Star's token; unreadable is a refusal). `record_charge_gate` (write connection, no agent's scope,
+refused on any agent token; audited kind `charge_gate`) writes one row and one `charge_gate_recorded`
+event in one transaction; `read_charge_gate` (both connections) answers with the reason and history.
+**`read_buyer_flow` carries it as `charge_gate`**, so Genie and every agent read it with the flow, and a
+charge gate it cannot read is "do not know, treat as no". It charges nobody, moves no stage and opens no
+checkout. `npm run test:charge-gate`.
+
 **Buyer flow v2: five stages and the Stage 3 proposal page** (2026-10-17, Destiny — Jason in
 #bha-coordination the same day; SOPs 09cb58a7, the flow with its markings, and 66570ea2, Stage 3
 is non-transactional). `server/src/proposal.ts`, migration 81.

@@ -7,6 +7,7 @@
  */
 import * as mirror from '../mirror';
 import * as leadFlow from '../leadFlow';
+import * as chargeGate from '../chargeGate';
 import { PIPELINE } from '../../../src/data/leadPipeline';
 import type { ToolDefinition } from './tools';
 
@@ -16,7 +17,7 @@ const LIMIT_MAX = 200;
 export const readBuyerFlow: ToolDefinition = {
   name: 'read_buyer_flow',
   description:
-    'Where each vFarm buyer lead is in the five-stage flow, and what Stripe has actually seen for it. The engine is the only place that decides either: show these values as written, and if this read fails say you do not know. Stages: 1 Interest (Form A), 2 Site specification (position "invited" until Form 2 is in, then "spec"), 3 Proposal, 4 Agreement and deposit, 5 Customer; "closed" with a reason wins over any stage. Payment state is paid, failed, expired or pending, and mode test or live: a test payment is never a customer payment. A payment sets no stage, entitlement or subscriber; every proposal is a test until Canon Lock; Stage 5 is not a subscriber. Without arguments: counts by position and payment over every lead, and the open leads newest first. Narrow with buyer_intake_id (one lead, closed or not) or position. No name, email, organisation or form answer is ever returned; the lead is named by its buyer_intake_id. Stage moves, closes and reopens are dated as vfarm_flow_stage_moved, vfarm_flow_closed and vfarm_flow_reopened in read_engine_events from 18 Oct 2026. The full contract is the SOP "SOP -- Engine Surfaces Contract: vFarm buyer flow and Stripe", read whole with read_sop.',
+    'Where each vFarm buyer lead is in the five-stage flow, and what Stripe has actually seen for it. The engine is the only place that decides either: show these values as written, and if this read fails say you do not know. Stages: 1 Interest (Form A), 2 Site specification (position "invited" until Form 2 is in, then "spec"), 3 Proposal, 4 Agreement and deposit, 5 Customer; "closed" with a reason wins over any stage. Payment state is paid, failed, expired or pending, and mode test or live: a test payment is never a customer payment. A payment sets no stage, entitlement or subscriber; every proposal is a test until Canon Lock; Stage 5 is not a subscriber. Without arguments: counts by position and payment over every lead, and the open leads newest first. Narrow with buyer_intake_id (one lead, closed or not) or position. No name, email, organisation or form answer is ever returned; the lead is named by its buyer_intake_id. Stage moves, closes and reopens are dated as vfarm_flow_stage_moved, vfarm_flow_closed and vfarm_flow_reopened in read_engine_events from 18 Oct 2026. Every answer also carries charge_gate: whether real buyers can be charged right now (Hardik\'s acceptance pass green AND Jason\'s live-offer approval recorded), with the reason to quote; no payment changes it. The full contract is the SOP "SOP -- Engine Surfaces Contract: vFarm buyer flow and Stripe", read whole with read_sop.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -38,11 +39,21 @@ export const readBuyerFlow: ToolDefinition = {
     const limit = Math.max(1, Math.min(LIMIT_MAX, Math.floor(Number(args.limit)) || LIMIT));
     const r = await leadFlow.read({ buyer_intake_id: buyer, position, include_closed: args.include_closed === true });
     const leads = r.leads.slice(0, limit);
+    // "Can we charge real buyers?" is answered here too, so Genie and the agents read it with the flow.
+    // A charge gate that cannot be read is said to be unknown, never read as yes.
+    let charge_gate: Record<string, unknown>;
+    try {
+      const g = await chargeGate.status('vfarm_stripe_live');
+      charge_gate = { ok: true, rail: g.rail, can_charge_live: g.can_charge_live, answer: g.answer, missing: g.missing, acceptance_pass: g.acceptance_pass, offer_approval: g.offer_approval };
+    } catch (e) {
+      charge_gate = { ok: false, can_charge_live: false, answer: 'I could not read the charge gate just now, so I do not know; treat it as no.', error: e instanceof Error ? e.message : String(e) };
+    }
     const out = {
       ok: true,
       contract: r.contract,
       asked_for: { buyer_intake_id: buyer, position, include_closed: args.include_closed === true },
       counts: r.counts,
+      charge_gate,
       matched: r.leads.length,
       returned: leads.length,
       leads,
@@ -51,6 +62,7 @@ export const readBuyerFlow: ToolDefinition = {
         buyer && !r.leads.length ? `No lead carries buyer_intake_id ${buyer}. That is not proof the person never filled in Form A: check the id.` : null,
         r.leads.length > leads.length ? `${r.leads.length} leads matched and the newest ${leads.length} are returned. Narrow with position or raise limit (at most ${LIMIT_MAX}).` : null,
         'counts.payments is keyed state_mode, e.g. paid_test. A key that is not there means no such payment is recorded.',
+        'charge_gate answers "can we charge real buyers right now": yes only when can_charge_live is true. Quote charge_gate.answer. A paid payment, live or test, never changes it.',
       ].filter(Boolean),
     };
     await mirror.logWrite({ endpoint: 'mcp:read_buyer_flow', kind: 'vfarm_leads', method: 'MCP', key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET', outcome: 'read', detail: `${buyer ?? position ?? 'all'} → ${leads.length} of ${r.leads.length} (${r.counts.total} leads held)`, ms: Date.now() - t0 });
