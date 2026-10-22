@@ -13276,3 +13276,10 @@ Files:      docs/contracts/genie-answer-contract.md (header notes the revision; 
 Problem:    log_sop with supersedes ["cc5e8758-…"] was refused: "supersedes names ids that are not SOPs held: cc5e8758-0770-4435-86b5-e90ad23d4262" (audit 2978), because the old one had to be deleted first to free the title.
 Fix:        delete_sop cc5e8758 (full text kept on audit 2977), then log_sop without supersedes; the text itself names the id it replaces. New SOP 78478299-c1de-4303-a096-e7ab4d90b8ac (audit 2979). read_sop shows the whole text; verified:false only because four nested list items lost their two-space indent.
 Decision:   Replaced rather than added a second SOP beside it, so Genie reads one contract, not two that disagree.
+
+## 2026-10-22 19:00 — Missing Codex log check, a standing hourly DM (DW-9EP8)
+Intent:     Jason's ask of 20 Oct (DW-1792516757092-9EP8): something that catches a missing Codex log without anyone noticing an absence. Kavin's 20 Oct log failed on submission and nothing flagged it until a person looked.
+Files:      server/src/codexGap.ts (new), server/src/mcp/codexGapTools.ts (new), server/src/mcp/tools.ts, server/src/index.ts (startSweeping at boot), server/src/timers.ts, server/test/codex-gap.test.cjs (new), package.json (test:codex-gap), CLAUDE.md.
+Problem:    The test's seed rows were refused: 'null value in column "builder_id"' and then 'null value in column "first_seen_at"' on engine_codex_submissions (both NOT NULL); the seed now fills both.
+Fix:        Hourly: regular loggers (5 of the last 14 days) with no submission for 30 hours get one Bays DM, Destiny a one-line copy. The claim is an engine event keyed on builder + newest log, written before the DM; a refused DM deletes it and retries. 6 checks pass on a local _test database.
+Decision:   Hours, not a calendar day: Kaiqi logs at 04:00 Lagos and Jegan and Kavin in India's evening, so a Lagos "today" would flag people who logged. Layer 0 holds count as submitted, because a parked log was sent. Jason is never flagged; he reviews.

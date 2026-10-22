@@ -74,6 +74,7 @@ import * as publishGate from './publishGate';
 import * as draftEval from './draftEval';
 import * as decisionWatch from './decisionWatch';
 import * as patternCapture from './patternCapture';
+import * as codexGap from './codexGap';
 import * as sops from './sops';
 import { toolByName as mcpToolByName } from './mcp/tools';
 import { callerStore } from './mcp/caller';
@@ -2807,6 +2808,7 @@ async function boot(): Promise<void> {
     void draftEval.markInterrupted().then((n) => { if (n) console.log(`[draft-eval] ${n} run(s) left running by the last process marked interrupted`); }).catch((e) => console.error(`[draft-eval] interrupted runs not marked: ${(e as Error).message}`));
     decisionWatch.startSweeping();
     patternCapture.startSweeping();
+    codexGap.startSweeping();
     intake2.startSweeping();
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();
