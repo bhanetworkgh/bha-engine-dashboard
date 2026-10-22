@@ -234,6 +234,20 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       ]),
     },
     {
+      // 2026-10-22, Destiny: Hardik's independent audit of the Stripe -> ledger path (Jason's
+      // acceptance pass on the controlled $1 run, #vfarm-early-access 1792596244.622659).
+      // A person's look-only key for his own Claude or Codex: reads only, and never a write
+      // tool, so the audit cannot change what it is checking. A read token never resolves to write.
+      agent: 'hardik_audit',
+      env: 'READONLY_SECRETS_HARDIK_AUDIT',
+      access: 'read',
+      tools: new Set([
+        'query_postgres', 'describe_schema', 'get_health', 'search_logs',
+        'list_pages', 'get_page_structure', 'get_page_data',
+        'read_buyer_flow', 'read_engine_events', 'read_sop',
+      ]),
+    },
+    {
       // 2026-10-11: Slack Genie (Kaiqi's service), LOOP-1791653985161-QRTH. Jason's go-time notice:
       // Genie reads the same two surfaces the three agents read, read-only, so it never builds its
       // own view of incidents. A read token can never resolve to write.
