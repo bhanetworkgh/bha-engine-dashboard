@@ -1569,6 +1569,13 @@ repeat adds a line and never a second job. The incident stays open as before. Fi
 real farm with a crop cycle set (none yet on 21 Oct). Jegan's five vision doubts wait on the
 camera signals (F0UG). `npm run test:monitoring-recurrence`, `npm run test:range-doubt`.
 
+**CST test traffic is kept apart** (24 Oct 2026, Destiny — D8). About 1,335 of 1,379 `engine_cst_turns`
+rows were the automated tests' fake +1 555 numbers and hand-made turn ids, counted as customers.
+Migration 92 adds `test` and `test_reason` and backfills them; `systemFeeds.cstTestReason` applies the
+same rule on every write (`test: true` on the event, a +1 555 number, or a turn id that is not a Twilio SID
+or a channel id). Test rows are listed and marked on the CST page (hidden until "show test traffic") and
+counted in no figure there or in `engine.ts`. `npm run test:cst-test-traffic`.
+
 **Everything vFarm records reaches the dashboard** (24 Oct 2026, Destiny — D5; Jegan's Monday plan in
 #bha-coordination 1792735807.245499). The snapshot's optional `history`, `layout` and `rover_config`
 blocks (contract in `docs/contracts/vfarm.md`) land in `engine_vfarm_history` (migration 91), one row per

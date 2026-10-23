@@ -95,6 +95,14 @@ A single event can be posted on its own, without the `events` wrapper. A batch h
 - `401` means the key is missing or wrong.
 - Every call, refused ones included, is logged on the dashboard's engine-writes log.
 
+## Test traffic is marked, never counted (24 Oct 2026, D8)
+
+Send `"test": true` on any event that is a test. The dashboard also treats as a test, on every write and
+for the rows held before this rule (migration 92): any +1 555 number on the event (fictional by design),
+and a `turn_id` that is neither a Twilio SID (`CA`, `SM` or `MM` + 32 hex) nor a channel id
+(`voice_`, `sms_` or `web_` + a uuid). A test row is stored, listed on the CST page behind "show test
+traffic" with the reason, and left out of every CST figure on the page and on the engine overview.
+
 ## Test without leaving a row
 
 Add `"dry_run": true` at the top level. Every check and database write runs, then everything is rolled back, and the answer says `"dry_run": true`.
