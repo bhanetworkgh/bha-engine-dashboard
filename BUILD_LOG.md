@@ -13318,3 +13318,7 @@ Intent:     Genie, asked "Is rack vFarm_01 live or simulated?" (#workflow-logs-d
 Files:      server/src/vfarmEvidence.ts, server/src/mcp/tools.ts, server/src/mcp/vfarmGateTools.ts, server/test/vfarm-evidence.test.cjs
 Problem:    read_monitoring_twin filtered farm_id by exact id only; "vFarm_01" is the name (code vfarm-01) of farm 9598b09c. With no match, evidence_status fell to noRealFarm(). get_vfarm_gates carried nothing about FVA9.
 Fix:        matchFarms(): id exactly, else code or name compared without case or punctuation. The answer carries matched_by and held_farms; a name nothing answers to gets unknownFarm() ("I don't hold a farm called … The farms I do hold are …") and a warning, never noRealFarm(); two matches are warned never to be merged. get_vfarm_gates returns pilot1_go_no_go from LOOP-FVA9's own status, with the sentence to say (proposal awaiting Jason; unknown if unreadable). vfarm-evidence 9 checks; vfarm-gates 14, vfarm-gate-auto 10, genie-doctrine 13, mcp-write pass.
+
+## 2026-10-24 12:05 — get_vfarm_gates: Pilot 1 go/no-go read fixed (D6)
+
+Live check after a7992c0: `pilot1_go_no_go` answered `unknown` with `function pg_catalog.timezone(unknown, text) does not exist`, because `engine_loops.updated_at` is text, not a timestamp. The query now reads the column as stored. It failed safe (unknown, never accepted), which is why it was caught on the live read rather than looking fine.

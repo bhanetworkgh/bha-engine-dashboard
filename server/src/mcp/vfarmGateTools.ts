@@ -42,7 +42,7 @@ export const FVA9 = 'LOOP-1792528168754-FVA9';
 async function pilot1GoNoGo() {
   try {
     const r = await query<{ status: string | null; updated_at: string | null }>(
-      `SELECT fields->>'Status' AS status, to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+      `SELECT fields->>'Status' AS status, updated_at
          FROM engine_loops WHERE natural_id = $1 ORDER BY updated_at DESC LIMIT 1`,
       [FVA9],
     );
