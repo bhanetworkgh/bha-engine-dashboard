@@ -930,6 +930,22 @@ const TURN_COLS = [
   'message', 'reply', 'intent', 'status', 'reason', 'incident_id', 'duration_ms', 'occurred_at',
 ];
 
+/**
+ * Whether a CST row is test traffic, and why (24 Oct 2026, D8; migration 92 has the same rule in SQL
+ * for the rows already held). The event saying test: true; any +1 555 number on it (fictional by
+ * design: the automated tests use them); or a turn id that is neither a Twilio SID (CA/SM/MM + 32
+ * hex) nor a channel id (voice_/sms_/web_ + uuid). Null means real.
+ */
+const TWILIO_SID = /^(CA|SM|MM)[0-9a-f]{32}$/;
+const CHANNEL_ID = /^(voice|sms|web)_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const FAKE_555 = /(^|[^0-9])1555[0-9]{7}([^0-9]|$)/;
+export function cstTestReason(turnId: string, payload: unknown): string | null {
+  if (isObj(payload) && (payload.test === true || payload.test === 'true')) return 'sent as a test';
+  if (FAKE_555.test(JSON.stringify(payload ?? ''))) return 'a fake +1 555 number';
+  if (!TWILIO_SID.test(turnId) && !CHANNEL_ID.test(turnId)) return 'a hand-made turn id, not a Twilio or channel id';
+  return null;
+}
+
 export async function storeCst(body: Obj): Promise<CstStoreResult & { dry_run: boolean }> {
   const batch = Array.isArray(body.events);
   const list = batch ? (body.events as unknown[]) : [body];
@@ -946,13 +962,16 @@ export async function storeCst(body: Obj): Promise<CstStoreResult & { dry_run: b
         const vals = TURN_COLS.map((k) => ev.row[k]);
         const set = TURN_COLS.map((k) => `${k} = EXCLUDED.${k}`).join(', ');
         const changedCheck = TURN_COLS.map((k) => `engine_cst_turns.${k} IS DISTINCT FROM EXCLUDED.${k}`).join(' OR ');
+        const why = cstTestReason(ev.turn_id, ev.payload);
+        const n = TURN_COLS.length;
         const r = await db.query<{ inserted: boolean }>(
-          `INSERT INTO engine_cst_turns (turn_id, ${TURN_COLS.join(', ')}, turn_payload)
-           VALUES ($1, ${TURN_COLS.map((_, i) => `$${i + 2}`).join(', ')}, $${TURN_COLS.length + 2})
-           ON CONFLICT (turn_id) DO UPDATE SET ${set}, turn_payload = EXCLUDED.turn_payload, received_at = now()
-             WHERE ${changedCheck} OR engine_cst_turns.turn_payload IS NULL
+          `INSERT INTO engine_cst_turns (turn_id, ${TURN_COLS.join(', ')}, turn_payload, test, test_reason)
+           VALUES ($1, ${TURN_COLS.map((_, i) => `$${i + 2}`).join(', ')}, $${n + 2}, $${n + 3}, $${n + 4})
+           ON CONFLICT (turn_id) DO UPDATE SET ${set}, turn_payload = EXCLUDED.turn_payload, received_at = now(),
+             test = engine_cst_turns.test OR EXCLUDED.test, test_reason = coalesce(engine_cst_turns.test_reason, EXCLUDED.test_reason)
+             WHERE ${changedCheck} OR engine_cst_turns.turn_payload IS NULL OR (EXCLUDED.test AND NOT engine_cst_turns.test)
            RETURNING (xmax = 0) AS inserted`,
-          [ev.turn_id, ...vals, JSON.stringify(ev.payload)],
+          [ev.turn_id, ...vals, JSON.stringify(ev.payload), why !== null, why],
         );
         if (!r.rows.length) unchanged++;
         else if (r.rows[0].inserted) inserted++;
@@ -960,18 +979,20 @@ export async function storeCst(body: Obj): Promise<CstStoreResult & { dry_run: b
       } else {
         const rank = DELIVERY_RANK[ev.status] ?? 0;
         const r = await db.query<{ inserted: boolean }>(
-          `INSERT INTO engine_cst_turns (turn_id, delivery_status, delivery_error, delivery_attempts, delivery_at, delivery_payload)
-           VALUES ($1,$2,$3,$4,$5,$6)
+          `INSERT INTO engine_cst_turns (turn_id, delivery_status, delivery_error, delivery_attempts, delivery_at, delivery_payload, test, test_reason)
+           VALUES ($1,$2,$3,$4,$5,$6,$8,$9)
            ON CONFLICT (turn_id) DO UPDATE SET delivery_status = EXCLUDED.delivery_status, delivery_error = EXCLUDED.delivery_error,
              delivery_attempts = coalesce(EXCLUDED.delivery_attempts, engine_cst_turns.delivery_attempts),
-             delivery_at = EXCLUDED.delivery_at, delivery_payload = EXCLUDED.delivery_payload
-             WHERE (CASE engine_cst_turns.delivery_status WHEN 'queued' THEN 1 WHEN 'sending' THEN 1 WHEN 'sent' THEN 2
+             delivery_at = EXCLUDED.delivery_at, delivery_payload = EXCLUDED.delivery_payload,
+             test = engine_cst_turns.test OR EXCLUDED.test, test_reason = coalesce(engine_cst_turns.test_reason, EXCLUDED.test_reason)
+             WHERE ((CASE engine_cst_turns.delivery_status WHEN 'queued' THEN 1 WHEN 'sending' THEN 1 WHEN 'sent' THEN 2
                       WHEN 'delivered' THEN 3 WHEN 'undelivered' THEN 3 WHEN 'failed' THEN 3 ELSE 0 END) <= $7
                AND (engine_cst_turns.delivery_status IS DISTINCT FROM EXCLUDED.delivery_status
                     OR engine_cst_turns.delivery_error IS DISTINCT FROM EXCLUDED.delivery_error
-                    OR engine_cst_turns.delivery_attempts IS DISTINCT FROM EXCLUDED.delivery_attempts)
+                    OR engine_cst_turns.delivery_attempts IS DISTINCT FROM EXCLUDED.delivery_attempts))
+               OR (EXCLUDED.test AND NOT engine_cst_turns.test)
            RETURNING (xmax = 0) AS inserted`,
-          [ev.turn_id, ev.status, ev.error, ev.attempts, ev.at, JSON.stringify(ev.payload), rank],
+          [ev.turn_id, ev.status, ev.error, ev.attempts, ev.at, JSON.stringify(ev.payload), rank, cstTestReason(ev.turn_id, ev.payload) !== null, cstTestReason(ev.turn_id, ev.payload)],
         );
         if (!r.rows.length) unchanged++;
         else if (r.rows[0].inserted) inserted++;
@@ -1035,6 +1056,8 @@ interface CstRow {
   delivery_attempts: number | null;
   delivery_at: string | null;
   retention_cleared_at: string | null;
+  test: boolean;
+  test_reason: string | null;
 }
 
 export async function cstData() {
@@ -1042,12 +1065,13 @@ export async function cstData() {
   const r = await query<CstRow>(
     `SELECT turn_id, conversation_id, tenant_id, project_id, channel, customer_ref, person_id, phone_e164, customer_name, role, is_known,
             message, reply, intent, status, reason, incident_id, duration_ms, ${t('occurred_at')}, ${t('received_at')},
-            delivery_status, delivery_error, delivery_attempts, ${t('delivery_at')}, ${t('retention_cleared_at')}
+            delivery_status, delivery_error, delivery_attempts, ${t('delivery_at')}, ${t('retention_cleared_at')}, test, test_reason
        FROM engine_cst_turns
       ORDER BY coalesce(occurred_at, received_at) DESC`,
   );
   const turns = r.rows.map((x) => ({ ...x, outcome: cstOutcome(x.status, x.intent) }));
-  const real = turns.filter((x) => x.status !== null);
+  // Test traffic (migration 92) is listed but counted in no figure: a fake number is not a customer.
+  const real = turns.filter((x) => x.status !== null && !x.test);
   const n = real.length;
   const now = Date.now();
   const at = (x: CstRow) => Date.parse(x.occurred_at ?? x.received_at);
@@ -1084,10 +1108,12 @@ export async function cstData() {
         lost: md.filter((x) => x.delivery_status === 'failed' || x.delivery_status === 'undelivered').length,
       };
     });
-  const m = await query<{ first: string | null; last_received: string | null; orphans: number }>(
+  const m = await query<{ first: string | null; last_received: string | null; orphans: number; test_rows: number; test_turns: number }>(
     `SELECT to_char(min(coalesce(occurred_at, received_at)) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS first,
             to_char(max(greatest(received_at, coalesce(delivery_at, received_at))) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_received,
-            count(*) FILTER (WHERE status IS NULL)::int AS orphans
+            count(*) FILTER (WHERE status IS NULL AND NOT test)::int AS orphans,
+            count(*) FILTER (WHERE test)::int AS test_rows,
+            count(*) FILTER (WHERE test AND status IS NOT NULL)::int AS test_turns
        FROM engine_cst_turns`,
   );
   return {
@@ -1097,6 +1123,9 @@ export async function cstData() {
       first_at: m.rows[0]?.first ?? null,
       last_received_at: m.rows[0]?.last_received ?? null,
       deliveries_without_turn: m.rows[0]?.orphans ?? 0,
+      test_rows: m.rows[0]?.test_rows ?? 0,
+      test_turns: m.rows[0]?.test_turns ?? 0,
+      test_note: 'Test traffic: an event sent with test: true, a fake +1 555 number, or a hand-made turn id. Listed, marked, and counted in no figure.',
     },
     summary: {
       turns: n,

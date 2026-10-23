@@ -3924,6 +3924,9 @@ export interface CstTurn {
   retention_cleared_at: string | null;
   /** Answered · Escalated · Refused · Needs verification · Unknown caller · Failed · Turn not received. */
   outcome: string;
+  /** Test traffic (migration 92): listed and marked, counted in no figure. Optional: an older server does not send it. */
+  test?: boolean;
+  test_reason?: string | null;
 }
 
 export interface CstCohort {
@@ -3938,7 +3941,7 @@ export interface CstCohort {
 
 export interface CstData {
   turns: CstTurn[];
-  meta: { rows: number; first_at: string | null; last_received_at: string | null; deliveries_without_turn: number };
+  meta: { rows: number; first_at: string | null; last_received_at: string | null; deliveries_without_turn: number; test_rows?: number; test_turns?: number; test_note?: string };
   summary: {
     turns: number;
     conversations: number;

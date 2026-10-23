@@ -113,6 +113,7 @@ function Freshness({ data }: { data: CstData }) {
       {data.meta.deliveries_without_turn
         ? ` · ${data.meta.deliveries_without_turn} delivery update(s) whose turn has not arrived, shown as "turn not received" and left out of every figure`
         : ''}
+      {data.meta.test_rows ? ` · ${data.meta.test_rows} test row(s) (fake +1 555 numbers, hand-made ids or sent as a test) left out of every figure` : ''}
     </p>
   );
 }
@@ -120,7 +121,11 @@ function Freshness({ data }: { data: CstData }) {
 function Turns({ data }: { data: CstData }) {
   const s = data.summary;
   const [open, setOpen] = useState<string | null>(null);
-  const paged = usePaged(data.turns, 'all');
+  // Test traffic (24 Oct 2026, D8): hidden by default, never counted. The toggle only lists it.
+  const [showTest, setShowTest] = useState(false);
+  const testN = data.turns.filter((t) => t.test).length;
+  const rows = showTest ? data.turns : data.turns.filter((t) => !t.test);
+  const paged = usePaged(rows, showTest ? 'with-test' : 'real');
   return (
     <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-6 pb-6 md:px-8">
       <Freshness data={data} />
@@ -137,7 +142,20 @@ function Turns({ data }: { data: CstData }) {
         <PercentileCell label="Time to reply" p={s.duration} unit="s" caption={`over ${s.duration.n} of ${s.duration.of} turns that sent it`} />
       </StatStrip>
       <Card className="pb-3">
-        <CardHeader title="Turns" right={<span className="tabular text-[11.5px] text-faint">newest first · click a row for the whole record</span>} />
+        <CardHeader
+          title="Turns"
+          right={
+            <span className="flex items-center gap-3 tabular text-[11.5px] text-faint">
+              {testN > 0 && (
+                <label className="flex items-center gap-1.5" title={data.meta.test_note}>
+                  <input type="checkbox" checked={showTest} onChange={(e) => setShowTest(e.target.checked)} />
+                  show test traffic ({testN})
+                </label>
+              )}
+              <span>newest first · click a row for the whole record</span>
+            </span>
+          }
+        />
         <TableFrame flat grow={false} label="Customer Service Twin turns">
           <thead>
             <tr>
@@ -168,7 +186,14 @@ function TurnRow({ t, open, onToggle }: { t: CstTurn; open: boolean; onToggle: (
     <>
       <tr className="cursor-pointer" onClick={onToggle}>
         <td className="td tabular whitespace-nowrap text-faint">{when(t.occurred_at ?? t.received_at)}</td>
-        <td className="td tabular text-dim">{who(t)}</td>
+        <td className="td tabular text-dim">
+          {who(t)}
+          {t.test && (
+            <span className="ml-1.5" title={t.test_reason ?? 'test traffic'}>
+              <Pill>test</Pill>
+            </span>
+          )}
+        </td>
         <td className="td text-dim">{t.channel ?? '—'}</td>
         <td className="td td-clip" style={{ maxWidth: '44ch' }} title={t.message ?? undefined}>
           {t.message ?? <span className="text-faint">{t.retention_cleared_at ? 'cleared after 180 days' : t.status === null ? 'turn not received' : 'not sent'}</span>}
