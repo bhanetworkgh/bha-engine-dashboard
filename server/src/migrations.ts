@@ -3529,6 +3529,33 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE engine_vfarm_snapshots ADD COLUMN IF NOT EXISTS history jsonb`,
     ],
   },
+  {
+    // 24 Oct 2026, Destiny (D8): about 1,335 of the 1,379 CST rows came from the automated tests' fake
+    // +1 555 numbers and hand-made turn ids, none marked, so every CST figure counted them as
+    // customers. A row is a test when the event says so (test: true), when any number on it is a
+    // +1 555 one (fictional by design), or when its turn id is not a Twilio SID (CA/SM/MM + 32 hex)
+    // or a channel id (voice_/sms_/web_ + uuid). The same rule runs on every write
+    // (systemFeeds.cstTestReason); this backfills the rows already held. Nothing is deleted.
+    id: 92,
+    name: 'engine_cst_turns.test: CST test traffic kept apart from real customers',
+    statements: [
+      `ALTER TABLE engine_cst_turns ADD COLUMN IF NOT EXISTS test boolean NOT NULL DEFAULT false`,
+      `ALTER TABLE engine_cst_turns ADD COLUMN IF NOT EXISTS test_reason text`,
+      `UPDATE engine_cst_turns SET test = true, test_reason = CASE
+          WHEN coalesce(turn_payload->>'test', delivery_payload->>'test') = 'true' THEN 'sent as a test'
+          WHEN coalesce(phone_e164, '') ~ '^\\+?1555[0-9]{7}$'
+            OR coalesce(turn_payload::text, '') ~ '(^|[^0-9])1555[0-9]{7}([^0-9]|$)'
+            OR coalesce(delivery_payload::text, '') ~ '(^|[^0-9])1555[0-9]{7}([^0-9]|$)' THEN 'a fake +1 555 number'
+          ELSE 'a hand-made turn id, not a Twilio or channel id' END
+        WHERE test = false AND (
+          coalesce(turn_payload->>'test', delivery_payload->>'test') = 'true'
+          OR coalesce(phone_e164, '') ~ '^\\+?1555[0-9]{7}$'
+          OR coalesce(turn_payload::text, '') ~ '(^|[^0-9])1555[0-9]{7}([^0-9]|$)'
+          OR coalesce(delivery_payload::text, '') ~ '(^|[^0-9])1555[0-9]{7}([^0-9]|$)'
+          OR (turn_id !~ '^(CA|SM|MM)[0-9a-f]{32}$' AND turn_id !~ '^(voice|sms|web)_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'))`,
+      `CREATE INDEX IF NOT EXISTS engine_cst_turns_real ON engine_cst_turns (occurred_at DESC) WHERE NOT test`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

@@ -13349,3 +13349,14 @@ Until today the 3-minute snapshot carried current state only: device state, plac
 - **Farm filter** (Jegan's ask): `FarmPicker` on the vFarm page (Overview, Devices, Alerts) and the Monitoring Twin (Farms, Incidents), kept in `?farm=`. The twin's farm card shows the rover strip and a "What vFarm sends" table with any truncated, failed or refused section in amber.
 - Contract: `docs/contracts/vfarm.md`, new section. The vFarm side (engine_snapshot.py sending these blocks) is a PR into bhavfarm develop for Jegan to merge.
 - `npm run test:vfarm-history` (8 checks). vfarm-unlisted, vfarm-evidence, twin-envelope, un9d, monitoring-recurrence, range-doubt, audit-token and mcp-write still pass. The client was not type-checked locally (no React types in this environment); Render's build runs `tsc -b`.
+
+## 2026-10-24 14:10 — CST test traffic kept apart from real customers (D8)
+
+Found in D1 (Ahad's CST audit): about 1,335 of the 1,379 rows in `engine_cst_turns` came from the automated tests' fake +1 555 numbers and hand-made turn ids (`SM_PROBE_002`, `corr_stress_627`, `SCOPE_VALID_001` …), none marked, so every CST figure on the engine overview and the CST page counted test calls as customers.
+
+- **Migration 92**: `test boolean` and `test_reason` on `engine_cst_turns`, backfilled by one rule, and a partial index on real rows. Nothing is deleted.
+- **The rule** (`systemFeeds.cstTestReason`, same in the migration): the event says `test: true`; or any number on it is a +1 555 one (matched as `1555` + 7 digits not inside a longer number); or the turn id is neither a Twilio SID (`CA`/`SM`/`MM` + 32 hex) nor a channel id (`voice_`/`sms_`/`web_` + uuid). Applied on every turn and delivery write; once a test, always a test.
+- **Counts**: `engine.ts` cst, cst_week, cst_lost and cst_escalated exclude test rows; `cstData` lists them with `test` and `test_reason`, counts them in no figure, and reports `meta.test_rows`/`test_turns`. The CST page hides them behind "show test traffic (N)" and marks each with a test pill and its reason.
+- Contract: `docs/contracts/cst-events.md` gains the optional `test: true`.
+- `npm run test:cst-test-traffic` (4 checks, including the backfill on rows written before migration 92).
+- Also: the client was type-checked locally this time (React 18 types from DefinitelyTyped, router shimmed); the only errors were from the shim.
