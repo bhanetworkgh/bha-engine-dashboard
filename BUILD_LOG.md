@@ -13322,3 +13322,11 @@ Fix:        matchFarms(): id exactly, else code or name compared without case or
 ## 2026-10-24 12:05 — get_vfarm_gates: Pilot 1 go/no-go read fixed (D6)
 
 Live check after a7992c0: `pilot1_go_no_go` answered `unknown` with `function pg_catalog.timezone(unknown, text) does not exist`, because `engine_loops.updated_at` is text, not a timestamp. The query now reads the column as stored. It failed safe (unknown, never accepted), which is why it was caught on the live read rather than looking fine.
+
+## 2026-10-24 12:30 — read_buyer_flow: the amount says its unit, and a team test says it is one (D6, Genie drill)
+
+Found by the Genie "Kaiqi is away" drill. Asked in a fresh Bays session where VFBUYER-FORMA-RU0W2P stands and whether it paid, Bays answered "a live payment of $100": the read gave `amount: 100` with no unit, and that is Stripe's figure in cents, so the payment was 1.00 USD (Destiny's controlled live acceptance test of 21 Oct). Bays also called it "a live charge against someone who shouldn't have been chargeable", because nothing on the read says the lead is the team's own.
+
+- `leadFlow.read` now gives each payment `amount_minor_units` (the same figure) and `amount_text` ("1.00 USD"; zero-decimal currencies are not divided), and the read's notes and description say the amount is in the smallest unit and to quote `amount_text`. `amount` is unchanged.
+- Each lead carries `team_test`: true when its address is @bhanetwork.org, worked out in SQL so no address leaves the database. A note says a team test is never a buyer and a live payment on one is the team's own controlled test. All seven leads held today are team tests.
+- `npm run test:buyer-flow` pins both (7 checks).
