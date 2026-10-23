@@ -83,10 +83,13 @@ const ok = (name) => (passed++, console.log(`  ok  ${name}`));
   const l = out.leads[0];
   assert.deepEqual([l.stage, l.position, l.payment.state, l.payment.mode, l.proposal.test], [4, 'agreement', 'paid', 'test', true]);
   assert.ok(out.counts.payments.paid_test >= 1);
+  assert.deepEqual([l.payment.amount, l.payment.amount_minor_units, l.payment.amount_text], [100, 100, '1.00 USD']);
+  assert.ok(out.notes.some((n) => /smallest unit/.test(n)));
+  assert.equal(l.team_test, true, 'a lead on an @bhanetwork.org address is a team test');
   const text = JSON.stringify(out);
   for (const s of ['Secretname', 'zed.secret', 'Hidden Orchard', 'Full name', 'One rack']) assert.ok(!text.includes(s), `read_buyer_flow leaked "${s}"`);
   assert.ok(out.rules.length >= 5);
-  ok('read_buyer_flow answers stage, position, payment and mode, and no personal field');
+  ok('read_buyer_flow answers stage, position, payment and mode (100 cents read as 1.00 USD), and no personal field');
 
   const bad = await readBuyerFlow.handler({ position: 'paying' }, { access: 'read' });
   assert.equal(bad.reason, 'unknown_position');
