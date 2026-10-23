@@ -1435,7 +1435,15 @@ refused on any agent token; audited kind `charge_gate`) writes one row and one `
 event in one transaction; `read_charge_gate` (both connections) answers with the reason and history.
 **`read_buyer_flow` carries it as `charge_gate`**, so Genie and every agent read it with the flow, and a
 charge gate it cannot read is "do not know, treat as no". It charges nobody, moves no stage and opens no
-checkout. `npm run test:charge-gate`.
+checkout. **Jason's offer_approved fields** (23 Oct 2026, #workflow-logs-destiny 1792769106.709119;
+migration 94): an approved offer carries `offer_id`, `loop_id` (LOOP-…) and a `conditions` snapshot as Jason set
+them, a withdrawal names `offer_id`, and a green pass names the acceptance bundle it rests on (`bundle_ref`,
+Hardik's Honest Gate record); approver_id is `decided_by` and the timestamp the row's own. Each approval also
+writes one `offer_approved` (or `offer_withdrawn`) engine event in those fields. A newest row missing them counts
+as no, and a "no" opens with Jason's sentence "The offer is not approved for live charging yet." **Real Stage 5
+reads the gate**: `stage5Payment` needs `can_charge_live` as well as a live payment; a team test lead on a test
+payment is unchanged. Not built: the Honest Gate event verifying a live payment, which waits on Hardik's record.
+`npm run test:charge-gate`.
 
 **Buyer flow v2: five stages and the Stage 3 proposal page** (2026-10-17, Destiny — Jason in
 #bha-coordination the same day; SOPs 09cb58a7, the flow with its markings, and 66570ea2, Stage 3
