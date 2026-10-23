@@ -67,8 +67,10 @@ export interface FlowLead {
   position_label: string;
   position_since: string;
   form_2_in_at: string | null;
+  /** The lead's address is an @bhanetwork.org one: a team test, never a buyer. Worked out in SQL so no address leaves the database. */
+  team_test: boolean;
   proposal: { made_at: string | null; accepted_at: string | null; test: true } | null;
-  payment: { state: string; mode: string; amount: number | null; currency: string | null; paid_at: string | null; updated_at: string | null } | null;
+  payment: { state: string; mode: string; amount: number | null; amount_minor_units: number | null; amount_text: string | null; currency: string | null; paid_at: string | null; updated_at: string | null } | null;
   closed: { at: string; reason: string | null } | null;
 }
 
@@ -82,10 +84,11 @@ export async function read(opts: { buyer_intake_id?: string | null; position?: s
   const r = await query<{
     id: string; buyer: string | null; campaign: string | null; stage: number; stage_changed_at: Date | null; created_at: Date;
     intake_2_completed_at: Date | null; closed_at: Date | null; closed_reason: string | null;
-    proposal_made: string | null; proposal_accepted: string | null; pay: Record<string, unknown> | null;
+    proposal_made: string | null; proposal_accepted: string | null; pay: Record<string, unknown> | null; team_test: boolean;
   }>(
     `SELECT id::text AS id, form_a->>'buyer_intake_id' AS buyer, COALESCE(source_campaign, form_a->>'source_campaign') AS campaign,
             stage, stage_changed_at, created_at, intake_2_completed_at, closed_at, closed_reason,
+            lower(COALESCE(email, form_a->>'email', '')) LIKE '%@bhanetwork.org' AS team_test,
             proposal->>'created_at' AS proposal_made, proposal->>'accepted_at' AS proposal_accepted,
             CASE WHEN stripe_payment IS NULL THEN NULL ELSE jsonb_build_object(
               'state', stripe_payment->>'state', 'mode', stripe_payment->>'mode', 'amount', stripe_payment->'amount',
@@ -111,8 +114,9 @@ export async function read(opts: { buyer_intake_id?: string | null; position?: s
       position_label: PIPELINE.find((s) => s.key === pos.key)?.label ?? pos.key,
       position_since: pos.since,
       form_2_in_at: iso(x.intake_2_completed_at),
+      team_test: x.team_test === true,
       proposal: x.proposal_made || x.proposal_accepted ? { made_at: x.proposal_made, accepted_at: x.proposal_accepted, test: true } : null,
-      payment: p ? { state: String(p.state), mode: String(p.mode), amount: p.amount == null ? null : Number(p.amount), currency: (p.currency as string) ?? null, paid_at: (p.paid_at as string) ?? null, updated_at: (p.updated_at as string) ?? null } : null,
+      payment: p ? { state: String(p.state), mode: String(p.mode), ...money(p.amount == null ? null : Number(p.amount), (p.currency as string) ?? null), paid_at: (p.paid_at as string) ?? null, updated_at: (p.updated_at as string) ?? null } : null,
       closed: x.closed_at ? { at: iso(x.closed_at) as string, reason: x.closed_reason } : null,
     };
   });
@@ -139,3 +143,15 @@ export const RULES = [
   'No entitlement, reservation or delivery is recorded anywhere. Never claim one.',
   'Moves, closes and reopens are dated in engine_events as vfarm_flow_stage_moved, vfarm_flow_closed and vfarm_flow_reopened (from 18 Oct 2026; earlier moves are only in this read).',
 ];
+
+/**
+ * Stripe sends amounts in the currency's smallest unit. Bays read a live 100 (1.00 USD) as "$100"
+ * in the Genie drill of 24 Oct 2026, so the read says the unit and gives the figure to quote.
+ */
+const ZERO_DECIMAL = new Set(['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf']);
+export function money(amount: number | null, currency: string | null): { amount: number | null; amount_minor_units: number | null; amount_text: string | null; currency: string | null } {
+  if (amount == null || !Number.isFinite(amount)) return { amount: null, amount_minor_units: null, amount_text: null, currency };
+  const cur = (currency ?? '').toLowerCase();
+  const major = ZERO_DECIMAL.has(cur) ? amount.toFixed(0) : (amount / 100).toFixed(2);
+  return { amount, amount_minor_units: amount, amount_text: `${major} ${cur.toUpperCase()}`.trim(), currency };
+}
