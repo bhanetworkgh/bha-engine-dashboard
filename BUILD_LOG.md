@@ -13360,3 +13360,10 @@ Found in D1 (Ahad's CST audit): about 1,335 of the 1,379 rows in `engine_cst_tur
 - Contract: `docs/contracts/cst-events.md` gains the optional `test: true`.
 - `npm run test:cst-test-traffic` (4 checks, including the backfill on rows written before migration 92).
 - Also: the client was type-checked locally this time (React 18 types from DefinitelyTyped, router shimmed); the only errors were from the shim.
+
+## 2026-10-23 17:05 — Stage 3 question owner and Stage 5 live payment (Jason's 23 Oct decisions)
+Intent:     Wire Jason's two buyer-flow decisions from #vfarm-early-access (1792596244.622659, 13:43): every Stage 3 buyer question gets a named owner and honest copy; a real buyer reaches Stage 5 only on a live payment.
+Files:      server/src/proposal.ts, server/src/earlyAccess.ts, server/src/leadFlow.ts, server/test/proposal.test.cjs, src/data/types.ts, src/screens/VFarm/EarlyAccess.tsx, CLAUDE.md
+Problem:    The 22 Oct walk (5SWD) found a question told the buyer "We will answer by email" with nobody named, and Stage 5 accepted any paid payment, test mode included (3TH40G reached it on a sandbox payment).
+Fix:        proposal.act stores `assignee` (QUESTION_OWNER: Destiny, Jason backstop) on a question, names both on its vfarm_proposal_question event and tags them in the channel post; the buyer sees QUESTION_RECEIVED, Jason's sentence verbatim. moveStage reads the payment's mode and the team-test rule; stage5Payment refuses a test-mode payment unless the lead is a team test lead, and that move writes `test_payment: {mode: test, team_test: true, grants: nothing}` on stage_history and on vfarm_flow_stage_moved. The lead panel shows the owner. test:proposal 6 passed (two new checks), test:buyer-flow 7 passed, against a local Postgres 16.
+Decision:   Team test lead is the existing @bhanetwork.org rule (TEAM_TEST_SQL), not a new flag, so the gate and read_buyer_flow's team_test cannot disagree. 3TH40G stays at Stage 5: it is a team lead on a test payment, which Jason allowed.

@@ -1457,6 +1457,15 @@ is non-transactional). `server/src/proposal.ts`, migration 81.
   `vfarm_proposal_*` event, and one post in #vfarm-early-access whose outcome is written back.
   The proposal link is copied from the lead panel; no email sends it yet. CST answering
   questions and the agreement are not built. `npm run test:proposal`.
+- **A buyer's question has a named owner, and Stage 5 needs a live payment** (23 Oct 2026, Jason
+  in #vfarm-early-access, SOPs c803d029 and c14e9e54). Every Ask a question is stored with
+  `assignee` (`QUESTION_OWNER` in `proposal.ts`: Destiny, Jason as backstop), its event names
+  both, the channel post tags them, and the buyer is told `QUESTION_RECEIVED` word for word:
+  manual, not instant. `stage5Payment` (`earlyAccess.ts`, pure) decides the move into Stage 5:
+  a paid **live** payment for a real buyer; a paid test-mode payment only for a team test lead
+  (`TEAM_TEST_SQL`, an @bhanetwork.org address, the same rule `leadFlow.read` calls
+  `team_test`), and that move carries `test_payment` on the row's history and its event,
+  saying it grants nothing.
 - **`test_buyer_flow`** (`server/src/mcp/intake2Tools.ts`, write connection, no agent's scope):
   walks a test lead through the flow one step per call through the real functions: `move`
   (moveStage with its gates), `propose` (proposal.create), `buyer_open`, `buyer_accept`,
