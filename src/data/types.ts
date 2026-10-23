@@ -4160,10 +4160,35 @@ export interface MonitoringFarm {
     sources: { cabinet_id: string; config_hash: string; burn_in_state: string };
   };
   state_counts: Record<string, number>;
+  /** false when vFarm's snapshot no longer names this farm (migration 90). */
+  listed?: boolean;
+  code?: string | null;
+  /** Everything else vFarm sends, by section (D5, migration 91). Optional: an older server does not send it. */
+  feed_history?: {
+    sections: Array<{ section: string; rows: number; last_24h: number; latest_at: string | null }> | null;
+    last_report: { taken_at: string; truncated: string[]; errors: Record<string, string>; refused: Record<string, number> } | null;
+    note: string;
+  };
+  /** The six rover signals (D5). Readings only: no thresholds are set. */
+  rover?: MonitoringRover | { note: string };
   devices: MonitoringDevice[];
   open_incidents: MonitoringIncident[];
   recent_incidents: MonitoringIncident[];
   last_evaluated_at: string | null;
+}
+export interface MonitoringRoverSignal<T> {
+  value: T | null;
+  note: string;
+}
+export interface MonitoringRover {
+  rover_devices: string[];
+  heartbeat_age_s: MonitoringRoverSignal<Array<{ device_id: string; age_s: number | null; status: string | null }>>;
+  runs_24h: MonitoringRoverSignal<{ expected: number | null; started: number; completed: number; failed: number; in_progress: number }>;
+  run_duration_vs_expected: MonitoringRoverSignal<{ runs: number; median_s: number | null; max_s: number | null; expected_s: number | null; over_expected: number | null }>;
+  limit_hit_24h: MonitoringRoverSignal<number>;
+  stops_without_frame_24h: MonitoringRoverSignal<{ stops: number; without_frame: number }>;
+  upload_backlog: MonitoringRoverSignal<{ waiting: number; failed: number; oldest_age_s: number | null }>;
+  thresholds: string;
 }
 export interface MonitoringProfileVersion {
   version: number;

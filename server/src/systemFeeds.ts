@@ -257,6 +257,8 @@ export interface SnapshotStoreResult {
   farms_unlisted: number;
   /** Every farm in it was a simulated one (the Monitoring Twin's test rack). */
   synthetic: boolean;
+  /** What the history, layout and rover_config blocks carried and what was stored (migration 91); null when none was sent. */
+  history: HistorySummary | null;
 }
 
 /**
@@ -321,6 +323,8 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
     if (!id) throw new FeedError(422, `open_alerts[${i}].id is required.`);
     return { id, a };
   });
+
+  checkHistoryShape(body);
 
   return tx(body.dry_run === true, async (db) => {
     // An older snapshot than the newest held changes nothing: posts can arrive out of order on a retry.
@@ -407,17 +411,208 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
         WHERE closed_at IS NULL AND (farm_id = ANY($1::text[]) OR (farm_id IS NULL AND NOT $4::boolean)) AND NOT (alert_id = ANY($2::text[]))`,
       [farmIds, opens.map((x) => x.id), takenAt, synthetic],
     );
-    await db.query(`INSERT INTO engine_vfarm_snapshots (taken_at, farms, devices, open_alerts, pipeline, synthetic) VALUES ($1,$2,$3,$4,$5,$6)`, [
+    const history = await storeHistory(db, body, farmIds, takenAt, synthetic);
+    await db.query(`INSERT INTO engine_vfarm_snapshots (taken_at, farms, devices, open_alerts, pipeline, synthetic, history) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [
       takenAt,
       farms.length,
       devs.length,
       opens.length,
       isObj(body.alert_pipeline) ? JSON.stringify(body.alert_pipeline) : null,
       synthetic,
+      history ? JSON.stringify(history) : null,
     ]);
     events.changed('vfarm_state', null, db);
-    return { taken_at: takenAt, farms: farms.length, devices: devs.length, open_alerts: opens.length, devices_gone: gone.rowCount ?? 0, alerts_closed: closed.rowCount ?? 0, farms_unlisted: unlisted.rowCount ?? 0, synthetic };
+    return { taken_at: takenAt, farms: farms.length, devices: devs.length, open_alerts: opens.length, devices_gone: gone.rowCount ?? 0, alerts_closed: closed.rowCount ?? 0, farms_unlisted: unlisted.rowCount ?? 0, synthetic, history };
   });
+}
+
+/* ------------------------------------------------- vFarm history (migration 91) */
+
+/**
+ * The snapshot's `history`, `layout` and `rover_config` blocks (24 Oct 2026, D5). vFarm sends every
+ * row that changed since its last accepted tick, per section, with the row whole; this keeps one row
+ * per vFarm row (section + vFarm's own key), so a re-sent window changes nothing. Readings go to
+ * engine_vfarm_readings, one row per metric and reading time. Nothing is dropped quietly: a row with
+ * no key, or naming a farm the snapshot does not list, is counted as refused, and a section vFarm
+ * marked truncated or failed is recorded on the snapshot row as it said.
+ */
+type Db = Parameters<Parameters<typeof withTransaction>[0]>[0];
+export interface HistorySectionSummary {
+  received: number;
+  stored_new: number;
+  updated: number;
+  unchanged: number;
+  refused: number;
+  refused_reasons: string[];
+  truncated: boolean;
+  since: string | null;
+  next_since: string | null;
+  gone?: number;
+}
+export interface HistorySummary {
+  sections: Record<string, HistorySectionSummary>;
+  errors: Record<string, string>;
+}
+export const HISTORY_SECTION = /^[a-z][a-z0-9_]{0,39}$/;
+/** Full every tick: an item a listed farm stops sending is marked gone. */
+export const FULL_SECTIONS: Record<string, [string, string]> = {
+  layout_zones: ['layout', 'zones'],
+  layout_locations: ['layout', 'locations'],
+  layout_sublocations: ['layout', 'sublocations'],
+  rover_schedules: ['rover_config', 'schedules'],
+  rover_settings: ['rover_config', 'settings'],
+  rover_rail_map: ['rover_config', 'rail_map'],
+};
+const MAX_SECTION_ROWS = 10_000;
+
+/** vFarm's own key for a row of a section. Null means the row cannot be kept, and is counted as refused. */
+export function historyKey(section: string, r: Obj): string | null {
+  const s = (v: unknown) => (v === null || v === undefined || v === '' ? null : String(v));
+  switch (section) {
+    case 'rover_runs':
+      return s(r.run_id);
+    case 'rover_stops':
+      return r.run_id != null && (r.seq ?? r.stop_seq) != null ? `${r.run_id}:${r.seq ?? r.stop_seq}` : null;
+    case 'rover_videos':
+      return s(r.id) ?? s(r.run_id);
+    case 'vision_frames':
+      return s(r.frame_id) ?? s(r.id);
+    case 'rover_schedules':
+      return s(r.id) ?? s(r.device_id);
+    case 'rover_settings':
+      return s(r.id) ?? s(r.farm_id);
+    case 'rover_rail_map':
+      return s(r.id) ?? (r.device_id != null && r.seq != null ? `${r.device_id}:${r.seq}` : null);
+    default:
+      return s(r.id) ?? s(r.key);
+  }
+}
+
+function checkHistoryShape(body: Obj): void {
+  if (body.history !== undefined && body.history !== null) {
+    if (!isObj(body.history)) throw new FeedError(422, 'history must be an object.');
+    const sections = body.history.sections;
+    if (sections !== undefined && !isObj(sections)) throw new FeedError(422, 'history.sections must be an object of sections.');
+    for (const [name, sec] of Object.entries((sections as Obj) ?? {})) {
+      if (!HISTORY_SECTION.test(name)) throw new FeedError(422, `history section "${name}" is not a section name (lower case, digits and _).`);
+      if (!isObj(sec) || !Array.isArray(sec.rows)) throw new FeedError(422, `history.sections.${name} needs rows (a list; empty means nothing changed).`);
+      if (sec.rows.length > MAX_SECTION_ROWS) throw new FeedError(413, `history.sections.${name} has ${sec.rows.length} rows; at most ${MAX_SECTION_ROWS} in one snapshot.`);
+    }
+  }
+  for (const [section, [blockKey, listKey]] of Object.entries(FULL_SECTIONS)) {
+    const blk = body[blockKey];
+    if (blk === undefined || blk === null) continue;
+    if (!isObj(blk)) throw new FeedError(422, `${blockKey} must be an object.`);
+    const list = blk[listKey];
+    if (list !== undefined && !Array.isArray(list)) throw new FeedError(422, `${blockKey}.${listKey} must be a list.`);
+    if (Array.isArray(list) && list.length > MAX_SECTION_ROWS) throw new FeedError(413, `${blockKey}.${listKey} has ${list.length} rows; at most ${MAX_SECTION_ROWS} (section ${section}).`);
+  }
+}
+
+async function upsertHistory(db: Db, section: string, rows: Array<{ key: string; farm: string | null; device: string | null; at: string | null; row: Obj }>, synthetic: boolean) {
+  if (!rows.length) return { stored_new: 0, updated: 0 };
+  const r = await db.query<{ inserted: boolean }>(
+    `INSERT INTO engine_vfarm_history (section, source_id, farm_id, device_id, at, row, synthetic)
+     SELECT $1, x.k, x.f, x.d, x.a, x.r, $7
+       FROM unnest($2::text[], $3::text[], $4::text[], $5::timestamptz[], $6::jsonb[]) AS x(k, f, d, a, r)
+     ON CONFLICT (section, source_id) DO UPDATE SET farm_id = EXCLUDED.farm_id, device_id = EXCLUDED.device_id, at = EXCLUDED.at,
+       row = EXCLUDED.row, synthetic = EXCLUDED.synthetic, updated_at = now(), gone_at = NULL
+      WHERE engine_vfarm_history.row IS DISTINCT FROM EXCLUDED.row OR engine_vfarm_history.gone_at IS NOT NULL
+     RETURNING (xmax = 0) AS inserted`,
+    [section, rows.map((x) => x.key), rows.map((x) => x.farm), rows.map((x) => x.device), rows.map((x) => x.at), rows.map((x) => JSON.stringify(x.row)), synthetic],
+  );
+  const stored_new = r.rows.filter((x) => x.inserted).length;
+  return { stored_new, updated: r.rows.length - stored_new };
+}
+
+async function storeHistory(db: Db, body: Obj, farmIds: string[], takenAt: string, synthetic: boolean): Promise<HistorySummary | null> {
+  const h = isObj(body.history) ? body.history : null;
+  const anyFull = Object.values(FULL_SECTIONS).some(([b, l]) => isObj(body[b]) && Array.isArray((body[b] as Obj)[l]));
+  if (!h && !anyFull) return null;
+  const out: HistorySummary = { sections: {}, errors: {} };
+  if (h && isObj(h.errors)) for (const [k, v] of Object.entries(h.errors)) out.errors[k] = String(v).slice(0, 500);
+  const sections = h && isObj(h.sections) ? (h.sections as Obj) : {};
+  const sum = (sec: Obj | null, received: number): HistorySectionSummary => ({
+    received, stored_new: 0, updated: 0, unchanged: 0, refused: 0, refused_reasons: [],
+    truncated: sec?.truncated === true, since: sec ? iso(sec.since) : null, next_since: sec ? iso(sec.next_since) : null,
+  });
+  const refuse = (s: HistorySectionSummary, why: string) => {
+    s.refused += 1;
+    if (s.refused_reasons.length < 5 && !s.refused_reasons.includes(why)) s.refused_reasons.push(why);
+  };
+
+  for (const [name, raw] of Object.entries(sections)) {
+    const sec = raw as Obj;
+    const rows = sec.rows as unknown[];
+    const s = sum(sec, rows.length);
+    if (name === 'readings') {
+      const f: string[] = [], d: string[] = [], m: string[] = [], v: number[] = [], u: (string | null)[] = [], st: (string | null)[] = [], t: string[] = [];
+      for (const r of rows) {
+        if (!isObj(r)) { refuse(s, 'not an object'); continue; }
+        const farm = str(r.farm_id), dev = str(r.device_id) ?? str(r.sensor_id), at = iso(r.reading_ts) ?? iso(r.at);
+        if (!farm || !farmIds.includes(farm)) { refuse(s, `farm_id "${farm ?? ''}" is not in this snapshot`); continue; }
+        if (!dev || !at) { refuse(s, 'a reading needs device_id and reading_ts'); continue; }
+        const metrics = readingRows(r.values, at);
+        if (!metrics.length) { refuse(s, 'no numeric value in values'); continue; }
+        for (const x of metrics) { f.push(farm); d.push(dev); m.push(x.metric); v.push(x.value); u.push(x.unit); st.push(x.status); t.push(x.read_at); }
+      }
+      if (f.length) {
+        const ins = await db.query(
+          `INSERT INTO engine_vfarm_readings (farm_id, device_id, metric, value, unit, status, read_at, synthetic)
+           SELECT x.f, x.d, x.m, x.v, x.u, x.s, x.t, $8
+             FROM unnest($1::text[], $2::text[], $3::text[], $4::float8[], $5::text[], $6::text[], $7::timestamptz[]) AS x(f, d, m, v, u, s, t)
+           ON CONFLICT (farm_id, device_id, metric, read_at) DO NOTHING`,
+          [f, d, m, v, u, st, t, synthetic],
+        );
+        s.stored_new = ins.rowCount ?? 0;
+        s.unchanged = f.length - s.stored_new;
+      }
+      out.sections[name] = s;
+      continue;
+    }
+    const keep: Array<{ key: string; farm: string | null; device: string | null; at: string | null; row: Obj }> = [];
+    const seen = new Set<string>();
+    for (const r of rows) {
+      if (!isObj(r)) { refuse(s, 'not an object'); continue; }
+      const key = historyKey(name, r);
+      if (!key) { refuse(s, 'no key (vFarm id) on the row'); continue; }
+      const farm = str(r.farm_id);
+      if (farm && !farmIds.includes(farm)) { refuse(s, `farm_id "${farm}" is not in this snapshot`); continue; }
+      if (seen.has(key)) continue; // the same row twice in one window (a boundary repeat) is one row
+      seen.add(key);
+      keep.push({ key, farm, device: str(r.device_id), at: iso(r.at), row: r });
+    }
+    const w = await upsertHistory(db, name, keep, synthetic);
+    s.stored_new = w.stored_new; s.updated = w.updated; s.unchanged = keep.length - w.stored_new - w.updated;
+    out.sections[name] = s;
+  }
+
+  for (const [section, [blockKey, listKey]] of Object.entries(FULL_SECTIONS)) {
+    const blk = body[blockKey];
+    if (!isObj(blk) || !Array.isArray(blk[listKey])) continue;
+    const rows = blk[listKey] as unknown[];
+    const s = sum(null, rows.length);
+    const keep: Array<{ key: string; farm: string | null; device: string | null; at: string | null; row: Obj }> = [];
+    for (const r of rows) {
+      if (!isObj(r)) { refuse(s, 'not an object'); continue; }
+      const key = historyKey(section, r);
+      const farm = str(r.farm_id);
+      if (!key) { refuse(s, 'no key (vFarm id) on the row'); continue; }
+      if (!farm || !farmIds.includes(farm)) { refuse(s, `farm_id "${farm ?? ''}" is not in this snapshot`); continue; }
+      keep.push({ key, farm, device: str(r.device_id), at: takenAt, row: r });
+    }
+    const w = await upsertHistory(db, section, keep, synthetic);
+    s.stored_new = w.stored_new; s.updated = w.updated; s.unchanged = keep.length - w.stored_new - w.updated;
+    // Sent whole: an item of a listed farm no longer sent is gone (kept, marked), as devices are.
+    const gone = await db.query(
+      `UPDATE engine_vfarm_history SET gone_at = $4, updated_at = now()
+        WHERE section = $1 AND gone_at IS NULL AND farm_id = ANY($2::text[]) AND NOT (source_id = ANY($3::text[]))`,
+      [section, farmIds, keep.map((x) => x.key), takenAt],
+    );
+    s.gone = gone.rowCount ?? 0;
+    out.sections[section] = s;
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ reads */

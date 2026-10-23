@@ -1,8 +1,8 @@
 import { useSearchParams } from 'react-router-dom';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useData } from '../../app/useData';
-import { getVfarmGates, getVfarmLeads, getVfarmLive, type VfarmLead, type VfarmLeadsData } from '../../data';
-import { useReplayKey, LoadFailed, Loading, PageHeader, Tabs } from '../../components/ui';
+import { getVfarmGates, getVfarmLeads, getVfarmLive, type VfarmLead, type VfarmLeadsData, type VfarmLiveData } from '../../data';
+import { useReplayKey, FarmPicker, LoadFailed, Loading, PageHeader, Tabs } from '../../components/ui';
 import EarlyAccess from './EarlyAccess';
 import { Alerts, Devices, Overview, reporting } from './Live';
 import { Gates } from './Gates';
@@ -58,7 +58,7 @@ export default function VFarm() {
   const [held, setHeld] = useState<VfarmLeadsData | null>(null);
   const { status, data: loaded, error } = useData(getVfarmLeads, [], { kinds: VFARM_KINDS });
   const live = useData(getVfarmLive, [], { kinds: LIVE_KINDS });
-  const liveData = live.data;
+  const liveData = useMemo(() => (live.data ? scopeLive(live.data, farm) : null), [live.data, farm]);
   const gates = useData(getVfarmGates, [], { kinds: GATE_KINDS });
   const quiet = liveData ? liveData.devices.filter((d) => !d.gone_at && !reporting(d)).length : 0;
 

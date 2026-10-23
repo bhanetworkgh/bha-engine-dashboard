@@ -47,6 +47,7 @@
  * and is never folded into success.
  */
 import { hostname } from 'node:os';
+import * as vfarmHistory from './vfarmHistory';
 import { query, withTransaction, type Queryable } from './pg';
 import * as events from './events';
 import * as bharag from './bharag';
@@ -882,6 +883,21 @@ export async function monitoringData(db: Queryable = { query }) {
     ),
   ]);
   const pipeOf = new Map(pipes.rows.map((r) => [r.synthetic, r]));
+  // Everything else vFarm records (migration 91, D5): what each farm holds by section, what the
+  // newest snapshot's history block reported, and the six rover signals. Each read on its own, so a
+  // database not yet migrated costs these lines and never the twin's answer.
+  const [feedHistory, historyReport] = await Promise.all([vfarmHistory.historyByFarm(db), vfarmHistory.lastHistoryReport(db)]);
+  const roverOf = new Map<string, ReturnType<typeof vfarmHistory.roverSignals> | null>();
+  for (const f of farms.rows) {
+    const inputs = await vfarmHistory.roverInputs(
+      f.farm_id,
+      devices.rows
+        .filter((d) => d.farm_id === f.farm_id)
+        .map((d) => ({ device_id: d.device_id, device_type: d.device_type, last_seen_at: d.last_seen_at, status: (d.fields && typeof d.fields === 'object' ? ((d.fields as Record<string, unknown>).status as string | undefined) : undefined) ?? null })),
+      db,
+    );
+    roverOf.set(f.farm_id, inputs ? vfarmHistory.roverSignals(inputs) : null);
+  }
   const healerOf = new Map(healer.rows.map((r) => [r.ledger_id, r]));
   const withRetry = <T extends { closed_at: string | null; close_reason: string | null; opened_at: string; ledger_id: string | null }>(i: T) => ({
     ...i,
@@ -960,6 +976,14 @@ export async function monitoringData(db: Queryable = { query }) {
       reading_history: history
         ? { readings_held: Number(history.get(f.farm_id)?.readings ?? 0), since: history.get(f.farm_id)?.since ?? null, latest: history.get(f.farm_id)?.latest ?? null, note: 'Every sensor reading a snapshot carries, stored once per device, metric and reading time, from 21 Oct 2026 (migration 87). Nothing before that was kept: the devices table held the latest value only.' }
         : { readings_held: null, since: null, latest: null, note: 'The reading history could not be read.' },
+      feed_history: feedHistory
+        ? {
+            sections: feedHistory.get(f.farm_id) ?? [],
+            last_report: f.synthetic ? null : historyReport,
+            note: 'What vFarm records beyond current state, held here from 24 Oct 2026 (migration 91): rover runs, stops, detections and videos, camera frames, automation, relay and drain events, commands, device events, alert history, and the layout and rover setup. Rows per section, in all and in the last 24 h. last_report says what the newest snapshot marked truncated, failed or refused; a truncated section continues on the next tick.',
+          }
+        : { sections: null, last_report: null, note: 'The vFarm history could not be read.' },
+      rover: roverOf.get(f.farm_id) ?? { note: 'The rover signals could not be read.' },
       devices: devs.map((d) => ({
         device_id: d.device_id,
         ...(({ sources, ...id }) => ({ ...id, identity_sources: sources }))(identityOf(d.fields, f.fields)),
