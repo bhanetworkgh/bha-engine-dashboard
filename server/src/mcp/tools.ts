@@ -24,6 +24,7 @@ import * as systemFeeds from '../systemFeeds';
 import * as publicationDecision from '../publicationDecision';
 import * as doctrineGap from '../doctrineGap';
 import * as monitoringTwin from '../monitoringTwin';
+import * as vfarmHistory from '../vfarmHistory';
 import * as vfarmEvidence from '../vfarmEvidence';
 import * as engineEvents from '../engineEvents';
 import * as approvals from '../approvals';
@@ -933,7 +934,7 @@ const readDoctrineGapSummary: ToolDefinition = {
 const readMonitoringTwin: ToolDefinition = {
   name: 'read_monitoring_twin',
   description:
-    'The Monitoring Twin’s judgement of every vFarm farm, the same answer the Monitoring Twin page and GET /api/engine/monitoring-twin give: for each farm, whether its feed is arriving, the crop cycle and stage it is in with that stage’s target ranges (a versioned crop profile), uptime over the last 24 h (share of observed time with no device OFFLINE), every device’s state (LIVE ≤90 s, STALE ≤900 s, OFFLINE, NOT_WIRED, NO_FEED, GONE) with its readings checked against the stage targets, and the open and recent INC-VFARM incidents. Each farm also carries the twin envelope: farm_id, cabinet_id, config_hash, burn_in_state (not_started, burn_in, passed), worker_health (healthy or unhealthy, vFarm’s alert worker) and retry_envelope (how many incidents are self_healed, retrying, needs_human); each device carries cabinet_id, config_hash and burn_in_state, and each incident its own retry_envelope. cabinet_id, config_hash and burn_in_state are null with source "not sent by vFarm yet" until vFarm sends them: say not sent, never guess. Simulated farms are marked synthetic: never describe them as the real rack. A device that is not LIVE has no current reading to quote. Each cycle says where day 0 is (day0, day0_means) and which stages are reference_only_stages: stages that happen at the supplier and that the cabinet never runs, so never infer or report them as cabinet stages. evidence carries the rules in force: Coimbatore and crop-profile figures are an agronomy reference and never cabinet proof; a claim about a cabinet needs cabinet_telemetry from a real farm. Research Twin: read this before writing a finding about a vFarm cabinet’s crop stage, timing, uptime or yield. Every farm carries evidence_status (BP-INFRA-002): live, degraded, absent or simulated, which devices may be reported (reportable_devices), an instruction and a fallback sentence. Follow the instruction: a silent feed, a device that is not LIVE or a simulated farm is never reported as a reading, a healthy rack or an empty one. A read that fails answers ok:false, degraded:true with the error: that means the dashboard could not look, never that there is nothing there.',
+    'The Monitoring Twin’s judgement of every vFarm farm, the same answer the Monitoring Twin page and GET /api/engine/monitoring-twin give: for each farm, whether its feed is arriving, the crop cycle and stage it is in with that stage’s target ranges (a versioned crop profile), uptime over the last 24 h (share of observed time with no device OFFLINE), every device’s state (LIVE ≤90 s, STALE ≤900 s, OFFLINE, NOT_WIRED, NO_FEED, GONE) with its readings checked against the stage targets, and the open and recent INC-VFARM incidents. Each farm also carries the twin envelope: farm_id, cabinet_id, config_hash, burn_in_state (not_started, burn_in, passed), worker_health (healthy or unhealthy, vFarm’s alert worker) and retry_envelope (how many incidents are self_healed, retrying, needs_human); each device carries cabinet_id, config_hash and burn_in_state, and each incident its own retry_envelope. cabinet_id, config_hash and burn_in_state are null with source "not sent by vFarm yet" until vFarm sends them: say not sent, never guess. Simulated farms are marked synthetic: never describe them as the real rack. A device that is not LIVE has no current reading to quote. Each cycle says where day 0 is (day0, day0_means) and which stages are reference_only_stages: stages that happen at the supplier and that the cabinet never runs, so never infer or report them as cabinet stages. evidence carries the rules in force: Coimbatore and crop-profile figures are an agronomy reference and never cabinet proof; a claim about a cabinet needs cabinet_telemetry from a real farm. Research Twin: read this before writing a finding about a vFarm cabinet’s crop stage, timing, uptime or yield. Every farm carries evidence_status (BP-INFRA-002): live, degraded, absent or simulated, which devices may be reported (reportable_devices), an instruction and a fallback sentence. Follow the instruction: a silent feed, a device that is not LIVE or a simulated farm is never reported as a reading, a healthy rack or an empty one. A read that fails answers ok:false, degraded:true with the error: that means the dashboard could not look, never that there is nothing there. From 24 Oct 2026 each farm also carries feed_history (what else vFarm sends, by section: readings, rover runs and stops, frames, automation and drain events, commands, device events, alert history, layout; rows in all and in the last 24 h, and anything the newest snapshot marked truncated, failed or refused) and rover (six readings: heartbeat age, runs against the schedule, run time against its budget, limit hits, stops with no frame, upload backlog; no thresholds are set, and an input vFarm does not send yet says so). For the rows themselves use read_vfarm_history.',
   inputSchema: {
     type: 'object',
     properties: { farm_id: { type: 'string', description: 'Only this farm: its id, or its code or name (matched without case or punctuation, so "vFarm_01" finds Vfarm_01). A name nothing held answers to returns no farm, held_farms, and an evidence_status saying so, never "no real farm".' } },
@@ -995,6 +996,67 @@ const readMonitoringTwin: ToolDefinition = {
   },
 };
 
+/**
+ * Everything vFarm records, as rows (24 Oct 2026, Destiny — D5, migration 91). The Monitoring Twin
+ * read summarises it; this returns the rows themselves, for one section at a time.
+ */
+const HISTORY_LIMIT_MAX = 500;
+const readVfarmHistory: ToolDefinition = {
+  name: 'read_vfarm_history',
+  description:
+    'The rows vFarm sends beyond current state, as the dashboard holds them from 24 Oct 2026 (migration 91), one section at a time: readings (every sensor reading, one row per device, metric and reading time), rover_runs, rover_stops, rover_detections, rover_videos, vision_frames (camera frames: who, where, when; never the image), automation_events (relay, drain and other automation steps), device_commands, device_events, alert_changes (alerts opened and cleared), alert_firings, and the setup sent whole every tick: layout_zones, layout_locations, layout_sublocations (room, cabinet, tray/rail/reservoir), rover_schedules, rover_settings, rover_rail_map. Each row is vFarm\'s own row as sent, with farm_id, device_id and at. farm_id is a farm\'s id, code or name ("vFarm_01" finds Vfarm_01); without it, every real (not simulated) farm. since/until bound `at` (ISO). Newest first, `limit` 50 by default and at most 500; `matched` is every row that matched, so a capped answer says how many there are. A section with no rows means vFarm has sent none for it yet, not that nothing happened before 24 Oct: nothing earlier was kept. Simulated farms are only included when named. Read only.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      section: { type: 'string', description: 'readings, or one of the history sections named above.' },
+      farm_id: { type: 'string', description: 'A farm\'s id, code or name. Omit for every real farm.' },
+      since: { type: 'string', description: 'ISO time; rows at or after it.' },
+      until: { type: 'string', description: 'ISO time; rows at or before it.' },
+      device_id: { type: 'string', description: 'Only this device.' },
+      metric: { type: 'string', description: 'readings only: one metric, e.g. temperature.' },
+      limit: { type: 'number', description: 'Rows to return, newest first. Default 50, at most 500.' },
+      include_gone: { type: 'boolean', description: 'Setup sections: include items vFarm stopped sending (marked gone). Default false.' },
+    },
+    required: ['section'],
+    additionalProperties: false,
+  },
+  annotations: { ...READS_DB, title: 'vFarm history rows: readings, rover, frames, events, alerts, layout' },
+  handler: async (args) => {
+    const section = String(args.section ?? '').trim();
+    if (!/^[a-z][a-z0-9_]{0,39}$/.test(section)) return { ok: false, reason: 'bad_section', message: `"${section}" is not a section name.` };
+    const limit = Math.min(HISTORY_LIMIT_MAX, Math.max(1, Math.floor(Number(args.limit) || 50)));
+    const held = await pgQuery<{ farm_id: string; code: string | null; name: string | null; synthetic: boolean; unlisted: boolean }>(
+      `SELECT farm_id, code, name, coalesce((fields->>'synthetic')::boolean, false) AS synthetic, unlisted_at IS NOT NULL AS unlisted FROM engine_vfarm_farms`,
+    );
+    const ref = typeof args.farm_id === 'string' && args.farm_id.trim() ? args.farm_id.trim() : null;
+    const match = ref ? vfarmEvidence.matchFarms(held.rows, ref) : { farms: held.rows.filter((f) => !f.synthetic), matched_by: null };
+    if (ref && !match.farms.length) {
+      return { ok: true, section, farms: [], matched: 0, rows: [], evidence_status: vfarmEvidence.unknownFarm(ref, held.rows.map((f) => ({ ...f, listed: !f.unlisted }))) };
+    }
+    const farmIds = match.farms.map((f) => f.farm_id);
+    const iso = (v: unknown) => (typeof v === 'string' && Number.isFinite(Date.parse(v)) ? new Date(v).toISOString() : null);
+    const opts = { farm_ids: farmIds, since: iso(args.since), until: iso(args.until), device_id: typeof args.device_id === 'string' ? args.device_id : null, limit };
+    const res = section === 'readings'
+      ? await vfarmHistory.readReadings({ ...opts, metric: typeof args.metric === 'string' ? args.metric : null })
+      : await vfarmHistory.readRows({ ...opts, section, include_gone: args.include_gone === true });
+    return {
+      ok: true,
+      section,
+      farms: match.farms.map((f) => ({ farm_id: f.farm_id, code: f.code, name: f.name, synthetic: f.synthetic, listed: !f.unlisted })),
+      matched_by: match.matched_by,
+      matched: res.matched,
+      returned: res.rows.length,
+      capped: res.matched > res.rows.length,
+      rows: res.rows,
+      note: res.matched === 0
+        ? 'No rows held for this section and farm. vFarm sends history from 24 Oct 2026; a section it has not sent yet is empty, which is not the same as nothing having happened.'
+        : res.matched > res.rows.length
+          ? `${res.matched} rows matched; the newest ${res.rows.length} are here. Narrow with since/until or device_id.`
+          : null,
+    };
+  },
+};
+
 export const TOOLS: ToolDefinition[] = [
   // The reads, in the order the instructions suggest reaching for them.
   listPages,
@@ -1018,6 +1080,8 @@ export const TOOLS: ToolDefinition[] = [
   readDoctrineGapSummary,
   // 2026-10-01: the Monitoring Twin's judgement of every vFarm farm.
   readMonitoringTwin,
+  // 2026-10-24: everything else vFarm records, as rows (D5, migration 91).
+  readVfarmHistory,
   // 2026-09-24: what the Bays agent read through n8n tools of its own.
   listN8nWorkflows,
   getN8nWorkflow,

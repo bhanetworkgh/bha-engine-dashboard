@@ -29,3 +29,4 @@ export * from './InfoTip';
 export * from './Live';
 export * from './Button';
 export * from './FacetPicker';
+export * from './FarmPicker';

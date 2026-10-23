@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useData } from '../app/useData';
-import { getMonitoringTwin, type MonitoringFarm, type MonitoringIncident, type MonitoringState, type MonitoringTwinData } from '../data';
+import { getMonitoringTwin, type MonitoringFarm, type MonitoringIncident, type MonitoringRover, type MonitoringState, type MonitoringTwinData } from '../data';
 import {
   Card,
   CardHeader,
   EmptyState,
+  FarmPicker,
   FigureCell,
   LoadFailed,
   Loading,
@@ -57,13 +59,28 @@ function SimTag() {
 export default function MonitoringTwin() {
   const [tab, setTab] = useState<Tab>('Farms');
   useReplayKey(tab);
-  const { status, data, error } = useData(getMonitoringTwin, [], { kinds: ['monitoring_twin', 'vfarm_state'] });
+  const { status, data: all, error } = useData(getMonitoringTwin, [], { kinds: ['monitoring_twin', 'vfarm_state'] });
+  // One farm at a time when asked (24 Oct 2026, D5, Jegan's multi-farm filter), kept in the URL.
+  const [params, setParams] = useSearchParams();
+  const farm = params.get('farm');
+  const setFarm = (v: string | null) => {
+    const next = new URLSearchParams(params);
+    if (v) next.set('farm', v);
+    else next.delete('farm');
+    setParams(next, { replace: true });
+  };
+  const data = useMemo(() => (all && farm ? { ...all, farms: all.farms.filter((f) => f.farm_id === farm) } : all), [all, farm]);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
         title="Monitoring Twin"
         subtitle="What the twin sees on every vFarm farm: sensor state, crop stage, uptime and incidents"
-        below={<Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Incidents: data?.counts.open_incidents ? { n: data.counts.open_incidents } : undefined }} />}
+        below={
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Incidents: data?.counts.open_incidents ? { n: data.counts.open_incidents } : undefined }} />
+            {tab !== 'Crop profiles' && all && <FarmPicker value={farm} farms={all.farms} onChange={setFarm} />}
+          </div>
+        }
       />
       {status === 'loading' && !data ? (
         <Loading />
@@ -176,6 +193,8 @@ function FarmCard({ f }: { f: MonitoringFarm }) {
         />
         <FigureCell label="Open incidents" value={f.open_incidents.length} tone={f.open_incidents.length ? 'degraded' : undefined} caption={`${f.recent_incidents.length} closed in 7 days`} note="Opened once per fault, closed when it clears." />
       </StatStrip>
+      {f.rover && 'runs_24h' in f.rover && f.rover.rover_devices.length > 0 && <RoverStrip r={f.rover} />}
+      {f.feed_history && <FeedHistory h={f.feed_history} />}
       <Card className="pb-3">
         <CardHeader title="Devices" right={<span className="tabular text-[11.5px] text-faint">readings checked against the {c?.stage?.label ?? c?.stage?.stage ?? 'current'} stage</span>} />
         {f.devices.length === 0 ? (
@@ -389,5 +408,84 @@ function Profiles({ data }: { data: MonitoringTwinData }) {
         );
       })}
     </>
+  );
+}
+
+/**
+ * The six rover signals (24 Oct 2026, D5). Readings, not verdicts: no limits are agreed yet, so
+ * nothing is coloured as a fault. A signal vFarm does not send yet says so instead of a number.
+ */
+function RoverStrip({ r }: { r: MonitoringRover }) {
+  const hb = r.heartbeat_age_s.value ?? [];
+  const worst = hb.reduce<number | null>((m, x) => (x.age_s === null ? m : m === null ? x.age_s : Math.max(m, x.age_s)), null);
+  const runs = r.runs_24h.value;
+  const dur = r.run_duration_vs_expected.value;
+  const stops = r.stops_without_frame_24h.value;
+  const up = r.upload_backlog.value;
+  return (
+    <StatStrip cols={6} flush>
+      <FigureCell label="Rover heartbeat" value={worst} unit="s ago" missing="Never seen" caption={`${hb.length} rover${hb.length === 1 ? '' : 's'}`} note={r.heartbeat_age_s.note} />
+      <FigureCell label="Runs, 24 h" value={runs ? runs.completed : null} caption={runs ? `${runs.started} started · ${runs.failed} failed · ${runs.expected ?? '?'} expected` : ''} note={r.runs_24h.note} />
+      <FigureCell label="Run time" value={dur?.median_s != null ? Math.round(dur.median_s / 60) : null} unit="min" missing="No complete run" caption={dur?.expected_s != null ? `budget ${ago(dur.expected_s)} · ${dur.over_expected ?? 0} over` : 'budget not sent yet'} note={r.run_duration_vs_expected.note} />
+      <FigureCell label="Limit hits, 24 h" value={r.limit_hit_24h.value} missing="Not sent yet" note={r.limit_hit_24h.note} />
+      <FigureCell label="Stops with no frame" value={stops ? stops.without_frame : null} caption={stops ? `of ${stops.stops} stops` : ''} note={r.stops_without_frame_24h.note} />
+      <FigureCell label="Upload backlog" value={up ? up.waiting : null} caption={up?.oldest_age_s != null ? `oldest ${ago(up.oldest_age_s)}${up.failed ? ` · ${up.failed} failed` : ''}` : up?.failed ? `${up.failed} failed` : 'nothing waiting'} note={r.upload_backlog.note} />
+    </StatStrip>
+  );
+}
+
+const SECTION_LABEL: Record<string, string> = {
+  readings: 'Readings',
+  rover_runs: 'Rover runs',
+  rover_stops: 'Rover stops',
+  rover_detections: 'Flower detections',
+  rover_videos: 'Run videos',
+  vision_frames: 'Camera frames',
+  automation_events: 'Automation (relay, drain)',
+  device_commands: 'Commands',
+  device_events: 'Device events',
+  alert_changes: 'Alerts opened and cleared',
+  alert_firings: 'Alert firings',
+  layout_zones: 'Rooms',
+  layout_locations: 'Cabinets',
+  layout_sublocations: 'Trays, rails, reservoirs',
+  rover_schedules: 'Rover schedules',
+  rover_settings: 'Rover settings',
+  rover_rail_map: 'Rail map',
+};
+
+/** What else vFarm sent for this farm, by section, and anything its newest snapshot marked truncated or failed. */
+function FeedHistory({ h }: { h: NonNullable<MonitoringFarm['feed_history']> }) {
+  const rep = h.last_report;
+  const problems = rep ? [...rep.truncated.map((s) => `${SECTION_LABEL[s] ?? s} cut short, continues next tick`), ...Object.entries(rep.errors).map(([s, e]) => `${SECTION_LABEL[s] ?? s} not read: ${e}`), ...Object.entries(rep.refused).map(([s, n]) => `${n} ${SECTION_LABEL[s] ?? s} row${n === 1 ? '' : 's'} refused`)] : [];
+  return (
+    <Card className="pb-3">
+      <CardHeader title="What vFarm sends" right={<span className="tabular text-[11.5px] text-faint">{rep ? `newest report ${relativeTime(rep.taken_at) ?? ''}` : 'held from 24 Oct 2026'}</span>} />
+      {!h.sections || h.sections.length === 0 ? (
+        <EmptyState compact>{h.sections ? 'vFarm has not sent any history for this farm yet. Only its current state arrives.' : h.note}</EmptyState>
+      ) : (
+        <TableFrame flat grow={false} label="vFarm history by section">
+          <thead>
+            <tr>
+              <Th>section</Th>
+              <Th>last 24 h</Th>
+              <Th>held</Th>
+              <Th>newest</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {h.sections.map((x) => (
+              <tr key={x.section}>
+                <td className="td">{SECTION_LABEL[x.section] ?? x.section}</td>
+                <td className="td tabular">{x.last_24h}</td>
+                <td className="td tabular text-dim">{x.rows}</td>
+                <td className="td tabular text-dim">{relativeTime(x.latest_at) ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </TableFrame>
+      )}
+      {problems.length > 0 && <p className="px-4 pt-2 text-[12px] text-degraded">{problems.join(' · ')}</p>}
+    </Card>
   );
 }

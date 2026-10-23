@@ -3501,6 +3501,34 @@ const MIGRATIONS: Migration[] = [
     name: 'engine_vfarm_farms.unlisted_at: a real farm the snapshot stopped listing',
     statements: [`ALTER TABLE engine_vfarm_farms ADD COLUMN IF NOT EXISTS unlisted_at timestamptz`],
   },
+  {
+    // 24 Oct 2026, Destiny (D5): the snapshot carried current state only, so rover runs, frames,
+    // drain and relay events, commands, device events and alert history never reached the
+    // dashboard, and it kept about one reading in sixty. The snapshot's new `history` block lands
+    // here, one row per vFarm row (section + vFarm's own key), the row stored whole so a new column
+    // vFarm adds flows without a change here. `layout` and `rover_config` are full every tick and
+    // land in the same table; an item a listed farm stops sending is marked gone, never deleted.
+    // Every reading in `history.readings` goes to engine_vfarm_readings (migration 87).
+    id: 91,
+    name: 'engine_vfarm_history: everything vFarm records, by section, kept whole',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_vfarm_history (
+         section       text NOT NULL,
+         source_id     text NOT NULL,
+         farm_id       text,
+         device_id     text,
+         at            timestamptz,
+         row           jsonb NOT NULL,
+         synthetic     boolean NOT NULL DEFAULT false,
+         first_seen_at timestamptz NOT NULL DEFAULT now(),
+         updated_at    timestamptz NOT NULL DEFAULT now(),
+         gone_at       timestamptz,
+         PRIMARY KEY (section, source_id)
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_vfarm_history_farm ON engine_vfarm_history (farm_id, section, at DESC)`,
+      `ALTER TABLE engine_vfarm_snapshots ADD COLUMN IF NOT EXISTS history jsonb`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
