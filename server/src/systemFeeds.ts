@@ -253,6 +253,8 @@ export interface SnapshotStoreResult {
   open_alerts: number;
   devices_gone: number;
   alerts_closed: number;
+  /** Real farms held here that this snapshot left out, marked not listed (migration 90). */
+  farms_unlisted: number;
   /** Every farm in it was a simulated one (the Monitoring Twin's test rack). */
   synthetic: boolean;
 }
@@ -333,10 +335,21 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
          ON CONFLICT (farm_id) DO UPDATE SET code = EXCLUDED.code, name = EXCLUDED.name, status = EXCLUDED.status, device_count = EXCLUDED.device_count,
            online_count = EXCLUDED.online_count, offline_count = EXCLUDED.offline_count, unhealthy_count = EXCLUDED.unhealthy_count,
-           fields = EXCLUDED.fields, snapshot_at = EXCLUDED.snapshot_at, updated_at = now()`,
+           fields = EXCLUDED.fields, snapshot_at = EXCLUDED.snapshot_at, unlisted_at = NULL, updated_at = now()`,
         [id, str(f.code), str(f.name), str(f.status), num(f.device_count), num(f.online_count), num(f.offline_count), num(f.unhealthy_count), JSON.stringify(f), takenAt],
       );
     }
+    // A real farm held here that this real snapshot leaves out is marked not listed (migration 90),
+    // never left to read as a silent feed: the feed is arriving, it just no longer names that farm.
+    // Its own rows are kept as they were. Simulated snapshots never judge real farms, nor the reverse.
+    const unlisted = synthetic
+      ? { rowCount: 0 }
+      : await db.query(
+          `UPDATE engine_vfarm_farms SET unlisted_at = $2
+            WHERE unlisted_at IS NULL AND NOT (farm_id = ANY($1::text[]))
+              AND coalesce((fields->>'synthetic')::boolean, false) = false`,
+          [farmIds, takenAt],
+        );
     for (const { id, farmId, d } of devs) {
       await db.query(
         `INSERT INTO engine_vfarm_devices (device_id, farm_id, place, device_type, model, status, health_score, last_seen_at, last_reading_at, latest, fields, snapshot_at, gone_at, updated_at)
@@ -403,7 +416,7 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
       synthetic,
     ]);
     events.changed('vfarm_state', null, db);
-    return { taken_at: takenAt, farms: farms.length, devices: devs.length, open_alerts: opens.length, devices_gone: gone.rowCount ?? 0, alerts_closed: closed.rowCount ?? 0, synthetic };
+    return { taken_at: takenAt, farms: farms.length, devices: devs.length, open_alerts: opens.length, devices_gone: gone.rowCount ?? 0, alerts_closed: closed.rowCount ?? 0, farms_unlisted: unlisted.rowCount ?? 0, synthetic };
   });
 }
 

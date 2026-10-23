@@ -3878,7 +3878,15 @@ under `/api/engine` with the same `x-dashboard-key`, each logged on
   (farms, devices, open alerts, alert-pipeline health). **Absence is read only
   inside the farms a snapshot lists**: a device it stops listing is marked
   gone, and an open alert is marked cleared. An older snapshot than the newest
-  held is a 409.
+  held is a 409. **A real farm a real snapshot leaves out is marked not listed**
+  (24 Oct 2026, Destiny — D2; migration 90, `engine_vfarm_farms.unlisted_at`):
+  the twin judges nothing on it (no feed-silent incident; Vfarm_01 held one for
+  two days while v-farm kept arriving), its devices read GONE, `listed: false`
+  and an absent evidence status saying vFarm no longer lists it. An incident
+  whose farm or device vFarm stopped listing closes as **not listed**
+  (`closeReason`, retry state `not_listed`, a person's close on the self-healing
+  scorecard), never "cleared", because it did not recover. Listing it again
+  lists it again. `npm run test:vfarm-unlisted`.
 - `dry_run: true` on any of them runs every check and write and rolls back, so
   a payload can be proved without a test row on a live page.
 

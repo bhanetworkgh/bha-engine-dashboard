@@ -13,6 +13,7 @@
 import * as gates from '../vfarmGates';
 import * as gateAuto from '../vfarmGateAuto';
 import { auditClose, auditOpen } from './writeTools';
+import { query } from '../pg';
 import type { ToolDefinition } from './tools';
 
 const str = (args: Record<string, unknown>, key: string): string => (typeof args[key] === 'string' ? (args[key] as string).trim() : '');
@@ -21,15 +22,46 @@ const bare = (v: string) => v.replace(/^<@?([A-Z0-9]+)(\|[^>]*)?>$/, '$1');
 export const getVfarmGates: ToolDefinition = {
   name: 'get_vfarm_gates',
   description:
-    'Read the vFarm stage gates and the 5-rack pilot offer: every VFARM_STAGE1_LAB_VALIDATION_v1, VFARM_STAGE2_PILOT_CHECKLIST_v1 and VFARM_5RACK_PILOT_OFFER_v1 record with its status, its four checks (who checked, when, manual or sensor), the Early Access leads tied to each offer, and the latest VFARM_* events. Use it to answer "where does Stage 1 stand", "can Stage 2 start", "is the offer tied to a pilot". Rows with fixture: true are test records, never real state: say so or leave them out. Three checks (root-zone moisture, airflow velocity, early disease detection) are recorded by a person, not a sensor; never describe them as automated detection. Also the scoreboard: `pipeline` (the three steps from the newest real record of each), `boards` (per record: checks passed of four, days to target, days in status, who was asked, uptime and incidents against the Stage 2 budgets) and `prompts_waiting` (cards sent and not yet answered). Sensor-fed checks and the growth stage fill themselves from the Monitoring Twin when the record names its farm (monitoring_farm_id); the owner is sent Passed/Failed cards for the rest and Jason a card when all four have passed, so do not chase people for those. Returns {stage1, stage2, offers, pipeline, boards, prompts_waiting, automation, fixtures, checks, gates, events, note}.',
+    'Read the vFarm stage gates and the 5-rack pilot offer: every VFARM_STAGE1_LAB_VALIDATION_v1, VFARM_STAGE2_PILOT_CHECKLIST_v1 and VFARM_5RACK_PILOT_OFFER_v1 record with its status, its four checks (who checked, when, manual or sensor), the Early Access leads tied to each offer, and the latest VFARM_* events. Use it to answer "where does Stage 1 stand", "can Stage 2 start", "is the offer tied to a pilot". Rows with fixture: true are test records, never real state: say so or leave them out. Three checks (root-zone moisture, airflow velocity, early disease detection) are recorded by a person, not a sensor; never describe them as automated detection. Also the scoreboard: `pipeline` (the three steps from the newest real record of each), `boards` (per record: checks passed of four, days to target, days in status, who was asked, uptime and incidents against the Stage 2 budgets) and `prompts_waiting` (cards sent and not yet answered). Sensor-fed checks and the growth stage fill themselves from the Monitoring Twin when the record names its farm (monitoring_farm_id); the owner is sent Passed/Failed cards for the rest and Jason a card when all four have passed, so do not chase people for those. Also `pilot1_go_no_go`: whether the four Pilot 1 go/no-go gates (LOOP-FVA9) are still a proposal awaiting Jason; when asked if Pilot 1 is ready, say its `say` line too. Returns {stage1, stage2, offers, pipeline, boards, prompts_waiting, automation, fixtures, checks, gates, events, note, pilot1_go_no_go}.',
   inputSchema: {
     type: 'object',
     properties: { events: { type: 'number', description: 'How many of the latest events to include. Default 20, at most 500.' } },
     additionalProperties: false,
   },
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Read the vFarm stage gates and pilot offer' },
-  handler: async (args) => ({ ok: true, ...(await gateAuto.scoreboard({ events: typeof args.events === 'number' ? args.events : 20 })) }),
+  handler: async (args) => ({ ok: true, ...(await gateAuto.scoreboard({ events: typeof args.events === 'number' ? args.events : 20 })), pilot1_go_no_go: await pilot1GoNoGo() }),
 };
+
+/**
+ * Where the Pilot 1 go/no-go criteria stand (24 Oct 2026, D6). Genie answered "is Pilot 1 ready?"
+ * from the Stage 1 record alone and left out that the four gates are still Destiny's proposal on
+ * LOOP-FVA9, which the answer contract (SOP 78478299) asks it to say. Read from the loop itself;
+ * a loop that cannot be read is "unknown", never "accepted".
+ */
+export const FVA9 = 'LOOP-1792528168754-FVA9';
+async function pilot1GoNoGo() {
+  try {
+    const r = await query<{ status: string | null; updated_at: string | null }>(
+      `SELECT fields->>'Status' AS status, to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+         FROM engine_loops WHERE natural_id = $1 ORDER BY updated_at DESC LIMIT 1`,
+      [FVA9],
+    );
+    const row = r.rows[0];
+    if (!row) return { loop_id: FVA9, state: 'unknown', say: 'The Pilot 1 go/no-go loop could not be found, so whether the gates are accepted is not known.' };
+    const closed = (row.status ?? '').toLowerCase() === 'closed';
+    return {
+      loop_id: FVA9,
+      loop_status: row.status,
+      updated_at: row.updated_at,
+      state: closed ? 'loop_closed_check_sop' : 'proposal_awaiting_jason',
+      say: closed
+        ? 'The go/no-go loop is closed; read the SOP with read_sop before saying the gates are accepted, and quote which pass.'
+        : 'The four Pilot 1 go/no-go gates are written as a proposal on LOOP-FVA9 and are waiting on Jason\'s sign-off; they are not yet a rule.',
+    };
+  } catch (e) {
+    return { loop_id: FVA9, state: 'unknown', say: 'The go/no-go loop could not be read just now, so whether the gates are accepted is not known.', error: e instanceof Error ? e.message : String(e) };
+  }
+}
 
 export const writeVfarmGate: ToolDefinition = {
   name: 'write_vfarm_gate',
