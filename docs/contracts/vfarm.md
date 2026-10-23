@@ -87,6 +87,44 @@ Answers: `201` with `{ ok, taken_at, farms, devices, open_alerts, devices_gone, 
 
 ---
 
+### Everything else vFarm records: `history`, `layout`, `rover_config` (24 Oct 2026, D5)
+
+Optional, additive to `vfarm.snapshot.v1`, and only for the farms the snapshot lists. Until 24 Oct the
+snapshot carried current state only, so rover runs, frames, drain and relay events, commands, device
+events and alert history never reached the dashboard, and it kept about one reading in sixty.
+
+```json
+"history": {
+  "until": "<taken_at>",
+  "sections": {
+    "<section>": { "since": "<ISO>", "next_since": "<ISO>", "truncated": false, "rows": [ { "...vFarm's row as stored...": "", "farm_id": "<uuid>", "device_id": "<id or null>", "at": "<ISO>" } ] }
+  },
+  "errors": { "<section>": "<why it could not be read this tick>" }
+},
+"layout": { "zones": [ ... ], "locations": [ ... ], "sublocations": [ ... ] },
+"rover_config": { "schedules": [ ... ], "settings": [ ... ], "rail_map": [ ... ] }
+```
+
+- **Sections and their key** (the dashboard keeps one row per section and key, so a re-sent window
+  changes nothing and a changed row is updated): `readings` (rows `{device_id, farm_id, reading_ts, values}`,
+  stored one row per metric and reading time in `engine_vfarm_readings`), `rover_runs` (`run_id`),
+  `rover_stops` (`run_id` + `seq`), `rover_detections` (`id`), `rover_videos` (`id`, else `run_id`),
+  `vision_frames` (`frame_id`), `automation_events` (`id`), `device_commands` (`id`), `device_events`
+  (`id`), `alert_changes` (`id`), `alert_firings` (`id`). Any other lower-case section name is accepted
+  and keyed on `id` (else `key`), so vFarm can add one (a `drain_cycles` section, say) without a change here.
+- **`layout` and `rover_config` are sent whole every tick.** An item of a listed farm that stops being sent
+  is marked gone, never deleted, as a device is.
+- **Every row carries `farm_id`.** A row naming a farm the snapshot does not list, or with no key, is
+  refused and counted on the snapshot's record, never stored against the wrong farm.
+- **Nothing is dropped quietly.** `truncated: true` on a section means vFarm hit its cap and continues
+  from `next_since` on the next tick; `errors` names a section vFarm could not read. Both are stored on
+  the snapshot row (`engine_vfarm_snapshots.history`) and shown on the Monitoring Twin.
+- At most 10,000 rows per section; the whole body at most 4 MB.
+- Reads: the Monitoring Twin's `feed_history` (rows per section, last 24 h, newest) and `rover` (the six
+  rover signals: heartbeat age, runs against the schedule, run time against its budget, limit hits, stops
+  with no frame, the upload backlog; readings only, no thresholds set), and the MCP tool `read_vfarm_history`
+  for the rows themselves.
+
 ## 2. Alert fires: live, the envelope you already build
 
 `POST /api/engine/vfarm-alerts`

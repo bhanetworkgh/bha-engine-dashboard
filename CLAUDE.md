@@ -1569,6 +1569,16 @@ repeat adds a line and never a second job. The incident stays open as before. Fi
 real farm with a crop cycle set (none yet on 21 Oct). Jegan's five vision doubts wait on the
 camera signals (F0UG). `npm run test:monitoring-recurrence`, `npm run test:range-doubt`.
 
+**Everything vFarm records reaches the dashboard** (24 Oct 2026, Destiny — D5; Jegan's Monday plan in
+#bha-coordination 1792735807.245499). The snapshot's optional `history`, `layout` and `rover_config`
+blocks (contract in `docs/contracts/vfarm.md`) land in `engine_vfarm_history` (migration 91), one row per
+section and vFarm key, the row stored whole; readings go to `engine_vfarm_readings`. A row with no key or
+naming an unlisted farm is refused and counted; truncated and failed sections are kept on
+`engine_vfarm_snapshots.history`. `vfarmHistory.ts` reads it back: the twin's `feed_history` per farm, the
+six rover signals (`roverSignals`, pure, readings only, "not sent by vFarm yet" where an input is missing),
+and `read_vfarm_history` (both connections, Genie's scope). The vFarm page and the Monitoring Twin take a
+farm filter (`FarmPicker`, `?farm=`). `npm run test:vfarm-history`.
+
 **Only the newest server instance judges** (21 Oct 2026, Destiny — LOOP-1792602989664-YRKG). During a deploy the old instance once ran a pass under the old rule after the new one had, reopening 8 relay incidents. `evaluate()` claims `meta` `monitoring.judge_owner` under its advisory lock: a later-started instance takes over, an older one stands down (`skipped`), and an owner silent for 3 minutes (`OWNER_STALE_MS`) gives way. `npm run test:monitoring-owner` proves it with two processes.
 
 **Engine health holds every monitoring incident the ledger took** (2026-10-04,

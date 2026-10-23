@@ -268,6 +268,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // from the gate records, never on its own. Both reads; the answer contract is the SOP
         // "SOP -- Genie Answer Contract: Payments, Rack Evidence and Pilot 1 Readiness".
         'read_monitoring_twin', 'get_vfarm_gates',
+        // 2026-10-24 (D5): the rows behind the twin's summary (readings, rover runs, frames,
+        // events, alert history, layout), so Genie answers from what vFarm sent, never a guess.
+        'read_vfarm_history',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>
