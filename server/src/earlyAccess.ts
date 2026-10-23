@@ -44,6 +44,7 @@ import { offersByLead } from './vfarmGates';
 import { FORM_A_QUESTIONS } from '../../src/data/formA';
 import type { Intake2Invite, Intake2Stored } from '../../src/data/intake2';
 import * as intake2 from './intake2';
+import * as chargeGate from './chargeGate';
 import * as proposalMod from './proposal';
 import { CLOSE_REASONS, type LeadActivity } from '../../src/data/leadPipeline';
 
@@ -586,9 +587,10 @@ export const TEAM_TEST_SQL = `lower(COALESCE(email, form_a->>'email', '')) LIKE 
  * needs a live, paid Stripe payment: a test-mode charge never makes anyone a customer. A team
  * test lead may move on a paid test-mode payment, and that move grants nothing. Pure.
  */
-export function stage5Payment(state: string | null, mode: string | null, teamTest: boolean): { ok: true } | { ok: false; message: string } {
+export function stage5Payment(state: string | null, mode: string | null, teamTest: boolean, canChargeLive = false): { ok: true } | { ok: false; message: string } {
   if (state !== 'paid') return { ok: false, message: 'Stage 5 is a customer: the agreement and the payment both in. No paid Stripe payment is recorded on this lead.' };
-  if (mode === 'live') return { ok: true };
+  // Jason, 23 Oct: real Stage 5 needs can_charge_live (Hardik's green pass on a bundle and Jason's offer_approved) as well as a live payment.
+  if (mode === 'live') return canChargeLive ? { ok: true } : { ok: false, message: 'The offer is not approved for live charging yet. The acceptance bundle and/or Jason\'s offer_approved event do not exist, so a real buyer cannot reach Stage 5 (read_charge_gate says why).' };
   if (mode === 'test' && teamTest) return { ok: true };
   return { ok: false, message: `Stage 5 needs a live Stripe payment. This lead's payment is ${mode === 'test' ? 'a test-mode payment' : `in mode "${mode ?? 'unknown'}"`}, and only a team test lead (an @bhanetwork.org address) may move on one.` };
 }
@@ -626,7 +628,15 @@ export async function moveStage(
     if (to >= 3 && !row.intake_2_completed_at) throw new SubmissionError(409, 'Stage 3 is the proposal, for a buyer whose site specification (Form 2) is in and whose five checks have cleared. This lead has not sent Form 2 yet.');
     if (to >= 4 && !row.accepted) throw new SubmissionError(409, 'Stage 4 is for a buyer who accepted their proposal. This lead has not accepted one.');
     if (to >= 5 && row.paid !== 'paid') throw new SubmissionError(409, 'Stage 5 is a customer: the agreement and the payment both in. No paid Stripe payment is recorded on this lead.');
-    const stage5 = stage5Payment(row.paid, row.pay_mode, row.team_test === true);
+    let canCharge = false;
+    if (to >= 5 && row.pay_mode === 'live') {
+      try {
+        canCharge = (await chargeGate.status('vfarm_stripe_live')).can_charge_live;
+      } catch {
+        canCharge = false; // a gate that cannot be read is "no"
+      }
+    }
+    const stage5 = stage5Payment(row.paid, row.pay_mode, row.team_test === true, canCharge);
     if (to >= 5 && !stage5.ok) throw new SubmissionError(409, stage5.message);
   }
   const testPayment = to >= 5 && to > row.stage && row.pay_mode === 'test';
