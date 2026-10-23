@@ -58,6 +58,14 @@ export interface GateInput {
   notes?: string | null;
   recorded_by: string;
   test?: boolean;
+  /** offer_approval: the offer this approves or withdraws. Required on both verdicts. */
+  offer_id?: string | null;
+  /** offer_approval, approved: the loop the offer belongs to (LOOP-…). */
+  loop_id?: string | null;
+  /** offer_approval, approved: the conditions as Jason set them, kept as sent (an object or his words). */
+  conditions?: unknown;
+  /** acceptance_pass, green: the acceptance bundle the pass rests on (Hardik's Honest Gate record: a link or an id). */
+  bundle_ref?: string | null;
 }
 
 export interface GateRow {
@@ -74,6 +82,10 @@ export interface GateRow {
   recorded_by: string;
   via: string;
   test: boolean;
+  offer_id: string | null;
+  loop_id: string | null;
+  conditions: unknown;
+  bundle_ref: string | null;
   created_at: string;
 }
 
@@ -95,7 +107,7 @@ export function parseLink(link: string): { channel: string; ts: string; thread_t
 }
 
 /** The rules, pure. Returns the cleaned input or throws ChargeGateError naming the rule. */
-export function check(i: GateInput): { kind: Kind; rail: Rail; verdict: string; decided_by: string; evidence_link: string; link: NonNullable<ReturnType<typeof parseLink>>; scope: string | null; notes: string | null; recorded_by: string; test: boolean } {
+export function check(i: GateInput): { kind: Kind; rail: Rail; verdict: string; decided_by: string; evidence_link: string; link: NonNullable<ReturnType<typeof parseLink>>; scope: string | null; notes: string | null; recorded_by: string; test: boolean; offer_id: string | null; loop_id: string | null; conditions: unknown; bundle_ref: string | null } {
   const kind = clean(i.kind, 40) as Kind;
   if (!KINDS.includes(kind)) throw new ChargeGateError('unknown_kind', `kind must be one of: ${KINDS.join(', ')}.`);
   const rail = (clean(i.rail, 60) || 'vfarm_stripe_live') as Rail;
@@ -118,7 +130,30 @@ export function check(i: GateInput): { kind: Kind; rail: Rail; verdict: string; 
     throw new ChargeGateError('scope_required', 'An approved offer names what is approved in scope, in Jason\'s words (the offer, the price, who it is for). Nothing is filled in for him.');
   }
   const notes = clean(i.notes, 2000) || null;
-  return { kind, rail, verdict, decided_by, evidence_link, link, scope, notes, recorded_by, test: i.test === true };
+  // Jason, 23 Oct (#workflow-logs-destiny 1792769106.709119): an offer approval is an offer_approved event
+  // carrying offer_id, loop_id, approver_id, timestamp and a conditions snapshot, and a pass rests on an
+  // acceptance bundle. approver_id is decided_by and the timestamp is the row's own created_at.
+  let offer_id: string | null = null;
+  let loop_id: string | null = null;
+  let conditions: unknown = null;
+  let bundle_ref: string | null = null;
+  if (kind === 'offer_approval') {
+    offer_id = clean(i.offer_id, 120) || null;
+    if (!offer_id || offer_id.length < 3) throw new ChargeGateError('offer_id_required', 'An offer approval names the offer it approves or withdraws (offer_id).');
+    if (verdict === 'approved') {
+      loop_id = clean(i.loop_id, 60) || null;
+      if (!loop_id || !/^LOOP-\d{10,}-[A-Z0-9]{4}$/.test(loop_id)) throw new ChargeGateError('loop_id_required', 'An approved offer names the loop it belongs to (loop_id, LOOP-<ms>-<4>).');
+      const cRaw = i.conditions;
+      if (typeof cRaw === 'string') conditions = clean(cRaw, 4000) || null;
+      else if (cRaw && typeof cRaw === 'object' && !Array.isArray(cRaw) && Object.keys(cRaw as object).length) conditions = cRaw;
+      if (conditions === null) throw new ChargeGateError('conditions_required', "An approved offer carries a snapshot of its conditions, as Jason set them (price, who it is for, limits). Nothing is filled in for him.");
+      if (JSON.stringify(conditions).length > 8000) throw new ChargeGateError('conditions_too_long', 'The conditions snapshot is 8,000 characters at most.');
+    }
+  } else if (verdict === 'green') {
+    bundle_ref = clean(i.bundle_ref, 500) || null;
+    if (!bundle_ref) throw new ChargeGateError('bundle_required', "A green pass names the acceptance bundle it rests on (bundle_ref: Hardik's Honest Gate record, a link or an id).");
+  }
+  return { kind, rail, verdict, decided_by, evidence_link, link, scope, notes, recorded_by, test: i.test === true, offer_id, loop_id, conditions, bundle_ref };
 }
 
 export type MessageCheck = (link: { channel: string; ts: string; thread_ts: string | null }) => Promise<{ ok: true; user: string | null } | { ok: false; reason: 'not_found' | 'unreadable'; message: string }>;
@@ -162,6 +197,10 @@ const toRow = (r: Record<string, unknown>): GateRow => ({
   recorded_by: String(r.recorded_by),
   via: String(r.via),
   test: r.test === true,
+  offer_id: (r.offer_id as string) ?? null,
+  loop_id: (r.loop_id as string) ?? null,
+  conditions: r.conditions ?? null,
+  bundle_ref: (r.bundle_ref as string) ?? null,
   created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
 });
 
@@ -200,6 +239,10 @@ export async function recordGate(
     recorded_by: c.recorded_by,
     via: opts.via,
     test: c.test,
+    offer_id: c.offer_id,
+    loop_id: c.loop_id,
+    conditions: c.conditions,
+    bundle_ref: c.bundle_ref,
     created_at: new Date().toISOString(),
   };
   if (opts.dry_run) {
@@ -208,9 +251,9 @@ export async function recordGate(
   }
   const event_id = await withTransaction(async (db) => {
     const ins = await db.query(
-      `INSERT INTO engine_charge_gate (gate_id, kind, rail, verdict, decided_by, evidence_link, evidence_channel, evidence_ts, scope, notes, recorded_by, via, test)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING created_at`,
-      [row.gate_id, row.kind, row.rail, row.verdict, row.decided_by, row.evidence_link, row.evidence_channel, row.evidence_ts, row.scope, row.notes, row.recorded_by, row.via, row.test],
+      `INSERT INTO engine_charge_gate (gate_id, kind, rail, verdict, decided_by, evidence_link, evidence_channel, evidence_ts, scope, notes, recorded_by, via, test, offer_id, loop_id, conditions, bundle_ref)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17) RETURNING created_at`,
+      [row.gate_id, row.kind, row.rail, row.verdict, row.decided_by, row.evidence_link, row.evidence_channel, row.evidence_ts, row.scope, row.notes, row.recorded_by, row.via, row.test, row.offer_id, row.loop_id, row.conditions === null ? null : JSON.stringify(row.conditions), row.bundle_ref],
     );
     row.created_at = (ins.rows[0] as { created_at: Date }).created_at.toISOString();
     const e = await record(
@@ -220,11 +263,27 @@ export async function recordGate(
         lane: 'VFARM',
         actor: row.recorded_by,
         source_ref: row.evidence_link,
-        detail: { gate_id: row.gate_id, kind: row.kind, verdict: row.verdict, decided_by: row.decided_by, test: row.test },
+        detail: { gate_id: row.gate_id, kind: row.kind, verdict: row.verdict, decided_by: row.decided_by, offer_id: row.offer_id, bundle_ref: row.bundle_ref, test: row.test },
         dedupe_key: `charge_gate:${row.gate_id}`,
       },
       db,
     );
+    if (row.kind === 'offer_approval') {
+      // The first-class event Jason named, with exactly his fields.
+      await record(
+        {
+          event_type: row.verdict === 'approved' ? 'offer_approved' : 'offer_withdrawn',
+          at: row.created_at,
+          subject_id: row.offer_id ?? row.rail,
+          lane: 'VFARM',
+          actor: row.decided_by,
+          source_ref: row.evidence_link,
+          detail: { offer_id: row.offer_id, loop_id: row.loop_id, approver_id: row.decided_by, timestamp: row.created_at, conditions: row.conditions, rail: row.rail, gate_id: row.gate_id, test: row.test },
+          dedupe_key: `offer:${row.gate_id}`,
+        },
+        db,
+      );
+    }
     return e.id;
   });
   const after = await status(c.rail);
@@ -250,10 +309,12 @@ export interface RailStatus {
 /** The pure decision from the newest real row of each kind. */
 export function decide(rail: Rail, pass: GateRow | null, offer: GateRow | null): RailStatus {
   const missing: string[] = [];
-  if (!pass) missing.push("Hardik's acceptance pass has not been recorded");
+  if (!pass) missing.push("Hardik's acceptance pass (on an acceptance bundle) has not been recorded");
   else if (pass.verdict !== OPEN_VERDICT.acceptance_pass) missing.push(`Hardik's newest acceptance pass is ${pass.verdict} (${pass.created_at.slice(0, 10)})`);
-  if (!offer) missing.push("Jason's live-offer approval has not been recorded");
+  else if (!pass.bundle_ref) missing.push("Hardik's newest green pass names no acceptance bundle");
+  if (!offer) missing.push("Jason's offer_approved event has not been recorded");
   else if (offer.verdict !== OPEN_VERDICT.offer_approval) missing.push(`Jason's newest offer approval is ${offer.verdict} (${offer.created_at.slice(0, 10)})`);
+  else if (!offer.offer_id || !offer.loop_id || offer.conditions === null) missing.push("Jason's newest offer approval is not a complete offer_approved event (offer_id, loop_id and a conditions snapshot)");
   const can = missing.length === 0;
   return {
     rail,
@@ -262,8 +323,8 @@ export function decide(rail: Rail, pass: GateRow | null, offer: GateRow | null):
     offer_approval: offer,
     missing,
     answer: can
-      ? `Yes, within what Jason approved: "${offer?.scope ?? ''}". Hardik's pass is green (${pass?.created_at.slice(0, 10)}) and Jason approved a live offer (${offer?.created_at.slice(0, 10)}).`
-      : `No. ${missing.join('; ')}. Real buyers can't be charged until both are recorded.`,
+      ? `Yes, within what Jason approved: offer ${offer?.offer_id ?? '(unnamed)'}, "${offer?.scope ?? ''}". Hardik's pass is green on ${pass?.bundle_ref ?? 'his acceptance bundle'} (${pass?.created_at.slice(0, 10)}) and Jason approved the offer (${offer?.created_at.slice(0, 10)}).`
+      : `No. The offer is not approved for live charging yet. ${missing.join('; ')}. Real buyers can't be charged until both are recorded.`,
   };
 }
 
@@ -292,5 +353,7 @@ export const RULES = [
   "acceptance_pass is Hardik's (U0BKT6MAW2Y) and offer_approval is Jason's (U0A9V97949F). Each counts only on that person's own Slack message, which Slack confirms they posted.",
   'Rows are never edited or deleted: a red pass or a withdrawn approval is a new row, and the newest row of each kind is the one that counts.',
   'A test row never counts. No agent may record either kind.',
+  "A green pass names the acceptance bundle it rests on (bundle_ref). An approved offer is Jason's offer_approved event: offer_id, loop_id, approver_id, timestamp and a conditions snapshot. A withdrawal names the offer_id.",
+  'Stage 5 for a real buyer also needs can_charge_live true and a live (not test-mode) payment. Test-mode payments never satisfy real Stage 5: they are test-only and never grant entitlements.',
   'This record charges nobody, moves no stage and opens no checkout. Anything said in public still needs read_publication_decision.',
 ];

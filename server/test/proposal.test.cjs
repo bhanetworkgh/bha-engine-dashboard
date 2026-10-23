@@ -92,7 +92,15 @@ const ok = (name) => (passed++, console.log(`  ok  ${name}`));
   await query(`UPDATE engine_vfarm_leads SET email = 'ada@example.org' WHERE id::text = $1`, [id]);
   await assert.rejects(ea.moveStage({ id }, 5, 'Destiny', null, 'page'), /needs a live Stripe payment/);
   await query(`UPDATE engine_vfarm_leads SET stripe_payment = '{"state":"paid","mode":"live"}'::jsonb WHERE id::text = $1`, [id]);
+  // A live payment is not enough on its own: the charge gate must say yes (Jason, 23 Oct).
+  await query(`DELETE FROM engine_charge_gate WHERE gate_id LIKE 'CG-PROPTEST-%'`);
+  await assert.rejects(ea.moveStage({ id }, 5, 'Destiny', null, 'page'), /not approved for live charging/);
+  await query(`INSERT INTO engine_charge_gate (gate_id, kind, rail, verdict, decided_by, evidence_link, evidence_channel, evidence_ts, recorded_by, via, bundle_ref, created_at)
+               VALUES ('CG-PROPTEST-1','acceptance_pass','vfarm_stripe_live','green','U0BKT6MAW2Y','x','C','1','t','test','TEST bundle', now() + interval '1 day')`);
+  await query(`INSERT INTO engine_charge_gate (gate_id, kind, rail, verdict, decided_by, evidence_link, evidence_channel, evidence_ts, recorded_by, via, scope, offer_id, loop_id, conditions, created_at)
+               VALUES ('CG-PROPTEST-2','offer_approval','vfarm_stripe_live','approved','U0A9V97949F','x','C','1','t','test','TEST','OFFER-TEST','LOOP-1792528168754-FVA9','{"price":"TEST"}', now() + interval '1 day')`);
   let moved5 = await ea.moveStage({ id }, 5, 'Destiny', 'agreement and payment in', 'page');
+  await query(`DELETE FROM engine_charge_gate WHERE gate_id LIKE 'CG-PROPTEST-%'`);
   assert.equal(moved5.stage, 5);
   await ea.moveStage({ id }, 4, 'Destiny', 'back for the team-test case', 'page');
   // A team test lead may move on a test-mode payment, and the move says it grants nothing.
@@ -106,9 +114,12 @@ const ok = (name) => (passed++, console.log(`  ok  ${name}`));
   assert.equal(sev.test_payment, true);
   assert.equal(sev.grants, 'nothing');
   assert.equal(ea.stage5Payment('paid', 'test', false).ok, false);
-  assert.equal(ea.stage5Payment('paid', 'live', false).ok, true);
+  assert.equal(ea.stage5Payment('paid', 'live', false).ok, false);
+  assert.match(ea.stage5Payment('paid', 'live', false).message, /^The offer is not approved for live charging yet\./);
+  assert.equal(ea.stage5Payment('paid', 'live', false, true).ok, true);
+  assert.equal(ea.stage5Payment('paid', 'test', false, true).ok, false);
   assert.equal(ea.stage5Payment('paid', null, true).ok, false);
-  ok('Stage 5 needs a paid live payment for a real buyer; a team test lead may move on a test payment, marked on the move and its event as granting nothing');
+  ok('Stage 5 needs a paid live payment and the charge gate at yes for a real buyer; a team test lead may move on a test payment, marked on the move and its event as granting nothing');
 
   await ea.moveStage({ id }, 3, 'Destiny', 'test the replace', 'page');
   const again = await prop.create(id, { ...input, price_amount: 400000 }, 'Destiny');

@@ -43,7 +43,7 @@ export const readChargeGate: ToolDefinition = {
 export const recordChargeGate: ToolDefinition = {
   name: 'record_charge_gate',
   description:
-    `Record ONE charge-gate verdict: Hardik's acceptance_pass on the payment path (green or red) or Jason's offer_approval of a live offer (approved or withdrawn). These are the two records "can we charge real buyers" waits on. HELD HERE: decided_by must be the owner (acceptance_pass ${gate.HARDIK}, offer_approval ${gate.JASON}) (not_the_owner); requester_user_id is the owner or Destiny (not_permitted); evidence_link is the Slack link of the owner's own message saying it, and Slack must confirm that person posted it (evidence_required, evidence_not_found, evidence_unchecked, evidence_not_owners); an approved offer names what is approved in scope, in Jason's words (scope_required). Never fill a verdict, scope or link in for anyone. Rows are never edited: a change of mind is a new row. Refused on any agent token. dry_run checks everything, Slack included, and writes nothing. test: true marks a test row that never counts. Returns {ok, written, row, status, message}. Audited on engine_mcp_writes.`,
+    `Record ONE charge-gate verdict: Hardik's acceptance_pass on the payment path (green or red) or Jason's offer_approval of a live offer (approved or withdrawn). These are the two records "can we charge real buyers" waits on. HELD HERE: decided_by must be the owner (acceptance_pass ${gate.HARDIK}, offer_approval ${gate.JASON}) (not_the_owner); requester_user_id is the owner or Destiny (not_permitted); evidence_link is the Slack link of the owner's own message saying it, and Slack must confirm that person posted it (evidence_required, evidence_not_found, evidence_unchecked, evidence_not_owners); an approved offer names what is approved in scope, in Jason's words (scope_required), and is Jason's offer_approved event: offer_id, loop_id and a conditions snapshot (offer_id_required, loop_id_required, conditions_required); a withdrawal names offer_id; a green pass names its acceptance bundle in bundle_ref (bundle_required). approver_id is decided_by and the timestamp is the row's own. An approval also writes one offer_approved (or offer_withdrawn) engine event with those fields. Never fill a verdict, scope or link in for anyone. Rows are never edited: a change of mind is a new row. Refused on any agent token. dry_run checks everything, Slack included, and writes nothing. test: true marks a test row that never counts. Returns {ok, written, row, status, message}. Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -53,6 +53,10 @@ export const recordChargeGate: ToolDefinition = {
       evidence_link: { type: 'string', description: "Slack link (Copy link) to the owner's own message giving this verdict." },
       scope: { type: 'string', description: 'For an approved offer: what is approved, in Jason\'s words. Required then.' },
       notes: { type: 'string' },
+      offer_id: { type: 'string', description: 'offer_approval: the offer approved or withdrawn. Required on both.' },
+      loop_id: { type: 'string', description: 'offer_approval, approved: the loop the offer belongs to (LOOP-<ms>-<4>). Required.' },
+      conditions: { description: 'offer_approval, approved: the conditions snapshot as Jason set them (an object, or his words). Required; never filled in for him.' },
+      bundle_ref: { type: 'string', description: "acceptance_pass, green: the acceptance bundle the pass rests on (Hardik's Honest Gate record, a link or id). Required." },
       rail: { type: 'string', enum: [...gate.RAILS], description: 'Default vfarm_stripe_live.' },
       requester_user_id: { type: 'string', description: 'Slack id of the person recording this: the owner or Destiny.' },
       test: { type: 'boolean', description: 'true marks a TEST row that never counts.' },
@@ -81,6 +85,10 @@ export const recordChargeGate: ToolDefinition = {
           evidence_link: str(args, 'evidence_link'),
           scope: str(args, 'scope') || null,
           notes: str(args, 'notes') || null,
+          offer_id: str(args, 'offer_id') || null,
+          loop_id: str(args, 'loop_id') || null,
+          conditions: args.conditions ?? null,
+          bundle_ref: str(args, 'bundle_ref') || null,
           recorded_by: requester ?? '',
           test: args.test === true,
         },

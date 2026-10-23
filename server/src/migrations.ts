@@ -3590,6 +3590,29 @@ const MIGRATIONS: Migration[] = [
       `CREATE UNIQUE INDEX IF NOT EXISTS engine_essence_markers_once ON engine_essence_markers (subject_id, kind, md5(quote), source_ref)`,
     ],
   },
+  {
+    // Jason, 23 Oct (#workflow-logs-destiny 1792769106.709119): an offer approval is an offer_approved
+    // event with offer_id, loop_id, approver_id, timestamp and a conditions snapshot, and a pass rests on
+    // an acceptance bundle. approver_id is decided_by and the timestamp created_at; these four are new.
+    // The CHECK is NOT VALID so any earlier row stays as it was; chargeGate.decide() still refuses to count
+    // an incomplete one.
+    id: 94,
+    name: 'engine_charge_gate: offer_id, loop_id, conditions and bundle_ref (Jason\'s offer_approved fields)',
+    statements: [
+      `ALTER TABLE engine_charge_gate ADD COLUMN IF NOT EXISTS offer_id text`,
+      `ALTER TABLE engine_charge_gate ADD COLUMN IF NOT EXISTS loop_id text`,
+      `ALTER TABLE engine_charge_gate ADD COLUMN IF NOT EXISTS conditions jsonb`,
+      `ALTER TABLE engine_charge_gate ADD COLUMN IF NOT EXISTS bundle_ref text`,
+      `DO $$ BEGIN
+         IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'engine_charge_gate_offer_fields') THEN
+           ALTER TABLE engine_charge_gate ADD CONSTRAINT engine_charge_gate_offer_fields CHECK (
+             (kind <> 'offer_approval' OR offer_id IS NOT NULL)
+             AND (kind <> 'offer_approval' OR verdict <> 'approved' OR (loop_id IS NOT NULL AND conditions IS NOT NULL))
+             AND (kind <> 'acceptance_pass' OR verdict <> 'green' OR bundle_ref IS NOT NULL)) NOT VALID;
+         END IF;
+       END $$`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

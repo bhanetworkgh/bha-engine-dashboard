@@ -14,8 +14,8 @@ let n = 0;
 const ok = (m) => { n += 1; console.log('  ok  ' + m); };
 
 const LINK = 'https://bayshorizonnetwork.slack.com/archives/C0AFPJ5S1C1/p1792686055908889?thread_ts=1792680780.486439&cid=C0AFPJ5S1C1';
-const PASS = { kind: 'acceptance_pass', verdict: 'green', decided_by: g.HARDIK, evidence_link: LINK, recorded_by: g.DESTINY };
-const OFFER = { kind: 'offer_approval', verdict: 'approved', decided_by: g.JASON, evidence_link: LINK, recorded_by: g.DESTINY, scope: 'TEST scope' };
+const PASS = { kind: 'acceptance_pass', verdict: 'green', decided_by: g.HARDIK, evidence_link: LINK, recorded_by: g.DESTINY, bundle_ref: 'TEST honest gate bundle' };
+const OFFER = { kind: 'offer_approval', verdict: 'approved', decided_by: g.JASON, evidence_link: LINK, recorded_by: g.DESTINY, scope: 'TEST scope', offer_id: 'OFFER-TEST-1', loop_id: 'LOOP-1792528168754-FVA9', conditions: { price: 'TEST', for: 'Client 2 pilot' } };
 const refused = (input, reason) => assert.throws(() => g.check(input), (e) => { assert.equal(e.reason, reason, `expected ${reason}, got ${e.reason}: ${e.message}`); return true; });
 
 (async () => {
@@ -51,16 +51,29 @@ const refused = (input, reason) => assert.throws(() => g.check(input), (e) => { 
   assert.equal(g.check({ ...OFFER, verdict: 'withdrawn', scope: '' }).scope, null);
   ok('a Slack link is required, and an approved offer must say what is approved');
 
-  const row = (kind, verdict, at = '2026-10-22T10:00:00.000Z') => ({ gate_id: 'X', kind, rail: 'vfarm_stripe_live', verdict, decided_by: g.OWNER[kind], evidence_link: LINK, evidence_channel: 'C', evidence_ts: '1', scope: kind === 'offer_approval' ? 'TEST scope' : null, notes: null, recorded_by: g.DESTINY, via: 't', test: false, created_at: at });
+  refused({ ...OFFER, offer_id: '' }, 'offer_id_required');
+  refused({ ...OFFER, verdict: 'withdrawn', scope: '', offer_id: '' }, 'offer_id_required');
+  refused({ ...OFFER, loop_id: 'FVA9' }, 'loop_id_required');
+  refused({ ...OFFER, conditions: {} }, 'conditions_required');
+  refused({ ...OFFER, conditions: '' }, 'conditions_required');
+  refused({ ...PASS, bundle_ref: '' }, 'bundle_required');
+  assert.equal(g.check({ ...PASS, verdict: 'red', bundle_ref: '' }).bundle_ref, null);
+  assert.equal(g.check({ ...OFFER, verdict: 'withdrawn', scope: '', loop_id: '', conditions: null }).loop_id, null);
+  ok("Jason's offer_approved fields: offer_id always, loop_id and a conditions snapshot on approval; a green pass names its bundle");
+
+  const row = (kind, verdict, at = '2026-10-22T10:00:00.000Z') => ({ gate_id: 'X', kind, rail: 'vfarm_stripe_live', verdict, decided_by: g.OWNER[kind], evidence_link: LINK, evidence_channel: 'C', evidence_ts: '1', scope: kind === 'offer_approval' ? 'TEST scope' : null, notes: null, recorded_by: g.DESTINY, via: 't', test: false, offer_id: kind === 'offer_approval' ? 'OFFER-TEST-1' : null, loop_id: kind === 'offer_approval' ? 'LOOP-1792528168754-FVA9' : null, conditions: kind === 'offer_approval' ? { price: 'TEST' } : null, bundle_ref: kind === 'acceptance_pass' ? 'TEST bundle' : null, created_at: at });
   assert.equal(g.decide('vfarm_stripe_live', null, null).can_charge_live, false);
-  assert.match(g.decide('vfarm_stripe_live', null, null).answer, /^No\. Hardik's acceptance pass has not been recorded; Jason's live-offer approval has not been recorded/);
+  assert.match(g.decide('vfarm_stripe_live', null, null).answer, /Hardik's acceptance pass \(on an acceptance bundle\) has not been recorded; Jason's offer_approved event has not been recorded/);
   assert.equal(g.decide('vfarm_stripe_live', row('acceptance_pass', 'green'), null).can_charge_live, false);
   assert.equal(g.decide('vfarm_stripe_live', null, row('offer_approval', 'approved')).can_charge_live, false);
   assert.equal(g.decide('vfarm_stripe_live', row('acceptance_pass', 'red'), row('offer_approval', 'approved')).can_charge_live, false);
   assert.equal(g.decide('vfarm_stripe_live', row('acceptance_pass', 'green'), row('offer_approval', 'withdrawn')).can_charge_live, false);
   const yes = g.decide('vfarm_stripe_live', row('acceptance_pass', 'green'), row('offer_approval', 'approved'));
   assert.equal(yes.can_charge_live, true);
-  assert.match(yes.answer, /^Yes, within what Jason approved: "TEST scope"/);
+  assert.match(yes.answer, /^Yes, within what Jason approved: offer OFFER-TEST-1, "TEST scope"/);
+  assert.equal(g.decide('vfarm_stripe_live', { ...row('acceptance_pass', 'green'), bundle_ref: null }, row('offer_approval', 'approved')).can_charge_live, false);
+  assert.equal(g.decide('vfarm_stripe_live', row('acceptance_pass', 'green'), { ...row('offer_approval', 'approved'), conditions: null }).can_charge_live, false);
+  assert.match(g.decide('vfarm_stripe_live', null, null).answer, /^No\. The offer is not approved for live charging yet\./);
   ok('yes only with a green pass AND an approved offer; every other combination is no, with the reason');
 
   // ---------------------------------------------------------------- part 2, local database
@@ -73,7 +86,7 @@ const refused = (input, reason) => assert.throws(() => g.check(input), (e) => { 
   const { query, closePool } = require(path.join(DIST, 'server/src', 'pg.js'));
   await migrate();
   const wipe = async () => {
-    await query(`DELETE FROM engine_events WHERE event_type = 'charge_gate_recorded'`);
+    await query(`DELETE FROM engine_events WHERE event_type IN ('charge_gate_recorded', 'offer_approved', 'offer_withdrawn')`);
     await query(`DELETE FROM engine_charge_gate`);
   };
   await wipe();
@@ -114,7 +127,13 @@ const refused = (input, reason) => assert.throws(() => g.check(input), (e) => { 
 
   const o = await g.recordGate(OFFER, { via: 'test', checkMessage: jasonSays });
   assert.equal(o.status.can_charge_live, true);
-  ok('a green pass and an approved offer answer yes');
+  const oa = await query(`SELECT subject_id, actor, detail FROM engine_events WHERE event_type = 'offer_approved' AND dedupe_key = $1`, [`offer:${o.row.gate_id}`]);
+  assert.equal(oa.rows.length, 1);
+  assert.equal(oa.rows[0].subject_id, 'OFFER-TEST-1');
+  for (const k of ['offer_id', 'loop_id', 'approver_id', 'timestamp', 'conditions']) assert.ok(oa.rows[0].detail[k], `offer_approved carries ${k}`);
+  assert.equal(oa.rows[0].detail.approver_id, g.JASON);
+  await assert.rejects(query(`INSERT INTO engine_charge_gate (gate_id, kind, rail, verdict, decided_by, evidence_link, evidence_channel, evidence_ts, recorded_by, via) VALUES ('CG-BAD2','offer_approval','vfarm_stripe_live','approved','U0A9V97949F','x','C','1','x','sql')`));
+  ok("a green pass and an approved offer answer yes, with one offer_approved event in Jason's fields; the table refuses an approval without them");
 
   await new Promise((r) => setTimeout(r, 15));
   const w = await g.recordGate({ ...OFFER, verdict: 'withdrawn', scope: '' }, { via: 'test', checkMessage: jasonSays });
