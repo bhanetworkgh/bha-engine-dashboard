@@ -3556,6 +3556,40 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_cst_turns_real ON engine_cst_turns (occurred_at DESC) WHERE NOT test`,
     ],
   },
+  {
+    // 0LEW essence markers (24 Oct 2026, Destiny; Jason's calls of 23 Oct). essence.ts holds the rules.
+    id: 93,
+    name: 'engine_essence_markers: confirmed lines about how a person decides, each with its own quote',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_essence_markers (
+        marker_id text PRIMARY KEY,
+        subject_id text NOT NULL,
+        subject_name text,
+        kind text NOT NULL CHECK (kind IN ('decision_rule','trade_off','debugging_instinct','standard','voice')),
+        line text NOT NULL CHECK (char_length(line) BETWEEN 8 AND 280),
+        quote text NOT NULL CHECK (char_length(quote) BETWEEN 15 AND 400),
+        source_kind text NOT NULL CHECK (source_kind IN ('codex_log','review','architect_answer','doctrine_post')),
+        source_ref text NOT NULL,
+        seen_in text[] NOT NULL DEFAULT '{}',
+        status text NOT NULL DEFAULT 'proposed' CHECK (status IN ('proposed','confirmed','rejected','stable')),
+        published boolean NOT NULL DEFAULT false,
+        confidence numeric CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+        proposed_by text NOT NULL,
+        via text NOT NULL DEFAULT 'unknown',
+        decided_by text,
+        decided_at timestamptz,
+        decision_note text,
+        test boolean NOT NULL DEFAULT false,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        CHECK (NOT published OR status IN ('confirmed','stable')),
+        CHECK (status = 'proposed' OR decided_by IS NULL OR decided_by = subject_id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_essence_markers_subject ON engine_essence_markers (subject_id, status)`,
+      `CREATE INDEX IF NOT EXISTS engine_essence_markers_source ON engine_essence_markers (source_ref)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_essence_markers_once ON engine_essence_markers (subject_id, kind, md5(quote), source_ref)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

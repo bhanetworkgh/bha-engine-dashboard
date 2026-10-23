@@ -44,6 +44,7 @@
     "test:audit-token": "node --no-warnings=ExperimentalWarning server/test/audit-token.test.cjs",
     "test:codex-gap": "node --no-warnings=ExperimentalWarning server/test/codex-gap.test.cjs",
     "test:charge-gate": "node --no-warnings=ExperimentalWarning server/test/charge-gate.test.cjs",
+    "test:essence": "node --no-warnings=ExperimentalWarning server/test/essence.test.cjs",
     "test:pattern-reingest": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/pattern-reingest.test.cjs",
     "test:move-loop": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/move-loop.test.cjs",
     "test:agent-inventory": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/agent-inventory.test.cjs",

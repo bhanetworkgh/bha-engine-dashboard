@@ -2818,6 +2818,25 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
 - The Bays page's fourth tab, Decision watch (`GET /api/bays/decision-watches`).
   A read. `npm run test:decision-watch`.
 
+**Essence markers** (24 Oct 2026, Destiny — LOOP-1792428941802-0LEW; Jason in #bha-coordination
+1792773102.009109: confirmation mandatory, private by default, founder markers through the same
+pipeline, never pay). `server/src/essence.ts`, migration 93, `engine_essence_markers`, contract
+`docs/contracts/essence-markers.md` (schema and the `read_essence` contract, for Jason to lock as
+Canon). A marker is one line about how a person decides (`decision_rule`, `trade_off`,
+`debugging_instinct`, `standard`, `voice`) with the exact sentence it came from. **No quote, no
+marker**: a codex marker's quote must be in that log's `Transcript` word for word (case, curly quotes
+and spacing aside) and the log must be the subject's; a founder marker's must be in a Slack message
+Slack confirms the subject posted. **Only the subject decides** (confirm, reject, publish,
+unpublish), never Destiny or Jason for them and never an agent token; the table's CHECK holds
+`decided_by = subject_id`. Private by default; published only when confirmed. The same line from a new
+source adds to `seen_in`, and a confirmed marker seen in 3 sources is `stable`. A rejected line is
+never proposed again; 3 markers per source at most. One `essence_marker_*` event per change. Tools:
+`read_essence` (read, both connections, returns confirmed and stable only, with the privacy rules;
+**in no agent's scope until Canon**), `propose_essence_marker` and `decide_essence_marker` (write
+connection, no agent's scope, audited kind `essence`). Not built: the Layer 2 field, the buttons, the
+backfill and a published-only BHARAG doc. Never read by pay, Logstream or any score.
+`npm run test:essence`.
+
 **The missing Codex log check** (2026-10-22, Destiny — DW-1792516757092-9EP8; Jason, 20 Oct: a
 standing mechanism, not a reminder, after Kavin's 20 Oct log broke on submission and nothing said so).
 `server/src/codexGap.ts`, a timer every hour, its numbers in `RULE` and nowhere else. A builder who
