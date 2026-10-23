@@ -3492,6 +3492,15 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_charge_gate_latest ON engine_charge_gate (rail, kind, created_at DESC)`,
     ],
   },
+  {
+    // 2026-10-24, Destiny (D2): a real farm vFarm's snapshot stops listing is "not listed", not a
+    // silent feed. Vfarm_01 left the snapshot on 21 Oct 06:36 while v-farm kept arriving every three
+    // minutes, and the twin held a critical FEED_SILENT incident on it for two days. Set when a real
+    // snapshot leaves the farm out, cleared when one lists it again.
+    id: 90,
+    name: 'engine_vfarm_farms.unlisted_at: a real farm the snapshot stopped listing',
+    statements: [`ALTER TABLE engine_vfarm_farms ADD COLUMN IF NOT EXISTS unlisted_at timestamptz`],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

@@ -68,6 +68,8 @@ export function closerOf(i: Pick<IncidentRow, 'incident_id' | 'resolution_status
   const by = String(i.resolved_by ?? '').toLowerCase();
   if (rs === 'wont_fix' || by.startsWith('recovery:chat_not_rerun')) return 'policy';
   if (rs === 'self_healed' || engineIds.has(i.incident_id) || (by.startsWith('recovery') && !by.includes('chat_not_rerun'))) return 'engine';
+  // A device or farm vFarm stopped listing was removed there by a person; it did not clear itself (D2, 24 Oct 2026).
+  if (by.startsWith('monitoring-twin') && by.includes('stopped listing')) return 'person';
   if (by.startsWith('monitoring-twin')) return 'cleared_itself';
   if (rs === 'manually_resolved' || by.startsWith('mcp:') || by.startsWith('page') || by.includes('@') || by === 'bays' || by === 'dashboard') return 'person';
   return 'not_recorded';

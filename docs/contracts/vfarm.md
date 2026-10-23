@@ -79,11 +79,11 @@ All three are optional. Until they are sent the twin reads `null` and says "not 
 
 Rules:
 
-- **List every farm the snapshot covers, with all of its devices and all of its open alerts.** The dashboard reads absence *within the farms you list*: a device you stop listing is marked gone, and an open alert you stop listing is marked cleared. A farm you leave out is left exactly as it was, so a partial snapshot never empties a farm.
+- **List every farm the snapshot covers, with all of its devices and all of its open alerts.** The dashboard reads absence *within the farms you list*: a device you stop listing is marked gone, and an open alert you stop listing is marked cleared. A farm you leave out keeps its rows exactly as they were, so a partial snapshot never empties a farm; from 24 Oct 2026 a real farm a real snapshot leaves out is marked **not listed** (`listed: false` on the twin's read): nothing about it is judged, its devices read GONE, and its open incidents close as "vFarm stopped listing this farm", never as a recovery and never as a silent feed. A device you stop listing closes its incidents the same way. Listing the farm again lists it again.
 - An older snapshot than the newest held is refused with `409`, so a late retry cannot roll the page back.
 - Every device's `farm_id` must be one of the listed farms; otherwise the snapshot is refused with `422`, naming the device.
 
-Answers: `201` with `{ ok, taken_at, farms, devices, open_alerts, devices_gone, alerts_closed, dry_run }`, or `422` naming the problem.
+Answers: `201` with `{ ok, taken_at, farms, devices, open_alerts, devices_gone, alerts_closed, farms_unlisted, dry_run }`, or `422` naming the problem.
 
 ---
 

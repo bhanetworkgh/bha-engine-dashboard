@@ -312,6 +312,24 @@ export function checkReadings(latest: unknown, targets: Record<string, Range> | 
 }
 
 const SUBSYSTEM: Record<string, string> = { offline: 'SENSOR', out_of_range: 'ENVIRONMENT', feed_silent: 'FEED' };
+
+/**
+ * Why an open incident is closing. A fault that stopped being true is "cleared"; one whose device
+ * or farm vFarm stopped listing did not recover, it was taken out (24 Oct 2026, D2), and saying
+ * "cleared" would count a retirement as the engine healing itself. Pure, so it is tested alone.
+ */
+export const NOT_LISTED_DEVICE = 'vFarm stopped listing this device (removed or retired there); it did not recover';
+export const NOT_LISTED_FARM = 'vFarm stopped listing this farm (its snapshot no longer names it); it did not recover';
+export function closeReason(
+  o: { farm_id: string; device_id: string | null },
+  trigger: string,
+  unlistedFarms: Set<string>,
+  goneDevices: Set<string>,
+): string {
+  if (unlistedFarms.has(o.farm_id)) return NOT_LISTED_FARM;
+  if (o.device_id && goneDevices.has(`${o.farm_id}|${o.device_id}`)) return NOT_LISTED_DEVICE;
+  return `cleared on the ${trigger === 'snapshot' ? 'next snapshot' : 'next check'}`;
+}
 const newIncidentId = (kind: string) => `INC-VFARM.${SUBSYSTEM[kind] ?? 'MONITORING'}-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
 interface Fault {
@@ -396,9 +414,9 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
       [OWNER_KEY, JSON.stringify({ instance: INSTANCE, started_at: STARTED_AT, last_pass_at: now } satisfies JudgeOwner)],
     );
     if (!stored || stored.instance !== INSTANCE) console.log(`[monitoring-twin] this instance (${INSTANCE}) now judges: ${may.reason}`);
-    const farms = await db.query<{ farm_id: string; name: string | null; snapshot_at: string; synthetic: boolean }>(
+    const farms = await db.query<{ farm_id: string; name: string | null; snapshot_at: string; synthetic: boolean; unlisted: boolean }>(
       `SELECT farm_id, name, to_char(snapshot_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS snapshot_at,
-              coalesce((fields->>'synthetic')::boolean, false) AS synthetic
+              coalesce((fields->>'synthetic')::boolean, false) AS synthetic, unlisted_at IS NOT NULL AS unlisted
          FROM engine_vfarm_farms`,
     );
     const devices = await db.query<{ device_id: string; farm_id: string; device_type: string | null; last_reading_at: string | null; last_seen_at: string | null; status: string | null; latest: unknown; gone: boolean }>(
@@ -412,6 +430,8 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
     );
   const cycleOf = new Map(cycles.rows.map((c) => [c.farm_id, c]));
     const faults: Fault[] = [];
+    const unlistedFarms = new Set<string>();
+    const goneDevices = new Set<string>();
     let judged = 0;
     for (const f of farms.rows) {
       await db.query(
@@ -420,7 +440,10 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
         [f.farm_id],
       );
       const feedAge = Math.round((now - Date.parse(f.snapshot_at)) / 1000);
-      const feedSilent = feedAge > THRESHOLDS.feed_silent_s;
+      // A farm vFarm stopped listing (migration 90) is not a silent feed: the feed is arriving and
+      // no longer names it. Nothing about it is judged, and its devices read GONE.
+      const feedSilent = !f.unlisted && feedAge > THRESHOLDS.feed_silent_s;
+      if (f.unlisted) unlistedFarms.add(f.farm_id);
       if (feedSilent && !f.synthetic) {
         faults.push({ farm_id: f.farm_id, device_id: null, kind: 'feed_silent', metric: null, severity: 'critical', detail: `No snapshot from vFarm for ${Math.round(feedAge / 60)} min (the job runs every 3). Nothing about this farm is known until one arrives.`, value: feedAge, min: null, max: THRESHOLDS.feed_silent_s, stage: null, synthetic: false });
       }
@@ -430,7 +453,8 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
         judged++;
         let state: DeviceState;
         let age: number | null = null;
-        if (d.gone) state = 'GONE';
+        if (d.gone) goneDevices.add(`${f.farm_id}|${d.device_id}`);
+        if (d.gone || f.unlisted) state = 'GONE';
         else if (feedSilent) state = 'NO_FEED';
         else {
           const fr = freshness(d.last_reading_at, f.snapshot_at, d.status, d.last_seen_at, d.device_type);
@@ -477,7 +501,7 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
     }
     for (const o of open.rows) {
       if (nowKeys.has(faultKey(o))) continue;
-      await db.query(`UPDATE engine_monitoring_incidents SET closed_at = now(), close_reason = $2 WHERE incident_id = $1`, [o.incident_id, `cleared on the ${trigger === 'snapshot' ? 'next snapshot' : 'next check'}`]);
+      await db.query(`UPDATE engine_monitoring_incidents SET closed_at = now(), close_reason = $2 WHERE incident_id = $1`, [o.incident_id, closeReason(o, trigger, unlistedFarms, goneDevices)]);
       closed++;
     }
     if (opened || closed) events.changed('monitoring_twin', null, db);
@@ -725,7 +749,7 @@ export const BURN_IN_STATES = ['not_started', 'burn_in', 'passed'] as const;
 export type BurnInState = (typeof BURN_IN_STATES)[number];
 /** An incident still open after this long has not healed itself: a person should look. */
 export const NEEDS_HUMAN_AFTER_S = 3600;
-export type RetryState = 'self_healed' | 'retrying' | 'needs_human' | 'closed_by_person';
+export type RetryState = 'self_healed' | 'retrying' | 'needs_human' | 'closed_by_person' | 'not_listed';
 
 const NOT_SENT = 'not sent by vFarm yet';
 const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : typeof v === 'number' && Number.isFinite(v) ? String(v) : null);
@@ -792,6 +816,7 @@ export function retryEnvelope(
   const recov = String(healer.recovery_status ?? '').toLowerCase();
   if (i.closed_at) {
     if (/person|manual|human|close_incidents/i.test(i.close_reason ?? '')) return { state: 'closed_by_person', why: i.close_reason ?? 'closed by a person', open_for_s: null };
+    if (/stopped listing/i.test(i.close_reason ?? '')) return { state: 'not_listed', why: i.close_reason ?? 'vFarm stopped listing it', open_for_s: null };
     return { state: 'self_healed', why: i.close_reason ?? 'cleared on its own', open_for_s: null };
   }
   const openFor = Math.max(0, Math.round((now - Date.parse(i.opened_at)) / 1000));
@@ -811,8 +836,9 @@ export async function monitoringData(db: Queryable = { query }) {
     .then((r) => new Map(r.rows.map((x) => [x.farm_id, x])))
     .catch(() => null);
   const [farms, devices, cycles, profiles, incidents, watch] = await Promise.all([
-    db.query<{ farm_id: string; name: string | null; code: string | null; snapshot_at: string; synthetic: boolean; fields: unknown }>(
-      `SELECT farm_id, name, code, ${ISO('snapshot_at')} AS snapshot_at, coalesce((fields->>'synthetic')::boolean, false) AS synthetic, fields FROM engine_vfarm_farms ORDER BY synthetic, name NULLS LAST`,
+    db.query<{ farm_id: string; name: string | null; code: string | null; snapshot_at: string; synthetic: boolean; fields: unknown; unlisted_at: string | null }>(
+      `SELECT farm_id, name, code, ${ISO('snapshot_at')} AS snapshot_at, coalesce((fields->>'synthetic')::boolean, false) AS synthetic, fields, ${ISO('unlisted_at')} AS unlisted_at
+         FROM engine_vfarm_farms ORDER BY synthetic, (unlisted_at IS NOT NULL), name NULLS LAST`,
     ),
     db.query<{ device_id: string; farm_id: string; place: string | null; device_type: string | null; model: string | null; latest: unknown; fields: unknown; last_reading_at: string | null; last_seen_at: string | null; state: string | null; since: string | null; age_s: number | null; checks: Check[] | null; evaluated_at: string | null; name_shared_with: Array<{ farm_id: string; name: string | null }> | null }>(
       `SELECT d.device_id, d.farm_id, d.place, d.device_type, d.model, d.latest, d.fields, ${ISO('d.last_reading_at')} AS last_reading_at, ${ISO('d.last_seen_at')} AS last_seen_at,
@@ -884,7 +910,7 @@ export async function monitoringData(db: Queryable = { query }) {
     const pipe = pipeOf.get(f.synthetic);
     const openInc = inc.filter((i) => !i.closed_at).map(({ opened_ms, closed_ms, ...i }) => withRetry(i));
     const recentInc = inc.filter((i) => i.closed_at).slice(0, 50).map(({ opened_ms, closed_ms, ...i }) => withRetry(i));
-    const retryCounts: Record<string, number> = { self_healed: 0, retrying: 0, needs_human: 0, closed_by_person: 0 };
+    const retryCounts: Record<string, number> = { self_healed: 0, retrying: 0, needs_human: 0, closed_by_person: 0, not_listed: 0 };
     for (const i of [...openInc, ...recentInc]) retryCounts[i.retry_envelope.state]++;
     return {
       farm_id: f.farm_id,
@@ -899,8 +925,13 @@ export async function monitoringData(db: Queryable = { query }) {
         sources: identity.sources,
       },
       name: f.name ?? f.code ?? f.farm_id,
+      code: f.code,
       synthetic: f.synthetic,
-      feed: { last_snapshot_at: f.snapshot_at, age_s: feedAge, silent: feedAge > THRESHOLDS.feed_silent_s },
+      // listed: false when vFarm's snapshot no longer names this farm (migration 90); then the feed
+      // is not silent, it simply stopped carrying this farm, and nothing about it is current.
+      listed: !f.unlisted_at,
+      unlisted_since: f.unlisted_at,
+      feed: { last_snapshot_at: f.snapshot_at, age_s: feedAge, silent: !f.unlisted_at && feedAge > THRESHOLDS.feed_silent_s },
       cycle: cyc
         ? {
             profile_id: cyc.profile_id,
@@ -999,6 +1030,7 @@ export async function monitoringData(db: Queryable = { query }) {
         retrying: 'open; the twin judges it again every minute and closes it when the fault clears',
         needs_human: `the healer used its attempts, a recovery failed again, or it has been open over ${NEEDS_HUMAN_AFTER_S / 60} minutes`,
         closed_by_person: 'a person closed it',
+        not_listed: 'vFarm stopped listing the device or farm (removed or retired there); it did not recover and is not counted as healed',
       },
       note: 'Every farm carries envelope; every device carries cabinet_id, config_hash and burn_in_state (its own, else its farm\'s); every incident carries retry_envelope. cabinet_id, config_hash and burn_in_state are read from the vFarm snapshot and are null, with the source saying so, until vFarm sends them. Nothing here is guessed.',
     },
