@@ -640,6 +640,7 @@ function ProposalPanel({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdate
                   <li key={a.at} className="text-ink">
                     {a.kind === 'accepted' ? 'Accepted' : a.kind === 'question' ? 'Asked' : 'Asked for a call'} · {stamp(a.at)}
                     {a.text ? <span className="whitespace-pre-wrap text-dim">: {a.text}</span> : null}
+                    {a.assignee ? <span className="text-dim"> · answered by {a.assignee.name}, {a.assignee.backstop_name} as backstop</span> : null}
                     {a.notified?.error ? <span className="text-failing"> · not posted in Slack: {a.notified.error}</span> : null}
                   </li>
                 ))}
@@ -772,7 +773,7 @@ function moments(l: VfarmLead): Moment[] {
   if (l.proposal) {
     m.push({ at: l.proposal.created_at, what: `Proposal ${l.proposal.proposal_id} made (test)`, who: l.proposal.created_by });
     if (l.proposal.opened_at) m.push({ at: l.proposal.opened_at, what: 'Opened their proposal' });
-    for (const a of l.proposal.actions) m.push({ at: a.at, what: a.kind === 'accepted' ? 'Accepted the proposal' : a.kind === 'question' ? `Asked a question: ${a.text ?? ''}` : `Asked for a call${a.text ? `: ${a.text}` : ''}` });
+    for (const a of l.proposal.actions) m.push({ at: a.at, what: a.kind === 'accepted' ? 'Accepted the proposal' : a.kind === 'question' ? `Asked a question: ${a.text ?? ''}${a.assignee ? ` (owner: ${a.assignee.name})` : ''}` : `Asked for a call${a.text ? `: ${a.text}` : ''}` });
   }
   if (l.stripe_payment?.updated_at) m.push({ at: l.stripe_payment.updated_at, what: `Stripe${l.stripe_payment.mode === 'test' ? ' (sandbox)' : ''}: ${l.stripe_payment.state}`, tone: l.stripe_payment.state === 'failed' ? 'failing' : undefined });
   for (const a of l.activity ?? []) {

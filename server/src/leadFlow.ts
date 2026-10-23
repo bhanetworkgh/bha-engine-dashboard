@@ -26,7 +26,7 @@ export const STAGE_NAMES: Record<number, string> = { 1: 'Interest', 2: 'Site spe
 /** One move, written by every path that changes `stage`. `by` is never a buyer's name. */
 export async function recordStageMove(
   db: Queryable,
-  m: { lead_id: string; buyer_intake_id: string | null; from: number; to: number; at: string; by: string; via: string; reason: string | null },
+  m: { lead_id: string; buyer_intake_id: string | null; from: number; to: number; at: string; by: string; via: string; reason: string | null; test_payment?: boolean },
 ): Promise<void> {
   await engineEvents.record(
     {
@@ -35,7 +35,7 @@ export async function recordStageMove(
       subject_id: m.buyer_intake_id ?? m.lead_id,
       lane: 'VFARM',
       actor: m.via === 'buyer' ? 'buyer' : m.by,
-      detail: { lead_id: m.lead_id, buyer_intake_id: m.buyer_intake_id, from_stage: m.from, to_stage: m.to, to_stage_name: STAGE_NAMES[m.to] ?? null, via: m.via, reason: m.reason },
+      detail: { lead_id: m.lead_id, buyer_intake_id: m.buyer_intake_id, from_stage: m.from, to_stage: m.to, to_stage_name: STAGE_NAMES[m.to] ?? null, via: m.via, reason: m.reason, ...(m.test_payment ? { test_payment: true, team_test: true, grants: 'nothing' } : {}) },
     },
     db,
   );

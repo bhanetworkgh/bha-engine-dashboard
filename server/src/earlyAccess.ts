@@ -490,6 +490,11 @@ export interface StageMove {
   reason: string | null;
   /** 'buyer' (17 Oct 2026): the buyer accepted their proposal, which moves Stage 3 to 4. */
   via: 'page' | 'engine' | 'buyer';
+  /**
+   * Set only on a move into Stage 5 on a test-mode payment (23 Oct 2026, Jason, SOP c14e9e54):
+   * allowed for a team lead alone, and it grants nothing.
+   */
+  test_payment?: { mode: 'test'; team_test: true; grants: 'nothing' };
 }
 
 /**
@@ -570,6 +575,24 @@ export async function leads(): Promise<LeadsData> {
  * logged as a move that did not happen. Found by the row id, or by Form A's
  * `buyer_intake_id`, which is what the Stage 2 path will hold.
  */
+/**
+ * A lead the BHA team made with its own address: a test of the flow, never a buyer. The same
+ * rule leadFlow.read uses for `team_test`, so the gate and the read cannot disagree.
+ */
+export const TEAM_TEST_SQL = `lower(COALESCE(email, form_a->>'email', '')) LIKE '%@bhanetwork.org'`;
+
+/**
+ * What Stage 5 needs from the payment (23 Oct 2026, Jason; SOP c14e9e54). A real buyer
+ * needs a live, paid Stripe payment: a test-mode charge never makes anyone a customer. A team
+ * test lead may move on a paid test-mode payment, and that move grants nothing. Pure.
+ */
+export function stage5Payment(state: string | null, mode: string | null, teamTest: boolean): { ok: true } | { ok: false; message: string } {
+  if (state !== 'paid') return { ok: false, message: 'Stage 5 is a customer: the agreement and the payment both in. No paid Stripe payment is recorded on this lead.' };
+  if (mode === 'live') return { ok: true };
+  if (mode === 'test' && teamTest) return { ok: true };
+  return { ok: false, message: `Stage 5 needs a live Stripe payment. This lead's payment is ${mode === 'test' ? 'a test-mode payment' : `in mode "${mode ?? 'unknown'}"`}, and only a team test lead (an @bhanetwork.org address) may move on one.` };
+}
+
 export async function moveStage(
   key: { id?: string; buyer_intake_id?: string },
   to: number,
@@ -584,8 +607,10 @@ export async function moveStage(
   const where = key.id ? `id = $1` : `form_a->>'buyer_intake_id' = $1`;
   const val = key.id ?? key.buyer_intake_id;
   if (!val) throw new SubmissionError(422, 'Name the lead by id or buyer_intake_id.');
-  const cur = await query<{ id: string; buyer: string | null; stage: number; intake_2_completed_at: Date | null; closed_at: Date | null; accepted: string | null; paid: string | null }>(
-    `SELECT id, form_a->>'buyer_intake_id' AS buyer, stage, intake_2_completed_at, closed_at, proposal->>'accepted_at' AS accepted, stripe_payment->>'state' AS paid FROM engine_vfarm_leads WHERE ${where}`,
+  const cur = await query<{ id: string; buyer: string | null; stage: number; intake_2_completed_at: Date | null; closed_at: Date | null; accepted: string | null; paid: string | null; pay_mode: string | null; team_test: boolean }>(
+    `SELECT id, form_a->>'buyer_intake_id' AS buyer, stage, intake_2_completed_at, closed_at, proposal->>'accepted_at' AS accepted, stripe_payment->>'state' AS paid,
+            stripe_payment->>'mode' AS pay_mode, ${TEAM_TEST_SQL} AS team_test
+       FROM engine_vfarm_leads WHERE ${where}`,
     [val],
   );
   if (!cur.rows.length) throw new SubmissionError(404, `No lead with that ${key.id ? 'id' : 'buyer_intake_id'}.`);
@@ -601,8 +626,15 @@ export async function moveStage(
     if (to >= 3 && !row.intake_2_completed_at) throw new SubmissionError(409, 'Stage 3 is the proposal, for a buyer whose site specification (Form 2) is in and whose five checks have cleared. This lead has not sent Form 2 yet.');
     if (to >= 4 && !row.accepted) throw new SubmissionError(409, 'Stage 4 is for a buyer who accepted their proposal. This lead has not accepted one.');
     if (to >= 5 && row.paid !== 'paid') throw new SubmissionError(409, 'Stage 5 is a customer: the agreement and the payment both in. No paid Stripe payment is recorded on this lead.');
+    const stage5 = stage5Payment(row.paid, row.pay_mode, row.team_test === true);
+    if (to >= 5 && !stage5.ok) throw new SubmissionError(409, stage5.message);
   }
-  const move: StageMove = { from: row.stage, to, at: new Date().toISOString(), by: who, reason: why, via };
+  const testPayment = to >= 5 && to > row.stage && row.pay_mode === 'test';
+  const move: StageMove = {
+    from: row.stage, to, at: new Date().toISOString(), by: who, via,
+    reason: testPayment ? `${why ? `${why} · ` : ''}Team test lead on a test-mode payment: grants no entitlement or reservation.` : why,
+    ...(testPayment ? { test_payment: { mode: 'test' as const, team_test: true as const, grants: 'nothing' as const } } : {}),
+  };
   // The row and its event in one transaction (18 Oct 2026, Engine Surfaces Contract): a move
   // other surfaces cannot see is the gap the contract named.
   await withTransaction(async (db) => {
@@ -610,7 +642,7 @@ export async function moveStage(
       `UPDATE engine_vfarm_leads SET stage = $2, stage_changed_at = now(), stage_history = stage_history || $3::jsonb WHERE id = $1`,
       [row.id, to, JSON.stringify([move])],
     );
-    await leadFlow.recordStageMove(db, { lead_id: String(row.id), buyer_intake_id: row.buyer, from: row.stage, to, at: move.at, by: who, via, reason: why });
+    await leadFlow.recordStageMove(db, { lead_id: String(row.id), buyer_intake_id: row.buyer, from: row.stage, to, at: move.at, by: who, via, reason: move.reason, test_payment: testPayment });
   });
   events.changed('vfarm_leads', row.id);
   // Stage 2 is Intake-2's trigger (Hardik's contract, 13 Oct). The invite never undoes the move:
