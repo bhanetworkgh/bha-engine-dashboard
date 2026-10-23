@@ -45,10 +45,39 @@ const GATE_KINDS = ['vfarm_gates'] as const;
 const TABS = ['Overview', 'Devices', 'Alerts', 'Gates', 'Early Access'] as const;
 type Tab = (typeof TABS)[number];
 
+/**
+ * One farm's share of the live data (24 Oct 2026, D5, Jegan's multi-farm filter). Everything that
+ * names a farm is cut to it; the snapshot line stays whole, because it describes the snapshot.
+ */
+function scopeLive(d: VfarmLiveData, farm: string | null): VfarmLiveData {
+  if (!farm) return d;
+  const name = d.farms.find((f) => f.farm_id === farm)?.name ?? null;
+  const ofFarm = (x: { farm_id?: string | null; farm_name?: string | null; farm?: string | null }) => x.farm_id === farm || (!x.farm_id && !!name && (x.farm_name ?? x.farm) === name);
+  const events = d.alert_events.filter(ofFarm);
+  return {
+    ...d,
+    farms: d.farms.filter((f) => f.farm_id === farm),
+    devices: d.devices.filter(ofFarm),
+    open_alerts: d.open_alerts.filter(ofFarm),
+    recently_closed: d.recently_closed.filter((x) => !!name && x.farm_name === name),
+    alert_events: events,
+    alerts_fired_24h: events.filter((e) => Date.now() - Date.parse(e.fired_at) < 86_400_000).length,
+    alerts_fired_all: events.length,
+  };
+}
+
 export default function VFarm() {
   // `?tab=early-access&lead=<id>` lands on a lead — Home's vFarm tile and its
   // "What moved" rows link here (2026-09-23).
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
+  // One farm at a time when asked, kept in the URL (?farm=<id>).
+  const farm = params.get('farm');
+  const setFarm = (v: string | null) => {
+    const next = new URLSearchParams(params);
+    if (v) next.set('farm', v);
+    else next.delete('farm');
+    setParams(next, { replace: true });
+  };
   const [tab, setTab] = useState<Tab>(() => {
     const t = params.get('tab');
     return t === 'early-access' ? 'Early Access' : t === 'devices' ? 'Devices' : t === 'alerts' ? 'Alerts' : t === 'gates' ? 'Gates' : 'Overview';
@@ -94,18 +123,21 @@ export default function VFarm() {
         title="vFarm"
         subtitle="The vertical-farm product"
         below={
-          <Tabs
-            tabs={TABS}
-            value={tab}
-            onChange={setTab}
-            // The lead count, where there is one. Overview carries none: it has
-            // nothing to count, which is what it says.
-            counts={{
-              'Early Access': data?.summary.total ? { n: data.summary.total } : undefined,
-              Devices: liveData?.devices.length ? { n: liveData.devices.length, tone: quiet ? 'degraded' : 'default' } : undefined,
-              Alerts: liveData?.open_alerts.length ? { n: liveData.open_alerts.length, tone: 'degraded' } : undefined,
-            }}
-          />
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <Tabs
+              tabs={TABS}
+              value={tab}
+              onChange={setTab}
+              // The lead count, where there is one. Overview carries none: it has
+              // nothing to count, which is what it says.
+              counts={{
+                'Early Access': data?.summary.total ? { n: data.summary.total } : undefined,
+                Devices: liveData?.devices.length ? { n: liveData.devices.length, tone: quiet ? 'degraded' : 'default' } : undefined,
+                Alerts: liveData?.open_alerts.length ? { n: liveData.open_alerts.length, tone: 'degraded' } : undefined,
+              }}
+            />
+            {(tab === 'Overview' || tab === 'Devices' || tab === 'Alerts') && live.data && <FarmPicker value={farm} farms={live.data.farms} onChange={setFarm} />}
+          </div>
         }
       />
 
