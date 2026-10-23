@@ -68,7 +68,8 @@ const ok = (name) => (passed++, console.log(`  ok  ${name}`));
   ok('the page opens on its link, says test, shows no payment link; a wrong link opens nothing');
 
   assert.equal((await prop.act(token, 'question', '')).flash.startsWith('Write your question'), true);
-  await prop.act(token, 'question', 'Does it need a drain?');
+  const asked = await prop.act(token, 'question', 'Does it need a drain?');
+  assert.equal(asked.flash, "We've received your question. A member of the team will reply by email. For now this is manual and not instant.");
   let r = await prop.act(token, 'accept', null);
   assert.ok(r.flash.includes('accepted'));
   let lead = (await query(`SELECT stage, proposal FROM engine_vfarm_leads WHERE id::text = $1`, [id])).rows[0];
@@ -78,12 +79,36 @@ const ok = (name) => (passed++, console.log(`  ok  ${name}`));
   r = await prop.act(token, 'accept', null);
   assert.ok(r.flash.includes('already'));
   assert.equal((await query(`SELECT jsonb_array_length(proposal->'actions') AS n FROM engine_vfarm_leads WHERE id::text = $1`, [id])).rows[0].n, 2);
-  ok('a question is recorded; Accept moves the lead to Stage 4 once, and a second changes nothing');
+  assert.deepEqual(lead.proposal.actions[0].assignee, { slack_id: 'U0AEW3TBYH1', name: 'Destiny Arupi', backstop_slack_id: 'U0A9V97949F', backstop_name: 'Jason Bays' });
+  assert.equal(lead.proposal.actions[1].assignee, undefined);
+  const qev = (await query(`SELECT detail FROM engine_events WHERE event_type = 'vfarm_proposal_question' AND detail->>'lead_id' = $1`, [id])).rows[0].detail;
+  assert.equal(qev.assignee, 'U0AEW3TBYH1');
+  assert.equal(qev.backstop, 'U0A9V97949F');
+  ok('a question is recorded with a named owner (Destiny, Jason backstop) and the buyer is told it is manual; Accept moves the lead to Stage 4 once, and a second changes nothing');
 
   await assert.rejects(ea.moveStage({ id }, 5, 'Destiny', null, 'page'), /paid/);
   await query(`UPDATE engine_vfarm_leads SET stripe_payment = '{"state":"paid","mode":"test"}'::jsonb WHERE id::text = $1`, [id]);
-  await ea.moveStage({ id }, 5, 'Destiny', 'agreement and payment in', 'page');
-  ok('Stage 5 needs a paid payment on the lead');
+  // A real buyer's address: a test-mode payment never makes them a customer (SOP c14e9e54).
+  await query(`UPDATE engine_vfarm_leads SET email = 'ada@example.org' WHERE id::text = $1`, [id]);
+  await assert.rejects(ea.moveStage({ id }, 5, 'Destiny', null, 'page'), /needs a live Stripe payment/);
+  await query(`UPDATE engine_vfarm_leads SET stripe_payment = '{"state":"paid","mode":"live"}'::jsonb WHERE id::text = $1`, [id]);
+  let moved5 = await ea.moveStage({ id }, 5, 'Destiny', 'agreement and payment in', 'page');
+  assert.equal(moved5.stage, 5);
+  await ea.moveStage({ id }, 4, 'Destiny', 'back for the team-test case', 'page');
+  // A team test lead may move on a test-mode payment, and the move says it grants nothing.
+  await query(`UPDATE engine_vfarm_leads SET email = 'ada@bhanetwork.org', stripe_payment = '{"state":"paid","mode":"test"}'::jsonb WHERE id::text = $1`, [id]);
+  await ea.moveStage({ id }, 5, 'Destiny', 'internal walk', 'page');
+  const hist = (await query(`SELECT stage_history FROM engine_vfarm_leads WHERE id::text = $1`, [id])).rows[0].stage_history;
+  const last = hist[hist.length - 1];
+  assert.deepEqual(last.test_payment, { mode: 'test', team_test: true, grants: 'nothing' });
+  assert.match(last.reason, /grants no entitlement or reservation/);
+  const sev = (await query(`SELECT detail FROM engine_events WHERE event_type = 'vfarm_flow_stage_moved' AND detail->>'lead_id' = $1 ORDER BY id DESC LIMIT 1`, [id])).rows[0].detail;
+  assert.equal(sev.test_payment, true);
+  assert.equal(sev.grants, 'nothing');
+  assert.equal(ea.stage5Payment('paid', 'test', false).ok, false);
+  assert.equal(ea.stage5Payment('paid', 'live', false).ok, true);
+  assert.equal(ea.stage5Payment('paid', null, true).ok, false);
+  ok('Stage 5 needs a paid live payment for a real buyer; a team test lead may move on a test payment, marked on the move and its event as granting nothing');
 
   await ea.moveStage({ id }, 3, 'Destiny', 'test the replace', 'page');
   const again = await prop.create(id, { ...input, price_amount: 400000 }, 'Destiny');

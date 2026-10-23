@@ -3205,7 +3205,7 @@ export interface VfarmProposal {
   created_by: string;
   opened_at: string | null;
   accepted_at: string | null;
-  actions: { kind: 'accepted' | 'question' | 'call'; at: string; text: string | null; notified: { ts: string | null; error: string | null } | null }[];
+  actions: { kind: 'accepted' | 'question' | 'call'; at: string; text: string | null; notified: { ts: string | null; error: string | null } | null; assignee?: { slack_id: string; name: string; backstop_slack_id: string; backstop_name: string } }[];
   link: string;
 }
 

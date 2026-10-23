@@ -49,7 +49,18 @@ export interface ProposalAction {
   at: string;
   text: string | null;
   notified: { ts: string | null; error: string | null } | null;
+  /**
+   * A buyer's question has a named owner from the moment it lands (23 Oct 2026, Jason; SOP
+   * c803d029): Destiny by default, Jason as backstop. Set on questions only.
+   */
+  assignee?: { slack_id: string; name: string; backstop_slack_id: string; backstop_name: string };
 }
+
+/** Who answers a buyer's Stage 3 question (SOP c803d029). One place, so the record and the post agree. */
+export const QUESTION_OWNER = { slack_id: 'U0AEW3TBYH1', name: 'Destiny Arupi', backstop_slack_id: 'U0A9V97949F', backstop_name: 'Jason Bays' } as const;
+
+/** What the buyer is told after asking, word for word from Jason (23 Oct 2026). */
+export const QUESTION_RECEIVED = "We've received your question. A member of the team will reply by email. For now this is manual and not instant.";
 
 export interface Proposal {
   proposal_id: string;
@@ -233,7 +244,7 @@ export async function act(token: string, actionRaw: unknown, textRaw: unknown): 
     const row = cur.rows[0];
     if (!row || row.proposal.proposal_id !== f.proposal.proposal_id) return 'replaced' as const;
     if (kind === 'accepted' && row.proposal.accepted_at) return 'already' as const;
-    const action: ProposalAction = { kind, at, text, notified: null };
+    const action: ProposalAction = { kind, at, text, notified: null, ...(kind === 'question' ? { assignee: { ...QUESTION_OWNER } } : {}) };
     const p: Proposal = { ...row.proposal, accepted_at: kind === 'accepted' ? at : row.proposal.accepted_at, actions: [...row.proposal.actions, action].slice(-50) };
     let stageSql = '';
     const params: unknown[] = [f.id, JSON.stringify(p)];
@@ -244,7 +255,7 @@ export async function act(token: string, actionRaw: unknown, textRaw: unknown): 
     await db.query(`UPDATE engine_vfarm_leads SET proposal = $2::jsonb${stageSql} WHERE id::text = $1`, params);
     if (stageSql) await leadFlow.recordStageMove(db, { lead_id: f.id, buyer_intake_id: f.buyer ?? null, from: 3, to: 4, at, by: 'buyer', via: 'buyer', reason: `Accepted ${row.proposal.proposal_id}` });
     await engineEvents.record(
-      { event_type: `vfarm_proposal_${kind}`, at, subject_id: f.buyer ?? f.id, lane: 'VFARM', actor: 'buyer', detail: { lead_id: f.id, proposal_id: row.proposal.proposal_id, test: true, moved_to_stage_4: kind === 'accepted' && row.stage === 3 }, dedupe_key: kind === 'accepted' ? `proposal-accepted:${row.proposal.proposal_id}` : null },
+      { event_type: `vfarm_proposal_${kind}`, at, subject_id: f.buyer ?? f.id, lane: 'VFARM', actor: 'buyer', detail: { lead_id: f.id, proposal_id: row.proposal.proposal_id, test: true, moved_to_stage_4: kind === 'accepted' && row.stage === 3, ...(kind === 'question' ? { assignee: QUESTION_OWNER.slack_id, backstop: QUESTION_OWNER.backstop_slack_id } : {}) }, dedupe_key: kind === 'accepted' ? `proposal-accepted:${row.proposal.proposal_id}` : null },
       db,
     );
     return 'ok' as const;
@@ -264,7 +275,11 @@ export async function act(token: string, actionRaw: unknown, textRaw: unknown): 
     ...(text ? [`*${kind === 'question' ? 'Question' : 'Note'}:* ${text}`] : []),
     `*Buyer:* ${f.buyer ?? 'unknown'} · ${p.proposal_id}`,
     '',
-    kind === 'accepted' ? 'Next is Stage 4: the agreement and their own Stripe link. No payment has been taken.' : 'Answer them by email. The Customer Service Twin is not wired to proposals yet.',
+    kind === 'accepted'
+      ? 'Next is Stage 4: the agreement and their own Stripe link. No payment has been taken.'
+      : kind === 'question'
+        ? `*Owner:* <@${QUESTION_OWNER.slack_id}> answers by email, <@${QUESTION_OWNER.backstop_slack_id}> as backstop. The buyer was told this is manual and not instant.`
+        : 'Answer them by email. The Customer Service Twin is not wired to proposals yet.',
     `Record: ${base()}/vfarm?tab=early-access&lead=${f.id}`,
   ].join('\n');
   const notified = await post(text2);
@@ -277,7 +292,7 @@ export async function act(token: string, actionRaw: unknown, textRaw: unknown): 
       kind === 'accepted'
         ? 'Thank you, you accepted the proposal. We will contact you by email about the next steps.'
         : kind === 'question'
-          ? 'Thank you, your question is with us. We will answer by email.'
+          ? QUESTION_RECEIVED
           : 'Thank you, we will get in touch to arrange a call.',
   };
 }
