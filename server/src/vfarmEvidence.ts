@@ -21,6 +21,9 @@ export interface FarmLike {
   farm_id: string;
   name?: string | null;
   synthetic: boolean;
+  /** false when vFarm's snapshot stopped naming this farm (migration 90). Absent means listed. */
+  listed?: boolean;
+  unlisted_since?: string | null;
   feed: { last_snapshot_at: string | null; age_s: number | null; silent: boolean };
   devices: Array<{ device_id: string; state: string | null }>;
   open_incidents: Array<{ incident_id?: string; ledger_id?: string | null; canonical_id?: string | null; device_id?: string | null; kind?: string }>;
@@ -52,6 +55,14 @@ export function evidenceStatus(f: FarmLike): EvidenceStatus {
       reasons: ['This farm is a simulator, not hardware.'], incidents,
       instruction: 'Never report anything from this farm as the real rack or as cabinet evidence. It proves the dashboard path only.',
       fallback: `${label} is a simulated farm; nothing from it describes a real cabinet.`,
+    };
+  }
+  if (f.listed === false) {
+    return {
+      state: 'absent', degraded: true, reportable: false, reportable_devices: [], not_reportable_devices: f.devices.map((d) => ({ device_id: d.device_id, state: d.state })),
+      reasons: [`vFarm no longer lists this farm: its snapshot has left it out since ${f.unlisted_since ?? '?'} (the last one naming it was at ${f.feed.last_snapshot_at}).`], incidents,
+      instruction: 'vFarm stopped sending this farm. Do not report any reading, state, health or uptime for it, and do not call it offline, silent, healthy or empty; say vFarm no longer lists it and when it was last sent.',
+      fallback: `vFarm no longer lists ${label}; the last snapshot that named it was at ${f.feed.last_snapshot_at}, so I have nothing current on it.`,
     };
   }
   if (!f.feed.last_snapshot_at) {
@@ -95,5 +106,32 @@ export function noRealFarm(): EvidenceStatus {
     reasons: ['No real vFarm farm is held.'], incidents: [],
     instruction: 'There is no real vFarm evidence. Do not report rack health, readings or uptime.',
     fallback: 'The dashboard holds no real vFarm farm yet, so there is nothing to report.',
+  };
+}
+
+/**
+ * Which held farms a caller means (24 Oct 2026, D6). Genie asked for "vFarm_01" and the read matched
+ * only internal ids, so the farm named Vfarm_01 (code vfarm-01) was not found and the answer said no
+ * real farm was held at all. A farm is matched by its id exactly, else by its code or name compared
+ * without case or punctuation ("vFarm_01", "vfarm-01" and "Vfarm 01" are one key). Pure.
+ */
+export const farmKey = (v: string | null | undefined) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+export function matchFarms<T extends { farm_id: string; code?: string | null; name?: string | null }>(farms: T[], ref: string): { farms: T[]; matched_by: 'farm_id' | 'code_or_name' | null } {
+  const exact = farms.filter((f) => f.farm_id === ref);
+  if (exact.length) return { farms: exact, matched_by: 'farm_id' };
+  const k = farmKey(ref);
+  if (!k) return { farms: [], matched_by: null };
+  const byKey = farms.filter((f) => farmKey(f.farm_id) === k || farmKey(f.code) === k || farmKey(f.name) === k);
+  return { farms: byKey, matched_by: byKey.length ? 'code_or_name' : null };
+}
+
+/** When a farm was asked for by a name nothing held answers to: unknown, never "no real farm". */
+export function unknownFarm(ref: string, held: Array<{ farm_id: string; code?: string | null; name?: string | null; synthetic?: boolean; listed?: boolean }>): EvidenceStatus {
+  const names = held.map((f) => `${f.name ?? f.farm_id} (${f.farm_id}${f.synthetic ? ', simulated' : ''}${f.listed === false ? ', no longer listed by vFarm' : ''})`);
+  return {
+    state: 'absent', degraded: true, reportable: false, reportable_devices: [], not_reportable_devices: [],
+    reasons: [`No held farm has the id, code or name "${ref}".`], incidents: [],
+    instruction: 'The farm asked about is not held under that name. Do not report it as live, offline, simulated, healthy or empty; say no farm by that name is held and name the farms that are, so the asker can say which one they meant.',
+    fallback: names.length ? `I don't hold a farm called "${ref}". The farms I do hold are: ${names.join('; ')}.` : `I don't hold a farm called "${ref}", and no vFarm farm is held yet.`,
   };
 }

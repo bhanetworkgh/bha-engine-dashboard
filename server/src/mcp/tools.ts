@@ -936,7 +936,7 @@ const readMonitoringTwin: ToolDefinition = {
     'The Monitoring Twin’s judgement of every vFarm farm, the same answer the Monitoring Twin page and GET /api/engine/monitoring-twin give: for each farm, whether its feed is arriving, the crop cycle and stage it is in with that stage’s target ranges (a versioned crop profile), uptime over the last 24 h (share of observed time with no device OFFLINE), every device’s state (LIVE ≤90 s, STALE ≤900 s, OFFLINE, NOT_WIRED, NO_FEED, GONE) with its readings checked against the stage targets, and the open and recent INC-VFARM incidents. Each farm also carries the twin envelope: farm_id, cabinet_id, config_hash, burn_in_state (not_started, burn_in, passed), worker_health (healthy or unhealthy, vFarm’s alert worker) and retry_envelope (how many incidents are self_healed, retrying, needs_human); each device carries cabinet_id, config_hash and burn_in_state, and each incident its own retry_envelope. cabinet_id, config_hash and burn_in_state are null with source "not sent by vFarm yet" until vFarm sends them: say not sent, never guess. Simulated farms are marked synthetic: never describe them as the real rack. A device that is not LIVE has no current reading to quote. Each cycle says where day 0 is (day0, day0_means) and which stages are reference_only_stages: stages that happen at the supplier and that the cabinet never runs, so never infer or report them as cabinet stages. evidence carries the rules in force: Coimbatore and crop-profile figures are an agronomy reference and never cabinet proof; a claim about a cabinet needs cabinet_telemetry from a real farm. Research Twin: read this before writing a finding about a vFarm cabinet’s crop stage, timing, uptime or yield. Every farm carries evidence_status (BP-INFRA-002): live, degraded, absent or simulated, which devices may be reported (reportable_devices), an instruction and a fallback sentence. Follow the instruction: a silent feed, a device that is not LIVE or a simulated farm is never reported as a reading, a healthy rack or an empty one. A read that fails answers ok:false, degraded:true with the error: that means the dashboard could not look, never that there is nothing there.',
   inputSchema: {
     type: 'object',
-    properties: { farm_id: { type: 'string', description: 'Only this farm.' } },
+    properties: { farm_id: { type: 'string', description: 'Only this farm: its id, or its code or name (matched without case or punctuation, so "vFarm_01" finds Vfarm_01). A name nothing held answers to returns no farm, held_farms, and an evidence_status saying so, never "no real farm".' } },
     additionalProperties: false,
   },
   annotations: { ...READS_DB, title: 'What the Monitoring Twin sees on every vFarm farm' },
@@ -960,8 +960,11 @@ const readMonitoringTwin: ToolDefinition = {
         fallback: 'I could not read the vFarm monitoring data just now, so I cannot say how the rack is doing.',
       };
     }
-    const farms = (id ? out.farms.filter((f) => f.farm_id === id) : out.farms).map((f) => ({ ...f, evidence_status: vfarmEvidence.evidenceStatus(f) }));
+    // A farm is asked for by id, code or name (D6, 24 Oct 2026): "vFarm_01" is the farm Vfarm_01.
+    const match = id ? vfarmEvidence.matchFarms(out.farms, id) : { farms: out.farms, matched_by: null };
+    const farms = match.farms.map((f) => ({ ...f, evidence_status: vfarmEvidence.evidenceStatus(f) }));
     const real = farms.filter((f) => !f.synthetic);
+    const held = out.farms.map((f) => ({ farm_id: f.farm_id, code: f.code, name: f.name, synthetic: f.synthetic, listed: f.listed }));
     await mirror.logWrite({
       endpoint: 'mcp:read_monitoring_twin',
       kind: 'monitoring_twin',
@@ -975,8 +978,19 @@ const readMonitoringTwin: ToolDefinition = {
       ok: true,
       ...out,
       farms,
-      evidence_status: real.length ? { degraded: real.some((f) => f.evidence_status.degraded), by_farm: real.map((f) => ({ farm_id: f.farm_id, state: f.evidence_status.state })) } : vfarmEvidence.noRealFarm(),
-      warnings: id && farms.length === 0 ? [`No farm "${id}" is held. Farms: ${out.farms.map((f) => f.farm_id).join(', ') || 'none yet'}.`] : [],
+      matched_by: match.matched_by,
+      held_farms: held,
+      evidence_status: id && farms.length === 0
+        ? vfarmEvidence.unknownFarm(id, held)
+        : real.length
+          ? { degraded: real.some((f) => f.evidence_status.degraded), by_farm: real.map((f) => ({ farm_id: f.farm_id, name: f.name, state: f.evidence_status.state })) }
+          : id
+            ? { degraded: false, by_farm: [], note: `"${id}" is a simulated farm; read its own evidence_status.` }
+            : out.farms.some((f) => !f.synthetic) ? { degraded: true, by_farm: [] } : vfarmEvidence.noRealFarm(),
+      warnings: [
+        ...(id && farms.length === 0 ? [`No farm has the id, code or name "${id}". Held: ${held.map((f) => `${f.name ?? f.farm_id} (${f.farm_id})`).join(', ') || 'none yet'}.`] : []),
+        ...(id && farms.length > 1 ? [`"${id}" matches ${farms.length} farms (${farms.map((f) => f.farm_id).join(', ')}); never merge them: speak for each by its own id.`] : []),
+      ],
     };
   },
 };

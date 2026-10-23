@@ -40,4 +40,23 @@ ok('a feed arriving with every device down is degraded and says no current readi
 s = ev.noRealFarm();
 assert.equal(s.state, 'absent'); assert.equal(s.degraded, true);
 ok('no real farm held is absent, never "no problems"');
+// D6, 24 Oct 2026: a farm asked for by name, as Genie asked for "vFarm_01".
+const held = [
+  { farm_id: '21dde23e-f7f6-46bc-9b54-e97fabaaafd7', code: 'v-farm', name: 'v-farm', synthetic: false, listed: true },
+  { farm_id: '9598b09c-c10c-403b-b4c2-7c5405b54987', code: 'vfarm-01', name: 'Vfarm_01', synthetic: false, listed: false },
+  { farm_id: 'SIM-TOMATO-01', code: 'sim-tomato-01', name: 'Simulated tomato test rack', synthetic: true },
+];
+let m = ev.matchFarms(held, 'vFarm_01');
+assert.deepEqual(m.farms.map((f) => f.farm_id), ['9598b09c-c10c-403b-b4c2-7c5405b54987']); assert.equal(m.matched_by, 'code_or_name');
+m = ev.matchFarms(held, 'V-FARM');
+assert.deepEqual(m.farms.map((f) => f.farm_id), ['21dde23e-f7f6-46bc-9b54-e97fabaaafd7']);
+m = ev.matchFarms(held, 'SIM-TOMATO-01');
+assert.equal(m.matched_by, 'farm_id');
+assert.equal(ev.farmKey('vFarm_01'), ev.farmKey('vfarm-01'));
+assert.notEqual(ev.farmKey('vfarm'), ev.farmKey('vfarm-01'));
+ok('matchFarms: by id exactly, else by code or name without case or punctuation; v-farm and Vfarm_01 stay two farms');
+assert.deepEqual(ev.matchFarms(held, 'rack-9').farms, []);
+s = ev.unknownFarm('rack-9', held);
+assert.equal(s.state, 'absent'); assert.match(s.fallback, /don't hold a farm called "rack-9"/); assert.match(s.fallback, /Vfarm_01 \(9598b09c.*no longer listed/); assert.doesNotMatch(s.fallback, /no real vFarm farm/);
+ok('a name nothing answers to says so and lists the farms held, never "no real farm"');
 console.log(`\n${n} checks passed`);
