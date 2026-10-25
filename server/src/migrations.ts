@@ -3613,6 +3613,18 @@ const MIGRATIONS: Migration[] = [
        END $$`,
     ],
   },
+  {
+    // 25 Oct 2026, Destiny: a main agent's draft eval falls back to its Anthropic backup when
+    // OpenRouter cannot pay. The run asks the backup, and covers the main draft it was checked
+    // against: which agent, and that draft's config hash, so the publish check can match it.
+    id: 95,
+    name: 'engine_draft_eval_runs: covers_agent_id and covers_config_hash (a backup run that covers its main agent)',
+    statements: [
+      `ALTER TABLE engine_draft_eval_runs ADD COLUMN IF NOT EXISTS covers_agent_id text`,
+      `ALTER TABLE engine_draft_eval_runs ADD COLUMN IF NOT EXISTS covers_config_hash text`,
+      `CREATE INDEX IF NOT EXISTS engine_draft_eval_runs_covers ON engine_draft_eval_runs (covers_agent_id, covers_config_hash) WHERE covers_agent_id IS NOT NULL`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
