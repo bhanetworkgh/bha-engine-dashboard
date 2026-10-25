@@ -527,7 +527,8 @@ export function mapLayer0(rec: AtRecord): Layer0Hold {
     builder_name: name,
     missing: layer0Missing(f['Missing Fields']),
     status,
-    open: (status ?? '').toLowerCase() !== 'completed',
+    // A voided parked log (2026-10-25, layer0Void.ts) is closed, not waiting.
+    open: !['completed', 'voided'].includes((status ?? '').toLowerCase()),
     /**
      * The one state that means a builder is being waited on. Deliberately
      * narrower than `open`, which is everything that is not `completed`: it is

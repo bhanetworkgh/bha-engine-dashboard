@@ -318,6 +318,29 @@ explicitly for this. Therefore:
   log's recording or session). A card Slack
   will not rewrite never undoes the reject: the answer is `ok: false`,
   `raise: true`, naming it. `npm run test:codex-reject`.
+- **A parked log can be voided** (2026-10-25, Destiny — Kaiqi in
+  #bha-log-reviews, 1792899253.224039). `server/src/layer0Void.ts`, one
+  function behind three doors: n8n's **Void this log** button
+  (`POST /api/engine/layer0/void`, `x-dashboard-key`, audited as access
+  `engine`), the write tool `void_parked_log` (in Bays' scope), and the
+  auto-retire hook. The builder who sent it, Jason or Destiny, a reason of 3 to
+  1,000 characters, and refused for a parked log already `completed` or
+  already `voided`. It writes Status `voided` and **new** fields — `Voided At`,
+  `Voided By`, `Voided By Slack ID`, `Voided Reason`, `Replaced By`, `Status
+  Before Void` — keeping every other field; the row stays on record. **From
+  then on every engine write to it is refused 409 `log_voided`**, and no engine
+  write may set voided (`use_void_path`). A voided row is not `open` and not
+  `pending_builder_input`, so the six-hourly reminder, `/log-status` and Needs
+  input drop it. A reply goes in its "Log parked" thread in #bha-log-reviews
+  (`LOG_REVIEW_CHANNEL`, found by the `Row:` id that post prints), and the
+  builder is told in their log channel when someone else voided it; a post
+  that does not land never undoes the void (`ok: false`, `raise: true`).
+  **Auto-retire**: a Codex write (`engineWrite.postRecord`) voids any
+  pending parked row for the same `Builder User ID` and recording (`Session
+  URL` without its query string) under another Submission ID, `Replaced By` the
+  new one; never awaited, never able to fail the write. `replaced_by` defaults
+  to the one Codex log for the same recording, and the dry run lists them as
+  `same_recording_in_codex`. `npm run test:layer0-void`.
 - **The three rules are not printed on the page** (decision 2026-09-14,
   Destiny). The tab label carries the meaning; a paragraph under it restating
   the rule is furniture. They live here, in this section, where they are the

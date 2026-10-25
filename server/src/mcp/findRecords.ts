@@ -144,7 +144,7 @@ export async function findRecords(input: Record<string, unknown>): Promise<Recor
   const mk = kind as mirror.MirrorKind;
   const spec = mirror.KINDS[mk];
   const shape = SHAPE[kind];
-  const selects = guards.writable(kind)?.selects ?? (kind === 'layer0' ? { Status: ['pending_builder_input', 'completed'] } : {});
+  const selects = guards.writable(kind)?.selects ?? (kind === 'layer0' ? { Status: ['pending_builder_input', 'completed', 'voided'] } : {});
   const warnings: string[] = [];
 
   const limitRaw = args.limit === undefined ? LIMIT_DEFAULT : Number(args.limit);
