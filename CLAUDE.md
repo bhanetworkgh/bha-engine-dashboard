@@ -2214,6 +2214,15 @@ holds each failed run's input and the healer resumes it from the failed step.
 - **The off switch** is a toggle on Engine health stored in `meta`
   (`recovery.enabled`), **on by default**, every flip a `record_writes` line
   with who made it; `RECOVERY_ENABLED=false` on the service overrides it.
+- **A run that names its own credit floor waits until the balance covers it**
+  (25 Oct 2026, Destiny). The n8n probe calls OpenRouter ok above its own $1
+  floor, so with $1.90 left the watcher announced "OpenRouter is back" twice and
+  re-ran two `Agent Evals — Runner` runs that refuse to start under $15; both
+  failed again. `creditFloorFor` reads the floor the failure states ("below the
+  $15 a run needs", "floor $15"), and `creditHold` keeps that incident waiting,
+  with the reason on its note and no batch or summary, while the probe's
+  `remaining_usd` is under it or unread. A refusal that names no floor is not
+  held. The plan says how many are held for credit. `npm run test:recovery`.
 - **A polling trigger's one-off error closes itself** (19 Oct 2026, Destiny —
   INC-BAYS.AGENT-055 and -063, each one failed Google Sheets poll of Form A,
   each closed by hand). A `UPSTREAM_5XX` or `NETWORK_TIMEOUT` on a step whose
