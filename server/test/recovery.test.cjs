@@ -18,7 +18,10 @@
  *   - a polling trigger's one-off 5xx (no execution id) closes itself
  *     self_healed once 30 minutes have passed with no repeat; a younger one
  *     waits and says when it will close; two of the same step inside 30
- *     minutes both stay open for a person (19 Oct 2026).
+ *     minutes both stay open for a person (19 Oct 2026);
+ *   - a run that names its own credit floor ("below the $50 a run needs")
+ *     stays waiting, with no batch, while the probe reads less than that, and
+ *     goes once the balance covers it (25 Oct 2026).
  *
  * Run with:  npm run test:recovery   (needs DATABASE_URL; migrations are applied here)
  */
@@ -54,9 +57,12 @@ inc('poll', 'UPSTREAM_5XX', 'TEST — Poll A', 'Trigger (polling)', undefined, 2
 inc('pollyoung', 'UPSTREAM_5XX', 'TEST — Poll B', 'Trigger (polling)', undefined, 5 * 60_000);
 inc('rep1', 'NETWORK_TIMEOUT', 'TEST — Poll C', 'Trigger (polling)', undefined, 2 * hour);
 inc('rep2', 'UPSTREAM_5XX', 'TEST — Poll C', 'Trigger (polling)', undefined, 1.75 * hour);
+inc('floor', 'BILLING_QUOTA', 'TEST — Recovery Floor', 'Enough Credit To Run?', '9108', 2 * hour);
+ledger.get(id('floor')).payload.error_message = 'Eval run not started: OpenRouter credit is $1.91, below the $50 a run needs. No case was asked.';
 
 const execs = {
   9100: { id: '9100', workflowId: 'wfA', status: 'error', workflowData: { nodes: [{ name: 'Model', credentials: { openRouterApi: { name: 'OR' } } }] } },
+  9108: { id: '9108', workflowId: 'wfFloor', status: 'error', workflowData: { nodes: [] } },
   9101: { id: '9101', workflowId: '134ezjaO6gYqYjez', status: 'error', workflowData: { nodes: [] } },
   9102: { id: '9102', workflowId: 'wfC', status: 'error', workflowData: { nodes: [{ name: 'Post to Slack', credentials: { slackApi: { name: 'Bays' } } }] } },
   9104: { id: '9104', workflowId: 'wfF', status: 'error', retrySuccessId: '9999', workflowData: { nodes: [] } },
@@ -154,6 +160,12 @@ const server = http.createServer((req, res) => {
     assert.equal(rows.host.status, 'replaying');
     assert.equal(rows.young, undefined, 'a timeout under 30 minutes is left to the healer');
     assert.equal(rows.other, undefined, 'SCHEMA_VALIDATION waits on nothing');
+    assert.equal(rows.floor.dependency, 'openrouter');
+    assert.equal(rows.floor.status, 'waiting', 'a run needing $50 waits while the probe reads $30.78');
+    assert.match(rows.floor.note, /\$30\.78 left, this run needs \$50/, 'and says why');
+    assert.equal(recovery.creditFloorFor('OpenRouter credit is $1.91, below the $15 a run needs.'), 15);
+    assert.equal(recovery.creditFloorFor('$2.09 left when this failed (floor $15).'), 15);
+    assert.equal(recovery.creditFloorFor('This request would exceed your available credits'), null, 'a refusal that names no floor is not held');
 
     assert.equal(calls.filter((c) => c.path === '/webhook/engine-dependency-probe').length, 1, 'one probe');
     assert.equal(calls.find((c) => c.path === '/webhook/engine-dependency-probe').key, 'inbound-key');
@@ -190,7 +202,8 @@ const server = http.createServer((req, res) => {
     assert.equal(calls.filter((c) => c.path === '/webhook/engine-recovery-summary').length, 0, 'no summary while two are replaying');
     const plan = await recovery.plan();
     assert.equal(plan.replaying.length, 2);
-    assert.equal(plan.waiting.filter((r) => r.incident_id.startsWith(`INC-TEST-${T}`)).length, 1);
+    assert.equal(plan.waiting.filter((r) => r.incident_id.startsWith(`INC-TEST-${T}`)).length, 2, 'slack and the credit-floor run wait');
+    assert.ok(plan.next_tick.some((l) => /1 of 1 need more credit/.test(l)), 'the plan says the floor run is held for credit');
 
     // The healer answers: A recovered, G exhausted.
     const now = new Date().toISOString();
@@ -217,6 +230,12 @@ const server = http.createServer((req, res) => {
 
     await recovery.runTick();
     assert.equal(calls.filter((c) => c.path === '/webhook/engine-recovery-summary').length, 1, 'a later tick sends nothing more');
+
+    // Credit back above the floor: the held run goes in its own batch.
+    probeState.openrouter.remaining_usd = 60;
+    await recovery.runTick();
+    const fl = await query(`SELECT status FROM engine_recovery WHERE incident_id = $1`, [id('floor')]);
+    assert.equal(fl.rows[0].status, 'replaying', 'once the balance covers its floor the run is re-run');
 
     // The plan calls nothing.
     const n = calls.length;
