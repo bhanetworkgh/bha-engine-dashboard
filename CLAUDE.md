@@ -340,7 +340,10 @@ explicitly for this. Therefore:
   URL` without its query string) under another Submission ID, `Replaced By` the
   new one; never awaited, never able to fail the write. `replaced_by` defaults
   to the one Codex log for the same recording, and the dry run lists them as
-  `same_recording_in_codex`. `npm run test:layer0-void`.
+  `same_recording_in_codex`. **On an agent token the yes is held on the
+  server**: without `confirmed: true` an agent's call is a dry run answering
+  `needs_confirmation` (25 Oct: Bays' first real void skipped the preview).
+  `npm run test:layer0-void`.
 - **The three rules are not printed on the page** (decision 2026-09-14,
   Destiny). The tab label carries the meaning; a paragraph under it restating
   the rule is furniture. They live here, in this section, where they are the
