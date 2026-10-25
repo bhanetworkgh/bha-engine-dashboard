@@ -33,6 +33,7 @@ import { IMPORT_GROUPS, finalImport as runFinalImport, isImportGroup } from './f
 import * as codex from './codex';
 import * as un9d from './un9d';
 import * as codexReject from './codexReject';
+import * as layer0Void from './layer0Void';
 import * as writeTools from './mcp/writeTools';
 import * as loops from './loops';
 import * as mirror from './mirror';
@@ -1046,6 +1047,41 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       const heldOk = a.reason === 'awaiting_approval';
       await mirror.logWrite({ endpoint, kind: 'slack_destination', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: dest, outcome: heldOk ? 'unchanged' : 'error', detail: `${heldOk ? 'held' : 'held, and the card was not posted'}: ${verdict.why} (${String(a.approval_id ?? 'no approval id')})`, ms: Date.now() - t0 });
       return send(res, 200, { ok: true, decision: heldOk ? 'held' : 'held_failed', raise: !heldOk, destination: dest, why: verdict.why, approval_id: a.approval_id ?? null, card_link: a.card_link ?? null, message: heldOk ? `Nothing was posted. ${dest} is ${verdict.why}, so the message is waiting on an Approve / Deny card (${String(a.card_link)}). Only Destiny or Jason can decide; it is posted from the dashboard once approved. Do not post it again.` : `Nothing was posted, and nobody could be asked to approve: ${String(a.message ?? a.reason)}.` });
+    }
+    /**
+     * Void a parked log from n8n (2026-10-25, layer0Void.ts): the Void this log
+     * button on the builder's parked-log form opens a pop-up asking why, and its
+     * submit lands here with the Slack id of whoever clicked. The rules are
+     * voidLog's; void_parked_log is the same function over MCP. A refusal is a
+     * 200 with ok:false, reason and a sentence n8n shows the person as it is;
+     * `raise: true` means the void landed but a Slack post did not.
+     */
+    if (p === '/api/engine/layer0/void') {
+      if (method !== 'POST') throw new HttpError(405, 'POST { log, requester_user_id, reason, replaced_by?, dry_run? }.');
+      const b = (await readJson(req, 16 * 1024)) as Record<string, unknown>;
+      const requester = typeof b.requester_user_id === 'string' ? b.requester_user_id.trim() || null : null;
+      const args = { log: b.log, requester_user_id: requester, reason: b.reason, replaced_by: b.replaced_by, dry_run: b.dry_run === true };
+      const audit = await writeTools.auditOpen({ tool: 'void_parked_log', args, access: 'engine', kind: 'layer0', requester, dry_run: args.dry_run });
+      try {
+        const r = await layer0Void.voidLog({
+          ref: typeof b.log === 'string' || typeof b.log === 'number' ? String(b.log) : '',
+          requester_user_id: requester,
+          reason: typeof b.reason === 'string' ? b.reason : null,
+          replaced_by: typeof b.replaced_by === 'string' ? b.replaced_by : null,
+          dry_run: args.dry_run,
+          actor: `n8n:${requester ?? 'unknown'}`,
+        });
+        await writeTools.auditClose(audit, { outcome: args.dry_run ? 'dry_run' : r.ok ? 'applied' : 'applied_with_errors', detail: 'message' in r && r.message ? String(r.message) : args.dry_run ? 'dry run' : `voided by ${r.voided_by}`, record_id: r.row_id, natural_id: r.submission_id, after: r });
+        return send(res, 200, { ...r, audit_id: audit });
+      } catch (e) {
+        if (e instanceof layer0Void.VoidError) {
+          await writeTools.auditClose(audit, { outcome: 'refused', detail: `${e.reason}: ${e.message}`, guard_result: { reason: e.reason } });
+          await mirror.logWrite({ endpoint, kind: 'layer0', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: typeof b.log === 'string' ? b.log : undefined, outcome: 'rejected', detail: `${e.reason}: ${e.message}`.slice(0, 500), ms: Date.now() - t0 });
+          return send(res, 200, { ok: false, voided: false, reason: e.reason, message: `${e.message} Nothing was changed.`, audit_id: audit });
+        }
+        await writeTools.auditClose(audit, { outcome: 'error', detail: e instanceof Error ? e.message : String(e) });
+        throw e;
+      }
     }
     /**
      * One click on an approval card (2026-10-04, 8185). n8n's Bays — Front Door

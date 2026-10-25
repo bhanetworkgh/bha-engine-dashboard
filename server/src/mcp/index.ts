@@ -231,6 +231,10 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'read_buyer_flow',
         // 2026-10-19: the self-healing scorecard, so a figure Bays quotes is the page's figure.
         'read_self_healing',
+        // 2026-10-25: void a parked log when its builder, Jason or Destiny asks in a thread (Kaiqi,
+        // #bha-log-reviews 1792899253.224039). Its dry run lists the Codex logs for the same recording,
+        // which is what Bays checks before saying there is no newer submission.
+        'void_parked_log',
       ]),
     },
     {
