@@ -860,6 +860,41 @@ async function startBatch(dep: RecoveryDependency, startedBy: string, p: Recover
   return id;
 }
 
+/**
+ * The OpenRouter balance a failed run said it needs before it will start
+ * (25 Oct 2026, Destiny). The dependency probe calls OpenRouter "ok" above its
+ * own $1 floor, so with $1.90 left the watcher announced "OpenRouter is back",
+ * re-ran two eval runs that refuse to start under $15, and both failed again.
+ * A run that names its own floor ("under the $15 a run needs", "floor $15")
+ * is held until the balance covers it; one that names none is not held.
+ */
+export function creditFloorFor(message: string | null | undefined): number | null {
+  const m = String(message ?? '');
+  for (const re of [/(?:under|below) the \$(\d+(?:\.\d+)?) a run needs/i, /\$(\d+(?:\.\d+)?) a run needs/i, /\bfloor \$(\d+(?:\.\d+)?)/i]) {
+    const hit = m.match(re);
+    if (hit) {
+      const n = Number(hit[1]);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  }
+  return null;
+}
+
+/**
+ * Why a run waiting on OpenRouter should stay waiting this tick even though the
+ * probe answered ok, or null when it may go. A balance the probe did not read
+ * holds a run that names a floor: "back" is a claim about money we cannot see.
+ */
+export function creditHold(row: Pick<HeldRow, 'dependency' | 'error_message'>, state: DependencyState | undefined): string | null {
+  if (row.dependency !== 'openrouter') return null;
+  const floor = creditFloorFor(row.error_message);
+  if (floor === null) return null;
+  const have = state?.remaining_usd;
+  if (typeof have !== 'number') return `Waiting for OpenRouter credit: this run needs $${floor} and the probe did not read the balance.`;
+  if (have < floor) return `Waiting for OpenRouter credit: $${have.toFixed(2)} left, this run needs $${floor}.`;
+  return null;
+}
+
 export interface TickResult {
   ran: boolean;
   at: string;
@@ -890,6 +925,15 @@ async function tick(): Promise<TickResult> {
       notes.push(`${rows.length} waiting on ${dep}, still ${p.dependencies[dep]?.status ?? 'unknown'}`);
       continue;
     }
+    // Answering is not the same as being able to pay for this run: a run that
+    // names its own credit floor waits until the balance covers it, quietly,
+    // with no batch and no "is back" summary.
+    const held = rows.map((r) => ({ r, why: creditHold(r, p.dependencies[dep]) }));
+    for (const h of held) if (h.why && h.r.note !== h.why) await setRow(h.r.incident_id, { note: h.why });
+    const ready = held.filter((h) => !h.why).map((h) => h.r);
+    if (held.length > ready.length) notes.push(`${held.length - ready.length} waiting on ${dep} credit`);
+    if (!ready.length) continue;
+    rows.splice(0, rows.length, ...ready);
     const id = await startBatch(dep, 'watcher', p, rows.map((r) => r.incident_id));
     console.log(`recovery: ${DEPENDENCY_LABEL[dep]} is back — batch ${id}, ${rows.length} incident(s), ${gapMs / 1000}s apart`);
     for (let i = 0; i < rows.length; i++) {
@@ -1021,6 +1065,8 @@ export async function plan(): Promise<RecoveryPlan> {
         const n = free.filter((r) => r.dependency === dep).length;
         if (!n) continue;
         const last = probeNow?.dependencies[dep];
+        const short = held.rows.filter((r) => r.status === 'waiting' && !r.batch_id && r.dependency === dep && creditHold(r, last)).length;
+        if (short) next.push(`${DEPENDENCY_LABEL[dep]}: ${short} of ${n} need more credit than the last probe read ($${typeof last?.remaining_usd === 'number' ? last.remaining_usd.toFixed(2) : '?'}), so they stay waiting until it covers them.`);
         next.push(
           `${DEPENDENCY_LABEL[dep]}: ${n} waiting. If it answers ok, ${n > 1 ? `re-run them oldest first, ${GAP_MS / 1000} seconds apart (about ${Math.max(1, Math.ceil(((n - 1) * GAP_MS) / 60_000))} min).` : 're-run it.'} Last probe: ${last?.ok === true ? 'ok' : last?.ok === false ? `not ok (${last.status ?? 'no status'})` : 'not asked yet'}.`,
         );
