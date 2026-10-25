@@ -49,6 +49,7 @@
     "test:pattern-reingest": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/pattern-reingest.test.cjs",
     "test:move-loop": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/move-loop.test.cjs",
     "test:agent-inventory": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/agent-inventory.test.cjs",
+    "test:docx": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/docx.test.cjs",
     "test:n8n-mcp": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/n8n-mcp.test.cjs",
     "test:sops": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/sops.test.cjs",
     "test:pattern-capture": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/pattern-capture.test.cjs",
