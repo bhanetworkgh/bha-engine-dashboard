@@ -17,6 +17,7 @@
  *   9. Auto-retire: a Codex log for the same builder and recording voids the parked copy,
  *      replaced by it; another recording's parked log is left alone.
  *  10. A review channel that cannot be read leaves the log voided and says so (ok: false).
+ *  11. On an agent token nothing is voided without confirmed: true; the answer asks for the yes.
  *
  * Run with:  npm run test:layer0-void   (needs a LOCAL DATABASE_URL)
  */
@@ -200,6 +201,22 @@ const tick = () => new Promise((r) => setTimeout(r, 400));
     assert.equal((await row(E)).fields.Status, 'voided');
     historyFails = false;
     ok('a review channel that cannot be read leaves the log voided and says so');
+
+    // 11
+    const F = await park('TESTVOID_6', KAIQI, 'https://otter.ai/u/TESTVOID-rec6');
+    history = [parkedPost(F)];
+    const asAgent = (args) => voidParkedLogTool.handler(args, { access: 'write', agent: 'bays' });
+    calls.length = 0;
+    r = await asAgent({ log: F, requester_user_id: DESTINY, reason: 'Resent and went through' });
+    assert.equal(r.voided, false);
+    assert.equal(r.needs_confirmation, true);
+    assert.match(r.note, /confirmed: true/);
+    assert.equal((await row(F)).fields.Status, 'pending_builder_input');
+    assert.equal(calls.filter((c) => c.method === 'chat.postMessage').length, 0);
+    r = await asAgent({ log: F, requester_user_id: DESTINY, reason: 'Resent and went through', confirmed: true });
+    assert.equal(r.voided, true, JSON.stringify(r));
+    assert.equal((await row(F)).fields.Status, 'voided');
+    ok('on an agent token nothing is voided until confirmed: true, and the first answer asks for the yes');
 
   } finally {
     await clean();
