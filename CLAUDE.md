@@ -1875,7 +1875,8 @@ agent did through n8n tools of its own are tools here:
   `user@` prefix and plain http are all `not_a_slack_file_url`), downloaded
   with `SLACK_BAYS_BOT_TOKEN` **without following redirects**, because an
   unauthorised Slack file redirects to a sign-in page that answers 200.
-  Outcomes `extracted`, `no_text_layer`, `file_not_found`, `not_authorised`;
+  Outcomes `extracted`, `no_text_layer`, `unsupported_type`, `unreadable`,
+  `file_not_found`, `not_authorised`;
   at most 30,000 characters with `truncated: true`. **A PDF is read by
   `server/src/pdf.ts`, not pdf-parse**: rule 5 of section 2 makes `pg` the
   ceiling, so it is Node's zlib and ~400 lines — objects, object streams, the
@@ -1883,6 +1884,18 @@ agent did through n8n tools of its own are tools here:
   OCR, or follow form XObjects, and says so in its outcome rather than
   guessing; a CID font with no `ToUnicode` is skipped and counted, never
   emitted as mojibake.
+  **A Word file (.docx) is read by `server/src/docx.ts`** (26 Oct 2026,
+  Destiny: Hardik's acceptance bundle reached Bays as raw zip bytes), the same
+  way: Node's zlib, the zip's central directory, `word/document.xml` walked in
+  order — a paragraph a line, a table row one line with its cells joined by
+  " | ", tracked deletions left out, pictures counted and named as not read.
+  Headers, footers, footnotes, comments and text boxes are not read. **Nothing
+  that is not text is handed back as text** (outcome `unsupported_type`): a
+  spreadsheet or deck (a zip with `xl/` or `ppt/`), any other zip, an old
+  `.doc`/`.xls`/`.ppt`, a picture, or anything with a NUL byte in its first
+  8 KB, each named, with "ask for a PDF or a .docx". A damaged .docx is
+  `unreadable` with the reason; one with no body text is `no_text_layer`.
+  `npm run test:docx` builds its Word files in code, no database or network.
 - **`share_doc`**, **`grant_drive_access`** and **`create_doc`** — write
   connection only, audited on `engine_mcp_writes` like the record tools.
   **`grant_drive_access` refuses any address that is not exactly
