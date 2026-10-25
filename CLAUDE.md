@@ -2920,9 +2920,14 @@ alert per episode**: more failures post nothing, and the episode ends after 60
 minutes with none. An alert Slack refuses is kept as failed with the reason
 and tried again every minute. It reads and posts; it retries, closes and
 changes nothing. An Answered ask that only talks about credits is not a
-failure. `Agent Evals — Runner` reads the balance before a run and does not
-start under $15 (an estimate), and stops at the first answer that fails on
-credit rather than scoring it. **An incident counts on its text, never on its
+failure. `Agent Evals — Runner` reads the balance before a run, and **from
+25 Oct 2026 (Destiny: "nothing should be failing because of the backup") never
+fails on OpenRouter credit**: under $15, or unreadable, it asks the three
+Anthropic backups instead; it reads the balance again before every case and
+moves to the backup under $2; a main agent's credit refusal re-asks that case of
+its backup. Every result carries `Answered By` (`main` or `anthropic_backup`) and
+the `eval_run_cost` event `answered_by`; it raises only when the backup refuses on
+credit too. Low credit is said by `Engine — OpenRouter Credit Alert`. **An incident counts on its text, never on its
 `BILLING_QUOTA` label alone** (15 Oct 2026, Destiny): the label is the error
 handler's guess, and on 15 Oct its model labelled OpenRouter's "could not verify
 available credits for this request in time" as billing, so this alert told Jason
