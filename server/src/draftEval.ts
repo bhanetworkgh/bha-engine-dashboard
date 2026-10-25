@@ -27,7 +27,8 @@
  *     covers it.
  *
  * Guards: n8n's MCP token must be set; the OpenRouter balance must be at least
- * $15 (the runner's floor) and is read fresh; one draft run per agent at a
+ * $15 (the runner's floor) and is read fresh, except for an Anthropic backup,
+ * which spends none of it (25 Oct 2026); one draft run per agent at a
  * time; an answer that failed because the account could not pay stops the run
  * (`stopped_credit`), as the runner does. A run is not resumed across a
  * restart: one left `running` at boot is marked `interrupted`.
@@ -65,7 +66,7 @@ export const BACKUPS: Record<string, { key: string; name: string }> = {
 };
 const EVAL_TABLE = process.env.AGENT_EVAL_SET_TABLE_ID?.trim() || 'Uj5kCvQBixzY3MqU';
 const EVAL_PROJECT = process.env.AGENT_EVAL_SET_PROJECT_ID?.trim() || 'HjupolvfBya6b0ox';
-const CREDIT_ERROR = /(exceed your available credits|insufficient credits|payment required|requires more credits)/i;
+const CREDIT_ERROR = /(exceed your available credits|insufficient credits|payment required|requires more credits|credit balance is too low)/i;
 
 type Dict = Record<string, unknown>;
 
@@ -201,21 +202,29 @@ export async function start(input: { agent: string; requested_by: string | null;
   const cases = latestCases(rows, agent);
   if (!cases.length) throw new DraftEvalError(`agent_eval_set holds no active case for ${agent}.`, 'no_cases');
   const expected = cases.reduce((n, c) => n + c.repeats, 0);
-  const credit = await researchSignals.credit(true);
+  // A backup answers on Anthropic, not OpenRouter (25 Oct 2026, Destiny: the Bays backup's eval was
+  // refused for OpenRouter's balance while the run would have spent none of it). Anthropic has no API
+  // that reads a balance, so a backup's run is not gated on one; it stops at the first answer the
+  // account could not pay for, as every run does.
+  const credit = backup ? null : await researchSignals.credit(true);
   const hash = await configHash(a.id).catch((e) => {
     throw new DraftEvalError(`The draft's config could not be read from n8n: ${e instanceof Error ? e.message : String(e)}`, 'draft_unread');
   });
-  const out: StartResult = { run_id: null, agent, agent_id: a.id, cases: cases.length, results_expected: expected, case_ids: cases.map((c) => c.case_id), config_hash: hash, credit_usd: credit.ok ? credit.remaining_usd : null, dry_run: input.dry_run === true };
-  if (!credit.ok) throw new DraftEvalError(`The OpenRouter balance could not be read (${credit.error}), so the run was not started.`, 'credit_unread');
-  if (credit.remaining_usd < RULE.credit_floor_usd) throw new DraftEvalError(`OpenRouter credit is $${credit.remaining_usd.toFixed(2)}, under the $${RULE.credit_floor_usd} a run needs. Nothing was asked.`, 'credit_low');
+  const out: StartResult = { run_id: null, agent, agent_id: a.id, cases: cases.length, results_expected: expected, case_ids: cases.map((c) => c.case_id), config_hash: hash, credit_usd: credit && credit.ok ? credit.remaining_usd : null, dry_run: input.dry_run === true };
+  if (credit && !credit.ok) throw new DraftEvalError(`The OpenRouter balance could not be read (${credit.error}), so the run was not started.`, 'credit_unread');
+  if (credit && credit.ok && credit.remaining_usd < RULE.credit_floor_usd) throw new DraftEvalError(`OpenRouter credit is $${credit.remaining_usd.toFixed(2)}, under the $${RULE.credit_floor_usd} a run needs. Nothing was asked.`, 'credit_low');
   if (input.dry_run) return out;
   const runId = mint();
+  const notes = [
+    agent === 'north_star' ? 'North Star answers are scored raw: the runner passes them through the Builder Pronoun Guard first and this does not.' : null,
+    backup ? 'Anthropic backup: answers on Anthropic, so the OpenRouter balance was not checked; Anthropic exposes no balance to read.' : null,
+  ].filter(Boolean).join(' ');
   await query(
     `INSERT INTO engine_draft_eval_runs (run_id, agent, agent_id, agent_name, config_hash_before, cases, results_expected, credit_before_usd, requested_by, detail)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [runId, agent, a.id, a.name, hash, cases.length, expected, credit.remaining_usd, input.requested_by, agent === 'north_star' ? 'North Star answers are scored raw: the runner passes them through the Builder Pronoun Guard first and this does not.' : null],
+    [runId, agent, a.id, a.name, hash, cases.length, expected, credit && credit.ok ? credit.remaining_usd : null, input.requested_by, notes || null],
   );
-  void run(runId, agent, a.id, cases).catch(async (e) => {
+  void run(runId, agent, a.id, cases, backup ? 'Anthropic' : 'OpenRouter').catch(async (e) => {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`[draft-eval] ${runId}: ${msg}`);
     await query(`UPDATE engine_draft_eval_runs SET state = 'error', detail = $2, finished_at = now() WHERE run_id = $1 AND state = 'running'`, [runId, msg.slice(0, 1000)]).catch(() => undefined);
@@ -225,7 +234,7 @@ export async function start(input: { agent: string; requested_by: string | null;
 
 interface Result { case_id: string; repeat: number; passed: boolean; failed_checks: string; answer: string; execution_id: string | null; status: string; not_asked?: boolean }
 
-async function run(runId: string, agent: string, agentId: string, cases: EvalCase[]): Promise<void> {
+async function run(runId: string, agent: string, agentId: string, cases: EvalCase[], provider = 'OpenRouter'): Promise<void> {
   const items = cases.flatMap((c) => Array.from({ length: c.repeats }, (_, i) => ({ c, repeat: i + 1 })));
   const results: Result[] = [];
   const deadline = Date.now() + RULE.run_limit_minutes * 60_000;
@@ -259,7 +268,7 @@ async function run(runId: string, agent: string, agentId: string, cases: EvalCas
         ans = { status: 'not_asked', response: '', execution_id: null, error: e instanceof Error ? e.message : String(e) };
       }
       if (!ans.response && CREDIT_ERROR.test(String(ans.error))) {
-        stop = { state: 'stopped_credit', detail: `stopped at ${it.c.case_id} (repeat ${it.repeat}): OpenRouter credit is out. The answers so far are a partial run, not a verdict. The agent said: ${String(ans.error).slice(0, 300)}` };
+        stop = { state: 'stopped_credit', detail: `stopped at ${it.c.case_id} (repeat ${it.repeat}): ${provider} credit is out. The answers so far are a partial run, not a verdict. The agent said: ${String(ans.error).slice(0, 300)}` };
         return;
       }
       const s = score(ans.response, ans.error, it.c.checks);
