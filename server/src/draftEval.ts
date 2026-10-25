@@ -178,12 +178,98 @@ export interface StartResult {
   config_hash: string | null;
   credit_usd: number | null;
   dry_run: boolean;
+  /** Which route the answers come through: OpenRouter for a main agent, Anthropic for a backup. */
+  ran_on: 'OpenRouter' | 'Anthropic';
+  /** Set when a main agent's run fell back to its backup: the main agent, and its draft's config, the run covers. */
+  covers_agent_id: string | null;
+  covers_config_hash: string | null;
+  fallback_reason: string | null;
+}
+
+/** A main agent's Anthropic backup, by the main agent's key. */
+export const BACKUP_OF: Record<string, string> = Object.fromEntries(Object.entries(BACKUPS).map(([id, b]) => [b.key, id]));
+
+function stable(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`;
+  if (v && typeof v === 'object') return `{${Object.keys(v as Dict).sort().map((k) => `${JSON.stringify(k)}:${stable((v as Dict)[k])}`).join(',')}}`;
+  return JSON.stringify(v ?? null);
+}
+
+/**
+ * Tools a backup carries in another shape that does the same thing, by tool
+ * name: the backup's workflow id. Each is a deliberate, documented stand-in.
+ *   GitHub: n8n's MCP will not let an agent's GitHub node take a model-filled
+ *   owner and repository, so the backup reads a repository through
+ *   `Bays — GitHub Repo Read` (18 Oct 2026; the workflow's sticky says so).
+ */
+export const EQUIVALENT_BACKUP_TOOLS: Record<string, string> = { GitHub: 'FB4i1s8gebDDQM45' };
+
+/** Tools keyed by name (their order is not behaviour); a known stand-in compares equal to the original. */
+function toolsByName(tools: unknown, side: 'main' | 'backup'): Dict {
+  const out: Dict = {};
+  for (const t of Array.isArray(tools) ? (tools as Dict[]) : []) {
+    const name = String(t?.name ?? '');
+    const stand = EQUIVALENT_BACKUP_TOOLS[name];
+    out[name] = stand && (side === 'main' || (t.type === 'workflow' && t.workflowId === stand)) ? `equivalent:${name}` : t;
+  }
+  return out;
+}
+
+/** The parts of a draft that decide how it answers; name, model, credential and scheduled tasks are left out. */
+const BEHAVIOUR_KEYS = ['instructions', 'tools', 'personalisation', 'memory', 'providerTools', 'config', 'mcpServers'] as const;
+
+/**
+ * Where a backup's draft would answer differently from its main agent's draft,
+ * in words; empty when the two differ only in name, model route, credential and
+ * scheduled tasks. Two get_agent results in, nothing read or written.
+ * Skills are compared by name, because each agent's skills carry its own ids.
+ */
+export function behaviourDiff(main: Dict, backup: Dict): string[] {
+  const out: string[] = [];
+  const mc = (main.config ?? {}) as Dict;
+  const bc = (backup.config ?? {}) as Dict;
+  const keyed = (c: Dict, side: 'main' | 'backup'): Dict => ({ ...c, tools: toolsByName(c.tools, side) });
+  const mk = keyed(mc, 'main');
+  const bk = keyed(bc, 'backup');
+  for (const k of BEHAVIOUR_KEYS) if (stable(mk[k]) !== stable(bk[k])) out.push(k === 'mcpServers' ? 'its MCP servers or their tool permissions' : k === 'instructions' ? 'its instructions' : k === 'tools' ? 'its tools' : k);
+  if (stable(main.customTools ?? []) !== stable(backup.customTools ?? [])) out.push('its custom tools');
+  const skills = (r: Dict): Map<string, string> => {
+    const m = new Map<string, string>();
+    for (const s of Object.values((r.skills ?? {}) as Dict)) {
+      const x = (s ?? {}) as Dict;
+      m.set(String(x.name), stable({ d: x.description, i: x.instructions, t: x.allowedTools ?? [], r: x.references ?? [] }));
+    }
+    return m;
+  };
+  const ms = skills(main);
+  const bs = skills(backup);
+  for (const [n, v] of ms) {
+    if (!bs.has(n)) out.push(`skill "${n}" is missing on the backup`);
+    else if (bs.get(n) !== v) out.push(`skill "${n}" differs`);
+  }
+  for (const n of bs.keys()) if (!ms.has(n)) out.push(`skill "${n}" is only on the backup`);
+  return out;
+}
+
+async function busyCheck(agentId: string, name: string): Promise<void> {
+  const busy = await query<{ run_id: string }>(`SELECT run_id FROM engine_draft_eval_runs WHERE agent_id = $1 AND state = 'running' LIMIT 1`, [agentId]);
+  if (busy.rows[0]) throw new DraftEvalError(`A draft eval is already running for ${name} (${busy.rows[0].run_id}). One at a time per agent.`, 'already_running');
 }
 
 /**
  * Checks everything, records the run and starts it in the background.
  * Returns at once; the run takes minutes. Throws DraftEvalError on a refusal,
  * with nothing recorded and nothing asked.
+ *
+ * **A main agent falls back to its Anthropic backup** (25 Oct 2026, Destiny:
+ * "evals have a backup the way Bays works"). When OpenRouter's balance is under
+ * the floor or cannot be read, the run asks the backup instead, which spends
+ * Anthropic credit, but only when the backup's draft matches the main draft in
+ * everything that decides an answer (`behaviourDiff`): the two run the same
+ * model by different routes, so the verdict is about the same change. The run
+ * then covers the main draft too (`covers_*`), which is what the publish check
+ * matches. A backup that differs is refused, naming what differs; this server
+ * does not edit an agent to make them match.
  */
 export async function start(input: { agent: string; requested_by: string | null; dry_run?: boolean }): Promise<StartResult> {
   const backup = BACKUPS[String(input.agent || '').trim()];
@@ -191,8 +277,25 @@ export async function start(input: { agent: string; requested_by: string | null;
   if (!agent) throw new DraftEvalError(`"${input.agent}" is not an agent this can test. One of: ${Object.keys(AGENTS).join(', ')}, or a backup's id (${Object.keys(BACKUPS).join(', ')}).`, 'unknown_agent');
   const a = backup ? { id: String(input.agent).trim(), name: backup.name } : AGENTS[agent];
   if (!n8nMcp.n8nMcpConfigured()) throw new DraftEvalError(`${n8nMcp.N8N_MCP_VAR} is not set on this server, so the draft cannot be asked.`, 'not_configured');
-  const busy = await query<{ run_id: string }>(`SELECT run_id FROM engine_draft_eval_runs WHERE agent_id = $1 AND state = 'running' LIMIT 1`, [a.id]);
-  if (busy.rows[0]) throw new DraftEvalError(`A draft eval is already running for ${a.name} (${busy.rows[0].run_id}). One at a time per agent.`, 'already_running');
+  await busyCheck(a.id, a.name);
+  const cases = await readCases(agent);
+  // A backup answers on Anthropic, not OpenRouter (25 Oct 2026): Anthropic has no API that reads a
+  // balance, so a backup's run is not gated on one; it stops at the first answer the account could
+  // not pay for, as every run does.
+  if (backup) {
+    return begin({ agent, a, cases, input, provider: 'Anthropic', credit: null, covers: null, why: null, notes: ['Anthropic backup: answers on Anthropic, so the OpenRouter balance was not checked; Anthropic exposes no balance to read.'] });
+  }
+  const credit = await researchSignals.credit(true);
+  const why = !credit.ok
+    ? `the OpenRouter balance could not be read (${credit.error})`
+    : credit.remaining_usd < RULE.credit_floor_usd
+      ? `OpenRouter credit is $${credit.remaining_usd.toFixed(2)}, under the $${RULE.credit_floor_usd} a run needs`
+      : null;
+  if (!why) return begin({ agent, a, cases, input, provider: 'OpenRouter', credit: credit.ok ? credit.remaining_usd : null, covers: null, why: null, notes: [] });
+  return fallback(agent, a, cases, input, why, credit.ok ? 'credit_low' : 'credit_unread');
+}
+
+async function readCases(agent: string): Promise<EvalCase[]> {
   let rows: Dict[];
   try {
     rows = await n8nMcp.readDataTableRows(EVAL_TABLE, EVAL_PROJECT);
@@ -201,30 +304,68 @@ export async function start(input: { agent: string; requested_by: string | null;
   }
   const cases = latestCases(rows, agent);
   if (!cases.length) throw new DraftEvalError(`agent_eval_set holds no active case for ${agent}.`, 'no_cases');
-  const expected = cases.reduce((n, c) => n + c.repeats, 0);
-  // A backup answers on Anthropic, not OpenRouter (25 Oct 2026, Destiny: the Bays backup's eval was
-  // refused for OpenRouter's balance while the run would have spent none of it). Anthropic has no API
-  // that reads a balance, so a backup's run is not gated on one; it stops at the first answer the
-  // account could not pay for, as every run does.
-  const credit = backup ? null : await researchSignals.credit(true);
-  const hash = await configHash(a.id).catch((e) => {
+  return cases;
+}
+
+const sentence = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** The main agent's run, on its Anthropic backup. Refused when there is none or the drafts differ. */
+async function fallback(agent: string, main: { id: string; name: string }, cases: EvalCase[], input: { requested_by: string | null; dry_run?: boolean }, why: string, reason: string): Promise<StartResult> {
+  const bid = BACKUP_OF[agent];
+  if (!bid) throw new DraftEvalError(`${sentence(why)}, and ${main.name} has no Anthropic backup to run it on. Nothing was asked.`, reason);
+  const b = { id: bid, name: BACKUPS[bid].name };
+  await busyCheck(b.id, b.name);
+  let mainDraft: Dict;
+  let backupDraft: Dict;
+  try {
+    [mainDraft, backupDraft] = await Promise.all([n8nMcp.getAgent(main.id), n8nMcp.getAgent(b.id)]);
+  } catch (e) {
+    throw new DraftEvalError(`${sentence(why)}, and the drafts could not be read from n8n to check ${b.name} matches ${main.name}: ${e instanceof Error ? e.message : String(e)}`, 'draft_unread');
+  }
+  const diff = behaviourDiff(mainDraft, backupDraft);
+  if (diff.length) {
+    throw new DraftEvalError(
+      `${sentence(why)}, so this would run on ${b.name}, but its draft does not match ${main.name}'s draft: ${diff.slice(0, 6).join('; ')}${diff.length > 6 ? `; and ${diff.length - 6} more` : ''}. Bring the backup in line with the main draft, then run it again. Nothing was asked.`,
+      'backup_differs',
+    );
+  }
+  const coversHash = n8nMcp.changeHash(mainDraft);
+  return begin({
+    agent, a: b, cases, input, provider: 'Anthropic', credit: null, why,
+    covers: { agent_id: main.id, name: main.name, hash: coversHash },
+    hash: n8nMcp.changeHash(backupDraft),
+    notes: [`Ran on the Anthropic backup because ${why}. Its draft matched ${main.name}'s draft in everything but the model route, so this run covers ${main.name} at config ${(coversHash ?? 'unknown').slice(0, 16)}.`],
+  });
+}
+
+async function begin(o: {
+  agent: string; a: { id: string; name: string }; cases: EvalCase[]; input: { requested_by: string | null; dry_run?: boolean };
+  provider: 'OpenRouter' | 'Anthropic'; credit: number | null; covers: { agent_id: string; name: string; hash: string | null } | null;
+  why: string | null; notes: string[]; hash?: string | null;
+}): Promise<StartResult> {
+  const expected = o.cases.reduce((n, c) => n + c.repeats, 0);
+  const hash = o.hash !== undefined ? o.hash : await configHash(o.a.id).catch((e) => {
     throw new DraftEvalError(`The draft's config could not be read from n8n: ${e instanceof Error ? e.message : String(e)}`, 'draft_unread');
   });
-  const out: StartResult = { run_id: null, agent, agent_id: a.id, cases: cases.length, results_expected: expected, case_ids: cases.map((c) => c.case_id), config_hash: hash, credit_usd: credit && credit.ok ? credit.remaining_usd : null, dry_run: input.dry_run === true };
-  if (credit && !credit.ok) throw new DraftEvalError(`The OpenRouter balance could not be read (${credit.error}), so the run was not started.`, 'credit_unread');
-  if (credit && credit.ok && credit.remaining_usd < RULE.credit_floor_usd) throw new DraftEvalError(`OpenRouter credit is $${credit.remaining_usd.toFixed(2)}, under the $${RULE.credit_floor_usd} a run needs. Nothing was asked.`, 'credit_low');
-  if (input.dry_run) return out;
+  const out: StartResult = {
+    run_id: null, agent: o.agent, agent_id: o.a.id, cases: o.cases.length, results_expected: expected, case_ids: o.cases.map((c) => c.case_id),
+    config_hash: hash, credit_usd: o.credit, dry_run: o.input.dry_run === true, ran_on: o.provider,
+    covers_agent_id: o.covers?.agent_id ?? null, covers_config_hash: o.covers?.hash ?? null, fallback_reason: o.why,
+  };
+  if (o.input.dry_run) return out;
   const runId = mint();
-  const notes = [
-    agent === 'north_star' ? 'North Star answers are scored raw: the runner passes them through the Builder Pronoun Guard first and this does not.' : null,
-    backup ? 'Anthropic backup: answers on Anthropic, so the OpenRouter balance was not checked; Anthropic exposes no balance to read.' : null,
-  ].filter(Boolean).join(' ');
+  const notes = [o.agent === 'north_star' ? 'North Star answers are scored raw: the runner passes them through the Builder Pronoun Guard first and this does not.' : null, ...o.notes].filter(Boolean).join(' ');
   await query(
-    `INSERT INTO engine_draft_eval_runs (run_id, agent, agent_id, agent_name, config_hash_before, cases, results_expected, credit_before_usd, requested_by, detail)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [runId, agent, a.id, a.name, hash, cases.length, expected, credit && credit.ok ? credit.remaining_usd : null, input.requested_by, notes || null],
+    `INSERT INTO engine_draft_eval_runs (run_id, agent, agent_id, agent_name, config_hash_before, cases, results_expected, credit_before_usd, requested_by, detail, covers_agent_id, covers_config_hash)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    [runId, o.agent, o.a.id, o.a.name, hash, o.cases.length, expected, o.credit, o.input.requested_by, notes || null, o.covers?.agent_id ?? null, o.covers?.hash ?? null],
   );
-  void run(runId, agent, a.id, cases, backup ? 'Anthropic' : 'OpenRouter').catch(async (e) => {
+  const main = o.provider === 'OpenRouter' ? o.a : null;
+  void run(runId, o.agent, o.a.id, o.cases, o.provider, {
+    covers: o.covers,
+    // OpenRouter running out mid-run starts the whole run again on the backup, never a mix of the two.
+    onCreditOut: main ? () => fallback(o.agent, main, o.cases, { requested_by: o.input.requested_by }, 'OpenRouter credit ran out during the run', 'credit_low') : null,
+  }).catch(async (e) => {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`[draft-eval] ${runId}: ${msg}`);
     await query(`UPDATE engine_draft_eval_runs SET state = 'error', detail = $2, finished_at = now() WHERE run_id = $1 AND state = 'running'`, [runId, msg.slice(0, 1000)]).catch(() => undefined);
@@ -234,7 +375,10 @@ export async function start(input: { agent: string; requested_by: string | null;
 
 interface Result { case_id: string; repeat: number; passed: boolean; failed_checks: string; answer: string; execution_id: string | null; status: string; not_asked?: boolean }
 
-async function run(runId: string, agent: string, agentId: string, cases: EvalCase[], provider = 'OpenRouter'): Promise<void> {
+async function run(
+  runId: string, agent: string, agentId: string, cases: EvalCase[], provider = 'OpenRouter',
+  opts: { covers?: { agent_id: string; name: string; hash: string | null } | null; onCreditOut?: (() => Promise<StartResult>) | null } = {},
+): Promise<void> {
   const items = cases.flatMap((c) => Array.from({ length: c.repeats }, (_, i) => ({ c, repeat: i + 1 })));
   const results: Result[] = [];
   const deadline = Date.now() + RULE.run_limit_minutes * 60_000;
@@ -302,6 +446,14 @@ async function run(runId: string, agent: string, agentId: string, cases: EvalCas
   if (halted) {
     state = halted.state;
     detail = halted.detail;
+    if (state === 'stopped_credit' && opts.onCreditOut) {
+      try {
+        const again = await opts.onCreditOut();
+        detail += ` Started again on the Anthropic backup as ${again.run_id}.`;
+      } catch (e) {
+        detail += ` Not started again on the Anthropic backup: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    }
   } else {
     hashAfter = await configHash(agentId).catch(() => null);
     const before = (await query<{ config_hash_before: string | null }>(`SELECT config_hash_before FROM engine_draft_eval_runs WHERE run_id = $1`, [runId])).rows[0]?.config_hash_before ?? null;
@@ -319,6 +471,10 @@ async function run(runId: string, agent: string, agentId: string, cases: EvalCas
     } else if (hashAfter !== before) {
       state = 'draft_changed';
       detail = `the draft changed during the run (config ${before.slice(0, 12)} before, ${hashAfter.slice(0, 12)} after), so this is not a verdict about either`;
+    } else if (opts.covers && (!opts.covers.hash || (await configHash(opts.covers.agent_id).catch(() => null)) !== opts.covers.hash)) {
+      // A backup run covers the main draft only while that draft is still the one it was matched against.
+      state = 'draft_changed';
+      detail = `${opts.covers.name}'s draft changed during the run (or could not be read again), so this run no longer covers it; run it again`;
     } else if (regressed.length) {
       state = 'failed';
       detail = `${passed} of ${byCase.size} cases passed; ${regressed.join(', ')} failed${base ? ` and passed in ${base.run_id}` : ' (no finished production run to compare with)'}${known.length ? `; already failing before: ${known.join(', ')}` : ''}`;
@@ -352,11 +508,13 @@ export interface DraftRun {
   failed_cases: string[]; regressed: string[]; compared_with: string | null;
   config_hash_before: string | null; config_hash_after: string | null;
   requested_by: string | null; started_at: string; finished_at: string | null;
+  covers_agent_id: string | null; covers_config_hash: string | null;
   results?: Result[];
 }
 
 const COLS = `run_id, agent, agent_id, agent_name, state, detail, cases, results_expected, results_done, cases_passed, failed_cases, regressed, compared_with,
-              config_hash_before, config_hash_after, requested_by, started_at::text AS started_at, finished_at::text AS finished_at`;
+              config_hash_before, config_hash_after, requested_by, started_at::text AS started_at, finished_at::text AS finished_at,
+              covers_agent_id, covers_config_hash`;
 
 export async function read(runId: string): Promise<DraftRun | null> {
   const r = await query<DraftRun>(`SELECT ${COLS}, results FROM engine_draft_eval_runs WHERE run_id = $1`, [runId]);
@@ -372,13 +530,15 @@ export async function recent(limit = 20, agent?: string | null): Promise<DraftRu
 
 /**
  * The draft verdict that covers a version: the newest finished run for this
- * agent whose draft config, read after the run, is the config now published.
+ * agent whose draft config, read after the run, is the config now published,
+ * or a run on its Anthropic backup that was matched against that same config.
  */
 export async function verdictFor(agentId: string, hash: string | null): Promise<{ run_id: string; state: string; detail: string | null } | null> {
   if (!hash) return null;
   const r = await query<{ run_id: string; state: string; detail: string | null }>(
     `SELECT run_id, state, detail FROM engine_draft_eval_runs
-      WHERE agent_id = $1 AND config_hash_after = $2 AND state IN ('passed', 'failed') ORDER BY finished_at DESC LIMIT 1`,
+      WHERE ((agent_id = $1 AND config_hash_after = $2) OR (covers_agent_id = $1 AND covers_config_hash = $2))
+        AND state IN ('passed', 'failed') ORDER BY finished_at DESC LIMIT 1`,
     [agentId, hash],
   );
   return r.rows[0] ?? null;
