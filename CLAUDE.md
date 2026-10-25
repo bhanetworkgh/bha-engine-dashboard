@@ -1777,7 +1777,20 @@ when a skill is edited, so the hash compared everywhere here is `n8nMcp.changeHa
 before it carry n8n's plain hash and no longer match. **An Anthropic backup is
 tested with its primary's cases** (18 Oct 2026): `run_draft_eval` takes a backup's
 n8n agent id (`BACKUPS` in `draftEval.ts`), asks that agent's draft, and stores
-the run under the backup's id, so the publish check matches it like any other. **To change an
+the run under the backup's id, so the publish check matches it like any other. **A backup's run is
+not gated on the OpenRouter balance** (25 Oct 2026): it spends Anthropic credit, which has no API
+to read, and stops at the first answer the account cannot pay for. **A main agent's run falls back
+to its backup by itself** (25 Oct 2026, Destiny: "evals have a backup the way Bays works"): when
+OpenRouter is under $15 or unreadable, or runs out mid-run (the whole run starts again on the
+backup, never a mix), the run asks the backup instead, but only when `behaviourDiff` finds the two
+drafts the same in everything but name, model route, credential and scheduled tasks (instructions,
+tools by name, MCP permissions, skills by name, memory, config, custom tools;
+`EQUIVALENT_BACKUP_TOOLS` names the one deliberate stand-in, the backup's GitHub workflow). The two
+run the same model by different routes, so the verdict is about the same change: the run stores
+`covers_agent_id` and `covers_config_hash` (migration 95) and `verdictFor` matches it for the main
+agent too. A backup that differs is refused `backup_differs`, naming what; this server never edits
+an agent to make them match. The main draft is read again at the end, and a changed one is
+`draft_changed`. **To change an
 agent: edit the draft, `run_draft_eval`, publish only once it reads passed,
 then record the inventory.** `npm run test:draft-eval` pins the pure parts.
 
