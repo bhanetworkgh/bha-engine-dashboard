@@ -40,7 +40,7 @@ import type { ToolDefinition, ToolDeps } from './tools';
 interface AuditOpen {
   tool: string;
   args: Record<string, unknown>;
-  access: 'read' | 'write' | 'page';
+  access: 'read' | 'write' | 'page' | 'engine';
   kind: string | null;
   requester: string | null;
   dry_run: boolean;

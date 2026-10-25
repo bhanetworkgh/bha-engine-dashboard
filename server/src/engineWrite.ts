@@ -16,6 +16,7 @@
 import * as mirror from './mirror';
 import * as store from './store';
 import { guardRejected } from './codexReject';
+import { guardVoided, retireOnSubmission } from './layer0Void';
 
 /** The submission a whole-record codex write names, for the rejected-log guard. */
 function submissionOf(fields: unknown): string | null {
@@ -62,7 +63,12 @@ export async function postRecord(kind: mirror.MirrorKind, body: mirror.MirrorInp
   try {
     // A rejected Codex log is closed to the engine (2026-10-15, codexReject.ts).
     if (kind === 'codex') await guardRejected({ submissionId: submissionOf(body.fields) }, (body.fields as Record<string, unknown> | null) ?? null);
+    // A voided parked log is closed to the engine too (2026-10-25, layer0Void.ts).
+    if (kind === 'layer0') await guardVoided({ submissionId: submissionOf(body.fields) }, (body.fields as Record<string, unknown> | null) ?? null);
     const result = await mirror.upsert(kind, body, 'engine');
+    // A log that went through retires any parked copy of the same recording (2026-10-25).
+    // Not awaited and never able to fail this write: its outcome is on engine_writes.
+    if (kind === 'codex') void retireOnSubmission((body.fields as Record<string, unknown> | null) ?? null);
     // The row is stored; this dates the status it left the record in. It is
     // the only place a status change is timestamped, so it happens on the
     // write rather than being noticed later, and it never fails the write.
@@ -121,6 +127,7 @@ export async function patchRecord(
 ): Promise<mirror.PatchResult & { ok: true }> {
   try {
     if (kind === 'codex') await guardRejected({ rowId }, fields);
+    if (kind === 'layer0') await guardVoided({ rowId }, fields);
     const r = await mirror.patchFields(kind, rowId, fields, 'engine');
     // Same as a POST: the row is stored, and this dates the status it was
     // left in. A patch that sets Status is exactly such a change.

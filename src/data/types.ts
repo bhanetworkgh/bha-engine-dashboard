@@ -778,7 +778,7 @@ export interface Layer0Hold {
   builder_name: string | null;
   missing: string[];
   status: string | null;
-  /** Anything but "completed". */
+  /** Anything but "completed" or "voided". */
   open: boolean;
   /** Exactly `pending_builder_input`: the builder still owes an answer. */
   pending_builder_input: boolean;
