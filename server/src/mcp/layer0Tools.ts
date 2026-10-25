@@ -7,6 +7,13 @@
  *                     (layer0Void.voidLog): the builder, Jason or Destiny, a
  *                     reason, a parked log that is not completed. Audited on
  *                     engine_mcp_writes, refused and dry-run calls included.
+ *
+ * **On an agent token the confirmation is held here, not in a prompt**
+ * (2026-10-25, Destiny: on its first real use Bays voided Kaiqi's log without
+ * showing the preview and waiting for a yes). Without `confirmed: true` an
+ * agent's call is a dry run, and the answer tells it to show the person what
+ * would be voided and ask. The shared connector is already a person acting and
+ * is not held, the same rule the approval cards follow.
  */
 import * as layer0Void from '../layer0Void';
 import { auditClose, auditOpen } from './writeTools';
@@ -15,7 +22,7 @@ import type { ToolDefinition } from './tools';
 export const voidParkedLogTool: ToolDefinition = {
   name: 'void_parked_log',
   description:
-    "Void one parked log (a Layer 0 row the completeness check is holding for its builder) that will never be completed, for example because the builder sent the corrected log again as a new submission and that one went through. Only the builder who sent it, Jason (U0A9V97949F) or Destiny (U0AEW3TBYH1) can, and a reason is required. requester_user_id is the Slack id of the person who asked, never Bays'. Refused for a parked log already completed or already voided. The log is marked voided with who, when, why and what replaced it, stays on record (nothing is deleted), gets no more reminders, can no longer be completed, and no engine write can change it. A reply goes in its \"Log parked\" thread in #bha-log-reviews, and the builder is told in their log channel when someone else voided it. log: the row id (the number the \"Log parked\" post prints) or its Submission ID. replaced_by: the Submission ID of the newer log, when there is one; left out, the one Codex log for the same builder and recording is used. Before telling anyone there is no newer submission, call this with dry_run: same_recording_in_codex lists the Codex logs for the same recording. Returns {ok, voided, row_id, submission_id, replaced_by, posts, …}; ok is false when a Slack post did not land.",
+    "Void one parked log (a Layer 0 row the completeness check is holding for its builder) that will never be completed, for example because the builder sent the corrected log again as a new submission and that one went through. Only the builder who sent it, Jason (U0A9V97949F) or Destiny (U0AEW3TBYH1) can, and a reason is required. requester_user_id is the Slack id of the person who asked, never Bays'. Refused for a parked log already completed or already voided. The log is marked voided with who, when, why and what replaced it, stays on record (nothing is deleted), gets no more reminders, can no longer be completed, and no engine write can change it. A reply goes in its \"Log parked\" thread in #bha-log-reviews, and the builder is told in their log channel when someone else voided it. log: the row id (the number the \"Log parked\" post prints) or its Submission ID. replaced_by: the Submission ID of the newer log, when there is one; left out, the one Codex log for the same builder and recording is used. Before telling anyone there is no newer submission, call this with dry_run: same_recording_in_codex lists the Codex logs for the same recording. CALL IT TWICE when you are an agent: first without \"confirmed\" — nothing is changed and the answer says which session, its missing fields and what replaces it, which you show the person and ask them to confirm; then, only after they say yes, again with the same arguments and confirmed: true. Returns {ok, voided, row_id, submission_id, replaced_by, posts, …}; ok is false when a Slack post did not land.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -24,6 +31,7 @@ export const voidParkedLogTool: ToolDefinition = {
       reason: { type: 'string', description: 'Why it is voided, 3 to 1,000 characters. Kept on the log and shown in the review thread.' },
       replaced_by: { type: 'string', description: 'Submission ID of the Codex log that replaces it, if any.' },
       dry_run: { type: 'boolean', description: 'Check the call and say what would happen, including the Codex logs for the same recording, without voiding.' },
+      confirmed: { type: 'boolean', description: 'true only after the person has seen the preview and said yes. On an agent token, without it nothing is voided.' },
     },
     required: ['log', 'requester_user_id', 'reason'],
     additionalProperties: false,
@@ -31,7 +39,8 @@ export const voidParkedLogTool: ToolDefinition = {
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Void a parked log' },
   handler: async (args, deps) => {
     const requester = typeof args.requester_user_id === 'string' ? args.requester_user_id.trim() || null : null;
-    const dry = args.dry_run === true;
+    const held = Boolean(deps.agent) && args.confirmed !== true;
+    const dry = args.dry_run === true || held;
     const audit = await auditOpen({ tool: 'void_parked_log', args, access: deps.access, kind: 'layer0', requester, dry_run: dry });
     try {
       const r = await layer0Void.voidLog({
@@ -49,6 +58,14 @@ export const voidParkedLogTool: ToolDefinition = {
         natural_id: r.submission_id,
         after: r,
       });
+      if (held && args.dry_run !== true) {
+        return {
+          ...r,
+          needs_confirmation: true,
+          audit_id: audit,
+          note: `Nothing was voided yet. Show the person which session this is (${r.session ?? r.submission_id ?? r.row_id}), what is missing (${r.missing ?? 'not recorded'}) and what replaces it (${r.replaced_by ?? 'nothing named'}), and ask them to confirm. Only after they say yes, call void_parked_log again with the same arguments and confirmed: true.`,
+        };
+      }
       return { ...r, audit_id: audit };
     } catch (e) {
       if (e instanceof layer0Void.VoidError) {
