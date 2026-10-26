@@ -13,11 +13,14 @@
  *   1. The linked loop or backlog task is read from this database. Closed or
  *      done closes the watch (`moved`); a change to the row is movement and
  *      restarts the wait.
- *   2. The thread is read from Slack. A message from the owner closes the
- *      watch (`answered`), unless the decision has more than one part
- *      (`close_on_reply` false, 14 Oct 2026), when it restarts the wait like
- *      anyone else's; a message from anyone else restarts the wait. Bot
- *      posts, this module's own reminders included, are never movement.
+ *   2. The thread is read from Slack. Any message from a person, the owner's
+ *      included, restarts the wait. **A reply never closes a watch** (26 Oct
+ *      2026, Destiny, after DW-1792763652540-L0KS closed on Jegan's promise to
+ *      run tests nobody had run): a watch closes when what was owed is shown
+ *      done, with proof, through `close_decision_watch`, when its linked loop
+ *      or task closes, or when the owner says to close it (their message is the
+ *      proof). A snooze pauses it and never closes it. Bot posts, this module's
+ *      own reminders included, are never movement.
  *   3. Quiet past the wait: one reminder, as Bays, in the thread (a DM to the
  *      owner where the watch has no thread), naming the decision, the SOP and
  *      North Star reference, the owner and the next logged step.
@@ -107,7 +110,10 @@ export interface WatchRow {
   auto_key: string | null;
   record_hash: string | null;
   fixture: boolean;
-  /** False for a decision with more than one part: the owner replying restarts the wait instead of closing the watch (14 Oct 2026). */
+  /**
+   * Kept as history. Until 26 Oct 2026 true meant the owner's first reply closed the watch; since then
+   * no reply closes a watch, every row is false, and nothing reads it to decide (migration 96).
+   */
   close_on_reply: boolean;
   /** No reminder or escalation is posted before this; the watch stays open and replies still count (18 Oct 2026, migration 82). */
   snoozed_until: Date | null;
@@ -181,7 +187,7 @@ export interface OpenInput {
   created_via?: string | null;
   auto_key?: string | null;
   fixture?: boolean;
-  /** Default true. False when the decision has more than one part; see `WatchRow.close_on_reply`. */
+  /** Ignored since 26 Oct 2026: no reply closes a watch. Kept so an older caller is not refused. */
   close_on_reply?: boolean;
 }
 
@@ -284,9 +290,9 @@ export async function open(input: OpenInput): Promise<OpenResult> {
       input.created_via ?? null,
       input.auto_key ?? null,
       input.fixture === true,
-      JSON.stringify([{ at: new Date().toISOString(), what: `opened${input.created_via ? ` through ${input.created_via}` : ''}${input.close_on_reply === false ? '; more than one part, so a reply from the owner does not close it' : ''}` }]),
+      JSON.stringify([{ at: new Date().toISOString(), what: `opened${input.created_via ? ` through ${input.created_via}` : ''}` }]),
       recordHash,
-      input.close_on_reply !== false,
+      false,
     ],
   );
   if (!r.rows[0]) {
@@ -324,16 +330,66 @@ async function settle(w: WatchRow, status: WatchStatus, reason: string, by: stri
 
 export type CloseResult = { ok: true; watch_id: string; status: WatchStatus } | { ok: false; reason: string; message: string };
 
-/** A person, or Bays for a person, closing a watch. The requester, the owner, Destiny or Jason may. */
-export async function close(watchId: string, by: string, status: 'answered' | 'cancelled', reason: string, now = new Date()): Promise<CloseResult> {
+/**
+ * What counts as proof for a close (26 Oct 2026, Destiny: "it has to be closed on proof"): a link to
+ * where it was shown done or where the owner said to close it (a Slack message, a PR, a dashboard
+ * page), or the id of the record that settles it (a loop, a task, another watch it was folded into, an
+ * incident, an SOP). A sentence alone is not proof.
+ */
+export const PROOF_RE = /https?:\/\/\S+|\b(?:LOOP|TASK|DW|INC|REP|CODEX|CAND|BP)-[A-Z0-9.-]+\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+export function hasProof(proof: string | null | undefined): boolean {
+  return typeof proof === 'string' && PROOF_RE.test(proof);
+}
+
+/**
+ * A person, or Bays for a person, closing a watch. The requester, the owner, Destiny or Jason may, and
+ * only with proof: a link or record id showing it was settled, or showing the owner asked for it closed.
+ */
+export async function close(watchId: string, by: string, status: 'answered' | 'cancelled', reason: string, now = new Date(), proof?: string | null): Promise<CloseResult> {
+  const evidence = (proof ?? '').trim() || reason;
+  if (!hasProof(evidence)) {
+    return { ok: false, reason: 'proof_required', message: `${watchId} is closed only on proof: pass proof as a link to where it was shown done or where the owner said to close it (a Slack message, a PR, a dashboard page), or the id of the record that settles it (LOOP-…, TASK-…, the DW-… it was folded into). A promise to do it is not proof; leave the watch open, or snooze it to the date it is due.` };
+  }
   const found = await query<WatchRow>(`SELECT * FROM engine_decision_watches WHERE watch_id = $1`, [watchId]);
   const w = found.rows[0];
   if (!w) return { ok: false, reason: 'not_found', message: `No watch has the id "${watchId}". Use list_decision_watches to find it.` };
   if (w.status !== 'watching') return { ok: false, reason: 'already_closed', message: `${watchId} is already ${w.status}.` };
   const may = by === w.created_by || by === w.owner_user_id || (APPROVERS as readonly string[]).includes(by);
   if (!may) return { ok: false, reason: 'not_permitted', message: `${watchId} can be closed by the person who asked for it, by its owner <@${w.owner_user_id}>, or by Destiny or Jason.` };
-  await settle(w, status, reason, by, now);
+  await settle(w, status, proof && !reason.includes(proof.trim()) ? `${reason} Proof: ${proof.trim()}` : reason, by, now);
   return { ok: true, watch_id: watchId, status };
+}
+
+/**
+ * Opens a closed watch again (26 Oct 2026, Destiny): for a watch that was closed before what it waited on
+ * was done. Same id, same thread, same owner; the reminders count from nothing again and the wait starts
+ * now. The old close stays in its history. Destiny or Jason only.
+ */
+export type ReopenResult = { ok: true; watch: WatchRow } | { ok: false; reason: string; message: string };
+export async function reopen(watchId: string, by: string, reason: string, now = new Date()): Promise<ReopenResult> {
+  if (!(APPROVERS as readonly string[]).includes(by)) return { ok: false, reason: 'not_permitted', message: 'Only Destiny or Jason can reopen a watch.' };
+  if (reason.trim().length < 3) return { ok: false, reason: 'reason_required', message: 'Say why it is being reopened.' };
+  const found = await query<WatchRow>(`SELECT * FROM engine_decision_watches WHERE watch_id = $1`, [watchId]);
+  const w = found.rows[0];
+  if (!w) return { ok: false, reason: 'not_found', message: `No watch has the id "${watchId}". Use list_decision_watches to find it.` };
+  if (w.status === 'watching') return { ok: false, reason: 'already_open', message: `${watchId} is already open.` };
+  if (w.thread_ts) {
+    const held = await query<{ watch_id: string }>(`SELECT watch_id FROM engine_decision_watches WHERE channel_id = $1 AND thread_ts = $2 AND owner_user_id = $3 AND status = 'watching' AND watch_id <> $4 LIMIT 1`, [w.channel_id, w.thread_ts, w.owner_user_id, watchId]);
+    if (held.rows[0]) return { ok: false, reason: 'another_open', message: `${held.rows[0].watch_id} is already open on this thread for the same person. Add to that one with update_decision_watch rather than keeping two.` };
+  }
+  const line = `reopened by ${by}: ${clip(reason, 300)} (was ${w.status}${w.close_reason ? `: ${clip(w.close_reason, 200)}` : ''})`;
+  const r = await query<WatchRow>(
+    `UPDATE engine_decision_watches
+        SET status = 'watching', close_reason = NULL, closed_by = NULL, closed_at = NULL, last_error = NULL,
+            reminders_sent = 0, last_reminder_at = NULL, quiet_since = $2, close_on_reply = false,
+            history = history || $3::jsonb
+      WHERE watch_id = $1 AND status <> 'watching'
+      RETURNING *`,
+    [watchId, now.toISOString(), JSON.stringify([{ at: now.toISOString(), what: line }])],
+  );
+  if (!r.rows[0]) return { ok: false, reason: 'already_open', message: `${watchId} was reopened by someone else just now.` };
+  await event('decision_watch_reopened', r.rows[0], `dw:${watchId}:reopened:${now.getTime()}`, { by, reason: clip(reason, 300), was: w.status });
+  return { ok: true, watch: r.rows[0] };
 }
 
 /* ---------------------------------------------------------------- update */
@@ -377,7 +433,8 @@ export async function update(watchId: string, by: string, changes: Partial<Recor
     if (to && to.length > limit) return { ok: false, reason: 'too_long', message: `${field} would be ${to.length} characters; the limit is ${limit}. Send it with replace: true and a shorter text that keeps every part still owed.` };
     if (to !== from) changed.push({ field, from, to });
   }
-  const flip = typeof opts.closeOnReply === 'boolean' && opts.closeOnReply !== (w.close_on_reply !== false);
+  // close_on_reply is history since 26 Oct 2026: no reply closes a watch, so there is nothing to flip.
+  const flip = false;
   if (!changed.length && !flip) return { ok: true, watch: w, changed, flipped: false };
   const next = Object.fromEntries(changed.map((c) => [c.field, c.to])) as Partial<Record<Updatable, string | null>>;
   const lines = changed.map((c) =>
@@ -578,13 +635,10 @@ export function reminderText(w: WatchRow, n: number, now: Date): string {
   if (w.ns_refs) lines.push(`*North Star:* ${w.ns_refs}`);
   if (w.record_id) lines.push(`*Tracked as:* ${w.record_kind === 'loops' ? 'loop' : 'backlog task'} \`${w.record_id}\``);
   lines.push(`*Next logged step:* ${w.next_step || 'reply here with the decision, or say what is blocking it.'}`);
-  // 19 Oct 2026 (LOOP-1792136810976-BBGL): the closing line says what really closes this watch. On a
-  // decision with more than one part (close_on_reply false) a reply restarts the wait, so telling the
-  // owner it closes the watch was wrong (DW-1791985832450-IKOZ and DW-1791989874656-W3JQ, 16 Oct).
+  // 19 Oct 2026 (LOOP-1792136810976-BBGL): the closing line says what really closes this watch. Since
+  // 26 Oct 2026 no reply closes one: it closes on proof that it was done, or when the owner says close it.
   const where = w.thread_ts ? 'in this thread' : 'in a thread on this message';
-  const closes = w.close_on_reply === false
-    ? `This decision has more than one part, so a reply from you ${where} restarts the wait; the watch closes once every part is answered${w.record_id ? ' or the tracked item closes' : ''}. Waiting on a date? Ask Bays to snooze it until then.`
-    : `A reply from you ${where} closes this watch.`;
+  const closes = `A reply from you ${where} restarts the wait. The watch closes once what is owed is shown done (post the link or result here)${w.record_id ? ', or the tracked item closes' : ''}, or if you say it should be closed. Waiting on a date? Ask Bays to snooze it until then.`;
   lines.push(`_Reminder ${n} of ${w.max_reminders}. No movement for ${quiet}. ${closes} (\`${w.watch_id}\`)_`);
   return lines.join('\n');
 }
@@ -772,25 +826,20 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
         // An owner message up to a snooze is the snooze being asked for, never the answer.
         const ownerFloor = w.owner_seen_until ? Math.max(Number(oldest), new Date(w.owner_seen_until).getTime() / 1000) : Number(oldest);
         const fromOwner = human.filter((m) => m.user === w.owner_user_id && Number(m.ts) > ownerFloor).sort((a, b) => Number(b.ts) - Number(a.ts))[0];
-        if (fromOwner && w.close_on_reply !== false) {
-          const why = `${w.owner_name || 'the owner'} replied ${w.thread_ts ? 'in the thread' : 'under the reminder'} (${permalink(place.channel, fromOwner.ts as string)})`;
-          if (opts.dry) would(w, `close as answered: ${why}`);
-          else (await settle(w, 'answered', why, w.owner_user_id, now), out.closed.push(w.watch_id));
-          continue;
-        }
-        // A watch with more than one part (14 Oct 2026, Jason in #workflow-logs-kaiqi: "keep reminding until
-        // all three are addressed"): the owner's reply is movement, never the answer. It closes only when a
-        // person, or Bays for one, confirms every part was answered, or the linked record closes.
-        const ownerReplyNew = fromOwner && w.close_on_reply === false && Number(fromOwner.ts) * 1000 > quietSince.getTime() ? fromOwner : null;
+        // No reply closes a watch (26 Oct 2026, Destiny; before it, a single-part watch closed on the
+        // owner's first reply, and DW-1792763652540-L0KS closed on a promise). The owner's reply is
+        // movement: it restarts the wait. A watch closes on proof through close_decision_watch, or when
+        // its linked record closes.
+        const ownerReplyNew = fromOwner && Number(fromOwner.ts) * 1000 > quietSince.getTime() ? fromOwner : null;
         const newest = human.map((m) => Number(m.ts) * 1000).sort((a, b) => b - a)[0];
         if (newest && newest > quietSince.getTime()) quietSince = new Date(newest);
-        if (ownerReplyNew && opts.dry) would(w, 'the owner replied; this watch has more than one part, so the wait starts again and it stays open');
+        if (ownerReplyNew && opts.dry) would(w, 'the owner replied; a reply never closes a watch, so the wait starts again and it stays open until it is closed on proof');
         if (!opts.dry && readOk) {
           await note(w, {
             quiet_since: quietSince,
             last_error: null,
             checked: now,
-            ...(ownerReplyNew ? { history: `${w.owner_name || 'the owner'} replied (${permalink(place.channel, ownerReplyNew.ts as string)}); more than one part, so it stays open until every part is confirmed answered` } : {}),
+            ...(ownerReplyNew ? { history: `${w.owner_name || 'the owner'} replied (${permalink(place.channel, ownerReplyNew.ts as string)}); a reply never closes a watch, so it stays open until it is closed on proof` } : {}),
           });
         }
       } else if (!opts.dry && !place) await note(w, { checked: now });
@@ -900,9 +949,7 @@ const lagosTime = (d: Date) =>
 export function movesText(w: WatchRow, due: Date, now = new Date()): string {
   if (w.status !== 'watching') return `Closed (${w.status}). Nothing moves it any more.`;
   const owner = w.owner_name || `<@${w.owner_user_id}>`;
-  const ownerReply = w.close_on_reply === false
-    ? `a reply from ${owner} restarts the wait (the decision has more than one part, so it stays open until every part is answered and close_decision_watch is called)`
-    : `a reply from ${owner} closes it`;
+  const ownerReply = `a reply from ${owner} restarts the wait (no reply closes a watch: it closes only through close_decision_watch with proof that what was owed is done, or a link to ${owner} saying to close it)`;
   const parts: string[] = [];
   if (w.thread_ts && w.thread_link) {
     parts.push(`This watch is on ${w.thread_link}. Only messages in that thread count: ${ownerReply}; a reply from anyone else restarts the wait. A message anywhere else (another thread, a channel, a DM) does not count.`);
@@ -955,7 +1002,7 @@ export function show(w: WatchRow, now = new Date()) {
     created_by: w.created_by,
     created_via: w.created_via,
     fixture: w.fixture,
-    closes_on_owner_reply: w.close_on_reply !== false,
+    closes_on_owner_reply: false,
     snoozed_until: snoozed ? iso(w.snoozed_until) : null,
     snoozed_by: snoozed ? w.snoozed_by : null,
     history: w.history ?? [],
