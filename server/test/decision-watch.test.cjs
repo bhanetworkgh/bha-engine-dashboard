@@ -144,15 +144,37 @@ const srv = http.createServer((req, res) => {
   slack.unreadable.delete(CH);
   ok('an unread thread is held with the reason, never reminded on');
 
-  /* 6. the owner replies: answered */
-  slack.threads[key].push({ user: OWNER, ts: ts(600 + 48 * 60 + 20), text: 'yes, that method' });
+  /* 6. the owner replies: the wait restarts, and the watch stays open until it is closed on proof (26 Oct 2026) */
+  slack.threads[key].push({ user: OWNER, ts: ts(600 + 48 * 60 + 20), text: 'will run it this week' });
   r = await only(A, at(600 + 48 * 60 + 30));
-  assert.deepEqual(r.closed, [A]);
+  assert.deepEqual(r.closed, [], 'a reply never closes a watch');
+  assert.equal((await row(A)).status, 'watching');
+  assert.equal(new Date((await row(A)).quiet_since).getTime(), Number(ts(600 + 48 * 60 + 20)) * 1000, 'the owner\'s reply restarts the wait');
+  assert.match((await row(A)).history.at(-1).what, /a reply never closes a watch/);
+  // closing needs proof: a sentence or a promise is refused, a link or a record id is not
+  let cl = await dw.close(A, JASON, 'answered', 'Jegan said he will run them this week');
+  assert.equal(cl.reason, 'proof_required');
+  assert.equal((await row(A)).status, 'watching');
+  cl = await dw.close(A, JASON, 'answered', 'results posted', new Date(), 'https://bayshorizonnetwork.slack.com/archives/C1/p1792995473678329');
+  assert.equal(cl.ok, true);
   assert.equal((await row(A)).status, 'answered');
-  assert.equal((await row(A)).last_error, null);
+  assert.match((await row(A)).close_reason, /Proof: https:/);
   r = await only(A, at(600 + 96 * 60));
   assert.equal(r.looked_at, 0, 'a closed watch is not swept');
-  ok('a reply from the owner closes the watch');
+  // a watch closed too early is opened again: same id, reminders from nothing, wait from now
+  assert.equal((await dw.reopen(A, OWNER, 'tests not run')).reason, 'not_permitted');
+  const ro = await dw.reopen(A, JASON, 'closed on a promise; the tests are not run', at(600 + 96 * 60 + 5));
+  assert.equal(ro.ok, true);
+  const reopened = await row(A);
+  assert.equal(reopened.status, 'watching');
+  assert.equal(reopened.reminders_sent, 0);
+  assert.equal(reopened.closed_at, null);
+  assert.equal(new Date(reopened.quiet_since).getTime(), at(600 + 96 * 60 + 5).getTime());
+  assert.match(reopened.history.at(-1).what, /reopened by .*was answered/);
+  assert.equal((await dw.reopen(A, JASON, 'again')).reason, 'already_open');
+  assert.equal((await query(`SELECT count(*)::int AS n FROM engine_events WHERE event_type = 'decision_watch_reopened' AND subject_id = $1`, [A])).rows[0].n, 1);
+  assert.equal((await dw.close(A, JASON, 'answered', 'results posted at https://example.org/x')).ok, true, 'a link inside the reason is proof too');
+  ok('a reply restarts the wait and never closes; a close needs proof; a watch closed early can be reopened');
 
   /* 7. three reminders, then one escalation, then it stops; a failed post is retried */
   const b = await dw.open({ ...base, thread_ts: '1791733299.000001', ns_refs: 'CAPITAL ranked first' });
@@ -216,7 +238,7 @@ const srv = http.createServer((req, res) => {
   const both = await Promise.all([only(g.watch.watch_id, at(24 * 60 + 1)), only(g.watch.watch_id, at(24 * 60 + 1))]);
   assert.equal(slack.posts.length - n0, 1, 'one reminder from two overlapping passes');
   assert.equal(both[0].reminded.length + both[1].reminded.length, 1);
-  await dw.close(g.watch.watch_id, JASON, 'cancelled', 'test');
+  await dw.close(g.watch.watch_id, JASON, 'cancelled', 'test cleanup LOOP-TEST');
   // and an owner's DM reply closes a threadless watch
   await backlog(`${TASK}2`, { lane: 'GENIE', task: 'Second task', status: true }, at(-10));
   const d = await dw.open({ ...base, channel_id: null, thread_ts: null, record_kind: 'lane_backlog', record_id: `${TASK}2` });
@@ -232,9 +254,10 @@ const srv = http.createServer((req, res) => {
   slack.threads[`${dmChannel}:${remTs}`] = [{ user: OWNER, ts: String(Number(remTs) + 60), text: 'on it, blocked by keys' }];
   await query(`UPDATE engine_decision_watches SET last_checked_at = NULL WHERE watch_id = $1`, [D]);
   r = await only(D, at(24 * 60 + 40));
-  assert.deepEqual(r.closed, [D]);
-  assert.equal((await row(D)).status, 'answered');
-  ok('a threadless watch reminds by DM, follows its task, and closes on the owner\'s DM reply');
+  assert.deepEqual(r.closed, [], 'the owner\'s DM reply does not close it');
+  assert.equal((await row(D)).status, 'watching');
+  await dw.close(D, JASON, 'cancelled', 'test cleanup LOOP-TEST');
+  ok('a threadless watch reminds by DM, follows its task, and a DM reply under the reminder does not close it');
 
   /* 9. the daily cap holds a post, and says so */
   const e = await dw.open({ ...base, thread_ts: '1791733300.000001' });
@@ -258,10 +281,11 @@ const srv = http.createServer((req, res) => {
   ok('the daily cap holds a reminder rather than posting it');
 
   /* 10. who may close */
-  assert.equal((await dw.close(E, OTHER, 'cancelled', 'not mine')).reason, 'not_permitted');
-  assert.equal((await dw.close(E, JASON, 'answered', 'answered on a call')).ok, true);
-  assert.equal((await dw.close(E, JASON, 'answered', 'again')).reason, 'already_closed');
-  ok('only the requester, the owner, Destiny or Jason close a watch');
+  assert.equal((await dw.close(E, OTHER, 'cancelled', 'not mine', new Date(), 'LOOP-X')).reason, 'not_permitted');
+  assert.equal((await dw.close(E, JASON, 'answered', 'answered on a call')).reason, 'proof_required');
+  assert.equal((await dw.close(E, JASON, 'answered', 'answered on a call', new Date(), 'DW-1792712806772-JLRL')).ok, true);
+  assert.equal((await dw.close(E, JASON, 'answered', 'again', new Date(), 'LOOP-X')).reason, 'already_closed');
+  ok('only the requester, the owner, Destiny or Jason close a watch, and only on proof');
 
   /* 11. PX07: every open CAPITAL task with a nameable owner is watched once */
   const HARDIK = `U0H${String(T).slice(-8)}`;
@@ -277,7 +301,7 @@ const srv = http.createServer((req, res) => {
   assert.ok(Date.now() - new Date(cap.quiet_since).getTime() < 60_000, 'the wait starts when the watch is made, not from the task\'s old date');
   r = await only(cap.watch_id, new Date());
   assert.equal(r.reminded.length, 0, 'switching it on reminds nobody about the past');
-  await dw.close(cap.watch_id, JASON, 'cancelled', 'test');
+  await dw.close(cap.watch_id, JASON, 'cancelled', 'test cleanup LOOP-TEST');
   assert.equal(await dw.autoCapital(), 0, 'a closed watch is not reopened by the rule');
   ok('the CAPITAL rule watches each open task once, from now');
 
@@ -335,9 +359,9 @@ const srv = http.createServer((req, res) => {
   rg = await tools.openDecisionWatch.handler(regArgs(ROUT), { ...regDeps, agent: null });
   assert.equal(rg.ok, true, 'a person may watch where Bays is not set up');
   assert.match(rg.channel_setup, /not a member/, 'and is told why the channel was not set up');
-  await dw.close(personWatch, JASON, 'cancelled', 'test');
-  await dw.close(rg.watch_id, JASON, 'cancelled', 'test');
-  await dw.close(regWatch, JASON, 'cancelled', 'test');
+  await dw.close(personWatch, JASON, 'cancelled', 'test cleanup LOOP-TEST');
+  await dw.close(rg.watch_id, JASON, 'cancelled', 'test cleanup LOOP-TEST');
+  await dw.close(regWatch, JASON, 'cancelled', 'test cleanup LOOP-TEST');
   await query(`DELETE FROM engine_channel_tracking WHERE natural_id = ANY($1)`, [[RIN, ROUT, RNAME, RFAIL, RPERSON]]);
   ok('an untracked channel Bays is in is set up on the first watch; the rest are refused with steps');
   await query(`INSERT INTO engine_channel_tracking (airtable_record_id, natural_id, fields, source, first_seen_at, updated_at, created_time) VALUES ($1, $1, '{}'::jsonb, 'engine', $2, $2, $2) ON CONFLICT DO NOTHING`, [CH, at(0).toISOString()]);
@@ -379,7 +403,11 @@ const srv = http.createServer((req, res) => {
   t = await open({ decision: 'A dry run', owner_user_id: OWNER, requester_user_id: JASON, record_id: 'LOOP-123', dry_run: true }, 'bays');
   assert.equal(t.dry_run, true);
   t = await tools.closeDecisionWatch.handler({ watch_id: F, outcome: 'cancelled', reason: 'test over', requester_user_id: JASON }, deps('bays'));
+  assert.equal(t.reason, 'proof_required', 'the tool refuses a close with no proof');
+  t = await tools.closeDecisionWatch.handler({ watch_id: F, outcome: 'cancelled', reason: 'test over', proof: 'LOOP-TEST', requester_user_id: JASON }, deps('bays'));
   assert.equal(t.ok, true);
+  t = await tools.reopenDecisionWatch.handler({ watch_id: F, reason: 'not done', requester_user_id: JASON }, deps('bays'));
+  assert.equal(t.reason, 'not_permitted', 'an agent cannot reopen a watch');
   const list = await tools.listDecisionWatches.handler({ open_only: true }, deps('bays'));
   assert.equal(list.watches.every((w) => w.status === 'watching'), true);
   const audit = await query(`SELECT outcome, kind FROM engine_mcp_writes WHERE tool = 'open_decision_watch' ORDER BY id DESC LIMIT 4`);
@@ -410,7 +438,7 @@ const srv = http.createServer((req, res) => {
   assert.match(slack.posts.at(-1).text, /North Star:\* CAPITAL ranked first/);
   assert.equal((await query(`SELECT count(*)::int AS n FROM engine_events WHERE event_type = 'decision_watch_updated' AND subject_id = $1`, [U])).rows[0].n, 3);
   assert.equal((await row(U)).history.filter((h) => /^updated by/.test(h.what)).length, 3);
-  await dw.close(U, JASON, 'cancelled', 'test');
+  await dw.close(U, JASON, 'cancelled', 'test cleanup LOOP-TEST');
   assert.equal((await dw.update(U, JASON, { sop_refs: 'late' })).reason, 'already_closed');
   ok('a watch takes an SOP written after it was opened, logs each change, and its reminder carries it');
 
@@ -479,11 +507,12 @@ const srv = http.createServer((req, res) => {
     await query(`UPDATE engine_decision_watches SET last_error = 'held: today''s 12 Decision Watch posts are used; tried again on the next pass' WHERE watch_id = $1`, [S]);
     await dw.snooze(S, OWNER, at(D + 9 * DAY), null, at(D + 6 * DAY + 9));
     assert.equal((await row(S)).last_error, null);
-    // a reply from the owner still closes a snoozed watch
+    // a reply from the owner still counts on a snoozed watch: it is read, and it does not close it
     slack.threads[`${CH}:${sth}`].push({ user: OWNER, ts: (at(D + 7 * DAY).getTime() / 1000).toFixed(6), text: 'done' });
     r = await only(S, at(D + 7 * DAY + 1));
-    assert.deepEqual(r.closed, [S]);
-    assert.equal((await row(S)).status, 'answered');
+    assert.deepEqual(r.closed, []);
+    assert.equal((await row(S)).status, 'watching');
+    await dw.close(S, JASON, 'answered', 'shown done', new Date(), 'https://bayshorizonnetwork.slack.com/archives/C1/p1');
     assert.equal((await dw.snooze(S, OWNER, at(D + 8 * DAY), null, at(D + 7 * DAY + 2))).reason, 'already_closed');
     const sev = await query(`SELECT event_type, count(*)::int AS n FROM engine_events WHERE subject_id = $1 AND event_type LIKE 'decision_watch_%snoozed' GROUP BY 1`, [S]);
     const sn = Object.fromEntries(sev.rows.map((x) => [x.event_type, x.n]));
@@ -523,21 +552,23 @@ const srv = http.createServer((req, res) => {
     const listed = (await dw.read()).watches.find((w) => w.watch_id === S2);
     assert.match(listed.state, /^snoozed until/);
     assert.equal((await dw.read()).counts.snoozed >= 1, true);
-    await dw.close(S2, JASON, 'cancelled', 'test');
-    ok('a watch snoozes up to 14 days, stays open, posts nothing until the date, and a reply still closes it');
+    await dw.close(S2, JASON, 'cancelled', 'test cleanup LOOP-TEST');
+    ok('a watch snoozes up to 14 days, stays open, posts nothing until the date, and a reply is still read');
   }
 
   /* 12c. the reminder says what really closes the watch (19 Oct 2026, LOOP-1792136810976-BBGL) */
   {
     const base = { watch_id: 'DW-TEST-TEXT', owner_user_id: HARDIK, decision: 'Pick the card rail', quiet_since: new Date(Date.now() - 26 * 3600_000).toISOString(), max_reminders: 3, thread_ts: '1.2', sop_refs: null, ns_refs: null, record_id: null, record_kind: null, next_step: null, fixture: false };
-    const single = dw.reminderText({ ...base, close_on_reply: true }, 1, new Date());
-    assert.match(single, /A reply from you in this thread closes this watch\./);
-    const multi = dw.reminderText({ ...base, close_on_reply: false, record_id: 'LOOP-1', record_kind: 'loops' }, 2, new Date());
-    assert.doesNotMatch(multi, /closes this watch/);
-    assert.match(multi, /more than one part, so a reply from you in this thread restarts the wait/);
-    assert.match(multi, /or the tracked item closes/);
-    assert.match(multi, /snooze it until then/);
-    ok('a multi-part watch\'s reminder says a reply restarts the wait; a single-part one says it closes');
+    for (const flag of [true, false]) {
+      const t = dw.reminderText({ ...base, close_on_reply: flag, record_id: 'LOOP-1', record_kind: 'loops' }, 2, new Date());
+      assert.doesNotMatch(t, /closes this watch/);
+      assert.match(t, /A reply from you in this thread restarts the wait\./);
+      assert.match(t, /closes once what is owed is shown done/);
+      assert.match(t, /or the tracked item closes/);
+      assert.match(t, /if you say it should be closed/);
+      assert.match(t, /snooze it until then/);
+    }
+    ok('every reminder says a reply restarts the wait and what really closes it');
   }
 
   /* 12d. every listed watch says, in words, where a reply counts (19 Oct 2026, Kaiqi's JSUX) */
@@ -546,11 +577,11 @@ const srv = http.createServer((req, res) => {
     const row = { watch_id: 'DW-TEST-MOVES', status: 'watching', owner_user_id: HARDIK, owner_name: 'Kaiqi', decision: 'x', quiet_since: new Date('2026-10-18T14:42:00Z'), wait_minutes: 1440, max_reminders: 3, reminders_sent: 0, thread_ts: '1792332426.914229', channel_id: 'C1', thread_link: 'https://bayshorizonnetwork.slack.com/archives/C1/p1792332426914229', record_id: null, record_kind: null, snoozed_until: null, close_on_reply: false, last_error: null, history: [] };
     const multi = dw.show(row, now).how_it_moves;
     assert.match(multi, /This watch is on https:\/\/bayshorizonnetwork\.slack\.com\/archives\/C1\/p1792332426914229\. Only messages in that thread count/);
-    assert.match(multi, /a reply from Kaiqi restarts the wait \(the decision has more than one part/);
+    assert.match(multi, /a reply from Kaiqi restarts the wait \(no reply closes a watch/);
     assert.match(multi, /A message anywhere else \(another thread, a channel, a DM\) does not count\./);
     assert.match(multi, /reminder 1 of 3 goes at Mon 19 Oct, 15:42 Lagos \(14:42 UTC\)/);
     const single = dw.show({ ...row, close_on_reply: true, record_id: 'LOOP-9', record_kind: 'loops' }, now).how_it_moves;
-    assert.match(single, /a reply from Kaiqi closes it;/);
+    assert.doesNotMatch(single, /a reply from Kaiqi closes it/, 'close_on_reply is history; it no longer makes a reply close');
     assert.match(single, /restarts when loop LOOP-9 changes, and closes when it closes/);
     const dm = dw.show({ ...row, thread_ts: null, thread_link: null, channel_id: null }, now).how_it_moves;
     assert.match(dm, /no thread: reminders go to Kaiqi by DM/);
@@ -601,8 +632,8 @@ const srv = http.createServer((req, res) => {
     assert.equal(t3.ok, true, JSON.stringify(t3));
     assert.equal(t3.owner_other_open.length, 2);
     assert.match(t3.message, /2 other open watches \(owner_other_open\): if one is the same ask, keep one, not both/);
-    await dw.close(t3.watch_id, JASON, 'cancelled', 'test');
-    for (const w of [w1, w2]) await dw.close(w.watch.watch_id, JASON, 'cancelled', 'test');
+    await dw.close(t3.watch_id, JASON, 'cancelled', 'test cleanup LOOP-TEST');
+    for (const w of [w1, w2]) await dw.close(w.watch.watch_id, JASON, 'cancelled', 'test cleanup LOOP-TEST');
     await query(`DELETE FROM engine_builder_profiles WHERE natural_id = $1`, [P]);
     ok('a person gets one reminder per 12 hours across all their watches, and opening another names the ones already open');
   }

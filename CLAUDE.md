@@ -2848,6 +2848,18 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
   makes the owner's reply restart the wait like anyone else's, with a history
   line; the watch closes on `close_decision_watch` once every part is answered,
   or when its linked record closes, and keeps reminding until then.
+- **No reply closes a watch; a watch closes on proof** (26 Oct 2026, Destiny, after
+  DW-1792763652540-L0KS closed on Jegan's reply promising tests nobody had run). Every reply, the
+  owner's included, restarts the wait. A watch closes only (a) through `close_decision_watch` with
+  `proof`: a link to where what was owed is shown done or where the owner, Destiny or Jason said to
+  close it, or the id of the record that settles it (LOOP-…, TASK-…, the DW-… it was folded into;
+  `dw.PROOF_RE`), refused `proof_required` otherwise, a promise or a timeline never being proof; or
+  (b) when its linked loop or task closes. A snooze pauses it and never closes it. `close_on_reply`
+  is kept as history and read by nothing (migration 96 sets it false everywhere); the 14 Oct and
+  19 Oct bullets below are superseded. **`reopen_decision_watch`** (write connection, no agent's
+  scope, Destiny or Jason) opens a watch closed too early: same id, reminders from nought, the wait
+  from now, the old close kept in its history, one `decision_watch_reopened` event; refused where
+  another watch on the same thread and person is open.
 - **The reminder says what really closes the watch** (19 Oct 2026, LOOP-1792136810976-BBGL): a
   single-part watch says a reply closes it; a multi-part one (`close_on_reply` false) says a reply
   restarts the wait, that it closes once every part is answered or the tracked item closes, and that a

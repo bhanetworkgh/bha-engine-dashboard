@@ -49,7 +49,7 @@ async function audited(
 export const openDecisionWatch: ToolDefinition = {
   name: 'open_decision_watch',
   description:
-    `Start watching one decision that is waiting on one named person, so it cannot be forgotten. Use it (a) when you are already in a thread and a decision, question or lane step is put to a named person and not answered there and then, or (b) when somebody says "Bays, watch this". Never to watch a thread nobody asked a named person anything in. The dashboard then checks every few minutes: a reply from the owner closes the watch (unless close_on_reply is false), any other reply or a change to the linked loop or task restarts the wait, and after ${dw.RULE.wait_hours} quiet hours a reminder is posted in the thread as Bays, up to ${dw.RULE.max_reminders}, then one escalation to Jason and Destiny and it stops. Pass the thread as thread_link (a Slack message link) or channel_id + thread_ts; a watch with no thread needs record_id (a LOOP-… or TASK-… id) and reminds the owner by DM. sop_refs and ns_refs are the SOP title and id and the North Star position the decision ties to: look them up first and pass what you found, or leave them out; never invent one. A second call for the same thread and owner while the first is open answers the first and makes no duplicate. The answer lists owner_other_open, the owner's other open watches in any thread: if one of them is already waiting on the same ask, do not keep two, because both would remind the same person (add what is new to the older one with update_decision_watch and close this one with close_decision_watch, cancelled). However many watches a person has, they get at most one reminder per ${dw.RULE.owner_gap_hours} hours, and a snooze that ends (or is cleared) starts a fresh full wait rather than reminding at once. The thread is checked first: a ts Slack has no message for is refused (thread_not_found), a place no bot can read is refused (thread_not_readable), and a reply's ts is turned into its thread, so pass the link of the message the ask was made in. A channel you are in that the engine never set up is set up on this call (Drive folder, daily doc, tracking, the same setup as when you join), and channel_setup says so: tell the person it was set up. A channel you are not in (bays_not_in_channel), one kept out on purpose or a test channel (channel_excluded), or a setup that failed (register_failed) is refused with numbered steps: pass those steps to the person as they are. Returns {ok, watch_id, created, next_action_at, channel_setup}. Audited on engine_mcp_writes.`,
+    `Start watching one decision that is waiting on one named person, so it cannot be forgotten. Use it (a) when you are already in a thread and a decision, question or lane step is put to a named person and not answered there and then, or (b) when somebody says "Bays, watch this". Never to watch a thread nobody asked a named person anything in. The dashboard then checks every few minutes: any reply, the owner's included, or a change to the linked loop or task restarts the wait, and NO reply closes a watch (it closes only on proof, with close_decision_watch, or when its linked loop or task closes), and after ${dw.RULE.wait_hours} quiet hours a reminder is posted in the thread as Bays, up to ${dw.RULE.max_reminders}, then one escalation to Jason and Destiny and it stops. Pass the thread as thread_link (a Slack message link) or channel_id + thread_ts; a watch with no thread needs record_id (a LOOP-… or TASK-… id) and reminds the owner by DM. sop_refs and ns_refs are the SOP title and id and the North Star position the decision ties to: look them up first and pass what you found, or leave them out; never invent one. A second call for the same thread and owner while the first is open answers the first and makes no duplicate. The answer lists owner_other_open, the owner's other open watches in any thread: if one of them is already waiting on the same ask, do not keep two, because both would remind the same person (add what is new to the older one with update_decision_watch and close this one with close_decision_watch, cancelled). However many watches a person has, they get at most one reminder per ${dw.RULE.owner_gap_hours} hours, and a snooze that ends (or is cleared) starts a fresh full wait rather than reminding at once. The thread is checked first: a ts Slack has no message for is refused (thread_not_found), a place no bot can read is refused (thread_not_readable), and a reply's ts is turned into its thread, so pass the link of the message the ask was made in. A channel you are in that the engine never set up is set up on this call (Drive folder, daily doc, tracking, the same setup as when you join), and channel_setup says so: tell the person it was set up. A channel you are not in (bays_not_in_channel), one kept out on purpose or a test channel (channel_excluded), or a setup that failed (register_failed) is refused with numbered steps: pass those steps to the person as they are. Returns {ok, watch_id, created, next_action_at, channel_setup}. Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -67,7 +67,7 @@ export const openDecisionWatch: ToolDefinition = {
       requester_user_id: { type: 'string', description: 'Slack id of the person who asked for the watch, or whose message put the decision. Required.' },
       fixture: { type: 'boolean', description: 'A marked test watch. Refused on an agent token. Its posts start with TEST and it may wait as little as one minute (wait_minutes).' },
       wait_minutes: { type: 'number', description: 'Fixture only: the wait in minutes.' },
-      close_on_reply: { type: 'boolean', description: 'Default true. Pass false when the decision has more than one part (two or more separate asks of the owner): the owner replying then restarts the wait instead of closing the watch, and it stays open, reminding, until close_decision_watch is called once every part is answered, or the linked loop or task closes.' },
+      close_on_reply: { type: 'boolean', description: 'No longer used (26 Oct 2026): no reply closes a watch, whatever is sent here. Leave it out.' },
       dry_run: { type: 'boolean', description: 'Check the call and say what would be watched, without recording it.' },
     },
     required: ['decision', 'owner_user_id', 'requester_user_id'],
@@ -149,7 +149,7 @@ export const openDecisionWatch: ToolDefinition = {
         created_by: requester,
         created_via: deps.agent ?? 'the shared connector',
         fixture,
-        close_on_reply: args.close_on_reply !== false,
+        close_on_reply: false,
       };
       if (args.dry_run === true) {
         return { outcome: 'dry_run', detail: null, answer: { ok: true, dry_run: true, thread_checked: threadCheck?.ok ? threadCheck.checked : null, channel_setup: registered?.message ?? null, would_watch: { ...input, wait_minutes: input.wait_minutes ?? dw.RULE.wait_hours * 60, max_reminders: dw.RULE.max_reminders } } };
@@ -171,7 +171,7 @@ export const openDecisionWatch: ToolDefinition = {
           watch: shown,
           owner_other_open: r.others,
           message: r.created
-            ? `${registered ? `${registered.message} ` : ''}Watching. If <@${r.watch.owner_user_id}> has not replied and nothing has moved in ${shown.wait}, a reminder is posted as Bays.${r.watch.close_on_reply === false ? ' It has more than one part, so a reply from the owner restarts the wait and does not close it; close it with close_decision_watch once every part is answered.' : ''} Say this plainly to the person; do not promise anything more than that.${r.others.length ? ` <@${r.watch.owner_user_id}> already has ${r.others.length} other open watch${r.others.length === 1 ? '' : 'es'} (owner_other_open): if one is the same ask, keep one, not both.` : ''}`
+            ? `${registered ? `${registered.message} ` : ''}Watching. If <@${r.watch.owner_user_id}> has not replied and nothing has moved in ${shown.wait}, a reminder is posted as Bays. A reply from the owner restarts the wait and does not close it; close it with close_decision_watch, with proof, once what is owed is done. Say this plainly to the person; do not promise anything more than that.${r.others.length ? ` <@${r.watch.owner_user_id}> already has ${r.others.length} other open watch${r.others.length === 1 ? '' : 'es'} (owner_other_open): if one is the same ask, keep one, not both.` : ''}`
             : `This decision is already being watched as ${r.watch.watch_id}; no second watch was made, and nothing on it was changed. To attach an SOP or North Star reference to it, call update_decision_watch.`,
         },
       };
@@ -205,17 +205,18 @@ export const listDecisionWatches: ToolDefinition = {
 export const closeDecisionWatch: ToolDefinition = {
   name: 'close_decision_watch',
   description:
-    'Close a watch that is still open, by its watch_id (DW-…). outcome "answered" when the decision was given somewhere the watch could not see (a call, another thread); "cancelled" when it should never have been watched or no longer matters. Only the person who asked for the watch, its owner, Destiny or Jason may close it. A reason is required. Audited on engine_mcp_writes.',
+    'Close a watch that is still open, by its watch_id (DW-…). A watch closes ONLY on proof (26 Oct 2026, Destiny): a reply, a promise ("will run it this week"), a plan or a timeline is never a reason to close; the watch stays open and keeps reminding, or is snoozed to the date the person named (snooze_decision_watch). Close it when (a) what was owed is shown done: outcome "answered", proof the link to where it was shown (the Slack message with the result, a PR, a dashboard page) or the id of the record that settles it; (b) the owner, Destiny or Jason says to close it: outcome "cancelled" (or "answered" if they say it is done), proof the link to that message; or (c) it was folded into another watch on the same ask: outcome "cancelled", proof the DW-… it was folded into. Without proof the close is refused (proof_required). When a watch has several parts, every part must be shown done. Only the person who asked for the watch, its owner, Destiny or Jason may close it. Audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
       watch_id: { type: 'string', description: 'DW-…' },
       outcome: { type: 'string', enum: ['answered', 'cancelled'] },
-      reason: { type: 'string', description: 'Why, in a sentence. Where it was answered, if it was.' },
+      reason: { type: 'string', description: 'Why, in a sentence: what was shown done, or who said to close it.' },
+      proof: { type: 'string', description: 'Required. A link to where it was shown done or where the owner said to close it (Slack message, PR, dashboard page), or the id of the record that settles it (LOOP-…, TASK-…, the DW-… it was folded into).' },
       requester_user_id: { type: 'string', description: 'Slack id of the person asking. Required.' },
       dry_run: { type: 'boolean' },
     },
-    required: ['watch_id', 'outcome', 'reason', 'requester_user_id'],
+    required: ['watch_id', 'outcome', 'reason', 'proof', 'requester_user_id'],
     additionalProperties: false,
   },
   annotations: { ...WRITE, title: 'Close a watched decision' },
@@ -229,8 +230,10 @@ export const closeDecisionWatch: ToolDefinition = {
       if (outcome !== 'answered' && outcome !== 'cancelled') return refuse('bad_outcome', 'outcome is "answered" or "cancelled".');
       const reason = str(args, 'reason');
       if (reason.length < 3) return refuse('reason_required', 'Say why in a sentence.');
-      if (args.dry_run === true) return { outcome: 'dry_run', detail: null, target: id, answer: { ok: true, dry_run: true, would_close: { watch_id: id, outcome, reason } } };
-      const r = await dw.close(id, requester, outcome, reason);
+      const proof = str(args, 'proof');
+      if (!dw.hasProof(proof)) return refuse('proof_required', `${id} is closed only on proof: pass proof as a link to where it was shown done or where the owner said to close it, or the id of the record that settles it (LOOP-…, TASK-…, the DW-… it was folded into). A reply or a promise to do it is not proof: leave it open, or snooze it to the date it is due.`);
+      if (args.dry_run === true) return { outcome: 'dry_run', detail: null, target: id, answer: { ok: true, dry_run: true, would_close: { watch_id: id, outcome, reason, proof } } };
+      const r = await dw.close(id, requester, outcome, reason, new Date(), proof);
       if (!r.ok) return refuse(r.reason, r.message);
       return { outcome: 'applied', detail: `${id} ${outcome} by ${requester}${deps.agent ? ` through ${deps.agent}` : ''}`, target: id, answer: { ok: true, watch_id: id, status: r.status, message: `${id} is closed (${outcome}). No more reminders will be posted for it.` } };
     }),
@@ -239,7 +242,7 @@ export const closeDecisionWatch: ToolDefinition = {
 export const updateDecisionWatch: ToolDefinition = {
   name: 'update_decision_watch',
   description:
-    'Set or add to the references on a watch that is still open, by its watch_id (DW-…): sop_refs (the SOP title and BHARAG id its reminders point to), ns_refs (the North Star position) and next_step. Use it when an SOP is written, or found, after the watch was opened, so the next reminder names the rule and not only that the thread is quiet. Send only the fields to change. A field sent is ADDED to what the watch already holds (next_step as a new dated "Update" line under the old text, the references separated by "; "), so nothing already owed is lost; pass replace: true only when the old text must go, and then send the whole of what is still owed. An empty string clears a field. close_on_reply: false marks a watch whose decision has more than one part, so the owner\'s reply no longer closes it. What is being waited on, the owner and the thread cannot be changed: that is a different watch. Only the person who asked for the watch, its owner, Destiny or Jason may change it. Every change is a dated line in the watch\'s history and a decision_watch_updated engine event carrying the old and new value. Returns {ok, changed, watch}. Audited on engine_mcp_writes.',
+    'Set or add to the references on a watch that is still open, by its watch_id (DW-…): sop_refs (the SOP title and BHARAG id its reminders point to), ns_refs (the North Star position) and next_step. Use it when an SOP is written, or found, after the watch was opened, so the next reminder names the rule and not only that the thread is quiet. Send only the fields to change. A field sent is ADDED to what the watch already holds (next_step as a new dated "Update" line under the old text, the references separated by "; "), so nothing already owed is lost; pass replace: true only when the old text must go, and then send the whole of what is still owed. An empty string clears a field. What is being waited on, the owner and the thread cannot be changed: that is a different watch. Only the person who asked for the watch, its owner, Destiny or Jason may change it. Every change is a dated line in the watch\'s history and a decision_watch_updated engine event carrying the old and new value. Returns {ok, changed, watch}. Audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -249,7 +252,7 @@ export const updateDecisionWatch: ToolDefinition = {
       next_step: { type: 'string', description: 'The next logged step expected of the owner.' },
       append: { type: 'boolean', description: 'Kept for older callers: adding is the default now. append: false is the same as replace: true.' },
       replace: { type: 'boolean', description: 'Replace what is held instead of adding to it. Only when the old text must go; send everything still owed.' },
-      close_on_reply: { type: 'boolean', description: 'false: the decision has more than one part, so the owner replying restarts the wait instead of closing the watch. true: the first reply from the owner closes it.' },
+      close_on_reply: { type: 'boolean', description: 'No longer used (26 Oct 2026): no reply closes a watch. Leave it out.' },
       requester_user_id: { type: 'string', description: 'Slack id of the person asking. Required.' },
       dry_run: { type: 'boolean' },
     },
@@ -265,8 +268,8 @@ export const updateDecisionWatch: ToolDefinition = {
       if (!USER_RE.test(requester)) return refuse('requester_required', '"requester_user_id" must be the Slack id (U…) of the person asking.');
       const changes: Partial<Record<dw.Updatable, string | null>> = {};
       for (const f of dw.UPDATABLE) if (typeof args[f] === 'string') changes[f] = args[f] as string;
-      const closeOnReply = typeof args.close_on_reply === 'boolean' ? args.close_on_reply : undefined;
-      if (!Object.keys(changes).length && closeOnReply === undefined) return refuse('nothing_to_change', 'Send at least one of sop_refs, ns_refs, next_step or close_on_reply.');
+      if (!Object.keys(changes).length) return refuse('nothing_to_change', 'Send at least one of sop_refs, ns_refs or next_step. (close_on_reply is no longer used: no reply closes a watch.)');
+      const closeOnReply = undefined;
       const replace = args.replace === true || args.append === false;
       if (args.dry_run === true) return { outcome: 'dry_run', detail: null, target: id, answer: { ok: true, dry_run: true, would_change: { watch_id: id, ...changes, mode: replace ? 'replace' : 'add', ...(closeOnReply !== undefined ? { close_on_reply: closeOnReply } : {}) } } };
       const r = await dw.update(id, requester, changes, { replace, closeOnReply });
@@ -353,7 +356,7 @@ export const snoozeDecisionWatch: ToolDefinition = {
 export const runDecisionWatch: ToolDefinition = {
   name: 'run_decision_watch',
   description:
-    'Run the Decision Watch pass now, the same one the timer runs every five minutes. dry_run defaults to TRUE: nothing is posted or changed and the answer lists what each open watch would get. With dry_run false it reads the threads, closes what was answered and posts whatever is due. watch_id narrows it to one watch. For a person on the connector; in no agent\'s scope.',
+    'Run the Decision Watch pass now, the same one the timer runs every five minutes. dry_run defaults to TRUE: nothing is posted or changed and the answer lists what each open watch would get. With dry_run false it reads the threads, closes what its linked loop or task settled and posts whatever is due (no reply closes a watch). watch_id narrows it to one watch. For a person on the connector; in no agent\'s scope.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -373,4 +376,36 @@ export const runDecisionWatch: ToolDefinition = {
   },
 };
 
-export const DECISION_WATCH_WRITE_TOOLS: ToolDefinition[] = [openDecisionWatch, listDecisionWatches, closeDecisionWatch, updateDecisionWatch, snoozeDecisionWatch, runDecisionWatch];
+export const reopenDecisionWatch: ToolDefinition = {
+  name: 'reopen_decision_watch',
+  description:
+    'Open a closed watch again, by its watch_id (DW-…), when it was closed before what it waited on was done (26 Oct 2026, Destiny: a watch closes only on proof). Same id, thread and owner; its reminders count from nothing again and the wait starts now; the old close stays in its history. Refused when another watch on the same thread and person is already open (add to that one instead). Destiny or Jason only; in no agent\'s scope. Audited on engine_mcp_writes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      watch_id: { type: 'string', description: 'DW-…' },
+      reason: { type: 'string', description: 'Why it is being reopened: what is still owed.' },
+      requester_user_id: { type: 'string', description: 'Slack id of Destiny or Jason.' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['watch_id', 'reason', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { ...WRITE, title: 'Reopen a watched decision' },
+  handler: (args, deps) =>
+    audited('reopen_decision_watch', args, deps, async () => {
+      const id = str(args, 'watch_id');
+      const refuse = (reason: string, message: string) => ({ outcome: 'refused', detail: reason, target: id || null, answer: { ok: false, reason, message: `${message} Nothing was changed.` } });
+      if (deps.agent) return refuse('not_permitted', 'Reopening a watch is a person\'s call, through the connector.');
+      const requester = bare(str(args, 'requester_user_id'));
+      if (!(dw.APPROVERS as readonly string[]).includes(requester)) return refuse('not_permitted', 'Only Destiny or Jason can reopen a watch.');
+      const reason = str(args, 'reason');
+      if (reason.length < 3) return refuse('reason_required', 'Say what is still owed.');
+      if (args.dry_run === true) return { outcome: 'dry_run', detail: null, target: id, answer: { ok: true, dry_run: true, would_reopen: { watch_id: id, reason } } };
+      const r = await dw.reopen(id, requester, reason);
+      if (!r.ok) return refuse(r.reason, r.message);
+      return { outcome: 'applied', detail: `${id} reopened by ${requester}`, target: id, answer: { ok: true, watch_id: id, status: r.watch.status, next_action_at: dw.dueAt(r.watch).toISOString(), message: `${id} is open again. The wait starts now; the first reminder is due ${dw.dueAt(r.watch).toISOString()} if nothing moves.` } };
+    }),
+};
+
+export const DECISION_WATCH_WRITE_TOOLS: ToolDefinition[] = [openDecisionWatch, listDecisionWatches, closeDecisionWatch, updateDecisionWatch, snoozeDecisionWatch, runDecisionWatch, reopenDecisionWatch];

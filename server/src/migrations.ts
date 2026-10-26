@@ -3625,6 +3625,16 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS engine_draft_eval_runs_covers ON engine_draft_eval_runs (covers_agent_id, covers_config_hash) WHERE covers_agent_id IS NOT NULL`,
     ],
   },
+  {
+    // 26 Oct 2026, Destiny: no reply closes a decision watch; it closes on proof. close_on_reply is kept
+    // as history and nothing reads it to decide, so every open watch and every new one says false.
+    id: 96,
+    name: 'engine_decision_watches.close_on_reply: false everywhere (a reply never closes a watch)',
+    statements: [
+      `ALTER TABLE engine_decision_watches ALTER COLUMN close_on_reply SET DEFAULT false`,
+      `UPDATE engine_decision_watches SET close_on_reply = false WHERE status = 'watching' AND close_on_reply`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
