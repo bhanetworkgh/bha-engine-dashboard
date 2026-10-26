@@ -151,6 +151,13 @@ const srv = http.createServer((req, res) => {
   assert.equal((await row(A)).status, 'watching');
   assert.equal(new Date((await row(A)).quiet_since).getTime(), Number(ts(600 + 48 * 60 + 20)) * 1000, 'the owner\'s reply restarts the wait');
   assert.match((await row(A)).history.at(-1).what, /a reply never closes a watch/);
+  // the same reply read again on a later pass is not written down again (its ts carries microseconds)
+  slack.threads[key][slack.threads[key].length - 1].ts = (Number(ts(600 + 48 * 60 + 20)) + 0.000789).toFixed(6);
+  await query(`UPDATE engine_decision_watches SET quiet_since = to_timestamp($2::double precision) WHERE watch_id = $1`, [A, Math.floor(Number(slack.threads[key].at(-1).ts) * 1000) / 1000]);
+  const histBefore = (await row(A)).history.length;
+  await query(`UPDATE engine_decision_watches SET last_checked_at = NULL WHERE watch_id = $1`, [A]);
+  await only(A, at(600 + 48 * 60 + 70));
+  assert.equal((await row(A)).history.length, histBefore, 'one reply is one history line, however many passes read it');
   // closing needs proof: a sentence or a promise is refused, a link or a record id is not
   let cl = await dw.close(A, JASON, 'answered', 'Jegan said he will run them this week');
   assert.equal(cl.reason, 'proof_required');

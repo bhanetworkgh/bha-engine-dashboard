@@ -830,8 +830,12 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
         // owner's first reply, and DW-1792763652540-L0KS closed on a promise). The owner's reply is
         // movement: it restarts the wait. A watch closes on proof through close_decision_watch, or when
         // its linked record closes.
-        const ownerReplyNew = fromOwner && Number(fromOwner.ts) * 1000 > quietSince.getTime() ? fromOwner : null;
-        const newest = human.map((m) => Number(m.ts) * 1000).sort((a, b) => b - a)[0];
+        // Whole milliseconds (26 Oct 2026): a Slack ts carries microseconds and quiet_since is stored to the
+        // millisecond, so an unfloored ts stayed "newer" than the wait it had already set and the same reply
+        // was written into the history on every pass (225 lines on DW-1792759562101-D3Y5).
+        const msOf = (ts: unknown) => Math.floor(Number(ts) * 1000);
+        const ownerReplyNew = fromOwner && msOf(fromOwner.ts) > quietSince.getTime() ? fromOwner : null;
+        const newest = human.map((m) => msOf(m.ts)).sort((a, b) => b - a)[0];
         if (newest && newest > quietSince.getTime()) quietSince = new Date(newest);
         if (ownerReplyNew && opts.dry) would(w, 'the owner replied; a reply never closes a watch, so the wait starts again and it stays open until it is closed on proof');
         if (!opts.dry && readOk) {
