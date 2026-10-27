@@ -3782,6 +3782,53 @@ If you ask about buying, you will see: "We've received your question. A member o
       `INSERT INTO engine_help_page_history (page_id, action, actor, note, body_sha256, stage_after) SELECT 'what-cst-can-do', 'created', 'U0AEW3TBYH1', 'Seeded from the CST Help Corpus v0 Claude Doc, 27 Oct 2026', '51af8c6764ecef6fa9986a0bd35b8900f24ca7d9618d2184ff82819d360d6b76', 'draft' WHERE NOT EXISTS (SELECT 1 FROM engine_help_page_history WHERE page_id = 'what-cst-can-do')`,
     ],
   },
+  {
+    // 27 Oct 2026, Destiny (Jason in #bha-coordination 1793095655.765219): the pilot rule is confirmed, operators
+    // watch and the team makes every change. The quickstart now says it is the current pilot rule and that any change
+    // will be written into the help pages first, and its operator-controls gap is closed. Written here because the
+    // connector in use does not list write_help_page yet; the history line and event are the ones helpPages.write writes.
+    id: 99,
+    name: 'engine_help_pages: operator-quickstart states the pilot rule (Jason, 27 Oct), operator-controls gap closed',
+    statements: [
+      `UPDATE engine_help_pages SET body = $help$During the pilot you watch your rack in the vFarm app, and the BHA team makes changes to it. Your pilot channel in Slack is where you reach us, and a person answers every post.
+
+## What you can see
+
+- **Your farm only.** Your login shows your own farm and nothing else.
+- **Readings:** temperature, humidity, pH, soil moisture and air quality from the sensors that are reporting.
+- **Device status:** which parts of the rack are reporting and which are not.
+- **Camera:** snapshots, once your rack's camera is connected and reporting.
+
+A reading is only shown as current when its sensor is reporting live. If a sensor goes quiet, the app shows its last reading and when it was taken.
+
+## What you can change
+
+During the pilot, you watch and the BHA team makes every change. This is the current pilot rule. Your app may show you controls for watering, lights and the rack's settings; please leave those to the BHA team, because a change made without us can hide a problem we are watching for. To ask for a change, post it in your pilot channel and say what you want and why.
+
+If what you can do yourself changes later, this page and the other help pages will say so first. Until they do, nothing here is permission to use a control.
+
+## How to use your pilot channel
+
+1. **Setting up:** post photos when the rack arrives, as you unbox it and where you place it.
+2. **Power, water and network:** confirm each one with a short note and a photo.
+3. **Every day:** post one to three sentences on how things look.
+4. **If something is wrong:** say what you see, when it started and what you have already tried.
+5. **Wins:** share them. They help us as much as the problems do.
+6. **Not sure?** Post anyway. There are no silly questions in a pilot.
+
+## What happens after you post
+
+- You get a reply in your thread confirming we have seen it.
+- A person then answers, or tells you when they will. We aim for that within 2 hours during our support hours, and never longer than 4 hours.
+- If no one has replied in 4 hours, it goes straight to our founder.
+
+## If it is urgent
+
+A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep away from water near anything electrical, switch the rack off at the wall only if you can do so safely, then post **URGENT** in your channel. We send you the steps to make it safe first and look into the cause after.$help$, body_sha256 = 'e8463ab2fc18b34ba0fa3487b8129e29f4e9a469164316a8e08208566ef5b0df', gaps = '[]'::jsonb, stage = 'draft', checked_by = NULL, checked_at = NULL, checked_sha256 = NULL, check_evidence = NULL, bharag_doc_id = NULL, in_corpus_at = NULL, updated_by = 'U0AEW3TBYH1', updated_at = now() WHERE page_id = 'operator-quickstart' AND body_sha256 <> 'e8463ab2fc18b34ba0fa3487b8129e29f4e9a469164316a8e08208566ef5b0df'`,
+      `INSERT INTO engine_help_page_history (page_id, action, actor, note, body_sha256, stage_before, stage_after) SELECT 'operator-quickstart', 'edited', 'U0AEW3TBYH1', 'Pilot rule confirmed by Jason (#bha-coordination 1793095655.765219): stated as the current pilot rule; operator-controls gap closed', 'e8463ab2fc18b34ba0fa3487b8129e29f4e9a469164316a8e08208566ef5b0df', 'draft', 'draft' WHERE NOT EXISTS (SELECT 1 FROM engine_help_page_history WHERE page_id = 'operator-quickstart' AND body_sha256 = 'e8463ab2fc18b34ba0fa3487b8129e29f4e9a469164316a8e08208566ef5b0df')`,
+      `INSERT INTO engine_events (event_type, subject_id, lane, actor, detail) SELECT 'help_page_written', 'operator-quickstart', 'CST', 'U0AEW3TBYH1', jsonb_build_object('created', false, 'text_changed', true, 'stage_before', 'draft', 'stage_after', 'draft', 'gaps', 0, 'body_sha256', 'e8463ab2fc18b34ba0fa3487b8129e29f4e9a469164316a8e08208566ef5b0df', 'via', 'migration 99') WHERE NOT EXISTS (SELECT 1 FROM engine_events WHERE event_type = 'help_page_written' AND subject_id = 'operator-quickstart' AND detail->>'body_sha256' = 'e8463ab2fc18b34ba0fa3487b8129e29f4e9a469164316a8e08208566ef5b0df')`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
