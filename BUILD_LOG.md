@@ -13525,3 +13525,10 @@ Evals:      run_draft_eval DRAFT-202610271014-BTZZ (Bays, OpenRouter, 20 cases Ã
 Evals:      DRAFT-202610271021-RLI6 (Bays, OpenRouter) passed 20 of 20, no regression against EVAL-202610260400, config cs1:a45911ff unchanged before and after; 42 of 60 answers carried a Why line. DRAFT-202610271021-HF0R (backup, Anthropic) passed 20 of 20, cs1:c8531317; 27 of 60 answers carried one. The first pair (BTZZ, 7YL0) were interrupted when the 11:14 BUILD_LOG push redeployed this service mid-run: a push to main restarts the server and kills a draft eval in flight, so wait for it to finish before pushing.
 Published:  Bays 4a71a530-927a-4eb9-9938-6a17c4a4690b, backup d7724aeb-fdbd-4c88-b936-271296cf59ee. Inventory recorded (audits 3450, 3451), so the publish check matches each version to its passed draft run.
 Told:       Bays replied to Jason in the thread he asked in (C0BN30RU3UK, 1793098184.136659, audit 3452).
+
+## 2026-10-27 12:15 â€” Quickstart states the pilot rule (migration 99)
+Intent:     Jason in #bha-coordination (1793095655.765219) confirmed the pilot rule: operators watch, the team makes every change. Keep the line, say it is the current pilot rule, and that any change will be written into the help pages, never assumed.
+Files:      server/src/migrations.ts (99), server/test/help-pages.test.cjs.
+Change:     operator-quickstart's "What you can change" now opens with the rule as the current pilot rule and ends saying a change will be written here first and nothing on the page is permission to use a control. Its operator-controls gap is closed, leaving Jegan's two on rack-care. Still a draft for Hardik's check.
+Decision:   Written as a migration because the Claude connector in use still lists 99 tools and not write_help_page (a refresh did not pick it up); the migration writes the same history line and help_page_written event helpPages.write does, and is idempotent on the text's hash.
+Tests:      migration 99 applied to a local Postgres 16 (help_test) and run twice; test:help-pages 10 checks.
