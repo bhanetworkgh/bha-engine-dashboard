@@ -91,6 +91,7 @@ import * as engineEvents from './engineEvents';
 import * as vfarmGates from './vfarmGates';
 import * as vfarmGateAuto from './vfarmGateAuto';
 import * as mediaPostLog from './mediaPostLog';
+import * as helpPages from './helpPages';
 import * as publicationDecision from './publicationDecision';
 import * as doctrineGap from './doctrineGap';
 import * as approvals from './approvals';
@@ -1733,6 +1734,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await systemFeeds.cstData());
       /** Hardik's doctrine and contract changes, as posted (2026-09-30). */
       /** The Media Twin post log, for the page's Posts tab (2026-10-22, H58Q). A read; tests left out. */
+      // 2026-10-27: the CST help pages and their stage, for the Help pages tab on /cs-twin. A read.
+      case '/api/help-pages':
+        return send(res, 200, { ...(await helpPages.read()), history: await helpPages.history(undefined, 200) });
       case '/api/media-post-log':
         return send(res, 200, await mediaPostLog.read({ limit: 500 }));
       case '/api/media-doctrine': {

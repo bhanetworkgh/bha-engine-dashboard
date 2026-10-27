@@ -92,6 +92,7 @@ import type {
   SopsData,
   SopDoc,
   Intake2InviteOutcome,
+  HelpPagesData,
 } from './types';
 
 export * from './types';
@@ -671,6 +672,8 @@ export const getVfarmGates = () => api<VfarmGatesData>('/api/vfarm/gates');
 export const getMonitoringTwin = () => api<MonitoringTwinData>('/api/monitoring-twin');
 /** The Customer Service Twin's turns, as CST pushed them (2026-09-29). */
 export const getCsTwin = () => api<CstData>('/api/cs-twin');
+/** The CST help pages and their stage (27 Oct 2026). A read; pages are written over MCP by Destiny. */
+export const getHelpPages = () => api<HelpPagesData>('/api/help-pages');
 /** Hardik's doctrine and contract changes, for the Media Twin page (2026-09-30). */
 export const getMediaDoctrine = () => api<DoctrineData>('/api/media-doctrine');
 /** The Media Twin post log (2026-10-22, H58Q): which vFarm picture went where. */

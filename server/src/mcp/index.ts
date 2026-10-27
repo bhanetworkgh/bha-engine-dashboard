@@ -171,6 +171,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-18: the Engine Surfaces Contract. Where a vFarm lead is and what Stripe has seen,
         // with no personal field, and any SOP read whole (the contract is one).
         'read_buyer_flow', 'read_sop',
+        // 2026-10-27: the CST help pages with their stage (draft, checked by Hardik, in cst-help-manuals),
+        // so a draft is never quoted to a customer as final. Writing them stays with Destiny on the connector.
+        'read_help_pages',
       ]),
     },
     {
@@ -189,6 +192,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-18: the Engine Surfaces Contract. Where a vFarm lead is and what Stripe has seen,
         // with no personal field, and any SOP read whole (the contract is one).
         'read_buyer_flow', 'read_sop',
+        // 2026-10-27: the CST help pages with their stage (draft, checked by Hardik, in cst-help-manuals),
+        // so a draft is never quoted to a customer as final. Writing them stays with Destiny on the connector.
+        'read_help_pages',
       ]),
     },
     {
@@ -235,6 +241,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // #bha-log-reviews 1792899253.224039). Its dry run lists the Codex logs for the same recording,
         // which is what Bays checks before saying there is no newer submission.
         'void_parked_log',
+        // 2026-10-27: the CST help pages with their stage (draft, checked by Hardik, in cst-help-manuals),
+        // so a draft is never quoted to a customer as final. Writing them stays with Destiny on the connector.
+        'read_help_pages',
       ]),
     },
     {
@@ -278,6 +287,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-27 (7RZT): "is the engine under strain?" is answered from read_engine_strain's audience
         // lines, never from raw events: slower, nothing lost, a person answers; never "down".
         'read_engine_strain',
+        // 2026-10-27: the CST help pages with their stage (draft, checked by Hardik, in cst-help-manuals),
+        // so a draft is never quoted to a customer as final. Writing them stays with Destiny on the connector.
+        'read_help_pages',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>
