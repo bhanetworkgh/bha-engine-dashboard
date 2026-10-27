@@ -3648,6 +3648,140 @@ const MIGRATIONS: Migration[] = [
       `UPDATE engine_draft_eval_runs SET ran_on = CASE WHEN agent_name ILIKE '%(Anthropic backup)%' OR covers_agent_id IS NOT NULL THEN 'Anthropic' ELSE 'OpenRouter' END WHERE ran_on IS NULL`,
     ],
   },
+  {
+    // 27 Oct 2026, Destiny (Jason, #bha-coordination 1792702326.928939: Destiny owns cst-help-manuals, and
+    // Hardik's Honest Gate check comes before anything lands there). The CST help pages, held here so the team
+    // shares one link to each and the agents read them with their stage. helpPages.ts holds the rules; the
+    // three v0 drafts are seeded from the CST Help Corpus v0 Claude Doc, as drafts with their gaps named.
+    id: 98,
+    name: 'engine_help_pages and engine_help_page_history (CST help pages, draft to checked to in cst-help-manuals)',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_help_pages (
+         page_id        text PRIMARY KEY,
+         title          text NOT NULL,
+         body           text NOT NULL,
+         body_sha256    text NOT NULL,
+         gaps           jsonb NOT NULL DEFAULT '[]'::jsonb,
+         sources        text,
+         stage          text NOT NULL DEFAULT 'draft' CHECK (stage IN ('draft','checked','in_corpus')),
+         checked_by     text,
+         checked_at     timestamptz,
+         checked_sha256 text,
+         check_evidence text,
+         bharag_doc_id  text,
+         in_corpus_at   timestamptz,
+         sort           integer NOT NULL DEFAULT 100,
+         updated_by     text NOT NULL,
+         updated_at     timestamptz NOT NULL DEFAULT now(),
+         created_at     timestamptz NOT NULL DEFAULT now(),
+         CHECK (stage = 'draft' OR (checked_by = 'U0BKT6MAW2Y' AND checked_sha256 = body_sha256 AND check_evidence IS NOT NULL)),
+         CHECK (stage <> 'in_corpus' OR bharag_doc_id IS NOT NULL)
+       )`,
+      `CREATE TABLE IF NOT EXISTS engine_help_page_history (
+         id           bigserial PRIMARY KEY,
+         page_id      text NOT NULL,
+         action       text NOT NULL,
+         actor        text NOT NULL,
+         note         text,
+         body_sha256  text,
+         stage_before text,
+         stage_after  text,
+         evidence     text,
+         at           timestamptz NOT NULL DEFAULT now()
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_help_page_history_page ON engine_help_page_history (page_id, at DESC)`,
+      `INSERT INTO engine_help_pages (page_id, title, body, body_sha256, gaps, sources, stage, sort, updated_by) VALUES ('operator-quickstart', $help$Your vFarm pilot, quick start$help$, $help$During the pilot you watch your rack in the vFarm app, and the BHA team makes changes to it. Your pilot channel in Slack is where you reach us, and a person answers every post.
+
+## What you can see
+
+- **Your farm only.** Your login shows your own farm and nothing else.
+- **Readings:** temperature, humidity, pH, soil moisture and air quality from the sensors that are reporting.
+- **Device status:** which parts of the rack are reporting and which are not.
+- **Camera:** snapshots, once your rack's camera is connected and reporting.
+
+A reading is only shown as current when its sensor is reporting live. If a sensor goes quiet, the app shows its last reading and when it was taken.
+
+## What you can change
+
+Your app may show you controls for watering, lights and the rack's settings. During the pilot, please leave those to the BHA team: a change made without us can hide a problem we are watching for. To ask for a change, post it in your pilot channel and say what you want and why.
+
+## How to use your pilot channel
+
+1. **Setting up:** post photos when the rack arrives, as you unbox it and where you place it.
+2. **Power, water and network:** confirm each one with a short note and a photo.
+3. **Every day:** post one to three sentences on how things look.
+4. **If something is wrong:** say what you see, when it started and what you have already tried.
+5. **Wins:** share them. They help us as much as the problems do.
+6. **Not sure?** Post anyway. There are no silly questions in a pilot.
+
+## What happens after you post
+
+- You get a reply in your thread confirming we have seen it.
+- A person then answers, or tells you when they will. We aim for that within 2 hours during our support hours, and never longer than 4 hours.
+- If no one has replied in 4 hours, it goes straight to our founder.
+
+## If it is urgent
+
+A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep away from water near anything electrical, switch the rack off at the wall only if you can do so safely, then post **URGENT** in your channel. We send you the steps to make it safe first and look into the cause after.$help$, 'a7869472ec2d84e7f78f3fcb8cbe42e869024cbe9d7af934b6bfbd51c8a0e2d6', $help$[{"id": "operator-controls", "owner": "Jegan", "note": "Confirm that during the pilot operators only watch and the BHA team makes every change (watering, lights, rack settings). If operators may change anything themselves today, this page says so."}]$help$::jsonb, $help$SOP cst-help-manuals Content Standard (b1fabe02), SOP CST Help Not Production-Safe (646f9455), LOOP-1790541544543-8E8D (wet loop and burn-in), go/no-go draft (FVA9), the pilot channel's pinned note, the KMG9 test record of 26 Oct, and Ahad's CST release audit.$help$, 'draft', 1, 'U0AEW3TBYH1') ON CONFLICT (page_id) DO NOTHING`,
+      `INSERT INTO engine_help_page_history (page_id, action, actor, note, body_sha256, stage_after) SELECT 'operator-quickstart', 'created', 'U0AEW3TBYH1', 'Seeded from the CST Help Corpus v0 Claude Doc, 27 Oct 2026', 'a7869472ec2d84e7f78f3fcb8cbe42e869024cbe9d7af934b6bfbd51c8a0e2d6', 'draft' WHERE NOT EXISTS (SELECT 1 FROM engine_help_page_history WHERE page_id = 'operator-quickstart')`,
+      `INSERT INTO engine_help_pages (page_id, title, body, body_sha256, gaps, sources, stage, sort, updated_by) VALUES ('rack-care', $help$Caring for your rack and reservoir$help$, $help$The one job that keeps your rack healthy is a quick look for leaks and a dry floor. Anything that means opening, draining or cleaning the water system is done with the BHA team, step by step, until our written cleaning guide is ready.
+
+## How the water moves
+
+1. A pump in the reservoir (150 litres) lifts water up to the growing tray.
+2. The tray drains back into the reservoir through a motorised valve.
+3. An overflow outlet in the tray wall joins the same drain line, so the tray cannot overfill.
+4. A top-up line, with its own valve, refills the reservoir.
+
+The rack's pump and valve each run on a safety timer, so neither can run on and on by itself.
+
+## Your weekly check (about 5 minutes)
+
+- [ ] The floor under and around the reservoir is dry.
+- [ ] No drips at the drain valve, the pipe joints or the tray outlet.
+- [ ] The tray drains after watering and is not left standing full.
+- [ ] Take one photo of the reservoir and tray, and post it in your pilot channel.
+
+If you find water where it should not be, treat it as urgent: see "If it is urgent" on the quick start page.
+
+## Cleaning and draining
+
+The steps for draining the reservoir, cleaning the tray and flushing the lines, and how often to do each, are not written yet. Until they are, do not drain or take apart the water system yourself. Post in your pilot channel and we will walk you through it live.
+
+## Filters
+
+The current rack has no filter for you to clean or change.
+
+## What changes when plants go in
+
+Your rack is currently running on water only. When plants go in, this page gets a second update with plant-specific care.$help$, 'ad2bd8f2048bb34cee8fd8dd60e1af7070831e5239ab8120e72ae85654a985df', $help$[{"id": "cleaning-steps", "owner": "Jegan", "note": "The steps for draining the reservoir, cleaning the tray and flushing the lines, in the order they are done, and how often to do each."}, {"id": "plant-stage-care", "owner": "Jegan", "note": "Plant-stage care to add when plants go in: water changes, any nutrient mix, and how often."}]$help$::jsonb, $help$SOP cst-help-manuals Content Standard (b1fabe02), SOP CST Help Not Production-Safe (646f9455), LOOP-1790541544543-8E8D (wet loop and burn-in), go/no-go draft (FVA9), the pilot channel's pinned note, the KMG9 test record of 26 Oct, and Ahad's CST release audit.$help$, 'draft', 2, 'U0AEW3TBYH1') ON CONFLICT (page_id) DO NOTHING`,
+      `INSERT INTO engine_help_page_history (page_id, action, actor, note, body_sha256, stage_after) SELECT 'rack-care', 'created', 'U0AEW3TBYH1', 'Seeded from the CST Help Corpus v0 Claude Doc, 27 Oct 2026', 'ad2bd8f2048bb34cee8fd8dd60e1af7070831e5239ab8120e72ae85654a985df', 'draft' WHERE NOT EXISTS (SELECT 1 FROM engine_help_page_history WHERE page_id = 'rack-care')`,
+      `INSERT INTO engine_help_pages (page_id, title, body, body_sha256, gaps, sources, stage, sort, updated_by) VALUES ('what-cst-can-do', $help$What the BHA assistant can and cannot do for you today$help$, $help$The BHA assistant answers general questions from these help pages and hands everything else to a person. It does not see your farm's data, and it never guesses.
+
+## It can
+
+- Answer general questions about the pilot, the rack and how to use your pilot channel, from these help pages.
+- Point you to the right page or step.
+- Pass your question to a person on the BHA team.
+
+## It cannot, today
+
+- **See your farm's readings or device status.** It has no access to your farm's data, by design. For live readings, use the vFarm app. If the app is unavailable, it says so and stops.
+- **Diagnose or fix a device, or change your rack's settings.** A person does that, through your pilot channel.
+- **Quote prices, take payments or confirm an order.** A person on the team does that, by email.
+- **Promise harvests, yields or returns.** No one at BHA makes those promises yet.
+- **Give dates for shipping or new features.** A person answers those.
+
+## Labelled as general guidance
+
+While we finish testing the assistant, its answers are marked as general guidance. Check anything that matters with a person in your pilot channel.
+
+## Questions about buying
+
+If you ask about buying, you will see: "We've received your question. A member of the team will reply by email. For now this is manual and not instant." A named person on the team owns every one of those questions.$help$, '51af8c6764ecef6fa9986a0bd35b8900f24ca7d9618d2184ff82819d360d6b76', $help$[]$help$::jsonb, $help$SOP cst-help-manuals Content Standard (b1fabe02), SOP CST Help Not Production-Safe (646f9455), LOOP-1790541544543-8E8D (wet loop and burn-in), go/no-go draft (FVA9), the pilot channel's pinned note, the KMG9 test record of 26 Oct, and Ahad's CST release audit.$help$, 'draft', 3, 'U0AEW3TBYH1') ON CONFLICT (page_id) DO NOTHING`,
+      `INSERT INTO engine_help_page_history (page_id, action, actor, note, body_sha256, stage_after) SELECT 'what-cst-can-do', 'created', 'U0AEW3TBYH1', 'Seeded from the CST Help Corpus v0 Claude Doc, 27 Oct 2026', '51af8c6764ecef6fa9986a0bd35b8900f24ca7d9618d2184ff82819d360d6b76', 'draft' WHERE NOT EXISTS (SELECT 1 FROM engine_help_page_history WHERE page_id = 'what-cst-can-do')`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

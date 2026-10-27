@@ -4434,3 +4434,47 @@ export interface SopDoc {
   ok: true;
   sop: SopRow & { content: string | null; metadata: Record<string, unknown> | null };
 }
+
+/** CST help pages (27 Oct 2026): server/src/helpPages.ts. */
+export type HelpStage = 'draft' | 'checked' | 'in_corpus';
+export interface HelpGap {
+  id: string;
+  owner: string;
+  note: string;
+}
+export interface HelpPage {
+  page_id: string;
+  title: string;
+  body: string;
+  body_sha256: string;
+  gaps: HelpGap[];
+  sources: string | null;
+  stage: HelpStage;
+  stage_label: string;
+  customer_safe: boolean;
+  checked_by: string | null;
+  checked_at: string | null;
+  check_evidence: string | null;
+  bharag_doc_id: string | null;
+  in_corpus_at: string | null;
+  updated_by: string;
+  updated_at: string;
+  created_at: string;
+}
+export interface HelpHistoryRow {
+  id: number;
+  page_id: string;
+  action: string;
+  actor: string;
+  note: string | null;
+  stage_before: string | null;
+  stage_after: string | null;
+  evidence: string | null;
+  at: string;
+}
+export interface HelpPagesData {
+  pages: HelpPage[];
+  counts: { draft: number; checked: number; in_corpus: number; gaps_open: number };
+  rules: string[];
+  history: HelpHistoryRow[];
+}

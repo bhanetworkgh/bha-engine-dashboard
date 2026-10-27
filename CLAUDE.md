@@ -2663,7 +2663,7 @@ autopay, no pay wiring, no destructive automated action).
   Surfaces Contract): `read_buyer_flow` and `read_sop`, six tools in all, still
   read-only, and `test:eg4n` pins the six.
   **`read_monitoring_twin` and `get_vfarm_gates` join it on 22 Oct** (Jason on the 22 Oct log):
-  eight tools (ten with `read_vfarm_history`, 24 Oct, and `read_engine_strain`, 27 Oct), still read-only, so Genie answers "is this rack live or simulated" from
+  eight tools (eleven with `read_vfarm_history`, 24 Oct, `read_engine_strain` and `read_help_pages`, 27 Oct), still read-only, so Genie answers "is this rack live or simulated" from
   `evidence_status` and "is Pilot 1 ready" from the gate records. What Genie may and must not
   say on payments, rack evidence and Pilot 1 is `docs/contracts/genie-answer-contract.md`, also
   the SOP "SOP -- Genie Answer Contract: Payments, Rack Evidence and Pilot 1 Readiness".
@@ -2934,6 +2934,21 @@ and never moves the state; Codex's Needs input tab lists voided logs with who, w
 **The n8n backup's answer is checked** (same day): Mark Backup Answer in the three Agent Deliveries rejects a
 reply that only talks about an error payload or a missing request, takes its text out of the item so it cannot
 be posted, raises it, and writes `answer_check` on the event. `npm run test:engine-strain`.
+
+**CST help pages: one link each, and a stage the agents can read** (27 Oct 2026, Destiny — Jason in
+#bha-coordination 1792702326.928939: Destiny owns `cst-help-manuals`, and Hardik's Honest Gate check is mandatory
+before anything lands there). `server/src/helpPages.ts`, migration 98, `engine_help_pages` (the text as it stands)
+and `engine_help_page_history` (append-only). The Help pages tab on `/cs-twin` (`?tab=help`, one page at
+`&page=<id>`, `GET /api/help-pages`) shows each page with its stage and its open gaps by owner. Three stages:
+**draft**; **checked**, Hardik's pass bound to the sha256 of the text he checked, recorded only on his own Slack
+message (Slack must confirm he posted it; the table's CHECK holds `checked_by` to his id); **in_corpus**, only from
+checked, with the BHARAG doc id. **Any edit to a checked page's text puts it back to draft.** Tools:
+`read_help_pages` (read, both connections, in Bays', North Star's, Research Twin's and Genie's scopes; each page
+carries its stage, `customer_safe` true only at in_corpus, its link, and the rule that a draft is never quoted to
+a customer), `write_help_page` and `set_help_page_stage` (write connection, no agent's scope, refused on any agent
+token; Destiny or Jason write, Hardik may record his own check; audited kind `help_pages`). **CST never reads these
+rows**: it answers from `cst-help-manuals` only, and nothing here writes to BHARAG. Migration 98 seeded the three v0
+drafts from the "CST Help Corpus v0" Claude Doc, with Jegan's gaps named. `npm run test:help-pages`.
 
 **The missing Codex log check** (2026-10-22, Destiny — DW-1792516757092-9EP8; Jason, 20 Oct: a
 standing mechanism, not a reminder, after Kavin's 20 Oct log broke on submission and nothing said so).
