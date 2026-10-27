@@ -42,6 +42,7 @@ import { CANDIDATE_WRITE_TOOLS } from './candidateTools';
 import { LANE_READ_TOOLS, LANE_WRITE_TOOLS } from './laneTools';
 import { LOGSTREAM_READ_TOOLS } from './logstreamTools';
 import { SPEND_READ_TOOLS } from './spendTools';
+import { STRAIN_READ_TOOLS } from './strainTools';
 import { INCIDENT_WRITE_TOOLS } from './incidentTools';
 import { SIGNAL_WRITE_TOOLS } from './signalTools';
 import { LOOP_WRITE_TOOLS } from './loopTools';
@@ -1107,6 +1108,8 @@ export const TOOLS: ToolDefinition[] = [
   ...MEDIA_POST_LOG_READ_TOOLS,
   ...CHARGE_GATE_READ_TOOLS,
   ...ESSENCE_READ_TOOLS,
+  // 2026-10-27: engine strain and what each audience is told (7RZT).
+  ...STRAIN_READ_TOOLS,
   // The one that is not a read.
   resyncTool,
 ];

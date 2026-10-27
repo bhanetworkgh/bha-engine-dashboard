@@ -2663,7 +2663,7 @@ autopay, no pay wiring, no destructive automated action).
   Surfaces Contract): `read_buyer_flow` and `read_sop`, six tools in all, still
   read-only, and `test:eg4n` pins the six.
   **`read_monitoring_twin` and `get_vfarm_gates` join it on 22 Oct** (Jason on the 22 Oct log):
-  eight tools, still read-only, so Genie answers "is this rack live or simulated" from
+  eight tools (ten with `read_vfarm_history`, 24 Oct, and `read_engine_strain`, 27 Oct), still read-only, so Genie answers "is this rack live or simulated" from
   `evidence_status` and "is Pilot 1 ready" from the gate records. What Genie may and must not
   say on payments, rack evidence and Pilot 1 is `docs/contracts/genie-answer-contract.md`, also
   the SOP "SOP -- Genie Answer Contract: Payments, Rack Evidence and Pilot 1 Readiness".
@@ -2917,6 +2917,23 @@ never proposed again; 3 markers per source at most. One `essence_marker_*` event
 connection, no agent's scope, audited kind `essence`). Not built: the Layer 2 field, the buttons, the
 backfill and a published-only BHARAG doc. Never read by pay, Logstream or any score.
 `npm run test:essence`.
+
+**Engine strain, one read and what each audience is told** (27 Oct 2026, Destiny — Jason's 7RZT ask on the
+25 Oct log, #workflow-logs-destiny 1792946030.895079). `server/src/engineStrain.ts`, read tool
+`read_engine_strain` (both connections, in Genie's scope), `GET /api/engine-health/strain`, and the line under
+Engine health's header. It reads three states that were each recorded and read by nothing outside the team:
+OpenRouter credit refusals (`openrouter_credit_out`) and OpenRouter runs the recovery watcher holds now; answers
+from the Anthropic backup (`ai_provider_fallback`, with `answer_check` from 27 Oct) and draft eval runs on the
+backup or stopped for credit (`engine_draft_eval_runs.ran_on` and `fallback_reason`, migration 97, backfilled);
+and parked logs voided (`layer0_log_voided`). **Strained** is something in the last hour or a hold now,
+**recovering** is earlier in the window only, else **normal**. `assess` is pure and holds the audience lines:
+the team gets the numbers; Genie, a pilot operator and an early buyer get the effect in plain words, never the
+mechanics and never "down"; the pilot and buyer lines never change, because a person answers both. The Media
+Twin line is a proposal and becomes a claim only through Hardik's doctrine feed. A voided log is housekeeping
+and never moves the state; Codex's Needs input tab lists voided logs with who, why and what replaced them.
+**The n8n backup's answer is checked** (same day): Mark Backup Answer in the three Agent Deliveries rejects a
+reply that only talks about an error payload or a missing request, takes its text out of the item so it cannot
+be posted, raises it, and writes `answer_check` on the event. `npm run test:engine-strain`.
 
 **The missing Codex log check** (2026-10-22, Destiny — DW-1792516757092-9EP8; Jason, 20 Oct: a
 standing mechanism, not a reminder, after Kavin's 20 Oct log broke on submission and nothing said so).

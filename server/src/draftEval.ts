@@ -356,9 +356,10 @@ async function begin(o: {
   const runId = mint();
   const notes = [o.agent === 'north_star' ? 'North Star answers are scored raw: the runner passes them through the Builder Pronoun Guard first and this does not.' : null, ...o.notes].filter(Boolean).join(' ');
   await query(
-    `INSERT INTO engine_draft_eval_runs (run_id, agent, agent_id, agent_name, config_hash_before, cases, results_expected, credit_before_usd, requested_by, detail, covers_agent_id, covers_config_hash)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-    [runId, o.agent, o.a.id, o.a.name, hash, o.cases.length, expected, o.credit, o.input.requested_by, notes || null, o.covers?.agent_id ?? null, o.covers?.hash ?? null],
+    `INSERT INTO engine_draft_eval_runs (run_id, agent, agent_id, agent_name, config_hash_before, cases, results_expected, credit_before_usd, requested_by, detail, covers_agent_id, covers_config_hash, ran_on, fallback_reason)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+    // ran_on and fallback_reason stored (27 Oct 2026, migration 97), so a backup run is counted without reading detail.
+    [runId, o.agent, o.a.id, o.a.name, hash, o.cases.length, expected, o.credit, o.input.requested_by, notes || null, o.covers?.agent_id ?? null, o.covers?.hash ?? null, o.provider, o.why ?? null],
   );
   const main = o.provider === 'OpenRouter' ? o.a : null;
   void run(runId, o.agent, o.a.id, o.cases, o.provider, {

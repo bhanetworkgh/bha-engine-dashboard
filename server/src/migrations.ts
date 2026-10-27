@@ -3635,6 +3635,19 @@ const MIGRATIONS: Migration[] = [
       `UPDATE engine_decision_watches SET close_on_reply = false WHERE status = 'watching' AND close_on_reply`,
     ],
   },
+  {
+    // 27 Oct 2026, Destiny (7RZT): which provider a draft eval run asked, and why it fell back, were in the tool's
+    // answer only. Stored so the engine strain read and the Engine page can count backup runs without parsing detail.
+    // Older rows are filled from what they already say: a backup agent's name ends "(Anthropic backup)", and a main
+    // agent's fallback run carries covers_agent_id (migration 95).
+    id: 97,
+    name: 'engine_draft_eval_runs: ran_on and fallback_reason (which provider a run asked, and why it fell back)',
+    statements: [
+      `ALTER TABLE engine_draft_eval_runs ADD COLUMN IF NOT EXISTS ran_on text`,
+      `ALTER TABLE engine_draft_eval_runs ADD COLUMN IF NOT EXISTS fallback_reason text`,
+      `UPDATE engine_draft_eval_runs SET ran_on = CASE WHEN agent_name ILIKE '%(Anthropic backup)%' OR covers_agent_id IS NOT NULL THEN 'Anthropic' ELSE 'OpenRouter' END WHERE ran_on IS NULL`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

@@ -6,6 +6,7 @@ import { useReplayKey, LoadFailed, Loading, PageHeader, ResyncButton, Tabs, Toas
 import LaneView from './LaneView';
 import McpWrites from './McpWrites';
 import { SelfHealing } from './SelfHealing';
+import { StrainLine } from './StrainLine';
 import Approvals from './Approvals';
 import Recovery from './Recovery';
 import Repairs from './Repairs';
@@ -107,6 +108,9 @@ export default function EngineHealth() {
           />
         }
       />
+
+      {/* Engine strain, above every tab (27 Oct 2026, 7RZT): short of AI credit or answering on the backup. */}
+      <StrainLine />
 
       {tab === 'Self-healing' ? (
         <SelfHealing />

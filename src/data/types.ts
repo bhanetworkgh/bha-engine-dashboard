@@ -783,6 +783,8 @@ export interface Layer0Hold {
   /** Exactly `pending_builder_input`: the builder still owes an answer. */
   pending_builder_input: boolean;
   created_at: string | null;
+  /** Set only when the parked log was voided (27 Oct 2026): who, why, and the submission that replaced it. */
+  voided: { at: string | null; by: string | null; reason: string | null; replaced_by: string | null } | null;
   source: Source;
   airtable: AirtableRef;
 }

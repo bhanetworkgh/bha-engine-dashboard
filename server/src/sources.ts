@@ -537,6 +537,13 @@ export function mapLayer0(rec: AtRecord): Layer0Hold {
      */
     pending_builder_input: (status ?? '').toLowerCase() === LAYER0_PENDING,
     created_at: iso(f['Created At']),
+    /**
+     * Who voided it, why and what replaced it (27 Oct 2026, 7RZT): the row's own fields from layer0Void.ts,
+     * so the Codex page can show a voided log rather than only dropping it. Null on any row that is not voided.
+     */
+    voided: (status ?? '').toLowerCase() === 'voided'
+      ? { at: iso(f['Voided At']), by: str(f['Voided By']), reason: str(f['Voided Reason']), replaced_by: str(f['Replaced By']) }
+      : null,
     source: airtableSource(CODEX_BASE, CODEX_LAYER0.table, rec.id),
     airtable: { base: CODEX_BASE, table: CODEX_LAYER0.table, record_id: rec.id, url: recordUrl(CODEX_BASE, CODEX_LAYER0.table, rec.id) },
   };

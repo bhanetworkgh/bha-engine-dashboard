@@ -288,6 +288,20 @@ export interface SelfHealingData {
 }
 export const getSelfHealing = () => api<SelfHealingData>('/api/engine-health/self-healing');
 
+/**
+ * Engine strain (27 Oct 2026, 7RZT): whether the engine is short of AI credit or answering on its backup, and
+ * what each audience is told. The same read as the MCP tool read_engine_strain (server/src/engineStrain.ts).
+ */
+export interface EngineStrain {
+  state: 'normal' | 'strained' | 'recovering';
+  summary: string;
+  reasons: string[];
+  audiences: { team: string; pilot_operator: string; early_buyer: string; media_twin: string; genie: string };
+  counts: Record<string, number | string | null>;
+  at: string;
+}
+export const getEngineStrain = () => api<EngineStrain>('/api/engine-health/strain');
+
 
 /**
  * Puts one repair back: restores the workflow as it stood before it.
