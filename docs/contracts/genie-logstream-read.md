@@ -205,6 +205,24 @@ question.
    to rule 6. After a newer doctrine version is posted, it changes back to rule 3
    (`STALE_PUBLICATION_DECISION`), with no change on Genie's side.
 
+## Engine strain: "is the engine under strain?" (7RZT, 27 Oct 2026)
+
+`read_engine_strain` is on the same token, read only. It answers whether the
+engine is running short of AI credit or answering on its backup provider, and
+what each audience may be told. Call it with no arguments (24 hours) or with
+`hours` (at most 168).
+
+- `state` is `normal`, `strained` (a credit refusal or a backup answer in the
+  last hour, or runs held now) or `recovering` (earlier in the window only).
+- `audiences.genie` is the line Genie gives, in substance. Outside the team the
+  line is the effect in plain words: answers may be slower, nothing is lost.
+  Never the mechanics (OpenRouter, Anthropic, 402, incidents) and never "down".
+- `audiences.pilot_operator` and `audiences.early_buyer` do not change with
+  strain: a person stands in front of both.
+- `audiences.media_twin` is a proposed claim line, not doctrine. It becomes a
+  claim only once Hardik posts it through `media.doctrine.v1`.
+- A voided parked log is housekeeping, not strain, and never moves the state.
+
 ## How we will know it is wired
 
 Each call writes one line on the dashboard as `agent token: genie`. Once Genie
