@@ -50,8 +50,10 @@ const reason = async (p, r) => assert.rejects(p, (x) => { assert.equal(x.reason,
     for (const p of r.pages) assert.equal(p.body_sha256, h.sha(p.body), `${p.page_id}: stored hash is the text's`);
     assert.match(r.pages[0].body, /## What you can see/);
     assert.equal(r.counts.draft, 3);
-    assert.equal(r.counts.gaps_open, 3);
-    ok('migration 98 seeds the three v0 drafts with their gaps named and the hash of their text');
+    assert.equal(r.counts.gaps_open, 2);
+    assert.deepEqual(r.pages.find((p) => p.page_id === 'operator-quickstart').gaps, []);
+    assert.match(r.pages[0].body, /current pilot rule/);
+    ok('migrations 98 and 99 leave the three drafts with Jegan\'s two gaps named, the quickstart stating the pilot rule, and the hash of their text');
 
     const before = r.pages.find((p) => p.page_id === 'what-cst-can-do');
 
