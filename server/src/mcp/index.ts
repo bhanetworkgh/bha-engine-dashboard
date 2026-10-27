@@ -275,6 +275,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-24 (D5): the rows behind the twin's summary (readings, rover runs, frames,
         // events, alert history, layout), so Genie answers from what vFarm sent, never a guess.
         'read_vfarm_history',
+        // 2026-10-27 (7RZT): "is the engine under strain?" is answered from read_engine_strain's audience
+        // lines, never from raw events: slower, nothing lost, a person answers; never "down".
+        'read_engine_strain',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>

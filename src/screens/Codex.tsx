@@ -601,6 +601,11 @@ export default function Codex() {
   if (status === 'loading' || !loaded) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
   const m = metrics.data;
   const holds = loaded.layer0_holds.filter((h) => (builder === 'all' ? true : h.builder_id === builder) && h.open);
+  // Voided parked logs (27 Oct 2026, 7RZT): retired by a newer submission or by hand. Shown with who, why and the
+  // replacement, newest first, so a log that left Needs input is accounted for rather than only gone.
+  const voided = loaded.layer0_holds
+    .filter((h) => (builder === 'all' ? true : h.builder_id === builder) && h.voided)
+    .sort((a, b) => String(b.voided?.at ?? '').localeCompare(String(a.voided?.at ?? '')));
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -694,6 +699,26 @@ export default function Codex() {
               {holds.length} further {holds.length === 1 ? 'submission is' : 'submissions are'} parked at the completeness check with no row in a builder table yet
               {holds.some((h) => h.missing.length) ? `, waiting on ${[...new Set(holds.flatMap((h) => h.missing))].join(', ')}` : ''}. They appear here once the builder resubmits.
             </p>
+          )}
+          {tab === 'needs_input' && voided.length > 0 && (
+            <details className="text-[11.5px] leading-snug text-faint">
+              <summary className="cursor-pointer select-none">
+                {voided.length} parked {voided.length === 1 ? 'log was' : 'logs were'} voided: replaced by a newer submission or withdrawn
+              </summary>
+              <ul className="mt-1.5 space-y-1">
+                {voided.slice(0, 20).map((h) => (
+                  <li key={h.id}>
+                    <span className="tabular text-dim">{h.submission_id ?? h.id}</span>
+                    {h.builder_name ? ` · ${h.builder_name}` : ''}
+                    {h.voided?.at ? ` · ${h.voided.at.slice(0, 10)}` : ''}
+                    {` · voided by ${h.voided?.by ?? 'not recorded'}`}
+                    {h.voided?.replaced_by ? ` · replaced by ${h.voided.replaced_by}` : ''}
+                    {h.voided?.reason ? ` · “${h.voided.reason}”` : ''}
+                  </li>
+                ))}
+              </ul>
+              {voided.length > 20 && <p className="mt-1">and {voided.length - 20} more.</p>}
+            </details>
           )}
         </div>
 
