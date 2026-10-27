@@ -1,6 +1,8 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useData } from '../../app/useData';
-import { getCsTwin, type CstCohort, type CstData, type CstTurn } from '../../data';
+import { getCsTwin, getHelpPages, type CstCohort, type CstData, type CstTurn } from '../../data';
+import HelpPages from './HelpPages';
 import {
   Card,
   CardHeader,
@@ -47,7 +49,9 @@ import {
  * guard or a hand-off doing its job.
  */
 
-const TABS = ['Turns', 'Statistics'] as const;
+const TABS = ['Turns', 'Help pages', 'Statistics'] as const;
+/** The tab is in the address (27 Oct 2026): ?tab=help opens Help pages, and &page=<id> one page, so a page can be shared. */
+const TAB_PARAM: Record<Tab, string | null> = { Turns: null, 'Help pages': 'help', Statistics: 'statistics' };
 type Tab = (typeof TABS)[number];
 
 const OUTCOME_ORDER = ['Answered', 'Escalated', 'Refused', 'Needs verification', 'Unknown caller', 'Failed'];
@@ -71,18 +75,33 @@ const lastFour = (p: string | null) => (p ? `…${p.slice(-4)}` : null);
 const who = (t: CstTurn) => t.customer_name ?? lastFour(t.phone_e164) ?? t.customer_ref ?? '—';
 
 export default function CsTwin() {
-  const [tab, setTab] = useState<Tab>('Turns');
+  const [params, setParams] = useSearchParams();
+  const tab: Tab = params.get('tab') === 'help' ? 'Help pages' : params.get('tab') === 'statistics' ? 'Statistics' : 'Turns';
+  const helpOpen = params.get('page');
+  const setTab = (t: Tab) => setParams(TAB_PARAM[t] ? { tab: TAB_PARAM[t]! } : {});
+  const setHelpOpen = (id: string | null) => setParams(id ? { tab: 'help', page: id } : { tab: 'help' });
   useReplayKey(tab);
   const { status, data, error } = useData(getCsTwin, [], { kinds: ['cst_turns'] });
+  const help = useData(getHelpPages, [], { kinds: ['help_pages'] });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
         title="Customer Service Twin"
         subtitle="Every customer text, call and web message, and what CST did with it"
-        below={<Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Turns: data?.summary.turns ? { n: data.summary.turns } : undefined }} />}
+        below={<Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Turns: data?.summary.turns ? { n: data.summary.turns } : undefined, 'Help pages': help.data ? { n: help.data.pages.length } : undefined }} />}
       />
-      {status === 'loading' && !data ? (
+      {tab === 'Help pages' ? (
+        <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-6 pb-6 md:px-8">
+          {help.status === 'loading' && !help.data ? (
+            <Loading />
+          ) : !help.data ? (
+            <LoadFailed error={help.error} />
+          ) : (
+            <HelpPages data={help.data} openId={helpOpen} setOpenId={setHelpOpen} />
+          )}
+        </div>
+      ) : status === 'loading' && !data ? (
         <Loading />
       ) : status === 'error' && !data ? (
         <LoadFailed error={error} />
