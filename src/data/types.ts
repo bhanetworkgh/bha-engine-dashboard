@@ -4599,3 +4599,47 @@ export interface CodeChecksData {
   notes: string[];
   outputs: AuditOutput[];
 }
+
+/** The evidence store (28 Oct 2026, D3). One record per document, never edited; a correction is a new version. */
+export interface EvidenceRecord {
+  evidence_id: string;
+  name: string;
+  version: number;
+  title: string;
+  proves: string;
+  gate: string | null;
+  loop_id: string | null;
+  author_id: string;
+  author_name: string | null;
+  written_at: string | null;
+  saved_by: string;
+  saved_by_name: string | null;
+  saved_at: string;
+  via: string;
+  source_kind: 'slack_file' | 'text';
+  source_ref: string | null;
+  file_name: string;
+  content_type: string;
+  file_size: number;
+  file_sha256: string;
+  text_chars: number;
+  text_sha256: string;
+  extract: Record<string, unknown>;
+  supersedes: string | null;
+  superseded_by: string | null;
+  notes: string | null;
+  test: boolean;
+}
+
+export interface EvidenceData {
+  records: EvidenceRecord[];
+  total: number;
+  rules: string[];
+}
+
+export interface EvidenceDoc extends EvidenceRecord {
+  text: string;
+  versions: EvidenceRecord[];
+  file_url: string;
+  rules: string[];
+}

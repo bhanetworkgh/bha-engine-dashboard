@@ -92,6 +92,7 @@ import * as vfarmGates from './vfarmGates';
 import * as vfarmGateAuto from './vfarmGateAuto';
 import * as mediaPostLog from './mediaPostLog';
 import * as helpPages from './helpPages';
+import * as evidence from './evidence';
 import * as codeChecks from './codeChecks';
 import * as publicationDecision from './publicationDecision';
 import * as doctrineGap from './doctrineGap';
@@ -1850,6 +1851,34 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * The Codex entry behind a pay session, for the Open button on Pay
      * Tracker (2026-09-23). Resolved here, never guessed in the client.
      */
+    /**
+     * The evidence store (2026-10-28, D3): the list, one document with its text, and the original file.
+     * Reads only; a document is saved by Bays or on the connector (save_evidence), never edited.
+     */
+    if (p === '/api/evidence') {
+      return send(res, 200, await evidence.read({ include_test: url.searchParams.get('test') === '1' }));
+    }
+    const evFile = p.match(/^\/api\/evidence\/(EV-[0-9]+-[A-Z0-9]{4})\/file$/);
+    if (evFile) {
+      const f = await evidence.file(evFile[1]);
+      if (!f) throw new HttpError(404, 'That evidence record is not held.');
+      const safe = f.file_name.replace(/[^A-Za-z0-9._ -]/g, '_');
+      res.writeHead(200, {
+        'Content-Type': f.content_type || 'application/octet-stream',
+        'Content-Length': f.bytes.length,
+        'Content-Disposition': `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(f.file_name)}`,
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      res.end(f.bytes);
+      return;
+    }
+    const evDoc = p.match(/^\/api\/evidence\/([^/]+)$/);
+    if (evDoc) {
+      const d = await evidence.get(decodeURIComponent(evDoc[1]), { test: url.searchParams.get('test') === '1' });
+      if (!d) throw new HttpError(404, 'That evidence record is not held.');
+      return send(res, 200, { ...d, versions: await evidence.versions(d.name, d.test), file_url: `/api/evidence/${d.evidence_id}/file`, rules: evidence.RULES });
+    }
     const payCodex = p.match(/^\/api\/pay\/sessions\/([^/]+)\/codex$/);
     if (payCodex) {
       try {

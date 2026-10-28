@@ -151,10 +151,12 @@ export function check(i: GateInput): { kind: Kind; rail: Rail; verdict: string; 
     }
   } else if (verdict === 'green') {
     bundle_ref = clean(i.bundle_ref, 500) || null;
-    if (!bundle_ref) throw new ChargeGateError('bundle_required', "A green pass names the acceptance bundle it rests on (bundle_ref: Hardik's Honest Gate record, a link or an id).");
+    if (!bundle_ref) throw new ChargeGateError('bundle_required', "A green pass names the acceptance bundle it rests on (bundle_ref: the bundle's evidence store id, EV-…).");
   }
   return { kind, rail, verdict, decided_by, evidence_link, link, scope, notes, recorded_by, test: i.test === true, offer_id, loop_id, conditions, bundle_ref };
 }
+
+export type BundleCheck = (id: string) => Promise<{ ok: true; record: { evidence_id: string; name: string; version: number; superseded_by: string | null } } | { ok: false; reason: string; message: string }>;
 
 export type MessageCheck = (link: { channel: string; ts: string; thread_ts: string | null }) => Promise<{ ok: true; user: string | null } | { ok: false; reason: 'not_found' | 'unreadable'; message: string }>;
 
@@ -214,9 +216,17 @@ function newId(): string {
 /** Records one verdict, with its engine event, in one transaction. Refused with nothing written when a rule says no. */
 export async function recordGate(
   input: GateInput,
-  opts: { via: string; dry_run?: boolean; checkMessage?: MessageCheck } = { via: 'unknown' },
-): Promise<{ ok: true; written: boolean; row: GateRow; event_id: number | null; status: RailStatus; message: string }> {
+  opts: { via: string; dry_run?: boolean; checkMessage?: MessageCheck; checkBundle?: BundleCheck } = { via: 'unknown' },
+): Promise<{ ok: true; written: boolean; row: GateRow; event_id: number | null; status: RailStatus; message: string; bundle: { evidence_id: string; name: string; version: number; superseded_by: string | null } | null }> {
   const c = check(input);
+  // 28 Oct 2026 (D3): a real green pass rests on a record in the evidence store, held and readable by every
+  // system, never on a link that can move. A test pass may name anything.
+  let bundle: { evidence_id: string; name: string; version: number; superseded_by: string | null } | null = null;
+  if (c.kind === 'acceptance_pass' && c.verdict === 'green' && !c.test && c.bundle_ref) {
+    const g = await (opts.checkBundle ?? (await import('./evidence')).forGate)(c.bundle_ref);
+    if (!g.ok) throw new ChargeGateError(g.reason, `${g.message} Nothing was recorded.`);
+    bundle = { evidence_id: g.record.evidence_id, name: g.record.name, version: g.record.version, superseded_by: g.record.superseded_by };
+  }
   const verify = opts.checkMessage ?? slackAuthor;
   const seen = await verify(c.link);
   if (!seen.ok) {
@@ -247,7 +257,7 @@ export async function recordGate(
   };
   if (opts.dry_run) {
     const before = await status(c.rail);
-    return { ok: true, written: false, row, event_id: null, status: before, message: `Dry run: ${OWNER_NAME[c.kind]}'s ${c.kind} (${c.verdict}) would be recorded on ${c.rail}. Nothing was written.` };
+    return { ok: true, written: false, row, event_id: null, status: before, bundle, message: `Dry run: ${OWNER_NAME[c.kind]}'s ${c.kind} (${c.verdict}) would be recorded on ${c.rail}. Nothing was written.` };
   }
   const event_id = await withTransaction(async (db) => {
     const ins = await db.query(
@@ -293,7 +303,8 @@ export async function recordGate(
     row,
     event_id,
     status: after,
-    message: `Recorded ${OWNER_NAME[c.kind]}'s ${c.kind}: ${c.verdict}${row.test ? ' (TEST, never counts)' : ''}. Real buyers can be charged on ${c.rail}: ${after.can_charge_live ? 'yes' : 'no'}.`,
+    bundle,
+    message: `Recorded ${OWNER_NAME[c.kind]}'s ${c.kind}: ${c.verdict}${row.test ? ' (TEST, never counts)' : ''}${bundle ? `, resting on ${bundle.evidence_id} (${bundle.name} v${bundle.version}${bundle.superseded_by ? `; a newer version, ${bundle.superseded_by}, exists` : ''})` : ''}. Real buyers can be charged on ${c.rail}: ${after.can_charge_live ? 'yes' : 'no'}.`,
   };
 }
 
@@ -353,7 +364,7 @@ export const RULES = [
   "acceptance_pass is Hardik's (U0BKT6MAW2Y) and offer_approval is Jason's (U0A9V97949F). Each counts only on that person's own Slack message, which Slack confirms they posted.",
   'Rows are never edited or deleted: a red pass or a withdrawn approval is a new row, and the newest row of each kind is the one that counts.',
   'A test row never counts. No agent may record either kind.',
-  "A green pass names the acceptance bundle it rests on (bundle_ref). An approved offer is Jason's offer_approved event: offer_id, loop_id, approver_id, timestamp and a conditions snapshot. A withdrawal names the offer_id.",
+  "A green pass names the acceptance bundle it rests on (bundle_ref), a record in the evidence store (EV-…) that every system can read. An approved offer is Jason's offer_approved event: offer_id, loop_id, approver_id, timestamp and a conditions snapshot. A withdrawal names the offer_id.",
   'Stage 5 for a real buyer also needs can_charge_live true and a live (not test-mode) payment. Test-mode payments never satisfy real Stage 5: they are test-only and never grant entitlements.',
   'This record charges nobody, moves no stage and opens no checkout. Anything said in public still needs read_publication_decision.',
 ];

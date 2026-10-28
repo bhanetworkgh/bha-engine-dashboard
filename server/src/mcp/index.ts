@@ -177,6 +177,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-29: the code checks (Destiny's second review of approved logs) and November's outputs, so a
         // lane's "done" is weighed against what a check found live. A read; recording stays with Destiny.
         'read_code_checks',
+        // 2026-10-28 (D3): the evidence store, so a decision's evidence is read from the one copy the
+        // dashboard holds, by name, never from a link that can move. A read.
+        'read_evidence',
       ]),
     },
     {
@@ -198,6 +201,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-27: the CST help pages with their stage (draft, checked by Hardik, in cst-help-manuals),
         // so a draft is never quoted to a customer as final. Writing them stays with Destiny on the connector.
         'read_help_pages',
+        // 2026-10-28 (D3): the evidence store, so a decision's evidence is read from the one copy the
+        // dashboard holds, by name, never from a link that can move. A read.
+        'read_evidence',
       ]),
     },
     {
@@ -250,6 +256,12 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-29: the code checks and November's outputs (Jason, DM 1793181986.036119). Bays reads what is
         // waiting and what each check found; recording a check stays with Destiny until D6 opens it.
         'read_code_checks',
+        // 2026-10-28 (D3): the evidence store, so a decision's evidence is read from the one copy the
+        // dashboard holds, by name, never from a link that can move. A read.
+        'read_evidence',
+        // 2026-10-28 (D3): "Bays, save this into the evidence store" on a file posted in Slack. Saves one
+        // document and never edits one; who may ask is held on the server.
+        'save_evidence',
       ]),
     },
     {
@@ -296,6 +308,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-27: the CST help pages with their stage (draft, checked by Hardik, in cst-help-manuals),
         // so a draft is never quoted to a customer as final. Writing them stays with Destiny on the connector.
         'read_help_pages',
+        // 2026-10-28 (D3): the evidence store, so a decision's evidence is read from the one copy the
+        // dashboard holds, by name, never from a link that can move. A read.
+        'read_evidence',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>

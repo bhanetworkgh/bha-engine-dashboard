@@ -15,6 +15,8 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
 
 const LINK = 'https://bayshorizonnetwork.slack.com/archives/C0AFPJ5S1C1/p1792686055908889?thread_ts=1792680780.486439&cid=C0AFPJ5S1C1';
 const PASS = { kind: 'acceptance_pass', verdict: 'green', decided_by: g.HARDIK, evidence_link: LINK, recorded_by: g.DESTINY, bundle_ref: 'TEST honest gate bundle' };
+// The bundle is held in the evidence store (28 Oct 2026); its own checks are in evidence.test.cjs.
+const okBundle = async (id) => ({ ok: true, record: { evidence_id: id, name: 'test-bundle', version: 1, superseded_by: null } });
 const OFFER = { kind: 'offer_approval', verdict: 'approved', decided_by: g.JASON, evidence_link: LINK, recorded_by: g.DESTINY, scope: 'TEST scope', offer_id: 'OFFER-TEST-1', loop_id: 'LOOP-1792528168754-FVA9', conditions: { price: 'TEST', for: 'Client 2 pilot' } };
 const refused = (input, reason) => assert.throws(() => g.check(input), (e) => { assert.equal(e.reason, reason, `expected ${reason}, got ${e.reason}: ${e.message}`); return true; });
 
@@ -98,13 +100,13 @@ const refused = (input, reason) => assert.throws(() => g.check(input), (e) => { 
   const blind = async () => ({ ok: false, reason: 'unreadable', message: 'Could not read.' });
   const rejectsWith = (p, reason) => assert.rejects(p, (e) => { assert.equal(e.reason, reason, `expected ${reason}, got ${e.reason}: ${e.message}`); return true; });
 
-  await rejectsWith(g.recordGate(PASS, { via: 'test', checkMessage: someoneElse }), 'evidence_not_owners');
-  await rejectsWith(g.recordGate(PASS, { via: 'test', checkMessage: gone }), 'evidence_not_found');
-  await rejectsWith(g.recordGate(PASS, { via: 'test', checkMessage: blind }), 'evidence_unchecked');
+  await rejectsWith(g.recordGate(PASS, { via: 'test', checkBundle: okBundle, checkMessage: someoneElse }), 'evidence_not_owners');
+  await rejectsWith(g.recordGate(PASS, { via: 'test', checkBundle: okBundle, checkMessage: gone }), 'evidence_not_found');
+  await rejectsWith(g.recordGate(PASS, { via: 'test', checkBundle: okBundle, checkMessage: blind }), 'evidence_unchecked');
   assert.equal(Number((await query(`SELECT count(*) AS c FROM engine_charge_gate`)).rows[0].c), 0);
   ok("a message not posted by the owner, missing, or unreadable is refused and writes nothing");
 
-  const dry = await g.recordGate(PASS, { via: 'test', dry_run: true, checkMessage: hardikSays });
+  const dry = await g.recordGate(PASS, { via: 'test', checkBundle: okBundle, dry_run: true, checkMessage: hardikSays });
   assert.equal(dry.written, false);
   assert.equal(Number((await query(`SELECT count(*) AS c FROM engine_charge_gate`)).rows[0].c), 0);
   ok('a dry run checks Slack and writes nothing');
@@ -112,12 +114,12 @@ const refused = (input, reason) => assert.throws(() => g.check(input), (e) => { 
   await assert.rejects(query(`INSERT INTO engine_charge_gate (gate_id, kind, rail, verdict, decided_by, evidence_link, evidence_channel, evidence_ts, recorded_by, via) VALUES ('CG-BAD','offer_approval','vfarm_stripe_live','approved','U0AEW3TBYH1','x','C','1','x','sql')`));
   ok('the table itself refuses an offer approval decided by anyone but Jason');
 
-  const testRow = await g.recordGate({ ...PASS, test: true }, { via: 'test', checkMessage: hardikSays });
+  const testRow = await g.recordGate({ ...PASS, test: true }, { via: 'test', checkBundle: okBundle, checkMessage: hardikSays });
   assert.equal(testRow.row.test, true);
   assert.equal(testRow.status.acceptance_pass, null);
   ok('a test row is recorded and never counts');
 
-  const p = await g.recordGate(PASS, { via: 'test', checkMessage: hardikSays });
+  const p = await g.recordGate(PASS, { via: 'test', checkBundle: okBundle, checkMessage: hardikSays });
   assert.equal(p.written, true);
   assert.equal(p.status.can_charge_live, false);
   assert.equal(p.status.acceptance_pass.gate_id, p.row.gate_id);

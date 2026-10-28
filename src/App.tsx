@@ -40,6 +40,7 @@ const Commercial = lazy(() => import('./screens/Commercial'));
 const Executions = lazy(() => import('./screens/Executions'));
 const ScheduledRuns = lazy(() => import('./screens/ScheduledRuns'));
 const Logstream = lazy(() => import('./screens/Logstream'));
+const Evidence = lazy(() => import('./screens/Evidence'));
 const Registry = lazy(() => import('./screens/Registry'));
 const Settings = lazy(() => import('./screens/Settings'));
 
@@ -118,6 +119,7 @@ export default function App() {
         <Route path="/executions" element={<Suspense fallback={<Loading />}><Executions /></Suspense>} />
         <Route path="/scheduled-runs" element={<Suspense fallback={<Loading />}><ScheduledRuns /></Suspense>} />
         <Route path="/logstream" element={<Suspense fallback={<Loading />}><Logstream /></Suspense>} />
+        <Route path="/evidence" element={<Suspense fallback={<Loading />}><Evidence /></Suspense>} />
         <Route path="/registry" element={<Suspense fallback={<Loading />}><Registry /></Suspense>} />
         <Route path="/settings" element={<Suspense fallback={<Loading />}><Settings /></Suspense>} />
         <Route path="*" element={<Navigate to="/" replace />} />
