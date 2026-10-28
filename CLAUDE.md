@@ -4861,6 +4861,37 @@ and no card will ever be sent. Colour is otherwise reserved for what is genuinel
 bad: unpaid past sixty days, a disputed statement, a statement sent and unanswered
 past fourteen days.
 
+### Pay Tracker — Code checks (2026-10-29, Destiny)
+**A fifth tab, at its own address (`/pay?tab=code-checks`).** Jason said yes on 28 Oct (DM
+D0AF0DG8ZPY, 1793181986.036119): from **1 Nov 2026** Destiny checks every approved log against what
+is actually live (GitHub, Render, n8n, Twilio, this dashboard, BHARAG, vFarm) and makes a pay call,
+within **24 to 48 hours** of Jason's approval, in the format Jason confirmed. The format and how to
+run a check live in the `bha-code-check` skill; this tab and `server/src/codeChecks.ts` hold the
+record.
+
+- **Waiting** is read from the pay ledger, never kept by hand: a session approved on or after
+  1 Nov (Lagos) with no check. Past 48 hours it is late, and late is the only amber on the tab,
+  because it is somebody's pay stalling. **Destiny's own sessions are counted apart and named**:
+  he is the one checking.
+- **A check** (`engine_code_checks`, migration 101) is one row per Codex entry: verdict (matches /
+  partly / overstated) with one line on why, each claim with where it was checked, the result and
+  the proof, what is missing before customer ready (Jason's five items, in his order), what could
+  not be checked, and the pay call (as logged / partly / hold) with its follow-ups. Refused when the
+  verdict and the claims disagree, when pay partly or hold names no follow-up, when an overstated
+  log is paid as logged (also a table constraint), and on Destiny's own log. The approval time,
+  builder and session date come from the pay ledger, never from the caller. A second record for the
+  same Codex entry corrects the first (`code_check_corrected`).
+- **The discrepancy catalog is read from the checks**: every partly or overstated check, with only
+  the claims that were not confirmed. Nobody keeps it.
+- **November's outputs for Jason** (`engine_audit_outputs`): the catalog, one definition of done
+  checklist per lane Jason named (CST and comms; Genie and the Log, Guide and Briefing engines;
+  vFarm P1; North Star, SE8L, comp and infra) and the v2 execution audit spec, seeded not started,
+  due 30 Nov. "Accepted" needs Jason's message.
+- **Tools:** `read_code_checks` (both connections; Bays' and North Star's scopes),
+  `record_code_check` and `write_audit_output` (write connection, Destiny or Jason, refused on any
+  agent token). The Bays alert on approval, the reminders and Bays writing the check onto the log
+  are the next build (D6), which opens `record_code_check` to Bays for Destiny's posted check.
+
 ### System registry
 **Four registries on one page** (decision 2026-09-14, Destiny) — Builders,
 Tools, Endpoint, Workflow. **Engine writes is gone** (2026-09-22, Destiny): it

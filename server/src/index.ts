@@ -92,6 +92,7 @@ import * as vfarmGates from './vfarmGates';
 import * as vfarmGateAuto from './vfarmGateAuto';
 import * as mediaPostLog from './mediaPostLog';
 import * as helpPages from './helpPages';
+import * as codeChecks from './codeChecks';
 import * as publicationDecision from './publicationDecision';
 import * as doctrineGap from './doctrineGap';
 import * as approvals from './approvals';
@@ -1737,6 +1738,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       // 2026-10-27: the CST help pages and their stage, for the Help pages tab on /cs-twin. A read.
       case '/api/help-pages':
         return send(res, 200, { ...(await helpPages.read()), history: await helpPages.history(undefined, 200) });
+      // 2026-10-29: the code checks (Destiny's second review of approved logs) and November's outputs for
+      // Jason, for the Code checks tab on /pay. A read.
+      case '/api/code-checks':
+        return send(res, 200, await codeChecks.read());
       case '/api/media-post-log':
         return send(res, 200, await mediaPostLog.read({ limit: 500 }));
       case '/api/media-doctrine': {

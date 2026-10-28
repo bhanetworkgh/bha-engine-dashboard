@@ -13600,3 +13600,48 @@ Fix:       Server type-checked with the global tsc and a pg type stub (only the 
 Decision:  vFarm's part (send the block, raise its own alert on a refused write) is Kavin's;
            the shape is in the contract doc and posted in his thread.
 Tests:     test:rover-ledger 6 checks; test:vfarm-evidence 9 checks still pass.
+
+---
+
+## 2026-10-29 20:10 — Code checks: the record, the tab and November's outputs (D6 prerequisite)
+
+Intent:    Jason said yes (DM D0AF0DG8ZPY, 1793181986.036119) to Destiny's second review of every
+           approved log against what is live, from 1 Nov, within 24 to 48 hours of approval, in
+           the format he confirmed, and asked November to produce a discrepancy catalog, per-lane
+           definition of done checklists and a v2 spec. Before the Bays alert and reminders (D6),
+           the checks and those outputs need a home every system can read.
+
+Files:     server/src/codeChecks.ts (new), server/src/mcp/codeCheckTools.ts (new),
+           server/src/migrations.ts (101), server/src/mcp/tools.ts, server/src/mcp/index.ts
+           (read_code_checks in Bays' and North Star's scopes), server/src/index.ts
+           (GET /api/code-checks), src/data/types.ts, src/data/index.ts,
+           src/screens/PayTracker/CodeChecks.tsx (new), src/screens/PayTracker/index.tsx
+           (Code checks tab, /pay?tab=code-checks), server/test/code-checks.test.cjs (new),
+           package.json, CLAUDE.md, BUILD_LOG.md.
+
+- Migration 101: `engine_code_checks` (one row per Codex entry; overstated and pay as logged is
+  refused by a table constraint as well as the code) and `engine_audit_outputs`, seeded with the
+  catalog, four definition of done checklists (the lanes Jason named) and the v2 spec, all not
+  started, due 30 Nov.
+- Waiting is read from `engine_pay_sessions`: approved on or after 1 Nov 00:00 Lagos with no check,
+  late past 48 hours. Destiny's own sessions are counted apart and named (he is the checker).
+- `cleanCheck` holds the format: verdict and reason, claims with where, result and proof,
+  missing from Jason's five items, could-not-check, pay call with follow-ups (what, who, by,
+  loop). It refuses a verdict the claims disagree with, pay partly or hold with no follow-up,
+  overstated paid as logged, and anyone but Destiny or Jason.
+- The catalog is derived from partly and overstated checks, never kept by hand.
+- Tab: four figures (posted, waiting, past 48 hours, median approval to check), Waiting (oldest
+  first, amber only when late), Checks posted, Discrepancy catalog, November outputs.
+
+Problem:   `npm ci` still cannot reach the registry from this session ("tailwindcss-4.3.3.tgz
+           attempt 3 failed with ENOTFOUND"), leaving node_modules partial (react, @types/react
+           empty), so `npm run build` and `npm run typecheck` cannot run here.
+Fix:       Server type-checked and compiled with TypeScript 6.0.3 from /opt/npm-tools and its
+           @types/node (only the known mcp/sql.ts and pg.ts stub errors remain). The two screen
+           files type-checked against minimal React and router stubs, filtered to the changed
+           files; a deliberate bad prop was caught to prove the check is real. The Render build is
+           the first full frontend check.
+Decision:  Destiny's own logs are not waiting on his own check, and are named rather than hidden.
+           Writing a check stays off every agent token until D6 opens it to Bays for Destiny's
+           posted check.
+Tests:     test:code-checks 8 checks; test:rover-ledger 6 and test:vfarm-evidence 9 still pass.

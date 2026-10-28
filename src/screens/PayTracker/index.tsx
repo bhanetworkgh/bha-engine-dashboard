@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useData } from '../../app/useData';
-import { getPay, getPayMetrics } from '../../data';
+import { getCodeChecks, getPay, getPayMetrics } from '../../data';
 import { useReplayKey, LiveIndicator, LoadFailed, Loading, MonthPicker, monthLabel, monthsFrom, PageHeader, RowsLine, Tabs, thisMonth } from '../../components/ui';
 import Owed from './Owed';
 import Statements from './Statements';
 import Sessions from './Sessions';
 import Statistics from './Statistics';
+import CodeChecks from './CodeChecks';
 
 /**
  * Pay Tracker — built 2026-09-17, against a ledger created the same day.
@@ -44,11 +46,27 @@ import Statistics from './Statistics';
  */
 const PAY_KINDS = ['pay_sessions', 'pay_statements', 'pay_builders', 'codex'] as const;
 
-const TABS = ['Owed', 'Statements', 'Sessions', 'Statistics'] as const;
+const TABS = ['Owed', 'Statements', 'Sessions', 'Statistics', 'Code checks'] as const;
 type Tab = (typeof TABS)[number];
+/**
+ * Code checks (29 Oct 2026): Destiny's second review of every approved log, and November's outputs
+ * for Jason. Its own address (`/pay?tab=code-checks`) so read_code_checks can link to it. It is not
+ * cut to the month picker: a check owed is owed whatever month is showing.
+ */
+const CODE_CHECKS: Tab = 'Code checks';
+const CODE_CHECK_KINDS = ['code_checks', 'pay_sessions'] as const;
 
 export default function PayTracker() {
-  const [tab, setTab] = useState<Tab>('Owed');
+  const [params, setParams] = useSearchParams();
+  const [plainTab, setPlainTab] = useState<Tab>('Owed');
+  const tab: Tab = params.get('tab') === 'code-checks' ? CODE_CHECKS : plainTab;
+  const setTab = (t: Tab) => {
+    if (t === CODE_CHECKS) setParams({ tab: 'code-checks' });
+    else {
+      if (params.get('tab')) setParams({});
+      setPlainTab(t);
+    }
+  };
   /**
    * One month for the whole page (2026-09-22, Destiny's brief): Owed,
    * Statements, Sessions and Statistics all answer for the same month, so a
@@ -63,6 +81,7 @@ export default function PayTracker() {
   useReplayKey(`${tab}|${month}`);
   const { status, data: loaded, error } = useData(getPay, [], { kinds: PAY_KINDS });
   const metrics = useData(() => getPayMetrics(month), [month], { kinds: PAY_KINDS });
+  const checks = useData(getCodeChecks, [], { kinds: CODE_CHECK_KINDS });
 
   const all = loaded;
   const months = useMemo(
@@ -111,6 +130,8 @@ export default function PayTracker() {
             counts={{
               Owed: unpaid ? { n: unpaid, tone: 'degraded' } : undefined,
               Statements: openStatements ? { n: openStatements } : undefined,
+              // Only a late check is worth a count in amber: it is somebody's pay stalling.
+              'Code checks': checks.data?.counts.late ? { n: checks.data.counts.late, tone: 'degraded' } : checks.data?.counts.waiting ? { n: checks.data.counts.waiting } : undefined,
             }}
           />
         }
@@ -131,7 +152,15 @@ export default function PayTracker() {
         </div>
       </div>
 
-      {metrics.error ? (
+      {tab === CODE_CHECKS ? (
+        checks.status === 'loading' && !checks.data ? (
+          <Loading />
+        ) : !checks.data ? (
+          <LoadFailed error={checks.error} />
+        ) : (
+          <CodeChecks data={checks.data} />
+        )
+      ) : metrics.error ? (
         <div className="card mx-6 mb-4 px-5 py-4 text-[12.5px] text-failing md:mx-8">Figures unavailable: {metrics.error}</div>
       ) : !metrics.data ? (
         <Loading />
