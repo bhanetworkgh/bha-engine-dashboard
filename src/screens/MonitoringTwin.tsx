@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useData } from '../app/useData';
-import { getMonitoringTwin, type MonitoringFarm, type MonitoringIncident, type MonitoringRover, type MonitoringState, type MonitoringTwinData } from '../data';
+import { getMonitoringTwin, type MonitoringFarm, type MonitoringIncident, type MonitoringRover, type MonitoringRoverPass, type MonitoringState, type MonitoringTwinData } from '../data';
 import {
   Card,
   CardHeader,
@@ -194,6 +194,8 @@ function FarmCard({ f }: { f: MonitoringFarm }) {
         <FigureCell label="Open incidents" value={f.open_incidents.length} tone={f.open_incidents.length ? 'degraded' : undefined} caption={`${f.recent_incidents.length} closed in 7 days`} note="Opened once per fault, closed when it clears." />
       </StatStrip>
       {f.rover && 'runs_24h' in f.rover && f.rover.rover_devices.length > 0 && <RoverStrip r={f.rover} />}
+      {f.rover && 'runs_24h' in f.rover && f.rover.passes?.value && f.rover.passes.value.length > 0 && <RoverPasses passes={f.rover.passes.value} note={f.rover.passes.note} />}
+      {f.ledger_writes && <LedgerWrites w={f.ledger_writes} />}
       {f.feed_history && <FeedHistory h={f.feed_history} />}
       <Card className="pb-3">
         <CardHeader title="Devices" right={<span className="tabular text-[11.5px] text-faint">readings checked against the {c?.stage?.label ?? c?.stage?.stage ?? 'current'} stage</span>} />
@@ -429,14 +431,137 @@ function RoverStrip({ r }: { r: MonitoringRover }) {
       <FigureCell label="Run time" value={dur?.median_s != null ? Math.round(dur.median_s / 60) : null} unit="min" missing="No complete run" caption={dur?.expected_s != null ? `budget ${ago(dur.expected_s)} · ${dur.over_expected ?? 0} over` : 'budget not sent yet'} note={r.run_duration_vs_expected.note} />
       <FigureCell label="Limit hits, 24 h" value={r.limit_hit_24h.value} missing="Not sent yet" note={r.limit_hit_24h.note} />
       <FigureCell label="Stops with no frame" value={stops ? stops.without_frame : null} caption={stops ? `of ${stops.stops} stops` : ''} note={r.stops_without_frame_24h.note} />
-      <FigureCell label="Upload backlog" value={up ? up.waiting : null} caption={up?.oldest_age_s != null ? `oldest ${ago(up.oldest_age_s)}${up.failed ? ` · ${up.failed} failed` : ''}` : up?.failed ? `${up.failed} failed` : 'nothing waiting'} note={r.upload_backlog.note} />
+      <FigureCell label={r.run_source === 'passes' ? 'Photos not sent' : 'Upload backlog'} value={up ? up.waiting : null} caption={up?.oldest_age_s != null ? `oldest ${ago(up.oldest_age_s)}${up.failed ? ` · ${up.failed} failed` : ''}` : up?.failed ? `${up.failed} failed` : 'nothing waiting'} note={r.upload_backlog.note} />
     </StatStrip>
+  );
+}
+
+/**
+ * vFarm's ledger lanes (28 Oct 2026, D3 — Kavin's rover log of 26 Oct, NAFB). BHARAG can answer
+ * "accepted" and write nothing; the lane counts what was really written and the snapshot says so.
+ * A refused entry is the one coloured cell, and it has an incident beside it. Until vFarm sends the
+ * report the card says so in words rather than drawing an empty table that reads as all clear.
+ */
+function LedgerWrites({ w }: { w: NonNullable<MonitoringFarm['ledger_writes']> }) {
+  return (
+    <Card className="pb-3">
+      <CardHeader title="Ledger writes" right={<span className="tabular text-[11.5px] text-faint">{w.taken_at ? `newest report ${relativeTime(w.taken_at) ?? ''}` : 'no report yet'}</span>} />
+      {w.lanes.length === 0 ? (
+        <EmptyState compact>{w.note}</EmptyState>
+      ) : (
+        <>
+          <TableFrame flat grow={false} label="Ledger writes by lane">
+            <thead>
+              <tr>
+                <Th>lane</Th>
+                <Th>sent</Th>
+                <Th>written</Th>
+                <Th>refused</Th>
+                <Th>why</Th>
+                <Th>last pass</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {w.lanes.map((l) => (
+                <tr key={l.lane}>
+                  <td className="td">
+                    {l.lane}
+                    {l.corpus && <span className="ml-1.5 text-[11px] text-faint">{l.corpus}</span>}
+                  </td>
+                  <td className="td tabular">{l.sent}</td>
+                  <td className="td tabular">{l.written}</td>
+                  <td className="td tabular">{l.refused > 0 ? <Pill tone="failing">{l.refused}</Pill> : 0}</td>
+                  <td className="td text-[12px] text-dim">{l.reasons.length ? l.reasons.map((r) => `${r.code} ×${r.count}`).join(', ') : '—'}</td>
+                  <td className="td tabular text-dim">{relativeTime(l.last_pass_at) ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </TableFrame>
+          <p className="px-4 pt-2 text-[11.5px] text-faint">{w.note}</p>
+        </>
+      )}
+    </Card>
+  );
+}
+
+const metres = (mm: number | null) => (mm === null ? '—' : `${(mm / 1000).toFixed(mm % 1000 === 0 ? 1 : 2)} m`);
+const STOP_REASON: Record<string, string> = {
+  snapshot_failed: 'camera failed',
+  move_failed: 'could not reach',
+  pass_aborted: 'not driven to',
+  no_movement: 'motor stalled',
+};
+
+/**
+ * The rover's passes (28 Oct 2026, D3 — Kavin's rover log of 26 Oct, H1VM): each scheduled pass as
+ * vFarm summarises it, the same facts its own ledger lane writes, so the dashboard and the ledger
+ * cannot tell a farmer two different distances. A failed pass and one needing a manual check are
+ * the only coloured rows; a complete pass is the normal state and carries no colour.
+ */
+function RoverPasses({ passes, note }: { passes: MonitoringRoverPass[]; note: string }) {
+  return (
+    <Card className="pb-3">
+      <CardHeader title="Rover passes" right={<span className="tabular text-[11.5px] text-faint">newest first · last 8 days</span>} />
+      <TableFrame flat grow={false} label="Rover passes">
+        <thead>
+          <tr>
+            <Th>ended</Th>
+            <Th>rover</Th>
+            <Th>result</Th>
+            <Th>stops</Th>
+            <Th>distance</Th>
+            <Th>photos sent</Th>
+            <Th>ended at</Th>
+            <Th>took</Th>
+            <Th>failed stops</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {passes.map((p) => {
+            const failed = p.status === 'failed';
+            return (
+              <tr key={p.id}>
+                <td className="td tabular">
+                  {when(p.ended_at ?? p.started_at)}
+                  <span className="ml-1.5 text-[11px] text-faint">{relativeTime(p.ended_at ?? p.started_at) ?? ''}</span>
+                </td>
+                <td className="td">
+                  {p.device_id ?? '—'}
+                  {p.place && <span className="ml-1.5 text-[11px] text-faint">{p.place}</span>}
+                </td>
+                <td className="td">
+                  {failed ? <Pill tone="failing">failed</Pill> : <span>{p.status ?? '—'}</span>}
+                  {p.needs_manual_check && <span className="ml-1.5"><Pill tone="degraded">needs a check</Pill></span>}
+                </td>
+                <td className="td tabular">{p.stops_done ?? '—'} / {p.stops_planned ?? '—'}</td>
+                <td className="td tabular">{metres(p.distance_mm)}</td>
+                <td className="td tabular">
+                  {p.images_sent ?? '—'} / {p.images_taken ?? '—'}
+                  {p.images_not_sent > 0 && <span className="ml-1.5 text-[11px] text-degraded">{p.images_not_sent} not sent</span>}
+                </td>
+                <td className="td tabular">
+                  {p.returned_home ? 'home' : p.position_known === false ? <span className="text-degraded">unknown</span> : metres(p.position_mm)}
+                </td>
+                <td className="td tabular">{ago(p.duration_s)}</td>
+                <td className="td text-[12px]">
+                  {p.failed_stops.length === 0
+                    ? <span className="text-faint">none</span>
+                    : p.failed_stops.map((f) => `stop ${String(f.seq)}: ${f.reason ? (STOP_REASON[f.reason] ?? f.reason) : 'failed'}`).join(' · ')}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </TableFrame>
+      <p className="px-4 pt-2 text-[11.5px] text-faint">{note}</p>
+    </Card>
   );
 }
 
 const SECTION_LABEL: Record<string, string> = {
   readings: 'Readings',
   rover_runs: 'Rover runs',
+  rover_passes: 'Rover passes',
   rover_stops: 'Rover stops',
   rover_detections: 'Flower detections',
   rover_videos: 'Run videos',

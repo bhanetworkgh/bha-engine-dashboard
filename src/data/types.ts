@@ -3889,6 +3889,13 @@ export interface VfarmLiveData {
   alert_events: VfarmAlertEvent[];
   alerts_fired_24h: number;
   alerts_fired_all: number;
+  /** vFarm's ledger lanes (28 Oct 2026, migration 100). Null when it could not be read; optional for an older server. */
+  ledger_writes?: {
+    taken_at: string | null;
+    lanes: Array<{ lane: string; farm_id: string; sent: number; written: number; refused: number }>;
+    open_refusals: Array<{ incident_id: string; ledger_id: string | null; farm_id: string; metric: string | null; detail: string; opened_at: string }>;
+    note: string;
+  } | null;
 }
 
 /* ------------------------------------------------------------------------
@@ -4176,6 +4183,12 @@ export interface MonitoringFarm {
   };
   /** The six rover signals (D5). Readings only: no thresholds are set. */
   rover?: MonitoringRover | { note: string };
+  /** vFarm's ledger lanes: what each sent to BHARAG for this farm, what was written and what was refused (28 Oct 2026, migration 100). */
+  ledger_writes?: {
+    taken_at: string | null;
+    lanes: Array<{ lane: string; corpus: string | null; sent: number; written: number; refused: number; reasons: Array<{ code: string; count: number }>; last_pass_at: string | null }>;
+    note: string;
+  };
   devices: MonitoringDevice[];
   open_incidents: MonitoringIncident[];
   recent_incidents: MonitoringIncident[];
@@ -4193,7 +4206,31 @@ export interface MonitoringRover {
   limit_hit_24h: MonitoringRoverSignal<number>;
   stops_without_frame_24h: MonitoringRoverSignal<{ stops: number; without_frame: number }>;
   upload_backlog: MonitoringRoverSignal<{ waiting: number; failed: number; oldest_age_s: number | null }>;
+  /** The newest rover passes, as vFarm summarises them (28 Oct 2026). Optional: an older server does not send it. */
+  passes?: MonitoringRoverSignal<MonitoringRoverPass[]>;
+  run_source?: 'runs' | 'passes' | 'none';
   thresholds: string;
+}
+export interface MonitoringRoverPass {
+  id: string;
+  device_id: string | null;
+  place: string | null;
+  status: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  duration_s: number | null;
+  stops_done: number | null;
+  stops_planned: number | null;
+  distance_mm: number | null;
+  images_taken: number | null;
+  images_sent: number | null;
+  images_not_sent: number;
+  failed_stops: Array<{ seq: unknown; reason: string | null }>;
+  position_mm: number | null;
+  position_known: boolean | null;
+  returned_home: boolean | null;
+  needs_manual_check: boolean | null;
+  edge_version: string | null;
 }
 export interface MonitoringProfileVersion {
   version: number;
