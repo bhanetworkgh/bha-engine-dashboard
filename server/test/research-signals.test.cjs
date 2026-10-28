@@ -249,17 +249,17 @@ const ok = (name) => (passed++, console.log(`  ok  ${name}`));
   assert.equal(found[0].key, `fault:${req('logstream.js').signatureOf(WF, 'Call Supplier API')}`, "the key is Logstream's own fault signature, so the two cannot open two jobs");
   ok('T4: research_needed and two needs_human repairs each raise one signal on the fault signature; tests are left out');
 
-  // A DOCTRINE incident (SE8L's monitor) marked research_needed is still a T4 signal: Logstream leaves
-  // these out of its own thresholds (2026-10-17), but T4 reads the shared excludedReason, which is unchanged.
+  // A DOCTRINE incident (SE8L's monitor) is operational and never research (SOP dc89a498, 27 Oct 2026),
+  // so even one written before that day with research_needed true raises no T4 signal. Until 27 Oct this
+  // pinned the opposite (2026-10-17): T4 read the shared excludedReason and opened a job for it.
   const DOC_WF = req('logstream.js').DOCTRINE_GAP_WORKFLOW;
   const DOC_NODE = `genie_ns / RSTEST-${T}:GAP`;
   await query(`INSERT INTO engine_incidents (natural_id, lane_id, fields, source, first_seen_at, updated_at, open_now) VALUES ($1, 'bays', $2::jsonb, 'engine', $3, $3, true)`, [`INC-RSTEST-${T}-DOC`, JSON.stringify({ entity_id: `INC-RSTEST-${T}-DOC`, occurred_at: now, payload: { workflow_or_scenario: DOC_WF, failed_node_or_component: DOC_NODE, error_class: 'NEEDS_EVIDENCE', research_needed: true, impact_tags: ['media', 'doctrine', 'genie_ns'] } }), now]);
   const docSignal = mine((await rs.detect()).signals).find((s) => s.trigger === 'T4' && s.ref === `INC-RSTEST-${T}-DOC`);
-  assert.ok(docSignal, 'a research_needed DOCTRINE incident still raises a T4 signal');
-  assert.equal(docSignal.key, `fault:${DOC_WF} :: ${DOC_NODE}`);
+  assert.equal(docSignal, undefined, 'a research_needed DOCTRINE incident raises no T4 signal');
   // Out of the way again, so the pass below is about the same signals as before.
   await query(`DELETE FROM engine_incidents WHERE natural_id = $1`, [`INC-RSTEST-${T}-DOC`]);
-  ok('T4: a research_needed DOCTRINE incident still raises one T4 signal on its fault signature');
+  ok('T4: a research_needed DOCTRINE incident raises no signal: doctrine research comes only from detectDoctrineGaps');
 
   /* ------------------------------------------------------------ the pass */
   const before = (await query(`SELECT count(*)::int AS n FROM engine_rt_jobs`)).rows[0].n;
@@ -309,19 +309,10 @@ const ok = (name) => (passed++, console.log(`  ok  ${name}`));
   assert.equal((await sig(`fixture:RSTEST-${T}`)).state, 'held_credit');
   ok('a waiting card that stops holding is let go and says so, and gets its job if it asks again; a waiting question is kept; a waiting fixture is never opened by the clock');
 
-  // The DOCTRINE T4 signal goes through the one guard, open(), like every other automatic job:
-  // a job, or held by the budget or the credit floor, and recorded either way.
-  {
-    const g = await rs.open(docSignal);
-    assert.ok(['job_opened', 'held_budget', 'held_credit'].includes(g.state), `open() answered ${g.state}`);
-    const row = await sig(docSignal.key);
-    assert.equal(row.trigger_code, 'T4');
-    assert.equal(row.state, g.state);
-    ok(`a DOCTRINE T4 signal is routed through researchSignals.open() and its guards (${g.state})`);
-    // Give back the budget slot this took, so the checks below see the day exactly as before.
-    if (g.job_id) await query(`DELETE FROM engine_rt_jobs WHERE natural_id = $1`, [g.job_id]);
-    await query(`DELETE FROM engine_research_signals WHERE signal_key = $1`, [docSignal.key]);
-  }
+  // Until 27 Oct a DOCTRINE incident's T4 signal was routed through open() here. There is no such
+  // signal now (SOP dc89a498); a doctrine gap reaches open() only through detectDoctrineGaps, which
+  // test:se8l-episode-db drives through this same guard with three passes at once.
+  assert.equal(docSignal, undefined);
 
   /* -------------------------------------------------------------- reads */
   const read = await rs.read({ limit: 50 });

@@ -147,8 +147,12 @@ export const DOCTRINE_GAP_WORKFLOW = 'T0NO doctrine-gap monitor';
  * excludedReason leaves out, and DOCTRINE incidents (2026-10-17, Jason and
  * Destiny). A DOCTRINE incident is written down and shown as left out, but it
  * never counts toward a research job, an escalation alert or a shared outage
- * here. Logstream only: excludedReason itself is unchanged, because Research
- * Signals (T4) and pattern capture read it and must keep seeing these.
+ * here. excludedReason itself is unchanged, because pattern capture reads it
+ * and must keep seeing these. Research Signals (T4) reads it too, and from
+ * 27 Oct 2026 also skips DOCTRINE incidents through this function
+ * (researchSignals.detectIncidents; SOP dc89a498): a doctrine incident is
+ * operational and never research. Doctrine research comes only from
+ * researchSignals.detectDoctrineGaps.
  */
 export function thresholdExcludedReason(i: { workflow: string | null; node: string | null; tags?: string[] | null }): Excluded {
   const shared = excludedReason(i);
