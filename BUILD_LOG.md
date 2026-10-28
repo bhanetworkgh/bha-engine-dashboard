@@ -13710,3 +13710,10 @@ Files:      server/src/serviceBalances.ts (new); server/src/mcp/balanceTools.ts 
 Problem:    The dashboard holds neither the OpenRouter key for a credits read nor any Twilio credential, and adding a Twilio credential here would be a new secret for one read.
 Fix:        n8n already holds both credentials, so a webhook workflow reads both (free reads, each one carrying on if it fails) and answers one JSON object; the dashboard calls it with x-dashboard-key and judges each balance against the SOP floors. Manual run 55207 returned OpenRouter $28.42 and Twilio $42.30. Test: 12 checks (the floors, ok / low / at the floor, unreadable with its reason, missing service, non-USD, n8n refusing, garbage, unreachable, the key and path sent, no key calling nothing). eg4n still 13 (Genie's list unchanged).
 Decision:   Read only and in Bays' scope only; nobody's top-up is automated. The floors are code, not a setting, the same rule as every other number the SOP sets.
+
+## 2026-10-28 23:55 — Agent allow-lists for the evidence store and the balances tool
+Intent:     Make read_evidence, save_evidence and check_service_balances reachable by the agents that are scoped for them on the server.
+Files:      none in the repo. n8n agent drafts: Bays Nw5igXu4WWrjUMWB and its backup PjKGbV4ZnH4YOfri (read_evidence, save_evidence, check_service_balances); North Star 8NQRXadH0OrKe5XV, its backup fqeON4jXjenIi3cP, Research Twin dDtsExaaXhlFd2dv and its backup 7ToBQqHpffX1eUG0 (read_evidence).
+Problem:    The 22:20 entry says Bays' MCP server has no allow-list. That is wrong: Bays' toolPermissions blocks both categories and lists 42 tools by name, exactly as North Star's and Research Twin's do, so neither evidence tool was reachable by Bays.
+Fix:        One config.patch per draft adding the tools as always_allow; all three main drafts validate. Draft evals started for all six (DRAFT-202610282122-O10H, -2QGJ, -80DU on OpenRouter; -462T, -5MK4, -I5ZM on the Anthropic backups). Publish waits on a pass.
+Decision:   Genie's read_evidence is in its server scope already; Genie's own wiring is Kaiqi's.
