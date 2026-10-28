@@ -4515,3 +4515,87 @@ export interface HelpPagesData {
   rules: string[];
   history: HelpHistoryRow[];
 }
+
+/* ── Code checks (29 Oct 2026, Destiny) ─────────────────────────────────────
+ * Destiny's second review of every approved log against what is live, from
+ * 1 Nov 2026, and the outputs Jason asked November to produce. Served by
+ * GET /api/code-checks (server/src/codeChecks.ts). A read.
+ */
+export type CodeCheckVerdict = 'matches' | 'partly' | 'overstated';
+export type CodeCheckPayCall = 'as_logged' | 'partly' | 'hold';
+export interface CodeCheckClaim {
+  claim: string;
+  where: string;
+  result: 'confirmed' | 'partly' | 'not_found';
+  proof: string;
+}
+export interface CodeCheckFollowUp {
+  what: string;
+  who: string;
+  by: string;
+  loop_id: string | null;
+}
+export interface CodeCheck {
+  codex_entry_id: string;
+  builder_slack_id: string | null;
+  builder_name: string | null;
+  session_date: string | null;
+  approved_at: string | null;
+  posted_at: string;
+  check_link: string;
+  verdict: CodeCheckVerdict;
+  verdict_reason: string;
+  claims: CodeCheckClaim[];
+  missing: string[];
+  couldnt_check: string | null;
+  pay_call: CodeCheckPayCall;
+  follow_ups: CodeCheckFollowUp[];
+  recorded_by: string;
+  created_at: string;
+  updated_at: string;
+  hours_to_check: number | null;
+}
+export interface CodeCheckWaiting {
+  codex_entry_id: string | null;
+  builder: string | null;
+  builder_slack_id: string | null;
+  session_date: string | null;
+  approved_at: string | null;
+  hours_waiting: number | null;
+  late: boolean;
+}
+export interface AuditOutput {
+  output_id: string;
+  kind: 'catalog' | 'dod_checklist' | 'v2_spec';
+  lane: string | null;
+  title: string;
+  status: 'not_started' | 'drafting' | 'ready_for_jason' | 'accepted';
+  due: string | null;
+  link: string | null;
+  note: string | null;
+  sort: number;
+  updated_by: string;
+  updated_at: string;
+}
+export interface CodeChecksData {
+  start: string;
+  window_hours: number;
+  approved_since_start: number;
+  own_sessions_excluded: number;
+  waiting: CodeCheckWaiting[];
+  checks: CodeCheck[];
+  catalog: Array<CodeCheck & { not_confirmed: CodeCheckClaim[] }>;
+  counts: {
+    posted: number;
+    waiting: number;
+    late: number;
+    no_approval_time: number;
+    verdicts: Record<CodeCheckVerdict, number>;
+    pay_calls: Record<CodeCheckPayCall, number>;
+    within_window: number;
+    timed: number;
+  };
+  hours_to_check: { n: number; p50: number | null; p95: number | null };
+  notes: string[];
+  outputs: AuditOutput[];
+}

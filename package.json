@@ -33,6 +33,7 @@
     "test:client-report": "npm run build:server --silent && node server/test/client-report.test.cjs",
     "test:layer0-void": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/layer0-void.test.cjs",
     "test:codex-reject": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/codex-reject.test.cjs",
+    "test:code-checks": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/code-checks.test.cjs",
     "test:un9d": "node --no-warnings=ExperimentalWarning server/test/un9d.test.cjs",
     "test:vfarm-evidence": "node --no-warnings=ExperimentalWarning server/test/vfarm-evidence.test.cjs",
     "test:range-doubt": "node --no-warnings=ExperimentalWarning server/test/range-doubt.test.cjs",

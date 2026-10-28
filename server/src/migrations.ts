@@ -3838,6 +3838,59 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
     name: 'engine_vfarm_snapshots.ledger_writes: vFarm ledger lanes report what they wrote and what was refused',
     statements: [`ALTER TABLE engine_vfarm_snapshots ADD COLUMN IF NOT EXISTS ledger_writes jsonb`],
   },
+  {
+    // 29 Oct 2026, Destiny (Jason's yes, DM D0AF0DG8ZPY 1793181986.036119): the code check, Destiny's second
+    // review of every approved log against what is live, from 1 Nov. One row per Codex entry checked, in the
+    // format Jason confirmed; the discrepancy catalog is read from these rows. And the three things Jason asked
+    // November to produce, seeded as not started: the catalog, one definition of done checklist per lane he
+    // named, and the v2 spec. codeChecks.ts holds the rules.
+    id: 101,
+    name: 'engine_code_checks and engine_audit_outputs (second review of approved logs, and November\'s outputs for Jason)',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_code_checks (
+         codex_entry_id   text PRIMARY KEY,
+         builder_slack_id text,
+         builder_name     text,
+         session_date     text,
+         approved_at      timestamptz,
+         posted_at        timestamptz NOT NULL,
+         check_link       text NOT NULL,
+         verdict          text NOT NULL CHECK (verdict IN ('matches','partly','overstated')),
+         verdict_reason   text NOT NULL,
+         claims           jsonb NOT NULL DEFAULT '[]'::jsonb,
+         missing          jsonb NOT NULL DEFAULT '[]'::jsonb,
+         couldnt_check    text,
+         pay_call         text NOT NULL CHECK (pay_call IN ('as_logged','partly','hold')),
+         follow_ups       jsonb NOT NULL DEFAULT '[]'::jsonb,
+         recorded_by      text NOT NULL,
+         created_at       timestamptz NOT NULL DEFAULT now(),
+         updated_at       timestamptz NOT NULL DEFAULT now(),
+         CHECK (NOT (verdict = 'overstated' AND pay_call = 'as_logged'))
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_code_checks_posted ON engine_code_checks (posted_at DESC)`,
+      `CREATE TABLE IF NOT EXISTS engine_audit_outputs (
+         output_id  text PRIMARY KEY,
+         kind       text NOT NULL CHECK (kind IN ('catalog','dod_checklist','v2_spec')),
+         lane       text,
+         title      text NOT NULL,
+         status     text NOT NULL DEFAULT 'not_started' CHECK (status IN ('not_started','drafting','ready_for_jason','accepted')),
+         due        text,
+         link       text,
+         note       text,
+         sort       integer NOT NULL DEFAULT 100,
+         updated_by text NOT NULL,
+         updated_at timestamptz NOT NULL DEFAULT now()
+       )`,
+      `INSERT INTO engine_audit_outputs (output_id, kind, lane, title, status, due, note, sort, updated_by) VALUES
+         ('discrepancy-catalog', 'catalog', NULL, 'Discrepancy catalog: where logs were overstated against what is live', 'not_started', '2026-11-30', 'Built from every code check marked partly or overstated; the rows below are the catalog as it stands.', 1, 'U0AEW3TBYH1'),
+         ('dod-cst-comms', 'dod_checklist', 'CST and the core comms engine', 'Definition of done: CST and the core comms engine', 'not_started', '2026-11-30', NULL, 2, 'U0AEW3TBYH1'),
+         ('dod-genie-engines', 'dod_checklist', 'Slack Genie and the Log, Guide and Briefing engines', 'Definition of done: Slack Genie and the Log, Guide and Briefing engines', 'not_started', '2026-11-30', NULL, 3, 'U0AEW3TBYH1'),
+         ('dod-vfarm-p1', 'dod_checklist', 'vFarm P1 (cabinet, rover, telemetry, alerts)', 'Definition of done: vFarm P1 (cabinet, rover, telemetry, alerts)', 'not_started', '2026-11-30', NULL, 4, 'U0AEW3TBYH1'),
+         ('dod-ns-comp-infra', 'dod_checklist', 'North Star and SE8L, comp and engine infra', 'Definition of done: North Star and SE8L, comp and engine infra', 'not_started', '2026-11-30', NULL, 5, 'U0AEW3TBYH1'),
+         ('v2-execution-audit-spec', 'v2_spec', NULL, 'v2 execution audit spec: Bays or Genie run the first tier of checks against code and services', 'not_started', '2026-11-30', NULL, 6, 'U0AEW3TBYH1')
+       ON CONFLICT (output_id) DO NOTHING`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
