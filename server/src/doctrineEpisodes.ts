@@ -1,5 +1,5 @@
 /**
- * SE8L persistence: the doctrine-gap watcher's sweeps, gap episodes and alarms (migration 100).
+ * SE8L persistence: the doctrine-gap watcher's sweeps, gap episodes and alarms (migration 101).
  *
  * Three things the watcher must keep true across a crash, a retry and two instances overlapping on a
  * deploy, and none of them can live in memory:
