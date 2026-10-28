@@ -470,7 +470,7 @@ async function closeOnHealth(ledgerId: string, at: string): Promise<void> {
 }
 
 /**
- * Whether an incident is open on this key, and its ledger id. The alarm row (migration 100) answers
+ * Whether an incident is open on this key, and its ledger id. The alarm row (migration 101) answers
  * where it exists; a key whose incident was opened before 27 Oct has only the OPENED / RECOVERED
  * markers, so they answer for it.
  */
