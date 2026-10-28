@@ -3829,6 +3829,15 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `INSERT INTO engine_events (event_type, subject_id, lane, actor, detail) SELECT 'help_page_written', 'operator-quickstart', 'CST', 'U0AEW3TBYH1', jsonb_build_object('created', false, 'text_changed', true, 'stage_before', 'draft', 'stage_after', 'draft', 'gaps', 0, 'body_sha256', 'e8463ab2fc18b34ba0fa3487b8129e29f4e9a469164316a8e08208566ef5b0df', 'via', 'migration 99') WHERE NOT EXISTS (SELECT 1 FROM engine_events WHERE event_type = 'help_page_written' AND subject_id = 'operator-quickstart' AND detail->>'body_sha256' = 'e8463ab2fc18b34ba0fa3487b8129e29f4e9a469164316a8e08208566ef5b0df')`,
     ],
   },
+  {
+    // 28 Oct 2026, Destiny (D3 — Kavin's rover log of 26 Oct, NAFB): vFarm's bharag ledger lanes can be
+    // told "accepted" while writing nothing (0 of 8 sensor entries, 26 Oct), and the only trace was a
+    // log line. Each snapshot may now carry a `ledger_writes` report per lane and farm; it is kept on the
+    // snapshot row whole, and the Monitoring Twin opens an incident on any refused entry.
+    id: 100,
+    name: 'engine_vfarm_snapshots.ledger_writes: vFarm ledger lanes report what they wrote and what was refused',
+    statements: [`ALTER TABLE engine_vfarm_snapshots ADD COLUMN IF NOT EXISTS ledger_writes jsonb`],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
