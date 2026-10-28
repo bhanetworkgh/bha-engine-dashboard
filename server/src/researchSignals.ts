@@ -48,6 +48,10 @@ import * as engineWrite from './engineWrite';
 import * as engineEvents from './engineEvents';
 import * as logstream from './logstream';
 import * as timers from './timers';
+import * as doctrineGap from './doctrineGap';
+import * as doctrineEpisodes from './doctrineEpisodes';
+import * as doctrineConsumer from './doctrineConsumer';
+import { JOB_STATUSES } from './sources';
 
 export const RULE = {
   daily_budget: 5,
@@ -157,6 +161,30 @@ interface Row {
   rearm_days: number | null;
   opened_at: string | null;
   attempts: number;
+  previous_jobs?: string[];
+}
+
+/**
+ * A job opened before its signal row was told: postRecord landed and the write after it did not (a
+ * crash, a failed update). The row has no job_id but a job carries its Signal Key. open() always found
+ * such a job while it was still open; once it had been resolved or capped nothing found it, and the
+ * next pass opened a second job for the same signal (27 Oct 2026). This writes the job back onto the
+ * row, so the rules for a job the row knows about apply to it exactly as they would have. A job the
+ * row has already moved past (previous_jobs, after a re-arm) is never it. Open jobs are left to the
+ * existing recovery in open(), unchanged.
+ */
+async function adoptLostJob(row: Row, key: string): Promise<Row> {
+  const lost = await query<{ job_id: string; status: string | null; opened_at: string | null }>(
+    `SELECT natural_id AS job_id, fields->>'Status' AS status, fields->>'Opened At' AS opened_at FROM engine_rt_jobs
+      WHERE fields->>'Signal Key' = $1 AND natural_id IS NOT NULL AND NOT ($2::jsonb ? natural_id) ORDER BY id DESC LIMIT 1`,
+    [key, JSON.stringify(row.previous_jobs ?? [])],
+  );
+  const j = lost.rows[0];
+  if (!j || OPEN_STATUSES.includes(j.status ?? '')) return row;
+  const openedAt = row.opened_at ?? (j.opened_at && Number.isFinite(Date.parse(j.opened_at)) ? new Date(j.opened_at).toISOString() : null);
+  await query(`UPDATE engine_research_signals SET state = 'job_opened', job_id = $2, reason = NULL, opened_at = coalesce(opened_at, $3::timestamptz) WHERE id = $1 AND job_id IS NULL`, [row.id, j.job_id, openedAt]);
+  console.error(`[research-signals] ${row.signal_id}: job ${j.job_id} (${j.status ?? 'no status'}) carried this signal's key but was not on its row; written back, not reopened`);
+  return { ...row, state: 'job_opened', job_id: j.job_id, opened_at: openedAt };
 }
 
 const OPEN_STATUSES = ['Pending', 'In Progress'];
@@ -183,8 +211,8 @@ export async function open(s: Signal): Promise<Outcome> {
   const rearm = s.rearm_days ?? null;
   try {
     // What the signal already has, before anything is spent on it.
-    const held = await query<Row>(`SELECT id::text, signal_id, state, job_id, refs, rearm_days, opened_at::text, attempts FROM engine_research_signals WHERE signal_key = $1`, [s.key]);
-    const row = held.rows[0];
+    const held = await query<Row>(`SELECT id::text, signal_id, state, job_id, refs, rearm_days, opened_at::text, attempts, previous_jobs FROM engine_research_signals WHERE signal_key = $1`, [s.key]);
+    const row = held.rows[0] && !held.rows[0].job_id ? await adoptLostJob(held.rows[0], s.key) : held.rows[0];
     let previous: string | null = null;
     if (row?.job_id) {
       const status = await jobStatus(row.job_id);
@@ -202,6 +230,9 @@ export async function open(s: Signal): Promise<Outcome> {
       };
       if (status === null) return stop(`its job ${row.job_id} was removed by a person, so it is not opened again automatically`);
       if (status === 'Capped (needs human)') return stop(`its job ${row.job_id} was capped and needs a person; a capped question is not reopened automatically`);
+      // A status outside the job vocabulary, an empty one included, is not taken to mean finished (27 Oct
+      // 2026): until then it fell through to the rearm rule below and could open a second job.
+      if (!JOB_STATUSES.includes(status)) return stop(`its job ${row.job_id} has status "${status}", which is not one this guard knows (${JOB_STATUSES.join(', ')}); it is not reopened automatically`);
       if (rearm === null) return stop(`already researched once: job ${row.job_id} is ${status}`);
       const since = row.opened_at ? (Date.now() - new Date(row.opened_at).getTime()) / 86_400_000 : Infinity;
       if (since < rearm) return stop(`researched ${Math.floor(since)} day(s) ago (job ${row.job_id}, ${status}); the same signal can open a new job after ${rearm} days`, true);
@@ -373,6 +404,10 @@ async function detectIncidents(): Promise<Signal[]> {
   );
   for (const i of flagged.rows) {
     if (logstream.excludedReason(i)) continue;
+    // A doctrine incident is operational and never research (SOP dc89a498, 27 Oct 2026): a resolver
+    // outage, a refused or malformed read, a contradiction. Their incidents no longer ask for research,
+    // and this holds for any written before that change. Doctrine research comes from detectDoctrineGaps.
+    if (logstream.thresholdExcludedReason({ ...i, tags: i.tags }) === 'doctrine') continue;
     const sig = logstream.signatureOf(i.workflow, i.node);
     out.push({
       trigger: 'T4',
@@ -561,11 +596,72 @@ async function detectRedFlags(): Promise<Signal[]> {
   return out;
 }
 
+/**
+ * SE8L doctrine gaps (T4; SOP 192331ee, Jason, 27 Oct 2026). An open needs_evidence / stale_evidence
+ * episode becomes one signal per research question (`research_key`, shared across surfaces only where
+ * the gap is the claim's own) once doctrineGap.eligibleForResearch says yes: verified continuity for 7
+ * days, a verified consumer and at least one real hit. With VERIFIED_CONSUMER_WRITERS empty nothing is
+ * eligible, so in production this returns no signals and every refusal is listed for the read.
+ *
+ * The ref is the episode: a repeat pass for the same episode changes nothing, a second surface's
+ * episode while the job is open is added to it, and once the job is resolved only a NEW episode (the
+ * gap recovered and came back) may open another (rearm_days 0). An episode a finished job already
+ * covers (opened at or after the episode began, unreadable dates counted as covering) is skipped here,
+ * because rearm_days 0 would otherwise reopen for the same episode.
+ * Capped, removed and unknown-status jobs are never reopened (open()). This opens nothing itself.
+ */
+export async function detectDoctrineGaps(opts: { writers?: readonly string[]; now?: number } = {}): Promise<Signal[]> {
+  const out: Signal[] = [];
+  const now = opts.now ?? Date.now();
+  lastDoctrineRefusals.clear();
+  const byKey = new Map<string, Array<Awaited<ReturnType<typeof doctrineEpisodes.openResearchEpisodes>>[number] & { gap_age_days: number | null }>>();
+  for (const ep of await doctrineEpisodes.openResearchEpisodes()) {
+    const ev = await doctrineConsumer.consumerEvidence(ep.doctrine_id, ep.claim_id, ep.started_at, opts.writers);
+    const verdict = doctrineGap.eligibleForResearch(ep, ev, now);
+    lastDoctrineRefusals.set(ep.episode_id, { research_key: ep.research_key, refusals: verdict.refusals, gap_age_days: verdict.gap_age_days });
+    if (!verdict.eligible) continue;
+    byKey.set(ep.research_key, [...(byKey.get(ep.research_key) ?? []), { ...ep, gap_age_days: verdict.gap_age_days }]);
+  }
+  for (const [key, eps] of byKey) {
+    // An episode already has its job when a job carrying this key was opened at or after the episode
+    // began: only this detector writes doctrine-gap keys. Read from the jobs, not the signal row, so a
+    // job whose bookkeeping write was lost still counts. While that job is open the episode goes on to
+    // open() (a no-op, or added to the job); once it is finished the episode is skipped, because with
+    // rearm_days 0 open() would otherwise give the same episode a second job.
+    const jobs = await query<{ opened_at: string | null; status: string | null }>(`SELECT fields->>'Opened At' AS opened_at, fields->>'Status' AS status FROM engine_rt_jobs WHERE fields->>'Signal Key' = $1 AND natural_id IS NOT NULL`, [key]);
+    const covered = (e: { started_at: string }) => jobs.rows.some((j) => !OPEN_STATUSES.includes(j.status ?? '') && !(Date.parse(j.opened_at ?? '') < Date.parse(e.started_at)));
+    const ep = eps.find((e) => !covered(e));
+    if (!ep) continue;
+    const surfaces = [...new Set(eps.map((e) => e.surface))].join(', ');
+    out.push({
+      trigger: 'T4',
+      key,
+      source: 'Engine signal (doctrine gap)',
+      ref: ep.episode_id,
+      rearm_days: 0,
+      question: `Claim ${ep.claim_id} of doctrine ${ep.doctrine_id} has been ${ep.condition.replace('_', ' ')} for ${Math.floor(ep.gap_age_days ?? 0)} days while a verified consumer used it. What evidence would close this gap, where does it exist, and who holds it?`,
+      context: [
+        `Opened by SE8L (T4, SOP 192331ee): a needs_evidence / stale_evidence gap present for at least ${doctrineGap.RESEARCH_RULE.min_gap_days} consecutive days with a verified consumer and at least ${doctrineGap.RESEARCH_RULE.min_real_hits} real hit. One job per doctrine key; further gaps on it are added here, never a new job, until this job is resolved.`,
+        `Episode ${ep.episode_id} on ${surfaces} (key ${ep.recovery_key}), since ${ep.started_at}, last confirmed ${ep.last_confirmed_at}.`,
+        'The question is the missing evidence. It changes no doctrine, publication decision, card or loop.',
+      ].join('\n'),
+      detail: { research_key: key, episodes: eps.map((e) => e.episode_id), surfaces: eps.map((e) => e.surface) },
+    });
+  }
+  return out;
+}
+
+/** The last refusal per episode, for the read: why each open gap has not reached Research Twin. */
+const lastDoctrineRefusals = new Map<string, { research_key: string; refusals: string[]; gap_age_days: number | null }>();
+export function doctrineRefusals(): Array<{ episode_id: string; research_key: string; refusals: string[]; gap_age_days: number | null }> {
+  return [...lastDoctrineRefusals].map(([episode_id, v]) => ({ episode_id, ...v }));
+}
+
 /** Every signal the engine's own records hold right now. A read: it opens nothing. */
 export async function detect(): Promise<{ signals: Signal[]; errors: string[] }> {
   const signals: Signal[] = [];
   const errors: string[] = [];
-  for (const [name, fn] of [['incidents (T4)', detectIncidents], ['lane health (T5)', detectLaneHealth], ['commercial cards (T6)', detectCards], ['red flags (T8)', detectRedFlags]] as const) {
+  for (const [name, fn] of [['incidents (T4)', detectIncidents], ['lane health (T5)', detectLaneHealth], ['commercial cards (T6)', detectCards], ['red flags (T8)', detectRedFlags], ['doctrine gaps (T4, SE8L)', () => detectDoctrineGaps()]] as const) {
     try {
       signals.push(...(await fn()));
     } catch (e) {

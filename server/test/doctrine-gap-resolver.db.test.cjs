@@ -146,7 +146,9 @@ const bharag = http.createServer((req, res) => {
     m.vrfk.readDecisions = async (claims, surface) => { if (surface === 'vfarm') throw new Error('decision read failed (test)'); return realDecisions(claims, surface); };
     try { await sweep(); } finally { m.vrfk.readDecisions = realDecisions; }
     const rows = await resolverRows();
-    assert.equal(rows.length, 5);
+    // 4 from 27 Oct (5 before): the third, identical failure on the open alarm is no longer written
+    // (SOP 9daadbc3). This failure has a new reason, so it is a change and is written.
+    assert.equal(rows.length, 4);
     assert.deepEqual(rows[rows.length - 1], { c: 'resolver_unavailable', r: 'decision read failed (test)' });
     assert.equal((await healthyResolver()).length, 1);
     assert.deepEqual(statusPosts(), []);
@@ -216,6 +218,8 @@ const bharag = http.createServer((req, res) => {
   } finally {
     const ev = await q(`DELETE FROM engine_events WHERE subject_id LIKE $1 OR detail->>'doctrine_id' = $2 OR subject_id LIKE $3`, [`%${DOC}%`, DOC, ANY_RESOLVER_KEY]);
     const doc = await q(`DELETE FROM engine_media_doctrine WHERE doctrine_id = $1`, [DOC]);
+    await q(`DELETE FROM engine_doctrine_gap_episodes WHERE doctrine_id = $1`, [DOC]).catch(() => undefined);
+    await q(`DELETE FROM engine_doctrine_gap_alarms WHERE recovery_key LIKE $1 OR recovery_key LIKE $2`, [`%${DOC}%`, ANY_RESOLVER_KEY]).catch(() => undefined);
     console.log(`  cleaned up ${ev.rowCount} event row(s) and ${doc.rowCount} doctrine row(s) written by this run`);
     await m.pg.closePool();
     bharag.close();
