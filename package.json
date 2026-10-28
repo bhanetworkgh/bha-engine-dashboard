@@ -77,7 +77,7 @@
     "test:submit-log": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/submit-log-test.test.cjs",
     "test:qndm-drill": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/doctrine-drill.db.test.cjs",
     "test:se8l-writes": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/doctrine-gap-writes.db.test.cjs",
-    "test:se8l-resolver":"npm run build:server --silent && node server/test/doctrine-gap-resolver.test.cjs",
+    "test:se8l-resolver": "npm run build:server --silent && node server/test/doctrine-gap-resolver.test.cjs",
     "test:se8l-episode": "npm run build:server --silent && node server/test/doctrine-gap-episode.test.cjs",
     "test:se8l-episode-db": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/doctrine-gap-episode.db.test.cjs",
     "test:research-signals-open": "npm run build:server --silent && node server/test/research-signals-open.test.cjs",
@@ -86,7 +86,8 @@
     "test:self-healing": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/self-healing.test.cjs",
     "test:health-report": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/health-report.test.cjs",
     "test:engine-strain": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/engine-strain.test.cjs",
-    "test:repair-settle": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/repair-settle.test.cjs"
+    "test:repair-settle": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/repair-settle.test.cjs",
+    "test:service-balances": "node server/test/service-balances.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",

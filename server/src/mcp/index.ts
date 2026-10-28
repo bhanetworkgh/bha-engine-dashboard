@@ -262,6 +262,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-28 (D3): "Bays, save this into the evidence store" on a file posted in Slack. Saves one
         // document and never edits one; who may ask is held on the server.
         'save_evidence',
+        // 2026-10-28: "how much OpenRouter / Twilio credit is left?" asked in Slack. Both balances read now
+        // through n8n, judged against the SOP floors. A read; it tops nothing up.
+        'check_service_balances',
       ]),
     },
     {
