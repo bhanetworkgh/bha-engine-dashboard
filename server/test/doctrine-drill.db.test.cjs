@@ -150,10 +150,10 @@ const bharag = http.createServer((req, res) => {
     ok('break + sweep 3: one critical DOCTRINE incident, tagged drill, asking for no research; one row written; Engine health holds it open, Logstream leaves it out of its counts');
 
     s = (await tool({ step: 'sweep' })).result;
-    assert.equal(g(s).write_reason, 'alarm_open');
-    assert.equal(s.written, 1);
+    assert.equal(g(s).write_reason, 'unchanged');
+    assert.equal(s.written, 0);
     assert.equal(opens().length, 1, 'no second incident');
-    ok('sweep 4: the open alarm writes its one row, and no second incident opens');
+    ok('sweep 4: an identical reading on the open alarm writes nothing (SOP 9daadbc3), and no second incident opens');
 
     r = await tool({ step: 'record_decision', label: 'fix' });
     assert.equal(r.ok, true, JSON.stringify(r));
@@ -166,7 +166,7 @@ const bharag = http.createServer((req, res) => {
 
     s = (await tool({ step: 'sweep' })).result;
     assert.equal(g(s).incident, 'closed_after_two_healthy_reads');
-    assert.equal(g(s).write_reason, 'alarm_open');
+    assert.equal(g(s).write_reason, 'alarm_recovery');
     assert.deepEqual(statusPosts(), ['retrying', 'self_healed']);
     h = await heldIncident(ledgerId);
     assert.equal(h.open_now, false);
@@ -196,14 +196,16 @@ const bharag = http.createServer((req, res) => {
     assert.equal(events.filter((e) => e === 'doctrine_gap_incident_opened').length, 1);
     assert.equal(events.filter((e) => e === 'doctrine_gap_recovered').length, 1);
     assert.equal(events.filter((e) => e === 'vfam_claim_publication_decision').length, 3);
-    assert.equal(events.filter((e) => e === 'doctrine_gap_observed').length, 7, '3 first + break + alarm + fix + close');
+    assert.equal(events.filter((e) => e === 'doctrine_gap_observed').length, 6, '3 first + break + fix + close (an identical reading on the open alarm is not written, 27 Oct)');
     const audits = (await query(`SELECT count(*)::int AS n FROM engine_mcp_writes WHERE tool = 'run_doctrine_drill' AND arguments->>'run' = $1`, [RUN])).rows[0].n;
     assert.ok(audits >= 14);
-    ok('status gives the whole record: 1 open, 1 recovery, 3 decisions, 7 rows; every call audited');
+    ok('status gives the whole record: 1 open, 1 recovery, 3 decisions, 6 rows; every call audited');
   } finally {
     await query(`DELETE FROM engine_events WHERE detail->>'doctrine_id' IN ($1, $2) OR subject_id LIKE $3`, [REAL, drill.DOCTRINE_ID, `%${drill.DOCTRINE_ID}%`]);
     await query(`DELETE FROM engine_media_doctrine WHERE doctrine_id IN ($1, $2)`, [REAL, drill.DOCTRINE_ID]);
     await query(`DELETE FROM engine_incidents WHERE natural_id LIKE 'INC-QNDM-TEST-%'`);
+    await query(`DELETE FROM engine_doctrine_gap_episodes WHERE doctrine_id IN ($1, $2)`, [REAL, drill.DOCTRINE_ID]).catch(() => undefined);
+    await query(`DELETE FROM engine_doctrine_gap_alarms WHERE recovery_key LIKE $1 OR recovery_key LIKE $2`, [`%${drill.DOCTRINE_ID}%`, `%${REAL}%`]).catch(() => undefined);
     await query(`DELETE FROM engine_mcp_writes WHERE tool = 'run_doctrine_drill' AND (arguments->>'run' = $1 OR arguments->>'run' IS NULL)`, [RUN]);
     await closePool();
     bharag.close();

@@ -2583,9 +2583,10 @@ autopay, no pay wiring, no destructive automated action).
   `excluded_reason: 'doctrine'`, and shown as left out on the page and in
   `read_logstream`. That is `logstream.thresholdExcludedReason()`, used by
   `evaluate()` and `writeRows()` only; the shared `excludedReason()` is
-  unchanged, because Research Signals (T4) and pattern capture read it — a
-  `research_needed` DOCTRINE incident still raises a T4 signal and its job goes
-  through `researchSignals.open()`. `npm run test:logstream`,
+  unchanged, because Research Signals (T4) and pattern capture read it. **From
+  27 Oct 2026 T4 skips DOCTRINE incidents too** (SOP dc89a498; see SE8L / YEAO
+  below): a doctrine incident is operational and never research, and doctrine
+  research comes only from `detectDoctrineGaps`. `npm run test:logstream`,
   `npm run test:research-signals`.
 - **All it can do is open a research job and post a Slack message.** It never
   closes, retries, edits or deletes, and never touches pay. A job or alert that
@@ -4360,8 +4361,72 @@ and `policyFor` is unchanged. **Open (owner):** whether "2 failures" means 2 in 
 row (today it is 2 within 24 hours, healthy reads between or not); whether a read
 with no claims should recover a resolver incident (it does here) and whether no
 doctrine is a gap of its own; SE8L's incident authority; and two watcher
-processes recovering one key at once (not guarded; production runs one).
+processes recovering one key at once (not guarded then; fenced from 27 Oct, below).
 `npm run test:se8l-resolver`, `npm run test:se8l-resolver-db`.
+
+**SE8L / YEAO: gaps reach Research Twin, outages never do** (2026-10-27, Hardik —
+DW-1792507157643-YEAO; Jason's SOPs 9daadbc3, 192331ee and dc89a498 of the same
+day). Built on the existing SE8L, M4CV and T4 code; no new service or queue. **The
+watcher is still OFF** and nothing here turns it on. This narrows the M4CV write
+rule above (20 Oct) to Jason's three listed exceptions. Migration 100 adds three
+tables, written only by `server/src/doctrineEpisodes.ts`:
+
+- **Sweeps, fenced.** `engine_doctrine_gap_sweeps`, one running at a time (a partial
+  unique index decides). Its `seq` is the identity of every reading in the pass:
+  observation ids and dedupe keys are `recovery_key` + `seq`, never a timestamp, so a
+  replay is the same event. A sweep whose heartbeat is 10 minutes old is **taken over
+  under the same seq with a new `owner_token`**, and every write the sweep makes runs
+  `fence()` inside its own transaction (an `UPDATE … WHERE owner_token` that holds the
+  row lock), so a stale worker cannot change an episode, finish the sweep, claim an
+  alarm or reach BHARAG once ownership has moved. Reads happen before recording, so a
+  database or fence failure is never filed as a resolver outage.
+- **Episodes.** `engine_doctrine_gap_episodes`, one open per `recovery_key`, only for
+  `needs_evidence` / `stale_evidence`. Confirmed at most once per seq
+  (`last_sweep_seq < seq`, in the pure `episodeStep` and again in SQL). It ends on
+  recovery, on a different gap, on a confirmation gap over
+  `CONTINUITY.max_confirmation_gap_minutes` (**30, a provisional test value, not
+  Canon; the production threshold is a pending decision**), or on clock doubt, which
+  starts an episode that can never count. Age runs to the last confirmation, never to
+  now.
+- **Alarms.** `engine_doctrine_gap_alarms`, one per key: a fenced one-winner claim
+  before an incident is opened (a claim older than 2 minutes is reclaimable, and the
+  claimant looks for the incident in BHARAG first; BHARAG calls time out at 20
+  seconds), and the restatement clock.
+- **M4CV, exactly Jason's three exceptions.** First and changed readings, plus
+  `alarm_recovery` (a healthy reading on an open alarm), `counting` (a resolver
+  failure, keyed on its seq) and `incident_restatement` (only an open incident, at
+  most once in any rolling 24 hours from the alarm row's own `last_restated_at`,
+  carrying the ledger id). The 20 Oct `alarm_open`, `acting` and keyless
+  `daily_restatement` writes stop; whether anything was checked is the sweeps table's
+  to say, in `summary().sweeps`.
+- **Outages are operational.** Every doctrine incident has `research_needed: false`,
+  and `detectIncidents` skips DOCTRINE incidents, so a resolver outage, a refused or
+  malformed read or a contradiction never opens a Research Twin job (this reverses the
+  17 Oct rule that T4 kept seeing them). `needs_evidence` / `stale_evidence` no longer
+  open incidents at all.
+- **Escalation** is `researchSignals.detectDoctrineGaps`, T4, through the existing
+  `open()`: one job per `research_key` (`doctrine-gap:<doctrine>:<claim>:t0no_needs_evidence`
+  across surfaces; publication needs_evidence and stale_evidence per surface), only
+  when `eligibleForResearch` passes — verified continuity for 7 days, a verified
+  consumer and at least one real hit — and every refusal is named
+  (`continuity_unverified`, `gap_age_under_7_days`, `no_verified_consumer`,
+  `no_real_hit`, `consumer_evidence_unreadable`, `episode_ended`). The ref is the
+  episode; `rearm_days` is 0 so only a new episode reopens after a Resolved job, and an
+  episode a finished job already covers is skipped. Capped, removed and unknown-status
+  jobs are never reopened. **There is no Parked status; Capped is not treated as
+  parked.**
+- **Real use fails closed.** `server/src/doctrineConsumer.ts` counts only
+  `doctrine_claim_used` events (schema `doctrine.claim.use.v1`) from an actor on
+  `VERIFIED_CONSUMER_WRITERS`, never synthetic, fixture, test or drill. **The list is
+  empty and stays empty until an authorized producer exists**, so in production no
+  gap can reach Research Twin. A sweep is never a hit.
+- **Two changes to the shared `open()`**, for every trigger: a job carrying the
+  signal's key that the row was never told about is adopted whatever its status
+  (before, a resolved one was invisible and a second job opened), and a status outside
+  `JOB_STATUSES` is never reopened.
+
+`npm run test:se8l-episode` and `npm run test:research-signals-open` are pure;
+`npm run test:se8l-episode-db` needs a local `_test` Postgres.
 
 ### Media Twin, Genie and vFarm
 **Three single centred "coming soon" pages, and nothing else** (decisions

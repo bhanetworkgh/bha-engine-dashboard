@@ -3829,6 +3829,74 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `INSERT INTO engine_events (event_type, subject_id, lane, actor, detail) SELECT 'help_page_written', 'operator-quickstart', 'CST', 'U0AEW3TBYH1', jsonb_build_object('created', false, 'text_changed', true, 'stage_before', 'draft', 'stage_after', 'draft', 'gaps', 0, 'body_sha256', 'e8463ab2fc18b34ba0fa3487b8129e29f4e9a469164316a8e08208566ef5b0df', 'via', 'migration 99') WHERE NOT EXISTS (SELECT 1 FROM engine_events WHERE event_type = 'help_page_written' AND subject_id = 'operator-quickstart' AND detail->>'body_sha256' = 'e8463ab2fc18b34ba0fa3487b8129e29f4e9a469164316a8e08208566ef5b0df')`,
     ],
   },
+  {
+    /**
+     * 27 Oct 2026, Hardik (SE8L / DW-1792507157643-YEAO). Three tables the doctrine-gap watcher keeps
+     * so that what it counts survives a crash, a retry and two instances overlapping on a deploy.
+     * Additive only: nothing reads them before this commit and nothing writes them while the watcher
+     * is OFF.
+     *   - sweeps: one row per pass. `seq` is the identity every reading in the pass carries, and a
+     *     pass taken over after its owner went quiet keeps its seq; `owner_token` changes on takeover
+     *     and is checked inside every write the pass makes (the fence).
+     *   - episodes: one unbroken run of a needs_evidence / stale_evidence gap on one key, the only
+     *     thing the seven-day Research Twin rule is measured on.
+     *   - alarms: one row per recovery key, for opening its incident exactly once and for the rolling
+     *     24 hours between restatements of an open one.
+     */
+    id: 100,
+    name: 'SE8L: doctrine-gap sweeps (fenced), gap episodes and alarms',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_doctrine_gap_sweeps (
+        seq BIGSERIAL PRIMARY KEY,
+        state TEXT NOT NULL CHECK (state IN ('running', 'done')),
+        owner_token TEXT NOT NULL,
+        owner_version INTEGER NOT NULL DEFAULT 1,
+        claimed_by TEXT NOT NULL,
+        started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        finished_at TIMESTAMPTZ,
+        keys_processed INTEGER NOT NULL DEFAULT 0,
+        claims_read INTEGER,
+        resolver_error TEXT,
+        detail JSONB NOT NULL DEFAULT '{}'::jsonb
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_doctrine_gap_sweeps_one_running ON engine_doctrine_gap_sweeps ((true)) WHERE state = 'running'`,
+      `CREATE TABLE IF NOT EXISTS engine_doctrine_gap_episodes (
+        id BIGSERIAL PRIMARY KEY,
+        episode_id TEXT NOT NULL UNIQUE,
+        recovery_key TEXT NOT NULL,
+        research_key TEXT NOT NULL,
+        surface TEXT NOT NULL,
+        doctrine_id TEXT NOT NULL,
+        claim_id TEXT NOT NULL,
+        condition TEXT NOT NULL,
+        first_sweep_seq BIGINT NOT NULL,
+        last_sweep_seq BIGINT NOT NULL,
+        started_at TIMESTAMPTZ NOT NULL,
+        last_confirmed_at TIMESTAMPTZ NOT NULL,
+        confirmations INTEGER NOT NULL DEFAULT 1,
+        continuity TEXT NOT NULL DEFAULT 'verified' CHECK (continuity IN ('verified', 'unverified')),
+        continuity_note TEXT,
+        ended_at TIMESTAMPTZ,
+        end_reason TEXT CHECK (end_reason IN ('recovered', 'condition_changed', 'continuity_broken', 'clock_doubt')),
+        detail JSONB NOT NULL DEFAULT '{}'::jsonb
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_doctrine_gap_episodes_one_open ON engine_doctrine_gap_episodes (recovery_key) WHERE ended_at IS NULL`,
+      `CREATE INDEX IF NOT EXISTS engine_doctrine_gap_episodes_research ON engine_doctrine_gap_episodes (research_key) WHERE ended_at IS NULL`,
+      `CREATE TABLE IF NOT EXISTS engine_doctrine_gap_alarms (
+        recovery_key TEXT PRIMARY KEY,
+        state TEXT NOT NULL CHECK (state IN ('opening', 'open', 'closed')),
+        claim_token TEXT NOT NULL,
+        claimed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        ledger_id TEXT,
+        opened_at TIMESTAMPTZ,
+        closed_at TIMESTAMPTZ,
+        last_restated_at TIMESTAMPTZ,
+        restatements INTEGER NOT NULL DEFAULT 0,
+        detail JSONB NOT NULL DEFAULT '{}'::jsonb
+      )`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

@@ -47,17 +47,21 @@ ok('resolver failure incidents on the second consecutive observation');
   assert.equal(gap.writeDecision(at(ne, '2026-10-20T00:05:00.000Z'), ne, { alarmOpen: false, policy: quiet, now }).write, false);
   const changed = gap.writeDecision(at({ ...ne, condition: 'healthy', reason: 'T0NO_AND_VRFK_CLEAR' }, '2026-10-20T00:05:00.000Z'), ne, { alarmOpen: false, policy: quiet, now });
   assert.deepEqual([changed.write, changed.reason, changed.changed], [true, 'changed', ['condition', 'reason']]);
-  assert.equal(gap.writeDecision(ne, ne, { alarmOpen: true, policy: quiet, now }).reason, 'alarm_open');
-  assert.equal(gap.writeDecision(ne, ne, { alarmOpen: false, policy: { ...quiet, incident: true }, now }).reason, 'acting');
+  // M4CV exceptions as Jason listed them (SOP 9daadbc3, 27 Oct 2026): an identical unhealthy reading
+  // while the alarm is open, an incident action and a quiet day are no longer written.
+  assert.equal(gap.writeDecision(ne, ne, { alarmOpen: true, policy: quiet, now }).write, false, 'an identical unhealthy reading on an open alarm writes nothing');
+  const ok1 = at({ ...ne, condition: 'healthy', reason: 'T0NO_AND_VRFK_CLEAR' }, t0);
+  assert.equal(gap.writeDecision(ok1, ok1, { alarmOpen: true, policy: { ...quiet, recover: true }, now }).reason, 'alarm_recovery');
+  assert.equal(gap.writeDecision(ne, ne, { alarmOpen: false, policy: { ...quiet, incident: true }, now }).write, false, 'an incident action is not itself a reading to write');
   assert.equal(gap.writeDecision(ne, ne, { alarmOpen: false, policy: { ...quiet, recover: true }, now }).write, false, 'recover with no alarm open acts on nothing');
   const active = { ...ne, active_consumer: true };
-  assert.equal(gap.writeDecision(active, active, { alarmOpen: false, policy: quiet, now }).reason, 'counting');
+  assert.equal(gap.writeDecision(active, active, { alarmOpen: false, policy: quiet, now }).write, false, 'needs_evidence is never counted: it opens no incident');
   const down = at(gap.classify({ surface: 'genie_ns', resolver_error: { message: 'down' } }), t0);
   assert.equal(gap.writeDecision(down, down, { alarmOpen: false, policy: quiet, now }).reason, 'counting');
-  assert.equal(gap.writeDecision(ne, ne, { alarmOpen: false, policy: quiet, now: Date.parse(t0) + 24 * 3_600_000 - 1 }).write, false);
-  assert.equal(gap.writeDecision(ne, ne, { alarmOpen: false, policy: quiet, now: Date.parse(t0) + 24 * 3_600_000 }).reason, 'daily_restatement');
-  assert.deepEqual(gap.WRITE_RULE, { status: 'state_change_only', restate_hours: 24 });
-  ok('writeDecision writes the first reading, a change, an open alarm, an incident action, a counted failure and a 24-hour restatement, and nothing else (not a recover with no alarm open)');
+  assert.equal(gap.writeDecision(down, down, { alarmOpen: true, policy: quiet, now }).write, false, 'a resolver failure on an open alarm is not counted again');
+  assert.equal(gap.writeDecision(ne, ne, { alarmOpen: false, policy: quiet, now: Date.parse(t0) + 30 * 24 * 3_600_000 }).write, false, 'no daily restatement of a key with no incident');
+  assert.deepEqual(gap.WRITE_RULE, { status: 'state_change_only', restate_hours: 24, restate: 'open_incident_only_rolling_24h', exceptions: ['alarm_recovery', 'counting', 'incident_restatement'] });
+  ok('writeDecision writes the first reading, a change, a healthy reading on an open alarm and a counted resolver failure, and nothing else (no identical unhealthy reading on an alarm, no incident action, no keyless daily restatement)');
 }
 
 const unauthorized = gap.classify({ surface: 'genie_ns', resolver_error: { status: 401, message: 'unauthorized' }, active_consumer: true });
@@ -76,8 +80,9 @@ assert.equal(gap.policyFor(needs, []).incident, false);
 const n1 = at({ ...needs, observation_id: 'n1' }, '2026-10-10T00:00:00.000Z');
 const n2 = at({ ...needs, observation_id: 'n2' }, '2026-10-10T01:00:00.000Z');
 const n3 = at({ ...needs, observation_id: 'n3' }, '2026-10-10T02:00:00.000Z');
-assert.equal(gap.policyFor(n3, [n1, n2], Date.parse(n3.observed_at)).incident, true);
-ok('one-off needs_evidence is guidance; third active-consumer observation in 24h incidents');
+assert.equal(gap.policyFor(n3, [n1, n2], Date.parse(n3.observed_at)).incident, false);
+assert.equal(gap.policyFor(n3, [n1, n2], Date.parse(n3.observed_at)).reason, 'RESEARCH_EPISODE_ONLY');
+ok('needs_evidence never opens an incident, however often and with an active consumer: it is a research episode only (SOP dc89a498)');
 
 const missingConfigInternal = gap.classify({ surface: 'media_twin', claim: claim({ config_hash: null }), publication: publication(), requires_mechanical_provenance: true, requested_use: 'internal' });
 assert.equal(missingConfigInternal.condition, 'healthy');
@@ -112,8 +117,8 @@ assert.equal(gap.policyFor(stale, []).incident, false);
 const s1 = at({ ...stale, observation_id: 's1' }, '2026-10-10T00:00:00.000Z');
 const s2 = at({ ...stale, observation_id: 's2' }, '2026-10-10T01:00:00.000Z');
 const s3 = at({ ...stale, observation_id: 's3' }, '2026-10-10T02:00:00.000Z');
-assert.equal(gap.policyFor(s3, [s1, s2], Date.parse(s3.observed_at)).incident, true);
-ok('stale evidence stays quiet once and incidents at the proposed repeat threshold');
+assert.equal(gap.policyFor(s3, [s1, s2], Date.parse(s3.observed_at)).incident, false);
+ok('stale evidence never opens an incident either: a research episode only');
 
 const paid = gap.classify({ surface: 'vfarm', claim: claim(), publication: publication({ surface: 'vfarm' }), requested_use: 'paid', attempted_public_use: true, active_consumer: true });
 assert.equal(paid.condition, 'prohibited_surface_use');
@@ -147,7 +152,7 @@ const source = fs.readFileSync(path.join(root, 'server/src/doctrineGap.ts'), 'ut
 const http = fs.readFileSync(path.join(root, 'server/src/index.ts'), 'utf8');
 const mcp = fs.readFileSync(path.join(root, 'server/src/mcp/tools.ts'), 'utf8');
 const scopes = fs.readFileSync(path.join(root, 'server/src/mcp/index.ts'), 'utf8');
-assert.match(source, /engineEvents\.record\(observationEvent\(o\)\)/);
+assert.match(source, /engineEvents\.record\(observationEvent\(o\), db\)/);
 assert.match(source, /bharag\.openIncident\('bays'/);
 assert.match(source, /markRetrying\('bays'[ -￿]*closeIncident\('bays'/);
 assert.match(http, /api\/engine\/doctrine-gaps[ -￿]*doctrineGap\.summary/);
@@ -167,21 +172,30 @@ ok('summary reads one past the cap and reports truncated instead of cutting sile
   const events = require(path.join(DIST, 'server/src/engineEvents.js'));
   const pg = require(path.join(DIST, 'server/src/pg.js'));
   const bharag = require(path.join(DIST, 'server/src/bharag.js'));
-  const real = { record: events.record, query: pg.query, liveIncidents: bharag.liveIncidents, openIncident: bharag.openIncident, error: console.error };
+  const store = require(path.join(DIST, 'server/src/doctrineEpisodes.js'));
+  const real = { record: events.record, query: pg.query, liveIncidents: bharag.liveIncidents, openIncident: bharag.openIncident, error: console.error, store: { ...store } };
   const logged = [];
   const recorded = [];
+  const released = [];
   let opened = 0;
   try {
     events.record = async (e) => { recorded.push(e.event_type); return { recorded: true, id: recorded.length }; };
     pg.query = async () => ({ rows: [], rowCount: 0 });
+    store.readAlarm = async () => null;
+    store.fenced = async (_s, fn) => fn({ query: async () => ({ rows: [], rowCount: 0 }) }, '2026-10-27T00:00:00.000Z');
+    store.readEpisode = async () => ({ open: null, maxSeq: null });
+    store.applyEpisode = async () => ({ episode_id: null, changed: false });
+    store.claimAlarmOpen = async () => 'claim-1';
+    store.releaseAlarmClaim = async (key, token) => { released.push([key, token]); };
     bharag.liveIncidents = async () => { throw new Error('BHARAG answered 503'); };
     bharag.openIncident = async () => { opened++; return { id: 'never' }; };
     console.error = (line) => logged.push(String(line));
-    const r = await gap.observe({ surface: 'genie_ns', resolver_error: { status: 401, message: 'unauthorized' }, active_consumer: true });
+    const r = await gap.observe({ surface: 'genie_ns', resolver_error: { status: 401, message: 'unauthorized' }, active_consumer: true }, { seq: 7, token: 't', version: 1, at: '2026-10-27T00:00:00.000Z', resumed: false });
     assert.equal(r.policy.incident, true);
     assert.equal(r.incident.action, 'none');
     assert.equal(r.incident.error, 'BHARAG answered 503');
     assert.equal(opened, 0);
+    assert.deepEqual(released, [['doctrine:genie_ns:MEDIA_DOCTRINE:RESOLVER', 'claim-1']], 'the open claim is given back, so the next sweep may try');
     assert.deepEqual(recorded, ['doctrine_gap_observed']);
     assert.equal(logged.length, 1);
     assert.match(logged[0], /^\[doctrine-gap\] incident sync failed for doctrine:genie_ns:MEDIA_DOCTRINE:RESOLVER \(unauthorized_read, IMMEDIATE_CRITICAL_GAP\): BHARAG answered 503$/);
@@ -190,6 +204,7 @@ ok('summary reads one past the cap and reports truncated instead of cutting sile
     Object.assign(events, { record: real.record });
     Object.assign(pg, { query: real.query });
     Object.assign(bharag, { liveIncidents: real.liveIncidents, openIncident: real.openIncident });
+    Object.assign(store, real.store);
     console.error = real.error;
   }
 
