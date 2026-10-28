@@ -319,7 +319,12 @@ export function summarise(approvals: Approval[], checks: CodeCheck[], now: numbe
   if (own.length) notes.push(`${own.length} of Destiny's own approved sessions are not waiting on a check: he is the one checking.`);
   const noTime = checks.filter((c) => c.approved_at == null).length;
   if (noTime) notes.push(`${noTime} check(s) have no approval time on the pay ledger, so they are left out of the time to check.`);
-  if (!approvals.length) notes.push('The pay ledger holds no approved session, so nothing can be shown as waiting. That is not the same as nothing waiting.');
+  if (!inWindow.length)
+    notes.push(
+      now < startMs
+        ? 'Nothing is owed a check before 1 November: the first approval after midnight Lagos time is.'
+        : 'No session approved since 1 November is on the pay ledger yet, so nothing is waiting. If Jason has approved one, the ledger has not received it, which is not the same as nothing waiting.',
+    );
   return {
     start: START,
     window_hours: WINDOW_HOURS,

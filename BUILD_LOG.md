@@ -13645,3 +13645,13 @@ Decision:  Destiny's own logs are not waiting on his own check, and are named ra
            Writing a check stays off every agent token until D6 opens it to Bays for Destiny's
            posted check.
 Tests:     test:code-checks 8 checks; test:rover-ledger 6 and test:vfarm-evidence 9 still pass.
+
+## 2026-10-29 20:25 — Code checks: the empty-state note says the true thing
+
+Intent:    Live read of /api/code-checks after ada05a5 returned the note "The pay ledger holds no
+           approved session", which is false: the ledger holds October's sessions, none yet from
+           1 Nov.
+Files:     server/src/codeChecks.ts, server/test/code-checks.test.cjs, BUILD_LOG.md.
+Fix:       Before 1 Nov the note says nothing is owed a check yet; after it, that no session
+           approved since 1 Nov has reached the ledger, which is not the same as nothing waiting.
+Tests:     test:code-checks 8 checks.

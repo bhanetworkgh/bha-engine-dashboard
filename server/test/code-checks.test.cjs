@@ -126,6 +126,8 @@ ok('a partly check enters the catalog with only its unconfirmed claims, and a ch
 
 s = cc.summarise([], [], now);
 assert.match(s.notes.join(' '), /not the same as nothing waiting/);
-ok('an empty ledger says so rather than reading as nothing waiting');
+s = cc.summarise([approvals[0]], [], Date.parse('2026-10-29T12:00:00Z'));
+assert.match(s.notes.join(' '), /Nothing is owed a check before 1 November/);
+ok('no approval since 1 Nov says so rather than reading as nothing waiting, and before 1 Nov says nothing is owed yet');
 
 console.log(`\ncode-checks: ${n} checks passed`);
