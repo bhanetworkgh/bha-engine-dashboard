@@ -24,6 +24,16 @@
  * Run with:  npm run test:approvals   (needs a LOCAL DATABASE_URL)
  */
 const assert = require('node:assert/strict');
+/** Every word a card shows, across its blocks (28 Oct: the card is laid out in parts). */
+const cardText = (blocks) => {
+  const out = [];
+  const walk = (v) => {
+    if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') { if (typeof v.text === 'string') out.push(v.text); Object.values(v).forEach((x) => typeof x === 'object' && walk(x)); }
+  };
+  walk(blocks || []);
+  return out.join('\n');
+};
 const http = require('node:http');
 const path = require('node:path');
 
@@ -183,7 +193,7 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.addr
     assert.deepEqual(actions.elements.map((e) => e.action_id), [approvals.ACTION_APPROVE, approvals.ACTION_DENY]);
     approvalId = r.approval_id;
     assert.ok(actions.elements.every((e) => e.value === approvalId));
-    assert.ok(card.blocks[0].text.text.includes(`<@${DESTINY}>`) && card.blocks[0].text.text.includes(`<@${JASON}>`));
+    assert.ok(cardText(card.blocks).includes(`<@${DESTINY}>`) && cardText(card.blocks).includes(`<@${JASON}>`));
     assert.ok(String(r.card_link).includes('/archives/C0THREAD01/p'));
     const row = await rowOf(approvalId);
     assert.equal(row.status, 'pending');
@@ -232,7 +242,7 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.addr
     assert.equal(row.result_ok, true);
     assert.equal(seen.updates.length, u + 1);
     assert.ok(seen.updates[u].blocks.every((b) => b.type !== 'actions'), 'the settled card has no buttons');
-    assert.ok(seen.updates[u].blocks[0].text.text.includes('Approved'));
+    assert.ok(cardText(seen.updates[u].blocks).includes('Approved'));
     const audit = (await query(`SELECT actor, outcome FROM engine_mcp_writes WHERE tool = 'share_doc' AND natural_id = $1 ORDER BY id DESC LIMIT 1`, [doc])).rows[0];
     assert.equal(audit.outcome, 'applied');
     assert.ok(audit.actor.includes(`approved-by:${DESTINY}`) && audit.actor.includes(approvalId), audit.actor);
@@ -264,14 +274,14 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.addr
     const card = seen.posts[seen.posts.length - 1];
     assert.equal(card.channel, ALERTS);
     assert.equal(card.thread_ts, undefined);
-    assert.ok(card.blocks[0].text.text.includes('kavin@bhanetwork.org') && card.blocks[0].text.text.includes('commenter'));
+    assert.ok(cardText(card.blocks).includes('kavin@bhanetwork.org') && cardText(card.blocks).includes('commenter'));
     const d = await approvals.decide({ approval_id: r.approval_id, decision: 'deny', user_id: JASON });
     assert.equal(d.body.ok, true);
     assert.equal(d.body.decision, 'denied');
     assert.equal(d.body.done, false);
     assert.equal(seen.google.length, g);
     assert.equal((await rowOf(r.approval_id)).status, 'denied');
-    assert.ok(seen.updates[seen.updates.length - 1].blocks[0].text.text.includes('Denied'));
+    assert.ok(cardText(seen.updates[seen.updates.length - 1].blocks).includes('Denied'));
     ok('with no Slack origin the card goes to the alerts channel, and Deny by Jason does nothing');
   }
 
@@ -288,8 +298,8 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.addr
     assert.equal(r.reason, 'awaiting_approval', JSON.stringify(r));
     const card = seen.posts[seen.posts.length - 1];
     assert.equal(card.channel, 'D0DESTINY1', 'an approver’s own DM is used');
-    assert.ok(!card.blocks[0].text.text.includes(`<@${JASON}>`), 'an approver asking in their own thread pings nobody');
-    assert.ok(card.blocks[0].text.text.includes(tid));
+    assert.ok(!cardText(card.blocks).includes(`<@${JASON}>`), 'an approver asking in their own thread pings nobody');
+    assert.ok(cardText(card.blocks).includes(tid));
     assert.equal((await query(`SELECT count(*)::int AS n FROM engine_lane_backlog WHERE natural_id = $1`, [tid])).rows[0].n, 1, 'still there before approval');
     const d = await approvals.decide({ approval_id: r.approval_id, decision: 'approve', user_id: DESTINY });
     assert.equal(d.body.ok, true, JSON.stringify(d.body));
@@ -313,7 +323,7 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.addr
     const u = seen.updates.length;
     assert.equal(await approvals.sweepExpired(), 1);
     assert.equal((await rowOf(r.approval_id)).status, 'expired');
-    assert.ok(seen.updates[u].blocks[0].text.text.includes('Expired'));
+    assert.ok(cardText(seen.updates[u].blocks).includes('Expired'));
     const g = seen.google.length;
     const told = seen.posts[seen.posts.length - 1];
     assert.equal(told.channel, 'D0HARDIK01', 'the asker is told in their own DM that it expired');
@@ -350,7 +360,7 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.addr
     const row = await rowOf(r.approval_id);
     assert.equal(row.status, 'approved');
     assert.equal(row.result_ok, false);
-    assert.ok(seen.updates[seen.updates.length - 1].blocks[0].text.text.includes('but it failed'));
+    assert.ok(cardText(seen.updates[seen.updates.length - 1].blocks).includes('but it failed'));
     await query(`DELETE FROM engine_approvals WHERE target = 'FILE_DENIED'`);
     ok('an approved action that fails says so on the card and asks to be raised');
   }
@@ -410,13 +420,13 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.addr
     assert.equal(r.reason, 'awaiting_approval', JSON.stringify(r));
     assert.equal(seen.deletes.length, d, 'nothing is removed before a person approves');
     assert.equal(seen.posts.length, p + 1);
-    assert.ok(seen.posts[p].blocks[0].text.text.includes('turn off "anyone with the link"'));
+    assert.ok(cardText(seen.posts[p].blocks).includes('turn off "anyone with the link"'));
     const u = seen.updates.length;
     const done = await approvals.decide({ approval_id: r.approval_id, decision: 'approve', user_id: JASON });
     assert.equal(done.body.ok, true, JSON.stringify(done.body));
     assert.equal(done.body.raise, false);
     assert.deepEqual(seen.deletes.slice(d), [{ file, permission: 'anyoneWithLink' }]);
-    assert.ok(seen.updates[u].blocks[0].text.text.includes('The public link is off'));
+    assert.ok(cardText(seen.updates[u].blocks).includes('The public link is off'));
     const audit = (await query(`SELECT actor, outcome FROM engine_mcp_writes WHERE tool = 'unshare_doc' AND natural_id = $1 ORDER BY id DESC LIMIT 1`, [file])).rows[0];
     assert.equal(audit.outcome, 'applied');
     assert.ok(audit.actor.includes(`approved-by:${JASON}`), audit.actor);
@@ -442,7 +452,7 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.addr
     assert.equal(held.reason, 'awaiting_approval', JSON.stringify(held));
     assert.equal(seen.posts.length, p + 1, 'only the card is posted');
     assert.ok(!seen.posts.slice(p).some((x) => x.channel === stranger || x.channel === known), 'nobody is sent the DM before a person approves');
-    assert.ok(seen.posts[p].blocks[0].text.text.includes(`<@${stranger}>`));
+    assert.ok(cardText(seen.posts[p].blocks).includes(`<@${stranger}>`));
     const done = await approvals.decide({ approval_id: held.approval_id, decision: 'approve', user_id: DESTINY });
     assert.equal(done.body.ok, true, JSON.stringify(done.body));
     assert.deepEqual(seen.posts.filter((x) => [known, stranger].includes(x.channel) && x.text && x.text.includes(`Guard test ${T}`)).map((x) => x.channel), [known, stranger], 'Approve sends it once to each');

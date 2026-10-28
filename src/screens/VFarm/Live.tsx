@@ -144,6 +144,48 @@ export function Overview({ data }: { data: VfarmLiveData }) {
           </tbody>
         </TableFrame>
       </Card>
+      {data.ledger_writes !== undefined && (
+        <Card className="pb-3">
+          <CardHeader title="Ledger writes" right={<span className="tabular text-[11.5px] text-faint">{data.ledger_writes?.taken_at ? `newest report ${relativeTime(data.ledger_writes.taken_at) ?? ''}` : 'no report yet'}</span>} />
+          {!data.ledger_writes ? (
+            <EmptyState compact>The ledger write reports could not be read.</EmptyState>
+          ) : data.ledger_writes.lanes.length === 0 ? (
+            <EmptyState compact>{data.ledger_writes.note}</EmptyState>
+          ) : (
+            <TableFrame flat grow={false} label="Ledger writes">
+              <thead>
+                <tr>
+                  <Th>lane</Th>
+                  <Th>farm</Th>
+                  <Th>sent</Th>
+                  <Th>written</Th>
+                  <Th>refused</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.ledger_writes.lanes.map((l) => (
+                  <tr key={`${l.lane}|${l.farm_id}`}>
+                    <td className="td">{l.lane}</td>
+                    <td className="td text-dim">{data.farms.find((f) => f.farm_id === l.farm_id)?.name ?? l.farm_id}</td>
+                    <td className="td tabular">{l.sent}</td>
+                    <td className="td tabular">{l.written}</td>
+                    <td className="td tabular">{l.refused > 0 ? <Pill tone="failing">{l.refused}</Pill> : 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </TableFrame>
+          )}
+          {data.ledger_writes && data.ledger_writes.open_refusals.length > 0 && (
+            <ul className="px-4 pt-2 text-[12px] text-degraded">
+              {data.ledger_writes.open_refusals.map((i) => (
+                <li key={i.incident_id}>
+                  <RecordId>{i.ledger_id ?? i.incident_id}</RecordId> {i.detail}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
     </div>
   );
 }

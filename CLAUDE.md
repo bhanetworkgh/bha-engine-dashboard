@@ -1629,6 +1629,19 @@ six rover signals (`roverSignals`, pure, readings only, "not sent by vFarm yet" 
 and `read_vfarm_history` (both connections, Genie's scope). The vFarm page and the Monitoring Twin take a
 farm filter (`FarmPicker`, `?farm=`). `npm run test:vfarm-history`.
 
+**Rover passes and refused ledger writes** (28 Oct 2026, Destiny — D3, Kavin's rover log of 26 Oct).
+`history.sections.rover_passes` (one row per pass, `rover_pass.summarize`'s shape) is read by
+`vfarmHistory.roverSignals` as `passes` (the last 8 days, newest first) and, when vFarm sends no
+`rover_runs`, counts the rover tiles from the passes (`run_source: 'passes'`), saying so: a
+`snapshot_failed` stop is a stop with no photo and `images_not_sent` is photos not sent. The snapshot's
+optional `ledger_writes` block (contract in `docs/contracts/vfarm.md`, migration 100,
+`engine_vfarm_snapshots.ledger_writes`) is what each vFarm ledger lane really wrote, because BHARAG can
+answer 201 and write nothing. `systemFeeds.parseLedgerWrites` keeps good rows and counts bad ones;
+`monitoringTwin.ledgerFaults` opens one critical `ledger_refused` incident per lane and farm with a refused
+entry (class `LEDGER_WRITE_REFUSED`, subsystem `LEDGER`), closes it on a later report at refused 0, and
+keeps it open while the lane is silent. Shown on the Monitoring Twin and the vFarm Overview. Nothing is
+shown as clean before vFarm sends the block: the card says it is not sent yet. `npm run test:rover-ledger`.
+
 **Only the newest server instance judges** (21 Oct 2026, Destiny — LOOP-1792602989664-YRKG). During a deploy the old instance once ran a pass under the old rule after the new one had, reopening 8 relay incidents. `evaluate()` claims `meta` `monitoring.judge_owner` under its advisory lock: a later-started instance takes over, an older one stands down (`skipped`), and an owner silent for 3 minutes (`OWNER_STALE_MS`) gives way. `npm run test:monitoring-owner` proves it with two processes.
 
 **Engine health holds every monitoring incident the ledger took** (2026-10-04,
