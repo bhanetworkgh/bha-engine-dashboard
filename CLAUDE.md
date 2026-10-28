@@ -4317,7 +4317,9 @@ with an approved consumer-usage contract that records actual use; until then it
 is guidance and observations only. Logstream leaves `DOCTRINE` incidents out of
 its thresholds (2026-10-17, below under Logstream).
 **An observation is written only when its state changes** (2026-10-20, Destiny —
-LOOP-1792472755186-M4CV, the third of Jason's three conditions). `observe()` asks
+LOOP-1792472755186-M4CV, the third of Jason's three conditions). *Narrowed on 27 Oct
+2026 to Jason's three listed exceptions: the open-alarm, incident-action and keyless
+daily writes described here stop. See "SE8L / YEAO" below for the rule in force.* `observe()` asks
 `writeDecision` (pure, `WRITE_RULE` in `doctrineGap.ts`, the numbers there and
 nowhere else) before it writes, comparing the reading with the newest one written
 for its key on `STATE_FIELDS`. It writes the first reading, any change, every
