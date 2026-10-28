@@ -13532,3 +13532,31 @@ Files:      server/src/migrations.ts (99), server/test/help-pages.test.cjs.
 Change:     operator-quickstart's "What you can change" now opens with the rule as the current pilot rule and ends saying a change will be written here first and nothing on the page is permission to use a control. Its operator-controls gap is closed, leaving Jegan's two on rack-care. Still a draft for Hardik's check.
 Decision:   Written as a migration because the Claude connector in use still lists 99 tools and not write_help_page (a refresh did not pick it up); the migration writes the same history line and help_page_written event helpPages.write does, and is idempotent on the text's hash.
 Tests:      migration 99 applied to a local Postgres 16 (help_test) and run twice; test:help-pages 10 checks.
+
+---
+
+## 2026-10-28 08:10 — Approval cards laid out with Block Kit
+
+Intent:    The Approve / Deny cards in #bha-engine-alerts were one long paragraph with
+           the whole request in bold, which read as a wall of text (Destiny, 28 Oct).
+           Layout only: who may decide, the buttons and the decision are unchanged.
+
+Files:     server/src/approvals.ts, server/test/approvals.test.cjs, BUILD_LOG.md.
+
+- `cardBlocks` / `settledBlocks` now build: a headline with the state (Approval needed,
+  Approved — done, Approved but it failed, Denied, Expired), a divider, a two-column box
+  (Action, Record/Doc/To, Asked by, Expires or Decided by), "What Bays was asked to do"
+  and "Reason given" as their own quoted sections (`splitSummary` splits the summary on
+  "Reason given:"), the Result once decided, and the ids in a grey footer.
+- The footer names "Destiny or Jason" in plain words, not as mentions, so a card in an
+  approver's own thread still pings nobody.
+- The decided headline no longer repeats who decided (it has its own field); the
+  notification fallback text still says who.
+- Tests read the whole card's text (`cardText`) instead of block 0.
+
+Proof:     The npm registry is unreachable from this session, so `npm run test:approvals`
+           (which needs `pg`) could not run here. Checked instead by building the server
+           and rendering both cards from the real 28 Oct delete_record request with the
+           database module stubbed: Block Kit limits hold (≤ 10 fields, ≤ 2000 per field,
+           ≤ 3000 per section), the pending card has the buttons and the settled card has
+           none, an approver's own thread pings nobody. Live check: the next real card.

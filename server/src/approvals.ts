@@ -176,11 +176,78 @@ function expiryText(iso: string): string {
   return `${d.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 }
 
-function cardBlocks(row: Pick<ApprovalRow, 'approval_id' | 'summary' | 'requester_user_id' | 'expires_at' | 'tool'>, askApprovers: boolean): unknown[] {
-  const who = row.requester_user_id ? mention(row.requester_user_id) : 'nobody named';
+/*
+ * 28 Oct 2026 (Destiny): the card was one long paragraph with the whole request in bold, so it read
+ * as a wall of text. It is now laid out in parts: a headline that says the state at a glance, a
+ * two-column box (action, target, who asked, expiry or who decided), what Bays was asked and the
+ * reason given as their own short sections, the result once decided, and the ids in a grey footer.
+ * Layout only: who may decide, the buttons and the decision itself are unchanged.
+ */
+const TOOL_LABELS: Record<string, { action: string; target: string }> = {
+  delete_record: { action: 'Delete a record', target: 'Record' },
+  share_doc: { action: 'Share a doc by link', target: 'Doc' },
+  unshare_doc: { action: "Turn off a doc's public link", target: 'Doc' },
+  grant_drive_access: { action: 'Grant Drive access', target: 'File' },
+  send_nudge: { action: 'Send a DM as Bays', target: 'To' },
+  post_file: { action: 'Send a file as Bays', target: 'To' },
+  post_channel_message: { action: 'Post a message as Bays', target: 'Where' },
+};
+
+function labelsFor(tool: string): { action: string; target: string } {
+  return TOOL_LABELS[tool] ?? { action: tool.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()), target: 'Target' };
+}
+
+/** Slack ids become mentions; anything else is shown as code. */
+function targetText(target: string | null): string {
+  if (!target || !target.trim()) return '_not named_';
+  return target
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .map((t) => (/^[UW][A-Z0-9]{6,}$/.test(t) ? mention(t) : /^[CGD][A-Z0-9]{6,}$/.test(t) ? `<#${t}>` : `\`${t}\``))
+    .join(', ');
+}
+
+/** "permanently delete X. Reason given: Y" → what was asked, and the reason, apart. */
+export function splitSummary(summary: string): { asked: string; reason: string | null } {
+  const m = /^([\s\S]*?)\.?\s*Reason given:\s*([\s\S]*)$/.exec(summary.trim());
+  const cap = (t: string) => t.trim().replace(/^./, (c) => c.toUpperCase());
+  if (!m) return { asked: cap(summary), reason: null };
+  return { asked: cap(m[1]), reason: m[2].trim() ? cap(m[2]) : null };
+}
+
+const quoted = (t: string) => t.split('\n').map((l) => `>${l}`).join('\n');
+
+function detailBlocks(row: Pick<ApprovalRow, 'summary' | 'tool' | 'target' | 'requester_user_id'>, fourth: { label: string; value: string }): unknown[] {
+  const labels = labelsFor(row.tool);
+  const who = row.requester_user_id ? mention(row.requester_user_id) : '_nobody named_';
+  const { asked, reason } = splitSummary(row.summary);
+  const blocks: unknown[] = [
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: `*Action*\n${labels.action}` },
+        { type: 'mrkdwn', text: `*${labels.target}*\n${targetText(row.target)}` },
+        { type: 'mrkdwn', text: `*Asked by*\n${who}` },
+        { type: 'mrkdwn', text: `*${fourth.label}*\n${fourth.value}` },
+      ],
+    },
+    { type: 'section', text: { type: 'mrkdwn', text: `*What Bays was asked to do*\n${quoted(asked)}` } },
+  ];
+  if (reason) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Reason given*\n${quoted(reason)}` } });
+  return blocks;
+}
+
+function footer(row: Pick<ApprovalRow, 'approval_id' | 'tool'>, extra?: string): unknown {
+  return { type: 'context', elements: [{ type: 'mrkdwn', text: `\`${row.approval_id}\` · \`${row.tool}\`${extra ? ` · ${extra}` : ''}` }] };
+}
+
+export function cardBlocks(row: Pick<ApprovalRow, 'approval_id' | 'summary' | 'requester_user_id' | 'expires_at' | 'tool' | 'target'>, askApprovers: boolean): unknown[] {
+  const approvers = APPROVERS.map(mention);
   return [
-    { type: 'section', text: { type: 'mrkdwn', text: `:lock: *Approval needed*${askApprovers ? ` — ${APPROVERS.map(mention).join(' ')}` : ''}\nBays has been asked to *${row.summary}*.\nNothing has been done yet.` } },
-    { type: 'context', elements: [{ type: 'mrkdwn', text: `Asked by ${who} · \`${row.tool}\` · \`${row.approval_id}\` · only ${APPROVERS.map(mention).join(' or ')} can decide · expires ${expiryText(row.expires_at)}` }] },
+    { type: 'section', text: { type: 'mrkdwn', text: `:lock: *Approval needed*${askApprovers ? `\n${approvers.join(' ')}, one of you needs to decide this.` : ''}\nNothing has been done yet.` } },
+    { type: 'divider' },
+    ...detailBlocks(row, { label: 'Expires', value: expiryText(row.expires_at) }),
     {
       type: 'actions',
       block_id: `approval:${row.approval_id}`,
@@ -189,20 +256,25 @@ function cardBlocks(row: Pick<ApprovalRow, 'approval_id' | 'summary' | 'requeste
         { type: 'button', action_id: ACTION_DENY, style: 'danger', text: { type: 'plain_text', text: 'Deny' }, value: row.approval_id },
       ],
     },
+    footer(row, 'only Destiny or Jason can decide'),
   ];
 }
 
-function settledBlocks(row: ApprovalRow, headline: string, line: string): unknown[] {
-  const who = row.requester_user_id ? mention(row.requester_user_id) : 'nobody named';
+export function settledBlocks(row: ApprovalRow, headline: string, line: string): unknown[] {
+  const decided = row.decided_by ? mention(row.decided_by) : row.status === 'expired' ? '_nobody, it expired_' : '_not recorded_';
   return [
-    { type: 'section', text: { type: 'mrkdwn', text: `${headline}\nBays was asked to *${row.summary}*.\n${line}` } },
-    { type: 'context', elements: [{ type: 'mrkdwn', text: `Asked by ${who} · \`${row.tool}\` · \`${row.approval_id}\`` }] },
+    { type: 'section', text: { type: 'mrkdwn', text: headline } },
+    { type: 'divider' },
+    ...detailBlocks(row, { label: 'Decided by', value: decided }),
+    { type: 'section', text: { type: 'mrkdwn', text: `*Result*\n${quoted(line)}` } },
+    footer(row),
   ];
 }
 
 async function updateCard(row: ApprovalRow, headline: string, line: string): Promise<string | null> {
   if (!row.card_channel || !row.card_ts) return 'the card was never posted';
-  const text = `${headline} ${line}`.replace(/[*_`]/g, '');
+  const by = row.decided_by ? ` by <@${row.decided_by}>` : '';
+  const text = `${headline}${by}: ${line}`.replace(/[*_`]/g, '');
   const r = await slack.botCall('chat.update', { channel: row.card_channel, ts: row.card_ts, text, blocks: settledBlocks(row, headline, line) });
   return r.ok ? null : `Slack refused the card update: ${String(r.error ?? 'unknown error')}`;
 }
@@ -419,7 +491,7 @@ export async function decide(input: DecideInput): Promise<DecideResult> {
   const by = mention(input.user_id);
   if (next === 'denied') {
     const line = 'Nothing was done.';
-    const cardError = await updateCard(claimed, `:no_entry_sign: *Denied* by ${by}`, line);
+    const cardError = await updateCard(claimed, ':no_entry_sign: *Denied*', line);
     const note = await tellOrigin(claimed, `:no_entry_sign: ${by} said no to that request (\`${claimed.approval_id}\`). Nothing was done.`);
     await event('approval_decided', claimed, input.user_id, { decision: 'denied' });
     const problems = [cardError, note].filter(Boolean);
@@ -442,7 +514,7 @@ export async function decide(input: DecideInput): Promise<DecideResult> {
   const saved = await query<ApprovalRow>(`UPDATE engine_approvals SET executed_at = now(), result_ok = $2, result = $3::jsonb WHERE approval_id = $1 RETURNING ${COLS}`, [claimed.approval_id, ok, JSON.stringify(result)]);
   const done = saved.rows[0] ?? claimed;
   const line = resultLine(result);
-  const cardError = await updateCard(done, ok ? `:white_check_mark: *Approved* by ${by} — done` : `:x: *Approved* by ${by}, but it failed`, ok ? line : `Nothing was changed: ${line}`);
+  const cardError = await updateCard(done, ok ? ':white_check_mark: *Approved — done*' : ':x: *Approved, but it failed*', ok ? line : `Nothing was changed: ${line}`);
   const note = await tellOrigin(done, ok ? `:white_check_mark: ${by} approved it (\`${done.approval_id}\`). ${line}` : `:x: ${by} approved it (\`${done.approval_id}\`), but it failed: ${line}`);
   await event('approval_decided', done, input.user_id, { decision: 'approved', result_ok: ok, reason: ok ? null : (result.reason ?? null) });
   const problems = [ok ? null : `The approved ${done.tool} failed: ${line}`, cardError, note].filter(Boolean);
