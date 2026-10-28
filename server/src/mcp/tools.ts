@@ -62,6 +62,7 @@ import { CHARGE_GATE_READ_TOOLS, CHARGE_GATE_WRITE_TOOLS } from './chargeGateToo
 import { ESSENCE_READ_TOOLS, ESSENCE_WRITE_TOOLS } from './essenceTools';
 import { HELP_READ_TOOLS, HELP_WRITE_TOOLS } from './helpPageTools';
 import { EVIDENCE_READ_TOOLS, EVIDENCE_WRITE_TOOLS } from './evidenceTools';
+import { BALANCE_READ_TOOLS } from './balanceTools';
 import { CODE_CHECK_READ_TOOLS, CODE_CHECK_WRITE_TOOLS } from './codeCheckTools';
 import { CODEX_GAP_WRITE_TOOLS } from './codexGapTools';
 import { findRecords, READABLE_KINDS } from './findRecords';
@@ -1115,6 +1116,7 @@ export const TOOLS: ToolDefinition[] = [
   ...STRAIN_READ_TOOLS,
   ...HELP_READ_TOOLS,
   ...EVIDENCE_READ_TOOLS,
+  ...BALANCE_READ_TOOLS,
   ...CODE_CHECK_READ_TOOLS,
   // The one that is not a read.
   resyncTool,

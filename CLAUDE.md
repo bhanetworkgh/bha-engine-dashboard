@@ -2998,6 +2998,18 @@ Slack refuses deletes the claim so the next pass retries, and a new log resets i
 `run_codex_gap_check` (write connection, no agent's scope, `dry_run` by default) runs it on demand.
 It changes no log, loop or pay row. `npm run test:codex-gap`.
 
+**`check_service_balances`, both balances read now** (2026-10-28, Destiny). `server/src/serviceBalances.ts`,
+`server/src/mcp/balanceTools.ts`, read only, both connections, in Bays' scope, so "how much OpenRouter or
+Twilio credit is left?" is answered in Slack from a live read. This server holds no OpenRouter or Twilio
+credential for it: n8n's `Engine — Service Balances` (QZi2CUUzuc6namOd, folder Engine Self-Healing,
+`POST /webhook/engine-service-balances`, `x-dashboard-key` checked by the inbound-key credential) reads
+OpenRouter's `/credits` and Twilio's `Balance.json` on the CST account and answers `{checked_at, openrouter,
+twilio}`; both reads are free. **The floors are the SOP Critical Service Credits and live in `FLOORS_USD`
+only**: OpenRouter $15, Twilio $10. Each service is `ok`, `low` (under its floor) or `unreadable` with the
+reason, never a guessed number; a balance in another currency is not judged. One `read` line per call on
+`engine_writes`. It tops nothing up. The hourly alerts (`Engine — OpenRouter Credit Alert`, `Engine — Twilio
+Credit Alert`) are separate. `npm run test:service-balances`.
+
 **The credit-out alert** (2026-10-10, Destiny). `server/src/creditOut.ts`, a
 check every minute, no table of its own (its state is `meta`
 `credit_out.state`). On 10 Oct the OpenRouter credit ran out between two of
