@@ -125,6 +125,46 @@ events and alert history never reached the dashboard, and it kept about one read
   with no frame, the upload backlog; readings only, no thresholds set), and the MCP tool `read_vfarm_history`
   for the rows themselves.
 
+### Rover passes (28 Oct 2026, D3 — Kavin's rover log of 26 Oct)
+
+vFarm sends each pass as `history.sections.rover_passes`, one row per pass keyed on `id`, in the shape
+`rover_pass.summarize` builds: `status` (`complete` / `failed`), `started_at`, `ended_at`, `stops_planned`,
+`stops_done`, `distance_mm`, `images_taken`, `images_sent`, `images_not_sent` (a list), `failed_stops`
+(`[{seq, reason}]`, reason `snapshot_failed`, `move_failed`, `pass_aborted` or `no_movement`), `position_mm`,
+`position_known`, `returned_home`, `needs_manual_check`, `edge_version`. Nothing new to send: these have
+arrived since 24 Oct. From 28 Oct the Monitoring Twin lists the passes of the last 8 days, and when vFarm
+sends passes and no `rover_runs`, the rover tiles count runs, run time, stops with no photo
+(`snapshot_failed`) and photos not sent from the passes, and say so.
+
+### Ledger writes (28 Oct 2026, D3 — new, optional)
+
+BHARAG can answer 201 and write nothing, and vFarm's ledger lanes only log that to New Relic. Each
+snapshot may carry what each lane really managed since the previous one:
+
+```json
+"ledger_writes": {
+  "lanes": [
+    { "lane": "bharag_ledger", "farm_id": "<uuid>", "corpus": "vfarm.sensor",
+      "sent": 8, "written": 0, "refused": 8,
+      "reasons": [ { "code": "entry_not_written", "count": 8 } ],
+      "window_from": "<ISO>", "window_to": "<ISO>", "last_pass_at": "<ISO>" }
+  ]
+}
+```
+
+- **One row per lane and farm**, for every lane that ran, a clean one included (`refused: 0`). An empty
+  list means no lane ran. `lane` is lower case (`bharag_ledger`, `alert_ledger`, `rover_ledger`, …).
+- `sent`, `written` and `refused` are whole numbers and `written + refused` is at most `sent`. `corpus`,
+  `reasons` (at most 20), `window_from`, `window_to` and `last_pass_at` are optional.
+- A row naming a farm the snapshot does not list, a second row for one lane and farm, or impossible
+  counts is refused and counted on the snapshot's record; the rest of the snapshot still lands. A block
+  that is not `{lanes: [...]}` refuses the snapshot (422), at most 500 rows (413).
+- **Any `refused` above nought opens one critical incident** for that lane and farm (class
+  `LEDGER_WRITE_REFUSED`, subsystem `LEDGER`, on the BHARAG ledger and on Engine health), shown on the
+  Monitoring Twin and the vFarm page. It closes when a later report shows that lane at `refused: 0`. A lane
+  that stops reporting keeps its incident open and says it has not reported since. A simulated report
+  never judges a real farm.
+
 ## 2. Alert fires: live, the envelope you already build
 
 `POST /api/engine/vfarm-alerts`

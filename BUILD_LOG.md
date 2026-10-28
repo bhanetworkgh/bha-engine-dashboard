@@ -13560,3 +13560,43 @@ Proof:     The npm registry is unreachable from this session, so `npm run test:a
            database module stubbed: Block Kit limits hold (≤ 10 fields, ≤ 2000 per field,
            ≤ 3000 per section), the pending card has the buttons and the settled card has
            none, an approver's own thread pings nobody. Live check: the next real card.
+
+---
+
+## 2026-10-28 11:40 — Rover passes on the page, and refused ledger writes raise an incident (D3)
+
+Intent:    Kavin's rover log (26 Oct) found two gaps. vFarm's ledger lanes can be told
+           "accepted" by BHARAG and write nothing, and that only reaches New Relic. And the
+           rover's pass summaries, sent to the dashboard since 24 Oct (16 real passes held
+           for v-farm), were stored and shown only as a count, while the six rover tiles read
+           section names vFarm no longer sends and said "not sent".
+
+Files:     server/src/vfarmHistory.ts, server/src/systemFeeds.ts, server/src/monitoringTwin.ts,
+           server/src/migrations.ts (100), server/src/mcp/tools.ts, src/data/types.ts,
+           src/screens/MonitoringTwin.tsx, src/screens/VFarm/Live.tsx,
+           server/test/rover-ledger.test.cjs, server/test/_pg-stub.cjs, package.json,
+           docs/contracts/vfarm.md, CLAUDE.md, BUILD_LOG.md.
+
+- Rover passes: `passOf` reads a pass as vFarm summarises it; `roverSignals` lists the last
+  8 days newest first, and with no `rover_runs` counts runs, run time, stops with no photo
+  (`snapshot_failed`) and photos not sent from the passes, with a note saying so. Run rows
+  still win where vFarm sends them. A "Rover passes" table on the Monitoring Twin: stops,
+  distance, photos sent, where it ended (home / unknown / metres), failed stops in words,
+  "needs a check".
+- Ledger writes: an optional `ledger_writes` block on the snapshot, one row per lane and
+  farm (sent, written, refused, reasons). Stored on the snapshot row (migration 100). A
+  refused entry opens one critical incident per lane and farm through the Monitoring Twin's
+  own path (BHARAG ledger, Engine health), closed by a later report at refused 0, kept open
+  while the lane is silent. Read inside a savepoint so a bad read never aborts the judging
+  pass. Cards on the Monitoring Twin and the vFarm Overview say "not sent by vFarm yet"
+  until the first report.
+
+Problem:   `npm ci` cannot reach the registry from this session (CONNECT 403), so neither
+           `npm run build` nor the tests that need `pg` could run here.
+Fix:       Server type-checked with the global tsc and a pg type stub (only the two known
+           pg-stub errors in mcp/sql.ts); the new test loads the compiled server with a pg
+           stand-in. The two screens were parsed with esbuild and their imports, props and
+           types checked by hand; the Render build is the first full frontend check.
+Decision:  vFarm's part (send the block, raise its own alert on a refused write) is Kavin's;
+           the shape is in the contract doc and posted in his thread.
+Tests:     test:rover-ledger 6 checks; test:vfarm-evidence 9 checks still pass.

@@ -39,6 +39,7 @@
     "test:monitoring-owner": "node --no-warnings=ExperimentalWarning server/test/monitoring-judge-owner.test.cjs",
     "test:vfarm-readings": "node --no-warnings=ExperimentalWarning server/test/vfarm-readings.test.cjs",
     "test:cst-test-traffic": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/cst-test-traffic.test.cjs",
+    "test:rover-ledger": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/rover-ledger.test.cjs",
     "test:vfarm-history": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/vfarm-history.test.cjs",
     "test:vfarm-unlisted": "node --no-warnings=ExperimentalWarning server/test/vfarm-unlisted.test.cjs",
     "test:media-post-log": "node --no-warnings=ExperimentalWarning server/test/media-post-log.test.cjs",

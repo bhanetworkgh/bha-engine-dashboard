@@ -312,7 +312,7 @@ export function checkReadings(latest: unknown, targets: Record<string, Range> | 
   return out;
 }
 
-const SUBSYSTEM: Record<string, string> = { offline: 'SENSOR', out_of_range: 'ENVIRONMENT', feed_silent: 'FEED' };
+const SUBSYSTEM: Record<string, string> = { offline: 'SENSOR', out_of_range: 'ENVIRONMENT', feed_silent: 'FEED', ledger_refused: 'LEDGER' };
 
 /**
  * Why an open incident is closing. A fault that stopped being true is "cleared"; one whose device
@@ -336,7 +336,7 @@ const newIncidentId = (kind: string) => `INC-VFARM.${SUBSYSTEM[kind] ?? 'MONITOR
 interface Fault {
   farm_id: string;
   device_id: string | null;
-  kind: 'offline' | 'out_of_range' | 'feed_silent';
+  kind: 'offline' | 'out_of_range' | 'feed_silent' | 'ledger_refused';
   metric: string | null;
   severity: 'warning' | 'critical';
   detail: string;
@@ -347,6 +347,75 @@ interface Fault {
   synthetic: boolean;
 }
 const faultKey = (f: { farm_id: string; device_id: string | null; kind: string; metric: string | null }) => `${f.farm_id}|${f.device_id ?? ''}|${f.kind}|${f.metric ?? ''}`;
+
+/** A farm's newest ledger writes report, as the snapshot stored it (migration 100). */
+export interface LedgerReportRow {
+  taken_at: string;
+  synthetic: boolean;
+  lanes: Array<{ lane: string; farm_id: string; corpus: string | null; sent: number; written: number; refused: number; reasons: Array<{ code: string; count: number }> }>;
+}
+
+/**
+ * Refused ledger writes as faults (28 Oct 2026, D3 — Kavin's rover log of 26 Oct, NAFB). Pure.
+ *
+ * vFarm's ledger lanes count, per farm, what they sent, what the ledger wrote and what it refused,
+ * and the snapshot carries it (`ledger_writes`). Any refused entry is one fault per lane and farm,
+ * named by the lane in `metric`, so the incident says which lane and closes on its own once a later
+ * report shows that lane writing everything again. **A lane that stops reporting is not fine**: an
+ * incident already open for a lane missing from the newest report stays open and says so, because
+ * silence after a refusal is exactly the failure this exists to end. A farm vFarm no longer lists
+ * is left to closeReason. Reports from a simulated snapshot only ever judge simulated farms.
+ */
+export function ledgerFaults(
+  reports: LedgerReportRow[],
+  farms: Array<{ farm_id: string; synthetic: boolean; unlisted: boolean }>,
+  openLedger: Array<{ farm_id: string; metric: string | null }>,
+): Fault[] {
+  const out: Fault[] = [];
+  const farmOf = new Map(farms.map((f) => [f.farm_id, f]));
+  const reported = new Set<string>();
+  for (const rep of reports) {
+    for (const l of rep.lanes) {
+      const f = farmOf.get(l.farm_id);
+      if (!f || f.unlisted || f.synthetic !== rep.synthetic) continue;
+      reported.add(`${l.farm_id}|${l.lane}`);
+      if (l.refused <= 0) continue;
+      const why = l.reasons.length ? ` Reasons: ${l.reasons.map((r) => `${r.code} ×${r.count}`).join(', ')}.` : '';
+      out.push({
+        farm_id: l.farm_id,
+        device_id: null,
+        kind: 'ledger_refused',
+        metric: l.lane,
+        severity: 'critical',
+        detail: `The ledger refused ${l.refused} of ${l.sent} ${l.lane}${l.corpus ? ` (${l.corpus})` : ''} entries in the report of ${rep.taken_at}; ${l.written} were written.${why} History sent there in that window has a gap until it is re-sent or documented.`,
+        value: l.refused,
+        min: null,
+        max: 0,
+        stage: null,
+        synthetic: f.synthetic,
+      });
+    }
+  }
+  for (const o of openLedger) {
+    if (!o.metric || reported.has(`${o.farm_id}|${o.metric}`)) continue;
+    const f = farmOf.get(o.farm_id);
+    if (!f || f.unlisted) continue;
+    out.push({
+      farm_id: o.farm_id,
+      device_id: null,
+      kind: 'ledger_refused',
+      metric: o.metric,
+      severity: 'critical',
+      detail: `The ${o.metric} lane refused entries and has not reported since, so it is not known to be writing again. It closes once a report shows the lane writing everything.`,
+      value: null,
+      min: null,
+      max: 0,
+      stage: null,
+      synthetic: f.synthetic,
+    });
+  }
+  return out;
+}
 
 let running = false;
 
@@ -479,6 +548,29 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
         );
       }
     }
+    // Refused ledger writes (migration 100): the newest report each kind of snapshot carried.
+    // Read on its own, so a database not yet migrated costs this check and never the pass.
+    await db.query('SAVEPOINT ledger_writes');
+    try {
+      const reps = await db.query<{ taken_at: string; synthetic: boolean; ledger_writes: { lanes?: LedgerReportRow['lanes'] } }>(
+        `SELECT DISTINCT ON (synthetic) to_char(taken_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS taken_at, synthetic, ledger_writes
+           FROM engine_vfarm_snapshots WHERE ledger_writes IS NOT NULL ORDER BY synthetic, taken_at DESC`,
+      );
+      const openLedger = await db.query<{ farm_id: string; metric: string | null }>(
+        `SELECT farm_id, metric FROM engine_monitoring_incidents WHERE closed_at IS NULL AND kind = 'ledger_refused'`,
+      );
+      faults.push(
+        ...ledgerFaults(
+          reps.rows.map((r) => ({ taken_at: r.taken_at, synthetic: r.synthetic, lanes: Array.isArray(r.ledger_writes?.lanes) ? r.ledger_writes.lanes : [] })),
+          farms.rows.map((f) => ({ farm_id: f.farm_id, synthetic: f.synthetic, unlisted: f.unlisted })),
+          openLedger.rows,
+        ),
+      );
+      await db.query('RELEASE SAVEPOINT ledger_writes');
+    } catch (e) {
+      await db.query('ROLLBACK TO SAVEPOINT ledger_writes');
+      console.error(`[monitoring-twin] ledger writes not judged: ${(e as Error).message}`);
+    }
     // Open what is new, keep what is still true, close what has cleared.
     const open = await db.query<{ incident_id: string; farm_id: string; device_id: string | null; kind: string; metric: string | null }>(
       `SELECT incident_id, farm_id, device_id, kind, metric FROM engine_monitoring_incidents WHERE closed_at IS NULL`,
@@ -521,7 +613,7 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
  */
 export const LEDGER_LANE = 'bays';
 export const LEDGER_SUBSYSTEM = 'MONITORING';
-const LEDGER_CLASS: Record<string, string> = { offline: 'SENSOR_OFFLINE', out_of_range: 'ENVIRONMENT_OUT_OF_RANGE', feed_silent: 'FEED_SILENT' };
+const LEDGER_CLASS: Record<string, string> = { offline: 'SENSOR_OFFLINE', out_of_range: 'ENVIRONMENT_OUT_OF_RANGE', feed_silent: 'FEED_SILENT', ledger_refused: 'LEDGER_WRITE_REFUSED' };
 const LEDGER_SEVERITY: Record<string, string> = { warning: 'warning', critical: 'critical' };
 
 type LedgerRow = {
@@ -549,7 +641,7 @@ type LedgerRow = {
  */
 export function ledgerBody(r: LedgerRow) {
   const where = r.device_id ? `${r.farm_id} / ${r.device_id}` : r.farm_id;
-  const what = r.kind === 'offline' ? 'sensor offline' : r.kind === 'out_of_range' ? `${r.metric ?? 'reading'} out of range` : 'vFarm feed silent';
+  const what = r.kind === 'offline' ? 'sensor offline' : r.kind === 'out_of_range' ? `${r.metric ?? 'reading'} out of range` : r.kind === 'ledger_refused' ? `ledger refused writes on ${r.metric ?? 'a lane'}` : 'vFarm feed silent';
   const sim = r.synthetic ? '[SIMULATED] ' : '';
   return {
     type: 'INC' as const,
@@ -887,6 +979,15 @@ export async function monitoringData(db: Queryable = { query }) {
   // newest snapshot's history block reported, and the six rover signals. Each read on its own, so a
   // database not yet migrated costs these lines and never the twin's answer.
   const [feedHistory, historyReport] = await Promise.all([vfarmHistory.historyByFarm(db), vfarmHistory.lastHistoryReport(db)]);
+  // The ledger lanes' newest write report per kind of snapshot (migration 100). Read on its own:
+  // an unmigrated database costs this card, never the twin's answer.
+  const ledgerReports = await db
+    .query<{ synthetic: boolean; taken_at: string; ledger_writes: { lanes?: unknown[]; refused_rows?: unknown[] } }>(
+      `SELECT DISTINCT ON (synthetic) synthetic, ${ISO('taken_at')} AS taken_at, ledger_writes
+         FROM engine_vfarm_snapshots WHERE ledger_writes IS NOT NULL ORDER BY synthetic, taken_at DESC`,
+    )
+    .then((r) => new Map(r.rows.map((x) => [x.synthetic, x])))
+    .catch(() => null);
   const roverOf = new Map<string, ReturnType<typeof vfarmHistory.roverSignals> | null>();
   for (const f of farms.rows) {
     const inputs = await vfarmHistory.roverInputs(
@@ -984,6 +1085,21 @@ export async function monitoringData(db: Queryable = { query }) {
           }
         : { sections: null, last_report: null, note: 'The vFarm history could not be read.' },
       rover: roverOf.get(f.farm_id) ?? { note: 'The rover signals could not be read.' },
+      ledger_writes: ((): { taken_at: string | null; lanes: Array<{ lane: string; corpus: string | null; sent: number; written: number; refused: number; reasons: Array<{ code: string; count: number }>; last_pass_at: string | null }>; note: string } => {
+        if (!ledgerReports) return { taken_at: null, lanes: [], note: 'The ledger write reports could not be read.' };
+        const rep = ledgerReports.get(f.synthetic);
+        if (!rep) return { taken_at: null, lanes: [], note: 'Ledger write reports are not sent by vFarm yet. Until they are, a write the ledger refuses is only a line in vFarm\'s own log.' };
+        const lanes = (Array.isArray(rep.ledger_writes?.lanes) ? rep.ledger_writes.lanes : [])
+          .filter((l): l is Record<string, unknown> => typeof l === 'object' && l !== null && (l as Record<string, unknown>).farm_id === f.farm_id)
+          .map((l) => ({ lane: String(l.lane), corpus: (l.corpus as string | null) ?? null, sent: Number(l.sent), written: Number(l.written), refused: Number(l.refused), reasons: Array.isArray(l.reasons) ? (l.reasons as Array<{ code: string; count: number }>) : [], last_pass_at: (l.last_pass_at as string | null) ?? null }));
+        return {
+          taken_at: rep.taken_at,
+          lanes,
+          note: lanes.length
+            ? 'What each vFarm ledger lane sent to BHARAG for this farm since its last report, what was written and what was refused. Any refused entry opens an incident, closed once a later report shows the lane writing everything.'
+            : 'The newest report names no ledger lane for this farm, so nothing it sent there is known to have landed.',
+        };
+      })(),
       devices: devs.map((d) => ({
         device_id: d.device_id,
         ...(({ sources, ...id }) => ({ ...id, identity_sources: sources }))(identityOf(d.fields, f.fields)),
