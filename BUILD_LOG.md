@@ -13533,6 +13533,74 @@ Change:     operator-quickstart's "What you can change" now opens with the rule 
 Decision:   Written as a migration because the Claude connector in use still lists 99 tools and not write_help_page (a refresh did not pick it up); the migration writes the same history line and help_page_written event helpPages.write does, and is idempotent on the text's hash.
 Tests:      migration 99 applied to a local Postgres 16 (help_test) and run twice; test:help-pages 10 checks.
 
+---
+
+## 2026-10-28 08:10 — Approval cards laid out with Block Kit
+
+Intent:    The Approve / Deny cards in #bha-engine-alerts were one long paragraph with
+           the whole request in bold, which read as a wall of text (Destiny, 28 Oct).
+           Layout only: who may decide, the buttons and the decision are unchanged.
+
+Files:     server/src/approvals.ts, server/test/approvals.test.cjs, BUILD_LOG.md.
+
+- `cardBlocks` / `settledBlocks` now build: a headline with the state (Approval needed,
+  Approved — done, Approved but it failed, Denied, Expired), a divider, a two-column box
+  (Action, Record/Doc/To, Asked by, Expires or Decided by), "What Bays was asked to do"
+  and "Reason given" as their own quoted sections (`splitSummary` splits the summary on
+  "Reason given:"), the Result once decided, and the ids in a grey footer.
+- The footer names "Destiny or Jason" in plain words, not as mentions, so a card in an
+  approver's own thread still pings nobody.
+- The decided headline no longer repeats who decided (it has its own field); the
+  notification fallback text still says who.
+- Tests read the whole card's text (`cardText`) instead of block 0.
+
+Proof:     The npm registry is unreachable from this session, so `npm run test:approvals`
+           (which needs `pg`) could not run here. Checked instead by building the server
+           and rendering both cards from the real 28 Oct delete_record request with the
+           database module stubbed: Block Kit limits hold (≤ 10 fields, ≤ 2000 per field,
+           ≤ 3000 per section), the pending card has the buttons and the settled card has
+           none, an approver's own thread pings nobody. Live check: the next real card.
+
+---
+
+## 2026-10-28 11:40 — Rover passes on the page, and refused ledger writes raise an incident (D3)
+
+Intent:    Kavin's rover log (26 Oct) found two gaps. vFarm's ledger lanes can be told
+           "accepted" by BHARAG and write nothing, and that only reaches New Relic. And the
+           rover's pass summaries, sent to the dashboard since 24 Oct (16 real passes held
+           for v-farm), were stored and shown only as a count, while the six rover tiles read
+           section names vFarm no longer sends and said "not sent".
+
+Files:     server/src/vfarmHistory.ts, server/src/systemFeeds.ts, server/src/monitoringTwin.ts,
+           server/src/migrations.ts (100), server/src/mcp/tools.ts, src/data/types.ts,
+           src/screens/MonitoringTwin.tsx, src/screens/VFarm/Live.tsx,
+           server/test/rover-ledger.test.cjs, server/test/_pg-stub.cjs, package.json,
+           docs/contracts/vfarm.md, CLAUDE.md, BUILD_LOG.md.
+
+- Rover passes: `passOf` reads a pass as vFarm summarises it; `roverSignals` lists the last
+  8 days newest first, and with no `rover_runs` counts runs, run time, stops with no photo
+  (`snapshot_failed`) and photos not sent from the passes, with a note saying so. Run rows
+  still win where vFarm sends them. A "Rover passes" table on the Monitoring Twin: stops,
+  distance, photos sent, where it ended (home / unknown / metres), failed stops in words,
+  "needs a check".
+- Ledger writes: an optional `ledger_writes` block on the snapshot, one row per lane and
+  farm (sent, written, refused, reasons). Stored on the snapshot row (migration 100). A
+  refused entry opens one critical incident per lane and farm through the Monitoring Twin's
+  own path (BHARAG ledger, Engine health), closed by a later report at refused 0, kept open
+  while the lane is silent. Read inside a savepoint so a bad read never aborts the judging
+  pass. Cards on the Monitoring Twin and the vFarm Overview say "not sent by vFarm yet"
+  until the first report.
+
+Problem:   `npm ci` cannot reach the registry from this session (CONNECT 403), so neither
+           `npm run build` nor the tests that need `pg` could run here.
+Fix:       Server type-checked with the global tsc and a pg type stub (only the two known
+           pg-stub errors in mcp/sql.ts); the new test loads the compiled server with a pg
+           stand-in. The two screens were parsed with esbuild and their imports, props and
+           types checked by hand; the Render build is the first full frontend check.
+Decision:  vFarm's part (send the block, raise its own alert on a refused write) is Kavin's;
+           the shape is in the contract doc and posted in his thread.
+Tests:     test:rover-ledger 6 checks; test:vfarm-evidence 9 checks still pass.
+
 ## 2026-10-27 23:55 — SE8L / YEAO: doctrine gaps reach Research Twin through T4, outages never do (local, uncommitted)
 Intent:     Hardik (DW-1792507157643-YEAO): continue SE8L under Jason's three SOPs of 27 Oct — M4CV accepted exceptions (9daadbc3), the needs_evidence / stale_evidence escalation threshold (192331ee), and resolver outages as operational only (dc89a498) — reusing M4CV, T4 and researchSignals.open(), with the watcher OFF throughout. Isolated worktree bha-engine-se8l, branch fix/se8l-yeao-escalation at f3c45c0 (the commit production reported); no fetch, nothing committed, pushed or deployed.
 Files:      server/src/migrations.ts (97); server/src/doctrineGap.ts; server/src/doctrineEpisodes.ts (new); server/src/doctrineConsumer.ts (new); server/src/researchSignals.ts; server/test/doctrine-gap.test.cjs; server/test/doctrine-gap-episode.test.cjs (new); server/test/research-signals-open.test.cjs (new); server/test/doctrine-gap-episode.db.test.cjs (new); server/test/doctrine-gap.db.test.cjs, doctrine-gap-writes.db.test.cjs, doctrine-drill.db.test.cjs, doctrine-gap-resolver.db.test.cjs, research-signals.test.cjs (expectations); package.json; CLAUDE.md; BUILD_LOG.md

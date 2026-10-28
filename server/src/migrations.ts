@@ -3830,6 +3830,15 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
     ],
   },
   {
+    // 28 Oct 2026, Destiny (D3 — Kavin's rover log of 26 Oct, NAFB): vFarm's bharag ledger lanes can be
+    // told "accepted" while writing nothing (0 of 8 sensor entries, 26 Oct), and the only trace was a
+    // log line. Each snapshot may now carry a `ledger_writes` report per lane and farm; it is kept on the
+    // snapshot row whole, and the Monitoring Twin opens an incident on any refused entry.
+    id: 100,
+    name: 'engine_vfarm_snapshots.ledger_writes: vFarm ledger lanes report what they wrote and what was refused',
+    statements: [`ALTER TABLE engine_vfarm_snapshots ADD COLUMN IF NOT EXISTS ledger_writes jsonb`],
+  },
+  {
     /**
      * 27 Oct 2026, Hardik (SE8L / DW-1792507157643-YEAO). Three tables the doctrine-gap watcher keeps
      * so that what it counts survives a crash, a retry and two instances overlapping on a deploy.
@@ -3843,7 +3852,7 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
      *   - alarms: one row per recovery key, for opening its incident exactly once and for the rolling
      *     24 hours between restatements of an open one.
      */
-    id: 100,
+    id: 101,
     name: 'SE8L: doctrine-gap sweeps (fenced), gap episodes and alarms',
     statements: [
       `CREATE TABLE IF NOT EXISTS engine_doctrine_gap_sweeps (

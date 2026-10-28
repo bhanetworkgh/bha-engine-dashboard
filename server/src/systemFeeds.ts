@@ -259,6 +259,78 @@ export interface SnapshotStoreResult {
   synthetic: boolean;
   /** What the history, layout and rover_config blocks carried and what was stored (migration 91); null when none was sent. */
   history: HistorySummary | null;
+  /** The ledger lanes' write report (migration 100): the rows kept and the ones refused, with why. Null when none was sent. */
+  ledger_writes: LedgerWrites | null;
+}
+
+/* ------------------------------------------------- ledger writes (migration 100) */
+
+/** One ledger lane's writes for one farm since its last report, as vFarm counted them. */
+export interface LedgerLaneReport {
+  lane: string;
+  farm_id: string;
+  corpus: string | null;
+  sent: number;
+  written: number;
+  refused: number;
+  reasons: Array<{ code: string; count: number }>;
+  window_from: string | null;
+  window_to: string | null;
+  last_pass_at: string | null;
+}
+export interface LedgerWrites {
+  lanes: LedgerLaneReport[];
+  /** Rows of the report that could not be kept, with why. They are counted, never dropped silently. */
+  refused_rows: Array<{ index: number; reason: string }>;
+}
+export const LEDGER_LANE_NAME = /^[a-z][a-z0-9_.-]{0,39}$/;
+const MAX_LEDGER_ROWS = 500;
+const wholeCount = (v: unknown): number | null => {
+  const n = num(v);
+  return n !== null && Number.isInteger(n) && n >= 0 ? n : null;
+};
+
+/**
+ * The snapshot's `ledger_writes` block (28 Oct 2026, D3 — Kavin's rover log of 26 Oct). vFarm's
+ * bharag ledger lanes are told "accepted" even when an entry is not written (26 Oct: 0 of 8 sensor
+ * entries), and until now the only trace was a log line nobody reads. Each lane counts, per farm,
+ * what it sent, what the ledger wrote and what it refused since its last report, and the snapshot
+ * carries those counts here. Pure: the whole block's shape is refused with a 422; one bad row is
+ * counted in `refused_rows` and the rest kept, the way history rows are.
+ */
+export function parseLedgerWrites(body: Obj, farmIds: string[]): LedgerWrites | null {
+  const b = body.ledger_writes;
+  if (b === undefined || b === null) return null;
+  if (!isObj(b) || !Array.isArray(b.lanes)) throw new FeedError(422, 'ledger_writes needs lanes (a list, one row per lane and farm; empty means no lane ran).');
+  if (b.lanes.length > MAX_LEDGER_ROWS) throw new FeedError(413, `ledger_writes.lanes has ${b.lanes.length} rows; at most ${MAX_LEDGER_ROWS} in one snapshot.`);
+  const lanes: LedgerLaneReport[] = [];
+  const refused_rows: LedgerWrites['refused_rows'] = [];
+  const seen = new Set<string>();
+  b.lanes.forEach((r, index) => {
+    const no = (reason: string) => refused_rows.push({ index, reason });
+    if (!isObj(r)) return no('not an object');
+    const lane = str(r.lane);
+    if (!lane || !LEDGER_LANE_NAME.test(lane)) return no(`lane "${String(r.lane ?? '')}" is not a lane name (lower case, digits, _ . -)`);
+    const farm = str(r.farm_id);
+    if (!farm) return no('farm_id is required (the farm the entries were about)');
+    if (!farmIds.includes(farm)) return no(`farm_id "${farm}" is not in this snapshot's farms`);
+    const sent = wholeCount(r.sent);
+    const written = wholeCount(r.written);
+    const refused = wholeCount(r.refused);
+    if (sent === null || written === null || refused === null) return no('sent, written and refused must be whole numbers, 0 or more');
+    if (written + refused > sent) return no(`written (${written}) and refused (${refused}) add up to more than sent (${sent})`);
+    const key = `${lane}|${farm}`;
+    if (seen.has(key)) return no(`a second row for lane ${lane} and farm ${farm}; send one row per lane and farm`);
+    seen.add(key);
+    for (const k of ['window_from', 'window_to', 'last_pass_at'] as const) {
+      if (r[k] !== undefined && r[k] !== null && !iso(r[k])) return no(`${k} "${String(r[k])}" is not an ISO 8601 time`);
+    }
+    const reasons = Array.isArray(r.reasons)
+      ? r.reasons.filter(isObj).map((x) => ({ code: str(x.code) ?? str(x.status) ?? 'unknown', count: wholeCount(x.count) ?? 0 })).slice(0, 20)
+      : [];
+    lanes.push({ lane, farm_id: farm, corpus: str(r.corpus), sent, written, refused, reasons, window_from: iso(r.window_from), window_to: iso(r.window_to), last_pass_at: iso(r.last_pass_at) });
+  });
+  return { lanes, refused_rows };
 }
 
 /**
@@ -325,6 +397,7 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
   });
 
   checkHistoryShape(body);
+  const ledgerWrites = parseLedgerWrites(body, farmIds);
 
   return tx(body.dry_run === true, async (db) => {
     // An older snapshot than the newest held changes nothing: posts can arrive out of order on a retry.
@@ -412,7 +485,7 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
       [farmIds, opens.map((x) => x.id), takenAt, synthetic],
     );
     const history = await storeHistory(db, body, farmIds, takenAt, synthetic);
-    await db.query(`INSERT INTO engine_vfarm_snapshots (taken_at, farms, devices, open_alerts, pipeline, synthetic, history) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [
+    await db.query(`INSERT INTO engine_vfarm_snapshots (taken_at, farms, devices, open_alerts, pipeline, synthetic, history, ledger_writes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [
       takenAt,
       farms.length,
       devs.length,
@@ -420,9 +493,10 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
       isObj(body.alert_pipeline) ? JSON.stringify(body.alert_pipeline) : null,
       synthetic,
       history ? JSON.stringify(history) : null,
+      ledgerWrites ? JSON.stringify({ ...ledgerWrites, taken_at: takenAt }) : null,
     ]);
     events.changed('vfarm_state', null, db);
-    return { taken_at: takenAt, farms: farms.length, devices: devs.length, open_alerts: opens.length, devices_gone: gone.rowCount ?? 0, alerts_closed: closed.rowCount ?? 0, farms_unlisted: unlisted.rowCount ?? 0, synthetic, history };
+    return { taken_at: takenAt, farms: farms.length, devices: devs.length, open_alerts: opens.length, devices_gone: gone.rowCount ?? 0, alerts_closed: closed.rowCount ?? 0, farms_unlisted: unlisted.rowCount ?? 0, synthetic, history, ledger_writes: ledgerWrites };
   });
 }
 
@@ -819,7 +893,27 @@ export async function vfarmData() {
             (SELECT count(*) FROM engine_vfarm_snapshots WHERE NOT synthetic)::int AS snapshots,
             (SELECT count(*) FROM engine_vfarm_farms WHERE NOT ${REAL_FARM})::int AS simulated_farms`,
   );
+  // The ledger lanes' newest write report and the refusals open against it (migration 100). On its
+  // own, so a database not yet migrated loses this card and never the page.
+  const ledger = await Promise.all([
+    query<{ taken_at: string; ledger_writes: { lanes?: Array<Record<string, unknown>> } }>(
+      `SELECT to_char(taken_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS taken_at, ledger_writes
+         FROM engine_vfarm_snapshots WHERE NOT synthetic AND ledger_writes IS NOT NULL ORDER BY taken_at DESC LIMIT 1`,
+    ),
+    query<{ incident_id: string; ledger_id: string | null; farm_id: string; metric: string | null; detail: string; opened_at: string }>(
+      `SELECT incident_id, ledger_id, farm_id, metric, detail, to_char(opened_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS opened_at
+         FROM engine_monitoring_incidents WHERE kind = 'ledger_refused' AND closed_at IS NULL AND NOT synthetic ORDER BY opened_at DESC`,
+    ),
+  ])
+    .then(([rep, inc]) => ({
+      taken_at: rep.rows[0]?.taken_at ?? null,
+      lanes: (rep.rows[0]?.ledger_writes?.lanes ?? []).map((l) => ({ lane: String(l.lane), farm_id: String(l.farm_id), sent: Number(l.sent), written: Number(l.written), refused: Number(l.refused) })),
+      open_refusals: inc.rows,
+      note: rep.rows[0] ? 'What vFarm\'s ledger lanes wrote to BHARAG in the newest report, by lane and farm. A refused entry opens an incident on the Monitoring Twin and Engine health.' : 'Ledger write reports are not sent by vFarm yet. Until they are, a write the ledger refuses is only a line in vFarm\'s own log.',
+    }))
+    .catch(() => null);
   return {
+    ledger_writes: ledger,
     last_snapshot: snaps.rows[0] ?? null,
     snapshots: counts.rows[0]?.snapshots ?? 0,
     farms: farms.rows,
