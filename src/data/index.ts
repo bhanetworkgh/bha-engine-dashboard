@@ -93,6 +93,8 @@ import type {
   SopDoc,
   Intake2InviteOutcome,
   HelpPagesData,
+  EvidenceData,
+  EvidenceDoc,
   CodeChecksData,
 } from './types';
 
@@ -677,6 +679,9 @@ export const getCsTwin = () => api<CstData>('/api/cs-twin');
 export const getHelpPages = () => api<HelpPagesData>('/api/help-pages');
 /** Destiny's code checks and November's outputs for Jason (29 Oct 2026). A read; checks are recorded over MCP. */
 export const getCodeChecks = () => api<CodeChecksData>('/api/code-checks');
+/** The evidence store (28 Oct 2026, D3). A read; documents are saved by Bays or on the connector. */
+export const getEvidence = () => api<EvidenceData>('/api/evidence');
+export const getEvidenceDoc = (id: string) => api<EvidenceDoc>(`/api/evidence/${encodeURIComponent(id)}`);
 /** Hardik's doctrine and contract changes, for the Media Twin page (2026-09-30). */
 export const getMediaDoctrine = () => api<DoctrineData>('/api/media-doctrine');
 /** The Media Twin post log (2026-10-22, H58Q): which vFarm picture went where. */

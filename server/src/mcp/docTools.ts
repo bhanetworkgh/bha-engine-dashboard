@@ -81,6 +81,77 @@ export function isBinary(b: Buffer): boolean {
   return sig.startsWith('89504e47') || sig.startsWith('ffd8ff') || sig.startsWith('47494638');
 }
 
+/**
+ * A downloaded file as text, by what it is: a PDF's text layer, a Word file's body, plain text.
+ * Anything else is named and refused, never returned as bytes read as text. Shared by
+ * read_slack_file and the evidence store (28 Oct 2026), so the two read a file the same way.
+ */
+export type FileText = { ok: true; text: string; extra: Record<string, unknown> } | ({ ok: false } & Record<string, unknown>);
+export function extractFileText(bytes: Buffer, content_type: string): FileText {
+  const isPdf = content_type.includes('application/pdf') || bytes.subarray(0, 5).toString('latin1') === '%PDF-';
+  let text: string;
+  let extra: Record<string, unknown> = {};
+  if (isPdf) {
+    let r;
+    try {
+      r = extractPdfText(bytes);
+    } catch (e) {
+      return { ok: false, outcome: 'no_text_layer', reason: 'no_text_layer', type: 'pdf', bytes: bytes.length, step: 'extract PDF text', message: `The PDF could not be read: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    if (r.encrypted) return { ok: false, outcome: 'no_text_layer', reason: 'no_text_layer', type: 'pdf', pages: r.pages, bytes: bytes.length, message: 'The PDF is encrypted, and encrypted PDFs are not decrypted here — no text was read.' };
+    if (!r.text.replace(/\s/g, '')) {
+      return {
+        ok: false,
+        outcome: 'no_text_layer',
+        reason: 'no_text_layer',
+        type: 'pdf',
+        pages: r.pages,
+        bytes: bytes.length,
+        message: `The PDF has ${r.pages} page${r.pages === 1 ? '' : 's'} and no text layer — it is scanned or made of images${r.unmapped ? `, or its ${r.unmapped} strings use a font with no Unicode map` : ''}. No OCR is done here.`,
+      };
+    }
+    text = r.text;
+    extra = { type: 'pdf', pages: r.pages, ...(r.unmapped ? { unmapped_strings: r.unmapped, note: `${r.unmapped} strings used a font with no Unicode map and were left out.` } : {}) };
+  } else if (isZip(bytes)) {
+    // A .docx is a zip with word/document.xml (26 Oct 2026). Any other zip
+    // (a spreadsheet, slides, an archive) is named and refused, never
+    // handed back as bytes read as text.
+    const names = zipNames(bytes);
+    if (!names.includes('word/document.xml')) {
+      const kind = names.some((n) => n.startsWith('xl/')) ? 'an Excel spreadsheet (.xlsx)' : names.some((n) => n.startsWith('ppt/')) ? 'a PowerPoint deck (.pptx)' : 'a zip archive';
+      return { ok: false, outcome: 'unsupported_type', reason: 'unsupported_type', type: content_type.split(';')[0] || 'application/zip', bytes: bytes.length, message: `This file is ${kind}, which is not read here. PDFs, Word (.docx) and plain text files are. Ask for it as a PDF or a .docx.` };
+    }
+    let r;
+    try {
+      r = extractDocxText(bytes);
+    } catch (e) {
+      return { ok: false, outcome: 'unreadable', reason: 'unreadable', type: 'docx', bytes: bytes.length, step: 'extract Word text', message: `The Word file could not be read: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    if (!r.text.replace(/\s/g, '')) {
+      return { ok: false, outcome: 'no_text_layer', reason: 'no_text_layer', type: 'docx', bytes: bytes.length, images: r.images, message: `The Word file has no text in its body${r.images ? ` (it holds ${r.images} picture${r.images === 1 ? '' : 's'}, which are not read)` : ''}.` };
+    }
+    text = r.text;
+    extra = { type: 'docx', paragraphs: r.paragraphs, tables: r.tables, ...(r.images ? { images_skipped: r.images, note: `${r.images} picture${r.images === 1 ? '' : 's'} in the document were not read.` } : {}) };
+  } else if (isBinary(bytes)) {
+    // An image, an old .doc, or anything else that is not text: named, never dumped.
+    const old = bytes.length >= 4 && bytes.readUInt32LE(0) === 0xe011cfd0;
+    return {
+      ok: false,
+      outcome: 'unsupported_type',
+      reason: 'unsupported_type',
+      type: content_type.split(';')[0] || 'unknown',
+      bytes: bytes.length,
+      message: old
+        ? 'This is an old-format Office file (.doc, .xls or .ppt), which is not read here. Ask for it as a PDF or a .docx.'
+        : `This file (${content_type.split(';')[0] || 'unknown type'}) is not text, so it is not read here. PDFs, Word (.docx) and plain text files are.`,
+    };
+  } else {
+    text = bytes.toString('utf8');
+    extra = { type: content_type.split(';')[0] || 'unknown' };
+  }
+  return { ok: true, text, extra };
+}
+
 export const readSlackFile: ToolDefinition = {
   name: 'read_slack_file',
   description: `Read a file somebody shared in Slack, as text. Only https://files.slack.com/ addresses (url_private or url_private_download) — anything else is refused not_a_slack_file_url. Downloaded with the Bays bot token. A PDF has its text layer extracted; a Word file (.docx) has its body read, paragraphs in order and each table row as one line with its cells joined by " | "; a plain text file is returned as text. Anything else (a spreadsheet, slides, an image, an old .doc, a zip) is refused unsupported_type naming what it is, never returned as bytes: ask the person for a PDF or a .docx. At most ${TEXT_CAP} characters, with truncated: true beyond that. Outcomes: extracted, no_text_layer (a scanned or image-only PDF, an encrypted one, or a Word file with no text), unsupported_type, unreadable (a damaged Word file), file_not_found (404), not_authorised (401/403, or Slack redirecting to sign-in). Read only.`,
@@ -99,67 +170,9 @@ export const readSlackFile: ToolDefinition = {
       if (!slack.slackConfigured()) return { ok: false, reason: 'not_configured', message: `${slack.SLACK_TOKEN_VAR} is not set on this server, so no Slack file can be downloaded.` };
       const d = await slack.download(url);
       if (!d.ok) return { ok: false, outcome: d.outcome, reason: d.outcome, status: d.status || null, step: 'download from files.slack.com', message: d.message };
-      const isPdf = d.content_type.includes('application/pdf') || d.bytes.subarray(0, 5).toString('latin1') === '%PDF-';
-      let text: string;
-      let extra: Record<string, unknown> = {};
-      if (isPdf) {
-        let r;
-        try {
-          r = extractPdfText(d.bytes);
-        } catch (e) {
-          return { ok: false, outcome: 'no_text_layer', reason: 'no_text_layer', type: 'pdf', bytes: d.bytes.length, step: 'extract PDF text', message: `The PDF could not be read: ${e instanceof Error ? e.message : String(e)}` };
-        }
-        if (r.encrypted) return { ok: false, outcome: 'no_text_layer', reason: 'no_text_layer', type: 'pdf', pages: r.pages, bytes: d.bytes.length, message: 'The PDF is encrypted, and encrypted PDFs are not decrypted here — no text was read.' };
-        if (!r.text.replace(/\s/g, '')) {
-          return {
-            ok: false,
-            outcome: 'no_text_layer',
-            reason: 'no_text_layer',
-            type: 'pdf',
-            pages: r.pages,
-            bytes: d.bytes.length,
-            message: `The PDF has ${r.pages} page${r.pages === 1 ? '' : 's'} and no text layer — it is scanned or made of images${r.unmapped ? `, or its ${r.unmapped} strings use a font with no Unicode map` : ''}. No OCR is done here.`,
-          };
-        }
-        text = r.text;
-        extra = { type: 'pdf', pages: r.pages, ...(r.unmapped ? { unmapped_strings: r.unmapped, note: `${r.unmapped} strings used a font with no Unicode map and were left out.` } : {}) };
-      } else if (isZip(d.bytes)) {
-        // A .docx is a zip with word/document.xml (26 Oct 2026). Any other zip
-        // (a spreadsheet, slides, an archive) is named and refused, never
-        // handed back as bytes read as text.
-        const names = zipNames(d.bytes);
-        if (!names.includes('word/document.xml')) {
-          const kind = names.some((n) => n.startsWith('xl/')) ? 'an Excel spreadsheet (.xlsx)' : names.some((n) => n.startsWith('ppt/')) ? 'a PowerPoint deck (.pptx)' : 'a zip archive';
-          return { ok: false, outcome: 'unsupported_type', reason: 'unsupported_type', type: d.content_type.split(';')[0] || 'application/zip', bytes: d.bytes.length, message: `This file is ${kind}, which is not read here. PDFs, Word (.docx) and plain text files are. Ask for it as a PDF or a .docx.` };
-        }
-        let r;
-        try {
-          r = extractDocxText(d.bytes);
-        } catch (e) {
-          return { ok: false, outcome: 'unreadable', reason: 'unreadable', type: 'docx', bytes: d.bytes.length, step: 'extract Word text', message: `The Word file could not be read: ${e instanceof Error ? e.message : String(e)}` };
-        }
-        if (!r.text.replace(/\s/g, '')) {
-          return { ok: false, outcome: 'no_text_layer', reason: 'no_text_layer', type: 'docx', bytes: d.bytes.length, images: r.images, message: `The Word file has no text in its body${r.images ? ` (it holds ${r.images} picture${r.images === 1 ? '' : 's'}, which are not read)` : ''}.` };
-        }
-        text = r.text;
-        extra = { type: 'docx', paragraphs: r.paragraphs, tables: r.tables, ...(r.images ? { images_skipped: r.images, note: `${r.images} picture${r.images === 1 ? '' : 's'} in the document were not read.` } : {}) };
-      } else if (isBinary(d.bytes)) {
-        // An image, an old .doc, or anything else that is not text: named, never dumped.
-        const old = d.bytes.length >= 4 && d.bytes.readUInt32LE(0) === 0xe011cfd0;
-        return {
-          ok: false,
-          outcome: 'unsupported_type',
-          reason: 'unsupported_type',
-          type: d.content_type.split(';')[0] || 'unknown',
-          bytes: d.bytes.length,
-          message: old
-            ? 'This is an old-format Office file (.doc, .xls or .ppt), which is not read here. Ask for it as a PDF or a .docx.'
-            : `This file (${d.content_type.split(';')[0] || 'unknown type'}) is not text, so it is not read here. PDFs, Word (.docx) and plain text files are.`,
-        };
-      } else {
-        text = d.bytes.toString('utf8');
-        extra = { type: d.content_type.split(';')[0] || 'unknown' };
-      }
+      const ft = extractFileText(d.bytes, d.content_type);
+      if (!ft.ok) return ft;
+      const { text, extra } = ft;
       const truncated = text.length > TEXT_CAP;
       return { ok: true, outcome: 'extracted', ...extra, bytes: d.bytes.length, chars: text.length, truncated, text: truncated ? text.slice(0, TEXT_CAP) : text, ...(truncated ? { cap: TEXT_CAP } : {}) };
     })();

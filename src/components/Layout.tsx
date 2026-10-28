@@ -57,6 +57,8 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
       { to: '/scheduled-runs', label: 'Scheduled runs', icon: 'calendar' },
       // Repeating engine faults, what crossed a threshold and what was done about it (2026-10-10).
       { to: '/logstream', label: 'Logstream', icon: 'loop' },
+      // The documents the engine's decisions rest on, held once and read by name (2026-10-28, D3).
+      { to: '/evidence', label: 'Evidence store', icon: 'shield' },
       // Who is owed money, for what work, and what has been paid (2026-09-17).
       // Pay was a tick on a Slack card until today, so the only way to answer
       // "what do I owe Hardik for September" was to scroll back through weeks

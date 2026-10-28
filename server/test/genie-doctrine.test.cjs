@@ -104,8 +104,8 @@ let server;
   const ok = (name) => { passed++; console.log(`  ok  ${name}`); };
   try {
     // 1. Genie's tool list, exactly.
-    assert.deepEqual(await listOf(TOKENS.genie), ['get_vfarm_gates', 'read_buyer_flow', 'read_engine_events', 'read_engine_strain', 'read_help_pages', 'read_logstream', 'read_media_doctrine', 'read_monitoring_twin', 'read_publication_decision', 'read_sop', 'read_vfarm_history']);
-    ok("Genie's token lists exactly read_logstream, read_engine_events, read_media_doctrine, read_publication_decision, read_buyer_flow, read_sop, read_monitoring_twin, get_vfarm_gates, read_vfarm_history, read_engine_strain and read_help_pages");
+    assert.deepEqual(await listOf(TOKENS.genie), ['get_vfarm_gates', 'read_buyer_flow', 'read_engine_events', 'read_engine_strain', 'read_evidence', 'read_help_pages', 'read_logstream', 'read_media_doctrine', 'read_monitoring_twin', 'read_publication_decision', 'read_sop', 'read_vfarm_history']);
+    ok("Genie's token lists exactly read_logstream, read_engine_events, read_media_doctrine, read_publication_decision, read_buyer_flow, read_sop, read_monitoring_twin, get_vfarm_gates, read_vfarm_history, read_engine_strain, read_help_pages and read_evidence");
 
     // 2. Refusals: an unrelated read, the gap summary it was not given, and writes.
     for (const name of ['find_records', 'read_doctrine_gap_summary']) {
@@ -198,7 +198,7 @@ let server;
     }
     ok('North Star, Research Twin and Bays still list read_media_doctrine, read_publication_decision and read_doctrine_gap_summary');
 
-    assert.match(log, /genie \(READONLY_SECRETS_GENIE, read, 11 tools\)/);
+    assert.match(log, /genie \(READONLY_SECRETS_GENIE, read, 12 tools\)/);
     ok('the boot line names genie as read, 11 tools');
   } finally {
     const ev = await query(`DELETE FROM engine_events WHERE subject_id LIKE $1`, [`${DOC}:%`]);

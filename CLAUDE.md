@@ -1471,6 +1471,29 @@ reads the gate**: `stage5Payment` needs `can_charge_live` as well as a live paym
 payment is unchanged. Not built: the Honest Gate event verifying a live payment, which waits on Hardik's record.
 `npm run test:charge-gate`.
 
+**The evidence store: the documents decisions rest on, held once and read by name** (2026-10-28,
+Destiny — D3; Hardik's Stripe Honest Gate handoff, D0BKMFVU806 1793075715.810679: evidence lives on the
+dashboard, not in a Drive folder). `server/src/evidence.ts`, migration 103, `engine_evidence`.
+- **One row per document**: its full text and its original file (bytes, at most 15 MB), what it proves
+  (written by the person saving it, never inferred), the gate and loop it belongs to, who wrote it and
+  when, who saved it. An id `EV-<ms>-<4>` and a name (lower case and hyphens) each find it.
+- **Never edited or deleted**: a trigger on the table refuses both. A correction is a new version under
+  the same name that `supersedes` the newest one; the old version stays readable and names its
+  successor. The same file twice is refused (`already_saved`); a name already held needs `supersedes`
+  (`name_taken`). Only Destiny, Jason or someone with a Builder Profile may ask for a save.
+- **Text is read the way `read_slack_file` reads it**: `extractFileText` in `mcp/docTools.ts`, shared, so
+  PDF, Word (.docx), Markdown and plain text are read and anything else is refused by name.
+- **Tools**: `read_evidence` (read, both connections, in Bays', North Star's, Research Twin's and Genie's
+  scopes) finds a document by id, name, gate, loop or words and returns its text whole (60,000
+  characters a call, `offset` for the rest); `save_evidence` (write connection, in Bays' scope) saves
+  one from a Slack file or from text, audited on `engine_mcp_writes` (kind `evidence`). Each save is one
+  `evidence_saved` event. The page is `/evidence` under Records (`GET /api/evidence`,
+  `/api/evidence/:id`, `/api/evidence/:id/file` for the original), and it only reads.
+- **The charge gate rests on it**: a real green acceptance pass names its bundle as an `EV-` id that is
+  held and not a test (`bundle_not_evidence`, `bundle_not_found`, `bundle_is_test`); a pass on an older
+  version is recorded and names the newer one. A test pass may name anything.
+- **Not Codex**: nothing here feeds review or pay. `npm run test:evidence`.
+
 **Buyer flow v2: five stages and the Stage 3 proposal page** (2026-10-17, Destiny — Jason in
 #bha-coordination the same day; SOPs 09cb58a7, the flow with its markings, and 66570ea2, Stage 3
 is non-transactional). `server/src/proposal.ts`, migration 81.

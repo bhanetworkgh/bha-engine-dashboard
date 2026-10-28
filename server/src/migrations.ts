@@ -3959,6 +3959,57 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       )`,
     ],
   },
+  {
+    // 2026-10-28, Destiny (D3): the evidence store. One row per document, never edited or deleted:
+    // a correction is a new version (same name, supersedes the old id). The charge gate's green
+    // acceptance pass names one of these ids. See server/src/evidence.ts.
+    id: 103,
+    name: 'Evidence store: engine_evidence, append-only, versioned by name',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_evidence (
+        evidence_id TEXT PRIMARY KEY CHECK (evidence_id ~ '^EV-[0-9]{10,}-[A-Z0-9]{4}$'),
+        name TEXT NOT NULL CHECK (name ~ '^[a-z0-9][a-z0-9-]{1,79}$'),
+        version INTEGER NOT NULL CHECK (version >= 1),
+        title TEXT NOT NULL,
+        proves TEXT NOT NULL CHECK (length(proves) >= 10),
+        gate TEXT,
+        loop_id TEXT CHECK (loop_id IS NULL OR loop_id ~ '^LOOP-[0-9]{10,}-[A-Z0-9]{4}$'),
+        author_id TEXT NOT NULL,
+        author_name TEXT,
+        written_at TIMESTAMPTZ,
+        saved_by TEXT NOT NULL,
+        saved_by_name TEXT,
+        saved_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        via TEXT NOT NULL,
+        source_kind TEXT NOT NULL CHECK (source_kind IN ('slack_file', 'text')),
+        source_ref TEXT,
+        file_name TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        file_size INTEGER NOT NULL,
+        file_sha256 TEXT NOT NULL,
+        file_bytes BYTEA NOT NULL,
+        text TEXT NOT NULL,
+        text_chars INTEGER NOT NULL,
+        text_sha256 TEXT NOT NULL,
+        extract JSONB NOT NULL DEFAULT '{}'::jsonb,
+        supersedes TEXT REFERENCES engine_evidence (evidence_id),
+        notes TEXT,
+        test BOOLEAN NOT NULL DEFAULT false,
+        UNIQUE (name, version, test)
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_evidence_one_successor ON engine_evidence (supersedes) WHERE supersedes IS NOT NULL`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_evidence_file_once ON engine_evidence (file_sha256, test)`,
+      `CREATE INDEX IF NOT EXISTS engine_evidence_saved ON engine_evidence (saved_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_evidence_gate ON engine_evidence (lower(gate)) WHERE gate IS NOT NULL`,
+      `CREATE INDEX IF NOT EXISTS engine_evidence_loop ON engine_evidence (loop_id) WHERE loop_id IS NOT NULL`,
+      `CREATE OR REPLACE FUNCTION engine_evidence_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+       BEGIN
+         RAISE EXCEPTION 'engine_evidence is append-only: a record is never edited or deleted; save a new version that supersedes it';
+       END $$`,
+      `DROP TRIGGER IF EXISTS engine_evidence_no_change ON engine_evidence`,
+      `CREATE TRIGGER engine_evidence_no_change BEFORE UPDATE OR DELETE ON engine_evidence FOR EACH ROW EXECUTE FUNCTION engine_evidence_append_only()`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
