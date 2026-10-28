@@ -165,14 +165,14 @@ const bharag = http.createServer((req, res) => {
     assert.deepEqual(statusPosts(), ['retrying', 'self_healed']);
     assert.equal(opens().length, 1);
     o = await observed();
-    assert.deepEqual(o, { n: 9, d: 9 });
+    assert.deepEqual(o, { n: 8, d: 8 });
     const reasons = (await query(`SELECT detail->>'surface' AS s, string_agg(detail->>'write_reason', ',' ORDER BY at, id) AS r FROM engine_events WHERE event_type = 'doctrine_gap_observed' AND detail->>'doctrine_id' = $1 GROUP BY 1 ORDER BY 1`, [DOC])).rows;
     assert.deepEqual(reasons, [
-      { s: 'genie_ns', r: 'first,changed,alarm_open,changed,alarm_open' },
+      { s: 'genie_ns', r: 'first,changed,changed,alarm_recovery' },
       { s: 'media_twin', r: 'first,changed' },
       { s: 'vfarm', r: 'first,changed' },
     ]);
-    ok('a further healthy sweep does nothing to the ledger; nine sweeps wrote 9 observations for one claim (27 before), each naming why: first, changed, or alarm_open while the incident was open');
+    ok('a further healthy sweep does nothing to the ledger; nine sweeps wrote 8 observations for one claim (27 before), each naming why: first, changed, or alarm_recovery for the healthy read that closed it; the identical contradiction on the open alarm wrote nothing (SOP 9daadbc3, 27 Oct)');
 
     // The resolver cannot be read: the explicit resolver-failure path, unchanged.
     const realClaims = feeds.doctrineClaims;
@@ -200,6 +200,8 @@ const bharag = http.createServer((req, res) => {
   } finally {
     const ev = await query(`DELETE FROM engine_events WHERE subject_id LIKE $1 OR detail->>'doctrine_id' = $2 OR (event_type LIKE 'doctrine_gap_%' AND subject_id = 'doctrine:genie_ns:MEDIA_DOCTRINE:RESOLVER')`, [`%${DOC}%`, DOC]);
     const doc = await query(`DELETE FROM engine_media_doctrine WHERE doctrine_id = $1`, [DOC]);
+    await query(`DELETE FROM engine_doctrine_gap_episodes WHERE doctrine_id = $1`, [DOC]).catch(() => undefined);
+    await query(`DELETE FROM engine_doctrine_gap_alarms WHERE recovery_key LIKE $1 OR recovery_key = 'doctrine:genie_ns:MEDIA_DOCTRINE:RESOLVER'`, [`%${DOC}%`]).catch(() => undefined);
     console.log(`  cleaned up ${ev.rowCount} event row(s) and ${doc.rowCount} doctrine row(s) written by this run`);
     await closePool();
     bharag.close();

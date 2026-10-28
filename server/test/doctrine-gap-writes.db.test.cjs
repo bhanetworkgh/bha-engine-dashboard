@@ -97,7 +97,7 @@ const bharag = http.createServer((req, res) => {
       FROM engine_events WHERE event_type = 'doctrine_gap_observed' AND detail->>'doctrine_id' = $1)
     SELECT id, detail->>'recovery_key' AS key, detail->>'write_reason' AS reason FROM o
     WHERE prev IS NOT NULL AND at - prev_at < interval '24 hours'
-      AND coalesce(detail->>'write_reason', '') NOT IN ('alarm_open', 'counting', 'acting')
+      AND coalesce(detail->>'write_reason', '') NOT IN ('alarm_open', 'counting', 'acting', 'alarm_recovery', 'incident_restatement')
       AND ${gap.STATE_FIELDS.map((f) => `(detail->>'${f}') IS NOT DISTINCT FROM (prev->>'${f}')`).join(' AND ')}`, [DOC])).rows;
 
   try {
@@ -123,19 +123,18 @@ const bharag = http.createServer((req, res) => {
     ok(`eleven more sweeps (an hour at the five-minute cadence) take ${11 * CLAIMS * SURFACES} readings and write 0: twelve sweeps hold ${await rows()} rows, where they held ${12 * CLAIMS * SURFACES} before`);
 
     const beforePerDay = CLAIMS * SURFACES * SWEEPS_A_DAY;
-    const afterPerDay = CLAIMS * SURFACES;
+    const afterPerDay = 0;
     assert.equal(beforePerDay, 12096);
-    assert.equal(afterPerDay, 42);
-    ok(`projected rows a day for ${CLAIMS} claims: ${beforePerDay.toLocaleString('en-US')} before (every reading of ${SWEEPS_A_DAY} sweeps), ${afterPerDay} after (one restatement per claim and surface) plus one per real change`);
+    ok(`projected rows a day for ${CLAIMS} unchanged claims: ${beforePerDay.toLocaleString('en-US')} before (every reading of ${SWEEPS_A_DAY} sweeps), ${afterPerDay} after (no restatement without an open incident, SOP 9daadbc3) plus one per real change`);
 
     // Age every row past the restatement window, as a day with no change would.
     await query(`UPDATE engine_events SET at = at - interval '24 hours 1 minute', detail = jsonb_set(detail, '{observed_at}', to_jsonb(to_char((at - interval '24 hours 1 minute') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))) WHERE event_type = 'doctrine_gap_observed' AND detail->>'doctrine_id' = $1`, [DOC]);
     const restated = await sweep();
-    assert.equal(restated.written, CLAIMS * SURFACES);
-    assert.ok(restated.results.every((r) => r.write_reason === 'daily_restatement'));
+    assert.equal(restated.written, 0);
+    assert.ok(restated.results.every((r) => r.write_reason === 'unchanged'));
     const again = await sweep();
     assert.equal(again.written, 0);
-    ok(`once the last rows are 24 hours old the next sweep restates all ${restated.written} (write_reason daily_restatement), and the one after writes 0 again`);
+    ok('once the last rows are 24 hours old the next sweep still writes 0: a key with no open incident is never restated (27 Oct, SOP 9daadbc3)');
 
     // One claim clears (allowed on genie_ns only); a stored decision then contradicts it on genie_ns.
     const cleared = claims.map((c, i) => (i === 0 ? { ...c, maturity: 'PROVEN_NOW', allowed_wording: 'Test wording.', claim_state: 'interest_only_live', config_hash: 'cfg-se8lw-test', cad_provenance: { cad_revision: 'CAD-SE8LW-1', provenance_ref: 'OWLG:SE8LW-TEST' }, evidence_publication_status: 'PUBLISHABLE', fail_closed: { needs_evidence: false, reason: null }, allowed_use: { media_twin: false, vfarm: false, genie_ns: true } } : c));
@@ -148,10 +147,9 @@ const bharag = http.createServer((req, res) => {
     assert.equal(opens().length, 1);
     assert.equal(broke.written, 3, 'C01 changed on all three surfaces');
     const held1 = await sweep();
-    assert.equal(held1.written, 1, 'only the open alarm key is written');
-    assert.equal(held1.results.find((r) => r.written).write_reason, 'alarm_open');
+    assert.equal(held1.written, 0, 'an identical unhealthy reading on an open alarm is not written');
     assert.equal(opens().length, 1);
-    ok('a contradiction opens one alarm on its first sweep (3 rows: C01 changed on each surface); the next sweep writes 1 row, the alarm key (alarm_open), and opens nothing more');
+    ok('a contradiction opens one alarm on its first sweep (3 rows: C01 changed on each surface); the next sweep writes 0 and opens nothing more');
 
     const claim = (await feeds.doctrineClaims({ doctrine_id: DOC, claim_id: 'C01' })).claims[0];
     await vrfk.storeDecision({ decision_id: `DEC-${DOC}-1`, doctrine_id: DOC, claim_id: 'C01', surface: 'genie_ns', actor: 'test:se8l-writes', source_ref: 'LOOP-1792472755186-M4CV' }, claim);
@@ -169,10 +167,12 @@ const bharag = http.createServer((req, res) => {
     ok('the duplicate check finds no unchanged observation written twice inside 24 hours without an open alarm');
 
     // Sensitivity: plant exactly the row the old code wrote every sweep, and the check must see it.
-    const last = (await query(`SELECT detail FROM engine_events WHERE event_type = 'doctrine_gap_observed' AND detail->>'recovery_key' = $1 ORDER BY at DESC, id DESC LIMIT 1`, [`doctrine:vfarm:${DOC}:C05`])).rows[0].detail;
-    const planted = { ...last, observation_id: `DG-PLANTED-${T}`, observed_at: new Date().toISOString() };
+    // One minute after the real last row, so the copy falls inside 24 hours of it (from 27 Oct nothing
+    // restates a key with no open incident, so that last row is the one aged a day above).
+    const lastRow = (await query(`SELECT detail, at + interval '1 minute' AS plant_at FROM engine_events WHERE event_type = 'doctrine_gap_observed' AND detail->>'recovery_key' = $1 ORDER BY at DESC, id DESC LIMIT 1`, [`doctrine:vfarm:${DOC}:C05`])).rows[0];
+    const planted = { ...lastRow.detail, observation_id: `DG-PLANTED-${T}`, observed_at: new Date(lastRow.plant_at).toISOString() };
     delete planted.write_reason;
-    await query(`INSERT INTO engine_events (event_type, at, subject_id, lane, actor, source_ref, detail, dedupe_key) VALUES ('doctrine_gap_observed', now(), $1, 'MEDIA', 'test:se8l-writes', 'LOOP-1792472755186-M4CV', $2::jsonb, $3)`, [planted.recovery_key, JSON.stringify(planted), `doctrine_gap_observed:${planted.observation_id}`]);
+    await query(`INSERT INTO engine_events (event_type, at, subject_id, lane, actor, source_ref, detail, dedupe_key) VALUES ('doctrine_gap_observed', $4::timestamptz, $1, 'MEDIA', 'test:se8l-writes', 'LOOP-1792472755186-M4CV', $2::jsonb, $3)`, [planted.recovery_key, JSON.stringify(planted), `doctrine_gap_observed:${planted.observation_id}`, lastRow.plant_at]);
     const found = await duplicates();
     assert.equal(found.length, 1);
     assert.equal(found[0].key, `doctrine:vfarm:${DOC}:C05`);
@@ -187,10 +187,14 @@ const bharag = http.createServer((req, res) => {
     const s = await gap.summary(48);
     assert.equal(s.write_rule.status, 'state_change_only');
     assert.equal(s.write_rule.restate_hours, 24);
-    ok('summary names the write rule (state_change_only, restated every 24 hours)');
+    assert.equal(s.write_rule.restate, 'open_incident_only_rolling_24h');
+    assert.ok(s.sweeps.last_done, 'the summary says when a sweep last finished');
+    ok('summary names the write rule (state_change_only, an open incident restated at most once in a rolling 24 hours) and the last finished sweep');
   } finally {
     const ev = await query(`DELETE FROM engine_events WHERE subject_id LIKE $1 OR detail->>'doctrine_id' = $2`, [`%${DOC}%`, DOC]);
     const doc = await query(`DELETE FROM engine_media_doctrine WHERE doctrine_id = $1`, [DOC]);
+    await query(`DELETE FROM engine_doctrine_gap_episodes WHERE doctrine_id = $1`, [DOC]).catch(() => undefined);
+    await query(`DELETE FROM engine_doctrine_gap_alarms WHERE recovery_key LIKE $1`, [`%${DOC}%`]).catch(() => undefined);
     console.log(`  cleaned up ${ev.rowCount} event row(s) and ${doc.rowCount} doctrine row(s) written by this run`);
     await closePool();
     bharag.close();
