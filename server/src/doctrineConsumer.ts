@@ -8,17 +8,31 @@
  * synthetic, fixture, test or drill. The doctrine-gap sweep is never a use: it is the watcher looking,
  * not anything consuming the claim.
  *
- * VERIFIED_CONSUMER_WRITERS is empty, and stays empty in production until an authorized producer of
- * consumer-use events exists (the read receipt and delivery check prototyped as consumerUse.ts,
- * unmerged). Empty, every answer is "no verified consumer, no real hit", so no doctrine gap can reach
- * Research Twin. Only a test passes its own writer list. A read; it writes nothing.
+ * VERIFIED_CONSUMER_WRITERS is Jason's explicit list (28 Oct 2026, SOP 0df3475b): the doctrine
+ * framework, Media Twin, North Star and Monitoring Twin, named by the actor each writes under. No other
+ * actor's use counts, and no ad-hoc or external client may write one: POST /api/engine/events refuses
+ * doctrine_claim_used outright (externalUseRefusal), so a use can only be recorded in process by one of
+ * these subsystems. None of the four writes a use yet, so today every answer is still "no verified
+ * consumer, no real hit" and no doctrine gap can reach Research Twin. Widening the list is a new
+ * decision from Jason. A read; it writes nothing.
  */
 import { query } from './pg';
 import type { ConsumerEvidence } from './doctrineGap';
 
 export const USE_EVENT = 'doctrine_claim_used';
 export const USE_SCHEMA = 'doctrine.claim.use.v1';
-export const VERIFIED_CONSUMER_WRITERS: readonly string[] = Object.freeze([]);
+export const VERIFIED_CONSUMER_WRITERS: readonly string[] = Object.freeze(['doctrine-framework', 'media-twin', 'north-star', 'monitoring-twin']);
+
+/**
+ * Why an event from outside this process is refused, or null. Consumer-use evidence is written only in
+ * process by an authorized subsystem, never through the open event route (Jason, 28 Oct 2026: "No
+ * ad-hoc or external clients should be allowed to write SE8L evidence"). Pure.
+ */
+export function externalUseRefusal(eventType: unknown): string | null {
+  return typeof eventType === 'string' && eventType.trim() === USE_EVENT
+    ? `${USE_EVENT} is SE8L consumer-use evidence and is written only in process by an authorized subsystem (${VERIFIED_CONSUMER_WRITERS.join(', ')}); no external client may post one (Jason, 28 Oct 2026, SOP 0df3475b).`
+    : null;
+}
 
 const NOT_REAL = ['synthetic', 'fixture', 'test', 'drill'];
 

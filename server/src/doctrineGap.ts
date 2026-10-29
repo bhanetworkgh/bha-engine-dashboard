@@ -42,11 +42,13 @@ export const PROPOSED_POLICY = {
 export const RESEARCH_RULE = { min_gap_days: 7, min_real_hits: 1, source: 'SOP 192331ee (Jason, 27 Oct 2026)' } as const;
 
 /**
- * How continuity is judged. The 30 minutes is a PROVISIONAL value for isolated tests (Hardik, 27 Oct
- * 2026), not Canon: the production threshold is a pending decision. A gap between two confirmations
- * longer than this ends the episode, and the time it covers never counts towards the seven days.
+ * How continuity is judged. 30 minutes is APPROVED FOR PRODUCTION (Jason, 28 Oct 2026, SE8L/YEAO thread
+ * C0AF7AGC2UV 1793217396.662699; SOP 113b5b86): the initial production continuity threshold, to be
+ * tightened once live behaviour is seen. A gap between two confirmations longer than this ends the
+ * episode, and the time it covers never counts towards the seven days. Changing it is a new decision
+ * from Jason and a BUILD_LOG line.
  */
-export const CONTINUITY = { max_confirmation_gap_minutes: 30, clock_skew_seconds: 60, status: 'PROVISIONAL_TEST_VALUE_NOT_CANON' } as const;
+export const CONTINUITY = { max_confirmation_gap_minutes: 30, clock_skew_seconds: 60, status: 'APPROVED_FOR_PRODUCTION', source: 'Jason, 28 Oct 2026 (SOP 113b5b86)' } as const;
 
 export const CRITICAL_FIELD_POLICY = {
   claim_state: { critical_for: ['vfarm', 'commercial'], immediate_when_attempted: true },

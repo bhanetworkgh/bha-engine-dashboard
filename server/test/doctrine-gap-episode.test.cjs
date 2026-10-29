@@ -147,19 +147,27 @@ const KEY = 'doctrine-gap:B93H:CAP-1:t0no_needs_evidence';
 /* ------------------------------------------------------- consumer evidence */
 (async () => {
   {
-    assert.deepEqual(consumer.VERIFIED_CONSUMER_WRITERS, []);
+    assert.deepEqual(consumer.VERIFIED_CONSUMER_WRITERS, ['doctrine-framework', 'media-twin', 'north-star', 'monitoring-twin']);
     assert.ok(Object.isFrozen(consumer.VERIFIED_CONSUMER_WRITERS));
+    assert.equal(gap.CONTINUITY.max_confirmation_gap_minutes, 30);
+    assert.equal(gap.CONTINUITY.status, 'APPROVED_FOR_PRODUCTION');
+    ok("Jason's 28 Oct decisions: the four authorized writers, and 30 minutes approved for production");
+    assert.match(consumer.externalUseRefusal('doctrine_claim_used'), /no external client may post one/);
+    assert.match(consumer.externalUseRefusal(' doctrine_claim_used '), /no external client/);
+    assert.equal(consumer.externalUseRefusal('digest_dispatch_succeeded'), null);
+    assert.equal(consumer.externalUseRefusal(undefined), null);
+    ok('the open event route refuses consumer-use evidence by name and nothing else');
     const realQuery = pg.query;
     let asked = 0;
     pg.query = async () => { asked++; return { rows: [{ id: '1', actor: 'x', inside: true }], rowCount: 1 }; };
     try {
-      const ev = await consumer.consumerEvidence('B93H', 'CAP-1', iso(T0));
+      const ev = await consumer.consumerEvidence('B93H', 'CAP-1', iso(T0), []);
       assert.equal(ev.ok, true);
       assert.equal(ev.verified_consumer, false);
       assert.equal(ev.real_hits, 0);
       assert.match(ev.note, /fails closed/);
       assert.equal(asked, 0, 'with no authorized writer nothing is even read');
-      ok('production fails closed: no authorized consumer-use writer, so no consumer and no hit, whatever the event log holds');
+      ok('an empty writer list fails closed: no consumer and no hit, whatever the event log holds');
 
       let sql = '';
       let params = [];
