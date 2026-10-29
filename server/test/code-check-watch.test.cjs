@@ -42,6 +42,15 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
   assert.deepEqual([0, 1, 2.9, 3, 5.9, 6, 9, 24, 49].map(watch.stepFor), [0, 0, 0, 1, 1, 2, 3, 8, 16]);
   ok('the alert at approval, then a reminder every 3 hours');
 
+  assert.equal(watch.alertsFrom({ on: false, from: null }), cc.START);
+  assert.equal(watch.alertsFrom({ on: true, from: '2026-10-29T05:20:00.000Z' }), '2026-10-29T05:20:00.000Z');
+  assert.equal(watch.alertsFrom({ on: true, from: '2026-11-05T00:00:00.000Z' }), cc.START);
+  assert.equal(watch.alertsFrom({ on: false, from: '2026-10-29T05:20:00.000Z' }), cc.START);
+  const trialSummary = cc.summarise([{ codex_entry_id: 'CODEX-T', builder: 'Kavin G N', builder_slack_id: 'U0BNQGG020Y', session_date: '2026-10-29', approved_at: '2026-10-29T08:00:00.000Z' }], [], Date.parse('2026-10-29T09:00:00.000Z'), '2026-10-29T05:20:00.000Z');
+  assert.equal(trialSummary.waiting.length, 1);
+  assert.equal(cc.summarise([{ codex_entry_id: 'CODEX-T', builder: 'K', builder_slack_id: 'U0BNQGG020Y', session_date: null, approved_at: '2026-10-29T08:00:00.000Z' }], [], Date.parse('2026-10-29T09:00:00.000Z')).waiting.length, 0);
+  ok('the trial moves the alert start earlier, never later; off, or after 1 Nov, alerts start at 1 Nov; a 29 Oct approval waits only while the trial is on');
+
   /* 2. run() against stand-ins */
   const held = new Map();
   let nextId = 1;

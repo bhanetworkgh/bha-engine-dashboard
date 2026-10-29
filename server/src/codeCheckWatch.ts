@@ -27,6 +27,7 @@ import * as slack from './slack';
 import * as timers from './timers';
 import * as engineWrite from './engineWrite';
 import * as cc from './codeChecks';
+import { getMeta, setMeta } from './db';
 
 /** Destiny, 29 Oct 2026: the alert as soon as Jason approves, then a reminder every 3 hours until the check is recorded. */
 export const RULE = { every_minutes: 2, first_reminder_hours: 3, remind_every_hours: 3 } as const;
@@ -81,8 +82,37 @@ export function messageFor(d: Due): string {
 }
 
 /** The logs that are due a message now, from the same waiting list the Code checks tab shows. */
-export async function due(now = Date.now()): Promise<{ due: Due[]; skipped: string[] }> {
-  const s = await cc.read(now);
+/**
+ * The trial (Destiny, 29 Oct 2026): before 1 Nov the alert and reminders can be switched on to prove them on
+ * real approvals, then off again. It changes only what this watcher alerts on; the Code checks tab, its waiting
+ * list and its figures still start at 1 Nov. Off is the default and once 1 Nov arrives it no longer matters.
+ */
+export const TRIAL_KEY = 'code_check.alert_trial';
+export interface Trial { on: boolean; from: string | null; set_by: string | null; set_at: string | null }
+export async function trial(): Promise<Trial> {
+  try {
+    const v = await getMeta(TRIAL_KEY);
+    const t = v ? (JSON.parse(v) as Partial<Trial>) : {};
+    return { on: t.on === true, from: t.from ?? null, set_by: t.set_by ?? null, set_at: t.set_at ?? null };
+  } catch {
+    return { on: false, from: null, set_by: null, set_at: null };
+  }
+}
+export async function setTrial(on: boolean, by: string, from: string | null): Promise<Trial> {
+  const t: Trial = { on, from: on ? from : null, set_by: by, set_at: new Date().toISOString() };
+  await setMeta(TRIAL_KEY, JSON.stringify(t));
+  await record({ event_type: on ? 'code_check_trial_on' : 'code_check_trial_off', subject_id: TRIAL_KEY, lane: 'BAYS', actor: by, detail: { from: t.from } });
+  return t;
+}
+
+/** Pure: the approval time alerts count from. The trial only ever moves it earlier than 1 Nov. */
+export function alertsFrom(t: Trial): string {
+  return t.on && t.from && Date.parse(t.from) < Date.parse(cc.START) ? t.from : cc.START;
+}
+
+export async function due(now = Date.now()): Promise<{ due: Due[]; skipped: string[]; from: string }> {
+  const from = alertsFrom(await trial());
+  const s = from === cc.START ? await cc.read(now) : cc.summarise((await cc.approvals(from)).map((a) => a), await cc.checks(), now, from);
   const skipped: string[] = [];
   const out: Due[] = [];
   const ids = s.waiting.map((w) => w.codex_entry_id).filter((x): x is string => !!x);
@@ -105,11 +135,13 @@ export async function due(now = Date.now()): Promise<{ due: Due[]; skipped: stri
     }
     out.push({ codex_entry_id: w.codex_entry_id, builder: w.builder, session_date: w.session_date, approved_at: w.approved_at, hours_waiting: w.hours_waiting, late: w.late, step: stepFor(w.hours_waiting), channel_id: chOf.get(w.codex_entry_id) ?? null });
   }
-  return { due: out, skipped };
+  return { due: out, skipped, from };
 }
 
 export interface RunResult {
   waiting: number;
+  /** The approval time alerts counted from on this pass: 1 Nov, or the trial's start while it is on. */
+  from: string;
   sent: Array<{ codex_entry_id: string; step: number }>;
   already: number;
   failed: Array<{ codex_entry_id: string; step: number; detail: string }>;
@@ -119,8 +151,8 @@ export interface RunResult {
 
 export async function run(opts: { now?: number; dry_run?: boolean; send?: typeof slack.dm } = {}): Promise<RunResult> {
   const send = opts.send ?? slack.dm;
-  const { due: list, skipped } = await due(opts.now ?? Date.now());
-  const out: RunResult = { waiting: list.length, sent: [], already: 0, failed: [], would_send: [], skipped };
+  const { due: list, skipped, from } = await due(opts.now ?? Date.now());
+  const out: RunResult = { waiting: list.length, from, sent: [], already: 0, failed: [], would_send: [], skipped };
   for (const d of list) {
     const key = dedupeKey(d.codex_entry_id, d.step);
     if (opts.dry_run) {

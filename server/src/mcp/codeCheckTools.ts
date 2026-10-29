@@ -151,5 +151,48 @@ export const writeAuditOutput: ToolDefinition = {
   handler: (args, deps) => guarded('write_audit_output', args, deps, (dry) => cc.writeOutput(args, { dry_run: dry })),
 };
 
+
+export const codeCheckAlertTrial: ToolDefinition = {
+  name: 'code_check_alert_trial',
+  description: `Switch the code check alert's trial on or off, or read it (action on / off / status). Before ${cc.START} the alert and the 3-hourly reminders only fire for approvals on or after that date; the trial (Destiny, 29 Oct 2026) makes them fire for approvals from the moment it is switched on (or from \`from\`, an ISO time), so they can be proven on real logs, then switched off. It changes only what the alert fires on: the Code checks tab, its waiting list and its figures still start at ${cc.START}. HELD HERE: Destiny or Jason (requester_user_id). Refused on any agent token. Audited on engine_mcp_writes.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', enum: ['on', 'off', 'status'] },
+      from: { type: 'string', description: 'ISO time alerts count from while on; defaults to now.' },
+      requester_user_id: { type: 'string' },
+    },
+    required: ['action', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Switch the code check alert trial' },
+  handler: async (args, deps) => {
+    const action = str(args, 'action');
+    const requester = str(args, 'requester_user_id') || null;
+    if (action === 'status') return { ok: true, trial: await codeCheckWatch.trial(), alerts_from: codeCheckWatch.alertsFrom(await codeCheckWatch.trial()) };
+    const audit = await auditOpen({ tool: 'code_check_alert_trial', args, access: deps.access, kind: 'code_checks', requester, dry_run: false });
+    const refuse = async (reason: string, message: string) => {
+      await auditClose(audit, { outcome: 'refused', detail: `${reason}: ${message}`, guard_result: { reason } });
+      return { ok: false, reason, message: `${message} Nothing was changed.`, audit_id: audit };
+    };
+    if (deps.agent) return refuse('agent_not_permitted', `An agent (${deps.agent}) may not switch the trial.`);
+    if (!requester || !cc.RECORDERS.has(requester)) return refuse('not_permitted', 'Only Destiny or Jason may switch the trial.');
+    if (action !== 'on' && action !== 'off') return refuse('bad_action', 'action must be on, off or status.');
+    let from: string | null = null;
+    if (action === 'on') {
+      const given = str(args, 'from');
+      const d = given ? new Date(given) : new Date();
+      if (Number.isNaN(d.getTime())) return refuse('bad_from', 'from must be an ISO time with its zone.');
+      from = d.toISOString();
+    }
+    const t = await codeCheckWatch.setTrial(action === 'on', requester, from);
+    const message = t.on
+      ? `Trial on: approvals from ${t.from} now alert Destiny within about 2 minutes, then remind every 3 hours until a check is recorded. Switch it off once it is proven.`
+      : `Trial off: the alert fires again only for approvals on or after ${cc.START}.`;
+    await auditClose(audit, { outcome: 'updated', detail: message, after: t });
+    return { ok: true, trial: t, alerts_from: codeCheckWatch.alertsFrom(t), message, audit_id: audit };
+  },
+};
+
 export const CODE_CHECK_READ_TOOLS: ToolDefinition[] = [readCodeChecks];
-export const CODE_CHECK_WRITE_TOOLS: ToolDefinition[] = [recordCodeCheck, writeAuditOutput];
+export const CODE_CHECK_WRITE_TOOLS: ToolDefinition[] = [recordCodeCheck, writeAuditOutput, codeCheckAlertTrial];
