@@ -13807,3 +13807,9 @@ Intent:     Prove the one-lead-per-email rule on production, and bring Shivnath 
 Files:      none (n8n one-off workflow Pm1o0vFZPL7fus9k, folder vFarm, archived after use)
 Fix:        Execution 55667 posted the sheet row as written (21 answers, VFBUYER-FORMA-19RS5Q3): 201, lead 657b654b-2d35-4426-aef6-962ec4668ba2. 55668 re-posted it with the time as ISO (11:19:16 New York = 2026-09-23T15:19:16Z): 200 updated. 55669 and 55670 posted two sign-ups from destiny+dedup-1029@bhanetwork.org: one lead (fdebbee2-a4db-4817-9a8d-a94898821624), one resubmission, one timeline line naming the changed organisation.
 Decision:   Shibu's two sign-ups stay two leads (two emails, two companies) until someone asks him whether he meant to register both. The imported lead's created_at is 29 Oct (when the dashboard received it); its Form A carries 23 Sep. The dedup test lead is an @bhanetwork.org team test lead.
+
+## 2026-10-29 07:40 — Early Access cleared of team test leads (migration 104)
+Intent:     Destiny: the Early Access list should hold only the two real sign-ups (Shivnath Kamath, two emails).
+Files:      server/src/migrations.ts (migration 104)
+Fix:        Migration 104 copies each of eight named test leads whole into record_deletions (kind vfarm_leads, actor "migration 104 (Destiny)", ip_hash left out), then deletes them, in one transaction. Both statements also require an @bhanetwork.org email, so no real lead can match even by a wrong id: proved locally with a real-email row under one of the eight ids, which was left in place.
+Decision:   Removed: 25da727a (D8 acceptance 25 Sep), a5f7e513 (UYQP roundtrip), 1742c361, 229cf102, 4e168bab (1 and 2 Oct Form A confirmation tests), 3d9a7f9a (the stage 5 $1 Stripe test lead), 7277c6c7 (admin@ stage 4), fdebbee2 (today's dedup check). Their engine_events and the one Stripe test event stay as history; the row copies are in record_deletions.
