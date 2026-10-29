@@ -89,7 +89,7 @@ export async function download(url: string): Promise<DownloadResult> {
 }
 
 /** A DM from Bays to one person, by Slack user id. chat.postMessage opens the IM itself. */
-export async function dm(userId: string, text: string): Promise<{ ok: boolean; detail: string; ts?: string }> {
+export async function dm(userId: string, text: string, blocks?: unknown[]): Promise<{ ok: boolean; detail: string; ts?: string }> {
   const t = token();
   if (!t) return { ok: false, detail: `${SLACK_TOKEN_VAR} is not set on this server, so the DM was not sent.` };
   const controller = new AbortController();
@@ -98,7 +98,7 @@ export async function dm(userId: string, text: string): Promise<{ ok: boolean; d
     const res = await fetch(`${API}/chat.postMessage`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ channel: userId, text }),
+      body: JSON.stringify(blocks?.length ? { channel: userId, text, blocks } : { channel: userId, text }),
       signal: controller.signal,
     });
     const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; ts?: string } | null;

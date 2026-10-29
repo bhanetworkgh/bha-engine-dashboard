@@ -5,8 +5,8 @@
  * Every RULE.every_minutes, the waiting list codeChecks.read() already computes (a session on the pay ledger
  * approved on or after 1 Nov, not Destiny's own, with no check recorded) is walked. Each waiting log is at one
  * step: step 0 is the alert, sent once Jason has approved it; step k (k >= 1) is reminder k, due
- * RULE.first_reminder_hours (3) after approval and then every RULE.remind_every_hours (3), until the check is
- * recorded. Past codeChecks.WINDOW_HOURS a reminder says it is late. Only the current step is sent, so a
+ * RULE.first_reminder_hours (3) after approval and then every RULE.remind_every_hours (3), RULE.max_reminders (4)
+ * at most, about 12 hours; after the fourth nothing more is sent for that log. Only the current step is sent, so a
  * process that was down sends one message on its return, never a backlog.
  *
  * One DM per step: the claim is an engine event (code_check_due_alerted, or code_check_reminded) whose dedupe
@@ -29,8 +29,8 @@ import * as engineWrite from './engineWrite';
 import * as cc from './codeChecks';
 import { getMeta, setMeta } from './db';
 
-/** Destiny, 29 Oct 2026: the alert as soon as Jason approves, then a reminder every 3 hours until the check is recorded. */
-export const RULE = { every_minutes: 2, first_reminder_hours: 3, remind_every_hours: 3 } as const;
+/** Destiny, 29 Oct 2026: the alert as soon as Jason approves, then a reminder every 3 hours, 4 at most (about 12 hours). */
+export const RULE = { every_minutes: 2, first_reminder_hours: 3, remind_every_hours: 3, max_reminders: 4 } as const;
 
 const DASHBOARD = () => (process.env.PUBLIC_DASHBOARD_URL || 'https://dashboard.bhanetwork.org').replace(/\/+$/, '');
 
@@ -58,27 +58,54 @@ export interface Due {
   channel_id: string | null;
 }
 
-/** Pure: the message for one step. */
-export function messageFor(d: Due): string {
+/** Pure: the message for one step, as Block Kit with a plain-text fallback. */
+export function messageFor(d: Due): { text: string; blocks: unknown[] } {
   const by = new Date(Date.parse(d.approved_at) + cc.WINDOW_HOURS * 3_600_000).toISOString();
   const who = d.builder ?? 'a builder';
-  const where = [`<${DASHBOARD()}/codex/${encodeURIComponent(d.codex_entry_id)}|Open the log>`, d.channel_id ? `log channel <#${d.channel_id}>` : null].filter(Boolean).join(' · ');
-  if (d.step === 0) {
-    return [
-      `*Code check due:* ${who}, \`${d.codex_entry_id}\`${d.session_date ? ` (session ${d.session_date})` : ''}.`,
-      `Jason approved it ${lagos(d.approved_at)} Lagos time. Due by ${lagos(by)} Lagos (${cc.WINDOW_HOURS} hours).`,
-      where,
-    ].join('\n');
-  }
-  const late = d.hours_waiting - cc.WINDOW_HOURS;
-  return [
-    `*Reminder ${d.step}: code check still owed* for ${who}, \`${d.codex_entry_id}\`.`,
-    d.late
-      ? `*Late:* approved ${Math.floor(d.hours_waiting)} hours ago, ${Math.ceil(late)} hours past the ${cc.WINDOW_HOURS}-hour window. If it cannot be done, say so on the record rather than letting pay stall quietly.`
-      : `Approved ${Math.floor(d.hours_waiting)} hours ago. Due by ${lagos(by)} Lagos.`,
-    where,
-    `_Next reminder in ${RULE.remind_every_hours} hours, until the check is recorded._`,
-  ].join('\n');
+  const logUrl = `${DASHBOARD()}/codex/${encodeURIComponent(d.codex_entry_id)}`;
+  const last = d.step >= RULE.max_reminders;
+  const header = d.step === 0 ? 'A log is ready for your code check' : last ? `Last reminder: code check still owed` : `Reminder ${d.step} of ${RULE.max_reminders}: code check still owed`;
+  const lead =
+    d.step === 0
+      ? `Jason approved *${who}*'s log. It is ready for your review.`
+      : `*${who}*'s log was approved ${Math.floor(d.hours_waiting)} hours ago and has no check recorded yet.${last ? ' This is the last reminder for it.' : ''}`;
+  const text =
+    d.step === 0
+      ? `Code check due: ${who}, ${d.codex_entry_id}. Approved ${lagos(d.approved_at)} Lagos, due by ${lagos(by)} Lagos.`
+      : `${header}: ${who}, ${d.codex_entry_id}, approved ${Math.floor(d.hours_waiting)} hours ago.`;
+  const blocks: unknown[] = [
+    { type: 'header', text: { type: 'plain_text', text: header } },
+    { type: 'section', text: { type: 'mrkdwn', text: lead } },
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: `*Builder*\n${who}` },
+        { type: 'mrkdwn', text: `*Codex ID*\n\`${d.codex_entry_id}\`` },
+        { type: 'mrkdwn', text: `*Approved*\n${lagos(d.approved_at)} Lagos` },
+        { type: 'mrkdwn', text: `*Due by*\n${lagos(by)} Lagos` },
+      ],
+    },
+    {
+      type: 'actions',
+      elements: [
+        { type: 'button', style: 'primary', text: { type: 'plain_text', text: 'Open the log' }, url: logUrl, action_id: 'code_check_open_log' },
+        { type: 'button', text: { type: 'plain_text', text: 'Code checks' }, url: `${DASHBOARD()}/pay?tab=code-checks`, action_id: 'code_check_open_tab' },
+      ],
+    },
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: [
+            d.channel_id ? `Log channel <#${d.channel_id}>` : null,
+            last ? 'No more reminders after this one.' : `Reminders every ${RULE.remind_every_hours} hours, ${RULE.max_reminders} at most, until the check is recorded.`,
+          ].filter(Boolean).join(' · '),
+        },
+      ],
+    },
+  ];
+  return { text, blocks };
 }
 
 /** The logs that are due a message now, from the same waiting list the Code checks tab shows. */
@@ -138,7 +165,9 @@ export async function due(now = Date.now()): Promise<{ due: Due[]; skipped: stri
       skipped.push(`${w.codex_entry_id} has no approval time on the pay ledger`);
       continue;
     }
-    out.push({ codex_entry_id: w.codex_entry_id, builder: w.builder, session_date: w.session_date, approved_at: w.approved_at, hours_waiting: w.hours_waiting, late: w.late, step: stepFor(w.hours_waiting), channel_id: chOf.get(w.codex_entry_id) ?? null });
+    const step = stepFor(w.hours_waiting);
+    if (step > RULE.max_reminders) continue; // the four reminders have gone; nothing more is sent for it
+    out.push({ codex_entry_id: w.codex_entry_id, builder: w.builder, session_date: w.session_date, approved_at: w.approved_at, hours_waiting: w.hours_waiting, late: w.late, step, channel_id: chOf.get(w.codex_entry_id) ?? null });
   }
   return { due: out, skipped, from };
 }
@@ -163,7 +192,7 @@ export async function run(opts: { now?: number; dry_run?: boolean; send?: typeof
     if (opts.dry_run) {
       const held = await query(`SELECT 1 FROM engine_events WHERE dedupe_key = $1`, [key]);
       if (held.rows.length) out.already++;
-      else out.would_send.push({ codex_entry_id: d.codex_entry_id, step: d.step, text: messageFor(d) });
+      else out.would_send.push({ codex_entry_id: d.codex_entry_id, step: d.step, text: messageFor(d).text });
       continue;
     }
     const claim = await record({
@@ -178,7 +207,8 @@ export async function run(opts: { now?: number; dry_run?: boolean; send?: typeof
       out.already++;
       continue;
     }
-    const sent = await send(cc.DESTINY, messageFor(d));
+    const m = messageFor(d);
+    const sent = await send(cc.DESTINY, m.text, m.blocks);
     if (!sent.ok) {
       // Give the claim back so the next pass tries again; a reminder nobody received is never counted.
       await query(`DELETE FROM engine_events WHERE id = $1`, [claim.id]);

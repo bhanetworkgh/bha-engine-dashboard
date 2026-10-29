@@ -5010,8 +5010,9 @@ record.
 - **The alert, the reminders and the note on the log** (29 Oct 2026, D6). `server/src/codeCheckWatch.ts`,
   a timer every 2 minutes over the same waiting list the tab shows. Each waiting log gets one DM to
   Destiny as Bays when Jason approves it (builder, Codex ID, approval time and the 48-hour deadline in
-  Lagos time, the log on the dashboard and its log channel), then a reminder every 3 hours until the
-  check is recorded (Destiny, 29 Oct: quick, not a day), saying it is late past Jason's 48. Only the current step is sent, never
+  Lagos time, the log on the dashboard and its log channel), then a reminder every 3 hours, 4 at most
+  (about 12 hours), and nothing more after the fourth (Destiny, 29 Oct: quick, not a day). Each is a
+  Block Kit card with a plain-text fallback (`slack.dm` takes optional blocks). Only the current step is sent, never
   a backlog. One DM per step: the claim is a `code_check_due_alerted` / `code_check_reminded` event keyed
   `code_check_due:<codex id>:<step>`, written before the DM; a DM Slack refuses deletes the claim and is
   retried, so a reminder nobody got is never counted. A session with no Codex ID is skipped and named.
