@@ -89,7 +89,12 @@ export function messageFor(d: Due): string {
  */
 export const TRIAL_KEY = 'code_check.alert_trial';
 export interface Trial { on: boolean; from: string | null; set_by: string | null; set_at: string | null }
+export const TRIAL_ENV = 'CODE_CHECK_ALERT_TRIAL_FROM';
 export async function trial(): Promise<Trial> {
+  // The service setting wins where it is set (an ISO time), so the trial can be switched from Render
+  // when the MCP tool is not reachable. Unset, the stored switch decides.
+  const env = process.env[TRIAL_ENV]?.trim();
+  if (env && !Number.isNaN(Date.parse(env))) return { on: true, from: new Date(env).toISOString(), set_by: `service setting ${TRIAL_ENV}`, set_at: null };
   try {
     const v = await getMeta(TRIAL_KEY);
     const t = v ? (JSON.parse(v) as Partial<Trial>) : {};
