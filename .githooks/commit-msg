@@ -1,0 +1,20 @@
+#!/bin/sh
+# Commit attribution guard (29 Oct 2026, Destiny): no commit on this repo carries Claude.
+# Strips Co-Authored-By: Claude, Claude-Session and "Generated with Claude Code" lines from the message,
+# and refuses a commit whose author or committer is Claude. Turned on per clone with:
+#   git config core.hooksPath .githooks
+msg="$1"
+tmp="$msg.tmp.$$"
+grep -viE '^(Co-Authored-By: Claude|Claude-Session:|.*Generated with \[?Claude Code)' "$msg" > "$tmp" || true
+# drop trailing blank lines
+sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$tmp" > "$msg"
+rm -f "$tmp"
+for who in "$(git var GIT_AUTHOR_IDENT)" "$(git var GIT_COMMITTER_IDENT)"; do
+  case "$who" in
+    *noreply@anthropic.com*|Claude\ \<*)
+      echo "commit-msg: refused. The author or committer is Claude ($who)." >&2
+      echo "Commit as Destiny: git -c user.name=\"Destiny Arupi\" -c user.email=\"destiny@arupra.ai\" commit ..." >&2
+      exit 1 ;;
+  esac
+done
+exit 0
