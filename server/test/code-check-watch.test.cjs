@@ -80,19 +80,22 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
     ],
   });
   const sent = [];
-  const okSend = async (to, text) => { sent.push({ to, text }); return { ok: true, detail: 'sent' }; };
+  const okSend = async (to, text, blocks) => { sent.push({ to, text, blocks, json: JSON.stringify(blocks) }); return { ok: true, detail: 'sent' }; };
 
   try {
     let r = await watch.run({ now: at(1), send: okSend });
     assert.equal(r.sent.length, 1);
     assert.equal(sent[0].to, DESTINY);
-    assert.match(sent[0].text, /Code check due:\* Kavin G N, `CODEX-20261102-kavin-g-n-rover`/);
-    assert.match(sent[0].text, /Due by .* Lagos \(48 hours\)/);
-    assert.match(sent[0].text, /codex\/CODEX-20261102-kavin-g-n-rover\|Open the log/);
-    assert.match(sent[0].text, /<#C0BN30RU3UK>/);
+    assert.match(sent[0].text, /Code check due: Kavin G N, CODEX-20261102-kavin-g-n-rover/);
+    assert.equal(sent[0].blocks[0].type, 'header');
+    assert.equal(sent[0].blocks[0].text.text, 'A log is ready for your code check');
+    assert.match(sent[0].json, /Due by/);
+    assert.match(sent[0].json, /codex\/CODEX-20261102-kavin-g-n-rover/);
+    assert.match(sent[0].json, /<#C0BN30RU3UK>/);
+    assert.match(sent[0].json, /4 at most/);
     assert.equal(r.skipped.length, 1);
     assert.match(r.skipped[0], /no Codex ID/);
-    ok('Jason approves: one DM to Destiny naming the builder, the Codex ID, the 48-hour deadline and the log; a session with no Codex ID is named as skipped');
+    ok('Jason approves: one Block Kit DM to Destiny naming the builder, the Codex ID, the deadline and the log, with a plain-text fallback; a session with no Codex ID is named as skipped');
 
     r = await watch.run({ now: at(2), send: okSend });
     assert.equal(r.sent.length, 0);
@@ -110,18 +113,29 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
 
     r = await watch.run({ now: at(4), send: okSend });
     assert.equal(r.sent.length, 1);
-    assert.match(sent[1].text, /Reminder 1: code check still owed/);
-    assert.match(sent[1].text, /Approved 4 hours ago/);
+    assert.equal(sent[1].blocks[0].text.text, 'Reminder 1 of 4: code check still owed');
+    assert.match(sent[1].json, /approved 4 hours ago/);
     ok('the next pass retries it and reminder 1 goes');
 
-    waitingHours = 50;
-    r = await watch.run({ now: at(50), dry_run: true, send: okSend });
+    waitingHours = 12.5;
+    r = await watch.run({ now: at(12.5), dry_run: true, send: okSend });
     assert.equal(r.sent.length, 0);
     assert.equal(r.would_send.length, 1);
-    assert.equal(r.would_send[0].step, 16);
-    assert.match(r.would_send[0].text, /\*Late:\* approved 50 hours ago, 2 hours past the 48-hour window/);
+    assert.equal(r.would_send[0].step, 4);
+    assert.match(r.would_send[0].text, /Last reminder/);
     assert.equal(sent.length, 2);
-    ok('a dry run sends nothing and lists what would go; past 48 hours the reminder says it is late; only the current step is sent, never a backlog');
+    ok('a dry run sends nothing and lists what would go; the fourth reminder is the last; only the current step is sent, never a backlog');
+
+    r = await watch.run({ now: at(12.5), send: okSend });
+    assert.match(sent[2].json, /No more reminders after this one/);
+    waitingHours = 15.5;
+    r = await watch.run({ now: at(15.5), send: okSend });
+    assert.equal(r.waiting, 0);
+    assert.equal(sent.length, 3);
+    waitingHours = 40;
+    r = await watch.run({ now: at(40), send: okSend });
+    assert.equal(sent.length, 3);
+    ok('after the fourth reminder (about 12 hours) nothing more is sent for that log');
   } finally {
     Object.assign(events, { record: real.record });
     Object.assign(pg, { query: real.query });

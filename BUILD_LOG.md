@@ -13765,3 +13765,10 @@ Files:      server/src/codeCheckWatch.ts, CLAUDE.md
 Problem:    The connector's tool list did not pick up code_check_alert_trial after two refreshes (109 tools, nothing added), so the switch could not be flipped from here.
 Fix:        trial() reads CODE_CHECK_ALERT_TRIAL_FROM (an ISO time) first; set, the trial is on from that time. Unset, the stored switch decides. Off is removing the setting.
 Decision:   Switched through Render's environment, which restarts the service; nothing else changes.
+
+## 2026-10-29 06:50 — Code check alert: Block Kit cards, and 4 reminders at most
+Intent:     Destiny: the alert and reminders as proper Block Kit cards, and reminders every 3 hours for 4 at most (about 12 hours), not indefinitely.
+Files:      server/src/codeCheckWatch.ts, server/src/slack.ts, server/test/code-check-watch.test.cjs, CLAUDE.md
+Problem:    The messages were plain text, and reminders had no end.
+Fix:        messageFor returns {text, blocks}: a header (ready for review / Reminder n of 4 / Last reminder), a lead line, fields for builder, Codex ID, approved and due by, buttons to open the log and the Code checks tab, and a context line with the log channel. slack.dm takes optional blocks. RULE.max_reminders 4: a step past it is not sent. Tests 13/13, codex-gap 6/6, strict check clean.
+Decision:   The late-past-48-hours wording is gone: with 4 reminders the last one goes at about 12 hours.
