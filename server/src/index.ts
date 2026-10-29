@@ -1202,11 +1202,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           method,
           key_label: 'DASHBOARD_INBOUND_KEY',
           natural_id: w.buyer_intake_id,
-          outcome: w.inserted ? 'inserted' : 'updated',
-          detail: `${w.answers} answers${w.missing_questions.length ? `, ${w.missing_questions.length} Form A questions not sent` : ''}${w.unexpected_questions.length ? `, ${w.unexpected_questions.length} unexpected` : ''}`,
+          outcome: w.stored === 'merged' ? 'updated' : w.inserted ? 'inserted' : 'updated',
+          detail: `${w.stored === 'merged' ? `repeat sign-up added to lead ${w.merged_into?.id}, no new lead; ` : ''}${w.answers} answers${w.missing_questions.length ? `, ${w.missing_questions.length} Form A questions not sent` : ''}${w.unexpected_questions.length ? `, ${w.unexpected_questions.length} unexpected` : ''}`,
           ms: Date.now() - t0,
         });
-        return send(res, w.inserted ? 201 : 200, { ok: true, stored: w.inserted ? 'inserted' : 'updated', ...w });
+        return send(res, w.inserted ? 201 : 200, { ok: true, ...w });
       } catch (e) {
         if (e instanceof earlyAccess.SubmissionError) {
           await mirror.logWrite({ endpoint, kind: 'vfarm_leads', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });

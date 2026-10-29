@@ -2346,6 +2346,15 @@ itself. Handled by `storeFormA` in `server/src/earlyAccess.ts`.
   `form_a->>'buyer_intake_id'`. The same submission posted twice updates one
   row. An update replaces the columns and the whole blob, and never touches
   `status` or `notes`, which belong to the dashboard.
+- **One lead per email** (29 Oct 2026, Jason: "we should also have a duplication blocker";
+  Destiny: email only, never names, because two people can share a name and an email is one
+  person). A Form A whose email (case-blind) is already a lead makes **no new lead**: it is kept
+  whole on that lead under `form_a.resubmissions`, the lead keeps its first answers, and one
+  `resubmitted` line on its timeline says when and what changed. Stage, follow-ups and notes are
+  untouched, and no second lead event is written. The reply says `stored: "merged"` with
+  `merged_into`. The same repeat posted again changes nothing more. The tracker already spots a
+  returning email in its own sheet ("(returning email)" on the post, the "details are updated"
+  email). Leads already held twice are left as they are. `npm run test:vfarm-lead-dedup`.
 - **Answers** are keyed by Form A's question text, character for character.
   Two questions end in a space, and a key without that space is a different
   key. The 23 questions live in `src/data/formA.ts`. A key that is not one of

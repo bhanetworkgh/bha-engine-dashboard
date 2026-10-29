@@ -42,7 +42,7 @@ export const closeReasonLabel = (k: string | null | undefined): string => CLOSE_
 export interface LeadActivity {
   at: string;
   by: string;
-  kind: 'note' | 'next_step' | 'closed' | 'reopened';
+  kind: 'note' | 'next_step' | 'closed' | 'reopened' | 'resubmitted';
   text: string | null;
   due?: string | null;
   reason?: string | null;
