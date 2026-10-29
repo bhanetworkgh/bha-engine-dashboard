@@ -1516,8 +1516,16 @@ is non-transactional). `server/src/proposal.ts`, migration 81.
   stored, a link that opens nothing gets the "not valid" page. Made from the lead panel
   (`POST /api/vfarm/leads/:id/proposal`) for a lead in Stage 3 only; a new one replaces the old
   and the old link stops working.
-- **Every proposal is a test until Canon Lock exists** (`test: true`, not settable): the page
-  carries a "Test proposal, not an offer" banner on every view. **No payment and no payment
+- **Only a team test lead gets a test proposal** (29 Oct 2026, Destiny: a real client is never
+  marked test; this replaces "every proposal is a test until Canon Lock"). A lead with an
+  @bhanetwork.org address gets `test: true` and the "Test proposal, not an offer" banner on every
+  view. A real buyer gets a real proposal or none: `proposal.create` refuses it
+  (`no_approved_offer`, or `gate_unread` when the charge gate cannot be read) until Jason's newest
+  real offer approval is `approved` with an `offer_id`, which stands for the setup and its price
+  (Jason, 17 Oct: "Canon-Locked setups only" and "this is its price"). A real proposal has
+  `test: false`, carries that `offer_id`, and shows no banner, no `[Test proposal]` tag in the
+  channel and `test: false` on its events. Each lead carries `proposal_rule`, and the lead page
+  says in words which case it is. **No payment and no payment
   link on it.** Three plain HTML forms: Accept (the lead moves to Stage 4 once, `via: 'buyer'`),
   Ask a question (text required), Request a call. Each is recorded on `proposal.actions`, one
   `vfarm_proposal_*` event, and one post in #vfarm-early-access whose outcome is written back.

@@ -472,6 +472,8 @@ export interface Lead {
   intake_2_invite: Omit<Intake2Invite, 'token_sha256'> | null;
   /** Stage 3's proposal (17 Oct 2026), never its link's hash. */
   proposal: ReturnType<typeof proposalMod.forPage>;
+  /** Test or real, and whether a real proposal can be made now (29 Oct 2026). */
+  proposal_rule: proposalMod.ProposalRule;
   /** What Stripe said about this lead's payment (17 Oct 2026, stripeLedger). */
   stripe_payment: Record<string, unknown> | null;
   /** The CRM (15 Oct 2026): what happens next and by when, a close with a reason, and the timeline. */
@@ -539,6 +541,7 @@ export async function leads(): Promise<LeadsData> {
 
   const iso = (d: Date | string | null): string | null => (d ? new Date(d).toISOString() : null);
   const tied = await offersByLead();
+  const gate = await proposalMod.currentOffer();
   const rows: Lead[] = r.rows.map((row) => ({
     ...row,
     pilot_offers: tied.get(String(row.id)) ?? [],
@@ -550,6 +553,7 @@ export async function leads(): Promise<LeadsData> {
     intake_2_completed_at: iso(row.intake_2_completed_at),
     intake_2_invite: intake2.forPage(row.intake_2_invite),
     proposal: proposalMod.forPage(row.proposal),
+    proposal_rule: proposalMod.rule(row.email, gate.offer, gate.unread),
     next_step_due: row.next_step_due ? String(row.next_step_due) : null,
     closed_at: iso(row.closed_at),
     activity: Array.isArray(row.activity) ? row.activity : [],

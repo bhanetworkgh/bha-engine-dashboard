@@ -10,9 +10,12 @@
  *   and only its sha256 is stored. Any link that opens nothing gets the same "not valid" page.
  * - **Made only for a lead in Stage 3** (Form 2 in, moved on by a person once the five checks
  *   cleared), never closed. A new proposal replaces the old one and the old link stops working.
- * - **Every proposal is marked test until Canon Lock exists.** No setup is Canon-Locked yet, so
- *   nothing here can be a real offer: the page says so in a banner on every view. `test` is not
- *   a field a caller can turn off.
+ * - **Only a team test lead gets a test proposal** (29 Oct 2026, Destiny: a real client is never
+ *   marked test). A lead with an @bhanetwork.org address gets one marked test on every view. A
+ *   real buyer gets a real proposal or none: it is refused (`no_approved_offer`) until Jason's
+ *   live offer approval is recorded on the charge gate, which is what stands for the setup and its
+ *   price (Jason, 17 Oct: "Canon-Locked setups only" and "this is its price"), and it carries that
+ *   offer's id. `test` is decided here, never by a caller.
  * - **Non-transactional.** Three buttons: Accept (the lead moves to Stage 4, where the
  *   templated agreement and their own Stripe link belong), Ask a question, Request a call.
  *   Nothing on this page takes a payment or shows a payment link.
@@ -27,6 +30,39 @@ import * as events from './events';
 import * as slack from './slack';
 import * as intake2 from './intake2';
 import { brandedPage, escapeHtml as esc, notValidPage } from './intake2Page';
+import * as chargeGate from './chargeGate';
+
+/** A team test lead: the same rule as earlyAccess.TEAM_TEST_SQL and leadFlow's team_test. Pure. */
+export const isTeamTest = (email: string | null | undefined): boolean => /@bhanetwork\.org$/i.test(String(email ?? '').trim());
+
+export interface ProposalRule {
+  team_test: boolean;
+  can_make_real: boolean;
+  offer_id: string | null;
+  reason: string;
+}
+
+/**
+ * Whether a lead's proposal is a test or a real one. Pure: `offer` is the newest real
+ * offer_approval from the charge gate, or null; `unread` when the gate could not be read.
+ */
+export function rule(email: string | null | undefined, offer: { verdict: string; offer_id: string | null } | null, unread = false): ProposalRule {
+  if (isTeamTest(email)) return { team_test: true, can_make_real: false, offer_id: null, reason: 'A team test lead: its proposal is marked test on every view and is not an offer.' };
+  if (unread) return { team_test: false, can_make_real: false, offer_id: null, reason: 'A real buyer gets a real proposal, never a test. The charge gate could not be read just now, so no proposal can be made until it can.' };
+  if (offer && offer.verdict === 'approved' && offer.offer_id) return { team_test: false, can_make_real: true, offer_id: offer.offer_id, reason: `A real proposal, made under Jason's approved offer ${offer.offer_id}. It takes no payment.` };
+  return { team_test: false, can_make_real: false, offer_id: null, reason: "A real buyer gets a real proposal, never a test. Jason has not approved a live offer (the setup and its price) yet, so no proposal can be made for this lead. It waits in Stage 3 until he does." };
+}
+
+/** The rule for every lead at once: one read of the charge gate. */
+export async function currentOffer(): Promise<{ offer: { verdict: string; offer_id: string | null } | null; unread: boolean }> {
+  try {
+    const s = await chargeGate.status();
+    return { offer: s.offer_approval ? { verdict: s.offer_approval.verdict, offer_id: s.offer_approval.offer_id } : null, unread: false };
+  } catch (e) {
+    console.error(`[proposal] charge gate not read: ${e instanceof Error ? e.message : String(e)}`);
+    return { offer: null, unread: true };
+  }
+}
 
 const ALERT_CHANNEL = () => process.env.INTAKE2_ALERT_CHANNEL?.trim() || 'C0C36GPEB3L';
 const base = () => (process.env.PUBLIC_DASHBOARD_URL || 'https://dashboard.bhanetwork.org').replace(/\/+$/, '');
@@ -64,7 +100,9 @@ export const QUESTION_RECEIVED = "We've received your question. A member of the 
 
 export interface Proposal {
   proposal_id: string;
-  test: true;
+  test: boolean;
+  /** The approved offer a real proposal was made under (charge gate offer_id); null on a test. */
+  offer_id?: string | null;
   setup_name: string;
   summary: string;
   inclusions: string[];
@@ -142,9 +180,10 @@ export async function create(leadId: string, input: ProposalInput, by: string): 
   const who = clean(by, 120) || 'the dashboard login';
   const fields = validate(input);
   secret();
+  const gate = await currentOffer();
   const out = await withTransaction(async (db) => {
-    const r = await db.query<{ id: string; stage: number; closed_at: Date | null; intake_2_completed_at: Date | null; buyer: string | null; proposal: Proposal | null }>(
-      `SELECT id::text AS id, stage, closed_at, intake_2_completed_at, form_a->>'buyer_intake_id' AS buyer, proposal FROM engine_vfarm_leads WHERE id::text = $1 FOR UPDATE`,
+    const r = await db.query<{ id: string; stage: number; closed_at: Date | null; intake_2_completed_at: Date | null; buyer: string | null; proposal: Proposal | null; email: string | null }>(
+      `SELECT id::text AS id, stage, closed_at, intake_2_completed_at, form_a->>'buyer_intake_id' AS buyer, proposal, email FROM engine_vfarm_leads WHERE id::text = $1 FOR UPDATE`,
       [leadId],
     );
     const row = r.rows[0];
@@ -152,14 +191,16 @@ export async function create(leadId: string, input: ProposalInput, by: string): 
     if (row.closed_at) throw new ProposalError(409, 'closed', 'That lead is closed. Reopen it first.');
     if (row.stage !== 3) throw new ProposalError(409, 'not_stage_3', `A proposal is made for a lead in Stage 3 (Form 2 in and the five checks cleared). This lead is in Stage ${row.stage}.`);
     if (!row.intake_2_completed_at) throw new ProposalError(409, 'no_form_2', 'This lead has not sent Form 2, so there is no site to propose against.');
+    const rl = rule(row.email, gate.offer, gate.unread);
+    if (!rl.team_test && !rl.can_make_real) throw new ProposalError(409, gate.unread ? 'gate_unread' : 'no_approved_offer', rl.reason);
     const n = (row.proposal?.proposal_id?.match(/-(\d+)$/)?.[1] ?? '0') as string;
     const suffix = (row.buyer ?? row.id).replace(/^VFBUYER-/, '').replace(/[^A-Za-z0-9-]/g, '');
     const proposal_id = `VFPROP-${suffix}-${Number(n) + 1}`;
     const token = tokenFor(proposal_id);
-    const p: Proposal = { proposal_id, test: true, ...fields, created_at: new Date().toISOString(), created_by: who, opened_at: null, accepted_at: null, actions: [], token_sha256: sha(token) };
+    const p: Proposal = { proposal_id, test: rl.team_test, offer_id: rl.offer_id, ...fields, created_at: new Date().toISOString(), created_by: who, opened_at: null, accepted_at: null, actions: [], token_sha256: sha(token) };
     await db.query(`UPDATE engine_vfarm_leads SET proposal = $2::jsonb WHERE id::text = $1`, [leadId, JSON.stringify(p)]);
     await engineEvents.record(
-      { event_type: 'vfarm_proposal_made', subject_id: row.buyer ?? row.id, lane: 'VFARM', actor: who, detail: { lead_id: row.id, proposal_id, replaced: row.proposal?.proposal_id ?? null, test: true, price_amount: p.price_amount, currency: p.currency }, dedupe_key: `proposal:${proposal_id}` },
+      { event_type: 'vfarm_proposal_made', subject_id: row.buyer ?? row.id, lane: 'VFARM', actor: who, detail: { lead_id: row.id, proposal_id, replaced: row.proposal?.proposal_id ?? null, test: p.test, offer_id: p.offer_id ?? null, price_amount: p.price_amount, currency: p.currency }, dedupe_key: `proposal:${proposal_id}` },
       db,
     );
     return { p, replaced: row.proposal?.proposal_id ?? null };
@@ -192,7 +233,7 @@ const first = (name: string) => name.trim().split(/\s+/)[0] || 'there';
 
 function proposalBody(f: Found, flash: string | null): string {
   const p = f.proposal;
-  const test = `<div class="banner bad"><strong>Test proposal.</strong> This is an internal test of the vFarm proposal page, not an offer. No setup is confirmed yet, and nothing here is a price you can buy at.</div>`;
+  const test = p.test === false ? '' : `<div class="banner bad"><strong>Test proposal.</strong> This is an internal test of the vFarm proposal page, not an offer. No setup is confirmed yet, and nothing here is a price you can buy at.</div>`;
   const inc = p.inclusions.length ? `<ul>${p.inclusions.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>` : '';
   const card = `<section class="card"><h2>The setup that fits your site</h2>
 <p style="font-size:20px;font-weight:600;margin:6px 0 4px">${esc(p.setup_name)}</p>
@@ -255,7 +296,7 @@ export async function act(token: string, actionRaw: unknown, textRaw: unknown): 
     await db.query(`UPDATE engine_vfarm_leads SET proposal = $2::jsonb${stageSql} WHERE id::text = $1`, params);
     if (stageSql) await leadFlow.recordStageMove(db, { lead_id: f.id, buyer_intake_id: f.buyer ?? null, from: 3, to: 4, at, by: 'buyer', via: 'buyer', reason: `Accepted ${row.proposal.proposal_id}` });
     await engineEvents.record(
-      { event_type: `vfarm_proposal_${kind}`, at, subject_id: f.buyer ?? f.id, lane: 'VFARM', actor: 'buyer', detail: { lead_id: f.id, proposal_id: row.proposal.proposal_id, test: true, moved_to_stage_4: kind === 'accepted' && row.stage === 3, ...(kind === 'question' ? { assignee: QUESTION_OWNER.slack_id, backstop: QUESTION_OWNER.backstop_slack_id } : {}) }, dedupe_key: kind === 'accepted' ? `proposal-accepted:${row.proposal.proposal_id}` : null },
+      { event_type: `vfarm_proposal_${kind}`, at, subject_id: f.buyer ?? f.id, lane: 'VFARM', actor: 'buyer', detail: { lead_id: f.id, proposal_id: row.proposal.proposal_id, test: row.proposal.test !== false, moved_to_stage_4: kind === 'accepted' && row.stage === 3, ...(kind === 'question' ? { assignee: QUESTION_OWNER.slack_id, backstop: QUESTION_OWNER.backstop_slack_id } : {}) }, dedupe_key: kind === 'accepted' ? `proposal-accepted:${row.proposal.proposal_id}` : null },
       db,
     );
     return 'ok' as const;
@@ -265,7 +306,7 @@ export async function act(token: string, actionRaw: unknown, textRaw: unknown): 
   events.changed('vfarm_leads', f.id);
 
   const p = f.proposal;
-  const head = '*[Test proposal]* ';
+  const head = p.test === false ? '' : '*[Test proposal]* ';
   const title = kind === 'accepted' ? 'Proposal accepted (moved to Stage 4)' : kind === 'question' ? 'Question on a proposal' : 'Call requested on a proposal';
   const text2 = [
     `${head}*${title}*`,
