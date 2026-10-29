@@ -5026,7 +5026,8 @@ record.
   `record_code_check` too, or the server's scope is never reached. **A trial switch** (Destiny, 29 Oct:
   prove it on real approvals before 1 Nov, then off): `code_check_alert_trial` (write connection, Destiny
   or Jason, refused on agent tokens), stored in `meta` `code_check.alert_trial`, makes the alert count
-  approvals from the moment it is switched on. It moves only the alert's start, never later than 1 Nov,
+  approvals from the moment it is switched on; the service setting `CODE_CHECK_ALERT_TRIAL_FROM` (an ISO time)
+  does the same and wins where it is set, for when the tool is not reachable. It moves only the alert's start, never later than 1 Nov,
   and the tab and its figures still start at 1 Nov. `npm run test:code-check-watch`.
 
 ### System registry

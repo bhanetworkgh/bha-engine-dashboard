@@ -13758,3 +13758,10 @@ Files:      server/src/codeCheckWatch.ts, server/src/codeChecks.ts, server/src/m
 Problem:    The alert counted only approvals on or after 1 Nov (Jason's start), so nothing before then could prove it.
 Fix:        meta code_check.alert_trial {on, from, set_by, set_at}, written by the new code_check_alert_trial tool (Destiny or Jason; one code_check_trial_on/off event each). While on, the watcher counts approvals from `from` (default: the moment it is switched on); it can only move the start earlier than 1 Nov. approvals() and summarise() take the start as a parameter, defaulting to 1 Nov, so the tab is unchanged. Tests 12/12, code-checks 8/8, strict check clean.
 Decision:   The trial starts from the moment it is switched on, not from midnight, so yesterday's approvals do not all alert at once.
+
+## 2026-10-29 06:40 — Code check trial: a Render setting can switch it too
+Intent:     Turn the trial on now.
+Files:      server/src/codeCheckWatch.ts, CLAUDE.md
+Problem:    The connector's tool list did not pick up code_check_alert_trial after two refreshes (109 tools, nothing added), so the switch could not be flipped from here.
+Fix:        trial() reads CODE_CHECK_ALERT_TRIAL_FROM (an ISO time) first; set, the trial is on from that time. Unset, the stored switch decides. Off is removing the setting.
+Decision:   Switched through Render's environment, which restarts the service; nothing else changes.
