@@ -43,7 +43,7 @@ export const readChargeGate: ToolDefinition = {
 export const recordChargeGate: ToolDefinition = {
   name: 'record_charge_gate',
   description:
-    `Record ONE charge-gate verdict: Hardik's acceptance_pass on the payment path (green or red) or Jason's offer_approval of a live offer (approved or withdrawn). These are the two records "can we charge real buyers" waits on. HELD HERE: decided_by must be the owner (acceptance_pass ${gate.HARDIK}, offer_approval ${gate.JASON}) (not_the_owner); requester_user_id is the owner or Destiny (not_permitted); evidence_link is the Slack link of the owner's own message saying it, and Slack must confirm that person posted it (evidence_required, evidence_not_found, evidence_unchecked, evidence_not_owners); an approved offer names what is approved in scope, in Jason's words (scope_required), and is Jason's offer_approved event: offer_id, loop_id and a conditions snapshot (offer_id_required, loop_id_required, conditions_required); a withdrawal names offer_id; a green pass names its acceptance bundle in bundle_ref, as the bundle's evidence store id EV-… (bundle_required; bundle_not_evidence, bundle_not_found or bundle_is_test when the record is not held here, unless the pass is a test). approver_id is decided_by and the timestamp is the row's own. An approval also writes one offer_approved (or offer_withdrawn) engine event with those fields. Never fill a verdict, scope or link in for anyone. Rows are never edited: a change of mind is a new row. Refused on any agent token. dry_run checks everything, Slack included, and writes nothing. test: true marks a test row that never counts. Returns {ok, written, row, status, message}. Audited on engine_mcp_writes.`,
+    `Record ONE charge-gate verdict: Hardik's acceptance_pass on the payment path (green or red) or Jason's offer_approval of a live offer (approved or withdrawn). These are the two records "can we charge real buyers" waits on. HELD HERE: decided_by must be the owner (acceptance_pass ${gate.HARDIK}, offer_approval ${gate.JASON}) (not_the_owner); requester_user_id is the owner or Destiny (not_permitted); evidence_link is the Slack link of the owner's own message saying it, and Slack must confirm that person posted it (evidence_required, evidence_not_found, evidence_unchecked, evidence_not_owners); an approved offer names what is approved in scope, in Jason's words (scope_required), and is Jason's offer_approved event: offer_id, loop_id and a conditions snapshot (offer_id_required, loop_id_required, conditions_required); a withdrawal names offer_id; a green pass names its acceptance bundle in bundle_ref, as the bundle's evidence store id EV-… (bundle_required; bundle_not_evidence, bundle_not_found or bundle_is_test when the record is not held here, unless the pass is a test). approver_id is decided_by and the timestamp is the row's own. An approval also writes one offer_approved (or offer_withdrawn) engine event with those fields. Never fill a verdict, scope or link in for anyone. Rows are never edited: a change of mind is a new row. One decision is one row: the same message, kind, verdict, rail and test flag recorded again returns the row already held (written false, duplicate true, same gate_id, no new event); the same message and verdict stating a different bundle_ref, offer_id, loop_id, conditions or scope is refused (decision_conflict, naming existing_gate_id). Refused on any agent token. dry_run checks everything, Slack included, and writes nothing. test: true marks a test row that never counts. Returns {ok, written, duplicate, row, status, message}. Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -65,7 +65,7 @@ export const recordChargeGate: ToolDefinition = {
     required: ['kind', 'verdict', 'decided_by', 'evidence_link', 'requester_user_id'],
     additionalProperties: false,
   },
-  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Record a charge-gate verdict' },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Record a charge-gate verdict' },
   handler: async (args, deps) => {
     const requester = str(args, 'requester_user_id') || null;
     const dry = args.dry_run === true;
@@ -94,7 +94,7 @@ export const recordChargeGate: ToolDefinition = {
         },
         { via: `mcp:${deps.access}`, dry_run: dry },
       );
-      await auditClose(audit, { outcome: dry ? 'dry_run' : 'inserted', detail: r.message, natural_id: dry ? null : r.row.gate_id, after: r.row });
+      await auditClose(audit, { outcome: dry ? 'dry_run' : r.duplicate ? 'existing' : 'inserted', detail: r.message, natural_id: dry ? null : r.row.gate_id, after: r.row });
       return { ...r, audit_id: audit };
     } catch (e) {
       if (e instanceof gate.ChargeGateError) {

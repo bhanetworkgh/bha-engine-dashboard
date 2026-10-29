@@ -1468,6 +1468,13 @@ Hardik's (`U0BKT6MAW2Y`), the offer Jason's (`U0A9V97949F`); the recorder is tha
 North Star's token; unreadable is a refusal). `record_charge_gate` (write connection, no agent's scope,
 refused on any agent token; audited kind `charge_gate`) writes one row and one `charge_gate_recorded`
 event in one transaction; `read_charge_gate` (both connections) answers with the reason and history.
+**One decision is one row** (ROQY, migration 105, unique index `engine_charge_gate_decision`): its
+identity is `(evidence_channel, evidence_ts, kind, rail, verdict, test)`. Recording the same decision
+again, or twice at once, returns the row already held (`written: false, duplicate: true`, same `gate_id`,
+no new event); the same message and verdict with a different `bundle_ref`, `offer_id`, `loop_id`,
+`conditions` or `scope` is `decision_conflict`. A different verdict on the same message keeps its own
+row, and replaying an older verdict returns its old row, so it never becomes the newest. ROQY calls the
+verdict the "decision score"; that reading awaits the loop owner's confirmation.
 **`read_buyer_flow` carries it as `charge_gate`**, so Genie and every agent read it with the flow, and a
 charge gate it cannot read is "do not know, treat as no". It charges nobody, moves no stage and opens no
 checkout. **Jason's offer_approved fields** (23 Oct 2026, #workflow-logs-destiny 1792769106.709119;

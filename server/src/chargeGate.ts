@@ -21,7 +21,7 @@
  *
  * `check()` is pure, so the rules are tested without a database or Slack.
  */
-import { query, withTransaction } from './pg';
+import { query, withTransaction, type Queryable } from './pg';
 import { record } from './engineEvents';
 import * as slack from './slack';
 
@@ -213,11 +213,52 @@ function newId(): string {
   return `CG-${Date.now()}-${s}`;
 }
 
-/** Records one verdict, with its engine event, in one transaction. Refused with nothing written when a rule says no. */
+/**
+ * A decision's identity (LOOP-1793124602015-ROQY, 28 Oct 2026): one Slack message, one kind, one verdict,
+ * on one rail, real or test. Migration 105's unique index holds it, so a retry, or two writers at once,
+ * can land one row and no more. ROQY names the third part "decision score"; the verdict is the only
+ * decision value this record has, and that reading awaits the loop owner's confirmation.
+ * A different verdict on the same message is a different identity and its own row, as before.
+ */
+const IDENTITY = 'evidence_channel, evidence_ts, kind, rail, verdict, test';
+
+/** What a retry must repeat exactly to be the same decision. notes, via, recorded_by and the link's query are not the decision. */
+const DECISION_FIELDS = ['bundle_ref', 'offer_id', 'loop_id', 'conditions', 'scope'] as const;
+
+/** The row already holding this identity, and which decision fields the new request states differently. */
+async function heldDecision(db: Queryable, row: GateRow): Promise<{ row: GateRow; differs: string[] } | null> {
+  const r = await db.query<Record<string, unknown>>(
+    `SELECT *, bundle_ref IS NOT DISTINCT FROM $7 AS same_bundle_ref, offer_id IS NOT DISTINCT FROM $8 AS same_offer_id,
+            loop_id IS NOT DISTINCT FROM $9 AS same_loop_id, conditions IS NOT DISTINCT FROM $10::jsonb AS same_conditions,
+            scope IS NOT DISTINCT FROM $11 AS same_scope
+       FROM engine_charge_gate
+      WHERE evidence_channel = $1 AND evidence_ts = $2 AND kind = $3 AND rail = $4 AND verdict = $5 AND test = $6`,
+    [row.evidence_channel, row.evidence_ts, row.kind, row.rail, row.verdict, row.test, row.bundle_ref, row.offer_id, row.loop_id, row.conditions === null ? null : JSON.stringify(row.conditions), row.scope],
+  );
+  const held = r.rows[0];
+  if (!held) return null;
+  return { row: toRow(held), differs: DECISION_FIELDS.filter((f) => held[`same_${f}`] !== true) };
+}
+
+/** The same message and verdict stating something else is refused, never answered as the earlier record. */
+function conflict(c: { kind: Kind; verdict: string }, held: { row: GateRow; differs: string[] }): ChargeGateError {
+  return new ChargeGateError(
+    'decision_conflict',
+    `That Slack message already records ${OWNER_NAME[c.kind]}'s ${c.kind} (${c.verdict}) as ${held.row.gate_id}, with a different ${held.differs.join(', ')}. A different decision needs its own message.`,
+    { existing_gate_id: held.row.gate_id, differs: held.differs },
+  );
+}
+
+/**
+ * Records one verdict, with its engine event, in one transaction. Refused with nothing written when a rule says no.
+ * The same decision again (same identity, same decision fields) returns the row already held, with
+ * written false and duplicate true, and writes no event. Every check runs before that lookup, so only a
+ * request that could record the decision learns its gate_id.
+ */
 export async function recordGate(
   input: GateInput,
   opts: { via: string; dry_run?: boolean; checkMessage?: MessageCheck; checkBundle?: BundleCheck } = { via: 'unknown' },
-): Promise<{ ok: true; written: boolean; row: GateRow; event_id: number | null; status: RailStatus; message: string; bundle: { evidence_id: string; name: string; version: number; superseded_by: string | null } | null }> {
+): Promise<{ ok: true; written: boolean; duplicate: boolean; row: GateRow; event_id: number | null; status: RailStatus; message: string; bundle: { evidence_id: string; name: string; version: number; superseded_by: string | null } | null }> {
   const c = check(input);
   // 28 Oct 2026 (D3): a real green pass rests on a record in the evidence store, held and readable by every
   // system, never on a link that can move. A test pass may name anything.
@@ -256,15 +297,27 @@ export async function recordGate(
     created_at: new Date().toISOString(),
   };
   if (opts.dry_run) {
+    const held = await heldDecision({ query }, row);
+    if (held?.differs.length) throw conflict(c, held);
     const before = await status(c.rail);
-    return { ok: true, written: false, row, event_id: null, status: before, bundle, message: `Dry run: ${OWNER_NAME[c.kind]}'s ${c.kind} (${c.verdict}) would be recorded on ${c.rail}. Nothing was written.` };
+    if (held) return { ok: true, written: false, duplicate: true, row: held.row, event_id: null, status: before, bundle, message: `Dry run: this is ${held.row.gate_id}, already recorded; a real run would return it and write nothing.` };
+    return { ok: true, written: false, duplicate: false, row, event_id: null, status: before, bundle, message: `Dry run: ${OWNER_NAME[c.kind]}'s ${c.kind} (${c.verdict}) would be recorded on ${c.rail}. Nothing was written.` };
   }
-  const event_id = await withTransaction(async (db) => {
+  const out = await withTransaction(async (db): Promise<{ event_id: number | null; held: GateRow | null }> => {
+    // ON CONFLICT on the identity: a concurrent writer of the same decision waits here for the first to
+    // commit, then inserts nothing and reads the row that won (READ COMMITTED: a fresh snapshot per statement).
     const ins = await db.query(
       `INSERT INTO engine_charge_gate (gate_id, kind, rail, verdict, decided_by, evidence_link, evidence_channel, evidence_ts, scope, notes, recorded_by, via, test, offer_id, loop_id, conditions, bundle_ref)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17) RETURNING created_at`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17)
+       ON CONFLICT (${IDENTITY}) DO NOTHING RETURNING created_at`,
       [row.gate_id, row.kind, row.rail, row.verdict, row.decided_by, row.evidence_link, row.evidence_channel, row.evidence_ts, row.scope, row.notes, row.recorded_by, row.via, row.test, row.offer_id, row.loop_id, row.conditions === null ? null : JSON.stringify(row.conditions), row.bundle_ref],
     );
+    if (!ins.rows.length) {
+      const held = await heldDecision(db, row);
+      if (!held) throw new Error(`engine_charge_gate refused ${row.gate_id} on its identity but holds no row for it.`);
+      if (held.differs.length) throw conflict(c, held);
+      return { event_id: null, held: held.row };
+    }
     row.created_at = (ins.rows[0] as { created_at: Date }).created_at.toISOString();
     const e = await record(
       {
@@ -294,12 +347,26 @@ export async function recordGate(
         db,
       );
     }
-    return e.id;
+    return { event_id: e.id, held: null };
   });
   const after = await status(c.rail);
+  if (out.held) {
+    return {
+      ok: true,
+      written: false,
+      duplicate: true,
+      row: out.held,
+      event_id: null,
+      status: after,
+      bundle,
+      message: `Already recorded: ${OWNER_NAME[c.kind]}'s ${c.kind} (${c.verdict}) on this message is ${out.held.gate_id} (${out.held.created_at.slice(0, 10)}). Nothing new was written. Real buyers can be charged on ${c.rail}: ${after.can_charge_live ? 'yes' : 'no'}.`,
+    };
+  }
+  const event_id = out.event_id;
   return {
     ok: true,
     written: true,
+    duplicate: false,
     row,
     event_id,
     status: after,
