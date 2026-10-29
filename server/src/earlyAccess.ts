@@ -723,12 +723,37 @@ export interface FormAStored {
   correlation_id: string | null;
   source_campaign: string | null;
   submitted_at: string | null;
+  /**
+   * Every later Form A from the same email (29 Oct 2026, Jason: "we should also have a
+   * duplication blocker"). The lead keeps its first answers here and each repeat is kept whole
+   * beside them, oldest first; a repeat never makes a second lead.
+   */
+  resubmissions?: FormAResubmission[];
+}
+
+/** One later Form A from an email already held, stored as it was sent. */
+export interface FormAResubmission {
+  buyer_intake_id: string;
+  early_access_lead_id: string | null;
+  correlation_id: string | null;
+  submitted_at: string | null;
+  received_at: string;
+  name: string;
+  organisation: string | null;
+  answers: Record<string, unknown>;
 }
 
 export interface FormAWrite {
   id: string;
   buyer_intake_id: string;
   inserted: boolean;
+  /**
+   * `merged` when this email was already a lead: the sign-up went onto that lead and no new lead
+   * was made. `inserted` and `updated` are the same submission's first and repeat posts.
+   */
+  stored: 'inserted' | 'updated' | 'merged';
+  /** The lead a repeat sign-up was added to, and when that lead first came in. */
+  merged_into: { id: string; first_signed_up: string } | null;
   answers: number;
   /** Keys sent that are not one of Form A's 23 questions — stored anyway, and shown. */
   unexpected_questions: string[];
@@ -744,6 +769,22 @@ function opt(v: unknown, max: number): string | null {
   if (v === null || v === undefined) return null;
   const t = String(v).trim();
   return t ? t.slice(0, max) : null;
+}
+
+/**
+ * The timeline line for a repeat sign-up: when, and every answer that differs from the first
+ * Form A, so a person reading the lead sees what changed without opening two records. Pure.
+ */
+export function resubmitText(first: Record<string, unknown>, again: FormAResubmission): string {
+  const v = (x: unknown) => (x === null || x === undefined ? '' : typeof x === 'string' ? x.trim() : JSON.stringify(x));
+  const clip = (x: string) => (x.length > 120 ? `${x.slice(0, 119)}…` : x || '(blank)');
+  const keys = [...new Set([...FORM_A_QUESTIONS, ...Object.keys(again.answers)])].filter((k) => k in again.answers || k in first);
+  const changed = keys.filter((k) => v(first[k]) !== v(again.answers[k]));
+  const head = `Filled in Form A again${again.submitted_at ? ` (${again.submitted_at})` : ''}, as ${again.name}${again.organisation ? `, ${again.organisation}` : ''}.`;
+  if (!changed.length) return `${head} Same answers as before.`;
+  const lines = changed.slice(0, 12).map((k) => `${k.trim()}: ${clip(v(first[k]))} → ${clip(v(again.answers[k]))}`);
+  const more = changed.length > 12 ? `\n…and ${changed.length - 12} more.` : '';
+  return `${head} Changed:\n${lines.join('\n')}${more}`;
 }
 
 /**
@@ -801,31 +842,75 @@ export async function storeFormA(body: Record<string, unknown>): Promise<FormAWr
   // blob keeps whatever was sent, Google Forms' "9/23/2026 14:05:09" included.
   const submittedAt = submitted && /^\d{4}-\d{2}-\d{2}T/.test(submitted) && Number.isFinite(Date.parse(submitted)) ? new Date(submitted).toISOString() : null;
 
-  const r = await query<{ id: string; inserted: boolean }>(
-    `INSERT INTO engine_vfarm_leads (full_name, email, organization_name, source_surface, source_campaign, submitted_at, form_a)
-     VALUES ($1, $2, $3, 'form_a', $4, $5, $6::jsonb)
-     ON CONFLICT ((form_a->>'buyer_intake_id')) WHERE form_a ? 'buyer_intake_id'
-     DO UPDATE SET full_name = EXCLUDED.full_name,
-                   email = EXCLUDED.email,
-                   organization_name = EXCLUDED.organization_name,
-                   source_campaign = EXCLUDED.source_campaign,
-                   submitted_at = EXCLUDED.submitted_at,
-                   form_a = EXCLUDED.form_a
-     RETURNING id, (xmax = 0) AS inserted`,
-    [name, email, org, stored.source_campaign, submittedAt, JSON.stringify(stored)],
-  );
+  // Email is the one thing that says two sign-ups are the same person (29 Oct 2026, Destiny: two
+  // people share a name, never an email). Serialised per email so two posts cannot both insert.
+  const out = await withTransaction(async (db) => {
+    await db.query(`SELECT pg_advisory_xact_lock(hashtext('vfarm_lead_email:' || $1))`, [email]);
+    const own = await db.query(`SELECT 1 FROM engine_vfarm_leads WHERE form_a->>'buyer_intake_id' = $1`, [buyer]);
+    if (!own.rows.length) {
+      const prev = await db.query<{ id: string; form_a: FormAStored | null; created_at: Date }>(
+        `SELECT id::text AS id, form_a, created_at FROM engine_vfarm_leads WHERE lower(email) = $1 ORDER BY created_at, id LIMIT 1 FOR UPDATE`,
+        [email],
+      );
+      if (prev.rows.length) {
+        const row = prev.rows[0];
+        const entry: FormAResubmission = {
+          buyer_intake_id: buyer,
+          early_access_lead_id: stored.early_access_lead_id,
+          correlation_id: stored.correlation_id,
+          submitted_at: submitted,
+          received_at: new Date().toISOString(),
+          name,
+          organisation: org,
+          answers,
+        };
+        const subs = Array.isArray(row.form_a?.resubmissions) ? row.form_a!.resubmissions! : [];
+        const seen = subs.findIndex((x) => x.buyer_intake_id === buyer);
+        if (seen >= 0) {
+          // The same repeat posted again: the newer post replaces it, and the timeline already has its line.
+          subs[seen] = { ...entry, received_at: subs[seen].received_at };
+          await db.query(`UPDATE engine_vfarm_leads SET form_a = jsonb_set(form_a, '{resubmissions}', $2::jsonb) WHERE id::text = $1`, [row.id, JSON.stringify(subs)]);
+        } else {
+          const a: LeadActivity = { at: entry.received_at, by: 'the buyer (Form A again)', kind: 'resubmitted', text: resubmitText(row.form_a?.answers ?? {}, entry) };
+          // A lead from the old public route has no Form A: this one becomes its Form A.
+          const formA = row.form_a ? { ...row.form_a, resubmissions: [...subs, entry] } : stored;
+          await db.query(`UPDATE engine_vfarm_leads SET form_a = $2::jsonb, activity = activity || $3::jsonb WHERE id::text = $1`, [row.id, JSON.stringify(formA), JSON.stringify([a])]);
+        }
+        return { id: row.id, inserted: false, merged_into: { id: row.id, first_signed_up: new Date(row.created_at).toISOString() } };
+      }
+    }
+    const r = await db.query<{ id: string; inserted: boolean }>(
+      `INSERT INTO engine_vfarm_leads (full_name, email, organization_name, source_surface, source_campaign, submitted_at, form_a)
+       VALUES ($1, $2, $3, 'form_a', $4, $5, $6::jsonb)
+       ON CONFLICT ((form_a->>'buyer_intake_id')) WHERE form_a ? 'buyer_intake_id'
+       DO UPDATE SET full_name = EXCLUDED.full_name,
+                     email = EXCLUDED.email,
+                     organization_name = EXCLUDED.organization_name,
+                     source_campaign = EXCLUDED.source_campaign,
+                     submitted_at = EXCLUDED.submitted_at,
+                     form_a = EXCLUDED.form_a || jsonb_build_object('resubmissions', COALESCE(engine_vfarm_leads.form_a->'resubmissions', '[]'::jsonb))
+       RETURNING id, (xmax = 0) AS inserted`,
+      [name, email, org, stored.source_campaign, submittedAt, JSON.stringify(stored)],
+    );
+    return { id: r.rows[0].id, inserted: r.rows[0].inserted, merged_into: null };
+  });
 
-  events.changed('vfarm_leads', r.rows[0].id);
-  // The lead's event (ZX0W). Never able to fail the lead: a lead nobody could tag is still a lead,
-  // and the boot backfill writes the event the next time the process starts.
-  await vfarmCustomerEvents
-    .recordLead({ id: r.rows[0].id, buyer_intake_id: buyer, early_access_lead_id: stored.early_access_lead_id, correlation_id: stored.correlation_id, source_campaign: stored.source_campaign, source_surface: 'form_a', at: submittedAt })
-    .catch((e) => console.error(`[vfarm-customers] lead event not recorded for ${buyer}: ${(e as Error).message}`));
+  events.changed('vfarm_leads', out.id);
+  // The lead's event (ZX0W), for a new lead only: a repeat sign-up is the same lead, not a second one.
+  // Never able to fail the lead: a lead nobody could tag is still a lead, and the boot backfill
+  // writes the event the next time the process starts.
+  if (!out.merged_into) {
+    await vfarmCustomerEvents
+      .recordLead({ id: out.id, buyer_intake_id: buyer, early_access_lead_id: stored.early_access_lead_id, correlation_id: stored.correlation_id, source_campaign: stored.source_campaign, source_surface: 'form_a', at: submittedAt })
+      .catch((e) => console.error(`[vfarm-customers] lead event not recorded for ${buyer}: ${(e as Error).message}`));
+  }
   const known = new Set(FORM_A_QUESTIONS);
   return {
-    id: r.rows[0].id,
+    id: out.id,
     buyer_intake_id: buyer,
-    inserted: r.rows[0].inserted,
+    inserted: out.inserted,
+    stored: out.merged_into ? 'merged' : out.inserted ? 'inserted' : 'updated',
+    merged_into: out.merged_into,
     answers: Object.keys(answers).length,
     unexpected_questions: Object.keys(answers).filter((k) => !known.has(k)),
     missing_questions: FORM_A_QUESTIONS.filter((q) => !(q in answers)),

@@ -778,7 +778,7 @@ function moments(l: VfarmLead): Moment[] {
   if (l.stripe_payment?.updated_at) m.push({ at: l.stripe_payment.updated_at, what: `Stripe${l.stripe_payment.mode === 'test' ? ' (sandbox)' : ''}: ${l.stripe_payment.state}`, tone: l.stripe_payment.state === 'failed' ? 'failing' : undefined });
   for (const a of l.activity ?? []) {
     if (a.kind === 'next_step') continue;
-    const what = a.kind === 'note' ? <span className="whitespace-pre-wrap text-ink">{a.text}</span> : a.kind === 'closed' ? `Closed: ${closeReasonLabel(a.reason)}${a.text ? `. ${a.text}` : ''}` : `Reopened${a.text ? `. ${a.text}` : ''}`;
+    const what = a.kind === 'note' || a.kind === 'resubmitted' ? <span className="whitespace-pre-wrap text-ink">{a.text}</span> : a.kind === 'closed' ? `Closed: ${closeReasonLabel(a.reason)}${a.text ? `. ${a.text}` : ''}` : `Reopened${a.text ? `. ${a.text}` : ''}`;
     m.push({ at: a.at, what, who: a.by });
   }
   return m.sort((a, b) => b.at.localeCompare(a.at));

@@ -60,6 +60,7 @@
     "test:pattern-capture": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/pattern-capture.test.cjs",
     "test:credit-out": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/credit-out.test.cjs",
     "test:logstream": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/logstream.test.cjs",
+    "test:vfarm-lead-dedup": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/vfarm-lead-dedup.test.cjs",
     "test:vfarm-customers": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/vfarm-customers.test.cjs",
     "test:twin-envelope": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/twin-envelope.test.cjs",
     "test:research-signals": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/research-signals.test.cjs",
