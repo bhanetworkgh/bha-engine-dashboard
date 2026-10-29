@@ -413,8 +413,8 @@ export function alertMessage(c: Crossing, triggerId: string): AlertMessage {
       {
         type: 'section',
         fields: [
-          { type: 'mrkdwn', text: `*Step*\n${mrkdwnSafe(c.node)}` },
-          { type: 'mrkdwn', text: `*Workflow*\n${mrkdwnSafe(c.workflow)}` },
+          { type: 'mrkdwn', text: `*Step*\n${mrkdwnSafe(c.node ?? "not named")}` },
+          { type: 'mrkdwn', text: `*Workflow*\n${mrkdwnSafe(c.workflow ?? "not named")}` },
           { type: 'mrkdwn', text: `*Times in ${RULE.window_days} days*\n${c.n}` },
           { type: 'mrkdwn', text: `*Rule*\n${RULE.escalate_at} or more goes to a person` },
         ],
