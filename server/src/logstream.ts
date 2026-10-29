@@ -373,18 +373,64 @@ function jobText(c: Crossing): { question: string; context: string } {
   };
 }
 
-function alertText(c: Crossing, triggerId: string): string {
+type AlertMessage = { text: string; blocks: unknown[] };
+
+const dashboardUrl = () => (process.env.PUBLIC_DASHBOARD_URL || 'https://dashboard.bhanetwork.org').replace(/\/+$/, '');
+const mrkdwnSafe = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/**
+ * The alert as Slack Block Kit (29 Oct 2026, Destiny: it should not read like an error). A calm
+ * header, what happened in fields, the incidents as dashboard links, one button to Logstream and
+ * a quiet footer. `text` is the plain fallback for notifications and clients without blocks.
+ */
+export function alertMessage(c: Crossing, triggerId: string): AlertMessage {
+  const base = dashboardUrl();
+  const footer = { type: 'context', elements: [{ type: 'mrkdwn', text: `Logstream \`${triggerId}\` · Nothing was retried, closed or changed by this.` }] };
+  const logstreamButton = { type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open Logstream' }, url: `${base}/logstream`, action_id: 'logstream_open' }] };
   if (c.kind === 'shared_outage') {
-    return `:rotating_light: *Logstream: one shared-cause outage* (\`${triggerId}\`)\n${c.n} workflows crossed a fault threshold in the last ${RULE.window_days} days: ${c.workflows.join(', ')}.\nThis is treated as one event. No per-workflow research is opened while it holds. A person needs to look for the shared cause.`;
+    const text = `Logstream: ${c.n} workflows are failing together in the last ${RULE.window_days} days, likely one shared cause. A person should look. (${triggerId})`;
+    return {
+      text,
+      blocks: [
+        { type: 'header', text: { type: 'plain_text', text: 'Several workflows are failing together' } },
+        { type: 'section', text: { type: 'mrkdwn', text: `${c.n} workflows crossed a fault threshold in the last ${RULE.window_days} days. This is treated as one event with one shared cause, so no per-workflow research is opened while it holds.` } },
+        { type: 'section', text: { type: 'mrkdwn', text: `*Workflows*\n${c.workflows.map((w) => `• ${mrkdwnSafe(w)}`).join('\n')}` } },
+        { type: 'section', text: { type: 'mrkdwn', text: '*What to do*\nLook for what they share: a credential, a service or a recent change.' } },
+        logstreamButton,
+        footer,
+      ],
+    };
   }
-  return `:warning: *Logstream: a fault needs a person* (\`${triggerId}\`)\nThe step *${c.node}* in *${c.workflow}* failed ${c.n} times in the last ${RULE.window_days} days (${RULE.escalate_at} or more escalates to a person).\nIncidents: ${c.incident_ids.join(', ')}.\nNothing was retried, closed or changed by this.`;
+  const text = `Logstream: "${c.node}" in ${c.workflow} failed ${c.n} times in the last ${RULE.window_days} days. A person should take a look. (${triggerId})`;
+  const shown = c.incident_ids.slice(0, 10);
+  const links = shown.map((id) => `<${base}/engine-health?incident=${encodeURIComponent(id)}|${mrkdwnSafe(id)}>`).join('  ·  ');
+  const more = c.incident_ids.length > shown.length ? `  and ${c.incident_ids.length - shown.length} more` : '';
+  return {
+    text,
+    blocks: [
+      { type: 'header', text: { type: 'plain_text', text: 'A repeating fault needs a look' } },
+      { type: 'section', text: { type: 'mrkdwn', text: `The same step keeps failing, so it has been handed to a person rather than retried again.` } },
+      {
+        type: 'section',
+        fields: [
+          { type: 'mrkdwn', text: `*Step*\n${mrkdwnSafe(c.node)}` },
+          { type: 'mrkdwn', text: `*Workflow*\n${mrkdwnSafe(c.workflow)}` },
+          { type: 'mrkdwn', text: `*Times in ${RULE.window_days} days*\n${c.n}` },
+          { type: 'mrkdwn', text: `*Rule*\n${RULE.escalate_at} or more goes to a person` },
+        ],
+      },
+      { type: 'section', text: { type: 'mrkdwn', text: `*Incidents*\n${links}${more}` } },
+      logstreamButton,
+      footer,
+    ],
+  };
 }
 
-async function alert(text: string): Promise<{ ok: true; channel: string; ts: string } | { ok: false; error: string }> {
+async function alert(msg: AlertMessage): Promise<{ ok: true; channel: string; ts: string } | { ok: false; error: string }> {
   const channel = quota.channelId();
   if (!channel) return { ok: false, error: `${quota.CHANNEL_VAR} is not set, so there is nowhere to post the alert` };
   if (!slack.slackConfigured()) return { ok: false, error: `${slack.SLACK_TOKEN_VAR} is not set, so nothing can be posted` };
-  const r = await slack.botCall('chat.postMessage', { channel, text, unfurl_links: false, unfurl_media: false });
+  const r = await slack.botCall('chat.postMessage', { channel, text: msg.text, blocks: msg.blocks, unfurl_links: false, unfurl_media: false });
   if (r.ok && typeof r.ts === 'string') return { ok: true, channel: typeof r.channel === 'string' ? r.channel : channel, ts: r.ts };
   return { ok: false, error: `Slack refused the alert: ${String(r.error ?? 'unknown error')}` };
 }
@@ -507,7 +553,7 @@ export async function sweep(): Promise<{ rows_written: number; crossings: number
           }
           out.jobs_opened++;
         } else {
-          const a = await alert(alertText(c, row.trigger_id));
+          const a = await alert(alertMessage(c, row.trigger_id));
           if (!a.ok) throw new Error(a.error);
           await query(`UPDATE engine_logstream_triggers SET action_state = 'alerted', alert_channel = $2, alert_ts = $3, error = NULL, attempts = attempts + 1, acted_at = now() WHERE id = $1`, [row.id, a.channel, a.ts]);
           out.alerts_posted++;

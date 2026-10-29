@@ -2605,6 +2605,12 @@ autopay, no pay wiring, no destructive automated action).
   first seen while it holds are `suppressed_shared_outage`. Each crossing is one
   row in `engine_logstream_triggers`, once per 7 days, and one
   `logstream_threshold_crossed` event.
+- **The alert is a Block Kit card** (29 Oct 2026, Destiny: it should not read like an error).
+  `logstream.alertMessage` gives the escalation the header "A repeating fault needs a look", the step,
+  workflow, count and rule as fields, each incident as a link to Engine health (ten at most, the rest
+  counted), an Open Logstream button and a footer with the trigger id and "Nothing was retried, closed or
+  changed". A shared outage is "Several workflows are failing together". No warning emoji; `text` stays
+  the plain fallback. The OpenRouter credit alert in n8n got the same treatment the same day.
 - **The rate rule leaves a guard's refusals out too** (10 Oct): a run whose
   incident is excluded (matched on the incident's `execution_id`) is dropped
   from both the runs and the failures. A refused ask throws on purpose, so
