@@ -613,7 +613,7 @@ function ProposalPanel({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdate
   return (
     <div>
       <p className="rounded-[10px] bg-hover px-3 py-2 text-[12.5px] text-ink">
-        Every proposal is marked <strong>test</strong> until Canon Lock exists: the buyer&rsquo;s page says so on every view, and it is not an offer. Stage 3 takes no payment.
+        {lead.proposal_rule?.reason ?? 'Stage 3 takes no payment.'}
       </p>
       {p && !editing && (
         <div className="mt-3 space-y-1 text-[12.5px]">
@@ -663,7 +663,7 @@ function ProposalPanel({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdate
           </div>
         </div>
       )}
-      {editing && (
+      {editing && (lead.proposal_rule?.team_test || lead.proposal_rule?.can_make_real) && (
         <div className="mt-3 grid gap-2 text-[12.5px]">
           <input className="input" placeholder="Setup name (for example: 1 rack, leafy greens, office lobby)" value={name} onChange={(e) => setName(e.target.value)} />
           <textarea className="input min-h-[72px] py-2" placeholder="What the setup is and why it fits their site" value={summary} onChange={(e) => setSummary(e.target.value)} />
@@ -675,7 +675,7 @@ function ProposalPanel({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdate
           </div>
           <div className="flex gap-2">
             <Button size="sm" variant="primary" loading={busy} disabled={!name.trim() || !summary.trim() || !Number(price)} onClick={save}>
-              {p ? 'Replace the proposal' : 'Make the test proposal'}
+              {p ? 'Replace the proposal' : lead.proposal_rule?.team_test ? 'Make the test proposal' : 'Make the proposal'}
             </Button>
             {p && (
               <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
@@ -771,7 +771,7 @@ function moments(l: VfarmLead): Moment[] {
   for (const c of inv?.unresponsive_cleared ?? []) m.push({ at: c.at, what: 'Unresponsive cleared', who: c.by });
   if (l.intake_2) m.push({ at: l.intake_2.submitted_at, what: 'Sent Form 2 back' });
   if (l.proposal) {
-    m.push({ at: l.proposal.created_at, what: `Proposal ${l.proposal.proposal_id} made (test)`, who: l.proposal.created_by });
+    m.push({ at: l.proposal.created_at, what: `Proposal ${l.proposal.proposal_id} made${l.proposal.test === false ? '' : ' (test)'}`, who: l.proposal.created_by });
     if (l.proposal.opened_at) m.push({ at: l.proposal.opened_at, what: 'Opened their proposal' });
     for (const a of l.proposal.actions) m.push({ at: a.at, what: a.kind === 'accepted' ? 'Accepted the proposal' : a.kind === 'question' ? `Asked a question: ${a.text ?? ''}${a.assignee ? ` (owner: ${a.assignee.name})` : ''}` : `Asked for a call${a.text ? `: ${a.text}` : ''}` });
   }

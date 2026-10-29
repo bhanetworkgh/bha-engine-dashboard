@@ -3190,15 +3190,29 @@ export interface VfarmLead {
   activity?: LeadActivity[];
   /** Only on the answer to a stage move: what happened to the Intake-2 invite the move triggered. */
   intake_2_invite_result?: Intake2InviteOutcome;
-  /** Stage 3's proposal (2026-10-17). Always a test until Canon Lock exists. */
+  /** Stage 3's proposal (2026-10-17). A test only on a team test lead (29 Oct 2026). */
   proposal?: VfarmProposal | null;
+  /** Whether this lead's proposal is a test or a real one, and whether a real one can be made now. */
+  proposal_rule?: VfarmProposalRule;
   /** What Stripe said about this lead's payment (2026-10-17). */
   stripe_payment?: VfarmStripePayment | null;
 }
 
+export interface VfarmProposalRule {
+  /** A team test lead (an @bhanetwork.org address): its proposal is marked test. */
+  team_test: boolean;
+  /** A real buyer only: Jason's approved live offer is recorded, so a real proposal can be made. */
+  can_make_real: boolean;
+  offer_id: string | null;
+  /** In words, for the lead page. */
+  reason: string;
+}
+
 export interface VfarmProposal {
   proposal_id: string;
-  test: true;
+  test: boolean;
+  /** The approved offer a real proposal was made under; null on a test proposal. */
+  offer_id?: string | null;
   setup_name: string;
   summary: string;
   inclusions: string[];

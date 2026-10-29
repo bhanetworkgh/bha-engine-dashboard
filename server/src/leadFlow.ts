@@ -138,7 +138,7 @@ export const RULES = [
   'The engine decides where a lead is and what Stripe has seen. Show these values as written; if this read fails, say you do not know.',
   'A stage number proves its gate held: 3 needs Form 2 in, 4 an accepted proposal, 5 a paid Stripe payment. Never work a stage out from a thread, a form reply, an email or an open proposal.',
   'A payment sets no stage, entitlement, subscriber or reservation. mode "test" is never a customer payment and is never described as a sale.',
-  'Every proposal is a test until Canon Lock: an accepted proposal is not an offer or an agreement.',
+  'A proposal is a test only on a team test lead (an @bhanetwork.org address). A real buyer gets a real proposal only once Jason has approved a live offer, and it carries that offer_id; an accepted proposal is still not an agreement or a payment.',
   'Stage 5 is not a subscriber. Subscriber state comes only from VFARM_SUBSCRIBER_* events, which have no writer yet: "none recorded", not "none exist".',
   'No entitlement, reservation or delivery is recorded anywhere. Never claim one.',
   'Moves, closes and reopens are dated in engine_events as vfarm_flow_stage_moved, vfarm_flow_closed and vfarm_flow_reopened (from 18 Oct 2026; earlier moves are only in this read).',

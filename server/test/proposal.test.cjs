@@ -1,7 +1,9 @@
 /**
  * Stage 3, the proposal (2026-10-17), against a real local database.
  *
- *   - a proposal is made only for a lead in Stage 3 with Form 2 in, and is always a test;
+ *   - a proposal is made only for a lead in Stage 3 with Form 2 in; a team test lead's is a test;
+ *   - a real buyer's proposal is refused until Jason's live offer is approved, then made real
+ *     (no test banner, no [Test proposal] tag, the offer_id carried) (29 Oct 2026);
  *   - the page opens on its link, says "Test proposal" and shows no payment link;
  *   - a wrong link and a replaced link open nothing;
  *   - Accept moves the lead to Stage 4 once; a second Accept changes nothing;
@@ -56,7 +58,7 @@ const ok = (name) => (passed++, console.log(`  ok  ${name}`));
   const token = made.proposal.link.split('/proposal/')[1];
   const row = (await query(`SELECT proposal FROM engine_vfarm_leads WHERE id::text = $1`, [id])).rows[0].proposal;
   assert.ok(!JSON.stringify(row).includes(token), 'the token itself is never stored');
-  ok('a proposal is always a test, and only the hash of its link is stored');
+  ok('a team test lead\'s proposal is a test, and only the hash of its link is stored');
 
   const html = await prop.page(token);
   assert.ok(html.includes('Test proposal'));
@@ -127,6 +129,51 @@ const ok = (name) => (passed++, console.log(`  ok  ${name}`));
   assert.equal(await prop.page(token), null);
   assert.ok(await prop.page(again.proposal.link.split('/proposal/')[1]));
   ok('a replaced proposal\'s old link stops working and the new one opens');
+
+  // 29 Oct 2026: a real buyer never gets a test proposal.
+  assert.equal(prop.rule('ada@BHANETWORK.org', null).team_test, true);
+  assert.equal(prop.rule('shibu@example.com', null).can_make_real, false);
+  assert.equal(prop.rule('shibu@example.com', { verdict: 'withdrawn', offer_id: 'OFFER-1' }).can_make_real, false);
+  assert.equal(prop.rule('shibu@example.com', { verdict: 'approved', offer_id: 'OFFER-1' }, true).can_make_real, false);
+  assert.deepEqual(prop.rule('shibu@example.com', { verdict: 'approved', offer_id: 'OFFER-1' }), { team_test: false, can_make_real: true, offer_id: 'OFFER-1', reason: "A real proposal, made under Jason's approved offer OFFER-1. It takes no payment." });
+  ok('the rule: a team address is a test; a real buyer needs an approved offer with its id, and an unread gate is no');
+
+  const RB = `VFBUYER-PRTEST-${T}-REAL`;
+  const realId = (
+    await query(`INSERT INTO engine_vfarm_leads (full_name, email, organization_name, source_surface, form_a, stage, intake_2_completed_at) VALUES ('Real Buyer', 'real.buyer@example.com', 'Real Farms', 'form_a', $1::jsonb, 3, now()) RETURNING id::text AS id`, [
+      JSON.stringify({ buyer_intake_id: RB, answers: {} }),
+    ])
+  ).rows[0].id;
+  const gateRow = (gid, verdict, offer) =>
+    query(
+      `INSERT INTO engine_charge_gate (gate_id, kind, rail, verdict, decided_by, evidence_link, evidence_channel, evidence_ts, recorded_by, via, test, offer_id, loop_id, conditions, created_at)
+       VALUES ($1,'offer_approval','vfarm_stripe_live',$2,'U0A9V97949F','https://x.slack.com/archives/C1/p1','C1','1.1','test','test',false,$3,'LOOP-1793000000000-TEST','{}'::jsonb, now() + interval '1 hour' * $4)`,
+      [gid, verdict, offer, verdict === 'withdrawn' ? 1 : 2],
+    );
+  const GW = `CG-PRTEST-${T}-W`, GA = `CG-PRTEST-${T}-A`;
+  try {
+    await gateRow(GW, 'withdrawn', 'OFFER-PRTEST');
+    await assert.rejects(prop.create(realId, input, 'Destiny'), (e) => e.reason === 'no_approved_offer' && /never a test/.test(e.message));
+    assert.equal((await query(`SELECT proposal FROM engine_vfarm_leads WHERE id::text = $1`, [realId])).rows[0].proposal, null);
+    const listed = (await ea.leads()).leads.find((l) => l.id === realId);
+    assert.equal(listed.proposal_rule.can_make_real, false);
+    ok('a real buyer gets no proposal while no live offer is approved, and the lead says why');
+
+    await gateRow(GA, 'approved', 'OFFER-PRTEST');
+    const real = await prop.create(realId, input, 'Destiny');
+    assert.equal(real.proposal.test, false);
+    assert.equal(real.proposal.offer_id, 'OFFER-PRTEST');
+    const rhtml = await prop.page(real.proposal.link.split('/proposal/')[1]);
+    assert.ok(!/Test proposal/i.test(rhtml), 'no test banner for a real buyer');
+    assert.ok(rhtml.includes('4,500.00 USD'));
+    const ev = (await query(`SELECT detail FROM engine_events WHERE event_type = 'vfarm_proposal_made' AND subject_id = $1`, [RB])).rows[0].detail;
+    assert.equal(ev.test, false);
+    assert.equal(ev.offer_id, 'OFFER-PRTEST');
+    ok('with Jason\'s offer approved, a real buyer\'s proposal is real: no test banner, its event says test false and names the offer');
+  } finally {
+    await query(`DELETE FROM engine_charge_gate WHERE gate_id IN ($1, $2)`, [GW, GA]);
+    await query(`DELETE FROM engine_events WHERE subject_id = $1`, [RB]);
+  }
 
   await clean();
   console.log(`\n${passed} passed`);
