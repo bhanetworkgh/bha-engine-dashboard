@@ -294,8 +294,8 @@ function pct(sorted: number[], p: number): number | null {
  * Everything the tab and the read tool answer, from the approvals and the checks. Pure, so the rules can be
  * tested without a database. `now` is when the read happens.
  */
-export function summarise(approvals: Approval[], checks: CodeCheck[], now: number): Summary {
-  const startMs = Date.parse(START);
+export function summarise(approvals: Approval[], checks: CodeCheck[], now: number, start: string = START): Summary {
+  const startMs = Date.parse(start);
   const checkedIds = new Set(checks.map((c) => c.codex_entry_id));
   const inWindow = approvals.filter((a) => a.approved_at && Date.parse(a.approved_at) >= startMs);
   const own = inWindow.filter((a) => a.builder_slack_id === DESTINY);
@@ -326,7 +326,7 @@ export function summarise(approvals: Approval[], checks: CodeCheck[], now: numbe
         : 'No session approved since 1 November is on the pay ledger yet, so nothing is waiting. If Jason has approved one, the ledger has not received it, which is not the same as nothing waiting.',
     );
   return {
-    start: START,
+    start,
     window_hours: WINDOW_HOURS,
     approved_since_start: inWindow.length,
     own_sessions_excluded: own.length,
@@ -392,12 +392,12 @@ function toOutput(r: Record<string, unknown>): AuditOutput {
 }
 
 /** Approved sessions from the pay ledger, since the start. */
-export async function approvals(): Promise<Approval[]> {
+export async function approvals(since: string = START): Promise<Approval[]> {
   const r = await query(
     `SELECT fields FROM engine_pay_sessions
       WHERE fields->>'Approved At' IS NOT NULL AND fields->>'Approved At' <> ''
         AND (fields->>'Approved At')::timestamptz >= $1::timestamptz`,
-    [START],
+    [since],
   );
   return r.rows.map((row) => {
     const f = (row.fields ?? {}) as Record<string, unknown>;

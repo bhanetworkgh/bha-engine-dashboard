@@ -13751,3 +13751,10 @@ Files:      server/src/codeCheckWatch.ts, server/src/timers.ts, server/src/sourc
 Problem:    The first cut reminded at 24 hours and every 12; the timer ran every 10 minutes; the six Code Check fields were stored on the Codex row but nothing on the page showed them.
 Fix:        RULE every 2 minutes, first reminder at 3 hours, then every 3. The Codex mapper reads the Code Check fields as code_check (left off the list shape), and the entry dialog draws a Code check block under Jason's notes. Tests 11/11; server strict check clean.
 Decision:   The late line stays at Jason's 48-hour window.
+
+## 2026-10-29 06:30 — Code check alert: a trial switch to prove it on today's approvals
+Intent:     Destiny: see the alert and the 3-hour reminders work on a real approval today, 29 Oct, then switch it off until 1 Nov.
+Files:      server/src/codeCheckWatch.ts, server/src/codeChecks.ts, server/src/mcp/codeCheckTools.ts, server/test/code-check-watch.test.cjs, CLAUDE.md
+Problem:    The alert counted only approvals on or after 1 Nov (Jason's start), so nothing before then could prove it.
+Fix:        meta code_check.alert_trial {on, from, set_by, set_at}, written by the new code_check_alert_trial tool (Destiny or Jason; one code_check_trial_on/off event each). While on, the watcher counts approvals from `from` (default: the moment it is switched on); it can only move the start earlier than 1 Nov. approvals() and summarise() take the start as a parameter, defaulting to 1 Nov, so the tab is unchanged. Tests 12/12, code-checks 8/8, strict check clean.
+Decision:   The trial starts from the moment it is switched on, not from midnight, so yesterday's approvals do not all alert at once.
