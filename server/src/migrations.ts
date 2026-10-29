@@ -4010,6 +4010,24 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE TRIGGER engine_evidence_no_change BEFORE UPDATE OR DELETE ON engine_evidence FOR EACH ROW EXECUTE FUNCTION engine_evidence_append_only()`,
     ],
   },
+  {
+    // 2026-10-29, Destiny: clear the team's test leads off Early Access so it holds only real buyers
+    // (Shivnath Kamath's two sign-ups). Named rows only, and only where the email is a team
+    // @bhanetwork.org address, so no real lead can match. Each row is kept whole in record_deletions
+    // first (kind vfarm_leads), in the same transaction. Their engine_events and the one Stripe test
+    // event stay, as history.
+    id: 104,
+    name: 'Early Access: remove the eight team test leads, each copied to record_deletions first',
+    statements: [
+      `INSERT INTO record_deletions (kind, record_id, natural_id, builder_id, table_id, reason, fields, actor, at)
+       SELECT 'vfarm_leads', id::text, form_a->>'buyer_intake_id', NULL, NULL,
+              'Team test lead removed so Early Access holds only real buyers (Destiny, 29 Oct 2026)',
+              to_jsonb(l) - 'ip_hash', 'migration 104 (Destiny)', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+         FROM engine_vfarm_leads l
+        WHERE id::text IN ('25da727a-a690-4f87-909c-90bb8bc016a7','a5f7e513-3de8-4983-9212-699259172f35','1742c361-7f5f-429c-bcd5-d1c749b7d8ce','229cf102-6750-4b7c-a826-a9b92664e0f8','3d9a7f9a-65b6-4c92-89bc-b0b961e5016b','4e168bab-6fa3-4808-bd91-6c3f33d5f561','7277c6c7-d959-4566-b576-7c87805dca79','fdebbee2-a4db-4817-9a8d-a94898821624') AND lower(email) LIKE '%@bhanetwork.org'`,
+      `DELETE FROM engine_vfarm_leads WHERE id::text IN ('25da727a-a690-4f87-909c-90bb8bc016a7','a5f7e513-3de8-4983-9212-699259172f35','1742c361-7f5f-429c-bcd5-d1c749b7d8ce','229cf102-6750-4b7c-a826-a9b92664e0f8','3d9a7f9a-65b6-4c92-89bc-b0b961e5016b','4e168bab-6fa3-4808-bd91-6c3f33d5f561','7277c6c7-d959-4566-b576-7c87805dca79','fdebbee2-a4db-4817-9a8d-a94898821624') AND lower(email) LIKE '%@bhanetwork.org'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
