@@ -87,6 +87,7 @@ import * as logstream from './logstream';
 import * as researchSignals from './researchSignals';
 import * as vfarmCustomerEvents from './vfarmCustomerEvents';
 import * as creditOut from './creditOut';
+import * as doctrineConsumer from './doctrineConsumer';
 import * as engineEvents from './engineEvents';
 import * as vfarmGates from './vfarmGates';
 import * as vfarmGateAuto from './vfarmGateAuto';
@@ -978,6 +979,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       if (method !== 'POST') throw new HttpError(405, 'POST { event_type, subject_id, at?, lane?, actor?, source_ref?, detail?, dedupe_key? }.');
       const b = (await readJson(req, 32 * 1024)) as Record<string, unknown>;
       const subject = typeof b.subject_id === 'string' ? b.subject_id.trim().slice(0, 300) : undefined;
+      const useRefused = doctrineConsumer.externalUseRefusal(b.event_type);
+      if (useRefused) {
+        await mirror.logWrite({ endpoint, kind: 'engine_events', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: subject || undefined, outcome: 'rejected', detail: useRefused, ms: Date.now() - t0 });
+        throw new HttpError(403, useRefused);
+      }
       try {
         const r = await engineEvents.record(b as unknown as engineEvents.EngineEvent);
         await mirror.logWrite({ endpoint, kind: 'engine_events', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: subject, outcome: r.recorded ? 'inserted' : 'unchanged', detail: `${String(b.event_type)}${r.recorded ? '' : ' (dedupe_key already held)'}`, ms: Date.now() - t0 });

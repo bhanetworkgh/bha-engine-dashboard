@@ -4440,8 +4440,8 @@ tables, written only by `server/src/doctrineEpisodes.ts`:
   `needs_evidence` / `stale_evidence`. Confirmed at most once per seq
   (`last_sweep_seq < seq`, in the pure `episodeStep` and again in SQL). It ends on
   recovery, on a different gap, on a confirmation gap over
-  `CONTINUITY.max_confirmation_gap_minutes` (**30, a provisional test value, not
-  Canon; the production threshold is a pending decision**), or on clock doubt, which
+  `CONTINUITY.max_confirmation_gap_minutes` (**30 minutes, approved for production**
+  by Jason on 28 Oct 2026, SOP 113b5b86, to be tightened once live behaviour is seen), or on clock doubt, which
   starts an episode that can never count. Age runs to the last confirmation, never to
   now.
 - **Alarms.** `engine_doctrine_gap_alarms`, one per key: a fenced one-winner claim
@@ -4470,12 +4470,21 @@ tables, written only by `server/src/doctrineEpisodes.ts`:
   episode; `rearm_days` is 0 so only a new episode reopens after a Resolved job, and an
   episode a finished job already covers is skipped. Capped, removed and unknown-status
   jobs are never reopened. **There is no Parked status; Capped is not treated as
-  parked.**
+  parked.** **A Research Twin job never closes a doctrine gap** (Jason, 28 Oct 2026, SOP dc9c45ec): a job
+  SE8L opened that ends Parked (once RT has that status), Capped, Resolved or removed leaves the gap
+  open and visible. The doctrine side closes only on valid new doctrine evidence (the sweep reads the
+  claim healthy and the episode ends on recovery) or on an explicit decision by a person to accept the
+  gap. Nothing in `doctrineEpisodes.ts` reads a job's status, and an accept-the-gap action is not
+  built.
 - **Real use fails closed.** `server/src/doctrineConsumer.ts` counts only
   `doctrine_claim_used` events (schema `doctrine.claim.use.v1`) from an actor on
-  `VERIFIED_CONSUMER_WRITERS`, never synthetic, fixture, test or drill. **The list is
-  empty and stays empty until an authorized producer exists**, so in production no
-  gap can reach Research Twin. A sweep is never a hit.
+  `VERIFIED_CONSUMER_WRITERS`, never synthetic, fixture, test or drill. **The list is Jason's**
+  (28 Oct 2026, SOP 0df3475b): `doctrine-framework`, `media-twin`, `north-star` and
+  `monitoring-twin`, only explicitly authorized engine subsystems, and widening it is a new decision
+  from him. **No external client may write a use**: `POST /api/engine/events` refuses
+  `doctrine_claim_used` with a 403 (`externalUseRefusal`) and logs it `rejected`, so a use is written
+  only in process. None of the four writes one yet, so today no gap can reach Research Twin. A sweep
+  is never a hit.
 - **Two changes to the shared `open()`**, for every trigger: a job carrying the
   signal's key that the row was never told about is adopted whatever its status
   (before, a resolved one was invisible and a second job opened), and a status outside
