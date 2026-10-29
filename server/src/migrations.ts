@@ -4028,6 +4028,20 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `DELETE FROM engine_vfarm_leads WHERE id::text IN ('25da727a-a690-4f87-909c-90bb8bc016a7','a5f7e513-3de8-4983-9212-699259172f35','1742c361-7f5f-429c-bcd5-d1c749b7d8ce','229cf102-6750-4b7c-a826-a9b92664e0f8','3d9a7f9a-65b6-4c92-89bc-b0b961e5016b','4e168bab-6fa3-4808-bd91-6c3f33d5f561','7277c6c7-d959-4566-b576-7c87805dca79','fdebbee2-a4db-4817-9a8d-a94898821624') AND lower(email) LIKE '%@bhanetwork.org'`,
     ],
   },
+  {
+    // 2026-10-28, Hardik (LOOP-1793124602015-ROQY): a charge-gate decision has one identity, the Slack
+    // message it rests on, its kind and its verdict, on its rail, real or test. A retried or concurrent
+    // record of the same decision lands one row; recordGate() returns the row already held. A different
+    // verdict on the same message is a different identity and keeps its own row. The table held no rows
+    // when this was written, so the index cannot meet a duplicate there. Written as 104; renumbered to 105
+    // on 29 Oct because main took 104 for the Early Access cleanup and production had already applied it,
+    // so a second 104 would have been skipped and the index never built.
+    id: 105,
+    name: 'engine_charge_gate: one row per decision (message, kind, rail, verdict, test)',
+    statements: [
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_charge_gate_decision ON engine_charge_gate (evidence_channel, evidence_ts, kind, rail, verdict, test)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
