@@ -74,7 +74,7 @@ import * as researchSignals from './researchSignals';
  * time of each status change, so a closed incident's own `occurred_at` is its close, and reading it
  * dated every closed incident by its close: time to recovery near nought, and the 7-day windows
  * counting it on the wrong day. The earlier of `occurred_at` and `first_seen_at` (the first poll
- * that saw it) is when it happened. The self-healing scorecard reads it the same way (569e12d).
+ * that saw it) is when it happened. The self-healing scorecard reads it the same way (64595d6).
  * Every query here, and research signals' T4, reads this one expression.
  */
 export const INCIDENT_AT = `LEAST(CASE WHEN fields->>'occurred_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN (fields->>'occurred_at')::timestamptz END,
