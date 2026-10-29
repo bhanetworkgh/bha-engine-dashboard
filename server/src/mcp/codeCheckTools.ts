@@ -4,17 +4,15 @@
  *   `read_code_checks`     — read, both connections; in Bays' and North Star's scopes. What is waiting on a
  *                            check (and what is past Jason's 48 hours), every check posted with its verdict and
  *                            pay call, the discrepancy catalog, and November's outputs for Jason.
- *   `record_code_check`    — write connection, in Bays' scope (D6, 29 Oct). Destiny or Jason records a check
- *                            as posted in the log's thread; on an agent token only Bays, only for Destiny, and
- *                            only for a Slack message Slack confirms Destiny posted. A recorded check is also
- *                            written onto the Codex row (../codeCheckWatch.ts codexNote).
+ *   `record_code_check`    — write connection, no agent's scope, refused on any agent token. Destiny or Jason
+ *                            records a check as posted in the log's thread, and it is also written onto the
+ *                            Codex row (../codeCheckWatch.ts codexNote).
  *   `write_audit_output`   — write connection, no agent's scope, refused on any agent token. Moves one of
  *                            the November outputs (catalog, a lane's definition of done, the v2 spec).
  *
  * Every write call is on engine_mcp_writes, kind code_checks, refused ones included.
  */
 import * as codeCheckWatch from '../codeCheckWatch';
-import { parseLink, slackAuthor } from '../chargeGate';
 import * as cc from '../codeChecks';
 import * as mirror from '../mirror';
 import { auditClose, auditOpen } from './writeTools';
@@ -61,22 +59,10 @@ async function guarded(
   const dry = args.dry_run === true;
   const audit = await auditOpen({ tool, args, access: deps.access, kind: 'code_checks', requester, dry_run: dry });
   if (deps.agent) {
-    const refuse = async (reason: string, message: string) => {
-      await auditClose(audit, { outcome: 'refused', detail: `${reason}: ${message}`, guard_result: { reason } });
-      return { ok: false, written: false, reason, message: `${message} Nothing was changed.`, audit_id: audit };
-    };
-    // D6 (29 Oct 2026): Bays may record Destiny's posted check, and nothing else. The check must be
-    // Destiny's own message in Slack, and Slack must confirm he posted it.
-    if (tool !== 'record_code_check' || deps.agent !== 'bays')
-      return refuse('agent_not_permitted', `An agent (${deps.agent}) may not write ${tool === 'record_code_check' ? 'a code check' : 'a November output'}: ${tool === 'record_code_check' ? 'only Bays may, and only for a check Destiny posted' : 'Destiny records them'}.`);
-    if (requester !== cc.DESTINY) return refuse('not_destinys_check', 'Bays records a code check only for Destiny: requester_user_id must be his Slack id.');
-    const link = parseLink(str(args, 'check_link'));
-    if (!link) return refuse('check_link_required', 'check_link must be the Slack link (Copy link) of Destiny\'s posted check.');
-    if (!dry) {
-      const who = await slackAuthor(link);
-      if (!who.ok) return refuse(who.reason === 'not_found' ? 'check_not_found' : 'check_unreadable', who.message);
-      if (who.user !== cc.DESTINY) return refuse('not_destinys_check', `That message was posted by ${who.user ?? 'someone Slack does not name'}, not Destiny. Bays records only a check Destiny posted himself.`);
-    }
+    // Destiny records his checks through the connector (29 Oct 2026: a Slack path through Bays is not needed).
+    const message = `An agent (${deps.agent}) may not write a code check or a November output: Destiny records them.`;
+    await auditClose(audit, { outcome: 'refused', detail: `agent_not_permitted: ${message}`, guard_result: { reason: 'agent_not_permitted' } });
+    return { ok: false, written: false, reason: 'agent_not_permitted', message: `${message} Nothing was changed.`, audit_id: audit };
   }
   try {
     const r = await run(dry);
@@ -103,7 +89,7 @@ async function guarded(
 
 export const recordCodeCheck: ToolDefinition = {
   name: 'record_code_check',
-  description: `Record one code check as posted in the log's own thread, or correct one already recorded for that Codex ID. The format Jason confirmed: verdict (${cc.VERDICTS.join(' / ')}) with one line on why; each main claim with where it was checked, the result (${cc.RESULTS.join(' / ')}) and the proof; what is missing before customer ready (${cc.MISSING.join(', ')}); what could not be checked; the pay call (${cc.PAY_CALLS.join(' / ')}) with each follow-up (what, who, by, loop_id). Refused when the verdict and the claims disagree, when pay partly or hold names no follow-up, when an overstated log is paid as logged, and on Destiny's own log. The approval time, builder and session date come from the pay ledger. HELD HERE: Destiny or Jason (requester_user_id). dry_run writes nothing. On an agent token only Bays may call it, only for Destiny (requester_user_id), and only when check_link is a Slack message Slack confirms Destiny posted. A recorded check is also written onto the Codex row (Code Check Verdict, Pay Call, Reason, Link, At, By) and the answer says whether that landed (codex_note). Audited on engine_mcp_writes.`,
+  description: `Record one code check as posted in the log's own thread, or correct one already recorded for that Codex ID. The format Jason confirmed: verdict (${cc.VERDICTS.join(' / ')}) with one line on why; each main claim with where it was checked, the result (${cc.RESULTS.join(' / ')}) and the proof; what is missing before customer ready (${cc.MISSING.join(', ')}); what could not be checked; the pay call (${cc.PAY_CALLS.join(' / ')}) with each follow-up (what, who, by, loop_id). Refused when the verdict and the claims disagree, when pay partly or hold names no follow-up, when an overstated log is paid as logged, and on Destiny's own log. The approval time, builder and session date come from the pay ledger. HELD HERE: Destiny or Jason (requester_user_id). dry_run writes nothing. Refused on any agent token. A recorded check is also written onto the Codex row (Code Check Verdict, Pay Call, Reason, Link, At, By) and the answer says whether that landed (codex_note). Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {

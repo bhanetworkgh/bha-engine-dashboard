@@ -5005,8 +5005,8 @@ record.
   vFarm P1; North Star, SE8L, comp and infra) and the v2 execution audit spec, seeded not started,
   due 30 Nov. "Accepted" needs Jason's message.
 - **Tools:** `read_code_checks` (both connections; Bays' and North Star's scopes),
-  `record_code_check` and `write_audit_output` (write connection, Destiny or Jason). `write_audit_output`
-  is refused on any agent token; `record_code_check` is in Bays' scope from D6, below.
+  `record_code_check` and `write_audit_output` (write connection, Destiny or Jason). both are refused on any
+  agent token.
 - **The alert, the reminders and the note on the log** (29 Oct 2026, D6). `server/src/codeCheckWatch.ts`,
   a timer every 2 minutes over the same waiting list the tab shows. Each waiting log gets one DM to
   Destiny as Bays when Jason approves it (builder, Codex ID, approval time and the 48-hour deadline in
@@ -5016,15 +5016,13 @@ record.
   a backlog. One DM per step: the claim is a `code_check_due_alerted` / `code_check_reminded` event keyed
   `code_check_due:<codex id>:<step>`, written before the DM; a DM Slack refuses deletes the claim and is
   retried, so a reminder nobody got is never counted. A session with no Codex ID is skipped and named.
-  **Bays records Destiny's posted check**: on an agent token `record_code_check` is Bays only, for
-  Destiny only (`requester_user_id`), and only when `check_link` is a Slack message Slack confirms Destiny
-  posted (`chargeGate.slackAuthor`); anything else is refused by name and records nothing. **Every
+  **Destiny records his checks through the connector**, not through Bays (29 Oct 2026: a Slack path
+  would only repeat a step already done); `record_code_check` is refused on every agent token. **Every
   recorded check is written onto the log**: `Code Check Verdict`, `Code Check Pay Call`, `Code Check
   Reason`, `Code Check Link`, `Code Check At` and `Code Check By` (new field names) merged onto the one
   Codex row carrying the id through `engineWrite.patchRecord`; two rows or none writes nothing and says
   why, and it never fails the check (`codex_note` on the answer). The Codex entry page shows it as a
-  "Code check" block under Jason's notes (verdict, pay call, date, reason, the full check in Slack). Bays' n8n allow-list must carry
-  `record_code_check` too, or the server's scope is never reached. **A trial switch** (Destiny, 29 Oct:
+  "Code check" block under Jason's notes (verdict, pay call, date, reason, the full check in Slack). **A trial switch** (Destiny, 29 Oct:
   prove it on real approvals before 1 Nov, then off): `code_check_alert_trial` (write connection, Destiny
   or Jason, refused on agent tokens), stored in `meta` `code_check.alert_trial`, makes the alert count
   approvals from the moment it is switched on; the service setting `CODE_CHECK_ALERT_TRIAL_FROM` (an ISO time)

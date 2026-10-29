@@ -13772,3 +13772,10 @@ Files:      server/src/codeCheckWatch.ts, server/src/slack.ts, server/test/code-
 Problem:    The messages were plain text, and reminders had no end.
 Fix:        messageFor returns {text, blocks}: a header (ready for review / Reminder n of 4 / Last reminder), a lead line, fields for builder, Codex ID, approved and due by, buttons to open the log and the Code checks tab, and a context line with the log channel. slack.dm takes optional blocks. RULE.max_reminders 4: a step past it is not sent. Tests 13/13, codex-gap 6/6, strict check clean.
 Decision:   The late-past-48-hours wording is gone: with 4 reminders the last one goes at about 12 hours.
+
+## 2026-10-29 07:00 — Code check: Bays' record permission taken back out (D6 closed)
+Intent:     Destiny: recording a check through Bays in Slack would only repeat what he already does through the connector, so drop it.
+Files:      server/src/mcp/index.ts, server/src/mcp/codeCheckTools.ts, server/test/code-check-watch.test.cjs, CLAUDE.md
+Problem:    record_code_check had been added to Bays' server scope with a Slack author check, and was never wired into Bays' n8n allow-list: an unused permission.
+Fix:        Removed from Bays' scope; record_code_check is refused on every agent token again; the Slack author check is gone with it. A check recorded through the connector is still written onto the Codex row. Tests 12/12, strict check clean.
+Decision:   D6 is the alert, the 3-hourly reminders (4 at most), the trial switch and the note on the log. Recording stays with Destiny through Claude.

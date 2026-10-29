@@ -4,8 +4,8 @@
  *   1. stepFor: the alert at approval, reminder 1 at 24 hours, then one every 12 hours.
  *   2. run(): one DM per step, claimed before it is sent; a repeat pass sends nothing; a DM Slack refuses
  *      gives the claim back and is retried; a dry run sends nothing and lists what would go; a late log says so.
- *   3. record_code_check on an agent token: only Bays, only for Destiny, only a Slack message Slack confirms he
- *      posted; any other agent, or Bays on write_audit_output, is refused as before.
+ *   3. record_code_check is refused on every agent token, and a check recorded through the connector is
+ *      written onto the log.
  *   4. codexNote writes the check onto the one Codex row that carries the id, and refuses to pick between two.
  *
  * No database and no network: pg, the events table, Slack and the audit lines are stood in.
@@ -26,7 +26,6 @@ const events = req('engineEvents.js');
 const cc = req('codeChecks.js');
 const watch = req('codeCheckWatch.js');
 const engineWrite = req('engineWrite.js');
-const chargeGate = req('chargeGate.js');
 const writeTools = req('mcp/writeTools.js');
 const tools = req('mcp/codeCheckTools.js');
 
@@ -142,47 +141,30 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
     cc.read = real.read;
   }
 
-  /* 3. the agent guard on record_code_check */
+  /* 3. record_code_check: refused on every agent token; a recorded check is written onto the log */
   const audits = [];
-  const realAudit = { open: writeTools.auditOpen, close: writeTools.auditClose, author: chargeGate.slackAuthor, recordCheck: cc.recordCheck, note: watch.codexNote };
+  const realAudit = { open: writeTools.auditOpen, close: writeTools.auditClose, recordCheck: cc.recordCheck, note: watch.codexNote };
   writeTools.auditOpen = async () => 77;
   writeTools.auditClose = async (_id, c) => { audits.push(c); };
-  let author = { ok: true, user: DESTINY };
-  chargeGate.slackAuthor = async () => author;
   let recorded = 0;
   cc.recordCheck = async (args) => { recorded++; return { ok: true, written: true, corrected: false, check: { codex_entry_id: args.codex_entry_id, verdict: 'matches', pay_call: 'as_logged' }, message: 'Recorded.' }; };
   let noted = 0;
   watch.codexNote = async () => { noted++; return { ok: true, row_id: '397', detail: 'written onto Codex row 397' }; };
   const args = { codex_entry_id: 'CODEX-20261102-kavin-g-n-rover', check_link: 'https://bayshorizonnetwork.slack.com/archives/C0BN30RU3UK/p1793300000123456?thread_ts=1793290000.000100', verdict: 'matches', verdict_reason: 'x', claims: [], pay_call: 'as_logged', requester_user_id: DESTINY };
   try {
-    let a = await tools.recordCodeCheck.handler(args, { access: 'write', agent: 'north_star' });
-    assert.equal(a.reason, 'agent_not_permitted');
-    a = await tools.writeAuditOutput.handler({ output_id: 'x', requester_user_id: DESTINY }, { access: 'write', agent: 'bays' });
-    assert.equal(a.reason, 'agent_not_permitted');
-    ok('any agent but Bays is refused, and Bays still may not move a November output');
-
-    a = await tools.recordCodeCheck.handler({ ...args, requester_user_id: 'U0BKT6MAW2Y' }, { access: 'write', agent: 'bays' });
-    assert.equal(a.reason, 'not_destinys_check');
-    a = await tools.recordCodeCheck.handler({ ...args, check_link: 'not a link' }, { access: 'write', agent: 'bays' });
-    assert.equal(a.reason, 'check_link_required');
-    author = { ok: true, user: 'U0BKT6MAW2Y' };
-    a = await tools.recordCodeCheck.handler(args, { access: 'write', agent: 'bays' });
-    assert.equal(a.reason, 'not_destinys_check');
-    assert.match(a.message, /posted by U0BKT6MAW2Y, not Destiny/);
-    author = { ok: false, reason: 'unreadable', message: 'Could not read C0BN30RU3UK.' };
-    a = await tools.recordCodeCheck.handler(args, { access: 'write', agent: 'bays' });
-    assert.equal(a.reason, 'check_unreadable');
+    for (const agent of ['bays', 'north_star', 'genie']) {
+      const a = await tools.recordCodeCheck.handler(args, { access: 'write', agent });
+      assert.equal(a.reason, 'agent_not_permitted');
+    }
     assert.equal(recorded, 0);
-    ok('Bays is refused for anyone but Destiny, for a check link that is not a Slack link, for a message someone else posted, and when Slack cannot say who posted it; nothing is recorded');
+    ok('every agent token is refused, Bays included: Destiny records his checks through the connector');
 
-    author = { ok: true, user: DESTINY };
-    a = await tools.recordCodeCheck.handler(args, { access: 'write', agent: 'bays' });
+    let a = await tools.recordCodeCheck.handler(args, { access: 'write' });
     assert.equal(a.ok, true);
-    assert.equal(recorded, 1);
     assert.equal(noted, 1);
     assert.equal(a.codex_note.ok, true);
     assert.match(a.message, /Written onto the log/);
-    ok("Bays records Destiny's own posted check, and it is written onto the log");
+    ok('a check recorded through the connector is written onto the log');
 
     watch.codexNote = async () => ({ ok: false, row_id: null, detail: '2 Codex rows carry it' });
     a = await tools.recordCodeCheck.handler(args, { access: 'write' });
@@ -192,7 +174,6 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
   } finally {
     writeTools.auditOpen = realAudit.open;
     writeTools.auditClose = realAudit.close;
-    chargeGate.slackAuthor = realAudit.author;
     cc.recordCheck = realAudit.recordCheck;
     watch.codexNote = realAudit.note;
   }
