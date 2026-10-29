@@ -13801,3 +13801,9 @@ Problem:    The dashboard upserted on buyer_intake_id, which the tracker derives
 Fix:        storeFormA, under a per-email advisory lock: a new buyer_intake_id whose email (case-blind) is already held goes onto that lead's form_a.resubmissions, whole, with one 'resubmitted' timeline line naming the answers that changed; no new row, no second VFARM_LEAD_CAPTURED. A retry of the same repeat changes nothing more. The upsert of a lead's own submission keeps its resubmissions.
 Decision:   Email only, never name (Destiny: there are many Jason Bays; an email is one person). The first answers stay the lead's Form A; repeats sit beside them. Existing duplicate rows (only destiny@bhanetwork.org test leads) left as they are.
 Tests:      test:vfarm-lead-dedup 7, test:vfarm-customers 5, test:intake2 16.
+
+## 2026-10-29 07:20 — Dedup proved live; Shibu's 23 Sep sign-up brought in
+Intent:     Prove the one-lead-per-email rule on production, and bring Shivnath Kamath's first Form A (23 Sep, landlord@kamathcommercialproprties.com, Kamath commercial properties) onto the dashboard: it predates Save To Dashboard and was only in Hardik's sheet.
+Files:      none (n8n one-off workflow Pm1o0vFZPL7fus9k, folder vFarm, archived after use)
+Fix:        Execution 55667 posted the sheet row as written (21 answers, VFBUYER-FORMA-19RS5Q3): 201, lead 657b654b-2d35-4426-aef6-962ec4668ba2. 55668 re-posted it with the time as ISO (11:19:16 New York = 2026-09-23T15:19:16Z): 200 updated. 55669 and 55670 posted two sign-ups from destiny+dedup-1029@bhanetwork.org: one lead (fdebbee2-a4db-4817-9a8d-a94898821624), one resubmission, one timeline line naming the changed organisation.
+Decision:   Shibu's two sign-ups stay two leads (two emails, two companies) until someone asks him whether he meant to register both. The imported lead's created_at is 29 Oct (when the dashboard received it); its Form A carries 23 Sep. The dedup test lead is an @bhanetwork.org team test lead.
