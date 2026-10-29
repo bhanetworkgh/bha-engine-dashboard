@@ -265,9 +265,6 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-28: "how much OpenRouter / Twilio credit is left?" asked in Slack. Both balances read now
         // through n8n, judged against the SOP floors. A read; it tops nothing up.
         'check_service_balances',
-        // 2026-10-29 (D6): Bays records Destiny's posted code check onto the log. Held on the server: Bays
-        // only, for Destiny only, and only a Slack message Slack confirms he posted.
-        'record_code_check',
       ]),
     },
     {
