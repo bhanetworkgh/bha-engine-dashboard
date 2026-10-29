@@ -77,6 +77,7 @@ import * as draftEval from './draftEval';
 import * as decisionWatch from './decisionWatch';
 import * as patternCapture from './patternCapture';
 import * as codexGap from './codexGap';
+import * as codeCheckWatch from './codeCheckWatch';
 import * as sops from './sops';
 import { toolByName as mcpToolByName } from './mcp/tools';
 import { callerStore } from './mcp/caller';
@@ -2893,6 +2894,7 @@ async function boot(): Promise<void> {
     decisionWatch.startSweeping();
     patternCapture.startSweeping();
     codexGap.startSweeping();
+    codeCheckWatch.startSweeping();
     intake2.startSweeping();
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();

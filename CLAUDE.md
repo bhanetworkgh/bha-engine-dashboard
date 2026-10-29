@@ -5005,9 +5005,24 @@ record.
   vFarm P1; North Star, SE8L, comp and infra) and the v2 execution audit spec, seeded not started,
   due 30 Nov. "Accepted" needs Jason's message.
 - **Tools:** `read_code_checks` (both connections; Bays' and North Star's scopes),
-  `record_code_check` and `write_audit_output` (write connection, Destiny or Jason, refused on any
-  agent token). The Bays alert on approval, the reminders and Bays writing the check onto the log
-  are the next build (D6), which opens `record_code_check` to Bays for Destiny's posted check.
+  `record_code_check` and `write_audit_output` (write connection, Destiny or Jason). `write_audit_output`
+  is refused on any agent token; `record_code_check` is in Bays' scope from D6, below.
+- **The alert, the reminders and the note on the log** (29 Oct 2026, D6). `server/src/codeCheckWatch.ts`,
+  a timer every 10 minutes over the same waiting list the tab shows. Each waiting log gets one DM to
+  Destiny as Bays when Jason approves it (builder, Codex ID, approval time and the 48-hour deadline in
+  Lagos time, the log on the dashboard and its log channel), then reminder 1 at 24 hours and one every
+  12 hours until the check is recorded, saying it is late past 48. Only the current step is sent, never
+  a backlog. One DM per step: the claim is a `code_check_due_alerted` / `code_check_reminded` event keyed
+  `code_check_due:<codex id>:<step>`, written before the DM; a DM Slack refuses deletes the claim and is
+  retried, so a reminder nobody got is never counted. A session with no Codex ID is skipped and named.
+  **Bays records Destiny's posted check**: on an agent token `record_code_check` is Bays only, for
+  Destiny only (`requester_user_id`), and only when `check_link` is a Slack message Slack confirms Destiny
+  posted (`chargeGate.slackAuthor`); anything else is refused by name and records nothing. **Every
+  recorded check is written onto the log**: `Code Check Verdict`, `Code Check Pay Call`, `Code Check
+  Reason`, `Code Check Link`, `Code Check At` and `Code Check By` (new field names) merged onto the one
+  Codex row carrying the id through `engineWrite.patchRecord`; two rows or none writes nothing and says
+  why, and it never fails the check (`codex_note` on the answer). Bays' n8n allow-list must carry
+  `record_code_check` too, or the server's scope is never reached. `npm run test:code-check-watch`.
 
 ### System registry
 **Four registries on one page** (decision 2026-09-14, Destiny) — Builders,
