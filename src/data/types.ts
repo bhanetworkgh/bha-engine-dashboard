@@ -704,6 +704,8 @@ export interface CodexEntryDetail extends CodexEntry {
   summary: string | null;
   session_description: string | null;
   jason_notes: string | null;
+  /** Destiny's code check, written onto the log when it is recorded; null until there is one. */
+  code_check: { verdict: string | null; pay_call: string | null; reason: string | null; link: string | null; at: string | null } | null;
 }
 
 /**

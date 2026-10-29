@@ -39,8 +39,8 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
 
 (async () => {
   /* 1. steps */
-  assert.deepEqual([0, 1, 23.9, 24, 35.9, 36, 48, 49, 60].map(watch.stepFor), [0, 0, 0, 1, 1, 2, 3, 3, 4]);
-  ok('the alert at approval, reminder 1 at 24 hours, then one every 12 hours');
+  assert.deepEqual([0, 1, 2.9, 3, 5.9, 6, 9, 24, 49].map(watch.stepFor), [0, 0, 0, 1, 1, 2, 3, 8, 16]);
+  ok('the alert at approval, then a reminder every 3 hours');
 
   /* 2. run() against stand-ins */
   const held = new Map();
@@ -91,25 +91,25 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
     assert.equal(sent.length, 1);
     ok('the next pass, still at the alert step, sends nothing: the claim is held');
 
-    waitingHours = 25;
+    waitingHours = 4;
     const failSend = async () => ({ ok: false, detail: 'channel_not_found' });
-    r = await watch.run({ now: at(25), send: failSend });
+    r = await watch.run({ now: at(4), send: failSend });
     assert.equal(r.failed.length, 1);
     assert.equal(deleted.length, 1);
     assert.ok(!held.has(watch.dedupeKey('CODEX-20261102-kavin-g-n-rover', 1)));
     ok('a reminder Slack refuses gives its claim back, so it is never counted as sent');
 
-    r = await watch.run({ now: at(25), send: okSend });
+    r = await watch.run({ now: at(4), send: okSend });
     assert.equal(r.sent.length, 1);
     assert.match(sent[1].text, /Reminder 1: code check still owed/);
-    assert.match(sent[1].text, /Approved 25 hours ago/);
+    assert.match(sent[1].text, /Approved 4 hours ago/);
     ok('the next pass retries it and reminder 1 goes');
 
     waitingHours = 50;
     r = await watch.run({ now: at(50), dry_run: true, send: okSend });
     assert.equal(r.sent.length, 0);
     assert.equal(r.would_send.length, 1);
-    assert.equal(r.would_send[0].step, 3);
+    assert.equal(r.would_send[0].step, 16);
     assert.match(r.would_send[0].text, /\*Late:\* approved 50 hours ago, 2 hours past the 48-hour window/);
     assert.equal(sent.length, 2);
     ok('a dry run sends nothing and lists what would go; past 48 hours the reminder says it is late; only the current step is sent, never a backlog');

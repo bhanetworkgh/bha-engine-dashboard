@@ -5,7 +5,7 @@
  * Every RULE.every_minutes, the waiting list codeChecks.read() already computes (a session on the pay ledger
  * approved on or after 1 Nov, not Destiny's own, with no check recorded) is walked. Each waiting log is at one
  * step: step 0 is the alert, sent once Jason has approved it; step k (k >= 1) is reminder k, due
- * RULE.first_reminder_hours after approval and then every RULE.remind_every_hours, until the check is
+ * RULE.first_reminder_hours (3) after approval and then every RULE.remind_every_hours (3), until the check is
  * recorded. Past codeChecks.WINDOW_HOURS a reminder says it is late. Only the current step is sent, so a
  * process that was down sends one message on its return, never a backlog.
  *
@@ -28,7 +28,8 @@ import * as timers from './timers';
 import * as engineWrite from './engineWrite';
 import * as cc from './codeChecks';
 
-export const RULE = { every_minutes: 10, first_reminder_hours: 24, remind_every_hours: 12 } as const;
+/** Destiny, 29 Oct 2026: the alert as soon as Jason approves, then a reminder every 3 hours until the check is recorded. */
+export const RULE = { every_minutes: 2, first_reminder_hours: 3, remind_every_hours: 3 } as const;
 
 const DASHBOARD = () => (process.env.PUBLIC_DASHBOARD_URL || 'https://dashboard.bhanetwork.org').replace(/\/+$/, '');
 
