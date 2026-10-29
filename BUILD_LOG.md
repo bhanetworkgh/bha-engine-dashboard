@@ -13717,3 +13717,10 @@ Files:      none in the repo. n8n agent drafts: Bays Nw5igXu4WWrjUMWB and its ba
 Problem:    The 22:20 entry says Bays' MCP server has no allow-list. That is wrong: Bays' toolPermissions blocks both categories and lists 42 tools by name, exactly as North Star's and Research Twin's do, so neither evidence tool was reachable by Bays.
 Fix:        One config.patch per draft adding the tools as always_allow; all three main drafts validate. Draft evals started for all six (DRAFT-202610282122-O10H, -2QGJ, -80DU on OpenRouter; -462T, -5MK4, -I5ZM on the Anthropic backups). Publish waits on a pass.
 Decision:   Genie's read_evidence is in its server scope already; Genie's own wiring is Kaiqi's.
+
+## 2026-10-29 04:20 — Engine alerts as Block Kit cards
+Intent:     Destiny: the Logstream "a fault needs a person" alert and the OpenRouter credit alert read like errors. Make them calm, readable cards.
+Files:      server/src/logstream.ts, server/test/logstream.test.cjs, CLAUDE.md; n8n Engine — OpenRouter Credit Alert (EGRebAjXYEH36OCa)
+Problem:    Both posted plain text led by :warning: / :rotating_light:. The first test run failed on the old wording check ("shared-cause outage") and left a shared_outage trigger row in the local test database, so the rerun saw "1 !== 2" (once per 7 days).
+Fix:        alertText became alertMessage returning {text, blocks}: header, fields, incident links to /engine-health?incident=, an Open Logstream button, a context footer. alert() sends blocks with text as the fallback. Test asserts the card, the links and no warning emoji; leftover row deleted. n8n credit alert: header with the balance, a "Nothing has failed" lead, fields, Top up and Engine health buttons; sandbox test execution 55623, Slack ok.
+Decision:   Kept the behaviour exactly (who is told, when, once per 7 days); only the message shape changed. 26 of 26 logstream checks pass.

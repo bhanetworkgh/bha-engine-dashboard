@@ -264,6 +264,9 @@ const hook = http.createServer((req, res) => {
   assert.equal(posts.length, 1);
   assert.equal(posts[0].channel, 'C0ALERTS001');
   assert.ok(posts[0].text.includes('Step A') && posts[0].text.includes('5 times'));
+  assert.ok(Array.isArray(posts[0].blocks) && posts[0].blocks[0].text.text === 'A repeating fault needs a look', 'the escalation is a Block Kit card');
+  assert.ok(!/:warning:|:rotating_light:/.test(JSON.stringify(posts[0])), 'no warning emoji');
+  assert.ok(JSON.stringify(posts[0].blocks).includes('/engine-health?incident='), 'each incident links to Engine health');
   await logstream.sweep();
   assert.equal(posts.length, 1, 'told once');
   assert.equal((await jobs()).length, 1);
@@ -346,7 +349,8 @@ const hook = http.createServer((req, res) => {
   assert.equal(out.action_state, 'alerted');
   assert.ok(out.n >= 5);
   assert.equal(posts.length, p + 1);
-  assert.ok(posts[p].text.includes('shared-cause outage'));
+  assert.ok(posts[p].text.includes('shared cause'));
+  assert.ok(Array.isArray(posts[p].blocks) && posts[p].blocks[0].text.text === 'Several workflows are failing together', 'the outage alert is a Block Kit card');
   t = await triggers(`lstest-${T}-o`);
   assert.ok(t.length === 3 && t.every((x) => x.action_state === 'suppressed_shared_outage'));
   assert.equal((await jobs()).length, before, 'no per-workflow research during an outage');
