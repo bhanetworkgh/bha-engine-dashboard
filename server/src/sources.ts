@@ -502,13 +502,17 @@ export function mapCodex(rec: AtRecord, owner: string, table: string, pending?: 
     summary: str(f.Summary),
     session_description: str(f['Session Description']),
     jason_notes: str(f['Jason Notes']),
+    // Destiny's code check, written onto the log when it is recorded (codeCheckWatch.codexNote, 29 Oct 2026).
+    code_check: str(f['Code Check Verdict'])
+      ? { verdict: str(f['Code Check Verdict']), pay_call: str(f['Code Check Pay Call']), reason: str(f['Code Check Reason']), link: str(f['Code Check Link']), at: iso(f['Code Check At']) }
+      : null,
   };
 }
 
 /** The list shape: everything but the long text. */
 export function codexSummary(e: CodexEntryDetail): CodexEntry {
-  const { entry, layer1_review, summary, session_description, jason_notes, ...rest } = e;
-  void [entry, layer1_review, summary, session_description, jason_notes];
+  const { entry, layer1_review, summary, session_description, jason_notes, code_check, ...rest } = e;
+  void [entry, layer1_review, summary, session_description, jason_notes, code_check];
   return rest;
 }
 

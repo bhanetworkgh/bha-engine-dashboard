@@ -10,6 +10,9 @@ import { deleteCodexEntry, getCodexDetail, rejectCodexLog, setCodexStatus, type 
 import { Button, Pill, NotLanded, unlanded } from '../components/ui';
 import { ENTRY_DEFS, JASON_STATUS_DEFS, PAID_DEFS, QUALITY_DEF, STAGE_DEFS } from './codexDefinitions';
 
+const CODE_CHECK_VERDICT: Record<string, string> = { matches: 'Matches the log', partly: 'Partly matches', overstated: 'Overstated' };
+const CODE_CHECK_PAY: Record<string, string> = { as_logged: 'Pay as logged', partly: 'Pay partly', hold: 'Hold' };
+
 export function when(iso: string | null): string {
   return iso ? iso.slice(0, 16).replace('T', ' ') : '—';
 }
@@ -280,6 +283,22 @@ export function CodexEntryDialog({
                 <div className="min-w-0 md:col-span-3">
                   <div className="text-[11px] text-faint">Jason’s notes</div>
                   <div className="text-ink">{detail.jason_notes}</div>
+                </div>
+              )}
+              {detail.code_check && (
+                <div className="min-w-0 md:col-span-3">
+                  <div className="text-[11px] text-faint">Code check</div>
+                  <div className="text-ink">
+                    {CODE_CHECK_VERDICT[detail.code_check.verdict ?? ''] ?? detail.code_check.verdict}
+                    {detail.code_check.pay_call ? ` · ${CODE_CHECK_PAY[detail.code_check.pay_call] ?? detail.code_check.pay_call}` : ''}
+                    {detail.code_check.at ? ` · ${detail.code_check.at.slice(0, 10)}` : ''}
+                  </div>
+                  {detail.code_check.reason && <div className="text-dim">{detail.code_check.reason}</div>}
+                  {detail.code_check.link && (
+                    <a className="text-accent hover:underline" href={detail.code_check.link} target="_blank" rel="noreferrer">
+                      The full check in Slack ↗
+                    </a>
+                  )}
                 </div>
               )}
             </div>

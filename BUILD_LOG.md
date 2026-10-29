@@ -13744,3 +13744,10 @@ Files:      server/src/logstream.ts
 Problem:    Render refused both builds: `server/src/logstream.ts(416,57): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.` (and 417,61). A crossing's node and workflow can be null, and the strict build caught what the local emit-only build did not. So 0496657 and ec2eda9 never ran in production, though the tests passed; the earlier note that the Logstream card deployed was wrong.
 Fix:        `c.node ?? "not named"` and `c.workflow ?? "not named"`. Checked the whole server with the real strict settings and Node's types before pushing: clean apart from the pg driver, which this workspace does not have installed.
 Decision:   From now on every push here is strict-checked first, not only built and tested.
+
+## 2026-10-29 06:15 — Code check alert: reminders every 3 hours, and the check shown on the Codex entry
+Intent:     Destiny: the alert the moment Jason approves, then reminders every 3 hours, not a day; and his review visible on the Codex entry on the dashboard.
+Files:      server/src/codeCheckWatch.ts, server/src/timers.ts, server/src/sources.ts, src/data/types.ts, src/screens/CodexEntryDialog.tsx, server/test/code-check-watch.test.cjs, CLAUDE.md
+Problem:    The first cut reminded at 24 hours and every 12; the timer ran every 10 minutes; the six Code Check fields were stored on the Codex row but nothing on the page showed them.
+Fix:        RULE every 2 minutes, first reminder at 3 hours, then every 3. The Codex mapper reads the Code Check fields as code_check (left off the list shape), and the entry dialog draws a Code check block under Jason's notes. Tests 11/11; server strict check clean.
+Decision:   The late line stays at Jason's 48-hour window.
