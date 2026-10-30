@@ -675,6 +675,34 @@ async function lastOwnerReminder(owner: string, except: string): Promise<{ watch
   return r.rows[0] ? { watch_id: r.rows[0].watch_id, at: new Date(r.rows[0].last_reminder_at) } : null;
 }
 
+/**
+ * The order today's remaining posts go in (30 Oct 2026, Destiny): every open, unsnoozed, real watch whose
+ * wait has run out, longest overdue first. A reminder is queued only for a person nobody has reminded in
+ * RULE.owner_gap_hours, and only their longest-overdue watch; an escalation is never held by that gap and
+ * always queued. The due time is the sweep's own: the later of the last movement and a snooze's end, plus
+ * the wait. Pure SQL over the rows, so it reads no thread: a watch whose thread moved since is let go by
+ * the sweep when it reads it, and its place goes to the next pass.
+ */
+export async function postQueue(now: Date): Promise<{ watch_id: string; owner_user_id: string; due_at: Date; escalation: boolean }[]> {
+  const r = await query<{ watch_id: string; owner_user_id: string; due_at: Date; escalation: boolean }>(
+    `WITH d AS (
+       SELECT watch_id, owner_user_id, reminders_sent >= max_reminders AS escalation,
+              GREATEST(quiet_since, COALESCE(snoozed_until, quiet_since)) + make_interval(mins => wait_minutes) AS due_at
+         FROM engine_decision_watches
+        WHERE status = 'watching' AND NOT fixture AND (snoozed_until IS NULL OR snoozed_until <= $1::timestamptz)),
+     due AS (SELECT * FROM d WHERE due_at <= $1::timestamptz),
+     gap AS (SELECT DISTINCT owner_user_id FROM engine_decision_watches
+              WHERE NOT fixture AND last_reminder_at > $1::timestamptz - make_interval(hours => $2::int)),
+     rem AS (SELECT DISTINCT ON (owner_user_id) * FROM due
+              WHERE NOT escalation AND owner_user_id NOT IN (SELECT owner_user_id FROM gap)
+              ORDER BY owner_user_id, due_at, watch_id)
+     SELECT watch_id, owner_user_id, due_at, escalation FROM (SELECT * FROM rem UNION ALL SELECT * FROM due WHERE escalation) q
+      ORDER BY due_at, watch_id`,
+    [now.toISOString(), RULE.owner_gap_hours],
+  );
+  return r.rows;
+}
+
 async function postedToday(now: Date): Promise<number> {
   const r = await query<{ n: string }>(
     `SELECT count(*)::text AS n
@@ -772,11 +800,19 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
       [now.toISOString()],
     );
   }
-  const rows = await query<WatchRow>(
-    `SELECT * FROM engine_decision_watches WHERE status = 'watching' AND ($1::text IS NULL OR watch_id = $1) ORDER BY last_checked_at ASC NULLS FIRST, id ASC LIMIT $2`,
-    [opts.only ?? null, RULE.per_pass],
-  );
   let posted = await postedToday(now);
+  // The queue (30 Oct 2026, Destiny): which due watches may post today, longest-waiting first, one per
+  // person. Before it, the pass posted whichever due watch it happened to reach first, so with far more
+  // watches due than posts allowed some got three reminders while others (DW-1792775143788-4KD5, six days)
+  // got none. Its first entries are pulled into this pass, so a watch at the front is never left waiting
+  // for the rotation to reach it.
+  const queue = await postQueue(now);
+  const allowed = new Set(queue.slice(0, Math.max(0, RULE.daily_cap - posted)).map((q) => q.watch_id));
+  const rows = await query<WatchRow>(
+    `SELECT * FROM engine_decision_watches WHERE status = 'watching' AND ($1::text IS NULL OR watch_id = $1)
+      ORDER BY (watch_id = ANY($3::text[])) DESC, last_checked_at ASC NULLS FIRST, id ASC LIMIT $2`,
+    [opts.only ?? null, RULE.per_pass, [...allowed]],
+  );
   // Owners reminded during this pass, so two of their watches due in the same pass do not both post.
   const remindedOwners = new Map<string, { watch_id: string; at: Date }>();
   const would = (w: WatchRow, action: string) => out.would?.push({ watch_id: w.watch_id, action });
@@ -868,17 +904,28 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
         const since = recent ? now.getTime() - recent.at.getTime() : Infinity;
         if (recent && since >= 0 && since < RULE.owner_gap_hours * 3_600_000) {
           out.held_owner.push(w.watch_id);
+          const why = `held: ${w.owner_name || 'the owner'} was reminded by ${recent.watch_id} at ${recent.at.toISOString()}; one reminder per person per ${RULE.owner_gap_hours} hours, so this one goes on a later pass`;
           if (opts.dry) would(w, `hold: <@${w.owner_user_id}> was reminded by ${recent.watch_id} at ${recent.at.toISOString()}; one reminder per person per ${RULE.owner_gap_hours} hours`);
+          else {
+            // Recorded on the row and once a day as an event (30 Oct 2026): a hold that left no trace
+            // was a reminder nobody could see was owed.
+            await note(w, { last_error: why });
+            await event('decision_watch_held', w, `dw:${w.watch_id}:held_owner:${now.toISOString().slice(0, 10)}`, { reason: 'owner_gap', reminded_by: recent.watch_id, at: recent.at.toISOString(), gap_hours: RULE.owner_gap_hours });
+          }
           continue;
         }
       }
-      if (posted >= RULE.daily_cap && !w.fixture) {
+      if ((posted >= RULE.daily_cap || !allowed.has(w.watch_id)) && !w.fixture) {
         out.held_cap.push(w.watch_id);
-        if (opts.dry) would(w, `hold: today's ${RULE.daily_cap} posts are used`);
+        const pos = queue.findIndex((q) => q.watch_id === w.watch_id);
+        const why = posted >= RULE.daily_cap
+          ? `held: today's ${RULE.daily_cap} Decision Watch posts are used; tried again on the next pass`
+          : `held: ${pos >= 0 ? `number ${pos + 1} in the queue` : 'not yet in the queue'}; ${Math.max(0, RULE.daily_cap - posted)} of today's ${RULE.daily_cap} posts are left and go to the watches that have waited longest, one per person`;
+        if (opts.dry) would(w, `hold: ${why.slice(6)}`);
         else {
-          await note(w, { last_error: `held: today's ${RULE.daily_cap} Decision Watch posts are used; tried again on the next pass` });
+          await note(w, { last_error: why });
           // Once a day per watch: the rate limit doing its job is logged, not only noted on the row.
-          await event('decision_watch_held', w, `dw:${w.watch_id}:held:${now.toISOString().slice(0, 10)}`, { reason: 'daily_cap', cap: RULE.daily_cap, posted_today: posted });
+          await event('decision_watch_held', w, `dw:${w.watch_id}:held:${now.toISOString().slice(0, 10)}`, { reason: posted >= RULE.daily_cap ? 'daily_cap' : 'queued', cap: RULE.daily_cap, posted_today: posted, queue_position: pos >= 0 ? pos + 1 : null });
         }
         continue;
       }
