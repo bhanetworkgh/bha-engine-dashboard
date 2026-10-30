@@ -94,6 +94,7 @@ import * as vfarmGates from './vfarmGates';
 import * as vfarmGateAuto from './vfarmGateAuto';
 import * as mediaPostLog from './mediaPostLog';
 import * as helpPages from './helpPages';
+import * as cstHelp from './cstHelp';
 import * as evidence from './evidence';
 import * as codeChecks from './codeChecks';
 import * as publicationDecision from './publicationDecision';
@@ -354,6 +355,21 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       void stripeLedger.logCall('error', String(ev.id ?? ''), e instanceof Error ? e.message : String(e), Date.now() - t0);
       return send(res, 500, { ok: false, reason: 'store_failed' });
     }
+  }
+  // CST's voice agent reads the help pages here (30 Oct 2026). Which key called decides what it
+  // sees: the live key only approved pages, the preview key every page marked by stage. cstHelp.ts.
+  if (p === '/api/public/cst-help') {
+    if (method !== 'GET') throw new HttpError(405, 'GET the help pages.');
+    const t0 = Date.now();
+    const hk = req.headers['x-cst-help-key'];
+    const m = cstHelp.modeFor(Array.isArray(hk) ? hk[0] : hk);
+    if (!m.ok) {
+      void mirror.logWrite({ endpoint: p, kind: 'help_pages', method, key_label: null, outcome: m.status === 401 ? 'unauthorised' : 'error', detail: m.reason, ms: Date.now() - t0 });
+      return send(res, m.status, { ok: false, reason: m.reason });
+    }
+    const view = cstHelp.agentView(await helpPages.list(), m.mode);
+    void mirror.logWrite({ endpoint: p, kind: 'help_pages', method, key_label: cstHelp.KEY_VARS[m.mode], outcome: 'read', detail: `${m.mode}: ${view.pages.length} page(s) — ${view.pages.map((x) => `${x.page_id} ${x.status}`).join(', ') || 'none'}`, ms: Date.now() - t0 });
+    return send(res, 200, { ok: true, ...view }, { 'Cache-Control': 'no-store' });
   }
   if (p === '/api/public/vfarm-doctrine' && method === 'GET') {
     const origin = earlyAccess.originOf(req);
@@ -2831,6 +2847,7 @@ async function boot(): Promise<void> {
     );
     {
       const sc = stripeLedger.configured();
+      console.log(`  cst help: /api/public/cst-help — live ${process.env.CST_HELP_KEY ? 'on' : 'off (CST_HELP_KEY not set)'}, preview ${process.env.CST_HELP_PREVIEW_KEY ? 'on' : 'off (CST_HELP_PREVIEW_KEY not set)'}`);
       console.log(`  stripe: webhook /api/public/stripe/webhook — sandbox ${sc.test ? 'on' : `off (${stripeLedger.SECRET_VARS.test} not set)`}, live ${sc.live ? 'on' : `off (${stripeLedger.SECRET_VARS.live} not set)`}`);
     }
     console.log(
