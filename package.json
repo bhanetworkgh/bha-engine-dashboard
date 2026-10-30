@@ -48,6 +48,7 @@
     "test:audit-token": "node --no-warnings=ExperimentalWarning server/test/audit-token.test.cjs",
     "test:codex-gap": "node --no-warnings=ExperimentalWarning server/test/codex-gap.test.cjs",
     "test:charge-gate": "node --no-warnings=ExperimentalWarning server/test/charge-gate.test.cjs",
+    "test:cst-help": "node --no-warnings=ExperimentalWarning server/test/cst-help.test.cjs",
     "test:help-pages": "node --no-warnings=ExperimentalWarning server/test/help-pages.test.cjs",
     "test:evidence": "node --no-warnings=ExperimentalWarning server/test/evidence.test.cjs",
     "test:essence": "node --no-warnings=ExperimentalWarning server/test/essence.test.cjs",

@@ -3022,9 +3022,20 @@ checked, with the BHARAG doc id. **Any edit to a checked page's text puts it bac
 `read_help_pages` (read, both connections, in Bays', North Star's, Research Twin's and Genie's scopes; each page
 carries its stage, `customer_safe` true only at in_corpus, its link, and the rule that a draft is never quoted to
 a customer), `write_help_page` and `set_help_page_stage` (write connection, no agent's scope, refused on any agent
-token; Destiny or Jason write, Hardik may record his own check; audited kind `help_pages`). **CST never reads these
-rows**: it answers from `cst-help-manuals` only, and nothing here writes to BHARAG. Migration 98 seeded the three v0
-drafts from the "CST Help Corpus v0" Claude Doc, with Jegan's gaps named. `npm run test:help-pages`.
+token; Destiny or Jason write, Hardik may record his own check; audited kind `help_pages`). **The old CST never
+reads these rows**: it answers from `cst-help-manuals` only, and nothing here writes to BHARAG. Migration 98 seeded
+the three v0 drafts from the "CST Help Corpus v0" Claude Doc, with Jegan's gaps named. `npm run test:help-pages`.
+
+**The voice agent reads them, gated by key** (30 Oct 2026, Destiny: the help pages are CST's knowledge base, kept
+here, and the new voice agent is pointed at them rather than given copies). The ElevenLabs agent "BHA Customer
+Service Twin" (`agent_5701m66tmyfseeyt84r3rcwrg3b7`, Jason's cloned voice, a draft with no phone number) has one
+webhook tool, `lookup_help_pages`, calling `GET /api/public/cst-help` with `x-cst-help-key`. `server/src/cstHelp.ts`.
+**Which key called decides what it sees, never the agent's instructions**: `CST_HELP_KEY` (live) returns only pages
+at `in_corpus` whose text is the text Hardik checked, and with none it tells the agent to say so and offer a
+person; `CST_HELP_PREVIEW_KEY` (testing) returns every page marked "approved" or "draft, not for customers", with
+what is not written yet and who owes it. Going live is moving the tool from the preview key to the live key. No
+default for either: unset is 503 naming the variable; a wrong key is 401. Every call is a `read` (or
+`unauthorised`) line on `engine_writes`, kind `help_pages`. `npm run test:cst-help`.
 
 **The missing Codex log check** (2026-10-22, Destiny — DW-1792516757092-9EP8; Jason, 20 Oct: a
 standing mechanism, not a reminder, after Kavin's 20 Oct log broke on submission and nothing said so).

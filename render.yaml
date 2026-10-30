@@ -100,6 +100,12 @@ services:
       # Generating a new token in n8n revokes the old one, so update it here.
       - key: N8N_MCP_TOKEN
         sync: false
+      # The CST voice agent's help-page keys (30 Oct 2026). Live shows only approved pages;
+      # preview shows drafts, marked, for testing. cstHelp.ts.
+      - key: CST_HELP_KEY
+        sync: false
+      - key: CST_HELP_PREVIEW_KEY
+        sync: false
       # The n8n Cloud plan's execution quota and its alerts (2026-09-26, Jason
       # and Destiny). N8N_EXECUTION_QUOTA is the plan's monthly executions
       # (50000); N8N_BILLING_CYCLE_START a day the monthly count restarted
