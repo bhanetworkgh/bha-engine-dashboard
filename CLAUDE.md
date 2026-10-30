@@ -3042,6 +3042,19 @@ reason, never a guessed number; a balance in another currency is not judged. One
 `engine_writes`. It tops nothing up. The hourly alerts (`Engine — OpenRouter Credit Alert`, `Engine — Twilio
 Credit Alert`) are separate. `npm run test:service-balances`.
 
+**The System Registry over MCP** (2026-10-30, Destiny: "when we're talking about new tools, we can
+immediately tell it from Slack to register it in the dashboard"). `server/src/mcp/registryTools.ts`.
+`read_registry` (read, both connections, Bays' scope) lists services, endpoints or workflows, searched by
+words, with the spend figures. `write_registry` (write connection, Bays' scope, audited kind `registry`)
+creates, updates, removes or restores one row of those three kinds through `registry.create`, `update` and
+`setDeleted`, the page's own functions. Held on the server: `requester_user_id` must be Destiny, Jason or
+someone with a Builder Profile; remove and restore are Destiny's or Jason's (a tool BHA stopped using is
+`status: retired`, not removed); the credentials registry is refused (`not_served`); a field outside the
+kind's spec is `unknown_field`; a name already held is `already_held`; and **any value shaped like a secret
+is refused** (`secret_refused`, the BHARAG guard's shapes plus Stripe, ElevenLabs and Twilio keys), never
+stored redacted. A cost nobody stated is left empty: spend is not tracked yet (the Mercury card feed is a
+later step). `npm run test:registry-tools`.
+
 **The credit-out alert** (2026-10-10, Destiny). `server/src/creditOut.ts`, a
 check every minute, no table of its own (its state is `meta`
 `credit_out.state`). On 10 Oct the OpenRouter credit ran out between two of

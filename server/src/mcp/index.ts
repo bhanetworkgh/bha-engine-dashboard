@@ -265,6 +265,10 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-28: "how much OpenRouter / Twilio credit is left?" asked in Slack. Both balances read now
         // through n8n, judged against the SOP floors. A read; it tops nothing up.
         'check_service_balances',
+        // 2026-10-30: "Bays, register this tool in the dashboard" from Slack (Destiny). Reads and writes
+        // the System Registry's services, endpoints and workflows; no secret is ever written (held on the
+        // server), and remove and restore are Destiny's or Jason's.
+        'read_registry', 'write_registry',
       ]),
     },
     {
