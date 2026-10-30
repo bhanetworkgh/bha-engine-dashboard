@@ -13,7 +13,7 @@ while an earlier one is open.
 | Gate | Decision | Decided by |
 |---|---|---|
 | A | Release the design package (spec, BOM, CAD, config) to sovereign contacts, Onshape and Stratasys | Jason, on Hardik's and Jegan's evidence |
-| B | Accept the assembled unit on receipt | The named receiver (PROPOSED below), signed off by Jegan |
+| B | Accept the assembled unit on receipt | The named receiver (Jason, section below), signed off by Jegan |
 | C | Ship to Pilot 1 (Client 2) | Jason |
 | D | Keep the pilot running, and expand it | Jason, from the Stage 2 record |
 
@@ -50,9 +50,9 @@ FABRICATION RELEASE NOT AUTHORIZED").
 Hardik's DHT11 packet already defines receipt verification for one part. This gate applies the
 same pattern to the whole unit, so known failure points are caught at the door, not on site.
 
-**Who receives it. PROPOSED:** one named person at the delivery address (likely Albany, not
-necessarily), recorded on the Stage 2 record before the unit ships, with a second operator
-named the same way (SOP 8ee2e9cd, the second-operator rule). Jegan signs off remotely from the
+**Who receives it. SET 30 Oct 2026 (Destiny, in the FVA9 thread):** Jason Bays receives the unit
+at the delivery address and Kavin is the second operator (SOP 8ee2e9cd, the second-operator
+rule), both recorded on the Stage 2 record before the unit ships. Jegan signs off remotely from the
 receiver's evidence; nothing is accepted on a verbal "looks fine".
 
 | # | Step at receipt | Evidence |
@@ -106,8 +106,8 @@ against numbers chosen afterwards. Uptime comes only from the twin's own inciden
 rules). Today the dashboard watches climate, pH, soil moisture and gas; substrate and cabinet
 function beyond those sensors are recorded by a person, and are never described as automated.
 
-**The open line to Client 2. PROPOSED:** one shared channel for the pilot (a Slack Connect
-channel or the CST line, Jason to choose), carrying C9's three rhythms. A problem report there
+**The open line to Client 2. SET 30 Oct 2026:** #pilot1-client2-vfarm (C0CC02VL6FL), the one
+shared channel for the pilot with Shibu, carrying C9's three rhythms. A problem report there
 opens an incident the same day, so a pilot fault is never only a message.
 
 **Expansion to strawberries and other produce.** Not before the Stage 2 verdict passes, and only
