@@ -26,6 +26,7 @@ import type {
   DoctrineData,
   VfarmLiveData,
   MonitoringTwinData,
+  HeroBayData,
   CstData,
   ScorecardData,
   PatternCandidatesData,
@@ -673,6 +674,8 @@ export const getVfarmLive = () => api<VfarmLiveData>('/api/vfarm/live');
 /** The stage gates and the 5-rack pilot offer (2026-10-09, 7S0O). */
 export const getVfarmGates = () => api<VfarmGatesData>('/api/vfarm/gates');
 export const getMonitoringTwin = () => api<MonitoringTwinData>('/api/monitoring-twin');
+/** The Halloween hero bay (FOCB): one bay, read only, every field classed. */
+export const getHeroBay = () => api<HeroBayData>('/api/vfarm-hero-bay');
 /** The Customer Service Twin's turns, as CST pushed them (2026-09-29). */
 export const getCsTwin = () => api<CstData>('/api/cs-twin');
 /** The CST help pages and their stage (27 Oct 2026). A read; pages are written over MCP by Destiny. */
