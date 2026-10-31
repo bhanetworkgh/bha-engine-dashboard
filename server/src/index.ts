@@ -84,6 +84,7 @@ import { toolByName as mcpToolByName } from './mcp/tools';
 import { callerStore } from './mcp/caller';
 import * as dataGovernance from './dataGovernance';
 import * as monitoringTwin from './monitoringTwin';
+import * as heroBay from './heroBay';
 import * as qualityAlert from './qualityAlert';
 import * as logstream from './logstream';
 import * as researchSignals from './researchSignals';
@@ -1800,6 +1801,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** The Monitoring Twin's judgement of every farm vFarm sends (2026-10-01). */
       case '/api/monitoring-twin':
         return send(res, 200, await monitoringTwin.monitoringData());
+      /** The Halloween hero bay, P1.0 Tray A, every field classed REAL / SIMULATED / NOT_VERIFIED (FOCB, 2026-10-30). Reads only. */
+      case '/api/vfarm-hero-bay':
+        return send(res, 200, await heroBay.heroBayData());
       /** Pay Tracker: the ledger's rows, and the figures over them. */
       case '/api/pay':
         return send(res, 200, await pay.data());
