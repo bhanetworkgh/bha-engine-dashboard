@@ -62,6 +62,7 @@ import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, agentTokens
 import * as mcpLogs from './mcp/logs';
 import * as earlyAccess from './earlyAccess';
 import * as stripeLedger from './stripeLedger';
+import * as vfarmEntitlement from './vfarmEntitlement';
 import * as proposal from './proposal';
 import * as intake2 from './intake2';
 import * as intake2Page from './intake2Page';
@@ -1171,6 +1172,26 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       const r = await stripeLedger.readBack({ lead_id: url.searchParams.get('lead_id'), limit: Number(url.searchParams.get('limit')) || 50 });
       await mirror.logWrite({ endpoint, kind: 'stripe_events', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `${r.events.length} events, ${r.payments.length} payments`, ms: Date.now() - t0 });
       return send(res, 200, { ok: true, ...r });
+    }
+    /**
+     * vFarm entitlement (31 Oct 2026, Destiny — Jason's contract, #bha-coordination
+     * 1793375674.351769): vFarm reads one farm's record by farm_id on the snapshot's own
+     * key and keeps the last good copy. No record is a 200 with found: false, so vFarm
+     * caches the Monitor / pending floor rather than retrying a 404. Read only.
+     */
+    if (p === '/api/engine/vfarm-entitlement') {
+      if (method !== 'GET') throw new HttpError(405, 'GET ?farm_id=<vFarm farm id>. The Engine record is the only writer; vFarm only reads it.');
+      try {
+        const r = await vfarmEntitlement.read(url.searchParams.get('farm_id'));
+        await mirror.logWrite({ endpoint, kind: 'vfarm_entitlement', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: r.farm_id, outcome: 'read', detail: r.found ? `${r.record_id}: plan ${r.plan ?? 'none'}, ${r.status}` : 'no record: floor', ms: Date.now() - t0 });
+        return send(res, 200, { ok: true, ...r });
+      } catch (e) {
+        if (e instanceof vfarmEntitlement.EntitlementError) {
+          await mirror.logWrite({ endpoint, kind: 'vfarm_entitlement', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          throw new HttpError(e.status, e.message);
+        }
+        throw e;
+      }
     }
     if (p === '/api/engine/vfarm-leads/intake-2/invite') {
       if (method !== 'POST') throw new HttpError(405, 'POST { buyer_intake_id, by, resend, dry_run }.');
