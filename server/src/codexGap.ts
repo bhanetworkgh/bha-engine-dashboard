@@ -24,7 +24,7 @@ import * as slack from './slack';
 import * as timers from './timers';
 
 export const RULE = {
-  gap_hours: 30,
+  gap_hours: 18,
   lookback_days: 14,
   regular_days: 5,
   every_minutes: 60,

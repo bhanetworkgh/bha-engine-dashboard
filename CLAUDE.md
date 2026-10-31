@@ -3085,7 +3085,7 @@ default for either: unset is 503 naming the variable; a wrong key is 401. Every 
 standing mechanism, not a reminder, after Kavin's 20 Oct log broke on submission and nothing said so).
 `server/src/codexGap.ts`, a timer every hour, its numbers in `RULE` and nowhere else. A builder who
 logged on 5 or more of the last 14 days, and whose newest submission (a builder-table row or a Layer 0
-hold) is over 30 hours old, gets **one DM as Bays** and Destiny one line; measured in hours because the
+hold) is over 18 hours old (30 until 31 Oct 2026, Destiny: same-day catch), gets **one DM as Bays** and Destiny one line; measured in hours because the
 builders are in four time zones. Jason is never flagged. **One note per gap**: the claim is a
 `codex_log_gap_flagged` event keyed on the builder and their newest log, written before the DM; a DM
 Slack refuses deletes the claim so the next pass retries, and a new log resets it.
