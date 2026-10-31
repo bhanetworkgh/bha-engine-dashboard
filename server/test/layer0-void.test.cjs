@@ -218,6 +218,26 @@ const tick = () => new Promise((r) => setTimeout(r, 400));
     assert.equal((await row(F)).fields.Status, 'voided');
     ok('on an agent token nothing is voided until confirmed: true, and the first answer asks for the yes');
 
+    // 12 (31 Oct, Q2VC): no "Log parked" post; the incomplete log sits on Jason's review card,
+    // whose place the Codex row keeps under the same Submission ID. The reply goes in that thread.
+    const G = await park('TESTVOID_7', DESTINY, 'https://dashboard.bhanetwork.org/codex/testvoid-7');
+    await mirror.upsert('codex', { builder_id: 'destiny', fields: { 'Submission ID': 'TESTVOID_7', 'Builder User ID': DESTINY, 'Jason Status': 'Approved', 'Session Url': 'https://dashboard.bhanetwork.org/codex/testvoid-7', 'Review Card Channel': REVIEW, 'Review Card TS': '1793380874.507929' } }, 'engine');
+    history = [];
+    calls.length = 0;
+    r = await call({ log: G, requester_user_id: DESTINY, reason: 'Q2VC test log, never to be completed' });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    const cardReply = calls.filter((c) => c.method === 'chat.postMessage');
+    assert.equal(cardReply.length, 1);
+    assert.equal(cardReply[0].body.channel, REVIEW);
+    assert.equal(cardReply[0].body.thread_ts, '1793380874.507929');
+    assert.match(cardReply[0].body.text, /approval already given on this card stands/);
+    const H = await park('TESTVOID_8', DESTINY, 'https://dashboard.bhanetwork.org/codex/testvoid-8');
+    r = await call({ log: H, requester_user_id: DESTINY, reason: 'Neither post nor card exists' });
+    assert.equal(r.voided, true);
+    assert.equal(r.ok, false);
+    assert.match(r.message, /no review card is saved for TESTVOID_8/);
+    ok('with no "Log parked" post the void replies on the saved review card, and with neither it says so');
+
   } finally {
     await clean();
     await closePool();
