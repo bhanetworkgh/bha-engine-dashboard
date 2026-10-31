@@ -1877,6 +1877,17 @@ each ask row, read from the agent node's own output and null when it gave none.
 them up per agent: tokens, never money, because no price is stored. A scheduled
 task run and a failed run carry none and are counted apart, never as nought.
 
+**`delete_codex_log`, the Codex page's delete over MCP, with the pay rows** (31 Oct 2026,
+Destiny: no manual steps; Q2VC's approved test log B was refused by `delete_record`).
+`server/src/mcp/codexDeleteTools.ts`, write connection only, in no agent's scope, refused on any
+agent token. Calls `store.deleteCodex`, the Codex page's delete, so the whole row goes to
+`record_deletions` first; approved logs included. Its pay rows (`engine_pay_sessions` with the same
+Codex Entry ID) go with it, each copied to `record_deletions` through `mirror.deleteRow`, so a deleted
+log never stays on the pay record as owed. Refused when any pay row says Paid (`already_paid`), when
+the log matches two rows (`ambiguous`), and without confirm `DELETE <Codex Entry ID>` (the Submission
+ID when there is none). Destiny or Jason, a reason of 3 to 1,000 characters, `dry_run`. Audited on
+`engine_mcp_writes` (kind `codex`).
+
 **`close_incidents`, the Engine health close over MCP** (decision 2026-10-01,
 Destiny). `server/src/mcp/incidentTools.ts`, write connection only, calling
 `health.closeIncidents` — the function the page's close button calls — so the
