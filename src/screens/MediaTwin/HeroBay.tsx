@@ -1,10 +1,14 @@
+import { useEffect, useState } from 'react';
 import type { HeroBayData, HeroEvidenceClass, HeroField } from '../../data';
 import { Card, CardHeader, Pill, relativeTime } from '../../components/ui';
+import { fieldsNow, RECHECK_MS } from './heroBayAge';
 
 /**
  * The Halloween hero bay (FOCB, 30 Oct 2026, Hardik). One bay, P1.0 Tray A, read only.
  * Every class, state and note on this page comes from `server/src/heroBay.ts`; the page
  * decides nothing about what is real. A value with no evidence is a dash, never a filler.
+ * The one thing re-checked here is the server's own silent-feed rule, every RECHECK_MS, so a
+ * kept answer cannot go on saying LIVE after vFarm stops looking (`heroBayAge.ts`).
  */
 
 const when = (iso: string | null) => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : '—');
@@ -29,7 +33,7 @@ function shown(f: HeroField) {
 }
 
 /** The rack as the P1 specification draws it, to scale (1 px = 5 mm). Not the Onshape model. */
-function RackDrawing({ data }: { data: HeroBayData }) {
+function RackDrawing({ data, fields }: { data: HeroBayData; fields: HeroField[] }) {
   const s = 0.2;
   const W = data.cad.width_mm * s;
   const H = data.cad.height_mm * s;
@@ -37,7 +41,7 @@ function RackDrawing({ data }: { data: HeroBayData }) {
   const y0 = 20;
   const tiers = Array.from({ length: data.cad.tiers }, (_, i) => i + 1);
   const tierY = (t: number) => y0 + H - (H / (data.cad.tiers + 0.5)) * (t - 0.5);
-  const temp = data.fields.find((f) => f.key === 'temperature');
+  const temp = fields.find((f) => f.key === 'temperature');
   return (
     <svg viewBox={`0 0 ${W + x0 + 120} ${H + y0 + 50}`} className="h-auto w-full max-w-[420px]" role="img" aria-label={`P1 rack, ${data.cad.width_mm} by ${data.cad.height_mm} mm, ${data.cad.tiers} tiers, specification drawing`}>
       <rect x={x0} y={y0} width={W} height={H} fill="none" stroke="var(--line-strong)" strokeWidth={2} />
@@ -60,6 +64,12 @@ function RackDrawing({ data }: { data: HeroBayData }) {
 
 export function HeroBay({ data }: { data: HeroBayData }) {
   const stageOf = data.story.current_stage;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), RECHECK_MS);
+    return () => clearInterval(timer);
+  }, []);
+  const fields = fieldsNow(data, now);
   return (
     <div className="flex flex-col gap-4 px-6 pb-8 md:px-8">
       <p className="text-[12.5px] text-dim">
@@ -70,7 +80,7 @@ export function HeroBay({ data }: { data: HeroBayData }) {
         <Card>
           <CardHeader title="The rack" right={<ClassPill c={data.cad.class} />} />
           <div className="flex flex-col gap-2 px-5 pb-4">
-            <RackDrawing data={data} />
+            <RackDrawing data={data} fields={fields} />
             <p className="text-[11.5px] text-faint">
               {data.cad.cabinet_type} · {data.cad.note}. Onshape document {data.cad.onshape_document}, version {data.cad.onshape_version ?? 'not pinned'}. Which tier holds
               Tray A and where the DHT11 is mounted are not recorded; the drawing places them for the picture only.
@@ -83,7 +93,7 @@ export function HeroBay({ data }: { data: HeroBayData }) {
             right={<span className="tabular text-[11.5px] text-faint">vFarm last looked {when(data.feed.last_snapshot_at)}{data.feed.last_snapshot_at ? ` (${relativeTime(data.feed.last_snapshot_at) ?? '—'})` : ''}</span>}
           />
           <div className="flex flex-col divide-y divide-line px-5 pb-3">
-            {data.fields.map((f) => (
+            {fields.map((f) => (
               <div key={f.key} className="grid grid-cols-[110px_90px_1fr] items-start gap-3 py-2">
                 <span className="text-[12.5px] text-dim">{f.label}</span>
                 <span className="tabular text-[14px] font-medium text-ink">{shown(f)}</span>
@@ -116,7 +126,7 @@ export function HeroBay({ data }: { data: HeroBayData }) {
                 key={`${s.where}-${s.stage}`}
                 className={`rounded-md border px-3 py-2 text-[12px] ${s.stage === stageOf && s.where === 'cabinet' ? 'border-accent text-ink' : 'border-line text-dim'}`}
               >
-                <div className="font-medium capitalize">{s.label}</div>
+                <div className="font-medium">{s.label}</div>
                 <div className="text-[11px] text-faint">{s.where === 'supplier' ? 'at the supplier' : `cabinet days ${s.from_day}–${s.to_day}`}</div>
               </li>
             ))}

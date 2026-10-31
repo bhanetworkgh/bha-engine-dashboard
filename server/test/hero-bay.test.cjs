@@ -95,6 +95,7 @@ assert.equal(field(b, 'ph').class, 'SIMULATED'); assert.equal(field(b, 'ph').val
 assert.equal(field(b, 'ec').value, 2.5);
 assert.match(field(b, 'ph').note, /illustrative.*still under development and validation\. Not a sensor reading, and nothing on the rack is controlled to it/);
 assert.deepEqual(b.story.stages.map((s) => `${s.where}:${s.stage}`), ['supplier:nursery', 'supplier:vegetative', 'cabinet:flowering', 'cabinet:fruit_set', 'cabinet:harvest']);
+assert.deepEqual(b.story.stages.map((s) => s.label), ['Nursery', 'Vegetative', 'Flowering and pollination', 'Fruit set and development', 'Harvest window'], 'labels read as sentences; the profile\'s own labels are kept as written');
 assert.equal(b.story.current_stage, 'flowering'); assert.match(b.story.note, /Nothing here was measured/);
 b = build({}, Date.parse('2026-11-10T00:00:00Z'));
 assert.equal(field(b, 'ec').value, null); assert.match(field(b, 'ec').note, /no EC target in the profile for this stage/);
@@ -109,6 +110,7 @@ for (const out of [build(), build({ device: null })]) {
     assert.match(field(out, k).note, /recorded command mapping is not an observed load state|recorded command mapping, not an observed load state/);
   }
   assert.match(field(out, 'lights').note, /led_light_01\) on relay_m2_3/);
+  assert.doesNotMatch(field(out, 'lights').note + field(out, 'water').note, /offline|went down|\bis (on|off)\b(?! or)/, 'the notes assume no outage and claim no light state');
   assert.match(field(out, 'water').note, /drain_pump_01\) on relay_m3_1 \(CH9\); the pump's channel is not yet verified/);
 }
 assert.ok(!/relay_m\d_\d['"]?\s*[:=]/.test(fs.readFileSync(path.join(SRC, 'heroBay.ts'), 'utf8')), 'no relay channel drives a state in code');
@@ -159,6 +161,48 @@ for (const fields of [undefined, null, {}, { cabinet_id: '  ', config_hash: 42 }
 b = build({ farm: null });
 assert.equal(b.bay.cabinet_id, null); assert.equal(b.bay.config_hash, null); assert.equal(b.bay.burn_in_state, null);
 ok('no identity, a null, blank or non-object fields block, or no farm gives nulls and says vFarm sends no cabinet_id; nothing is guessed');
+
+// ── 6c. the page's own re-check: a kept LIVE answer ages into feed quiet ─
+// src/screens/MediaTwin/heroBayAge.ts, transpiled with the repo's own TypeScript (no new dependency).
+const ts = require('typescript');
+const ageSrc = fs.readFileSync(path.join(__dirname, '../../src/screens/MediaTwin/heroBayAge.ts'), 'utf8');
+const ageMod = { exports: {} };
+new Function('module', 'exports', 'require', ts.transpileModule(ageSrc, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)(ageMod, ageMod.exports, require);
+const age = ageMod.exports;
+{
+  const payload = JSON.parse(JSON.stringify(build())); // what the browser holds: LIVE at 16:15:00, snapshot 16:14:50
+  assert.equal(field(payload, 'temperature').state, 'LIVE');
+  const at = (s) => NOW + s * 1000;
+  const fresh = age.fieldsNow(payload, at(0));
+  assert.equal(fresh, payload.fields, 'inside the window the server answer is shown as it came');
+  const near = age.fieldsNow(payload, Date.parse('2026-10-30T16:14:50Z') + 600_000);
+  assert.equal(near.find((f) => f.key === 'temperature').state, 'LIVE', 'exactly 600 s is not yet quiet (the server uses >)');
+  const later = age.fieldsNow(payload, Date.parse('2026-10-30T16:14:50Z') + 601_000);
+  for (const k of ['temperature', 'humidity']) {
+    const f = later.find((x) => x.key === k);
+    assert.equal(f.state, 'NO_FEED'); assert.equal(f.class, 'REAL');
+    assert.equal(f.value, field(payload, k).value); assert.equal(f.observed_at, field(payload, k).observed_at);
+    assert.match(f.note, /feed has gone quiet/);
+  }
+  for (const k of ['lights', 'water', 'ec', 'ph', 'growth_stage', 'crop_day'])
+    assert.deepEqual(later.find((x) => x.key === k), field(payload, k), `${k} is untouched`);
+  assert.equal(field(payload, 'temperature').state, 'LIVE', 'the held answer itself is never changed');
+  // Same verdict as the server's own builder at the same moment.
+  const server = build({}, Date.parse('2026-10-30T16:14:50Z') + 601_000);
+  assert.equal(server.feed.silent, true); assert.equal(field(server, 'temperature').state, 'NO_FEED');
+  assert.equal(field(server, 'temperature').note, age.QUIET_NOTE, 'the page uses the server\'s note word for word');
+  // Fail closed: no or unreadable snapshot time is quiet.
+  for (const bad of [null, '', 'not a time']) {
+    const f = age.fieldsNow({ ...payload, feed: { ...payload.feed, last_snapshot_at: bad } }, at(0)).find((x) => x.key === 'temperature');
+    assert.equal(f.state, 'NO_FEED', `last_snapshot_at ${JSON.stringify(bad)}`);
+  }
+  assert.equal(age.FEED_SILENT_S, require(path.join(DIST, 'server/src', 'monitoringTwin.js')).THRESHOLDS.feed_silent_s, 'the page and the Twin share the threshold');
+  assert.ok(age.RECHECK_MS <= 30_000, 're-checked at least every 30 s');
+  const page = fs.readFileSync(path.join(__dirname, '../../src/screens/MediaTwin/HeroBay.tsx'), 'utf8');
+  assert.match(page, /setInterval\(\(\) => setNow\(Date\.now\(\)\), RECHECK_MS\)/); assert.match(page, /return \(\) => clearInterval\(timer\)/);
+  assert.ok(!/data\.fields/.test(page), 'the page draws the re-checked fields, never the held ones');
+}
+ok('a LIVE answer the page keeps turns feed quiet past 600 s on the page\'s own clock, as the server would; nothing else changes; no snapshot time is quiet');
 
 // ── 7 and 8. read only: SELECTs, one GET route, no write or control path ─
 (async () => {
