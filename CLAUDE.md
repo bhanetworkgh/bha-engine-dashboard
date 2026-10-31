@@ -1629,6 +1629,21 @@ identity, and the catalog says "none recorded", not "none exist". The state
 names are a v0 proposal and are Jason's to change. `npm run
 test:vfarm-customers` pins it.
 
+**vFarm entitlement: what a farm is switched on for, read by vFarm** (31 Oct 2026, Destiny — Jason's
+contract in #bha-coordination 1793375674.351769). `server/src/vfarmEntitlement.ts`, migration 106,
+`engine_vfarm_entitlements`, contract `docs/contracts/vfarm-entitlement.md` (`vfarm.entitlement.v0`).
+**The Engine record is the only writer**; vFarm reads it and derives every feature from plan + status.
+`GET /api/engine/vfarm-entitlement?farm_id=` (`x-dashboard-key`, the snapshot's own key) answers 200
+whether found or not, so vFarm caches the floor: **no record or no plan derives Monitor / pending.**
+One record per farm, linked to the paying-customer lead (a real lead at Stage 5, or a team test lead,
+marked `test`). **The plan comes only from Jason's newest real approved offer**: accepted only when it
+is the `plan` in that offer's conditions, by `offer_id` (`no_approved_offer`, `plan_not_on_offer`,
+`plan_mismatch`, `not_newest_offer`); nothing names a plan for him. **Status is never stored**: the
+newest `VFARM_SUBSCRIBER_STATE_CHANGED` naming the farm, else `pending` with `status_recorded: false`;
+no trial. A null limit is "not set". `set_vfarm_entitlement` (write connection, no agent's scope,
+Destiny or Jason, audited kind `vfarm_entitlement`, one `vfarm_entitlement_set` event per write) and
+`read_vfarm_entitlement` (both connections). `npm run test:vfarm-entitlement`.
+
 **A monitoring incident that keeps coming back opens one Research Twin job**
 (2026-10-04, Destiny). `server/src/monitoringRecurrence.ts`, migration 55,
 `engine_monitoring_recurrences`. The rule is Canon v1 as Jason approved it on

@@ -4042,6 +4042,35 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE UNIQUE INDEX IF NOT EXISTS engine_charge_gate_decision ON engine_charge_gate (evidence_channel, evidence_ts, kind, rail, verdict, test)`,
     ],
   },
+  {
+    // 31 Oct 2026, Destiny — Jason's vFarm entitlement contract (#bha-coordination
+    // 1793375674.351769): one record per farm, the Engine the only writer, read by vFarm
+    // by farm_id. plan comes only from Jason's approved offer; status is read from the
+    // customer events contract, never stored here. A null limit is "not set".
+    id: 106,
+    name: 'engine_vfarm_entitlements: one entitlement record per vFarm farm',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_vfarm_entitlements (
+         record_id       text PRIMARY KEY,
+         farm_id         text NOT NULL UNIQUE,
+         lead_id         uuid NOT NULL REFERENCES engine_vfarm_leads (id),
+         buyer_intake_id text,
+         plan            text,
+         offer_id        text,
+         pilot           boolean NOT NULL DEFAULT false,
+         start_at        timestamptz,
+         renew_at        timestamptz,
+         limit_racks     integer CHECK (limit_racks IS NULL OR limit_racks > 0),
+         limit_devices   integer CHECK (limit_devices IS NULL OR limit_devices > 0),
+         limit_users     integer CHECK (limit_users IS NULL OR limit_users > 0),
+         test            boolean NOT NULL DEFAULT false,
+         set_by          text NOT NULL,
+         created_at      timestamptz NOT NULL DEFAULT now(),
+         updated_at      timestamptz NOT NULL DEFAULT now(),
+         CHECK (plan IS NULL OR offer_id IS NOT NULL)
+       )`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
