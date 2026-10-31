@@ -14,11 +14,11 @@ const H = 3_600_000;
 (async () => {
   const now = new Date('2026-10-22T18:00:00Z');
   const b = (user_id, days_logged, hoursAgo) => ({ user_id, name: null, days_logged, last_log_at: new Date(now.getTime() - hoursAgo * H).toISOString() });
-  const gaps = gap.findGaps([b('UREG', 9, 31), b('UFRESH', 9, 29), b('URARE', 4, 80), b('U0A9V97949F', 9, 90)], now);
+  const gaps = gap.findGaps([b('UREG', 9, 19), b('UFRESH', 9, 17), b('URARE', 4, 80), b('U0A9V97949F', 9, 90)], now);
   assert.deepEqual(gaps.map((g) => g.user_id), ['UREG']);
-  ok('only a regular logger past 30 hours is flagged; a recent log, a rare logger and Jason are not');
-  assert.equal(gaps[0].dedupe_key, `codex_gap:UREG:${new Date(now.getTime() - 31 * H).toISOString()}`);
-  assert.match(gap.builderText(gaps[0]), /no Codex log from you has reached the engine since .* \(31 hours ago\)/);
+  ok('only a regular logger past 18 hours is flagged; a recent log, a rare logger and Jason are not');
+  assert.equal(gaps[0].dedupe_key, `codex_gap:UREG:${new Date(now.getTime() - 19 * H).toISOString()}`);
+  assert.match(gap.builderText(gaps[0]), /no Codex log from you has reached the engine since .* \(19 hours ago\)/);
   ok('the gap is keyed on the builder and their newest log, and the DM says how long');
 
   const url = process.env.DATABASE_URL || '';
