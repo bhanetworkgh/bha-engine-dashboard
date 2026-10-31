@@ -159,13 +159,16 @@ const NOT_CLAIMED = [
   'The rack geometry is a specification drawing, not a pinned Onshape model.',
 ];
 
+/** A reference stage has only its key ("nursery"); its label is that key as a sentence ("Nursery"). */
+const sentenceCase = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
 /** The hero tier's story: the stages the profile names outside the cabinet, then the ones in it. */
 function storyStages(content: unknown): { stages: HeroStoryStage[]; cabinet: Stage[] } {
   if (!isObj(content)) return { stages: [], cabinet: [] };
   const cabinet = (Array.isArray(content.stages) ? content.stages : []).filter(isObj) as unknown as Stage[];
   const reference = (Array.isArray(content.reference_only_stages) ? content.reference_only_stages : []).filter(isObj);
   const stages: HeroStoryStage[] = [
-    ...reference.map((r) => ({ stage: String(r.stage), label: String(r.stage).replace(/_/g, ' '), where: 'supplier' as const, from_day: null, to_day: null })),
+    ...reference.map((r) => ({ stage: String(r.stage), label: sentenceCase(String(r.stage).replace(/_/g, ' ')), where: 'supplier' as const, from_day: null, to_day: null })),
     ...cabinet.map((s) => ({ stage: s.stage, label: s.label ?? s.stage, where: 'cabinet' as const, from_day: s.from_day, to_day: s.to_day })),
   ];
   return { stages, cabinet };
@@ -232,7 +235,7 @@ export function buildHeroBay(input: HeroBayInput, now = Date.now()): HeroBay {
     key, label, value: null, unit: null, class: 'NOT_VERIFIED', state: null, observed_at: null,
     source: "vFarm's command log and relay channels",
     note: key === 'lights'
-      ? 'vFarm\'s command log records the grow light (led_light_01) on relay_m2_3. That is a recorded command mapping, not an observed load state: the snapshot carries only the relay bit, last seen before the rack went offline, so the light\'s state is not shown'
+      ? 'vFarm\'s command log records the grow light (led_light_01) on relay_m2_3. That is a recorded command mapping, not an observed load state: a relay bit is not proof the light is on or off, so the light\'s state is not shown'
       : 'vFarm\'s command log records the drain valve (drain_pump_01) on relay_m3_1 (CH9); the pump\'s channel is not yet verified. A recorded command mapping is not an observed load state, so water state is not shown',
   });
 
