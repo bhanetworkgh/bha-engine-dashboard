@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useData } from '../../app/useData';
-import { getMediaDoctrine, getMediaPostLog, type DoctrineChange, type DoctrineData, type MediaPostLogData } from '../../data';
+import { getHeroBay, getMediaDoctrine, getMediaPostLog, type DoctrineChange, type DoctrineData, type MediaPostLogData } from '../../data';
+import { HeroBay } from './HeroBay';
 import {
   Card,
   CardHeader,
@@ -37,9 +38,13 @@ import {
  * one row per post of one picture to one place, read from engine_media_post_log
  * (server/src/mediaPostLog.ts holds the rules). Clips and the weekly platform
  * report are not here yet, and the page does not pretend they are.
+ *
+ * Its third tab is **Hero bay** (2026-10-30, FOCB): the Halloween story asset, one bay
+ * (P1.0 Tray A) read from vFarm's snapshot and the crop profile, every field marked real,
+ * simulated or not verified by `server/src/heroBay.ts`. Read only.
  */
 
-const TABS = ['Doctrine', 'Posts'] as const;
+const TABS = ['Doctrine', 'Posts', 'Hero bay'] as const;
 type Tab = (typeof TABS)[number];
 
 const when = (iso: string | null) => (iso ? iso.slice(0, 16).replace('T', ' ') : '—');
@@ -51,6 +56,7 @@ export default function MediaTwin() {
   useReplayKey(tab);
   const { status, data, error } = useData(getMediaDoctrine, [], { kinds: ['media_doctrine'] });
   const posts = useData(getMediaPostLog, [], { kinds: ['media_post_log'] });
+  const hero = useData(getHeroBay, [], { kinds: ['monitoring_twin', 'vfarm_state'] });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -59,7 +65,15 @@ export default function MediaTwin() {
         subtitle="What vFarm may publicly claim, as Hardik's doctrine sets it"
         below={<Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Doctrine: data?.summary.doctrines_in_force ? { n: data.summary.doctrines_in_force } : undefined, Posts: posts.data?.counts.rows ? { n: posts.data.counts.rows } : undefined }} />}
       />
-      {tab === 'Posts' ? (
+      {tab === 'Hero bay' ? (
+        hero.status === 'error' && !hero.data ? (
+          <LoadFailed error={hero.error} />
+        ) : !hero.data ? (
+          <Loading />
+        ) : (
+          <HeroBay data={hero.data} />
+        )
+      ) : tab === 'Posts' ? (
         posts.status === 'loading' && !posts.data ? (
           <Loading />
         ) : posts.status === 'error' && !posts.data ? (

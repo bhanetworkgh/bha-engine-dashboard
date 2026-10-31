@@ -4257,6 +4257,63 @@ export interface MonitoringProfileVersion {
   stages: MonitoringStage[];
   sources: unknown[];
 }
+/** The Halloween hero bay (FOCB): `server/src/heroBay.ts` decides every class; this mirrors its answer. */
+export type HeroEvidenceClass = 'REAL' | 'SIMULATED' | 'NOT_VERIFIED';
+export interface HeroField {
+  key: 'temperature' | 'humidity' | 'lights' | 'water' | 'ec' | 'ph' | 'growth_stage' | 'crop_day';
+  label: string;
+  value: number | string | null;
+  unit: string | null;
+  class: HeroEvidenceClass;
+  state: 'LIVE' | 'STALE' | 'OFFLINE' | 'NO_FEED' | 'UNKNOWN' | null;
+  observed_at: string | null;
+  source: string;
+  note: string;
+}
+export interface HeroBayData {
+  schema: 'vfarm.hero_bay.v0';
+  generated_at: string;
+  read_only: true;
+  bay: {
+    name: string;
+    farm_code: string;
+    farm_id: string | null;
+    class: HeroEvidenceClass;
+    /** As vFarm reports them; a reported identifier, not verified provenance. */
+    cabinet_id: string | null;
+    config_hash: string | null;
+    burn_in_state: string | null;
+    note: string;
+  };
+  feed: { last_snapshot_at: string | null; age_s: number | null; silent: boolean };
+  cad: {
+    class: HeroEvidenceClass;
+    canonical: boolean;
+    cabinet_type: string;
+    width_mm: number;
+    depth_mm: number;
+    height_mm: number;
+    tiers: number;
+    tray_mm: { width: number; depth: number };
+    hero_tier: number;
+    source: string;
+    onshape_document: string;
+    onshape_version: string | null;
+    note: string;
+  };
+  fields: HeroField[];
+  story: {
+    class: 'SIMULATED';
+    profile_id: string;
+    profile_version: number | null;
+    day0: { at: string; event: string; source: string };
+    crop_day: number | null;
+    current_stage: string | null;
+    stages: { stage: string; label: string; where: 'supplier' | 'cabinet'; from_day: number | null; to_day: number | null }[];
+    note: string;
+  };
+  not_claimed: string[];
+}
 export interface MonitoringTwinData {
   schema: string;
   as_of: string;
