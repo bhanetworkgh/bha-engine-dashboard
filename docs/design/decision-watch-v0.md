@@ -122,3 +122,20 @@ watch's `history` and one `decision_watch_updated` event carrying the old and ne
 `run_decision_watch` (a person on the connector; `dry_run` by default). Every call is audited on
 `engine_mcp_writes`. `npm run test:decision-watch` pins the behaviour against a local database
 with Slack stood in.
+
+
+## Reminder contract, 31 Oct 2026
+
+Jason's contract of 30 Oct (#workflow-logs-destiny 1793376980.352649), built the next morning:
+
+1. **Combined DM per person, the main reminder.** Once per 12 hours, only when at least one of the
+   person's watches is past its first wait: one DM listing every open watch they hold, with its ID,
+   thread link and one line of what is owed, overdue first and longest waiting first.
+2. **In-thread reminders as a sparse audit backstop.** Reminder 1 after the first 24 hours, reminder 2
+   after 72 hours quiet, reminder 3 after 7 days quiet. Each says it was picked under that rule and that
+   the full list comes by DM.
+3. **Unchanged:** longest-waiting first, one thread reminder per person per 12 hours, the visible "held"
+   note on a watch the limit holds back, and the escalation to Jason and Destiny after the third reminder.
+
+The numbers are `RULE.thread_step_hours`, `RULE.digest_gap_hours` and `RULE.digest_max_listed` in
+`server/src/decisionWatch.ts`, and nowhere else.

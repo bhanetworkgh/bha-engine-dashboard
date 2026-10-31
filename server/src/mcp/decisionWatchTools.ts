@@ -356,12 +356,14 @@ export const snoozeDecisionWatch: ToolDefinition = {
 export const runDecisionWatch: ToolDefinition = {
   name: 'run_decision_watch',
   description:
-    'Run the Decision Watch pass now, the same one the timer runs every five minutes. dry_run defaults to TRUE: nothing is posted or changed and the answer lists what each open watch would get. With dry_run false it reads the threads, closes what its linked loop or task settled and posts whatever is due (no reply closes a watch). watch_id narrows it to one watch. For a person on the connector; in no agent\'s scope.',
+    'Run the Decision Watch pass now, the same one the timer runs every five minutes: the in-thread reminders (24 hours, then 72 hours, then 7 days quiet) and the combined DM (one per person per 12 hours, every open watch listed). dry_run defaults to TRUE: nothing is posted or changed and the answer lists what each open watch and each person would get. With dry_run false it reads the threads, closes what its linked loop or task settled and posts whatever is due (no reply closes a watch). watch_id narrows it to one watch. For a person on the connector; in no agent\'s scope.',
   inputSchema: {
     type: 'object',
     properties: {
       dry_run: { type: 'boolean', description: 'Default true.' },
-      watch_id: { type: 'string', description: 'Optional. Only this watch.' },
+      watch_id: { type: 'string', description: 'Optional. Only this watch (the combined DM pass is skipped).' },
+      digest_for: { type: 'string', description: 'Optional Slack id: only this person\'s combined DM. With dry_run true the answer carries the DM\'s text as preview.' },
+      digest_now: { type: 'boolean', description: 'Send digest_for\'s combined DM now, whatever the 12-hour gap. Only for the requester\'s own list (digest_for must be requester_user_id).' },
       requester_user_id: { type: 'string' },
     },
     additionalProperties: false,
@@ -370,8 +372,19 @@ export const runDecisionWatch: ToolDefinition = {
   handler: (args, deps) => {
     const dry = args.dry_run !== false;
     return audited('run_decision_watch', { ...args, dry_run: dry }, deps, async () => {
-      const r = await dw.sweep(new Date(), { dry, only: str(args, 'watch_id') || undefined });
-      return { outcome: dry ? 'dry_run' : 'applied', detail: `${r.looked_at} looked at, ${r.reminded.length} reminded, ${r.closed.length} closed, ${r.escalated.length} escalated, ${r.failed.length} failed`, answer: { ok: true, dry_run: dry, ...r } };
+      const digestFor = bare(str(args, 'digest_for')) || undefined;
+      const now = args.digest_now === true;
+      if (now && (dry || !digestFor || digestFor !== bare(str(args, 'requester_user_id')))) {
+        return { outcome: 'refused', detail: 'digest_now', answer: { ok: false, reason: 'digest_now_own_list_only', message: 'digest_now sends a combined DM at once, so it needs dry_run false and digest_for equal to requester_user_id: a person may push only their own list. Nothing was sent.' } };
+      }
+      const watchId = str(args, 'watch_id') || undefined;
+      const r = digestFor && !watchId ? null : await dw.sweep(new Date(), { dry, only: watchId });
+      const d = watchId ? null : await dw.digestSweep(new Date(), { dry, only: digestFor, force: now });
+      const detail = [
+        r ? `${r.looked_at} looked at, ${r.reminded.length} reminded, ${r.closed.length} closed, ${r.escalated.length} escalated, ${r.failed.length} failed` : null,
+        d ? `combined DM: ${dry ? `${d.would?.filter((w) => w.action.startsWith('send')).length ?? 0} would send` : `${d.sent.length} sent`}, ${d.held_gap.length} held, ${d.failed.length} failed` : null,
+      ].filter(Boolean).join('; ');
+      return { outcome: dry ? 'dry_run' : 'applied', detail, answer: { ok: !(d?.failed.length), dry_run: dry, ...(r ?? {}), ...(d ? { digest: d } : {}) } };
     });
   },
 };
