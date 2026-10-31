@@ -69,6 +69,7 @@
     "test:draft-eval": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/draft-eval.test.cjs",
     "test:intake2": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/intake2.test.cjs",
     "test:decision-watch": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/decision-watch.test.cjs",
+    "test:decision-watch-digest": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/decision-watch-digest.test.cjs",
     "test:publish-gate": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/publish-gate.test.cjs",
     "test:scheduled-runs": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/scheduled-runs.test.cjs",
     "test:vfarm-gates": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/vfarm-gates.test.cjs && node --no-warnings=ExperimentalWarning server/test/vfarm-gate-auto.test.cjs",

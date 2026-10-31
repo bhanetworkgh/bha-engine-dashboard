@@ -67,7 +67,21 @@ export const RULE = {
    * back to back. The second waits and goes on a later pass.
    */
   owner_gap_hours: 12,
+  /**
+   * The in-thread reminders slow down (30 Oct 2026, Jason's reminder contract in #workflow-logs-destiny
+   * 1793376980.352649): reminder 1 after the watch's own wait (24 hours by default), reminder 2 after
+   * 72 hours quiet, reminder 3 after 7 days quiet. The escalation after the third still waits the
+   * watch's own wait. They are an audit trail in each thread; the combined DM below is the reminder.
+   */
+  thread_step_hours: [24, 72, 168],
+  /** One combined DM per person per this many hours, listing every open watch they hold (30 Oct 2026). */
+  digest_gap_hours: 12,
+  /** Watches named in one DM; the rest are counted and linked. */
+  digest_max_listed: 25,
 } as const;
+
+/** Where a person sees all their watches. */
+const WATCHES_PAGE = `${(process.env.PUBLIC_DASHBOARD_URL || 'https://dashboard.bhanetwork.org').replace(/\/$/, '')}/bays?tab=decision-watch`;
 
 /** Destiny and Jason: who an escalation names, and who may close anybody's watch. */
 export const APPROVERS = ['U0A9V97949F', 'U0AEW3TBYH1'] as const;
@@ -146,8 +160,19 @@ export function waitFrom(w: Pick<WatchRow, 'quiet_since'> & { snoozed_until?: Da
   return new Date(Math.max(quietSince.getTime(), end));
 }
 
-export function dueAt(w: Pick<WatchRow, 'quiet_since' | 'wait_minutes'> & { snoozed_until?: Date | null }): Date {
-  return new Date(waitFrom(w).getTime() + w.wait_minutes * 60_000);
+/**
+ * How long this watch waits before its next post (30 Oct 2026): the first reminder after its own wait,
+ * the second after 72 hours quiet, the third after 7 days quiet (RULE.thread_step_hours), never shorter
+ * than its own wait; an escalation after its own wait, as before.
+ */
+export function stepWaitMinutes(w: Pick<WatchRow, 'wait_minutes' | 'reminders_sent' | 'max_reminders'>): number {
+  if (w.reminders_sent <= 0 || w.reminders_sent >= w.max_reminders) return w.wait_minutes;
+  const steps = RULE.thread_step_hours;
+  return Math.max(w.wait_minutes, steps[Math.min(w.reminders_sent, steps.length - 1)] * 60);
+}
+
+export function dueAt(w: Pick<WatchRow, 'quiet_since' | 'wait_minutes' | 'reminders_sent' | 'max_reminders'> & { snoozed_until?: Date | null }): Date {
+  return new Date(waitFrom(w).getTime() + stepWaitMinutes(w) * 60_000);
 }
 
 /** A Slack permalink for a thread, built here so a row never depends on one being handed in. */
@@ -639,7 +664,11 @@ export function reminderText(w: WatchRow, n: number, now: Date): string {
   // 26 Oct 2026 no reply closes one: it closes on proof that it was done, or when the owner says close it.
   const where = w.thread_ts ? 'in this thread' : 'in a thread on this message';
   const closes = `A reply from you ${where} restarts the wait. The watch closes once what is owed is shown done (post the link or result here)${w.record_id ? ', or the tracked item closes' : ''}, or if you say it should be closed. Waiting on a date? Ask Bays to snooze it until then.`;
+  // 30 Oct 2026 (Jason's reminder contract): the post says why it was picked and that the full list goes by DM.
+  const step = RULE.thread_step_hours[Math.min(n - 1, RULE.thread_step_hours.length - 1)];
+  const picked = `Posted under the 24-hour / 72-hour / 7-day rule: reminder ${n} of ${w.max_reminders}, after ${n === 1 ? 'the first quiet wait' : `${step === 168 ? '7 days' : `${step} hours`} quiet`}, longest-waiting first. One reminder per person per ${RULE.owner_gap_hours} hours across all their watches; the full list of what you are holding comes by DM.`;
   lines.push(`_Reminder ${n} of ${w.max_reminders}. No movement for ${quiet}. ${closes} (\`${w.watch_id}\`)_`);
+  lines.push(`_${picked}_`);
   return lines.join('\n');
 }
 
@@ -687,7 +716,10 @@ export async function postQueue(now: Date): Promise<{ watch_id: string; owner_us
   const r = await query<{ watch_id: string; owner_user_id: string; due_at: Date; escalation: boolean }>(
     `WITH d AS (
        SELECT watch_id, owner_user_id, reminders_sent >= max_reminders AS escalation,
-              GREATEST(quiet_since, COALESCE(snoozed_until, quiet_since)) + make_interval(mins => wait_minutes) AS due_at
+              GREATEST(quiet_since, COALESCE(snoozed_until, quiet_since)) + make_interval(mins => CASE
+                WHEN reminders_sent <= 0 OR reminders_sent >= max_reminders THEN wait_minutes
+                WHEN reminders_sent = 1 THEN GREATEST(wait_minutes, $3::int * 60)
+                ELSE GREATEST(wait_minutes, $4::int * 60) END) AS due_at
          FROM engine_decision_watches
         WHERE status = 'watching' AND NOT fixture AND (snoozed_until IS NULL OR snoozed_until <= $1::timestamptz)),
      due AS (SELECT * FROM d WHERE due_at <= $1::timestamptz),
@@ -698,7 +730,7 @@ export async function postQueue(now: Date): Promise<{ watch_id: string; owner_us
               ORDER BY owner_user_id, due_at, watch_id)
      SELECT watch_id, owner_user_id, due_at, escalation FROM (SELECT * FROM rem UNION ALL SELECT * FROM due WHERE escalation) q
       ORDER BY due_at, watch_id`,
-    [now.toISOString(), RULE.owner_gap_hours],
+    [now.toISOString(), RULE.owner_gap_hours, RULE.thread_step_hours[1], RULE.thread_step_hours[2]],
   );
   return r.rows;
 }
@@ -711,6 +743,150 @@ async function postedToday(now: Date): Promise<number> {
     [`${now.toISOString().slice(0, 10)}T00:00:00.000Z`],
   );
   return Number(r.rows[0]?.n ?? 0);
+}
+
+/* --------------------------------------------------------- combined DM */
+
+/**
+ * One DM per person, at most once per RULE.digest_gap_hours, listing every open watch they hold (30 Oct
+ * 2026, Jason's reminder contract in #workflow-logs-destiny 1793376980.352649: "the combined per-person
+ * reminder as the primary channel"). It goes only to a person with at least one watch past its first wait;
+ * it lists all their open watches, the overdue ones first and the longest-waiting first within each. Built
+ * in code from the rows, never by the agent. The in-thread reminders above stay as the audit trail.
+ */
+export interface DigestItem {
+  watch_id: string;
+  thread_link: string | null;
+  record: string | null;
+  owed: string;
+  waiting_minutes: number;
+  overdue: boolean;
+  snoozed_until: string | null;
+}
+
+/** The one line of what is owed: the newest line of the next step, else the ask itself. */
+export function owedLine(w: Pick<WatchRow, 'next_step' | 'decision'>): string {
+  const lines = (w.next_step ?? '').split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const pick = (lines.length ? lines[lines.length - 1] : w.decision).replace(/^Update \d{4}-\d{2}-\d{2}[^:]*:\s*/i, '').replace(/\s+/g, ' ');
+  return clip(pick, 180);
+}
+
+export function digestItems(rows: WatchRow[], now: Date): DigestItem[] {
+  return rows
+    .map((w) => {
+      const from = waitFrom(w);
+      const snoozed = snoozedAt(w, now);
+      return {
+        watch_id: w.watch_id,
+        thread_link: w.thread_link,
+        record: w.record_id ? `${w.record_kind === 'loops' ? 'loop' : 'task'} ${w.record_id}` : null,
+        owed: owedLine(w),
+        waiting_minutes: Math.max(0, (now.getTime() - new Date(w.quiet_since).getTime()) / 60_000),
+        overdue: !snoozed && from.getTime() + w.wait_minutes * 60_000 <= now.getTime(),
+        snoozed_until: snoozed ? new Date(w.snoozed_until as Date).toISOString().slice(0, 10) : null,
+      };
+    })
+    .sort((a, b) => Number(b.overdue) - Number(a.overdue) || b.waiting_minutes - a.waiting_minutes || a.watch_id.localeCompare(b.watch_id));
+}
+
+export function digestText(ownerId: string, items: DigestItem[], opts: { test?: boolean } = {}): string {
+  const overdue = items.filter((i) => i.overdue).length;
+  const listed = items.slice(0, RULE.digest_max_listed);
+  const line = (i: DigestItem, k: number) => {
+    const where = i.thread_link ? `<${i.thread_link}|thread>` : i.record ? i.record : 'no thread';
+    // Days from two days up, so a reader sees "4 days", not "100 hours".
+    const age = i.waiting_minutes >= 48 * 60 ? `${Math.round(i.waiting_minutes / 1440)} days` : hoursWords(i.waiting_minutes);
+    const state = i.snoozed_until ? `snoozed until ${i.snoozed_until}` : `${i.overdue ? 'waiting' : 'quiet'} ${age}`;
+    return `${k}. \`${i.watch_id}\` · ${where} · ${state}\n      ${i.owed}`;
+  };
+  const out = [
+    `${opts.test ? 'TEST. ' : ''}:eyes: *Decision Watch* ${mention(ownerId)}, you have *${items.length} open ${items.length === 1 ? 'ask' : 'asks'}*, ${overdue} past ${overdue === 1 ? 'its' : 'their'} first wait.`,
+    'Longest waiting first. Each one closes once what is owed is shown done in its own thread (post the link or result there).',
+    '',
+  ];
+  let k = 1;
+  const due = listed.filter((i) => i.overdue);
+  const rest = listed.filter((i) => !i.overdue);
+  if (due.length) out.push('*Waiting on you*', ...due.map((i) => line(i, k++)));
+  if (rest.length) out.push('', '*Open, not due yet*', ...rest.map((i) => line(i, k++)));
+  if (items.length > listed.length) out.push('', `_and ${items.length - listed.length} more: <${WATCHES_PAGE}|all your watches>_`);
+  out.push('', `_One summary per ${RULE.digest_gap_hours} hours. Reminders in the threads now come at 24 hours, 72 hours and 7 days. Waiting on a date? Ask Bays to snooze that watch._`);
+  return out.join('\n');
+}
+
+export interface DigestResult {
+  owners_due: number;
+  sent: Array<{ owner: string; open: number; overdue: number; ts?: string }>;
+  held_gap: Array<{ owner: string; last_sent_at: string }>;
+  failed: Array<{ owner: string; error: string }>;
+  would?: Array<{ owner: string; open: number; overdue: number; action: string }>;
+  preview?: string;
+}
+
+async function lastDigest(owner: string): Promise<Date | null> {
+  const r = await query<{ at: Date }>(
+    `SELECT max(at) AS at FROM engine_events WHERE event_type = 'decision_watch_digest_sent' AND subject_id = $1`,
+    [owner],
+  );
+  return r.rows[0]?.at ? new Date(r.rows[0].at) : null;
+}
+
+/**
+ * The digest pass. `dry` sends nothing and says who would get one. `only` narrows to one person, and with
+ * `force` sends theirs now whatever the gap (a person testing their own list); the claim is still written.
+ */
+export async function digestSweep(now = new Date(), opts: { dry?: boolean; only?: string; force?: boolean } = {}): Promise<DigestResult> {
+  const out: DigestResult = { owners_due: 0, sent: [], held_gap: [], failed: [], ...(opts.dry ? { would: [] } : {}) };
+  const rows = await query<WatchRow>(
+    `SELECT * FROM engine_decision_watches WHERE status = 'watching' AND NOT fixture AND ($1::text IS NULL OR owner_user_id = $1) ORDER BY owner_user_id, quiet_since`,
+    [opts.only ?? null],
+  );
+  const byOwner = new Map<string, WatchRow[]>();
+  for (const w of rows.rows) byOwner.set(w.owner_user_id, [...(byOwner.get(w.owner_user_id) ?? []), w]);
+  const gapMs = RULE.digest_gap_hours * 3_600_000;
+  for (const [owner, ws] of byOwner) {
+    const items = digestItems(ws, now);
+    const overdue = items.filter((i) => i.overdue).length;
+    if (!overdue && !opts.force) continue;
+    out.owners_due++;
+    const last = await lastDigest(owner);
+    if (!opts.force && last && now.getTime() - last.getTime() < gapMs) {
+      out.held_gap.push({ owner, last_sent_at: last.toISOString() });
+      out.would?.push({ owner, open: items.length, overdue, action: `held: last summary ${last.toISOString()}` });
+      continue;
+    }
+    const text = digestText(owner, items);
+    if (opts.dry) {
+      out.would?.push({ owner, open: items.length, overdue, action: 'send the combined DM' });
+      if (opts.only) out.preview = text;
+      continue;
+    }
+    // The claim comes first, so the timer and a person (or two instances in a deploy) send one DM, not two.
+    const window = Math.floor(now.getTime() / gapMs);
+    const claim = await engineEvents.record({
+      event_type: 'decision_watch_digest_sent',
+      subject_id: owner,
+      lane: 'BAYS',
+      actor: 'decision-watch',
+      detail: { open: items.length, overdue, watch_ids: items.map((i) => i.watch_id), forced: Boolean(opts.force) },
+      dedupe_key: `dw-digest:${owner}:${window}${opts.force ? `:forced:${now.getTime()}` : ''}`,
+    });
+    if (!claim.recorded) continue;
+    const r = await slack.dm(owner, text);
+    if (!r.ok) {
+      // Nothing went out, so the claim is given back and the next pass tries again; the failure is kept.
+      await query(`DELETE FROM engine_events WHERE id = $1`, [claim.id]);
+      out.failed.push({ owner, error: r.detail });
+      await engineEvents
+        .record({ event_type: 'decision_watch_digest_failed', subject_id: owner, lane: 'BAYS', actor: 'decision-watch', detail: { error: r.detail }, dedupe_key: `dw-digest-failed:${owner}:${now.toISOString().slice(0, 10)}` })
+        .catch(() => undefined);
+      console.error(`[decision-watch] combined DM to ${owner} not sent: ${r.detail}`);
+      continue;
+    }
+    if (r.ts) await query(`UPDATE engine_events SET source_ref = $2 WHERE id = $1`, [claim.id, r.ts]);
+    out.sent.push({ owner, open: items.length, overdue, ts: r.ts });
+  }
+  return out;
 }
 
 /* ----------------------------------------------------------------- sweep */
@@ -891,7 +1067,7 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
       }
 
       // 4. Quiet past the wait, counted from the later of the last movement and a snooze's end.
-      const dueTime = waitFrom(w, quietSince).getTime() + w.wait_minutes * 60_000;
+      const dueTime = waitFrom(w, quietSince).getTime() + stepWaitMinutes(w) * 60_000;
       if (dueTime > now.getTime()) {
         if (opts.dry) would(w, `nothing: not due until ${new Date(dueTime).toISOString()}`);
         continue;
@@ -1095,6 +1271,11 @@ export function startSweeping(): void {
       .then((r) => {
         const did = r.opened_auto + r.closed.length + r.reminded.length + r.escalated.length + r.failed.length;
         if (did) console.log(`[decision-watch] ${r.looked_at} looked at: ${r.opened_auto} opened (CAPITAL), ${r.closed.length} closed, ${r.reminded.length} reminded, ${r.escalated.length} escalated, ${r.failed.length} failed, ${r.unread.length} unread`);
+      })
+      // The combined DM runs after the threads are read, so it lists what is still open after this pass.
+      .then(() => digestSweep())
+      .then((d) => {
+        if (d.sent.length || d.failed.length) console.log(`[decision-watch] combined DM: ${d.sent.length} sent, ${d.failed.length} failed, ${d.held_gap.length} held by the ${RULE.digest_gap_hours}-hour gap`);
       })
       .catch((e) => console.error(`[decision-watch] sweep failed: ${e instanceof Error ? e.message : String(e)}`))
       .finally(() => (busy = false));

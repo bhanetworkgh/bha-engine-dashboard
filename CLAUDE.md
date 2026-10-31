@@ -2993,6 +2993,24 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
   held (`held_owner`) and goes on a later pass; escalations are not held. `open()` returns the
   owner's other open watches (`others`, `owner_other_open` on the tool) and the tool tells Bays to
   keep one watch when two are the same ask. `test:decision-watch` check 12e.
+- **The reminder contract: one combined DM per person, sparse thread posts** (31 Oct 2026, Destiny —
+  Jason in #workflow-logs-destiny 1793376980.352649, DW-1793377019281-VGKO; SOP 7947a581). With 94 open
+  watches and one reminder per person per 12 hours, one watch got a nudge about every ten days.
+  **The combined DM is the main reminder** (`digestSweep`, after every sweep): once per
+  `RULE.digest_gap_hours` (12) per person, only to a person with at least one watch past its first wait,
+  one DM as Bays listing every open watch they hold (ID, thread link, one line of what is owed from the
+  newest line of `next_step`, else the ask), past-wait ones first and longest waiting first, snoozed ones
+  marked, 25 named and the rest counted with a link to the page. The claim is a
+  `decision_watch_digest_sent` event (dedupe key per person and 12-hour window) written before the DM; a
+  DM Slack refuses deletes the claim, writes one `decision_watch_digest_failed` event a day and is tried
+  on the next pass. Fixture watches are never listed. **The in-thread reminders stay as the audit trail,
+  slower** (`RULE.thread_step_hours`, `stepWaitMinutes`): reminder 1 after the watch's own wait (24 hours
+  by default), reminder 2 after 72 hours quiet, reminder 3 after 7 days quiet, never shorter than the own
+  wait; the escalation still waits the own wait. Each post says it was picked under the 24-hour /
+  72-hour / 7-day rule and that the full list comes by DM. Longest-waiting first, the 12-hour
+  per-person limit on thread posts and the "held" note on the row are unchanged. `run_decision_watch`
+  runs both passes; `digest_for` narrows the DM pass to one person (a dry run returns the DM's text as
+  `preview`), and `digest_now` sends the requester's own list at once. `npm run test:decision-watch-digest`.
 - Tools, write connection: `open_decision_watch`, `list_decision_watches`,
   `close_decision_watch` (Bays' scope) and `run_decision_watch` (a person;
   `dry_run` by default). `fixture: true` makes a marked test watch whose posts
