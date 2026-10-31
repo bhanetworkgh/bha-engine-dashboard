@@ -27,7 +27,9 @@
  * - drops out of everything that reads `pending_builder_input` literally: the
  *   six-hourly reminder, `/log-status`, the Codex page's Needs input stage;
  * - replies in the "Log parked" thread in #bha-log-reviews, which is found by
- *   the row id that post prints, and tells the builder in their log channel
+ *   the row id that post prints, or, when there is none (since Q2VC an
+ *   incomplete log goes to Jason's review card instead), in the review card's
+ *   thread kept on the Codex row (`findReviewCard`); and tells the builder in their log channel
  *   when someone else voided it. A Slack post that does not land never undoes
  *   the void: the answer is `ok: false, raise: true`, naming it.
  *
@@ -167,6 +169,24 @@ export async function findParkedPost(row: Pick<HeldRow, 'id' | 'created_at' | 'f
   return { ok: false, error: `conversations.history could not read ${LOG_REVIEW_CHANNEL} (${tried.join('; ') || 'no Slack token'})` };
 }
 
+/**
+ * Since Q2VC (30 Oct 2026) an incomplete log is not posted as "Log parked": it
+ * goes to Jason's review card, marked incomplete, and the parked row and the
+ * Codex row share one Submission ID. `Save Review Card Location · PATCH` keeps
+ * the card's place on the Codex row (`Review Card Channel`, `Review Card TS`),
+ * so a void replies in that card's thread when there is no "Log parked" post.
+ */
+export async function findReviewCard(submissionId: string | null): Promise<{ channel: string; ts: string } | null> {
+  if (!submissionId) return null;
+  const r = await query<{ channel: string | null; ts: string | null }>(
+    `SELECT fields->>'Review Card Channel' AS channel, fields->>'Review Card TS' AS ts FROM engine_codex_submissions
+      WHERE fields->>'Submission ID' = $1 AND fields->>'Review Card TS' IS NOT NULL ORDER BY id DESC LIMIT 1`,
+    [submissionId],
+  );
+  const hit = r.rows[0];
+  return hit?.ts ? { channel: hit.channel?.trim() || LOG_REVIEW_CHANNEL, ts: hit.ts } : null;
+}
+
 function dashboardUrl(): string {
   return (process.env.PUBLIC_DASHBOARD_URL || 'https://dashboard.bhanetwork.org').replace(/\/+$/, '');
 }
@@ -260,7 +280,22 @@ export async function voidLog(input: VoidInput) {
     const p = await slack.botCall('chat.postMessage', { channel: LOG_REVIEW_CHANNEL, thread_ts: found.ts, unfurl_links: false, unfurl_media: false, text });
     done.push({ what: 'review_thread_reply', channel: LOG_REVIEW_CHANNEL, ts: String(p.ts ?? found.ts), ok: p.ok, ...(p.ok ? {} : { error: String(p.error) }) });
   } else {
-    done.push({ what: 'review_thread_reply', channel: LOG_REVIEW_CHANNEL, ts: '', ok: false, error: found.ok ? `no "Log parked" post for row ${row.id} was found in the channel` : found.error });
+    // No "Log parked" post: since Q2VC the incomplete log sits on Jason's review card instead.
+    let card: { channel: string; ts: string } | null = null;
+    let cardError: string | null = null;
+    try {
+      card = await findReviewCard(row.submission_id);
+    } catch (e) {
+      cardError = e instanceof Error ? e.message : String(e);
+    }
+    if (card) {
+      const text = `:wastebasket: *Voided by ${by}.* The parked copy of this log is closed: no more reminders, and it can no longer be completed. Any approval already given on this card stands.\n*Why:* ${reason}${replacedLine}\nIt stays on record on the dashboard (${dashboardUrl()}/codex).`;
+      const p = await slack.botCall('chat.postMessage', { channel: card.channel, thread_ts: card.ts, unfurl_links: false, unfurl_media: false, text });
+      done.push({ what: 'review_thread_reply', channel: card.channel, ts: String(p.ts ?? card.ts), ok: p.ok, ...(p.ok ? {} : { error: String(p.error) }) });
+    } else {
+      const parked = found.ok ? `no "Log parked" post for row ${row.id} was found in the channel` : found.error;
+      done.push({ what: 'review_thread_reply', channel: LOG_REVIEW_CHANNEL, ts: '', ok: false, error: `${parked}, and ${cardError ? `the review card could not be looked up (${cardError})` : `no review card is saved for ${row.submission_id ?? `row ${row.id}`}`}` });
+    }
   }
   // The builder is told in their log channel when someone else voided it.
   if (!auto && !isBuilder && row.builder_user_id) {
