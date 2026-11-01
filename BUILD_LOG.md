@@ -14021,3 +14021,10 @@ Files:      server/src/mediaPosts.ts (new), server/src/migrations.ts (109), serv
 Problem:    The existing post log (engine_media_post_log) only accepts approved vFarm renders from the Drive folder, so it refuses the generated daily cards; there was nowhere to keep a draft, a reject note or a revision.
 Fix:        Three tables, one module. Jason's claim-gating v0 rules run in claimCheck() on every draft (blocked: sensor-driven irrigation, fully automated farm; flagged: performance or revenue numbers), and the decisions table refuses an approve of a blocked draft and a reject with no note. Checked by hand on ten sample sentences with node --experimental-strip-types: the two blocked phrases block, "3x more basil", "90%" and "$5k a month" flag, "Day 3", "Part 1 of 4", "12 fixes" and "Happy new month" stay clean.
 Decision:   Only Jason or Destiny decide (Destiny as Jason's backstop, as on the other gates). The Media Twin agent reads only; its workflows write over the engine routes.
+
+## 2026-11-01 14:10 — A Media Twin revision keeps what Jason already approved
+Intent:     When Jason approves LinkedIn and rejects X, the rewrite should only redo X.
+Files:      server/src/mediaPosts.ts
+Problem:    create() built a revision from only the platforms the rewrite sent, so an approved platform vanished from the new draft and its status always started at in_review.
+Fix:        Inside the transaction, every platform the parent had approved and the revision does not send again is copied over with its decision, decided_by, decided_at and claim check; the overall claim check and the status (statusOf) are worked out after that, so a revision that only rewrites X reads partly_decided.
+Decision:   n8n's Media Twin — Rewrite Draft sends only the rejected platforms, so the carried-over text is exactly what Jason passed.
