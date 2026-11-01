@@ -1340,3 +1340,128 @@ html[data-scroll="document"] .aurora::before {
 .spark-hit:hover .spark-dot {
   opacity: 1;
 }
+
+/* ---------------------------------------------------------------------------
+   Field design, a preview (1 Nov 2026, Destiny). The website's look, from the
+   Bays Horizon Network design system (bhanetwork-site 3576442): warm paper,
+   deep field green, olive and one butter accent, set in Geist. Switched on by
+   <html data-design="field"> from the leaf chip in the top bar, remembered in
+   this browser only (bha.design). It changes colours and the font and
+   nothing else: no layout, no component, no data. The dashboard's own design
+   (BHA Dashboard) stays the default; delete this block, the chip and the line
+   in index.html to remove it. Outside every layer, so it wins over both
+   themes' tokens.
+   --------------------------------------------------------------------------- */
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/geist-latin.woff") format("woff");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+:root[data-design="field"] {
+  --bg: #f4f2ea;
+  --sidebar: #e9e6da;
+  --panel: #ffffff;
+  --raised: #efede4;
+  --hover: #e4e1d4;
+  --line: rgba(24, 32, 15, 0.08);
+  --line-strong: rgba(24, 32, 15, 0.14);
+
+  --ink: #18200f;
+  --dim: #5c6352;
+  --faint: #8d9381;
+
+  /* The accent is the field green: links, focus, the active tab. 13.9:1 on
+     paper. Butter is the primary button, as on the site. */
+  --accent: #1d2e1c;
+  --accent-soft: rgba(125, 136, 98, 0.18);
+  --accent-ink: #2a3f27;
+  --accent-on: #f2f1e8;
+
+  --primary: #f6ea8f;
+  --primary-hover: #ecdc6a;
+  --primary-on: #18200f;
+  --primary-edge: #c9b94a;
+
+  --tint-blue: #2a3f27;
+  --tint-indigo: #5f6a48;
+  --tint-teal: #4f7a5a;
+  --tint-green: #3d6b35;
+  --tint-purple: #6b5a3a;
+  --tint-graphite: #48503f;
+  --tint-mint: #6f8f5f;
+  --tint-cyan: #567a6a;
+
+  --hero-a: #e3e8d3;
+  --hero-b: #ece6c4;
+  --hero-c: #d7dfc6;
+
+  --shadow-card: 0 1px 2px rgba(24, 32, 15, 0.03), 0 8px 24px rgba(24, 32, 15, 0.05);
+  --glass-bg: rgba(255, 255, 255, 0.6);
+  --frost-card: rgba(255, 255, 255, 0.74);
+  --frost-side: rgba(233, 230, 218, 0.78);
+  --frost-bar: rgba(244, 242, 234, 0.3);
+  --aurora-a: rgba(125, 136, 98, 0.18);
+  --aurora-b: rgba(246, 234, 143, 0.2);
+  --aurora-c: rgba(29, 46, 28, 0.08);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%235c6352' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");
+}
+
+:root[data-design="field"][data-theme="dark"] {
+  --bg: #142113;
+  --sidebar: #101a0f;
+  --panel: #1d2e1c;
+  --raised: #24371f;
+  --hover: #2a3f27;
+  --line: rgba(242, 241, 232, 0.08);
+  --line-strong: rgba(242, 241, 232, 0.16);
+
+  --ink: #f2f1e8;
+  --dim: #cdd4c5;
+  --faint: #a7b39f;
+
+  /* Butter is the accent on forest: 11.7:1, ink label 13.6:1. */
+  --accent: #f6ea8f;
+  --accent-soft: rgba(246, 234, 143, 0.14);
+  --accent-ink: #f6ea8f;
+  --accent-on: #18200f;
+
+  --primary: #f6ea8f;
+  --primary-hover: #ecdc6a;
+  --primary-on: #18200f;
+  --primary-edge: #f6ea8f;
+
+  --tint-blue: #4f7a5a;
+  --tint-indigo: #7d8862;
+  --tint-teal: #6f9a7a;
+  --tint-green: #5c8f52;
+  --tint-purple: #9a8a5a;
+  --tint-graphite: #7a8471;
+  --tint-mint: #8fae7f;
+  --tint-cyan: #7aa08f;
+
+  --hero-a: #24371f;
+  --hero-b: #2f3a1c;
+  --hero-c: #1f3324;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(242, 241, 232, 0.05);
+  --glass-bg: rgba(242, 241, 232, 0.08);
+  --frost-card: rgba(29, 46, 28, 0.74);
+  --frost-side: rgba(16, 26, 15, 0.78);
+  --frost-bar: rgba(20, 33, 19, 0.3);
+  --aurora-a: rgba(125, 136, 98, 0.2);
+  --aurora-b: rgba(246, 234, 143, 0.08);
+  --aurora-c: rgba(201, 207, 180, 0.06);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%23cdd4c5' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");
+}
+
+:root[data-design="field"] body,
+:root[data-design="field"] .font-sans,
+:root[data-design="field"] input,
+:root[data-design="field"] select,
+:root[data-design="field"] textarea,
+:root[data-design="field"] button {
+  font-family: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+}

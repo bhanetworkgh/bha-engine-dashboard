@@ -13986,3 +13986,10 @@ Proof:     npm registry unreachable from the build machine (ENOTFOUND), so: serv
 Live proof in #bha-builder-sandbox (run_renewal_check sandbox, audits 4212 and 4214, ts 1793514947.303999
 and 1793514954.156649) showed the 1-day card ending "Not a real tool.." because the registry sentence
 already ends in a full stop. The card now drops it before adding its own. Test part 1 gains the check.
+
+## 2026-11-01 10:30 — Field design preview: the website's look over the dashboard, one switch
+Intent:     Let Destiny see the dashboard in the new Bays Horizon Network design (the website's: warm paper, field green, olive, butter, Geist) without changing the dashboard's own design.
+Files:      src/index.css (a "Field design" block at the end, outside every layer), src/components/ClockChip.tsx (DesignChip), src/components/Layout.tsx (the chip beside the theme toggle), index.html (pre-paint line), public/fonts/geist-latin.woff and OFL-Geist.txt.
+Problem:    None in the code. Locally the front end could not be built: `npm ci` cannot reach the registry from this machine and left node_modules incomplete (`MODULE_NOT_FOUND` from vite). Render's build is the check.
+Fix:        —
+Decision:   A preview, not a redesign. It overrides colour tokens and the font only, under <html data-design="field">, for light and dark; no layout, component or data changes. Off by default; the leaf chip in the top bar turns it on, remembered per browser in localStorage `bha.design`. The dashboard's design (now named BHA Dashboard) stays the default. To remove it: delete the block, the chip and the index.html line. Field accent is the forest green on paper (13.9:1) and butter on forest in dark (11.7:1); the primary button is butter with an ink label, as on the site.
