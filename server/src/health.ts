@@ -185,7 +185,7 @@ export async function incidents(): Promise<Incident[]> {
   const ids = [...new Set(mapped.map((i) => i.execution_id).filter((v): v is string => typeof v === 'string' && /^\d+$/.test(v)))];
   if (ids.length) {
     const runs = await query<{ execution_id: string; workflow_id: string }>(
-      `SELECT execution_id::text AS execution_id, workflow_id FROM engine_execution_runs WHERE execution_id = ANY($1::bigint[])`,
+      `SELECT execution_id::text AS execution_id, workflow_id FROM engine_execution_runs WHERE id_epoch = 0 AND execution_id = ANY($1::bigint[])`,
       [ids],
     );
     const byId = new Map(runs.rows.map((x) => [x.execution_id, x.workflow_id]));
