@@ -61,6 +61,8 @@ interface Field {
   defaultOnCreate?: string;
   /** Refused as empty on every write, not only on create — the column is NOT NULL. */
   notNull?: boolean;
+  /** Holds which card pays: five or more digits in a row (a card number) is refused, never stored. */
+  cardSafe?: boolean;
 }
 
 interface KindSpec {
@@ -127,6 +129,10 @@ export const KINDS: Record<RegistryKind, KindSpec> = {
       { name: 'cost_currency', type: 'text', max: 8 },
       { name: 'billing_cycle', type: 'select', options: CYCLES },
       { name: 'renewal_date', type: 'date' },
+      // Which card or account the charge lands on (1 Nov 2026, Destiny): the owner's name and the
+      // last four digits at most, e.g. "Visa 6967 (Destiny)" or "Mercury card". Never a card number:
+      // five or more digits in a row is refused. The renewal reminder names it on every alert.
+      { name: 'paid_with', type: 'text', max: 120, cardSafe: true },
       { name: 'status', type: 'select', options: STATUS_SERVICE, defaultOnCreate: 'active' },
       { name: 'notes', type: 'longtext', max: 2000 },
     ],
@@ -250,6 +256,9 @@ function cleanValue(field: Field, raw: unknown): unknown {
   const s = String(raw).trim();
   if (!s) return null;
 
+  if (field.cardSafe && /\d{5,}/.test(s.replace(/[\s-]/g, ''))) {
+    throw new RegistryError(`"${field.name}" takes the card's owner and last four digits at most (e.g. "Visa 6967 (Destiny)"), never a card number.`);
+  }
   if (field.type === 'date') {
     if (!DATE.test(s)) throw new RegistryError(`"${field.name}" must be a date as YYYY-MM-DD.`);
     return s;

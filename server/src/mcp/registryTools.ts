@@ -16,6 +16,7 @@
  * section 4: there is no credentials registry). Remove and restore are Destiny's or Jason's.
  */
 import * as registry from '../registry';
+import * as renewal from '../renewalReminder';
 import * as mirror from '../mirror';
 import { query } from '../pg';
 import { redactSecrets } from '../dataGovernance';
@@ -115,6 +116,8 @@ export const readRegistry: ToolDefinition = {
     if (kind === 'services') {
       const spend = registry.spendOf(rows.filter((r) => !r.deleted_at));
       answer.spend = spend;
+      const today = new Date().toISOString().slice(0, 10);
+      answer.renewal_alerts = renewal.due(rows as unknown as renewal.Service[], today).map((d) => ({ id: d.service.id, renews: d.service.renewal_date, days: d.days, stage_due: d.stage }));
     }
     if (words.length && !hit.length) answer.note = `Nothing in ${kind} matches "${str(args, 'search')}". ${rows.length} are held.`;
     await mirror.logWrite({ endpoint: 'mcp:read_registry', kind: 'registry', method: 'MCP', key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET', outcome: 'read', detail: `${kind} ${hit.length}/${rows.length}${words.length ? ` "${words.join(' ')}"` : ''}`, ms: Date.now() - t0 }).catch(() => undefined);
@@ -124,7 +127,7 @@ export const readRegistry: ToolDefinition = {
 
 export const writeRegistry: ToolDefinition = {
   name: 'write_registry',
-  description: `Add, edit, remove or restore ONE row of the System Registry, the dashboard's list of every tool and service BHA uses: use it when someone says "register this tool in the dashboard" or a tool's details change. kind is services (the default), endpoints or workflows. action create needs name (services, endpoints) and, for endpoints, url; for workflows, id (the n8n workflow id) and name. update, remove and restore need id (read_registry gives it). fields are the row's own columns: for services name, category (hosting, automation, data, ai, comms, storage, other), what_it_is_for, url, managed_by, plan, billing_owner, cost_amount (a number), cost_currency, billing_cycle (monthly, quarterly, yearly, one-off), renewal_date (YYYY-MM-DD), status (active, trial, retired), notes. Leave a cost out when nobody has said it: never guess one. To retire a tool BHA stopped using, update status to retired (it stays listed as history); remove takes a row off the list and is for a row added by mistake. HELD HERE: requester_user_id must be Destiny, Jason or someone with a Builder Profile (not_permitted), and remove and restore are Destiny's or Jason's; NEVER put a password, API key or token in any field: a value shaped like one is refused (secret_refused) and nothing is written. Say where the secret lives instead (e.g. "in Bitwarden"). create refuses a name already held (already_held, naming the row): update it instead. dry_run checks everything and writes nothing. Returns {ok, written, row, page, message}. Audited on engine_mcp_writes.`,
+  description: `Add, edit, remove or restore ONE row of the System Registry, the dashboard's list of every tool and service BHA uses: use it when someone says "register this tool in the dashboard" or a tool's details change. kind is services (the default), endpoints or workflows. action create needs name (services, endpoints) and, for endpoints, url; for workflows, id (the n8n workflow id) and name. update, remove and restore need id (read_registry gives it). fields are the row's own columns: for services name, category (hosting, automation, data, ai, comms, storage, other), what_it_is_for, url, managed_by, plan, billing_owner, cost_amount (a number), cost_currency, billing_cycle (monthly, quarterly, yearly, one-off), renewal_date (YYYY-MM-DD: the renewal reminder posts in #bha-engine-alerts 7, 3 and 1 day before it), paid_with (which card pays: owner and last four digits at most, e.g. "Visa 6967 (Destiny)" or "Mercury card"; a card number is refused), status (active, trial, retired), notes. Leave a cost out when nobody has said it: never guess one. To retire a tool BHA stopped using, update status to retired (it stays listed as history); remove takes a row off the list and is for a row added by mistake. HELD HERE: requester_user_id must be Destiny, Jason or someone with a Builder Profile (not_permitted), and remove and restore are Destiny's or Jason's; NEVER put a password, API key or token in any field: a value shaped like one is refused (secret_refused) and nothing is written. Say where the secret lives instead (e.g. "in Bitwarden"). create refuses a name already held (already_held, naming the row): update it instead. dry_run checks everything and writes nothing. Returns {ok, written, row, page, message}. Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -211,5 +214,44 @@ export const writeRegistry: ToolDefinition = {
   },
 };
 
+
+const SANDBOX = 'C0ATTFED35E';
+
+export const runRenewalCheck: ToolDefinition = {
+  name: 'run_renewal_check',
+  description: `Runs the renewal reminder now, the same check the dashboard runs every hour: every active tool in the System Registry with a renewal date gets one Block Kit card in #bha-engine-alerts at 7 days, 3 days and 1 day before it (tagging Destiny and Jason, with the amount and the card that pays), and a passed monthly, quarterly or yearly renewal date is moved on by its cycle. Each stage posts once (an engine event, registry_renewal_alert_sent); a post Slack refuses is retried next hour and DMs Destiny. dry_run lists what would post and writes nothing. sandbox posts the due cards to #bha-builder-sandbox instead, claims nothing and moves no date: the proof run. only narrows to one registry id. Destiny or Jason only. Returns {ok, today, channel, rolled, alerts}.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      requester_user_id: { type: 'string', description: 'Slack id of the person asking: Destiny or Jason.' },
+      dry_run: { type: 'boolean' },
+      sandbox: { type: 'boolean', description: 'Post to #bha-builder-sandbox, claim nothing, move no date.' },
+      only: { type: 'string', description: 'One registry service id.' },
+    },
+    required: ['requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Run the renewal reminder' },
+  handler: async (args, deps) => {
+    const requester = str(args, 'requester_user_id') || null;
+    const dry = args.dry_run === true;
+    const audit = await auditOpen({ tool: 'run_renewal_check', args, access: deps.access, kind: 'registry', requester, dry_run: dry });
+    if (requester !== DESTINY && requester !== JASON) {
+      await auditClose(audit, { outcome: 'refused', detail: 'not_permitted', guard_result: { reason: 'not_permitted' } });
+      return { ok: false, reason: 'not_permitted', message: 'Only Destiny or Jason may run the renewal reminder by hand. It runs on its own every hour.', audit_id: audit };
+    }
+    try {
+      const r = await renewal.check({ dry_run: dry, channel_override: args.sandbox === true ? SANDBOX : undefined, only: str(args, 'only') || undefined });
+      const failed = r.alerts.filter((a) => a.outcome === 'post_failed');
+      await auditClose(audit, { outcome: dry ? 'dry_run' : failed.length ? 'failed' : 'updated', detail: `${r.alerts.map((a) => `${a.id} ${a.stage}d ${a.outcome}`).join(', ') || 'nothing due'}${r.rolled.length ? `; rolled ${r.rolled.map((x) => `${x.id} to ${x.to}`).join(', ')}` : ''}` });
+      return { ok: failed.length === 0, ...(failed.length ? { raise: true } : {}), ...r, audit_id: audit };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      await auditClose(audit, { outcome: 'failed', detail: message });
+      return { ok: false, reason: 'error', message, raise: true, audit_id: audit };
+    }
+  },
+};
+
 export const REGISTRY_READ_TOOLS: ToolDefinition[] = [readRegistry];
-export const REGISTRY_WRITE_TOOLS: ToolDefinition[] = [writeRegistry];
+export const REGISTRY_WRITE_TOOLS: ToolDefinition[] = [writeRegistry, runRenewalCheck];
