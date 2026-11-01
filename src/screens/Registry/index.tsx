@@ -641,7 +641,7 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
   const shown = rows.filter(
     (s) =>
       (category === 'all' || s.category === category) &&
-      (!term || [s.name, s.what_it_is_for, s.managed_by, s.plan, s.billing_owner].some((v) => v && v.toLowerCase().includes(term))),
+      (!term || [s.name, s.what_it_is_for, s.managed_by, s.plan, s.billing_owner, s.paid_with].some((v) => v && v.toLowerCase().includes(term))),
   );
   const paged = usePaged(shown, `${category}|${term}`);
 
@@ -703,6 +703,7 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
             { name: 'cost_currency', label: 'currency', placeholder: 'USD' },
             { name: 'billing_cycle', label: 'billing cycle', type: 'select', options: CYCLES },
             { name: 'renewal_date', label: 'renews', type: 'date' },
+            { name: 'paid_with', label: 'paid with', placeholder: 'Visa 6967 (Destiny)' },
             { name: 'notes', label: 'notes' },
           ]}
         />
@@ -716,8 +717,8 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
       */}
       <Grid
         label="Tools"
-        min={1040}
-        cols={12}
+        min={1120}
+        cols={13}
         empty="No tool is registered yet."
 
         head={
@@ -732,6 +733,7 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
             <Th>cycle</Th>
             <Th>renews</Th>
             <Th>who pays</Th>
+            <Th>paid with</Th>
             <Th>status</Th>
             <Th />
           </>
@@ -799,6 +801,7 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
                 )}
               </td>
               <td className="td text-dim">{cell(p, 'services', s, 'billing_owner')}</td>
+              <td className="td text-dim">{cell(p, 'services', s, 'paid_with')}</td>
               <td className="td card-meta">{cell(p, 'services', s, 'status', { type: 'select', options: SERVICE_STATUS })}</td>
               <td className="td card-actions td-actions">
                 <RowTools {...p} kind="services" row={s} />

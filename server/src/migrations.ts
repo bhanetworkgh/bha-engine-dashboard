@@ -4071,6 +4071,14 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
        )`,
     ],
   },
+  {
+    // 1 Nov 2026, Destiny: n8n Cloud lapsed at the 1 Nov renewal because the card had no funds, and
+    // nothing said so in advance. The registry now records which card pays each tool, so the
+    // renewal reminder (renewalReminder.ts) can name it, and the move to the Mercury card can be tracked.
+    id: 107,
+    name: 'registry_services.paid_with: which card or account pays each tool',
+    statements: [`ALTER TABLE registry_services ADD COLUMN IF NOT EXISTS paid_with text`],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

@@ -2555,6 +2555,7 @@ export interface RegistryService extends RegistryBase {
   managed_by: string | null;
   plan: string | null;
   billing_owner: string | null;
+  paid_with: string | null;
   cost_amount: number | null;
   cost_currency: string | null;
   billing_cycle: BillingCycle | null;

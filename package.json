@@ -94,7 +94,8 @@
     "test:engine-strain": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/engine-strain.test.cjs",
     "test:repair-settle": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/repair-settle.test.cjs",
     "test:service-balances": "node server/test/service-balances.test.cjs",
-    "test:registry-tools": "node server/test/registry-tools.test.cjs"
+    "test:registry-tools": "node server/test/registry-tools.test.cjs",
+    "test:renewal-reminder": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/renewal-reminder.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",

@@ -13950,3 +13950,33 @@ Problem:    The Lights note said the relay bit was "last seen before the rack we
 Fix:        Lights: "a relay bit is not proof the light is on or off, so the light's state is not shown". Stage names as the profile writes them; the supplier stages from their key in sentence case ("Nursery"). heroBayAge.fieldsNow applies the server's own silent-feed rule again with the browser's clock: once feed.last_snapshot_at is more than 600 s old (monitoringTwin.THRESHOLDS.feed_silent_s, checked equal by the test) every REAL reading reads NO_FEED with the server's note word for word; a missing or unreadable snapshot time counts as quiet. It only downgrades, changes no value or timestamp, and never touches SIMULATED or NOT_VERIFIED. The interval is cleared on unmount. useData, the Monitoring Twin and the server rules are unchanged.
 Proof:      npm run test:hero-bay 15 checks (the aging check transpiles heroBayAge.ts with the repo's TypeScript and runs it on a test clock against a buildHeroBay payload: LIVE at 600 s, NO_FEED at 601 s, the same verdict and note as the server). In a local browser on a scratch database: a snapshot 574 s old read LIVE; with the database stopped so every re-read failed, the page turned to "feed quiet" with a grey DHT11 dot at about 17:19 UTC, with no reload. typecheck and build pass.
 Decision:   Kept on the page rather than in useData, which every screen shares. The page re-checks every 15 s, inside the 30 s asked for.
+
+---
+
+## 2026-11-01 07:30 — Renewal reminders for paid tools (7, 3 and 1 day before)
+
+Intent:    n8n Cloud renewed at 00:00 UTC on 1 Nov against an unfunded card, the charge failed and
+           the workspace went offline from about 00:41 to 06:07 UTC (404 "No instance here", then 503
+           "Workspace offline"); Bays and every workflow stopped. Destiny moved funds and resubscribed
+           (Paddle receipt 82021774-170695744, Cloud Pro-2, $155.52). Nothing warned in advance, and a
+           bank transfer needs days. Destiny: warn 7 days, 3 days and 1 day before, as a Block Kit
+           card in #bha-engine-alerts, running on the dashboard so it does not depend on n8n.
+
+Files:     server/src/renewalReminder.ts (new) — hourly sweep: one card per stage per renewal,
+             claimed as engine event registry_renewal_alert_sent before posting; a refused post gives
+             the claim back, writes registry_renewal_alert_failed and DMs Destiny once a day; a passed
+             monthly/quarterly/yearly date rolls forward by its cycle (registry_renewal_rolled_forward).
+           server/src/registry.ts — services.paid_with (owner + last four at most; 5+ digits refused).
+           server/src/migrations.ts — 107: registry_services.paid_with.
+           server/src/mcp/registryTools.ts — run_renewal_check (Destiny/Jason; dry_run, sandbox, only);
+             read_registry returns renewal_alerts; write_registry documents paid_with.
+           server/src/index.ts, server/src/timers.ts — the timer, on the Scheduled runs page.
+           src/screens/Registry/index.tsx, src/data/types.ts — "paid with" column and form field.
+           server/test/renewal-reminder.test.cjs, package.json — test:renewal-reminder.
+
+Proof:     npm registry unreachable from the build machine (ENOTFOUND), so: server typecheck with
+           TypeScript 6.0.3 clean for every changed file (the only errors are pg's missing types, not
+           installed); test part 1, 4 of 4; a stand-in run of check() with database and Slack faked,
+           13 of 13 (it caught the roll-forward reading the date after updating it, fixed). Part 2 of
+           the repo test needs a local _test database and was not run here. Live proof on production
+           after deploy: sandbox card, then the real path on a throwaway row.
