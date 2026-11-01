@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useSession } from '../app/session';
 import { Button, Icon, ReplayProvider, type IconName } from './ui';
-import { ClockChip, DesignChip, ThemeChip } from './ClockChip';
+import { ClockChip, ThemeChip } from './ClockChip';
 import { cx } from '../lib';
 
 const GROUPS: { group: string | null; items: { to: string; label: string; icon: IconName }[] }[] = [
@@ -217,7 +217,6 @@ export default function Layout() {
             </Button>
             <div className="ml-auto flex min-w-0 items-center gap-2">
               <ClockChip />
-              <DesignChip />
               <ThemeChip />
             </div>
           </div>

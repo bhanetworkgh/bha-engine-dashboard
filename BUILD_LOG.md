@@ -14000,3 +14000,10 @@ Files:      BUILD_LOG.md
 Problem:    The entry above says the field accent is 13.9:1 on paper; measured, forest #1d2e1c on paper #f4f2ea is 12.8:1. Muted text (#5c6352) on a white panel is 6.2:1; faint (#8d9381) on white is 3.2:1, above the dashboard's own faint (#a1a1a6, 2.6:1), so no worse than today.
 Fix:        Render deploy dep-dbjg812vcj2c73eup230 built and went live at 09:19:57 UTC (commit ea73415), so the stylesheet and the chip compile. The page itself cannot be fetched from here (robots and the login), so the look is for Destiny to judge.
 Decision:   —
+
+## 2026-11-01 10:25 — Field design preview reverted
+Intent:     Remove the field design preview; Destiny looked at it live and called it terrible.
+Files:      index.html, src/index.css, src/components/ClockChip.tsx, src/components/Layout.tsx back to 820a984; public/fonts/ removed.
+Problem:    `git revert ea73415` conflicted on BUILD_LOG.md (two entries appended since), so the four code files were restored from 820a984 by hand and the font folder removed; the log keeps every entry.
+Fix:        Reverted. A browser that had the switch on keeps a stray `bha.design` key in localStorage; nothing reads it any more, so it does nothing.
+Decision:   The dashboard stays on its own design (BHA Dashboard). The Bays Horizon Network design system is for outward-facing work only: the site, social posts, decks.
