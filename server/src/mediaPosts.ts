@@ -213,12 +213,19 @@ export async function create(input: CreateInput) {
     };
   }
   if (!Object.keys(platforms).length) refuse('missing_field', 'A draft needs text for at least one platform.');
-  const overall = worst(Object.values(platforms).map((p) => p!.claim_check_status));
 
   return withTransaction(async (db) => {
     const parentId = s(input.parent_post_id, 40);
     const parent = parentId ? await one(db, parentId, true) : null;
     if (parentId && !parent) refuse('not_found', `No Media Twin post ${parentId} to revise.`, 404);
+    // A revision rewrites what Jason rejected. A platform he already approved, and that the rewrite does not
+    // send again, is carried over with its approval, so he is not asked twice about text he passed.
+    if (parent) {
+      for (const [k, v] of Object.entries(parent.platforms)) {
+        if (!platforms[k as Platform] && v && v.decision === 'approved') platforms[k as Platform] = { ...v };
+      }
+    }
+    const overall = worst(Object.values(platforms).map((p) => p!.claim_check_status));
     const id = newId();
     const now = new Date().toISOString();
     const post: MediaPost = {
@@ -229,7 +236,7 @@ export async function create(input: CreateInput) {
       angle: s(input.angle, 500),
       revision: parent ? parent.revision + 1 : 1,
       parent_post_id: parent?.post_id ?? null,
-      status: 'in_review',
+      status: statusOf({ platforms }),
       card,
       images: [],
       platforms,
