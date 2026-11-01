@@ -723,6 +723,51 @@ export interface MediaPostLogData {
 }
 export const getMediaPostLog = () => api<MediaPostLogData>('/api/media-post-log');
 
+/** The Media Twin's drafts (2026-11-01): server/src/mediaPosts.ts. */
+export interface TwinDraftPlatform {
+  text: string;
+  thread: string[];
+  publish_at: string | null;
+  claim_check_status: 'clean' | 'flagged' | 'blocked';
+  claim_findings: { status: string; rule: string; text: string; why: string }[];
+  decision: 'pending' | 'approved' | 'rejected';
+  decided_by: string | null;
+  decided_at: string | null;
+  note: string | null;
+  posted_id: string | null;
+  posted_url: string | null;
+  posted_at: string | null;
+}
+export interface TwinDraft {
+  post_id: string;
+  run_date: string;
+  occasion: string;
+  occasion_label: string | null;
+  angle: string | null;
+  revision: number;
+  parent_post_id: string | null;
+  status: string;
+  card: { kicker?: string; headline?: string; sub?: string; foot?: string; photo?: string };
+  images: { platform: string; width: number; height: number; url: string }[];
+  platforms: Record<string, TwinDraftPlatform>;
+  claim_check_status: string;
+  sources: Record<string, unknown>;
+  drafted_by: string;
+  slack_channel: string | null;
+  slack_ts: string | null;
+  test: boolean;
+  created_at: string;
+  decisions: { platform: string; decision: string; decided_by: string; by_name: string; note: string | null; at: string }[];
+  metrics: Record<string, unknown>[];
+}
+export interface TwinDraftsData {
+  schema: string;
+  counts: { drafts: number; waiting_on_decision: number; approved: number; rejected: number; blocked: number; test_drafts: number };
+  posts: TwinDraft[];
+  rules: string[];
+}
+export const getMediaDrafts = () => api<TwinDraftsData>('/api/media-posts');
+
 /**
  * A lead's status, or its notes, or both. Nothing else about a lead is
  * editable, and the server refuses anything else rather than ignoring it.

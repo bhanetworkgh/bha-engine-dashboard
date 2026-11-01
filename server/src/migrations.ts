@@ -4097,6 +4097,60 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `ALTER TABLE engine_execution_runs ADD PRIMARY KEY (id_epoch, execution_id)`,
     ],
   },
+  {
+    // 1 Nov 2026, Destiny: the Media Twin's record. One row per draft (mediaPosts.ts holds the rules),
+    // every Approve / Reject with its note beside it, append-only, and each platform's analytics once
+    // posting is on. The dashboard records everything that moves through the Media Twin.
+    id: 109,
+    name: 'engine_media_posts, engine_media_post_decisions, engine_media_post_metrics',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_media_posts (
+         post_id            text PRIMARY KEY,
+         run_date           date NOT NULL,
+         occasion           text NOT NULL,
+         occasion_label     text,
+         angle              text,
+         revision           integer NOT NULL DEFAULT 1,
+         parent_post_id     text REFERENCES engine_media_posts(post_id),
+         status             text NOT NULL,
+         card               jsonb NOT NULL DEFAULT '{}'::jsonb,
+         images             jsonb NOT NULL DEFAULT '[]'::jsonb,
+         platforms          jsonb NOT NULL,
+         claim_check_status text NOT NULL CHECK (claim_check_status IN ('clean','flagged','blocked')),
+         sources            jsonb NOT NULL DEFAULT '{}'::jsonb,
+         drafted_by         text NOT NULL,
+         slack_channel      text,
+         slack_ts           text,
+         test               boolean NOT NULL DEFAULT false,
+         created_at         timestamptz NOT NULL DEFAULT now(),
+         updated_at         timestamptz NOT NULL DEFAULT now()
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_media_posts_created ON engine_media_posts (created_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_media_posts_slack ON engine_media_posts (slack_channel, slack_ts)`,
+      `CREATE TABLE IF NOT EXISTS engine_media_post_decisions (
+         id                 bigserial PRIMARY KEY,
+         post_id            text NOT NULL REFERENCES engine_media_posts(post_id),
+         platform           text NOT NULL,
+         decision           text NOT NULL CHECK (decision IN ('approve','reject')),
+         decided_by         text NOT NULL CHECK (decided_by IN ('U0A9V97949F','U0AEW3TBYH1')),
+         note               text,
+         claim_check_status text NOT NULL,
+         via                text,
+         at                 timestamptz NOT NULL DEFAULT now(),
+         CHECK (decision <> 'reject' OR length(coalesce(note,'')) >= 3),
+         CHECK (decision <> 'approve' OR claim_check_status <> 'blocked')
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_media_post_decisions_post ON engine_media_post_decisions (post_id, at)`,
+      `CREATE TABLE IF NOT EXISTS engine_media_post_metrics (
+         id          bigserial PRIMARY KEY,
+         post_id     text NOT NULL REFERENCES engine_media_posts(post_id),
+         platform    text NOT NULL,
+         read_at     timestamptz NOT NULL DEFAULT now(),
+         impressions integer, reach integer, likes integer, comments integer, shares integer, saves integer, clicks integer,
+         raw         jsonb NOT NULL DEFAULT '{}'::jsonb
+       )`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

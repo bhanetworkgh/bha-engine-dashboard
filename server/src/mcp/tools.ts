@@ -60,6 +60,7 @@ import { CODEX_DELETE_WRITE_TOOLS } from './codexDeleteTools';
 import { INVENTORY_WRITE_TOOLS } from './inventoryTools';
 import { VFARM_GATE_READ_TOOLS, VFARM_GATE_WRITE_TOOLS } from './vfarmGateTools';
 import { MEDIA_POST_LOG_READ_TOOLS, MEDIA_POST_LOG_WRITE_TOOLS } from './mediaPostLogTools';
+import { MEDIA_POSTS_READ_TOOLS } from './mediaPostsTools';
 import { CHARGE_GATE_READ_TOOLS, CHARGE_GATE_WRITE_TOOLS } from './chargeGateTools';
 import { ESSENCE_READ_TOOLS, ESSENCE_WRITE_TOOLS } from './essenceTools';
 import { HELP_READ_TOOLS, HELP_WRITE_TOOLS } from './helpPageTools';
@@ -1115,6 +1116,7 @@ export const TOOLS: ToolDefinition[] = [
   ...ENTITLEMENT_READ_TOOLS,
   // 2026-10-22: the Media Twin post log (H58Q, Jason's SOURCE_TO_TARGET_LOG).
   ...MEDIA_POST_LOG_READ_TOOLS,
+  ...MEDIA_POSTS_READ_TOOLS,
   ...CHARGE_GATE_READ_TOOLS,
   ...ESSENCE_READ_TOOLS,
   // 2026-10-27: engine strain and what each audience is told (7RZT).

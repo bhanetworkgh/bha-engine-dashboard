@@ -96,6 +96,7 @@ import * as engineEvents from './engineEvents';
 import * as vfarmGates from './vfarmGates';
 import * as vfarmGateAuto from './vfarmGateAuto';
 import * as mediaPostLog from './mediaPostLog';
+import * as mediaPosts from './mediaPosts';
 import * as helpPages from './helpPages';
 import * as cstHelp from './cstHelp';
 import * as evidence from './evidence';
@@ -840,6 +841,61 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           return send(res, e.status, { ok: false, reason: e.reason, message: `${e.message} Nothing was written.`, ...e.extra });
         }
         throw e;
+      }
+    }
+    /**
+     * Media Twin posts (2026-11-01, Destiny). The record of every draft, decision and later the
+     * analytics. Rules in mediaPosts.ts. POST /api/engine/media-posts creates a draft (claim check
+     * run here); PATCH /api/engine/media-posts/:id attaches images and the Slack card;
+     * POST …/:id/decision records an Approve or Reject; POST …/:id/metrics adds analytics.
+     * GET reads (?post_id, ?status, ?slack_ts, ?include_test=1). A refusal writes nothing.
+     */
+    {
+      const mp = p.match(/^\/api\/engine\/media-posts(?:\/([A-Za-z0-9-]+))?(?:\/(decision|metrics))?$/);
+      if (mp) {
+        const [, postId, sub] = mp;
+        const log = (outcome: string, detail: string, id: string | null = postId ?? null) =>
+          mirror.logWrite({ endpoint, kind: 'media_posts', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: id, outcome: outcome as never, detail: detail.slice(0, 300), ms: Date.now() - t0 });
+        try {
+          if (!postId && method === 'GET') {
+            const slackTs = url.searchParams.get('slack_ts');
+            const r = await mediaPosts.read({ post_id: url.searchParams.get('post_id'), status: url.searchParams.get('status'), include_test: url.searchParams.get('include_test') === '1', limit: Number(url.searchParams.get('limit')) || undefined });
+            const posts = slackTs ? r.posts.filter((x) => x.slack_ts === slackTs) : r.posts;
+            await log('read', `${posts.length} post(s)`);
+            return send(res, 200, { ok: true, ...r, posts });
+          }
+          if (!postId && method === 'POST') {
+            const body = await readJson(req, 256 * 1024);
+            const r = await mediaPosts.create(body as unknown as mediaPosts.CreateInput);
+            await log(r.written ? 'inserted' : 'unchanged', r.message, r.post.post_id);
+            return send(res, r.written ? 201 : 200, r);
+          }
+          if (postId && !sub && method === 'PATCH') {
+            const body = await readJson(req, 64 * 1024);
+            const r = await mediaPosts.attach(postId, body ?? {});
+            await log('updated', `images ${r.post.images.length}, slack ${r.post.slack_channel ?? '-'}/${r.post.slack_ts ?? '-'}`);
+            return send(res, 200, r);
+          }
+          if (postId && sub === 'decision' && method === 'POST') {
+            const body = await readJson(req, 64 * 1024);
+            const r = await mediaPosts.decide(postId, { platform: str(body?.platform, 20), decision: str(body?.decision, 10), by: str(body?.by, 40), note: str(body?.note, 2000) || null, via: str(body?.via, 60) || 'http' });
+            await log('updated', `${r.decided.platform} ${r.decided.decision} by ${r.decided.by_name}`);
+            return send(res, 200, r);
+          }
+          if (postId && sub === 'metrics' && method === 'POST') {
+            const body = await readJson(req, 64 * 1024);
+            const r = await mediaPosts.addMetrics(postId, body ?? {});
+            await log('inserted', `metrics ${str(body?.platform, 20)}`);
+            return send(res, 201, r);
+          }
+          throw new HttpError(405, 'GET or POST /api/engine/media-posts; PATCH /api/engine/media-posts/:id; POST …/:id/decision or …/:id/metrics.');
+        } catch (e) {
+          if (e instanceof mediaPosts.MediaPostError) {
+            await log('rejected', `${e.status} ${e.reason}: ${e.message}`);
+            return send(res, e.status, { ok: false, reason: e.reason, message: `${e.message} Nothing was written.` });
+          }
+          throw e;
+        }
       }
     }
     if (p === '/api/engine/publication-decision') {
@@ -1791,6 +1847,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await codeChecks.read());
       case '/api/media-post-log':
         return send(res, 200, await mediaPostLog.read({ limit: 500 }));
+      case '/api/media-posts':
+        return send(res, 200, await mediaPosts.read({ limit: 200 }));
       case '/api/media-doctrine': {
         // Media Twin renders the history and consumes the exact same resolved
         // T0NO gate as HTTP/MCP readers. The history remains presentation;
