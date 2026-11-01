@@ -155,7 +155,8 @@ export function message(s: Service, days: number, stage: number, mentions = `<@$
   const when = whenText(days);
   const title = `${s.name} renews ${when}`;
   const paid = s.paid_with?.trim() || 'Not recorded';
-  const purpose = s.what_it_is_for?.trim();
+  // The registry's own sentence, its closing full stop dropped so the card adds exactly one.
+  const purpose = s.what_it_is_for?.trim().replace(/[.\s]+$/, '');
   const ask =
     stage === 1
       ? `*Last call: make sure the card has the funds today.* If the charge fails on ${dateLabel(s.renewal_date as string)}, ${s.name} stops${purpose ? ` and with it: ${purpose}` : ''}.`
