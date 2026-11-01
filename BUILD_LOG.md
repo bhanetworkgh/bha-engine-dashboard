@@ -13980,3 +13980,9 @@ Proof:     npm registry unreachable from the build machine (ENOTFOUND), so: serv
            13 of 13 (it caught the roll-forward reading the date after updating it, fixed). Part 2 of
            the repo test needs a local _test database and was not run here. Live proof on production
            after deploy: sandbox card, then the real path on a throwaway row.
+
+## 2026-11-01 07:40 — Renewal card: one full stop after the tool's purpose
+
+Live proof in #bha-builder-sandbox (run_renewal_check sandbox, audits 4212 and 4214, ts 1793514947.303999
+and 1793514954.156649) showed the 1-day card ending "Not a real tool.." because the registry sentence
+already ends in a full stop. The card now drops it before adding its own. Test part 1 gains the check.

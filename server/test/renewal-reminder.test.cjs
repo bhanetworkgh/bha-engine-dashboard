@@ -46,6 +46,7 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   assert.match(r.message(n8n, 1, 1).blocks[0].text.text, /renews tomorrow$/);
   assert.match(r.message(n8n, 1, 1).blocks[1].text.text, /^\*Last call/);
   assert.equal(r.amountText({ ...n8n, cost_amount: null }), 'Not recorded');
+  assert.match(r.message({ ...n8n, what_it_is_for: 'Runs every workflow.' }, 1, 1).blocks[1].text.text, /Runs every workflow\.$/);
   ok('the card names when, the date, the amount, the card that pays and the plan, and tags Destiny and Jason');
 
   const url = process.env.DATABASE_URL || '';
