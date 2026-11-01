@@ -4151,6 +4151,24 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
        )`,
     ],
   },
+  {
+    // 1 Nov 2026, Destiny: keep only the last test draft on the Media Twin record. The three earlier TEST drafts
+    // (one card carrying four platforms, then a render that did not load) are removed; each row goes to
+    // record_deletions whole first, as every delete here does. Only test rows, only these ids.
+    id: 110,
+    name: 'media_posts_remove_early_tests',
+    statements: [
+      `INSERT INTO record_deletions (kind, record_id, natural_id, reason, fields, actor, at)
+         SELECT 'media_posts', p.post_id, p.post_id, 'Earlier TEST draft removed so only the final 1 Nov test stays on the record',
+                to_jsonb(p) || jsonb_build_object('decisions', COALESCE((SELECT jsonb_agg(to_jsonb(d)) FROM engine_media_post_decisions d WHERE d.post_id = p.post_id), '[]'::jsonb)),
+                'migration 110 (Destiny)', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+           FROM engine_media_posts p WHERE p.test = true AND p.post_id IN ('MTP-1793533528175-5VTF', 'MTP-1793534364884-1PZ7', 'MTP-1793536055792-AWBL')`,
+      `DELETE FROM engine_media_post_metrics WHERE post_id IN (SELECT post_id FROM engine_media_posts WHERE test = true AND post_id IN ('MTP-1793533528175-5VTF', 'MTP-1793534364884-1PZ7', 'MTP-1793536055792-AWBL'))`,
+      `DELETE FROM engine_media_post_decisions WHERE post_id IN (SELECT post_id FROM engine_media_posts WHERE test = true AND post_id IN ('MTP-1793533528175-5VTF', 'MTP-1793534364884-1PZ7', 'MTP-1793536055792-AWBL'))`,
+      `UPDATE engine_media_posts SET parent_post_id = NULL WHERE parent_post_id IN ('MTP-1793533528175-5VTF', 'MTP-1793534364884-1PZ7', 'MTP-1793536055792-AWBL')`,
+      `DELETE FROM engine_media_posts WHERE test = true AND post_id IN ('MTP-1793533528175-5VTF', 'MTP-1793534364884-1PZ7', 'MTP-1793536055792-AWBL')`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
