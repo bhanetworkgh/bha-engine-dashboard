@@ -190,7 +190,7 @@ async function put(rows: n8n.N8nExecution[], name: (id: string, fallback: string
       `INSERT INTO engine_execution_runs
          (execution_id, workflow_id, workflow_name, status, mode, day, started_at, stopped_at, duration_ms, first_seen_at, updated_at)
        VALUES ${tuples.join(',')}
-       ON CONFLICT (execution_id) DO UPDATE SET
+       ON CONFLICT (id_epoch, execution_id) DO UPDATE SET
          workflow_id   = EXCLUDED.workflow_id,
          workflow_name = EXCLUDED.workflow_name,
          status        = EXCLUDED.status,
@@ -225,7 +225,7 @@ export async function sync(full = false): Promise<SyncResult> {
     return { ...blank, note: `${n8n.N8N_API_VAR} is not set on this server, so no execution has ever been read.` };
   }
 
-  const held = await query<{ highest: string | null }>(`SELECT max(execution_id)::text AS highest FROM engine_execution_runs`);
+  const held = await query<{ highest: string | null }>(`SELECT max(execution_id)::text AS highest FROM engine_execution_runs WHERE id_epoch = 0`);
   const from = full ? 0 : Math.max(0, Number(held.rows[0]?.highest ?? 0) - LOOKBACK_IDS);
 
   let read: n8n.ExecutionRead;
@@ -257,7 +257,7 @@ export async function sync(full = false): Promise<SyncResult> {
    */
   const openRows = await query<{ execution_id: string }>(
     `SELECT execution_id::text AS execution_id FROM engine_execution_runs
-      WHERE status NOT IN ('success','error','crashed','canceled','unknown')
+      WHERE id_epoch = 0 AND status NOT IN ('success','error','crashed','canceled','unknown')
       ORDER BY execution_id ASC LIMIT $1`,
     [RESOLVE_PER_PASS],
   );
@@ -266,7 +266,7 @@ export async function sync(full = false): Promise<SyncResult> {
     try {
       const e = await n8n.execution(row.execution_id);
       if (!e) {
-        await query(`UPDATE engine_execution_runs SET status = 'unknown', updated_at = $2 WHERE execution_id = $1`, [Number(row.execution_id), at]);
+        await query(`UPDATE engine_execution_runs SET status = 'unknown', updated_at = $2 WHERE id_epoch = 0 AND execution_id = $1`, [Number(row.execution_id), at]);
         events.changed('executions', Number(row.execution_id));
         continue;
       }
@@ -278,10 +278,11 @@ export async function sync(full = false): Promise<SyncResult> {
     }
   }
 
-  const after = await query<{ open: string; highest: string | null; lowest: string | null; held: string; workflows: string; failed: string }>(
+  const after = await query<{ open: string; highest: string | null; lowest: string | null; live: string; held: string; workflows: string; failed: string }>(
     `SELECT count(*) FILTER (WHERE status NOT IN ('success','error','crashed','canceled','unknown'))::text AS open,
-            max(execution_id)::text AS highest,
-            min(execution_id)::text AS lowest,
+            max(execution_id) FILTER (WHERE id_epoch = 0)::text AS highest,
+            min(execution_id) FILTER (WHERE id_epoch = 0)::text AS lowest,
+            count(*) FILTER (WHERE id_epoch = 0)::text AS live,
             count(*)::text AS held,
             count(DISTINCT workflow_id)::text AS workflows,
             count(*) FILTER (WHERE status IN ('error','crashed'))::text AS failed
@@ -305,7 +306,9 @@ export async function sync(full = false): Promise<SyncResult> {
    * that both are looking at the same set.
    */
   const span = lowest !== null && highest !== null ? highest - lowest + 1 : 0;
-  const gaps = span ? span - heldNow : 0;
+  // Only the live numbering (id_epoch 0): runs n8n lost in a restore share their ids with new ones.
+  const liveHeld = Number(after.rows[0]?.live ?? 0);
+  const gaps = span ? span - liveHeld : 0;
 
   /**
    * The pass checking itself against n8n's own total.
@@ -716,7 +719,7 @@ interface Held {
 
 async function held(): Promise<Held> {
   const r = await query<{ rows: string; oldest: string | null; newest: string | null; highest: string | null }>(
-    `SELECT count(*)::text AS rows, min(day) AS oldest, max(day) AS newest, max(execution_id)::text AS highest FROM engine_execution_runs`,
+    `SELECT count(*)::text AS rows, min(day) AS oldest, max(day) AS newest, max(execution_id) FILTER (WHERE id_epoch = 0)::text AS highest FROM engine_execution_runs`,
   );
   const x = r.rows[0];
   return { rows: Number(x?.rows ?? 0), oldest: x?.oldest ?? null, newest: x?.newest ?? null, highest: x?.highest ?? null };
@@ -1097,11 +1100,11 @@ export async function workflow(workflowId: string, grain: ExecutionGrain, wanted
     byDay.set(r.day, t);
   }
 
-  const runRows = await query<{ execution_id: string; status: string; mode: string | null; started_at: string; stopped_at: string | null; duration_ms: string | null }>(
-    `SELECT execution_id::text AS execution_id, status, mode, started_at, stopped_at, duration_ms::text AS duration_ms
+  const runRows = await query<{ execution_id: string; status: string; mode: string | null; started_at: string; stopped_at: string | null; duration_ms: string | null; id_epoch: number }>(
+    `SELECT execution_id::text AS execution_id, status, mode, started_at, stopped_at, duration_ms::text AS duration_ms, id_epoch
        FROM engine_execution_runs
       WHERE workflow_id = $1 AND day >= $2 AND day <= $3 AND ${scopeSql(scope)}
-      ORDER BY execution_id DESC LIMIT $4`,
+      ORDER BY started_at DESC LIMIT $4`,
     [workflowId, selected.start, selected.end, limit],
   );
   const runs: ExecutionRun[] = runRows.rows.map((r) => ({
@@ -1111,6 +1114,7 @@ export async function workflow(workflowId: string, grain: ExecutionGrain, wanted
     started_at: r.started_at,
     stopped_at: r.stopped_at,
     duration_ms: r.duration_ms === null ? null : Number(r.duration_ms),
+    n8n_gone: Number(r.id_epoch) !== 0,
   }));
 
   const meta = idRow.rows[0];

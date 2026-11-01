@@ -283,9 +283,11 @@ function WorkflowPanel({ workflowId, grain, period, scope, onClose }: { workflow
                 </thead>
                 <tbody>
                   {runs.map((r) => (
-                    <tr key={r.execution_id} className="border-b border-line/60">
+                    <tr key={`${r.n8n_gone ? 1 : 0}:${r.execution_id}`} className="border-b border-line/60">
                       <td className="tabular px-2 py-1.5">
-                        {detail.n8n_base ? (
+                        {r.n8n_gone ? (
+                          <span title="n8n lost this run when it was restored on 1 Nov 2026. It is kept here; its id now names a different run in n8n.">{r.execution_id} (gone from n8n)</span>
+                        ) : detail.n8n_base ? (
                           <a href={`${detail.n8n_base}/workflow/${detail.workflow.workflow_id}/executions/${r.execution_id}`} target="_blank" rel="noreferrer" className="hover:text-accent-ink">
                             {r.execution_id}
                           </a>

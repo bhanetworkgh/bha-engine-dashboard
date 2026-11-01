@@ -3059,6 +3059,8 @@ export interface ExecutionRun {
   stopped_at: string | null;
   /** Null, never nought, where the run recorded no end. */
   duration_ms: number | null;
+  /** True for a run n8n lost in a restore (1 Nov 2026): kept here, but its id now names a different run in n8n, so it is not linked. */
+  n8n_gone?: boolean;
 }
 
 /**

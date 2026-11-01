@@ -14007,3 +14007,10 @@ Files:      index.html, src/index.css, src/components/ClockChip.tsx, src/compone
 Problem:    `git revert ea73415` conflicted on BUILD_LOG.md (two entries appended since), so the four code files were restored from 820a984 by hand and the font folder removed; the log keeps every entry.
 Fix:        Reverted. A browser that had the switch on keeps a stray `bha.design` key in localStorage; nothing reads it any more, so it does nothing.
 Decision:   The dashboard stays on its own design (BHA Dashboard). The Bays Horizon Network design system is for outward-facing work only: the site, social posts, decks.
+
+## 2026-11-01 10:55 — Executions survive n8n reusing its ids after the restore
+Intent:     Keep the 520 runs n8n lost in the 1 Nov restore, and start copying today's runs again.
+Files:      server/src/migrations.ts (migration 108), server/src/executions.ts, server/src/health.ts, src/data/types.ts, src/screens/Executions/index.tsx
+Problem:    n8n Cloud came back from a copy of about 31 Oct 11:15 UTC and numbered executions again from 59333 (first new run 06:16 UTC today). This database already held 520 runs numbered 59333 to 59970 (31 Oct 11:48 to 1 Nov 00:41) that n8n no longer has. The poll reads from 400 below the highest id held (59570), so it copied none of today's runs (0 held since 06:00 while n8n had run 59333 to 59405), and once n8n passed 59570 the upsert on execution_id would have overwritten those 520 rows with different runs.
+Fix:        Migration 108 adds id_epoch (default 0), marks the 520 rows id_epoch 1 (execution_id >= 59333 and started before 06:00 UTC 1 Nov), and makes the key (id_epoch, execution_id). The poll, the open-run re-reads, the gap count and the highest-id figure use id_epoch 0 only; every count and chart still includes both. The workflow drill-down lists runs by start time and shows a lost run as "gone from n8n" with no link, because its id now opens a different run there. Engine health links an incident to an execution only in the live numbering.
+Decision:   Nothing deleted and no id renumbered. A future restore that reuses ids again is id_epoch 2, set the same way in a new migration.

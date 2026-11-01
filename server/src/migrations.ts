@@ -4079,6 +4079,24 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
     name: 'registry_services.paid_with: which card or account pays each tool',
     statements: [`ALTER TABLE registry_services ADD COLUMN IF NOT EXISTS paid_with text`],
   },
+  {
+    // 1 Nov 2026, Destiny: when n8n Cloud was renewed it came back from a copy of about 31 Oct 11:15 UTC
+    // and began numbering executions again from 59333. This database already held 520 runs numbered
+    // 59333 to 59970 (31 Oct 11:48 to 1 Nov 00:41) that n8n no longer has. Keyed on the id alone, the
+    // poll read nothing (it starts 400 below the highest id held) and, once n8n passed 59570, would have
+    // overwritten those 520 rows with different runs. Those rows keep everything and are marked
+    // id_epoch 1, "numbered before the 1 Nov restore"; every live row is id_epoch 0, and the key is the
+    // pair. Nothing is deleted. A later restore that reuses ids again is id_epoch 2, the same way.
+    id: 108,
+    name: 'engine_execution_runs.id_epoch: runs n8n lost in the 1 Nov restore keep their rows',
+    statements: [
+      `ALTER TABLE engine_execution_runs ADD COLUMN IF NOT EXISTS id_epoch smallint NOT NULL DEFAULT 0`,
+      `UPDATE engine_execution_runs SET id_epoch = 1
+        WHERE id_epoch = 0 AND execution_id >= 59333 AND started_at < '2026-11-01T06:00:00Z'`,
+      `ALTER TABLE engine_execution_runs DROP CONSTRAINT IF EXISTS engine_execution_runs_pkey`,
+      `ALTER TABLE engine_execution_runs ADD PRIMARY KEY (id_epoch, execution_id)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
