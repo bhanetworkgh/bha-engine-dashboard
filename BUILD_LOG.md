@@ -13993,3 +13993,10 @@ Files:      src/index.css (a "Field design" block at the end, outside every laye
 Problem:    None in the code. Locally the front end could not be built: `npm ci` cannot reach the registry from this machine and left node_modules incomplete (`MODULE_NOT_FOUND` from vite). Render's build is the check.
 Fix:        —
 Decision:   A preview, not a redesign. It overrides colour tokens and the font only, under <html data-design="field">, for light and dark; no layout, component or data changes. Off by default; the leaf chip in the top bar turns it on, remembered per browser in localStorage `bha.design`. The dashboard's design (now named BHA Dashboard) stays the default. To remove it: delete the block, the chip and the index.html line. Field accent is the forest green on paper (13.9:1) and butter on forest in dark (11.7:1); the primary button is butter with an ink label, as on the site.
+
+## 2026-11-01 10:22 — Field design preview is live; one figure corrected
+Intent:     Confirm the preview deployed, and correct a contrast figure in the entry above.
+Files:      BUILD_LOG.md
+Problem:    The entry above says the field accent is 13.9:1 on paper; measured, forest #1d2e1c on paper #f4f2ea is 12.8:1. Muted text (#5c6352) on a white panel is 6.2:1; faint (#8d9381) on white is 3.2:1, above the dashboard's own faint (#a1a1a6, 2.6:1), so no worse than today.
+Fix:        Render deploy dep-dbjg812vcj2c73eup230 built and went live at 09:19:57 UTC (commit ea73415), so the stylesheet and the chip compile. The page itself cannot be fetched from here (robots and the login), so the look is for Destiny to judge.
+Decision:   —
