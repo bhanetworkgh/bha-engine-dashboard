@@ -183,6 +183,18 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       ]),
     },
     {
+      // 1 Nov 2026, Destiny: the Media Twin agent (n8n Agent, BHA Media Twin). It reads; its drafts and
+      // Jason's decisions are written by its own n8n workflows over the engine routes, never by the agent.
+      agent: 'media_twin',
+      env: 'MCP_AGENT_TOKEN_MEDIA_TWIN',
+      access: 'read',
+      tools: new Set([
+        'read_media_posts', 'read_slack', 'find_records', 'read_slack_file',
+        'read_media_doctrine', 'read_publication_decision', 'read_media_post_log',
+        'read_engine_events', 'read_sop', 'read_evidence', 'get_vfarm_gates',
+      ]),
+    },
+    {
       agent: 'research_twin',
       env: 'MCP_AGENT_TOKEN_RESEARCH_TWIN',
       access: 'write',

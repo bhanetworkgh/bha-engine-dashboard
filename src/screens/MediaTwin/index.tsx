@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useData } from '../../app/useData';
-import { getHeroBay, getMediaDoctrine, getMediaPostLog, type DoctrineChange, type DoctrineData, type MediaPostLogData } from '../../data';
+import { getHeroBay, getMediaDoctrine, getMediaDrafts, getMediaPostLog, type DoctrineChange, type DoctrineData, type MediaPostLogData } from '../../data';
+import { Drafts } from './Drafts';
 import { HeroBay } from './HeroBay';
 import {
   Card,
@@ -44,7 +45,7 @@ import {
  * simulated or not verified by `server/src/heroBay.ts`. Read only.
  */
 
-const TABS = ['Doctrine', 'Posts', 'Hero bay'] as const;
+const TABS = ['Drafts', 'Doctrine', 'Posts', 'Hero bay'] as const;
 type Tab = (typeof TABS)[number];
 
 const when = (iso: string | null) => (iso ? iso.slice(0, 16).replace('T', ' ') : '—');
@@ -52,20 +53,29 @@ const day = (iso: string | null) => (iso ? iso.slice(0, 10) : '—');
 const maturityLabel = (m: string) => m.toLowerCase().replace(/_/g, ' ');
 
 export default function MediaTwin() {
-  const [tab, setTab] = useState<Tab>('Doctrine');
+  const [tab, setTab] = useState<Tab>('Drafts');
   useReplayKey(tab);
   const { status, data, error } = useData(getMediaDoctrine, [], { kinds: ['media_doctrine'] });
   const posts = useData(getMediaPostLog, [], { kinds: ['media_post_log'] });
   const hero = useData(getHeroBay, [], { kinds: ['monitoring_twin', 'vfarm_state'] });
+  const drafts = useData(getMediaDrafts, [], { kinds: ['media_posts'] });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
         title="Media Twin"
-        subtitle="What vFarm may publicly claim, as Hardik's doctrine sets it"
-        below={<Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Doctrine: data?.summary.doctrines_in_force ? { n: data.summary.doctrines_in_force } : undefined, Posts: posts.data?.counts.rows ? { n: posts.data.counts.rows } : undefined }} />}
+        subtitle="Everything moving through the Media Twin: drafts, Jason's decisions, the doctrine, the post log"
+        below={<Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Drafts: drafts.data?.counts.waiting_on_decision ? { n: drafts.data.counts.waiting_on_decision } : undefined, Doctrine: data?.summary.doctrines_in_force ? { n: data.summary.doctrines_in_force } : undefined, Posts: posts.data?.counts.rows ? { n: posts.data.counts.rows } : undefined }} />}
       />
-      {tab === 'Hero bay' ? (
+      {tab === 'Drafts' ? (
+        drafts.status === 'error' && !drafts.data ? (
+          <LoadFailed error={drafts.error} />
+        ) : !drafts.data ? (
+          <Loading />
+        ) : (
+          <Drafts data={drafts.data} />
+        )
+      ) : tab === 'Hero bay' ? (
         hero.status === 'error' && !hero.data ? (
           <LoadFailed error={hero.error} />
         ) : !hero.data ? (

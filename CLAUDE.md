@@ -4388,6 +4388,22 @@ page's `GET /api/media-post-log`. Each write is one `media_post_logged` or
 `media_post_updated` event, lane MEDIA. `npm run test:media-post-log` (14 checks;
 part 2 needs a local `_test` database).
 
+**Media Twin drafts: the record of everything the Media Twin writes** (2026-11-01, Destiny: "the dashboard
+records everything, the drafts, approved, rejects, Jason's notes, even the data from the socials").
+`server/src/mediaPosts.ts`, migration 109: `engine_media_posts` (one row per draft: occasion, angle, card, images,
+the text per platform with its own claim check and decision, revision and the draft it replaces, the Slack card),
+`engine_media_post_decisions` (every Approve or Reject, append-only, with Jason's note) and
+`engine_media_post_metrics` (each platform's analytics once posting is on). Written only by the Media Twin's n8n
+workflows: `POST /api/engine/media-posts` (a draft; the claim check runs here),
+`PATCH /api/engine/media-posts/:id` (images and the Slack card only), `POST …/:id/decision` and `POST …/:id/metrics`,
+all `x-dashboard-key`. **Jason's claim-gating v0 rules are held in code** (`claimCheck`, pure): "sensor-driven
+irrigation" and "fully automated farm" are **blocked** and a blocked platform cannot be approved (the decisions table's
+CHECK holds it too); a number about how the farm performs or what it earns is **flagged**; the card's text counts
+against every platform. **Only Jason or Destiny decide** (the table's CHECK); a reject needs a note of 3 characters or
+more, and the Media Twin rewrites the draft from it as the next revision, which supersedes the old one. Nothing posts
+to a platform from here. The Media Twin page opens on **Drafts**; `read_media_posts` (both connections) is the read.
+The Media Twin agent has its own read-only token, `MCP_AGENT_TOKEN_MEDIA_TWIN`.
+
 **T0NO, the doctrine read resolved to seven fields** (2026-10-09). `t0noPrimitive`
 (`server/src/systemFeeds.ts`) turns each claim in force into `maturity_state`,
 `claim_state`, `config_hash`, `cad_provenance`, `evidence_publication_status`,
