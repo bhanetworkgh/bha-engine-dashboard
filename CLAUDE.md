@@ -5182,7 +5182,18 @@ record.
   prove it on real approvals before 1 Nov, then off): `code_check_alert_trial` (write connection, Destiny
   or Jason, refused on agent tokens), stored in `meta` `code_check.alert_trial`, makes the alert count
   approvals from the moment it is switched on; the service setting `CODE_CHECK_ALERT_TRIAL_FROM` (an ISO time)
-  does the same and wins where it is set, for when the tool is not reachable. **The check also lands in BHARAG** (2 Nov 2026, Destiny — Jegan's edit-in-place, LOOP-1793257277585-KWV1, bharag2-v0.1.22 `PATCH /api/v1/documents/:id`): `codeCheckWatch.bharagNote` finds every document in the Codex workspace (key `ingestKeyVar('codex')`) whose metadata `codex_entry_id` is the entry and merges metadata `code_check` (verdict, pay call, reason, claims not confirmed, missing, link, at, by) onto it, same id, nothing else touched. `record_code_check` does it after every check and reports `bharag_note`, never failing the check; `sync_code_check_to_bharag` (write connection, Destiny or Jason, refused on agent tokens, `dry_run`) does it for a check already recorded. The key needs BHARAG's `documents:write`; a refusal names it. It moves only the alert's start, never later than 1 Nov,
+  does the same and wins where it is set, for when the tool is not reachable. **The alert lives in
+  #bha-code-reviews, not a DM** (2 Nov 2026, Destiny: a DM gets buried). One card per waiting log in
+  `CODE_CHECK_CHANNEL` (default `C0CDRV4TMCP`; Destiny, Jason and Bays are in it), claimed by the event key
+  `code_check_card:<Codex ID>` with the card's ts on that event, in the same look plus a third button,
+  **Mark reviewed**. Every reminder is a reply in the card's thread tagging Destiny. The button reuses the
+  approval card's action id (`engine_approval_approve`) with value `CCR-<Codex ID>`, so n8n's Front Door and
+  `Bays — Approval Decision` forward it unchanged and `/api/engine/approvals/decide` hands a `CCR-` id to
+  `codeCheckWatch.markReviewed`: Destiny or Jason only (anyone else is told privately), one
+  `code_check_marked_reviewed` event per log, the card rewritten without the button. A reviewed log gets no
+  more reminders; `record_code_check` marks its card reviewed too. **Marking reviewed records no check**: the
+  Code checks tab keeps the log waiting until one is recorded. A log past its four reminders with no card
+  gets one card and nothing after. **The check also lands in BHARAG** (2 Nov 2026, Destiny — Jegan's edit-in-place, LOOP-1793257277585-KWV1, bharag2-v0.1.22 `PATCH /api/v1/documents/:id`): `codeCheckWatch.bharagNote` finds every document in the Codex workspace (key `ingestKeyVar('codex')`) whose metadata `codex_entry_id` is the entry and merges metadata `code_check` (verdict, pay call, reason, claims not confirmed, missing, link, at, by) onto it, same id, nothing else touched. `record_code_check` does it after every check and reports `bharag_note`, never failing the check; `sync_code_check_to_bharag` (write connection, Destiny or Jason, refused on agent tokens, `dry_run`) does it for a check already recorded. The key needs BHARAG's `documents:write`; a refusal names it. It moves only the alert's start, never later than 1 Nov,
   and the tab and its figures still start at 1 Nov. `npm run test:code-check-watch`.
 
 ### System registry

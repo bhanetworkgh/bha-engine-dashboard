@@ -1,5 +1,6 @@
 /**
- * The code check's alert, reminders and Codex note (29 Oct 2026, Destiny — D6).
+ * The code check's alert, reminders and Codex note (29 Oct 2026, Destiny — D6); the channel card and
+ * Mark reviewed (2 Nov 2026).
  *
  *   1. stepFor: the alert at approval, reminder 1 at 24 hours, then one every 12 hours.
  *   2. run(): one DM per step, claimed before it is sent; a repeat pass sends nothing; a DM Slack refuses
@@ -28,6 +29,7 @@ const watch = req('codeCheckWatch.js');
 const engineWrite = req('engineWrite.js');
 const writeTools = req('mcp/writeTools.js');
 const tools = req('mcp/codeCheckTools.js');
+const slackMod = req('slack.js');
 
 let n = 0;
 const ok = (m) => { n += 1; console.log('  ok  ' + m); };
@@ -50,25 +52,30 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
   assert.equal(cc.summarise([{ codex_entry_id: 'CODEX-T', builder: 'K', builder_slack_id: 'U0BNQGG020Y', session_date: null, approved_at: '2026-10-29T08:00:00.000Z' }], [], Date.parse('2026-10-29T09:00:00.000Z')).waiting.length, 0);
   ok('the trial moves the alert start earlier, never later; off, or after 1 Nov, alerts start at 1 Nov; a 29 Oct approval waits only while the trial is on');
 
-  /* 2. run() against stand-ins */
+  /* 2. run() against stand-ins: one card in the channel, reminders in its thread, Mark reviewed */
   const held = new Map();
   let nextId = 1;
   const deleted = [];
   let waitingHours = 1;
-  const real = { record: events.record, query: pg.query, read: cc.read };
+  const real = { record: events.record, query: pg.query, read: cc.read, botCall: slackMod.botCall };
   events.record = async (e) => {
     if (held.has(e.dedupe_key)) return { recorded: false, id: null };
     const id = nextId++;
-    held.set(e.dedupe_key, { id, e });
+    held.set(e.dedupe_key, { id, e: { ...e, detail: { ...(e.detail || {}) } } });
     return { recorded: true, id };
   };
+  const byId = (id) => [...held.values()].find((v) => v.id === Number(id));
   pg.query = async (sql, params) => {
     if (/DELETE FROM engine_events/.test(sql)) {
       deleted.push(params[0]);
       for (const [k, v] of held) if (v.id === params[0]) held.delete(k);
       return { rows: [], rowCount: 1 };
     }
+    if (/UPDATE engine_events SET detail/.test(sql)) { Object.assign(byId(params[0]).e.detail, JSON.parse(params[1])); return { rows: [], rowCount: 1 }; }
     if (/SELECT 1 FROM engine_events WHERE dedupe_key/.test(sql)) return { rows: held.has(params[0]) ? [{}] : [], rowCount: 0 };
+    if (/SELECT id::text, detail FROM engine_events/.test(sql)) { const v = held.get(params[0]); return { rows: v ? [{ id: String(v.id), detail: v.e.detail }] : [] }; }
+    if (/SELECT actor FROM engine_events/.test(sql)) { const v = held.get(params[0]); return { rows: v ? [{ actor: v.e.actor }] : [] }; }
+    if (/code_check_marked_reviewed/.test(sql)) return { rows: [...held.values()].filter((v) => v.e.event_type === 'code_check_marked_reviewed' && params[0].includes(v.e.subject_id)).map((v) => ({ subject_id: v.e.subject_id })) };
     if (/Builder Channel ID/.test(sql)) return { rows: [{ cid: 'CODEX-20261102-kavin-g-n-rover', ch: 'C0BN30RU3UK' }], rowCount: 1 };
     throw new Error('unexpected query: ' + sql.slice(0, 80));
   };
@@ -79,71 +86,92 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
     ],
   });
   const sent = [];
-  const okSend = async (to, text, blocks) => { sent.push({ to, text, blocks, json: JSON.stringify(blocks) }); return { ok: true, detail: 'sent' }; };
+  let tsN = 100;
+  const okPost = async (channel, text, blocks, thread_ts) => { sent.push({ channel, text, blocks, thread_ts, json: JSON.stringify(blocks || null) }); return { ok: true, detail: 'posted', ts: `1793.${tsN++}` }; };
+  const calls = [];
+  slackMod.botCall = async (method, body) => { calls.push({ method, body }); return { ok: true, http_status: 200 }; };
 
   try {
-    let r = await watch.run({ now: at(1), send: okSend });
+    let r = await watch.run({ now: at(1), post: okPost });
     assert.equal(r.sent.length, 1);
-    assert.equal(sent[0].to, DESTINY);
+    assert.equal(sent[0].channel, 'C0CDRV4TMCP');
+    assert.equal(sent[0].thread_ts, undefined);
     assert.match(sent[0].text, /Code check due: Kavin G N, CODEX-20261102-kavin-g-n-rover/);
-    assert.equal(sent[0].blocks[0].type, 'header');
     assert.equal(sent[0].blocks[0].text.text, 'A log is ready for your code check');
     assert.match(sent[0].json, /Due by/);
     assert.match(sent[0].json, /codex\/CODEX-20261102-kavin-g-n-rover/);
     assert.match(sent[0].json, /<#C0BN30RU3UK>/);
-    assert.match(sent[0].json, /4 at most/);
+    assert.match(sent[0].json, /"value":"CCR-CODEX-20261102-kavin-g-n-rover","action_id":"engine_approval_approve"/);
+    assert.match(sent[0].json, /Mark reviewed/);
+    assert.equal(held.get(watch.cardKey('CODEX-20261102-kavin-g-n-rover')).e.detail.ts, '1793.100');
     assert.equal(r.skipped.length, 1);
-    assert.match(r.skipped[0], /no Codex ID/);
-    ok('Jason approves: one Block Kit DM to Destiny naming the builder, the Codex ID, the deadline and the log, with a plain-text fallback; a session with no Codex ID is named as skipped');
+    ok('Jason approves: one card in #bha-code-reviews with Open the log, Code checks and Mark reviewed; its ts is kept on the claim');
 
-    r = await watch.run({ now: at(2), send: okSend });
+    r = await watch.run({ now: at(2), post: okPost });
     assert.equal(r.sent.length, 0);
     assert.equal(r.already, 1);
     assert.equal(sent.length, 1);
     ok('the next pass, still at the alert step, sends nothing: the claim is held');
 
     waitingHours = 4;
-    const failSend = async () => ({ ok: false, detail: 'channel_not_found' });
-    r = await watch.run({ now: at(4), send: failSend });
+    r = await watch.run({ now: at(4), post: async () => ({ ok: false, detail: 'not_in_channel' }) });
     assert.equal(r.failed.length, 1);
-    assert.equal(deleted.length, 1);
     assert.ok(!held.has(watch.dedupeKey('CODEX-20261102-kavin-g-n-rover', 1)));
     ok('a reminder Slack refuses gives its claim back, so it is never counted as sent');
 
-    r = await watch.run({ now: at(4), send: okSend });
+    r = await watch.run({ now: at(4), post: okPost });
     assert.equal(r.sent.length, 1);
-    assert.equal(sent[1].blocks[0].text.text, 'Reminder 1 of 4: code check still owed');
-    assert.match(sent[1].json, /approved 4 hours ago/);
-    ok('the next pass retries it and reminder 1 goes');
+    assert.equal(sent[1].thread_ts, '1793.100');
+    assert.match(sent[1].text, /<@U0AEW3TBYH1> Reminder 1 of 4: Kavin G N's log was approved 4 hours ago/);
+    ok('the next pass retries it and reminder 1 goes in the card\'s thread, tagging Destiny');
 
     waitingHours = 12.5;
-    r = await watch.run({ now: at(12.5), dry_run: true, send: okSend });
-    assert.equal(r.sent.length, 0);
+    r = await watch.run({ now: at(12.5), dry_run: true, post: okPost });
     assert.equal(r.would_send.length, 1);
-    assert.equal(r.would_send[0].step, 4);
     assert.match(r.would_send[0].text, /Last reminder/);
     assert.equal(sent.length, 2);
-    ok('a dry run sends nothing and lists what would go; the fourth reminder is the last; only the current step is sent, never a backlog');
+    ok('a dry run posts nothing and lists what would go');
 
-    r = await watch.run({ now: at(12.5), send: okSend });
-    assert.match(sent[2].json, /No more reminders after this one/);
-    waitingHours = 15.5;
-    r = await watch.run({ now: at(15.5), send: okSend });
+    let m = await watch.markReviewed({ id: 'CCR-CODEX-20261102-kavin-g-n-rover', user_id: 'U0BNQGG020Y' });
+    assert.equal(m.body.reason, 'not_allowed');
+    assert.equal(calls[0].method, 'chat.postEphemeral');
+    m = await watch.markReviewed({ id: 'CCR-CODEX-20261102-kavin-g-n-rover', user_id: DESTINY });
+    assert.equal(m.body.ok, true);
+    const upd = calls.find((c) => c.method === 'chat.update');
+    assert.equal(upd.body.ts, '1793.100');
+    assert.equal(upd.body.channel, 'C0CDRV4TMCP');
+    assert.doesNotMatch(JSON.stringify(upd.body.blocks), /Mark reviewed/);
+    assert.match(JSON.stringify(upd.body.blocks), /Marked reviewed by <@U0AEW3TBYH1>/);
+    m = await watch.markReviewed({ id: 'CCR-CODEX-20261102-kavin-g-n-rover', user_id: 'U0A9V97949F' });
+    assert.equal(m.body.reason, 'already_reviewed');
+    ok('only Destiny or Jason can mark reviewed (anyone else is told privately); the card is rewritten without the button; a second click changes nothing');
+
+    r = await watch.run({ now: at(12.5), post: okPost });
     assert.equal(r.waiting, 0);
+    assert.equal(sent.length, 2);
+    ok('a reviewed log gets no more reminders');
+
+    // A log past every reminder that was only ever DM'd gets its card, once.
+    held.clear();
+    waitingHours = 30;
+    r = await watch.run({ now: at(30), post: okPost });
+    assert.equal(r.sent.length, 1);
+    assert.equal(sent[2].blocks[0].text.text, 'Code check still owed');
+    r = await watch.run({ now: at(31), post: okPost });
     assert.equal(sent.length, 3);
-    waitingHours = 40;
-    r = await watch.run({ now: at(40), send: okSend });
-    assert.equal(sent.length, 3);
-    ok('after the fourth reminder (about 12 hours) nothing more is sent for that log');
+    ok('a log past its reminders with no card gets one card and nothing after');
   } finally {
     Object.assign(events, { record: real.record });
     Object.assign(pg, { query: real.query });
     cc.read = real.read;
+    slackMod.botCall = real.botCall;
   }
 
   /* 3. record_code_check: refused on every agent token; a recorded check is written onto the log */
   const audits = [];
-  const realAudit = { open: writeTools.auditOpen, close: writeTools.auditClose, recordCheck: cc.recordCheck, note: watch.codexNote };
+  const realAudit = { open: writeTools.auditOpen, close: writeTools.auditClose, recordCheck: cc.recordCheck, note: watch.codexNote, rag: watch.bharagNote, card: watch.reviewedByCheck };
+  watch.bharagNote = async () => ({ ok: true, documents: [], edited: [], detail: 'stood in' });
+  watch.reviewedByCheck = async () => ({ ok: true, detail: 'stood in' });
   writeTools.auditOpen = async () => 77;
   writeTools.auditClose = async (_id, c) => { audits.push(c); };
   let recorded = 0;
@@ -176,6 +204,8 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
     writeTools.auditClose = realAudit.close;
     cc.recordCheck = realAudit.recordCheck;
     watch.codexNote = realAudit.note;
+    watch.bharagNote = realAudit.rag;
+    watch.reviewedByCheck = realAudit.card;
   }
 
   /* 4. codexNote */

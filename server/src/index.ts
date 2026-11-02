@@ -1190,7 +1190,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         throw new HttpError(422, 'approval_id, decision ("approve" or "deny") and user_id (a Slack user id) are all required.');
       }
       // A vFarm gate card (2026-10-09, 7S0O) uses the same two buttons; its id starts VFP-.
-      const r = vfarmGateAuto.isPromptId(approvalId)
+      // A code check card (2 Nov 2026) has one button, Mark reviewed; its id starts CCR-.
+      const r = codeCheckWatch.isReviewId(approvalId)
+        ? await codeCheckWatch.markReviewed({ id: approvalId, user_id: userId })
+        : vfarmGateAuto.isPromptId(approvalId)
         ? await vfarmGateAuto.decide({ prompt_id: approvalId, decision, user_id: userId })
         : await approvals.decide({ approval_id: approvalId, decision, user_id: userId, channel_id: typeof b.channel_id === 'string' ? b.channel_id.trim() : null });
       await mirror.logWrite({

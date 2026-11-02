@@ -76,6 +76,9 @@ async function guarded(
       const rag = await codeCheckWatch.bharagNote(r.check as cc.CodeCheck);
       (r as Record<string, unknown>).bharag_note = rag;
       r.message = rag.ok ? `${r.message} Written onto BHARAG (${rag.detail}).` : `${r.message} Not written onto BHARAG: ${rag.detail}`;
+      // And its card in #bha-code-reviews is marked reviewed (2 Nov 2026). Never able to fail the check.
+      const card = await codeCheckWatch.reviewedByCheck(r.check as cc.CodeCheck);
+      (r as Record<string, unknown>).review_card = card;
     }
     const natural = (r.check as cc.CodeCheck | undefined)?.codex_entry_id ?? (r.output as cc.AuditOutput | undefined)?.output_id ?? null;
     await auditClose(audit, { outcome: dry ? 'dry_run' : r.written ? 'updated' : 'unchanged', detail: r.message, natural_id: natural, after: r.check ?? r.output });

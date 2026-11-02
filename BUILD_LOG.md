@@ -14179,3 +14179,23 @@ Problem:    None. The reference documents `subAgents.modelsByDifficulty` only as
 Fix:        Main: model openrouter/anthropic/claude-haiku-5.5; `subAgents: { maxChildren: 2, modelsByDifficulty: { high: openrouter/anthropic/claude-sonnet-5 (credential obXfGhI1zrHGWcKo) } }`; one instruction section, "Hard reasoning goes to a helper": lookups, records, nudges and short answers it does itself; weighing a decision, planning, reviewing code/design/contract or long analysis it delegates at difficulty high with the facts it read; writes, sends and closes are never delegated. Backup mirrored on the Anthropic route (anthropic/claude-haiku-5.5, high to anthropic/claude-sonnet-5, credential Azyh6tmDAXXTUdPz), same instruction text (verified identical by comparison after the write).
 Proof:      Preview chat, a one-week trade-off question: Haiku read get_vfarm_gates, read_buyer_flow and read_media_doctrine itself, then called delegate_subagent (inline, difficulty high), which ran on openrouter/anthropic/claude-sonnet-5. Draft eval DRAFT-202611021441-T5RS passed 17 of 20, no regressions, the three failures (BAYS-SOP-01, -04, -05) the same ones the Sonnet build had; draft hash unchanged across the run. Both published and recorded; the main's recorded config is the evaluated one.
 Decision:   Only high goes to Sonnet: low and medium fall back to Haiku, so a helper is a deliberate escalation, not a habit. maxChildren 2 so one ask cannot fan out. Bays' 12 scheduled tasks now run on Haiku too, which settles "scheduled tasks on a cheaper model". The inventory row does not record modelsByDifficulty (sub_agents lists saved agents only); not changed here.
+
+## 2026-11-02 18:55 — Code check alerts move to #bha-code-reviews with a Mark reviewed button
+Intent:     Destiny: the code check alert is a DM and gets buried. Send every alert to a new channel
+            (C0CDRV4TMCP, #bha-code-reviews, with Jason and Bays), add a button to mark a log reviewed, and
+            put the four logs waiting now (Kavin, Jegan, Hardik, Kaiqi) in the channel at once.
+Files:      server/src/codeCheckWatch.ts, server/src/index.ts, server/src/mcp/codeCheckTools.ts,
+            server/test/code-check-watch.test.cjs, CLAUDE.md
+Problem:    The local node_modules was emptied by an `npm ci` that could not reach the registry
+            ("npm error Exit handler never called!", then registry.npmjs.org "connect_rejected" by the proxy).
+            Built for the test with /opt/npm-tools' TypeScript 6 and @types/node (--ignoreDeprecations 6.0);
+            the only type errors are the five pg ones the unchanged main also shows with no @types/pg, so
+            nothing new. Render builds from the lockfile as always.
+Fix:        One card per log in the channel (event code_check_card:<id>, ts kept on it), reminders as thread
+            replies tagging Destiny, a third button Mark reviewed (action engine_approval_approve, value
+            CCR-<id>) so no n8n change was needed; the decide route hands CCR- ids to markReviewed (Destiny or
+            Jason, one claim, card rewritten without the button). Reviewed logs get no more reminders; a
+            recorded check marks the card too; a log past its reminders with no card gets one card.
+Decision:   Marking reviewed records no check and moves nothing on the Code checks tab: the pay call still
+            needs record_code_check. Reusing the approval action id keeps n8n untouched.
+            npm run test:code-check-watch: 14 checks pass.
