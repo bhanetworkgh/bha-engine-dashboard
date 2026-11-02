@@ -14157,3 +14157,10 @@ Files:      n8n agents Bays (Nw5igXu4WWrjUMWB, active d58fc12f…, config cs1:ad
 Problem:    None in the eval. DRAFT-202611021352-PTVZ: 17 of 20 passed, BAYS-SOP-01, -04, -05 failed and were already failing in EVAL-202611020738, no regressions, draft hash unchanged across the run.
 Fix:        Both Bays agents published: maxIterations 30 (was 60), budget guardrail ($1 a session, $200 a month, alert at 80%), episodic recall 3, Slack read tools returning selected fields, ten unused tools removed. Inventory recorded for both; the main agent's config is the one the draft eval passed, so the publish check settles it from that run.
 Decision:   Prompt caching measured OFF. With hourly readings live, single asks priced exactly at the uncached rate: 13:38 to 13:42 UTC, one ask, 755,708 prompt and 7,974 completion tokens, $2.29 (uncached $3/$15 per million: $2.39); 13:42 to 13:45, 312,472 and 4,968, $1.01 (uncached: $1.01). The fix is moving the three main agents to the direct Anthropic credential; drafted to Jason for a go-ahead and funding (DM draft, not sent).
+
+## 2026-11-02 — Correction: the caching evidence, at the real price
+Intent:     Check the price behind the "caching is off" finding before acting on it further.
+Files:      BUILD_LOG.md only.
+Problem:    The 13:38 and 13:42 single-ask figures above were priced at $3/$15 per million. OpenRouter's Sonnet 5 price is $2 input, $10 output, $0.20 cache read (model page and n8n's catalog). At that price those two windows cost more than their recorded asks even uncached, so they held other spend (scheduled runs, extractors, transcription record no tokens) and prove nothing on their own.
+Fix:        The finding rests on the longer window instead: 08:10 to 13:38 UTC, 95 recorded asks, 20,204,372 prompt and 338,464 completion tokens, $43.80 at full price; OpenRouter measured $45.90. With the repeated prefix cached it would have been about $15. Caching is off. The draft to Jason was corrected in the reply to Destiny before sending.
+Decision:   Per-ask readings are not used as evidence again: the hourly reading covers every caller on the account, and only the agents record tokens.
