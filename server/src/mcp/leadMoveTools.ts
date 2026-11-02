@@ -20,7 +20,8 @@
  *   organisation, never a pick.
  * - Audited on `engine_mcp_writes`, kind `vfarm_leads`.
  */
-import { query } from '../pg';
+import { query, withTransaction } from '../pg';
+import * as events from '../events';
 import * as earlyAccess from '../earlyAccess';
 import * as approvals from '../approvals';
 import { ADMIN_IDS } from '../writeGuards';
@@ -156,4 +157,126 @@ export const moveBuyerToForm2Tool: ToolDefinition = {
   },
 };
 
-export const LEAD_MOVE_WRITE_TOOLS: ToolDefinition[] = [moveBuyerToForm2Tool];
+/**
+ * team_test_lead (2 Nov 2026, Destiny): a team test lead made and removed from here, so the live flow can be
+ * proven end to end and then leave no trace. `create` sends a whole Form A through `earlyAccess.storeFormA`,
+ * the function the website's Form A reaches, under an @bhanetwork.org address (the engine's team-test rule,
+ * so it can never count as a buyer). `delete` copies the row whole into record_deletions and removes it, in
+ * one transaction, and only ever a team lead. Jason or Destiny only, each with its own confirm. Not in any
+ * agent's scope.
+ */
+const TEST_ANSWERS = (name: string, email: string, org: string): Record<string, unknown> => ({
+  'Full name': name,
+  'Email address': email,
+  'Organization / household name': org,
+  City: 'Lagos',
+  'State / Province / Region': 'Lagos',
+  Country: 'Nigeria',
+  'Which best describes you or your organization?': 'Commercial operator',
+  'What is your primary use case for vFarm?': 'Restaurant / food service',
+  'What would you like vFarm to help you accomplish?': 'Team test of the live Stage 1 to Stage 2 move. Not a buyer.',
+  'What type of environment would the first vFarm most likely operate in? ': 'Indoor commercial',
+  'Do you have an indoor or protected space available?': 'Yes',
+  'Approximately how much space could you make available?': 'Larger than 4 ft × 6 ft',
+  'Is electrical power available near the potential installation area?': 'Yes',
+  'Is a water source available near the potential installation area?': 'Yes',
+  'How would you most want to monitor or interact with your vFarm?': 'On-unit kiosk / display',
+  'When could you realistically consider a vFarm pilot or purchase?': 'Ready to discuss within the next 3 months',
+  'Which best describes your current budget readiness?': 'Ready to discuss a paid pilot',
+  'How serious is your interest in becoming an early vFarm buyer or pilot partner? ': 5,
+  'Would you be willing to provide structured feedback during an Early Access pilot?': 'Yes',
+  'Would you consider a small Early Access reservation commitment in exchange for priority consideration as pilot units become available?': 'Yes',
+  'How did you hear about vFarm?': 'Bays Horizon team',
+});
+
+export const teamTestLeadTool: ToolDefinition = {
+  name: 'team_test_lead',
+  description:
+    'Make or remove a TEAM TEST vFarm lead, to prove the live buyer flow and then clean up. action "create": a whole Form A through the same function the website\'s Form A reaches, at Stage 1, under an @bhanetwork.org email (the engine\'s team-test rule, so it never counts as a buyer); confirm exactly "CREATE TEST LEAD". action "delete": the lead copied whole into record_deletions and removed, only ever an @bhanetwork.org lead; confirm exactly "DELETE <buyer_intake_id>". Jason or Destiny only. dry_run changes nothing. Audited on engine_mcp_writes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', enum: ['create', 'delete'] },
+      requester_user_id: { type: 'string', description: 'Destiny or Jason.' },
+      email: { type: 'string', description: 'create: an @bhanetwork.org address the Form 2 email may go to.' },
+      name: { type: 'string', description: 'create: full name. Default "Destiny Arupi".' },
+      organisation: { type: 'string', description: 'create: default "BHA Test".' },
+      lead: { type: 'string', description: 'delete: the buyer_intake_id.' },
+      reason: { type: 'string', description: 'delete: why (3 to 1,000 characters).' },
+      confirm: { type: 'string' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['action', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false, title: 'Make or remove a team test lead' },
+  handler: async (args, deps) => {
+    const requester = typeof args.requester_user_id === 'string' ? args.requester_user_id.trim() : null;
+    const dry = args.dry_run === true;
+    const action = args.action;
+    const audit = await auditOpen({ tool: 'team_test_lead', args, access: deps.access, kind: 'vfarm_leads', requester, dry_run: dry });
+    const refuse = async (why: string, message: string) => {
+      await auditClose(audit, { outcome: 'refused', detail: `${why}: ${message}`, guard_result: { reason: why } });
+      return { ok: false, reason: why, message: `${message} Nothing changed.`, audit_id: audit };
+    };
+    if (!requester || !ADMIN_IDS.includes(requester)) return refuse('not_permitted', 'Only Destiny or Jason can make or remove a team test lead.');
+    if (deps.agent) return refuse('not_permitted', 'A team test lead is made by a person on the connector, never on an agent token.');
+
+    if (action === 'create') {
+      const email = typeof args.email === 'string' ? args.email.trim().toLowerCase() : '';
+      if (!/^[^\s@]+@bhanetwork\.org$/.test(email)) return refuse('not_a_team_address', 'email must be an @bhanetwork.org address.');
+      if (args.confirm !== 'CREATE TEST LEAD') return refuse('confirm_required', 'Send confirm: "CREATE TEST LEAD".');
+      const name = typeof args.name === 'string' && args.name.trim() ? args.name.trim() : 'Destiny Arupi';
+      const org = typeof args.organisation === 'string' && args.organisation.trim() ? args.organisation.trim() : 'BHA Test';
+      const held = await query<{ buyer: string }>(`SELECT form_a->>'buyer_intake_id' AS buyer FROM engine_vfarm_leads WHERE lower(email) = $1 AND closed_at IS NULL`, [email]);
+      if (held.rows.length) return refuse('already_held', `${email} already has a lead (${held.rows.map((r) => r.buyer).join(', ')}). Delete it first.`);
+      const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
+      const body = {
+        buyer_intake_id: `VFBUYER-FORMA-${suffix}`,
+        correlation_id: `VFARM-FORMA-${suffix}`,
+        early_access_lead_id: `VFLEAD-${Date.now()}-${suffix}`,
+        source_campaign: 'team_test',
+        submitted_at: new Date().toISOString(),
+        answers: TEST_ANSWERS(name, email, org),
+      };
+      if (dry) {
+        await auditClose(audit, { outcome: 'dry_run', detail: `would create ${body.buyer_intake_id} for ${email}` });
+        return { ok: true, dry_run: true, would_create: { buyer_intake_id: body.buyer_intake_id, email, name, organisation: org, stage: 1 }, audit_id: audit };
+      }
+      const w = await earlyAccess.storeFormA(body);
+      await auditClose(audit, { outcome: 'applied', detail: `created ${w.buyer_intake_id} (${w.stored})`, record_id: w.id, natural_id: w.buyer_intake_id });
+      return { ok: w.stored === 'inserted', created: w.stored === 'inserted', buyer_intake_id: w.buyer_intake_id, stored: w.stored, stage: 1, organisation: org, audit_id: audit };
+    }
+
+    if (action === 'delete') {
+      const ref = typeof args.lead === 'string' ? args.lead.trim() : '';
+      const reason = typeof args.reason === 'string' ? args.reason.trim() : '';
+      if (!ref) return refuse('no_lead_named', 'Name the lead by its buyer_intake_id.');
+      if (reason.length < 3 || reason.length > 1000) return refuse('reason_required', 'Give a reason of 3 to 1,000 characters.');
+      const r = await query<{ id: string; team: boolean }>(`SELECT id::text, ${earlyAccess.TEAM_TEST_SQL} AS team FROM engine_vfarm_leads WHERE form_a->>'buyer_intake_id' = $1`, [ref]);
+      if (r.rows.length !== 1) return refuse('not_found', r.rows.length ? `"${ref}" names ${r.rows.length} leads.` : `No lead "${ref}" is held.`);
+      if (!r.rows[0].team) return refuse('not_a_team_lead', `${ref} is a real buyer. Only an @bhanetwork.org lead can be removed here.`);
+      if (args.confirm !== `DELETE ${ref}`) return refuse('confirm_required', `Send confirm: "DELETE ${ref}".`);
+      if (dry) {
+        await auditClose(audit, { outcome: 'dry_run', detail: `would delete ${ref}`, natural_id: ref });
+        return { ok: true, dry_run: true, would_delete: ref, audit_id: audit };
+      }
+      const id = r.rows[0].id;
+      await withTransaction(async (db) => {
+        await db.query(
+          `INSERT INTO record_deletions (kind, record_id, natural_id, builder_id, table_id, reason, fields, actor, at)
+           SELECT 'vfarm_leads', id::text, form_a->>'buyer_intake_id', NULL, NULL, $2, to_jsonb(l) - 'ip_hash', $3, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+             FROM engine_vfarm_leads l WHERE id::text = $1 AND ${earlyAccess.TEAM_TEST_SQL}`,
+          [id, reason, `team_test_lead (${requester})`],
+        );
+        await db.query(`DELETE FROM engine_vfarm_leads WHERE id::text = $1 AND ${earlyAccess.TEAM_TEST_SQL}`, [id]);
+      });
+      events.changed('vfarm_leads', id);
+      await auditClose(audit, { outcome: 'applied', detail: `deleted ${ref}, copied to record_deletions`, record_id: id, natural_id: ref });
+      return { ok: true, deleted: ref, kept_in: 'record_deletions', audit_id: audit };
+    }
+    return refuse('bad_action', 'action is "create" or "delete".');
+  },
+};
+
+export const LEAD_MOVE_WRITE_TOOLS: ToolDefinition[] = [moveBuyerToForm2Tool, teamTestLeadTool];
