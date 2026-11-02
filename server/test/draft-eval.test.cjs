@@ -24,7 +24,11 @@ const rows = [
   { id: 4, case_id: 'C', agent: 'north_star', question: 'other agent', checks: '{}', repeats: 1, active: true },
 ];
 const cases = d.latestCases(rows, 'bays');
-ok(cases.length === 1 && cases[0].question === 'new' && cases[0].repeats === 3, 'newest row per case wins, inactive and other agents are left out');
+ok(cases.length === 1 && cases[0].question === 'new' && cases[0].repeats === 1, 'newest row per case wins, inactive and other agents are left out; a Bays lookup is asked once (2 Nov 2026)');
+ok(d.repeatsFor('north_star', { repeats: 3, checks: '{}' }) === 3, 'North Star judges, so its repeats stand');
+ok(d.repeatsFor('bays', { repeats: 3, checks: '{"judgement": true}' }) === 3, 'a case marked judgement keeps its repeats');
+ok(d.repeatsFor('research_twin', { repeats: 3, checks: '{"cites": true}' }) === 1, 'any other case is asked once');
+ok(d.repeatsFor('north_star', { repeats: 9, checks: 'not json' }) === 5, 'repeats stay capped at 5, and bad checks JSON is no judgement');
 ok(d.contextFor('bays', 'ASK-1', 'Q?').endsWith('Question:\nQ?'), "Bays' context block ends with the question, as the runner's does");
 ok(d.contextFor('research_twin', 'ASK-1', 'Q?').startsWith('source: eval, ask_id: ASK-1'), "Research Twin's context block is the runner's");
 ok(d.agentKeyFor('Nw5igXu4WWrjUMWB') === 'bays' && d.agentKeyFor('nobody') === null, 'agent ids and keys resolve, unknowns do not');

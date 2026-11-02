@@ -14112,3 +14112,20 @@ Fix:        engine_model_usage_readings, one row per reading of OpenRouter's lif
             Anthropic backup's answers and credit refusals.
 Decision:   Dollars only from the counter; the per-agent split is an estimate by token share and is
             labelled one. No price table: a list price ignores caching and would read as a bill.
+
+## 2026-11-02 15:20 — Cheaper evals
+Intent:     Cut eval spend (about $626 of $2,712 measured 11 Oct to 2 Nov) without losing the gate.
+Files:      server/src/draftEval.ts (repeatsFor), server/src/publishGate.ts, server/test/draft-eval.test.cjs,
+            server/test/model-spend.test.cjs (new), package.json, CLAUDE.md; n8n Agent Evals — Runner
+            (8nv31oanjnkEGHie), Expand Repeats, Pick Route and the sticky note, restore point
+            93503898-f496-4ff0-9bd9-d5b1cd23050e.
+Problem:    Every run asked all 40 cases 3 times (120 full agent runs), for all three agents, after every
+            publish, even when only Bays changed and even when the same config had passed its draft eval.
+            The schedule itself was already weekly (Monday 05:00), not daily as I had said.
+Fix:        Repeats only for judgement cases (North Star, or checks judgement:true): 120 answers to 62 for
+            all three (Bays 20, North Star 33, Research Twin 9). The publish check sends only the agents
+            that changed, settles a version on its passed draft run without a second run, and compares
+            runs that hold that agent's cases. The runner stops and raises at $10 spent per run.
+Decision:   The runner stays unpublished (paused this morning) until there is credit; the Monday run and
+            the publish check need it published again. The draft eval stays the full set, since it is now
+            the one run a change gets.

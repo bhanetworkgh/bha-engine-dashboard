@@ -164,13 +164,13 @@ async function post(stored: string): Promise<{ ok: true; ts: string } | { ok: fa
   return r.ok && typeof r.ts === 'string' ? { ok: true, ts: r.ts } : { ok: false, error: String(r.error ?? 'unknown error') };
 }
 
-async function askForRun(reason: string): Promise<{ ok: boolean; error?: string }> {
+async function askForRun(reason: string, agents: string[] = []): Promise<{ ok: boolean; error?: string }> {
   const key = process.env.DASHBOARD_INBOUND_KEY?.trim();
   if (!key) return { ok: false, error: 'DASHBOARD_INBOUND_KEY is not set' };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20_000);
   try {
-    const res = await fetch(`${n8n.n8nHost()}${RUN_PATH}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-dashboard-key': key }, body: JSON.stringify({ reason }), signal: controller.signal });
+    const res = await fetch(`${n8n.n8nHost()}${RUN_PATH}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-dashboard-key': key }, body: JSON.stringify({ reason, agents }), signal: controller.signal });
     if (res.status < 200 || res.status >= 300) return { ok: false, error: `n8n answered ${res.status} at ${RUN_PATH}: ${(await res.text()).slice(0, 200)}` };
     return { ok: true };
   } catch (e) {
@@ -215,7 +215,21 @@ export async function sweep(now = new Date()): Promise<{ asked: boolean; settled
     out.settled++;
   }
 
-  // 2. ask for one run for everything that has settled.
+  // 2a. (2 Nov 2026, Destiny — eval cost) A version whose exact config passed its draft eval before the
+  // publish is settled on that run: a second full run of the same config spends money to learn nothing new.
+  for (const v of open.filter((x) => x.eval_state === 'pending')) {
+    const d = await query<{ draft_state: string | null; draft_run_id: string | null }>(`SELECT draft_state, draft_run_id FROM engine_agent_versions WHERE id = $1`, [v.id]);
+    if (d.rows[0]?.draft_state === 'passed_before_publish') {
+      await query(
+        `UPDATE engine_agent_versions SET eval_state = 'passed', eval_run_id = $2, eval_detail = $3, settled_at = $4 WHERE id = $1`,
+        [v.id, d.rows[0].draft_run_id, `covered by draft run ${d.rows[0].draft_run_id}, which tested this exact config before the publish; no second run was asked for (2 Nov 2026 cost rule)`, now.toISOString()],
+      );
+      v.eval_state = 'passed';
+      out.settled++;
+    }
+  }
+
+  // 2. ask for one run for everything that has settled, of the agents that changed only.
   const pending = open.filter((v) => v.eval_state === 'pending');
   if (pending.length && pending.every((v) => now.getTime() - new Date(v.seen_at).getTime() >= RULE.settle_seconds * 1000)) {
     const today = await query<{ n: string }>(`SELECT count(DISTINCT requested_at)::text AS n FROM engine_agent_versions WHERE requested_at > $1::timestamptz - interval '24 hours'`, [now.toISOString()]);
@@ -223,7 +237,8 @@ export async function sweep(now = new Date()): Promise<{ asked: boolean; settled
     if (Number(today.rows[0].n) >= RULE.max_runs_per_day) {
       await query(`UPDATE engine_agent_versions SET eval_state = 'requested', requested_at = $2, eval_detail = $3 WHERE id = ANY($1::bigint[])`, [ids, now.toISOString(), `no run was asked for: ${RULE.max_runs_per_day} have been asked for in 24 hours. A run started by hand still counts.`]);
     } else {
-      const a = await askForRun(pending.map((v) => `${v.name} ${v.version_id.slice(0, 8)}`).join(', '));
+      const agents = [...new Set(pending.map((v) => evalKey(v.name)).filter((x): x is string => !!x))];
+      const a = await askForRun(pending.map((v) => `${v.name} ${v.version_id.slice(0, 8)}`).join(', '), agents);
       await query(`UPDATE engine_agent_versions SET eval_state = 'requested', requested_at = $2, eval_detail = $3 WHERE id = ANY($1::bigint[])`, [ids, now.toISOString(), a.ok ? 'an eval run was asked for' : `the eval run could not be asked for: ${a.error}. A run started by hand still counts.`]);
       out.asked = a.ok;
       if (!a.ok) console.error(`[publish-check] the eval run was not asked for: ${a.error}`);
@@ -234,14 +249,21 @@ export async function sweep(now = new Date()): Promise<{ asked: boolean; settled
   // 3 and 4. settle each requested row.
   for (const v of open.filter((x) => x.eval_state === 'requested')) {
     const agent = evalKey(v.name);
-    const after = await query<{ run_id: string }>(`${FINISHED} AND started > $1::timestamptz ORDER BY started LIMIT 1`, [v.seen_at]);
+    const after = await query<{ run_id: string }>(
+      `${FINISHED} AND started > $1::timestamptz AND EXISTS (SELECT 1 FROM engine_eval_runs e WHERE e.fields->>'Run ID' = runs.run_id AND e.fields->>'Agent' = $2) ORDER BY started LIMIT 1`,
+      [v.seen_at, agent],
+    );
     const run = after.rows[0]?.run_id ?? null;
     let state: string | null = null;
     let detail = '';
     let alert: string | null = null;
     if (run && agent) {
       const now_ = await failedCases(run, agent);
-      const before = await query<{ run_id: string }>(`${FINISHED} AND ended <= $1::timestamptz ORDER BY ended DESC LIMIT 1`, [v.seen_at]);
+      // The run before must hold this agent's cases: from 2 Nov a run may test one agent only.
+      const before = await query<{ run_id: string }>(
+        `${FINISHED} AND ended <= $1::timestamptz AND EXISTS (SELECT 1 FROM engine_eval_runs e WHERE e.fields->>'Run ID' = runs.run_id AND e.fields->>'Agent' = $2) ORDER BY ended DESC LIMIT 1`,
+        [v.seen_at, agent],
+      );
       const prior = before.rows[0] ? await failedCases(before.rows[0].run_id, agent) : null;
       const regressed = prior ? now_.failed.filter((c) => !prior.failed.includes(c)) : now_.failed;
       const known = now_.failed.filter((c) => !regressed.includes(c));

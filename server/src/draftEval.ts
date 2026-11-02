@@ -115,6 +115,24 @@ export function score(answer: string, error: string | null, checksJson: unknown)
 
 export interface EvalCase { case_id: string; question: string; checks: string; repeats: number }
 
+/**
+ * How many times one case is asked (2 Nov 2026, Destiny — eval cost). Repeats exist to catch an
+ * answer that changes run to run, which matters for a judgement (a ranking, a verdict, a score) and
+ * not for a lookup with one right answer. So: North Star's cases, whose job is ranking and judging,
+ * and any case whose checks say "judgement": true keep the repeats the row asks for; every other case
+ * is asked once. Kept in step with Expand Repeats in n8n's Agent Evals — Runner.
+ */
+export function repeatsFor(agent: string, row: { repeats?: unknown; checks?: unknown }): number {
+  const asked = Math.max(1, Math.min(5, Number(row.repeats) || 1));
+  let checks: Dict = {};
+  try {
+    checks = typeof row.checks === 'string' ? (JSON.parse(row.checks || '{}') as Dict) : ((row.checks as Dict) ?? {});
+  } catch {
+    checks = {};
+  }
+  return agent === 'north_star' || checks.judgement === true ? asked : 1;
+}
+
 /** The newest row per case_id, active, for one agent: what the runner would ask. */
 export function latestCases(rows: Dict[], agent: string): EvalCase[] {
   const latest: Record<string, Dict> = {};
@@ -126,7 +144,7 @@ export function latestCases(rows: Dict[], agent: string): EvalCase[] {
   return Object.values(latest)
     .filter((c) => c.agent === agent && c.active !== false)
     .sort((a, b) => Number(a.id) - Number(b.id))
-    .map((c) => ({ case_id: String(c.case_id), question: String(c.question ?? ''), checks: typeof c.checks === 'string' ? c.checks : JSON.stringify(c.checks ?? {}), repeats: Math.max(1, Math.min(5, Number(c.repeats) || 1)) }));
+    .map((c) => ({ case_id: String(c.case_id), question: String(c.question ?? ''), checks: typeof c.checks === 'string' ? c.checks : JSON.stringify(c.checks ?? {}), repeats: repeatsFor(agent, c) }));
 }
 
 /* ----------------------------------------------------------- the production baseline */

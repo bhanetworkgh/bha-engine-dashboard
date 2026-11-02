@@ -1876,6 +1876,15 @@ an agent to make them match. The main draft is read again at the end, and a chan
 agent: edit the draft, `run_draft_eval`, publish only once it reads passed,
 then record the inventory.** `npm run test:draft-eval` pins the pure parts.
 
+**Evals cost less** (2 Nov 2026, Destiny: about $626 of the $2,712 OpenRouter spent from 11 Oct to
+2 Nov went on eval runs). `draftEval.repeatsFor` is the one rule, kept in step with Expand Repeats in n8n's
+runner: a case is repeated only where the answer is a judgement (North Star's cases, or checks with
+`"judgement": true`); every other case is asked once, so all three agents are 62 answers, not 120. The
+publish check asks the runner for **only the agents that changed** (`agents` in the body), settles a
+version whose exact config passed its draft eval on that run without asking for a second, and matches
+before and after runs that hold that agent's cases. The runner stops at $10 spent on OpenRouter
+(`max_usd` may set another) and raises it. `npm run test:draft-eval`, `npm run test:model-spend`.
+
 **Tokens and tool calls are on every ask** (2026-10-10). The three Agent
 Delivery workflows write `Prompt Tokens`, `Completion Tokens`, `Total Tokens`,
 `Tool Call Count` and `Tool Calls` (tool names in order, ` > ` between them) on
