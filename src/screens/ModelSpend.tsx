@@ -21,6 +21,9 @@ const AGENT: Record<string, string> = { bays: 'Bays', north_star: 'North Star', 
 
 const usd = (n: number | null | undefined) => (n === null || n === undefined || !Number.isFinite(n) ? '—' : `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const k = (n: number | null | undefined) => (n === null || n === undefined ? '—' : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+// Whole days when any are measured; otherwise the stretch the readings do cover, said as such; otherwise nothing.
+const spanHint = (v: number | null, measured: number, of: number, span: { from: string; to: string } | null) =>
+  v !== null ? `${measured} of ${of} days measured` : span ? `only ${when(span.from)} to ${when(span.to)} UTC is measured` : 'not measured';
 const when = (iso: string | null) => (iso ? iso.slice(0, 16).replace('T', ' ') : '—');
 
 /** Daily dollars as small bars; a day not measured is a gap with a dashed tick, never a zero bar. */
@@ -59,10 +62,10 @@ function Dollars({ data }: { data: ModelSpendData }) {
     <>
       <StatStrip cols={4}>
         <StatCell>
-          <Stat label="Last 7 days" value={usd(o.last_7_days_usd)} hint={`${o.last_7_days_measured} of 7 days measured`} size="lg" />
+          <Stat label="Last 7 days" value={usd(o.last_7_days_usd ?? o.last_7_days_span?.spent_usd)} hint={spanHint(o.last_7_days_usd, o.last_7_days_measured, 7, o.last_7_days_span)} size="lg" />
         </StatCell>
         <StatCell>
-          <Stat label="This month so far" value={usd(o.month_to_date_usd)} hint={`${o.month_to_date_measured} of ${o.month_days} days measured`} />
+          <Stat label="This month so far" value={usd(o.month_to_date_usd ?? o.month_to_date_span?.spent_usd)} hint={spanHint(o.month_to_date_usd, o.month_to_date_measured, o.month_days, o.month_to_date_span)} />
         </StatCell>
         <StatCell>
           <Stat label="Per measured day" value={usd(o.per_day_usd)} hint={`over the last ${data.window.days} days`} />

@@ -4727,10 +4727,12 @@ export interface ModelSpendData {
   openrouter: {
     latest: { at: string; total_usage_usd: number; remaining_usd: number | null; origin: string } | null;
     last_read_error: string | null;
-    last_7_days_usd: number;
+    last_7_days_usd: number | null;
     last_7_days_measured: number;
-    month_to_date_usd: number;
+    last_7_days_span: { spent_usd: number; from: string; to: string } | null;
+    month_to_date_usd: number | null;
     month_to_date_measured: number;
+    month_to_date_span: { spent_usd: number; from: string; to: string } | null;
     month_days: number;
     per_day_usd: number | null;
     window_usd: { spent_usd: number; from: string; to: string } | null;

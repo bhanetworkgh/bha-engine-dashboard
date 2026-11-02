@@ -180,7 +180,12 @@ export async function read(opts: { days?: number } = {}) {
   const latest = readings[readings.length - 1] ?? null;
   const daily = dailySpend(readings, fromDay, today);
   const measuredDays = daily.filter((d) => d.measured);
-  const sum = (ds: Day[]) => Math.round(ds.reduce((a, d) => a + (d.spent_usd ?? 0), 0) * 100) / 100;
+  // A window with no measured day is not measured, never $0 (CLAUDE.md section 4: a zero and an unknown never look the same).
+  const sum = (ds: Day[]) => (ds.some((d) => d.measured) ? Math.round(ds.reduce((a, d) => a + (d.spent_usd ?? 0), 0) * 100) / 100 : null);
+  // Between the first and last readings inside a window: what was spent in the part of it the readings cover.
+  const nowMs = Date.now();
+  const last7Span = spendBetween(readings, nowMs - 7 * 86_400_000, nowMs);
+  const monthSpan = spendBetween(readings, Date.parse(`${today.slice(0, 7)}-01T00:00:00Z`), nowMs);
   const last7 = daily.slice(-7);
   const monthStart = `${today.slice(0, 7)}-01`;
   const monthDays = daily.filter((d) => d.day >= monthStart);
@@ -270,10 +275,12 @@ export async function read(opts: { days?: number } = {}) {
       last_read_error: lastError,
       last_7_days_usd: sum(last7),
       last_7_days_measured: last7.filter((d) => d.measured).length,
+      last_7_days_span: last7Span,
       month_to_date_usd: sum(monthDays),
       month_to_date_measured: monthDays.filter((d) => d.measured).length,
+      month_to_date_span: monthSpan,
       month_days: monthDays.length,
-      per_day_usd: measuredDays.length ? Math.round((sum(measuredDays) / measuredDays.length) * 100) / 100 : null,
+      per_day_usd: measuredDays.length ? Math.round(((sum(measuredDays) ?? 0) / measuredDays.length) * 100) / 100 : null,
       window_usd: windowSpend,
       daily,
     },
