@@ -3133,6 +3133,8 @@ is refused** (`secret_refused`, the BHARAG guard's shapes plus Stripe, ElevenLab
 stored redacted. A cost nobody stated is left empty: spend is not tracked yet (the Mercury card feed is a
 later step). `npm run test:registry-tools`.
 
+**Agents get shorter tool descriptions** (2 Nov 2026, Destiny: token cost). Every description is sent to an agent's model on every step, and on Bays the tool list was ~64% of what was sent before any conversation. `server/src/mcp/agentDescriptions.ts` holds a shorter description for 18 tools (25,933 characters down to 11,214), served only on an agent token (`catalogueFor`); Claude's connector keeps the full text. Each keeps every instruction an agent acts on and drops history, internals and return shapes. **Change a rule in tools.ts first, then here**; a tool with no entry gets its full description. `npm run test:agent-descriptions` checks each names a real tool, is shorter, and keeps its key rules.
+
 **Bays reads a long thread shorter** (2 Nov 2026, Destiny: token cost). In `Bays — Agent Delivery`'s Build Agent Message, thread messages up to Bays' last post are sent at 300 characters and later ones at 800, the first message always whole, 8,000 characters at most; Bays' own thread memory holds the rest. Shortened, never dropped: a Bays workflow card is not in that memory.
 
 **Model spend, a Records page** (2026-11-02, Destiny: "a record page for tracking token spending and

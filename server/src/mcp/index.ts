@@ -75,6 +75,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { McpError } from './source';
 import { toolByName, toolCatalogue, sourceWarning, type ToolDeps } from './tools';
+import { AGENT_DESCRIPTIONS } from './agentDescriptions';
 import { callerStore, currentAgent } from './caller';
 import { auditOpen, auditClose } from './writeTools';
 
@@ -409,7 +410,10 @@ function logCall(access: McpAccess, name: string, args: unknown, outcome: string
 /** The catalogue this caller may see: its access's tools, narrowed to its scope. */
 function catalogueFor(deps: ToolDeps): ReturnType<typeof toolCatalogue> {
   const all = toolCatalogue(mcpAccess(deps.access));
-  return deps.scope ? all.filter((t) => deps.scope!.has(t.name)) : all;
+  const scoped = deps.scope ? all.filter((t) => deps.scope!.has(t.name)) : all;
+  // 2 Nov 2026 (token cost): an agent token is served the shorter descriptions in
+  // agentDescriptions.ts; every other caller keeps the full ones.
+  return deps.agent ? scoped.map((t) => (AGENT_DESCRIPTIONS[t.name] ? { ...t, description: AGENT_DESCRIPTIONS[t.name] } : t)) : scoped;
 }
 
 /* -------------------------------------------------------------- the methods */
