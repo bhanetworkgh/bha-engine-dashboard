@@ -8,37 +8,41 @@
  * lead. An unknown or wrong link gets the same plain "not valid" page, so a
  * link cannot be used to learn whether another one exists.
  *
- * Colours are the vFarm brand kit the Form A confirmation email uses: forest
- * header, paper body, gold button with black text.
+ * Look (2 Nov 2026, Destiny): the Bays Horizon Network design system the site moved to on 31 Oct,
+ * read from bhanetwork-site's tokens.css: paper ground, white cards, a deep field-green header with
+ * the tree mark and wordmark, Geist throughout (Geist Mono for the small labels), butter as the one
+ * accent on the pill button. The questions, the link and the submit are unchanged.
  */
 import { INTAKE2_FIELDS, INTAKE2_SECTIONS, INTAKE2_FILE_MAX_BYTES, INTAKE2_FILES_PER_FIELD } from '../../src/data/intake2';
 
 const CSS = `
-:root{--forest:#0f2419;--on-forest:#edebe3;--on-forest-dim:#c9d1c8;--lime:#c6f36b;--paper:#f2efe6;--card:#ffffff;--ink:#13170f;--muted:#5b5f55;--gold:#e0b84a;--gold-on:#0a0a0a;--gold-ink:#7d5e0d;--rule:#ddd8c9;--bad:#b42318;--bad-soft:#fdecea;--focus:#0a6ee6}
+:root{--paper:#f4f2ea;--card:#ffffff;--tile:#e9e6da;--forest:#1d2e1c;--forest-raised:#2a3f27;--forest-deep:#142113;--olive:#7d8862;--olive-deep:#5f6a48;--sage:#c9cfb4;--ink:#18200f;--moss:#5c6352;--on-forest:#f2f1e8;--on-forest-dim:#cdd4c5;--on-forest-faint:#a7b39f;--butter:#f6ea8f;--butter-deep:#ecdc6a;--line:rgba(24,32,15,.12);--line-forest:rgba(242,241,232,.16);--focus:#18200f;--bad:#b3261e;--bad-soft:#f7dcd8;--shadow-tile:0 24px 60px rgba(24,32,15,.08);--r-tile:24px;--r-inner:16px;--r-sm:12px;--r-pill:999px;--font:"Geist",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;--mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace}
 *{box-sizing:border-box}
-html,body{margin:0;background:var(--paper);color:var(--ink);font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;font-size:16px;line-height:1.55}
-header{background:var(--forest);color:var(--on-forest);padding:28px 16px}
+html,body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased}
+header{background:radial-gradient(90% 70% at 15% 0%,#2c4428 0%,var(--forest) 60%,var(--forest-deep) 100%);color:var(--on-forest);padding:28px 16px 40px}
 .wrap{max-width:760px;margin:0 auto}
-.brand{display:flex;align-items:center;gap:12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:var(--lime)}
-.brand img{width:36px;height:36px;border-radius:8px;display:block}
-h1{font-family:"Instrument Serif",Georgia,"Times New Roman",serif;font-weight:400;font-size:clamp(30px,6vw,40px);line-height:1.15;margin:18px 0 8px}
+.brand{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.brand img{width:30px;height:30px;display:block}
+.brand .name{font-weight:600;font-size:16px;letter-spacing:-.02em;color:var(--on-forest)}
+.brand .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--butter);padding-left:10px;border-left:1px solid var(--line-forest)}
+h1{font-family:var(--font);font-weight:600;letter-spacing:-.03em;font-size:clamp(30px,6vw,44px);line-height:1.08;margin:28px 0 10px}
 header p{margin:0;color:var(--on-forest-dim);max-width:60ch}
-main{padding:24px 16px 64px}
-.note{background:var(--card);border-left:4px solid var(--gold-ink);border-radius:8px;padding:14px 16px;font-size:14px;margin:0 0 20px}
-section.card{background:var(--card);border:1px solid var(--rule);border-radius:12px;padding:20px 18px;margin:0 0 18px}
-section.card h2{font-size:13px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin:0 0 4px;font-weight:600}
-.q{padding:16px 0;border-top:1px solid var(--rule)}
+main{padding:28px 16px 64px}
+.note{background:var(--card);border-left:4px solid var(--olive);border-radius:var(--r-sm);padding:14px 16px;font-size:14px;margin:0 0 20px}
+section.card{background:var(--card);border:0;border-radius:var(--r-tile);padding:24px 22px;margin:0 0 18px;box-shadow:var(--shadow-tile)}
+section.card h2{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--olive-deep);margin:0 0 4px;font-weight:500}
+.q{padding:18px 0;border-top:1px solid var(--line)}
 .q:first-of-type{border-top:0}
-.q>label,.q>.label{display:block;font-weight:600;margin:0 0 8px}
-.req{color:var(--gold-ink);font-weight:600;margin-left:4px}
-.opt{color:var(--muted);font-weight:400;font-size:13px;margin-left:6px}
-.hint{color:var(--muted);font-size:13px;margin:-4px 0 8px}
-input[type=text],input[type=number],input[type=month],textarea,select{width:100%;font:inherit;color:inherit;background:#fff;border:1px solid #c9c4b4;border-radius:8px;padding:10px 12px}
+.q>label,.q>.label{display:block;font-weight:600;letter-spacing:-.01em;margin:0 0 8px}
+.req{color:var(--olive-deep);font-weight:600;margin-left:4px}
+.opt{color:var(--moss);font-weight:400;font-size:13px;margin-left:6px}
+.hint{color:var(--moss);font-size:13px;margin:-4px 0 8px}
+input[type=text],input[type=number],input[type=month],textarea,select{width:100%;font:inherit;color:inherit;background:#fff;border:1px solid rgba(24,32,15,.22);border-radius:var(--r-sm);padding:11px 14px}
 textarea{min-height:96px;resize:vertical}
 input:focus,textarea:focus,select:focus,button:focus-visible,.choice input:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .choices{display:grid;gap:6px}
 .choice{display:flex;gap:10px;align-items:flex-start;padding:6px 0;font-weight:400;cursor:pointer}
-.choice input{margin-top:4px;width:18px;height:18px;flex:none}
+.choice input{margin-top:4px;width:18px;height:18px;flex:none;accent-color:var(--forest)}
 .parts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
 .parts label{display:block;font-size:14px;font-weight:500;margin:0 0 4px}
 .detail{margin-top:10px}
@@ -47,17 +51,18 @@ input:focus,textarea:focus,select:focus,button:focus-visible,.choice input:focus
 .q.bad .err{display:block}
 .q.bad input,.q.bad textarea,.q.bad select{border-color:var(--bad)}
 .files{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:6px}
-.files li{display:flex;justify-content:space-between;gap:10px;align-items:center;background:var(--paper);border-radius:8px;padding:8px 10px;font-size:14px;word-break:break-all}
+.files li{display:flex;justify-content:space-between;gap:10px;align-items:center;background:var(--tile);border-radius:var(--r-sm);padding:8px 12px;font-size:14px;word-break:break-all}
 .files button{background:none;border:0;color:var(--bad);font:inherit;font-size:13px;cursor:pointer;padding:4px}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--gold);color:var(--gold-on);border:1px solid #b08a22;border-radius:8px;padding:13px 24px;font:inherit;font-weight:600;cursor:pointer;min-height:44px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--butter);color:var(--ink);border:1px solid var(--butter-deep);border-radius:var(--r-pill);padding:13px 28px;font:inherit;font-weight:600;cursor:pointer;min-height:48px;transition:background-color .15s ease}
+.btn:hover{background:var(--butter-deep)}
 .btn[disabled]{opacity:.6;cursor:progress}
-.banner{border-radius:10px;padding:14px 16px;margin:0 0 18px;font-size:15px}
+.banner{border-radius:var(--r-sm);padding:14px 16px;margin:0 0 18px;font-size:15px}
 .banner.bad{background:var(--bad-soft);color:var(--bad)}
-.done{background:var(--card);border:1px solid var(--rule);border-radius:12px;padding:28px 22px}
-.done h2{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:30px;margin:0 0 8px}
-footer{color:var(--muted);font-size:13px;margin-top:28px}
+.done{background:var(--card);border-radius:var(--r-tile);padding:32px 26px;box-shadow:var(--shadow-tile)}
+.done h2{font-family:var(--font);font-weight:600;letter-spacing:-.03em;font-size:30px;line-height:1.1;margin:0 0 10px}
+footer{color:var(--moss);font-size:13px;margin-top:28px}
 footer a{color:var(--ink)}
-.status{font-size:13px;color:var(--muted)}
+.status{font-size:13px;color:var(--moss)}
 `;
 
 function esc(s: string): string {
@@ -70,13 +75,13 @@ function shell(title: string, body: string, script = ''): string {
 <meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
 <title>${esc(title)}</title>
 <link rel="icon" href="https://bhanetwork.org/favicon.ico">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@500&display=swap" rel="stylesheet">
 <style>${CSS}</style></head>
 <body>${body}${script ? `<script>${script}</script>` : ''}</body></html>`;
 }
 
 const HEADER = (title: string, lead: string) => `<header><div class="wrap">
-<div class="brand"><img src="https://bhanetwork.org/icon-192.png" alt="BHA"><span>vFarm · Site &amp; deployment specification</span></div>
+<div class="brand"><img src="https://bhanetwork.org/mark-tree.png?v=4" alt=""><span class="name">Bays Horizon Network</span><span class="kicker">vFarm · Site &amp; deployment specification</span></div>
 <h1>${esc(title)}</h1><p>${lead}</p></div></header>`;
 
 /** For a link that does not open anything. Says nothing about why. */
@@ -87,7 +92,7 @@ const HEADER = (title: string, lead: string) => `<header><div class="wrap">
  */
 export function brandedPage(kicker: string, title: string, lead: string, body: string): string {
   const header = `<header><div class="wrap">
-<div class="brand"><img src="https://bhanetwork.org/icon-192.png" alt="BHA"><span>vFarm · ${esc(kicker)}</span></div>
+<div class="brand"><img src="https://bhanetwork.org/mark-tree.png?v=4" alt=""><span class="name">Bays Horizon Network</span><span class="kicker">vFarm · ${esc(kicker)}</span></div>
 <h1>${esc(title)}</h1><p>${lead}</p></div></header>`;
   return shell(title, `${header}<main><div class="wrap">${body}</div></main>`);
 }

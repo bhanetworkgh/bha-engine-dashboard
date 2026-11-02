@@ -281,6 +281,10 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // the System Registry's services, endpoints and workflows; no secret is ever written (held on the
         // server), and remove and restore are Destiny's or Jason's.
         'read_registry', 'write_registry',
+        // 2026-11-02 (Destiny): "Bays, move Shibu to Form 2" from Jason. Stage 1 to 2 only, Jason or Destiny
+        // only, and on this token it never moves anything itself: it posts an Approve / Cancel card in
+        // #bha-engine-alerts and the lead moves when one of them approves.
+        'move_buyer_to_form_2',
       ]),
     },
     {

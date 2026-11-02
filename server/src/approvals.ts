@@ -46,7 +46,13 @@ import * as timers from './timers';
 
 /** Destiny and Jason. The only two people whose click decides anything. */
 export const APPROVERS: ReadonlyArray<string> = ['U0AEW3TBYH1', 'U0A9V97949F'];
-export const GATED_TOOLS: ReadonlyArray<string> = ['share_doc', 'unshare_doc', 'grant_drive_access', 'delete_record'];
+export const GATED_TOOLS: ReadonlyArray<string> = ['share_doc', 'unshare_doc', 'grant_drive_access', 'delete_record', 'move_buyer_to_form_2'];
+/**
+ * Whose card always goes to the engine alerts channel, never the thread it was asked in (2 Nov 2026,
+ * Destiny): a buyer moving stage is a second check against a mistake, kept where the approvers look
+ * for engine actions. The thread is still told the outcome (tellOrigin).
+ */
+export const ALERTS_ONLY_TOOLS: ReadonlyArray<string> = ['move_buyer_to_form_2'];
 /**
  * Gated only for some calls (2026-10-10): `send_nudge` and `post_file` go
  * straight through to a person with a Builder Profile, which is every DM Bays
@@ -191,6 +197,7 @@ const TOOL_LABELS: Record<string, { action: string; target: string }> = {
   send_nudge: { action: 'Send a DM as Bays', target: 'To' },
   post_file: { action: 'Send a file as Bays', target: 'To' },
   post_channel_message: { action: 'Post a message as Bays', target: 'Where' },
+  move_buyer_to_form_2: { action: 'Move a buyer to Form 2 (Stage 1 to 2)', target: 'Buyer' },
 };
 
 function labelsFor(tool: string): { action: string; target: string } {
@@ -253,7 +260,7 @@ export function cardBlocks(row: Pick<ApprovalRow, 'approval_id' | 'summary' | 'r
       block_id: `approval:${row.approval_id}`,
       elements: [
         { type: 'button', action_id: ACTION_APPROVE, style: 'primary', text: { type: 'plain_text', text: 'Approve' }, value: row.approval_id },
-        { type: 'button', action_id: ACTION_DENY, style: 'danger', text: { type: 'plain_text', text: 'Deny' }, value: row.approval_id },
+        { type: 'button', action_id: ACTION_DENY, style: 'danger', text: { type: 'plain_text', text: ALERTS_ONLY_TOOLS.includes(row.tool) ? 'Cancel' : 'Deny' }, value: row.approval_id },
       ],
     },
     footer(row, 'only Destiny or Jason can decide'),
@@ -352,7 +359,7 @@ export async function request(input: RequestInput): Promise<RequestResult> {
    */
   const alerts = quota.channelId();
   const origin = row.origin_channel;
-  const inThread = origin !== null && (origin.startsWith('D') ? requester !== null && APPROVERS.includes(requester) : true);
+  const inThread = !ALERTS_ONLY_TOOLS.includes(input.tool) && origin !== null && (origin.startsWith('D') ? requester !== null && APPROVERS.includes(requester) : true);
   const tries: { channel: string; thread: string | null }[] = [];
   if (inThread && origin) tries.push({ channel: origin, thread: row.origin_thread_ts });
   if (alerts && !tries.some((t) => t.channel === alerts)) tries.push({ channel: alerts, thread: null });
@@ -449,6 +456,13 @@ async function ephemeral(channel: string | null | undefined, user: string, threa
 
 export function resultLine(result: Record<string, unknown>): string {
   const link = typeof result.link === 'string' ? ` ${result.link}` : '';
+  // 2 Nov 2026: a buyer moved to Form 2. The move can land while the email does not.
+  if (result.moved === true) {
+    const id = String(result.buyer_intake_id ?? '');
+    return result.form_2_link_sent === true
+      ? `\`${id}\` is in Stage 2 and their Form 2 link has been emailed to them.`
+      : `\`${id}\` is in Stage 2, but the Form 2 link did not go out: ${String(result.message ?? 'no reason given')}`;
+  }
   if (result.ok === true) {
     if (result.deleted === true) return `Deleted \`${String(result.natural_id ?? result.id)}\` (${String(result.kind)}). The whole row is kept in record_deletions.`;
     if (result.public_link_removed === true) return `The public link is off: "anyone with the link" can no longer open it. Everyone it is shared with by name or through the domain keeps their access.${link}`;
@@ -491,8 +505,9 @@ export async function decide(input: DecideInput): Promise<DecideResult> {
   const by = mention(input.user_id);
   if (next === 'denied') {
     const line = 'Nothing was done.';
-    const cardError = await updateCard(claimed, ':no_entry_sign: *Denied*', line);
-    const note = await tellOrigin(claimed, `:no_entry_sign: ${by} said no to that request (\`${claimed.approval_id}\`). Nothing was done.`);
+    const cancelled = ALERTS_ONLY_TOOLS.includes(claimed.tool);
+    const cardError = await updateCard(claimed, cancelled ? ':no_entry_sign: *Cancelled*' : ':no_entry_sign: *Denied*', line);
+    const note = await tellOrigin(claimed, `:no_entry_sign: ${by} ${cancelled ? 'cancelled' : 'said no to'} that request (\`${claimed.approval_id}\`). Nothing was done.`);
     await event('approval_decided', claimed, input.user_id, { decision: 'denied' });
     const problems = [cardError, note].filter(Boolean);
     return { status: 200, body: { ok: true, decision: 'denied', done: false, raise: problems.length > 0, approval_id: claimed.approval_id, ...(problems.length ? { message: problems.join(' ') } : {}) } };
@@ -514,7 +529,7 @@ export async function decide(input: DecideInput): Promise<DecideResult> {
   const saved = await query<ApprovalRow>(`UPDATE engine_approvals SET executed_at = now(), result_ok = $2, result = $3::jsonb WHERE approval_id = $1 RETURNING ${COLS}`, [claimed.approval_id, ok, JSON.stringify(result)]);
   const done = saved.rows[0] ?? claimed;
   const line = resultLine(result);
-  const cardError = await updateCard(done, ok ? ':white_check_mark: *Approved — done*' : ':x: *Approved, but it failed*', ok ? line : `Nothing was changed: ${line}`);
+  const cardError = await updateCard(done, ok ? ':white_check_mark: *Approved — done*' : ':x: *Approved, but it failed*', ok || result.moved === true ? line : `Nothing was changed: ${line}`);
   const note = await tellOrigin(done, ok ? `:white_check_mark: ${by} approved it (\`${done.approval_id}\`). ${line}` : `:x: ${by} approved it (\`${done.approval_id}\`), but it failed: ${line}`);
   await event('approval_decided', done, input.user_id, { decision: 'approved', result_ok: ok, reason: ok ? null : (result.reason ?? null) });
   const problems = [ok ? null : `The approved ${done.tool} failed: ${line}`, cardError, note].filter(Boolean);
