@@ -97,7 +97,7 @@ export interface LedgerIncident {
   [k: string]: unknown;
 }
 
-async function call<T>(path: string, key: string, body?: unknown, method?: 'DELETE'): Promise<T> {
+async function call<T>(path: string, key: string, body?: unknown, method?: 'DELETE' | 'PATCH'): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let res: Response;
@@ -499,4 +499,60 @@ export async function deleteDocument(keyVar: string, id: string): Promise<{ ok: 
   } catch (e) {
     return { ok: false, status: e instanceof BharagError ? e.status || null : null, detail: e instanceof Error ? e.message : String(e) };
   }
+}
+
+/* ------------------------------------------------------ edit in place */
+
+/**
+ * Edit one document in place (2 Nov 2026, Destiny — Jegan's PATCH /api/v1/documents/:id, bharag2-v0.1.22,
+ * LOOP-1793257277585-KWV1). Send only what changes: `metadata` is merged key by key by BHARAG and a null
+ * value removes a key; a `content` change re-chunks and re-embeds. The id never changes, so every link to
+ * the document keeps working. The key needs `documents:write`; a key issued with no permission list has
+ * it already. Never throws: the outcome is returned.
+ */
+export async function patchDocument(
+  keyVar: string,
+  id: string,
+  changes: { title?: string; content?: string; metadata?: Record<string, unknown>; source_url?: string },
+): Promise<{ ok: boolean; status: number | null; detail: string }> {
+  const key = process.env[keyVar]?.trim();
+  if (!key) return { ok: false, status: null, detail: `${keyVar} is not set on this server, so nothing was sent to BHARAG.` };
+  try {
+    const r = await call<Record<string, unknown>>(`/documents/${encodeURIComponent(id)}`, key, changes, 'PATCH');
+    const edit = (r?.edit ?? null) as Record<string, unknown> | null;
+    return { ok: true, status: 200, detail: `edited ${id} in place${edit && edit.reembedded === true ? ' (re-embedded)' : ''} (workspace key ${keyVar})` };
+  } catch (e) {
+    const status = e instanceof BharagError ? e.status || null : null;
+    const msg = e instanceof Error ? e.message : String(e);
+    const hint = status === 403 ? ' The key may lack documents:write: ask Jegan for a key that carries it, or issue one in the BHARAG console.' : '';
+    return { ok: false, status, detail: `${msg}${hint}` };
+  }
+}
+
+/**
+ * Every document in a workspace whose metadata carries `key = value`, newest first. Walks
+ * `GET /documents` a page at a time (BHARAG has no metadata filter); `complete` is false when the walk
+ * stopped at the page cap, so a miss there is "not found yet", not "not there".
+ */
+export async function findByMetadata(
+  keyVar: string,
+  metaKey: string,
+  value: string,
+  maxPages = 60,
+): Promise<{ ids: string[]; scanned: number; complete: boolean }> {
+  const ids: string[] = [];
+  let scanned = 0;
+  let pages = 0;
+  let more = true;
+  while (more && pages < maxPages) {
+    const r = await listDocuments('codex', 100, pages * 100, keyVar);
+    pages++;
+    for (const d of r.documents) {
+      scanned++;
+      const m = (d.metadata ?? {}) as Record<string, unknown>;
+      if (String(m[metaKey] ?? '') === value) ids.push(d.id);
+    }
+    more = r.hasMore;
+  }
+  return { ids, scanned, complete: !more };
 }

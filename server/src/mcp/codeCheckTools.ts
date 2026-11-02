@@ -72,6 +72,10 @@ async function guarded(
       (r as Record<string, unknown>).codex_note = note;
       if (!note.ok) r.message = `${r.message} The check is recorded, but it was not written onto the log: ${note.detail}`;
       else r.message = `${r.message} Written onto the log (${note.detail}).`;
+      // And onto the entry's own document in BHARAG, in place (2 Nov 2026). Never able to fail the check either.
+      const rag = await codeCheckWatch.bharagNote(r.check as cc.CodeCheck);
+      (r as Record<string, unknown>).bharag_note = rag;
+      r.message = rag.ok ? `${r.message} Written onto BHARAG (${rag.detail}).` : `${r.message} Not written onto BHARAG: ${rag.detail}`;
     }
     const natural = (r.check as cc.CodeCheck | undefined)?.codex_entry_id ?? (r.output as cc.AuditOutput | undefined)?.output_id ?? null;
     await auditClose(audit, { outcome: dry ? 'dry_run' : r.written ? 'updated' : 'unchanged', detail: r.message, natural_id: natural, after: r.check ?? r.output });
@@ -89,7 +93,7 @@ async function guarded(
 
 export const recordCodeCheck: ToolDefinition = {
   name: 'record_code_check',
-  description: `Record one code check as posted in the log's own thread, or correct one already recorded for that Codex ID. The format Jason confirmed: verdict (${cc.VERDICTS.join(' / ')}) with one line on why; each main claim with where it was checked, the result (${cc.RESULTS.join(' / ')}) and the proof; what is missing before customer ready (${cc.MISSING.join(', ')}); what could not be checked; the pay call (${cc.PAY_CALLS.join(' / ')}) with each follow-up (what, who, by, loop_id). Refused when the verdict and the claims disagree, when pay partly or hold names no follow-up, when an overstated log is paid as logged, and on Destiny's own log. The approval time, builder and session date come from the pay ledger. HELD HERE: Destiny or Jason (requester_user_id). dry_run writes nothing. Refused on any agent token. A recorded check is also written onto the Codex row (Code Check Verdict, Pay Call, Reason, Link, At, By) and the answer says whether that landed (codex_note). Audited on engine_mcp_writes.`,
+  description: `Record one code check as posted in the log's own thread, or correct one already recorded for that Codex ID. The format Jason confirmed: verdict (${cc.VERDICTS.join(' / ')}) with one line on why; each main claim with where it was checked, the result (${cc.RESULTS.join(' / ')}) and the proof; what is missing before customer ready (${cc.MISSING.join(', ')}); what could not be checked; the pay call (${cc.PAY_CALLS.join(' / ')}) with each follow-up (what, who, by, loop_id). Refused when the verdict and the claims disagree, when pay partly or hold names no follow-up, when an overstated log is paid as logged, and on Destiny's own log. The approval time, builder and session date come from the pay ledger. HELD HERE: Destiny or Jason (requester_user_id). dry_run writes nothing. Refused on any agent token. A recorded check is also written onto the Codex row (Code Check Verdict, Pay Call, Reason, Link, At, By) and onto the entry's own document in BHARAG as metadata code_check, in place with the same id; the answer says whether each landed (codex_note, bharag_note). Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -180,5 +184,39 @@ export const codeCheckAlertTrial: ToolDefinition = {
   },
 };
 
+export const syncCodeCheckToBharag: ToolDefinition = {
+  name: 'sync_code_check_to_bharag',
+  description: 'Write a code check already recorded onto its Codex entry\'s own document in BHARAG, in place (same id, metadata key code_check, nothing else touched). For a check recorded before this went in, or one whose BHARAG write was refused. record_code_check does this by itself for every new check. Finds every document in the Codex workspace whose metadata codex_entry_id is the entry. dry_run finds them and edits nothing. HELD HERE: Destiny or Jason. Refused on any agent token. Audited on engine_mcp_writes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      codex_entry_id: { type: 'string' },
+      requester_user_id: { type: 'string' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['codex_entry_id', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Write a code check onto BHARAG' },
+  handler: async (args, deps) => {
+    const id = str(args, 'codex_entry_id');
+    const requester = str(args, 'requester_user_id');
+    const dry = args.dry_run === true;
+    const audit = await auditOpen({ tool: 'sync_code_check_to_bharag', args, access: deps.access, kind: 'code_checks', requester: requester || null, dry_run: dry });
+    const refuse = async (reason: string, message: string) => {
+      await auditClose(audit, { outcome: 'refused', detail: `${reason}: ${message}`, guard_result: { reason } });
+      return { ok: false, reason, message: `${message} Nothing was changed.`, audit_id: audit };
+    };
+    if (deps.agent) return refuse('agent_not_permitted', `An agent (${deps.agent}) may not write a code check.`);
+    if (!cc.RECORDERS.has(requester)) return refuse('not_permitted', 'Only Destiny or Jason may write a code check.');
+    const r = await cc.read();
+    const check = r.checks.find((c) => c.codex_entry_id === id);
+    if (!check) return refuse('not_found', `No code check is recorded for ${id}.`);
+    const note = await codeCheckWatch.bharagNote(check, { dry_run: dry });
+    await auditClose(audit, { outcome: dry ? 'dry_run' : note.ok ? 'updated' : 'failed', detail: note.detail, natural_id: id });
+    return { ok: note.ok, written: !dry && note.edited.length > 0, documents: note.documents, edited: note.edited, message: note.detail, audit_id: audit, ...(note.ok || dry ? {} : { raise: true }) };
+  },
+};
+
 export const CODE_CHECK_READ_TOOLS: ToolDefinition[] = [readCodeChecks];
-export const CODE_CHECK_WRITE_TOOLS: ToolDefinition[] = [recordCodeCheck, writeAuditOutput, codeCheckAlertTrial];
+export const CODE_CHECK_WRITE_TOOLS: ToolDefinition[] = [recordCodeCheck, writeAuditOutput, codeCheckAlertTrial, syncCodeCheckToBharag];

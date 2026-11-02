@@ -14055,3 +14055,10 @@ Intent:     Destiny: prove the live Stage 1 to 2 path end to end on a lead of ou
 Files:      server/src/mcp/leadMoveTools.ts, BUILD_LOG.md
 Fix:        team_test_lead (write connection, no agent's scope, refused on any agent token). create: a whole Form A through earlyAccess.storeFormA under an @bhanetwork.org address, source_campaign team_test, confirm "CREATE TEST LEAD". delete: the row copied whole into record_deletions and removed in one transaction, only an @bhanetwork.org lead, confirm "DELETE <buyer_intake_id>". Jason or Destiny only; dry_run; audited on engine_mcp_writes.
 Decision:   A tool rather than another cleanup migration, so a test can be made and removed the same day without a deploy in between.
+
+## 2026-11-02 10:55 — Code checks written onto the Codex entry in BHARAG, in place
+Intent:     Jegan shipped BHARAG's edit-in-place (PATCH /api/v1/documents/:id, bharag2-v0.1.22, KWV1). Use it so each code check lands on the builder's Codex document Bays and the twins search, not only on the dashboard.
+Files:      server/src/bharag.ts (call takes PATCH; patchDocument; findByMetadata), server/src/codeCheckWatch.ts (bharagNote), server/src/mcp/codeCheckTools.ts (record_code_check also writes to BHARAG; new sync_code_check_to_bharag), CLAUDE.md.
+Problem:    BHARAG has no metadata filter and the Codex row holds no BHARAG document id. Submit Actions' "Ingest to BHA RAG" stamps metadata.codex_entry_id, so the document is found by walking GET /documents (100 a page, 60 pages at most) and matching that key. Whether the "BHARAG - Codex" key (BHARAG_SOPS_KEY) carries documents:write is unknown until the first call.
+Fix:        Metadata-only PATCH of key code_check on every matching document; never fails the check; a 403 names the missing documents:write.
+Decision:   Metadata, not content: instant, no re-embedding, and the log text stays exactly what the builder wrote. Every copy of the entry is edited so no search hit carries a stale review.

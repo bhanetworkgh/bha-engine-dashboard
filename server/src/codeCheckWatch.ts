@@ -27,6 +27,7 @@ import * as slack from './slack';
 import * as timers from './timers';
 import * as engineWrite from './engineWrite';
 import * as cc from './codeChecks';
+import * as bharag from './bharag';
 import { getMeta, setMeta } from './db';
 
 /** Destiny, 29 Oct 2026: the alert as soon as Jason approves, then a reminder every 3 hours, 4 at most (about 12 hours). */
@@ -252,6 +253,52 @@ export async function codexNote(check: cc.CodeCheck): Promise<{ ok: boolean; row
     const detail = e instanceof Error ? e.message : String(e);
     console.error(`[code-check-watch] the check for ${check.codex_entry_id} was recorded but not written onto the log: ${detail}`);
     return { ok: false, row_id: null, detail };
+  }
+}
+
+/**
+ * Writes the recorded check onto the Codex entry's own document in BHARAG (2 Nov 2026, Destiny — Jegan's
+ * edit-in-place, KWV1): metadata key `code_check`, the same id, nothing else touched, so Bays and the twins
+ * read the review on the document they already search. Every copy of the entry (metadata codex_entry_id) is
+ * edited. Never throws; `dry_run` finds the documents and edits nothing.
+ */
+export async function bharagNote(check: cc.CodeCheck, opts: { dry_run?: boolean } = {}): Promise<{ ok: boolean; documents: string[]; edited: string[]; detail: string }> {
+  const keyVar = bharag.ingestKeyVar('codex');
+  try {
+    const found = await bharag.findByMetadata(keyVar, 'codex_entry_id', check.codex_entry_id);
+    if (!found.ids.length) {
+      return { ok: false, documents: [], edited: [], detail: `no document in the Codex workspace carries ${check.codex_entry_id} (${found.scanned} read${found.complete ? '' : ', stopped at the page cap'})` };
+    }
+    if (opts.dry_run) return { ok: true, documents: found.ids, edited: [], detail: `would edit ${found.ids.length} document(s): ${found.ids.join(', ')}` };
+    const metadata = {
+      code_check: {
+        verdict: check.verdict,
+        verdict_label: cc.VERDICT_LABEL[check.verdict as cc.Verdict] ?? check.verdict,
+        pay_call: check.pay_call,
+        pay_label: cc.PAY_LABEL[check.pay_call as cc.PayCall] ?? check.pay_call,
+        reason: check.verdict_reason,
+        not_confirmed: check.claims.filter((x) => x.result !== 'confirmed').map((x) => x.claim),
+        missing: check.missing,
+        link: check.check_link,
+        at: check.posted_at,
+        by: check.recorded_by,
+      },
+    };
+    const edited: string[] = [];
+    const failed: string[] = [];
+    for (const id of found.ids) {
+      const r = await bharag.patchDocument(keyVar, id, { metadata });
+      if (r.ok) edited.push(id);
+      else failed.push(`${id}: ${r.detail}`);
+    }
+    if (failed.length) console.error(`[code-check-watch] BHARAG note for ${check.codex_entry_id} failed on ${failed.join('; ')}`);
+    return failed.length
+      ? { ok: false, documents: found.ids, edited, detail: `edited ${edited.length} of ${found.ids.length}; refused: ${failed.join('; ')}` }
+      : { ok: true, documents: found.ids, edited, detail: `written onto ${edited.length} BHARAG document(s) in place: ${edited.join(', ')}` };
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    console.error(`[code-check-watch] BHARAG note for ${check.codex_entry_id} not written: ${detail}`);
+    return { ok: false, documents: [], edited: [], detail };
   }
 }
 
