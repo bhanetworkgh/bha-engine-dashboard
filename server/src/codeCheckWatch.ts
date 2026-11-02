@@ -92,7 +92,7 @@ export function messageFor(d: Due, opts: { reviewed?: { by: string; at: string; 
   const lead =
     d.step === 0
       ? `Jason approved *${who}*'s log. It is ready for your review.`
-      : `*${who}*'s log was approved ${Math.floor(d.hours_waiting)} hours ago and has no check recorded yet.${last ? ' This is the last reminder for it.' : ''}`;
+      : `*${who}*'s log was approved ${Math.floor(d.hours_waiting)} hours ago and has no check recorded yet.${last && !d.quiet ? ' This is the last reminder for it.' : ''}`;
   const text =
     d.step === 0
       ? `Code check due: ${who}, ${d.codex_entry_id}. Approved ${lagos(d.approved_at)} Lagos, due by ${lagos(by)} Lagos.`
