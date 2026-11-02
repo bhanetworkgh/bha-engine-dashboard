@@ -3124,6 +3124,18 @@ is refused** (`secret_refused`, the BHARAG guard's shapes plus Stripe, ElevenLab
 stored redacted. A cost nobody stated is left empty: spend is not tracked yet (the Mercury card feed is a
 later step). `npm run test:registry-tools`.
 
+**Model spend, a Records page** (2026-11-02, Destiny: "a record page for tracking token spending and
+costs"). `server/src/modelSpend.ts`, migration 111, `engine_model_usage_readings`, `/model-spend`
+(`GET /api/model-spend`), four tabs: Dollars, Tokens, Evals, Anthropic backup. **Dollars are measured**:
+every hour this process reads OpenRouter's `/credits` with `OPENROUTER_API_KEY` and keeps the account's
+lifetime `total_usage` (only goes up; a top-up moves `total_credits`, never usage), so the difference
+between two readings is what was spent. Migration 111 copied in the readings every eval run took before
+and after itself, from 11 Oct 2026. A day's figure is the counter interpolated at its two UTC edges,
+only when a reading sits within 6 hours of each; otherwise the day is "not measured", never nought.
+**The per-agent dollars are an estimate** (the window's measured spend less the eval runs, shared by
+token count) and say so; eval spend merges overlapping runs so a dollar is counted once. The Anthropic
+backup has no usage API: answers, failures and credit refusals only. A read and nothing else.
+
 **The credit-out alert** (2026-10-10, Destiny). `server/src/creditOut.ts`, a
 check every minute, no table of its own (its state is `meta`
 `credit_out.state`). On 10 Oct the OpenRouter credit ran out between two of
@@ -3295,6 +3307,7 @@ RECORDS
   Clients
   Executions             ← every run of every workflow, tabbed by system
   Scheduled runs         ← every scheduler's runs: agent tasks, timed workflows, reminders, timers
+  Model spend            ← OpenRouter's measured dollars, every agent's tokens, evals, the backup (2026-11-02)
   Logstream              ← faults that keep coming back, what crossed a threshold, what asked for research
   Pay Tracker            ← who is owed, for what work, and what has been paid
 

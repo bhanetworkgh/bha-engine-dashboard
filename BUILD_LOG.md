@@ -14095,3 +14095,20 @@ Fix:        A third watch in creditOut.ts on the same tick: ANTHROPIC_CREDIT_TEX
             OpenRouter-only failure.
 Decision:   No balance-based warning: Anthropic exposes no balance endpoint, and its cost reports need an
             organisation admin key. The alert fires on the first refusal; the free $100 returns on the 16th.
+
+## 2026-11-02 14:50 — Model spend page and hourly usage readings
+Intent:     Destiny: "a record page for tracking token spending and costs", and "can you tell the amount
+            spent between Oct 1st and Nov 1st" — which could not be answered: the only dollar figures
+            held were OpenRouter's usage counter read around each eval run, from 11 Oct.
+Files:      server/src/modelSpend.ts (new), server/src/migrations.ts (111), server/src/index.ts,
+            server/src/timers.ts, src/screens/ModelSpend.tsx (new), src/data/index.ts, src/data/types.ts,
+            src/App.tsx, src/components/Layout.tsx, CLAUDE.md
+Problem:    No record of daily spend. From the eval readings: Oct 11 05:12 to Nov 2 04:50 UTC the
+            account spent $2,711.88 (about $123 a day); eval windows merged for overlap about $626.
+Fix:        engine_model_usage_readings, one row per reading of OpenRouter's lifetime total_usage; an
+            hourly reading (timer "model spend reading"); the eval readings backfilled by migration 111.
+            /model-spend: measured dollars per UTC day (not measured where no reading is near both
+            edges), tokens per agent and per Bays source, eval runs with overlaps merged, and the
+            Anthropic backup's answers and credit refusals.
+Decision:   Dollars only from the counter; the per-agent split is an estimate by token share and is
+            labelled one. No price table: a list price ignores caching and would read as a bill.

@@ -668,6 +668,7 @@ export const getBaysReminders = () => api<BaysRemindersData>('/api/bays/reminder
 export const getDecisionWatches = () => api<DecisionWatchData>('/api/bays/decision-watches');
 /** Every scheduler's runs on one page (2026-10-09, K9B7). */
 export const getScheduledRuns = () => api<ScheduledRunsData>('/api/scheduled-runs');
+export const getModelSpend = () => api<import('./types').ModelSpendData>('/api/model-spend');
 /** Logstream v0: repeating faults, what crossed a threshold and what was done (2026-10-10). */
 export const getLogstream = () => api<LogstreamData>('/api/logstream');
 export const getVfarmLive = () => api<VfarmLiveData>('/api/vfarm/live');

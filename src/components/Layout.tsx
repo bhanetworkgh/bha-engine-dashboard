@@ -55,6 +55,8 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
       // Every scheduler's runs on one page (2026-10-09, K9B7): agent tasks, timed
       // workflows, reminder posts and this dashboard's own timers.
       { to: '/scheduled-runs', label: 'Scheduled runs', icon: 'calendar' },
+      // What the models cost: OpenRouter's measured dollars and every agent's tokens (2026-11-02).
+      { to: '/model-spend', label: 'Model spend', icon: 'pulse' },
       // Repeating engine faults, what crossed a threshold and what was done about it (2026-10-10).
       { to: '/logstream', label: 'Logstream', icon: 'loop' },
       // The documents the engine's decisions rest on, held once and read by name (2026-10-28, D3).

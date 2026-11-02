@@ -91,6 +91,7 @@ import * as logstream from './logstream';
 import * as researchSignals from './researchSignals';
 import * as vfarmCustomerEvents from './vfarmCustomerEvents';
 import * as creditOut from './creditOut';
+import * as modelSpend from './modelSpend';
 import * as doctrineConsumer from './doctrineConsumer';
 import * as engineEvents from './engineEvents';
 import * as vfarmGates from './vfarmGates';
@@ -1829,6 +1830,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await logstream.read());
       case '/api/scheduled-runs':
         return send(res, 200, await scheduledRuns.scheduledRuns());
+      /** Model spend (2026-11-02, Destiny): OpenRouter's measured dollars and every agent's tokens. A read. */
+      case '/api/model-spend':
+        return send(res, 200, await modelSpend.read({ days: Number(url.searchParams.get('days')) || undefined }));
       case '/api/vfarm/live':
         return send(res, 200, await systemFeeds.vfarmData());
       /** The stage gates and the 5-rack offer, for the Gates tab (2026-10-09, 7S0O). A read. */
@@ -2989,6 +2993,7 @@ async function boot(): Promise<void> {
       .then((n) => n && console.log(`[vfarm-customers] ${n} lead event(s) written for leads already held`))
       .catch((e) => console.error(`[vfarm-customers] lead backfill failed: ${(e as Error).message}`));
     creditOut.startWatching();
+    modelSpend.startReading();
     publishGate.startSweeping();
     // A draft eval left running by the last process is not resumed (13 Oct 2026).
     void draftEval.markInterrupted().then((n) => { if (n) console.log(`[draft-eval] ${n} run(s) left running by the last process marked interrupted`); }).catch((e) => console.error(`[draft-eval] interrupted runs not marked: ${(e as Error).message}`));

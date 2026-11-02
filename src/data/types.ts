@@ -4719,3 +4719,27 @@ export interface EvidenceDoc extends EvidenceRecord {
   file_url: string;
   rules: string[];
 }
+
+/** Model spend (2026-11-02, Destiny): server/src/modelSpend.ts read(). */
+export interface ModelSpendDay { day: string; spent_usd: number | null; measured: boolean }
+export interface ModelSpendData {
+  window: { days: number; since: string; readings_held: number; first_reading: string | null };
+  openrouter: {
+    latest: { at: string; total_usage_usd: number; remaining_usd: number | null; origin: string } | null;
+    last_read_error: string | null;
+    last_7_days_usd: number;
+    last_7_days_measured: number;
+    month_to_date_usd: number;
+    month_to_date_measured: number;
+    month_days: number;
+    per_day_usd: number | null;
+    window_usd: { spent_usd: number; from: string; to: string } | null;
+    daily: ModelSpendDay[];
+  };
+  evals: { runs: Array<{ run_id: string; at: string; started_at: string | null; spent_usd: number; results: number; answered_by: unknown }>; merged_usd: number; runs_counted: number };
+  agents: Array<{ agent: string; asks: number; tokens: number; p50: number | null; p95: number | null; est_usd: number | null }>;
+  by_agent_day: Array<{ agent: string; day: string; asks: number; with_tokens: number; tokens: number; p50: number | null; p95: number | null }>;
+  bays_by_source: Array<{ source: string; asks: number; tokens: number; p50: number | null }>;
+  anthropic_backup: { by_day: Array<{ day: string; answered: number; failed: number }>; credit_refusals: number; last_refusal_at: string | null; note: string };
+  notes: string[];
+}

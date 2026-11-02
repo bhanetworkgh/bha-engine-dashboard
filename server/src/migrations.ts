@@ -4169,6 +4169,33 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `DELETE FROM engine_media_posts WHERE test = true AND post_id IN ('MTP-1793533528175-5VTF', 'MTP-1793534364884-1PZ7', 'MTP-1793536055792-AWBL')`,
     ],
   },
+  {
+    // 2026-11-02, Destiny — the Model spend page. OpenRouter's lifetime usage counter, one row per
+    // reading. Read hourly from now on; the eval runs' own before/after readings (from 11 Oct) copied in.
+    id: 111,
+    name: 'model_usage_readings',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_model_usage_readings (
+         id bigserial PRIMARY KEY,
+         source text NOT NULL,
+         at timestamptz NOT NULL,
+         total_usage_usd numeric NOT NULL,
+         total_credits_usd numeric,
+         origin text NOT NULL,
+         UNIQUE (source, at)
+       )`,
+      `INSERT INTO engine_model_usage_readings (source, at, total_usage_usd, total_credits_usd, origin)
+         SELECT 'openrouter', (detail->>'started_at')::timestamptz, (detail->>'usage_before_usd')::numeric, NULL, 'eval_before'
+           FROM engine_events
+          WHERE event_type = 'eval_run_cost' AND detail->>'usage_before_usd' ~ '^[0-9.]+$' AND detail->>'started_at' IS NOT NULL
+         ON CONFLICT (source, at) DO NOTHING`,
+      `INSERT INTO engine_model_usage_readings (source, at, total_usage_usd, total_credits_usd, origin)
+         SELECT 'openrouter', at, (detail->>'usage_after_usd')::numeric, NULL, 'eval_after'
+           FROM engine_events
+          WHERE event_type = 'eval_run_cost' AND detail->>'usage_after_usd' ~ '^[0-9.]+$'
+         ON CONFLICT (source, at) DO NOTHING`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
