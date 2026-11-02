@@ -14082,3 +14082,16 @@ Decision:   Cut by default and say so on the answer, never silently: a value tha
             unpublished (no credit), and both Bays drafts (main and backup) given a $1 per-run cost
             cap, a $200 monthly budget with an 80% alert, step cap 60 -> 30, and episodic memory
             topK 3 / 3 entries per run. Drafts only; not published until there is credit to eval.
+
+## 2026-11-02 12:40 — Anthropic backup credit alert
+Intent:     Alert the minute the Anthropic backup fails on credit, as the OpenRouter credit-out watch does.
+Files:      server/src/creditOut.ts, CLAUDE.md
+Problem:    The backup refused four Bays asks this morning (09:50 to 09:58 UTC) with "Your credit balance
+            is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase
+            credits." Nothing alerted: CREDIT_TEXT matches OpenRouter's words only.
+Fix:        A third watch in creditOut.ts on the same tick: ANTHROPIC_CREDIT_TEXT, state key
+            anthropic_out.state, event anthropic_credit_out, one alert per episode in the engine alerts
+            channel. The pattern was run against the live ledger first: it matches those four rows and no
+            OpenRouter-only failure.
+Decision:   No balance-based warning: Anthropic exposes no balance endpoint, and its cost reports need an
+            organisation admin key. The alert fires on the first refusal; the free $100 returns on the 16th.

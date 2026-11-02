@@ -43,6 +43,7 @@ import * as timers from './timers';
 export const RULE = { tick_seconds: 60, window_minutes: 15, quiet_minutes: 60 } as const;
 export const STATE_KEY = 'credit_out.state';
 export const PROVIDER_STATE_KEY = 'provider_down.state';
+export const ANTHROPIC_STATE_KEY = 'anthropic_out.state';
 
 /**
  * What OpenRouter, and n8n speaking for it, say when the account cannot pay for a request, and
@@ -58,6 +59,15 @@ export const CREDIT_TEXT =
  * the three n8n error handlers' Parse Classification nodes.
  */
 export const PROVIDER_HANG_TEXT = '(could not verify (your )?available credits|verify available credits[^.]{0,60}in time)';
+
+/**
+ * What Anthropic says when the backup account cannot pay (2 Nov 2026, Destiny: "add an alert for the
+ * anthropic just like openrouter"). The backup answers whenever OpenRouter fails, and on 2 Nov it was
+ * down to about $4 of the $100 that comes back on the 16th. Anthropic has no balance endpoint, so
+ * this is the alert that can be built: the minute a run fails because the backup could not pay.
+ */
+export const ANTHROPIC_CREDIT_TEXT =
+  '(credit balance is too low|anthropic[^\\n]{0,160}(insufficient credit|not enough credit|out of credit|purchase credits|plans & billing))';
 
 export interface Hit {
   source: 'incident' | 'bays ask' | 'north star ask' | 'research twin ask' | 'eval result';
@@ -112,6 +122,11 @@ export async function hits(since: string): Promise<Hit[]> {
   return find(since, CREDIT_TEXT, PROVIDER_HANG_TEXT);
 }
 
+/** Every failure since `since` that says the Anthropic backup could not pay, oldest first. */
+export async function anthropicHits(since: string): Promise<Hit[]> {
+  return find(since, ANTHROPIC_CREDIT_TEXT, null);
+}
+
 /** Every failure since `since` that says OpenRouter did not answer in time, oldest first. */
 export async function providerHits(since: string): Promise<Hit[]> {
   return find(since, PROVIDER_HANG_TEXT, null);
@@ -147,8 +162,21 @@ export function providerAlertText(first: Hit, count: number): string {
     .join('\n');
 }
 
+export function anthropicAlertText(first: Hit, count: number): string {
+  const tag = quota.mentions();
+  return [
+    `:rotating_light: *Anthropic backup credit is out* ${tag}`.trim(),
+    `A run has just failed because the Anthropic backup account could not pay for it. First seen: ${described(first)}, at ${first.at.slice(0, 16).replace('T', ' ')} UTC.`,
+    count > 1 ? `${count} failures on the backup's credit in the last ${RULE.window_minutes} minutes.` : null,
+    'The backup only answers when OpenRouter fails, so while both are out Bays, North Star and Research Twin cannot answer at all. Top up OpenRouter (https://openrouter.ai/settings/credits) or the Anthropic account (https://console.anthropic.com/settings/billing); the free monthly credit returns on the 16th.',
+    `This is posted once. It will post again only after ${RULE.quiet_minutes} minutes with no such failure and then a new one.`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 interface Watch {
-  name: 'credit-out' | 'provider-down';
+  name: 'credit-out' | 'provider-down' | 'anthropic-out';
   stateKey: string;
   eventType: string;
   find: (since: string) => Promise<Hit[]>;
@@ -162,6 +190,14 @@ const PROVIDER_WATCH: Watch = {
   eventType: 'openrouter_not_responding',
   find: providerHits,
   text: providerAlertText,
+};
+
+const ANTHROPIC_WATCH: Watch = {
+  name: 'anthropic-out',
+  stateKey: ANTHROPIC_STATE_KEY,
+  eventType: 'anthropic_credit_out',
+  find: anthropicHits,
+  text: anthropicAlertText,
 };
 
 async function readState(key: string): Promise<State | null> {
@@ -232,7 +268,7 @@ async function look(w: Watch, now: Date): Promise<{ outcome: Outcome; state: Sta
         actor: `${w.name} watcher`,
         source_ref: `slack:${sent.channel}/${sent.ts}`,
         detail: { first, failures: count },
-        dedupe_key: `${w.name === 'credit-out' ? 'credit_out' : 'provider_down'}:${next.first_seen_at}`,
+        dedupe_key: `${w.name.replace('-', '_')}:${next.first_seen_at}`,
       })
       .catch((e) => console.error(`[${w.name}] the event was not recorded: ${e instanceof Error ? e.message : String(e)}`));
     console.log(`[${w.name}] alerted: ${first.source} ${first.id}, ${count} failure(s)`);
@@ -250,6 +286,11 @@ export async function checkProvider(now = new Date()): Promise<{ outcome: Outcom
   return look(PROVIDER_WATCH, now);
 }
 
+/** One look for the Anthropic backup's credit running out. `now` is passed only by the test. */
+export async function checkAnthropic(now = new Date()): Promise<{ outcome: Outcome; state: State | null }> {
+  return look(ANTHROPIC_WATCH, now);
+}
+
 let timer: NodeJS.Timeout | null = null;
 let busy = false;
 export function startWatching(): void {
@@ -258,11 +299,13 @@ export function startWatching(): void {
     timers.beat('credit-out watch');
     if (busy) return;
     busy = true;
-    // Two watches, one after the other: a failure in one never stops the other.
+    // Three watches, one after the other: a failure in one never stops the others.
     check()
       .catch((e) => console.error(`[credit-out] check failed: ${e instanceof Error ? e.message : String(e)}`))
       .then(() => checkProvider())
       .catch((e) => console.error(`[provider-down] check failed: ${e instanceof Error ? e.message : String(e)}`))
+      .then(() => checkAnthropic())
+      .catch((e) => console.error(`[anthropic-out] check failed: ${e instanceof Error ? e.message : String(e)}`))
       .finally(() => (busy = false));
   }, RULE.tick_seconds * 1000);
   timer.unref();

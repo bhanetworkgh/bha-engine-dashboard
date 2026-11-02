@@ -3157,7 +3157,11 @@ rules (`checkProvider`, meta `provider_down.state`, event
 `openrouter_not_responding`), whose alert says it is not a credit problem and
 not to top up. `PROVIDER_HANG_TEXT` is kept in step with `PROVIDER_HANG_SIGNAL`
 in the three n8n error handlers, which class it `network_timeout`.
-`npm run test:credit-out` pins both watches.
+**The Anthropic backup has the third watch** (2 Nov 2026, Destiny: "add an alert for the anthropic just
+like openrouter"): `ANTHROPIC_CREDIT_TEXT` (Anthropic's "credit balance is too low … Plans & Billing"),
+meta `anthropic_out.state`, event `anthropic_credit_out`, same window and one alert per episode,
+saying that with both out the agents cannot answer at all. Anthropic has no balance API, so it alerts
+on the first refusal, not before. `npm run test:credit-out` pins the first two watches.
 
 ## 5. Design
 
