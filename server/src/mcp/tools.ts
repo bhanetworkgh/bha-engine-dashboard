@@ -801,7 +801,7 @@ const getRecoveryStatus: ToolDefinition = {
 const findRecordsTool: ToolDefinition = {
   name: 'find_records',
   description:
-    'One structured read for every writable kind — loops, codex, patterns, pattern_candidates, commercial, rt-jobs, lane_backlog, builder_profiles — plus two read-only kinds: layer0 (parked logs) and channel_tracking (which capture doc each Slack channel writes into now — doc_id — and the one before it — previous_doc_id). Filter on any field (exact, a value or a list; top-level columns builder_id, lane_id, table_id, natural_id, id too), search by words (the Bays router\u2019s own word match: every row gets a match_score 0–1, rows with no word matched are dropped, best first), exclude statuses with status_not ("Closed" is the usual "everything still open"), and order newest, oldest or status_age (In Progress, then Open, oldest first within each). Counts by status, lane and builder are over the whole filtered set, not the page. Loops come back one row per loop_id, the way the Open loops page counts them. An unknown field or a value outside a field\u2019s vocabulary is applied and warned about, never silently dropped. Use this instead of query_postgres for anything a kind\u2019s own fields can answer.',
+    'One structured read for every writable kind — loops, codex, patterns, pattern_candidates, commercial, rt-jobs, lane_backlog, builder_profiles — plus two read-only kinds: layer0 (parked logs) and channel_tracking (which capture doc each Slack channel writes into now — doc_id — and the one before it — previous_doc_id). Filter on any field (exact, a value or a list; top-level columns builder_id, lane_id, table_id, natural_id, id too), search by words (the Bays router\u2019s own word match: every row gets a match_score 0–1, rows with no word matched are dropped, best first), exclude statuses with status_not ("Closed" is the usual "everything still open"), and order newest, oldest or status_age (In Progress, then Open, oldest first within each). Counts by status, lane and builder are over the whole filtered set, not the page. Loops come back one row per loop_id, the way the Open loops page counts them. An unknown field or a value outside a field\u2019s vocabulary is applied and warned about, never silently dropped. Long field values are cut (at 400 characters in a list, 4,000 for one row) and the answer says so in fields_cut; ask with fields: [names] for the ones you need whole, or full: true for one row whole. Use this instead of query_postgres for anything a kind\u2019s own fields can answer.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -814,6 +814,8 @@ const findRecordsTool: ToolDefinition = {
       order: { type: 'string', enum: ['newest', 'oldest', 'status_age'], description: 'Default newest; with a search, best match first.' },
       limit: { type: 'number', description: 'Rows to return. Default 20, at most 100.' },
       offset: { type: 'number', description: 'Rows to skip, for the next page.' },
+      fields: { description: 'Field names to return whole, e.g. ["Orchestrator Layer2 Review"]. Other long fields are left out; short ones stay so the row is still recognisable.', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+      full: { type: 'boolean', description: 'Every field whole. Use with a filter that finds one row; a list with full: true can be very large.' },
     },
     required: ['kind'],
     additionalProperties: false,

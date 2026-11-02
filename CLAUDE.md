@@ -1154,6 +1154,13 @@ archive records directly, with the checks the Bays Tools Router enforces.
   lookups — not to `engine_mcp_writes`, which is the record of changes.
   `page_url` is under `PUBLIC_DASHBOARD_URL`, defaulting to
   https://dashboard.bhanetwork.org.
+  **Long field values are cut** (2 Nov 2026, Destiny — agent upgrade, token cost): at 400
+  characters in a list and 4,000 for one row, each cut value saying how much was cut, and
+  `fields_cut` on the answer. `fields: [names]` returns those fields whole (other long ones left
+  out), `full: true` every field whole. A Codex search had returned twenty whole transcripts, and
+  every one rode along on each later step of Bays' run. `list_decision_watches` likewise returns
+  each watch short (no history or how_it_moves), 15 by default and 40 at most, and `watch_id`
+  returns one watch whole.
 - **Eight writable kinds**: loops, codex, patterns, pattern_candidates,
   commercial, rt-jobs, lane_backlog, builder_profiles. `list_writable_kinds`
   reads their columns and row counts from the database and the values each

@@ -14062,3 +14062,23 @@ Files:      server/src/bharag.ts (call takes PATCH; patchDocument; findByMetadat
 Problem:    BHARAG has no metadata filter and the Codex row holds no BHARAG document id. Submit Actions' "Ingest to BHA RAG" stamps metadata.codex_entry_id, so the document is found by walking GET /documents (100 a page, 60 pages at most) and matching that key. Whether the "BHARAG - Codex" key (BHARAG_SOPS_KEY) carries documents:write is unknown until the first call.
 Fix:        Metadata-only PATCH of key code_check on every matching document; never fails the check; a 403 names the missing documents:write.
 Decision:   Metadata, not content: instant, no re-embedding, and the log text stays exactly what the builder wrote. Every copy of the entry is edited so no search hit carries a stale review.
+
+## 2026-11-02 12:05 — Agent upgrade, step 1: smaller tool answers
+Intent:     Cut what Bays carries on every step of a run. Measured over 14 days: 442M tokens,
+            267k per ask at p50, 670k at p95, 99% of it prompt. An ask with no tool call costs
+            ~61k; each tool call adds ~65k, because everything already in the run is sent again.
+            find_records (991 calls) and list_decision_watches (537) were the heaviest answers, and
+            workspace_read_tool_result ran 429 times paging answers that came back too big.
+Files:      server/src/mcp/findRecords.ts, server/src/mcp/tools.ts,
+            server/src/mcp/decisionWatchTools.ts, CLAUDE.md
+Problem:    find_records returned every field of every row whole; a Codex search returned twenty
+            rows each with the full transcript and both reviews. list_decision_watches returned up
+            to forty whole watches (history, how_it_moves, full next step).
+Fix:        find_records cuts long values (400 chars in a list, 4,000 for one row), says so in
+            fields_cut, and takes fields: [names] or full: true. list_decision_watches returns each
+            watch short, 15 by default, and watch_id for one whole.
+Decision:   Cut by default and say so on the answer, never silently: a value that was cut names how
+            much and how to get it whole. Same day, on the n8n side: Agent Evals — Runner
+            unpublished (no credit), and both Bays drafts (main and backup) given a $1 per-run cost
+            cap, a $200 monthly budget with an 80% alert, step cap 60 -> 30, and episodic memory
+            topK 3 / 3 entries per run. Drafts only; not published until there is credit to eval.

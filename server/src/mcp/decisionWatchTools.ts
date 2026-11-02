@@ -178,14 +178,57 @@ export const openDecisionWatch: ToolDefinition = {
     }),
 };
 
+/** Keep the head of a long text, saying how much was cut. */
+function clipHead(v: unknown, n: number): string | null {
+  if (v === null || v === undefined) return null;
+  const t = String(v);
+  return t.length <= n ? t : `${t.slice(0, n)}… [+${t.length - n} chars]`;
+}
+
+/** Keep the end of a long text (a next step grows by dated lines at the end), saying how much was cut. */
+function clipTail(v: unknown, n: number): string | null {
+  if (v === null || v === undefined) return null;
+  const t = String(v);
+  return t.length <= n ? t : `[${t.length - n} earlier chars cut] …${t.slice(t.length - n)}`;
+}
+
+/**
+ * One watch, short, for the list (2 Nov 2026, Destiny — agent upgrade). The whole row with its
+ * history and how_it_moves is ~3k characters, and Bays listed forty at a time hundreds of times a
+ * week, every one re-sent on each later step of the run. The list keeps what tells watches apart;
+ * watch_id returns one whole.
+ */
+function compactWatch(w: ReturnType<typeof dw.show>) {
+  return {
+    watch_id: w.watch_id,
+    state: w.state,
+    decision: clipHead(w.decision, 240),
+    owner_name: w.owner_name,
+    owner_user_id: w.owner_user_id,
+    lane: w.lane,
+    thread_link: w.thread_link,
+    record: w.record,
+    next_step_latest: clipTail(w.next_step, 280),
+    next_action: w.next_action,
+    next_action_when: w.next_action_when,
+    overdue: w.overdue,
+    snoozed_until: w.snoozed_until,
+    problem: clipHead(w.problem, 200),
+    closed_at: w.closed_at,
+    close_reason: clipHead(w.close_reason, 160),
+  };
+}
+
 export const listDecisionWatches: ToolDefinition = {
   name: 'list_decision_watches',
   description:
-    'List the decisions being watched: open ones first (soonest reminder first), then the closed ones. status is watching, answered (the owner replied), moved (the linked loop or task was closed), escalated (the reminders ran out and Jason and Destiny were told) or cancelled. "problem" is why a watch could not be checked or posted, e.g. a thread no bot can read. Filter with owner_user_id or open_only. Use it to answer "what is Bays watching" or "what am I being waited on for". Each watch carries how_it_moves: where a reply counts, what it does, and when the next reminder goes. Before telling anyone what a watch will do (whether a message resets it, closes it, or when it will nudge), read that line and say it as written; never work it out from the thread you are in, because the watch may be on a different thread.',
+    'List the decisions being watched: open ones first (soonest reminder first), then the closed ones. status is watching, answered (the owner replied), moved (the linked loop or task was closed), escalated (the reminders ran out and Jason and Destiny were told) or cancelled. "problem" is why a watch could not be checked or posted, e.g. a thread no bot can read. Filter with owner_user_id or open_only. Each watch comes back short (the decision and its latest next step clipped, no history, no how_it_moves) to keep the answer small; pass watch_id to get one watch whole, with how_it_moves and its history. Use it to answer "what is Bays watching" or "what am I being waited on for". Each watch carries how_it_moves: where a reply counts, what it does, and when the next reminder goes. Before telling anyone what a watch will do (whether a message resets it, closes it, or when it will nudge), read that line and say it as written; never work it out from the thread you are in, because the watch may be on a different thread.',
   inputSchema: {
     type: 'object',
     properties: {
+      watch_id: { type: 'string', description: 'One watch (DW-…), returned whole: how_it_moves, full next step and history.' },
       open_only: { type: 'boolean', description: 'Only watches still open.' },
+      limit: { type: 'number', description: 'Watches to return. Default 15, at most 40.' },
       owner_user_id: { type: 'string', description: 'Only watches waiting on this person.' },
       include_fixtures: { type: 'boolean', description: 'Include marked test watches.' },
     },
@@ -198,7 +241,23 @@ export const listDecisionWatches: ToolDefinition = {
     let rows = all.watches;
     if (args.open_only === true) rows = rows.filter((w) => w.status === 'watching');
     if (who) rows = rows.filter((w) => w.owner_user_id === who);
-    return { ok: true, rule: all.rule.in_words, counts: all.counts, posted_today: all.posted_today, count: rows.length, watches: rows.slice(0, 40).map(({ history: _history, ...w }) => w), truncated: rows.length > 40 };
+    const one = str(args, 'watch_id');
+    if (one) {
+      const w = rows.find((x) => x.watch_id === one);
+      if (!w) return { ok: false, reason: 'not_found', message: `No watch ${one} matches (with the other filters given).` };
+      return { ok: true, rule: all.rule.in_words, watch: w };
+    }
+    const limit = Math.min(Math.max(Math.floor(Number(args.limit) || 15), 1), 40);
+    return {
+      ok: true,
+      counts: all.counts,
+      posted_today: all.posted_today,
+      count: rows.length,
+      returned: Math.min(rows.length, limit),
+      watches: rows.slice(0, limit).map(compactWatch),
+      truncated: rows.length > limit,
+      note: 'Each watch is shortened. Ask again with watch_id for one watch whole (how_it_moves, full next step, history), and quote its how_it_moves before saying what a watch will do.',
+    };
   },
 };
 

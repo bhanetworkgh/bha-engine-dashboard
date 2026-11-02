@@ -43,6 +43,26 @@ import * as guards from '../writeGuards';
 import { McpError } from './source';
 
 const LIMIT_DEFAULT = 20;
+/**
+ * How long one field's text may be before it is cut (2 Nov 2026, Destiny — agent upgrade). A
+ * Codex row carries the whole transcript and both reviews; twenty of them came back on every
+ * search and rode along on every later step of the agent's run. A list cuts a long field at
+ * CLIP_LIST, one row at CLIP_ONE; `fields` names the fields wanted whole, `full: true` returns
+ * every field whole. A cut field says how much was cut, so it never reads as the whole.
+ */
+const CLIP_LIST = 400;
+const CLIP_ONE = 4000;
+
+/** A field's value with long text cut, saying how much was cut and how to get it whole. */
+function clipValue(v: unknown, n: number): unknown {
+  if (typeof v === 'string') return v.length <= n ? v : `${v.slice(0, n)}… [cut: ${v.length - n} more chars; ask with fields: [this field] or full: true]`;
+  if (v && typeof v === 'object') {
+    const t = JSON.stringify(v);
+    if (t.length <= n) return v;
+    return `[${Array.isArray(v) ? 'list' : 'object'} of ${t.length} chars cut; ask with fields: [this field] or full: true]`;
+  }
+  return v;
+}
 const LIMIT_MAX = 100;
 /** Top-level columns a filter may name directly; each only where that kind's table has it. */
 const COLUMNS = ['id', 'natural_id', 'builder_id', 'lane_id', 'table_id'] as const;
@@ -294,6 +314,30 @@ export async function findRecords(input: Record<string, unknown>): Promise<Recor
   if (shape.lane) counts.by_lane = tally((row) => str(row.fields[shape.lane!]) || (row.lane_id ?? ''));
   if (cols.has('builder_id')) counts.by_builder = tally((row) => row.builder_id ?? '');
 
+  let fieldsArg: unknown = args.fields;
+  if (typeof fieldsArg === 'string' && fieldsArg.trim().startsWith('[')) {
+    try { fieldsArg = JSON.parse(fieldsArg); } catch { /* left as one name */ }
+  }
+  const wanted = Array.isArray(fieldsArg) ? (fieldsArg as unknown[]).map(String) : typeof fieldsArg === 'string' && fieldsArg ? [fieldsArg] : [];
+  const full = args.full === true;
+  const pageCount = Math.max(0, Math.min(limit, rows.length - offset));
+  const clipAt = pageCount <= 1 ? CLIP_ONE : CLIP_LIST;
+  let clipped = 0;
+  const shapeFields = (f: Record<string, unknown>): Record<string, unknown> => {
+    if (full) return f;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(f)) {
+      if (wanted.length && !wanted.includes(k)) {
+        // Named fields only: the others are left out, except the short ones that identify the row.
+        if (typeof v === 'string' && v.length <= 80) out[k] = v;
+        continue;
+      }
+      const c = wanted.includes(k) ? v : clipValue(v, clipAt);
+      if (c !== v) clipped += 1;
+      out[k] = c;
+    }
+    return out;
+  };
   const pageRows = rows.slice(offset, offset + limit).map((row) => ({
     id: row.id,
     natural_id: row.natural_id,
@@ -303,7 +347,7 @@ export async function findRecords(input: Record<string, unknown>): Promise<Recor
     created_time: row.created_time,
     updated_at: row.updated_at,
     ...(row.match_score !== undefined ? { match_score: row.match_score, matched_terms: row.matched_terms } : {}),
-    fields: row.fields,
+    fields: shapeFields(row.fields),
   }));
 
   return {
@@ -318,6 +362,7 @@ export async function findRecords(input: Record<string, unknown>): Promise<Recor
     rows: pageRows,
     page_url: pageUrl(kind),
     ...(kind === 'loops' ? { note: 'One row per loop_id, the most recently written — the rule the Open loops page counts by.' } : {}),
+    ...(clipped ? { fields_cut: `${clipped} long field value(s) were cut at ${clipAt} characters to keep this answer small. Ask again with fields: ["Field Name"] for those fields whole, or full: true for every field whole (one row at a time).` } : {}),
     ...(warnings.length ? { warnings } : {}),
   };
 }
