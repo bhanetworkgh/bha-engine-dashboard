@@ -14129,3 +14129,10 @@ Fix:        Repeats only for judgement cases (North Star, or checks judgement:tr
 Decision:   The runner stays unpublished (paused this morning) until there is credit; the Monday run and
             the publish check need it published again. The draft eval stays the full set, since it is now
             the one run a change gets.
+
+## 2026-11-02 — Bays reads a long thread shorter
+Intent:     Cut Bays' tokens on long Slack threads (Bays is 94% of agent tokens).
+Files:      n8n `Bays — Agent Delivery` (5AFqtZQaeKFFiGqe), node Build Agent Message. Published, active version 7c709962-5772-44ac-913a-adb46cebb260. Restore point 3dcf29f7-cfde-4259-9ce9-57b6fff5a8ba.
+Problem:    Every reply in a thread re-sent the last 20 messages at up to 800 characters each, though Bays' own per-thread memory already holds the earlier turns.
+Fix:        Messages up to Bays' last post in the thread are sent at 300 characters, later ones at 800; the thread's first message is always whole. History cap 12,000 to 8,000 characters. Bays' posts are told apart by bot_profile.name "Bays" (checked on execution 61409).
+Decision:   Shortened, not dropped. A first version sent only what came after Bays' last reply; some Bays posts are workflow cards (a Codex entry, a review card) the agent's memory never saw, so dropping them could lose what a person is replying to.

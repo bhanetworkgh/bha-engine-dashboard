@@ -3133,6 +3133,8 @@ is refused** (`secret_refused`, the BHARAG guard's shapes plus Stripe, ElevenLab
 stored redacted. A cost nobody stated is left empty: spend is not tracked yet (the Mercury card feed is a
 later step). `npm run test:registry-tools`.
 
+**Bays reads a long thread shorter** (2 Nov 2026, Destiny: token cost). In `Bays — Agent Delivery`'s Build Agent Message, thread messages up to Bays' last post are sent at 300 characters and later ones at 800, the first message always whole, 8,000 characters at most; Bays' own thread memory holds the rest. Shortened, never dropped: a Bays workflow card is not in that memory.
+
 **Model spend, a Records page** (2026-11-02, Destiny: "a record page for tracking token spending and
 costs"). `server/src/modelSpend.ts`, migration 111, `engine_model_usage_readings`, `/model-spend`
 (`GET /api/model-spend`), four tabs: Dollars, Tokens, Evals, Anthropic backup. **Dollars are measured**:
