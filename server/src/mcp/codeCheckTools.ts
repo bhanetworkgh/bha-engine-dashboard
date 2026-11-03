@@ -68,17 +68,10 @@ async function guarded(
     const r = await run(dry);
     // A recorded check is written onto the log itself (D6). Never able to fail the check: its outcome rides on the answer.
     if (tool === 'record_code_check' && !dry && r.written && r.check) {
-      const note = await codeCheckWatch.codexNote(r.check as cc.CodeCheck);
-      (r as Record<string, unknown>).codex_note = note;
-      if (!note.ok) r.message = `${r.message} The check is recorded, but it was not written onto the log: ${note.detail}`;
-      else r.message = `${r.message} Written onto the log (${note.detail}).`;
-      // And onto the entry's own document in BHARAG, in place (2 Nov 2026). Never able to fail the check either.
-      const rag = await codeCheckWatch.bharagNote(r.check as cc.CodeCheck);
-      (r as Record<string, unknown>).bharag_note = rag;
-      r.message = rag.ok ? `${r.message} Written onto BHARAG (${rag.detail}).` : `${r.message} Not written onto BHARAG: ${rag.detail}`;
-      // And its card in #bha-code-reviews is marked reviewed (2 Nov 2026). Never able to fail the check.
-      const card = await codeCheckWatch.reviewedByCheck(r.check as cc.CodeCheck);
-      (r as Record<string, unknown>).review_card = card;
+      const a = await codeCheckWatch.afterRecord(r.check as cc.CodeCheck);
+      Object.assign(r, a);
+      r.message = a.codex_note.ok ? `${r.message} Written onto the log (${a.codex_note.detail}).` : `${r.message} The check is recorded, but it was not written onto the log: ${a.codex_note.detail}`;
+      r.message = a.bharag_note.ok ? `${r.message} Written onto BHARAG (${a.bharag_note.detail}).` : `${r.message} Not written onto BHARAG: ${a.bharag_note.detail}`;
     }
     const natural = (r.check as cc.CodeCheck | undefined)?.codex_entry_id ?? (r.output as cc.AuditOutput | undefined)?.output_id ?? null;
     await auditClose(audit, { outcome: dry ? 'dry_run' : r.written ? 'updated' : 'unchanged', detail: r.message, natural_id: natural, after: r.check ?? r.output });
@@ -118,6 +111,24 @@ export const recordCodeCheck: ToolDefinition = {
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Record a code check' },
   handler: (args, deps) => guarded('record_code_check', args, deps, (dry) => cc.recordCheck(args, { dry_run: dry })),
+};
+
+export const prepareCodeCheck: ToolDefinition = {
+  name: 'prepare_code_check',
+  description: `Save a code check as ready to send, once Destiny has heard it and agreed it. Give everything record_code_check takes except check_link, plus draft_text: the check exactly as it will be drafted on Slack. Answers with the channel and thread to draft into. When he sends that draft, the check records itself from his message (Codex, BHARAG, the review card) and a line confirms it in the thread, so do not call record_code_check afterwards. A verdict or pay call changed before sending stops it and says so. Preparing again replaces the earlier one.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      ...(recordCodeCheck.inputSchema as { properties: Record<string, unknown> }).properties,
+      draft_text: { type: 'string', description: 'The check as drafted on Slack: opens "Code check:" and names the Codex ID.' },
+      channel_id: { type: 'string', description: 'Only when the posted Codex cannot be found.' },
+      thread_ts: { type: 'string', description: 'Only when the posted Codex cannot be found.' },
+    },
+    required: ['codex_entry_id', 'draft_text', 'verdict', 'verdict_reason', 'claims', 'pay_call', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Save a code check as ready to send' },
+  handler: (args, deps) => guarded('prepare_code_check', args, deps, (dry) => codeCheckWatch.prepare(args, { dry_run: dry })),
 };
 
 export const writeAuditOutput: ToolDefinition = {
@@ -222,4 +233,4 @@ export const syncCodeCheckToBharag: ToolDefinition = {
 };
 
 export const CODE_CHECK_READ_TOOLS: ToolDefinition[] = [readCodeChecks];
-export const CODE_CHECK_WRITE_TOOLS: ToolDefinition[] = [recordCodeCheck, writeAuditOutput, codeCheckAlertTrial, syncCodeCheckToBharag];
+export const CODE_CHECK_WRITE_TOOLS: ToolDefinition[] = [recordCodeCheck, prepareCodeCheck, writeAuditOutput, codeCheckAlertTrial, syncCodeCheckToBharag];

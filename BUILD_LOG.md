@@ -14274,3 +14274,10 @@ Intent:     Prove runs finish and a replaced server cannot strand one.
 Fix:        DRAFT-202611031235-PITE and 9XX3 passed 9 of 9; 4LHM and SUJC read passed at 16 of 20, no regression. J5IH, started and deployed over at 12:47, read interrupted at 12:47:57.
 Problem:    BAYS-DW-01, BAYS-SOP-01, BAYS-SOP-04 and BAYS-SOP-05 fail on both Bays agents, and were failing in EVAL-202611020738 before today's work.
 Decision:   J5IH was cleared by the boot pass, so the orphan sweep itself has not yet fired on a real gap.
+
+## 2026-11-03 17:30 — Open the log, and a sent check records itself
+Intent:     Destiny's D3 ask: the card should open the posted Codex so he reviews in that thread, and sending the check should be the last thing he does.
+Files:      server/src/codeCheckWatch.ts, decisionWatch.ts (readSince exported), mcp/codeCheckTools.ts, migrations.ts (113), timers.ts, test/code-check-watch.test.cjs, CLAUDE.md
+Problem:    `Builder Channel Post` on the Codex row holds only the channel id, so the card had no link to the post.
+Fix:        findLogPost reads the log channel for Bays' Codex post by exact id. prepare_code_check saves the check beside the Slack draft; the two-minute pass reads only ready threads and records his reply.
+Decision:   Verdict or pay call changed before sending stops rather than records, because the structured record would disagree with what the builder read. Problems go to the card thread, never under the builder's log.

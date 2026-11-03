@@ -38,6 +38,85 @@ const HOUR = 3_600_000;
 const APPROVED = '2026-11-02T10:00:00.000Z';
 const at = (h) => Date.parse(APPROVED) + h * HOUR;
 
+/* 3 Nov 2026: the card opens the posted log; a sent check records itself. */
+async function sendItAndTheRest() {
+  const CX = 'CODEX-20261102-kavin-g-n-vfarm-incident-fix';
+  const post = { ts: '1793640704.876389', bot_id: 'B1', text: `:book: Bays — Codex Entry *Codex ID:* \`${CX}\`` };
+  assert.equal(watch.isLogPost(post, CX), true);
+  assert.equal(watch.isLogPost({ ...post, bot_id: undefined }, CX), false);
+  assert.equal(watch.isLogPost({ ...post, ts: '2', thread_ts: '1' }, CX), false);
+  assert.equal(watch.isLogPost(post, 'CODEX-20261102-kavin'), false);
+  assert.equal(watch.isLogPost({ ts: '3', bot_id: 'B1', text: `Code review for ${CX}` }, CX), false);
+  ok('only Bays\' top-level post for that exact id is the log');
+  assert.match(watch.threadUrl('C0BN30RU3UK', post.ts), /archives\/C0BN30RU3UK\/p1793640704876389\?thread_ts=1793640704\.876389&cid=C0BN30RU3UK$/);
+  const due = { codex_entry_id: CX, builder: 'Kavin', session_date: null, approved_at: APPROVED, hours_waiting: 1, late: false, step: 0, channel_id: 'C1' };
+  const url = (d) => watch.messageFor(d).blocks.find((b) => b.type === 'actions').elements[0].url;
+  assert.match(url({ ...due, log_url: 'https://x.slack.com/a' }), /x\.slack\.com/);
+  assert.match(url(due), /\/codex\//);
+  assert.match(JSON.stringify(watch.messageFor(due).blocks), /was not found/);
+  ok('Open the log goes to the post, else the dashboard and the card says so');
+
+  const after = 1000;
+  const m = { ts: '1001.5', user: DESTINY, text: `*Code check: Kavin, ${CX}, 3 Nov*\n*Verdict:* Matches the log` };
+  assert.equal(watch.isSentCheck(m, CX, DESTINY, after), true);
+  assert.equal(watch.isSentCheck({ ...m, user: 'U999' }, CX, DESTINY, after), false);
+  assert.equal(watch.isSentCheck({ ...m, ts: '999' }, CX, DESTINY, after), false);
+  assert.equal(watch.isSentCheck({ ...m, text: `I will do the code check for ${CX}` }, CX, DESTINY, after), false);
+  assert.equal(watch.isSentCheck({ ...m, text: '*Code check: Kavin, CODEX-other*' }, CX, DESTINY, after), false);
+  assert.equal(watch.isSentCheck({ ...m, bot_id: 'B1' }, CX, DESTINY, after), false);
+  ok('only his own message opening the check, naming the log, after the save, counts');
+  const d = `*Verdict:* Partly matches, x\n*4. Pay call*\nPay partly`;
+  assert.deepEqual(watch.compareSent(d, d.replace(/\*/g, ''), 'partly', 'partly'), { same: true, conflict: null });
+  assert.equal(watch.compareSent(d, d + ' more', 'partly', 'partly').same, false);
+  assert.match(watch.compareSent(d, d.replace('Partly matches', 'Overstated'), 'partly', 'partly').conflict, /verdict/);
+  assert.match(watch.compareSent(d, d.replace('Pay partly', 'Hold'), 'partly', 'partly').conflict, /pay call/);
+  ok('changed wording is noted; a changed verdict or pay call stops it');
+
+  const realQ = pg.query;
+  const rows = [{ codex_entry_id: CX, check_input: { verdict: 'matches', pay_call: 'as_logged' }, draft_text: `Code check: ${CX} Matches the log. Pay as logged`, channel: 'C1', thread_ts: post.ts, state: 'ready', prepared_by: DESTINY, prepared_at: 'x', epoch: '1000' }];
+  const sqls = [];
+  pg.query = async (sql, p) => {
+    sqls.push({ sql, p });
+    if (/SELECT codex_entry_id, check_input/.test(sql)) return { rows: rows.filter((r) => r.state === 'ready') };
+    if (/SET state = 'recording'/.test(sql)) { const r = rows[0]; if (r.state !== 'ready') return { rows: [] }; r.state = 'recording'; return { rows: [{}] }; }
+    if (/SET state = \$2/.test(sql)) { rows[0].state = p[1]; return { rows: [] }; }
+    return { rows: [] };
+  };
+  const posts = []; const recorded = [];
+  const sentMsg = { ts: '1500.25', user: DESTINY, text: `*Code check: Kavin, ${CX}*\nMatches the log\nPay as logged` };
+  const deps = {
+    post: async (c, text, b, ts) => { posts.push({ c, text, ts }); return { ok: true, detail: 'posted', ts: '9' }; },
+    read: async () => ({ ok: true, read_as: 'Bays', messages: [sentMsg] }),
+    record: async (i) => { recorded.push(i); return { check: { codex_entry_id: CX } }; },
+    after: async () => ({ codex_note: { ok: true, detail: '' }, bharag_note: { ok: true, detail: '' }, review_card: { ok: true, detail: '' } }),
+  };
+  let r = await watch.recordSent(deps);
+  assert.deepEqual(r.recorded, [CX]);
+  assert.equal(recorded[0].requester_user_id, DESTINY);
+  assert.match(recorded[0].check_link, /archives\/C1\/p150025/);
+  assert.equal(recorded[0].posted_at, new Date(1500250).toISOString());
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].ts, post.ts);
+  assert.match(posts[0].text, /Codex, BHARAG, the review card/);
+  r = await watch.recordSent(deps);
+  assert.equal(recorded.length, 1);
+  ok('a sent check records once, from his own message, and confirms in the thread');
+
+  rows[0].state = 'ready'; recorded.length = 0; posts.length = 0;
+  r = await watch.recordSent({ ...deps, read: async () => ({ ok: true, read_as: 'Bays', messages: [{ ...sentMsg, text: `*Code check: ${CX}* Overstated. Hold` }] }) });
+  assert.deepEqual(r.stopped, [CX]);
+  assert.equal(recorded.length, 0);
+  assert.equal(rows[0].state, 'stopped');
+  ok('a changed verdict is not recorded and is raised');
+
+  rows[0].state = 'ready';
+  r = await watch.recordSent({ ...deps, read: async () => ({ ok: false, error: 'not_in_channel' }) });
+  assert.deepEqual(r.unread, [CX]);
+  assert.equal(rows[0].state, 'ready');
+  ok('a thread that cannot be read stays ready');
+  pg.query = realQ;
+}
+
 (async () => {
   /* 1. steps */
   assert.deepEqual([0, 1, 2.9, 3, 5.9, 6, 9, 24, 49].map(watch.stepFor), [0, 0, 0, 1, 1, 2, 3, 8, 16]);
@@ -92,7 +171,7 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
   slackMod.botCall = async (method, body) => { calls.push({ method, body }); return { ok: true, http_status: 200 }; };
 
   try {
-    let r = await watch.run({ now: at(1), post: okPost });
+    let r = await watch.run({ find: async () => null, now: at(1), post: okPost });
     assert.equal(r.sent.length, 1);
     assert.equal(sent[0].channel, 'C0CDRV4TMCP');
     assert.equal(sent[0].thread_ts, undefined);
@@ -107,26 +186,26 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
     assert.equal(r.skipped.length, 1);
     ok('Jason approves: one card in #bha-code-reviews with Open the log, Code checks and Mark reviewed; its ts is kept on the claim');
 
-    r = await watch.run({ now: at(2), post: okPost });
+    r = await watch.run({ find: async () => null, now: at(2), post: okPost });
     assert.equal(r.sent.length, 0);
     assert.equal(r.already, 1);
     assert.equal(sent.length, 1);
     ok('the next pass, still at the alert step, sends nothing: the claim is held');
 
     waitingHours = 4;
-    r = await watch.run({ now: at(4), post: async () => ({ ok: false, detail: 'not_in_channel' }) });
+    r = await watch.run({ find: async () => null, now: at(4), post: async () => ({ ok: false, detail: 'not_in_channel' }) });
     assert.equal(r.failed.length, 1);
     assert.ok(!held.has(watch.dedupeKey('CODEX-20261102-kavin-g-n-rover', 1)));
     ok('a reminder Slack refuses gives its claim back, so it is never counted as sent');
 
-    r = await watch.run({ now: at(4), post: okPost });
+    r = await watch.run({ find: async () => null, now: at(4), post: okPost });
     assert.equal(r.sent.length, 1);
     assert.equal(sent[1].thread_ts, '1793.100');
     assert.match(sent[1].text, /<@U0AEW3TBYH1> Reminder 1 of 4: Kavin G N's log was approved 4 hours ago/);
     ok('the next pass retries it and reminder 1 goes in the card\'s thread, tagging Destiny');
 
     waitingHours = 12.5;
-    r = await watch.run({ now: at(12.5), dry_run: true, post: okPost });
+    r = await watch.run({ find: async () => null, now: at(12.5), dry_run: true, post: okPost });
     assert.equal(r.would_send.length, 1);
     assert.match(r.would_send[0].text, /Last reminder/);
     assert.equal(sent.length, 2);
@@ -146,7 +225,7 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
     assert.equal(m.body.reason, 'already_reviewed');
     ok('only Destiny or Jason can mark reviewed (anyone else is told privately); the card is rewritten without the button; a second click changes nothing');
 
-    r = await watch.run({ now: at(12.5), post: okPost });
+    r = await watch.run({ find: async () => null, now: at(12.5), post: okPost });
     assert.equal(r.waiting, 0);
     assert.equal(sent.length, 2);
     ok('a reviewed log gets no more reminders');
@@ -154,10 +233,10 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
     // A log past every reminder that was only ever DM'd gets its card, once.
     held.clear();
     waitingHours = 30;
-    r = await watch.run({ now: at(30), post: okPost });
+    r = await watch.run({ find: async () => null, now: at(30), post: okPost });
     assert.equal(r.sent.length, 1);
     assert.equal(sent[2].blocks[0].text.text, 'Code check still owed');
-    r = await watch.run({ now: at(31), post: okPost });
+    r = await watch.run({ find: async () => null, now: at(31), post: okPost });
     assert.equal(sent.length, 3);
     ok('a log past its reminders with no card gets one card and nothing after');
   } finally {
@@ -178,6 +257,8 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
   cc.recordCheck = async (args) => { recorded++; return { ok: true, written: true, corrected: false, check: { codex_entry_id: args.codex_entry_id, verdict: 'matches', pay_call: 'as_logged' }, message: 'Recorded.' }; };
   let noted = 0;
   watch.codexNote = async () => { noted++; return { ok: true, row_id: '397', detail: 'written onto Codex row 397' }; };
+  const realAfter = watch.afterRecord;
+  watch.afterRecord = async (c) => ({ codex_note: await watch.codexNote(c), bharag_note: await watch.bharagNote(c), review_card: await watch.reviewedByCheck(c) });
   const args = { codex_entry_id: 'CODEX-20261102-kavin-g-n-rover', check_link: 'https://bayshorizonnetwork.slack.com/archives/C0BN30RU3UK/p1793300000123456?thread_ts=1793290000.000100', verdict: 'matches', verdict_reason: 'x', claims: [], pay_call: 'as_logged', requester_user_id: DESTINY };
   try {
     for (const agent of ['bays', 'north_star', 'genie']) {
@@ -232,6 +313,8 @@ const at = (h) => Date.parse(APPROVED) + h * HOUR;
     engineWrite.patchRecord = realPatch;
     pg.query = real.query;
   }
+
+  await sendItAndTheRest();
 
   console.log(`\n${n} code check watch checks passed.`);
 })().catch((e) => {

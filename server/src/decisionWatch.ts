@@ -579,7 +579,7 @@ async function replies(channel: string, threadTs: string, oldest: string, token?
 }
 
 /** Replies after `oldest` under one message. Bays' own token first, North Star's where Bays cannot read the place. */
-async function readSince(channel: string, threadTs: string, oldest: string): Promise<ThreadRead> {
+export async function readSince(channel: string, threadTs: string, oldest: string): Promise<ThreadRead> {
   const tried: string[] = [];
   if (slack.slackConfigured()) {
     const r = await replies(channel, threadTs, oldest);

@@ -4209,6 +4209,19 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE TABLE IF NOT EXISTS engine_model_usage_scans (execution_id bigint PRIMARY KEY, available boolean NOT NULL, scanned_at timestamptz NOT NULL DEFAULT now())`,
     ],
   },
+  {
+    id: 113,
+    name: 'code checks ready to send',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_code_check_prepared (
+        codex_entry_id text PRIMARY KEY, check_input jsonb NOT NULL, draft_text text NOT NULL, channel text NOT NULL, thread_ts text NOT NULL,
+        state text NOT NULL DEFAULT 'ready' CHECK (state IN ('ready','recording','recorded','stopped','failed')),
+        prepared_by text NOT NULL, prepared_at timestamptz NOT NULL DEFAULT now(), claimed_at timestamptz,
+        sent_ts text, sent_link text, sent_text text, sent_differs boolean, recorded_at timestamptz, detail text
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_code_check_prepared_ready ON engine_code_check_prepared (prepared_at) WHERE state IN ('ready','recording')`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

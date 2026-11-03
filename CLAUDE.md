@@ -5202,6 +5202,20 @@ record.
   gets one card and nothing after. **The check also lands in BHARAG** (2 Nov 2026, Destiny — Jegan's edit-in-place, LOOP-1793257277585-KWV1, bharag2-v0.1.22 `PATCH /api/v1/documents/:id`): `codeCheckWatch.bharagNote` finds every document in the Codex workspace (key `ingestKeyVar('codex')`) whose metadata `codex_entry_id` is the entry and merges metadata `code_check` (verdict, pay call, reason, claims not confirmed, missing, link, at, by) onto it, same id, nothing else touched. `record_code_check` does it after every check and reports `bharag_note`, never failing the check; `sync_code_check_to_bharag` (write connection, Destiny or Jason, refused on agent tokens, `dry_run`) does it for a check already recorded. The key needs BHARAG's `documents:write`; a refusal names it. It moves only the alert's start, never later than 1 Nov,
   and the tab and its figures still start at 1 Nov. `npm run test:code-check-watch`.
 
+- **Open the log opens the post, and sending the check is the last step** (3 Nov 2026, Destiny). `codeCheckWatch.ts`.
+  The card's Open the log button opens the posted Codex in the builder's log channel, in its thread: `findLogPost`
+  reads the channel for Bays' top-level "Codex Entry" post carrying the exact Codex ID, a card already posted is
+  rewritten when it is found, and a post not found keeps the dashboard link and says so. `prepare_code_check` (write
+  connection, Destiny or Jason, refused on agent tokens, audited kind `code_checks`, migration 113,
+  `engine_code_check_prepared`) saves the whole check as ready to send with its draft text, once Destiny has heard
+  it. On each two-minute pass only the threads of ready checks are read. His reply there, after the save, opening
+  "Code check:" and carrying the exact Codex ID, is recorded through `cc.recordCheck` with that message's link and
+  time, then `afterRecord` runs the Codex note, BHARAG note and reviewed card, the same code `record_code_check` runs,
+  and one line confirms it in the thread. **A verdict or pay call changed before sending is not recorded**: state
+  `stopped`, and the card's thread says so, because the record would disagree with the thread. Changed wording is
+  recorded and noted (`sent_differs`, `sent_text`). A thread that cannot be read stays ready. The state leaves
+  `ready` before anything is written, so one message cannot record twice. No Bays tag is needed.
+
 ### System registry
 **Four registries on one page** (decision 2026-09-14, Destiny) — Builders,
 Tools, Endpoint, Workflow. **Engine writes is gone** (2026-09-22, Destiny): it

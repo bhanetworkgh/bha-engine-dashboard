@@ -30,7 +30,19 @@
  * more reminders. Recording the check (record_code_check) marks its card reviewed too. Marking reviewed records
  * no check: the Code checks tab keeps it waiting until one is recorded.
  *
- * It posts cards, writes events and stamps the Codex row; it changes no pay row and no check.
+ * The log itself (3 Nov 2026, Destiny): the card's Open the log button opens the posted Codex in the builder's
+ * log channel, in its thread, because that is where the check is written. findLogPost() reads the channel for
+ * Bays' top-level "Codex Entry" post carrying the exact Codex ID; a card already posted is rewritten once the
+ * post is found. Not found, the button opens the dashboard and the card says so.
+ *
+ * Send it and the rest happens (3 Nov 2026, Destiny): prepare_code_check saves the whole check as ready to send
+ * (engine_code_check_prepared) beside the Slack draft. Every pass reads only the threads of ready checks. A reply
+ * after the save, from the person who prepared it, that opens "Code check:" and carries the exact Codex ID is the
+ * check going out: it is recorded with that message's own link and time, which runs the same Codex note, BHARAG
+ * note and reviewed card as record_code_check, and one line confirms it under his message. A verdict or pay call
+ * changed in the draft before sending is never recorded from the saved one: it stops, and the card's thread says so.
+ *
+ * It posts cards, writes events and stamps the Codex row; it changes no pay row and no check it was not handed.
  */
 import { query } from './pg';
 import { record } from './engineEvents';
@@ -39,6 +51,7 @@ import * as timers from './timers';
 import * as engineWrite from './engineWrite';
 import * as cc from './codeChecks';
 import * as bharag from './bharag';
+import { readSince } from './decisionWatch';
 import { getMeta, setMeta } from './db';
 
 /** Destiny, 29 Oct 2026: the alert as soon as Jason approves, then a reminder every 3 hours, 4 at most (about 12 hours). */
@@ -79,6 +92,8 @@ export interface Due {
   channel_id: string | null;
   /** Past the last reminder: only a missing card is posted. */
   quiet?: boolean;
+  /** The posted Codex in the builder's log channel, opened in its thread. */
+  log_url?: string | null;
 }
 
 /** Pure: the message for one step, as Block Kit with a plain-text fallback. */
@@ -86,7 +101,7 @@ export function messageFor(d: Due, opts: { reviewed?: { by: string; at: string; 
   const reviewed = opts.reviewed ?? null;
   const by = new Date(Date.parse(d.approved_at) + cc.WINDOW_HOURS * 3_600_000).toISOString();
   const who = d.builder ?? 'a builder';
-  const logUrl = `${DASHBOARD()}/codex/${encodeURIComponent(d.codex_entry_id)}`;
+  const logUrl = d.log_url || `${DASHBOARD()}/codex/${encodeURIComponent(d.codex_entry_id)}`;
   const last = d.step >= RULE.max_reminders;
   const header = d.quiet ? 'Code check still owed' : d.step === 0 ? 'A log is ready for your code check' : last ? `Last reminder: code check still owed` : `Reminder ${d.step} of ${RULE.max_reminders}: code check still owed`;
   const lead =
@@ -126,6 +141,7 @@ export function messageFor(d: Due, opts: { reviewed?: { by: string; at: string; 
           type: 'mrkdwn',
           text: [
             d.channel_id ? `Log channel <#${d.channel_id}>` : null,
+            d.log_url ? null : 'The posted log was not found, so Open the log goes to the dashboard.',
             reviewed
               ? null
               : d.quiet
@@ -277,8 +293,9 @@ async function ensureCard(d: Due, post: Poster): Promise<{ state: 'posted' | 'he
   return { state: 'posted', ts: sent.ts };
 }
 
-export async function run(opts: { now?: number; dry_run?: boolean; post?: Poster } = {}): Promise<RunResult> {
+export async function run(opts: { now?: number; dry_run?: boolean; post?: Poster; find?: typeof findLogPost } = {}): Promise<RunResult> {
   const post = opts.post ?? slackPost;
+  const find = opts.find ?? findLogPost;
   const { due: list, skipped, from } = await due(opts.now ?? Date.now());
   const out: RunResult = { waiting: list.length, from, sent: [], already: 0, failed: [], would_send: [], skipped };
   for (const d of list) {
@@ -296,6 +313,11 @@ export async function run(opts: { now?: number; dry_run?: boolean; post?: Poster
       continue;
     }
     // The card first: a log that was only ever DM'd (before 2 Nov) gets its card on the next pass.
+    const held = await cardFor(d.codex_entry_id);
+    if (!held?.due?.log_url) {
+      d.log_url = await logUrlFor(d, find);
+      if (held && d.log_url) await linkCard(held, d.log_url);
+    }
     const card = await ensureCard(d, post);
     if (card.state === 'failed') {
       console.error(`[code-check-watch] card for ${d.codex_entry_id} not posted, will retry: ${card.detail}`);
@@ -335,6 +357,228 @@ export async function run(opts: { now?: number; dry_run?: boolean; post?: Poster
       continue;
     }
     out.sent.push({ codex_entry_id: d.codex_entry_id, step: d.step });
+  }
+  return out;
+}
+
+/* ------------------------------------------------------- the posted log */
+
+export interface LogPost { channel: string; ts: string; url: string }
+const WORKSPACE = (): string => process.env.SLACK_WORKSPACE_URL?.trim().replace(/\/+$/, '') || 'https://bayshorizonnetwork.slack.com';
+/** Pure: a link that opens the message's own thread. */
+export const threadUrl = (channel: string, ts: string): string =>
+  `${WORKSPACE()}/archives/${channel}/p${ts.replace('.', '')}?thread_ts=${ts}&cid=${channel}`;
+
+/** Pure: Bays' top-level Codex post for exactly this id, never a later message that only mentions it. */
+export function isLogPost(m: { text?: string; blocks?: unknown; bot_id?: string; thread_ts?: string; ts?: string }, codexId: string): boolean {
+  if (!m.bot_id || (m.thread_ts && m.thread_ts !== m.ts)) return false;
+  const body = `${m.text ?? ''} ${m.blocks ? JSON.stringify(m.blocks) : ''}`;
+  return body.includes('Codex Entry') && new RegExp(`${codexId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9-])`).test(body);
+}
+
+/** Finds the posted Codex in the log channel, reading back from the newest message. Null, with the reason logged, when it is not there. */
+export async function findLogPost(codexId: string, channel: string | null, around: string): Promise<LogPost | null> {
+  if (!channel) return null;
+  const oldest = String(Math.floor(Date.parse(around) / 1000) - 21 * 86_400);
+  for (const token of [undefined, slack.northStarToken()] as const) {
+    if (token === null) continue;
+    let cursor: string | undefined;
+    let error: string | null = null;
+    for (let page = 0; page < 5 && !error; page++) {
+      const r = await slack.botCall('conversations.history', { channel, oldest, limit: 200, cursor }, 'form', token);
+      if (!r.ok) {
+        error = String(r.error);
+        break;
+      }
+      const hit = ((r.messages as { ts?: string; text?: string; blocks?: unknown; bot_id?: string; thread_ts?: string }[]) ?? []).find((m) => m.ts && isLogPost(m, codexId));
+      if (hit?.ts) return { channel, ts: hit.ts, url: threadUrl(channel, hit.ts) };
+      cursor = (r.response_metadata as { next_cursor?: string } | undefined)?.next_cursor || undefined;
+      if (!cursor) return null;
+    }
+    if (error) console.error(`[code-check-watch] could not read ${channel} for ${codexId}: ${error}`);
+  }
+  return null;
+}
+
+/** Looked for and not found: not asked again for an hour, so a missing post is not a read every two minutes. */
+const notFoundAt = new Map<string, number>();
+
+async function logUrlFor(d: Due, find: typeof findLogPost): Promise<string | null> {
+  const last = notFoundAt.get(d.codex_entry_id);
+  if (last && Date.now() - last < 3_600_000) return null;
+  const hit = await find(d.codex_entry_id, d.channel_id, d.approved_at).catch(() => null);
+  if (!hit) notFoundAt.set(d.codex_entry_id, Date.now());
+  return hit?.url ?? null;
+}
+
+/** Rewrites a card posted before its log was found. A card Slack will not rewrite stays as it was and is tried again. */
+async function linkCard(card: Card, url: string): Promise<void> {
+  const due = { ...card.due, log_url: url };
+  const m = messageFor(due);
+  const r = await slack.botCall('chat.update', { channel: card.channel, ts: card.ts, text: m.text, blocks: m.blocks });
+  if (!r.ok) {
+    console.error(`[code-check-watch] card for ${due.codex_entry_id} not linked to its log: ${String(r.error)}`);
+    return;
+  }
+  await query(`UPDATE engine_events SET detail = detail || $2::jsonb WHERE id = $1`, [card.id, JSON.stringify({ due })]);
+}
+
+/* ------------------------------------------------- send it and the rest happens */
+
+export const OPENS_CHECK = /^[\s*_~>]*code check:/i;
+const flat = (t: string): string => t.replace(/[*_~`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** Pure: is this reply the check going out? From the person who prepared it, a real message, opening the check, naming the exact log. */
+export function isSentCheck(m: { user?: string; bot_id?: string; subtype?: string; text?: string; ts?: string }, codexId: string, preparedBy: string, afterTs: number): boolean {
+  if (m.bot_id || m.subtype || m.user !== preparedBy || !m.ts || Number(m.ts) <= afterTs) return false;
+  return OPENS_CHECK.test(m.text ?? '') && (m.text ?? '').includes(codexId);
+}
+
+/** Pure: what the sent text does to the saved check. A changed verdict or pay call stops it; changed wording is noted. */
+export function compareSent(draft: string, sent: string, verdict: cc.Verdict, payCall: cc.PayCall): { same: boolean; conflict: string | null } {
+  const s = flat(sent);
+  const conflict = !s.includes(flat(cc.VERDICT_LABEL[verdict]))
+    ? `the verdict "${cc.VERDICT_LABEL[verdict]}" is not in what went out`
+    : !s.includes(flat(cc.PAY_LABEL[payCall]))
+      ? `the pay call "${cc.PAY_LABEL[payCall]}" is not in what went out`
+      : null;
+  return { same: flat(draft) === s, conflict };
+}
+
+/** Everything a recorded check sets off. Each outcome is reported; none can fail the check. */
+export async function afterRecord(check: cc.CodeCheck): Promise<{ codex_note: Awaited<ReturnType<typeof codexNote>>; bharag_note: Awaited<ReturnType<typeof bharagNote>>; review_card: { ok: boolean; detail: string } }> {
+  const codex_note = await codexNote(check);
+  const bharag_note = await bharagNote(check);
+  const review_card = await reviewedByCheck(check);
+  return { codex_note, bharag_note, review_card };
+}
+
+export interface Prepared {
+  codex_entry_id: string;
+  check: cc.CheckInput;
+  draft_text: string;
+  channel: string;
+  thread_ts: string;
+  state: string;
+  prepared_by: string;
+  prepared_at: string;
+}
+
+/** Saves a check as ready to send, replacing an earlier one for the same log. */
+export async function prepare(i: cc.CheckInput & { draft_text?: unknown; channel_id?: unknown; thread_ts?: unknown }, opts: { dry_run?: boolean } = {}): Promise<{ ok: true; written: boolean; message: string; channel: string; thread_ts: string; log_url: string; check: cc.CodeCheck }> {
+  const id = typeof i.codex_entry_id === 'string' ? i.codex_entry_id.trim() : '';
+  const draft = typeof i.draft_text === 'string' ? i.draft_text.trim() : '';
+  if (!OPENS_CHECK.test(draft) || !draft.includes(id)) throw new cc.CodeCheckError('bad_draft', 'draft_text is the check exactly as drafted on Slack: it opens "Code check:" and names the Codex ID, or the watch could not recognise it when it goes out.');
+  let channel = typeof i.channel_id === 'string' ? i.channel_id.trim() : '';
+  let ts = typeof i.thread_ts === 'string' ? i.thread_ts.trim() : '';
+  if (!channel || !ts) {
+    const row = await query<{ ch: string | null; at: string | null }>(
+      `SELECT NULLIF(fields->>'Builder Channel ID', '') AS ch, COALESCE(fields->>'Jason Reviewed At', fields->>'Processed At') AS at
+         FROM engine_codex_submissions WHERE fields->>'Codex Entry ID' = $1 ORDER BY updated_at DESC LIMIT 1`,
+      [id],
+    );
+    const hit = await findLogPost(id, row.rows[0]?.ch ?? null, row.rows[0]?.at ?? new Date().toISOString());
+    if (!hit) throw new cc.CodeCheckError('log_post_not_found', `The posted Codex for ${id} was not found in its log channel. Pass channel_id and thread_ts.`);
+    channel = hit.channel;
+    ts = hit.ts;
+  }
+  const log_url = threadUrl(channel, ts);
+  const dry = await cc.recordCheck({ ...i, check_link: log_url }, { dry_run: true });
+  const c = compareSent(draft, draft, dry.check.verdict as cc.Verdict, dry.check.pay_call as cc.PayCall);
+  if (c.conflict) throw new cc.CodeCheckError('draft_disagrees', `The draft and the check say different things: ${c.conflict.replace('what went out', 'the draft')}.`);
+  if (opts.dry_run) return { ok: true, written: false, message: `Dry run: ${id} would be saved as ready to send in ${channel}, thread ${ts}.`, channel, thread_ts: ts, log_url, check: dry.check };
+  const { draft_text: _d, channel_id: _c, thread_ts: _t, ...check } = i;
+  await query(
+    `INSERT INTO engine_code_check_prepared (codex_entry_id, check_input, draft_text, channel, thread_ts, state, prepared_by)
+     VALUES ($1, $2::jsonb, $3, $4, $5, 'ready', $6)
+     ON CONFLICT (codex_entry_id) DO UPDATE SET check_input = EXCLUDED.check_input, draft_text = EXCLUDED.draft_text, channel = EXCLUDED.channel,
+       thread_ts = EXCLUDED.thread_ts, state = 'ready', prepared_by = EXCLUDED.prepared_by, prepared_at = now(), sent_ts = NULL, sent_link = NULL,
+       sent_text = NULL, sent_differs = NULL, recorded_at = NULL, detail = NULL`,
+    [id, JSON.stringify(check), draft, channel, ts, dry.check.recorded_by],
+  );
+  return { ok: true, written: true, message: `${id} is ready to send. Sending it from Slack records it; nothing else is needed.`, channel, thread_ts: ts, log_url, check: dry.check };
+}
+
+async function settle(id: string, state: string, detail: string, sent?: { ts: string; link: string; text: string; differs: boolean }): Promise<void> {
+  await query(
+    `UPDATE engine_code_check_prepared SET state = $2, detail = $3, sent_ts = COALESCE($4, sent_ts), sent_link = COALESCE($5, sent_link),
+       sent_text = COALESCE($6, sent_text), sent_differs = COALESCE($7, sent_differs), recorded_at = CASE WHEN $2 = 'recorded' THEN now() ELSE recorded_at END
+     WHERE codex_entry_id = $1`,
+    [id, state, detail, sent?.ts ?? null, sent?.link ?? null, sent?.text ?? null, sent?.differs ?? null],
+  );
+}
+
+/** A problem goes to the card's thread, among reviewers, never under the builder's log. */
+async function raise(id: string, p: Prepared, text: string, post: Poster): Promise<void> {
+  const card = await cardFor(id);
+  const sent = card ? await post(card.channel, `<@${p.prepared_by}> ${text}`, undefined, card.ts) : { ok: false, detail: 'no card' };
+  if (!sent.ok) {
+    const dm = await slack.dm(p.prepared_by, text);
+    if (!dm.ok) console.error(`[code-check-watch] could not raise on ${id}: ${text} (${dm.detail})`);
+  }
+}
+
+export interface SentResult { ready: number; recorded: string[]; stopped: string[]; failed: string[]; unread: string[] }
+
+/** One pass over the ready checks. Reads only those threads. */
+export async function recordSent(opts: { post?: Poster; read?: typeof readSince; record?: typeof cc.recordCheck; after?: typeof afterRecord } = {}): Promise<SentResult> {
+  const post = opts.post ?? slackPost;
+  const read = opts.read ?? readSince;
+  const out: SentResult = { ready: 0, recorded: [], stopped: [], failed: [], unread: [] };
+  // A claim a crashed pass left behind goes back; recording again is a correction, never a second check.
+  await query(`UPDATE engine_code_check_prepared SET state = 'ready' WHERE state = 'recording' AND claimed_at < now() - interval '10 minutes'`);
+  const rows = await query<Prepared & { check_input: cc.CheckInput; epoch: string }>(
+    `SELECT codex_entry_id, check_input, draft_text, channel, thread_ts, state, prepared_by, prepared_at, extract(epoch from prepared_at)::text AS epoch
+       FROM engine_code_check_prepared WHERE state = 'ready' ORDER BY prepared_at`,
+  );
+  out.ready = rows.rows.length;
+  for (const row of rows.rows) {
+    const id = row.codex_entry_id;
+    const p: Prepared = { ...row, check: row.check_input };
+    const after = Number(row.epoch);
+    const seen = await read(row.channel, row.thread_ts, String(after));
+    if (!seen.ok) {
+      out.unread.push(id);
+      await query(`UPDATE engine_code_check_prepared SET detail = $2 WHERE codex_entry_id = $1`, [id, seen.error]);
+      continue;
+    }
+    const m = seen.messages.find((x) => isSentCheck(x, id, row.prepared_by, after));
+    if (!m?.ts) continue;
+    const claim = await query(`UPDATE engine_code_check_prepared SET state = 'recording', claimed_at = now() WHERE codex_entry_id = $1 AND state = 'ready' RETURNING 1`, [id]);
+    if (!claim.rows.length) continue;
+    const sentText = m.text ?? '';
+    const link = `${WORKSPACE()}/archives/${row.channel}/p${m.ts.replace('.', '')}?thread_ts=${row.thread_ts}&cid=${row.channel}`;
+    const check = row.check_input as cc.CheckInput;
+    const cmp = compareSent(row.draft_text, sentText, check.verdict as cc.Verdict, check.pay_call as cc.PayCall);
+    const sent = { ts: m.ts, link, text: sentText, differs: !cmp.same };
+    if (cmp.conflict) {
+      const text = `The check on ${id} went out, but ${cmp.conflict}, so it was not recorded: the record would disagree with the thread. Prepare it again with what it should say. ${link}`;
+      await settle(id, 'stopped', cmp.conflict, sent);
+      await raise(id, p, text, post);
+      out.stopped.push(id);
+      continue;
+    }
+    try {
+      const r = await (opts.record ?? cc.recordCheck)({ ...check, check_link: link, posted_at: new Date(Number(m.ts) * 1000).toISOString(), requester_user_id: row.prepared_by });
+      const a = await (opts.after ?? afterRecord)(r.check);
+      const notes = [
+        a.codex_note.ok ? 'Codex' : null,
+        a.bharag_note.ok ? 'BHARAG' : null,
+        a.review_card.ok ? 'the review card' : null,
+      ].filter(Boolean);
+      const missed = [a.codex_note.ok ? null : `Codex: ${a.codex_note.detail}`, a.bharag_note.ok ? null : `BHARAG: ${a.bharag_note.detail}`, a.review_card.ok ? null : `the card: ${a.review_card.detail}`].filter(Boolean);
+      await settle(id, 'recorded', missed.length ? `not all landed: ${missed.join('; ')}` : 'recorded', sent);
+      const line = `Recorded on ${notes.join(', ') || 'the Code checks tab'}.${cmp.same ? '' : ' Your edits are what stands in this thread; the verdict and pay call matched the saved check.'}`;
+      const reply = await post(row.channel, line, undefined, row.thread_ts);
+      if (!reply.ok) console.error(`[code-check-watch] ${id} recorded, confirmation not posted: ${reply.detail}`);
+      if (missed.length) await raise(id, p, `The check on ${id} is recorded, but ${missed.join('; ')}. ${link}`, post);
+      out.recorded.push(id);
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      await settle(id, 'failed', detail, sent);
+      await raise(id, p, `The check on ${id} went out and could not be recorded: ${detail} ${link}`, post);
+      out.failed.push(id);
+    }
   }
   return out;
 }
@@ -484,7 +728,13 @@ export function startSweeping(): void {
     timers.beat('code check watch');
     if (busy) return;
     busy = true;
-    run()
+    recordSent()
+      .then((r) => {
+        if (r.recorded.length || r.stopped.length || r.failed.length) console.log(`[code-check-watch] sent checks: recorded ${r.recorded.join(', ') || 'none'}; stopped ${r.stopped.join(', ') || 'none'}; failed ${r.failed.join(', ') || 'none'}`);
+        for (const id of r.unread) console.error(`[code-check-watch] the thread for ${id} could not be read; it stays ready`);
+      })
+      .catch((e) => console.error(`[code-check-watch] sent pass failed: ${e instanceof Error ? e.message : String(e)}`))
+      .then(() => run())
       .then((r) => {
         if (r.sent.length || r.failed.length) console.log(`[code-check-watch] ${r.waiting} waiting: sent ${r.sent.map((x) => `${x.codex_entry_id}#${x.step}`).join(', ') || 'none'}; failed ${r.failed.length}`);
       })
