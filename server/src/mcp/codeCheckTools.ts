@@ -89,7 +89,7 @@ async function guarded(
 
 export const recordCodeCheck: ToolDefinition = {
   name: 'record_code_check',
-  description: `Record one code check as posted in the log's own thread, or correct one already recorded for that Codex ID. The format Jason confirmed: verdict (${cc.VERDICTS.join(' / ')}) with one line on why; each main claim with where it was checked, the result (${cc.RESULTS.join(' / ')}) and the proof; what is missing before customer ready (${cc.MISSING.join(', ')}); what could not be checked; the pay call (${cc.PAY_CALLS.join(' / ')}) with each follow-up (what, who, by, loop_id). Refused when the verdict and the claims disagree, when pay partly or hold names no follow-up, when an overstated log is paid as logged, and on Destiny's own log. The approval time, builder and session date come from the pay ledger. HELD HERE: Destiny or Jason (requester_user_id). dry_run writes nothing. Refused on any agent token. A recorded check is also written onto the Codex row (Code Check Verdict, Pay Call, Reason, Link, At, By) and onto the entry's own document in BHARAG as metadata code_check, in place with the same id; the answer says whether each landed (codex_note, bharag_note). Audited on engine_mcp_writes.`,
+  description: `Record one code check as posted in the log's own thread, or correct one already recorded for that Codex ID. The format Jason confirmed: verdict (${cc.VERDICTS.join(' / ')}) with one line on why; each main claim with where it was checked, the result (${cc.RESULTS.join(' / ')}) and the proof; what is missing before customer ready (${cc.MISSING.join(', ')}); what could not be checked; the pay call (${cc.PAY_CALLS.join(' / ')}) with each follow-up (what, who, by, loop_id); and the Bays summary Jason asked for: approve (yes / no: did this move the lane towards its goal), approve_why (one line), lane_goal and lane_check. A no does not change the pay call. Refused when the verdict and the claims disagree, when pay partly or hold names no follow-up, when an overstated log is paid as logged, when an overstated or held log is approved yes, and on Destiny's own log. The approval time, builder and session date come from the pay ledger. HELD HERE: Destiny or Jason (requester_user_id). dry_run writes nothing. Refused on any agent token. A recorded check is also written onto the Codex row (Code Check Verdict, Pay Call, Reason, Approve, Why, Lane Goal, Lane, Link, At, By) and onto the entry's own document in BHARAG as metadata code_check, in place with the same id; the answer says whether each landed (codex_note, bharag_note). Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -103,10 +103,14 @@ export const recordCodeCheck: ToolDefinition = {
       couldnt_check: { type: 'string' },
       pay_call: { type: 'string', enum: [...cc.PAY_CALLS] },
       follow_ups: { type: 'array', items: { type: 'object', properties: { what: { type: 'string' }, who: { type: 'string' }, by: { type: 'string' }, loop_id: { type: 'string' } }, required: ['what', 'who', 'by'] } },
+      approve: { type: 'string', enum: [...cc.APPROVALS], description: 'Did this work move the lane towards its goal. Does not change the pay call.' },
+      approve_why: { type: 'string', description: 'One clear line.' },
+      lane_goal: { type: 'string', description: 'What this lane is trying to do.' },
+      lane_check: { type: 'string', description: 'How this work moves it, or why it does not.' },
       requester_user_id: { type: 'string' },
       dry_run: { type: 'boolean' },
     },
-    required: ['codex_entry_id', 'check_link', 'verdict', 'verdict_reason', 'claims', 'pay_call', 'requester_user_id'],
+    required: ['codex_entry_id', 'check_link', 'verdict', 'verdict_reason', 'claims', 'pay_call', 'approve', 'approve_why', 'lane_goal', 'lane_check', 'requester_user_id'],
     additionalProperties: false,
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Record a code check' },
@@ -115,7 +119,7 @@ export const recordCodeCheck: ToolDefinition = {
 
 export const prepareCodeCheck: ToolDefinition = {
   name: 'prepare_code_check',
-  description: `Save a code check as ready to send, once Destiny has heard it and agreed it. Give everything record_code_check takes except check_link, plus draft_text: the check exactly as it will be drafted on Slack. Marks the log's card reviewed at the same moment, since the review is done once the check is drafted. Answers with the channel and thread to draft into. When he sends that draft, the check records itself from his message (Codex, BHARAG, the review card) and a line confirms it in the thread, so do not call record_code_check afterwards. A verdict or pay call changed before sending stops it and says so. Preparing again replaces the earlier one.`,
+  description: `Save a code check as ready to send, once Destiny has heard it and agreed it. Give everything record_code_check takes except check_link, plus draft_text: the check exactly as it will be drafted on Slack. Marks the log's card reviewed at the same moment, since the review is done once the check is drafted. Answers with the channel and thread to draft into. When he sends that draft, the check records itself from his message (Codex, BHARAG, the review card) and a line confirms it in the thread, so do not call record_code_check afterwards. The draft ends with the Bays summary, including a line reading "Approve: yes" or "Approve: no". A verdict, pay call or Approve changed before sending stops it and says so. Preparing again replaces the earlier one.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -124,7 +128,7 @@ export const prepareCodeCheck: ToolDefinition = {
       channel_id: { type: 'string', description: 'Only when the posted Codex cannot be found.' },
       thread_ts: { type: 'string', description: 'Only when the posted Codex cannot be found.' },
     },
-    required: ['codex_entry_id', 'draft_text', 'verdict', 'verdict_reason', 'claims', 'pay_call', 'requester_user_id'],
+    required: ['codex_entry_id', 'draft_text', 'verdict', 'verdict_reason', 'claims', 'pay_call', 'approve', 'approve_why', 'lane_goal', 'lane_check', 'requester_user_id'],
     additionalProperties: false,
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Save a code check as ready to send' },

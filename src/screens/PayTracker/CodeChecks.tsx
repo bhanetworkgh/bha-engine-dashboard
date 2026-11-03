@@ -86,6 +86,11 @@ export default function CodeChecks({ data }: { data: CodeChecksData }) {
             {data.notes.map((n) => <li key={n}>{n}</li>)}
           </ul>
         )}
+        {data.lane_watch.length > 0 && (
+          <p className="text-[12.5px] text-ink">
+            Worth a conversation: {data.lane_watch.map((w) => `${w.builder ?? w.builder_slack_id ?? 'unknown'} (${w.no_in_a_row} no's in a row on the lane check)`).join(', ')}. Pay is not affected.
+          </p>
+        )}
 
         <Card>
           <CardHeader title="Waiting on a check" right={<span className="text-[11.5px] text-faint">oldest first</span>} />
@@ -116,7 +121,7 @@ export default function CodeChecks({ data }: { data: CodeChecksData }) {
           {data.checks.length ? (
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-[12.5px]">
-                <thead><tr><Th>Posted</Th><Th>Builder</Th><Th>Codex entry</Th><Th>Verdict</Th><Th>Pay call</Th><Th>Took</Th><Th /></tr></thead>
+                <thead><tr><Th>Posted</Th><Th>Builder</Th><Th>Codex entry</Th><Th>Verdict</Th><Th>Approve</Th><Th>Pay call</Th><Th>Took</Th><Th /></tr></thead>
                 <tbody>
                   {data.checks.map((k) => (
                     <tr key={k.codex_entry_id}>
@@ -126,6 +131,10 @@ export default function CodeChecks({ data }: { data: CodeChecksData }) {
                       <Td>
                         <VerdictPill v={k.verdict} />
                         <div className="mt-1 text-[11.5px] text-dim">{k.verdict_reason}</div>
+                      </Td>
+                      <Td>
+                        {k.bays_summary ? (k.bays_summary.approve === 'yes' ? 'Yes' : 'No') : '—'}
+                        {k.bays_summary && <div className="mt-1 text-[11.5px] text-dim">{k.bays_summary.why}</div>}
                       </Td>
                       <Td>
                         {PAY[k.pay_call]}

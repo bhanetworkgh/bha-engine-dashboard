@@ -294,6 +294,12 @@ export function CodexEntryDialog({
                     {detail.code_check.at ? ` · ${detail.code_check.at.slice(0, 10)}` : ''}
                   </div>
                   {detail.code_check.reason && <div className="text-dim">{detail.code_check.reason}</div>}
+                  {detail.code_check.approve && (
+                    <div className="text-dim">
+                      Approve: {detail.code_check.approve}{detail.code_check.why ? `. ${detail.code_check.why}` : ''}
+                      {detail.code_check.lane_check ? ` Lane: ${detail.code_check.lane_check}` : ''}
+                    </div>
+                  )}
                   {detail.code_check.link && (
                     <a className="text-accent hover:underline" href={detail.code_check.link} target="_blank" rel="noreferrer">
                       The full check in Slack ↗

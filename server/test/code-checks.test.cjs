@@ -36,6 +36,10 @@ const base = {
   verdict_reason: 'Everything the log claims is live.',
   claims: [{ claim: 'Media Twin posts to X', where: 'Render logs', result: 'confirmed', proof: 'post 1789 at 10:02 UTC' }],
   pay_call: 'as_logged',
+  approve: 'yes',
+  approve_why: 'It finishes the post flow.',
+  lane_goal: 'Media Twin posts for BHA.',
+  lane_check: 'Posting now works end to end.',
   requester_user_id: DESTINY,
 };
 
@@ -129,5 +133,20 @@ assert.match(s.notes.join(' '), /not the same as nothing waiting/);
 s = cc.summarise([approvals[0]], [], Date.parse('2026-10-29T12:00:00Z'));
 assert.match(s.notes.join(' '), /Nothing is owed a check before 1 November/);
 ok('no approval since 1 Nov says so rather than reading as nothing waiting, and before 1 Nov says nothing is owed yet');
+
+refused({ ...base, approve: undefined }, 'summary_required');
+refused({ ...base, lane_check: '' }, 'summary_required');
+refused({ ...base, approve: 'maybe' }, 'summary_required');
+refused({ ...base, verdict: 'overstated', claims: [{ ...base.claims[0], result: 'not_found' }], pay_call: 'hold', follow_ups: [{ what: 'w', who: 'x', by: 'Fri' }] }, 'approve_disagrees');
+assert.equal(cc.cleanCheck({ ...base, approve: 'no' }).pay_call, 'as_logged');
+ok('the Bays summary is required, a no leaves the pay call alone, and an overstated or held log cannot be a yes');
+
+const sc = (id, at, approve) => ({ codex_entry_id: id, builder_slack_id: HARDIK, builder_name: 'Hardik', verdict: 'matches', pay_call: 'as_logged', claims: [], missing: [], follow_ups: [], posted_at: at, bays_summary: approve ? { approve, why: 'w', lane_goal: 'g', lane_check: 'c' } : null });
+s = cc.summarise([], [sc('a', '2026-11-05T00:00:00Z', 'no'), sc('b', '2026-11-04T00:00:00Z', 'no'), sc('c', '2026-11-03T00:00:00Z', 'no'), sc('d', '2026-11-02T00:00:00Z', 'yes')], now);
+assert.deepEqual(s.lane_watch, [{ builder_slack_id: HARDIK, builder: 'Hardik', no_in_a_row: 3 }]);
+assert.equal(s.counts.approve.no, 3);
+s = cc.summarise([], [sc('a', '2026-11-05T00:00:00Z', 'no'), sc('b', '2026-11-04T00:00:00Z', 'yes'), sc('c', '2026-11-03T00:00:00Z', 'no'), sc('d', '2026-11-02T00:00:00Z', 'no')], now);
+assert.deepEqual(s.lane_watch, []);
+ok('three no answers running name the builder, and a yes breaks the run');
 
 console.log(`\ncode-checks: ${n} checks passed`);

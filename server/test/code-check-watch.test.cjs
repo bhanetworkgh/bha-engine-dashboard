@@ -65,12 +65,13 @@ async function sendItAndTheRest() {
   assert.equal(watch.isSentCheck({ ...m, text: '*Code check: Kavin, CODEX-other*' }, CX, DESTINY, after), false);
   assert.equal(watch.isSentCheck({ ...m, bot_id: 'B1' }, CX, DESTINY, after), false);
   ok('only his own message opening the check, naming the log, after the save, counts');
-  assert.equal(cc.cleanCheck({ codex_entry_id: 'CODEX-20261102-UNKNOWN-hardik-bhatt-hero-bay-freshness-fix', check_link: 'https://x.slack.com/archives/C0AF7AGC2UV/p1793640525750039', verdict: 'matches', verdict_reason: 'r', claims: [{ claim: 'c', where: 'w', result: 'confirmed', proof: 'p' }], pay_call: 'as_logged', requester_user_id: DESTINY }).verdict, 'matches');
+  assert.equal(cc.cleanCheck({ codex_entry_id: 'CODEX-20261102-UNKNOWN-hardik-bhatt-hero-bay-freshness-fix', check_link: 'https://x.slack.com/archives/C0AF7AGC2UV/p1793640525750039', verdict: 'matches', verdict_reason: 'r', claims: [{ claim: 'c', where: 'w', result: 'confirmed', proof: 'p' }], pay_call: 'as_logged', approve: 'yes', approve_why: 'w', lane_goal: 'g', lane_check: 'c', requester_user_id: DESTINY }).verdict, 'matches');
   ok('a Codex ID with capitals in it is a Codex ID');
   const d = `*Verdict:* Partly matches, x\n*4. Pay call*\nPay partly`;
   assert.deepEqual(watch.compareSent(d, d.replace(/\*/g, ''), 'partly', 'partly'), { same: true, conflict: null });
   assert.equal(watch.compareSent(d, d + ' more', 'partly', 'partly').same, false);
   assert.match(watch.compareSent(d, d.replace('Partly matches', 'Overstated'), 'partly', 'partly').conflict, /verdict/);
+  { const e = 'Code check: x\nMatches the log\nPay as logged\n**Approve:** Yes'; assert.equal(watch.compareSent(e, e, 'matches', 'as_logged', 'yes').conflict, null); assert.match(watch.compareSent(e, e, 'matches', 'as_logged', 'no').conflict, /Approve: no/); assert.equal(watch.compareSent(e, e, 'matches', 'as_logged').conflict, null); }
   assert.match(watch.compareSent(d, d.replace('Pay partly', 'Hold'), 'partly', 'partly').conflict, /pay call/);
   ok('changed wording is noted; a changed verdict or pay call stops it');
 
@@ -306,7 +307,7 @@ async function draftMarksTheCard() {
   watch.codexNote = async () => { noted++; return { ok: true, row_id: '397', detail: 'written onto Codex row 397' }; };
   const realAfter = watch.afterRecord;
   watch.afterRecord = async (c) => ({ codex_note: await watch.codexNote(c), bharag_note: await watch.bharagNote(c), review_card: await watch.reviewedByCheck(c) });
-  const args = { codex_entry_id: 'CODEX-20261102-kavin-g-n-rover', check_link: 'https://bayshorizonnetwork.slack.com/archives/C0BN30RU3UK/p1793300000123456?thread_ts=1793290000.000100', verdict: 'matches', verdict_reason: 'x', claims: [], pay_call: 'as_logged', requester_user_id: DESTINY };
+  const args = { codex_entry_id: 'CODEX-20261102-kavin-g-n-rover', check_link: 'https://bayshorizonnetwork.slack.com/archives/C0BN30RU3UK/p1793300000123456?thread_ts=1793290000.000100', verdict: 'matches', verdict_reason: 'x', claims: [], pay_call: 'as_logged', approve: 'yes', approve_why: 'w', lane_goal: 'g', lane_check: 'c', requester_user_id: DESTINY };
   try {
     for (const agent of ['bays', 'north_star', 'genie']) {
       const a = await tools.recordCodeCheck.handler(args, { access: 'write', agent });

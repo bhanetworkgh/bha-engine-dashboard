@@ -705,7 +705,7 @@ export interface CodexEntryDetail extends CodexEntry {
   session_description: string | null;
   jason_notes: string | null;
   /** Destiny's code check, written onto the log when it is recorded; null until there is one. */
-  code_check: { verdict: string | null; pay_call: string | null; reason: string | null; link: string | null; at: string | null } | null;
+  code_check: { verdict: string | null; pay_call: string | null; reason: string | null; approve: string | null; why: string | null; lane_goal: string | null; lane_check: string | null; link: string | null; at: string | null } | null;
 }
 
 /**
@@ -4611,6 +4611,12 @@ export interface CodeCheckFollowUp {
   by: string;
   loop_id: string | null;
 }
+export interface CodeCheckSummary {
+  approve: 'yes' | 'no';
+  why: string;
+  lane_goal: string;
+  lane_check: string;
+}
 export interface CodeCheck {
   codex_entry_id: string;
   builder_slack_id: string | null;
@@ -4626,6 +4632,7 @@ export interface CodeCheck {
   couldnt_check: string | null;
   pay_call: CodeCheckPayCall;
   follow_ups: CodeCheckFollowUp[];
+  bays_summary: CodeCheckSummary | null;
   recorded_by: string;
   created_at: string;
   updated_at: string;
@@ -4661,6 +4668,7 @@ export interface CodeChecksData {
   waiting: CodeCheckWaiting[];
   checks: CodeCheck[];
   catalog: Array<CodeCheck & { not_confirmed: CodeCheckClaim[] }>;
+  lane_watch: Array<{ builder_slack_id: string | null; builder: string | null; no_in_a_row: number }>;
   counts: {
     posted: number;
     waiting: number;
@@ -4668,6 +4676,7 @@ export interface CodeChecksData {
     no_approval_time: number;
     verdicts: Record<CodeCheckVerdict, number>;
     pay_calls: Record<CodeCheckPayCall, number>;
+    approve: { yes: number; no: number };
     within_window: number;
     timed: number;
   };

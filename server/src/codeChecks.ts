@@ -20,6 +20,12 @@
  *
  * Destiny's own sessions are not waiting on a check: he is the one checking, and a check of his own log by
  * himself would prove nothing. They are counted apart and named.
+ *
+ * The Bays summary (3 Nov 2026, Destiny — Jason's voice note, 1 of the BHA code reviews): three lines at the end
+ * of every check so he can decide at a glance: Approve yes or no, one line why, and how the work moves that lane
+ * towards its goal. Approve is the lane check; the pay call stays the honesty check. A "no" does not touch pay,
+ * because the agreements pay per day worked and a builder may have done what they were told. It is seen, and
+ * LANE_NO_ROW in a row names the builder for a conversation with Destiny and Jason.
  */
 import { query, withTransaction } from './pg';
 import { record } from './engineEvents';
@@ -35,6 +41,8 @@ export const RECORDERS: ReadonlySet<string> = new Set([DESTINY, JASON]);
 export const START = '2026-11-01T00:00:00+01:00';
 /** Jason's window, approval to check (24 to 48 hours; late past the outer edge). */
 export const WINDOW_HOURS = 48;
+/** Approve "no" this many checks running names a builder on the tab. */
+export const LANE_NO_ROW = 3;
 
 export const VERDICTS = ['matches', 'partly', 'overstated'] as const;
 export type Verdict = (typeof VERDICTS)[number];
@@ -44,6 +52,8 @@ export type ClaimResult = (typeof RESULTS)[number];
 export const PAY_CALLS = ['as_logged', 'partly', 'hold'] as const;
 export type PayCall = (typeof PAY_CALLS)[number];
 export const PAY_LABEL: Record<PayCall, string> = { as_logged: 'Pay as logged', partly: 'Pay partly', hold: 'Hold' };
+export const APPROVALS = ['yes', 'no'] as const;
+export type Approve = (typeof APPROVALS)[number];
 /** The readiness items Jason confirmed, in his order. "missing" names only these. */
 export const MISSING = ['tested_for_real', 'deployed_and_live', 'failures_raised', 'monitored', 'written_down'] as const;
 export type Missing = (typeof MISSING)[number];
@@ -85,6 +95,14 @@ export interface FollowUp {
   loop_id: string | null;
 }
 
+/** The three lines at the end of a check. Null on a check recorded before 3 Nov 2026. */
+export interface BaysSummary {
+  approve: Approve;
+  why: string;
+  lane_goal: string;
+  lane_check: string;
+}
+
 export interface CodeCheck {
   codex_entry_id: string;
   builder_slack_id: string | null;
@@ -100,6 +118,7 @@ export interface CodeCheck {
   couldnt_check: string | null;
   pay_call: PayCall;
   follow_ups: FollowUp[];
+  bays_summary: BaysSummary | null;
   recorded_by: string;
   created_at: string;
   updated_at: string;
@@ -155,6 +174,10 @@ export interface CheckInput {
   couldnt_check?: unknown;
   pay_call?: unknown;
   follow_ups?: unknown;
+  approve?: unknown;
+  approve_why?: unknown;
+  lane_goal?: unknown;
+  lane_check?: unknown;
   requester_user_id?: unknown;
 }
 
@@ -169,6 +192,7 @@ export interface CleanCheck {
   couldnt_check: string | null;
   pay_call: PayCall;
   follow_ups: FollowUp[];
+  bays_summary: BaysSummary;
   requester: string;
 }
 
@@ -179,7 +203,9 @@ export interface CleanCheck {
  *   - "Matches the log" cannot carry a claim that was not found, and "Overstated" needs at least one claim
  *     that was not confirmed (otherwise the verdict and the claims say different things);
  *   - pay partly or hold names every follow-up: what, who, by when, and its loop when there is one;
- *   - pay as logged on an overstated log is refused: Jason's rule is a pay call that follows the finding.
+ *   - pay as logged on an overstated log is refused: Jason's rule is a pay call that follows the finding;
+ *   - the Bays summary: approve yes or no, one line why, the lane's goal and how the work moves it. A "yes" is
+ *     refused on an overstated or held log: work that did not happen moved nothing.
  */
 export function cleanCheck(i: CheckInput): CleanCheck {
   const requester = text(i.requester_user_id, 40);
@@ -235,7 +261,14 @@ export function cleanCheck(i: CheckInput): CleanCheck {
   if (verdict !== 'matches' && !notConfirmed) throw new CodeCheckError('verdict_disagrees', `"${VERDICT_LABEL[verdict]}" with every claim confirmed: name the claim that was not.`);
   if (pay_call !== 'as_logged' && !follow_ups.length) throw new CodeCheckError('follow_ups_required', `${PAY_LABEL[pay_call]} names each follow-up: what, who, by when, and its loop.`);
   if (verdict === 'overstated' && pay_call === 'as_logged') throw new CodeCheckError('pay_disagrees', 'An overstated log is not paid as logged: pay partly with the follow-ups named, or hold.');
-  return { codex_entry_id, check_link, posted_at, verdict, verdict_reason, claims, missing, couldnt_check, pay_call, follow_ups, requester };
+  const approve = text(i.approve, 10).toLowerCase() as Approve;
+  if (!(APPROVALS as readonly string[]).includes(approve)) throw new CodeCheckError('summary_required', 'approve is yes or no: the Bays summary Jason asked for at the end of every check.');
+  const why = text(i.approve_why, 300);
+  const lane_goal = text(i.lane_goal, 300);
+  const lane_check = text(i.lane_check, 400);
+  if (!why || !lane_goal || !lane_check) throw new CodeCheckError('summary_required', 'The Bays summary needs approve_why (one line), lane_goal (what this lane is trying to do) and lane_check (how this work moves it, or does not).');
+  if (approve === 'yes' && (verdict === 'overstated' || pay_call === 'hold')) throw new CodeCheckError('approve_disagrees', `Approve yes on ${verdict === 'overstated' ? 'an overstated log' : 'a held log'}: work that is not there moved nothing.`);
+  return { codex_entry_id, check_link, posted_at, verdict, verdict_reason, claims, missing, couldnt_check, pay_call, follow_ups, bays_summary: { approve, why, lane_goal, lane_check }, requester };
 }
 
 export interface OutputInput {
@@ -270,6 +303,8 @@ export interface Summary {
   waiting: Waiting[];
   checks: CodeCheck[];
   catalog: Array<CodeCheck & { not_confirmed: Claim[] }>;
+  /** Builders whose newest LANE_NO_ROW or more checks all read approve no. */
+  lane_watch: Array<{ builder_slack_id: string | null; builder: string | null; no_in_a_row: number }>;
   counts: {
     posted: number;
     waiting: number;
@@ -277,6 +312,7 @@ export interface Summary {
     no_approval_time: number;
     verdicts: Record<Verdict, number>;
     pay_calls: Record<PayCall, number>;
+    approve: Record<Approve, number>;
     within_window: number;
     timed: number;
   };
@@ -310,10 +346,22 @@ export function summarise(approvals: Approval[], checks: CodeCheck[], now: numbe
   const sortedChecks = [...checks].sort((x, y) => Date.parse(y.posted_at) - Date.parse(x.posted_at));
   const verdicts = { matches: 0, partly: 0, overstated: 0 } as Record<Verdict, number>;
   const pay_calls = { as_logged: 0, partly: 0, hold: 0 } as Record<PayCall, number>;
+  const approve = { yes: 0, no: 0 } as Record<Approve, number>;
   for (const c of checks) {
     verdicts[c.verdict]++;
     pay_calls[c.pay_call]++;
+    if (c.bays_summary) approve[c.bays_summary.approve]++;
   }
+  // Newest first, per builder: a run of "no" ends at the first "yes". A check with no summary (before 3 Nov) ends it too.
+  const runs = new Map<string, { builder_slack_id: string | null; builder: string | null; no_in_a_row: number; open: boolean }>();
+  for (const c of sortedChecks) {
+    const key = c.builder_slack_id ?? c.builder_name ?? c.codex_entry_id;
+    const r = runs.get(key) ?? { builder_slack_id: c.builder_slack_id, builder: c.builder_name, no_in_a_row: 0, open: true };
+    if (r.open && c.bays_summary?.approve === 'no') r.no_in_a_row++;
+    else r.open = false;
+    runs.set(key, r);
+  }
+  const lane_watch = [...runs.values()].filter((r) => r.no_in_a_row >= LANE_NO_ROW).map(({ open: _o, ...r }) => r);
   const timed = checks.map((c) => c.hours_to_check).filter((h): h is number => h != null).sort((a, b) => a - b);
   const notes: string[] = [];
   if (own.length) notes.push(`${own.length} of Destiny's own approved sessions are not waiting on a check: he is the one checking.`);
@@ -333,6 +381,7 @@ export function summarise(approvals: Approval[], checks: CodeCheck[], now: numbe
     waiting,
     checks: sortedChecks,
     catalog: sortedChecks.filter((c) => c.verdict !== 'matches').map((c) => ({ ...c, not_confirmed: c.claims.filter((x) => x.result !== 'confirmed') })),
+    lane_watch,
     counts: {
       posted: checks.length,
       waiting: waiting.length,
@@ -340,6 +389,7 @@ export function summarise(approvals: Approval[], checks: CodeCheck[], now: numbe
       no_approval_time: noTime,
       verdicts,
       pay_calls,
+      approve,
       within_window: timed.filter((h) => h <= WINDOW_HOURS).length,
       timed: timed.length,
     },
@@ -368,6 +418,7 @@ function toCheck(r: Record<string, unknown>): CodeCheck {
     couldnt_check: (r.couldnt_check as string) ?? null,
     pay_call: r.pay_call as PayCall,
     follow_ups: Array.isArray(r.follow_ups) ? (r.follow_ups as FollowUp[]) : [],
+    bays_summary: (r.bays_summary as BaysSummary) ?? null,
     recorded_by: String(r.recorded_by),
     created_at: iso(r.created_at) ?? '',
     updated_at: iso(r.updated_at) ?? '',
@@ -460,6 +511,7 @@ export async function recordCheck(i: CheckInput, opts: { dry_run?: boolean } = {
     couldnt_check: c.couldnt_check,
     pay_call: c.pay_call,
     follow_ups: c.follow_ups,
+    bays_summary: c.bays_summary,
     recorded_by: c.requester,
     created_at: '',
     updated_at: '',
@@ -472,16 +524,16 @@ export async function recordCheck(i: CheckInput, opts: { dry_run?: boolean } = {
     await db.query(
       `INSERT INTO engine_code_checks
          (codex_entry_id, builder_slack_id, builder_name, session_date, approved_at, posted_at, check_link, verdict, verdict_reason,
-          claims, missing, couldnt_check, pay_call, follow_ups, recorded_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14::jsonb,$15)
+          claims, missing, couldnt_check, pay_call, follow_ups, recorded_by, bays_summary)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14::jsonb,$15,$16::jsonb)
        ON CONFLICT (codex_entry_id) DO UPDATE SET
          builder_slack_id=EXCLUDED.builder_slack_id, builder_name=EXCLUDED.builder_name, session_date=EXCLUDED.session_date,
          approved_at=EXCLUDED.approved_at, posted_at=EXCLUDED.posted_at, check_link=EXCLUDED.check_link, verdict=EXCLUDED.verdict,
          verdict_reason=EXCLUDED.verdict_reason, claims=EXCLUDED.claims, missing=EXCLUDED.missing, couldnt_check=EXCLUDED.couldnt_check,
-         pay_call=EXCLUDED.pay_call, follow_ups=EXCLUDED.follow_ups, recorded_by=EXCLUDED.recorded_by, updated_at=now()`,
+         pay_call=EXCLUDED.pay_call, follow_ups=EXCLUDED.follow_ups, recorded_by=EXCLUDED.recorded_by, bays_summary=EXCLUDED.bays_summary, updated_at=now()`,
       [
         c.codex_entry_id, builder_slack_id, preview.builder_name, preview.session_date, approved_at, posted_at, c.check_link, c.verdict, c.verdict_reason,
-        JSON.stringify(c.claims), JSON.stringify(c.missing), c.couldnt_check, c.pay_call, JSON.stringify(c.follow_ups), c.requester,
+        JSON.stringify(c.claims), JSON.stringify(c.missing), c.couldnt_check, c.pay_call, JSON.stringify(c.follow_ups), c.requester, JSON.stringify(c.bays_summary),
       ],
     );
     await record(
@@ -492,7 +544,7 @@ export async function recordCheck(i: CheckInput, opts: { dry_run?: boolean } = {
         actor: c.requester,
         source_ref: c.check_link,
         detail: {
-          verdict: c.verdict, pay_call: c.pay_call, builder_slack_id, approved_at, posted_at,
+          verdict: c.verdict, pay_call: c.pay_call, approve: c.bays_summary.approve, builder_slack_id, approved_at, posted_at,
           hours_to_check: preview.hours_to_check, claims: c.claims.length,
           not_confirmed: c.claims.filter((x) => x.result !== 'confirmed').length,
           follow_ups: c.follow_ups.map((x) => x.loop_id).filter(Boolean),

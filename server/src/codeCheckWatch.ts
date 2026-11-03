@@ -435,13 +435,15 @@ export function isSentCheck(m: { user?: string; bot_id?: string; subtype?: strin
 }
 
 /** Pure: what the sent text does to the saved check. A changed verdict or pay call stops it; changed wording is noted. */
-export function compareSent(draft: string, sent: string, verdict: cc.Verdict, payCall: cc.PayCall): { same: boolean; conflict: string | null } {
+export function compareSent(draft: string, sent: string, verdict: cc.Verdict, payCall: cc.PayCall, approve?: cc.Approve | null): { same: boolean; conflict: string | null } {
   const s = flat(sent);
   const conflict = !s.includes(flat(cc.VERDICT_LABEL[verdict]))
     ? `the verdict "${cc.VERDICT_LABEL[verdict]}" is not in what went out`
     : !s.includes(flat(cc.PAY_LABEL[payCall]))
       ? `the pay call "${cc.PAY_LABEL[payCall]}" is not in what went out`
-      : null;
+      : approve && !s.includes(`approve: ${approve}`)
+        ? `the summary line "Approve: ${approve}" is not in what went out`
+        : null;
   return { same: flat(draft) === s, conflict };
 }
 
@@ -487,7 +489,7 @@ export async function prepare(
   }
   const log_url = threadUrl(channel, ts);
   const dry = await (opts.dryRecord ?? cc.recordCheck)({ ...i, check_link: log_url }, { dry_run: true });
-  const c = compareSent(draft, draft, dry.check.verdict as cc.Verdict, dry.check.pay_call as cc.PayCall);
+  const c = compareSent(draft, draft, dry.check.verdict as cc.Verdict, dry.check.pay_call as cc.PayCall, dry.check.bays_summary?.approve);
   if (c.conflict) throw new cc.CodeCheckError('draft_disagrees', `The draft and the check say different things: ${c.conflict.replace('what went out', 'the draft')}.`);
   if (opts.dry_run) return { ok: true, written: false, message: `Dry run: ${id} would be saved as ready to send in ${channel}, thread ${ts}.`, channel, thread_ts: ts, log_url, check: dry.check };
   const { draft_text: _d, channel_id: _c, thread_ts: _t, ...check } = i;
@@ -577,7 +579,7 @@ export async function recordSent(opts: { post?: Poster; read?: typeof readSince;
     const sentText = m.text ?? '';
     const link = `${WORKSPACE()}/archives/${row.channel}/p${m.ts.replace('.', '')}?thread_ts=${row.thread_ts}&cid=${row.channel}`;
     const check = row.check_input as cc.CheckInput;
-    const cmp = compareSent(row.draft_text, sentText, check.verdict as cc.Verdict, check.pay_call as cc.PayCall);
+    const cmp = compareSent(row.draft_text, sentText, check.verdict as cc.Verdict, check.pay_call as cc.PayCall, check.approve as cc.Approve | undefined);
     const sent = { ts: m.ts, link, text: sentText, differs: !cmp.same };
     if (cmp.conflict) {
       const text = `The check on ${id} went out, but ${cmp.conflict}, so it was not recorded: the record would disagree with the thread. Prepare it again with what it should say. ${link}`;
@@ -691,6 +693,7 @@ export async function codexNote(check: cc.CodeCheck): Promise<{ ok: boolean; row
         'Code Check Verdict': check.verdict,
         'Code Check Pay Call': check.pay_call,
         'Code Check Reason': check.verdict_reason,
+        ...(check.bays_summary ? { 'Code Check Approve': check.bays_summary.approve, 'Code Check Why': check.bays_summary.why, 'Code Check Lane Goal': check.bays_summary.lane_goal, 'Code Check Lane': check.bays_summary.lane_check } : {}),
         'Code Check Link': check.check_link,
         'Code Check At': check.posted_at,
         'Code Check By': check.recorded_by,
@@ -726,6 +729,7 @@ export async function bharagNote(check: cc.CodeCheck, opts: { dry_run?: boolean 
         pay_call: check.pay_call,
         pay_label: cc.PAY_LABEL[check.pay_call as cc.PayCall] ?? check.pay_call,
         reason: check.verdict_reason,
+        summary: check.bays_summary,
         not_confirmed: check.claims.filter((x) => x.result !== 'confirmed').map((x) => x.claim),
         missing: check.missing,
         link: check.check_link,

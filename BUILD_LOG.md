@@ -14299,3 +14299,10 @@ Files:      server/src/codeCheckWatch.ts, server/src/mcp/codeCheckTools.ts, serv
 Problem:    He was pressing Mark reviewed himself (Jegan's check, event at 14:41:36 UTC, via button). Marking at the draft stops the reminders, so a draft nobody sent would have gone quiet.
 Fix:        prepare() calls reviewedOnCard(check, 'check drafted') after the save. recordSent() posts one line in the card's thread when a saved draft is unsent after 6 hours (event code_check_draft_unsent, claim given back if the post fails).
 Decision:   A card that cannot be marked never loses the saved check; the answer says so. The log stays on the Code checks tab as waiting until the sent check records.
+
+## 2026-11-03 17:05 — Code checks end with a Bays summary
+Intent:     Jason asked for a short Approve yes or no, one clear why, and how the work moves the lane, at the end of every review.
+Files:      server/src/codeChecks.ts, server/src/codeCheckWatch.ts, server/src/mcp/codeCheckTools.ts, server/src/migrations.ts (114), server/src/sources.ts, src/data/types.ts, src/screens/PayTracker/CodeChecks.tsx, src/screens/CodexEntryDialog.tsx, server/test/code-checks.test.cjs, server/test/code-check-watch.test.cjs, CLAUDE.md
+Problem:    The check told him what was true but not whether the work moved the lane, and he reads every one in full.
+Fix:        Four required fields stored as bays_summary, written onto the log and BHARAG, shown on the tab and the entry. Three no's running name the builder on the tab.
+Decision:   Destiny, 3 Nov: Claude writes it, and a "no" does not change pay, because the agreements pay per day worked and go for signature on 5 Nov. Pay stays about whether the work is real; repeated no's lead to a conversation.

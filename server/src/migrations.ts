@@ -4222,6 +4222,11 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE INDEX IF NOT EXISTS engine_code_check_prepared_ready ON engine_code_check_prepared (prepared_at) WHERE state IN ('ready','recording')`,
     ],
   },
+  {
+    id: 114,
+    name: 'code checks carry the Bays summary',
+    statements: [`ALTER TABLE engine_code_checks ADD COLUMN IF NOT EXISTS bays_summary jsonb`],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
