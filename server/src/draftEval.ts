@@ -60,15 +60,23 @@ export const AGENTS: Record<string, { id: string; name: string }> = {
  * matches on.
  */
 export const BACKUPS: Record<string, { key: string; name: string }> = {
-  PjKGbV4ZnH4YOfri: { key: 'bays', name: 'Bays (Anthropic backup)' },
-  fqeON4jXjenIi3cP: { key: 'north_star', name: 'North Star (Anthropic backup)' },
-  '7ToBQqHpffX1eUG0': { key: 'research_twin', name: 'Research Twin (Anthropic backup)' },
+  PjKGbV4ZnH4YOfri: { key: 'bays', name: 'Bays (OpenRouter backup)' },
+  fqeON4jXjenIi3cP: { key: 'north_star', name: 'North Star (OpenRouter backup)' },
+  '7ToBQqHpffX1eUG0': { key: 'research_twin', name: 'Research Twin (OpenRouter backup)' },
 };
 const EVAL_TABLE = process.env.AGENT_EVAL_SET_TABLE_ID?.trim() || 'Uj5kCvQBixzY3MqU';
 const EVAL_PROJECT = process.env.AGENT_EVAL_SET_PROJECT_ID?.trim() || 'HjupolvfBya6b0ox';
 const CREDIT_ERROR = /(exceed your available credits|insufficient credits|payment required|requires more credits|credit balance is too low)/i;
 
 type Dict = Record<string, unknown>;
+
+/** The configured provider decides billing, never an agent's name or fixed ID. */
+export function providerForDraft(draft: Dict): 'Anthropic' | 'OpenRouter' {
+  const model = String(((draft.config ?? {}) as Dict).model ?? '');
+  if (model.startsWith('anthropic/')) return 'Anthropic';
+  if (model.startsWith('openrouter/')) return 'OpenRouter';
+  throw new DraftEvalError(`The draft model "${model}" has no supported billing route. Nothing was asked.`, 'unknown_provider');
+}
 
 export function agentKeyFor(idOrKey: string): string | null {
   const v = String(idOrKey || '').trim();
@@ -196,7 +204,7 @@ export interface StartResult {
   config_hash: string | null;
   credit_usd: number | null;
   dry_run: boolean;
-  /** Which route the answers come through: OpenRouter for a main agent, Anthropic for a backup. */
+  /** Provider read from the draft's model configuration, independent of its role. */
   ran_on: 'OpenRouter' | 'Anthropic';
   /** Set when a main agent's run fell back to its backup: the main agent, and its draft's config, the run covers. */
   covers_agent_id: string | null;
@@ -204,7 +212,7 @@ export interface StartResult {
   fallback_reason: string | null;
 }
 
-/** A main agent's Anthropic backup, by the main agent's key. */
+/** A main agent's backup ID, by the main agent's key. */
 export const BACKUP_OF: Record<string, string> = Object.fromEntries(Object.entries(BACKUPS).map(([id, b]) => [b.key, id]));
 
 function stable(v: unknown): string {
@@ -297,11 +305,10 @@ export async function start(input: { agent: string; requested_by: string | null;
   if (!n8nMcp.n8nMcpConfigured()) throw new DraftEvalError(`${n8nMcp.N8N_MCP_VAR} is not set on this server, so the draft cannot be asked.`, 'not_configured');
   await busyCheck(a.id, a.name);
   const cases = await readCases(agent);
-  // A backup answers on Anthropic, not OpenRouter (25 Oct 2026): Anthropic has no API that reads a
-  // balance, so a backup's run is not gated on one; it stops at the first answer the account could
-  // not pay for, as every run does.
-  if (backup) {
-    return begin({ agent, a, cases, input, provider: 'Anthropic', credit: null, covers: null, why: null, notes: ['Anthropic backup: answers on Anthropic, so the OpenRouter balance was not checked; Anthropic exposes no balance to read.'] });
+  const draft = await n8nMcp.getAgent(a.id);
+  const provider = providerForDraft(draft);
+  if (provider === 'Anthropic') {
+    return begin({ agent, a, cases, input, provider, credit: null, covers: null, why: null, hash: n8nMcp.changeHash(draft), notes: ['The live draft uses Anthropic directly. Anthropic exposes no balance endpoint, so no OpenRouter balance gate was applied.'] });
   }
   const credit = await researchSignals.credit(true);
   const why = !credit.ok
@@ -309,7 +316,8 @@ export async function start(input: { agent: string; requested_by: string | null;
     : credit.remaining_usd < RULE.credit_floor_usd
       ? `OpenRouter credit is $${credit.remaining_usd.toFixed(2)}, under the $${RULE.credit_floor_usd} a run needs`
       : null;
-  if (!why) return begin({ agent, a, cases, input, provider: 'OpenRouter', credit: credit.ok ? credit.remaining_usd : null, covers: null, why: null, notes: [] });
+  if (!why) return begin({ agent, a, cases, input, provider: 'OpenRouter', credit: credit.ok ? credit.remaining_usd : null, covers: null, why: null, hash: n8nMcp.changeHash(draft), notes: [] });
+  if (backup) throw new DraftEvalError(`${why}. This is already the backup, so no recursive fallback was attempted.`, credit.ok ? 'credit_low' : 'credit_unread');
   return fallback(agent, a, cases, input, why, credit.ok ? 'credit_low' : 'credit_unread');
 }
 
@@ -330,7 +338,7 @@ const sentence = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 /** The main agent's run, on its Anthropic backup. Refused when there is none or the drafts differ. */
 async function fallback(agent: string, main: { id: string; name: string }, cases: EvalCase[], input: { requested_by: string | null; dry_run?: boolean }, why: string, reason: string): Promise<StartResult> {
   const bid = BACKUP_OF[agent];
-  if (!bid) throw new DraftEvalError(`${sentence(why)}, and ${main.name} has no Anthropic backup to run it on. Nothing was asked.`, reason);
+  if (!bid) throw new DraftEvalError(`${sentence(why)}, and ${main.name} has no backup to run it on. Nothing was asked.`, reason);
   const b = { id: bid, name: BACKUPS[bid].name };
   await busyCheck(b.id, b.name);
   let mainDraft: Dict;
@@ -348,11 +356,18 @@ async function fallback(agent: string, main: { id: string; name: string }, cases
     );
   }
   const coversHash = n8nMcp.changeHash(mainDraft);
+  const provider = providerForDraft(backupDraft);
+  let credit: number | null = null;
+  if (provider === 'OpenRouter') {
+    const balance = await researchSignals.credit(true);
+    if (!balance.ok || balance.remaining_usd < RULE.credit_floor_usd) throw new DraftEvalError(`${sentence(why)}. The OpenRouter backup cannot fund this run, so nothing was asked.`, balance.ok ? 'credit_low' : 'credit_unread');
+    credit = balance.remaining_usd;
+  }
   return begin({
-    agent, a: b, cases, input, provider: 'Anthropic', credit: null, why,
+    agent, a: b, cases, input, provider, credit, why,
     covers: { agent_id: main.id, name: main.name, hash: coversHash },
     hash: n8nMcp.changeHash(backupDraft),
-    notes: [`Ran on the Anthropic backup because ${why}. Its draft matched ${main.name}'s draft in everything but the model route, so this run covers ${main.name} at config ${(coversHash ?? 'unknown').slice(0, 16)}.`],
+    notes: [`Ran on the ${provider} backup because ${why}. Its draft matched ${main.name}'s draft in everything but the model route, so this run covers ${main.name} at config ${(coversHash ?? 'unknown').slice(0, 16)}.`],
   });
 }
 
@@ -379,11 +394,11 @@ async function begin(o: {
     // ran_on and fallback_reason stored (27 Oct 2026, migration 97), so a backup run is counted without reading detail.
     [runId, o.agent, o.a.id, o.a.name, hash, o.cases.length, expected, o.credit, o.input.requested_by, notes || null, o.covers?.agent_id ?? null, o.covers?.hash ?? null, o.provider, o.why ?? null],
   );
-  const main = o.provider === 'OpenRouter' ? o.a : null;
+  const main = BACKUPS[o.a.id] ? null : o.a;
   void run(runId, o.agent, o.a.id, o.cases, o.provider, {
     covers: o.covers,
     // OpenRouter running out mid-run starts the whole run again on the backup, never a mix of the two.
-    onCreditOut: main ? () => fallback(o.agent, main, o.cases, { requested_by: o.input.requested_by }, 'OpenRouter credit ran out during the run', 'credit_low') : null,
+    onCreditOut: main ? () => fallback(o.agent, main, o.cases, { requested_by: o.input.requested_by }, `${o.provider} credit ran out during the run`, 'credit_low') : null,
   }).catch(async (e) => {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`[draft-eval] ${runId}: ${msg}`);
@@ -468,9 +483,9 @@ async function run(
     if (state === 'stopped_credit' && opts.onCreditOut) {
       try {
         const again = await opts.onCreditOut();
-        detail += ` Started again on the Anthropic backup as ${again.run_id}.`;
+        detail += ` Started again on the ${again.ran_on} backup as ${again.run_id}.`;
       } catch (e) {
-        detail += ` Not started again on the Anthropic backup: ${e instanceof Error ? e.message : String(e)}`;
+        detail += ` Not started again on the backup: ${e instanceof Error ? e.message : String(e)}`;
       }
     }
   } else {

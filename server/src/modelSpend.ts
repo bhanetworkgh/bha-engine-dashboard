@@ -1,25 +1,8 @@
-/**
- * Model spend (2026-11-02, Destiny: "a record page for tracking token spending and costs").
- *
- * Until this, the only dollar figure the engine held was what OpenRouter's lifetime usage counter
- * read before and after each eval run. Nobody could answer "what did October cost": readings were
- * taken only when an eval ran. So:
- *
- *   - Every hour this process reads OpenRouter's /credits with its own key and keeps one row in
- *     engine_model_usage_readings: the account's total_usage (lifetime dollars spent, which only
- *     goes up) and total_credits (lifetime dollars bought). A top-up moves total_credits, never
- *     total_usage, so the difference between two readings is exactly what was spent between them.
- *   - Migration 111 copied in every reading the eval runs had already taken (from 11 Oct 2026).
- *
- * Dollars are measured, never estimated, except the per-agent split, which OpenRouter does not
- * give: that is the measured total shared out by each agent's token count and is labelled an
- * estimate wherever it is shown. The Anthropic backup has no balance API, so it is tokens and
- * refusals only, and says so.
- *
- * A day's figure is the counter interpolated at the day's two edges, only when a reading sits
- * within MAX_GAP_H of each edge; otherwise the day is "not measured", never nought.
+/** Provider spend: OpenRouter account counters and independently captured model responses.
+ * Response-derived costs are labelled partial. No cross-provider allocation by token share.
  */
 import { query } from './pg';
+import { collectUsage, readUsage } from './modelUsage';
 import * as timers from './timers';
 import { ANTHROPIC_CREDIT_TEXT } from './creditOut';
 
@@ -83,6 +66,8 @@ export function startReading(): void {
       .catch((e) => console.error(`[model-spend] reading failed: ${e instanceof Error ? e.message : String(e)}`));
   };
   setTimeout(tick, 30_000).unref();
+  setTimeout(() => { void collectUsage(); }, 45_000).unref();
+  setInterval(() => { void collectUsage(); }, 60_000).unref();
   timer = setInterval(tick, RULE.tick_minutes * 60_000);
   timer.unref();
 }
@@ -261,14 +246,13 @@ export async function read(opts: { days?: number } = {}) {
   // Per-agent dollars: the measured spend in the window less the eval windows, shared by token count. An estimate.
   const windowSpend = spendBetween(readings, Date.parse(since), now);
   const totals = agentTotals.rows.map((x) => ({ agent: x.agent, asks: Number(x.asks), tokens: Number(x.tokens), p50: x.p50 === null ? null : Math.round(Number(x.p50)), p95: x.p95 === null ? null : Math.round(Number(x.p95)) }));
-  const allTokens = totals.reduce((a, x) => a + x.tokens, 0);
-  const shareable = windowSpend ? Math.max(0, windowSpend.spent_usd - evalMerged) : null;
   const agents = totals.map((x) => ({
     ...x,
-    est_usd: shareable === null || !allTokens ? null : Math.round(((shareable * x.tokens) / allTokens) * 100) / 100,
+    est_usd: null, // Mixed providers and models invalidate the old token-share dollar allocation.
   }));
 
   return {
+    provider_usage: await readUsage(since),
     window: { days, since, readings_held: readings.length, first_reading: readings[0]?.at ?? null },
     openrouter: {
       latest: latest ? { at: latest.at, total_usage_usd: latest.total_usage_usd, remaining_usd: latest.total_credits_usd === null ? null : Math.round((latest.total_credits_usd - latest.total_usage_usd) * 100) / 100, origin: latest.origin } : null,
@@ -292,12 +276,12 @@ export async function read(opts: { days?: number } = {}) {
       by_day: backup.rows.map((x) => ({ day: x.day, answered: Number(x.answered), failed: Number(x.failed) })),
       credit_refusals: Number(refusals.rows[0]?.n ?? 0),
       last_refusal_at: refusals.rows[0]?.last ?? null,
-      note: 'Anthropic has no balance or usage API for this account, so the backup is shown as answers and refusals, never dollars. Its free $100 returns on the 16th.',
+      note: 'Fallback events include both historical Anthropic backups and new OpenRouter backups. Company Anthropic uses prepaid credits; there is no monthly free-credit reset assumed here.',
     },
     notes: [
       'Dollars are OpenRouter\'s own lifetime usage counter, read every hour (and, before 2 Nov 2026, only around eval runs). A day with no reading near both its edges is not measured, never nought.',
-      'The per-agent dollars are an estimate: the measured spend for the window, less the eval runs, shared out by each agent\'s token count. Other model calls on the account (the extractors, pattern drafts, voice notes) sit inside it.',
-      'Eval spend merges overlapping runs, so a dollar spent while two runs were going is counted once. Asks answered during a run are inside its window, so it is an upper bound.',
+      'OpenRouter dollars are that provider only, including historical primary usage. They are not whole-engine costs. Per-agent token-share dollar estimates are disabled after the provider migration.',
+      'Eval dollar deltas measure OpenRouter only. Anthropic answers are excluded; small OpenRouter deltas do not mean an Anthropic eval was cheap. Overlapping windows are merged.',
     ],
   };
 }

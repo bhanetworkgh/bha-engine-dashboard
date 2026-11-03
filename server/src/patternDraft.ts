@@ -7,7 +7,7 @@
  * the two things a candidate actually has — its Summary and the Slack thread at
  * its Source Link — with **the same model and the same prompt** the Pattern
  * Extractor uses (`Bays — Commercial & Pattern Extractors`, `Pat Prep Build
- * Patterns`): `anthropic/claude-sonnet-5` through OpenRouter, JSON out (the
+ * Patterns`): `anthropic/claude-sonnet-5` through Anthropic directly, OpenRouter backup, JSON out (the
  * extractor moved to it with the agents on 2026-09-24).
  *
  * **It saves nothing.** The draft goes back to the page, the person acting
@@ -35,15 +35,19 @@
  * says "(none)" and the prompt says such a source contributes nothing. Both
  * doors call this: the page's button and `draft_pattern_candidate` over MCP.
  *
- * `OPENROUTER_API_KEY`, no default. Unset, the button answers not_configured
+ * `ANTHROPIC_API_KEY` is primary and `OPENROUTER_API_KEY` is backup, neither has a default. With both unset the button answers not_configured
  * and names the variable. `OPENROUTER_API_URL` is optional, for the local
  * stand-in.
  */
 import * as slack from './slack';
+import { randomUUID } from 'node:crypto';
+import { responseUsage, storeUsage } from './modelUsage';
 import * as mirror from './mirror';
 import { PEOPLE } from './mcp/northStarTools';
 
 export const OPENROUTER_KEY_VAR = 'OPENROUTER_API_KEY';
+export const ANTHROPIC_KEY_VAR = 'ANTHROPIC_API_KEY';
+const ANTHROPIC_URL = (process.env.ANTHROPIC_API_URL || 'https://api.anthropic.com/v1').replace(/\/+$/, '');
 const OPENROUTER_URL = (process.env.OPENROUTER_API_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
 /** `Pat Prep Build Patterns`' own model and token budget. */
 export const DRAFT_MODEL = 'anthropic/claude-sonnet-5';
@@ -55,7 +59,44 @@ const MESSAGE_CLIP = 2_000;
 const THREAD_CHARS = 40_000;
 
 export function draftConfigured(): boolean {
-  return Boolean(process.env[OPENROUTER_KEY_VAR]?.trim());
+  return Boolean(process.env[ANTHROPIC_KEY_VAR]?.trim() || process.env[OPENROUTER_KEY_VAR]?.trim());
+}
+
+/** No persistence or external writes. Same request, Anthropic first, OpenRouter on failure. */
+export async function requestDraftModel(body: { model: string; max_tokens: number; messages: { role: string; content: string }[]; response_format: { type: string } }): Promise<{ json: Record<string, unknown>; provider: 'anthropic' | 'openrouter'; primary_error: string | null }> {
+  const errors: string[] = [];
+  for (const provider of ['anthropic', 'openrouter'] as const) {
+    const key = process.env[provider === 'anthropic' ? ANTHROPIC_KEY_VAR : OPENROUTER_KEY_VAR]?.trim();
+    if (!key) { errors.push(`${provider}: credential not configured`); continue; }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
+    try {
+      const payload = provider === 'anthropic' ? {
+        model: body.model.replace(/^anthropic\//, ''), max_tokens: body.max_tokens,
+        system: [{ type: 'text', text: body.messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n') + '\nReturn exactly one JSON object. No prose or code fences.', cache_control: { type: 'ephemeral', ttl: '1h' } }],
+        messages: body.messages.filter(m => m.role !== 'system'),
+      } : body;
+      const res = await fetch(provider === 'anthropic' ? `${ANTHROPIC_URL}/messages` : `${OPENROUTER_URL}/chat/completions`, {
+        method: 'POST', headers: provider === 'anthropic' ? { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' } : { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Title': 'BHA Engine Dashboard - Draft full pattern' },
+        body: JSON.stringify(payload), signal: controller.signal,
+      });
+      const raw = await res.text();
+      let json: Record<string, unknown>;
+      try { json = JSON.parse(raw) as Record<string, unknown>; } catch { throw new Error(`HTTP ${res.status}: invalid response JSON`); }
+      if (!res.ok || json.error) throw new Error(`HTTP ${res.status}: ${String((json.error as { message?: string })?.message || raw.slice(0, 200))}`);
+      const usage = responseUsage({ type: 'n8n-nodes-base.httpRequest', parameters: { url: provider === 'anthropic' ? 'https://api.anthropic.com/v1/messages' : 'https://openrouter.ai/api/v1/chat/completions' } }, json);
+      if (usage) await storeUsage('dashboard:pattern:' + randomUUID(), new Date().toISOString(), 'dashboard-pattern-draft', 'Draft full pattern', usage).catch(e => console.error('[pattern usage]', e instanceof Error ? e.message : String(e)));
+      if (provider === 'anthropic') {
+        const content = (Array.isArray(json.content) ? json.content as { type?: string; text?: string }[] : []).filter(b => b.type === 'text').map(b => b.text || '').join('');
+        json = { ...json, choices: [{ message: { content }, finish_reason: json.stop_reason === 'max_tokens' ? 'length' : 'stop' }] };
+      }
+      const content = (json.choices as { message?: { content?: string } }[] | undefined)?.[0]?.message?.content;
+      if (!content?.trim()) throw new Error('no answer text');
+      return { json, provider, primary_error: errors[0] ?? null };
+    } catch (e) { errors.push(`${provider}: ${e instanceof Error ? e.message : String(e)}`); }
+    finally { clearTimeout(timer); }
+  }
+  throw new DraftError(502, 'model_unreachable', `Neither model provider answered. ${errors.join('; ')}. Nothing was drafted.`);
 }
 
 /**
@@ -411,6 +452,8 @@ export class DraftError extends Error {
 
 export interface DraftResult {
   ok: true;
+  provider: 'anthropic' | 'openrouter';
+  primary_provider_error: string | null;
   fields: Record<string, string>;
   empty_fields: string[];
   model: string;
@@ -420,8 +463,7 @@ export interface DraftResult {
 }
 
 export async function draft(row: mirror.LookupRow, extras: DraftExtras = {}): Promise<DraftResult> {
-  const key = process.env[OPENROUTER_KEY_VAR]?.trim();
-  if (!key) throw new DraftError(503, 'not_configured', `${OPENROUTER_KEY_VAR} is not set on this server, so no draft can be made. Fill the form by hand, or set the variable on the service.`);
+  if (!draftConfigured()) throw new DraftError(503, 'not_configured', `${ANTHROPIC_KEY_VAR} and ${OPENROUTER_KEY_VAR} are not set on this server, so no draft can be made.`);
   const f = row.fields;
   const s = (k: string) => (f[k] === null || f[k] === undefined ? '' : String(f[k]).trim());
   const thread = await readThread(s('Source Link') || null);
@@ -437,34 +479,7 @@ export async function draft(row: mirror.LookupRow, extras: DraftExtras = {}): Pr
       { role: 'user', content: userPrompt({ candidate: s('Candidate'), lane: s('Lane'), builder: s('Builder'), summary: s('Summary'), why: s('Why This Architect'), thread, other, notes, codex }) },
     ],
   };
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
-  let res: Response;
-  let text: string;
-  try {
-    res = await fetch(`${OPENROUTER_URL}/chat/completions`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Title': 'BHA Engine Dashboard - Draft full pattern' },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    text = await res.text();
-  } catch (e) {
-    const timedOut = e instanceof Error && e.name === 'AbortError';
-    throw new DraftError(502, 'model_unreachable', timedOut ? `OpenRouter did not answer within ${MODEL_TIMEOUT_MS / 1000} seconds. Nothing was drafted.` : `Could not reach OpenRouter: ${e instanceof Error ? e.message : String(e)}`);
-  } finally {
-    clearTimeout(timer);
-  }
-  let json: Record<string, unknown> | null = null;
-  try {
-    json = JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    /* handled below */
-  }
-  if (!res.ok || !json) {
-    const err = (json?.error as { message?: string } | undefined)?.message ?? text.slice(0, 300);
-    throw new DraftError(502, res.status === 402 ? 'model_billing' : 'model_error', `OpenRouter answered ${res.status}: ${err}. Nothing was drafted.`);
-  }
+  const { json, provider, primary_error } = await requestDraftModel(body);
   const choice = (json.choices as { message?: { content?: string }; finish_reason?: string }[] | undefined)?.[0];
   const content = choice?.message?.content ?? '';
   // An answer that ran out of room is named as that, never as "not JSON".
@@ -490,6 +505,8 @@ export async function draft(row: mirror.LookupRow, extras: DraftExtras = {}): Pr
   ].filter(Boolean) as string[];
   return {
     ok: true,
+    provider,
+    primary_provider_error: primary_error,
     fields,
     empty_fields: empty,
     model: DRAFT_MODEL,

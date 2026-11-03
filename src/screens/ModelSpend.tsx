@@ -5,26 +5,19 @@ import type { ModelSpendData, ModelSpendDay } from '../data/types';
 import { Card, CardHeader } from '../components/ui/Card';
 import { EmptyState, LoadFailed, Loading, PageHeader, Stat, StatCell, StatStrip, TableFrame, Tabs, Th } from '../components/ui';
 
-/**
- * Model spend (2026-11-02, Destiny: "a record page for tracking token spending and costs").
- *
- * Dollars are OpenRouter's own lifetime usage counter, read every hour; a day with no reading near
- * both its edges is "not measured", never nought. Tokens come from each agent's ask ledger. The
- * per-agent dollar split is an estimate and says so. The Anthropic backup has no usage API, so it is
- * answers and refusals only. A read and nothing else.
- */
+/** Provider usage and measured account counters are kept separate. */
 
-const TABS = ['Dollars', 'Tokens', 'Evals', 'Anthropic backup'] as const;
+const TABS = ['Dollars', 'Tokens', 'Evals', 'Providers & cache'] as const;
 type Tab = (typeof TABS)[number];
-const SLUG: Record<Tab, string> = { Dollars: 'dollars', Tokens: 'tokens', Evals: 'evals', 'Anthropic backup': 'backup' };
+const SLUG: Record<Tab, string> = { Dollars: 'dollars', Tokens: 'tokens', Evals: 'evals', 'Providers & cache': 'backup' };
 const AGENT: Record<string, string> = { bays: 'Bays', north_star: 'North Star', research_twin: 'Research Twin' };
 
-const usd = (n: number | null | undefined) => (n === null || n === undefined || !Number.isFinite(n) ? '—' : `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-const k = (n: number | null | undefined) => (n === null || n === undefined ? '—' : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+const usd = (n: number | null | undefined) => (n === null || n === undefined || !Number.isFinite(n) ? 'Not recorded' : `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+const k = (n: number | null | undefined) => (n === null || n === undefined ? 'Not recorded' : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 // Whole days when any are measured; otherwise the stretch the readings do cover, said as such; otherwise nothing.
 const spanHint = (v: number | null, measured: number, of: number, span: { from: string; to: string } | null) =>
   v !== null ? `${measured} of ${of} days measured` : span ? `only ${when(span.from)} to ${when(span.to)} UTC is measured` : 'not measured';
-const when = (iso: string | null) => (iso ? iso.slice(0, 16).replace('T', ' ') : '—');
+const when = (iso: string | null) => (iso ? iso.slice(0, 16).replace('T', ' ') : 'Not recorded');
 
 /** Daily dollars as small bars; a day not measured is a gap with a dashed tick, never a zero bar. */
 function DailyBars({ days }: { days: ModelSpendDay[] }) {
@@ -60,15 +53,16 @@ function Dollars({ data }: { data: ModelSpendData }) {
   const days = [...o.daily].reverse();
   return (
     <>
+      <ProviderUsage data={data} />
       <StatStrip cols={4}>
         <StatCell>
-          <Stat label="Last 7 days" value={usd(o.last_7_days_usd ?? o.last_7_days_span?.spent_usd)} hint={spanHint(o.last_7_days_usd, o.last_7_days_measured, 7, o.last_7_days_span)} size="lg" />
+          <Stat label="OpenRouter, last 7 days" value={usd(o.last_7_days_usd ?? o.last_7_days_span?.spent_usd)} hint={spanHint(o.last_7_days_usd, o.last_7_days_measured, 7, o.last_7_days_span)} size="lg" />
         </StatCell>
         <StatCell>
-          <Stat label="This month so far" value={usd(o.month_to_date_usd ?? o.month_to_date_span?.spent_usd)} hint={spanHint(o.month_to_date_usd, o.month_to_date_measured, o.month_days, o.month_to_date_span)} />
+          <Stat label="OpenRouter, this month" value={usd(o.month_to_date_usd ?? o.month_to_date_span?.spent_usd)} hint={spanHint(o.month_to_date_usd, o.month_to_date_measured, o.month_days, o.month_to_date_span)} />
         </StatCell>
         <StatCell>
-          <Stat label="Per measured day" value={usd(o.per_day_usd)} hint={`over the last ${data.window.days} days`} />
+          <Stat label="OpenRouter per measured day" value={usd(o.per_day_usd)} hint={`over the last ${data.window.days} days`} />
         </StatCell>
         <StatCell>
           <Stat
@@ -82,7 +76,7 @@ function Dollars({ data }: { data: ModelSpendData }) {
       {o.last_read_error && <p className="px-6 pb-2 text-[12px] text-failing md:px-8">The last hourly reading failed: {o.last_read_error}</p>}
       <div className="px-6 pb-4 md:px-8">
         <Card>
-          <CardHeader title="Dollars spent per day (UTC)" right={<span className="text-[11.5px] text-faint">a dashed tick is a day not measured</span>} />
+          <CardHeader title="OpenRouter dollars per day (UTC)" right={<span className="text-[11.5px] text-faint">a dashed tick is a day not measured</span>} />
           <div className="px-5 pb-4">
             <DailyBars days={o.daily} />
           </div>
@@ -120,13 +114,13 @@ function Tokens({ data }: { data: ModelSpendData }) {
             <Stat
               label={AGENT[a.agent] ?? a.agent}
               value={k(a.tokens)}
-              hint={`${a.asks} asks · p50 ${k(a.p50)} · p95 ${k(a.p95)} · about ${usd(a.est_usd)} (estimate)`}
+              hint={`${a.asks} asks · p50 ${k(a.p50)} · p95 ${k(a.p95)}`}
             />
           </StatCell>
         ))}
       </StatStrip>
       <p className="px-6 pb-3 text-[12px] text-dim md:px-8">
-        {k(total)} tokens across the three agents in the last {data.window.days} days. The dollar figure beside each is the measured spend less the evals, shared by token count: an estimate, not a bill.
+        {k(total)} tokens across the three agents in the last {data.window.days} days. Tokens include cached context and repeated calls. Dollar attribution by token share is disabled because provider and model rates differ.
       </p>
       <div className="px-6 pb-2 md:px-8">
         <h2 className="text-[13px] font-medium text-ink">Bays, by where the ask came from</h2>
@@ -190,10 +184,10 @@ function Evals({ data }: { data: ModelSpendData }) {
     <>
       <StatStrip cols={2}>
         <StatCell>
-          <Stat label="Eval spend, overlaps counted once" value={usd(e.merged_usd)} hint={`${e.runs_counted} runs in the last ${data.window.days} days · an upper bound`} size="lg" />
+          <Stat label="OpenRouter spend during eval windows" value={usd(e.merged_usd)} hint={`${e.runs_counted} runs in the last ${data.window.days} days · an upper bound`} size="lg" />
         </StatCell>
         <StatCell>
-          <Stat label="Share of measured spend" value={data.openrouter.window_usd && data.openrouter.window_usd.spent_usd > 0 ? `${Math.round((e.merged_usd / data.openrouter.window_usd.spent_usd) * 100)}%` : '—'} hint={data.openrouter.window_usd ? `of ${usd(data.openrouter.window_usd.spent_usd)} measured in the window` : 'no measured spend in the window'} />
+          <Stat label="Share of OpenRouter spend" value={data.openrouter.window_usd && data.openrouter.window_usd.spent_usd > 0 ? `${Math.round((e.merged_usd / data.openrouter.window_usd.spent_usd) * 100)}%` : 'Not recorded'} hint={data.openrouter.window_usd ? `of ${usd(data.openrouter.window_usd.spent_usd)} measured in the window` : 'no measured spend in the window'} />
         </StatCell>
       </StatStrip>
       {e.runs.length === 0 ? (
@@ -205,7 +199,7 @@ function Evals({ data }: { data: ModelSpendData }) {
               <Th>Finished (UTC)</Th>
               <Th>Run</Th>
               <Th>Answers</Th>
-              <Th>Spent while it ran</Th>
+              <Th>OpenRouter only</Th>
               <Th>Answered by</Th>
             </tr>
           </thead>
@@ -213,8 +207,8 @@ function Evals({ data }: { data: ModelSpendData }) {
             {e.runs.map((r) => (
               <tr key={`${r.run_id}-${r.at}`} className="border-b border-line">
                 <td className="tabular px-3 py-2 text-dim">{when(r.at)}</td>
-                <td className="px-3 py-2 text-ink">{r.run_id || '—'}</td>
-                <td className="tabular px-3 py-2 text-dim">{Number.isFinite(r.results) ? r.results : '—'}</td>
+                <td className="px-3 py-2 text-ink">{r.run_id || 'Not recorded'}</td>
+                <td className="tabular px-3 py-2 text-dim">{Number.isFinite(r.results) ? r.results : 'Not recorded'}</td>
                 <td className="tabular px-3 py-2 text-ink">{usd(r.spent_usd)}</td>
                 <td className="px-3 py-2 text-dim">{r.answered_by ? Object.entries(r.answered_by as Record<string, number>).map(([a, n]) => `${a === 'anthropic_backup' ? 'backup' : a} ${n}`).join(' · ') : 'not recorded'}</td>
               </tr>
@@ -226,15 +220,38 @@ function Evals({ data }: { data: ModelSpendData }) {
   );
 }
 
+function ProviderUsage({ data }: { data: ModelSpendData }) {
+  const usage = data.provider_usage;
+  if (!usage) return <EmptyState>Provider usage has not been read yet.</EmptyState>;
+  return <div className="space-y-3 px-6 py-4 md:px-8">
+    <h2 className="text-[13px] font-medium text-ink">Anthropic primary and OpenRouter fallback</h2>
+    <p className="text-[12px] text-dim">{usage.note}</p>
+    {usage.last_error && <p className="text-[12px] text-failing">Usage collection failed: {usage.last_error}</p>}
+    <p className="text-[11.5px] text-faint">Response capture from {usage.since}. Last scan: {when(usage.last_scan_at)} UTC. Missing usage is unknown.</p>
+    {usage.providers.length === 0 ? <EmptyState>No model responses captured yet.</EmptyState> : <TableFrame grow={false} label="Provider usage and cache coverage">
+      <thead><tr><Th>Provider</Th><Th>Responses</Th><Th>Input</Th><Th>Output</Th><Th>Cache reads</Th><Th>Cache writes, 5m / 1h</Th><Th>Calculated cost, partial</Th></tr></thead>
+      <tbody>{usage.providers.map(p => <tr key={p.provider} className="border-b border-line">
+        <td className="px-3 py-2 text-ink">{p.provider}</td><td className="px-3 py-2 tabular">{p.calls}</td>
+        <td className="px-3 py-2 tabular">{k(p.input_tokens)}</td><td className="px-3 py-2 tabular">{k(p.output_tokens)}</td>
+        <td className="px-3 py-2 tabular">{k(p.cache_read_tokens)}<span className="block text-faint">{p.calls_without_cache_split} without split</span></td>
+        <td className="px-3 py-2 tabular">{k(p.cache_write_5m_tokens)} / {k(p.cache_write_1h_tokens)}</td>
+        <td className="px-3 py-2 tabular">{usd(p.estimated_usd)}<span className="block text-faint">{p.unpriced_calls} unpriced</span></td>
+      </tr>)}</tbody>
+    </TableFrame>}
+    <p className="text-[12px] text-dim">Planning budget: $350-$500/month of Anthropic credits, plus a separate $50 OpenRouter reserve. Forecast only, excluding tax. Anthropic remaining credit must be checked in its billing console.</p>
+  </div>;
+}
+
 function Backup({ data }: { data: ModelSpendData }) {
   const b = data.anthropic_backup;
   const answered = b.by_day.reduce((a, d) => a + d.answered, 0);
   const failed = b.by_day.reduce((a, d) => a + d.failed, 0);
   return (
     <>
+      <ProviderUsage data={data} />
       <StatStrip cols={3}>
         <StatCell>
-          <Stat label="Answers the backup gave" value={answered} hint={`last ${data.window.days} days`} />
+          <Stat label="Fallback answers, both historical routes" value={answered} hint={`last ${data.window.days} days`} />
         </StatCell>
         <StatCell>
           <Stat label="Backup also failed" value={failed} tone={failed ? 'failing' : 'default'} hint="both providers failed on the same ask" />
@@ -275,7 +292,7 @@ export default function ModelSpend() {
     <div className="relative flex h-full min-h-0 flex-col">
       <PageHeader
         title="Model spend"
-        subtitle="What the models cost: OpenRouter's measured dollars, every agent's tokens, the evals and the Anthropic backup"
+        subtitle="Anthropic primary, OpenRouter fallback: recorded tokens, cache usage and provider costs"
         below={<Tabs tabs={TABS} value={tab} onChange={setTab} />}
       />
       {status === 'loading' && !data ? (

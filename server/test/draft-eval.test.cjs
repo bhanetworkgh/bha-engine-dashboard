@@ -5,6 +5,9 @@
  */
 const assert = require('node:assert');
 const d = require('../../server-dist/server/src/draftEval.js');
+assert.equal(d.providerForDraft({config:{model:'anthropic/claude-sonnet-5'}}),'Anthropic');
+assert.equal(d.providerForDraft({config:{model:'openrouter/anthropic/claude-sonnet-5'}}),'OpenRouter');
+assert.throws(()=>d.providerForDraft({config:{model:'unknown'}}),/no supported billing route/);
 
 let n = 0;
 const ok = (cond, what) => { assert(cond, what); n++; console.log(`ok ${n} - ${what}`); };

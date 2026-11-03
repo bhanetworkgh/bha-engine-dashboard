@@ -73,7 +73,7 @@ export async function spend(days: number): Promise<Record<string, unknown>[]> {
 export const getAgentSpend: ToolDefinition = {
   name: 'get_agent_spend',
   description:
-    `Tokens and tool calls per agent (Bays, North Star, Research Twin), added up from each agent's own ask ledger. For each agent over the window: asks, how many carried a token count, prompt, completion and total tokens, tokens per ask as p50, p95 and max, tool calls, the tools called most, and tokens by day. Tokens, not money, for the agents: no price is stored. eval_runs gives what each eval run cost in dollars, measured from the account. The fields were first written on ${TOKENS_SINCE}; an older ask, a scheduled task run and a failed run carry none and are counted as asks_without_tokens, never as nought. Read only.`,
+    `Tokens and tool calls per agent (Bays, North Star, Research Twin), added up from each agent's own ask ledger. For each agent over the window: asks, how many carried a token count, prompt, completion and total tokens, tokens per ask as p50, p95 and max, tool calls, the tools called most, and tokens by day. Tokens, not money, for the agents: no price is stored. eval_runs gives the OpenRouter-only account delta during each eval, excluding Anthropic costs. It is not total eval cost. Provider response usage and cache coverage are on /model-spend. The fields were first written on ${TOKENS_SINCE}; an older ask, a scheduled task run and a failed run carry none and are counted as asks_without_tokens, never as nought. Read only.`,
   inputSchema: {
     type: 'object',
     properties: { days: { type: 'number', description: 'How many days back to read. Default 7, at most 90.' } },
@@ -97,7 +97,7 @@ export const getAgentSpend: ToolDefinition = {
       agents,
       eval_runs: evals.rows.map((e) => ({ run_id: e.run_id, at: e.at, measured: e.detail.measured === true, spent_usd: e.detail.spent_usd ?? null, usd_per_result: e.detail.usd_per_result ?? null, results: e.detail.results ?? null, credit_left_usd: e.detail.credit_left_usd ?? null })),
       notes: [
-        'eval_runs is the one money figure here: what the OpenRouter account spent while each eval run was going, read from the account before and after. Other asks answered in that window are inside it, so it is an upper bound. Recorded from 11 Oct 2026; an earlier run has no figure.',
+        'eval_runs measures OpenRouter only, including other asks in the window and excluding Anthropic. It is not total eval cost. Provider/model and cache response coverage is on /model-spend.',
         'Tokens are what the agent node reported for the whole run of one ask, prompt and completion, cached prompt tokens included.',
         'No price is stored, so there is no currency figure. The OpenRouter balance is on get_recovery_status and the hourly credit check.',
         'asks_without_tokens are asks from before the fields existed, scheduled task runs and failed runs. They are not nought tokens.',

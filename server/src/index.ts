@@ -2923,8 +2923,8 @@ async function boot(): Promise<void> {
     );
     console.log(
       patternDraft.draftConfigured()
-        ? `  draft:    ${patternDraft.OPENROUTER_KEY_VAR} set — "Draft full pattern" drafts a candidate with ${patternDraft.DRAFT_MODEL}`
-        : `  draft:    ${patternDraft.OPENROUTER_KEY_VAR} NOT set — "Draft full pattern" answers not_configured; registering by hand still works`,
+        ? `  draft:    a model credential is set; "Draft full pattern" uses Anthropic first and OpenRouter as backup with ${patternDraft.DRAFT_MODEL}`
+        : `  draft:    ${patternDraft.ANTHROPIC_KEY_VAR} and ${patternDraft.OPENROUTER_KEY_VAR} NOT set; "Draft full pattern" answers not_configured`,
     );
     console.log(
       bharag.ingestConfigured('research_twin')

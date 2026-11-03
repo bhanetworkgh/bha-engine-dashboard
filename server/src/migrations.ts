@@ -4196,6 +4196,19 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
          ON CONFLICT (source, at) DO NOTHING`,
     ],
   },
+  {
+    id: 112,
+    name: 'provider model response usage and cache splits',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_model_calls (
+        call_key text PRIMARY KEY, at timestamptz NOT NULL, workflow_id text NOT NULL, node_name text NOT NULL,
+        provider text NOT NULL, model text, input_tokens bigint NOT NULL, output_tokens bigint NOT NULL,
+        cache_read_tokens bigint, cache_write_5m_tokens bigint, cache_write_1h_tokens bigint, estimated_usd numeric
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_model_calls_at ON engine_model_calls (at DESC)`,
+      `CREATE TABLE IF NOT EXISTS engine_model_usage_scans (execution_id bigint PRIMARY KEY, available boolean NOT NULL, scanned_at timestamptz NOT NULL DEFAULT now())`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

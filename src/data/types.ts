@@ -4723,6 +4723,12 @@ export interface EvidenceDoc extends EvidenceRecord {
 /** Model spend (2026-11-02, Destiny): server/src/modelSpend.ts read(). */
 export interface ModelSpendDay { day: string; spent_usd: number | null; measured: boolean }
 export interface ModelSpendData {
+  provider_usage: {
+    since: string; primary: string; backup: string; last_scan_at: string | null; last_error: string | null; note: string;
+    providers: Array<{ provider: string; calls: number; input_tokens: number; output_tokens: number; cache_read_tokens: number | null;
+      cache_write_5m_tokens: number | null; cache_write_1h_tokens: number | null; calls_without_cache_split: number;
+      estimated_usd: number | null; unpriced_calls: number; first_at: string; last_at: string }>;
+  };
   window: { days: number; since: string; readings_held: number; first_reading: string | null };
   openrouter: {
     latest: { at: string; total_usage_usd: number; remaining_usd: number | null; origin: string } | null;
