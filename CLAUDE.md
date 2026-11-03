@@ -1876,7 +1876,7 @@ agent too. A backup that differs is refused `backup_differs`, naming what; this 
 an agent to make them match. The main draft is read again at the end, and a changed one is
 `draft_changed`. **To change an
 agent: edit the draft, `run_draft_eval`, publish only once it reads passed,
-then record the inventory.** `npm run test:draft-eval` pins the pure parts.
+then record the inventory.** **A run lives in one process** (3 Nov 2026): a process marks its own runs interrupted on SIGTERM, and a one-minute sweep marks any run no live process holds once it is 15 minutes old, so a run started in the gap while a deploy hands over cannot read `running` for good and block its agent. `npm run test:draft-eval` pins the pure parts.
 
 **Evals cost less** (2 Nov 2026, Destiny: about $626 of the $2,712 OpenRouter spent from 11 Oct to
 2 Nov went on eval runs). `draftEval.repeatsFor` is the one rule, kept in step with Expand Repeats in n8n's

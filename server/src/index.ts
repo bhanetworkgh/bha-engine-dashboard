@@ -3020,6 +3020,7 @@ async function boot(): Promise<void> {
     publishGate.startSweeping();
     // A draft eval left running by the last process is not resumed (13 Oct 2026).
     void draftEval.markInterrupted().then((n) => { if (n) console.log(`[draft-eval] ${n} run(s) left running by the last process marked interrupted`); }).catch((e) => console.error(`[draft-eval] interrupted runs not marked: ${(e as Error).message}`));
+    draftEval.startSweeping();
     decisionWatch.startSweeping();
     patternCapture.startSweeping();
     codexGap.startSweeping();
@@ -3058,7 +3059,11 @@ async function catchUp(): Promise<void> {
 // in-flight transaction is not cut mid-statement.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.on(signal, () => {
-    server.close(() => void closePool().finally(() => process.exit(0)));
+    // A draft eval dies with this process, so it says so before the pool closes (3 Nov 2026).
+    void draftEval
+      .interruptActive()
+      .catch((e) => console.error(`[draft-eval] runs not marked at shutdown: ${(e as Error).message}`))
+      .finally(() => server.close(() => void closePool().finally(() => process.exit(0))));
   });
 }
 

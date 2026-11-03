@@ -43,6 +43,7 @@ import * as engineEvents from './engineEvents';
 import * as n8nMcp from './n8nMcp';
 import { query } from './pg';
 import * as researchSignals from './researchSignals';
+import * as timers from './timers';
 
 // concurrency 1 from 13 Oct 2026: at 3, n8n's MCP server answered 429 to 32 of 60 calls in the first run.
 export const RULE = { credit_floor_usd: 15, concurrency: 1, call_timeout_ms: 300_000, run_limit_minutes: 120 } as const;
@@ -395,6 +396,7 @@ async function begin(o: {
     [runId, o.agent, o.a.id, o.a.name, hash, o.cases.length, expected, o.credit, o.input.requested_by, notes || null, o.covers?.agent_id ?? null, o.covers?.hash ?? null, o.provider, o.why ?? null],
   );
   const main = BACKUPS[o.a.id] ? null : o.a;
+  activeRuns.add(runId);
   void run(runId, o.agent, o.a.id, o.cases, o.provider, {
     covers: o.covers,
     // OpenRouter running out mid-run starts the whole run again on the backup, never a mix of the two.
@@ -403,7 +405,7 @@ async function begin(o: {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`[draft-eval] ${runId}: ${msg}`);
     await query(`UPDATE engine_draft_eval_runs SET state = 'error', detail = $2, finished_at = now() WHERE run_id = $1 AND state = 'running'`, [runId, msg.slice(0, 1000)]).catch(() => undefined);
-  });
+  }).finally(() => activeRuns.delete(runId));
   return { ...out, run_id: runId };
 }
 
@@ -520,12 +522,47 @@ async function run(
   await query(
     `UPDATE engine_draft_eval_runs SET state = $2, detail = trim(both ' ' from coalesce(detail || ' ', '') || $3), config_hash_after = $4, results_done = $5, cases_passed = $6,
             failed_cases = $7::jsonb, regressed = $8::jsonb, compared_with = $9, results = $10::jsonb, finished_at = now()
-      WHERE run_id = $1`,
+      WHERE run_id = $1 AND state = 'running'`,
     [runId, state, detail, hashAfter, results.length, passed, JSON.stringify(failed), JSON.stringify(regressed), compared, JSON.stringify(results)],
   );
   await engineEvents
     .record({ event_type: 'draft_eval_finished', subject_id: agentId, lane: 'ENGINE', actor: 'draft eval', detail: { run_id: runId, agent, state, detail, config_hash: hashAfter, cases: byCase.size, cases_passed: passed, regressed }, dedupe_key: `draft_eval:${runId}` })
     .catch((e) => console.error(`[draft-eval] event not recorded: ${e instanceof Error ? e.message : String(e)}`));
+}
+
+/**
+ * A run lives in the process that started it, and during a deploy two processes overlap (3 Nov 2026).
+ * The new one marks what is running at boot, then Render keeps sending requests to the old one for a
+ * few seconds: a run started in that gap dies with the old process and nothing ever marks it, so it
+ * read `running` for good and blocked its agent. On 3 Nov that took three runs. Two things end it: the
+ * process marks its own runs as it stops, and a sweep marks any run no live process holds.
+ */
+const activeRuns = new Set<string>();
+const ORPHAN_AFTER_MINUTES = 15;
+const ORPHAN_NOTE = 'the server running it was replaced before it finished, so this is not a verdict; run it again';
+
+/** Called on SIGTERM: this process's runs will not finish. */
+export async function interruptActive(): Promise<number> {
+  if (!activeRuns.size) return 0;
+  const r = await query(`UPDATE engine_draft_eval_runs SET state = 'interrupted', detail = trim(both ' ' from coalesce(detail || ' ', '') || $2), finished_at = now() WHERE state = 'running' AND run_id = ANY($1)`, [[...activeRuns], ORPHAN_NOTE]);
+  return r.rowCount ?? 0;
+}
+
+/** Runs still `running` that this process does not hold and that are too old to be another process's. */
+export async function sweepOrphans(): Promise<number> {
+  const r = await query(
+    `UPDATE engine_draft_eval_runs SET state = 'interrupted', detail = trim(both ' ' from coalesce(detail || ' ', '') || $2), finished_at = now()
+      WHERE state = 'running' AND NOT (run_id = ANY($1)) AND started_at < now() - ($3 || ' minutes')::interval`,
+    [[...activeRuns], ORPHAN_NOTE, String(ORPHAN_AFTER_MINUTES)],
+  );
+  return r.rowCount ?? 0;
+}
+
+export function startSweeping(): void {
+  setInterval(() => {
+    timers.beat('draft eval orphan sweep');
+    void sweepOrphans().catch((e) => console.error(`[draft-eval] orphan sweep failed: ${(e as Error).message}`));
+  }, 60_000).unref();
 }
 
 /** A run left `running` by a process that stopped is not resumed. Called at boot. */
