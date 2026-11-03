@@ -14321,3 +14321,10 @@ Problem:    update_decision_watch could not change the record, and open_decision
 Fix:        unlink_record: true on update_decision_watch clears record_kind, record_id and record_hash. Destiny or Jason only. Refused no_thread on a watch with no thread.
 Decision:   Same watch rather than cancel and replace, so its history and snooze stay. test:decision-watch fails on main before this change at "reminder 2": its loop still expects a 24 hour gap from before the 31 Oct 24h / 72h / 7 day spacing, so this has its own test file. That suite needs bringing in step. Tests ran against a local Postgres with the server built by TypeScript 6 and pg built from source, because the npm registry was unreachable from this session.
 
+
+## 2026-11-03 21:10 — n8n changes from the Media Twin and CST sessions, recorded at close
+Intent:     Record the n8n and agent changes made outside this repo after 8267a60, so the log still reads as a runbook.
+Files:      none in this repo; n8n only
+Problem:    Media Twin's instructions named read_media_doctrine, read_media_posts and read_slack while its only tool was read_news. Read Codex Logs had no end date, so a log approved today was written up as yesterday's. Media Twin — Daily Draft (jUy6631k7aH24LP2) was inactive and its test trigger was hardcoded.
+Fix:        Media Twin (c9DVdUUSVFpekZN8, version 05d82a09-b886-42fe-af7b-bf55dcb33f35) and its backup (oqahGbB45yxiTXcA, version 0a62b9c7-f416-4625-be63-ee2c5b04f848) reach the dashboard MCP through credential 4j420vNdKbOObEj0 with eleven read tools. Selling vFarm is the first rule, in Jason's own words. Daily Draft published (9a861dc2-fb3c-464a-bc52-c85df2f1906e), lte upper bound on Read Codex Logs, hardcoded brief removed. Proof: execution 65151, MTP-1793722786427-VR2B, Jason approved four cards.
+Decision:   Nothing posts to a platform. Trial runs daily through Sunday. No eval cases exist for Media Twin, so no draft eval ran. Restore points are each agent's previous version in n8n. DW-1793619895309-KUQN was unlinked through Bays' draft chat, execution FQPU6J4k2gxMk5hc, audit 4726, because the connector's tool list held the old schema.
