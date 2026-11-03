@@ -580,7 +580,9 @@ explicitly for this. Therefore:
   decoded before anything else reads the body (`decodeFieldsB64` in `server/src/index.ts`).
   Render's edge filter refuses a body that reads like a shell command before it reaches this
   server, so a Codex log that quoted one (Submit Actions run 39814) could not be saved. Both
-  `fields` and `fields_b64` is a 422, as is one that does not decode to a JSON object.
+  `fields` and `fields_b64` is a 422, as is one that does not decode to a JSON object. **The whole body
+  may come as `body_b64`** on any engine POST or PATCH, the guard, the repair report and the
+  destination check (3 Nov 2026): a title or a note reads like a command as easily as a field does.
 - **PATCH merges into `fields` and touches nothing else.** A key not sent is
   left exactly as it is and a key sent as `null` is removed — which is the whole
   reason it exists beside POST, a whole-record write that replaces the blob: an

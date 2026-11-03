@@ -158,7 +158,7 @@ function decodeFieldsB64(body: Record<string, unknown>): void {
 }
 
 /**
- * `body_b64` on the repair report (3 Nov 2026, Destiny). A repair report quotes the failed run, and on
+ * `body_b64` on the repair report, then on every engine POST and PATCH (3 Nov 2026, Destiny). A repair report quotes the failed run, and on
  * 3 Nov Render's firewall refused REP-5AFqtZQaeKFFiGqe-63850 three times because of what it quoted, so the
  * record never landed. The whole body may come as base64 of its JSON, which the firewall does not read.
  */
@@ -1135,7 +1135,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      */
     if (p === '/api/engine/slack-destination') {
       if (method !== 'POST') throw new HttpError(405, 'POST { channel, text, parts?, thread_ts?, dry_run? }.');
-      const b = (await readJson(req, 512 * 1024)) as Record<string, unknown>;
+      const b = decodeBodyB64(await readJson(req, 512 * 1024));
       const dest = typeof b.channel === 'string' ? b.channel.trim().replace(/^<[@#]?([A-Z0-9]+)(\|[^>]*)?>$/, '$1') : '';
       const text = typeof b.text === 'string' ? b.text : '';
       if (!/^[CDGUW][A-Z0-9]{6,}$/.test(dest) || !text.trim()) {
@@ -1563,7 +1563,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       } else {
         rowId = decodeURIComponent(withId![2]);
       }
-      const body = await readJson(req, 256 * 1024);
+      const body = decodeBodyB64(await readJson(req, 512 * 1024));
       decodeFieldsB64(body);
       const patch = body.fields;
       if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
@@ -1645,7 +1645,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     }
     if (method !== 'POST') throw new HttpError(405, 'POST to upsert a whole record — the same row twice updates rather than duplicating. GET /api/engine/:kind to read rows back, PATCH /api/engine/:kind/:id to change part of one.');
 
-    const body = await readJson(req, 256 * 1024);
+    const body = decodeBodyB64(await readJson(req, 512 * 1024));
     decodeFieldsB64(body);
     try {
       // The same function the MCP write tools call (engineWrite.ts). The

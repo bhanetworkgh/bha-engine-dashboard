@@ -14249,3 +14249,8 @@ Files:      server/src/index.ts, CLAUDE.md
 Problem:    Ledger rows landed, then "The BHARAG write guard did not answer for ask NS-1793706713994-Y6HX ... 403 ... Blocked". Same firewall, a second node. The guard's title and metadata carry the question, so content_b64 would not cover it.
 Fix:        /api/engine/bharag-guard accepts body_b64; the three Agent Deliveries send it.
 Decision:   One decoder (decodeBodyB64), not a second per-field option.
+
+## 2026-11-03 12:30 — body_b64 on every engine write
+Intent:     A sweep of the 58 active workflows found 84 engine writes that are not encoded, about 25 of them carrying free text.
+Files:      server/src/index.ts, CLAUDE.md
+Fix:        decodeBodyB64 on POST and PATCH /api/engine/:kind and the Slack destination check; 512 KB limit because base64 grows the body by a third.
