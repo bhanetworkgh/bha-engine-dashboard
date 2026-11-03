@@ -1024,8 +1024,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * be a later date so the clearing can be proved before any row is old enough.
      */
     if (p === '/api/engine/bharag-guard') {
-      if (method !== 'POST') throw new HttpError(405, 'POST { workspace, title, content (or content_b64), kind, outcome, source, run_id, metadata }. The answer says allow or not, and carries the title, content and metadata to ingest.');
-      const b = await readJson(req, 8 * 1024 * 1024);
+      if (method !== 'POST') throw new HttpError(405, 'POST { workspace, title, content (or content_b64), kind, outcome, source, run_id, metadata }, or the whole body as body_b64. The answer says allow or not, and carries the title, content and metadata to ingest.');
+      // 3 Nov 2026: the title and metadata quote the question too, so content_b64 alone did not get
+      // past the filter (ask NS-1793706713994-Y6HX). The whole body may come as body_b64.
+      const b = decodeBodyB64(await readJson(req, 8 * 1024 * 1024));
       const text = (v: unknown) => (typeof v === 'string' ? v : v === undefined || v === null ? '' : String(v));
       const kind = text(b.kind) as dataGovernance.GuardKind;
       if (!dataGovernance.GUARD_KINDS.includes(kind)) throw new HttpError(422, `kind must be one of ${dataGovernance.GUARD_KINDS.join(', ')}; got "${text(b.kind)}".`);

@@ -14242,3 +14242,10 @@ Files:      server/src/recovery.ts, src/data/types.ts, src/screens/EngineHealth/
 Problem:    Every BILLING_QUOTA incident was filed under OpenRouter; api.anthropic.com and the anthropicApi credential were unknown to the classifier.
 Fix:        New dependency `anthropic`: host, credential, and a BILLING_QUOTA whose error names Anthropic's own refusal. n8n's Engine — Dependency Probe gained one 1-token request to Anthropic (execution 63947: anthropic ok 200, openrouter ok, slack ok, google ok).
 Decision:   npm's registry was unreachable from this session, so tsc and test:recovery did not run here; Render's build is the type check, and a failed build leaves the old version live.
+
+## 2026-11-03 12:20 — The BHARAG guard takes body_b64
+Intent:     Prove the twins' ledger writes with a question quoting a shell command.
+Files:      server/src/index.ts, CLAUDE.md
+Problem:    Ledger rows landed, then "The BHARAG write guard did not answer for ask NS-1793706713994-Y6HX ... 403 ... Blocked". Same firewall, a second node. The guard's title and metadata carry the question, so content_b64 would not cover it.
+Fix:        /api/engine/bharag-guard accepts body_b64; the three Agent Deliveries send it.
+Decision:   One decoder (decodeBodyB64), not a second per-field option.

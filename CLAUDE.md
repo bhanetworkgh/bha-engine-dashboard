@@ -4370,7 +4370,9 @@ in `engine_bharag_guard`, counted on the Agent maturity page.
 2026): Render's edge filter blocks a body that reads like a shell command
 (`curl https://…`) before it reaches this server, which is how Kaiqi's playbook
 was refused twice and reported as "the guard did not answer". `Bays — Guarded
-BHARAG Ingest` sends it that way; plain `content` still works.
+BHARAG Ingest` sends it that way; plain `content` still works. **The whole body may
+come as `body_b64`** (3 Nov 2026): the title quotes the question, so `content_b64` alone did not
+get a North Star ask past the filter.
 
 **The Customer Service Twin joined the same day** (2026-09-29, Destiny), fourth
 route, same rules: `POST /api/engine/cst-events`, `cst.event.v1`, migration 41,
