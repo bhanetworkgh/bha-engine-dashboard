@@ -14268,3 +14268,9 @@ Files:      server/src/draftEval.ts, server/src/index.ts, CLAUDE.md
 Problem:    Not a hang. Run C52C and U4O6 were started on instance r2pqs at 11:56, eight seconds after the new instance 4qdpx booted at 11:55:48; RFW7 on 4wnhq at 12:19:46, after cddmf booted at 12:19:32. Render was still routing to the old process. markInterrupted had already run at boot, so when the old process stopped the runs read `running` for ever.
 Fix:        interruptActive on SIGTERM; a one-minute sweep for runs no live process holds, past 15 minutes; the final write only lands on a run still `running`.
 Decision:   Not resumed: a verdict from half a run in another process is not one.
+
+## 2026-11-03 13:50 — Draft eval fix proved
+Intent:     Prove runs finish and a replaced server cannot strand one.
+Fix:        DRAFT-202611031235-PITE and 9XX3 passed 9 of 9; 4LHM and SUJC read passed at 16 of 20, no regression. J5IH, started and deployed over at 12:47, read interrupted at 12:47:57.
+Problem:    BAYS-DW-01, BAYS-SOP-01, BAYS-SOP-04 and BAYS-SOP-05 fail on both Bays agents, and were failing in EVAL-202611020738 before today's work.
+Decision:   J5IH was cleared by the boot pass, so the orphan sweep itself has not yet fired on a real gap.
