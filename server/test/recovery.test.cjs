@@ -34,7 +34,7 @@ const hour = 3600_000;
 const ago = (ms) => new Date(Date.now() - ms).toISOString();
 const T = Date.now();
 const id = (k) => `INC-TEST-${T}-${k}`;
-const probeState = { openrouter: { ok: true, remaining_usd: 30.78, floor_usd: 5, status: 'ok' }, slack: { ok: false, status: 'auth_failed' }, google: { ok: true, status: 'ok' } };
+const probeState = { anthropic: { ok: true, status: 200, answered: true }, openrouter: { ok: true, remaining_usd: 30.78, floor_usd: 5, status: 'ok' }, slack: { ok: false, status: 'auth_failed' }, google: { ok: true, status: 'ok' } };
 
 function inc(k, cls, wf, node, exec, age) {
   ledger.set(id(k), {

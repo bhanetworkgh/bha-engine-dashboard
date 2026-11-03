@@ -2299,7 +2299,7 @@ holds each failed run's input and the healer resumes it from the failed step.
 - **Every five minutes, and only while something is waiting**
   (`setInterval`, `unref`, never two ticks at once, first look a minute after
   boot). Nothing waiting means **no probe**. The probe is
-  `POST /webhook/engine-dependency-probe` with `x-dashboard-key` for OpenRouter,
+  `POST /webhook/engine-dependency-probe` with `x-dashboard-key` for Anthropic, OpenRouter,
   Slack and Google; BHARAG is the ledger read the tick already made (ok where any
   keyed lane answered). The ledger is read live, `open` and `retrying` both —
   an unread lane falls back to the mirror and is never taken to mean an
@@ -4065,7 +4065,7 @@ which n8n calls after the scheduled post lands. The document id is kept in `meta
 **The Recovery tab is "Waiting on a dependency"** (2026-09-23, Destiny). The
 watcher's switch at the top — on or off, who flipped it last, and a sentence
 where `RECOVERY_ENABLED=false` overrides it rather than a button that silently
-does nothing. Then **one card per dependency** — OpenRouter, Slack, Google,
+does nothing. Then **one card per dependency** — Anthropic, OpenRouter, Slack, Google,
 BHARAG — with its state from the last probe (OpenRouter's `remaining_usd`
 beside it) and every incident waiting on it: workflow, failed at, error class,
 status and **Re-run now**, which runs the same per-incident steps a batch does

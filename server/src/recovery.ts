@@ -2,7 +2,7 @@
  * Engine recovery: re-running what failed because something it depends on was
  * down, once that thing is back (2026-09-23, Destiny — brief D2).
  *
- * When OpenRouter runs out of credit, a Slack or Google login lapses, or
+ * When Anthropic or OpenRouter runs out of credit, a Slack or Google login lapses, or
  * BHARAG stops answering, every workflow that touches it fails, and each
  * failure is already an open incident in the BHARAG ledger. The healer retries
  * a failure three times over twenty minutes and then stops, which is right for
@@ -19,7 +19,7 @@
  *   1. off switch — the page toggle, and `RECOVERY_ENABLED=false` over it;
  *   2. read the live incidents, and note which ones wait on a dependency;
  *      nothing waiting means **no probe**;
- *   3. probe once — the n8n `Engine — Dependency Probe` for OpenRouter, Slack
+ *   3. probe once — the n8n `Engine — Dependency Probe` for Anthropic, OpenRouter, Slack
  *      and Google, and BHARAG from the ledger read this tick already made;
  *   4. for each dependency that is waited on and ok, drain a batch: oldest
  *      first, twenty seconds apart, checking before each re-run that it is not
@@ -78,8 +78,8 @@ export const ONE_OFF_QUIET_MS = 30 * 60_000;
 /** How the error handler names a polling trigger's failed step: "Trigger (polling)". */
 const POLL_NODE = /\(polling\)/i;
 
-export const DEPENDENCIES: RecoveryDependency[] = ['openrouter', 'slack', 'google', 'bharag'];
-export const DEPENDENCY_LABEL: Record<RecoveryDependency, string> = { openrouter: 'OpenRouter', slack: 'Slack', google: 'Google', bharag: 'BHARAG' };
+export const DEPENDENCIES: RecoveryDependency[] = ['anthropic', 'openrouter', 'slack', 'google', 'bharag'];
+export const DEPENDENCY_LABEL: Record<RecoveryDependency, string> = { anthropic: 'Anthropic', openrouter: 'OpenRouter', slack: 'Slack', google: 'Google', bharag: 'BHARAG' };
 
 export const ENABLED_VAR = 'RECOVERY_ENABLED';
 const TOGGLE_KEY = 'recovery.enabled';
@@ -234,6 +234,7 @@ const CLASS_BY_HOST = new Set(['UPSTREAM_5XX', 'NETWORK_TIMEOUT']);
 
 function hostDependency(host: string): RecoveryDependency | null {
   const h = host.toLowerCase();
+  if (h === 'api.anthropic.com') return 'anthropic';
   if (h === 'openrouter.ai' || h.endsWith('.openrouter.ai')) return 'openrouter';
   if (h === 'slack.com' || h.endsWith('.slack.com')) return 'slack';
   if (h === 'googleapis.com' || h.endsWith('.googleapis.com')) return 'google';
@@ -244,6 +245,7 @@ function hostDependency(host: string): RecoveryDependency | null {
 
 function credentialDependency(node: n8n.N8nNode): { dependency: RecoveryDependency; from: string } | null {
   for (const [type, cred] of Object.entries(node.credentials ?? {})) {
+    if (type === 'anthropicApi') return { dependency: 'anthropic', from: `credential ${type}` };
     if (type === 'openRouterApi') return { dependency: 'openrouter', from: `credential ${type}` };
     if (type === 'slackApi' || type === 'slackOAuth2Api') return { dependency: 'slack', from: `credential ${type}` };
     if (/^google/i.test(type) || /^gmail/i.test(type)) return { dependency: 'google', from: `credential ${type}` };
@@ -273,7 +275,12 @@ async function classify(inc: OpenIncident): Promise<ClassifyResult> {
     return c.dependency ? { kind: 'dependency', value: c } : { kind: 'skip', reason: c.from, cache: true };
   };
 
-  if (cls === 'BILLING_QUOTA') return remember({ dependency: 'openrouter', from: 'error class BILLING_QUOTA', workflow_id: null });
+  // Anthropic's own refusal ("credit balance is too low … Plans & Billing"), not the
+  // class alone: since 3 Nov 2026 Anthropic is first, and a billing failure names which.
+  if (cls === 'BILLING_QUOTA') {
+    const dep: RecoveryDependency = /credit balance is too low|anthropic/i.test(inc.error_message ?? '') ? 'anthropic' : 'openrouter';
+    return remember({ dependency: dep, from: 'error class BILLING_QUOTA', workflow_id: null });
+  }
   if (!CLASS_BY_NODE.has(cls) && !CLASS_BY_HOST.has(cls)) {
     return remember({ dependency: null, from: `${cls ? `${cls} is` : 'An unclassified incident is'} not a class that waits on a dependency — left to the healer and people.`, workflow_id: null });
   }
@@ -296,7 +303,7 @@ async function classify(inc: OpenIncident): Promise<ClassifyResult> {
   // falls back to the other, because an HTTP Request node carrying a Slack
   // credential and a Slack node with no URL both say plainly what they call.
   const first = CLASS_BY_NODE.has(cls) ? credentialDependency(node) ?? urlDependency(node) : urlDependency(node) ?? credentialDependency(node);
-  if (!first) return remember({ dependency: null, from: `"${inc.failed_node}" calls nothing this watcher probes (OpenRouter, Slack, Google, BHARAG).`, workflow_id: wfId });
+  if (!first) return remember({ dependency: null, from: `"${inc.failed_node}" calls nothing this watcher probes (Anthropic, OpenRouter, Slack, Google, BHARAG).`, workflow_id: wfId });
   return remember({ dependency: first.dependency, from: first.from, workflow_id: wfId });
 }
 
@@ -545,7 +552,7 @@ function depState(v: unknown): DependencyState {
 }
 
 /**
- * One probe. OpenRouter, Slack and Google come from the n8n probe workflow;
+ * One probe. Anthropic, OpenRouter, Slack and Google come from the n8n probe workflow;
  * BHARAG comes from the ledger read this tick has just made — ok where any
  * keyed lane answered, unknown where none is keyed.
  */
@@ -559,7 +566,7 @@ async function probe(read: IncidentRead): Promise<RecoveryProbe> {
       : { ok: false, status: 'unreachable', detail: Object.values(read.errors).join(' · ') || 'No lane answered.' };
   const result: RecoveryProbe = {
     checked_at: nowIso(),
-    dependencies: { openrouter: unknown, slack: unknown, google: unknown, bharag: bharagState },
+    dependencies: { anthropic: unknown, openrouter: unknown, slack: unknown, google: unknown, bharag: bharagState },
     error: null,
   };
   try {
@@ -567,6 +574,7 @@ async function probe(read: IncidentRead): Promise<RecoveryProbe> {
     if (r.status < 200 || r.status >= 300) throw new Error(`The dependency probe answered ${r.status}${r.text ? `: ${r.text.slice(0, 200)}` : '.'}`);
     const body = JSON.parse(r.text) as Record<string, unknown>;
     result.checked_at = s(body.checked_at) ?? result.checked_at;
+    result.dependencies.anthropic = depState(body.anthropic);
     result.dependencies.openrouter = depState(body.openrouter);
     result.dependencies.slack = depState(body.slack);
     result.dependencies.google = depState(body.google);
@@ -1060,7 +1068,7 @@ export async function plan(): Promise<RecoveryPlan> {
     const free = waiting.filter((r) => !r.batch_id);
     if (!free.length) next.push('Nothing is waiting, so no probe is sent.');
     else {
-      next.push('Probe OpenRouter, Slack and Google once through n8n, and BHARAG through the ledger read.');
+      next.push('Probe Anthropic, OpenRouter, Slack and Google once through n8n, and BHARAG through the ledger read.');
       for (const dep of DEPENDENCIES) {
         const n = free.filter((r) => r.dependency === dep).length;
         if (!n) continue;

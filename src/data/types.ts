@@ -1836,7 +1836,7 @@ export interface RetryResult {
  * was down, re-run from its failed step once that dependency answers again.
  * See `server/src/recovery.ts`.
  */
-export type RecoveryDependency = 'openrouter' | 'slack' | 'google' | 'bharag';
+export type RecoveryDependency = 'anthropic' | 'openrouter' | 'slack' | 'google' | 'bharag';
 export type RecoveryStatus = 'waiting' | 'replaying' | 'recovered' | 'already_done' | 'chat_not_rerun' | 'failed_again' | 'data_gone';
 
 export interface RecoveryRow {

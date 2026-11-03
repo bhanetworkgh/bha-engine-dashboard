@@ -31,8 +31,8 @@ import { HEALTH_KINDS } from './kinds';
  * come from the runs that were sent, not recomputed.
  */
 
-const DEPS: RecoveryDependency[] = ['openrouter', 'slack', 'google', 'bharag'];
-const LABEL: Record<RecoveryDependency, string> = { openrouter: 'OpenRouter', slack: 'Slack', google: 'Google', bharag: 'BHARAG' };
+const DEPS: RecoveryDependency[] = ['anthropic', 'openrouter', 'slack', 'google', 'bharag'];
+const LABEL: Record<RecoveryDependency, string> = { anthropic: 'Anthropic', openrouter: 'OpenRouter', slack: 'Slack', google: 'Google', bharag: 'BHARAG' };
 
 /** One line per status, in plain English, for the tooltip on each pill. */
 const STATUS_DEF: Record<RecoveryStatus, string> = {
@@ -137,7 +137,7 @@ export default function Recovery() {
       {!data.n8n_configured && <p className="text-[12.5px] text-degraded">N8N_API_KEY is not set, so failed runs cannot be read and nothing is re-run.</p>}
       {data.last_probe?.error && (
         <p className="text-[12.5px] text-degraded">
-          The last probe could not ask n8n about OpenRouter, Slack and Google: {data.last_probe.error}
+          The last probe could not ask n8n about Anthropic, OpenRouter, Slack and Google: {data.last_probe.error}
         </p>
       )}
 

@@ -14235,3 +14235,10 @@ Files:      server/src/index.ts, CLAUDE.md, docs/history/commit-map-2026-11-03.m
 Problem:    report.dashboard.refused status 403 on REP-5AFqtZQaeKFFiGqe-63850, three attempts: "blocked by this site's web application firewall", because the body quoted the failed run.
 Fix:        POST /api/engine/repair takes body_b64, base64 of the whole JSON body, up to 4 MB. The bridge sends it that way. Bays, North Star and Research Twin Agent Delivery send their ledger rows as fields_b64 (existing route).
 Decision:   main rewritten from b3874a3 so the three Codex commits read Destiny Arupi; tree identical. Map in docs/history. feature/focb-hero-bay and tmp-media-twin-import were not touched and still sit on the old ids.
+
+## 2026-11-03 12:00 — Anthropic is a dependency the recovery watcher waits on
+Intent:     Anthropic is the agents' first provider, but the watcher only knew OpenRouter, so an Anthropic outage would wait on nothing.
+Files:      server/src/recovery.ts, src/data/types.ts, src/screens/EngineHealth/Recovery.tsx, server/test/recovery.test.cjs, CLAUDE.md
+Problem:    Every BILLING_QUOTA incident was filed under OpenRouter; api.anthropic.com and the anthropicApi credential were unknown to the classifier.
+Fix:        New dependency `anthropic`: host, credential, and a BILLING_QUOTA whose error names Anthropic's own refusal. n8n's Engine — Dependency Probe gained one 1-token request to Anthropic (execution 63947: anthropic ok 200, openrouter ok, slack ok, google ok).
+Decision:   npm's registry was unreachable from this session, so tsc and test:recovery did not run here; Render's build is the type check, and a failed build leaves the old version live.
