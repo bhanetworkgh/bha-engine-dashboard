@@ -5215,6 +5215,8 @@ record.
   `stopped`, and the card's thread says so, because the record would disagree with the thread. Changed wording is
   recorded and noted (`sent_differs`, `sent_text`). A thread that cannot be read stays ready. The state leaves
   `ready` before anything is written, so one message cannot record twice. No Bays tag is needed.
+  `POST /api/engine/code-check/prepare` (`x-dashboard-key`, `body_b64` accepted) is the same handler, for when the
+  connector's tool list has not picked the tool up.
 
 ### System registry
 **Four registries on one page** (decision 2026-09-14, Destiny) — Builders,

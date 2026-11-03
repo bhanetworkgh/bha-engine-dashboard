@@ -14281,3 +14281,8 @@ Files:      server/src/codeCheckWatch.ts, decisionWatch.ts (readSince exported),
 Problem:    `Builder Channel Post` on the Codex row holds only the channel id, so the card had no link to the post.
 Fix:        findLogPost reads the log channel for Bays' Codex post by exact id. prepare_code_check saves the check beside the Slack draft; the two-minute pass reads only ready threads and records his reply.
 Decision:   Verdict or pay call changed before sending stops rather than records, because the structured record would disagree with what the builder read. Problems go to the card thread, never under the builder's log.
+
+## 2026-11-03 15:10 — prepare_code_check reachable when the connector's list is stale
+Intent:     Prepare Kaiqi's check. Claude's connector kept its old tool list after a refresh (120 tools, nothing added), so prepare_code_check could not be called.
+Files:      server/src/index.ts, CLAUDE.md
+Fix:        POST /api/engine/code-check/prepare runs the tool's own handler, as doctrine-drill and submit-log-test do.

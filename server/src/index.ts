@@ -80,6 +80,7 @@ import * as patternCapture from './patternCapture';
 import * as codexGap from './codexGap';
 import * as renewalReminder from './renewalReminder';
 import * as codeCheckWatch from './codeCheckWatch';
+import * as codeCheckTools from './mcp/codeCheckTools';
 import * as sops from './sops';
 import { toolByName as mcpToolByName } from './mcp/tools';
 import { callerStore } from './mcp/caller';
@@ -674,6 +675,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       const body = await readJson(req, 16 * 1024);
       const out = (await doctrineDrillTools.runDoctrineDrillTool.handler(body as Record<string, unknown>, { access: 'write' } as never)) as { ok: boolean; step?: string; reason?: string; message?: string };
       await mirror.logWrite({ endpoint, kind: 'doctrine_drill', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: 'QNDM-DRILL', outcome: out.ok ? 'updated' : 'rejected', detail: `${String(body.step ?? '')}${out.ok ? '' : `: ${out.reason} ${out.message ?? ''}`}`.slice(0, 400), ms: Date.now() - t0 });
+      return send(res, out.ok ? 200 : 422, out);
+    }
+    // prepare_code_check's own handler (3 Nov 2026), for when the connector's tool list has not picked the
+    // tool up: Claude's connector kept its old list after a refresh. Same guards; audited on engine_mcp_writes.
+    if (p === '/api/engine/code-check/prepare') {
+      if (method !== 'POST') throw new HttpError(405, 'POST the prepare_code_check arguments.');
+      const body = decodeBodyB64(await readJson(req, 256 * 1024));
+      const out = (await codeCheckTools.prepareCodeCheck.handler(body as Record<string, unknown>, { access: 'write' } as never)) as { ok: boolean; reason?: string; message?: string };
+      await mirror.logWrite({ endpoint, kind: 'code_checks', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: String((body as Record<string, unknown>).codex_entry_id ?? ''), outcome: out.ok ? 'updated' : 'rejected', detail: out.message ?? out.reason ?? null });
       return send(res, out.ok ? 200 : 422, out);
     }
     // The log form's field check, the same handler as test_submit_log (2026-10-21), for when the
