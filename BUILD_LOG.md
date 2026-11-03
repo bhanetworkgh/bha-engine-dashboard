@@ -14306,3 +14306,10 @@ Files:      server/src/codeChecks.ts, server/src/codeCheckWatch.ts, server/src/m
 Problem:    The check told him what was true but not whether the work moved the lane, and he reads every one in full.
 Fix:        Four required fields stored as bays_summary, written onto the log and BHARAG, shown on the tab and the entry. Three no's running name the builder on the tab.
 Decision:   Destiny, 3 Nov: Claude writes it, and a "no" does not change pay, because the agreements pay per day worked and go for signature on 5 Nov. Pay stays about whether the work is real; repeated no's lead to a conversation.
+
+## 2026-11-03 17:10 — D5: incidents, the sweep, voice notes and North Star's hand-off
+Intent:     Close the open incidents and fix what they exposed. n8n changes only, each with a named version and restore point.
+Files:      n8n: Bays, North Star and Research Twin Agent Delivery, Research Queue Weekly Sweep; agents Bays and Bays (OpenRouter backup)
+Problem:    "Tool find_records not found"; execution 61236 threw out a real backup answer; sweep 64724 answered six jobs and saved three with no error; Jason's voice notes got "I can't listen to audio"; "Slack refused the post: channel_not_found" (INC-NS.AGENT-073, 074).
+Fix:        Bays instructions name the BHA_Dashboard_ prefix and the five outcomes (b6c5abe2, backup e39c8e10; DRAFT-202611031523-OIRE, DRAFT-202611031526-X917). Mark Backup Answer reads the first 400 characters. Sweep prompt requires the save, its Call node continues on error, Raise If Anything Failed raises a miss. Build Agent Message names the transcribe tool (a8c62415, proved by execution 64899). North Star hands a refused post to Bays (4c10f073, pinned run 65051). Build Ask Row reads requires_human true (17615d51).
+Decision:   Five rt-asks rows I mislabelled were corrected with a one-off workflow, now archived. North Star's reminder timeouts move to the CST work. Run 64841 shows one tool search miss since the instructions change, to watch.
