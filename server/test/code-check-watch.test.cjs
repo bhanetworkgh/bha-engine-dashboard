@@ -65,6 +65,8 @@ async function sendItAndTheRest() {
   assert.equal(watch.isSentCheck({ ...m, text: '*Code check: Kavin, CODEX-other*' }, CX, DESTINY, after), false);
   assert.equal(watch.isSentCheck({ ...m, bot_id: 'B1' }, CX, DESTINY, after), false);
   ok('only his own message opening the check, naming the log, after the save, counts');
+  assert.equal(cc.cleanCheck({ codex_entry_id: 'CODEX-20261102-UNKNOWN-hardik-bhatt-hero-bay-freshness-fix', check_link: 'https://x.slack.com/archives/C0AF7AGC2UV/p1793640525750039', verdict: 'matches', verdict_reason: 'r', claims: [{ claim: 'c', where: 'w', result: 'confirmed', proof: 'p' }], pay_call: 'as_logged', requester_user_id: DESTINY }).verdict, 'matches');
+  ok('a Codex ID with capitals in it is a Codex ID');
   const d = `*Verdict:* Partly matches, x\n*4. Pay call*\nPay partly`;
   assert.deepEqual(watch.compareSent(d, d.replace(/\*/g, ''), 'partly', 'partly'), { same: true, conflict: null });
   assert.equal(watch.compareSent(d, d + ' more', 'partly', 'partly').same, false);

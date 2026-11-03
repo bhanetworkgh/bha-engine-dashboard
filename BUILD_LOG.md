@@ -14286,3 +14286,9 @@ Decision:   Verdict or pay call changed before sending stops rather than records
 Intent:     Prepare Kaiqi's check. Claude's connector kept its old tool list after a refresh (120 tools, nothing added), so prepare_code_check could not be called.
 Files:      server/src/index.ts, CLAUDE.md
 Fix:        POST /api/engine/code-check/prepare runs the tool's own handler, as doctrine-drill and submit-log-test do.
+
+## 2026-11-03 16:05 — A Codex ID may carry capitals
+Intent:     Save Hardik's code check.
+Files:      server/src/codeChecks.ts, server/test/code-check-watch.test.cjs
+Problem:    prepare_code_check refused CODEX-20261102-UNKNOWN-hardik-bhatt-hero-bay-freshness-fix: "codex_entry_id is the log's Codex ID".
+Fix:        The pattern accepted lower case only; the engine really mints UNKNOWN in an ID when a builder name is missing. Kaiqi's check proved the send step live the same hour: sent 13:55 UTC, recorded 13:56, Codex, BHARAG and the card all landed.

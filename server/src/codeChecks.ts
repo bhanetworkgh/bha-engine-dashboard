@@ -61,7 +61,7 @@ export const OUTPUT_STATUSES = ['not_started', 'drafting', 'ready_for_jason', 'a
 export type OutputStatus = (typeof OUTPUT_STATUSES)[number];
 export const OUTPUT_STATUS_LABEL: Record<OutputStatus, string> = { not_started: 'Not started', drafting: 'Drafting', ready_for_jason: 'With Jason', accepted: 'Accepted by Jason' };
 
-const CODEX_ID = /^CODEX-\d{8}-[a-z0-9-]{3,160}$/;
+const CODEX_ID = /^CODEX-[A-Za-z0-9][A-Za-z0-9._-]{3,190}$/;
 const OUTPUT_ID = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/;
 const LOOP_ID = /^LOOP-\d{10,16}-[A-Z0-9]{4}$/;
 
