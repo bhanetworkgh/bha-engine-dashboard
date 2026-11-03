@@ -465,7 +465,10 @@ export interface Prepared {
 }
 
 /** Saves a check as ready to send, replacing an earlier one for the same log. */
-export async function prepare(i: cc.CheckInput & { draft_text?: unknown; channel_id?: unknown; thread_ts?: unknown }, opts: { dry_run?: boolean } = {}): Promise<{ ok: true; written: boolean; message: string; channel: string; thread_ts: string; log_url: string; check: cc.CodeCheck }> {
+export async function prepare(
+  i: cc.CheckInput & { draft_text?: unknown; channel_id?: unknown; thread_ts?: unknown },
+  opts: { dry_run?: boolean; dryRecord?: typeof cc.recordCheck; mark?: typeof reviewedOnCard } = {},
+): Promise<{ ok: true; written: boolean; message: string; channel: string; thread_ts: string; log_url: string; check: cc.CodeCheck; review_card?: { ok: boolean; detail: string } }> {
   const id = typeof i.codex_entry_id === 'string' ? i.codex_entry_id.trim() : '';
   const draft = typeof i.draft_text === 'string' ? i.draft_text.trim() : '';
   if (!OPENS_CHECK.test(draft) || !draft.includes(id)) throw new cc.CodeCheckError('bad_draft', 'draft_text is the check exactly as drafted on Slack: it opens "Code check:" and names the Codex ID, or the watch could not recognise it when it goes out.');
@@ -483,7 +486,7 @@ export async function prepare(i: cc.CheckInput & { draft_text?: unknown; channel
     ts = hit.ts;
   }
   const log_url = threadUrl(channel, ts);
-  const dry = await cc.recordCheck({ ...i, check_link: log_url }, { dry_run: true });
+  const dry = await (opts.dryRecord ?? cc.recordCheck)({ ...i, check_link: log_url }, { dry_run: true });
   const c = compareSent(draft, draft, dry.check.verdict as cc.Verdict, dry.check.pay_call as cc.PayCall);
   if (c.conflict) throw new cc.CodeCheckError('draft_disagrees', `The draft and the check say different things: ${c.conflict.replace('what went out', 'the draft')}.`);
   if (opts.dry_run) return { ok: true, written: false, message: `Dry run: ${id} would be saved as ready to send in ${channel}, thread ${ts}.`, channel, thread_ts: ts, log_url, check: dry.check };
@@ -496,7 +499,12 @@ export async function prepare(i: cc.CheckInput & { draft_text?: unknown; channel
        sent_text = NULL, sent_differs = NULL, recorded_at = NULL, detail = NULL`,
     [id, JSON.stringify(check), draft, channel, ts, dry.check.recorded_by],
   );
-  return { ok: true, written: true, message: `${id} is ready to send. Sending it from Slack records it; nothing else is needed.`, channel, thread_ts: ts, log_url, check: dry.check };
+  // The review is done once the check is drafted, so the card says so now. Sending is what records it.
+  const review_card = await (opts.mark ?? reviewedOnCard)(dry.check, 'check drafted');
+  return {
+    ok: true, written: true, channel, thread_ts: ts, log_url, check: dry.check, review_card,
+    message: `${id} is ready to send and ${review_card.ok ? 'its card is marked reviewed' : `its card could not be marked: ${review_card.detail}`}. Sending it from Slack records it; nothing else is needed.`,
+  };
 }
 
 async function settle(id: string, state: string, detail: string, sent?: { ts: string; link: string; text: string; differs: boolean }): Promise<void> {
@@ -518,10 +526,27 @@ async function raise(id: string, p: Prepared, text: string, post: Poster): Promi
   }
 }
 
+/** Hours a saved check may sit unsent before the card's thread says so, once. */
+export const UNSENT_AFTER_HOURS = 6;
+
+/**
+ * Marking the card at the draft stops its reminders, so a draft nobody sends would otherwise go quiet
+ * while the log still waits. One line in the card's thread; the claim is an event, given back if the post fails.
+ */
+async function nudgeUnsent(id: string, p: Prepared, preparedEpoch: number, post: Poster, now = Date.now()): Promise<void> {
+  if (now - preparedEpoch * 1000 < UNSENT_AFTER_HOURS * 3_600_000) return;
+  const key = `code_check_unsent:${id}:${Math.floor(preparedEpoch)}`;
+  const claim = await record({ event_type: 'code_check_draft_unsent', subject_id: id, lane: 'BAYS', actor: 'code-check-watch', detail: { prepared_at: p.prepared_at }, dedupe_key: key });
+  if (!claim.recorded) return;
+  const card = await cardFor(id);
+  const sent = card ? await post(card.channel, `<@${p.prepared_by}> The code check on ${id} was drafted ${UNSENT_AFTER_HOURS} hours ago and has not been sent, so it is not recorded. Send it from your drafts.`, undefined, card.ts) : { ok: false, detail: 'no card' };
+  if (!sent.ok) await query(`DELETE FROM engine_events WHERE dedupe_key = $1`, [key]);
+}
+
 export interface SentResult { ready: number; recorded: string[]; stopped: string[]; failed: string[]; unread: string[] }
 
 /** One pass over the ready checks. Reads only those threads. */
-export async function recordSent(opts: { post?: Poster; read?: typeof readSince; record?: typeof cc.recordCheck; after?: typeof afterRecord } = {}): Promise<SentResult> {
+export async function recordSent(opts: { post?: Poster; read?: typeof readSince; record?: typeof cc.recordCheck; after?: typeof afterRecord; now?: number } = {}): Promise<SentResult> {
   const post = opts.post ?? slackPost;
   const read = opts.read ?? readSince;
   const out: SentResult = { ready: 0, recorded: [], stopped: [], failed: [], unread: [] };
@@ -543,7 +568,10 @@ export async function recordSent(opts: { post?: Poster; read?: typeof readSince;
       continue;
     }
     const m = seen.messages.find((x) => isSentCheck(x, id, row.prepared_by, after));
-    if (!m?.ts) continue;
+    if (!m?.ts) {
+      await nudgeUnsent(id, p, after, post, opts.now);
+      continue;
+    }
     const claim = await query(`UPDATE engine_code_check_prepared SET state = 'recording', claimed_at = now() WHERE codex_entry_id = $1 AND state = 'ready' RETURNING 1`, [id]);
     if (!claim.rows.length) continue;
     const sentText = m.text ?? '';
@@ -629,8 +657,13 @@ export async function markReviewed(input: { id: string; user_id: string; via?: s
 
 /** A recorded check marks its card reviewed. Never throws; never fails the check. */
 export async function reviewedByCheck(check: cc.CodeCheck): Promise<{ ok: boolean; detail: string }> {
+  return reviewedOnCard(check, `check recorded: ${cc.VERDICT_LABEL[check.verdict as cc.Verdict] ?? check.verdict}`);
+}
+
+/** Marks the card reviewed. Never throws: neither a save nor a recorded check fails over a card. */
+export async function reviewedOnCard(check: cc.CodeCheck, via: string): Promise<{ ok: boolean; detail: string }> {
   try {
-    const r = await markReviewed({ id: check.codex_entry_id, user_id: check.recorded_by, via: `check recorded: ${cc.VERDICT_LABEL[check.verdict as cc.Verdict] ?? check.verdict}`, tell: false });
+    const r = await markReviewed({ id: check.codex_entry_id, user_id: check.recorded_by, via, tell: false });
     if (r.body.reason === 'already_reviewed') return { ok: true, detail: 'the card was already marked reviewed' };
     return { ok: r.body.ok === true, detail: String(r.body.message ?? r.body.reason ?? '') };
   } catch (e) {

@@ -14292,3 +14292,10 @@ Intent:     Save Hardik's code check.
 Files:      server/src/codeChecks.ts, server/test/code-check-watch.test.cjs
 Problem:    prepare_code_check refused CODEX-20261102-UNKNOWN-hardik-bhatt-hero-bay-freshness-fix: "codex_entry_id is the log's Codex ID".
 Fix:        The pattern accepted lower case only; the engine really mints UNKNOWN in an ID when a builder name is missing. Kaiqi's check proved the send step live the same hour: sent 13:55 UTC, recorded 13:56, Codex, BHARAG and the card all landed.
+
+## 2026-11-03 15:50 — Saving a code check marks its card reviewed
+Intent:     Destiny asked that the card be marked reviewed at the moment the check is drafted, not by hand or only on send.
+Files:      server/src/codeCheckWatch.ts, server/src/mcp/codeCheckTools.ts, server/test/code-check-watch.test.cjs, CLAUDE.md
+Problem:    He was pressing Mark reviewed himself (Jegan's check, event at 14:41:36 UTC, via button). Marking at the draft stops the reminders, so a draft nobody sent would have gone quiet.
+Fix:        prepare() calls reviewedOnCard(check, 'check drafted') after the save. recordSent() posts one line in the card's thread when a saved draft is unsent after 6 hours (event code_check_draft_unsent, claim given back if the post fails).
+Decision:   A card that cannot be marked never loses the saved check; the answer says so. The log stays on the Code checks tab as waiting until the sent check records.

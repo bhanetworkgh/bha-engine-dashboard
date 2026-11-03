@@ -119,6 +119,51 @@ async function sendItAndTheRest() {
   pg.query = realQ;
 }
 
+/* 3 Nov 2026: drafting the check marks the card; a draft left unsent says so once. */
+async function draftMarksTheCard() {
+  const CX = 'CODEX-20261103-kaiqi-yang-front-door-human-gate';
+  const realQ = pg.query;
+  const realRecord = events.record;
+  const saved = []; const evs = new Set(); const posts = [];
+  pg.query = async (sql, p) => {
+    if (/INSERT INTO engine_code_check_prepared/.test(sql)) saved.push(p);
+    if (/SELECT codex_entry_id, check_input/.test(sql)) return { rows: [{ codex_entry_id: CX, check_input: {}, draft_text: 'x', channel: 'C1', thread_ts: '1.1', state: 'ready', prepared_by: DESTINY, prepared_at: 'x', epoch: '1000' }] };
+    if (/DELETE FROM engine_events/.test(sql)) { evs.delete(p[0]); return { rows: [] }; }
+    if (/INSERT INTO engine_events/.test(sql)) { const k = p.find((x) => typeof x === 'string' && x.startsWith('code_check_unsent:')); if (evs.has(k)) return { rows: [] }; evs.add(k); return { rows: [{ id: 1 }] }; }
+    if (/SELECT id::text, detail FROM engine_events/.test(sql)) return { rows: [{ id: '1', detail: { channel: 'C0CARD', ts: '7.7', due: {} } }] };
+    return { rows: [] };
+  };
+  try {
+    const marked = [];
+    const args = { codex_entry_id: CX, draft_text: `Code check: Kaiqi, ${CX}\nMatches the log\nPay as logged`, channel_id: 'C1', thread_ts: '1.1', verdict: 'matches', pay_call: 'as_logged', requester_user_id: DESTINY };
+    const deps = { dryRecord: async () => ({ check: { codex_entry_id: CX, recorded_by: DESTINY, verdict: 'matches', pay_call: 'as_logged' } }), mark: async (c, via) => { marked.push({ id: c.codex_entry_id, via }); return { ok: true, detail: 'Marked reviewed.' }; } };
+    let r = await watch.prepare(args, { ...deps, dry_run: true });
+    assert.equal(marked.length, 0);
+    assert.equal(saved.length, 0);
+    ok('a dry run marks nothing');
+    r = await watch.prepare(args, deps);
+    assert.equal(saved.length, 1);
+    assert.deepEqual(marked, [{ id: CX, via: 'check drafted' }]);
+    assert.match(r.message, /marked reviewed/);
+    ok('saving the drafted check marks its card reviewed');
+    r = await watch.prepare(args, { ...deps, mark: async () => ({ ok: false, detail: 'chat.update refused' }) });
+    assert.equal(r.written, true);
+    assert.match(r.message, /could not be marked: chat\.update refused/);
+    ok('a card that cannot be marked never loses the saved check, and says so');
+    const pass = { post: async (c, text, b, ts) => { posts.push({ c, text, ts }); return { ok: true, detail: 'posted' }; }, read: async () => ({ ok: true, read_as: 'Bays', messages: [] }) };
+    await watch.recordSent({ ...pass, now: 1000 * 1000 + 5 * HOUR });
+    assert.equal(posts.length, 0);
+    await watch.recordSent({ ...pass, now: 1000 * 1000 + 6.1 * HOUR });
+    await watch.recordSent({ ...pass, now: 1000 * 1000 + 9 * HOUR });
+    assert.equal(posts.length, 1);
+    assert.match(posts[0].text, /has not been sent/);
+    ok('a draft left unsent says so once in the card thread after 6 hours');
+  } finally {
+    pg.query = realQ;
+    events.record = realRecord;
+  }
+}
+
 (async () => {
   /* 1. steps */
   assert.deepEqual([0, 1, 2.9, 3, 5.9, 6, 9, 24, 49].map(watch.stepFor), [0, 0, 0, 1, 1, 2, 3, 8, 16]);
@@ -317,6 +362,7 @@ async function sendItAndTheRest() {
   }
 
   await sendItAndTheRest();
+  await draftMarksTheCard();
 
   console.log(`\n${n} code check watch checks passed.`);
 })().catch((e) => {

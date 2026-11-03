@@ -115,7 +115,7 @@ export const recordCodeCheck: ToolDefinition = {
 
 export const prepareCodeCheck: ToolDefinition = {
   name: 'prepare_code_check',
-  description: `Save a code check as ready to send, once Destiny has heard it and agreed it. Give everything record_code_check takes except check_link, plus draft_text: the check exactly as it will be drafted on Slack. Answers with the channel and thread to draft into. When he sends that draft, the check records itself from his message (Codex, BHARAG, the review card) and a line confirms it in the thread, so do not call record_code_check afterwards. A verdict or pay call changed before sending stops it and says so. Preparing again replaces the earlier one.`,
+  description: `Save a code check as ready to send, once Destiny has heard it and agreed it. Give everything record_code_check takes except check_link, plus draft_text: the check exactly as it will be drafted on Slack. Marks the log's card reviewed at the same moment, since the review is done once the check is drafted. Answers with the channel and thread to draft into. When he sends that draft, the check records itself from his message (Codex, BHARAG, the review card) and a line confirms it in the thread, so do not call record_code_check afterwards. A verdict or pay call changed before sending stops it and says so. Preparing again replaces the earlier one.`,
   inputSchema: {
     type: 'object',
     properties: {

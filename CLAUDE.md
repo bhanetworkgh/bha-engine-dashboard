@@ -5217,6 +5217,10 @@ record.
   `ready` before anything is written, so one message cannot record twice. No Bays tag is needed.
   `POST /api/engine/code-check/prepare` (`x-dashboard-key`, `body_b64` accepted) is the same handler, for when the
   connector's tool list has not picked the tool up.
+  **Saving the check marks the card reviewed** (3 Nov 2026, Destiny): the review is done once the check is drafted, so
+  `prepare` calls `reviewedOnCard` (via `check drafted`), which stops the reminders; a card that cannot be marked never
+  loses the saved check and the answer says so. Sending is still what records it. A draft unsent after
+  `UNSENT_AFTER_HOURS` (6) says so once in the card's thread (`code_check_draft_unsent`).
 
 ### System registry
 **Four registries on one page** (decision 2026-09-14, Destiny) — Builders,
