@@ -3954,6 +3954,8 @@ root cause, the exact change, and a way back. So:
   healthy tone. Colour marks only what needs somebody: needing a person, and not
   repaired.
 
+**A repair report may arrive as `body_b64`** (3 Nov 2026, Destiny): base64 of the whole JSON body, on `POST /api/engine/repair` only, up to 4 MB, because a report quotes the failed run and Render's firewall refused REP-5AFqtZQaeKFFiGqe-63850 three times for what it quoted. The bridge sends it that way.
+
 **A settled fix is answered in its own card's thread** (20 Oct 2026, Destiny: "rather than dm me, let it
 notify the proof inside the thread on the self healing channel"). n8n's `BHA — Self Healer Reports` posts
 each repair card in #bha-self-healing; for a `repaired_pending` card it then calls

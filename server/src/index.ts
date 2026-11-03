@@ -157,6 +157,24 @@ function decodeFieldsB64(body: Record<string, unknown>): void {
   delete body.fields_b64;
 }
 
+/**
+ * `body_b64` on the repair report (3 Nov 2026, Destiny). A repair report quotes the failed run, and on
+ * 3 Nov Render's firewall refused REP-5AFqtZQaeKFFiGqe-63850 three times because of what it quoted, so the
+ * record never landed. The whole body may come as base64 of its JSON, which the firewall does not read.
+ */
+function decodeBodyB64(body: Record<string, unknown>): Record<string, unknown> {
+  if (body.body_b64 === undefined) return body;
+  if (typeof body.body_b64 !== 'string' || !body.body_b64.trim()) throw new HttpError(422, '"body_b64" must be base64 of the JSON body.');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(body.body_b64, 'base64').toString('utf8'));
+  } catch {
+    throw new HttpError(422, '"body_b64" did not decode to JSON.');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new HttpError(422, '"body_b64" must decode to a JSON object.');
+  return parsed as Record<string, unknown>;
+}
+
 function inboundOk(req: IncomingMessage): boolean {
   if (!INBOUND_KEY) return false;
   const given = req.headers['x-dashboard-key'];
@@ -670,7 +688,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     }
     if (p === '/api/engine/repair' || p === '/api/engine/repairs') {
       if (method !== 'POST') throw new HttpError(405, 'POST. An upsert on repair_id, so the same result twice updates rather than duplicating.');
-      const body = await readJson(req, 1024 * 1024);
+      const body = decodeBodyB64(await readJson(req, 4 * 1024 * 1024));
       try {
         const result = await repairs.store(body);
         await mirror.logWrite({

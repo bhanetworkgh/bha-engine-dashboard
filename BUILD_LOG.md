@@ -14228,3 +14228,10 @@ Registry:   Anthropic's record now distinguishes the earlier insufficient-credit
 - Full client/server build, provider routing fixtures, model usage pricing/dedupe fixtures, model-spend maths and draft-eval checks pass. Anthropic Admin account costs and remaining balance are not accessible with a standard inference key; missing usage stays unknown.
 
 - Follow-through: provider-neutral publish/strain descriptions; primary Anthropic draft evals no longer count as fallback strain, and forced fallback tests are excluded. Ask Bays default model label now reflects Haiku with Sonnet helper. Post-publication checks cover six agent routes, worker primary/fallback paths and the actual dashboard delivery entry. Detailed execution evidence remains in the internal change record. Native dashboard pattern draft returned Anthropic with a 2,358-token one-hour write.
+
+## 2026-11-03 12:30 — Repair reports past the firewall, Codex commits renamed
+Intent:     Destiny: finish the D1 clean-ups. Stop Render's firewall losing repair reports; show his name on the three Codex commits.
+Files:      server/src/index.ts, CLAUDE.md, docs/history/commit-map-2026-11-03.md
+Problem:    report.dashboard.refused status 403 on REP-5AFqtZQaeKFFiGqe-63850, three attempts: "blocked by this site's web application firewall", because the body quoted the failed run.
+Fix:        POST /api/engine/repair takes body_b64, base64 of the whole JSON body, up to 4 MB. The bridge sends it that way. Bays, North Star and Research Twin Agent Delivery send their ledger rows as fields_b64 (existing route).
+Decision:   main rewritten from b3874a3 so the three Codex commits read Destiny Arupi; tree identical. Map in docs/history. feature/focb-hero-bay and tmp-media-twin-import were not touched and still sit on the old ids.
