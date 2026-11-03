@@ -51,7 +51,7 @@ export const ASK_URL = process.env.ASK_BAYS_URL?.trim() || ASK_URL_FALLBACK;
 /** Whether the URL came from the environment or from the fallback above, for /api/status and the boot log. */
 export const ASK_URL_FROM_ENV = Boolean(process.env.ASK_BAYS_URL?.trim());
 const ASK_KEY = process.env.ASK_BAYS_API_KEY || null;
-export const MODEL_LABEL = process.env.ASK_BAYS_MODEL_LABEL || 'Claude Sonnet 5.0';
+export const MODEL_LABEL = process.env.ASK_BAYS_MODEL_LABEL || 'Claude Haiku 5.5 (Sonnet helper)' ;
 
 /**
  * The agent is synchronous and calls tools before answering. With ten tools a

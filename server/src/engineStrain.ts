@@ -68,15 +68,15 @@ export function assess(c: StrainCounts): StrainAssessment {
   const reasons: string[] = [];
   if (c.openrouter_held_now) reasons.push(`${c.openrouter_held_now} OpenRouter run(s) are held until the balance can pay for them${c.openrouter_balance_usd != null ? ` (last probe $${c.openrouter_balance_usd.toFixed(2)})` : ''}.`);
   if (c.credit_out_last_hour) reasons.push(`OpenRouter refused for credit ${c.credit_out_last_hour} time(s) in the last hour.`);
-  if (c.fallbacks_last_hour) reasons.push(`${c.fallbacks_last_hour} answer(s) in the last hour came from the Anthropic backup.`);
+  if (c.fallbacks_last_hour) reasons.push(`${c.fallbacks_last_hour} answer(s) in the last hour used the fallback provider.`);
   const now = c.openrouter_held_now > 0 || c.credit_out_last_hour > 0 || c.fallbacks_last_hour > 0;
   const earlier = c.credit_out_total > 0 || c.fallbacks_total > 0 || c.draft_evals_stopped_for_credit > 0;
   const state: StrainState = now ? 'strained' : earlier ? 'recovering' : 'normal';
   if (!now && c.credit_out_total) reasons.push(`OpenRouter refused for credit ${c.credit_out_total} time(s) in the last ${c.hours} hours, none in the last hour.`);
-  if (!now && c.fallbacks_total) reasons.push(`${c.fallbacks_total} answer(s) in the last ${c.hours} hours came from the Anthropic backup, none in the last hour.`);
+  if (!now && c.fallbacks_total) reasons.push(`${c.fallbacks_total} answer(s) in the last ${c.hours} hours used the fallback provider, none in the last hour.`);
   if (c.fallbacks_failed) reasons.push(`${c.fallbacks_failed} fallback(s) did not produce a real answer and were raised.`);
   if (c.fallbacks_unchecked) reasons.push(`${c.fallbacks_unchecked} fallback(s) were recorded before answers were checked, so whether they answered is not known.`);
-  if (c.draft_evals_on_backup) reasons.push(`${c.draft_evals_on_backup} draft eval run(s) ran on the Anthropic backup.`);
+  if (c.draft_evals_on_backup) reasons.push(`${c.draft_evals_on_backup} draft eval run(s) used a fallback copy.`);
   if (c.draft_evals_stopped_for_credit) reasons.push(`${c.draft_evals_stopped_for_credit} draft eval run(s) stopped for credit.`);
   if (c.voided_logs) reasons.push(`${c.voided_logs} parked Codex log(s) were voided (replaced or withdrawn); that is housekeeping, not strain.`);
 
@@ -114,7 +114,7 @@ const n = (v: unknown): number => Number(v ?? 0) || 0;
 /** The counts, read from the events, the recovery plan and the draft eval runs. */
 export async function read(hours = 24): Promise<StrainAssessment & { counts: StrainCounts; voided: Array<Record<string, unknown>>; recent_fallbacks: Array<Record<string, unknown>>; at: string }> {
   const h = Math.max(1, Math.min(168, Math.floor(hours) || 24));
-  const notTest = `coalesce(detail->>'test', 'false') <> 'true'`;
+  const notTest = `coalesce(detail->>'test', 'false') <> 'true' AND coalesce(detail->>'forced_test', 'false') <> 'true'`;
   const credit = await query<{ total: string; last_hour: string; latest: string | null }>(
     `SELECT count(*) AS total, count(*) FILTER (WHERE at > now() - interval '1 hour') AS last_hour,
             to_char(max(at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS latest
@@ -144,7 +144,7 @@ export async function read(hours = 24): Promise<StrainAssessment & { counts: Str
     [h],
   );
   const evals = await query<{ on_backup: string; stopped: string }>(
-    `SELECT count(*) FILTER (WHERE ran_on = 'Anthropic') AS on_backup, count(*) FILTER (WHERE state = 'stopped_credit') AS stopped
+    `SELECT count(*) FILTER (WHERE covers_agent_id IS NOT NULL) AS on_backup, count(*) FILTER (WHERE state = 'stopped_credit') AS stopped
        FROM engine_draft_eval_runs WHERE started_at > now() - make_interval(hours => $1::int)`,
     [h],
   );

@@ -109,7 +109,7 @@ export async function onVersionChange(input: { agent_id: string; name: string; f
  * publish". No such run, or a failing one, is said in the engine alerts
  * channel at once. The eval after the publish still runs either way.
  */
-const BACKUP_DETAIL = 'an Anthropic backup: the eval runner tests only the main agents, so this version is judged by its draft eval';
+const BACKUP_DETAIL = 'a backup provider copy: the eval runner tests the main agents; this version has its own draft and live-route evidence';
 
 async function draftCheck(versionRowId: string, input: { agent_id: string; name: string; to: string | null; from: string | null; config_hash: string | null }): Promise<void> {
   const v = await draftEval.verdictFor(input.agent_id, input.config_hash);
