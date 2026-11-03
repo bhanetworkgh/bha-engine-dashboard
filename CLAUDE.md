@@ -2962,6 +2962,12 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
   `close_on_reply`. Nothing else on a watch can be changed. Each change is a
   line in its history and one `decision_watch_updated` event with the old and
   new value.
+- **A linked loop or task can come off a watch** (3 Nov 2026, Jason on DW-1793619895309-KUQN: it must not
+  close with LOOP-1791317275796-MPMD, and no tool could say so; the one-watch-per-decision rule also refused a
+  replacement). `update_decision_watch` with `unlink_record: true` clears the record, so it stops restarting the
+  wait and stops closing the watch, and the watch closes on proof alone. Destiny or Jason only, because it
+  removes a way a watch closes; refused `no_thread` on a watch with no thread, whose record is all it can read.
+  A history line and one `decision_watch_updated` event. `npm run test:decision-watch-unlink`.
 - **A decision with more than one part is not closed by the first reply**
   (14 Oct 2026, Destiny; migration 75, `close_on_reply`, default true).
   `open_decision_watch` or `update_decision_watch` with `close_on_reply: false`

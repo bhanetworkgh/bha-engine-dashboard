@@ -301,7 +301,7 @@ export const closeDecisionWatch: ToolDefinition = {
 export const updateDecisionWatch: ToolDefinition = {
   name: 'update_decision_watch',
   description:
-    'Set or add to the references on a watch that is still open, by its watch_id (DW-…): sop_refs (the SOP title and BHARAG id its reminders point to), ns_refs (the North Star position) and next_step. Use it when an SOP is written, or found, after the watch was opened, so the next reminder names the rule and not only that the thread is quiet. Send only the fields to change. A field sent is ADDED to what the watch already holds (next_step as a new dated "Update" line under the old text, the references separated by "; "), so nothing already owed is lost; pass replace: true only when the old text must go, and then send the whole of what is still owed. An empty string clears a field. What is being waited on, the owner and the thread cannot be changed: that is a different watch. Only the person who asked for the watch, its owner, Destiny or Jason may change it. Every change is a dated line in the watch\'s history and a decision_watch_updated engine event carrying the old and new value. Returns {ok, changed, watch}. Audited on engine_mcp_writes.',
+    'Set or add to the references on a watch that is still open, by its watch_id (DW-…): sop_refs (the SOP title and BHARAG id its reminders point to), ns_refs (the North Star position) and next_step. Use it when an SOP is written, or found, after the watch was opened, so the next reminder names the rule and not only that the thread is quiet. Send only the fields to change. A field sent is ADDED to what the watch already holds (next_step as a new dated "Update" line under the old text, the references separated by "; "), so nothing already owed is lost; pass replace: true only when the old text must go, and then send the whole of what is still owed. An empty string clears a field. What is being waited on, the owner and the thread cannot be changed: that is a different watch. unlink_record: true takes the linked loop or task off the watch, so it stops closing with that record and closes on proof alone: only Destiny or Jason may ask for that, and a watch with no thread is refused. Otherwise only the person who asked for the watch, its owner, Destiny or Jason may change it. Every change is a dated line in the watch\'s history and a decision_watch_updated engine event carrying the old and new value. Returns {ok, changed, watch}. Audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -312,6 +312,7 @@ export const updateDecisionWatch: ToolDefinition = {
       append: { type: 'boolean', description: 'Kept for older callers: adding is the default now. append: false is the same as replace: true.' },
       replace: { type: 'boolean', description: 'Replace what is held instead of adding to it. Only when the old text must go; send everything still owed.' },
       close_on_reply: { type: 'boolean', description: 'No longer used (26 Oct 2026): no reply closes a watch. Leave it out.' },
+      unlink_record: { type: 'boolean', description: 'true takes the linked loop or task off the watch, so it closes on proof alone. Only when Destiny or Jason asked.' },
       requester_user_id: { type: 'string', description: 'Slack id of the person asking. Required.' },
       dry_run: { type: 'boolean' },
     },
@@ -327,17 +328,18 @@ export const updateDecisionWatch: ToolDefinition = {
       if (!USER_RE.test(requester)) return refuse('requester_required', '"requester_user_id" must be the Slack id (U…) of the person asking.');
       const changes: Partial<Record<dw.Updatable, string | null>> = {};
       for (const f of dw.UPDATABLE) if (typeof args[f] === 'string') changes[f] = args[f] as string;
-      if (!Object.keys(changes).length) return refuse('nothing_to_change', 'Send at least one of sop_refs, ns_refs or next_step. (close_on_reply is no longer used: no reply closes a watch.)');
+      const unlinkRecord = args.unlink_record === true;
+      if (!Object.keys(changes).length && !unlinkRecord) return refuse('nothing_to_change', 'Send at least one of sop_refs, ns_refs, next_step or unlink_record. (close_on_reply is no longer used: no reply closes a watch.)');
       const closeOnReply = undefined;
       const replace = args.replace === true || args.append === false;
-      if (args.dry_run === true) return { outcome: 'dry_run', detail: null, target: id, answer: { ok: true, dry_run: true, would_change: { watch_id: id, ...changes, mode: replace ? 'replace' : 'add', ...(closeOnReply !== undefined ? { close_on_reply: closeOnReply } : {}) } } };
-      const r = await dw.update(id, requester, changes, { replace, closeOnReply });
+      if (args.dry_run === true) return { outcome: 'dry_run', detail: null, target: id, answer: { ok: true, dry_run: true, would_change: { watch_id: id, ...changes, mode: replace ? 'replace' : 'add', ...(unlinkRecord ? { unlink_record: true } : {}), ...(closeOnReply !== undefined ? { close_on_reply: closeOnReply } : {}) } } };
+      const r = await dw.update(id, requester, changes, { replace, closeOnReply, unlinkRecord });
       if (!r.ok) return refuse(r.reason, r.message);
       return {
-        outcome: r.changed.length || r.flipped ? 'applied' : 'unchanged',
-        detail: r.changed.length || r.flipped ? `${id}: ${[...r.changed.map((c) => c.field), ...(r.flipped ? ['close_on_reply'] : [])].join(', ')} ${replace ? 'replaced' : 'updated'} by ${requester}${deps.agent ? ` through ${deps.agent}` : ''}` : `${id}: already holds this`,
+        outcome: r.changed.length || r.flipped || r.unlinked ? 'applied' : 'unchanged',
+        detail: r.changed.length || r.flipped || r.unlinked ? `${id}: ${[...r.changed.map((c) => c.field), ...(r.flipped ? ['close_on_reply'] : []), ...(r.unlinked ? [`unlinked ${r.unlinked}`] : [])].join(', ')} ${replace ? 'replaced' : 'updated'} by ${requester}${deps.agent ? ` through ${deps.agent}` : ''}` : `${id}: already holds this`,
         target: id,
-        answer: { ok: true, watch_id: id, changed: r.changed, watch: dw.show(r.watch), message: r.changed.length || r.flipped ? `${id} updated${replace ? ' (replaced)' : ', added to what it held'}. Its next reminder will carry this.` : `${id} already holds exactly this; nothing was changed.` },
+        answer: { ok: true, watch_id: id, changed: r.changed, watch: dw.show(r.watch), message: r.unlinked ? `${id} is no longer linked to ${r.unlinked}: it no longer closes with it, and closes on proof alone.` : r.changed.length || r.flipped ? `${id} updated${replace ? ' (replaced)' : ', added to what it held'}. Its next reminder will carry this.` : `${id} already holds exactly this; nothing was changed.` },
       };
     }),
 };

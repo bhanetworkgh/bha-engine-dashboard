@@ -422,7 +422,7 @@ export async function reopen(watchId: string, by: string, reason: string, now = 
 export const UPDATABLE = ['sop_refs', 'ns_refs', 'next_step'] as const;
 export type Updatable = (typeof UPDATABLE)[number];
 export type UpdateResult =
-  | { ok: true; watch: WatchRow; changed: Array<{ field: Updatable; from: string | null; to: string | null }>; flipped?: boolean }
+  | { ok: true; watch: WatchRow; changed: Array<{ field: Updatable; from: string | null; to: string | null }>; flipped?: boolean; unlinked?: string | null }
   | { ok: false; reason: string; message: string };
 
 /**
@@ -433,14 +433,24 @@ export type UpdateResult =
  * where are what the watch *is*, and changing those is a new watch. `append`
  * adds to what is held instead of replacing it. Every change is a dated line in
  * the watch's history and one `decision_watch_updated` event with both values.
+ *
+ * `unlinkRecord` takes the linked loop or task off the watch (3 Nov 2026, Jason on
+ * DW-1793619895309-KUQN: it must not close when LOOP-1791317275796-MPMD closes,
+ * and no tool could say so). Destiny or Jason only, because it removes a way a
+ * watch closes. The record's changes stop restarting the wait and its close stops
+ * closing the watch, so it then closes on proof alone. Refused on a watch with no
+ * thread: the record would be the only thing it could read.
  */
-export async function update(watchId: string, by: string, changes: Partial<Record<Updatable, string | null>>, opts: { append?: boolean; replace?: boolean; closeOnReply?: boolean } = {}, now = new Date()): Promise<UpdateResult> {
+export async function update(watchId: string, by: string, changes: Partial<Record<Updatable, string | null>>, opts: { append?: boolean; replace?: boolean; closeOnReply?: boolean; unlinkRecord?: boolean } = {}, now = new Date()): Promise<UpdateResult> {
   const found = await query<WatchRow>(`SELECT * FROM engine_decision_watches WHERE watch_id = $1`, [watchId]);
   const w = found.rows[0];
   if (!w) return { ok: false, reason: 'not_found', message: `No watch has the id "${watchId}". Use list_decision_watches to find it.` };
   if (w.status !== 'watching') return { ok: false, reason: 'already_closed', message: `${watchId} is ${w.status}, so its reminders are over and there is nothing to attach a reference to.` };
   const may = by === w.created_by || by === w.owner_user_id || (APPROVERS as readonly string[]).includes(by);
   if (!may) return { ok: false, reason: 'not_permitted', message: `${watchId} can be changed by the person who asked for it, by its owner <@${w.owner_user_id}>, or by Destiny or Jason.` };
+  if (opts.unlinkRecord && !(APPROVERS as readonly string[]).includes(by)) return { ok: false, reason: 'not_permitted', message: `Only Destiny or Jason can take the linked record off ${watchId}, because that removes a way it closes.` };
+  if (opts.unlinkRecord && w.record_id && !w.thread_ts) return { ok: false, reason: 'no_thread', message: `${watchId} has no thread, so its linked ${w.record_id} is the only thing it can read. Open a watch on a thread instead.` };
+  const unlinked = opts.unlinkRecord && w.record_id ? w.record_id : null;
   const changed: Array<{ field: Updatable; from: string | null; to: string | null }> = [];
   for (const field of UPDATABLE) {
     if (!(field in changes)) continue;
@@ -460,7 +470,7 @@ export async function update(watchId: string, by: string, changes: Partial<Recor
   }
   // close_on_reply is history since 26 Oct 2026: no reply closes a watch, so there is nothing to flip.
   const flip = false;
-  if (!changed.length && !flip) return { ok: true, watch: w, changed, flipped: false };
+  if (!changed.length && !flip && !unlinked) return { ok: true, watch: w, changed, flipped: false, unlinked: null };
   const next = Object.fromEntries(changed.map((c) => [c.field, c.to])) as Partial<Record<Updatable, string | null>>;
   const lines = changed.map((c) =>
     c.from && c.to && c.to.startsWith(c.from)
@@ -468,6 +478,7 @@ export async function update(watchId: string, by: string, changes: Partial<Recor
       : `${c.field} ${c.from ? 'changed' : 'set'}${c.to ? ` to "${clip(c.to, 200)}"` : ' to nothing'}`,
   );
   if (flip) lines.push(opts.closeOnReply ? 'a reply from the owner now closes it' : 'more than one part: a reply from the owner no longer closes it');
+  if (unlinked) lines.push(`no longer linked to ${w.record_kind === 'loops' ? 'loop' : 'backlog task'} ${unlinked}: it closes on proof alone`);
   const line = lines.join('; ');
   const r = await query<WatchRow>(
     `UPDATE engine_decision_watches
@@ -475,15 +486,18 @@ export async function update(watchId: string, by: string, changes: Partial<Recor
             ns_refs = CASE WHEN $4::boolean THEN $5 ELSE ns_refs END,
             next_step = CASE WHEN $6::boolean THEN $7 ELSE next_step END,
             close_on_reply = CASE WHEN $9::boolean THEN $10 ELSE close_on_reply END,
+            record_kind = CASE WHEN $11::boolean THEN NULL ELSE record_kind END,
+            record_id = CASE WHEN $11::boolean THEN NULL ELSE record_id END,
+            record_hash = CASE WHEN $11::boolean THEN NULL ELSE record_hash END,
             history = history || $8::jsonb
       WHERE watch_id = $1 AND status = 'watching'
       RETURNING *`,
-    [watchId, 'sop_refs' in next, next.sop_refs ?? null, 'ns_refs' in next, next.ns_refs ?? null, 'next_step' in next, next.next_step ?? null, JSON.stringify([{ at: now.toISOString(), what: `updated by ${by}: ${line}` }]), flip, opts.closeOnReply === true],
+    [watchId, 'sop_refs' in next, next.sop_refs ?? null, 'ns_refs' in next, next.ns_refs ?? null, 'next_step' in next, next.next_step ?? null, JSON.stringify([{ at: now.toISOString(), what: `updated by ${by}: ${line}` }]), flip, opts.closeOnReply === true, Boolean(unlinked)],
   );
   if (!r.rows[0]) return { ok: false, reason: 'already_closed', message: `${watchId} closed while it was being changed. Nothing was changed.` };
   // Not deduped: every change is its own event.
-  await event('decision_watch_updated', r.rows[0], `dw:${watchId}:updated:${now.getTime()}:${Math.random().toString(36).slice(2, 8)}`, { by, changes: changed, ...(flip ? { close_on_reply: opts.closeOnReply } : {}) });
-  return { ok: true, watch: r.rows[0], changed, flipped: flip };
+  await event('decision_watch_updated', r.rows[0], `dw:${watchId}:updated:${now.getTime()}:${Math.random().toString(36).slice(2, 8)}`, { by, changes: changed, ...(flip ? { close_on_reply: opts.closeOnReply } : {}), ...(unlinked ? { unlinked_record: unlinked } : {}) });
+  return { ok: true, watch: r.rows[0], changed, flipped: flip, unlinked };
 }
 
 /* ---------------------------------------------------------------- snooze */
