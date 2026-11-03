@@ -14254,3 +14254,10 @@ Decision:   One decoder (decodeBodyB64), not a second per-field option.
 Intent:     A sweep of the 58 active workflows found 84 engine writes that are not encoded, about 25 of them carrying free text.
 Files:      server/src/index.ts, CLAUDE.md
 Fix:        decodeBodyB64 on POST and PATCH /api/engine/:kind and the Slack destination check; 512 KB limit because base64 grows the body by a third.
+
+## 2026-11-03 12:20 — D1 leftovers proved and closed in n8n
+Intent:     Prove the bridge key, the bridge report and the three ledgers on real requests, and finish the Anthropic wording.
+Files:      n8n only, this entry.
+Problem:    The proof surfaced "The BHARAG write guard did not answer ... 403 Blocked", and "Anthropic answer cut off at the length limit" on AI Classify Error (Build AI Payload max_tokens 150).
+Fix:        25 free-text engine writes across 14 workflows wrapped in body_b64 through the n8n API (node groups intact on every one). Classifier max_tokens 600. Dependency Probe checks Anthropic (execution 63947). Context Harvester calls Claude Sonnet 5 directly, three tries, no backup route. Agent Evals notes corrected by PUT, because the MCP tool cannot set notes.
+Decision:   The other 59 unencoded writes carry ids, statuses and short events, so they stay as they are. Two draft evals stalled for over 20 minutes on one call each; the service was restarted and they were run one agent at a time.
