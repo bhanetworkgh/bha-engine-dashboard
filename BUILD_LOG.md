@@ -14394,3 +14394,10 @@ Files:      server/src/mcp/findRecords.ts, server/src/mcp/agentDescriptions.ts, 
 Problem:    "loops filtered by builder_id \"U0BNQGG020Y\" returned 0 rows": rows hold the name kavin. Haiku's other errors: "data must have required property 'kind'", "data must NOT have additional properties".
 Fix:        builderIdValues matches a roster Slack id to the name as well as the id; a Slack id nothing is held under warns. The agent description states kind is required, shows one example, and says filters go inside filters.
 Decision:   The value sent stays beside the name, because profile builders, candidates and digests hold the Slack id itself.
+
+## 2026-11-04 16:55 — Bays: one Tool issue rule, tools loaded first, Slack files by the proper tool
+Intent:     Cut Bays' tool issues: badly formed lookups, workspace downloads of Slack files, and lines where nothing failed.
+Files:      n8n agents Nw5igXu4WWrjUMWB and PjKGbV4ZnH4YOfri (instructions only)
+Problem:    Haiku called find_records before loading it ("data must have required property 'kind'"), and section 2's "never leave it out" produced lines reading "Tool issue: none".
+Fix:        Section 2 now says a line is written only when a call failed and it changed what Bays could do. Added: load a tool before its first call, a correct find_records example, check rows against total, Slack files by read_slack_file. Eval DRAFT-202611041547-KSMN passed 16 of 20, no regressions; BAYS-DW-01 and SOP-01, 04, 05 were already failing. Published Bays 84e2ae92, backup 386a4abf. find_records by Slack id proved live: Kavin's U0BNQGG020Y returns 49 open loops.
+Decision:   Outcome "Answered with tool issues" is derived from the line in the reply, so the instruction drives it and the workflow was left alone.
