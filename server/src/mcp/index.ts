@@ -281,6 +281,11 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-11-04 (Destiny): Bays checks a claim against the live source: commit numbers, deploys, calls,
         // payments. Read only, allowlisted paths; people's numbers and emails are masked on an agent's token.
         'read_github', 'read_render', 'read_twilio', 'read_elevenlabs', 'read_stripe',
+        // 2026-11-04 (Destiny): the automatic code check runs on this token. Only the finished check comes back
+        // here; Destiny's Approve is what posts it.
+        'submit_code_check_draft',
+        // Reads the check needs beside the five above.
+        'read_open_loops', 'read_monitoring_twin', 'read_vfarm_history',
         // 2026-10-30: "Bays, register this tool in the dashboard" from Slack (Destiny). Reads and writes
         // the System Registry's services, endpoints and workflows; no secret is ever written (held on the
         // server), and remove and restore are Destiny's or Jason's.

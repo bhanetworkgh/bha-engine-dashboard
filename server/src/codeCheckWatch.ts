@@ -757,6 +757,12 @@ export async function bharagNote(check: cc.CodeCheck, opts: { dry_run?: boolean 
 
 /* ----------------------------------------------------------------- timer */
 
+/** The automatic check's pass, loaded late because codeCheckDraft imports this file. A failure never stops the watch. */
+async function draftSweep(): Promise<void> {
+  const d = await import('./codeCheckDraft');
+  await d.sweep().catch((e) => console.error(`[code-check-draft] sweep failed: ${e instanceof Error ? e.message : String(e)}`));
+}
+
 let timer: NodeJS.Timeout | null = null;
 let busy = false;
 export function startSweeping(): void {
@@ -772,6 +778,7 @@ export function startSweeping(): void {
       })
       .catch((e) => console.error(`[code-check-watch] sent pass failed: ${e instanceof Error ? e.message : String(e)}`))
       .then(() => run())
+      .then((r) => draftSweep().then(() => r))
       .then((r) => {
         if (r.sent.length || r.failed.length) console.log(`[code-check-watch] ${r.waiting} waiting: sent ${r.sent.map((x) => `${x.codex_entry_id}#${x.step}`).join(', ') || 'none'}; failed ${r.failed.length}`);
       })

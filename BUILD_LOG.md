@@ -14336,3 +14336,10 @@ Problem:    n8n test 66733: "This credential is configured to prevent use within
 Fix:        Five read tools, GET to allowlisted paths only, secrets redacted, people masked on agent tokens. twilio_admin for Destiny on the write connection, confirm required for a change.
 Decision:   Keys sit on this service and join the one MCP connection (Destiny's rule); the official GitHub and Render MCPs were not connected because Render's can deploy and replace environment variables. The npm registry was unreachable from this session, so the test ran on a TypeScript 6 build with pg stood in, and type checks were read for the new files only.
 
+## 2026-11-04 15:25 — The automatic code check, with Destiny on the last step
+Intent:     Destiny: the check should run itself from the moment Jason approves, land as a card like the log review, and post in the Codex thread when he clicks Approve. Bays posts it. Approve or Send notes, no reject.
+Files:      server/src/codeCheckDraft.ts, server/src/codeCheckBrief.ts, server/src/codeCheckWatch.ts, server/src/mcp/codeCheckTools.ts, server/src/mcp/index.ts, server/src/index.ts, server/src/migrations.ts (115), server/test/service-reads.test.cjs, CLAUDE.md
+Problem:    Every check was a session's work by hand, and the alert only said one was owed.
+Fix:        submit_code_check_draft, start_code_check, /api/engine/code-check/start and /api/engine/service-reads/check. n8n's Code Check — Run does the checking on Bays' token, so no new connection, key or service.
+Decision:   Send notes asks for a reply in the card's thread rather than opening a Slack box: a box needs Slack's three-second trigger id carried through two live workflows, a thread reply needs no change to them. Destiny may ask for the box later. Automatic starts stay off until the first log is proved. Only Destiny's click counts.
+

@@ -4227,6 +4227,26 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
     name: 'code checks carry the Bays summary',
     statements: [`ALTER TABLE engine_code_checks ADD COLUMN IF NOT EXISTS bays_summary jsonb`],
   },
+  {
+    id: 115,
+    name: 'automatic code check drafts',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_code_check_drafts (
+         codex_entry_id text PRIMARY KEY,
+         round integer NOT NULL DEFAULT 1,
+         state text NOT NULL,
+         builder text,
+         check_input jsonb,
+         draft_text text,
+         notes text,
+         card_channel text,
+         card_ts text,
+         notes_asked_ts text,
+         detail text,
+         started_at timestamptz NOT NULL DEFAULT now()
+       )`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

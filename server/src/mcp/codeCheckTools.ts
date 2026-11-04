@@ -13,6 +13,7 @@
  * Every write call is on engine_mcp_writes, kind code_checks, refused ones included.
  */
 import * as codeCheckWatch from '../codeCheckWatch';
+import * as draft from '../codeCheckDraft';
 import * as cc from '../codeChecks';
 import * as mirror from '../mirror';
 import { auditClose, auditOpen } from './writeTools';
@@ -236,5 +237,47 @@ export const syncCodeCheckToBharag: ToolDefinition = {
   },
 };
 
+export const submitCodeCheckDraft: ToolDefinition = {
+  name: 'submit_code_check_draft',
+  description: 'Hand back the finished automatic code check. Only while that round is running. Nothing reaches the builder: Bays posts it as a card in #bha-code-reviews for Destiny. Takes codex_entry_id, round, draft_text and the fields of a check. A refusal names what to fix; fix it and call again.',
+  inputSchema: {
+    type: 'object',
+    properties: { ...(prepareCodeCheck.inputSchema as { properties: Record<string, unknown> }).properties, round: { type: 'number' } },
+    required: ['codex_entry_id', 'round', 'draft_text', 'verdict', 'verdict_reason', 'claims', 'pay_call', 'approve', 'approve_why', 'lane_goal', 'lane_check'],
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false, title: 'Hand back an automatic code check' },
+  handler: async (args, deps) => {
+    const audit = await auditOpen({ tool: 'submit_code_check_draft', args, access: deps.access, kind: 'code_checks', requester: null, dry_run: false });
+    const r = await draft.submit(args);
+    await auditClose(audit, { outcome: r.ok ? 'updated' : 'refused', detail: String(r.message), natural_id: str(args, 'codex_entry_id') });
+    return { ...r, audit_id: audit };
+  },
+};
+
+export const startCodeCheck: ToolDefinition = {
+  name: 'start_code_check',
+  description: 'Run the automatic code check on one approved log now (codex_entry_id), or switch automatic starts on or off (auto: true or false; on covers logs approved from that moment). Destiny or Jason. Refused on any agent token. The check lands as a card in #bha-code-reviews.',
+  inputSchema: {
+    type: 'object',
+    properties: { codex_entry_id: { type: 'string' }, auto: { type: 'boolean' }, requester_user_id: { type: 'string' } },
+    required: ['requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Start the automatic code check' },
+  handler: async (args, deps) => {
+    const requester = str(args, 'requester_user_id');
+    const audit = await auditOpen({ tool: 'start_code_check', args, access: deps.access, kind: 'code_checks', requester, dry_run: false });
+    if (deps.agent || !cc.RECORDERS.has(requester)) {
+      await auditClose(audit, { outcome: 'refused', detail: 'not_permitted' });
+      return { ok: false, reason: 'not_permitted', message: 'Destiny or Jason, on the connector. Nothing was changed.', audit_id: audit };
+    }
+    const id = str(args, 'codex_entry_id');
+    const auto = typeof args.auto === 'boolean' ? await draft.setAuto(args.auto, requester) : undefined;
+    const r = id ? await draft.start(id) : { ok: true, message: auto ? `Automatic starts are on from ${auto}.` : 'Automatic starts are off.' };
+    await auditClose(audit, { outcome: r.ok ? 'updated' : 'refused', detail: r.message, natural_id: id || null });
+    return { ...r, auto_from: await draft.autoFrom(), audit_id: audit };
+  },
+};
+
 export const CODE_CHECK_READ_TOOLS: ToolDefinition[] = [readCodeChecks];
-export const CODE_CHECK_WRITE_TOOLS: ToolDefinition[] = [recordCodeCheck, prepareCodeCheck, writeAuditOutput, codeCheckAlertTrial, syncCodeCheckToBharag];
+export const CODE_CHECK_WRITE_TOOLS: ToolDefinition[] = [submitCodeCheckDraft, startCodeCheck, recordCodeCheck, prepareCodeCheck, writeAuditOutput, codeCheckAlertTrial, syncCodeCheckToBharag];

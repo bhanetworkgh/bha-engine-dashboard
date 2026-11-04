@@ -81,6 +81,8 @@ import * as codexGap from './codexGap';
 import * as renewalReminder from './renewalReminder';
 import * as codeCheckWatch from './codeCheckWatch';
 import * as codeCheckTools from './mcp/codeCheckTools';
+import * as codeCheckDraft from './codeCheckDraft';
+import * as serviceReads from './serviceReads';
 import * as sops from './sops';
 import { toolByName as mcpToolByName } from './mcp/tools';
 import { callerStore } from './mcp/caller';
@@ -686,6 +688,33 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       await mirror.logWrite({ endpoint, kind: 'code_checks', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: String((body as Record<string, unknown>).codex_entry_id ?? ''), outcome: out.ok ? 'updated' : 'rejected', detail: out.message ?? out.reason ?? null });
       return send(res, out.ok ? 200 : 422, out);
     }
+    // start_code_check's handler, for the same reason as above (4 Nov 2026).
+    if (p === '/api/engine/code-check/start') {
+      if (method !== 'POST') throw new HttpError(405, 'POST the start_code_check arguments.');
+      const body = decodeBodyB64(await readJson(req, 16 * 1024));
+      const out = (await codeCheckTools.startCodeCheck.handler(body as Record<string, unknown>, { access: 'write' } as never)) as { ok: boolean; reason?: string; message?: string };
+      await mirror.logWrite({ endpoint, kind: 'code_checks', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: String((body as Record<string, unknown>).codex_entry_id ?? ''), outcome: out.ok ? 'updated' : 'rejected', detail: out.message ?? out.reason ?? null });
+      return send(res, out.ok ? 200 : 422, out);
+    }
+    // One read per service, so a key is proved by a real answer (4 Nov 2026). Says what each answered, never a value.
+    if (p === '/api/engine/service-reads/check') {
+      if (method !== 'POST') throw new HttpError(405, 'POST with no body.');
+      const reads: Array<[serviceReads.Service, string, Record<string, string>]> = [
+        ['github', '/repos/bhanetworkgh/bhavfarm/commits', { per_page: '1' }],
+        ['github', '/repos/bhanetworkgh/bharag', {}],
+        ['render', '/services', { limit: '1' }],
+        ['twilio', '/Calls.json', { PageSize: '1' }],
+        ['twilio', '/monitor/v1/Alerts', { PageSize: '1' }],
+        ['elevenlabs', '/convai/conversations', { page_size: '1' }],
+        ['stripe', '/events', { limit: '1' }],
+      ];
+      const results = [];
+      for (const [service, path, q] of reads) {
+        const r = await serviceReads.read(service, path, q);
+        results.push({ service, path, ok: r.ok === true, status: r.status ?? null, reason: r.reason ?? null, chars: r.total_chars ?? null, message: r.ok === true ? null : r.message ?? null });
+      }
+      return send(res, 200, { ok: results.every((x) => x.ok), results });
+    }
     // The log form's field check, the same handler as test_submit_log (2026-10-21), for when the
     // connector's tool list has not picked the tool up. Same guards: Destiny or Jason, confirm
     // "TEST SUBMIT LOG", a broken submission only; audited on engine_mcp_writes and logged here.
@@ -1221,7 +1250,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       }
       // A vFarm gate card (2026-10-09, 7S0O) uses the same two buttons; its id starts VFP-.
       // A code check card (2 Nov 2026) has one button, Mark reviewed; its id starts CCR-.
-      const r = codeCheckWatch.isReviewId(approvalId)
+      const r = codeCheckDraft.isDraftId(approvalId)
+        ? await codeCheckDraft.click({ id: approvalId, decision, user_id: userId })
+        : codeCheckWatch.isReviewId(approvalId)
         ? await codeCheckWatch.markReviewed({ id: approvalId, user_id: userId })
         : vfarmGateAuto.isPromptId(approvalId)
         ? await vfarmGateAuto.decide({ prompt_id: approvalId, decision, user_id: userId })

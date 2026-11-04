@@ -1917,6 +1917,18 @@ customers' numbers and emails are masked. An unset key is `not_configured`. Keys
 Jason, audited kind `twilio`) uses `TWILIO_ADMIN_KEY_SID` and `TWILIO_ADMIN_KEY_SECRET`: a GET runs at once, a POST or
 DELETE only with `confirm: "<METHOD> <path>"`. `npm run test:service-reads`.
 
+**The automatic code check** (4 Nov 2026, Destiny: "why should I have to do the code checks manually"; Bays posts, he
+approves). `server/src/codeCheckDraft.ts`, its brief `server/src/codeCheckBrief.ts`, migration 115,
+`engine_code_check_drafts`. A log goes to n8n's `Code Check — Run` (`/webhook/code-check-run`), whose agent reads the
+log and the live services on Bays' token and hands the check back with `submit_code_check_draft`, checked like a
+recorded check. Bays posts a card in #bha-code-reviews with **Approve** and **Send notes**, Destiny's click only, value
+`CCD-<Codex ID>` on the approval card's two action ids, so the Front Door forwards it unchanged. Approve posts the
+check in the log's thread as Bays and records it (Codex, BHARAG, the alert card). Send notes asks in the card's thread;
+his next reply goes back to the agent and the next round replaces the card. There is no reject. A run silent for 30
+minutes is failed and raised. Automatic starts are off until `start_code_check` with `auto: true` (write connection, no
+agent's scope), and cover logs approved from then on; `codex_entry_id` runs one log by hand. A change to the format is
+made in the brief and in the bha-code-check skill together. `npm run test:service-reads`.
+
 **`close_incidents`, the Engine health close over MCP** (decision 2026-10-01,
 Destiny). `server/src/mcp/incidentTools.ts`, write connection only, calling
 `health.closeIncidents` — the function the page's close button calls — so the
