@@ -337,7 +337,7 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // events, alert history, layout), so Genie answers from what vFarm sent, never a guess.
         'read_vfarm_history',
         // 2026-10-27 (7RZT): "is the engine under strain?" is answered from read_engine_strain's audience
-        // lines, never from raw events: slower, nothing lost, a person answers; never "down".
+        // lines, never from raw events: slower, some may fail, a person answers; never "down".
         'read_engine_strain',
         // 2026-10-27: the CST help pages with their stage (draft, checked by Hardik, in cst-help-manuals),
         // so a draft is never quoted to a customer as final. Writing them stays with Destiny on the connector.
