@@ -281,7 +281,7 @@ export async function submit(i: cc.CheckInput & { draft_text?: unknown; round?: 
     throw e;
   }
   const m = cardBlocks({ codex_entry_id: id, builder: cur.builder, round: cur.round, draft_text: draft, log_url: post?.url ?? null, check });
-  if (cur.card_ts && cur.card_channel) await slack.botCall('chat.update', { channel: cur.card_channel, ts: cur.card_ts, ...settledBlocks(`Round ${cur.round - 1} was replaced by round ${cur.round}.`, cur.builder) });
+  if (cur.card_ts && cur.card_channel) await slack.botCall('chat.delete', { channel: cur.card_channel, ts: cur.card_ts });
   const posted = await slack.botCall('chat.postMessage', { channel: watch.CHANNEL(), text: m.text, blocks: m.blocks, unfurl_links: false, unfurl_media: false });
   if (!posted.ok) return { ok: false, reason: 'card_not_posted', raise: true, message: `Slack refused the card: ${String(posted.error)}` };
   await query(`UPDATE engine_code_check_drafts SET state = 'ready', check_input = $2::jsonb, draft_text = $3, card_channel = $4, card_ts = $5 WHERE codex_entry_id = $1`, [id, JSON.stringify(check), draft, watch.CHANNEL(), String(posted.ts)]);
