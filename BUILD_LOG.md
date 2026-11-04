@@ -14431,3 +14431,24 @@ Fix:        backupOutcome() words the recovering line from the counts: most answ
 Decision:   "Most" prints only where failures are under half of the fallbacks, so the wording cannot outrun the counts. The evidence figures on the Media Twin line are dated 3 Nov because they are fixed text. Whether Genie holds its own copy of the line was not checked.
 Test:       npm ci fails in this workspace ("Exit handler never called!"), so tsc did not run here. The 11 strain checks passed on a type-stripped copy of the file outside the repo; Render's build is the type check.
 Fix 2:      Live read: 107 fallbacks, 61 answered, 7 failed, 39 unchecked. "Most" now needs confirmed answers over half, not just few failures, so unchecked fallbacks cannot count toward it. read_engine_strain's description carried "nothing lost" too and was corrected (7149f08).
+
+## 2026-11-04 21:15 — QNDM drill run on production
+Intent:     Prove the doctrine alarm opens and clears for DW-1793202429141-VJU0.
+Files:      none; run_doctrine_drill run 20261104.
+Problem:    none.
+Fix:        INC-BAYS.DOCTRINE-003 opened 19:30:11 UTC, closed 19:30:44 after two healthy reads. Unchanged sweeps wrote nothing, no Research Twin job, drill doctrine retired. Audits 4866 to 4878; watch closed audit 4879.
+Decision:   Timer stays off: that still waits on the owner decision.
+
+## 2026-11-04 22:15 — Jegan's approved log finished after the Submit Actions failure
+Intent:     Jason's urgent ask, #bha-pipeline-errors 1793813202.149769.
+Files:      n8n only: Bays — Submit Actions (YTpezWSOIN6TNYcX) de900651 from the repair bridge. No repo code.
+Problem:    Execution 67761: "messages.1.content.2: `tool_use` ids must be unique" at BHA Orchestrator. A format slip after a tool call, repeated by retryOnFail. Row 438 (U0AF011R821_1793813009256) read Approved with no Codex Entry ID. REP-YTpezWSOIN6TNYcX-67761 fixed the parser but did not re-run the log. retry_incident refused: no retry row held (audit 4885).
+Fix:        Posted to BHA — Self Healer's Retry Now door (execution 68750); run 68756 succeeded, parser ran three times. CODEX-20261104-jeganathan-liveness-contract-shipped posted, pay row Monthly unpaid, INC-BAYS.CODEX-039 closed, retry row Recovered.
+Decision:   Retried from the failed step rather than replaying the approval, so Jason's confirmation was not repeated. The repair stays repaired_pending until an ordinary approval proves it; the bridge checks until 5 Nov 17:28 UTC. retry_incident has no way in for a run with no retry row: a gap to close.
+
+## 2026-11-04 22:30 — Tello registered; messages and decisions
+Intent:     Register the BHA US line and clear the waiting threads.
+Files:      registry row tello (audit 4891). No repo code.
+Problem:    No public Tello API found, so reading codes needs a forwarder on the phone; parked. OpenRouter's email could not be changed: no setting found, and linking Google said the address is tied to another account.
+Fix:        Security PIN left out of the registry; it belongs in Bitwarden. OpenRouter: Mercury card, auto top-up $50 at $20, passkey added to the Bitwarden login, LOOP-1793743648695-GULZ stays open for the email.
+Decision:   Keys: Bitwarden holds them by lane; a Key registry beside the Tool registry holds no values, because the dashboard has one shared login and agents read its database. Jason accepted it as canon. Owed next session: Key registry, backup test, marketing logging fix with the 2 Nov backfill, five read tools on Genie's token.
