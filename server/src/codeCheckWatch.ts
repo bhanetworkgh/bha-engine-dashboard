@@ -495,11 +495,13 @@ export interface Prepared {
 
 /** Saves a check as ready to send, replacing an earlier one for the same log. */
 export async function prepare(
-  i: cc.CheckInput & { draft_text?: unknown; channel_id?: unknown; thread_ts?: unknown },
-  opts: { dry_run?: boolean; dryRecord?: typeof cc.recordCheck; mark?: typeof reviewedOnCard } = {},
+  i: cc.CheckInput & { draft_text?: unknown; channel_id?: unknown; thread_ts?: unknown; readiness?: unknown; gate?: unknown; gate_ref?: unknown },
+  opts: { dry_run?: boolean; dryRecord?: typeof cc.recordCheck; mark?: typeof reviewedOnCard; gate?: typeof cc.checkGate } = {},
 ): Promise<{ ok: true; written: boolean; message: string; channel: string; thread_ts: string; log_url: string; check: cc.CodeCheck; review_card?: { ok: boolean; detail: string } }> {
   const id = typeof i.codex_entry_id === 'string' ? i.codex_entry_id.trim() : '';
   const draft = typeof i.draft_text === 'string' ? i.draft_text.trim() : '';
+  const broke = await (opts.gate ?? cc.checkGate)({ ...i, codex_entry_id: id, draft_text: draft });
+  if (broke) throw new cc.CodeCheckError(broke.reason, broke.message);
   if (!OPENS_CHECK.test(draft) || !draft.includes(id)) throw new cc.CodeCheckError('bad_draft', 'draft_text is the check exactly as drafted on Slack: it opens "Code check:" and names the Codex ID, or the watch could not recognise it when it goes out.');
   let channel = typeof i.channel_id === 'string' ? i.channel_id.trim() : '';
   let ts = typeof i.thread_ts === 'string' ? i.thread_ts.trim() : '';

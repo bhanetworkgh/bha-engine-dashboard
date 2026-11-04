@@ -137,7 +137,7 @@ async function draftMarksTheCard() {
   try {
     const marked = [];
     const args = { codex_entry_id: CX, draft_text: `Code check: Kaiqi, ${CX}\nMatches the log\nPay as logged`, channel_id: 'C1', thread_ts: '1.1', verdict: 'matches', pay_call: 'as_logged', requester_user_id: DESTINY };
-    const deps = { dryRecord: async () => ({ check: { codex_entry_id: CX, recorded_by: DESTINY, verdict: 'matches', pay_call: 'as_logged' } }), mark: async (c, via) => { marked.push({ id: c.codex_entry_id, via }); return { ok: true, detail: 'Marked reviewed.' }; } };
+    const deps = { gate: async () => null, dryRecord: async () => ({ check: { codex_entry_id: CX, recorded_by: DESTINY, verdict: 'matches', pay_call: 'as_logged' } }), mark: async (c, via) => { marked.push({ id: c.codex_entry_id, via }); return { ok: true, detail: 'Marked reviewed.' }; } };
     let r = await watch.prepare(args, { ...deps, dry_run: true });
     assert.equal(marked.length, 0);
     assert.equal(saved.length, 0);

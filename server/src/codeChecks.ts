@@ -65,6 +65,40 @@ export const MISSING_LABEL: Record<Missing, string> = {
   written_down: 'Written down so someone else could run it',
 };
 
+/**
+ * Jason's two rules on the review cards (4 Nov 2026, #bha-code-reviews 1793801806.859099), held here so a check that
+ * breaks one is refused rather than trusted to the wording. Customer ready follows gate state: a lane behind a stage
+ * gate is never called ready until that gate's loop is closed. What could not be checked is always stated.
+ */
+export const READINESS = ['no_gate', 'blocked_on_gate', 'customer_ready'] as const;
+export type Readiness = (typeof READINESS)[number];
+export const GATED_LANES = ['VFARM_HARDWARE', 'KIOSK', 'CAD_API', 'CST'] as const;
+export const DEFAULT_GATE = 'Stage 1 and Stage 2 (LOOP-1791428275782-TU4O)';
+
+/** Pure: why this check breaks Jason's rules, or null. gateClosed: the named gate loop reads Closed. */
+export function gateProblem(i: { readiness?: unknown; gate?: unknown; gate_ref?: unknown; couldnt_check?: unknown; draft: string; lanes: string; gateClosed: boolean }): { reason: string; message: string } | null {
+  const readiness = String(i.readiness ?? '');
+  const gate = String(i.gate ?? '').trim();
+  if (!String(i.couldnt_check ?? '').trim()) return { reason: 'coverage_missing', message: 'couldnt_check is required on every check. Name what could not be opened, or say "Nothing: every claim was opened at its source."' };
+  if (!/\*3\. What I couldn't check\*/i.test(i.draft)) return { reason: 'coverage_missing', message: `draft_text must carry the section "*3. What I couldn't check*" on every check.` };
+  if (!(READINESS as readonly string[]).includes(readiness)) return { reason: 'bad_readiness', message: `readiness is one of ${READINESS.join(', ')}.` };
+  const gated = GATED_LANES.some((l) => i.lanes.toUpperCase().includes(l));
+  if (gated && readiness === 'no_gate') return { reason: 'gate_required', message: `This log touches a gated lane (${i.lanes}). Set readiness to blocked_on_gate and name the gate, for example ${DEFAULT_GATE}.` };
+  if (readiness === 'blocked_on_gate' && (!gate || !/blocked on/i.test(i.draft))) return { reason: 'gate_not_named', message: 'blocked_on_gate needs gate, and draft_text must say "passes current tests but blocked on Stage gate X" (or that it does not pass yet and is blocked on it).' };
+  if (readiness === 'customer_ready' && gated && !i.gateClosed) return { reason: 'gate_not_passed', message: `${String(i.gate_ref ?? '') || 'No gate loop'} is not closed, so this cannot be called customer ready. Set readiness to blocked_on_gate.` };
+  const rest = i.draft.replace(/before it'?s customer[- ]ready/gi, '').replace(/not customer[- ]ready/gi, '');
+  if (readiness !== 'customer_ready' && /customer[- ]ready/i.test(rest)) return { reason: 'customer_ready_claimed', message: 'draft_text calls this customer ready while its readiness says otherwise. Say what it is blocked on.' };
+  return null;
+}
+
+/** Reads the log's lanes and the gate loop, then applies the rules. */
+export async function checkGate(i: CheckInput & { draft_text?: unknown; readiness?: unknown; gate?: unknown; gate_ref?: unknown }): Promise<{ reason: string; message: string } | null> {
+  const lanes = await query<{ l: string | null }>(`SELECT fields->>'Lanes Touched' AS l FROM engine_codex_submissions WHERE fields->>'Codex Entry ID' = $1 ORDER BY updated_at DESC LIMIT 1`, [String(i.codex_entry_id ?? '')]);
+  const ref = String(i.gate_ref ?? '').trim();
+  const loop = ref ? await query<{ s: string | null }>(`SELECT fields->>'Status' AS s FROM engine_loops WHERE natural_id = $1 ORDER BY updated_at DESC LIMIT 1`, [ref]) : null;
+  return gateProblem({ readiness: i.readiness, gate: i.gate, gate_ref: ref, couldnt_check: i.couldnt_check, draft: String(i.draft_text ?? ''), lanes: lanes.rows[0]?.l ?? '', gateClosed: loop?.rows[0]?.s === 'Closed' });
+}
+
 export const OUTPUT_KINDS = ['catalog', 'dod_checklist', 'v2_spec'] as const;
 export type OutputKind = (typeof OUTPUT_KINDS)[number];
 export const OUTPUT_STATUSES = ['not_started', 'drafting', 'ready_for_jason', 'accepted'] as const;

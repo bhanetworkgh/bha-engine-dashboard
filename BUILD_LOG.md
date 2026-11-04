@@ -14356,3 +14356,10 @@ Files:      server/src/codeCheckDraft.ts, server/src/codeCheckWatch.ts, server/t
 Problem:    The fields, section mrkdwn and result emoji read as noise. Each log also had two cards, the alert and the check.
 Fix:        richInline, richPart and richBody turn the check into rich_text blocks: one bullet list for the facts, a list for claims, paragraphs for prose. The post in the log's thread uses the same blocks. RULE is now 6, 6, 3. Where a check card exists the watch posts no alert card and reminds in that card's thread. A card deleted in Slack is reposted from the held check at the redraw, so nothing was run again (card style v3).
 Decision:   Approve keeps Slack's primary style, the one colour on the card, so the action is plain to see.
+
+## 2026-11-04 15:55 — Jason's two rules held in code on the code check
+Intent:     Jason on the announcement: customer ready must follow gate state, and what could not be checked is never implied. Bays had told him both were locked, but it had only saved a note the check never reads.
+Files:      server/src/codeChecks.ts, server/src/codeCheckDraft.ts, server/src/codeCheckWatch.ts, server/src/codeCheckBrief.ts, server/src/mcp/codeCheckTools.ts, server/test/service-reads.test.cjs, CLAUDE.md, BUILD_LOG.md
+Problem:    Nothing stopped a check saying customer ready with a stage unpassed. Section 3 could be left out.
+Fix:        gateProblem is pure and refuses by name: coverage_missing, bad_readiness, gate_required, gate_not_named, gate_not_passed, customer_ready_claimed. checkGate reads the log's Lanes Touched and the gate loop. New required field readiness, with gate and gate_ref; the card shows a Readiness line.
+Decision:   The gated lanes are VFARM_HARDWARE, KIOSK, CAD_API and CST, and the default gate is TU4O, the one Jason named. Any other lane gate is his to add. The four cards already waiting are re-run so they carry the rule.

@@ -1917,6 +1917,8 @@ customers' numbers and emails are masked. An unset key is `not_configured`. Keys
 Jason, audited kind `twilio`) uses `TWILIO_ADMIN_KEY_SID` and `TWILIO_ADMIN_KEY_SECRET`: a GET runs at once, a POST or
 DELETE only with `confirm: "<METHOD> <path>"`. `npm run test:service-reads`.
 
+**Customer ready follows gate state, and coverage is always stated** (4 Nov 2026, Jason, #bha-code-reviews 1793801806.859099). `cc.gateProblem`, held in code on the automatic check and on `prepare_code_check`: a log touching `GATED_LANES` (VFARM_HARDWARE, KIOSK, CAD_API, CST) is `blocked_on_gate` until its gate loop (TU4O by default) is Closed; a draft that calls it customer ready otherwise is refused; `couldnt_check` is never empty and section 3 is on every check. These cards plus Destiny's Approve are Jason's source of truth for claims, pay and readiness.
+
 **The automatic code check** (4 Nov 2026, Destiny: "why should I have to do the code checks manually"; Bays posts, he
 approves). `server/src/codeCheckDraft.ts`, its brief `server/src/codeCheckBrief.ts`, migration 115,
 `engine_code_check_drafts`. A log goes to n8n's `Code Check — Run` (`/webhook/code-check-run`), whose agent reads the

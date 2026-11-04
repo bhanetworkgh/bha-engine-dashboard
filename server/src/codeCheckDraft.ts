@@ -156,7 +156,7 @@ export function richBody(text: string): unknown[] {
 }
 
 /** Pure: the card for one round: a header, the facts as a list, the check in rich text, then the buttons. No emoji and no colour but the one button. */
-export function cardBlocks(d: { codex_entry_id: string; builder: string | null; round: number; draft_text: string; log_url: string | null; check?: cc.CheckInput | null }): { text: string; blocks: unknown[] } {
+export function cardBlocks(d: { codex_entry_id: string; builder: string | null; round: number; draft_text: string; log_url: string | null; check?: (cc.CheckInput & { readiness?: unknown; gate?: unknown }) | null }): { text: string; blocks: unknown[] } {
   const who = d.builder ?? 'a builder';
   const verdictLabel = cc.VERDICT_LABEL[String(d.check?.verdict ?? '') as cc.Verdict] ?? null;
   const payLabel = cc.PAY_LABEL[String(d.check?.pay_call ?? '') as cc.PayCall] ?? null;
@@ -166,6 +166,7 @@ export function cardBlocks(d: { codex_entry_id: string; builder: string | null; 
     `*Codex ID:* \`${d.codex_entry_id}\``,
     ...(verdictLabel ? [`*Verdict:* ${verdictLabel}`] : []),
     ...(payLabel ? [`*Pay call:* ${payLabel}`] : []),
+    ...(d.check?.readiness === 'blocked_on_gate' ? [`*Readiness:* Blocked on ${String(d.check.gate ?? 'a stage gate')}`] : d.check?.readiness === 'customer_ready' ? ['*Readiness:* Customer ready, gate passed'] : []),
     ...(approve ? [`*Lane check:* ${approve === 'yes' ? 'Approve' : 'Do not approve'}`] : []),
     `*Round:* ${d.round}`,
   ];
@@ -259,13 +260,15 @@ async function logUrl(id: string): Promise<watch.LogPost | null> {
 }
 
 /** The agent hands the check back. Checked exactly as a recorded check is, so a bad one is refused before anyone sees it. */
-export async function submit(i: cc.CheckInput & { draft_text?: unknown; round?: unknown }): Promise<Record<string, unknown>> {
+export async function submit(i: cc.CheckInput & { draft_text?: unknown; round?: unknown; readiness?: unknown; gate?: unknown; gate_ref?: unknown }): Promise<Record<string, unknown>> {
   const id = typeof i.codex_entry_id === 'string' ? i.codex_entry_id.trim() : '';
   const cur = await byId(id);
   if (!cur || cur.state !== 'running') return { ok: false, reason: 'not_running', message: `No check is running for ${id}. Nothing was saved.` };
   if (Number(i.round) !== cur.round) return { ok: false, reason: 'wrong_round', message: `Round ${cur.round} is running, not ${String(i.round)}.` };
   const draft = typeof i.draft_text === 'string' ? i.draft_text.trim() : '';
   if (!watch.OPENS_CHECK.test(draft) || !draft.includes(id)) return { ok: false, reason: 'bad_draft', message: 'draft_text opens "*Code check:" and names the Codex ID.' };
+  const broke = await cc.checkGate(i);
+  if (broke) return { ok: false, ...broke, message: `${broke.message} Fix it and submit again.` };
   const { draft_text: _d, round: _r, ...fields } = i;
   const check = { ...fields, requester_user_id: cc.DESTINY };
   const post = await logUrl(id);

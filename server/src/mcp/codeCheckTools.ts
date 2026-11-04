@@ -126,10 +126,13 @@ export const prepareCodeCheck: ToolDefinition = {
     properties: {
       ...(recordCodeCheck.inputSchema as { properties: Record<string, unknown> }).properties,
       draft_text: { type: 'string', description: 'The check as drafted on Slack: opens "Code check:" and names the Codex ID.' },
+      readiness: { type: 'string', enum: [...cc.READINESS], description: `Jason's rule. no_gate only outside the gated lanes (${cc.GATED_LANES.join(', ')}). blocked_on_gate when the gate is not passed. customer_ready only when gate_ref is a closed loop.` },
+      gate: { type: 'string', description: `The stage gate by name, for example ${cc.DEFAULT_GATE}.` },
+      gate_ref: { type: 'string', description: 'The gate loop id, for example LOOP-1791428275782-TU4O.' },
       channel_id: { type: 'string', description: 'Only when the posted Codex cannot be found.' },
       thread_ts: { type: 'string', description: 'Only when the posted Codex cannot be found.' },
     },
-    required: ['codex_entry_id', 'draft_text', 'verdict', 'verdict_reason', 'claims', 'pay_call', 'approve', 'approve_why', 'lane_goal', 'lane_check', 'requester_user_id'],
+    required: ['codex_entry_id', 'draft_text', 'verdict', 'verdict_reason', 'claims', 'couldnt_check', 'readiness', 'pay_call', 'approve', 'approve_why', 'lane_goal', 'lane_check', 'requester_user_id'],
     additionalProperties: false,
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Save a code check as ready to send' },
@@ -243,7 +246,7 @@ export const submitCodeCheckDraft: ToolDefinition = {
   inputSchema: {
     type: 'object',
     properties: { ...(prepareCodeCheck.inputSchema as { properties: Record<string, unknown> }).properties, round: { type: 'number' } },
-    required: ['codex_entry_id', 'round', 'draft_text', 'verdict', 'verdict_reason', 'claims', 'pay_call', 'approve', 'approve_why', 'lane_goal', 'lane_check'],
+    required: ['codex_entry_id', 'round', 'draft_text', 'verdict', 'verdict_reason', 'claims', 'couldnt_check', 'readiness', 'pay_call', 'approve', 'approve_why', 'lane_goal', 'lane_check'],
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false, title: 'Hand back an automatic code check' },
   handler: async (args, deps) => {
