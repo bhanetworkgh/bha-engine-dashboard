@@ -100,7 +100,8 @@ check('no audience says nothing was lost, whatever the state', () => {
 });
 
 check('after a shortage Genie says what happened, from the counts', () => {
-  assert.match(assess({ ...base, fallbacks_total: 148, fallbacks_failed: 6 }).audiences.genie, /answered most requests, but some failed/);
+  assert.match(assess({ ...base, fallbacks_total: 148, fallbacks_answered: 142, fallbacks_failed: 6 }).audiences.genie, /answered most requests, but some failed/);
+  assert.match(assess({ ...base, fallbacks_total: 100, fallbacks_answered: 40, fallbacks_failed: 5, fallbacks_unchecked: 55 }).audiences.genie, /answered some requests, and others failed/);
   assert.match(assess({ ...base, fallbacks_total: 4, fallbacks_failed: 3 }).audiences.genie, /answered some requests, and others failed/);
   assert.match(assess({ ...base, fallbacks_total: 4 }).audiences.genie, /does not mean every request was answered/);
   assert.match(assess({ ...base, credit_out_total: 3 }).audiences.genie, /Some requests may not have been answered/);

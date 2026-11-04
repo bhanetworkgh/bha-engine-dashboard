@@ -113,7 +113,8 @@ export function assess(c: StrainCounts): StrainAssessment {
 function backupOutcome(c: StrainCounts): string {
   if (!c.fallbacks_total) return 'Some requests may not have been answered.';
   if (!c.fallbacks_failed) return 'Its backup took over, but that does not mean every request was answered.';
-  return c.fallbacks_failed * 2 < c.fallbacks_total
+  // "Most" needs confirmed answers: an unchecked fallback is not counted as one.
+  return c.fallbacks_answered * 2 > c.fallbacks_total
     ? 'Its backup answered most requests, but some failed.'
     : 'Its backup answered some requests, and others failed.';
 }
