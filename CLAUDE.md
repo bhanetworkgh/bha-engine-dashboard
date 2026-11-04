@@ -4483,6 +4483,19 @@ more, and the Media Twin rewrites the draft from it as the next revision, which 
 to a platform from here. The Media Twin page opens on **Drafts**; `read_media_posts` (both connections) is the read.
 The Media Twin agent has its own read-only token, `MCP_AGENT_TOKEN_MEDIA_TWIN`.
 
+**A reliability claim is a target until Stage 1 proves it** (4 Nov 2026, Jason, #bha-media-twin 1793801513.860909, after the 3 Nov soil
+probe failed unseen). A fourth claim state, `target`, migration 116. `claimCheck` marks "no surprises", "only runs when needed", "no stuck
+valves", "no puddles", "feels like an appliance / science project" and days-unattended lines (`TARGET`) when stated as today's behaviour;
+the same words beside a sentence saying what we are designing, building or testing (`FRAMED`, that sentence or the next) pass. Worded as a
+target, it is never a wording decision alone: `targetGate()` reads the live records, and a record it cannot read counts as not passed.
+It clears only when `LOOP-1791428275782-TU4O` is Closed, a real (non-fixture) Stage 1 record has passed, and a real cabinet log is saved
+with `save_evidence` under gate `vfarm_reliability_claim` (`TARGET_PROOF_GATE`, non-test). Cleared, the line is `flagged` for Jason.
+A target cannot be approved (`claim_target`, naming what is missing; the decisions table's CHECK holds it too), and `decide` runs the rules
+again at the click on the stored text, so a card drawn before a rule existed cannot pass it. The missing records are stored per platform as
+`target_gate`. The approval card shows every word of the post (split into blocks, never cut), the target and its reason, and only Reject,
+which rewrites it. The agent's instructions carry the rule: targets framed as targets, real incidents as material, work in progress said
+to be in progress. `read_media_posts` is in Bays' scope, so a claim is read whole. `npm run test:media-claims`.
+
 **T0NO, the doctrine read resolved to seven fields** (2026-10-09). `t0noPrimitive`
 (`server/src/systemFeeds.ts`) turns each claim in force into `maturity_state`,
 `claim_state`, `config_hash`, `cad_provenance`, `evidence_publication_status`,

@@ -224,6 +224,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       env: 'MCP_AGENT_TOKEN_BAYS',
       access: 'write',
       tools: new Set([
+        // 2026-11-04: the Media Twin's drafts whole, so a reliability claim is read in full, never from its hook.
+        'read_media_posts',
         'list_writable_kinds', 'find_records', 'create_record', 'update_record', 'archive_record', 'delete_record',
         'get_page_data', 'get_health', 'get_recovery_status', 'list_n8n_workflows', 'get_n8n_workflow',
         'read_slack_file', 'share_doc', 'grant_drive_access', 'create_doc', 'send_nudge', 'post_file',

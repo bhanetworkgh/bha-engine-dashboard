@@ -63,7 +63,7 @@ function DraftCard({ post }: { post: TwinDraft }) {
             <Pill>{OCCASION_LABEL[post.occasion] ?? post.occasion}</Pill>
             {post.revision > 1 ? <Pill>revision {post.revision}</Pill> : null}
             <Pill tone={post.status === 'approved' ? 'accent' : 'default'}>{STATUS_LABEL[post.status] ?? post.status}</Pill>
-            {post.claim_check_status === 'blocked' ? <Pill tone="failing">blocked claim</Pill> : post.claim_check_status === 'flagged' ? <Pill>flagged claim</Pill> : null}
+            {post.claim_check_status === 'blocked' ? <Pill tone="failing">blocked claim</Pill> : post.claim_check_status === 'target' ? <Pill tone="failing">target, not proven</Pill> : post.claim_check_status === 'flagged' ? <Pill>flagged claim</Pill> : null}
             {post.test ? <Pill>test</Pill> : null}
           </span>
         }
@@ -110,7 +110,7 @@ function DraftCard({ post }: { post: TwinDraft }) {
                 <ul className="list-disc pl-5 text-[12px] text-dim">
                   {d.claim_findings.map((f, i) => (
                     <li key={i}>
-                      <span className={f.status === 'blocked' ? 'text-failing' : ''}>{f.status}</span>: “{f.text}” — {f.why}
+                      <span className={f.status === 'blocked' || f.status === 'target' ? 'text-failing' : ''}>{f.status}</span>: “{f.text}” — {f.why}
                     </li>
                   ))}
                 </ul>

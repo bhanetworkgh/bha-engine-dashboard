@@ -4247,6 +4247,18 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
        )`,
     ],
   },
+  {
+    // 4 Nov 2026, Destiny (Jason, #bha-media-twin 1793801513.860909): a fourth claim state. A reliability claim
+    // stated as today's behaviour is `target` until Stage 1 evidence clears it, and a target cannot be approved,
+    // here as in mediaPosts.ts.
+    id: 116,
+    name: 'media post claim state target',
+    statements: [
+      `ALTER TABLE engine_media_posts DROP CONSTRAINT IF EXISTS engine_media_posts_claim_check_status_check`,
+      `ALTER TABLE engine_media_posts ADD CONSTRAINT engine_media_posts_claim_check_status_check CHECK (claim_check_status IN ('clean','flagged','target','blocked'))`,
+      `ALTER TABLE engine_media_post_decisions ADD CONSTRAINT engine_media_post_decisions_target_check CHECK (decision <> 'approve' OR claim_check_status <> 'target')`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

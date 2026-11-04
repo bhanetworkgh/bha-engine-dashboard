@@ -14,10 +14,14 @@
  *     A blocked platform cannot be approved.
  *   - flagged: a number about how the farm performs or what it earns (yield, revenue, cost,
  *     a percentage, a price). Approvable, but marked for Jason.
- *   - clean: neither.
+ *   - target (Jason, 4 Nov 2026, #bha-media-twin 1793801513.860909): a reliability claim stated as how vFarm
+ *     behaves today ("no surprises", "only runs when needed", "feels like an appliance"). Cannot be approved
+ *     until the live records say so: TU4O Closed, a real Stage 1 record passed, and a real cabinet log saved
+ *     as evidence under TARGET_PROOF_GATE. The same line framed as what we are building or testing is fine.
+ *   - clean: none of these.
  * No publish without a claim check and a recorded approver. Only Jason or Destiny decide.
  *
- * `claimCheck()` is pure, so the rules are tested without a database.
+ * `claimCheck()` is pure, so the rules are tested without a database; `targetGate()` reads the records.
  */
 import { query, withTransaction, type Queryable } from './pg';
 import { record } from './engineEvents';
@@ -41,13 +45,28 @@ export const BLOCKED: { id: string; re: RegExp; why: string }[] = [
   { id: 'fully_automated_farm', re: /fully[\s-]*automat(ed|ic)\s+(vertical\s+)?(farm|farming|grow)/i, why: 'vFarm is not a fully automated farm.' },
 ];
 
+/** Reliability claims: the contract vFarm is held to, not yet behaviour it has shown. */
+export const TARGET: { id: string; re: RegExp; why: string }[] = [
+  { id: 'no_surprises', re: /\bno\s+surprises?\b/i, why: '"No surprises" is the target, not proven behaviour.' },
+  { id: 'only_runs_when_needed', re: /\bonly\s+(runs?|turns?\s+on|waters?|starts?|comes?\s+on|kicks?\s+in)\b[^.!?\n]{0,70}\bwhen\b/i, why: '"Only runs when needed" is the plumbing contract under test, not proven behaviour.' },
+  { id: 'no_stuck_valves', re: /\bno\s+(stuck\s+valves?|valves?\s+stuck)\b|\bvalves?\s+(never|won'?t|can'?t|don'?t)\s+(sticks?|gets?\s+stuck)\b/i, why: '"No stuck valves" is a target, not proven behaviour.' },
+  { id: 'no_puddles', re: /\bno\s+(puddles?|leaks?|floods?|flooding|water\s+pooling|pooling)\b/i, why: '"No puddles" is a target, not proven behaviour.' },
+  { id: 'appliance_not_science_project', re: /\b(feels?|behaves?|works?|acts?)\s+like\s+an?\s+appliance\b|\bappliance,?\s+(not|instead\s+of)\b|\bmore\s+appliance\b|\bscience\s+project\b/i, why: '"An appliance, not a science project" is what vFarm is being built to be, not what it has shown.' },
+  { id: 'runs_unattended', re: /\b(for|after)\s+(two|three|four|several|a\s+few|\d+)\s+days\b[^.!?\n]{0,60}\b(no|without)\b|\bforget\s+to\s+check\b|\bwith(out)?\s+no\s+issues\b|\bwithout\s+(any\s+)?(issues?|problems?)\b/i, why: 'Running unattended for days has not been shown on a real cabinet.' },
+];
+
+/** A sentence that says this is the aim or the test, not the track record. Next to a claim, it makes the claim a target. */
+const FRAMED = /\b(we(['’]re| are)|i(['’]m| am))\s+(still\s+|now\s+)?(designing|building|testing|working\s+toward|aiming)\b|\b(what|how)\s+we(['’]re| are)\s+(building|designing|testing)\b|\bbeing\s+(built|designed|tested)\s+to\b|\b(the\s+)?(reliability\s+|plumbing\s+)?(rule|contract)\s+(we|that\s+we)\b|\bthe\s+target\b|\bour\s+target\b|\bin\s+stage\s*1\b|\b(not|n['’]t)\s+(yet\s+)?proven\b/i;
+
 /** Words that make a number a claim about how the farm performs or what it earns. */
 const PERFORMANCE = /\b(yield|yields|harvest|harvests|revenue|profit|profits|margin|roi|return|returns|earn|earns|earning|income|cost|costs|cheaper|save|saves|saving|savings|faster|more|less|times|grow|grows|growth|output|water|energy|kg|kilo|kilos|lbs|pounds|tons|tonnes|per\s+(month|year|week|day|square|sq))\b/i;
 const MONEY_OR_PCT = /[$€£₦]\s?\d|\d\s?(%|percent\b|x\b|×)/i;
 const HAS_NUMBER = /\d/;
 
+export type ClaimStatus = 'clean' | 'flagged' | 'target' | 'blocked';
+
 export interface ClaimFinding {
-  status: 'blocked' | 'flagged';
+  status: 'blocked' | 'target' | 'flagged';
   rule: string;
   text: string;
   why: string;
@@ -62,22 +81,76 @@ function sentences(text: string): string[] {
 }
 
 /** The claim check for one piece of text. Pure. */
-export function claimCheck(text: string): { status: 'clean' | 'flagged' | 'blocked'; findings: ClaimFinding[] } {
+export function claimCheck(text: string): { status: ClaimStatus; findings: ClaimFinding[] } {
   const findings: ClaimFinding[] = [];
   for (const b of BLOCKED) {
     const m = String(text || '').match(b.re);
     if (m) findings.push({ status: 'blocked', rule: b.id, text: m[0], why: b.why });
   }
+  const lines = sentences(String(text || '').replace(/\*/g, ''));
+  lines.forEach((line, i) => {
+    if (FRAMED.test(line) || FRAMED.test(lines[i + 1] ?? '')) return;
+    for (const t of TARGET) if (t.re.test(line)) findings.push({ status: 'target', rule: t.id, text: line.slice(0, 300), why: t.why });
+  });
   for (const s of sentences(text)) {
     if (MONEY_OR_PCT.test(s) || (HAS_NUMBER.test(s) && PERFORMANCE.test(s) && !/^\s*(day|part|step|week)\s*\d/i.test(s))) {
       findings.push({ status: 'flagged', rule: 'performance_or_revenue_number', text: s.slice(0, 300), why: 'A number about how the farm performs or what it earns: Jason checks it before it goes out.' });
     }
   }
-  const status = findings.some((f) => f.status === 'blocked') ? 'blocked' : findings.length ? 'flagged' : 'clean';
-  return { status, findings };
+  return { status: worst(findings.map((f) => f.status)), findings };
 }
 
-const worst = (a: string[]): 'clean' | 'flagged' | 'blocked' => (a.includes('blocked') ? 'blocked' : a.includes('flagged') ? 'flagged' : 'clean');
+function worst(a: string[]): ClaimStatus {
+  return a.includes('blocked') ? 'blocked' : a.includes('target') ? 'target' : a.includes('flagged') ? 'flagged' : 'clean';
+}
+
+/* ----------------------------------------------------------------- the target gate */
+
+export const STAGE_GATE_LOOP = 'LOOP-1791428275782-TU4O';
+/** The `gate` an evidence row is saved under to name a real cabinet log that proves a reliability claim. */
+export const TARGET_PROOF_GATE = 'vfarm_reliability_claim';
+
+export interface TargetGate {
+  cleared: boolean;
+  checks: { check: string; passed: boolean; detail: string }[];
+  missing: string[];
+  read_at: string;
+}
+
+/** Live records decide, never the wording. A record that cannot be read counts as not passed. */
+export async function targetGate(): Promise<TargetGate> {
+  const check = async (name: string, read: () => Promise<{ passed: boolean; detail: string }>) => {
+    try {
+      return { check: name, ...(await read()) };
+    } catch (e) {
+      return { check: name, passed: false, detail: `could not be read: ${(e as Error).message}` };
+    }
+  };
+  const checks = [
+    await check('stage_gate_loop', async () => {
+      const r = await query<{ status: string | null }>(`SELECT fields->>'Status' AS status FROM engine_loops WHERE natural_id = $1 ORDER BY updated_at DESC LIMIT 1`, [STAGE_GATE_LOOP]);
+      const status = r.rows[0]?.status ?? null;
+      return { passed: status === 'Closed', detail: status ? `${STAGE_GATE_LOOP} is ${status}` : `${STAGE_GATE_LOOP} is not held` };
+    }),
+    await check('stage1_record', async () => {
+      const r = await query<{ object_id: string }>(`SELECT object_id FROM engine_vfarm_gates WHERE kind = 'stage1' AND status = 'passed' AND is_fixture IS NOT TRUE ORDER BY updated_at DESC LIMIT 1`);
+      return { passed: r.rows.length > 0, detail: r.rows[0] ? `Stage 1 record ${r.rows[0].object_id} passed` : 'no real Stage 1 record has passed' };
+    }),
+    await check('cabinet_log', async () => {
+      const r = await query<{ evidence_id: string }>(`SELECT evidence_id FROM engine_evidence WHERE gate = $1 AND test = false ORDER BY saved_at DESC LIMIT 1`, [TARGET_PROOF_GATE]);
+      return { passed: r.rows.length > 0, detail: r.rows[0] ? `cabinet log ${r.rows[0].evidence_id}` : `no real cabinet log saved as evidence under ${TARGET_PROOF_GATE}` };
+    }),
+  ];
+  return { cleared: checks.every((c) => c.passed), checks, missing: checks.filter((c) => !c.passed).map((c) => c.detail), read_at: new Date().toISOString() };
+}
+
+/** What a target finding means once the records are read. Cleared, it is still marked for Jason. Pure. */
+export function settleTarget(findings: ClaimFinding[], gate: TargetGate): { status: ClaimStatus; findings: ClaimFinding[] } {
+  const next = findings.map((f) =>
+    f.status !== 'target' ? f : gate.cleared ? { ...f, status: 'flagged' as const, why: `${f.why} Stage 1 evidence clears it; Jason checks the wording.` } : { ...f, why: `${f.why} Rewrite it as what we are building or testing. Missing: ${gate.missing.join('; ')}.` },
+  );
+  return { status: worst(next.map((f) => f.status)), findings: next };
+}
 
 /* ----------------------------------------------------------------- shapes */
 
@@ -85,8 +158,10 @@ export interface PlatformDraft {
   text: string;
   thread: string[];
   publish_at: string | null;
-  claim_check_status: 'clean' | 'flagged' | 'blocked';
+  claim_check_status: ClaimStatus;
   claim_findings: ClaimFinding[];
+  /** The records read when a reliability claim was found: which gate failed. */
+  target_gate?: TargetGate;
   decision: 'pending' | 'approved' | 'rejected';
   decided_by: string | null;
   decided_at: string | null;
@@ -213,6 +288,16 @@ export async function create(input: CreateInput) {
     };
   }
   if (!Object.keys(platforms).length) refuse('missing_field', 'A draft needs text for at least one platform.');
+  if (Object.values(platforms).some((p) => p!.claim_check_status === 'target')) {
+    const gate = await targetGate();
+    for (const p of Object.values(platforms)) {
+      if (p!.claim_check_status !== 'target') continue;
+      const settled = settleTarget(p!.claim_findings, gate);
+      p!.claim_check_status = settled.status;
+      p!.claim_findings = settled.findings;
+      p!.target_gate = gate;
+    }
+  }
 
   return withTransaction(async (db) => {
     const parentId = s(input.parent_post_id, 40);
@@ -316,6 +401,20 @@ export async function decide(postId: string, input: DecideInput) {
     if (!p) refuse('not_found', `${postId} has no ${platform} draft.`, 404);
     if (decision === 'approve' && p!.claim_check_status === 'blocked')
       refuse('claim_blocked', `The ${platform} draft carries a blocked claim (${p!.claim_findings.filter((f) => f.status === 'blocked').map((f) => f.text).join('; ')}), so it cannot be approved. Reject it with a note and the Media Twin will rewrite it.`);
+    // The claim rules run again at the click, on the stored text, so a card drawn before a rule existed cannot pass it.
+    let effective: string = p!.claim_check_status;
+    if (decision === 'approve') {
+      const card = before!.card ?? {};
+      const again = claimCheck([...['kicker', 'headline', 'sub', 'foot'].map((k) => String(card[k] ?? '')), p!.text, ...(p!.thread ?? [])].join('\n'));
+      if (again.status === 'blocked') refuse('claim_blocked', `The ${platform} draft carries a blocked claim, so it cannot be approved. Reject it with a note and the Media Twin will rewrite it.`);
+      const targets = again.findings.filter((f) => f.status === 'target');
+      if (targets.length) {
+        const gate = await targetGate();
+        if (!gate.cleared)
+          refuse('claim_target', `The ${platform} draft states a target as fact ("${targets[0].text.slice(0, 120)}"), so it cannot be approved yet. Missing: ${gate.missing.join('; ')}. Reject it with a note and the Media Twin will rewrite it as what we are building and testing.`);
+        effective = 'flagged';
+      } else if (effective === 'target') effective = 'flagged';
+    }
     const now = new Date().toISOString();
     const nextPlatform: PlatformDraft = { ...p!, decision: decision === 'approve' ? 'approved' : 'rejected', decided_by: by, decided_at: now, note: note ?? p!.note };
     const platforms = { ...before!.platforms, [platform]: nextPlatform };
@@ -323,10 +422,10 @@ export async function decide(postId: string, input: DecideInput) {
     await db.query(`UPDATE engine_media_posts SET platforms = $2::jsonb, status = $3, updated_at = now() WHERE post_id = $1`, [postId, JSON.stringify(platforms), status]);
     await db.query(
       `INSERT INTO engine_media_post_decisions (post_id, platform, decision, decided_by, note, claim_check_status, via) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [postId, platform, decision, by, note, p!.claim_check_status, s(input.via, 60) ?? 'http'],
+      [postId, platform, decision, by, note, effective, s(input.via, 60) ?? 'http'],
     );
     await record(
-      { event_type: 'media_post_decided', subject_id: postId, lane: 'MEDIA', actor: by, source_ref: before!.slack_ts, detail: { schema: SCHEMA, platform, decision, note, claim_check_status: p!.claim_check_status, revision: before!.revision, test: before!.test } },
+      { event_type: 'media_post_decided', subject_id: postId, lane: 'MEDIA', actor: by, source_ref: before!.slack_ts, detail: { schema: SCHEMA, platform, decision, note, claim_check_status: effective, revision: before!.revision, test: before!.test } },
       db,
     );
     events.changed('media_posts', postId, db);
@@ -382,13 +481,14 @@ export async function read(input: { post_id?: string | null; status?: string | n
             count(*) FILTER (WHERE NOT test AND status = 'approved')::text AS approved,
             count(*) FILTER (WHERE NOT test AND status = 'rejected')::text AS rejected,
             count(*) FILTER (WHERE NOT test AND claim_check_status = 'blocked')::text AS blocked,
+            count(*) FILTER (WHERE NOT test AND claim_check_status = 'target')::text AS target,
             count(*) FILTER (WHERE test)::text AS tests
        FROM engine_media_posts`,
   );
   const k = c.rows[0] ?? {};
   return {
     schema: SCHEMA,
-    counts: { drafts: Number(k.drafts ?? 0), waiting_on_decision: Number(k.waiting ?? 0), approved: Number(k.approved ?? 0), rejected: Number(k.rejected ?? 0), blocked: Number(k.blocked ?? 0), test_drafts: Number(k.tests ?? 0) },
+    counts: { drafts: Number(k.drafts ?? 0), waiting_on_decision: Number(k.waiting ?? 0), approved: Number(k.approved ?? 0), rejected: Number(k.rejected ?? 0), blocked: Number(k.blocked ?? 0), target: Number(k.target ?? 0), test_drafts: Number(k.tests ?? 0) },
     posts: posts.map((p) => ({
       ...p,
       decisions: hist.rows.filter((h) => h.post_id === p.post_id).map((h) => ({ ...h, by_name: APPROVERS[h.decided_by] ?? h.decided_by, at: h.at instanceof Date ? h.at.toISOString() : String(h.at) })),
@@ -396,6 +496,7 @@ export async function read(input: { post_id?: string | null; status?: string | n
     })),
     rules: [
       'Blocked: "sensor-driven irrigation" and "fully automated farm" are not true of vFarm yet; a blocked platform cannot be approved.',
+      `Target: a reliability claim stated as today's behaviour ("no surprises", "only runs when needed", "feels like an appliance"); it cannot be approved until ${STAGE_GATE_LOOP} is Closed, a real Stage 1 record has passed and a real cabinet log is saved as evidence under ${TARGET_PROOF_GATE}. Framed as what we are building or testing, it is fine.`,
       'Flagged: a number about how the farm performs or what it earns; Jason checks it before approving.',
       'Only Jason or Destiny decide; a reject carries a note, and the Media Twin rewrites the draft from it as the next revision.',
       'Nothing is posted to a platform until posting is switched on; a decision here is the record that it may be.',

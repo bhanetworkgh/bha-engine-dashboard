@@ -15,7 +15,7 @@ const str = (args: Record<string, unknown>, key: string): string => (typeof args
 export const readMediaPosts: ToolDefinition = {
   name: 'read_media_posts',
   description:
-    'Read the Media Twin\'s drafts (media.post.v1), newest first: for each, the occasion and angle, the text for LinkedIn, X, Facebook and Instagram, the branded card and its image links, the claim check per platform (clean, flagged, blocked, with the sentence that tripped it), Jason\'s Approve or Reject per platform with his note, the revision and the draft it replaced, the Slack card, and analytics once posting is on. Use it to see what is waiting on Jason, what he rejected and why (read the notes before rewriting a draft), and what has been approved. Test drafts are left out unless include_test is true. Returns {schema, counts, posts, rules}.',
+    'Read the Media Twin\'s drafts (media.post.v1), newest first: for each, the occasion and angle, the text for LinkedIn, X, Facebook and Instagram, the branded card and its image links, the claim check per platform (clean, flagged, target, blocked, with the sentence that tripped it and, on a target, which Stage 1 records are missing), Jason\'s Approve or Reject per platform with his note, the revision and the draft it replaced, the Slack card, and analytics once posting is on. Use it to see what is waiting on Jason, what he rejected and why (read the notes before rewriting a draft), and what has been approved. Each post\'s text comes back whole. Test drafts are left out unless include_test is true. Returns {schema, counts, posts, rules}.',
   inputSchema: {
     type: 'object',
     properties: {

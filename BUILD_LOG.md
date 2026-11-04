@@ -14401,3 +14401,11 @@ Files:      n8n agents Nw5igXu4WWrjUMWB and PjKGbV4ZnH4YOfri (instructions only)
 Problem:    Haiku called find_records before loading it ("data must have required property 'kind'"), and section 2's "never leave it out" produced lines reading "Tool issue: none".
 Fix:        Section 2 now says a line is written only when a call failed and it changed what Bays could do. Added: load a tool before its first call, a correct find_records example, check rows against total, Slack files by read_slack_file. Eval DRAFT-202611041547-KSMN passed 16 of 20, no regressions; BAYS-DW-01 and SOP-01, 04, 05 were already failing. Published Bays 84e2ae92, backup 386a4abf. find_records by Slack id proved live: Kavin's U0BNQGG020Y returns 49 open loops.
 Decision:   Outcome "Answered with tool issues" is derived from the line in the reply, so the instruction drives it and the workflow was left alone.
+
+## 2026-11-04 17:40 — Media Twin: reliability claims are targets until Stage 1 proves them
+Intent:     Jason's notes on the 4 Nov draft (#bha-media-twin 1793801513.860909): separate target from status, use real incidents, tie the claim check to Stage 1, and show the whole post before approval.
+Files:      server/src/mediaPosts.ts, server/src/migrations.ts (116), server/src/mcp/index.ts, server/src/mcp/mediaPostsTools.ts, src/screens/MediaTwin/Drafts.tsx, server/test/media-claims.test.cjs, package.json, CLAUDE.md
+Problem:    MTP-1793790047912-QONB read clean: "No puddles. No stuck valve. No surprises." The check only knew two banned phrases and numbers. The agent's own instructions said never post about incidents and described vFarm as behaving like an appliance, which is the opposite of Jason's note.
+Fix:        A fourth state, target, gated on live records (TU4O Closed, a real Stage 1 pass, a real cabinet log saved as evidence under vfarm_reliability_claim), re-run at the Approve click on the stored text. The card shows all of the post and no Approve on a target.
+Decision:   The proof log is an engine_evidence row, the smallest record that already exists, so no new table. Framing is judged on the sentence and the one after it, because the accepted post opens "Only runs when needed." and frames it in the next sentence. "built" does not frame: "it's how vFarm's watering is built" is a claim about today.
+
