@@ -14343,3 +14343,9 @@ Problem:    Every check was a session's work by hand, and the alert only said on
 Fix:        submit_code_check_draft, start_code_check, /api/engine/code-check/start and /api/engine/service-reads/check. n8n's Code Check — Run does the checking on Bays' token, so no new connection, key or service.
 Decision:   Send notes asks for a reply in the card's thread rather than opening a Slack box: a box needs Slack's three-second trigger id carried through two live workflows, a thread reply needs no change to them. Destiny may ask for the box later. Automatic starts stay off until the first log is proved. Only Destiny's click counts.
 
+## 2026-11-04 16:20 — The code check card laid out as a review card
+Intent:     Destiny: "its not proper block kit". The card dumped the whole check as raw sections under one header.
+Files:      server/src/codeCheckDraft.ts, server/test/service-reads.test.cjs, BUILD_LOG.md
+Problem:    Nothing failed. The card simply was not built the way the log review card in #bha-log-reviews is.
+Fix:        draftParts reads the check into its parts. The card is now a header, the facts as fields (builder, Codex ID, verdict, pay call, lane check, round), a divider, one section per part with each claim marked by its result, a divider, an action line, and the buttons. A card still waiting is redrawn once on the next sweep (meta code_check.card_style).
+Decision:   The text Approve posts in the log's thread is unchanged: only the card's layout moved.

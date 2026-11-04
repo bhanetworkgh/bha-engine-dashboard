@@ -34,6 +34,8 @@ export const MAX_SECTION = 2900;
 export const MAX_SECTIONS = 40;
 const RUN_PATH = process.env.CODE_CHECK_RUN_PATH?.trim() || '/webhook/code-check-run';
 const AUTO_KEY = 'code_check.auto_from';
+const CARD_KEY = 'code_check.card_style';
+export const CARD_STYLE = 'v2';
 
 export interface DraftRow {
   codex_entry_id: string;
@@ -71,23 +73,76 @@ export function splitSections(text: string, max = MAX_SECTION): string[] {
   return out;
 }
 
-/** Pure: the card for one round. */
-export function cardBlocks(d: { codex_entry_id: string; builder: string | null; round: number; draft_text: string; log_url: string | null }): { text: string; blocks: unknown[] } {
+/** Pure: the check read back as its parts, so the card can lay them out. A heading is a line that is bold and nothing else. */
+export function draftParts(text: string): { title: string | null; verdict: string | null; sections: { heading: string | null; body: string }[] } {
+  const sections: { heading: string | null; lines: string[] }[] = [];
+  let title: string | null = null;
+  let verdict: string | null = null;
+  for (const line of text.split('\n')) {
+    const heading = /^\*([^*]+)\*\s*$/.exec(line.trim());
+    if (heading && /^code check:/i.test(heading[1])) { title = heading[1].trim(); continue; }
+    const v = /^\*Verdict:\*\s*(.+)$/i.exec(line.trim());
+    if (v && verdict === null) { verdict = v[1].trim(); continue; }
+    if (heading) { sections.push({ heading: heading[1].trim(), lines: [] }); continue; }
+    if (!sections.length) sections.push({ heading: null, lines: [] });
+    sections[sections.length - 1].lines.push(line);
+  }
+  return { title, verdict, sections: sections.map((p) => ({ heading: p.heading, body: p.lines.join('\n').trim() })).filter((p) => p.heading || p.body) };
+}
+
+/** Pure: a claim's bullet carries its result, the way a log review carries its verdict. */
+export function markClaims(body: string): string {
+  return body.split('\n').map((l) => {
+    const m = /^•\s*(\*[^*]+\*)\s*(Confirmed|Partly|Not found|Refuted|Contradicted)\b/i.exec(l);
+    if (!m) return l;
+    const r = m[2].toLowerCase();
+    const mark = r === 'confirmed' ? ':white_check_mark:' : r === 'partly' ? ':large_yellow_circle:' : ':red_circle:';
+    return l.replace(/^•\s*/, `${mark} `);
+  }).join('\n');
+}
+
+const VERDICT_MARK: Record<string, string> = { matches: ':white_check_mark:', partly: ':large_yellow_circle:', overstated: ':red_circle:' };
+
+/** Pure: the card for one round, laid out like the log review card: a header, the facts as fields, one section per part, then the action. */
+export function cardBlocks(d: { codex_entry_id: string; builder: string | null; round: number; draft_text: string; log_url: string | null; check?: cc.CheckInput | null }): { text: string; blocks: unknown[] } {
   const who = d.builder ?? 'a builder';
-  const parts = splitSections(d.draft_text);
-  const shown = parts.slice(0, MAX_SECTIONS);
+  const parts = draftParts(d.draft_text);
+  const verdictKey = String(d.check?.verdict ?? '');
+  const payKey = String(d.check?.pay_call ?? '');
+  const verdictLabel = cc.VERDICT_LABEL[verdictKey as cc.Verdict] ?? null;
+  const payLabel = cc.PAY_LABEL[payKey as cc.PayCall] ?? null;
+  const approve = typeof d.check?.approve === 'string' ? d.check.approve : null;
+  const fields = [
+    `*Builder:*\n${who}`,
+    `*Codex ID:*\n\`${d.codex_entry_id}\``,
+    ...(verdictLabel ? [`*Verdict:*\n${VERDICT_MARK[verdictKey] ?? ''} ${verdictLabel}`.trim()] : []),
+    ...(payLabel ? [`*Pay call:*\n${payLabel}`] : []),
+    ...(approve ? [`*Lane check:*\n${approve === 'yes' ? ':white_check_mark: Approve' : ':red_circle: Do not approve'}`] : []),
+    `*Round:*\n${d.round}`,
+  ];
+  const body: unknown[] = [];
+  if (parts.verdict) body.push({ type: 'section', text: { type: 'mrkdwn', text: `*Why this verdict*\n${parts.verdict}`.slice(0, MAX_SECTION) } });
+  for (const p of parts.sections) {
+    const text = `${p.heading ? `*${p.heading}*\n` : ''}${markClaims(p.body)}`.trim();
+    for (const piece of splitSections(text)) body.push({ type: 'section', text: { type: 'mrkdwn', text: piece } });
+  }
+  const shown = body.slice(0, MAX_SECTIONS);
   const blocks: unknown[] = [
-    { type: 'header', text: { type: 'plain_text', text: `Code check ready: ${who}`.slice(0, 150) } },
-    ...shown.map((t) => ({ type: 'section', text: { type: 'mrkdwn', text: t } })),
+    { type: 'header', text: { type: 'plain_text', text: ':mag: Code check review: action required', emoji: true } },
+    { type: 'section', fields: fields.map((text) => ({ type: 'mrkdwn', text })) },
+    { type: 'divider' },
+    ...shown,
+    { type: 'divider' },
+    { type: 'section', text: { type: 'mrkdwn', text: ':large_yellow_circle: *Action required: Destiny*' } },
     {
       type: 'actions',
       elements: [
-        { type: 'button', style: 'primary', text: { type: 'plain_text', text: 'Approve' }, value: `${DRAFT_PREFIX}${d.codex_entry_id}`, action_id: watch.ACTION_MARK },
-        { type: 'button', text: { type: 'plain_text', text: 'Send notes' }, value: `${DRAFT_PREFIX}${d.codex_entry_id}`, action_id: 'engine_approval_deny' },
+        { type: 'button', style: 'primary', text: { type: 'plain_text', text: ':white_check_mark: Approve', emoji: true }, value: `${DRAFT_PREFIX}${d.codex_entry_id}`, action_id: watch.ACTION_MARK },
+        { type: 'button', text: { type: 'plain_text', text: ':memo: Send notes', emoji: true }, value: `${DRAFT_PREFIX}${d.codex_entry_id}`, action_id: 'engine_approval_deny' },
         ...(d.log_url ? [{ type: 'button', text: { type: 'plain_text', text: 'Open the log' }, url: d.log_url, action_id: 'code_check_open_log' }] : []),
       ],
     },
-    { type: 'context', elements: [{ type: 'mrkdwn', text: `Round ${d.round}. Approve posts this in the log's thread as Bays. Send notes sends it back with your notes.${parts.length > shown.length ? ' It is too long for one card, so the end is cut here; Approve still posts all of it.' : ''}` }] },
+    { type: 'context', elements: [{ type: 'mrkdwn', text: `Approve posts this in the log's thread as Bays. Send notes sends it back with your notes.${body.length > shown.length ? ' It is too long for one card, so the end is cut here; Approve still posts all of it.' : ''}` }] },
   ];
   return { text: `Code check ready: ${who}, ${d.codex_entry_id}, round ${d.round}.`, blocks };
 }
@@ -179,7 +234,7 @@ export async function submit(i: cc.CheckInput & { draft_text?: unknown; round?: 
     if (e instanceof cc.CodeCheckError) return { ok: false, reason: e.reason, message: `${e.message} Fix it and submit again.` };
     throw e;
   }
-  const m = cardBlocks({ codex_entry_id: id, builder: cur.builder, round: cur.round, draft_text: draft, log_url: post?.url ?? null });
+  const m = cardBlocks({ codex_entry_id: id, builder: cur.builder, round: cur.round, draft_text: draft, log_url: post?.url ?? null, check });
   if (cur.card_ts && cur.card_channel) await slack.botCall('chat.update', { channel: cur.card_channel, ts: cur.card_ts, ...settledBlocks(`Round ${cur.round - 1} was replaced by round ${cur.round}.`, cur.builder) });
   const posted = await slack.botCall('chat.postMessage', { channel: watch.CHANNEL(), text: m.text, blocks: m.blocks, unfurl_links: false, unfurl_media: false });
   if (!posted.ok) return { ok: false, reason: 'card_not_posted', raise: true, message: `Slack refused the card: ${String(posted.error)}` };
@@ -260,8 +315,22 @@ export async function setAuto(on: boolean, by: string): Promise<string | null> {
   return from || null;
 }
 
+/** A card still waiting when the layout changes is redrawn once, so nobody decides on the old one. */
+async function redrawCards(): Promise<void> {
+  if ((await getMeta(CARD_KEY).catch(() => null)) === CARD_STYLE) return;
+  const ready = await query<DraftRow>(`SELECT ${COLS} FROM engine_code_check_drafts WHERE state = 'ready' AND card_ts IS NOT NULL`);
+  for (const d of ready.rows) {
+    const post = await logUrl(d.codex_entry_id);
+    const m = cardBlocks({ codex_entry_id: d.codex_entry_id, builder: d.builder, round: d.round, draft_text: d.draft_text ?? '', log_url: post?.url ?? null, check: d.check_input });
+    const r = await slack.botCall('chat.update', { channel: d.card_channel, ts: d.card_ts, text: m.text, blocks: m.blocks });
+    if (!r.ok) { console.error(`[code-check-draft] could not redraw ${d.codex_entry_id}: ${String(r.error)}`); return; }
+  }
+  await setMeta(CARD_KEY, CARD_STYLE);
+}
+
 /** One pass: notes that arrived, runs that went quiet, and new approvals once automatic starts are on. */
 export async function sweep(opts: { read?: typeof readSince; send?: Sender } = {}): Promise<void> {
+  await redrawCards();
   const read = opts.read ?? readSince;
   const waiting = await query<DraftRow>(`SELECT ${COLS} FROM engine_code_check_drafts WHERE state = 'awaiting_notes' AND notes_asked_ts IS NOT NULL`);
   for (const d of waiting.rows) {
