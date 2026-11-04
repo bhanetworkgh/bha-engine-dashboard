@@ -3101,7 +3101,7 @@ and parked logs voided (`layer0_log_voided`). **Strained** is something in the l
 **recovering** is earlier in the window only, else **normal**. `assess` is pure and holds the audience lines:
 the team gets the numbers; Genie, a pilot operator and an early buyer get the effect in plain words, never the
 mechanics and never "down"; the pilot and buyer lines never change, because a person answers both. The Media
-Twin line is a proposal and becomes a claim only through Hardik's doctrine feed. A voided log is housekeeping
+Twin line is a proposal and becomes a claim only through Hardik's doctrine feed. **No audience says nothing was lost** (4 Nov 2026, Jason on 3 Nov, #bha-media-twin 1793712008.785219): failed fallbacks are on record, so Genie's line says what the counts show and promises no uptime, and the Media Twin line holds the backup claim behind Jason's five conditions, with forced run 49651 labelled apart from natural run 60674. A voided log is housekeeping
 and never moves the state; Codex's Needs input tab lists voided logs with who, why and what replaced them.
 **The n8n backup's answer is checked** (same day): Mark Backup Answer in the three Agent Deliveries rejects a
 reply that only talks about an error payload or a missing request, takes its text out of the item so it cannot

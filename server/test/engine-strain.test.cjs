@@ -74,10 +74,37 @@ check('a voided log is named as housekeeping and alone does not make the engine 
   assert.match(a.audiences.team, /housekeeping, not strain/);
 });
 
-check('the Media Twin line allows the backup claim with its evidence and forbids uptime', () => {
+check('the Media Twin line holds the backup claim, labels the forced run and forbids uptime', () => {
   const a = assess(base);
-  assert.match(a.audiences.media_twin, /49651/);
+  assert.match(a.audiences.media_twin, /Nothing about backup providers may be said publicly yet/);
+  assert.match(a.audiences.media_twin, /forced run 49651/);
+  assert.match(a.audiences.media_twin, /natural run 60674/);
   assert.match(a.audiences.media_twin, /Not safe to claim: any uptime figure/);
+});
+
+check('no audience says nothing was lost, whatever the state', () => {
+  const states = [
+    base,
+    { ...base, credit_out_last_hour: 1, openrouter_held_now: 2 },
+    { ...base, credit_out_total: 3 },
+    { ...base, fallbacks_total: 148, fallbacks_failed: 6 },
+    { ...base, fallbacks_total: 4 },
+    { ...base, fallbacks_total: 4, fallbacks_failed: 3 },
+  ];
+  for (const c of states) {
+    const a = assess(c);
+    assert.doesNotMatch(a.summary, /nothing (is|was) lost/i);
+    assert.doesNotMatch(a.audiences.genie, /nothing (is|was) lost/i);
+    assert.doesNotMatch(a.audiences.team, /nothing (is|was) lost/i);
+  }
+});
+
+check('after a shortage Genie says what happened, from the counts', () => {
+  assert.match(assess({ ...base, fallbacks_total: 148, fallbacks_failed: 6 }).audiences.genie, /answered most requests, but some failed/);
+  assert.match(assess({ ...base, fallbacks_total: 4, fallbacks_failed: 3 }).audiences.genie, /answered some requests, and others failed/);
+  assert.match(assess({ ...base, fallbacks_total: 4 }).audiences.genie, /does not mean every request was answered/);
+  assert.match(assess({ ...base, credit_out_total: 3 }).audiences.genie, /Some requests may not have been answered/);
+  assert.doesNotMatch(assess({ ...base, fallbacks_total: 148, fallbacks_failed: 6 }).audiences.genie, /OpenRouter|Anthropic/);
 });
 
 console.log(`\n${passed} passed`);

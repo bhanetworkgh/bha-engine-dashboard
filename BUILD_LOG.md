@@ -14423,3 +14423,10 @@ Problem:    The backup's first run, DRAFT-202611041634-VIZY, read failed: 15 of 
 Fix:        Nothing changed. Ran the same config again: DRAFT-202611041640-H45D passed, 16 of 20, no regressions. Main agent DRAFT-202611041634-7FE4 passed, 16 of 20, no regressions. Published both and recorded the inventory for all four agents.
 Decision:   Published the backup on the rerun's pass and say so here, because one pass in two on a wording check is a flaky case, not a clean result. BAYS-DW-01 and BAYS-SOP-01, -04, -05 were already failing.
 
+## 2026-11-04 19:05 — Genie stops saying nothing was lost
+Intent:     Jason's ruling of 3 Nov (#bha-media-twin 1793712008.785219): Genie's strain line cannot stand, because failed fallbacks are recorded.
+Files:      server/src/engineStrain.ts, server/test/engine-strain.test.cjs, docs/contracts/genie-logstream-read.md, CLAUDE.md
+Problem:    assess() said "Nothing was lost." when recovering and "nothing is lost" when strained, for Genie and for the team summary. The Media Twin line also allowed the backup claim on eval 49651, 40 of 40, which is the forced run, while Jason has that line blocked.
+Fix:        backupOutcome() words the recovering line from the counts: most answered and some failed, some and others failed, backup took over with no promise every request was answered, or some may not have been answered. Strained reads "some may fail". The Media Twin line now says nothing may be said publicly yet, names the five conditions, and labels 49651 forced and 60674 natural.
+Decision:   "Most" prints only where failures are under half of the fallbacks, so the wording cannot outrun the counts. The evidence figures on the Media Twin line are dated 3 Nov because they are fixed text. Whether Genie holds its own copy of the line was not checked.
+Test:       npm ci fails in this workspace ("Exit handler never called!"), so tsc did not run here. The 11 strain checks passed on a type-stripped copy of the file outside the repo; Render's build is the type check.

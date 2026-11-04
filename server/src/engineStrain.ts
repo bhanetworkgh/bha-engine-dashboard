@@ -82,16 +82,16 @@ export function assess(c: StrainCounts): StrainAssessment {
 
   const summary =
     state === 'strained'
-      ? 'The engine is running short of AI credit or answering on its backup right now. Answers may be slower; nothing is lost.'
+      ? 'The engine is running short of AI credit or answering on its backup right now. Answers may be slower, and some may fail.'
       : state === 'recovering'
         ? `The engine ran short of AI credit or answered on its backup in the last ${c.hours} hours and is back to normal now.`
         : `The engine is running normally: no credit refusals, holds or backup answers in the last ${c.hours} hours.`;
 
   const genie =
     state === 'strained'
-      ? `Answers may be slower right now while the engine runs short of AI credit; nothing is lost${c.openrouter_held_now ? `, and ${c.openrouter_held_now} held run(s) will be re-run once it can pay` : ''}. If asked how it is answering: on its backup provider.`
+      ? `Answers may be slower right now while the engine runs short of AI credit, and some requests may fail${c.openrouter_held_now ? `. ${c.openrouter_held_now} held run(s) will be re-run once it can pay` : ''}. If asked how it is answering: on its backup provider.`
       : state === 'recovering'
-        ? 'The engine was short of AI credit earlier and is back to normal. Nothing was lost.'
+        ? `The engine was short of AI credit earlier and is back to normal. ${backupOutcome(c)}`
         : 'The engine is running normally.';
 
   return {
@@ -103,10 +103,19 @@ export function assess(c: StrainCounts): StrainAssessment {
       pilot_operator: PILOT_LINE,
       early_buyer: BUYER_LINE,
       media_twin:
-        'May say the engine\'s agents switch to a backup provider mid-run when the primary runs out (evidence: eval run 49651, 40 of 40). Not safe to claim: any uptime figure, or that the engine never stops.',
+        'Nothing about backup providers may be said publicly yet. Jason has blocked that line until KIYE is approved, the Mercury guardrail is live, Genie\'s wording is corrected, the claim check covers non-hardware claims, and one natural fallback has happened after Mercury. Internal evidence only, as of 3 Nov: forced run 49651 (40 of 40), natural run 60674 (36 of 40), 148 live fallbacks with 6 giving no answer. Not safe to claim: any uptime figure, any latency or success rate, or that nothing was lost.',
       genie,
     },
   };
+}
+
+/** What happened to requests during a shortage, from the counts; never a promise that none failed. */
+function backupOutcome(c: StrainCounts): string {
+  if (!c.fallbacks_total) return 'Some requests may not have been answered.';
+  if (!c.fallbacks_failed) return 'Its backup took over, but that does not mean every request was answered.';
+  return c.fallbacks_failed * 2 < c.fallbacks_total
+    ? 'Its backup answered most requests, but some failed.'
+    : 'Its backup answered some requests, and others failed.';
 }
 
 const n = (v: unknown): number => Number(v ?? 0) || 0;

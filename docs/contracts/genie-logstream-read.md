@@ -215,7 +215,7 @@ what each audience may be told. Call it with no arguments (24 hours) or with
 - `state` is `normal`, `strained` (a credit refusal or a backup answer in the
   last hour, or runs held now) or `recovering` (earlier in the window only).
 - `audiences.genie` is the line Genie gives, in substance. Outside the team the
-  line is the effect in plain words: answers may be slower, nothing is lost.
+  line is the effect in plain words: answers may be slower and some may fail.
   Never the mechanics (OpenRouter, Anthropic, 402, incidents) and never "down".
 - `audiences.pilot_operator` and `audiences.early_buyer` do not change with
   strain: a person stands in front of both.
