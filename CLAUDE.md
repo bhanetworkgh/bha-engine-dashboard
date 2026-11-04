@@ -1921,7 +1921,7 @@ DELETE only with `confirm: "<METHOD> <path>"`. `npm run test:service-reads`.
 approves). `server/src/codeCheckDraft.ts`, its brief `server/src/codeCheckBrief.ts`, migration 115,
 `engine_code_check_drafts`. A log goes to n8n's `Code Check — Run` (`/webhook/code-check-run`), whose agent reads the
 log and the live services on Bays' token and hands the check back with `submit_code_check_draft`, checked like a
-recorded check. Bays posts a card in #bha-code-reviews with **Approve** and **Send notes**, Destiny's click only, value
+recorded check. Bays posts a card in #bha-code-reviews, in rich text with no emoji (header, facts as a list, the check, buttons; `richBody`, also used for the post in the log's thread), with **Approve** and **Send notes**, Destiny's click only, value
 `CCD-<Codex ID>` on the approval card's two action ids, so the Front Door forwards it unchanged. Approve posts the
 check in the log's thread as Bays and records it (Codex, BHARAG, the alert card). Send notes asks in the card's thread;
 his next reply goes back to the agent and the next round replaces the card. There is no reject. A run silent for 30
@@ -5202,8 +5202,8 @@ record.
 - **The alert, the reminders and the note on the log** (29 Oct 2026, D6). `server/src/codeCheckWatch.ts`,
   a timer every 2 minutes over the same waiting list the tab shows. Each waiting log gets one DM to
   Destiny as Bays when Jason approves it (builder, Codex ID, approval time and the 48-hour deadline in
-  Lagos time, the log on the dashboard and its log channel), then a reminder every 3 hours, 4 at most
-  (about 12 hours), and nothing more after the fourth (Destiny, 29 Oct: quick, not a day). Each is a
+  Lagos time, the log on the dashboard and its log channel), then a reminder every 6 hours, 3 at most
+  (18 hours), and nothing more after the third (Destiny, 4 Nov; it was every 3 hours, 4 at most). **Under the automatic check there is no alert card**: the check's own card is the alert, and the reminders go in its thread until Approve records it. Each is a
   Block Kit card with a plain-text fallback (`slack.dm` takes optional blocks). Only the current step is sent, never
   a backlog. One DM per step: the claim is a `code_check_due_alerted` / `code_check_reminded` event keyed
   `code_check_due:<codex id>:<step>`, written before the DM; a DM Slack refuses deletes the claim and is
@@ -5228,7 +5228,7 @@ record.
   `codeCheckWatch.markReviewed`: Destiny or Jason only (anyone else is told privately), one
   `code_check_marked_reviewed` event per log, the card rewritten without the button. A reviewed log gets no
   more reminders; `record_code_check` marks its card reviewed too. **Marking reviewed records no check**: the
-  Code checks tab keeps the log waiting until one is recorded. A log past its four reminders with no card
+  Code checks tab keeps the log waiting until one is recorded. A log past its reminders with no card
   gets one card and nothing after. **The check also lands in BHARAG** (2 Nov 2026, Destiny — Jegan's edit-in-place, LOOP-1793257277585-KWV1, bharag2-v0.1.22 `PATCH /api/v1/documents/:id`): `codeCheckWatch.bharagNote` finds every document in the Codex workspace (key `ingestKeyVar('codex')`) whose metadata `codex_entry_id` is the entry and merges metadata `code_check` (verdict, pay call, reason, claims not confirmed, missing, link, at, by) onto it, same id, nothing else touched. `record_code_check` does it after every check and reports `bharag_note`, never failing the check; `sync_code_check_to_bharag` (write connection, Destiny or Jason, refused on agent tokens, `dry_run`) does it for a check already recorded. The key needs BHARAG's `documents:write`; a refusal names it. It moves only the alert's start, never later than 1 Nov,
   and the tab and its figures still start at 1 Nov. `npm run test:code-check-watch`.
 

@@ -35,7 +35,7 @@ export const MAX_SECTIONS = 40;
 const RUN_PATH = process.env.CODE_CHECK_RUN_PATH?.trim() || '/webhook/code-check-run';
 const AUTO_KEY = 'code_check.auto_from';
 const CARD_KEY = 'code_check.card_style';
-export const CARD_STYLE = 'v2';
+export const CARD_STYLE = 'v3';
 
 export interface DraftRow {
   codex_entry_id: string;
@@ -90,55 +90,98 @@ export function draftParts(text: string): { title: string | null; verdict: strin
   return { title, verdict, sections: sections.map((p) => ({ heading: p.heading, body: p.lines.join('\n').trim() })).filter((p) => p.heading || p.body) };
 }
 
-/** Pure: a claim's bullet carries its result, the way a log review carries its verdict. */
-export function markClaims(body: string): string {
-  return body.split('\n').map((l) => {
-    const m = /^•\s*(\*[^*]+\*)\s*(Confirmed|Partly|Not found|Refuted|Contradicted)\b/i.exec(l);
-    if (!m) return l;
-    const r = m[2].toLowerCase();
-    const mark = r === 'confirmed' ? ':white_check_mark:' : r === 'partly' ? ':large_yellow_circle:' : ':red_circle:';
-    return l.replace(/^•\s*/, `${mark} `);
-  }).join('\n');
+type Inline = Record<string, unknown>;
+const RICH_MAX = 2800;
+
+/** Pure: one line of Slack mrkdwn as rich text elements: bold, code, links and mentions. */
+export function richInline(line: string): Inline[] {
+  const out: Inline[] = [];
+  const re = /\*([^*\n]+)\*|`([^`\n]+)`|<(https?:[^|>]+)(?:\|([^>]+))?>|<@([UW][A-Z0-9]+)(?:\|[^>]*)?>|<#(C[A-Z0-9]+)(?:\|[^>]*)?>/g;
+  let at = 0;
+  for (let m = re.exec(line); m; m = re.exec(line)) {
+    if (m.index > at) out.push({ type: 'text', text: line.slice(at, m.index) });
+    if (m[1]) out.push({ type: 'text', text: m[1], style: { bold: true } });
+    else if (m[2]) out.push({ type: 'text', text: m[2], style: { code: true } });
+    else if (m[3]) out.push({ type: 'link', url: m[3], ...(m[4] ? { text: m[4] } : {}) });
+    else if (m[5]) out.push({ type: 'user', user_id: m[5] });
+    else if (m[6]) out.push({ type: 'channel', channel_id: m[6] });
+    at = m.index + m[0].length;
+  }
+  if (at < line.length) out.push({ type: 'text', text: line.slice(at) });
+  return out.length ? out : [{ type: 'text', text: ' ' }];
 }
 
-const VERDICT_MARK: Record<string, string> = { matches: ':white_check_mark:', partly: ':large_yellow_circle:', overstated: ':red_circle:' };
+const section = (lines: string[]): Inline => ({ type: 'rich_text_section', elements: lines.flatMap((l, i) => [...richInline(l), ...(i < lines.length - 1 ? [{ type: 'text', text: '\n' }] : [])]) });
+const list = (lines: string[]): Inline => ({ type: 'rich_text_list', style: 'bullet', elements: lines.map((l) => section([l])) });
 
-/** Pure: the card for one round, laid out like the log review card: a header, the facts as fields, one section per part, then the action. */
+/** Pure: one part of the check as rich text blocks. Bullets and "*Label:* value" lines are lists, the rest paragraphs. */
+export function richPart(heading: string | null, body: string): unknown[] {
+  const groups: { bullet: boolean; lines: string[] }[] = [];
+  for (const raw of body.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const bullet = /^[•\-]\s+/.test(line) || /^\*[^*]+:\*/.test(line);
+    const text = line.replace(/^[•\-]\s+/, '');
+    const last = groups[groups.length - 1];
+    if (last && last.bullet === bullet) last.lines.push(text);
+    else groups.push({ bullet, lines: [text] });
+  }
+  const blocks: unknown[] = [];
+  let cur: Inline[] = heading ? [{ type: 'rich_text_section', elements: [{ type: 'text', text: heading, style: { bold: true } }] }] : [];
+  let size = heading?.length ?? 0;
+  const flush = () => { if (cur.length) blocks.push({ type: 'rich_text', elements: cur }); cur = []; size = 0; };
+  const add = (el: Inline, n: number) => { if (size + n > RICH_MAX) flush(); cur.push(el); size += n; };
+  for (const g of groups) {
+    if (!g.bullet) { add(section(g.lines), g.lines.join('\n').length); continue; }
+    let batch: string[] = [];
+    let n = 0;
+    for (const l of g.lines) {
+      if (n + l.length > RICH_MAX && batch.length) { add(list(batch), n); batch = []; n = 0; }
+      batch.push(l);
+      n += l.length;
+    }
+    if (batch.length) add(list(batch), n);
+  }
+  flush();
+  return blocks;
+}
+
+/** Pure: the check as rich text, for the card and for the builder's thread. */
+export function richBody(text: string): unknown[] {
+  const parts = draftParts(text);
+  return [
+    ...(parts.verdict ? richPart('Verdict', parts.verdict) : []),
+    ...parts.sections.flatMap((p) => richPart(p.heading, p.body)),
+  ];
+}
+
+/** Pure: the card for one round: a header, the facts as a list, the check in rich text, then the buttons. No emoji and no colour but the one button. */
 export function cardBlocks(d: { codex_entry_id: string; builder: string | null; round: number; draft_text: string; log_url: string | null; check?: cc.CheckInput | null }): { text: string; blocks: unknown[] } {
   const who = d.builder ?? 'a builder';
-  const parts = draftParts(d.draft_text);
-  const verdictKey = String(d.check?.verdict ?? '');
-  const payKey = String(d.check?.pay_call ?? '');
-  const verdictLabel = cc.VERDICT_LABEL[verdictKey as cc.Verdict] ?? null;
-  const payLabel = cc.PAY_LABEL[payKey as cc.PayCall] ?? null;
+  const verdictLabel = cc.VERDICT_LABEL[String(d.check?.verdict ?? '') as cc.Verdict] ?? null;
+  const payLabel = cc.PAY_LABEL[String(d.check?.pay_call ?? '') as cc.PayCall] ?? null;
   const approve = typeof d.check?.approve === 'string' ? d.check.approve : null;
-  const fields = [
-    `*Builder:*\n${who}`,
-    `*Codex ID:*\n\`${d.codex_entry_id}\``,
-    ...(verdictLabel ? [`*Verdict:*\n${VERDICT_MARK[verdictKey] ?? ''} ${verdictLabel}`.trim()] : []),
-    ...(payLabel ? [`*Pay call:*\n${payLabel}`] : []),
-    ...(approve ? [`*Lane check:*\n${approve === 'yes' ? ':white_check_mark: Approve' : ':red_circle: Do not approve'}`] : []),
-    `*Round:*\n${d.round}`,
+  const facts = [
+    `*Builder:* ${who}`,
+    `*Codex ID:* \`${d.codex_entry_id}\``,
+    ...(verdictLabel ? [`*Verdict:* ${verdictLabel}`] : []),
+    ...(payLabel ? [`*Pay call:* ${payLabel}`] : []),
+    ...(approve ? [`*Lane check:* ${approve === 'yes' ? 'Approve' : 'Do not approve'}`] : []),
+    `*Round:* ${d.round}`,
   ];
-  const body: unknown[] = [];
-  if (parts.verdict) body.push({ type: 'section', text: { type: 'mrkdwn', text: `*Why this verdict*\n${parts.verdict}`.slice(0, MAX_SECTION) } });
-  for (const p of parts.sections) {
-    const text = `${p.heading ? `*${p.heading}*\n` : ''}${markClaims(p.body)}`.trim();
-    for (const piece of splitSections(text)) body.push({ type: 'section', text: { type: 'mrkdwn', text: piece } });
-  }
+  const body = richBody(d.draft_text);
   const shown = body.slice(0, MAX_SECTIONS);
   const blocks: unknown[] = [
-    { type: 'header', text: { type: 'plain_text', text: ':mag: Code check review: action required', emoji: true } },
-    { type: 'section', fields: fields.map((text) => ({ type: 'mrkdwn', text })) },
+    { type: 'header', text: { type: 'plain_text', text: `Code check: ${who}`.slice(0, 150) } },
+    { type: 'rich_text', elements: [list(facts)] },
     { type: 'divider' },
     ...shown,
     { type: 'divider' },
-    { type: 'section', text: { type: 'mrkdwn', text: ':large_yellow_circle: *Action required: Destiny*' } },
     {
       type: 'actions',
       elements: [
-        { type: 'button', style: 'primary', text: { type: 'plain_text', text: ':white_check_mark: Approve', emoji: true }, value: `${DRAFT_PREFIX}${d.codex_entry_id}`, action_id: watch.ACTION_MARK },
-        { type: 'button', text: { type: 'plain_text', text: ':memo: Send notes', emoji: true }, value: `${DRAFT_PREFIX}${d.codex_entry_id}`, action_id: 'engine_approval_deny' },
+        { type: 'button', style: 'primary', text: { type: 'plain_text', text: 'Approve' }, value: `${DRAFT_PREFIX}${d.codex_entry_id}`, action_id: watch.ACTION_MARK },
+        { type: 'button', text: { type: 'plain_text', text: 'Send notes' }, value: `${DRAFT_PREFIX}${d.codex_entry_id}`, action_id: 'engine_approval_deny' },
         ...(d.log_url ? [{ type: 'button', text: { type: 'plain_text', text: 'Open the log' }, url: d.log_url, action_id: 'code_check_open_log' }] : []),
       ],
     },
@@ -275,6 +318,13 @@ async function askForNotes(id: string, cur: DraftRow): Promise<ClickResult> {
   return { status: 200, body: { ok: true, done: true, raise: false, message: 'Waiting for notes.' } };
 }
 
+/** Pure: the title and the check as rich text for the builder's thread; plain text if it would not fit one message. */
+export function threadBlocks(text: string): { blocks?: unknown[] } {
+  const title = draftParts(text).title;
+  const blocks = [...(title ? [{ type: 'rich_text', elements: [{ type: 'rich_text_section', elements: [{ type: 'text', text: title, style: { bold: true } }] }] }] : []), ...richBody(text)];
+  return blocks.length && blocks.length <= 50 ? { blocks } : {};
+}
+
 async function approve(id: string, cur: DraftRow): Promise<ClickResult> {
   const back = async (detail: string) => {
     await query(`UPDATE engine_code_check_drafts SET state = 'ready', detail = $2 WHERE codex_entry_id = $1`, [id, detail]);
@@ -283,7 +333,7 @@ async function approve(id: string, cur: DraftRow): Promise<ClickResult> {
   };
   const post = await logUrl(id);
   if (!post) return back(`The posted Codex for ${id} was not found in its log channel.`);
-  const sent = await slack.botCall('chat.postMessage', { channel: post.channel, thread_ts: post.ts, text: cur.draft_text, unfurl_links: false, unfurl_media: false });
+  const sent = await slack.botCall('chat.postMessage', { channel: post.channel, thread_ts: post.ts, text: cur.draft_text, ...threadBlocks(cur.draft_text ?? ''), unfurl_links: false, unfurl_media: false });
   if (!sent.ok) return back(`Slack refused it: ${String(sent.error)}.`);
   const ts = String(sent.ts);
   const link = `${post.url.split('/p')[0]}/p${ts.replace('.', '')}?thread_ts=${post.ts}&cid=${post.channel}`;
@@ -323,7 +373,11 @@ async function redrawCards(): Promise<void> {
     const post = await logUrl(d.codex_entry_id);
     const m = cardBlocks({ codex_entry_id: d.codex_entry_id, builder: d.builder, round: d.round, draft_text: d.draft_text ?? '', log_url: post?.url ?? null, check: d.check_input });
     const r = await slack.botCall('chat.update', { channel: d.card_channel, ts: d.card_ts, text: m.text, blocks: m.blocks });
-    if (!r.ok) { console.error(`[code-check-draft] could not redraw ${d.codex_entry_id}: ${String(r.error)}`); return; }
+    if (r.ok) continue;
+    // The card was deleted in Slack: the check is still held, so it is posted again rather than run again.
+    const again = await slack.botCall('chat.postMessage', { channel: d.card_channel, text: m.text, blocks: m.blocks, unfurl_links: false, unfurl_media: false });
+    if (!again.ok) { console.error(`[code-check-draft] could not redraw ${d.codex_entry_id}: ${String(again.error)}`); return; }
+    await query(`UPDATE engine_code_check_drafts SET card_ts = $2 WHERE codex_entry_id = $1`, [d.codex_entry_id, String(again.ts)]);
   }
   await setMeta(CARD_KEY, CARD_STYLE);
 }

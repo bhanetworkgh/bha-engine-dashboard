@@ -167,8 +167,8 @@ async function draftMarksTheCard() {
 
 (async () => {
   /* 1. steps */
-  assert.deepEqual([0, 1, 2.9, 3, 5.9, 6, 9, 24, 49].map(watch.stepFor), [0, 0, 0, 1, 1, 2, 3, 8, 16]);
-  ok('the alert at approval, then a reminder every 3 hours');
+  assert.deepEqual([0, 1, 5.9, 6, 11.9, 12, 18, 24, 49].map(watch.stepFor), [0, 0, 0, 1, 1, 2, 3, 4, 8]);
+  ok('the alert at approval, then a reminder every 6 hours');
 
   assert.equal(watch.alertsFrom({ on: false, from: null }), cc.START);
   assert.equal(watch.alertsFrom({ on: true, from: '2026-10-29T05:20:00.000Z' }), '2026-10-29T05:20:00.000Z');
@@ -241,19 +241,19 @@ async function draftMarksTheCard() {
     ok('the next pass, still at the alert step, sends nothing: the claim is held');
 
     waitingHours = 4;
-    r = await watch.run({ find: async () => null, now: at(4), post: async () => ({ ok: false, detail: 'not_in_channel' }) });
+    r = await watch.run({ find: async () => null, now: at(7), post: async () => ({ ok: false, detail: 'not_in_channel' }) });
     assert.equal(r.failed.length, 1);
     assert.ok(!held.has(watch.dedupeKey('CODEX-20261102-kavin-g-n-rover', 1)));
     ok('a reminder Slack refuses gives its claim back, so it is never counted as sent');
 
-    r = await watch.run({ find: async () => null, now: at(4), post: okPost });
+    r = await watch.run({ find: async () => null, now: at(7), post: okPost });
     assert.equal(r.sent.length, 1);
     assert.equal(sent[1].thread_ts, '1793.100');
-    assert.match(sent[1].text, /<@U0AEW3TBYH1> Reminder 1 of 4: Kavin G N's log was approved 4 hours ago/);
+    assert.match(sent[1].text, /<@U0AEW3TBYH1> Reminder 1 of 3: Kavin G N's log was approved 7 hours ago/);
     ok('the next pass retries it and reminder 1 goes in the card\'s thread, tagging Destiny');
 
     waitingHours = 12.5;
-    r = await watch.run({ find: async () => null, now: at(12.5), dry_run: true, post: okPost });
+    r = await watch.run({ find: async () => null, now: at(18.5), dry_run: true, post: okPost });
     assert.equal(r.would_send.length, 1);
     assert.match(r.would_send[0].text, /Last reminder/);
     assert.equal(sent.length, 2);
@@ -273,7 +273,7 @@ async function draftMarksTheCard() {
     assert.equal(m.body.reason, 'already_reviewed');
     ok('only Destiny or Jason can mark reviewed (anyone else is told privately); the card is rewritten without the button; a second click changes nothing');
 
-    r = await watch.run({ find: async () => null, now: at(12.5), post: okPost });
+    r = await watch.run({ find: async () => null, now: at(18.5), post: okPost });
     assert.equal(r.waiting, 0);
     assert.equal(sent.length, 2);
     ok('a reviewed log gets no more reminders');

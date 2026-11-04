@@ -14349,3 +14349,10 @@ Files:      server/src/codeCheckDraft.ts, server/test/service-reads.test.cjs, BU
 Problem:    Nothing failed. The card simply was not built the way the log review card in #bha-log-reviews is.
 Fix:        draftParts reads the check into its parts. The card is now a header, the facts as fields (builder, Codex ID, verdict, pay call, lane check, round), a divider, one section per part with each claim marked by its result, a divider, an action line, and the buttons. A card still waiting is redrawn once on the next sweep (meta code_check.card_style).
 Decision:   The text Approve posts in the log's thread is unchanged: only the card's layout moved.
+
+## 2026-11-04 15:40 — Code check card in rich text, reminders in its thread
+Intent:     Destiny deleted the cards as they arrived: emoji and colour everywhere, not properly formatted. He asked for rich text lists, and for reminders inside the code review card's thread, 3 times, every 6 hours, 18 hours in all.
+Files:      server/src/codeCheckDraft.ts, server/src/codeCheckWatch.ts, server/test/service-reads.test.cjs, server/test/code-check-watch.test.cjs, CLAUDE.md, BUILD_LOG.md
+Problem:    The fields, section mrkdwn and result emoji read as noise. Each log also had two cards, the alert and the check.
+Fix:        richInline, richPart and richBody turn the check into rich_text blocks: one bullet list for the facts, a list for claims, paragraphs for prose. The post in the log's thread uses the same blocks. RULE is now 6, 6, 3. Where a check card exists the watch posts no alert card and reminds in that card's thread. A card deleted in Slack is reposted from the held check at the redraw, so nothing was run again (card style v3).
+Decision:   Approve keeps Slack's primary style, the one colour on the card, so the action is plain to see.

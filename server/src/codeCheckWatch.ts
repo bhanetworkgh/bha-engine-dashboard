@@ -5,8 +5,8 @@
  * Every RULE.every_minutes, the waiting list codeChecks.read() already computes (a session on the pay ledger
  * approved on or after 1 Nov, not Destiny's own, with no check recorded) is walked. Each waiting log is at one
  * step: step 0 is the alert, sent once Jason has approved it; step k (k >= 1) is reminder k, due
- * RULE.first_reminder_hours (3) after approval and then every RULE.remind_every_hours (3), RULE.max_reminders (4)
- * at most, about 12 hours; after the fourth nothing more is sent for that log. Only the current step is sent, so a
+ * RULE.first_reminder_hours (6) after approval and then every RULE.remind_every_hours (6), RULE.max_reminders (3)
+ * at most, 18 hours; after the third nothing more is sent for that log. Only the current step is sent, so a
  * process that was down sends one message on its return, never a backlog.
  *
  * One DM per step: the claim is an engine event (code_check_due_alerted, or code_check_reminded) whose dedupe
@@ -54,8 +54,8 @@ import * as bharag from './bharag';
 import { readSince } from './decisionWatch';
 import { getMeta, setMeta } from './db';
 
-/** Destiny, 29 Oct 2026: the alert as soon as Jason approves, then a reminder every 3 hours, 4 at most (about 12 hours). */
-export const RULE = { every_minutes: 2, first_reminder_hours: 3, remind_every_hours: 3, max_reminders: 4 } as const;
+/** Destiny, 4 Nov 2026: a reminder every 6 hours, 3 at most (18 hours). It was every 3 hours, 4 at most. */
+export const RULE = { every_minutes: 2, first_reminder_hours: 6, remind_every_hours: 6, max_reminders: 3 } as const;
 
 /** #bha-code-reviews (2 Nov 2026, Destiny). */
 export const CHANNEL = (): string => process.env.CODE_CHECK_CHANNEL?.trim() || 'C0CDRV4TMCP';
@@ -293,11 +293,22 @@ async function ensureCard(d: Due, post: Poster): Promise<{ state: 'posted' | 'he
   return { state: 'posted', ts: sent.ts };
 }
 
+/** Where a log stands with the automatic check: a card to remind on, nothing to send yet, or no automatic check at all. */
+async function draftFor(d: Due, automatic: string | null): Promise<{ ts?: string; skip?: boolean }> {
+  const r = await query<{ state: string; card_ts: string | null }>(`SELECT state, card_ts FROM engine_code_check_drafts WHERE codex_entry_id = $1`, [d.codex_entry_id]);
+  const row = r.rows[0];
+  if (row?.state === 'ready' && row.card_ts) return { ts: row.card_ts };
+  if (row && row.state !== 'failed') return { skip: true };
+  if (!row && automatic && Date.parse(d.approved_at) >= Date.parse(automatic)) return { skip: true };
+  return {};
+}
+
 export async function run(opts: { now?: number; dry_run?: boolean; post?: Poster; find?: typeof findLogPost } = {}): Promise<RunResult> {
   const post = opts.post ?? slackPost;
   const find = opts.find ?? findLogPost;
   const { due: list, skipped, from } = await due(opts.now ?? Date.now());
   const out: RunResult = { waiting: list.length, from, sent: [], already: 0, failed: [], would_send: [], skipped };
+  const automatic = (await getMeta('code_check.auto_from').catch(() => null)) || null;
   for (const d of list) {
     const key = dedupeKey(d.codex_entry_id, d.step);
     if (opts.dry_run) {
@@ -310,6 +321,22 @@ export async function run(opts: { now?: number; dry_run?: boolean; post?: Poster
       }
       if (held.rows.length && card) out.already++;
       else out.would_send.push({ codex_entry_id: d.codex_entry_id, step: d.step, text: card ? reminderFor(d) : messageFor(d).text });
+      continue;
+    }
+    // The automatic check's card is the alert, and its reminders go in that card's thread. No second card.
+    const draft = await draftFor(d, automatic);
+    if (draft.skip) continue;
+    if (draft.ts) {
+      if (d.quiet || d.step === 0) { out.already++; continue; }
+      const claimed = await record({ event_type: 'code_check_reminded', subject_id: d.codex_entry_id, lane: 'BAYS', actor: 'code-check-watch', detail: { step: d.step, approved_at: d.approved_at, hours_waiting: d.hours_waiting, late: d.late, builder: d.builder, rule: RULE, channel: CHANNEL(), on: 'check card' }, dedupe_key: key });
+      if (!claimed.recorded) { out.already++; continue; }
+      const sent = await post(CHANNEL(), reminderFor(d), undefined, draft.ts);
+      if (!sent.ok) {
+        await query(`DELETE FROM engine_events WHERE id = $1`, [claimed.id]);
+        out.failed.push({ codex_entry_id: d.codex_entry_id, step: d.step, detail: sent.detail });
+        continue;
+      }
+      out.sent.push({ codex_entry_id: d.codex_entry_id, step: d.step });
       continue;
     }
     // The card first: a log that was only ever DM'd (before 2 Nov) gets its card on the next pass.
