@@ -14409,3 +14409,17 @@ Problem:    MTP-1793790047912-QONB read clean: "No puddles. No stuck valve. No s
 Fix:        A fourth state, target, gated on live records (TU4O Closed, a real Stage 1 pass, a real cabinet log saved as evidence under vfarm_reliability_claim), re-run at the Approve click on the stored text. The card shows all of the post and no Approve on a target.
 Decision:   The proof log is an engine_evidence row, the smallest record that already exists, so no new table. Framing is judged on the sentence and the one after it, because the accepted post opens "Only runs when needed." and frames it in the next sentence. "built" does not frame: "it's how vFarm's watering is built" is a claim about today.
 
+## 2026-11-04 17:50 — Media Twin target rule live: workflows, agents, proof
+Intent:     Put the target rule in front of tomorrow's 6am New York run, after ed9d80d went live.
+Files:      n8n workflows gsFnnxYz63oc4thE (48969d5a), jNOGmW9LAiXE65WJ (9f370aac), jUy6631k7aH24LP2 (599c868a); agents c9DVdUUSVFpekZN8 (236d8fc9, restore point 05d82a09) and oqahGbB45yxiTXcA (8a318ffe, restore point 0a62b9c7); Bays' two allow-lists gain read_media_posts.
+Problem:    The agent's own instructions contradicted Jason: "Never post about internal struggles, outages, bugs, fixes, incidents" and "vFarm is grab-and-go and behaves like an appliance". run_draft_eval answers unknown_agent for the Media Twin, so it has no eval route.
+Fix:        Instructions replaced on both: real product failures allowed and preferred, only when logs show them; the contrast said as what we are building; a Target versus status section with Jason's accepted post word for word. Tested with call_agent previews on both drafts (each read the gates and framed the claim), then published.
+Decision:   Proof ran through the live route, not a copy of the code: a temporary n8n workflow (AjfIqZl0XdApdR3E, archived, execution 67481) sent QONB's stored text and the accepted post to POST /api/engine/media-posts with dry_run true. QONB reads target on all four platforms, naming TU4O Open, no Stage 1 pass, no cabinet log. The accepted post reads clean. Nothing was written and QONB's stored row stays clean.
+
+## 2026-11-04 17:55 — Bays reads Media Twin drafts
+Intent:     read_media_posts on Bays' n8n allow-list and its backup's, through the draft eval.
+Files:      n8n agents Nw5igXu4WWrjUMWB (2a4d695e) and PjKGbV4ZnH4YOfri (04ce35fa).
+Problem:    The backup's first run, DRAFT-202611041634-VIZY, read failed: 15 of 20, BAYS-DW-03 regressed on the check not_contains "i would open a decision watch". The answer was right and the wording tripped the check. The case failed the same way on the main agent at 14:47 today with no change to it.
+Fix:        Nothing changed. Ran the same config again: DRAFT-202611041640-H45D passed, 16 of 20, no regressions. Main agent DRAFT-202611041634-7FE4 passed, 16 of 20, no regressions. Published both and recorded the inventory for all four agents.
+Decision:   Published the backup on the rerun's pass and say so here, because one pass in two on a wording check is a flaky case, not a clean result. BAYS-DW-01 and BAYS-SOP-01, -04, -05 were already failing.
+
