@@ -99,7 +99,8 @@
     "test:service-balances": "node server/test/service-balances.test.cjs",
     "test:registry-tools": "node server/test/registry-tools.test.cjs",
     "test:renewal-reminder": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/renewal-reminder.test.cjs",
-    "test:agent-descriptions": "node server/test/agent-descriptions.test.cjs"
+    "test:agent-descriptions": "node server/test/agent-descriptions.test.cjs",
+    "test:find-records-builder": "npm run build:server --silent && node server/test/find-records-builder.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",

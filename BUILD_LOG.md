@@ -14387,3 +14387,10 @@ Intent:     Close the gap left in the entry above: a builder with only In Progre
 Files:      BUILD_LOG.md only. The change is in n8n: the seven open-loops reminder tasks on Bays.
 Fix:        Each task now says "if there is no Open key, total is 0". All seven were byte-compared against the intended text on the draft and again on the active version (7 of 7). DRAFT-202611041526-5CGX passed 17 of 20 with no regression; BAYS-SOP-01, BAYS-SOP-04 and BAYS-SOP-05 fail as they did in EVAL-202611031650. Published Bays c66c55cd, inventory recorded (audit 4804).
 Decision:   The backup has no tasks, so it stays at b480881d. n8n's config hash did not move on a task edit: versions 42f592ff and c66c55cd both read cs1:176189a4, so the publish check cannot tell them apart by hash. The draft run was started after the task edits, so it did test them; this is noted and left as it is.
+
+## 2026-11-04 16:50 — find_records takes a Slack id; agent description states kind
+Intent:     Destiny saw too many tool issues on Bays. Of the last 45 flagged asks, two were a real lookup bug and about eight were badly formed find_records calls.
+Files:      server/src/mcp/findRecords.ts, server/src/mcp/agentDescriptions.ts, server/test/find-records-builder.test.cjs, package.json, CLAUDE.md
+Problem:    "loops filtered by builder_id \"U0BNQGG020Y\" returned 0 rows": rows hold the name kavin. Haiku's other errors: "data must have required property 'kind'", "data must NOT have additional properties".
+Fix:        builderIdValues matches a roster Slack id to the name as well as the id; a Slack id nothing is held under warns. The agent description states kind is required, shows one example, and says filters go inside filters.
+Decision:   The value sent stays beside the name, because profile builders, candidates and digests hold the Slack id itself.

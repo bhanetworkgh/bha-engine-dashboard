@@ -40,9 +40,29 @@
 import { query } from '../pg';
 import * as mirror from '../mirror';
 import * as guards from '../writeGuards';
+import { SLACK_TO_BUILDER } from '../sources';
 import { McpError } from './source';
 
 const LIMIT_DEFAULT = 20;
+
+const SLACK_ID = /^[UW][A-Z0-9]{8,}$/;
+
+/**
+ * A Slack user id in a `builder_id` filter (4 Nov 2026, Destiny). Loops and Codex hold one of the
+ * seven names, so a filter on Kavin's Slack id matched nothing and read as a person with no loops.
+ * The value sent stays beside the name, because a profile builder and a candidate or digest row
+ * hold the Slack id itself. `check` lists the Slack ids that have no name, for the warning.
+ */
+export function builderIdValues(values: string[]): { values: string[]; check: string[] } {
+  const out = new Set(values);
+  const check: string[] = [];
+  for (const v of values) {
+    const name = SLACK_TO_BUILDER[v];
+    if (name) out.add(name);
+    else if (SLACK_ID.test(v)) check.push(v);
+  }
+  return { values: [...out], check };
+}
 /**
  * How long one field's text may be before it is cut (2 Nov 2026, Destiny — agent upgrade). A
  * Codex row carries the whole transcript and both reviews; twenty of them came back on every
@@ -211,6 +231,14 @@ export async function findRecords(input: Record<string, unknown>): Promise<Recor
         values = values.map((v) => allowed.find((a) => a.toLowerCase() === v.toLowerCase()) ?? v);
         const bad = values.filter((v) => !allowed.includes(v));
         if (bad.length) warnings.push(`"${name}" ${bad.map((b) => `"${b}"`).join(', ')} is not one of ${allowed.join(', ')}.`);
+      }
+    }
+    if (name === 'builder_id') {
+      const resolved = builderIdValues(values);
+      values = resolved.values;
+      for (const id of resolved.check) {
+        const held = await query(`SELECT 1 FROM ${spec.table} WHERE builder_id = $1 LIMIT 1`, [id]);
+        if (!held.rowCount) warnings.push(`"builder_id" ${id} is a Slack id no ${kind} row is held under and no builder name matches, so it finds nothing. That does not mean this person has no ${kind}: try lane_id or search.`);
       }
     }
     params.push(values);

@@ -1156,6 +1156,9 @@ archive records directly, with the checks the Bays Tools Router enforces.
   lookups — not to `engine_mcp_writes`, which is the record of changes.
   `page_url` is under `PUBLIC_DASHBOARD_URL`, defaulting to
   https://dashboard.bhanetwork.org.
+  **A `builder_id` filter takes a Slack id as well as a name** (4 Nov 2026, Destiny): an id on the
+  roster also matches that builder's name, and a Slack id nothing is held under answers a warning,
+  never a quiet nought.
   **Long field values are cut** (2 Nov 2026, Destiny — agent upgrade, token cost): at 400
   characters in a list and 4,000 for one row, each cut value saying how much was cut, and
   `fields_cut` on the answer. `fields: [names]` returns those fields whole (other long ones left
