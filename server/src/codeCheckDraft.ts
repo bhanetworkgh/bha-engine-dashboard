@@ -35,7 +35,7 @@ export const MAX_SECTIONS = 40;
 const RUN_PATH = process.env.CODE_CHECK_RUN_PATH?.trim() || '/webhook/code-check-run';
 const AUTO_KEY = 'code_check.auto_from';
 const CARD_KEY = 'code_check.card_style';
-export const CARD_STYLE = 'v4';
+export const CARD_STYLE = 'v5';
 
 export interface DraftRow {
   codex_entry_id: string;
@@ -74,20 +74,23 @@ export function splitSections(text: string, max = MAX_SECTION): string[] {
 }
 
 /** Pure: the check read back as its parts, so the card can lay them out. A heading is a line that is bold and nothing else. */
-export function draftParts(text: string): { title: string | null; verdict: string | null; sections: { heading: string | null; body: string }[] } {
+export function draftParts(text: string): { title: string | null; verdict: string | null; readiness: string | null; sections: { heading: string | null; body: string }[] } {
   const sections: { heading: string | null; lines: string[] }[] = [];
   let title: string | null = null;
   let verdict: string | null = null;
+  let readiness: string | null = null;
   for (const line of text.split('\n')) {
     const heading = /^\*([^*]+)\*\s*$/.exec(line.trim());
     if (heading && /^code check:/i.test(heading[1])) { title = heading[1].trim(); continue; }
     const v = /^\*Verdict:\*\s*(.+)$/i.exec(line.trim());
     if (v && verdict === null) { verdict = v[1].trim(); continue; }
+    const r = /^(?:[•\-]\s*)?\*Readiness:\*\s*(.+)$/i.exec(line.trim());
+    if (r && readiness === null) { readiness = r[1].trim(); continue; }
     if (heading) { sections.push({ heading: heading[1].trim(), lines: [] }); continue; }
     if (!sections.length) sections.push({ heading: null, lines: [] });
     sections[sections.length - 1].lines.push(line);
   }
-  return { title, verdict, sections: sections.map((p) => ({ heading: p.heading, body: p.lines.join('\n').trim() })).filter((p) => p.heading || p.body) };
+  return { title, verdict, readiness, sections: sections.map((p) => ({ heading: p.heading, body: p.lines.join('\n').trim() })).filter((p) => p.heading || p.body) };
 }
 
 type Inline = Record<string, unknown>;
@@ -116,16 +119,20 @@ const list = (lines: string[]): Inline => ({ type: 'rich_text_list', style: 'bul
 
 /** Pure: one part of the check as rich text blocks. Bullets and "*Label:* value" lines are lists, the rest paragraphs. */
 export function richPart(heading: string | null, body: string): unknown[] {
+  const lines = body.split('\n').map((l) => l.trim().replace(/^[•\-]\s+/, '')).filter(Boolean);
+  const opened = lines.filter((l) => /^\*Follow-ups opened:\*/i.test(l));
+  const rest = lines.filter((l) => !opened.includes(l));
+  // One rule for every card: a numbered section is a list, except the pay call's own opening line.
+  const numbered = /^\d+\./.test(heading ?? '');
+  const isPay = /pay call/i.test(heading ?? '');
   const groups: { bullet: boolean; lines: string[] }[] = [];
-  for (const raw of body.split('\n')) {
-    const line = raw.trim();
-    if (!line) continue;
-    const bullet = /^[•\-]\s+/.test(line) || /^\*[^*]+:\*/.test(line);
-    const text = line.replace(/^[•\-]\s+/, '');
+  rest.forEach((text, i) => {
+    const bullet = numbered ? !(isPay && i === 0) : /^\*[^*]+:\*/.test(text) || rest.length > 1;
     const last = groups[groups.length - 1];
     if (last && last.bullet === bullet) last.lines.push(text);
     else groups.push({ bullet, lines: [text] });
-  }
+  });
+  if (opened.length) groups.push({ bullet: false, lines: opened });
   const blocks: unknown[] = [];
   let cur: Inline[] = heading ? [{ type: 'rich_text_section', elements: [{ type: 'text', text: heading, style: { bold: true } }] }] : [];
   let size = heading?.length ?? 0;
@@ -149,7 +156,7 @@ export function richPart(heading: string | null, body: string): unknown[] {
 /** Pure: the check as rich text, for the card and for the builder's thread. */
 export function richBody(text: string): unknown[] {
   const parts = draftParts(text);
-  const groups = [...(parts.verdict ? [richPart('Verdict', parts.verdict)] : []), ...parts.sections.map((p) => richPart(p.heading, p.body))].filter((g) => g.length);
+  const groups = [...(parts.verdict ? [richPart('Verdict', parts.verdict)] : []), ...(parts.readiness ? [richPart('Readiness', parts.readiness)] : []), ...parts.sections.map((p) => richPart(p.heading, p.body))].filter((g) => g.length);
   // A blank line closes every part but the last: Slack sets rich text blocks tight against each other.
   groups.slice(0, -1).forEach((g) => (g[g.length - 1] as { elements: Inline[] }).elements.push({ type: 'rich_text_section', elements: [{ type: 'text', text: '\n' }] }));
   return groups.flat();

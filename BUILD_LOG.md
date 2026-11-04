@@ -14368,3 +14368,9 @@ Decision:   The gated lanes are VFARM_HARDWARE, KIOSK, CAD_API and CST, and the 
 Intent:     Destiny: the rich text was better. Style the metadata at the top and put proper spacing between sections.
 Files:      server/src/codeCheckDraft.ts, server/test/service-reads.test.cjs, BUILD_LOG.md
 Fix:        The facts above the divider are a two-column field block. Below it the check stays rich text, with a blank line closing every part but the last. Card style v4 redraws waiting cards in place.
+
+## 2026-11-04 16:55 — Code check cards read the same way
+Intent:     Destiny: some cards were not consistent. The agent wrote claims as bullets on one card and bold lines on another, and placed follow-ups differently.
+Files:      server/src/codeCheckDraft.ts, server/src/codeCheckBrief.ts, server/test/service-reads.test.cjs, BUILD_LOG.md
+Fix:        The renderer now decides, not the model: Readiness has its own section under Verdict, numbered sections are lists, the pay call opens with one line, and Follow-ups opened comes last. The brief says the same. Card style v5 redraws waiting cards.
+Decision:   The text in draft_text is untouched, so what the check says does not change, only how it is drawn.

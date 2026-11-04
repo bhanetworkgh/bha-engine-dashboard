@@ -50,6 +50,8 @@ THE FORMAT, EXACT, IN SLACK MRKDWN (one * for bold), AS draft_text
 *Why:* [one clear line]
 *Lane check:* [that lane's goal, and how this work moves it closer, or why it does not]
 
+Every card reads the same way. In sections 1, 2 and 3 every item is its own line starting "- ". A claim line is "- *the claim.* Confirmed. / Partly. / Not found. then where you checked and the proof". Section 4 opens with the pay call on one line, then each follow-up as "- what, who, by when". The *Follow-ups opened:* line comes after them.
+
 A log that checks out stays short: leave out section 2 when there is nothing in it. Section 3 is always there. Plain words, short lines, no tables, no em dashes. Name proof precisely. Write as Destiny's reviewer, in the first person.
 
 FINISH
