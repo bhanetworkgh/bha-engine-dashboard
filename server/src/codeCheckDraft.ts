@@ -35,7 +35,7 @@ export const MAX_SECTIONS = 40;
 const RUN_PATH = process.env.CODE_CHECK_RUN_PATH?.trim() || '/webhook/code-check-run';
 const AUTO_KEY = 'code_check.auto_from';
 const CARD_KEY = 'code_check.card_style';
-export const CARD_STYLE = 'v3';
+export const CARD_STYLE = 'v4';
 
 export interface DraftRow {
   codex_entry_id: string;
@@ -149,10 +149,10 @@ export function richPart(heading: string | null, body: string): unknown[] {
 /** Pure: the check as rich text, for the card and for the builder's thread. */
 export function richBody(text: string): unknown[] {
   const parts = draftParts(text);
-  return [
-    ...(parts.verdict ? richPart('Verdict', parts.verdict) : []),
-    ...parts.sections.flatMap((p) => richPart(p.heading, p.body)),
-  ];
+  const groups = [...(parts.verdict ? [richPart('Verdict', parts.verdict)] : []), ...parts.sections.map((p) => richPart(p.heading, p.body))].filter((g) => g.length);
+  // A blank line closes every part but the last: Slack sets rich text blocks tight against each other.
+  groups.slice(0, -1).forEach((g) => (g[g.length - 1] as { elements: Inline[] }).elements.push({ type: 'rich_text_section', elements: [{ type: 'text', text: '\n' }] }));
+  return groups.flat();
 }
 
 /** Pure: the card for one round: a header, the facts as a list, the check in rich text, then the buttons. No emoji and no colour but the one button. */
@@ -162,19 +162,19 @@ export function cardBlocks(d: { codex_entry_id: string; builder: string | null; 
   const payLabel = cc.PAY_LABEL[String(d.check?.pay_call ?? '') as cc.PayCall] ?? null;
   const approve = typeof d.check?.approve === 'string' ? d.check.approve : null;
   const facts = [
-    `*Builder:* ${who}`,
-    `*Codex ID:* \`${d.codex_entry_id}\``,
-    ...(verdictLabel ? [`*Verdict:* ${verdictLabel}`] : []),
-    ...(payLabel ? [`*Pay call:* ${payLabel}`] : []),
-    ...(d.check?.readiness === 'blocked_on_gate' ? [`*Readiness:* Blocked on ${String(d.check.gate ?? 'a stage gate')}`] : d.check?.readiness === 'customer_ready' ? ['*Readiness:* Customer ready, gate passed'] : []),
-    ...(approve ? [`*Lane check:* ${approve === 'yes' ? 'Approve' : 'Do not approve'}`] : []),
-    `*Round:* ${d.round}`,
+    `*Builder*\n${who}`,
+    `*Codex ID*\n\`${d.codex_entry_id}\``,
+    ...(verdictLabel ? [`*Verdict*\n${verdictLabel}`] : []),
+    ...(payLabel ? [`*Pay call*\n${payLabel}`] : []),
+    ...(d.check?.readiness === 'blocked_on_gate' ? [`*Readiness*\nBlocked on ${String(d.check.gate ?? 'a stage gate')}`] : d.check?.readiness === 'customer_ready' ? ['*Readiness*\nCustomer ready, gate passed'] : []),
+    ...(approve ? [`*Lane check*\n${approve === 'yes' ? 'Approve' : 'Do not approve'}`] : []),
+    `*Round*\n${d.round}`,
   ];
   const body = richBody(d.draft_text);
   const shown = body.slice(0, MAX_SECTIONS);
   const blocks: unknown[] = [
     { type: 'header', text: { type: 'plain_text', text: `Code check: ${who}`.slice(0, 150) } },
-    { type: 'rich_text', elements: [list(facts)] },
+    { type: 'section', fields: facts.map((text) => ({ type: 'mrkdwn', text: text.slice(0, 1900) })) },
     { type: 'divider' },
     ...shown,
     { type: 'divider' },

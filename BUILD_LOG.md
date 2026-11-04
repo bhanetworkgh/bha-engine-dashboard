@@ -14363,3 +14363,8 @@ Files:      server/src/codeChecks.ts, server/src/codeCheckDraft.ts, server/src/c
 Problem:    Nothing stopped a check saying customer ready with a stage unpassed. Section 3 could be left out.
 Fix:        gateProblem is pure and refuses by name: coverage_missing, bad_readiness, gate_required, gate_not_named, gate_not_passed, customer_ready_claimed. checkGate reads the log's Lanes Touched and the gate loop. New required field readiness, with gate and gate_ref; the card shows a Readiness line.
 Decision:   The gated lanes are VFARM_HARDWARE, KIOSK, CAD_API and CST, and the default gate is TU4O, the one Jason named. Any other lane gate is his to add. The four cards already waiting are re-run so they carry the rule.
+
+## 2026-11-04 16:35 — Code check card: styled facts on top, space between sections
+Intent:     Destiny: the rich text was better. Style the metadata at the top and put proper spacing between sections.
+Files:      server/src/codeCheckDraft.ts, server/test/service-reads.test.cjs, BUILD_LOG.md
+Fix:        The facts above the divider are a two-column field block. Below it the check stays rich text, with a blank line closing every part but the last. Card style v4 redraws waiting cards in place.
