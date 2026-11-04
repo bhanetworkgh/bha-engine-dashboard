@@ -40,6 +40,24 @@ services:
         value: admin@bhanetwork.org
       - key: AUTH_PASSWORD_HASH
         sync: false
+      - key: GITHUB_READ_TOKEN
+        sync: false
+      - key: RENDER_READ_KEY
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_READ_KEY_SID
+        sync: false
+      - key: TWILIO_READ_KEY_SECRET
+        sync: false
+      - key: TWILIO_ADMIN_KEY_SID
+        sync: false
+      - key: TWILIO_ADMIN_KEY_SECRET
+        sync: false
+      - key: ELEVENLABS_READ_KEY
+        sync: false
+      - key: STRIPE_READ_KEY
+        sync: false
       - key: SESSION_SECRET
         generateValue: true
       # The company n8n instance. n8n.arupiautomates.cloud is retired; the

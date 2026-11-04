@@ -278,6 +278,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-28: "how much OpenRouter / Twilio credit is left?" asked in Slack. Both balances read now
         // through n8n, judged against the SOP floors. A read; it tops nothing up.
         'check_service_balances',
+        // 2026-11-04 (Destiny): Bays checks a claim against the live source: commit numbers, deploys, calls,
+        // payments. Read only, allowlisted paths; people's numbers and emails are masked on an agent's token.
+        'read_github', 'read_render', 'read_twilio', 'read_elevenlabs', 'read_stripe',
         // 2026-10-30: "Bays, register this tool in the dashboard" from Slack (Destiny). Reads and writes
         // the System Registry's services, endpoints and workflows; no secret is ever written (held on the
         // server), and remove and restore are Destiny's or Jason's.

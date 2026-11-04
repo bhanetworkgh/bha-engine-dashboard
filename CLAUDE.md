@@ -1906,6 +1906,17 @@ the log matches two rows (`ambiguous`), and without confirm `DELETE <Codex Entry
 ID when there is none). Destiny or Jason, a reason of 3 to 1,000 characters, `dry_run`. Audited on
 `engine_mcp_writes` (kind `codex`).
 
+**Reads of the services builders work on** (4 Nov 2026, Destiny: the code check, Bays and the dashboard should
+check a claim against the source). `server/src/serviceReads.ts`, `server/src/mcp/serviceTools.ts`. `read_github`,
+`read_render`, `read_twilio`, `read_elevenlabs` and `read_stripe` (read only, both connections, in Bays' scope): a GET
+to a path on `ALLOWED` and nothing else, so a broad key still reads only what the lists name; Render's environment
+variables are on no list. 30,000 characters a call (`offset` for the rest), secrets redacted, and on an agent's token
+customers' numbers and emails are masked. An unset key is `not_configured`. Keys, no defaults: `GITHUB_READ_TOKEN`,
+`RENDER_READ_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_READ_KEY_SID`, `TWILIO_READ_KEY_SECRET`, `ELEVENLABS_READ_KEY`,
+`STRIPE_READ_KEY`. **`twilio_admin`** (write connection, no agent's scope, refused on any agent token, Destiny or
+Jason, audited kind `twilio`) uses `TWILIO_ADMIN_KEY_SID` and `TWILIO_ADMIN_KEY_SECRET`: a GET runs at once, a POST or
+DELETE only with `confirm: "<METHOD> <path>"`. `npm run test:service-reads`.
+
 **`close_incidents`, the Engine health close over MCP** (decision 2026-10-01,
 Destiny). `server/src/mcp/incidentTools.ts`, write connection only, calling
 `health.closeIncidents` — the function the page's close button calls — so the
