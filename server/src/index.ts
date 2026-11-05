@@ -909,7 +909,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * GET reads (?post_id, ?status, ?slack_ts, ?include_test=1). A refusal writes nothing.
      */
     {
-      const mp = p.match(/^\/api\/engine\/media-posts(?:\/([A-Za-z0-9-]+))?(?:\/(decision|metrics))?$/);
+      const mp = p.match(/^\/api\/engine\/media-posts(?:\/([A-Za-z0-9-]+))?(?:\/(decision|metrics|edit))?$/);
       if (mp) {
         const [, postId, sub] = mp;
         const log = (outcome: string, detail: string, id: string | null = postId ?? null) =>
@@ -938,6 +938,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
             const body = await readJson(req, 64 * 1024);
             const r = await mediaPosts.decide(postId, { platform: str(body?.platform, 20), decision: str(body?.decision, 10), by: str(body?.by, 40), note: str(body?.note, 2000) || null, via: str(body?.via, 60) || 'http' });
             await log('updated', `${r.decided.platform} ${r.decided.decision} by ${r.decided.by_name}`);
+            return send(res, 200, r);
+          }
+          if (postId && sub === 'edit' && method === 'POST') {
+            // The same function as edit_media_post, for when the connector has not picked that tool up.
+            const body = await readJson(req, 64 * 1024);
+            const r = await mediaPosts.editText(postId, { platform: str(body?.platform, 20), text: typeof body?.text === 'string' ? body.text : null, thread: Array.isArray(body?.thread) ? (body.thread as string[]) : null, by: str(body?.by, 40), reason: str(body?.reason, 500), dry_run: body?.dry_run === true });
+            await log(r.written ? 'updated' : 'read', `edit ${str(body?.platform, 20)}, claim check ${r.claim_check_status}`);
             return send(res, 200, r);
           }
           if (postId && sub === 'metrics' && method === 'POST') {
