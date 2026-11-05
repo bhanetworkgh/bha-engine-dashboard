@@ -391,7 +391,7 @@ export interface RouteInfo {
 }
 
 /** Components in a route's element that wrap the page rather than being it. */
-const ROUTE_WRAPPERS = new Set(['Suspense', 'Loading', 'Fragment']);
+const ROUTE_WRAPPERS = new Set(['AdminGate', 'Suspense', 'Loading', 'Fragment']);
 
 function collectRoutes(nodes: JsxNode[], out: JsxNode[] = []): JsxNode[] {
   for (const n of nodes) {
