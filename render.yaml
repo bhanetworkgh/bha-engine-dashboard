@@ -265,6 +265,12 @@ services:
       # same string goes into the connector URL.
       - key: MCP_WRITE_TOKEN
         sync: false
+      # The Stage 1 agreements' encryption key (base64 of 32 bytes), also in Bitwarden. No default.
+      - key: AGREEMENTS_KEY
+        sync: false
+      # One-time code for setting the admin password on /admin. Delete it once the password is set.
+      - key: ADMIN_SETUP_CODE
+        sync: false
       # BHARAG workspace keys for the write tools' ingest on create. Unset, the
       # row still saves and the answer says it is not in BHARAG.
       - key: BHARAG_CODEX_KEY

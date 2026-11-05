@@ -44,6 +44,8 @@ const Logstream = lazy(() => import('./screens/Logstream'));
 const Evidence = lazy(() => import('./screens/Evidence'));
 const Registry = lazy(() => import('./screens/Registry'));
 const Stage1 = lazy(() => import('./screens/Stage1'));
+const AdminGate = lazy(() => import('./screens/Admin').then((m) => ({ default: m.AdminGate })));
+const AdminHome = lazy(() => import('./screens/Admin').then((m) => ({ default: m.AdminHome })));
 const Settings = lazy(() => import('./screens/Settings'));
 
 export default function App() {
@@ -78,7 +80,7 @@ export default function App() {
         <Route path="/monitoring-twin" element={<Suspense fallback={<Loading />}><MonitoringTwin /></Suspense>} />
         <Route path="/engine-health" element={<Suspense fallback={<Loading />}><EngineHealth /></Suspense>} />
         <Route path="/agent-maturity" element={<Suspense fallback={<Loading />}><AgentMaturity /></Suspense>} />
-        <Route path="/pay" element={<Suspense fallback={<Loading />}><PayTracker /></Suspense>} />
+        <Route path="/pay" element={<Suspense fallback={<Loading />}><AdminGate><PayTracker /></AdminGate></Suspense>} />
         {/*
           A stable link per record (2026-09-22, Destiny), so Bays can stop
           linking people into Airtable.
@@ -124,7 +126,8 @@ export default function App() {
         <Route path="/logstream" element={<Suspense fallback={<Loading />}><Logstream /></Suspense>} />
         <Route path="/evidence" element={<Suspense fallback={<Loading />}><Evidence /></Suspense>} />
         <Route path="/registry" element={<Suspense fallback={<Loading />}><Registry /></Suspense>} />
-        <Route path="/stage-1" element={<Suspense fallback={<Loading />}><Stage1 /></Suspense>} />
+        <Route path="/stage-1" element={<Suspense fallback={<Loading />}><AdminGate><Stage1 /></AdminGate></Suspense>} />
+        <Route path="/admin" element={<Suspense fallback={<Loading />}><AdminGate><AdminHome /></AdminGate></Suspense>} />
         <Route path="/settings" element={<Suspense fallback={<Loading />}><Settings /></Suspense>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

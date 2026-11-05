@@ -2663,6 +2663,7 @@ export interface RegistryStage1 extends RegistryBase {
 }
 
 export interface RegistryData {
+  admin: boolean;
   keys: RegistryKey[];
   stage1: RegistryStage1[];
   workflows: RegistryWorkflow[];

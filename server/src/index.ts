@@ -60,6 +60,8 @@ import * as slack from './slack';
 import * as google from './google';
 import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, agentTokensConfigured, MCP_SECRET_VAR, MCP_WRITE_TOKEN_VAR, MCP_ONE_URL } from './mcp';
 import * as mcpLogs from './mcp/logs';
+import * as adminAuth from './adminAuth';
+import * as agreements from './agreements';
 import * as earlyAccess from './earlyAccess';
 import * as stripeLedger from './stripeLedger';
 import * as vfarmEntitlement from './vfarmEntitlement';
@@ -1709,6 +1711,69 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
   if (!internal && !readSession(req)) throw new HttpError(401, 'Sign in to continue.');
 
   /**
+   * The admin login (5 Nov 2026, Destiny). A second gate behind the team login, for what is Destiny's and
+   * Jason's alone. A person on the shared connector comes through the loopback as internal; an agent's token
+   * marks its loopback `__agent=1` and is never admin. See server/src/adminAuth.ts for what is gated.
+   */
+  const agentLoopback = internal && url.searchParams.get(adminAuth.AGENT_MARK) === '1';
+  const isAdmin = internal ? !agentLoopback : Boolean(adminAuth.readAdmin(req));
+  if (!isAdmin && adminAuth.gated(p, method, agentLoopback)) throw new HttpError(403, adminAuth.NEEDED);
+  if (p === '/api/admin/session' && method === 'GET') return send(res, 200, await adminAuth.status(req));
+  if (p === '/api/admin/login' && method === 'POST') {
+    const body = await readJson(req);
+    const r = await adminAuth.login(req, res, str(body.who, 20) ?? '', str(body.password, 1024) ?? '');
+    if (!r.ok) throw new HttpError(r.status, r.message);
+    return send(res, 200, { ok: true, by: r.by });
+  }
+  if (p === '/api/admin/setup' && method === 'POST') {
+    const body = await readJson(req);
+    const r = await adminAuth.setup(req, res, str(body.code, 200) ?? '', str(body.who, 20) ?? '', str(body.password, 1024) ?? '');
+    if (!r.ok) throw new HttpError(r.status, r.message);
+    return send(res, 200, { ok: true, by: r.by });
+  }
+  if (p === '/api/admin/logout' && method === 'POST') {
+    adminAuth.logout(req, res);
+    return send(res, 200, { ok: true });
+  }
+  if (p === '/api/agreements' && method === 'GET') return send(res, 200, await agreements.list());
+  if (p === '/api/agreements' && method === 'POST') {
+    const body = await readJson(req, 22 * 1024 * 1024);
+    const admin = adminAuth.readAdmin(req);
+    try {
+      return send(res, 201, await agreements.save({
+        person_id: str(body.person_id, 80) ?? '',
+        person_name: str(body.person_name, 120) ?? '',
+        status: str(body.status, 20) ?? '',
+        filename: str(body.filename, 200) ?? '',
+        content_type: str(body.content_type, 100) ?? '',
+        bytes: Buffer.from(typeof body.base64 === 'string' ? body.base64 : '', 'base64'),
+        note: str(body.note, 500),
+        by: admin?.by ?? 'admin',
+      }));
+    } catch (e) {
+      if (e instanceof agreements.AgreementError) throw new HttpError(e.status, e.message);
+      throw e;
+    }
+  }
+  const agreementFile = p.match(/^\/api\/agreements\/([A-Za-z0-9-]+)\/file$/);
+  if (agreementFile && method === 'GET') {
+    try {
+      const f = await agreements.open(agreementFile[1]);
+      res.writeHead(200, {
+        'Content-Type': f.row.content_type,
+        'Content-Length': f.bytes.length,
+        'Content-Disposition': `inline; filename="${f.row.filename.replace(/[^A-Za-z0-9._-]/g, '_')}"`,
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      return void res.end(f.bytes);
+    } catch (e) {
+      if (e instanceof agreements.AgreementError) throw new HttpError(e.status, e.message);
+      throw e;
+    }
+  }
+
+  /**
    * The live pages' change stream (2026-09-23): Server-Sent Events, one
    * `{kind, id, at}` per stored change, behind the same cookie as every page
    * route. It carries what changed, never the row — a page re-reads through
@@ -1997,16 +2062,17 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           store.builderFigures(),
         ]);
         return send(res, 200, {
+          admin: isAdmin,
           workflows,
-          services,
+          services: isAdmin ? services : services.map(adminAuth.withoutCosts),
           endpoints,
           bases,
           people,
           keys,
-          stage1,
+          stage1: isAdmin ? stage1 : [],
           builders,
           // Computed by the server from the rows, per CLAUDE.md section 4.
-          spend: registry.spendOf(services),
+          spend: registry.spendOf(isAdmin ? services : []),
           // Digest delivery health sits with the registry because the base it
           // is read from is described on the same page.
           digest_health: await mirror.digestHealth(),
@@ -2382,6 +2448,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     const kind = reg[1];
     if (!registry.isKind(kind)) throw new HttpError(404, 'No such registry kind.');
     const id = reg[2] ? decodeURIComponent(reg[2]) : null;
+    if (kind === 'stage1' && !isAdmin) throw new HttpError(403, adminAuth.NEEDED);
     try {
       if (method === 'POST') {
         if (id) {
@@ -2391,11 +2458,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           if (body.restore === true) return send(res, 200, await registry.setDeleted(kind, id, false));
           throw new HttpError(400, 'Send { restore: true } to restore a row.');
         }
-        return send(res, 201, await registry.create(kind, await readJson(req)));
+        const row = await readJson(req);
+        if (kind === 'services' && !isAdmin && adminAuth.touchesCosts(row)) throw new HttpError(403, adminAuth.NEEDED);
+        return send(res, 201, await registry.create(kind, row));
       }
       if (!id) throw new HttpError(400, 'An id is required.');
       if (method === 'DELETE') return send(res, 200, await registry.setDeleted(kind, id, true));
-      return send(res, 200, await registry.update(kind, id, await readJson(req)));
+      const patch = await readJson(req);
+      if (kind === 'services' && !isAdmin && adminAuth.touchesCosts(patch)) throw new HttpError(403, adminAuth.NEEDED);
+      return send(res, 200, await registry.update(kind, id, patch));
     } catch (e) {
       if (e instanceof registry.RegistryError) throw new HttpError(e.status, e.message);
       throw e;
@@ -2520,7 +2591,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       if (req.method !== 'POST') throw new HttpError(405, 'POST only.');
       const body = await readJson(req);
       try {
-        return send(res, 200, await mediaPosts.decide(mediaApprove[1], { platform: String(body.platform ?? ''), decision: 'approve', by: String(body.by ?? ''), via: 'dashboard' }));
+        return send(res, 200, await mediaPosts.decide(mediaApprove[1], { platform: String(body.platform ?? ''), decision: 'approve', by: adminAuth.slackId(adminAuth.readAdmin(req)?.by), via: 'dashboard' }));
       } catch (e) {
         if (e instanceof mediaPosts.MediaPostError) return send(res, e.status, { ok: false, reason: e.reason, message: e.message });
         throw e;
@@ -2873,6 +2944,7 @@ async function boot(): Promise<void> {
   const db = await assertDatabase();
   const m = await migrate();
   await store.initStore();
+  await agreements.importSeed().then((n) => n && console.log(`  agreements: ${n} carried in`)).catch((e) => console.error('[agreements] seed not carried in:', e));
   // Idempotent: a row that already exists is left exactly as it is, edits and
   // soft deletes included. See registry.seedRegistry.
   const seeded = await registry.seedRegistry();
@@ -2906,6 +2978,7 @@ async function boot(): Promise<void> {
     console.log(`  schema:   ${m.applied.length ? `applied ${m.applied.length} migration(s): ${m.applied.join(', ')}` : `up to date (${MIGRATION_COUNT} migration(s))`}`);
     const newRows = Object.values(seeded).reduce((n, c) => n + c, 0);
     console.log(`  registry: ${newRows ? `seeded ${newRows} row(s): ${registry.KIND_LIST.filter((k) => seeded[k]).map((k) => `${k} ${seeded[k]}`).join(', ')}` : 'already populated'}`);
+    console.log(`  agreements: ${agreements.keyConfigured() ? 'AGREEMENTS_KEY set' : 'NOT configured, set AGREEMENTS_KEY'}`);
     console.log(`  sign-in:  ${authConfigured() ? 'configured' : 'NOT configured — set AUTH_PASSWORD_HASH'}`);
     console.log(`  sessions: ${sessionSecretConfigured ? 'SESSION_SECRET set' : 'random key this boot (sessions end on restart)'}`);
     // Say where the URL came from, not just what it is. The line printed the

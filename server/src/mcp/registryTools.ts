@@ -15,6 +15,7 @@
  * real one was pasted somewhere), and the retired credentials table is not served or written (the Key
  * registry, kind keys, replaced the idea: it says where a key is and holds no value). Remove and restore are Destiny's or Jason's.
  */
+import * as adminAuth from '../adminAuth';
 import * as registry from '../registry';
 import * as renewal from '../renewalReminder';
 import * as mirror from '../mirror';
@@ -112,8 +113,8 @@ export const readRegistry: ToolDefinition = {
     const words = str(args, 'search').toLowerCase().split(/\s+/).filter((w) => w.length > 1);
     const hay = (r: registry.RegistryRow) => [r.id, r.name, r.key_name, r.bitwarden_item_name, r.bitwarden_folder, r.owner, ...(Array.isArray(r.lane_access) ? r.lane_access : []), r.lane, r.what_it_is_for, r.purpose, r.notes, r.url].filter(Boolean).join(' ').toLowerCase();
     const hit = words.length ? rows.filter((r) => words.every((w) => hay(r).includes(w))) : rows;
-    const answer: Record<string, unknown> = { ok: true, kind, count: hit.length, held: rows.length, rows: hit.map((r) => brief(kind, r)), page: PAGE };
-    if (kind === 'services') {
+    const answer: Record<string, unknown> = { ok: true, kind, count: hit.length, held: rows.length, rows: (kind === 'services' && deps.agent ? hit.map(adminAuth.withoutCosts) : hit).map((r) => brief(kind, r)), page: PAGE };
+    if (kind === 'services' && !deps.agent) {
       const spend = registry.spendOf(rows.filter((r) => !r.deleted_at));
       answer.spend = spend;
       const today = new Date().toISOString().slice(0, 10);

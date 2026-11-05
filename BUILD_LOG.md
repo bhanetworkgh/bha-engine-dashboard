@@ -14483,3 +14483,10 @@ Files:      server/src/codeCheckDraft.ts, server/src/codeCheckWatch.ts, CLAUDE.m
 Problem:    Neither card carried a mention.
 Fix:        A "For review by" field naming him on both cards, and on the automatic card the message text too.
 Decision:   A field rather than a new block, so the card's layout and its tests are unchanged.
+
+## 2026-11-05 22:00 — Admin login, encrypted agreements, send_agreement, agent keys closed
+Intent:     Steps 6 to 9 of Destiny's list: put agreements, Stage 1, Pay Tracker, costs and the two-person actions behind a second login, and shut agent keys out of pay and leads.
+Files:      server/src/adminAuth.ts, agreements.ts, auth.ts, index.ts, migrations.ts (119), mcp/agreementTools.ts, mcp/index.ts, mcp/registryTools.ts, mcp/sql.ts, mcp/tools.ts, server/data/agreements-seed.json, server/test/admin-gate.test.cjs, src/screens/Admin.tsx, Stage1, Registry, MediaTwin/Drafts, src/App.tsx, src/data, render.yaml, CLAUDE.md
+Problem:    get_page_data let Bays, North Star and hardik_audit read /api/pay and /api/vfarm/leads; hardik_audit's query_postgres read everything. An agent cannot be trusted to name its requester, so a check on the requester alone would not hold.
+Fix:        One gated() list checked on every /api route; agent loopback marked and never admin; assertAgentSql on agent tokens; send_agreement can only ever DM Destiny or Jason and returns no contents.
+Decision:   The file carrier is one commit: files sealed here under AGREEMENTS_KEY land through server/data/agreements-seed.json on boot, then the seed is removed. The password is set on /admin with a one-time code so it never passes through chat. Stage 1 stays readable by read_registry because Jason was told Bays can answer where someone stands, and it holds no pay.

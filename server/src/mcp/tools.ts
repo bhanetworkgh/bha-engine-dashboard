@@ -62,6 +62,7 @@ import { INVENTORY_WRITE_TOOLS } from './inventoryTools';
 import { VFARM_GATE_READ_TOOLS, VFARM_GATE_WRITE_TOOLS } from './vfarmGateTools';
 import { MEDIA_POST_LOG_READ_TOOLS, MEDIA_POST_LOG_WRITE_TOOLS } from './mediaPostLogTools';
 import { MEDIA_POSTS_READ_TOOLS, MEDIA_POSTS_WRITE_TOOLS } from './mediaPostsTools';
+import { AGREEMENT_WRITE_TOOLS } from './agreementTools';
 import { CHARGE_GATE_READ_TOOLS, CHARGE_GATE_WRITE_TOOLS } from './chargeGateTools';
 import { ESSENCE_READ_TOOLS, ESSENCE_WRITE_TOOLS } from './essenceTools';
 import { HELP_READ_TOOLS, HELP_WRITE_TOOLS } from './helpPageTools';
@@ -78,7 +79,7 @@ import * as quota from '../quota';
 import * as sources from '../sources';
 import { grepSource, McpError, REPO_ROOT, sourceAvailable, assertSource } from './source';
 import { component, dataSources, pageByPath, pageData, pageFiles, pages, pageStructure } from './structure';
-import { describeTables, DEFAULT_ROWS, MAX_ROWS, runSelect } from './sql';
+import { assertAgentSql, describeTables, DEFAULT_ROWS, MAX_ROWS, runSelect } from './sql';
 import { assertKind, diff, RESYNC_ROUTE, SOURCE_OF, status as mirrorStatus } from './inventory';
 import * as logs from './logs';
 
@@ -386,7 +387,8 @@ const getPageData: ToolDefinition = {
         continue;
       }
       if (only && r.path_prefix !== only && r.path !== only) continue;
-      const answer = await deps.dispatch(r.path);
+      // An agent's read is marked, so the admin gate holds for it (5 Nov 2026).
+      const answer = await deps.dispatch(deps.agent ? `${r.path}${r.path.includes('?') ? '&' : '?'}__agent=1` : r.path);
       const bytes = bytesOf(answer.body);
       bodies.push({ api: r.path, body: answer.body });
       // With `fields` the answer is a handful of values, so the byte cap that
@@ -624,8 +626,9 @@ const queryPostgres: ToolDefinition = {
     additionalProperties: false,
   },
   annotations: { ...READS_DB, title: 'Read-only SQL against the dashboard database' },
-  handler: async (args) => {
+  handler: async (args, deps) => {
     const sql = str(args, 'sql', true)!;
+    if (deps.agent) assertAgentSql(sql);
     const params = Array.isArray(args.parameters) ? (args.parameters as unknown[]) : [];
     return runSelect(sql, params, num(args, 'row_limit') ?? DEFAULT_ROWS);
   },
@@ -1142,7 +1145,7 @@ export const TOOLS: ToolDefinition[] = [
  * tool a client can see is a tool a model will try.
  */
 function toolsFor(access: 'read' | 'write'): ToolDefinition[] {
-  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...REMINDER_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS, ...LANE_WRITE_TOOLS, ...INCIDENT_WRITE_TOOLS, ...INVENTORY_WRITE_TOOLS, ...VFARM_GATE_WRITE_TOOLS, ...LOOP_WRITE_TOOLS, ...CODEX_WRITE_TOOLS, ...LAYER0_WRITE_TOOLS, ...INTAKE2_WRITE_TOOLS, ...LEAD_MOVE_WRITE_TOOLS, ...UN9D_WRITE_TOOLS, ...SOP_WRITE_TOOLS, ...SIGNAL_WRITE_TOOLS, ...DECISION_WATCH_WRITE_TOOLS, ...DRAFT_EVAL_WRITE_TOOLS, ...DOCTRINE_DRILL_WRITE_TOOLS, ...SUBMIT_LOG_TEST_WRITE_TOOLS, ...MEDIA_POST_LOG_WRITE_TOOLS, ...MEDIA_POSTS_WRITE_TOOLS, ...CHARGE_GATE_WRITE_TOOLS, ...CODEX_GAP_WRITE_TOOLS, ...ESSENCE_WRITE_TOOLS, ...HELP_WRITE_TOOLS, ...CODE_CHECK_WRITE_TOOLS, ...EVIDENCE_WRITE_TOOLS, ...REGISTRY_WRITE_TOOLS, ...ENTITLEMENT_WRITE_TOOLS, ...CODEX_DELETE_WRITE_TOOLS, ...SERVICE_WRITE_TOOLS] : TOOLS;
+  return access === 'write' ? [...TOOLS, ...WRITE_TOOLS, ...AGREEMENT_WRITE_TOOLS, ...DOC_WRITE_TOOLS, ...SLACK_WRITE_TOOLS, ...REMINDER_WRITE_TOOLS, ...RESEARCH_TWIN_WRITE_TOOLS, ...CANDIDATE_WRITE_TOOLS, ...LANE_WRITE_TOOLS, ...INCIDENT_WRITE_TOOLS, ...INVENTORY_WRITE_TOOLS, ...VFARM_GATE_WRITE_TOOLS, ...LOOP_WRITE_TOOLS, ...CODEX_WRITE_TOOLS, ...LAYER0_WRITE_TOOLS, ...INTAKE2_WRITE_TOOLS, ...LEAD_MOVE_WRITE_TOOLS, ...UN9D_WRITE_TOOLS, ...SOP_WRITE_TOOLS, ...SIGNAL_WRITE_TOOLS, ...DECISION_WATCH_WRITE_TOOLS, ...DRAFT_EVAL_WRITE_TOOLS, ...DOCTRINE_DRILL_WRITE_TOOLS, ...SUBMIT_LOG_TEST_WRITE_TOOLS, ...MEDIA_POST_LOG_WRITE_TOOLS, ...MEDIA_POSTS_WRITE_TOOLS, ...CHARGE_GATE_WRITE_TOOLS, ...CODEX_GAP_WRITE_TOOLS, ...ESSENCE_WRITE_TOOLS, ...HELP_WRITE_TOOLS, ...CODE_CHECK_WRITE_TOOLS, ...EVIDENCE_WRITE_TOOLS, ...REGISTRY_WRITE_TOOLS, ...ENTITLEMENT_WRITE_TOOLS, ...CODEX_DELETE_WRITE_TOOLS, ...SERVICE_WRITE_TOOLS] : TOOLS;
 }
 
 /**

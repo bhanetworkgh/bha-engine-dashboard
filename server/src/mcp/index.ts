@@ -224,6 +224,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       env: 'MCP_AGENT_TOKEN_BAYS',
       access: 'write',
       tools: new Set([
+        // 2026-11-05: a Stage 1 agreement to Destiny's or Jason's own DM, never through the agent.
+        'send_agreement',
         // 2026-11-04: the Media Twin's drafts whole, so a reliability claim is read in full, never from its hook.
         'read_media_posts',
         'list_writable_kinds', 'find_records', 'create_record', 'update_record', 'archive_record', 'delete_record',

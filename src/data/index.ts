@@ -724,7 +724,34 @@ export interface MediaPostLogData {
 }
 export const getMediaPostLog = () => api<MediaPostLogData>('/api/media-post-log');
 
-export const approveMediaPost = (id: string, platform: string, by: string) => api<{ ok: boolean }>(`/api/media-posts/${id}/approve`, { method: 'POST', body: { platform, by } });
+export const approveMediaPost = (id: string, platform: string) => api<{ ok: boolean }>(`/api/media-posts/${id}/approve`, { method: 'POST', body: { platform } });
+
+export interface AdminSession {
+  admin: boolean;
+  by: string | null;
+  configured: boolean;
+  setup_open: boolean;
+}
+export const getAdminSession = () => api<AdminSession>('/api/admin/session');
+export const adminLogin = (who: string, password: string) => api<{ ok: boolean; by: string }>('/api/admin/login', { method: 'POST', body: { who, password } });
+export const adminSetup = (code: string, who: string, password: string) => api<{ ok: boolean; by: string }>('/api/admin/setup', { method: 'POST', body: { code, who, password } });
+export const adminLogout = () => api<{ ok: boolean }>('/api/admin/logout', { method: 'POST', body: {} });
+
+export interface Agreement {
+  id: string;
+  person_id: string;
+  person_name: string;
+  title: string;
+  status: string;
+  filename: string;
+  size_bytes: number;
+  note: string | null;
+  uploaded_by: string;
+  uploaded_at: string;
+}
+export const getAgreements = () => api<{ agreements: Agreement[]; key_configured: boolean }>('/api/agreements');
+export const uploadAgreement = (body: { person_id: string; person_name: string; status: string; filename: string; content_type: string; base64: string; note?: string }) =>
+  api<Agreement>('/api/agreements', { method: 'POST', body, timeoutMs: 60_000 });
 
 /** The Media Twin's drafts (2026-11-01): server/src/mediaPosts.ts. */
 export interface TwinDraftPlatform {

@@ -36,6 +36,15 @@ export function hashPassword(password: string): string {
   return `scrypt$${salt}$${hash}`;
 }
 
+/** Check a password against a stored scrypt$salt$hash value. */
+export function matchesHash(password: string, stored: string): boolean {
+  const [scheme, salt, hex] = stored.split('$');
+  if (scheme !== 'scrypt' || !salt || !hex) return false;
+  const got = scryptSync(password, salt, 64);
+  const want = Buffer.from(hex, 'hex');
+  return got.length === want.length && timingSafeEqual(got, want);
+}
+
 function verifyPassword(password: string): boolean {
   if (passwordHash) {
     const [scheme, salt, hex] = passwordHash.split('$');
@@ -57,13 +66,13 @@ function verifyPassword(password: string): boolean {
 const failures = new Map<string, { count: number; lockedUntil: number }>();
 const globalFailures: number[] = [];
 
-function clientIp(req: IncomingMessage): string {
+export function clientIp(req: IncomingMessage): string {
   const fwd = req.headers['x-forwarded-for'];
   const first = Array.isArray(fwd) ? fwd[0] : fwd?.split(',')[0];
   return (first ?? req.socket.remoteAddress ?? 'unknown').trim();
 }
 
-function lockedFor(ip: string): number {
+export function lockedFor(ip: string): number {
   const now = Date.now();
   const f = failures.get(ip);
   if (f && f.lockedUntil > now) return Math.ceil((f.lockedUntil - now) / 1000);
@@ -72,7 +81,7 @@ function lockedFor(ip: string): number {
   return 0;
 }
 
-function recordFailure(ip: string): void {
+export function recordFailure(ip: string): void {
   const now = Date.now();
   globalFailures.push(now);
   const f = failures.get(ip) ?? { count: 0, lockedUntil: 0 };
@@ -94,7 +103,7 @@ interface SessionPayload {
 
 const revoked = new Set<string>();
 
-function sign(payload: string): string {
+export function sign(payload: string): string {
   return createHmac('sha256', secret).update(payload).digest('base64url');
 }
 
@@ -120,7 +129,7 @@ function decode(token: string): SessionPayload | null {
   }
 }
 
-function parseCookies(req: IncomingMessage): Record<string, string> {
+export function parseCookies(req: IncomingMessage): Record<string, string> {
   const out: Record<string, string> = {};
   for (const part of (req.headers.cookie ?? '').split(';')) {
     const i = part.indexOf('=');
@@ -129,7 +138,7 @@ function parseCookies(req: IncomingMessage): Record<string, string> {
   return out;
 }
 
-function secure(req: IncomingMessage): boolean {
+export function secure(req: IncomingMessage): boolean {
   return process.env.NODE_ENV === 'production' || req.headers['x-forwarded-proto'] === 'https';
 }
 

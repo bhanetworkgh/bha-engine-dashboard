@@ -4,14 +4,15 @@ import { useData } from '../../app/useData';
 import { createRegistryRow, getRegistry, updateRegistryRow, type RegistryData } from '../../data';
 import { EmptyState, LoadFailed, Loading, MetricCard, PageHeader, Toast, relativeTime, useToast } from '../../components/ui';
 import { EditableCell, NewRow } from '../Registry/Editable';
+import { Agreements } from './Agreements';
 
 /**
  * Stage 1 status (5 Nov 2026, Destiny; Jason, DM 1793820617.412249: "one clear table" of who is in under the
  * comp plan, so he can plan Stage 1 revenue and further offers without guessing).
  *
  * The rows are registry kind `stage1`: this dashboard is their record, edited here or through write_registry.
- * The dashboard has one shared login and agents read this database, so it holds where each person stands
- * and never a pay figure or contract text. Those stay in DocuSign. The signed dates are typed from DocuSign's
+ * Behind the admin login from 5 Nov 2026. The table holds where each person stands and never a pay figure or
+ * contract text; the agreements themselves sit under it, encrypted, and DocuSign stays the record of what was signed. The signed dates are typed from DocuSign's
  * own read-back: nothing here reads DocuSign, so the page says when a row was last changed.
  */
 /** Jason's knowledge capture standard, 5 Nov 2026, logged as an SOP in BHARAG. */
@@ -120,6 +121,7 @@ export default function Stage1() {
           </div>
         )}
       </div>
+      <Agreements people={rows.map((r) => ({ id: r.id, name: r.name }))} onDone={(text) => setToast({ text, tone: 'ok' })} onFail={fail} />
       <Toast toast={toast} />
     </div>
   );

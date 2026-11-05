@@ -187,6 +187,19 @@ function typeName(oid: number): string {
  * of the outcome — there is nothing to commit, and a rollback on the success
  * path means the code has exactly one exit for both.
  */
+/**
+ * What no agent token may read (5 Nov 2026, Destiny). A person on the shared connector is not held by this.
+ * The table names are refused by word, and the functions that could build a query from a string are refused
+ * too, because otherwise 'engine_' || 'pay_sessions' would walk past the word check.
+ */
+const AGENT_REFUSED_TABLES = /\b(engine_pay_\w+|engine_vfarm_leads|engine_agreements|engine_admin_auth|registry_stage1|registry_services|record_notes)\b/i;
+const AGENT_REFUSED_FUNCTIONS = /\b(query_to_\w+|table_to_\w+|schema_to_\w+|database_to_\w+|cursor_to_\w+|pg_read_\w+|pg_ls_\w+|dblink\w*|lo_get|lo_export)\b/i;
+
+export function assertAgentSql(sql: string): void {
+  const hit = sql.match(AGENT_REFUSED_TABLES) ?? sql.match(AGENT_REFUSED_FUNCTIONS);
+  if (hit) throw new McpError('not_permitted', `An agent key may not read "${hit[0]}". Pay, buyer leads, agreements and costs are for Destiny and Jason.`);
+}
+
 export async function runSelect(sql: string, params: unknown[], rowCap: number): Promise<SqlResult> {
   assertSingleSelect(sql);
   const cap = Math.max(1, Math.min(MAX_ROWS, rowCap));

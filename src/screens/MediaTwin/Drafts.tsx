@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { approveMediaPost, type TwinDraft, type TwinDraftsData } from '../../data';
+import { Link } from 'react-router-dom';
+import { useData } from '../../app/useData';
+import { approveMediaPost, getAdminSession, type TwinDraft, type TwinDraftsData } from '../../data';
 import { Button, Card, CardHeader, EmptyState, FigureCell, Pill, StatStrip, relativeTime } from '../../components/ui';
 
 /**
@@ -56,11 +58,13 @@ function DraftCard({ post }: { post: TwinDraft }) {
   const [busy, setBusy] = useState(false);
   const [decided, setDecided] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
-  const approve = async (by: string, name: string) => {
+  const session = useData(getAdminSession, [], { kinds: ['admin'] });
+  const adminName = session.data?.by ? session.data.by[0].toUpperCase() + session.data.by.slice(1) : null;
+  const approve = async (name: string) => {
     setBusy(true);
     setError(null);
     try {
-      await approveMediaPost(post.post_id, open, by);
+      await approveMediaPost(post.post_id, open);
       setDecided((v) => ({ ...v, [open]: name }));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The approval did not land.');
@@ -135,8 +139,11 @@ function DraftCard({ post }: { post: TwinDraft }) {
                   <p className="text-[12px]">Approved by {decided[open]}.</p>
                 ) : (
                   <div className="flex flex-wrap items-center gap-2">
-                    <Button variant="primary" loading={busy} onClick={() => approve('U0AEW3TBYH1', 'Destiny')}>Approve as Destiny</Button>
-                    <Button variant="secondary" disabled={busy} onClick={() => approve('U0A9V97949F', 'Jason')}>Approve as Jason</Button>
+                    {adminName ? (
+                      <Button variant="primary" loading={busy} onClick={() => approve(adminName)}>Approve as {adminName}</Button>
+                    ) : (
+                      <Link to="/admin" className="text-[12px] text-accent-ink">Sign in as admin to approve</Link>
+                    )}
                     {error ? <span className="text-[12px] text-failing">{error}</span> : null}
                   </div>
                 )

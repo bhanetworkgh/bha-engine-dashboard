@@ -4304,6 +4304,37 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
     name: 'stage 1 knowledge capture',
     statements: [`ALTER TABLE registry_stage1 ADD COLUMN IF NOT EXISTS knowledge_capture text`],
   },
+  {
+    // 5 Nov 2026, Destiny: the admin login's password hash and the agreements, stored encrypted.
+    id: 119,
+    name: 'admin login and agreements',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_admin_auth (
+        id int PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        password_hash text NOT NULL,
+        set_by text NOT NULL,
+        set_at timestamptz NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS engine_agreements (
+        id text PRIMARY KEY,
+        person_id text NOT NULL,
+        person_name text NOT NULL,
+        title text NOT NULL,
+        status text NOT NULL CHECK (status IN ('unsigned', 'signed', 'countersigned')),
+        filename text NOT NULL,
+        content_type text NOT NULL,
+        size_bytes int NOT NULL,
+        sha256 text NOT NULL UNIQUE,
+        iv bytea NOT NULL,
+        tag bytea NOT NULL,
+        cipher bytea NOT NULL,
+        note text,
+        uploaded_by text NOT NULL,
+        uploaded_at timestamptz NOT NULL DEFAULT now()
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_agreements_person ON engine_agreements (person_id, uploaded_at DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

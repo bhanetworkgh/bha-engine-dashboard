@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useData } from '../../app/useData';
 import {
@@ -279,7 +280,7 @@ export default function Registry() {
         </div>
 
         {tab === 'Builders' && <BuildersTab rows={d.people} {...shared} />}
-        {tab === 'Tools' && <ServicesTab rows={d.services} spend={d.spend} {...shared} />}
+        {tab === 'Tools' && <ServicesTab rows={d.services} spend={d.spend} admin={d.admin} {...shared} />}
         {tab === 'Keys' && <KeysTab rows={d.keys} {...shared} />}
         {tab === 'Endpoint' && <EndpointsTab rows={d.endpoints} bases={d.bases} digests={d.digest_health} {...shared} />}
         {tab === 'Workflow' && <WorkflowsTab rows={d.workflows} {...shared} />}
@@ -708,7 +709,7 @@ function SpendPanel({ spend, services }: { spend: Spend; services: RegistryData[
   );
 }
 
-function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['services']; spend: Spend }) {
+function ServicesTab({ rows, spend, admin, ...p }: TabProps & { rows: RegistryData['services']; spend: Spend; admin: boolean }) {
   const [q, setQ] = useState('');
   const [category, setCategory] = useState('all');
   const term = q.trim().toLowerCase();
@@ -737,7 +738,11 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
 
   return (
     <>
-      <SpendPanel spend={spend} services={rows} />
+      {admin ? (
+        <SpendPanel spend={spend} services={rows} />
+      ) : (
+        <p className="px-6 text-[13px] text-dim md:px-8">Costs and cards are behind the <Link to="/admin" className="text-accent-ink">admin login</Link>.</p>
+      )}
 
       <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -803,12 +808,16 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
             <Th width="15%">what it is for</Th>
             <Th>managed by</Th>
             <Th>plan</Th>
-            <Th right>cost</Th>
-            <Th>currency</Th>
-            <Th>cycle</Th>
-            <Th>renews</Th>
-            <Th>who pays</Th>
-            <Th>paid with</Th>
+            {admin && (
+              <>
+                <Th right>cost</Th>
+                <Th>currency</Th>
+                <Th>cycle</Th>
+                <Th>renews</Th>
+                <Th>who pays</Th>
+                <Th>paid with</Th>
+              </>
+            )}
             <Th>status</Th>
             <Th />
           </>
@@ -858,6 +867,8 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
               </td>
               <td className="td text-dim">{cell(p, 'services', s, 'managed_by')}</td>
               <td className="td text-dim">{cell(p, 'services', s, 'plan')}</td>
+              {admin && (
+                <>
               <td className="td tabular text-right">{cell(p, 'services', s, 'cost_amount', { type: 'number', align: 'right' })}</td>
               <td className="td text-faint">{cell(p, 'services', s, 'cost_currency')}</td>
               {/*
@@ -877,6 +888,8 @@ function ServicesTab({ rows, spend, ...p }: TabProps & { rows: RegistryData['ser
               </td>
               <td className="td text-dim">{cell(p, 'services', s, 'billing_owner')}</td>
               <td className="td text-dim">{cell(p, 'services', s, 'paid_with')}</td>
+                </>
+              )}
               <td className="td card-meta">{cell(p, 'services', s, 'status', { type: 'select', options: SERVICE_STATUS })}</td>
               <td className="td card-actions td-actions">
                 <RowTools {...p} kind="services" row={s} />
