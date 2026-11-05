@@ -14518,3 +14518,9 @@ Files:      server/src/engineStrain.ts
 Problem:    Log Provider Fallback in the three Agent Deliveries sends no forced_test flag, so a forced run would read as real strain.
 Fix:        A primary_error starting "forced for a test" is left out, the same as forced_test, with no change to the published workflows.
 Decision:   Pinned runs of the published workflows instead of editing them. No production workflow changes for the test.
+
+## 2026-11-05 23:25 — D4: backup route forced and judged, yesterday's proofs read
+Intent:     Exercise and evaluate the OpenRouter backup, DW-1793809858770-219J condition 1.
+Files:      None beyond 70ff155.
+Proof:      Published workflows run with the primary pinned to a 429: Bays 70760, North Star 70764, Research Twin 70772 (fallback_ok true, answer_check answered, events 74882 onward), Media Twin 70780 (Check Draft passed, save and card pinned). Evals: RT V9IA 9/9, Bays ZRMC 16/20 with no regression, NS OWCS 10/11: NS-12 "she" in one repeat of three, scored raw; Check Builder Pronouns sits after Agent Answer, so it covers the backup. Test rows deleted, audits 5021 to 5023. Agent key refused live: 70777, 70778.
+Limit:      Forced only: no natural fallback since 3 Nov. Media Twin's fallback writes no ai_provider_fallback event and has no eval. Migration stays not accepted.
