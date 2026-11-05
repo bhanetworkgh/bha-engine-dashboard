@@ -14537,3 +14537,11 @@ Limit:      The workflow bug remains: Approve wipes existing Jason Notes. Linked
 Intent:     Close D5 on Destiny's decision.
 Files:      None in this repo.
 Decision:   The LinkedIn Twin will be retired, superseded by the Media Twin (Destiny). The logging fix and 2 Nov backfill are dropped and the draft to Hardik deleted. This replaces "wait on Hardik" in the entry above.
+
+## 2026-11-05 23:40 — Close: tags written, CST standard logged, two loops raised
+Intent:     Finish what followed the reviews going out.
+Files:      None in this repo.
+Fix:        Review Tag, Review Pay Recommendation, Review Link, Reviewed By and Reviewed At (new field names) written on Codex rows 404, 412, 440; Jason Notes unchanged, read back. SOP -- CST Pay-Eligible Log Standard, id 64226d40, audit 5034, verified. LOOP-1793917910192-F2YB (Approve wipes Jason Notes) and LOOP-1793917912446-8KGQ (Media Twin fallback event) raised on Destiny.
+Problem:    The automatic code checks recorded on the same three logs at 22:27 to 22:28 UTC contradict two sent reviews: on 30 Oct the timeout and concurrency change is not in commit 261b4b6328 (the SHA in the log is garbled) and that commit is already live; on 4 Nov /status is fixed text and the 4d531ac deploy failed.
+Decision:   Tags and recommendations stand. A follow-up correction goes to Jason and Ahad; the reviews are not edited.
+Correction: The entry above says execution ids 70796 and 70815 and "the 29 Oct run"; the three runs are 70796, 70800 and 70815.
