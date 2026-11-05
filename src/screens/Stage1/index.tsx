@@ -15,7 +15,7 @@ import { EditableCell, NewRow } from '../Registry/Editable';
  * own read-back: nothing here reads DocuSign, so the page says when a row was last changed.
  */
 /** Jason's knowledge capture standard, 5 Nov 2026, logged as an SOP in BHARAG. */
-const KNOWLEDGE_STANDARD = '/codex?view=sops&sop=0984fd4b-3916-41c8-bc34-5edf34ec2d9b';
+const KNOWLEDGE_STANDARD = '/codex?view=sops&sop=7345a32f-7813-45bb-8ccb-cbc7144bfb16';
 
 const PLAN_STATUS = ['In under this plan', 'Out / paused', 'Need X clarified before committing', 'No response, treated as paused'] as const;
 

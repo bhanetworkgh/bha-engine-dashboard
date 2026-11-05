@@ -14469,3 +14469,10 @@ Decision:   Keys: Bitwarden holds them by lane; a Key registry beside the Tool r
 ## 2026-11-05 — Media Twin: edit a draft, approve on the page (Destiny)
 
 - `edit_media_post` and `mediaPosts.editText`; Approve buttons on the Drafts tab through `decide()`. No migration: edits live on the platform's blob.
+
+## 2026-11-05 21:00 — Knowledge capture standard: date set, page link moved
+Intent:     Jason accepted Friday 13 November for every lane to pass the standard, so the SOP's "proposed 30 November" had to go.
+Files:      src/screens/Stage1/index.tsx
+Problem:    An SOP in BHARAG cannot be edited in place and log_sop refuses a title already held.
+Fix:        delete_sop (audit 5000 keeps the old text) then log_sop, verified, new id 7345a32f-7813-45bb-8ccb-cbc7144bfb16. The Stage 1 page's link moved to the new id.
+Decision:   Kaiqi's and Jegan's signed dates set from DocuSign (both completed 5 Nov). Hardik's note says Jason answered and his choice is awaited. Ahad's corrected envelope is still unopened.
