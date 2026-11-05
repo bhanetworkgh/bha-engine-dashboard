@@ -10,6 +10,8 @@ for (const [p, m] of [['/api/codex', 'GET'], ['/api/codex/x', 'GET'], ['/api/vfa
 assert.equal(a.gated('/api/vfarm/leads', 'GET', true), true);
 assert.deepEqual(Object.keys(a.withoutCosts({ name: 'x', cost_amount: 5, paid_with: 'card', plan: 'p' })), ['name', 'plan']);
 
+assert.equal(a.gated('/api/agreements/AG-X/text', 'GET', false), true);
+
 const k = randomBytes(32);
 const plain = Buffer.from('an agreement');
 const sealed = g.seal(plain, k);

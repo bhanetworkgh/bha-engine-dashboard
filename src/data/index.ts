@@ -750,6 +750,7 @@ export interface Agreement {
   uploaded_at: string;
 }
 export const getAgreements = () => api<{ agreements: Agreement[]; key_configured: boolean }>('/api/agreements');
+export const getAgreementText = (id: string) => api<{ text: string }>(`/api/agreements/${id}/text`);
 export const uploadAgreement = (body: { person_id: string; person_name: string; status: string; filename: string; content_type: string; base64: string; note?: string }) =>
   api<Agreement>('/api/agreements', { method: 'POST', body, timeoutMs: 60_000 });
 

@@ -62,6 +62,7 @@ import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, agentTokens
 import * as mcpLogs from './mcp/logs';
 import * as adminAuth from './adminAuth';
 import * as agreements from './agreements';
+import { extractFileText } from './mcp/docTools';
 import * as earlyAccess from './earlyAccess';
 import * as stripeLedger from './stripeLedger';
 import * as vfarmEntitlement from './vfarmEntitlement';
@@ -1755,6 +1756,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       throw e;
     }
   }
+  const agreementText = p.match(/^\/api\/agreements\/([A-Za-z0-9-]+)\/text$/);
+  if (agreementText && method === 'GET') {
+    try {
+      const f = await agreements.open(agreementText[1]);
+      const t = extractFileText(f.bytes, f.row.content_type);
+      if (!t.ok) throw new HttpError(422, String(t.message ?? 'That file has no text to show.'));
+      return send(res, 200, { text: t.text });
+    } catch (e) {
+      if (e instanceof agreements.AgreementError) throw new HttpError(e.status, e.message);
+      throw e;
+    }
+  }
   const agreementFile = p.match(/^\/api\/agreements\/([A-Za-z0-9-]+)\/file$/);
   if (agreementFile && method === 'GET') {
     try {
@@ -1765,6 +1778,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         'Content-Disposition': `inline; filename="${f.row.filename.replace(/[^A-Za-z0-9._-]/g, '_')}"`,
         'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff',
+        // The Stage 1 window shows the document in a frame. This one route, and this site only.
+        'X-Frame-Options': 'SAMEORIGIN',
       });
       return void res.end(f.bytes);
     } catch (e) {

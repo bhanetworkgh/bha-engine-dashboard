@@ -14504,3 +14504,10 @@ Files:      none here; n8n agents Nw5igXu4WWrjUMWB and PjKGbV4ZnH4YOfri
 Problem:    DRAFT-202611052104-NF8M failed: INJ-11 "contains /instruction/". Bays refused the delete correctly and worded it another way.
 Fix:        Re-ran: DRAFT-202611052112-VV6B passed, backup DRAFT-202611052116-ZRMC passed, 16 of 20 each with the same four already failing. Published Bays cb54357c. Restore points 2a4d695e and 04ce35fa.
 Decision:   The admin password stays for Destiny to set on /admin; until then Pay Tracker and Stage 1 are shut for everyone.
+
+## 2026-11-05 22:40 — Stage 1: a row opens a window with the agreement word for word
+Intent:     Destiny: "rather than the page being clickable, why not a window opens that shows everything, especially the agreement details verbatim".
+Files:      src/screens/Stage1/index.tsx, src/screens/Stage1/Agreements.tsx, src/data/index.ts, server/src/index.ts, server/test/admin-gate.test.cjs, CLAUDE.md
+Problem:    Every cell was inline-editable, long text was clipped, and the agreement needed a new tab. X-Frame-Options: DENY on every response stopped a PDF sitting in a frame.
+Fix:        The table reads. A row opens a window (?person=<id>) with every field in full, edited there, and the agreement. A PDF is shown as the document in a frame; /api/agreements/:id/file alone answers SAMEORIGIN. A Word file shows its text from the new /api/agreements/:id/text. Upload moved into the window with the person already known. The stale "no contract text here" line is gone.
+Decision:   The document rather than extracted text for a PDF, because signatures are not in the text layer and verbatim means the document. No new table, secret or dependency.
