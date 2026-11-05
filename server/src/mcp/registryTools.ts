@@ -12,8 +12,8 @@
  *
  * Two rules held here and not in a prompt: no secret is ever written (a value shaped like a key,
  * token or password is refused, never stored redacted, because a redacted key is still a sign the
- * real one was pasted somewhere), and the credentials registry is not served or written (CLAUDE.md
- * section 4: there is no credentials registry). Remove and restore are Destiny's or Jason's.
+ * real one was pasted somewhere), and the retired credentials table is not served or written (the Key
+ * registry, kind keys, replaced the idea: it says where a key is and holds no value). Remove and restore are Destiny's or Jason's.
  */
 import * as registry from '../registry';
 import * as renewal from '../renewalReminder';
@@ -27,7 +27,7 @@ export const DESTINY = 'U0AEW3TBYH1';
 export const JASON = 'U0A9V97949F';
 
 /** The kinds these tools touch. Credentials, Airtable bases (history) and people are left to the page. */
-export const MCP_KINDS = ['services', 'endpoints', 'workflows'] as const;
+export const MCP_KINDS = ['services', 'endpoints', 'workflows', 'keys', 'stage1'] as const;
 type McpKind = (typeof MCP_KINDS)[number];
 const isMcpKind = (v: string): v is McpKind => (MCP_KINDS as readonly string[]).includes(v);
 
@@ -93,7 +93,7 @@ const PAGE = 'https://dashboard.bhanetwork.org/registry';
 
 export const readRegistry: ToolDefinition = {
   name: 'read_registry',
-  description: `The System Registry: what BHA uses and pays for (kind services: name, category, what it is for, url, who manages it, plan, who pays, cost, billing cycle, renewal, status active / trial / retired), the endpoints the engine calls (kind endpoints) and the n8n workflow registry (kind workflows). Without kind, services. search narrows by words in the name, id, purpose or notes. A cost nobody has filled in is null and is said as "not recorded", never as nought. Use it before write_registry to see whether a tool is already held. Read only.`,
+  description: `The System Registry: what BHA uses and pays for (kind services: name, category, what it is for, url, who manages it, plan, who pays, cost, billing cycle, renewal, status active / trial / retired), the endpoints the engine calls (kind endpoints), the n8n workflow registry (kind workflows), the Key registry (kind keys: where a key sits in Bitwarden, which lanes may use it, who owns it, how it rotates and how to ask for access; it never holds a key value, so use it for "where is X key and who can touch it" and never ask anyone to paste a key) and Jason's Stage 1 status table (kind stage1: name, lane, status under the comp plan, hard constraints, agreement sent, signed and countersigned dates; no pay figures). Without kind, services. search narrows by words in the name, id, purpose or notes. A cost nobody has filled in is null and is said as "not recorded", never as nought. Use it before write_registry to see whether a tool is already held. Read only.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -110,7 +110,7 @@ export const readRegistry: ToolDefinition = {
     if (!isMcpKind(kind)) return { ok: false, reason: 'unknown_kind', message: `kind is one of ${MCP_KINDS.join(', ')}. The credentials registry is not served, and holds no secrets.` };
     const rows = await registry.list(kind, args.include_removed === true);
     const words = str(args, 'search').toLowerCase().split(/\s+/).filter((w) => w.length > 1);
-    const hay = (r: registry.RegistryRow) => [r.id, r.name, r.what_it_is_for, r.purpose, r.notes, r.url].filter(Boolean).join(' ').toLowerCase();
+    const hay = (r: registry.RegistryRow) => [r.id, r.name, r.key_name, r.bitwarden_item_name, r.bitwarden_folder, r.owner, ...(Array.isArray(r.lane_access) ? r.lane_access : []), r.lane, r.what_it_is_for, r.purpose, r.notes, r.url].filter(Boolean).join(' ').toLowerCase();
     const hit = words.length ? rows.filter((r) => words.every((w) => hay(r).includes(w))) : rows;
     const answer: Record<string, unknown> = { ok: true, kind, count: hit.length, held: rows.length, rows: hit.map((r) => brief(kind, r)), page: PAGE };
     if (kind === 'services') {
@@ -127,7 +127,7 @@ export const readRegistry: ToolDefinition = {
 
 export const writeRegistry: ToolDefinition = {
   name: 'write_registry',
-  description: `Add, edit, remove or restore ONE row of the System Registry, the dashboard's list of every tool and service BHA uses: use it when someone says "register this tool in the dashboard" or a tool's details change. kind is services (the default), endpoints or workflows. action create needs name (services, endpoints) and, for endpoints, url; for workflows, id (the n8n workflow id) and name. update, remove and restore need id (read_registry gives it). fields are the row's own columns: for services name, category (hosting, automation, data, ai, comms, storage, other), what_it_is_for, url, managed_by, plan, billing_owner, cost_amount (a number), cost_currency, billing_cycle (monthly, quarterly, yearly, one-off), renewal_date (YYYY-MM-DD: the renewal reminder posts in #bha-engine-alerts 7, 3 and 1 day before it), paid_with (which card pays: owner and last four digits at most, e.g. "Visa 6967 (Destiny)" or "Mercury card"; a card number is refused), status (active, trial, retired), notes. Leave a cost out when nobody has said it: never guess one. To retire a tool BHA stopped using, update status to retired (it stays listed as history); remove takes a row off the list and is for a row added by mistake. HELD HERE: requester_user_id must be Destiny, Jason or someone with a Builder Profile (not_permitted), and remove and restore are Destiny's or Jason's; NEVER put a password, API key or token in any field: a value shaped like one is refused (secret_refused) and nothing is written. Say where the secret lives instead (e.g. "in Bitwarden"). create refuses a name already held (already_held, naming the row): update it instead. dry_run checks everything and writes nothing. Returns {ok, written, row, page, message}. Audited on engine_mcp_writes.`,
+  description: `Add, edit, remove or restore ONE row of the System Registry, the dashboard's list of every tool and service BHA uses: use it when someone says "register this tool in the dashboard" or a tool's details change. kind is services (the default), endpoints, workflows, keys or stage1. action create needs name (services, endpoints) and, for endpoints, url; for workflows, id (the n8n workflow id) and name. update, remove and restore need id (read_registry gives it). fields are the row's own columns: for services name, category (hosting, automation, data, ai, comms, storage, other), what_it_is_for, url, managed_by, plan, billing_owner, cost_amount (a number), cost_currency, billing_cycle (monthly, quarterly, yearly, one-off), renewal_date (YYYY-MM-DD: the renewal reminder posts in #bha-engine-alerts 7, 3 and 1 day before it), paid_with (which card pays: owner and last four digits at most, e.g. "Visa 6967 (Destiny)" or "Mercury card"; a card number is refused), status (active, trial, retired), notes; for keys key_name, bitwarden_folder, bitwarden_item_name, lane_access (a list), owner, rotation_policy, access_request_path, status (active, not issued, retired), notes; for stage1 name, lane, plan_status (In under this plan, Out / paused, Need X clarified before committing, No response, treated as paused), hard_constraints, agreement_sent, signed, countersigned (YYYY-MM-DD), notes, and never a pay figure or contract text. Leave a cost out when nobody has said it: never guess one. To retire a tool BHA stopped using, update status to retired (it stays listed as history); remove takes a row off the list and is for a row added by mistake. HELD HERE: requester_user_id must be Destiny, Jason or someone with a Builder Profile (not_permitted), and remove and restore are Destiny's or Jason's; NEVER put a password, API key or token in any field: a value shaped like one is refused (secret_refused) and nothing is written. Say where the secret lives instead (e.g. "in Bitwarden"). create refuses a name already held (already_held, naming the row): update it instead. dry_run checks everything and writes nothing. Returns {ok, written, row, page, message}. Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -179,10 +179,10 @@ export const writeRegistry: ToolDefinition = {
         if (action === 'restore' && !before.deleted_at) throw new Refusal('not_removed', `${id} is on the list already.`);
         if (action === 'update' && !Object.keys(raw).length) throw new Refusal('nothing_to_change', 'fields names nothing to change.');
       } else {
-        const name = String(raw.name ?? '').trim();
+        const name = String(raw.name ?? raw.key_name ?? '').trim();
         const norm = (s: unknown) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        const dup = held.find((r) => (name && norm(r.name) === norm(name)) || (id && r.id === id));
-        if (dup) throw new Refusal('already_held', `${kind} already holds "${dup.name}" (id ${dup.id})${dup.deleted_at ? ', removed from the list: restore it' : ': update it instead'}.`, { row: brief(kind, dup) });
+        const dup = held.find((r) => (name && norm(r.name ?? r.key_name) === norm(name)) || (id && r.id === id));
+        if (dup) throw new Refusal('already_held', `${kind} already holds "${dup.name ?? dup.key_name}" (id ${dup.id})${dup.deleted_at ? ', removed from the list: restore it' : ': update it instead'}.`, { row: brief(kind, dup) });
       }
 
       let row: registry.RegistryRow | null = null;
@@ -197,7 +197,7 @@ export const writeRegistry: ToolDefinition = {
 
       const verb = { create: 'Added', update: 'Updated', remove: 'Removed from the list', restore: 'Restored' }[action];
       await auditClose(audit, { outcome: action === 'create' ? 'created' : action === 'update' ? 'updated' : action === 'remove' ? 'archived' : 'updated', detail: `${verb} ${kind} ${row.id} for ${who}`, natural_id: row.id, before: before ? brief(kind, before) : null, after: brief(kind, row) });
-      return { ok: true, written: true, action, kind, row: brief(kind, row), page: PAGE, message: `${verb}: ${String(row.name ?? row.id)} (${row.id}).`, audit_id: audit };
+      return { ok: true, written: true, action, kind, row: brief(kind, row), page: PAGE, message: `${verb}: ${String(row.name ?? row.key_name ?? row.id)} (${row.id}).`, audit_id: audit };
     } catch (e) {
       if (e instanceof Refusal) {
         await auditClose(audit, { outcome: 'refused', detail: `${e.reason}: ${e.message}`, guard_result: { reason: e.reason } });

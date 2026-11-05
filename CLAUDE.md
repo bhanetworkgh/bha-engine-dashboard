@@ -1920,6 +1920,8 @@ customers' numbers and emails are masked. An unset key is `not_configured`. Keys
 Jason, audited kind `twilio`) uses `TWILIO_ADMIN_KEY_SID` and `TWILIO_ADMIN_KEY_SECRET`: a GET runs at once, a POST or
 DELETE only with `confirm: "<METHOD> <path>"`. `npm run test:service-reads`.
 
+**The Key registry and the Stage 1 table** (5 Nov 2026, Destiny; Jason, #bha-coordination 1793822857.081889 and DM 1793820617.412249). Registry kinds `keys` (`registry_keys`, the Keys tab) and `stage1` (`registry_stage1`, the page `/stage-1`), migration 117, read and written by `read_registry` and `write_registry`. Bitwarden is the single holder of every secret: `keys` says where one sits and who may touch it, and has no value column. This supersedes "there is no credentials registry" only in that sense; the old credentials kind stays unserved. `stage1` holds Jason's four statuses and dates, never a pay figure or contract text, because the dashboard has one shared login and agents read this database.
+
 **Customer ready follows gate state, and coverage is always stated** (4 Nov 2026, Jason, #bha-code-reviews 1793801806.859099). `cc.gateProblem`, held in code on the automatic check and on `prepare_code_check`: a log touching `GATED_LANES` (VFARM_HARDWARE, KIOSK, CAD_API, CST) is `blocked_on_gate` until its gate loop (TU4O by default) is Closed; a draft that calls it customer ready otherwise is refused; `couldnt_check` is never empty and section 3 is on every check. These cards plus Destiny's Approve are Jason's source of truth for claims, pay and readiness.
 
 **The automatic code check** (4 Nov 2026, Destiny: "why should I have to do the code checks manually"; Bays posts, he

@@ -40,7 +40,7 @@ export class RegistryError extends Error {
   }
 }
 
-export type RegistryKind = 'workflows' | 'services' | 'credentials' | 'endpoints' | 'bases' | 'people';
+export type RegistryKind = 'workflows' | 'services' | 'credentials' | 'endpoints' | 'bases' | 'people' | 'keys' | 'stage1';
 
 type FieldType = 'text' | 'longtext' | 'number' | 'date' | 'array' | 'select' | 'url';
 
@@ -83,6 +83,9 @@ const CATEGORIES = ['hosting', 'automation', 'data', 'ai', 'comms', 'storage', '
 const CYCLES = ['monthly', 'quarterly', 'yearly', 'one-off'] as const;
 export const REPLAY = ['auto', 'never'] as const;
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+export const KEY_STATUS = ['active', 'not issued', 'retired'] as const;
+/** Jason's own words, DM 1793820617.412249. A person nobody has heard from is the last one, never blank. */
+export const PLAN_STATUS = ['In under this plan', 'Out / paused', 'Need X clarified before committing', 'No response, treated as paused'] as const;
 
 export const KINDS: Record<RegistryKind, KindSpec> = {
   workflows: {
@@ -151,6 +154,48 @@ export const KINDS: Record<RegistryKind, KindSpec> = {
       { name: 'owner', type: 'text', max: 80 },
       { name: 'notes', type: 'longtext', max: 2000 },
       // There is no value column here, and there is not to be one.
+    ],
+  },
+  // The Key registry (5 Nov 2026, Jason's canon). Bitwarden is the single holder of every secret; this says where a
+  // key sits and who may touch it. There is no value column and there is not to be one. The credentials kind above
+  // stays retired: that was a list with no Bitwarden path and no owner of the rule.
+  keys: {
+    table: 'registry_keys',
+    label: 'key',
+    idLabel: 'id',
+    idFromCaller: false,
+    order: 'key_name',
+    seed: [],
+    fields: [
+      { name: 'key_name', type: 'text', required: true, max: 160 },
+      { name: 'bitwarden_folder', type: 'text', max: 160 },
+      { name: 'bitwarden_item_name', type: 'text', max: 160 },
+      { name: 'lane_access', type: 'array' },
+      { name: 'owner', type: 'text', max: 80 },
+      { name: 'rotation_policy', type: 'longtext', max: 600 },
+      { name: 'access_request_path', type: 'longtext', max: 800 },
+      { name: 'status', type: 'select', options: KEY_STATUS, defaultOnCreate: 'active' },
+      { name: 'notes', type: 'longtext', max: 2000 },
+    ],
+  },
+  // Jason's Stage 1 table (5 Nov 2026). The dashboard has one shared login and agents read this database, so it holds
+  // where each person stands and never a pay figure or a line of a contract: those stay in DocuSign.
+  stage1: {
+    table: 'registry_stage1',
+    label: 'person',
+    idLabel: 'id',
+    idFromCaller: false,
+    order: 'name',
+    seed: [],
+    fields: [
+      { name: 'name', type: 'text', required: true, max: 120 },
+      { name: 'lane', type: 'text', max: 120 },
+      { name: 'plan_status', type: 'select', options: PLAN_STATUS, defaultOnCreate: 'No response, treated as paused', notNull: true },
+      { name: 'hard_constraints', type: 'longtext', max: 600 },
+      { name: 'agreement_sent', type: 'date' },
+      { name: 'signed', type: 'date' },
+      { name: 'countersigned', type: 'date' },
+      { name: 'notes', type: 'longtext', max: 1000 },
     ],
   },
   endpoints: {
@@ -339,7 +384,7 @@ export async function create(kind: RegistryKind, input: Record<string, unknown>)
   const given = String(input.id ?? '').trim();
   if (spec.idFromCaller && !given) throw new RegistryError(`A ${spec.label} needs its ${spec.idLabel}.`);
   if (given && !ID.test(given)) throw new RegistryError(`That ${spec.idLabel} has characters an id cannot hold.`);
-  const id = given || slug(String(input.name ?? ''));
+  const id = given || slug(String(input.name ?? input.key_name ?? ''));
 
   // A declared default fills in only where the caller said nothing at all.
   const withDefaults = { ...input };

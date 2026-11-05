@@ -78,6 +78,7 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
     group: 'Reference',
     items: [
       { to: '/registry', label: 'System registry', icon: 'book' },
+      { to: '/stage-1', label: 'Stage 1 status', icon: 'shield' },
       // The agent maturity scorecard (2026-09-28): 12 dimensions, scored, with the live metrics behind them.
       { to: '/agent-maturity', label: 'Agent maturity', icon: 'shield' },
     ],

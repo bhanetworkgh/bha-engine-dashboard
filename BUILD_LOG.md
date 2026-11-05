@@ -14452,3 +14452,11 @@ Files:      registry row tello (audit 4891). No repo code.
 Problem:    No public Tello API found, so reading codes needs a forwarder on the phone; parked. OpenRouter's email could not be changed: no setting found, and linking Google said the address is tied to another account.
 Fix:        Security PIN left out of the registry; it belongs in Bitwarden. OpenRouter: Mercury card, auto top-up $50 at $20, passkey added to the Bitwarden login, LOOP-1793743648695-GULZ stays open for the email.
 Decision:   Keys: Bitwarden holds them by lane; a Key registry beside the Tool registry holds no values, because the dashboard has one shared login and agents read its database. Jason accepted it as canon. Owed next session: Key registry, backup test, marketing logging fix with the 2 Nov backfill, five read tools on Genie's token.
+
+## 2026-11-05 — Key registry, Stage 1 status, Genie's five reads (Destiny, D3)
+
+- **Key registry**, Jason's canon of 4 Nov (#bha-coordination 1793822857.081889, 1793823104.127659): registry kind `keys`, table `registry_keys`, migration 117, a Keys tab beside Tools. Fields are Jason's: key_name, bitwarden_folder, bitwarden_item_name, lane_access, owner, rotation_policy, access_request_path, plus status and notes. No value column; `write_registry` refuses anything shaped like a key. The retired credentials kind stays retired.
+- **Stage 1 status**, Jason's single table (DM 1793820617.412249): kind `stage1`, `registry_stage1`, page `/stage-1` under Reference. Name, lane, his four statuses, hard constraints, sent, signed, countersigned, notes. No pay figures or contract text: one shared login, and agents read this database. Nothing reads DocuSign; dates are entered from its read-back.
+- `read_registry` and `write_registry` serve both kinds, so Bays answers "where is X key and who can touch it" with no new tool or allow-list change.
+- **Genie's token** gets `read_github`, `read_render`, `read_twilio`, `read_elevenlabs`, `read_stripe` (RW4J). Reads at the source; nothing is ingested into BHARAG, whatever the loop said. Kaiqi's service must list the tools on its side too.
+- Not type-checked here: the npm registry is unreachable from the workspace, so Render's build is the check.

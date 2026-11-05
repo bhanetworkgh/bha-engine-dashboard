@@ -1977,12 +1977,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         // Destiny): there is no credentials registry. The table is not dropped,
         // because nothing drops a table, but it is neither read nor served.
         const deleted = url.searchParams.get('deleted') === 'true';
-        const [workflows, services, endpoints, bases, people, builders] = await Promise.all([
+        const [workflows, services, endpoints, bases, people, keys, stage1, builders] = await Promise.all([
           registry.list('workflows', deleted),
           registry.list('services', deleted),
           registry.list('endpoints', deleted),
           registry.list('bases', deleted),
           registry.list('people', deleted),
+          registry.list('keys', deleted),
+          registry.list('stage1', deleted),
           // The Builders registry is the roster with its live figures beside
           // it, read from the record tables rather than from a fixture.
           store.builderFigures(),
@@ -1993,6 +1995,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           endpoints,
           bases,
           people,
+          keys,
+          stage1,
           builders,
           // Computed by the server from the rows, per CLAUDE.md section 4.
           spend: registry.spendOf(services),

@@ -345,6 +345,10 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-28 (D3): the evidence store, so a decision's evidence is read from the one copy the
         // dashboard holds, by name, never from a link that can move. A read.
         'read_evidence',
+        // 2026-11-05 (RW4J): the five live service reads Bays has, read at the source, so Genie checks a
+        // claim against what is really deployed. Nothing is copied into BHARAG. Customer details stay masked
+        // on any agent token (serviceReads.ts).
+        'read_github', 'read_render', 'read_twilio', 'read_elevenlabs', 'read_stripe',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>

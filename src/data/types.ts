@@ -2503,7 +2503,7 @@ export type RecordMetrics = LoopMetrics | CodexMetrics | PatternMetrics | Commer
  * and renders as "—"; the page never fills a gap with something plausible, and
  * the spend total states how many services are unpriced beside the figure.
  */
-export type RegistryKind = 'workflows' | 'services' | 'credentials' | 'endpoints' | 'bases' | 'people';
+export type RegistryKind = 'workflows' | 'services' | 'credentials' | 'endpoints' | 'bases' | 'people' | 'keys' | 'stage1';
 
 /**
  * The kinds the registry page reads and writes.
@@ -2638,7 +2638,32 @@ export interface BuilderFigures {
   entries_this_week: number | null;
 }
 
+/** A key's place in Bitwarden and who may touch it. There is no value field and there is not to be one. */
+export interface RegistryKey extends RegistryBase {
+  key_name: string;
+  bitwarden_folder: string | null;
+  bitwarden_item_name: string | null;
+  lane_access: string[] | null;
+  owner: string | null;
+  rotation_policy: string | null;
+  access_request_path: string | null;
+  status: string | null;
+}
+
+/** One person's standing under the comp plan. No pay figure and no contract text, ever. */
+export interface RegistryStage1 extends RegistryBase {
+  name: string;
+  lane: string | null;
+  plan_status: string;
+  hard_constraints: string | null;
+  agreement_sent: string | null;
+  signed: string | null;
+  countersigned: string | null;
+}
+
 export interface RegistryData {
+  keys: RegistryKey[];
+  stage1: RegistryStage1[];
   workflows: RegistryWorkflow[];
   services: RegistryService[];
   endpoints: RegistryEndpoint[];
@@ -2660,6 +2685,8 @@ export interface RegistryRowOf {
   endpoints: RegistryEndpoint;
   bases: RegistryBaseRow;
   people: RegistryPerson;
+  keys: RegistryKey;
+  stage1: RegistryStage1;
 }
 
 /* --------------------------------------------------------- engine writes */

@@ -76,9 +76,10 @@ import { DASH, EditableCell, NewRow, type CellType } from './Editable';
  * compared against nothing. The write log itself (`engine_writes`) is kept and
  * still read — by the Clients and Pay pages and by the MCP tools.
  */
-const TABS = ['Builders', 'Tools', 'Endpoint', 'Workflow'] as const;
+const TABS = ['Builders', 'Tools', 'Keys', 'Endpoint', 'Workflow'] as const;
 type Tab = (typeof TABS)[number];
 
+const KEY_STATUS = ['active', 'not issued', 'retired'] as const;
 const WORKFLOW_STATUS = ['production', 'experimental', 'retired'] as const;
 /** Whether the recovery watcher may re-run this workflow's failures once a dependency is back (2026-09-23). */
 const WORKFLOW_REPLAY = ['auto', 'never'] as const;
@@ -249,6 +250,7 @@ export default function Registry() {
   const counts = {
     Builders: { n: d.people.filter((p) => !p.deleted_at).length },
     Tools: { n: d.services.filter((s) => !s.deleted_at).length },
+    Keys: { n: d.keys.filter((k) => !k.deleted_at).length },
     Endpoint: { n: d.endpoints.filter((e) => !e.deleted_at).length + d.bases.filter((b) => !b.deleted_at).length },
     Workflow: { n: d.workflows.filter((w) => !w.deleted_at).length },
   } as Partial<Record<Tab, { n: number }>>;
@@ -259,7 +261,7 @@ export default function Registry() {
     <div className="relative flex h-full min-h-0 flex-col">
       <PageHeader
         title="System registry"
-        subtitle="Who the builders are, what BHA pays for, what it calls, and what runs"
+        subtitle="Who the builders are, what BHA pays for, where its keys sit, what it calls, and what runs"
         right={
           <label className="flex cursor-pointer items-center gap-2 text-[12px] text-dim">
             <input type="checkbox" checked={showDeleted} onChange={(e) => setShowDeleted(e.target.checked)} className="accent-[var(--accent)]" />
@@ -278,6 +280,7 @@ export default function Registry() {
 
         {tab === 'Builders' && <BuildersTab rows={d.people} {...shared} />}
         {tab === 'Tools' && <ServicesTab rows={d.services} spend={d.spend} {...shared} />}
+        {tab === 'Keys' && <KeysTab rows={d.keys} {...shared} />}
         {tab === 'Endpoint' && <EndpointsTab rows={d.endpoints} bases={d.bases} digests={d.digest_health} {...shared} />}
         {tab === 'Workflow' && <WorkflowsTab rows={d.workflows} {...shared} />}
       </div>
@@ -330,6 +333,78 @@ function cell<K extends ShownKind>(
       onSave={(v) => p.save(kind, row.id, field, v)}
       onError={p.fail}
     />
+  );
+}
+
+/* ------------------------------------------------------------------ keys */
+
+/**
+ * The Key registry (5 Nov 2026, Jason's canon): Bitwarden holds every key, by lane, and this says where
+ * one sits and who may touch it. No value is ever typed here: the server has no column for one, and
+ * write_registry refuses anything shaped like a key.
+ */
+function KeysTab({ rows, ...p }: TabProps & { rows: RegistryData['keys'] }) {
+  const [q, setQ] = useState('');
+  const term = q.trim().toLowerCase();
+  const shown = rows.filter((k) => !term || [k.key_name, k.bitwarden_folder, k.bitwarden_item_name, k.owner, (k.lane_access ?? []).join(' ')].some((v) => v && v.toLowerCase().includes(term)));
+  const paged = usePaged(shown, term);
+  return (
+    <>
+      <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
+        <div className="max-w-[104ch] text-[11.5px] leading-snug text-faint">
+          Bitwarden is the only place a key lives. This list says where it sits and how to ask for it. Never type a key here, and never send one through Slack.
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <SearchBox value={q} onChange={setQ} placeholder="Search keys" />
+        </div>
+        <NewRow
+          label="key"
+          onError={p.fail}
+          onCreate={(v) => p.add('keys', v)}
+          fields={[
+            { name: 'key_name', label: 'key name', required: true },
+            { name: 'bitwarden_folder', label: 'bitwarden folder' },
+            { name: 'bitwarden_item_name', label: 'bitwarden item' },
+            { name: 'lane_access', label: 'lanes', type: 'array', placeholder: 'Engine, vFarm' },
+            { name: 'owner', label: 'owner' },
+          ]}
+        />
+      </div>
+      <Grid
+        label="Keys"
+        min={1280}
+        cols={9}
+        empty="No key is registered yet."
+        head={
+          <>
+            <Th width="20%">key</Th>
+            <Th>bitwarden folder</Th>
+            <Th>bitwarden item</Th>
+            <Th>lanes</Th>
+            <Th>owner</Th>
+            <Th width="16%">rotation</Th>
+            <Th width="20%">how to get access</Th>
+            <Th>status</Th>
+            <Th />
+          </>
+        }
+      >
+        {paged.rows.map((k) => (
+          <tr key={k.id} className={k.deleted_at ? 'opacity-50' : ''}>
+            <td className="td card-title td-clip" style={{ maxWidth: '32ch' }}>{cell(p, 'keys', k, 'key_name', { width: '32ch' })}</td>
+            <td className="td text-dim">{cell(p, 'keys', k, 'bitwarden_folder')}</td>
+            <td className="td td-clip text-dim" style={{ maxWidth: '28ch' }}>{cell(p, 'keys', k, 'bitwarden_item_name', { width: '28ch' })}</td>
+            <td className="td text-dim">{cell(p, 'keys', k, 'lane_access', { type: 'array' })}</td>
+            <td className="td text-dim">{cell(p, 'keys', k, 'owner')}</td>
+            <td className="td td-clip text-dim" style={{ maxWidth: '32ch' }}>{cell(p, 'keys', k, 'rotation_policy', { type: 'longtext', width: '32ch' })}</td>
+            <td className="td td-clip text-dim" style={{ maxWidth: '40ch' }}>{cell(p, 'keys', k, 'access_request_path', { type: 'longtext', width: '40ch' })}</td>
+            <td className="td card-meta">{cell(p, 'keys', k, 'status', { type: 'select', options: KEY_STATUS })}</td>
+            <td className="td card-actions td-actions"><RowTools {...p} kind="keys" row={k} /></td>
+          </tr>
+        ))}
+      </Grid>
+      <Pagination paged={paged} unit="keys" />
+    </>
   );
 }
 

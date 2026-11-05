@@ -43,6 +43,7 @@ const ModelSpend = lazy(() => import('./screens/ModelSpend'));
 const Logstream = lazy(() => import('./screens/Logstream'));
 const Evidence = lazy(() => import('./screens/Evidence'));
 const Registry = lazy(() => import('./screens/Registry'));
+const Stage1 = lazy(() => import('./screens/Stage1'));
 const Settings = lazy(() => import('./screens/Settings'));
 
 export default function App() {
@@ -123,6 +124,7 @@ export default function App() {
         <Route path="/logstream" element={<Suspense fallback={<Loading />}><Logstream /></Suspense>} />
         <Route path="/evidence" element={<Suspense fallback={<Loading />}><Evidence /></Suspense>} />
         <Route path="/registry" element={<Suspense fallback={<Loading />}><Registry /></Suspense>} />
+        <Route path="/stage-1" element={<Suspense fallback={<Loading />}><Stage1 /></Suspense>} />
         <Route path="/settings" element={<Suspense fallback={<Loading />}><Settings /></Suspense>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

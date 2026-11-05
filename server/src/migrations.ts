@@ -4259,6 +4259,45 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `ALTER TABLE engine_media_post_decisions ADD CONSTRAINT engine_media_post_decisions_target_check CHECK (decision <> 'approve' OR claim_check_status <> 'target')`,
     ],
   },
+  {
+    // 5 Nov 2026, Destiny (Jason, #bha-coordination 1793822857.081889 and 1793823104.127659): the Key registry, beside
+    // the Tool registry. Where a key sits in Bitwarden and who may touch it; there is no column a value could go in,
+    // and adding one needs a decision, not a patch. The Stage 1 status table is Jason's single table from DM
+    // 1793820617.412249: where each person stands under the comp plan, with no pay figure and no contract text.
+    id: 117,
+    name: 'key registry and stage 1 status',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS registry_keys (
+         id                  text PRIMARY KEY,
+         key_name            text NOT NULL,
+         bitwarden_folder    text,
+         bitwarden_item_name text,
+         lane_access         text[],
+         owner               text,
+         rotation_policy     text,
+         access_request_path text,
+         status              text,
+         notes               text,
+         created_at          text NOT NULL,
+         updated_at          text NOT NULL,
+         deleted_at          text
+       )`,
+      `CREATE TABLE IF NOT EXISTS registry_stage1 (
+         id                  text PRIMARY KEY,
+         name                text NOT NULL,
+         lane                text,
+         plan_status         text,
+         hard_constraints    text,
+         agreement_sent      text,
+         signed              text,
+         countersigned       text,
+         notes               text,
+         created_at          text NOT NULL,
+         updated_at          text NOT NULL,
+         deleted_at          text
+       )`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
