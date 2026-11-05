@@ -738,6 +738,7 @@ export const adminSetup = (code: string, who: string, password: string) => api<{
 export const adminLogout = () => api<{ ok: boolean }>('/api/admin/logout', { method: 'POST', body: {} });
 
 export interface Agreement {
+  content_type: string;
   id: string;
   person_id: string;
   person_name: string;
