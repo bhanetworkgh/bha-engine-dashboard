@@ -169,6 +169,8 @@ export interface PlatformDraft {
   posted_id: string | null;
   posted_url: string | null;
   posted_at: string | null;
+  /** Every direct edit, oldest first, each with the text it replaced. */
+  edits?: { at: string; by: string; reason: string; before_text: string; before_thread: string[] }[];
 }
 
 export interface MediaPost {
@@ -430,6 +432,76 @@ export async function decide(postId: string, input: DecideInput) {
     );
     events.changed('media_posts', postId, db);
     return { ok: true, post: { ...before!, platforms, status }, decided: { platform, decision, by, by_name: APPROVERS[by!], note, at: now } };
+  });
+}
+
+/* ----------------------------------------------------------------- edit */
+
+export interface EditInput {
+  platform: string;
+  text?: string | null;
+  thread?: string[] | null;
+  by: string;
+  reason: string;
+  dry_run?: boolean;
+}
+
+/**
+ * Changes one platform's words directly (5 Nov 2026, Destiny): a person's exact lines, where a reject would send them
+ * through the model. Jason or Destiny only, on a platform still waiting for its decision, so approved text can never
+ * change underneath the approval. The claim rules run on the new words, and the old words stay on the platform.
+ * The Slack card is not redrawn, so the dashboard and read_media_posts hold the current text.
+ */
+export async function editText(postId: string, input: EditInput) {
+  const by = bare(s(input.by, 40));
+  if (!by || !APPROVERS[by]) refuse('not_permitted', `Only Jason or Destiny edit a Media Twin post${by ? `; ${by} is not one of them` : ''}.`, 403);
+  const platform = s(input.platform, 20) as Platform;
+  if (!(PLATFORMS as readonly string[]).includes(platform)) refuse('bad_value', `platform must be one of ${PLATFORMS.join(', ')}.`);
+  const reason = s(input.reason, 500);
+  if (!reason || reason.length < 3) refuse('reason_required', 'An edit needs a reason of at least 3 characters.');
+  const text = input.text === undefined || input.text === null ? null : String(input.text).trim();
+  if (text === '') refuse('bad_value', 'text cannot be empty.');
+  if (input.thread != null && (!Array.isArray(input.thread) || input.thread.some((t) => !String(t).trim()))) refuse('bad_value', 'thread must be a list of non-empty strings.');
+  if (text === null && input.thread == null) refuse('missing_field', 'Send text, thread or both.');
+
+  return withTransaction(async (db) => {
+    const before = await one(db, postId, true);
+    if (!before) refuse('not_found', `No Media Twin post ${postId}.`, 404);
+    if (before!.status === 'superseded') refuse('superseded', `${postId} was replaced by a newer revision; edit that one.`, 409);
+    const p = before!.platforms[platform];
+    if (!p) refuse('not_found', `${postId} has no ${platform} draft.`, 404);
+    if (p!.decision !== 'pending') refuse('already_decided', `The ${platform} draft is already ${p!.decision}, so its words cannot change.`, 409);
+    if (p!.posted_at) refuse('already_posted', `The ${platform} draft has been posted.`, 409);
+    const nextText = text ?? p!.text;
+    const nextThread = input.thread != null ? input.thread.map((t) => String(t).trim()) : p!.thread;
+    if (platform === 'x') {
+      const long = [nextText, ...nextThread].findIndex((t) => t.length > 280);
+      if (long >= 0) refuse('too_long', `Tweet ${long + 1} is over 280 characters.`);
+    }
+    const card = before!.card ?? {};
+    const checked = claimCheck([...['kicker', 'headline', 'sub', 'foot'].map((k) => String(card[k] ?? '')), nextText, ...nextThread].join('\n'));
+    let status: ClaimStatus = checked.status;
+    let findings = checked.findings;
+    let target_gate: TargetGate | undefined;
+    if (status === 'target') {
+      target_gate = await targetGate();
+      const settled = settleTarget(findings, target_gate);
+      status = settled.status;
+      findings = settled.findings;
+    }
+    const now = new Date().toISOString();
+    const edits = [...(p!.edits ?? []), { at: now, by: by!, reason: reason!, before_text: p!.text, before_thread: p!.thread }];
+    const next: PlatformDraft = { ...p!, text: nextText, thread: nextThread, claim_check_status: status, claim_findings: findings, edits, ...(target_gate ? { target_gate } : {}) };
+    const platforms = { ...before!.platforms, [platform]: next };
+    const overall = worst(Object.values(platforms).map((x) => x!.claim_check_status));
+    if (input.dry_run) return { ok: true, dry_run: true, written: false, platform: next, claim_check_status: overall };
+    await db.query(`UPDATE engine_media_posts SET platforms = $2::jsonb, claim_check_status = $3, updated_at = now() WHERE post_id = $1`, [postId, JSON.stringify(platforms), overall]);
+    await record(
+      { event_type: 'media_post_edited', subject_id: postId, lane: 'MEDIA', actor: by, source_ref: before!.slack_ts, detail: { schema: SCHEMA, platform, reason, claim_check_status: status } },
+      db,
+    );
+    events.changed('media_posts', postId, db);
+    return { ok: true, written: true, platform: next, claim_check_status: overall };
   });
 }
 

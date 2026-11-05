@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import type { TwinDraft, TwinDraftsData } from '../../data';
-import { Card, CardHeader, EmptyState, FigureCell, Pill, StatStrip, relativeTime } from '../../components/ui';
+import { approveMediaPost, type TwinDraft, type TwinDraftsData } from '../../data';
+import { Button, Card, CardHeader, EmptyState, FigureCell, Pill, StatStrip, relativeTime } from '../../components/ui';
 
 /**
  * Drafts (2026-11-01, Destiny): everything the Media Twin wrote, newest first. Each draft shows
  * the card it went out with, the text for each platform, the claim check (with the sentence that
  * tripped it), Jason's Approve or Reject per platform with his note, and which revision it is.
- * A read. Decisions are made on the Slack card in #bha-media-twin; nothing posts from here.
+ * Approve is here and on the Slack card in #bha-media-twin; a reject happens on the card, because it starts the rewrite. Nothing posts from here.
  * Colour only where something is wrong: a blocked claim. Approved is the accent, never green.
  */
 
@@ -53,6 +53,21 @@ function DraftCard({ post }: { post: TwinDraft }) {
   const platforms = Object.keys(post.platforms);
   const [open, setOpen] = useState(platforms[0] ?? '');
   const d = post.platforms[open];
+  const [busy, setBusy] = useState(false);
+  const [decided, setDecided] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const approve = async (by: string, name: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await approveMediaPost(post.post_id, open, by);
+      setDecided((v) => ({ ...v, [open]: name }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'The approval did not land.');
+    } finally {
+      setBusy(false);
+    }
+  };
   const img = post.images.find((i) => i.platform === open) ?? post.images.find((i) => open === 'facebook' && i.platform === 'instagram') ?? post.images[0];
   return (
     <Card className="pb-4">
@@ -114,6 +129,17 @@ function DraftCard({ post }: { post: TwinDraft }) {
                     </li>
                   ))}
                 </ul>
+              ) : null}
+              {d.decision === 'pending' && post.status !== 'superseded' ? (
+                decided[open] ? (
+                  <p className="text-[12px]">Approved by {decided[open]}.</p>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="primary" loading={busy} onClick={() => approve('U0AEW3TBYH1', 'Destiny')}>Approve as Destiny</Button>
+                    <Button variant="secondary" disabled={busy} onClick={() => approve('U0A9V97949F', 'Jason')}>Approve as Jason</Button>
+                    {error ? <span className="text-[12px] text-failing">{error}</span> : null}
+                  </div>
+                )
               ) : null}
               {d.decision !== 'pending' ? (
                 <p className="text-[12px]">

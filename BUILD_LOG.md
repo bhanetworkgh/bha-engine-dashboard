@@ -14465,3 +14465,7 @@ Decision:   Keys: Bitwarden holds them by lane; a Key registry beside the Tool r
 ## 2026-11-05 — Stage 1 knowledge capture (Destiny; Jason, DM 1793883251.946919)
 
 - SOP 0984fd4b logged in BHARAG. `knowledge_capture` added to `registry_stage1`, a column and a link to the SOP on `/stage-1`.
+
+## 2026-11-05 — Media Twin: edit a draft, approve on the page (Destiny)
+
+- `edit_media_post` and `mediaPosts.editText`; Approve buttons on the Drafts tab through `decide()`. No migration: edits live on the platform's blob.

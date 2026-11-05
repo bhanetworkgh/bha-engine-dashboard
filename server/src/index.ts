@@ -2507,6 +2507,19 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * write. Every write is the MCP write tools' own handler, so the guards and
      * the engine_mcp_writes line are the same ones — see candidateActions.ts.
      */
+    // 5 Nov 2026, Destiny: Approve on the Drafts tab, beside the Slack card's button, through the same decide().
+    const mediaApprove = p.match(/^\/api\/media-posts\/([A-Za-z0-9-]+)\/approve$/);
+    if (mediaApprove) {
+      if (req.method !== 'POST') throw new HttpError(405, 'POST only.');
+      const body = await readJson(req);
+      try {
+        return send(res, 200, await mediaPosts.decide(mediaApprove[1], { platform: String(body.platform ?? ''), decision: 'approve', by: String(body.by ?? ''), via: 'dashboard' }));
+      } catch (e) {
+        if (e instanceof mediaPosts.MediaPostError) return send(res, e.status, { ok: false, reason: e.reason, message: e.message });
+        throw e;
+      }
+    }
+
     const candidateAction = p.match(/^\/api\/pattern-candidates\/([^/]+)\/(register|decline|reassign|draft)$/);
     if (candidateAction) {
       if (req.method !== 'POST') throw new HttpError(405, 'POST only.');

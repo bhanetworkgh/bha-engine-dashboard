@@ -4485,6 +4485,8 @@ more, and the Media Twin rewrites the draft from it as the next revision, which 
 to a platform from here. The Media Twin page opens on **Drafts**; `read_media_posts` (both connections) is the read.
 The Media Twin agent has its own read-only token, `MCP_AGENT_TOKEN_MEDIA_TWIN`.
 
+**A draft's words can be edited, and Approve is on the page** (5 Nov 2026, Destiny). `mediaPosts.editText` behind `edit_media_post` (write connection, no agent's scope, refused on agent tokens, audited kind `media_posts`): Jason or Destiny, a reason, only while the platform is pending; the claim rules run on the new words and the old words stay on the platform's `edits`, with one `media_post_edited` event. The Slack card is not redrawn. `POST /api/media-posts/:id/approve` is the Drafts tab's button, calling `decide()`; its name is declared under the shared login. Reject stays on the Slack card, which starts the rewrite.
+
 **A reliability claim is a target until Stage 1 proves it** (4 Nov 2026, Jason, #bha-media-twin 1793801513.860909, after the 3 Nov soil
 probe failed unseen). A fourth claim state, `target`, migration 116. `claimCheck` marks "no surprises", "only runs when needed", "no stuck
 valves", "no puddles", "feels like an appliance / science project" and days-unattended lines (`TARGET`) when stated as today's behaviour;

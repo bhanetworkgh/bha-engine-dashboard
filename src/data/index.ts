@@ -724,6 +724,8 @@ export interface MediaPostLogData {
 }
 export const getMediaPostLog = () => api<MediaPostLogData>('/api/media-post-log');
 
+export const approveMediaPost = (id: string, platform: string, by: string) => api<{ ok: boolean }>(`/api/media-posts/${id}/approve`, { method: 'POST', body: { platform, by } });
+
 /** The Media Twin's drafts (2026-11-01): server/src/mediaPosts.ts. */
 export interface TwinDraftPlatform {
   text: string;
