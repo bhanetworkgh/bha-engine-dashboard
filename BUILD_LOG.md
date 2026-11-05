@@ -14532,3 +14532,8 @@ Problem:    Approving through Submit Actions writes Jason Notes as "" (Update Ja
 Fix:        Notes restored word for word (audits 5024 onward); loop reopened (5028). Executions 70796, 70815 and the 29 Oct run.
 Decision:   Tags written to Codex rows only after Destiny sends the reviews. Pay given as a share of the day, no figures on the record.
 Limit:      The workflow bug remains: Approve wipes existing Jason Notes. LinkedIn Twin is outside reach (Latenode going by Hardik's logs), so the publish path and backfill wait on Hardik. Media Twin fallback event not built.
+
+## 2026-11-05 23:30 — D5 dropped
+Intent:     Close D5 on Destiny's decision.
+Files:      None in this repo.
+Decision:   The LinkedIn Twin will be retired, superseded by the Media Twin (Destiny). The logging fix and 2 Nov backfill are dropped and the draft to Hardik deleted. This replaces "wait on Hardik" in the entry above.
