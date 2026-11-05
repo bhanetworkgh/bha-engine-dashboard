@@ -14461,3 +14461,7 @@ Decision:   Keys: Bitwarden holds them by lane; a Key registry beside the Tool r
 - **Genie's token** gets `read_github`, `read_render`, `read_twilio`, `read_elevenlabs`, `read_stripe` (RW4J). Reads at the source; nothing is ingested into BHARAG, whatever the loop said. Kaiqi's service must list the tools on its side too.
 - Not type-checked here: the npm registry is unreachable from the workspace, so Render's build is the check.
 - **Key registry filled**: the secret names each Render service's code asks for, plus n8n's non-OAuth credentials, seeded as `KEYS` in `registrySeed.ts`, one item per key, status `not in Bitwarden`. Names only. They come from the repos, not Render's live environment, which nothing here can read, so a name may be unset or a key may be missing. Render's own DATABASE_URL values and login-through-OAuth credentials are left out.
+
+## 2026-11-05 — Stage 1 knowledge capture (Destiny; Jason, DM 1793883251.946919)
+
+- SOP 0984fd4b logged in BHARAG. `knowledge_capture` added to `registry_stage1`, a column and a link to the SOP on `/stage-1`.

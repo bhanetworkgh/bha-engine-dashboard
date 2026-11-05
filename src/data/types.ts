@@ -2659,6 +2659,7 @@ export interface RegistryStage1 extends RegistryBase {
   agreement_sent: string | null;
   signed: string | null;
   countersigned: string | null;
+  knowledge_capture: string | null;
 }
 
 export interface RegistryData {

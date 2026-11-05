@@ -195,6 +195,7 @@ export const KINDS: Record<RegistryKind, KindSpec> = {
       { name: 'agreement_sent', type: 'date' },
       { name: 'signed', type: 'date' },
       { name: 'countersigned', type: 'date' },
+      { name: 'knowledge_capture', type: 'longtext', max: 1000 },
       { name: 'notes', type: 'longtext', max: 1000 },
     ],
   },

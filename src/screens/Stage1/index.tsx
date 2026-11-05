@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useData } from '../../app/useData';
 import { createRegistryRow, getRegistry, updateRegistryRow, type RegistryData } from '../../data';
 import { EmptyState, LoadFailed, Loading, MetricCard, PageHeader, Toast, relativeTime, useToast } from '../../components/ui';
@@ -13,6 +14,9 @@ import { EditableCell, NewRow } from '../Registry/Editable';
  * and never a pay figure or contract text. Those stay in DocuSign. The signed dates are typed from DocuSign's
  * own read-back: nothing here reads DocuSign, so the page says when a row was last changed.
  */
+/** Jason's knowledge capture standard, 5 Nov 2026, logged as an SOP in BHARAG. */
+const KNOWLEDGE_STANDARD = '/codex?view=sops&sop=0984fd4b-3916-41c8-bc34-5edf34ec2d9b';
+
 const PLAN_STATUS = ['In under this plan', 'Out / paused', 'Need X clarified before committing', 'No response, treated as paused'] as const;
 
 const TONE: Record<string, string> = {
@@ -62,7 +66,7 @@ export default function Stage1() {
       <PageHeader title="Stage 1 status" subtitle="Where each person stands under the comp plan" />
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="shrink-0 max-w-[104ch] px-6 pb-3 text-[11.5px] leading-snug text-faint md:px-8">
-          No pay figures and no contract text here: those stay in DocuSign. Signed dates are entered from DocuSign{newest ? `; last changed ${relativeTime(newest) ?? newest.slice(0, 10)}` : ''}.
+          No pay figures and no contract text here: those stay in DocuSign. Signed dates are entered from DocuSign{newest ? `; last changed ${relativeTime(newest) ?? newest.slice(0, 10)}` : ''}. <Link to={KNOWLEDGE_STANDARD} className="text-accent">Knowledge capture standard</Link>.
         </div>
         <div className="mx-6 mb-4 grid grid-cols-2 gap-3 md:mx-8 md:grid-cols-4">
           <MetricCard title="In under this plan"><span className="font-display tabular text-[28px] leading-none text-ink">{count(PLAN_STATUS[0])}</span></MetricCard>
@@ -89,10 +93,10 @@ export default function Stage1() {
           <EmptyState>Nobody is on the table yet.</EmptyState>
         ) : (
           <div className="card mx-6 mb-6 overflow-x-auto md:mx-8">
-            <table className="w-full min-w-[1080px] border-collapse text-[12.5px]">
+            <table className="w-full min-w-[1320px] border-collapse text-[12.5px]">
               <thead>
                 <tr className="text-left text-[11.5px] text-faint">
-                  {['name', 'lane', 'status', 'hard constraints', 'sent', 'signed', 'countersigned', 'notes'].map((h) => (
+                  {['name', 'lane', 'status', 'hard constraints', 'sent', 'signed', 'countersigned', 'knowledge capture', 'notes'].map((h) => (
                     <th key={h} className="border-b border-line px-3 py-2 font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -107,6 +111,7 @@ export default function Stage1() {
                     <td className="td tabular text-dim">{edit(r, 'agreement_sent', { type: 'date' })}</td>
                     <td className="td tabular text-dim">{edit(r, 'signed', { type: 'date' })}</td>
                     <td className="td tabular text-dim">{edit(r, 'countersigned', { type: 'date' })}</td>
+                    <td className="td td-clip text-dim" style={{ maxWidth: '34ch' }}>{edit(r, 'knowledge_capture', { type: 'longtext', width: '34ch' })}</td>
                     <td className="td td-clip text-dim" style={{ maxWidth: '34ch' }}>{edit(r, 'notes', { type: 'longtext', width: '34ch' })}</td>
                   </tr>
                 ))}

@@ -4336,7 +4336,13 @@ export async function migrate(): Promise<{ applied: number[]; already: number }>
                         )`);
 
     const have = await applied(client);
-    const done: number[] = [];
+    const done: number[] = [  {
+    // 5 Nov 2026, Destiny (Jason, DM 1793883251.946919): where each person stands against the knowledge capture standard.
+    id: 118,
+    name: 'stage 1 knowledge capture',
+    statements: [`ALTER TABLE registry_stage1 ADD COLUMN IF NOT EXISTS knowledge_capture text`],
+  },
+];
     let already = 0;
 
     for (const m of MIGRATIONS.slice().sort((a, b) => a.id - b.id)) {
