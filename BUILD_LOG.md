@@ -14490,3 +14490,10 @@ Files:      server/src/adminAuth.ts, agreements.ts, auth.ts, index.ts, migration
 Problem:    get_page_data let Bays, North Star and hardik_audit read /api/pay and /api/vfarm/leads; hardik_audit's query_postgres read everything. An agent cannot be trusted to name its requester, so a check on the requester alone would not hold.
 Fix:        One gated() list checked on every /api route; agent loopback marked and never admin; assertAgentSql on agent tokens; send_agreement can only ever DM Destiny or Jason and returns no contents.
 Decision:   The file carrier is one commit: files sealed here under AGREEMENTS_KEY land through server/data/agreements-seed.json on boot, then the seed is removed. The password is set on /admin with a one-time code so it never passes through chat. Stage 1 stays readable by read_registry because Jason was told Bays can answer where someone stands, and it holds no pay.
+
+## 2026-11-05 22:10 — Admin login proven on the draft, page map fixed
+Intent:     Step 10: prove the gates live.
+Files:      server/src/mcp/structure.ts (f3ab2f3)
+Problem:    get_page_data on /pay answered "It reads: POST /api/admin/login, ..." because AdminGate was taken for the page. Bays first answered that send_agreement was not in its toolset: the allow-list is mcpServers[0].toolPermissions, which the inventory's tools column does not show.
+Fix:        AdminGate added to ROUTE_WRAPPERS. send_agreement added to both Bays drafts, restore point: the published versions 2a4d695e (Bays) and 04ce35fa (backup).
+Decision:   Draft eval DRAFT-202611052104-NF8M runs before either is published. No deploy while it runs, because a run lives in one process.
