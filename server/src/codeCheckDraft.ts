@@ -169,6 +169,7 @@ export function cardBlocks(d: { codex_entry_id: string; builder: string | null; 
   const payLabel = cc.PAY_LABEL[String(d.check?.pay_call ?? '') as cc.PayCall] ?? null;
   const approve = typeof d.check?.approve === 'string' ? d.check.approve : null;
   const facts = [
+    `*For review by*\n<@${cc.DESTINY}>`,
     `*Builder*\n${who}`,
     `*Codex ID*\n\`${d.codex_entry_id}\``,
     ...(verdictLabel ? [`*Verdict*\n${verdictLabel}`] : []),
@@ -195,7 +196,7 @@ export function cardBlocks(d: { codex_entry_id: string; builder: string | null; 
     },
     { type: 'context', elements: [{ type: 'mrkdwn', text: `Approve posts this in the log's thread as Bays. Send notes sends it back with your notes.${body.length > shown.length ? ' It is too long for one card, so the end is cut here; Approve still posts all of it.' : ''}` }] },
   ];
-  return { text: `Code check ready: ${who}, ${d.codex_entry_id}, round ${d.round}.`, blocks };
+  return { text: `<@${cc.DESTINY}> Code check ready: ${who}, ${d.codex_entry_id}, round ${d.round}.`, blocks };
 }
 
 /** Pure: a settled card, buttons gone. */

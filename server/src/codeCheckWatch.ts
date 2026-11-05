@@ -118,6 +118,7 @@ export function messageFor(d: Due, opts: { reviewed?: { by: string; at: string; 
     {
       type: 'section',
       fields: [
+        { type: 'mrkdwn', text: `*For review by*\n<@${cc.DESTINY}>` },
         { type: 'mrkdwn', text: `*Builder*\n${who}` },
         { type: 'mrkdwn', text: `*Codex ID*\n\`${d.codex_entry_id}\`` },
         { type: 'mrkdwn', text: `*Approved*\n${lagos(d.approved_at)} Lagos` },

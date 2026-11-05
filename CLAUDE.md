@@ -1928,7 +1928,7 @@ DELETE only with `confirm: "<METHOD> <path>"`. `npm run test:service-reads`.
 approves). `server/src/codeCheckDraft.ts`, its brief `server/src/codeCheckBrief.ts`, migration 115,
 `engine_code_check_drafts`. A log goes to n8n's `Code Check — Run` (`/webhook/code-check-run`), whose agent reads the
 log and the live services on Bays' token and hands the check back with `submit_code_check_draft`, checked like a
-recorded check. Bays posts a card in #bha-code-reviews, in rich text with no emoji (header, facts as a list, the check, buttons; `richBody`, also used for the post in the log's thread), with **Approve** and **Send notes**, Destiny's click only, value
+recorded check. Bays posts a card in #bha-code-reviews tagging Destiny (a "For review by" field and the message text, so it notifies him), in rich text with no emoji (header, facts as a list, the check, buttons; `richBody`, also used for the post in the log's thread), with **Approve** and **Send notes**, Destiny's click only, value
 `CCD-<Codex ID>` on the approval card's two action ids, so the Front Door forwards it unchanged. Approve posts the
 check in the log's thread as Bays and records it (Codex, BHARAG, the alert card). Send notes asks in the card's thread;
 his next reply goes back to the agent and the next round replaces the card. There is no reject. A run silent for 30

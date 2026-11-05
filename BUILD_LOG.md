@@ -14476,3 +14476,10 @@ Files:      src/screens/Stage1/index.tsx
 Problem:    An SOP in BHARAG cannot be edited in place and log_sop refuses a title already held.
 Fix:        delete_sop (audit 5000 keeps the old text) then log_sop, verified, new id 7345a32f-7813-45bb-8ccb-cbc7144bfb16. The Stage 1 page's link moved to the new id.
 Decision:   Kaiqi's and Jegan's signed dates set from DocuSign (both completed 5 Nov). Hardik's note says Jason answered and his choice is awaited. Ahad's corrected envelope is still unopened.
+
+## 2026-11-05 21:25 — Code check cards tag Destiny
+Intent:     Destiny missed cards in #bha-code-reviews: only the reminders tagged him, so a new card made no notification.
+Files:      server/src/codeCheckDraft.ts, server/src/codeCheckWatch.ts, CLAUDE.md
+Problem:    Neither card carried a mention.
+Fix:        A "For review by" field naming him on both cards, and on the automatic card the message text too.
+Decision:   A field rather than a new block, so the card's layout and its tests are unchanged.
