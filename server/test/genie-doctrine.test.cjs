@@ -198,7 +198,7 @@ let server;
     }
     ok('North Star, Research Twin and Bays still list read_media_doctrine, read_publication_decision and read_doctrine_gap_summary');
 
-    assert.match(log, /genie \(READONLY_SECRETS_GENIE, read, 12 tools\)/);
+    assert.match(log, /genie \(READONLY_SECRETS_GENIE, read, 17 tools\)/);
     ok('the boot line names genie as read, 11 tools');
   } finally {
     const ev = await query(`DELETE FROM engine_events WHERE subject_id LIKE $1`, [`${DOC}:%`]);
