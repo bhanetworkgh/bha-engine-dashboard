@@ -14545,3 +14545,6 @@ Fix:        Review Tag, Review Pay Recommendation, Review Link, Reviewed By and 
 Problem:    The automatic code checks recorded on the same three logs at 22:27 to 22:28 UTC contradict two sent reviews: on 30 Oct the timeout and concurrency change is not in commit 261b4b6328 (the SHA in the log is garbled) and that commit is already live; on 4 Nov /status is fixed text and the 4d531ac deploy failed.
 Decision:   Tags and recommendations stand. A follow-up correction goes to Jason and Ahad; the reviews are not edited.
 Correction: The entry above says execution ids 70796 and 70815 and "the 29 Oct run"; the three runs are 70796, 70800 and 70815.
+
+## 2026-11-05 23:40 — The two reviews redrafted, not followed up
+Decision:   Nobody had read the 30 Oct and 4 Nov reviews, so Destiny deletes them and sends corrected versions instead of a follow-up. This replaces "A follow-up correction goes to Jason and Ahad" in the entry above. The 4 Nov recommendation on row 440 now also needs the deploy fixed and one post-call 200.
