@@ -83,7 +83,7 @@ const CATEGORIES = ['hosting', 'automation', 'data', 'ai', 'comms', 'storage', '
 const CYCLES = ['monthly', 'quarterly', 'yearly', 'one-off'] as const;
 export const REPLAY = ['auto', 'never'] as const;
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
-export const KEY_STATUS = ['active', 'not issued', 'retired'] as const;
+export const KEY_STATUS = ['active', 'not in Bitwarden', 'not issued', 'retired'] as const;
 /** Jason's own words, DM 1793820617.412249. A person nobody has heard from is the last one, never blank. */
 export const PLAN_STATUS = ['In under this plan', 'Out / paused', 'Need X clarified before committing', 'No response, treated as paused'] as const;
 
@@ -165,7 +165,7 @@ export const KINDS: Record<RegistryKind, KindSpec> = {
     idLabel: 'id',
     idFromCaller: false,
     order: 'key_name',
-    seed: [],
+    seed: seed.KEYS,
     fields: [
       { name: 'key_name', type: 'text', required: true, max: 160 },
       { name: 'bitwarden_folder', type: 'text', max: 160 },

@@ -471,3 +471,1434 @@ export const PEOPLE: SeedRow[] = [
     'Bays — Message Capture carries a different Slack id for Hardik (U0AEYQ6QB1B). The Daily Open Loops Sweep and the North Star Tools Router both agree on U0BKT6MAW2Y, so Message Capture is probably the wrong one — confirm before re-enabling that branch.'),
   P('kavin', 'Kavin G N', 'U0BNQGG020Y', 'kavin@bhanetwork.org', 'vFarm / kiosk', ['KIOSK']),
 ];
+
+export const KEYS: SeedRow[] = [
+  {
+    "id": "dashboard-login-password",
+    "key_name": "Dashboard - login password",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Dashboard - login password",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: AUTH_PASSWORD_HASH (stored hashed on Render; the plain password goes here)"
+  },
+  {
+    "id": "dashboard-session-signing-secret",
+    "key_name": "Dashboard - session signing secret",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Dashboard - session signing secret",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: SESSION_SECRET"
+  },
+  {
+    "id": "dashboard-inbound-engine-key",
+    "key_name": "Dashboard - inbound engine key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Dashboard - inbound engine key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: DASHBOARD_INBOUND_KEY, n8n \"BHA Dashboard — Inbound Key\", repair bridge"
+  },
+  {
+    "id": "dashboard-mcp-connector-secret",
+    "key_name": "Dashboard - MCP connector secret",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Dashboard - MCP connector secret",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: MCP_SECRET, MCP_WRITE_TOKEN"
+  },
+  {
+    "id": "dashboard-intake-link-secret",
+    "key_name": "Dashboard - intake link secret",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Dashboard - intake link secret",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: INTAKE2_LINK_SECRET"
+  },
+  {
+    "id": "dashboard-ip-hash-salt",
+    "key_name": "Dashboard - IP hash salt",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Dashboard - IP hash salt",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: IP_HASH_SALT"
+  },
+  {
+    "id": "dashboard-ask-bays-api-key",
+    "key_name": "Dashboard - Ask Bays API key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Dashboard - Ask Bays API key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: ASK_BAYS_API_KEY"
+  },
+  {
+    "id": "dashboard-cst-help-key",
+    "key_name": "Dashboard - CST help key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Dashboard - CST help key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: CST_HELP_KEY"
+  },
+  {
+    "id": "dashboard-cst-help-preview-key",
+    "key_name": "Dashboard - CST help preview key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Dashboard - CST help preview key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: CST_HELP_PREVIEW_KEY"
+  },
+  {
+    "id": "dashboard-bays-agent-token",
+    "key_name": "Dashboard - Bays agent token",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Dashboard - Bays agent token",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: MCP_AGENT_TOKEN_BAYS, n8n \"BHA Dashboard — Bays\""
+  },
+  {
+    "id": "dashboard-north-star-agent-token",
+    "key_name": "Dashboard - North Star agent token",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Dashboard - North Star agent token",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: READONLY_SECRETS_NORTH_STAR, n8n \"BHA Dashboard — North Star\""
+  },
+  {
+    "id": "dashboard-research-twin-agent-token",
+    "key_name": "Dashboard - Research Twin agent token",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Dashboard - Research Twin agent token",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: MCP_AGENT_TOKEN_RESEARCH_TWIN, n8n \"BHA Dashboard — Research Twin\""
+  },
+  {
+    "id": "dashboard-media-twin-agent-token",
+    "key_name": "Dashboard - Media Twin agent token",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Dashboard - Media Twin agent token",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: MCP_AGENT_TOKEN_MEDIA_TWIN, n8n \"BHA Dashboard — Media Twin\""
+  },
+  {
+    "id": "dashboard-hardik-audit-token",
+    "key_name": "Dashboard - Hardik audit token",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Dashboard - Hardik audit token",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: READONLY_SECRETS_HARDIK_AUDIT"
+  },
+  {
+    "id": "github-dashboard-read-token",
+    "key_name": "GitHub - dashboard read token",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "GitHub - dashboard read token",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: GITHUB_READ_TOKEN"
+  },
+  {
+    "id": "render-dashboard-read-key",
+    "key_name": "Render - dashboard read key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Render - dashboard read key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: RENDER_READ_KEY"
+  },
+  {
+    "id": "twilio-read-key",
+    "key_name": "Twilio - read key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Twilio - read key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: TWILIO_READ_KEY_SID, TWILIO_READ_KEY_SECRET"
+  },
+  {
+    "id": "twilio-admin-key",
+    "key_name": "Twilio - admin key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Twilio - admin key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: TWILIO_ADMIN_KEY_SID, TWILIO_ADMIN_KEY_SECRET"
+  },
+  {
+    "id": "elevenlabs-dashboard-read-key",
+    "key_name": "ElevenLabs - dashboard read key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "ElevenLabs - dashboard read key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: ELEVENLABS_READ_KEY"
+  },
+  {
+    "id": "stripe-dashboard-read-key",
+    "key_name": "Stripe - dashboard read key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Stripe - dashboard read key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: STRIPE_READ_KEY"
+  },
+  {
+    "id": "stripe-webhook-secret-live",
+    "key_name": "Stripe - webhook secret live",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Stripe - webhook secret live",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: STRIPE_WEBHOOK_SECRET_LIVE"
+  },
+  {
+    "id": "stripe-webhook-secret-test",
+    "key_name": "Stripe - webhook secret test",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Stripe - webhook secret test",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: STRIPE_WEBHOOK_SECRET_TEST"
+  },
+  {
+    "id": "n8n-public-api-key",
+    "key_name": "n8n - public API key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "n8n - public API key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: N8N_API_KEY, repair bridge N8N_API_KEY"
+  },
+  {
+    "id": "n8n-mcp-token",
+    "key_name": "n8n - MCP token",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "n8n - MCP token",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: N8N_MCP_TOKEN"
+  },
+  {
+    "id": "openrouter-api-key",
+    "key_name": "OpenRouter - API key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "OpenRouter - API key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: OPENROUTER_API_KEY, n8n \"OpenRouter\""
+  },
+  {
+    "id": "anthropic-api-key",
+    "key_name": "Anthropic - API key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Anthropic - API key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: ANTHROPIC_API_KEY, n8n \"Anthropic account\""
+  },
+  {
+    "id": "anthropic-backup-api-key",
+    "key_name": "Anthropic - backup API key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Anthropic - backup API key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: repair bridge ANTHROPIC_BACKUP_API_KEY"
+  },
+  {
+    "id": "anthropic-repair-bridge-auth-token",
+    "key_name": "Anthropic - repair bridge auth token",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Anthropic - repair bridge auth token",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: repair bridge ANTHROPIC_AUTH_TOKEN"
+  },
+  {
+    "id": "slack-bays-bot-token",
+    "key_name": "Slack - Bays bot token",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Slack - Bays bot token",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: SLACK_BAYS_BOT_TOKEN, n8n \"Bays\""
+  },
+  {
+    "id": "slack-north-star-bot-token",
+    "key_name": "Slack - North Star bot token",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Slack - North Star bot token",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: SLACK_NORTH_STAR_BOT_TOKEN, n8n \"North Star\""
+  },
+  {
+    "id": "slack-research-twin-bot-token",
+    "key_name": "Slack - Research Twin bot token",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Slack - Research Twin bot token",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: SLACK_RESEARCH_TWIN_BOT_TOKEN, n8n \"Research Twin\""
+  },
+  {
+    "id": "google-oauth-client-secret-and-refresh-token",
+    "key_name": "Google - OAuth client secret and refresh token",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Google - OAuth client secret and refresh token",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN"
+  },
+  {
+    "id": "google-service-account-json",
+    "key_name": "Google - service account JSON",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Google - service account JSON",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: GOOGLE_SERVICE_ACCOUNT_JSON"
+  },
+  {
+    "id": "repair-bridge-bridge-key",
+    "key_name": "Repair Bridge - bridge key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Repair Bridge - bridge key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: BRIDGE_KEY, n8n \"Repair Bridge Key\""
+  },
+  {
+    "id": "brave-search-api-key",
+    "key_name": "Brave - search API key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Brave - search API key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: n8n \"Admin Brave Search\""
+  },
+  {
+    "id": "hcti-api-login",
+    "key_name": "HCTI - API login",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "HCTI - API login",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: n8n \"HCTI — BHA\""
+  },
+  {
+    "id": "n8n-engine-header-key",
+    "key_name": "n8n - engine header key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "n8n - engine header key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: n8n \"n8n - BHA Engine\""
+  },
+  {
+    "id": "north-star-service-api-key",
+    "key_name": "North Star - service API key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "North Star - service API key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: n8n \"NS Service API Key\", Genie NORTH_STAR_API_KEY"
+  },
+  {
+    "id": "research-twin-service-api-key",
+    "key_name": "Research Twin - service API key",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Research Twin - service API key",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: n8n \"RT Service API Key\", CST RT_SERVICE_API_KEY, Genie RESEARCH_TWIN_API_KEY"
+  },
+  {
+    "id": "airtable-token-retired-service",
+    "key_name": "Airtable - token (retired service)",
+    "bitwarden_folder": "BHA Network/Engine",
+    "bitwarden_item_name": "Airtable - token (retired service)",
+    "lane_access": [
+      "Engine"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: AIRTABLE_TOKEN"
+  },
+  {
+    "id": "bharag-cluster-key",
+    "key_name": "BHARAG - cluster key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - cluster key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: n8n \"BHARAG Cluster\", CST BHARAG_CLUSTER_KEY, Genie BHARAG_CLUSTER_API_KEY"
+  },
+  {
+    "id": "bharag-codex-and-sops-key",
+    "key_name": "BHARAG - Codex and SOPs key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - Codex and SOPs key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: BHARAG_CODEX_KEY, BHARAG_SOPS_KEY, n8n \"BHARAG - Codex\""
+  },
+  {
+    "id": "bharag-build-patterns-key",
+    "key_name": "BHARAG - Build Patterns key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - Build Patterns key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: BHARAG_BUILD_PATTERNS_KEY, n8n \"BHARAG - Build Patterns\""
+  },
+  {
+    "id": "bharag-commercial-key",
+    "key_name": "BHARAG - Commercial key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - Commercial key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: BHARAG_COMMERCIAL_KEY, n8n \"BHARAG - Commercial Opps\""
+  },
+  {
+    "id": "bharag-research-twin-key",
+    "key_name": "BHARAG - Research Twin key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - Research Twin key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: BHARAG_RESEARCH_TWIN, n8n \"BHARAG - Research Twin\""
+  },
+  {
+    "id": "bharag-north-star-key",
+    "key_name": "BHARAG - North Star key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - North Star key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: n8n \"BHARAG - North Star\""
+  },
+  {
+    "id": "bharag-channel-archives-key",
+    "key_name": "BHARAG - Channel Archives key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - Channel Archives key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: n8n \"BHARAG - Channel Archives\""
+  },
+  {
+    "id": "bharag-bays-incidents-key",
+    "key_name": "BHARAG - Bays incidents key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - Bays incidents key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: BHARAG_BAYS_INCIDENTS, n8n \"BHARAG - Bays Incidents\""
+  },
+  {
+    "id": "bharag-ns-incidents-key",
+    "key_name": "BHARAG - NS incidents key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - NS incidents key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: BHARAG_NS_INCIDENTS, n8n \"BHARAG - NS Incidents\""
+  },
+  {
+    "id": "bharag-rt-incidents-key",
+    "key_name": "BHARAG - RT incidents key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - RT incidents key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: BHARAG_RT_INCIDENTS, n8n \"BHARAG - RT Incidents\""
+  },
+  {
+    "id": "bharag-genie-incidents-key",
+    "key_name": "BHARAG - Genie incidents key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - Genie incidents key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: BHARAG_GENIE_INCIDENTS, Genie BHARAG_INCIDENT_API_KEY"
+  },
+  {
+    "id": "bharag-cst-workspace-key",
+    "key_name": "BHARAG - CST workspace key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - CST workspace key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: CST BHARAG_WORKSPACE_KEY"
+  },
+  {
+    "id": "bharag-genie-workspace-key",
+    "key_name": "BHARAG - Genie workspace key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - Genie workspace key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie BHARAG_API_KEY"
+  },
+  {
+    "id": "bharag-genie-card-key",
+    "key_name": "BHARAG - Genie card key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - Genie card key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie BHARAG_CARD_API_KEY"
+  },
+  {
+    "id": "bharag-genie-ledger-workspace-keys",
+    "key_name": "BHARAG - Genie ledger workspace keys",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - Genie ledger workspace keys",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie BHARAG_LEDGER_WORKSPACE_KEYS"
+  },
+  {
+    "id": "bharag-ragingester-master-key",
+    "key_name": "BHARAG - ragingester master key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - ragingester master key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: ragingester BHARAG_MASTER_API_KEY"
+  },
+  {
+    "id": "bharag-ragingester-linkedin-key",
+    "key_name": "BHARAG - ragingester LinkedIn key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - ragingester LinkedIn key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: ragingester BHARAG_LINKEDIN_WORKSPACE_API_KEY"
+  },
+  {
+    "id": "bharag-ragingester-rss-key",
+    "key_name": "BHARAG - ragingester RSS key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - ragingester RSS key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: ragingester BHARAG_RSS_WORKSPACE_API_KEY"
+  },
+  {
+    "id": "bharag-ragingester-smartcursor-key",
+    "key_name": "BHARAG - ragingester SmartCursor key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - ragingester SmartCursor key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: ragingester BHARAG_SMARTCURSOR_WORKSPACE_API_KEY"
+  },
+  {
+    "id": "bharag-ragingester-youtube-key",
+    "key_name": "BHARAG - ragingester YouTube key",
+    "bitwarden_folder": "BHA Network/BHARAG",
+    "bitwarden_item_name": "BHARAG - ragingester YouTube key",
+    "lane_access": [
+      "BHARAG"
+    ],
+    "owner": "Jegan",
+    "status": "not in Bitwarden",
+    "notes": "Used by: ragingester BHARAG_YOUTUBE_WORKSPACE_API_KEY"
+  },
+  {
+    "id": "genie-read-token-on-the-dashboard",
+    "key_name": "Genie - read token on the dashboard",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - read token on the dashboard",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Destiny",
+    "status": "not in Bitwarden",
+    "notes": "Used by: READONLY_SECRETS_GENIE"
+  },
+  {
+    "id": "genie-service-api-key",
+    "key_name": "Genie - service API key",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - service API key",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: GENIE_SERVICE_API_KEY, n8n \"Genie Service API Key\""
+  },
+  {
+    "id": "genie-engine-dashboard-key",
+    "key_name": "Genie - engine dashboard key",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - engine dashboard key",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie ENGINE_DASHBOARD_KEY"
+  },
+  {
+    "id": "genie-cookie-secret",
+    "key_name": "Genie - cookie secret",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - cookie secret",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: AUTH_COOKIE_SECRET"
+  },
+  {
+    "id": "genie-callback-signing-secret",
+    "key_name": "Genie - callback signing secret",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - callback signing secret",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: GENIE_CALLBACK_SIGNING_SECRET"
+  },
+  {
+    "id": "genie-slack-bot-token",
+    "key_name": "Genie - Slack bot token",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - Slack bot token",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie SLACK_BOT_TOKEN"
+  },
+  {
+    "id": "genie-slack-client-secret",
+    "key_name": "Genie - Slack client secret",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - Slack client secret",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie SLACK_CLIENT_SECRET"
+  },
+  {
+    "id": "genie-slack-signing-secret",
+    "key_name": "Genie - Slack signing secret",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - Slack signing secret",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie SLACK_SIGNING_SECRET"
+  },
+  {
+    "id": "genie-slack-session-token-secret",
+    "key_name": "Genie - Slack session token secret",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - Slack session token secret",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: SLACK_SESSION_TOKEN_SECRET"
+  },
+  {
+    "id": "genie-anthropic-api-key",
+    "key_name": "Genie - Anthropic API key",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - Anthropic API key",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie ANTHROPIC_API_KEY"
+  },
+  {
+    "id": "genie-openai-api-key",
+    "key_name": "Genie - OpenAI API key",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - OpenAI API key",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie OPENAI_API_KEY"
+  },
+  {
+    "id": "genie-elevenlabs-api-key",
+    "key_name": "Genie - ElevenLabs API key",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - ElevenLabs API key",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie ELEVENLABS_API_KEY"
+  },
+  {
+    "id": "genie-n8n-mcp-token",
+    "key_name": "Genie - n8n MCP token",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - n8n MCP token",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie N8N_MCP_TOKEN"
+  },
+  {
+    "id": "genie-latenode-mcp-token",
+    "key_name": "Genie - Latenode MCP token",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - Latenode MCP token",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: LATENODE_PLATFORM_MCP_TOKEN"
+  },
+  {
+    "id": "genie-precisefp-bearer-token",
+    "key_name": "Genie - PreciseFP bearer token",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - PreciseFP bearer token",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: PRECISEFP_BEARER_TOKEN"
+  },
+  {
+    "id": "genie-supabase-database-password",
+    "key_name": "Genie - Supabase database password",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - Supabase database password",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie SUPABASE_DB_PASSWORD"
+  },
+  {
+    "id": "genie-supabase-service-key",
+    "key_name": "Genie - Supabase service key",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie - Supabase service key",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie SUPABASE_SERVICE_KEY"
+  },
+  {
+    "id": "genie-rss-api-key",
+    "key_name": "Genie-RSS - API key",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie-RSS - API key",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie-RSS API_KEY, Genie and ragingester GENIE_RSS_API_KEY"
+  },
+  {
+    "id": "genie-rss-jwt-secret",
+    "key_name": "Genie-RSS - JWT secret",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie-RSS - JWT secret",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie-RSS JWT_SECRET"
+  },
+  {
+    "id": "genie-rss-login-password",
+    "key_name": "Genie-RSS - login password",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie-RSS - login password",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie-RSS AUTH_PASSWORD"
+  },
+  {
+    "id": "genie-rss-newsletter-password",
+    "key_name": "Genie-RSS - newsletter password",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie-RSS - newsletter password",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: NEWSLETTER_PASSWORD"
+  },
+  {
+    "id": "genie-rss-openai-api-key",
+    "key_name": "Genie-RSS - OpenAI API key",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie-RSS - OpenAI API key",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie-RSS OPENAI_API_KEY"
+  },
+  {
+    "id": "genie-rss-apify-token",
+    "key_name": "Genie-RSS - Apify token",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie-RSS - Apify token",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: APIFY_TOKEN"
+  },
+  {
+    "id": "genie-rss-scrapingbee-key",
+    "key_name": "Genie-RSS - ScrapingBee key",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie-RSS - ScrapingBee key",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: SCRAPINGBEE_API_KEY"
+  },
+  {
+    "id": "genie-rss-youtube-api-key",
+    "key_name": "Genie-RSS - YouTube API key",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie-RSS - YouTube API key",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: YOUTUBE_API_KEY"
+  },
+  {
+    "id": "genie-rss-webhook-url",
+    "key_name": "Genie-RSS - webhook URL",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "Genie-RSS - webhook URL",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: Genie-RSS WEBHOOK_URL"
+  },
+  {
+    "id": "ragingester-slack-bot-token",
+    "key_name": "ragingester - Slack bot token",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "ragingester - Slack bot token",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: ragingester SLACK_BOT_TOKEN"
+  },
+  {
+    "id": "ragingester-slack-engine-key",
+    "key_name": "ragingester - Slack engine key",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "ragingester - Slack engine key",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: SLACK_ENGINE_API_KEY"
+  },
+  {
+    "id": "ragingester-supabase-anon-key",
+    "key_name": "ragingester - Supabase anon key",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "ragingester - Supabase anon key",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: SUPABASE_ANON_KEY, VITE_SUPABASE_ANON_KEY"
+  },
+  {
+    "id": "ragingester-supabase-jwt-secret",
+    "key_name": "ragingester - Supabase JWT secret",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "ragingester - Supabase JWT secret",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: SUPABASE_JWT_SECRET"
+  },
+  {
+    "id": "ragingester-supabase-service-role-key",
+    "key_name": "ragingester - Supabase service role key",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "ragingester - Supabase service role key",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: SUPABASE_SERVICE_ROLE_KEY"
+  },
+  {
+    "id": "ragingester-pipeline-errors-webhook",
+    "key_name": "ragingester - pipeline errors webhook",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "ragingester - pipeline errors webhook",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: TELEMETRY_PIPELINE_ERRORS_SLACK_WEBHOOK_URL"
+  },
+  {
+    "id": "ragingester-status-webhook",
+    "key_name": "ragingester - status webhook",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "ragingester - status webhook",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: TELEMETRY_STATUS_SLACK_WEBHOOK_URL"
+  },
+  {
+    "id": "smartcursorbrowser-service-api-key",
+    "key_name": "smartcursorbrowser - service API key",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "smartcursorbrowser - service API key",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: SERVICE_API_KEY, ragingester SMARTCURSOR_API_KEY, n8n \"Scraper Auth\""
+  },
+  {
+    "id": "smartcursorbrowser-openai-api-key",
+    "key_name": "smartcursorbrowser - OpenAI API key",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "smartcursorbrowser - OpenAI API key",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: smartcursorbrowser OPENAI_API_KEY"
+  },
+  {
+    "id": "smartcursorbrowser-oxylabs-login",
+    "key_name": "smartcursorbrowser - Oxylabs login",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "smartcursorbrowser - Oxylabs login",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: OXYLABS_USERNAME, OXYLABS_PASSWORD"
+  },
+  {
+    "id": "smartcursorbrowser-otter-login",
+    "key_name": "smartcursorbrowser - Otter login",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "smartcursorbrowser - Otter login",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: OTTER_LOGIN_PASSWORD, n8n \"Scraper Login — Otter\""
+  },
+  {
+    "id": "smartcursorbrowser-loom-login",
+    "key_name": "smartcursorbrowser - Loom login",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "smartcursorbrowser - Loom login",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: LOOM_LOGIN_PASSWORD, n8n \"Scraper Login — Loom\""
+  },
+  {
+    "id": "smartcursorbrowser-rv-password",
+    "key_name": "smartcursorbrowser - RV password",
+    "bitwarden_folder": "BHA Network/Genie",
+    "bitwarden_item_name": "smartcursorbrowser - RV password",
+    "lane_access": [
+      "Genie"
+    ],
+    "owner": "Kaiqi",
+    "status": "not in Bitwarden",
+    "notes": "Used by: RV_PASS"
+  },
+  {
+    "id": "cst-admin-password",
+    "key_name": "CST - admin password",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - admin password",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: CST_ADMIN_PASSWORD, CST_ADMIN_PASSWORD_HASH"
+  },
+  {
+    "id": "cst-api-key",
+    "key_name": "CST - API key",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - API key",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: CST_API_KEY"
+  },
+  {
+    "id": "cst-engine-dashboard-key",
+    "key_name": "CST - engine dashboard key",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - engine dashboard key",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: CST ENGINE_DASHBOARD_KEY"
+  },
+  {
+    "id": "cst-elevenlabs-api-key",
+    "key_name": "CST - ElevenLabs API key",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - ElevenLabs API key",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: CST ELEVENLABS_API_KEY"
+  },
+  {
+    "id": "cst-elevenlabs-webhook-secret",
+    "key_name": "CST - ElevenLabs webhook secret",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - ElevenLabs webhook secret",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: ELEVENLABS_WEBHOOK_SECRET"
+  },
+  {
+    "id": "cst-research-twin-callback-secret",
+    "key_name": "CST - Research Twin callback secret",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - Research Twin callback secret",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: RT_CALLBACK_SIGNING_SECRET"
+  },
+  {
+    "id": "cst-sink-expected-key",
+    "key_name": "CST - sink expected key",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - sink expected key",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: SINK_EXPECT_KEY"
+  },
+  {
+    "id": "cst-slack-bot-token",
+    "key_name": "CST - Slack bot token",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - Slack bot token",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: CST SLACK_BOT_TOKEN"
+  },
+  {
+    "id": "cst-slack-app-token",
+    "key_name": "CST - Slack app token",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - Slack app token",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: SLACK_APP_TOKEN"
+  },
+  {
+    "id": "cst-slack-client-secret",
+    "key_name": "CST - Slack client secret",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - Slack client secret",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: CST SLACK_CLIENT_SECRET"
+  },
+  {
+    "id": "cst-slack-signing-secret",
+    "key_name": "CST - Slack signing secret",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - Slack signing secret",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: CST SLACK_SIGNING_SECRET"
+  },
+  {
+    "id": "cst-slack-webhooks",
+    "key_name": "CST - Slack webhooks",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - Slack webhooks",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: SLACK_WEBHOOK_URL, SLACK_CS_WEBHOOK_URL, SLACK_CST_OPS_WEBHOOK_URL, SLACK_CUSTOMER_SERVICE_WEBHOOK_URL, SLACK_ERROR_WEBHOOK_URL"
+  },
+  {
+    "id": "cst-twilio-auth-token",
+    "key_name": "CST - Twilio auth token",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - Twilio auth token",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_MESSAGING_SERVICE_SID, n8n \"BHA Twilio (CST)\""
+  },
+  {
+    "id": "cst-vfarm-farm-key",
+    "key_name": "CST - vFarm farm key",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - vFarm farm key",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: VFARM_FARM_KEY, VFARM_API_FARM_KEY"
+  },
+  {
+    "id": "cst-vfarm-api-key",
+    "key_name": "CST - vFarm API key",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - vFarm API key",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: VFARM_API_KEY, VFARM_API_TOKEN"
+  },
+  {
+    "id": "cst-vfarm-resolve-key",
+    "key_name": "CST - vFarm resolve key",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - vFarm resolve key",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: VFARM_RESOLVE_API_KEY"
+  },
+  {
+    "id": "cst-vfarm-admin-password",
+    "key_name": "CST - vFarm admin password",
+    "bitwarden_folder": "BHA Network/CST",
+    "bitwarden_item_name": "CST - vFarm admin password",
+    "lane_access": [
+      "CST"
+    ],
+    "owner": "Ahad",
+    "status": "not in Bitwarden",
+    "notes": "Used by: VFARM_ADMIN_PASSWORD"
+  },
+  {
+    "id": "meta-media-twin-system-user-token",
+    "key_name": "Meta - Media Twin system user token",
+    "bitwarden_folder": "BHA Network/Media",
+    "bitwarden_item_name": "Meta - Media Twin system user token",
+    "lane_access": [
+      "Media"
+    ],
+    "owner": "Hardik",
+    "status": "not in Bitwarden",
+    "notes": "Used by: n8n \"BHA Media Twin (system user)\""
+  },
+  {
+    "id": "meta-bha-network-page-token",
+    "key_name": "Meta - BHA Network page token",
+    "bitwarden_folder": "BHA Network/Media",
+    "bitwarden_item_name": "Meta - BHA Network page token",
+    "lane_access": [
+      "Media"
+    ],
+    "owner": "Hardik",
+    "status": "not in Bitwarden",
+    "notes": "Used by: n8n \"BHA Network Page (page token)\""
+  },
+  {
+    "id": "slack-media-twin-bot-token",
+    "key_name": "Slack - Media Twin bot token",
+    "bitwarden_folder": "BHA Network/Media",
+    "bitwarden_item_name": "Slack - Media Twin bot token",
+    "lane_access": [
+      "Media"
+    ],
+    "owner": "Hardik",
+    "status": "not in Bitwarden",
+    "notes": "Used by: n8n \"Media Twin\""
+  }
+];

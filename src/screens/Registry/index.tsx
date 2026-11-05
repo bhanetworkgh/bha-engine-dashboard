@@ -79,7 +79,7 @@ import { DASH, EditableCell, NewRow, type CellType } from './Editable';
 const TABS = ['Builders', 'Tools', 'Keys', 'Endpoint', 'Workflow'] as const;
 type Tab = (typeof TABS)[number];
 
-const KEY_STATUS = ['active', 'not issued', 'retired'] as const;
+const KEY_STATUS = ['active', 'not in Bitwarden', 'not issued', 'retired'] as const;
 const WORKFLOW_STATUS = ['production', 'experimental', 'retired'] as const;
 /** Whether the recovery watcher may re-run this workflow's failures once a dependency is back (2026-09-23). */
 const WORKFLOW_REPLAY = ['auto', 'never'] as const;
