@@ -124,7 +124,7 @@ const n = (v: unknown): number => Number(v ?? 0) || 0;
 /** The counts, read from the events, the recovery plan and the draft eval runs. */
 export async function read(hours = 24): Promise<StrainAssessment & { counts: StrainCounts; voided: Array<Record<string, unknown>>; recent_fallbacks: Array<Record<string, unknown>>; at: string }> {
   const h = Math.max(1, Math.min(168, Math.floor(hours) || 24));
-  const notTest = `coalesce(detail->>'test', 'false') <> 'true' AND coalesce(detail->>'forced_test', 'false') <> 'true'`;
+  const notTest = `coalesce(detail->>'test', 'false') <> 'true' AND coalesce(detail->>'forced_test', 'false') <> 'true' AND coalesce(detail->>'primary_error', '') NOT LIKE 'forced for a test%'`;
   const credit = await query<{ total: string; last_hour: string; latest: string | null }>(
     `SELECT count(*) AS total, count(*) FILTER (WHERE at > now() - interval '1 hour') AS last_hour,
             to_char(max(at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS latest

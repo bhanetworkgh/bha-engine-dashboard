@@ -14511,3 +14511,10 @@ Files:      src/screens/Stage1/index.tsx, src/screens/Stage1/Agreements.tsx, src
 Problem:    Every cell was inline-editable, long text was clipped, and the agreement needed a new tab. X-Frame-Options: DENY on every response stopped a PDF sitting in a frame.
 Fix:        The table reads. A row opens a window (?person=<id>) with every field in full, edited there, and the agreement. A PDF is shown as the document in a frame; /api/agreements/:id/file alone answers SAMEORIGIN. A Word file shows its text from the new /api/agreements/:id/text. Upload moved into the window with the person already known. The stale "no contract text here" line is gone.
 Decision:   The document rather than extracted text for a PDF, because signatures are not in the text layer and verbatim means the document. No new table, secret or dependency.
+
+## 2026-11-05 22:55 — A forced backup test stays out of the strain figures
+Intent:     D4. Run the real delivery workflows through the backup with the primary's failure pinned.
+Files:      server/src/engineStrain.ts
+Problem:    Log Provider Fallback in the three Agent Deliveries sends no forced_test flag, so a forced run would read as real strain.
+Fix:        A primary_error starting "forced for a test" is left out, the same as forced_test, with no change to the published workflows.
+Decision:   Pinned runs of the published workflows instead of editing them. No production workflow changes for the test.
