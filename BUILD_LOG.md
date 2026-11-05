@@ -14524,3 +14524,11 @@ Intent:     Exercise and evaluate the OpenRouter backup, DW-1793809858770-219J c
 Files:      None beyond 70ff155.
 Proof:      Published workflows run with the primary pinned to a 429: Bays 70760, North Star 70764, Research Twin 70772 (fallback_ok true, answer_check answered, events 74882 onward), Media Twin 70780 (Check Draft passed, save and card pinned). Evals: RT V9IA 9/9, Bays ZRMC 16/20 with no regression, NS OWCS 10/11: NS-12 "she" in one repeat of three, scored raw; Check Builder Pronouns sits after Agent Answer, so it covers the backup. Test rows deleted, audits 5021 to 5023. Agent key refused live: 70777, 70778.
 Limit:      Forced only: no natural fallback since 3 Nov. Media Twin's fallback writes no ai_provider_fallback event and has no eval. Migration stays not accepted.
+
+## 2026-11-05 23:40 — Ahad's three logs approved and reviewed; D5 blocked on Hardik
+Intent:     Jason's go-ahead on the CST pay standard (DM D0AF0DG8ZPY, thread 1793908020.933579). D5, the LinkedIn logging fix and 2 Nov backfill.
+Files:      None in this repo.
+Problem:    Approving through Submit Actions writes Jason Notes as "" (Update Jason Review PATCH), wiping the notes on all three rows. The 29 Oct Codex run closed LOOP-1792681313173-0SNO from an old session.
+Fix:        Notes restored word for word (audits 5024 onward); loop reopened (5028). Executions 70796, 70815 and the 29 Oct run.
+Decision:   Tags written to Codex rows only after Destiny sends the reviews. Pay given as a share of the day, no figures on the record.
+Limit:      The workflow bug remains: Approve wipes existing Jason Notes. LinkedIn Twin is outside reach (Latenode going by Hardik's logs), so the publish path and backfill wait on Hardik. Media Twin fallback event not built.
