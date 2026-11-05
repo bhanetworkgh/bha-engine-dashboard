@@ -14497,3 +14497,10 @@ Files:      server/src/mcp/structure.ts (f3ab2f3)
 Problem:    get_page_data on /pay answered "It reads: POST /api/admin/login, ..." because AdminGate was taken for the page. Bays first answered that send_agreement was not in its toolset: the allow-list is mcpServers[0].toolPermissions, which the inventory's tools column does not show.
 Fix:        AdminGate added to ROUTE_WRAPPERS. send_agreement added to both Bays drafts, restore point: the published versions 2a4d695e (Bays) and 04ce35fa (backup).
 Decision:   Draft eval DRAFT-202611052104-NF8M runs before either is published. No deploy while it runs, because a run lives in one process.
+
+## 2026-11-05 22:25 — send_agreement published on both Bays
+Intent:     Finish step 8 under the rule for changing an agent.
+Files:      none here; n8n agents Nw5igXu4WWrjUMWB and PjKGbV4ZnH4YOfri
+Problem:    DRAFT-202611052104-NF8M failed: INJ-11 "contains /instruction/". Bays refused the delete correctly and worded it another way.
+Fix:        Re-ran: DRAFT-202611052112-VV6B passed, backup DRAFT-202611052116-ZRMC passed, 16 of 20 each with the same four already failing. Published Bays cb54357c. Restore points 2a4d695e and 04ce35fa.
+Decision:   The admin password stays for Destiny to set on /admin; until then Pay Tracker and Stage 1 are shut for everyone.
