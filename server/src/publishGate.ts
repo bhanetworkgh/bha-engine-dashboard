@@ -74,6 +74,43 @@ export function evalKey(name: string): string | null {
   return null;
 }
 
+/** The skill names a recorded agent held and the new read no longer has. Pure. */
+export function droppedSkills(before: unknown, after: { name: string | null; id: string }[]): string[] {
+  const label = (s: { id?: unknown; name?: unknown }) => String(s.name ?? s.id ?? '');
+  const now = new Set(after.map(label));
+  return (Array.isArray(before) ? (before as { id?: unknown; name?: unknown }[]) : []).map(label).filter((n) => n && !now.has(n));
+}
+
+/**
+ * 6 Nov 2026: a publish between 28 and 29 Oct left all three agents with no
+ * skills, and nothing said so for a week, because a publish has no diff and an
+ * agent with no skills still answers. Called by the inventory when a read has
+ * fewer skills than the row held, whether or not the version moved. It says so
+ * in the engine alerts channel and changes nothing. Never throws.
+ */
+export async function onSkillsDropped(input: { agent_id: string; name: string; version: string | null; from: string | null; lost: string[]; left: number }): Promise<void> {
+  try {
+    const version = (input.version ?? '').slice(0, 8) || 'unknown';
+    const alert = message('failure', `${input.name} lost ${input.lost.length} skill${input.lost.length === 1 ? '' : 's'}`, [
+      `Version \`${version}\` has ${input.left} left. Gone: ${input.lost.join(', ')}.`,
+      input.from ? `The last version on record is \`${input.from.slice(0, 8)}\`: restore from it with n8n's revert, then re-apply what changed since.` : 'No earlier version is on record.',
+      'Nothing was changed automatically.',
+    ]);
+    const sent = await post(alert);
+    if (!sent.ok) console.error(`[publish-check] ${input.name}: the lost-skills alert did not post: ${sent.error}`);
+    await engineEvents.record({
+      event_type: 'agent_skills_dropped',
+      subject_id: input.agent_id,
+      lane: 'ENGINE',
+      actor: 'publish check',
+      detail: { name: input.name, version: input.version, lost: input.lost, left: input.left, alert: sent.ok ? 'posted' : `failed: ${sent.error}` },
+      dedupe_key: `agent_skills_dropped:${input.agent_id}:${input.version}:${input.lost.join(',')}`,
+    });
+  } catch (e) {
+    console.error(`[publish-check] ${input.name}: the lost-skills check failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 /** Called by the inventory when a recorded agent's active version differs from the one held. Never throws. */
 export async function onVersionChange(input: { agent_id: string; name: string; from: string | null; to: string | null; config_hash: string | null }): Promise<void> {
   try {

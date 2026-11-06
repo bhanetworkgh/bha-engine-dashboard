@@ -1829,6 +1829,7 @@ one alert in the engine alerts channel names the cases and the version to
 publish again. A case already failing before is named and is not a regression.
 No finished run in 90 minutes is `no_eval` and is alerted too. **It never
 publishes or rolls back.** The Agent maturity page lists the changes.
+**A read with fewer skills than the row held is alerted at once** (6 Nov 2026, `agent_skills_dropped`, by name, whether or not the version moved; it changes nothing).
 **Record the inventory after every agent publish**, or none of this starts.
 The runner also writes one `eval_run_cost` event per run (account usage before
 and after), which `get_agent_spend` returns as `eval_runs`. `npm run

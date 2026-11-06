@@ -288,8 +288,8 @@ export function derive(result: Dict, opts: { owner?: string | null; recordedBy?:
 export async function record(result: Dict, opts: { owner?: string | null; recordedBy?: string | null }): Promise<{ row: InventoryRow; outcome: 'inserted' | 'updated' | 'unchanged' }> {
   const d = derive(result, opts);
   const at = nowIso();
-  const before = await query<{ config_hash: string | null; active_version_id: string | null; autonomy_tier: string; tools: unknown; mcp_servers: unknown; tasks: unknown }>(
-    `SELECT config_hash, active_version_id, autonomy_tier, tools, mcp_servers, tasks FROM engine_agent_inventory WHERE agent_id = $1`,
+  const before = await query<{ config_hash: string | null; active_version_id: string | null; autonomy_tier: string; tools: unknown; mcp_servers: unknown; tasks: unknown; skills: unknown }>(
+    `SELECT config_hash, active_version_id, autonomy_tier, tools, mcp_servers, tasks, skills FROM engine_agent_inventory WHERE agent_id = $1`,
     [d.agent_id],
   );
   const prev = before.rows[0];
@@ -299,7 +299,8 @@ export async function record(result: Dict, opts: { owner?: string | null; record
     prev.autonomy_tier === d.autonomy_tier &&
     JSON.stringify(prev.tools) === JSON.stringify(d.tools) &&
     JSON.stringify(prev.mcp_servers) === JSON.stringify(d.mcp_servers) &&
-    JSON.stringify(prev.tasks) === JSON.stringify(d.tasks);
+    JSON.stringify(prev.tasks) === JSON.stringify(d.tasks) &&
+    JSON.stringify(prev.skills) === JSON.stringify(d.skills);
   const r = await query<InventoryRow>(
     `INSERT INTO engine_agent_inventory (agent_id, name, published, active_version_id, config_hash, model, reasoning, max_iterations, memory, tools, mcp_servers, skills, tasks, sub_agents, credentials, autonomy_tier, tier_reason, owner, read_from, read_at, recorded_by, raw, first_seen_at, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb, $16, $17, $18, $19, $20, $21, $22::jsonb, $20, $20)
@@ -321,6 +322,8 @@ export async function record(result: Dict, opts: { owner?: string | null; record
   if (prev && d.active_version_id && prev.active_version_id !== d.active_version_id) {
     await publishGate.onVersionChange({ agent_id: d.agent_id, name: d.name, from: prev.active_version_id, to: d.active_version_id, config_hash: d.config_hash });
   }
+  const lost = prev ? publishGate.droppedSkills(prev.skills, d.skills) : [];
+  if (lost.length) await publishGate.onSkillsDropped({ agent_id: d.agent_id, name: d.name, version: d.active_version_id, from: prev.active_version_id, lost, left: d.skills.length });
   return { row: r.rows[0], outcome: !prev ? 'inserted' : same ? 'unchanged' : 'updated' };
 }
 

@@ -159,6 +159,17 @@ const srv = http.createServer((req, res) => {
   await query(`DELETE FROM engine_draft_eval_runs WHERE run_id = $1`, [D]);
   ok('a backup is judged by its draft eval only: no run asked for, no "no eval" post');
 
+  // 6 Nov 2026: a read with fewer skills than the row held says so
+  assert.deepEqual(gate.droppedSkills([{ id: 's1', name: 'One' }, { id: 's2', name: 'Two' }], [{ id: 's9', name: 'Two' }]), ['One'], 'matched by name, not id');
+  assert.deepEqual(gate.droppedSkills([], [{ id: 's1', name: 'One' }]), [], 'a gain is not a loss');
+  assert.deepEqual(gate.droppedSkills(null, []), [], 'nothing held is nothing lost');
+  const before = seen.posts.length;
+  await gate.onSkillsDropped({ agent_id: A, name: 'Bays test', version: 'v9abcdefgh', from: 'v8abcdefgh', lost: ['One', 'Two'], left: 0 });
+  assert.equal(seen.posts.length, before + 1);
+  assert.match(seen.posts[before].text, /lost 2 skills/);
+  assert.equal((await query(`SELECT 1 FROM engine_events WHERE subject_id = $1 AND event_type = 'agent_skills_dropped'`, [A])).rows.length, 1);
+  ok('a lost skill is alerted by name, and recorded');
+
   await query(`DELETE FROM engine_eval_runs WHERE natural_id LIKE $1`, [`EVAL-T${T}%`]);
   await query(`DELETE FROM engine_agent_versions WHERE agent_id = $1`, [A]);
   await query(`DELETE FROM engine_events WHERE subject_id = $1`, [A]);

@@ -14548,3 +14548,10 @@ Correction: The entry above says execution ids 70796 and 70815 and "the 29 Oct r
 
 ## 2026-11-05 23:40 — The two reviews redrafted, not followed up
 Decision:   Nobody had read the 30 Oct and 4 Nov reviews, so Destiny deletes them and sends corrected versions instead of a follow-up. This replaces "A follow-up correction goes to Jason and Ahad" in the entry above. The 4 Nov recommendation on row 440 now also needs the deploy fixed and one post-call 200.
+
+## 2026-11-06 09:50 — Skills restored on all agents, and a publish that drops one now says so
+Intent:     Bays, North Star and Research Twin had no skills in their published config; find why and bring them back.
+Files:      server/src/publishGate.ts, server/src/agentInventory.ts, server/test/publish-gate.test.cjs. n8n: Bays, North Star, Research Twin and their backups.
+Problem:    Published versions went empty between 28 Oct 21:55 UTC and 29 Oct 03:35 UTC. Skills kept loading until 31 Oct 23:30; none has loaded since n8n came back on 1 Nov. Why n8n dropped them from those publishes is not proven.
+Fix:        Bays and its backup restored from their 27 Oct versions with today's config re-applied and checked byte for byte; four skills reworded where they named tools removed since (Slack posting, Docs and Drive, BHARAG records, Commercial cards). North Star and Research Twin skills re-added from their 18 and 19 Oct versions. record_agent_inventory now alerts the engine alerts channel when a read has fewer skills than the row held, and writes agent_skills_dropped; it changes nothing.
+Decision:   Tests were not run here: no Postgres or node_modules in this environment. test:publish-gate needs a run.
