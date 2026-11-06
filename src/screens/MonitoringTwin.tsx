@@ -36,7 +36,7 @@ import {
  * the vFarm page as vFarm's own.
  */
 
-const TABS = ['Farms', 'Incidents', 'Crop profiles'] as const;
+const TABS = ['Farms', 'Incidents', 'Crop profiles', 'Customer service'] as const;
 type Tab = (typeof TABS)[number];
 
 const when = (iso: string | null) => (iso ? iso.slice(0, 16).replace('T', ' ') : '—');
@@ -59,7 +59,7 @@ function SimTag() {
 export default function MonitoringTwin() {
   const [tab, setTab] = useState<Tab>('Farms');
   useReplayKey(tab);
-  const { status, data: all, error } = useData(getMonitoringTwin, [], { kinds: ['monitoring_twin', 'vfarm_state'] });
+  const { status, data: all, error } = useData(getMonitoringTwin, [], { kinds: ['monitoring_twin', 'vfarm_state', 'cst_turns'] });
   // One farm at a time when asked (24 Oct 2026, D5, Jegan's multi-farm filter), kept in the URL.
   const [params, setParams] = useSearchParams();
   const farm = params.get('farm');
@@ -74,11 +74,11 @@ export default function MonitoringTwin() {
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
         title="Monitoring Twin"
-        subtitle="What the twin sees on every vFarm farm: sensor state, crop stage, uptime and incidents"
+        subtitle="What the twin sees on every vFarm farm, and the calls and texts CST sends it"
         below={
           <div className="flex flex-wrap items-end justify-between gap-3">
             <Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Incidents: data?.counts.open_incidents ? { n: data.counts.open_incidents } : undefined }} />
-            {tab !== 'Crop profiles' && all && <FarmPicker value={farm} farms={all.farms} onChange={setFarm} />}
+            {tab !== 'Crop profiles' && tab !== 'Customer service' && all && <FarmPicker value={farm} farms={all.farms} onChange={setFarm} />}
           </div>
         }
       />
@@ -91,7 +91,7 @@ export default function MonitoringTwin() {
       ) : (
         <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-6 pb-6 md:px-8">
           <Rules data={data} />
-          {tab === 'Farms' ? <Farms data={data} /> : tab === 'Incidents' ? <Incidents data={data} /> : <Profiles data={data} />}
+          {tab === 'Farms' ? <Farms data={data} /> : tab === 'Incidents' ? <Incidents data={data} /> : tab === 'Crop profiles' ? <Profiles data={data} /> : <CustomerService data={data} />}
         </div>
       )}
     </div>
@@ -254,6 +254,73 @@ function FarmCard({ f }: { f: MonitoringFarm }) {
       </Card>
       {f.open_incidents.length > 0 && <IncidentTable rows={f.open_incidents} title="Open incidents" showFarm={false} />}
     </section>
+  );
+}
+
+/** CST's calls and texts: counts and outcomes only. The words are on the Customer Service Twin page. */
+function CustomerService({ data }: { data: MonitoringTwinData }) {
+  const c = data.customer_service;
+  if (!c?.ok) return <EmptyState>{c?.note ?? 'The CST rows could not be read.'}</EmptyState>;
+  return (
+    <>
+      <p className="px-1 text-[12px] text-dim">{c.note}</p>
+      <Card className="pb-3">
+        <CardHeader title="By channel" right={<span className="tabular text-[11.5px] text-faint">last {c.window_days} days · newest {c.last_at ? relativeTime(c.last_at) : 'none held'}</span>} />
+        {!c.channels?.length ? (
+          <EmptyState compact>No real call or text is held.</EmptyState>
+        ) : (
+          <TableFrame flat grow={false} label="CST by channel">
+            <thead>
+              <tr>
+                <th className="th">channel</th>
+                <th className="th">24 hours</th>
+                <th className="th">7 days</th>
+                <th className="th">failed</th>
+                <th className="th">last arrived</th>
+              </tr>
+            </thead>
+            <tbody>
+              {c.channels.map((r) => (
+                <tr key={r.channel}>
+                  <td className="td">{r.channel}</td>
+                  <td className="td tabular">{r.last_24h}</td>
+                  <td className="td tabular">{r.last_7d}</td>
+                  <td className="td tabular">{r.failed_7d > 0 ? <Pill tone="failing">{r.failed_7d}</Pill> : 0}</td>
+                  <td className="td tabular text-dim">{relativeTime(r.last_at) ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </TableFrame>
+        )}
+      </Card>
+      {!!c.recent?.length && (
+        <Card className="pb-3">
+          <CardHeader title="Latest" right={<span className="tabular text-[11.5px] text-faint">newest first</span>} />
+          <TableFrame flat grow={false} label="Latest CST turns">
+            <thead>
+              <tr>
+                <th className="th">when</th>
+                <th className="th">channel</th>
+                <th className="th">outcome</th>
+                <th className="th">intent</th>
+                <th className="th">delivery</th>
+              </tr>
+            </thead>
+            <tbody>
+              {c.recent.map((r) => (
+                <tr key={r.turn_id}>
+                  <td className="td tabular whitespace-nowrap text-dim">{when(r.at)}</td>
+                  <td className="td">{r.channel ?? '—'}</td>
+                  <td className="td">{r.failed ? <Pill tone="failing">{r.status === 'error' ? 'failed' : 'not delivered'}</Pill> : (r.status ?? '—')}</td>
+                  <td className="td text-dim">{r.intent ?? '—'}</td>
+                  <td className="td text-dim" title={r.delivery_error ?? undefined}>{r.delivery_status ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </TableFrame>
+        </Card>
+      )}
+    </>
   );
 }
 

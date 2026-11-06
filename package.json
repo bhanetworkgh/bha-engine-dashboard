@@ -42,6 +42,7 @@
     "test:vfarm-evidence": "node --no-warnings=ExperimentalWarning server/test/vfarm-evidence.test.cjs",
     "test:hero-bay": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/hero-bay.test.cjs",
     "test:range-doubt": "node --no-warnings=ExperimentalWarning server/test/range-doubt.test.cjs",
+    "test:monitoring-cst": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/monitoring-cst.test.cjs",
     "test:monitoring-owner": "node --no-warnings=ExperimentalWarning server/test/monitoring-judge-owner.test.cjs",
     "test:vfarm-readings": "node --no-warnings=ExperimentalWarning server/test/vfarm-readings.test.cjs",
     "test:cst-test-traffic": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/cst-test-traffic.test.cjs",

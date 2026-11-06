@@ -54,6 +54,7 @@ import * as bharag from './bharag';
 import * as recurrence from './monitoringRecurrence';
 import * as rangeDoubt from './rangeDoubt';
 import * as mirror from './mirror';
+import * as monitoringCst from './monitoringCst';
 import * as timers from './timers';
 import { evidenceBlock } from './evidenceRules';
 
@@ -1136,6 +1137,7 @@ export async function monitoringData(db: Queryable = { query }) {
       GONE: 'vFarm no longer lists the device',
     },
     farms: farmsOut,
+    customer_service: await monitoringCst.read(db, now),
     profiles: [...byId.entries()].map(([profile_id, versions]) => ({
       profile_id,
       crop: versions[0].crop,

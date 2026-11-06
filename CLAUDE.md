@@ -1686,6 +1686,8 @@ repeat adds a line and never a second job. The incident stays open as before. Fi
 real farm with a crop cycle set (none yet on 21 Oct). Jegan's five vision doubts wait on the
 camera signals (F0UG). `npm run test:monitoring-recurrence`, `npm run test:range-doubt`.
 
+**CST on the Monitoring Twin** (6 Nov 2026, Destiny; Jason's Engine-first list on the 5 Nov log). `server/src/monitoringCst.ts`: `customer_service` on `monitoringData`, so the page's Customer service tab and `read_monitoring_twin` read the same thing: real calls and texts by channel (24 hours, 7 days, failed, last arrived) and the latest 20, from `engine_cst_turns`. **Never a message, reply, number or name**: that read reaches Genie and the twins, and the words stay on `/cs-twin`. A quiet line opens nothing and says so. **CST sends nothing to Research Twin and reads no farm data** (Destiny, 4 Nov and the v1 decision), so no sensor fault comes from here; the twin's own feed covers those. An ElevenLabs conversation id (`conv_…`) is a real turn id, and a console test call keeps the fake +1 555 number, so it stays test traffic. `npm run test:monitoring-cst`.
+
 **CST test traffic is kept apart** (24 Oct 2026, Destiny — D8). About 1,335 of 1,379 `engine_cst_turns`
 rows were the automated tests' fake +1 555 numbers and hand-made turn ids, counted as customers.
 Migration 92 adds `test` and `test_reason` and backfills them; `systemFeeds.cstTestReason` applies the

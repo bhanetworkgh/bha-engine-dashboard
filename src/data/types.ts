@@ -4346,12 +4346,26 @@ export interface HeroBayData {
   };
   not_claimed: string[];
 }
+/** What CST sent the Monitoring Twin (2026-11-06): counts and outcomes, never the words or a number. */
+export interface MonitoringCst {
+  ok: boolean;
+  note: string;
+  source?: string;
+  window_days?: number;
+  last_at?: string | null;
+  turns_7d?: number;
+  failed_7d?: number;
+  channels?: Array<{ channel: string; last_24h: number; last_7d: number; failed_7d: number; last_at: string | null }>;
+  recent?: Array<{ turn_id: string; channel: string | null; at: string | null; status: string | null; intent: string | null; delivery_status: string | null; delivery_error: string | null; duration_ms: number | null; failed: boolean }>;
+}
+
 export interface MonitoringTwinData {
   schema: string;
   as_of: string;
   thresholds: { stale_s: number; offline_s: number; feed_silent_s: number };
   states: Record<string, string>;
   farms: MonitoringFarm[];
+  customer_service: MonitoringCst;
   profiles: Array<{ profile_id: string; crop: string; current_version: number; versions: MonitoringProfileVersion[] }>;
   ledger: { lane: string; subsystem: string; configured: boolean; note: string };
   counts: { farms: number; simulated_farms: number; open_incidents: number };

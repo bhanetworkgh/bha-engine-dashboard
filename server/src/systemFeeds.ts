@@ -1028,15 +1028,17 @@ const TURN_COLS = [
  * Whether a CST row is test traffic, and why (24 Oct 2026, D8; migration 92 has the same rule in SQL
  * for the rows already held). The event saying test: true; any +1 555 number on it (fictional by
  * design: the automated tests use them); or a turn id that is neither a Twilio SID (CA/SM/MM + 32
- * hex) nor a channel id (voice_/sms_/web_ + uuid). Null means real.
+ * hex), a channel id (voice_/sms_/web_ + uuid) nor an ElevenLabs conversation id (conv_...). Null means real.
  */
 const TWILIO_SID = /^(CA|SM|MM)[0-9a-f]{32}$/;
 const CHANNEL_ID = /^(voice|sms|web)_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** An ElevenLabs conversation id: the turn id of a call on the voice agent (6 Nov 2026). */
+const ELEVENLABS_ID = /^conv_[0-9a-z]+$/;
 const FAKE_555 = /(^|[^0-9])1555[0-9]{7}([^0-9]|$)/;
 export function cstTestReason(turnId: string, payload: unknown): string | null {
   if (isObj(payload) && (payload.test === true || payload.test === 'true')) return 'sent as a test';
   if (FAKE_555.test(JSON.stringify(payload ?? ''))) return 'a fake +1 555 number';
-  if (!TWILIO_SID.test(turnId) && !CHANNEL_ID.test(turnId)) return 'a hand-made turn id, not a Twilio or channel id';
+  if (!TWILIO_SID.test(turnId) && !CHANNEL_ID.test(turnId) && !ELEVENLABS_ID.test(turnId)) return 'a hand-made turn id, not a Twilio or channel id';
   return null;
 }
 
