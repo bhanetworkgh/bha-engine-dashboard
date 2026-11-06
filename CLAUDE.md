@@ -4450,6 +4450,8 @@ neutral, because NOT_SAFE_TO_CLAIM is a rule doing its job, not a fault. Home's
 Media Twin tile counts doctrines tracked once the first record lands. Media
 Twin's clips and weekly platform report are not on the page and it says so.
 
+**A draft's live post is recorded on the draft** (6 Nov 2026, Destiny). `POST /api/engine/media-posts/:id/posted` (`x-dashboard-key`), `mediaPosts.recordPosted`: `platform`, `posted_id`, `posted_url`, `dry_run`. Only an approved platform, and one not already marked (`not_approved`, `already_posted`), so a second run cannot claim a second post. One `media_post_published` event. n8n's `Media Twin — Post Approved Draft` is the only caller: it is unpublished, a person starts it for one draft, and **Approve never reaches it**, so Jason's gate (a Codex entry and an explicit 'approved for automated reuse' mark before Approve posts live) stands as written.
+
 **Media Twin's second tab is Posts: the post log** (2026-10-22, Destiny — H58Q,
 Jason's SOURCE_TO_TARGET_LOG). `server/src/mediaPostLog.ts`, migration 88,
 `engine_media_post_log`, contract `docs/contracts/media-post-log.md` (also an SOP

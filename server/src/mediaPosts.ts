@@ -505,6 +505,40 @@ export async function editText(postId: string, input: EditInput) {
   });
 }
 
+/* ----------------------------------------------------------------- posted */
+
+/**
+ * The live post, recorded on the platform it went to (6 Nov 2026, Destiny). `Media Twin — Post Approved Draft`
+ * calls this after each platform answers. Only an approved platform can be marked, and a platform already marked
+ * is refused, so a second run cannot claim a second post.
+ */
+export async function recordPosted(postId: string, input: { platform?: unknown; posted_id?: unknown; posted_url?: unknown; dry_run?: unknown }) {
+  const platform = s(input.platform, 20);
+  if (!(PLATFORMS as readonly string[]).includes(platform ?? '')) refuse('bad_value', `platform must be one of ${PLATFORMS.join(', ')}.`);
+  const postedId = s(input.posted_id, 200);
+  const postedUrl = s(input.posted_url, 500);
+  if (!postedId) refuse('bad_value', 'posted_id is required.');
+  if (!postedUrl || !/^https:\/\//.test(postedUrl)) refuse('bad_value', 'posted_url must be the live https link.');
+  return withTransaction(async (db) => {
+    const row = await one(db, postId, true);
+    if (!row) refuse('not_found', `No Media Twin post ${postId}.`, 404);
+    const d = row!.platforms[platform as Platform];
+    if (!d) refuse('not_found', `${postId} has no ${platform} draft.`, 404);
+    if (d.decision !== 'approved') refuse('not_approved', `${platform} on ${postId} is ${d.decision}, not approved.`, 409);
+    if (d.posted_id) refuse('already_posted', `${platform} on ${postId} is already posted: ${d.posted_url}`, 409);
+    if (input.dry_run === true) return { ok: true, written: false, platform, posted_url: postedUrl };
+    const at = new Date().toISOString();
+    const next = { ...row!.platforms, [platform as Platform]: { ...d, posted_id: postedId, posted_url: postedUrl, posted_at: at } };
+    await db.query(`UPDATE engine_media_posts SET platforms = $2::jsonb, updated_at = now() WHERE post_id = $1`, [postId, JSON.stringify(next)]);
+    await record(
+      { event_type: 'media_post_published', subject_id: postId, lane: 'MEDIA', actor: 'n8n:Media Twin — Post Approved Draft', source_ref: row!.slack_ts, detail: { schema: SCHEMA, platform, posted_id: postedId, posted_url: postedUrl, test: row!.test } },
+      db,
+    );
+    events.changed('media_posts', postId, db);
+    return { ok: true, written: true, platform, posted_id: postedId, posted_url: postedUrl, posted_at: at };
+  });
+}
+
 /* ----------------------------------------------------------------- metrics */
 
 export async function addMetrics(postId: string, input: Record<string, unknown>) {

@@ -14576,3 +14576,10 @@ Files:      server/src/monitoringCst.ts (new), server/src/monitoringTwin.ts, ser
 Problem:    no real call on the dashboard since 30 Oct. In bha_cst the ElevenLabs post-call path marked its events "published" with no send, and refused every report with a tool turn: "data.transcript.5.message: Invalid input: expected string, received null" (400 from 17:04 UTC on 4 Nov). The Monitoring Twin read farms only.
 Fix:        here: a Customer service tab and `customer_service` on the twin's read, counts and outcomes only; conv_ ids count as real turn ids. In bha_cst: see its own branch.
 Decision:   no words or numbers on the twin, because Genie's token reads it. A quiet line opens no incident: nobody calling is not a fault.
+
+## 2026-11-06 12:40 — Media Twin fallback events and the record of a live post
+Intent:     close LOOP-8KGQ (Media Twin fallback reaching read_engine_strain) and record each live post on its draft for the one-off run of the Tray A posts.
+Files:      server/src/mediaPosts.ts, server/src/index.ts, CLAUDE.md. n8n: Media Twin Daily Draft, Rewrite Draft, Front Door.
+Problem:    Daily Draft's backup wrote no event; Rewrite Draft's backup sat in an unpublished draft, so the live version had none; Front Door had no backup at all.
+Fix:        all three route only provider failures to the backup, check the answer and write one ai_provider_fallback event. Forced tests 71401, 71404, 71405; normal path 71406; both failed 71407. POST /api/engine/media-posts/:id/posted added.
+Decision:   the posting workflow stays unpublished and is started by a person. Approve never reaches it, so Jason's gate stands. read_engine_strain leaves forced tests out by design, so the count itself moves only on a real failure.

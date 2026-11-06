@@ -913,7 +913,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * GET reads (?post_id, ?status, ?slack_ts, ?include_test=1). A refusal writes nothing.
      */
     {
-      const mp = p.match(/^\/api\/engine\/media-posts(?:\/([A-Za-z0-9-]+))?(?:\/(decision|metrics|edit))?$/);
+      const mp = p.match(/^\/api\/engine\/media-posts(?:\/([A-Za-z0-9-]+))?(?:\/(decision|metrics|edit|posted))?$/);
       if (mp) {
         const [, postId, sub] = mp;
         const log = (outcome: string, detail: string, id: string | null = postId ?? null) =>
@@ -949,6 +949,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
             const body = await readJson(req, 64 * 1024);
             const r = await mediaPosts.editText(postId, { platform: str(body?.platform, 20), text: typeof body?.text === 'string' ? body.text : null, thread: Array.isArray(body?.thread) ? (body.thread as string[]) : null, by: str(body?.by, 40), reason: str(body?.reason, 500), dry_run: body?.dry_run === true });
             await log(r.written ? 'updated' : 'read', `edit ${str(body?.platform, 20)}, claim check ${r.claim_check_status}`);
+            return send(res, 200, r);
+          }
+          if (postId && sub === 'posted' && method === 'POST') {
+            const body = await readJson(req, 64 * 1024);
+            const r = await mediaPosts.recordPosted(postId, body ?? {});
+            await log(r.written ? 'updated' : 'read', `posted ${str(body?.platform, 20)}: ${str(body?.posted_url, 200)}`);
             return send(res, 200, r);
           }
           if (postId && sub === 'metrics' && method === 'POST') {
