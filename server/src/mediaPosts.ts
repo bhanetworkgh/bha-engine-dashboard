@@ -26,6 +26,8 @@
 import { query, withTransaction, type Queryable } from './pg';
 import { record } from './engineEvents';
 import * as events from './events';
+import * as n8n from './n8n';
+import * as slack from './slack';
 
 export const SCHEMA = 'media.post.v1';
 export const JASON = 'U0A9V97949F';
@@ -181,6 +183,7 @@ export interface MediaPost {
   angle: string | null;
   revision: number;
   parent_post_id: string | null;
+  pattern_ref?: string | null;
   status: string;
   card: Record<string, unknown>;
   images: { platform: string; width: number; height: number; url: string }[];
@@ -223,7 +226,7 @@ export function statusOf(p: Pick<MediaPost, 'platforms'>, superseded = false): s
 
 const newId = (now = Date.now()) => `MTP-${now}-${Math.random().toString(36).slice(2, 6).toUpperCase().padEnd(4, 'X')}`;
 
-const COLS = `post_id, run_date, occasion, occasion_label, angle, revision, parent_post_id, status, card, images, platforms,
+const COLS = `post_id, run_date, occasion, occasion_label, angle, revision, parent_post_id, pattern_ref, status, card, images, platforms,
   claim_check_status, sources, drafted_by, slack_channel, slack_ts, test, created_at, updated_at`;
 
 function show(r: Record<string, unknown>): MediaPost {
@@ -344,6 +347,8 @@ export async function create(input: CreateInput) {
       [id, post.run_date, post.occasion, post.occasion_label, post.angle, post.revision, post.parent_post_id, post.status, JSON.stringify(card), JSON.stringify(platforms), overall, JSON.stringify(post.sources), post.drafted_by, post.test],
     );
     if (parent) await db.query(`UPDATE engine_media_posts SET status = 'superseded', updated_at = now() WHERE post_id = $1`, [parent.post_id]);
+    // A rewrite stays on its pattern, so Jason's gate reads the same on revision 2.
+    if (parent?.pattern_ref) await db.query(`UPDATE engine_media_posts SET pattern_ref = $2 WHERE post_id = $1`, [id, parent.pattern_ref]);
     await record(
       { event_type: 'media_post_drafted', subject_id: id, lane: 'MEDIA', actor: post.drafted_by, source_ref: parent?.post_id ?? null, detail: { schema: SCHEMA, revision: post.revision, parent_post_id: post.parent_post_id, occasion: post.occasion, platforms: Object.keys(platforms), claim_check_status: overall, test: post.test } },
       db,
@@ -395,7 +400,7 @@ export async function decide(postId: string, input: DecideInput) {
   const note = s(input.note, 2000);
   if (decision === 'reject' && (!note || note.length < 3)) refuse('note_required', 'A reject needs a note saying what was wrong, so the Media Twin can rewrite it.');
 
-  return withTransaction(async (db) => {
+  const out = await withTransaction(async (db) => {
     const before = await one(db, postId, true);
     if (!before) refuse('not_found', `No Media Twin post ${postId}.`, 404);
     if (before!.status === 'superseded') refuse('superseded', `${postId} was replaced by a newer revision; decide on that one.`, 409);
@@ -431,7 +436,100 @@ export async function decide(postId: string, input: DecideInput) {
       db,
     );
     events.changed('media_posts', postId, db);
-    return { ok: true, post: { ...before!, platforms, status }, decided: { platform, decision, by, by_name: APPROVERS[by!], note, at: now } };
+    const auto_post = decision === 'approve' ? await autoPostFor(db, before!, platform) : { post: false, mode: 'record_only' as const, reason: 'A reject posts nothing.' };
+    return { ok: true, post: { ...before!, platforms, status }, decided: { platform, decision, by, by_name: APPROVERS[by!], note, at: now }, auto_post };
+  });
+  // After the commit, never awaited: the decision stands whatever the platform says, and the outcome goes in the card's thread.
+  if (out.auto_post.post) void runAutoPost(out.post, platform, out.auto_post.mode, by!);
+  return out;
+}
+
+/* ----------------------------------------------------------------- Jason's gate on Approve */
+
+/**
+ * Approve posts live only for a pattern with a Codex entry and an explicit 'approved for automated reuse' mark; otherwise
+ * it stays record-only and a person posts by hand (Jason, 6 Nov 2026, #bha-media-twin 1793927368.827389). A draft names
+ * its pattern in `pattern_ref`, the Codex entry's natural id; the mark is a row in engine_media_pattern_marks, written
+ * only by markPattern. Facebook and LinkedIn are not here: a post from the app in Development mode reaches app roles
+ * only, and LinkedIn's API access is not approved. Add one when that changes. A test draft runs the check, never a post.
+ */
+export const AUTO_POST_PLATFORMS: Platform[] = ['instagram', 'x'];
+const POST_PATH = process.env.MEDIA_POST_RUN_PATH?.trim() || '/webhook/media-twin-post';
+
+export type AutoPost = { post: boolean; mode: 'post' | 'check' | 'record_only'; reason: string };
+
+export async function autoPostFor(db: Queryable, post: Pick<MediaPost, 'pattern_ref' | 'test'>, platform: Platform): Promise<AutoPost> {
+  const ref = post.pattern_ref;
+  if (!ref) return { post: false, mode: 'record_only', reason: 'This draft names no pattern, so Approve only records.' };
+  const mark = await db.query(`SELECT 1 FROM engine_media_pattern_marks WHERE pattern_ref = $1`, [ref]);
+  if (!mark.rows[0]) return { post: false, mode: 'record_only', reason: `Pattern ${ref} is not marked for automated reuse, so Approve only records.` };
+  const codex = await db.query(`SELECT 1 FROM engine_codex_submissions WHERE natural_id = $1 LIMIT 1`, [ref]);
+  if (!codex.rows[0]) return { post: false, mode: 'record_only', reason: `Pattern ${ref} has no Codex entry, so Approve only records.` };
+  if (!AUTO_POST_PLATFORMS.includes(platform)) return { post: false, mode: 'record_only', reason: `${platform} is posted by hand until its automated posting is public.` };
+  return post.test ? { post: true, mode: 'check', reason: 'A test draft runs the check and posts nothing.' } : { post: true, mode: 'post', reason: `Pattern ${ref} is marked for automated reuse.` };
+}
+
+async function say(post: MediaPost, text: string): Promise<void> {
+  if (!post.slack_channel || !post.slack_ts) return;
+  await slack.botCall('chat.postMessage', { channel: post.slack_channel, thread_ts: post.slack_ts, text, unfurl_links: false }).catch(() => undefined);
+}
+
+async function runAutoPost(post: MediaPost, platform: Platform, mode: 'post' | 'check' | 'record_only', by: string): Promise<void> {
+  const id = post.post_id;
+  const call = { mode, post_id: id, platforms: [platform], ...(mode === 'post' ? { confirm: `POST ${id}` } : {}) };
+  let live: string | null = null;
+  let failure: string | null = null;
+  try {
+    const key = process.env.DASHBOARD_INBOUND_KEY?.trim();
+    if (!key) throw new Error('DASHBOARD_INBOUND_KEY is not set');
+    const r = await fetch(`${n8n.n8nHost()}${POST_PATH}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-dashboard-key': key }, body: JSON.stringify({ chatInput: JSON.stringify(call) }), signal: AbortSignal.timeout(170_000) });
+    const text = await r.text();
+    if (!r.ok) throw new Error(`n8n answered ${r.status}: ${text.slice(0, 300)}`);
+    if (mode === 'post') {
+      const body = JSON.parse(text) as { live?: Record<string, string | null> };
+      live = body.live?.[platform] ?? null;
+      if (!live) throw new Error(`the run ended with no ${platform} link: ${text.slice(0, 300)}`);
+    }
+  } catch (e) {
+    failure = e instanceof Error ? e.message : String(e);
+  }
+  await record({ event_type: failure ? 'media_post_auto_failed' : 'media_post_auto_posted', subject_id: id, lane: 'MEDIA', actor: by, source_ref: post.slack_ts, detail: { schema: SCHEMA, platform, mode, pattern_ref: post.pattern_ref, posted_url: live, error: failure, test: post.test } }).catch((e) => console.error('[media-posts] auto post event not written', e));
+  if (failure) console.error(`[media-posts] auto post of ${id} ${platform} failed: ${failure}`);
+  await say(post, failure ? `Approve did not post ${platform} on ${id}: ${failure}. The approval stands. Check the draft before running it again.` : mode === 'post' ? `Posted to ${platform} through Approve: ${live}` : `Test draft ${id}: the gate passed for ${platform} and the check ran. Nothing was posted.`);
+}
+
+/** Jason or Destiny only. The mark is what opens Approve, so no agent and no engine write can set it. */
+export async function markPattern(input: { pattern_ref?: unknown; by?: unknown; reason?: unknown; dry_run?: unknown }) {
+  const ref = s(input.pattern_ref, 80);
+  const by = bare(s(input.by, 40));
+  const reason = s(input.reason, 500);
+  if (!by || !APPROVERS[by]) refuse('not_permitted', 'Only Jason or Destiny mark a pattern for automated reuse.', 403);
+  if (!ref) refuse('bad_value', 'pattern_ref is the Codex entry that holds the pattern.');
+  if (!reason || reason.length < 3) refuse('bad_value', 'A reason is required.');
+  return withTransaction(async (db) => {
+    const codex = await db.query(`SELECT 1 FROM engine_codex_submissions WHERE natural_id = $1 LIMIT 1`, [ref]);
+    if (!codex.rows[0]) refuse('not_found', `No Codex entry ${ref}, and the gate needs one.`, 404);
+    if (input.dry_run === true) return { ok: true, written: false, pattern_ref: ref };
+    const r = await db.query(`INSERT INTO engine_media_pattern_marks (pattern_ref, marked_by, reason) VALUES ($1,$2,$3) ON CONFLICT (pattern_ref) DO NOTHING RETURNING marked_at`, [ref, by!, reason!]);
+    if (!r.rows[0]) return { ok: true, written: false, already: true, pattern_ref: ref };
+    await record({ event_type: 'media_pattern_marked_for_reuse', subject_id: ref, lane: 'MEDIA', actor: by!, source_ref: null, detail: { schema: SCHEMA, reason } }, db);
+    return { ok: true, written: true, pattern_ref: ref };
+  });
+}
+
+/** Says which pattern a draft belongs to, or clears it. Only a draft that names a pattern can reach the gate. */
+export async function setPattern(postId: string, input: { pattern_ref?: unknown; by?: unknown; dry_run?: unknown }) {
+  const by = bare(s(input.by, 40));
+  if (!by || !APPROVERS[by]) refuse('not_permitted', 'Only Jason or Destiny put a draft on a pattern.', 403);
+  const ref = s(input.pattern_ref, 80);
+  return withTransaction(async (db) => {
+    const row = await one(db, postId, true);
+    if (!row) refuse('not_found', `No Media Twin post ${postId}.`, 404);
+    if (input.dry_run === true) return { ok: true, written: false, post_id: postId, pattern_ref: ref };
+    await db.query(`UPDATE engine_media_posts SET pattern_ref = $2, updated_at = now() WHERE post_id = $1`, [postId, ref]);
+    await record({ event_type: 'media_post_pattern_set', subject_id: postId, lane: 'MEDIA', actor: by!, source_ref: row!.slack_ts, detail: { schema: SCHEMA, pattern_ref: ref, was: row!.pattern_ref ?? null } }, db);
+    events.changed('media_posts', postId, db);
+    return { ok: true, written: true, post_id: postId, pattern_ref: ref };
   });
 }
 

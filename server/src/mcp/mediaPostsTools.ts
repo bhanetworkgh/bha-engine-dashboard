@@ -132,5 +132,52 @@ export const recordMediaPostLink: ToolDefinition = {
   },
 };
 
+function gateTool(name: string, description: string, title: string, properties: Record<string, unknown>, required: string[], run: (args: Record<string, unknown>, by: string, dry: boolean) => Promise<Record<string, unknown>>, target: (args: Record<string, unknown>) => string): ToolDefinition {
+  return {
+    name,
+    description,
+    inputSchema: { type: 'object', properties: { ...properties, requester_user_id: { type: 'string' }, dry_run: { type: 'boolean' } }, required: [...required, 'requester_user_id'], additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false, title },
+    handler: async (args, deps) => {
+      if (deps.agent) return { ok: false, reason: 'agent_not_permitted', message: `An agent (${deps.agent}) may not change Jason's gate on Approve.` };
+      const dry = args.dry_run === true;
+      const requester = str(args, 'requester_user_id');
+      const audit = await auditOpen({ tool: name, args, access: deps.access, kind: 'media_posts', requester, dry_run: dry });
+      try {
+        const out = await run(args, requester, dry);
+        await auditClose(audit, { outcome: dry ? 'dry_run' : 'written', natural_id: target(args) });
+        return { ...out, audit_id: audit };
+      } catch (e) {
+        if (e instanceof posts.MediaPostError) {
+          await auditClose(audit, { outcome: 'refused', detail: e.reason, natural_id: target(args) });
+          return { ok: false, reason: e.reason, message: e.message, audit_id: audit };
+        }
+        await auditClose(audit, { outcome: 'failed', detail: String(e), natural_id: target(args) });
+        throw e;
+      }
+    },
+  };
+}
+
+export const markMediaPattern = gateTool(
+  'mark_media_pattern_reuse',
+  "Mark a Media Twin pattern 'approved for automated reuse' (Jason's gate). pattern_ref is the Codex entry that holds the pattern (its natural id). Once marked, Approve on a draft naming that pattern posts live on the platforms automated posting reaches; everything else stays record-only. Jason or Destiny, a reason required, refused on any agent token. Never removes a mark. dry_run checks and writes nothing. Audited on engine_mcp_writes.",
+  'Mark a pattern for automated reuse',
+  { pattern_ref: { type: 'string' }, reason: { type: 'string' } },
+  ['pattern_ref', 'reason'],
+  (a, by, dry) => posts.markPattern({ pattern_ref: str(a, 'pattern_ref'), by, reason: str(a, 'reason'), dry_run: dry }),
+  (a) => str(a, 'pattern_ref'),
+);
+
+export const setMediaPostPattern = gateTool(
+  'set_media_post_pattern',
+  "Say which pattern a Media Twin draft belongs to (pattern_ref, the Codex entry's natural id), or clear it with an empty value. Only a draft naming a marked pattern can post through Approve, and a rewrite keeps its draft's pattern. Jason or Destiny, refused on any agent token. dry_run checks and writes nothing. Audited on engine_mcp_writes.",
+  'Put a draft on a pattern',
+  { post_id: { type: 'string' }, pattern_ref: { type: 'string' } },
+  ['post_id'],
+  (a, by, dry) => posts.setPattern(str(a, 'post_id'), { pattern_ref: str(a, 'pattern_ref'), by, dry_run: dry }),
+  (a) => str(a, 'post_id'),
+);
+
 export const MEDIA_POSTS_READ_TOOLS: ToolDefinition[] = [readMediaPosts];
-export const MEDIA_POSTS_WRITE_TOOLS: ToolDefinition[] = [editMediaPost, recordMediaPostLink];
+export const MEDIA_POSTS_WRITE_TOOLS: ToolDefinition[] = [editMediaPost, recordMediaPostLink, markMediaPattern, setMediaPostPattern];

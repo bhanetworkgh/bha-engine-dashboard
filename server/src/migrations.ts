@@ -4335,6 +4335,19 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE INDEX IF NOT EXISTS engine_agreements_person ON engine_agreements (person_id, uploaded_at DESC)`,
     ],
   },
+  {
+    id: 120,
+    name: 'Jason\'s gate on Media Twin Approve: which pattern a draft belongs to, and which patterns are marked for automated reuse',
+    statements: [
+      `ALTER TABLE engine_media_posts ADD COLUMN IF NOT EXISTS pattern_ref text`,
+      `CREATE TABLE IF NOT EXISTS engine_media_pattern_marks (
+        pattern_ref text PRIMARY KEY,
+        marked_by text NOT NULL CHECK (marked_by IN ('U0A9V97949F', 'U0AEW3TBYH1')),
+        marked_at timestamptz NOT NULL DEFAULT now(),
+        reason text NOT NULL
+      )`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

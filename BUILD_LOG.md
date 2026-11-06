@@ -14591,3 +14591,10 @@ Problem:    run 71428 posted Instagram, X and Facebook, but Destiny's personal a
 Fix:        the Facebook post was made by hand from the page. Check no longer asks for post lists. Record Facebook builds the /posts/ address. record_media_post_link added so a hand post is recorded and a wrong link replaced with a reason.
 Decision:   the posting workflow stays unpublished and Approve stays record-only. The old link stays on posted_history rather than being overwritten.
 
+
+## 2026-11-06 14:15 — Approve keeps its notes, and Jason's gate on Media Twin Approve
+Intent:     finish D5: LOOP-1793917910192-F2YB, then the Tray A reuse mark and Approve wired to Jason's rule (#bha-media-twin 1793927368.827389).
+Files:      server/src/mediaPosts.ts, server/src/mcp/mediaPostsTools.ts, server/src/migrations.ts (120), CLAUDE.md. n8n: Bays — Submit Actions (restore point de900651-f08f-4d0a-bd18-736ce0214da8, published eefcbc31), Media Twin — Post Approved Draft.
+Problem:    Update Jason Review wrote "Jason Notes" even when the click carried none, so PATCH set it to empty. Separately, no draft said which pattern it belonged to, so the gate had nothing to read.
+Fix:        Jason Notes is sent only when there is a note. Drafts gain pattern_ref, marks live in engine_media_pattern_marks, and decide() calls /webhook/media-twin-post after its commit for a marked pattern.
+Decision:   Instagram and X only: Facebook is hidden while the app is in Development mode and LinkedIn's access is not approved. The gate sits in decide(), so the Slack card and the page's Approve behave the same. A test draft runs the check and posts nothing. Local tsc still cannot run here (no @types/node), so the deploy is the type check.
