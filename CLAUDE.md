@@ -1830,6 +1830,7 @@ publish again. A case already failing before is named and is not a regression.
 No finished run in 90 minutes is `no_eval` and is alerted too. **It never
 publishes or rolls back.** The Agent maturity page lists the changes.
 **A read with fewer skills than the row held is alerted at once** (6 Nov 2026, `agent_skills_dropped`, by name, whether or not the version moved; it changes nothing).
+**The live versions are read once a day** (6 Nov 2026, Destiny; `server/src/skillWatch.ts`): the inventory reads the draft, and only when somebody records it, so on 1 Nov agents ran on versions with no skills for days and nothing said so. Every agent's active version is read, its skills compared with what that version's agent held live on the last read (`meta` `skill_watch.live.<id>`), and a loss alerted once (a post Slack refuses is tried on the next pass). An agent n8n cannot read is one alert a day, never read as fine; a clean pass is one `agent_skills_checked` event. It changes nothing on n8n.
 **Record the inventory after every agent publish**, or none of this starts.
 The runner also writes one `eval_run_cost` event per run (account usage before
 and after), which `get_agent_spend` returns as `eval_runs`. `npm run

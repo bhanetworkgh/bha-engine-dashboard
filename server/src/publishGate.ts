@@ -88,8 +88,18 @@ export function droppedSkills(before: unknown, after: { name: string | null; id:
  * fewer skills than the row held, whether or not the version moved. It says so
  * in the engine alerts channel and changes nothing. Never throws.
  */
-export async function onSkillsDropped(input: { agent_id: string; name: string; version: string | null; from: string | null; lost: string[]; left: number }): Promise<void> {
+export async function onSkillsDropped(input: { agent_id: string; name: string; version: string | null; from: string | null; lost: string[]; left: number }): Promise<'posted' | 'already' | 'failed'> {
   try {
+    // Claimed before the post, so the inventory and the daily check alert once between them.
+    const claim = await engineEvents.record({
+      event_type: 'agent_skills_dropped',
+      subject_id: input.agent_id,
+      lane: 'ENGINE',
+      actor: 'publish check',
+      detail: { name: input.name, version: input.version, lost: input.lost, left: input.left },
+      dedupe_key: `agent_skills_dropped:${input.agent_id}:${input.version}:${input.lost.join(',')}`,
+    });
+    if (!claim.recorded) return 'already';
     const version = (input.version ?? '').slice(0, 8) || 'unknown';
     const alert = message('failure', `${input.name} lost ${input.lost.length} skill${input.lost.length === 1 ? '' : 's'}`, [
       `Version \`${version}\` has ${input.left} left. Gone: ${input.lost.join(', ')}.`,
@@ -97,17 +107,13 @@ export async function onSkillsDropped(input: { agent_id: string; name: string; v
       'Nothing was changed automatically.',
     ]);
     const sent = await post(alert);
-    if (!sent.ok) console.error(`[publish-check] ${input.name}: the lost-skills alert did not post: ${sent.error}`);
-    await engineEvents.record({
-      event_type: 'agent_skills_dropped',
-      subject_id: input.agent_id,
-      lane: 'ENGINE',
-      actor: 'publish check',
-      detail: { name: input.name, version: input.version, lost: input.lost, left: input.left, alert: sent.ok ? 'posted' : `failed: ${sent.error}` },
-      dedupe_key: `agent_skills_dropped:${input.agent_id}:${input.version}:${input.lost.join(',')}`,
-    });
+    if (sent.ok) return 'posted';
+    console.error(`[publish-check] ${input.name}: the lost-skills alert did not post: ${sent.error}`);
+    await query(`DELETE FROM engine_events WHERE id = $1`, [claim.id]);
+    return 'failed';
   } catch (e) {
     console.error(`[publish-check] ${input.name}: the lost-skills check failed: ${e instanceof Error ? e.message : String(e)}`);
+    return 'failed';
   }
 }
 
@@ -187,7 +193,7 @@ async function draftCheck(versionRowId: string, input: { agent_id: string; name:
 }
 
 /** Posts a message() string; a plain string (an alert stored before 18 Oct) is posted as text. */
-async function post(stored: string): Promise<{ ok: true; ts: string } | { ok: false; error: string }> {
+export async function post(stored: string): Promise<{ ok: true; ts: string } | { ok: false; error: string }> {
   const channel = quota.channelId();
   if (!channel) return { ok: false, error: `${quota.CHANNEL_VAR} is not set` };
   if (!slack.slackConfigured()) return { ok: false, error: `${slack.SLACK_TOKEN_VAR} is not set` };

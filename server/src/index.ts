@@ -82,6 +82,7 @@ import * as decisionWatch from './decisionWatch';
 import * as patternCapture from './patternCapture';
 import * as codexGap from './codexGap';
 import * as renewalReminder from './renewalReminder';
+import * as skillWatch from './skillWatch';
 import * as codeCheckWatch from './codeCheckWatch';
 import * as codeCheckTools from './mcp/codeCheckTools';
 import * as codeCheckDraft from './codeCheckDraft';
@@ -3171,6 +3172,7 @@ async function boot(): Promise<void> {
     creditOut.startWatching();
     modelSpend.startReading();
     publishGate.startSweeping();
+    skillWatch.startSweeping();
     // A draft eval left running by the last process is not resumed (13 Oct 2026).
     void draftEval.markInterrupted().then((n) => { if (n) console.log(`[draft-eval] ${n} run(s) left running by the last process marked interrupted`); }).catch((e) => console.error(`[draft-eval] interrupted runs not marked: ${(e as Error).message}`));
     draftEval.startSweeping();

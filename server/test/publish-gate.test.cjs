@@ -170,6 +170,11 @@ const srv = http.createServer((req, res) => {
   assert.equal((await query(`SELECT 1 FROM engine_events WHERE subject_id = $1 AND event_type = 'agent_skills_dropped'`, [A])).rows.length, 1);
   ok('a lost skill is alerted by name, and recorded');
 
+  const watch = req('skillWatch.js');
+  assert.deepEqual(watch.liveSkills({ config: { skills: [{ id: 'a' }, { id: 'b' }] }, skills: { a: { name: 'One' } } }), ['One', 'b']);
+  assert.deepEqual(watch.liveSkills({ config: {} }), [], 'a version with no skills reads as none');
+  ok('the daily check reads a live version\'s skills by name');
+
   await query(`DELETE FROM engine_eval_runs WHERE natural_id LIKE $1`, [`EVAL-T${T}%`]);
   await query(`DELETE FROM engine_agent_versions WHERE agent_id = $1`, [A]);
   await query(`DELETE FROM engine_events WHERE subject_id = $1`, [A]);

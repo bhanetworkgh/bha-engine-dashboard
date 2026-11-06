@@ -203,10 +203,11 @@ async function callTool(name: string, args: Dict, timeoutMs = TIMEOUT_MS): Promi
  * not that agent, because a row recorded from the wrong answer would be a
  * confident statement about an agent nobody read.
  */
-export async function getAgent(agentId: string): Promise<Dict> {
+export async function getAgent(agentId: string, versionId?: string): Promise<Dict> {
   const id = String(agentId || '').trim();
   if (!/^[A-Za-z0-9_-]{6,64}$/.test(id)) throw new N8nMcpError(`"${id.slice(0, 80)}" is not an n8n agent id.`, 'not_found');
-  const r = await callTool('get_agent', { agentId: id });
+  // With versionId: that published version's snapshot, which has no configHash. Without: the draft.
+  const r = await callTool('get_agent', versionId ? { agentId: id, versionId } : { agentId: id });
   if (!isDict(r)) throw new N8nMcpError(`n8n's get_agent answered with something that is not an object.`, 'bad_answer');
   if (r.ok === false) {
     const why = String(r.message ?? r.error ?? r.code ?? 'no reason given').slice(0, 300);
