@@ -14583,3 +14583,11 @@ Files:      server/src/mediaPosts.ts, server/src/index.ts, CLAUDE.md. n8n: Media
 Problem:    Daily Draft's backup wrote no event; Rewrite Draft's backup sat in an unpublished draft, so the live version had none; Front Door had no backup at all.
 Fix:        all three route only provider failures to the backup, check the answer and write one ai_provider_fallback event. Forced tests 71401, 71404, 71405; normal path 71406; both failed 71407. POST /api/engine/media-posts/:id/posted added.
 Decision:   the posting workflow stays unpublished and is started by a person. Approve never reaches it, so Jason's gate stands. read_engine_strain leaves forced tests out by design, so the count itself moves only on a real failure.
+
+## 2026-11-06 13:35 — Tray A live, and Facebook held back by the app's mode
+Intent:     post the approved Tray A draft through a one-off n8n workflow, Media Twin — Post Approved Draft (LrGUp6yfln0R8clK, unpublished), and keep each live link on the draft.
+Files:      server/src/mediaPosts.ts, server/src/mcp/mediaPostsTools.ts, CLAUDE.md. n8n: Media Twin — Post Approved Draft.
+Problem:    run 71428 posted Instagram, X and Facebook, but Destiny's personal account got "This isn't available" on Facebook while the page's own profile saw it. The app, BHA Media Twin, is "In development", and Meta shows such content to role users only. Going Live is blocked by business verification. Also, the Facebook link I built was the wrong shape, and check run 71442 returned the page's access token inside Facebook's paging link, so it sits in that run's stored data.
+Fix:        the Facebook post was made by hand from the page. Check no longer asks for post lists. Record Facebook builds the /posts/ address. record_media_post_link added so a hand post is recorded and a wrong link replaced with a reason.
+Decision:   the posting workflow stays unpublished and Approve stays record-only. The old link stays on posted_history rather than being overwritten.
+

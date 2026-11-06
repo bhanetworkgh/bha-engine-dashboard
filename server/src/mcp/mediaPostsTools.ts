@@ -86,5 +86,51 @@ export const editMediaPost: ToolDefinition = {
   },
 };
 
+export const recordMediaPostLink: ToolDefinition = {
+  name: 'record_media_post_link',
+  description:
+    "Record the live link of a post made by hand, or replace a live link already held, on one platform of a Media Twin draft. HELD HERE: requester_user_id is Jason or Destiny (not_permitted); refused on any agent token; the platform must be approved (not_approved); a link already held is replaced only with correction_reason (already_posted), and the old one stays on the platform's posted_history. It posts nothing to any platform. One media_post_published event. dry_run checks everything and writes nothing. Audited on engine_mcp_writes.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      post_id: { type: 'string' },
+      platform: { type: 'string', enum: [...posts.PLATFORMS] },
+      posted_id: { type: 'string', description: "The platform's id for the post, or the link's own short code for a post made by hand." },
+      posted_url: { type: 'string' },
+      correction_reason: { type: 'string', description: 'Why a link already held is being replaced.' },
+      requester_user_id: { type: 'string' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['post_id', 'platform', 'posted_id', 'posted_url', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false, title: 'Record a live post link' },
+  handler: async (args, deps) => {
+    if (deps.agent) return { ok: false, reason: 'agent_not_permitted', message: `An agent (${deps.agent}) may not record a live link.` };
+    const dry = args.dry_run === true;
+    const requester = str(args, 'requester_user_id');
+    const audit = await auditOpen({ tool: 'record_media_post_link', args, access: deps.access, kind: 'media_posts', requester, dry_run: dry });
+    try {
+      const out = await posts.recordPosted(str(args, 'post_id'), {
+        platform: str(args, 'platform'),
+        posted_id: str(args, 'posted_id'),
+        posted_url: str(args, 'posted_url'),
+        correction_reason: args.correction_reason,
+        by: requester,
+        dry_run: dry,
+      });
+      await auditClose(audit, { outcome: dry ? 'dry_run' : 'written', natural_id: str(args, 'post_id') });
+      return { ...out, audit_id: audit };
+    } catch (e) {
+      if (e instanceof posts.MediaPostError) {
+        await auditClose(audit, { outcome: 'refused', detail: e.reason, natural_id: str(args, 'post_id') });
+        return { ok: false, reason: e.reason, message: e.message, audit_id: audit };
+      }
+      await auditClose(audit, { outcome: 'failed', detail: String(e), natural_id: str(args, 'post_id') });
+      throw e;
+    }
+  },
+};
+
 export const MEDIA_POSTS_READ_TOOLS: ToolDefinition[] = [readMediaPosts];
-export const MEDIA_POSTS_WRITE_TOOLS: ToolDefinition[] = [editMediaPost];
+export const MEDIA_POSTS_WRITE_TOOLS: ToolDefinition[] = [editMediaPost, recordMediaPostLink];

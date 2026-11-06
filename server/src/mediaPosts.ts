@@ -512,11 +512,13 @@ export async function editText(postId: string, input: EditInput) {
  * calls this after each platform answers. Only an approved platform can be marked, and a platform already marked
  * is refused, so a second run cannot claim a second post.
  */
-export async function recordPosted(postId: string, input: { platform?: unknown; posted_id?: unknown; posted_url?: unknown; dry_run?: unknown }) {
+export async function recordPosted(postId: string, input: { platform?: unknown; posted_id?: unknown; posted_url?: unknown; dry_run?: unknown; correction_reason?: unknown; by?: unknown }) {
   const platform = s(input.platform, 20);
   if (!(PLATFORMS as readonly string[]).includes(platform ?? '')) refuse('bad_value', `platform must be one of ${PLATFORMS.join(', ')}.`);
   const postedId = s(input.posted_id, 200);
   const postedUrl = s(input.posted_url, 500);
+  const by = s(input.by, 40);
+  if (by && !APPROVERS[by]) refuse('not_permitted', `Only Jason or Destiny record a live link; ${by} is not one of them.`, 403);
   if (!postedId) refuse('bad_value', 'posted_id is required.');
   if (!postedUrl || !/^https:\/\//.test(postedUrl)) refuse('bad_value', 'posted_url must be the live https link.');
   return withTransaction(async (db) => {
@@ -525,13 +527,17 @@ export async function recordPosted(postId: string, input: { platform?: unknown; 
     const d = row!.platforms[platform as Platform];
     if (!d) return refuse('not_found', `${postId} has no ${platform} draft.`, 404);
     if (d.decision !== 'approved') refuse('not_approved', `${platform} on ${postId} is ${d.decision}, not approved.`, 409);
-    if (d.posted_id) refuse('already_posted', `${platform} on ${postId} is already posted: ${d.posted_url}`, 409);
+    // A link already held is replaced only with a written reason, and the old one stays on the platform.
+    const correction = s(input.correction_reason, 500);
+    if (d.posted_id && !correction) refuse('already_posted', `${platform} on ${postId} is already posted: ${d.posted_url}`, 409);
     if (input.dry_run === true) return { ok: true, written: false, platform, posted_url: postedUrl };
     const at = new Date().toISOString();
-    const next = { ...row!.platforms, [platform as Platform]: { ...d, posted_id: postedId, posted_url: postedUrl, posted_at: at } };
+    const earlier = (d as { posted_history?: unknown[] }).posted_history ?? [];
+    const history = d.posted_id ? { posted_history: [...earlier, { posted_id: d.posted_id, posted_url: d.posted_url, posted_at: d.posted_at, replaced_at: at, reason: correction }] } : {};
+    const next = { ...row!.platforms, [platform as Platform]: { ...d, posted_id: postedId, posted_url: postedUrl, posted_at: at, ...history } };
     await db.query(`UPDATE engine_media_posts SET platforms = $2::jsonb, updated_at = now() WHERE post_id = $1`, [postId, JSON.stringify(next)]);
     await record(
-      { event_type: 'media_post_published', subject_id: postId, lane: 'MEDIA', actor: 'n8n:Media Twin — Post Approved Draft', source_ref: row!.slack_ts, detail: { schema: SCHEMA, platform, posted_id: postedId, posted_url: postedUrl, test: row!.test } },
+      { event_type: 'media_post_published', subject_id: postId, lane: 'MEDIA', actor: by ?? 'n8n:Media Twin — Post Approved Draft', source_ref: row!.slack_ts, detail: { schema: SCHEMA, platform, posted_id: postedId, posted_url: postedUrl, test: row!.test, ...(correction ? { correction } : {}) } },
       db,
     );
     events.changed('media_posts', postId, db);
