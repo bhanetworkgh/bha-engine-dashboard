@@ -512,7 +512,7 @@ export async function markPattern(input: { pattern_ref?: unknown; by?: unknown; 
     if (input.dry_run === true) return { ok: true, written: false, pattern_ref: ref };
     const r = await db.query(`INSERT INTO engine_media_pattern_marks (pattern_ref, marked_by, reason) VALUES ($1,$2,$3) ON CONFLICT (pattern_ref) DO NOTHING RETURNING marked_at`, [ref, by!, reason!]);
     if (!r.rows[0]) return { ok: true, written: false, already: true, pattern_ref: ref };
-    await record({ event_type: 'media_pattern_marked_for_reuse', subject_id: ref, lane: 'MEDIA', actor: by!, source_ref: null, detail: { schema: SCHEMA, reason } }, db);
+    await record({ event_type: 'media_pattern_marked_for_reuse', subject_id: ref!, lane: 'MEDIA', actor: by!, source_ref: null, detail: { schema: SCHEMA, reason } }, db);
     return { ok: true, written: true, pattern_ref: ref };
   });
 }
@@ -709,7 +709,7 @@ export async function read(input: { post_id?: string | null; status?: string | n
       `Target: a reliability claim stated as today's behaviour ("no surprises", "only runs when needed", "feels like an appliance"); it cannot be approved until ${STAGE_GATE_LOOP} is Closed, a real Stage 1 record has passed and a real cabinet log is saved as evidence under ${TARGET_PROOF_GATE}. Framed as what we are building or testing, it is fine.`,
       'Flagged: a number about how the farm performs or what it earns; Jason checks it before approving.',
       'Only Jason or Destiny decide; a reject carries a note, and the Media Twin rewrites the draft from it as the next revision.',
-      'Nothing is posted to a platform until posting is switched on; a decision here is the record that it may be.',
+      'Approve posts live only for a draft on a pattern with a Codex entry and an approved for automated reuse mark, on Instagram and X. Otherwise a decision here is the record, and the post goes by hand.',
     ],
   };
 }
