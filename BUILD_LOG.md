@@ -14643,3 +14643,9 @@ Files:      BUILD_LOG.md only. Dashboard records: registry_stage1 (audit 5187), 
 Problem:    the Stage 1 table showed Destiny unsigned while DocuSign envelope 3b0c11f1 completed at 15:49 UTC today.
 Fix:        signed date and envelope written to his row; O834 carries the four signatures and what is still owed (Hardik, then Jason's countersignature). 9MSP holds the Tray A mark ruling and the claim check's target-framing false flag on JHYC. A first attempt to open a new Stage 1 loop was refused as a duplicate of O834, correctly.
 Decision:   CST texts, START/HELP/STOP, hang-up, talk-to-a-person and the CST system log roll to the next session on PUW0.
+
+## 2026-11-06 21:20 — Approve posts to Facebook too, now the app is Live
+Intent:     Destiny: Meta verified Bays Horizon Network LLC today and he published the BHA Media Twin app, so Facebook joins the automatic posting.
+Files:      server/src/mediaPosts.ts, CLAUDE.md. n8n: Media Twin — Post Approved Draft (sticky note and description only).
+Fix:        AUTO_POST_PLATFORMS is instagram, x, facebook. The n8n workflow already posts Facebook (Facebook Post, Record Facebook), so nothing else changes; the gate (a Codex entry plus a reuse mark) is unchanged. LinkedIn stays by hand.
+Decision:   no live Facebook post was made to prove it: the only marked pattern is Tray A, already posted, and a test draft runs the check only. The first real proof is the next approved draft on a marked pattern.

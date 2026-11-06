@@ -496,10 +496,11 @@ export async function decide(postId: string, input: DecideInput) {
  * Approve posts live only for a pattern with a Codex entry and an explicit 'approved for automated reuse' mark; otherwise
  * it stays record-only and a person posts by hand (Jason, 6 Nov 2026, #bha-media-twin 1793927368.827389). A draft names
  * its pattern in `pattern_ref`, the Codex entry's natural id; the mark is a row in engine_media_pattern_marks, written
- * only by markPattern. Facebook and LinkedIn are not here: a post from the app in Development mode reaches app roles
- * only, and LinkedIn's API access is not approved. Add one when that changes. A test draft runs the check, never a post.
+ * only by markPattern. Facebook joined on 6 Nov 2026, once Meta verified the business and the BHA Media Twin app went
+ * Live (LOOP-1793989931043-HMJC). LinkedIn is not here: its API access is not approved. Add it when that changes.
+ * A test draft runs the check, never a post.
  */
-export const AUTO_POST_PLATFORMS: Platform[] = ['instagram', 'x'];
+export const AUTO_POST_PLATFORMS: Platform[] = ['instagram', 'x', 'facebook'];
 const POST_PATH = process.env.MEDIA_POST_RUN_PATH?.trim() || '/webhook/media-twin-post';
 
 export type AutoPost = { post: boolean; mode: 'post' | 'check' | 'record_only'; reason: string };
