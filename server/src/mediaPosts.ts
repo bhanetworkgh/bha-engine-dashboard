@@ -57,6 +57,20 @@ export const TARGET: { id: string; re: RegExp; why: string }[] = [
   { id: 'runs_unattended', re: /\b(for|after)\s+(two|three|four|several|a\s+few|\d+)\s+days\b[^.!?\n]{0,60}\b(no|without)\b|\bforget\s+to\s+check\b|\bwith(out)?\s+no\s+issues\b|\bwithout\s+(any\s+)?(issues?|problems?)\b/i, why: 'Running unattended for days has not been shown on a real cabinet.' },
 ];
 
+/**
+ * Claims Jason checks before they go out (6 Nov 2026, his reference-pattern ruling on the Tray A LinkedIn post, and the
+ * lines Bays caught on draft EPMX): what is in the food, and how fresh a harvest is. We hold neither claim.
+ */
+export const FLAGGED: { id: string; re: RegExp; why: string }[] = [
+  { id: 'food_or_ingredient_claim', re: /\b(no|zero|without|free\s+of)\s+(added\s+)?(additives?|preservatives?|pesticides?|chemicals?|sprays?|nasties)\b|\b(pesticide|chemical|additive|spray|preservative)[\s-]*free\b|\bcan['’]?t\s+pronounce\b|\bhealthier\b|\bmore\s+nutritious\b|\bnutrient[\s-]*(dense|rich)\b|\bcleaner\s+than\b|\bknow\s+(exactly\s+)?what['’]?s\s+in\s+(it|your\s+food)\b/i, why: 'A claim about what is in the food. BHA holds no such claim: Jason checks it before it goes out.' },
+  { id: 'harvest_timing_claim', re: /\bpicked\s+(it\s+)?(an?|one|\d+|a\s+few)\s+(hours?|minutes?|mins?)\s+ago\b|\b(minutes|an\s+hour|hours)\s+(from|after|since)\s+(harvest|picking)\b|\bfresh\s+from\s+(your\s+)?(own\s+)?harvest\b|\bharvest(ed)?\s+(this\s+morning|tonight|minutes\s+ago|an\s+hour\s+ago)\b/i, why: 'A harvest timing claim. No full cabinet cycle has run: Jason checks it before it goes out.' },
+];
+
+/** A sentence that tells a failure as having happened. Jason (6 Nov 2026): every one is pinned to a real loop or log. */
+const FAILURE_STORY = /\b(failed|died|broke|went\s+wrong|stopped\s+working|didn['’]?t\s+(flag|catch|see|notice)|we\s+missed|missed\s+it)\b/i;
+/** Loop and Codex ids, the records a failure story can rest on. */
+const RECORD_ID = /\b(LOOP-\d{10,}-[A-Z0-9]{4}|CODEX-[A-Za-z0-9-]+)\b/g;
+
 /** A sentence that says this is the aim or the test, not the track record. Next to a claim, it makes the claim a target. */
 const FRAMED = /\b(we(['’]re| are)|i(['’]m| am))\s+(still\s+|now\s+)?(designing|building|testing|working\s+toward|aiming)\b|\b(what|how)\s+we(['’]re| are)\s+(building|designing|testing)\b|\bbeing\s+(built|designed|tested)\s+to\b|\b(the\s+)?(reliability\s+|plumbing\s+)?(rule|contract)\s+(we|that\s+we)\b|\bthe\s+target\b|\bour\s+target\b|\bin\s+stage\s*1\b|\b(not|n['’]t)\s+(yet\s+)?proven\b/i;
 
@@ -94,12 +108,33 @@ export function claimCheck(text: string): { status: ClaimStatus; findings: Claim
     if (FRAMED.test(line) || FRAMED.test(lines[i + 1] ?? '')) return;
     for (const t of TARGET) if (t.re.test(line)) findings.push({ status: 'target', rule: t.id, text: line.slice(0, 300), why: t.why });
   });
+  for (const f of FLAGGED) {
+    for (const line of lines) if (f.re.test(line)) findings.push({ status: 'flagged', rule: f.id, text: line.slice(0, 300), why: f.why });
+  }
   for (const s of sentences(text)) {
     if (MONEY_OR_PCT.test(s) || (HAS_NUMBER.test(s) && PERFORMANCE.test(s) && !/^\s*(day|part|step|week)\s*\d/i.test(s))) {
       findings.push({ status: 'flagged', rule: 'performance_or_revenue_number', text: s.slice(0, 300), why: 'A number about how the farm performs or what it earns: Jason checks it before it goes out.' });
     }
   }
   return { status: worst(findings.map((f) => f.status)), findings };
+}
+
+/** The record ids a draft's sources name, from `sources.loops`, `sources.codex` or anywhere else in them. Pure. */
+export function sourceIds(sources: unknown): string[] {
+  return [...new Set(JSON.stringify(sources ?? {}).match(RECORD_ID) ?? [])];
+}
+
+/**
+ * Jason's first hard constraint (6 Nov 2026): a failure story is pinned to a real loop or Codex log. A draft that tells
+ * one names the record in its sources, and the record has to be held. `found` is which of the ids are held. Pure.
+ */
+export function failureSourceFindings(text: string, ids: string[], found: string[]): ClaimFinding[] {
+  const story = sentences(String(text || '').replace(/\*/g, '')).find((l) => FAILURE_STORY.test(l));
+  if (!story) return [];
+  if (!ids.length) return [{ status: 'flagged', rule: 'failure_story_unsourced', text: story.slice(0, 300), why: 'A failure told as having happened, with no loop or Codex log named in the sources. Jason checks it is real before it goes out.' }];
+  const missing = ids.filter((i) => !found.includes(i));
+  if (missing.length === ids.length) return [{ status: 'flagged', rule: 'failure_story_source_not_found', text: story.slice(0, 300), why: `The sources name ${missing.join(', ')}, and none of them is held on the dashboard. Jason checks it is real before it goes out.` }];
+  return [];
 }
 
 function worst(a: string[]): ClaimStatus {
@@ -269,6 +304,16 @@ export async function create(input: CreateInput) {
   const cardText = ['kicker', 'headline', 'sub', 'foot'].map((k) => String(card[k] ?? '')).join('\n');
   const cardCheck = claimCheck(cardText);
 
+  // The records the sources name, read once: a failure story must rest on one that is held.
+  const ids = sourceIds(input.sources);
+  const found = ids.length
+    ? ((await query(
+        `SELECT natural_id FROM engine_loops WHERE natural_id = ANY($1::text[])
+         UNION SELECT fields->>'Codex Entry ID' FROM engine_codex_submissions WHERE fields->>'Codex Entry ID' = ANY($1::text[])`,
+        [ids],
+      )).rows.map((r) => String(r.natural_id)))
+    : [];
+
   const platforms: Partial<Record<Platform, PlatformDraft>> = {};
   for (const [k, v] of Object.entries(raw)) {
     const text = s(v?.text, 6000);
@@ -276,12 +321,13 @@ export async function create(input: CreateInput) {
     const thread = Array.isArray(v?.thread) ? v!.thread!.map((t) => s(t, 400)).filter((t): t is string => Boolean(t)).slice(0, 12) : [];
     const check = claimCheck([text, ...thread].join('\n'));
     // The card goes out with every platform, so its findings count against each one.
-    const findings = [...cardCheck.findings.map((f) => ({ ...f, text: `[card] ${f.text}` })), ...check.findings];
+    const sourced = failureSourceFindings([text, ...thread].join('\n'), ids, found);
+    const findings = [...cardCheck.findings.map((f) => ({ ...f, text: `[card] ${f.text}` })), ...check.findings, ...sourced];
     platforms[k as Platform] = {
       text: text!,
       thread,
       publish_at: s(v?.publish_at, 40),
-      claim_check_status: worst([cardCheck.status, check.status]),
+      claim_check_status: worst([cardCheck.status, check.status, ...sourced.map((f) => f.status)]),
       claim_findings: findings,
       decision: 'pending',
       decided_by: null,

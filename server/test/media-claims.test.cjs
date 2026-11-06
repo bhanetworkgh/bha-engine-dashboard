@@ -46,4 +46,34 @@ ok('an uncleared gate keeps target and names what is missing', () => {
   assert.match(r.findings[0].why, /no real Stage 1 record/);
 });
 ok('a cleared gate leaves it flagged for Jason', () => assert.equal(m.settleTarget(m.claimCheck('No surprises.').findings, gate(true)).status, 'flagged'));
+
+// Jason's reference pattern (6 Nov 2026): food and harvest claims are flagged, and a failure story rests on a held record.
+const TRAY_A = `Picture this: a soil moisture probe died in one of our grow trays, and for a while, every reading still said "ok."
+
+That happened on 3 Nov, on Tray A, while we were running Stage 1 tests on our rack. The sensor failed, and because we hadn't built the right checks yet, the charts didn't catch it either.
+
+We don't want vFarm to be a cabinet you have to babysit. The rule we're designing it around: if something fails, you hear about it before it matters, not after. We're not there yet.
+
+So we're building it: plausibility and jump checks at the point data comes in. That work is in progress, not finished.
+
+Join vFarm Early Access: bhanetwork.org/vfarm`;
+ok('the Tray A post Jason approved passes the text rules', () => assert.equal(m.claimCheck(TRAY_A).status, 'clean'));
+ok('food and ingredient claims are flagged', () => {
+  for (const t of ["No additive you can't pronounce.", 'Pesticide-free greens at home.', 'Healthier than the store.', 'Grown without chemicals.'])
+    assert.equal(m.claimCheck(t).findings.some((f) => f.rule === 'food_or_ingredient_claim'), true, t);
+});
+ok('harvest timing claims are flagged', () => {
+  for (const t of ['It tastes better when you picked it an hour ago.', 'Fresh from your harvest tonight.', 'Minutes from harvest to plate.'])
+    assert.equal(m.claimCheck(t).findings.some((f) => f.rule === 'harvest_timing_claim'), true, t);
+});
+ok('ordinary lines are not', () => {
+  for (const t of ['You watch it grow and pick it yourself.', 'Open the door, grab fresh strawberries.'])
+    assert.equal(m.claimCheck(t).status, 'clean', t);
+});
+ok('source ids are read from anywhere in the sources', () =>
+  assert.deepEqual(m.sourceIds({ loops: ['LOOP-1791428275782-TU4O'], codex: ['CODEX-20261030-ahad-vfarm-sensor-timeout'], slack: [] }), ['LOOP-1791428275782-TU4O', 'CODEX-20261030-ahad-vfarm-sensor-timeout']));
+ok('a failure story with no record is flagged', () => assert.equal(m.failureSourceFindings(TRAY_A, [], [])[0].rule, 'failure_story_unsourced'));
+ok('a failure story whose records are not held is flagged', () => assert.equal(m.failureSourceFindings(TRAY_A, ['LOOP-1000000000000-ABCD'], [])[0].rule, 'failure_story_source_not_found'));
+ok('a failure story on a held record passes', () => assert.equal(m.failureSourceFindings(TRAY_A, ['LOOP-1791428275782-TU4O'], ['LOOP-1791428275782-TU4O']).length, 0));
+ok('a post with no failure needs no record', () => assert.equal(m.failureSourceFindings('Open the door, grab fresh strawberries.', [], []).length, 0));
 console.log(n, 'checks passed');
