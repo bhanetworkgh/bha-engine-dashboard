@@ -14598,3 +14598,10 @@ Files:      server/src/mediaPosts.ts, server/src/mcp/mediaPostsTools.ts, server/
 Problem:    Update Jason Review wrote "Jason Notes" even when the click carried none, so PATCH set it to empty. Separately, no draft said which pattern it belonged to, so the gate had nothing to read.
 Fix:        Jason Notes is sent only when there is a note. Drafts gain pattern_ref, marks live in engine_media_pattern_marks, and decide() calls /webhook/media-twin-post after its commit for a marked pattern.
 Decision:   Instagram and X only: Facebook is hidden while the app is in Development mode and LinkedIn's access is not approved. The gate sits in decide(), so the Slack card and the page's Approve behave the same. A test draft runs the check and posts nothing. Local tsc still cannot run here (no @types/node), so the deploy is the type check.
+
+## 2026-11-06 16:10 — Approved Media Twin cards collapse to one line; LinkedIn live; a mark placed ahead of Jason's newest ruling
+Intent:     keep #bha-media-twin to what is still waiting, the way log review cards work (Destiny), and close the hand-posted Tray A set.
+Files:      BUILD_LOG.md. n8n: Media Twin — Approval Card (restore point 48969d5a-39cd-4e1c-8370-c2f10906a665): Build The Card and the sticky note.
+Problem:    Jason's reply in thread 1793536886.569679 says Approve is wired and the pattern flipped only after Meta verification and LinkedIn API access are in place. Tray A had already been marked at 14:49 UTC (engine_media_pattern_marks) and test draft MTP-1793536633355-ZOIW put on it, on the earlier reading of his gate. mark_media_pattern_reuse never removes a mark.
+Fix:        update mode now draws an approved platform as one line (who, when, draft id). LinkedIn recorded by hand: https://lnkd.in/p/dRJfpR3c, on the draft and the Codex entry's Live Links.
+Decision:   the mark is left for Destiny and Jason to rule on. Nothing real names the pattern today: NKEY has no pattern_ref, and the only draft on it is a test, which runs the check and posts nothing. Cards approved before this change keep their full look.
