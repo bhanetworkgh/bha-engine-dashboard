@@ -523,7 +523,7 @@ export async function recordPosted(postId: string, input: { platform?: unknown; 
     const row = await one(db, postId, true);
     if (!row) refuse('not_found', `No Media Twin post ${postId}.`, 404);
     const d = row!.platforms[platform as Platform];
-    if (!d) refuse('not_found', `${postId} has no ${platform} draft.`, 404);
+    if (!d) return refuse('not_found', `${postId} has no ${platform} draft.`, 404);
     if (d.decision !== 'approved') refuse('not_approved', `${platform} on ${postId} is ${d.decision}, not approved.`, 409);
     if (d.posted_id) refuse('already_posted', `${platform} on ${postId} is already posted: ${d.posted_url}`, 409);
     if (input.dry_run === true) return { ok: true, written: false, platform, posted_url: postedUrl };
