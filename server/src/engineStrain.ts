@@ -6,8 +6,11 @@
  *
  * The three states were each recorded already and read by nothing outside the team:
  *   A. a voided Codex log           — `layer0_log_voided` events (layer0Void.ts)
- *   B. a credit-floor refusal/hold  — `openrouter_credit_out` events (creditOut.ts), OpenRouter recovery holds
- *                                     (recovery.ts), draft eval runs stopped for credit (draftEval.ts)
+ *   B. a credit-floor refusal/hold  — `anthropic_credit_out` and `openrouter_credit_out` events (creditOut.ts),
+ *                                     OpenRouter recovery holds (recovery.ts), draft eval runs stopped for credit
+ *                                     (draftEval.ts). Since 3 Nov 2026 Anthropic is primary and OpenRouter the backup,
+ *                                     so an Anthropic refusal is the one that matters most (7 Nov 2026, Destiny, HVET:
+ *                                     until then only OpenRouter's was counted).
  *   C. a fallback to the backup     — `ai_provider_fallback` events (the n8n delivery workflows), draft eval
  *                                     runs that ran on Anthropic (engine_draft_eval_runs.ran_on, migration 97)
  *
@@ -27,6 +30,11 @@ export interface StrainCounts {
   credit_out_total: number;
   credit_out_last_hour: number;
   credit_out_latest_at: string | null;
+  /** Anthropic (the primary since 3 Nov 2026) refusing for credit: `anthropic_credit_out` events. Optional so a caller
+   *  built before it reads as none. */
+  anthropic_credit_out_total?: number;
+  anthropic_credit_out_last_hour?: number;
+  anthropic_credit_out_latest_at?: string | null;
   /** OpenRouter failures the recovery watcher is holding now. */
   openrouter_held_now: number;
   openrouter_balance_usd: number | null;
@@ -66,13 +74,17 @@ const BUYER_LINE = 'Nothing changes for an early buyer: Stage 3 questions are an
 /** The rule, pure. Strained: something happened in the last hour or runs are being held now. */
 export function assess(c: StrainCounts): StrainAssessment {
   const reasons: string[] = [];
+  const anthTotal = c.anthropic_credit_out_total ?? 0;
+  const anthHour = c.anthropic_credit_out_last_hour ?? 0;
+  if (anthHour) reasons.push(`Anthropic (the primary provider) refused for credit ${anthHour} time(s) in the last hour.`);
   if (c.openrouter_held_now) reasons.push(`${c.openrouter_held_now} OpenRouter run(s) are held until the balance can pay for them${c.openrouter_balance_usd != null ? ` (last probe $${c.openrouter_balance_usd.toFixed(2)})` : ''}.`);
-  if (c.credit_out_last_hour) reasons.push(`OpenRouter refused for credit ${c.credit_out_last_hour} time(s) in the last hour.`);
+  if (c.credit_out_last_hour) reasons.push(`OpenRouter (the backup provider) refused for credit ${c.credit_out_last_hour} time(s) in the last hour.`);
   if (c.fallbacks_last_hour) reasons.push(`${c.fallbacks_last_hour} answer(s) in the last hour used the fallback provider.`);
-  const now = c.openrouter_held_now > 0 || c.credit_out_last_hour > 0 || c.fallbacks_last_hour > 0;
-  const earlier = c.credit_out_total > 0 || c.fallbacks_total > 0 || c.draft_evals_stopped_for_credit > 0;
+  const now = c.openrouter_held_now > 0 || c.credit_out_last_hour > 0 || anthHour > 0 || c.fallbacks_last_hour > 0;
+  const earlier = c.credit_out_total > 0 || anthTotal > 0 || c.fallbacks_total > 0 || c.draft_evals_stopped_for_credit > 0;
   const state: StrainState = now ? 'strained' : earlier ? 'recovering' : 'normal';
-  if (!now && c.credit_out_total) reasons.push(`OpenRouter refused for credit ${c.credit_out_total} time(s) in the last ${c.hours} hours, none in the last hour.`);
+  if (!now && anthTotal) reasons.push(`Anthropic (the primary provider) refused for credit ${anthTotal} time(s) in the last ${c.hours} hours, none in the last hour.`);
+  if (!now && c.credit_out_total) reasons.push(`OpenRouter (the backup provider) refused for credit ${c.credit_out_total} time(s) in the last ${c.hours} hours, none in the last hour.`);
   if (!now && c.fallbacks_total) reasons.push(`${c.fallbacks_total} answer(s) in the last ${c.hours} hours used the fallback provider, none in the last hour.`);
   if (c.fallbacks_failed) reasons.push(`${c.fallbacks_failed} fallback(s) did not produce a real answer and were raised.`);
   if (c.fallbacks_unchecked) reasons.push(`${c.fallbacks_unchecked} fallback(s) were recorded before answers were checked, so whether they answered is not known.`);
@@ -131,6 +143,12 @@ export async function read(hours = 24): Promise<StrainAssessment & { counts: Str
        FROM engine_events WHERE event_type = 'openrouter_credit_out' AND at > now() - make_interval(hours => $1::int) AND ${notTest}`,
     [h],
   );
+  const anth = await query<{ total: string; last_hour: string; latest: string | null }>(
+    `SELECT count(*) AS total, count(*) FILTER (WHERE at > now() - interval '1 hour') AS last_hour,
+            to_char(max(at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS latest
+       FROM engine_events WHERE event_type = 'anthropic_credit_out' AND at > now() - make_interval(hours => $1::int) AND ${notTest}`,
+    [h],
+  );
   const fb = await query<{ total: string; last_hour: string; answered: string; failed: string; unchecked: string }>(
     `SELECT count(*) AS total, count(*) FILTER (WHERE at > now() - interval '1 hour') AS last_hour,
             count(*) FILTER (WHERE detail->>'answer_check' = 'answered') AS answered,
@@ -167,6 +185,9 @@ export async function read(hours = 24): Promise<StrainAssessment & { counts: Str
     credit_out_total: n(credit.rows[0]?.total),
     credit_out_last_hour: n(credit.rows[0]?.last_hour),
     credit_out_latest_at: credit.rows[0]?.latest ?? null,
+    anthropic_credit_out_total: n(anth.rows[0]?.total),
+    anthropic_credit_out_last_hour: n(anth.rows[0]?.last_hour),
+    anthropic_credit_out_latest_at: anth.rows[0]?.latest ?? null,
     openrouter_held_now: held,
     openrouter_balance_usd: typeof balance === 'number' ? balance : null,
     fallbacks_total: n(fb.rows[0]?.total),

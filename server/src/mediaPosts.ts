@@ -67,12 +67,15 @@ export const FLAGGED: { id: string; re: RegExp; why: string }[] = [
 ];
 
 /** A sentence that tells a failure as having happened. Jason (6 Nov 2026): every one is pinned to a real loop or log. */
-const FAILURE_STORY = /\b(failed|died|broke|went\s+wrong|stopped\s+working|didn['’]?t\s+(flag|catch|see|notice)|we\s+missed|missed\s+it)\b/i;
+// 7 Nov 2026 (9MSP): "acting up" added. Draft RAN6 said "like a sensor acting up on our test rack" with no record.
+const FAILURE_STORY = /\b(failed|died|broke|went\s+wrong|stopped\s+working|acting\s+up|didn['’]?t\s+(flag|catch|see|notice)|we\s+missed|missed\s+it)\b/i;
 /** Loop and Codex ids, the records a failure story can rest on. */
 const RECORD_ID = /\b(LOOP-\d{10,}-[A-Z0-9]{4}|CODEX-[A-Za-z0-9-]+)\b/g;
 
 /** A sentence that says this is the aim or the test, not the track record. Next to a claim, it makes the claim a target. */
-const FRAMED = /\b(we(['’]re| are)|i(['’]m| am))\s+(still\s+|now\s+)?(designing|building|testing|working\s+toward|aiming)\b|\b(what|how)\s+we(['’]re| are)\s+(building|designing|testing)\b|\bbeing\s+(built|designed|tested)\s+to\b|\b(the\s+)?(reliability\s+|plumbing\s+)?(rule|contract)\s+(we|that\s+we)\b|\bthe\s+target\b|\bour\s+target\b|\bin\s+stage\s*1\b|\b(not|n['’]t)\s+(yet\s+)?proven\b/i;
+const FRAMED = /\b(we(['’]re| are)|i(['’]m| am))\s+(still\s+|now\s+)?(designing|building|testing|working\s+toward|aiming)\b|\b(what|how)\s+we(['’]re| are)\s+(building|designing|testing)\b|\bbeing\s+(built|designed|tested)\s+to\b|\b(the\s+)?(reliability\s+|plumbing\s+)?(rule|contract)\s+(we|that\s+we)\b|\bthe\s+target\b|\bour\s+target\b|\bin\s+stage\s*1\b|\b(not|n['’]t)\s+(yet\s+)?proven\b|\b(that['’]?s|that\s+is|this\s+is)\s+(the|our)\s+goal\b|\b(the|our)\s+goal\s+(is|we)\b|\bnot\s+there\s+yet\b|\bwe\s+want\b|\bwe(['’]re| are)\s+(trying|working(\s+hard)?)\s+(to|on|toward)\b/i;
+// 7 Nov 2026 (9MSP, Destiny): "That's the goal", "We're not there yet", "we want", "we're working hard to" frame a claim
+// too. Rewrite JHYC used them and was still marked target on Facebook and Instagram.
 
 /** Words that make a number a claim about how the farm performs or what it earns. */
 const PERFORMANCE = /\b(yield|yields|harvest|harvests|revenue|profit|profits|margin|roi|return|returns|earn|earns|earning|income|cost|costs|cheaper|save|saves|saving|savings|faster|more|less|times|grow|grows|growth|output|water|energy|kg|kilo|kilos|lbs|pounds|tons|tonnes|per\s+(month|year|week|day|square|sq))\b/i;
@@ -106,6 +109,15 @@ export function claimCheck(text: string): { status: ClaimStatus; findings: Claim
   const lines = sentences(String(text || '').replace(/\*/g, ''));
   lines.forEach((line, i) => {
     if (FRAMED.test(line) || FRAMED.test(lines[i + 1] ?? '')) return;
+    // A run of short claims back to back ("No puddles. No stuck valves. No surprises. That's the goal.") is framed by the
+    // sentence right after the run (7 Nov 2026, 9MSP). Only short ones (six words or fewer each): a full sentence between
+    // the claim and the framing, or anything that is not a claim, still breaks it.
+    const short = (l: string) => l.split(/\s+/).filter(Boolean).length <= 6;
+    if (short(line)) {
+      let j = i + 1;
+      while (j < lines.length && short(lines[j]) && TARGET.some((t) => t.re.test(lines[j])) && !FRAMED.test(lines[j])) j++;
+      if (j > i + 1 && FRAMED.test(lines[j] ?? '')) return;
+    }
     for (const t of TARGET) if (t.re.test(line)) findings.push({ status: 'target', rule: t.id, text: line.slice(0, 300), why: t.why });
   });
   for (const f of FLAGGED) {

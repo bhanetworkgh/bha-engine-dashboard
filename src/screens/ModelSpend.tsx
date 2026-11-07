@@ -210,7 +210,7 @@ function Evals({ data }: { data: ModelSpendData }) {
                 <td className="px-3 py-2 text-ink">{r.run_id || 'Not recorded'}</td>
                 <td className="tabular px-3 py-2 text-dim">{Number.isFinite(r.results) ? r.results : 'Not recorded'}</td>
                 <td className="tabular px-3 py-2 text-ink">{usd(r.spent_usd)}</td>
-                <td className="px-3 py-2 text-dim">{r.answered_by ? Object.entries(r.answered_by as Record<string, number>).map(([a, n]) => `${a === 'anthropic_backup' ? 'backup' : a} ${n}`).join(' · ') : 'not recorded'}</td>
+                <td className="px-3 py-2 text-dim">{r.answered_by ? Object.entries(r.answered_by as Record<string, number>).map(([a, n]) => `${({ anthropic_primary: 'Anthropic', openrouter_backup: 'OpenRouter backup', anthropic_backup: 'Anthropic backup (before 3 Nov)', main: 'OpenRouter (before 3 Nov)' } as Record<string, string>)[a] ?? a} ${n}`).join(' · ') : 'not recorded'}</td>
               </tr>
             ))}
           </tbody>

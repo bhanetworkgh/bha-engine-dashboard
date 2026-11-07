@@ -28,6 +28,19 @@ ok('framing on the sentence or the next one clears it', () => {
   assert.equal(m.claimCheck('No surprises. That is the target we are testing in Stage 1.').status, 'clean');
 });
 ok('framing further away does not', () => assert.equal(m.claimCheck('No surprises. Then a line. We are testing this in Stage 1.').status, 'target'));
+ok('9MSP: goal and not-there-yet framing clears a claim, and a run of claims is framed by the line after it', () => {
+  assert.equal(m.claimCheck("No puddles. No stuck valves. No surprises. That's the goal.").status, 'clean');
+  assert.equal(m.claimCheck("No surprises. We're not there yet, and we're testing it in Stage 1.").status, 'clean');
+  assert.equal(m.claimCheck("Here's a small thing we're working hard to get right: we want vFarm's watering pump to only turn on when a tray actually needs water.").status, 'clean');
+  // the rewrite Jason was shown on 6 Nov (MTP-1793984717628-JHYC), Facebook and Instagram, now clean
+  assert.equal(m.claimCheck("Here's a small thing we're working hard to get right: we want vFarm's watering pump to only turn on when a tray actually needs water, and shut off the second that job is done.\n\nWe're not there yet and we won't pretend otherwise.").status, 'clean');
+  assert.equal(m.claimCheck("No puddles. No stuck valves. No surprises. That's the goal. 💧\n\nWe're designing vFarm's watering to only run when a tray actually needs it, and we're testing that in Stage 1.").status, 'clean');
+  // a non-claim between the run and the framing still breaks it
+  assert.equal(m.claimCheck("No puddles. Then a line. That's the goal.").status, 'target');
+});
+ok('9MSP: "acting up" is a failure story', () => {
+  assert.equal(m.failureSourceFindings('The monitoring twin learns from every hiccup, like a sensor acting up on our test rack.', [], []).length, 1);
+});
 ok('blocked outranks target', () => assert.equal(m.claimCheck('No surprises, a fully automated farm.').status, 'blocked'));
 ok('the 4 Nov draft Jason sent back is target on every platform and the card', () => {
   const texts = {

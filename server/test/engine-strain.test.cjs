@@ -108,4 +108,15 @@ check('after a shortage Genie says what happened, from the counts', () => {
   assert.doesNotMatch(assess({ ...base, fallbacks_total: 148, fallbacks_failed: 6 }).audiences.genie, /OpenRouter|Anthropic/);
 });
 
+check('HVET 7 Nov: an Anthropic credit refusal (the primary) counts as strain and is named', () => {
+  const now = assess({ ...base, anthropic_credit_out_total: 1, anthropic_credit_out_last_hour: 1 });
+  assert.equal(now.state, 'strained');
+  assert.match(now.audiences.team, /Anthropic \(the primary provider\) refused for credit 1 time/);
+  for (const k of OUTSIDE) assert.doesNotMatch(now.audiences[k], MECHANICS, k);
+  const earlier = assess({ ...base, anthropic_credit_out_total: 2 });
+  assert.equal(earlier.state, 'recovering');
+  assert.match(earlier.audiences.team, /Anthropic \(the primary provider\) refused for credit 2 time\(s\) in the last 24 hours, none in the last hour/);
+  assert.equal(assess(base).state, 'normal');
+});
+
 console.log(`\n${passed} passed`);
