@@ -336,6 +336,58 @@ export function threadBlocks(text: string): { blocks?: unknown[] } {
   return blocks.length && blocks.length <= 50 ? { blocks } : {};
 }
 
+const cut = (s: unknown, n: number): string => {
+  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+  return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t;
+};
+/** Whole sentences up to n characters; a first sentence longer than n is cut. */
+const sentences = (s: unknown, n: number): string => {
+  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+  let out = '';
+  for (const p of t.match(/[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g) ?? []) {
+    if ((out + p).length > n) break;
+    out += p;
+  }
+  return out.trim() || cut(t, n);
+};
+const RESULT_LABEL: Record<string, string> = { confirmed: 'Confirmed', partly: 'Partly', not_found: 'Not found' };
+const dashboardUrl = (): string => (process.env.PUBLIC_DASHBOARD_URL || 'https://dashboard.bhanetwork.org').replace(/\/+$/, '');
+
+/**
+ * Pure: the short version that goes in the log's thread on Approve (7 Nov 2026, Destiny — Jason's ask on Hardik's
+ * 7 Nov check: Verdict, Readiness and the records checked, every time). Built from the check's own fields, never
+ * rewritten by a model, so it can say nothing the long version does not. The long version is the Codex entry's
+ * and BHARAG's; this ends with a link to it.
+ */
+export function shortVersion(d: { codex_entry_id: string; builder: string | null; draft_text: string; check: (cc.CheckInput & { readiness?: unknown; gate?: unknown }) | null }): string {
+  const c = d.check ?? {};
+  const verdict = cc.VERDICT_LABEL[String(c.verdict ?? '') as cc.Verdict] ?? String(c.verdict ?? 'not given');
+  const readinessPart = draftParts(d.draft_text).sections.find((s) => /^readiness$/i.test(s.heading ?? ''))?.body ?? draftParts(d.draft_text).readiness;
+  const readiness = readinessPart
+    ? cut(readinessPart, 400)
+    : c.readiness === 'blocked_on_gate' ? `Not ready yet. Blocked on ${String(c.gate ?? 'a stage gate')}.` : c.readiness === 'customer_ready' ? 'Customer ready, gate passed.' : 'No stage gate on this lane.';
+  const claims = Array.isArray(c.claims) ? (c.claims as Partial<cc.Claim>[]) : [];
+  const missing = Array.isArray(c.missing) ? (c.missing as cc.Missing[]) : [];
+  const follow = Array.isArray(c.follow_ups) ? (c.follow_ups as Partial<cc.FollowUp>[]) : [];
+  const pay = cc.PAY_LABEL[String(c.pay_call ?? '') as cc.PayCall] ?? String(c.pay_call ?? 'not given');
+  const approve = c.approve === 'yes' ? 'yes' : c.approve === 'no' ? 'no' : null;
+  const lines = [
+    `*Code check: ${d.builder ?? 'a builder'}, ${d.codex_entry_id}*`,
+    `*Verdict:* ${verdict}. ${cut(c.verdict_reason, 400)}`.trim(),
+    `*Readiness:* ${readiness}`,
+    '*What was checked*',
+    ...(claims.length ? claims.map((x) => `• *${RESULT_LABEL[String(x.result)] ?? String(x.result ?? '')}:* ${cut(x.claim, 200)}. ${sentences(x.proof, 260)}`) : ['• No claims were recorded.']),
+    '*Still missing before customer ready*',
+    ...(missing.length ? missing.map((m) => `• ${cc.MISSING_LABEL[m] ?? m}`) : ['• Nothing named.']),
+    `*Could not check:* ${cut(c.couldnt_check, 500) || 'not given'}`,
+    `*Pay call:* ${pay}.`,
+    ...follow.map((f) => `• ${cut(f.what, 240)}, ${cut(f.who, 60)}, by ${cut(f.by, 40)}${f.loop_id ? ` (${f.loop_id})` : ''}`),
+    ...(approve ? [`*Bays recommendation:* Approve: ${approve}. ${cut(c.approve_why, 300)}`.trim()] : []),
+    `<${dashboardUrl()}/codex/${encodeURIComponent(d.codex_entry_id)}|Full check on the dashboard>`,
+  ];
+  return lines.join('\n');
+}
+
 async function approve(id: string, cur: DraftRow): Promise<ClickResult> {
   const back = async (detail: string) => {
     await query(`UPDATE engine_code_check_drafts SET state = 'ready', detail = $2 WHERE codex_entry_id = $1`, [id, detail]);
@@ -344,16 +396,18 @@ async function approve(id: string, cur: DraftRow): Promise<ClickResult> {
   };
   const post = await logUrl(id);
   if (!post) return back(`The posted Codex for ${id} was not found in its log channel.`);
-  const sent = await slack.botCall('chat.postMessage', { channel: post.channel, thread_ts: post.ts, text: cur.draft_text, ...threadBlocks(cur.draft_text ?? ''), unfurl_links: false, unfurl_media: false });
+  // The thread gets the short version only; the long one goes onto the Codex entry and into BHARAG below.
+  const short = shortVersion({ codex_entry_id: id, builder: cur.builder, draft_text: cur.draft_text ?? '', check: cur.check_input as (cc.CheckInput & { readiness?: unknown; gate?: unknown }) | null });
+  const sent = await slack.botCall('chat.postMessage', { channel: post.channel, thread_ts: post.ts, text: short, ...threadBlocks(short), unfurl_links: false, unfurl_media: false });
   if (!sent.ok) return back(`Slack refused it: ${String(sent.error)}.`);
   const ts = String(sent.ts);
   const link = `${post.url.split('/p')[0]}/p${ts.replace('.', '')}?thread_ts=${post.ts}&cid=${post.channel}`;
   try {
     const r = await cc.recordCheck({ ...(cur.check_input as cc.CheckInput), check_link: link, posted_at: new Date(Number(ts) * 1000).toISOString(), requester_user_id: cc.DESTINY });
-    const a = await watch.afterRecord(r.check);
+    const a = await watch.afterRecord(r.check, { full_text: cur.draft_text });
     const missed = [a.codex_note.ok ? null : `Codex: ${a.codex_note.detail}`, a.bharag_note.ok ? null : `BHARAG: ${a.bharag_note.detail}`, a.review_card.ok ? null : `the alert card: ${a.review_card.detail}`].filter(Boolean);
     await query(`UPDATE engine_code_check_drafts SET state = 'approved', detail = $2 WHERE codex_entry_id = $1`, [id, missed.length ? missed.join('; ') : 'recorded']);
-    const line = `:white_check_mark: Approved and posted in the log's thread. <${link}|Open it>.${missed.length ? ` Not everything landed: ${missed.join('; ')}.` : ''}`;
+    const line = `:white_check_mark: Approved. The short version is in the log's thread (<${link}|open it>) and the full check is on the Codex entry and in BHARAG.${missed.length ? ` Not everything landed: ${missed.join('; ')}.` : ''}`;
     await slack.botCall('chat.update', { channel: cur.card_channel, ts: cur.card_ts, ...settledBlocks(line, cur.builder) });
     return { status: 200, body: { ok: true, done: true, raise: missed.length > 0, message: line } };
   } catch (e) {

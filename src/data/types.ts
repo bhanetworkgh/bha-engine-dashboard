@@ -705,7 +705,7 @@ export interface CodexEntryDetail extends CodexEntry {
   session_description: string | null;
   jason_notes: string | null;
   /** Destiny's code check, written onto the log when it is recorded; null until there is one. */
-  code_check: { verdict: string | null; pay_call: string | null; reason: string | null; approve: string | null; why: string | null; lane_goal: string | null; lane_check: string | null; link: string | null; at: string | null } | null;
+  code_check: { verdict: string | null; pay_call: string | null; reason: string | null; approve: string | null; why: string | null; lane_goal: string | null; lane_check: string | null; link: string | null; at: string | null; full?: string | null } | null;
 }
 
 /**

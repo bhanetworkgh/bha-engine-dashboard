@@ -476,9 +476,9 @@ export function compareSent(draft: string, sent: string, verdict: cc.Verdict, pa
 }
 
 /** Everything a recorded check sets off. Each outcome is reported; none can fail the check. */
-export async function afterRecord(check: cc.CodeCheck): Promise<{ codex_note: Awaited<ReturnType<typeof codexNote>>; bharag_note: Awaited<ReturnType<typeof bharagNote>>; review_card: { ok: boolean; detail: string } }> {
-  const codex_note = await codexNote(check);
-  const bharag_note = await bharagNote(check);
+export async function afterRecord(check: cc.CodeCheck, opts: { full_text?: string | null } = {}): Promise<{ codex_note: Awaited<ReturnType<typeof codexNote>>; bharag_note: Awaited<ReturnType<typeof bharagNote>>; review_card: { ok: boolean; detail: string } }> {
+  const codex_note = await codexNote(check, opts);
+  const bharag_note = await bharagNote(check, opts);
   const review_card = await reviewedByCheck(check);
   return { codex_note, bharag_note, review_card };
 }
@@ -707,7 +707,7 @@ export async function reviewedOnCard(check: cc.CodeCheck, via: string): Promise<
  * Writes the recorded check onto the Codex row (new field names; every other field kept). Never throws:
  * the outcome is returned for the caller to report.
  */
-export async function codexNote(check: cc.CodeCheck): Promise<{ ok: boolean; row_id: string | null; detail: string }> {
+export async function codexNote(check: cc.CodeCheck, opts: { full_text?: string | null } = {}): Promise<{ ok: boolean; row_id: string | null; detail: string }> {
   try {
     const r = await query<{ id: string }>(
       `SELECT id::text FROM engine_codex_submissions WHERE fields->>'Codex Entry ID' = $1 ORDER BY updated_at DESC`,
@@ -727,6 +727,8 @@ export async function codexNote(check: cc.CodeCheck): Promise<{ ok: boolean; row
         'Code Check Link': check.check_link,
         'Code Check At': check.posted_at,
         'Code Check By': check.recorded_by,
+        // The whole check, when the log's thread carries only the short version (7 Nov 2026, Destiny).
+        ...(opts.full_text?.trim() ? { 'Code Check Full': opts.full_text.trim() } : {}),
       },
       { endpoint: 'code-check:note', method: 'INTERNAL', key_label: 'server', t0: Date.now(), note: `code check ${check.verdict} / ${check.pay_call} written onto the log` },
     );
@@ -744,7 +746,7 @@ export async function codexNote(check: cc.CodeCheck): Promise<{ ok: boolean; row
  * read the review on the document they already search. Every copy of the entry (metadata codex_entry_id) is
  * edited. Never throws; `dry_run` finds the documents and edits nothing.
  */
-export async function bharagNote(check: cc.CodeCheck, opts: { dry_run?: boolean } = {}): Promise<{ ok: boolean; documents: string[]; edited: string[]; detail: string }> {
+export async function bharagNote(check: cc.CodeCheck, opts: { dry_run?: boolean; full_text?: string | null } = {}): Promise<{ ok: boolean; documents: string[]; edited: string[]; detail: string }> {
   const keyVar = bharag.ingestKeyVar('codex');
   try {
     const found = await bharag.findByMetadata(keyVar, 'codex_entry_id', check.codex_entry_id);
@@ -765,6 +767,7 @@ export async function bharagNote(check: cc.CodeCheck, opts: { dry_run?: boolean 
         link: check.check_link,
         at: check.posted_at,
         by: check.recorded_by,
+        ...(opts.full_text?.trim() ? { full_text: opts.full_text.trim() } : {}),
       },
     };
     const edited: string[] = [];

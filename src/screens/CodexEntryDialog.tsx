@@ -300,9 +300,15 @@ export function CodexEntryDialog({
                       {detail.code_check.lane_check ? ` Lane: ${detail.code_check.lane_check}` : ''}
                     </div>
                   )}
+                  {detail.code_check.full && (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-accent hover:underline">The full check</summary>
+                      <div className="mt-1 whitespace-pre-wrap text-ink">{detail.code_check.full.replace(/\*([^*\n]+)\*/g, '$1')}</div>
+                    </details>
+                  )}
                   {detail.code_check.link && (
                     <a className="text-accent hover:underline" href={detail.code_check.link} target="_blank" rel="noreferrer">
-                      The full check in Slack ↗
+                      {detail.code_check.full ? 'The summary in Slack ↗' : 'The full check in Slack ↗'}
                     </a>
                   )}
                 </div>

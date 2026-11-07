@@ -504,7 +504,7 @@ export function mapCodex(rec: AtRecord, owner: string, table: string, pending?: 
     jason_notes: str(f['Jason Notes']),
     // Destiny's code check, written onto the log when it is recorded (codeCheckWatch.codexNote, 29 Oct 2026).
     code_check: str(f['Code Check Verdict'])
-      ? { verdict: str(f['Code Check Verdict']), pay_call: str(f['Code Check Pay Call']), reason: str(f['Code Check Reason']), approve: str(f['Code Check Approve']), why: str(f['Code Check Why']), lane_goal: str(f['Code Check Lane Goal']), lane_check: str(f['Code Check Lane']), link: str(f['Code Check Link']), at: iso(f['Code Check At']) }
+      ? { verdict: str(f['Code Check Verdict']), pay_call: str(f['Code Check Pay Call']), reason: str(f['Code Check Reason']), approve: str(f['Code Check Approve']), why: str(f['Code Check Why']), lane_goal: str(f['Code Check Lane Goal']), lane_check: str(f['Code Check Lane']), link: str(f['Code Check Link']), at: iso(f['Code Check At']), full: str(f['Code Check Full']) }
       : null,
   };
 }
