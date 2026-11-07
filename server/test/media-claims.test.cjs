@@ -6,7 +6,8 @@ process.env.DATABASE_URL = process.env.DATABASE_URL || 'x';
 const dist = path.join(process.env.SERVER_DIST || path.join(__dirname, '../../server-dist'), 'server/src');
 const m = require(path.join(dist, 'mediaPosts.js'));
 let n = 0;
-const ok = (name, fn) => { fn(); n++; console.log('ok', name); };
+const pending = [];
+const ok = (name, fn) => { const r = fn(); const done = () => { n++; console.log('ok', name); }; if (r && typeof r.then === 'function') pending.push(r.then(done)); else done(); };
 
 const REVISED = `Only runs when needed. That's the reliability rule we're designing vFarm around, and we're testing it in Stage 1. We haven't proven it in the field yet.
 
@@ -89,4 +90,18 @@ ok('a failure story with no record is flagged', () => assert.equal(m.failureSour
 ok('a failure story whose records are not held is flagged', () => assert.equal(m.failureSourceFindings(TRAY_A, ['LOOP-1000000000000-ABCD'], [])[0].rule, 'failure_story_source_not_found'));
 ok('a failure story on a held record passes', () => assert.equal(m.failureSourceFindings(TRAY_A, ['LOOP-1791428275782-TU4O'], ['LOOP-1791428275782-TU4O']).length, 0));
 ok('a post with no failure needs no record', () => assert.equal(m.failureSourceFindings('Open the door, grab fresh strawberries.', [], []).length, 0));
-console.log(n, 'checks passed');
+// The approver-of-record trial (7 Nov 2026): Approve posts live on weekdays to Sat 14 Nov, never on a weekend, then the pattern gate again.
+const noDb = { query: async () => { throw new Error('the trial must not read the database'); } };
+ok('trial: a weekday approval posts without a pattern', async () => {
+  const r = await m.autoPostFor(noDb, { pattern_ref: null, test: false }, 'x', new Date('2026-11-09T15:00:00Z'));
+  assert.equal(r.post, true); assert.equal(r.mode, 'post');
+});
+ok('trial: a weekend approval only records', () => {
+  assert.equal(m.trialWindow(new Date('2026-11-08T15:00:00Z')).open, false);
+  assert.equal(m.trialWindow(new Date('2026-11-14T15:00:00Z')).open, false);
+});
+ok('trial: Friday evening in New York is still a weekday', () => assert.equal(m.trialWindow(new Date('2026-11-14T03:00:00Z')).open, true));
+ok('trial: LinkedIn stays by hand', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: false }, 'linkedin', new Date('2026-11-10T15:00:00Z'))).post, false));
+ok('trial: a test draft only checks', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: true }, 'instagram', new Date('2026-11-10T15:00:00Z'))).mode, 'check'));
+ok('after the trial the pattern gate holds again', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: false }, 'x', new Date('2026-11-16T15:00:00Z'))).post, false));
+Promise.all(pending).then(() => console.log(n, 'checks passed'), (e) => { console.error(e); process.exit(1); });

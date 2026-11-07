@@ -517,8 +517,30 @@ const POST_PATH = process.env.MEDIA_POST_RUN_PATH?.trim() || '/webhook/media-twi
 
 export type AutoPost = { post: boolean; mode: 'post' | 'check' | 'record_only'; reason: string };
 
-export async function autoPostFor(db: Queryable, post: Pick<MediaPost, 'pattern_ref' | 'test'>, platform: Platform): Promise<AutoPost> {
+/**
+ * The approver-of-record trial (Jason, 7 Nov 2026, #bha-coordination 1793995604.721569; Destiny the same day): from now
+ * to the end of Saturday 14 Nov, Destiny is the media approver of record and his Approve (or Jason's) posts the platform
+ * live, whatever pattern the draft names, so each day ends with the approved copy and its live links. No posting on a
+ * weekend, in New York time. When the window ends, Approve falls back to Jason's pattern gate below until he rules on
+ * auto-posting (planned for 16 Nov, after the readiness summary).
+ */
+export const APPROVER_TRIAL = { until: '2026-11-15T05:00:00Z', label: 'the approver-of-record trial week (to Sat 14 Nov)' };
+
+export function trialWindow(now: Date = new Date()): { open: boolean; reason: string } {
+  if (now.getTime() >= Date.parse(APPROVER_TRIAL.until)) return { open: false, reason: 'The approver-of-record trial week has ended.' };
+  const day = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short' }).format(now);
+  if (day === 'Sat' || day === 'Sun') return { open: false, reason: 'No posting on weekends during the trial week, so Approve only records today. Post it on a weekday with the posting workflow or by hand.' };
+  return { open: true, reason: `Approved during ${APPROVER_TRIAL.label}.` };
+}
+
+export async function autoPostFor(db: Queryable, post: Pick<MediaPost, 'pattern_ref' | 'test'>, platform: Platform, now: Date = new Date()): Promise<AutoPost> {
   const ref = post.pattern_ref;
+  if (now.getTime() < Date.parse(APPROVER_TRIAL.until)) {
+    if (!AUTO_POST_PLATFORMS.includes(platform)) return { post: false, mode: 'record_only', reason: `${platform} is posted by hand until its automated posting is public.` };
+    const w = trialWindow(now);
+    if (!w.open) return { post: false, mode: 'record_only', reason: w.reason };
+    return post.test ? { post: true, mode: 'check', reason: 'A test draft runs the check and posts nothing.' } : { post: true, mode: 'post', reason: w.reason };
+  }
   if (!ref) return { post: false, mode: 'record_only', reason: 'This draft names no pattern, so Approve only records.' };
   const mark = await db.query(`SELECT 1 FROM engine_media_pattern_marks WHERE pattern_ref = $1`, [ref]);
   if (!mark.rows[0]) return { post: false, mode: 'record_only', reason: `Pattern ${ref} is not marked for automated reuse, so Approve only records.` };
