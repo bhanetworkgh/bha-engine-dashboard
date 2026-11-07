@@ -922,7 +922,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           if (!postId && method === 'GET') {
             const slackTs = url.searchParams.get('slack_ts');
             const r = await mediaPosts.read({ post_id: url.searchParams.get('post_id'), status: url.searchParams.get('status'), include_test: url.searchParams.get('include_test') === '1', limit: Number(url.searchParams.get('limit')) || undefined });
-            const posts = slackTs ? r.posts.filter((x) => x.slack_ts === slackTs) : r.posts;
+            const posts = slackTs ? r.posts.filter((x) => x.slack_ts === slackTs || Object.values(x.platforms).some((p) => p?.slack_ts === slackTs)) : r.posts;
             await log('read', `${posts.length} post(s)`);
             return send(res, 200, { ok: true, ...r, posts });
           }

@@ -218,6 +218,13 @@ export interface PlatformDraft {
   posted_id: string | null;
   posted_url: string | null;
   posted_at: string | null;
+  /**
+   * This platform's own Slack card (7 Nov 2026, Destiny): its ts, and the thread it sits in (its own ts for a card
+   * posted at the top of the channel). A rewrite posts this platform's new card in that thread, and an Approve's
+   * outcome is said there, so each platform's history stays under its own card. Absent on drafts posted before then.
+   */
+  slack_ts?: string | null;
+  slack_thread_ts?: string | null;
   /** Every direct edit, oldest first, each with the text it replaced. */
   edits?: { at: string; by: string; reason: string; before_text: string; before_thread: string[] }[];
 }
@@ -419,7 +426,7 @@ export async function create(input: CreateInput) {
 /* ----------------------------------------------------------------- attach */
 
 /** Adds what the workflow learns after the draft is saved: the rendered images and the Slack card. Nothing else. */
-export async function attach(postId: string, input: { images?: unknown; slack_channel?: unknown; slack_ts?: unknown }) {
+export async function attach(postId: string, input: { images?: unknown; slack_channel?: unknown; slack_ts?: unknown; slack_cards?: unknown }) {
   return withTransaction(async (db) => {
     const before = await one(db, postId, true);
     if (!before) refuse('not_found', `No Media Twin post ${postId}.`, 404);
@@ -431,9 +438,21 @@ export async function attach(postId: string, input: { images?: unknown; slack_ch
     }
     const channel = input.slack_channel !== undefined ? s(input.slack_channel, 40) : before!.slack_channel;
     const ts = input.slack_ts !== undefined ? s(input.slack_ts, 40) : before!.slack_ts;
-    await db.query(`UPDATE engine_media_posts SET images = $2::jsonb, slack_channel = $3, slack_ts = $4, updated_at = now() WHERE post_id = $1`, [postId, JSON.stringify(images), channel, ts]);
+    // Each platform's own card (7 Nov 2026): [{platform, ts, thread_ts}], one per card the workflow posted.
+    const platforms = { ...before!.platforms };
+    if (input.slack_cards !== undefined) {
+      if (!Array.isArray(input.slack_cards)) refuse('bad_value', 'slack_cards must be a list of {platform, ts, thread_ts}.');
+      for (const c of input.slack_cards as Record<string, unknown>[]) {
+        const k = s(c?.platform, 20) as Platform;
+        const cardTs = s(c?.ts, 40);
+        if (!(PLATFORMS as readonly string[]).includes(k) || !cardTs) refuse('bad_value', 'Every slack_cards entry needs a platform and a ts.');
+        if (!platforms[k]) continue;
+        platforms[k] = { ...platforms[k]!, slack_ts: cardTs, slack_thread_ts: s(c?.thread_ts, 40) ?? cardTs };
+      }
+    }
+    await db.query(`UPDATE engine_media_posts SET images = $2::jsonb, slack_channel = $3, slack_ts = $4, platforms = $5::jsonb, updated_at = now() WHERE post_id = $1`, [postId, JSON.stringify(images), channel, ts, JSON.stringify(platforms)]);
     events.changed('media_posts', postId, db);
-    return { ok: true, post: { ...before!, images, slack_channel: channel, slack_ts: ts } };
+    return { ok: true, post: { ...before!, images, platforms, slack_channel: channel, slack_ts: ts } };
   });
 }
 
@@ -550,9 +569,16 @@ export async function autoPostFor(db: Queryable, post: Pick<MediaPost, 'pattern_
   return post.test ? { post: true, mode: 'check', reason: 'A test draft runs the check and posts nothing.' } : { post: true, mode: 'post', reason: `Pattern ${ref} is marked for automated reuse.` };
 }
 
-async function say(post: MediaPost, text: string): Promise<void> {
-  if (!post.slack_channel || !post.slack_ts) return;
-  await slack.botCall('chat.postMessage', { channel: post.slack_channel, thread_ts: post.slack_ts, text, unfurl_links: false }).catch(() => undefined);
+/** Pure: the thread a platform's news goes in: its own card's thread, else the draft's first card (drafts before 7 Nov). */
+export function threadFor(post: Pick<MediaPost, 'platforms' | 'slack_ts'>, platform: Platform): string | null {
+  const p = post.platforms[platform];
+  return p?.slack_thread_ts || p?.slack_ts || post.slack_ts || null;
+}
+
+async function say(post: MediaPost, platform: Platform, text: string): Promise<void> {
+  const thread = threadFor(post, platform);
+  if (!post.slack_channel || !thread) return;
+  await slack.botCall('chat.postMessage', { channel: post.slack_channel, thread_ts: thread, text, unfurl_links: false }).catch(() => undefined);
 }
 
 async function runAutoPost(post: MediaPost, platform: Platform, mode: 'post' | 'check' | 'record_only', by: string): Promise<void> {
@@ -576,7 +602,7 @@ async function runAutoPost(post: MediaPost, platform: Platform, mode: 'post' | '
   }
   await record({ event_type: failure ? 'media_post_auto_failed' : 'media_post_auto_posted', subject_id: id, lane: 'MEDIA', actor: by, source_ref: post.slack_ts, detail: { schema: SCHEMA, platform, mode, pattern_ref: post.pattern_ref, posted_url: live, error: failure, test: post.test } }).catch((e) => console.error('[media-posts] auto post event not written', e));
   if (failure) console.error(`[media-posts] auto post of ${id} ${platform} failed: ${failure}`);
-  await say(post, failure ? `Approve did not post ${platform} on ${id}: ${failure}. The approval stands. Check the draft before running it again.` : mode === 'post' ? `Posted to ${platform} through Approve: ${live}` : `Test draft ${id}: the gate passed for ${platform} and the check ran. Nothing was posted.`);
+  await say(post, platform, failure ? `Approve did not post ${platform} on ${id}: ${failure}. The approval stands. Check the draft before running it again.` : mode === 'post' ? `Posted to ${platform} through Approve: ${live}` : `Test draft ${id}: the gate passed for ${platform} and the check ran. Nothing was posted.`);
 }
 
 /** Jason or Destiny only. The mark is what opens Approve, so no agent and no engine write can set it. */

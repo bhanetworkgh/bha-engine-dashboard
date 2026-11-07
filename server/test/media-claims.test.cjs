@@ -104,4 +104,12 @@ ok('trial: Friday evening in New York is still a weekday', () => assert.equal(m.
 ok('trial: LinkedIn stays by hand', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: false }, 'linkedin', new Date('2026-11-10T15:00:00Z'))).post, false));
 ok('trial: a test draft only checks', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: true }, 'instagram', new Date('2026-11-10T15:00:00Z'))).mode, 'check'));
 ok('after the trial the pattern gate holds again', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: false }, 'x', new Date('2026-11-16T15:00:00Z'))).post, false));
+// Each platform's news goes in its own card's thread (7 Nov 2026), and a draft from before then falls back to its first card.
+ok('a platform with its own card uses that card\'s thread', () => {
+  const post = { slack_ts: 'LI', platforms: { linkedin: { slack_ts: 'LI', slack_thread_ts: 'LI' }, instagram: { slack_ts: 'IG2', slack_thread_ts: 'IG1' }, x: { slack_ts: 'X1' } } };
+  assert.equal(m.threadFor(post, 'instagram'), 'IG1');
+  assert.equal(m.threadFor(post, 'x'), 'X1');
+  assert.equal(m.threadFor(post, 'linkedin'), 'LI');
+});
+ok('a draft with no card per platform falls back to its first card', () => assert.equal(m.threadFor({ slack_ts: 'LI', platforms: { facebook: {} } }, 'facebook'), 'LI'));
 Promise.all(pending).then(() => console.log(n, 'checks passed'), (e) => { console.error(e); process.exit(1); });
