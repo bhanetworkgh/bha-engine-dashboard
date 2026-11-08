@@ -23,6 +23,9 @@ assert.equal(pairs[1].backup, null, 'an agent with no backup recorded says none,
 
 assert.deepEqual(p.elevenLabsLlm({ conversation_config: { agent: { prompt: { llm: 'claude-sonnet-4-5', backup_llm_config: { preference: ['gemini-2.5-flash'] } } } } }), { model: 'claude-sonnet-4-5', backup: 'gemini-2.5-flash' });
 assert.deepEqual(p.elevenLabsLlm({}), { model: null, backup: null });
+assert.deepEqual(p.elevenLabsLlm({ conversation_config: { agent: { prompt: { llm: 'deepseek-v41-flash', backup_llm_config: { preference: 'default' } } } } }), { model: 'deepseek-v41-flash', backup: 'ElevenLabs default' }, 'the live WhatsApp agent shape, 8 Nov 2026');
+assert.equal(p.elevenProvider('deepseek-v41-flash'), 'DeepSeek (through ElevenLabs)');
+assert.equal(p.elevenProvider('ElevenLabs default'), 'ElevenLabs (its own backup choice)');
 
 assert.equal(pt.parseProofType('test_forced'), 'test_forced');
 assert.equal(pt.parseProofType(' LIVE_NATURAL '), 'live_natural');

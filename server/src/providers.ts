@@ -65,7 +65,8 @@ export function elevenLabsLlm(cfg: Dict): { model: string | null; backup: string
   const prompt = ((cfg.conversation_config as Dict)?.agent as Dict)?.prompt as Dict | undefined;
   const model = typeof prompt?.llm === 'string' ? prompt.llm : null;
   const b = prompt?.backup_llm_config as Dict | undefined;
-  const backup = b && Array.isArray(b.preference) && b.preference.length ? String(b.preference[0]) : b && typeof b.llm === 'string' ? b.llm : null;
+  // ElevenLabs gives either a list of models or a word ("default": its own backup choice, "disabled": none).
+  const backup = !b ? null : Array.isArray(b.preference) && b.preference.length ? String(b.preference[0]) : typeof b.llm === 'string' ? b.llm : typeof b.preference === 'string' ? `ElevenLabs ${b.preference}` : null;
   return { model, backup };
 }
 
@@ -93,9 +94,10 @@ async function elevenLabs(id: string, fetcher: typeof fetch) {
   }
 }
 
-const NAME_BRAND: Record<string, string> = { 'claude': 'Anthropic', 'gpt': 'OpenAI', 'gemini': 'Google', 'qwen': 'Alibaba', 'glm': 'Zhipu' };
-const elevenProvider = (m: string | null) => {
+const NAME_BRAND: Record<string, string> = { 'claude': 'Anthropic', 'gpt': 'OpenAI', 'gemini': 'Google', 'deepseek': 'DeepSeek', 'qwen': 'Alibaba', 'glm': 'Zhipu', 'llama': 'Meta', 'grok': 'xAI' };
+export const elevenProvider = (m: string | null) => {
   if (!m) return 'unknown';
+  if (m.startsWith('ElevenLabs ')) return 'ElevenLabs (its own backup choice)';
   const hit = Object.entries(NAME_BRAND).find(([k]) => m.toLowerCase().startsWith(k));
   return hit ? `${hit[1]} (through ElevenLabs)` : 'ElevenLabs';
 };
