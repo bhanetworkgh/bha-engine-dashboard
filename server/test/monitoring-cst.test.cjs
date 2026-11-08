@@ -23,3 +23,19 @@ assert.equal(cstTestReason('conv_8801k9abc0def', { channel: 'voice' }), null, 'a
 assert.match(cstTestReason('conv_8801k9abc0def', { phone_e164: '+15550000000' }), /555/, 'a console test call has no phone and stays a test');
 assert.match(cstTestReason('conv_nested real', {}), /hand-made/);
 console.log('monitoring-cst: all checks passed');
+
+// How a call or WhatsApp chat ended (8 Nov 2026, Jason on the 7 Nov log).
+{
+  const { cstEnded, endedSummary } = require(path.join(process.env.DIST || 'server-dist', 'server/src/systemFeeds.js'));
+  assert.deepEqual(cstEnded({ metadata: { ended: { code: 'caller_hung_up', text: 'Caller hung up', handed_to_person: false } } }), { code: 'caller_hung_up', text: 'Caller hung up', handed_to_person: false });
+  assert.deepEqual(cstEnded({ metadata: {} }), { code: null, text: null, handed_to_person: null }, 'a text or an older call has no ending, never a guess');
+  assert.equal(cstEnded({ metadata: { ended: { code: 'something_new' } } }).code, 'other', 'an unknown code is kept as other');
+  const t = m.endedTally([row({ ended_code: 'closed_by_genie' }), row({ ended_code: 'caller_hung_up', handed_to_person: true }), row({}), row({ channel: 'sms' })]);
+  assert.deepEqual(t, { by_code: { closed_by_genie: 1, caller_hung_up: 1 }, handed_to_person: 1, calls_without_ending: 1 });
+  const e = endedSummary([{ ended_code: 'went_quiet', handed_to_person: false, channel: 'whatsapp' }, { ended_code: null, handed_to_person: null, channel: 'voice' }, { ended_code: null, handed_to_person: null, channel: 'sms' }]);
+  assert.equal(e.counted, 1);
+  assert.equal(e.of_calls_and_chats, 2);
+  assert.equal(e.mix[0].label, 'Went quiet');
+  assert.match(e.note, /1 of 2/);
+}
+console.log('ended: ok');

@@ -27,6 +27,7 @@
  * because the agreements pay per day worked and a builder may have done what they were told. It is seen, and
  * LANE_NO_ROW in a row names the builder for a conversation with Destiny and Jason.
  */
+import { parseProofType, type ProofType } from './proofType';
 import { query, withTransaction } from './pg';
 import { record } from './engineEvents';
 import { changed } from './events';
@@ -120,6 +121,8 @@ export interface Claim {
   where: string;
   result: ClaimResult;
   proof: string;
+  /** How a confirmed claim was proven (8 Nov 2026, Jason): test_forced or live_natural. Left out on older checks. */
+  proof_type?: ProofType;
 }
 
 export interface FollowUp {
@@ -266,7 +269,13 @@ export function cleanCheck(i: CheckInput): CleanCheck {
     if (!where) throw new CodeCheckError('bad_claim', `Claim ${n + 1}: say where it was checked (GitHub, Render, Twilio, dashboard, BHARAG, vFarm, n8n...).`);
     if (!(RESULTS as readonly string[]).includes(result)) throw new CodeCheckError('bad_claim', `Claim ${n + 1}: result is one of ${RESULTS.join(', ')}.`);
     if (!proof) throw new CodeCheckError('bad_claim', `Claim ${n + 1}: give the proof (a commit, a run, a deploy, a record id), or what was looked for and not found.`);
-    return { claim, where, result, proof };
+    let proof_type: ProofType | null;
+    try {
+      proof_type = parseProofType(o.proof_type, `Claim ${n + 1}: proof_type`);
+    } catch (e) {
+      throw new CodeCheckError('bad_claim', (e as Error).message);
+    }
+    return proof_type ? { claim, where, result, proof, proof_type } : { claim, where, result, proof };
   });
   const missingIn = i.missing == null ? [] : i.missing;
   if (!Array.isArray(missingIn)) throw new CodeCheckError('bad_missing', `missing is a list of ${MISSING.join(', ')}.`);

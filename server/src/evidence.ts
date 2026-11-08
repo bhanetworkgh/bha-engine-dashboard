@@ -19,6 +19,7 @@
  * The charge gate's green acceptance pass names one of these records (bundle_ref = EV-…), and
  * chargeGate.recordGate refuses a pass whose record is not here.
  */
+import { parseProofType, ProofTypeError, type ProofType } from './proofType';
 import { createHash } from 'node:crypto';
 import { query, withTransaction } from './pg';
 import { record } from './engineEvents';
@@ -86,13 +87,15 @@ export interface Evidence {
   superseded_by: string | null;
   notes: string | null;
   test: boolean;
+  /** How what it proves was proven (8 Nov 2026): test_forced or live_natural; null is not stated, never live. */
+  proof_type: ProofType | null;
 }
 
 export type EvidenceWithText = Evidence & { text: string };
 
 const COLS = `evidence_id, name, version, title, proves, gate, loop_id, author_id, author_name, written_at, saved_by, saved_by_name,
   saved_at, via, source_kind, source_ref, file_name, content_type, file_size, file_sha256, text_chars, text_sha256, extract,
-  supersedes, notes, test`;
+  supersedes, notes, test, proof_type`;
 
 const iso = (v: unknown): string | null => (v instanceof Date ? v.toISOString() : typeof v === 'string' ? v : null);
 
@@ -125,6 +128,7 @@ function mapRow(r: Record<string, unknown>, supersededBy: Map<string, string>): 
     superseded_by: supersededBy.get(r.evidence_id as string) ?? null,
     notes: (r.notes as string) ?? null,
     test: r.test === true,
+    proof_type: (r.proof_type as ProofType) ?? null,
   };
 }
 
@@ -186,6 +190,8 @@ export interface SaveInput {
   text?: string | null;
   file_name?: string | null;
   test?: boolean;
+  /** test_forced or live_natural (8 Nov 2026, Jason). Left out, the record says it is not stated. */
+  proof_type?: string | null;
 }
 
 export interface FetchedFile {
@@ -299,6 +305,12 @@ export async function save(input: SaveInput, opts: { via: string; dry_run?: bool
   // A name is one document; a new version names the one it replaces.
   const latest = await query<{ evidence_id: string; version: number }>(`SELECT evidence_id, version FROM engine_evidence WHERE name = $1 AND test = $2 ORDER BY version DESC LIMIT 1`, [name, test]);
   const supersedes = clean(input.supersedes, 40) || null;
+  let proof_type: ProofType | null;
+  try {
+    proof_type = parseProofType(input.proof_type);
+  } catch (e) {
+    throw new EvidenceError('bad_proof_type', (e as ProofTypeError).message);
+  }
   let version = 1;
   if (latest.rows[0]) {
     const l = latest.rows[0];
@@ -335,6 +347,7 @@ export async function save(input: SaveInput, opts: { via: string; dry_run?: bool
     supersedes,
     notes,
     test,
+    proof_type,
   };
   const preview = text.slice(0, 600);
   if (opts.dry_run) {
@@ -344,10 +357,10 @@ export async function save(input: SaveInput, opts: { via: string; dry_run?: bool
   const saved_at = await withTransaction(async (db) => {
     const ins = await db.query(
       `INSERT INTO engine_evidence (evidence_id, name, version, title, proves, gate, loop_id, author_id, author_name, written_at, saved_by, saved_by_name,
-         via, source_kind, source_ref, file_name, content_type, file_size, file_sha256, file_bytes, text, text_chars, text_sha256, extract, supersedes, notes, test)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24::jsonb,$25,$26,$27) RETURNING saved_at`,
+         via, source_kind, source_ref, file_name, content_type, file_size, file_sha256, file_bytes, text, text_chars, text_sha256, extract, supersedes, notes, test, proof_type)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24::jsonb,$25,$26,$27,$28) RETURNING saved_at`,
       [row.evidence_id, row.name, row.version, row.title, row.proves, row.gate, row.loop_id, row.author_id, row.author_name, row.written_at, row.saved_by, row.saved_by_name,
-        row.via, row.source_kind, row.source_ref, row.file_name, row.content_type, row.file_size, row.file_sha256, f.bytes, text, row.text_chars, row.text_sha256, JSON.stringify(row.extract), row.supersedes, row.notes, row.test],
+        row.via, row.source_kind, row.source_ref, row.file_name, row.content_type, row.file_size, row.file_sha256, f.bytes, text, row.text_chars, row.text_sha256, JSON.stringify(row.extract), row.supersedes, row.notes, row.test, row.proof_type],
     );
     await record(
       {

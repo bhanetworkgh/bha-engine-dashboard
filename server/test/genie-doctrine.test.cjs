@@ -104,8 +104,8 @@ let server;
   const ok = (name) => { passed++; console.log(`  ok  ${name}`); };
   try {
     // 1. Genie's tool list, exactly.
-    assert.deepEqual(await listOf(TOKENS.genie), ['get_vfarm_gates', 'read_buyer_flow', 'read_engine_events', 'read_engine_strain', 'read_evidence', 'read_help_pages', 'read_logstream', 'read_media_doctrine', 'read_monitoring_twin', 'read_publication_decision', 'read_sop', 'read_vfarm_history']);
-    ok("Genie's token lists exactly read_logstream, read_engine_events, read_media_doctrine, read_publication_decision, read_buyer_flow, read_sop, read_monitoring_twin, get_vfarm_gates, read_vfarm_history, read_engine_strain, read_help_pages and read_evidence");
+    assert.deepEqual(await listOf(TOKENS.genie), ['get_vfarm_gates', 'read_buyer_flow', 'read_elevenlabs', 'read_engine_events', 'read_engine_strain', 'read_evidence', 'read_github', 'read_help_pages', 'read_logstream', 'read_media_doctrine', 'read_monitoring_twin', 'read_providers', 'read_publication_decision', 'read_render', 'read_sop', 'read_stripe', 'read_twilio', 'read_vfarm_history']);
+    ok("Genie's token lists exactly read_logstream, read_engine_events, read_media_doctrine, read_publication_decision, read_buyer_flow, read_sop, read_monitoring_twin, get_vfarm_gates, read_vfarm_history, read_engine_strain, read_help_pages, read_evidence, the five service reads and read_providers");
 
     // 2. Refusals: an unrelated read, the gap summary it was not given, and writes.
     for (const name of ['find_records', 'read_doctrine_gap_summary']) {

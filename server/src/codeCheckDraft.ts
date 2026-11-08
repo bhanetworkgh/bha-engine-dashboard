@@ -376,7 +376,7 @@ export function shortVersion(d: { codex_entry_id: string; builder: string | null
     `*Verdict:* ${verdict}. ${cut(c.verdict_reason, 400)}`.trim(),
     `*Readiness:* ${readiness}`,
     '*What was checked*',
-    ...(claims.length ? claims.map((x) => `• *${RESULT_LABEL[String(x.result)] ?? String(x.result ?? '')}:* ${cut(x.claim, 200)}. ${sentences(x.proof, 260)}`) : ['• No claims were recorded.']),
+    ...(claims.length ? claims.map((x) => `• *${RESULT_LABEL[String(x.result)] ?? String(x.result ?? '')}${x.proof_type === 'test_forced' ? ' (forced test only)' : x.proof_type === 'live_natural' ? ' (in real use)' : ''}:* ${cut(x.claim, 200)}. ${sentences(x.proof, 260)}`) : ['• No claims were recorded.']),
     '*Still missing before customer ready*',
     ...(missing.length ? missing.map((m) => `• ${cc.MISSING_LABEL[m] ?? m}`) : ['• Nothing named.']),
     `*Could not check:* ${cut(c.couldnt_check, 500) || 'not given'}`,

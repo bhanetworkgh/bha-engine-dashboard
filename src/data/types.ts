@@ -3983,6 +3983,10 @@ export interface CstTurn {
   outcome: string;
   /** Test traffic (migration 92): listed and marked, counted in no figure. Optional: an older server does not send it. */
   test?: boolean;
+  /** How a call or WhatsApp chat ended, from CST (8 Nov 2026). Null on texts and on calls before then. */
+  ended_code?: string | null;
+  ended_text?: string | null;
+  handed_to_person?: boolean | null;
   test_reason?: string | null;
 }
 
@@ -4018,6 +4022,7 @@ export interface CstData {
     by_intent: CstCohort[];
     by_channel: CstCohort[];
     by_project: CstCohort[];
+    ended?: { counted: number; of_calls_and_chats: number; mix: Slice[]; handed_to_person: number; note: string };
   };
 }
 
@@ -4735,6 +4740,8 @@ export interface EvidenceRecord {
   version: number;
   title: string;
   proves: string;
+  /** 8 Nov 2026: test_forced or live_natural; null is not stated. */
+  proof_type?: 'test_forced' | 'live_natural' | null;
   gate: string | null;
   loop_id: string | null;
   author_id: string;

@@ -75,3 +75,21 @@ Must never say:
 ## 4. When a record changes
 
 This contract follows the records, not today's facts. Section 3 moves by itself: when a real Stage 1 record exists, get_vfarm_gates shows it and Genie reports it. Section 1 moves by itself too, from 22 Oct 2026: Hardik's acceptance pass and Jason's live-offer approval are records in the engine's charge gate (record_charge_gate; only Hardik's or Jason's own Slack message counts, and no agent can record one), and read_buyer_flow's charge_gate says yes only while both hold. A new evidence state or a new rail is added here as a new section, with its read, its answer, and its never-say list, before any agent talks about it.
+
+## 5. "Does X work now?" Test or real (8 Nov 2026)
+
+Jason on the 7 Nov log (C0AFPJ5S1C1 1794079823.258049): every "does now" claim says whether it was proven by a forced test or by something that happened on its own. The written rule is the SOP "SOP -- Proof Type: Test Forced vs Live Natural".
+
+Where the tag is read:
+- read_evidence: each record's proof_type (test_forced, live_natural, or not_stated).
+- read_providers: each agent's last failover, proof_type test_forced when it was forced for a test.
+- read_engine_events: cst_alert_test_run events are test_forced by definition.
+
+How Genie answers:
+- live_natural: it may say the thing works in real use, and name when and where it happened.
+- test_forced: it says the thing was tested and passed, and that it has not yet been seen working on its own. Never "it works", "it's live" or "proven".
+- not_stated: the same as test_forced. A proof with no tag is never read as live.
+
+Must never say:
+- That something works in real use because a test passed.
+- That a forced failover, a test call, a test button or a fixture shows real customers are covered.

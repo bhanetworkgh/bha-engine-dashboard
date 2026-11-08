@@ -260,6 +260,12 @@ function TurnRow({ t, open, onToggle }: { t: CstTurn; open: boolean; onToggle: (
                 <p className="whitespace-pre-wrap text-ink">{t.reply ?? '—'}</p>
               </div>
               {t.reason && <p className="whitespace-pre-wrap text-dim">Why: {t.reason}</p>}
+              {t.ended_text && (
+                <p className="text-dim">
+                  How it ended: {t.ended_text}
+                  {t.handed_to_person ? ', handed to a person' : ''}
+                </p>
+              )}
               {t.delivery_status && (
                 <p className="text-dim">
                   Delivery: {t.delivery_status}
@@ -334,6 +340,25 @@ function Statistics({ data }: { data: CstData }) {
         <MetricCard title="By project" note="The vFarm project the receiving number is bound to, as CST sends it." align="top">
           <Cohorts rows={s.by_project} blank="No turn carries a project." />
         </MetricCard>
+        {s.ended && (
+          <MetricCard title="How calls and chats ended" note={s.ended.note} align="top">
+            {s.ended.counted === 0 ? (
+              <p className="text-[12px] text-faint">No call or WhatsApp chat has carried an ending yet. CST sends one from 8 Nov 2026.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {s.ended.mix.map((o) => (
+                  <div key={o.key} className="flex items-baseline justify-between gap-3 text-[12.5px]">
+                    <span className="truncate text-ink">{o.label}</span>
+                    <span className="tabular text-dim">{o.n}</span>
+                  </div>
+                ))}
+                <p className="pt-1 text-[11px] text-dim">
+                  Handed to a person: {s.ended.handed_to_person} of {s.ended.counted}
+                </p>
+              </div>
+            )}
+          </MetricCard>
+        )}
       </div>
     </div>
   );

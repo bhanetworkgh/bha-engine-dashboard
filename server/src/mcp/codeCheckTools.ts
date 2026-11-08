@@ -99,7 +99,7 @@ export const recordCodeCheck: ToolDefinition = {
       posted_at: { type: 'string', description: 'When the check was posted (ISO). Left out: now.' },
       verdict: { type: 'string', enum: [...cc.VERDICTS] },
       verdict_reason: { type: 'string' },
-      claims: { type: 'array', items: { type: 'object', properties: { claim: { type: 'string' }, where: { type: 'string' }, result: { type: 'string', enum: [...cc.RESULTS] }, proof: { type: 'string' } }, required: ['claim', 'where', 'result', 'proof'] } },
+      claims: { type: 'array', items: { type: 'object', properties: { claim: { type: 'string' }, where: { type: 'string' }, result: { type: 'string', enum: [...cc.RESULTS] }, proof: { type: 'string' }, proof_type: { type: 'string', enum: ['test_forced', 'live_natural'], description: 'For a confirmed claim: test_forced (proven by something we made happen) or live_natural (it happened on its own in real use).' } }, required: ['claim', 'where', 'result', 'proof'] } },
       missing: { type: 'array', items: { type: 'string', enum: [...cc.MISSING] } },
       couldnt_check: { type: 'string' },
       pay_call: { type: 'string', enum: [...cc.PAY_CALLS] },

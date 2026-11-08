@@ -662,6 +662,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           verified_by: Array.isArray(body.verified_by) ? (body.verified_by as never) : [],
           reason: String(body.reason ?? ''),
           by: `engine:${String(body.by ?? 'n8n').slice(0, 80)}`,
+          proof_type: typeof body.proof_type === 'string' ? body.proof_type : null,
         });
         await mirror.logWrite({ endpoint, kind: 'repairs', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: out.repair_id, outcome: 'updated', detail: 'proof corrected', ms: Date.now() - t0 });
         return send(res, 200, { ok: true, ...out });

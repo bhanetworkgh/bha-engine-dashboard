@@ -4348,6 +4348,16 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       )`,
     ],
   },
+  {
+    id: 121,
+    name: 'how a CST call or WhatsApp chat ended, and test or real on proof (Jason, 8 Nov 2026)',
+    statements: [
+      `ALTER TABLE engine_cst_turns ADD COLUMN IF NOT EXISTS ended_code text`,
+      `ALTER TABLE engine_cst_turns ADD COLUMN IF NOT EXISTS ended_text text`,
+      `ALTER TABLE engine_cst_turns ADD COLUMN IF NOT EXISTS handed_to_person boolean`,
+      `ALTER TABLE engine_evidence ADD COLUMN IF NOT EXISTS proof_type text CHECK (proof_type IS NULL OR proof_type IN ('test_forced', 'live_natural'))`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

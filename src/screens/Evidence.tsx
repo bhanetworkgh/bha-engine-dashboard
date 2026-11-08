@@ -107,6 +107,10 @@ function EvidenceDialog({ id, onClose, onOpen }: { id: string; onClose: () => vo
             <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-2 text-[13px] md:grid-cols-[140px_1fr]">
               <dt className="text-faint">Proves</dt>
               <dd>{doc.proves}</dd>
+              <dt className="text-faint">How it was proven</dt>
+              <dd>
+                {doc.proof_type === 'live_natural' ? 'In real use (live, natural)' : doc.proof_type === 'test_forced' ? 'By a forced test only' : <span className="text-faint">not stated, so not proven live</span>}
+              </dd>
               <dt className="text-faint">Gate</dt>
               <dd>{doc.gate ?? <span className="text-faint">none named</span>}</dd>
               <dt className="text-faint">Loop</dt>

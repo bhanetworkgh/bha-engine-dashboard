@@ -36,6 +36,7 @@
  * is absent, Revert **refuses and says why**, and names the manual route, which
  * is n8n's own version history. It is never drawn as a revert that happened.
  */
+import { parseProofType } from './proofType';
 import { query, withTransaction, type Queryable } from './pg';
 import * as events from './events';
 import * as mirror from './mirror';
@@ -258,9 +259,9 @@ export async function recordReportLink(body: Record<string, unknown>, db: Querya
  * restates the evidence, it does not re-decide the repair.
  */
 export async function correctProof(
-  body: { repair_id: string; verified_by: Array<{ execution_id?: string; evidence: string }>; reason: string; by: string },
+  body: { repair_id: string; verified_by: Array<{ execution_id?: string; evidence: string }>; reason: string; by: string; proof_type?: string | null },
   db: Queryable = { query },
-): Promise<{ repair_id: string; outcome: string; previous_verified_by: unknown; verified_by: unknown; change_summary: string }> {
+): Promise<{ repair_id: string; outcome: string; previous_verified_by: unknown; verified_by: unknown; change_summary: string; proof_type: string }> {
   const repairId = text(body.repair_id, 120);
   const reason = text(body.reason, 1000);
   if (!repairId) throw new RepairError('"repair_id" is required.', 422);
@@ -268,6 +269,12 @@ export async function correctProof(
   const proof = (Array.isArray(body.verified_by) ? body.verified_by : [])
     .map((v) => ({ execution_id: text(v?.execution_id, 60) ?? null, evidence: text(v?.evidence, 500) ?? '' }))
     .filter((v) => v.evidence.length >= 3);
+  let proofType: string | null;
+  try {
+    proofType = parseProofType(body.proof_type);
+  } catch (e) {
+    throw new RepairError((e as Error).message, 422);
+  }
   const held = await db.query<{ outcome: string; change_summary: string | null; vb: unknown }>(
     `SELECT outcome, change_summary, payload->'verified_by' AS vb FROM engine_repairs WHERE repair_id = $1`,
     [repairId],
@@ -277,17 +284,19 @@ export async function correctProof(
   const at = new Date().toISOString();
   const line = `Proof corrected ${at.slice(0, 10)} by ${body.by}: ${reason}`;
   const summary = `${row.change_summary ?? ''}\n\n${line}`.trim();
-  const correction = { at, by: body.by, reason, previous_verified_by: row.vb ?? null, verified_by: proof };
+  const correction = { at, by: body.by, reason, previous_verified_by: row.vb ?? null, verified_by: proof, proof_type: proofType };
+  // proof_type (8 Nov 2026, Jason): set only when the correction says it; never inferred from the run.
   await db.query(
     `UPDATE engine_repairs
         SET change_summary = $2,
-            payload = jsonb_set(payload || jsonb_build_object('verified_by', $3::jsonb, 'change_summary', $2::text),
+            payload = jsonb_set(payload || jsonb_build_object('verified_by', $3::jsonb, 'change_summary', $2::text)
+                                        || CASE WHEN $5::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('proof_type', $5::text) END,
                                 '{proof_corrections}', COALESCE(payload->'proof_corrections', '[]'::jsonb) || $4::jsonb)
       WHERE repair_id = $1`,
-    [repairId, summary, JSON.stringify(proof), JSON.stringify([correction])],
+    [repairId, summary, JSON.stringify(proof), JSON.stringify([correction]), proofType],
   );
   events.changed('repairs', repairId, db);
-  return { repair_id: repairId, outcome: row.outcome, previous_verified_by: row.vb ?? null, verified_by: proof, change_summary: summary };
+  return { repair_id: repairId, outcome: row.outcome, previous_verified_by: row.vb ?? null, verified_by: proof, change_summary: summary, proof_type: proofType ?? 'not_stated' };
 }
 
 function linkOf(payload: unknown): ReportLink | null {

@@ -316,6 +316,7 @@ export const correctRepairProofTool: ToolDefinition = {
       repair_id: { type: 'string' },
       verified_by: { type: 'array', items: { type: 'object', properties: { execution_id: { type: 'string' }, evidence: { type: 'string' } }, required: ['evidence'] } },
       reason: { type: 'string' },
+      proof_type: { type: 'string', enum: ['test_forced', 'live_natural'], description: 'How the new proof was proven: test_forced (a run we started) or live_natural (a real run that happened on its own). Left out, it stays not stated.' },
       requester_user_id: { type: 'string' },
       dry_run: { type: 'boolean' },
     },
@@ -337,7 +338,7 @@ export const correctRepairProofTool: ToolDefinition = {
         return { ok: Boolean(row), dry_run: true, repair_id: id, held: row, audit_id: audit };
       }
       const by = `mcp:${deps.access}${requester ? ` (${requester})` : ''}`;
-      const r = await repairs.correctProof({ repair_id: id, verified_by: Array.isArray(args.verified_by) ? (args.verified_by as never) : [], reason, by });
+      const r = await repairs.correctProof({ repair_id: id, verified_by: Array.isArray(args.verified_by) ? (args.verified_by as never) : [], reason, by, proof_type: typeof args.proof_type === 'string' ? args.proof_type : null });
       await auditClose(audit, { outcome: 'applied', detail: reason.slice(0, 500), natural_id: id, before: { verified_by: r.previous_verified_by }, after: { verified_by: r.verified_by } });
       return { ok: true, ...r, audit_id: audit };
     } catch (e) {

@@ -992,6 +992,7 @@ function cstEvent(e: unknown, at: string): CstEvent {
   const c = isObj(e.customer) ? e.customer : {};
   const known = c.is_known;
   const duration = num(e.duration_ms);
+  const ended = cstEnded(e);
   return {
     type: 'turn',
     turn_id: turnId,
@@ -1015,13 +1016,45 @@ function cstEvent(e: unknown, at: string): CstEvent {
       incident_id: str(e.incident_id),
       duration_ms: duration === null ? null : Math.max(0, Math.round(duration)),
       occurred_at: occurred ?? new Date().toISOString(),
+      ended_code: ended.code,
+      ended_text: ended.text,
+      handed_to_person: ended.handed_to_person,
     },
+  };
+}
+
+/**
+ * How a call or WhatsApp chat ended, as CST sends it on `metadata.ended` (8 Nov 2026, Jason on the
+ * 7 Nov log: CST outcomes as canonical data, not only the Slack card). A fixed code from CST's own
+ * list, the card's words, and whether the customer was handed to a person. A text, or a call sent
+ * before CST sent this, has none: all three null, never a guess.
+ */
+export const CST_ENDED_CODES = ['closed_by_genie', 'caller_hung_up', 'went_quiet', 'time_limit', 'safety_rule', 'failed', 'other', 'not_recorded'] as const;
+export const CST_ENDED_LABELS: Record<string, string> = {
+  closed_by_genie: 'Closed by CST Genie',
+  caller_hung_up: 'Caller hung up',
+  went_quiet: 'Went quiet',
+  time_limit: 'Hit the time limit',
+  safety_rule: 'Cut off by a safety rule',
+  failed: 'Failed',
+  other: 'Other',
+  not_recorded: 'Not recorded',
+};
+export function cstEnded(e: Record<string, unknown>): { code: string | null; text: string | null; handed_to_person: boolean | null } {
+  const meta = isObj(e.metadata) ? e.metadata : {};
+  const raw = isObj(meta.ended) ? meta.ended : isObj(e.ended) ? e.ended : null;
+  if (!raw) return { code: null, text: null, handed_to_person: null };
+  const code = str(raw.code)?.toLowerCase() ?? null;
+  return {
+    code: code && (CST_ENDED_CODES as readonly string[]).includes(code) ? code : code ? 'other' : null,
+    text: str(raw.text)?.slice(0, 200) ?? null,
+    handed_to_person: typeof raw.handed_to_person === 'boolean' ? raw.handed_to_person : null,
   };
 }
 
 const TURN_COLS = [
   'conversation_id', 'tenant_id', 'project_id', 'channel', 'customer_ref', 'person_id', 'phone_e164', 'customer_name', 'role', 'is_known',
-  'message', 'reply', 'intent', 'status', 'reason', 'incident_id', 'duration_ms', 'occurred_at',
+  'message', 'reply', 'intent', 'status', 'reason', 'incident_id', 'duration_ms', 'occurred_at', 'ended_code', 'ended_text', 'handed_to_person',
 ];
 
 /**
@@ -1154,6 +1187,9 @@ interface CstRow {
   retention_cleared_at: string | null;
   test: boolean;
   test_reason: string | null;
+  ended_code: string | null;
+  ended_text: string | null;
+  handed_to_person: boolean | null;
 }
 
 export async function cstData() {
@@ -1161,7 +1197,8 @@ export async function cstData() {
   const r = await query<CstRow>(
     `SELECT turn_id, conversation_id, tenant_id, project_id, channel, customer_ref, person_id, phone_e164, customer_name, role, is_known,
             message, reply, intent, status, reason, incident_id, duration_ms, ${t('occurred_at')}, ${t('received_at')},
-            delivery_status, delivery_error, delivery_attempts, ${t('delivery_at')}, ${t('retention_cleared_at')}, test, test_reason
+            delivery_status, delivery_error, delivery_attempts, ${t('delivery_at')}, ${t('retention_cleared_at')}, test, test_reason,
+            ended_code, ended_text, handed_to_person
        FROM engine_cst_turns
       ORDER BY coalesce(occurred_at, received_at) DESC`,
   );
@@ -1247,7 +1284,23 @@ export async function cstData() {
       by_intent: cohort((x) => x.intent, '(not sent)'),
       by_channel: cohort((x) => x.channel, '(not sent)'),
       by_project: cohort((x) => x.project_id, '(not sent)'),
+      ended: endedSummary(real),
     },
+  };
+}
+
+/** How the real calls and WhatsApp chats ended (8 Nov 2026). Only turns CST sent an ending for are counted; texts have none. */
+export function endedSummary(rows: Array<{ ended_code: string | null; handed_to_person: boolean | null; channel: string | null }>) {
+  const withEnd = rows.filter((x) => x.ended_code);
+  const calls = rows.filter((x) => x.channel === 'voice' || x.channel === 'whatsapp');
+  return {
+    counted: withEnd.length,
+    of_calls_and_chats: calls.length,
+    mix: tally(withEnd.map((x) => CST_ENDED_LABELS[x.ended_code as string] ?? x.ended_code), 'Not recorded'),
+    handed_to_person: withEnd.filter((x) => x.handed_to_person === true).length,
+    note: withEnd.length === calls.length
+      ? `Over all ${calls.length} real calls and WhatsApp chats.`
+      : `Over the ${withEnd.length} of ${calls.length} real calls and WhatsApp chats CST sent an ending for. CST began sending it on 8 Nov 2026; earlier ones and every text have none, and are left out rather than guessed.`,
   };
 }
 

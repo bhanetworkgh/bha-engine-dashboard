@@ -21,6 +21,9 @@ export interface TurnRow {
   delivery_status: string | null;
   delivery_error: string | null;
   duration_ms: number | null;
+  /** How a call or WhatsApp chat ended (8 Nov 2026): CST's code and whether a person was asked for. Null on texts. */
+  ended_code?: string | null;
+  handed_to_person?: boolean | null;
 }
 
 const failedDelivery = (d: string | null) => d === 'failed' || d === 'undelivered';
@@ -48,6 +51,7 @@ export function summarise(rows: TurnRow[], newest: Map<string, string>, now: num
     last_at: [...newest.values()].sort().at(-1) ?? null,
     turns_7d: rows.length,
     failed_7d: rows.filter(isFailed).length,
+    ended_7d: endedTally(rows),
     recent: rows.slice(0, WATCH.recent).map((r) => ({ ...r, failed: isFailed(r) })),
     note: rows.length
       ? 'Real calls and texts only; test traffic is left out. The words and numbers are on the Customer Service Twin page.'
@@ -55,12 +59,23 @@ export function summarise(rows: TurnRow[], newest: Map<string, string>, now: num
   };
 }
 
+/** Pure: how the calls and chats in the window ended, by CST's own code. Turns with no ending (texts, older calls) are counted apart. */
+export function endedTally(rows: TurnRow[]) {
+  const by: Record<string, number> = {};
+  let none = 0;
+  for (const r of rows) {
+    if (!r.ended_code) { if (r.channel === 'voice' || r.channel === 'whatsapp') none++; continue; }
+    by[r.ended_code] = (by[r.ended_code] ?? 0) + 1;
+  }
+  return { by_code: by, handed_to_person: rows.filter((r) => r.handed_to_person === true).length, calls_without_ending: none };
+}
+
 export async function read(db: Queryable, now = Date.now()) {
   const iso = (c: string) => `to_char(${c} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`;
   try {
     const [rows, newest] = await Promise.all([
       db.query<TurnRow>(
-        `SELECT turn_id, channel, ${iso('occurred_at')} AS at, status, intent, delivery_status, delivery_error, duration_ms
+        `SELECT turn_id, channel, ${iso('occurred_at')} AS at, status, intent, delivery_status, delivery_error, duration_ms, ended_code, handed_to_person
            FROM engine_cst_turns WHERE NOT test AND occurred_at >= now() - ($1::int * interval '1 day') ORDER BY occurred_at DESC`,
         [WATCH.window_days],
       ),
