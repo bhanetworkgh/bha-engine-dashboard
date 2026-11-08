@@ -150,6 +150,134 @@ export const deleteSopTool: ToolDefinition = {
 };
 
 /**
+ * edit_sop (8 Nov 2026, Destiny — Jason in #all-bayshorizonnetwork 1794151650.032329). Edit one SOP in
+ * BHARAG in place, through Jegan's PATCH /documents/:id (bharag.patchDocument), so the id and every link
+ * to it stay the same. Built because Bays logged an SOP with the wrong date in its text, Jason asked for
+ * the date fixed on the same record with no second SOP, and the only write anyone had was an ingest.
+ *
+ * Send the whole new text (`content`), or `replacements`: each `find` must occur exactly once in the
+ * text as it is now, so a small fix never needs the rule retyped. A new `title` must still start
+ * "SOP -- " and must not be another SOP's title. Only Destiny or Jason may ask (requester_user_id);
+ * it is in Bays' scope so Bays can make the fix when one of them asks in Slack. The text before the
+ * edit is kept whole on the audit line ("before"), and the edit is read back: verified only when the
+ * stored title and text are what was sent.
+ */
+type Replacement = { find: string; replace: string };
+
+export function applyReplacements(text: string, reps: Replacement[]): { ok: true; text: string } | { ok: false; reason: string } {
+  let out = text;
+  for (const [i, r] of reps.entries()) {
+    if (!r.find) return { ok: false, reason: `replacements[${i}].find is empty.` };
+    const first = out.indexOf(r.find);
+    if (first < 0) return { ok: false, reason: `replacements[${i}].find does not occur in the SOP's text as it is now: "${r.find.slice(0, 80)}".` };
+    if (out.indexOf(r.find, first + 1) >= 0) return { ok: false, reason: `replacements[${i}].find occurs more than once; widen it until it is unique: "${r.find.slice(0, 80)}".` };
+    out = out.slice(0, first) + r.replace + out.slice(first + r.find.length);
+  }
+  return { ok: true, text: out };
+}
+
+export const editSopTool: ToolDefinition = {
+  name: 'edit_sop',
+  description:
+    'Edit one SOP in BHARAG in place, by its BHARAG id: the id and every link to it stay the same, and no second SOP is made. Use it when Destiny or Jason asks for an SOP to be corrected (a wrong date, a wrong name, a changed rule), never log_sop or an ingest, which make a duplicate. Send `replacements` ([{find, replace}], each find occurring exactly once in the text as it is now) for a small fix, or `content` for the whole new text, and/or a new `title` (still "SOP -- ..."), and/or a new `source_link`. reason is required. requester_user_id: Destiny or Jason only. The old text is kept on the audit line and the edit is read back (verified true only when the stored text matches). dry_run shows the change and writes nothing. Returns {ok, edited, verified, id, changed}. Audited on engine_mcp_writes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', description: "The SOP's BHARAG document id (a UUID)." },
+      replacements: {
+        type: 'array',
+        items: { type: 'object', properties: { find: { type: 'string' }, replace: { type: 'string' } }, required: ['find', 'replace'], additionalProperties: false },
+        description: 'Exact text to find (once) and what to put in its place, applied in order.',
+      },
+      content: { type: 'string', description: 'The whole new text. Not with replacements.' },
+      title: { type: 'string', description: 'A new title, starting "SOP -- ".' },
+      source_link: { type: 'string', description: 'A new source link: the Slack message the rule came from.' },
+      reason: { type: 'string', description: 'Why, in a sentence, e.g. "date was 2 Nov, Jason stated it 8 Nov".' },
+      requester_user_id: { type: 'string', description: 'Slack id of the person asking: Destiny or Jason.' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['id', 'reason', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Edit an SOP in place' },
+  handler: async (args, deps) => {
+    const id = str(args.id);
+    const reason = str(args.reason).slice(0, 300);
+    const requester = str(args.requester_user_id) || null;
+    const dry = args.dry_run === true;
+    const reps: Replacement[] = Array.isArray(args.replacements)
+      ? (args.replacements as unknown[]).map((r) => ({ find: typeof (r as Replacement)?.find === 'string' ? (r as Replacement).find : '', replace: typeof (r as Replacement)?.replace === 'string' ? (r as Replacement).replace : '' }))
+      : [];
+    const newContent = typeof args.content === 'string' ? args.content : null;
+    const newTitle = typeof args.title === 'string' ? args.title.trim() : null;
+    const newLink = typeof args.source_link === 'string' ? args.source_link.trim() : null;
+    const audit = await auditOpen({ tool: 'edit_sop', args: { ...args, ...(newContent !== null ? { content: `${newContent.length} characters` } : {}) }, access: deps.access, kind: 'bharag_sop', requester, dry_run: dry });
+    const refuse = async (why: string, message: string) => {
+      await auditClose(audit, { outcome: 'refused', detail: `${why}: ${message}`, natural_id: id || null, guard_result: { reason: why } });
+      return { ok: false, edited: false, reason: why, message: `${message} Nothing was changed.`, audit_id: audit };
+    };
+    if (!requester || !ADMIN_IDS.includes(requester)) return refuse('not_permitted', 'Only Destiny or Jason can have an SOP edited. Send requester_user_id.');
+    if (!reason) return refuse('reason_required', 'Send a reason, e.g. "date was 2 Nov, Jason stated it 8 Nov".');
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return refuse('bad_id', 'id must be a BHARAG document id.');
+    if (newContent !== null && reps.length) return refuse('content_and_replacements', 'Send content or replacements, not both.');
+    if (newContent === null && !reps.length && newTitle === null && newLink === null) return refuse('nothing_to_change', 'Send replacements, content, title or source_link.');
+    if (newContent !== null && !newContent.trim()) return refuse('empty', 'content is empty.');
+    if (newTitle !== null && !/^SOP\s+--\s+\S/.test(newTitle)) return refuse('bad_title', 'title must start "SOP -- " followed by the rule\'s name.');
+    if (newLink !== null && !/^https:\/\/[a-z0-9-]+\.slack\.com\//i.test(newLink)) return refuse('bad_source', 'source_link must be the Slack message the SOP came from.');
+    const d = await sops.doc(id);
+    if (!d.ok) return refuse('not_an_sop', d.reason);
+    const oldText = d.sop.content ?? '';
+    let text = oldText;
+    if (newContent !== null) text = newContent;
+    else if (reps.length) {
+      if (d.sop.content === null) return refuse('no_text', 'BHARAG returned no text for this SOP, so a replacement cannot be checked against it.');
+      const r = applyReplacements(oldText, reps);
+      if (!r.ok) return refuse('replacement_not_found', r.reason);
+      text = r.text;
+    }
+    if (newTitle !== null && newTitle.toLowerCase() !== d.sop.title.toLowerCase()) {
+      const all = await sops.read({ fresh: true });
+      if (!all.ok || !all.complete) return refuse('cannot_check_duplicates', `The SOP list could not be read whole (${all.error ?? all.note ?? 'incomplete'}), so a title clash cannot be ruled out.`);
+      const clash = all.sops.find((s) => s.id !== id && s.title.toLowerCase() === newTitle.toLowerCase());
+      if (clash) return refuse('title_taken', `Another SOP already has that title (${clash.id}).`);
+    }
+    const changes: { title?: string; content?: string; metadata?: Record<string, unknown> } = {};
+    const changed: string[] = [];
+    if (text !== oldText) { changes.content = text; changed.push('content'); }
+    if (newTitle !== null && newTitle !== d.sop.title) { changes.title = newTitle; changed.push('title'); }
+    const prevMeta = (d.sop.metadata ?? {}) as Record<string, unknown>;
+    const edits = Array.isArray(prevMeta.edits) ? (prevMeta.edits as unknown[]) : [];
+    const edit = { at: new Date().toISOString(), by: requester, reason, changed: [...changed, ...(newLink !== null && newLink !== d.sop.source_link ? ['source_link'] : [])], via: 'mcp:edit_sop' };
+    if (newLink !== null && newLink !== d.sop.source_link) { changed.push('source_link'); }
+    if (!changed.length) return refuse('no_change', 'What was sent is what the SOP already says.');
+    changes.metadata = { ...(newLink !== null && newLink !== d.sop.source_link ? { source_link: newLink } : {}), edits: [...edits, edit].slice(-20) };
+    const before = { id, title: d.sop.title, source_link: d.sop.source_link, content: oldText };
+    if (dry) {
+      await auditClose(audit, { outcome: 'dry_run', detail: `would edit ${id} "${d.sop.title}" (${changed.join(', ')})`, natural_id: id });
+      return { ok: true, edited: false, dry_run: true, id, title: changes.title ?? d.sop.title, changed, new_content: changes.content, message: 'Dry run: nothing was changed.', audit_id: audit };
+    }
+    const r = await bharag.patchDocument(sops.keyVar(), id, changes);
+    if (!r.ok) {
+      await auditClose(audit, { outcome: 'failed', detail: r.detail, natural_id: id, before });
+      return { ok: false, edited: false, reason: 'edit_failed', message: `BHARAG did not take the edit: ${r.detail}`, raise: true, audit_id: audit };
+    }
+    sops.forget();
+    let verified = false;
+    let readBack = 'not read';
+    const after = await sops.doc(id);
+    if (!after.ok) readBack = `read-back failed: ${after.reason}`;
+    else {
+      verified = after.sop.title === (changes.title ?? d.sop.title) && (changes.content === undefined || after.sop.content === changes.content);
+      readBack = verified ? 'stored text matches' : 'stored text differs from what was sent';
+    }
+    await auditClose(audit, { outcome: verified ? 'updated' : 'failed', detail: `edited ${id} in place (${changed.join(', ')}): ${readBack} — ${reason}`, natural_id: id, before, after: { id, title: changes.title ?? d.sop.title, changed, verified } });
+    return verified
+      ? { ok: true, edited: true, verified: true, id, title: changes.title ?? d.sop.title, changed, read_back: readBack, message: `Edited "${changes.title ?? d.sop.title}" in place; same id, so every link still works. The old text is kept on audit line ${audit}.`, audit_id: audit }
+      : { ok: false, edited: true, verified: false, id, changed, read_back: readBack, reason: 'not_verified', message: 'BHARAG took the edit, but reading it back does not show what was sent.', raise: true, audit_id: audit };
+  },
+};
+
+/**
  * read_sop (2026-10-14, Destiny — LOOP-1791848474713-ZZVU). One SOP's whole text, by BHARAG id
  * or by exact title, the same read the Codex page's SOPs tab makes (sops.doc).
  *
@@ -234,4 +362,4 @@ export const readSopTool: ToolDefinition = {
 
 export const SOP_READ_TOOLS: ToolDefinition[] = [readSopTool];
 
-export const SOP_WRITE_TOOLS: ToolDefinition[] = [logSopTool, deleteSopTool];
+export const SOP_WRITE_TOOLS: ToolDefinition[] = [logSopTool, deleteSopTool, editSopTool];

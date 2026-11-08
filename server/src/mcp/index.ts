@@ -298,6 +298,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // only, and on this token it never moves anything itself: it posts an Approve / Cancel card in
         // #bha-engine-alerts and the lead moves when one of them approves.
         'move_buyer_to_form_2',
+        // 2026-11-08 (Destiny; Jason in #all-bayshorizonnetwork 1794151650.032329): correct an SOP in place
+        // when Destiny or Jason asks, instead of ingesting a second copy. Same id, old text on the audit line.
+        'edit_sop',
       ]),
     },
     {
