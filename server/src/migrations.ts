@@ -4358,6 +4358,14 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `ALTER TABLE engine_evidence ADD COLUMN IF NOT EXISTS proof_type text CHECK (proof_type IS NULL OR proof_type IN ('test_forced', 'live_natural'))`,
     ],
   },
+  {
+    id: 122,
+    name: 'Logstream shared farm event: one alert and one research job when a whole farm drops (Jason, 8 Nov 2026)',
+    statements: [
+      `ALTER TABLE engine_logstream_triggers DROP CONSTRAINT IF EXISTS engine_logstream_triggers_kind_check`,
+      `ALTER TABLE engine_logstream_triggers ADD CONSTRAINT engine_logstream_triggers_kind_check CHECK (kind IN ('signature_research', 'signature_escalation', 'workflow_rate', 'shared_outage', 'farm_event_alert', 'farm_event_research'))`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

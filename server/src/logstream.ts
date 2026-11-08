@@ -88,6 +88,8 @@ export const RULE = {
   rate_min_runs: 10,
   rate_min_failures: 3,
   outage_workflows: 5,
+  /** Shared farm event (8 Nov 2026, Jason, C0B5JHVAXCM 1791466065.559369): this many Monitoring Twin devices on one farm crossing together is one event. */
+  farm_event_devices: 5,
   recovery_trusted_from: '2026-10-02T00:00:00.000Z',
   /** The closure protocol was first used on 7 Oct 2026; a close before then is not judged against it. */
   s757_from: '2026-10-07T00:00:00.000Z',
@@ -179,7 +181,7 @@ export interface WorkflowRuns {
   failures: number;
 }
 export interface Crossing {
-  kind: 'signature_research' | 'signature_escalation' | 'workflow_rate' | 'shared_outage';
+  kind: 'signature_research' | 'signature_escalation' | 'workflow_rate' | 'shared_outage' | 'farm_event_alert' | 'farm_event_research';
   key: string;
   workflow: string | null;
   node: string | null;
@@ -191,6 +193,46 @@ export interface Crossing {
   workflows: string[];
   first_at: string | null;
   last_at: string | null;
+  /** A shared farm event only: the device crossings it stands for, and how many research jobs and person alerts they would have been. */
+  merged?: { farm_id: string; devices: string[]; research: number; alerts: number };
+}
+
+/** The Monitoring Twin writes its device faults as node "<farm id> / <device>". Pure. */
+export function farmDevice(c: { workflow: string | null; node: string | null }): { farm_id: string; device: string } | null {
+  if (c.workflow !== 'Monitoring Twin' || !c.node) return null;
+  const m = /^(\S+)\s\/\s(.+)$/.exec(c.node.trim());
+  return m ? { farm_id: m[1], device: m[2] } : null;
+}
+
+/**
+ * The shared farm event (8 Nov 2026, Jason on the Logstream re-tune, LOOP-1791558515351-4DR6). When
+ * RULE.farm_event_devices or more Monitoring Twin devices on one farm cross in the same pass, the farm
+ * dropped as a whole: their per-device crossings are replaced by ONE alert and ONE research job for the
+ * farm, and the farm event says which devices it stands for and what it saved. Pure.
+ */
+export function mergeFarmEvents(out: Crossing[]): Crossing[] {
+  const byFarm = new Map<string, Crossing[]>();
+  for (const c of out) {
+    if (c.kind !== 'signature_research' && c.kind !== 'signature_escalation') continue;
+    const fd = farmDevice(c);
+    if (fd) byFarm.set(fd.farm_id, [...(byFarm.get(fd.farm_id) ?? []), c]);
+  }
+  const merged = new Set<Crossing>();
+  const events: Crossing[] = [];
+  for (const [farm_id, list] of byFarm) {
+    const devices = [...new Set(list.map((c) => (farmDevice(c) as { device: string }).device))].sort();
+    if (devices.length < RULE.farm_event_devices) continue;
+    list.forEach((c) => merged.add(c));
+    const at = list.map((c) => c.first_at).filter(Boolean).sort() as string[];
+    const last = list.map((c) => c.last_at).filter(Boolean).sort() as string[];
+    const base = {
+      key: `farm:${farm_id}`, workflow: 'Monitoring Twin', node: null, lane_id: list[0].lane_id, n: devices.length, runs: null, failures: null,
+      incident_ids: [...new Set(list.flatMap((c) => c.incident_ids))], workflows: devices, first_at: at[0] ?? null, last_at: last[last.length - 1] ?? null,
+      merged: { farm_id, devices, research: list.filter((c) => c.kind === 'signature_research').length, alerts: list.filter((c) => c.kind === 'signature_escalation').length },
+    };
+    events.push({ kind: 'farm_event_alert', ...base }, { kind: 'farm_event_research', ...base });
+  }
+  return [...out.filter((c) => !merged.has(c)), ...events];
 }
 
 /**
@@ -218,6 +260,7 @@ export function evaluate(incidents: Incident[], runs: WorkflowRuns[]): Crossing[
     if (w.runs < RULE.rate_min_runs || w.failures < RULE.rate_min_failures || w.failures / w.runs < RULE.rate) continue;
     out.push({ kind: 'workflow_rate', key: w.workflow_id, workflow: w.workflow, node: null, lane_id: null, n: w.failures, runs: w.runs, failures: w.failures, incident_ids: [], workflows: [], first_at: null, last_at: null });
   }
+  out.splice(0, out.length, ...mergeFarmEvents(out));
   const crossed = [...new Set(out.map((c) => c.workflow ?? c.key))].sort();
   if (crossed.length >= RULE.outage_workflows) {
     out.push({ kind: 'shared_outage', key: 'shared-cause outage', workflow: null, node: null, lane_id: null, n: crossed.length, runs: null, failures: null, incident_ids: [...new Set(out.flatMap((c) => c.incident_ids))], workflows: crossed, first_at: null, last_at: null });
@@ -354,6 +397,16 @@ interface TriggerRow {
 }
 
 function jobText(c: Crossing): { question: string; context: string } {
+  if (c.kind === 'farm_event_research' && c.merged) {
+    return {
+      question: `${c.n} devices on farm ${c.merged.farm_id} failed together in the last ${RULE.window_days} days (${c.merged.devices.join(', ')}). What shared cause takes the whole farm down at once (the gateway, power, network, the feed), and what should change?`,
+      context: [
+        `Opened by Logstream's shared farm event rule (Jason Bays, 8 Nov 2026): ${RULE.farm_event_devices} or more Monitoring Twin devices on one farm crossing in the same pass are one farm event, with one research job, never one per device. This job stands in for ${c.merged.research} per-device jobs.`,
+        `First ${c.first_at}, latest ${c.last_at}. Incidents: ${c.incident_ids.join(', ')}.`,
+        'Before writing the finding, read the farm\'s feed and incidents: call read_monitoring_twin and read_logstream with workflow "Monitoring Twin". Cite each as a source by its tool name.',
+      ].join('\n'),
+    };
+  }
   if (c.kind === 'workflow_rate') {
     const pct = Math.round(((c.failures ?? 0) / Math.max(1, c.runs ?? 1)) * 100);
     return {
@@ -387,6 +440,20 @@ export function alertMessage(c: Crossing, triggerId: string): AlertMessage {
   const base = dashboardUrl();
   const footer = { type: 'context', elements: [{ type: 'mrkdwn', text: `Logstream \`${triggerId}\` · Nothing was retried, closed or changed by this.` }] };
   const logstreamButton = { type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open Logstream' }, url: `${base}/logstream`, action_id: 'logstream_open' }] };
+  if (c.kind === 'farm_event_alert' && c.merged) {
+    const text = `Logstream: ${c.n} devices on farm ${c.merged.farm_id} failed together in the last ${RULE.window_days} days, one shared farm event. A person should look. (${triggerId})`;
+    return {
+      text,
+      blocks: [
+        { type: 'header', text: { type: 'plain_text', text: 'A whole farm dropped together' } },
+        { type: 'section', text: { type: 'mrkdwn', text: `${c.n} devices on farm \`${mrkdwnSafe(c.merged.farm_id)}\` crossed a fault threshold in the last ${RULE.window_days} days. This is treated as one farm event with one shared cause: one alert and one research job, instead of ${c.merged.alerts} device alerts and ${c.merged.research} device research jobs.` } },
+        { type: 'section', text: { type: 'mrkdwn', text: `*Devices*\n${c.merged.devices.map((d) => `• ${mrkdwnSafe(d)}`).join('\n')}` } },
+        { type: 'section', text: { type: 'mrkdwn', text: '*What to do*\nCheck what the devices share first: the Pi gateway, power and the network at the farm.' } },
+        logstreamButton,
+        footer,
+      ],
+    };
+  }
   if (c.kind === 'shared_outage') {
     const text = `Logstream: ${c.n} workflows are failing together in the last ${RULE.window_days} days, likely one shared cause. A person should look. (${triggerId})`;
     return {
@@ -494,7 +561,7 @@ export async function sweep(): Promise<{ rows_written: number; crossings: number
             await db.query(`UPDATE engine_logstream_triggers SET n = $2, runs = $3, failures = $4, incident_ids = $5::jsonb, workflows = $6::jsonb, last_at = $7 WHERE id = $1`, [held.rows[0].id, c.n, c.runs, c.failures, JSON.stringify(c.incident_ids), JSON.stringify(c.workflows), c.last_at]);
             continue;
           }
-          const research = c.kind === 'signature_research' || c.kind === 'workflow_rate';
+          const research = c.kind === 'signature_research' || c.kind === 'workflow_rate' || c.kind === 'farm_event_research';
           const state = research && outage ? 'suppressed_shared_outage' : 'pending';
           const id = mint('LST');
           await db.query(
@@ -507,6 +574,13 @@ export async function sweep(): Promise<{ rows_written: number; crossings: number
             { event_type: 'logstream_threshold_crossed', subject_id: id, lane: c.lane_id, actor: 'Logstream', detail: { kind: c.kind, key: c.key, n: c.n, runs: c.runs, failures: c.failures, incident_ids: c.incident_ids, workflows: c.workflows, window_days: RULE.window_days, action: state === 'pending' ? (research ? 'research job to be opened' : 'a person to be told') : 'no research: shared-cause outage' }, dedupe_key: `logstream_trigger:${id}` },
             db,
           );
+          // One record per farm event (Jason, 8 Nov 2026): which devices were merged and what it saved.
+          if (c.kind === 'farm_event_alert' && c.merged) {
+            await engineEvents.record(
+              { event_type: 'logstream_farm_event', subject_id: id, lane: c.lane_id, actor: 'Logstream', detail: { farm_id: c.merged.farm_id, devices: c.merged.devices, devices_merged: c.merged.devices.length, research_jobs_avoided: Math.max(0, c.merged.research - 1), person_alerts_avoided: Math.max(0, c.merged.alerts - 1), incident_ids: c.incident_ids, rule: `${RULE.farm_event_devices} or more devices on one farm in one pass` }, dedupe_key: `logstream_farm_event:${id}` },
+              db,
+            );
+          }
         }
       });
     }
@@ -517,7 +591,7 @@ export async function sweep(): Promise<{ rows_written: number; crossings: number
       const c = byKey.get(`${row.kind}|${row.key}`);
       if (!c) continue; // it no longer holds; the row keeps its state and says so
       try {
-        if (row.kind === 'signature_research' || row.kind === 'workflow_rate') {
+        if (row.kind === 'signature_research' || row.kind === 'workflow_rate' || row.kind === 'farm_event_research') {
           const { question, context } = jobText(c);
           const lane = c.lane_id ? (links.get(WORK_LANE[c.lane_id] ?? c.lane_id) ?? [])[0] ?? '' : '';
           // One job per signal and the daily budget (11 Oct 2026): the guard every automatic research
@@ -525,7 +599,7 @@ export async function sweep(): Promise<{ rows_written: number; crossings: number
           // the credit low, the crossing waits as `held` and is tried again on every pass.
           const g = await researchSignals.open({
             trigger: 'T4',
-            key: row.kind === 'workflow_rate' ? `workflow_rate:${c.key}` : `fault:${c.key}`,
+            key: row.kind === 'workflow_rate' ? `workflow_rate:${c.key}` : row.kind === 'farm_event_research' ? `farm_event:${c.key}` : `fault:${c.key}`,
             source: 'Logstream',
             ref: row.trigger_id,
             lane: lane || null,

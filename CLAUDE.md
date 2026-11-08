@@ -2722,6 +2722,17 @@ autopay, no pay wiring, no destructive automated action).
   first seen while it holds are `suppressed_shared_outage`. Each crossing is one
   row in `engine_logstream_triggers`, once per 7 days, and one
   `logstream_threshold_crossed` event.
+- **A whole farm dropping is one event** (8 Nov 2026, Jason, C0B5JHVAXCM 1791466065.559369 — the
+  re-tune, LOOP-1791558515351-4DR6). Monitoring Twin writes each device fault as node `<farm id> / <device>`,
+  so a farm-wide drop crossed once per device and the shared-outage rule (workflows) could not see it.
+  `mergeFarmEvents` (pure, in `evaluate`): when `RULE.farm_event_devices` (5) or more Monitoring Twin devices
+  on one farm hold a signature crossing in the same pass, their per-device crossings are replaced by
+  `farm_event_alert` (one alert) and `farm_event_research` (one research job, key `farm_event:farm:<id>`),
+  each naming the devices it stands for; migration 122 widens the kind check. Each farm event writes one
+  `logstream_farm_event` event with the devices merged and the research jobs and person alerts avoided.
+  Replayed over 8 Oct to 8 Nov from `engine_incidents` (the old rule reproduced the 62 jobs and 57 alerts
+  exactly): 3 farm events (21 Oct, 28 Oct, 4 Nov), so 3 jobs and 3 alerts. 3 in 7, 5 in 7, the 20% rate
+  rule and the nightly empty-read check are unchanged. `npm run test:logstream-farm-event`.
 - **The alert is a Block Kit card** (29 Oct 2026, Destiny: it should not read like an error).
   `logstream.alertMessage` gives the escalation the header "A repeating fault needs a look", the step,
   workflow, count and rule as fields, each incident as a link to Engine health (ten at most, the rest

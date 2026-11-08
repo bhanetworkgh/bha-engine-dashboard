@@ -27,6 +27,8 @@ const KIND: Record<LogstreamTrigger['kind'], string> = {
   signature_escalation: 'same fault, 5 in 7 days',
   workflow_rate: 'workflow failing 20% or more',
   shared_outage: 'shared-cause outage',
+  farm_event_alert: 'whole farm at once (alert)',
+  farm_event_research: 'whole farm at once (research)',
 };
 
 function ActionPill({ t }: { t: LogstreamTrigger }) {
@@ -79,8 +81,8 @@ function Crossings({ data }: { data: LogstreamData }) {
             <tr key={t.trigger_id} className="border-b border-line align-top">
               <td className="tabular px-3 py-2 text-dim">{when(t.detected_at)}</td>
               <td className="px-3 py-2 text-ink">
-                {t.kind === 'shared_outage' ? `${t.n} workflows at once` : (t.failed_node ?? t.workflow ?? t.key)}
-                <div className="text-[11.5px] text-faint">{t.kind === 'shared_outage' ? t.workflows.join(', ') : `${t.workflow ?? ''}${t.lane_id ? ` · ${t.lane_id}` : ''}`}</div>
+                {t.kind === 'shared_outage' ? `${t.n} workflows at once` : t.kind === 'farm_event_alert' || t.kind === 'farm_event_research' ? `${t.n} devices on one farm at once` : (t.failed_node ?? t.workflow ?? t.key)}
+                <div className="text-[11.5px] text-faint">{t.kind === 'shared_outage' || t.kind === 'farm_event_alert' || t.kind === 'farm_event_research' ? t.workflows.join(', ') : `${t.workflow ?? ''}${t.lane_id ? ` · ${t.lane_id}` : ''}`}</div>
               </td>
               <td className="px-3 py-2 text-dim">{KIND[t.kind]}</td>
               <td className="tabular px-3 py-2 text-dim">{t.kind === 'workflow_rate' ? `${t.failures} of ${t.runs} runs` : t.n}</td>

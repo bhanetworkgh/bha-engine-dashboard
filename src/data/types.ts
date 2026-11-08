@@ -4470,7 +4470,7 @@ export interface ScheduledRunsData {
 /** The Logstream page (server/src/logstream.ts, 2026-10-10). */
 export interface LogstreamTrigger {
   trigger_id: string;
-  kind: 'signature_research' | 'signature_escalation' | 'workflow_rate' | 'shared_outage';
+  kind: 'signature_research' | 'signature_escalation' | 'workflow_rate' | 'shared_outage' | 'farm_event_alert' | 'farm_event_research';
   key: string;
   workflow: string | null;
   failed_node: string | null;
