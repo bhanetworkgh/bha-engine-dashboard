@@ -44,6 +44,7 @@ import * as executions from './executions';
 import * as health from './health';
 import * as selfHealing from './selfHealing';
 import * as engineStrain from './engineStrain';
+import * as providers from './providers';
 import * as healthReport from './healthReport';
 import * as repairs from './repairs';
 import * as doctrineDrillTools from './mcp/doctrineDrillTools';
@@ -2044,6 +2045,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** Engine strain and what each audience is told (27 Oct 2026, 7RZT). The page and read_engine_strain share it. */
       case '/api/engine-health/strain':
         return send(res, 200, await engineStrain.read(Number(url.searchParams.get('hours')) || 24));
+      /** Which AI provider each part runs on (8 Nov 2026). The page route and read_providers share providers.read. */
+      case '/api/engine-health/providers':
+        return send(res, 200, await providers.read());
       case '/api/engine-health/metrics': {
         const lane = url.searchParams.get('lane');
         if (lane && !health.LANE_KEYS.includes(lane)) throw new HttpError(404, `"${lane}" is not a lane this engine reports on. One of: ${health.LANE_KEYS.join(', ')}.`);
