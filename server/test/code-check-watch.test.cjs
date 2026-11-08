@@ -204,6 +204,8 @@ async function draftMarksTheCard() {
     if (/SELECT actor FROM engine_events/.test(sql)) { const v = held.get(params[0]); return { rows: v ? [{ actor: v.e.actor }] : [] }; }
     if (/code_check_marked_reviewed/.test(sql)) return { rows: [...held.values()].filter((v) => v.e.event_type === 'code_check_marked_reviewed' && params[0].includes(v.e.subject_id)).map((v) => ({ subject_id: v.e.subject_id })) };
     if (/Builder Channel ID/.test(sql)) return { rows: [{ cid: 'CODEX-20261102-kavin-g-n-rover', ch: 'C0BN30RU3UK' }], rowCount: 1 };
+    // No automatic check draft for this log (draftFor, added with the automatic check): the watch posts its own card.
+    if (/FROM engine_code_check_drafts/.test(sql)) return { rows: [], rowCount: 0 };
     throw new Error('unexpected query: ' + sql.slice(0, 80));
   };
   cc.read = async () => ({
@@ -240,7 +242,7 @@ async function draftMarksTheCard() {
     assert.equal(sent.length, 1);
     ok('the next pass, still at the alert step, sends nothing: the claim is held');
 
-    waitingHours = 4;
+    waitingHours = 7; // reminder 1 is due 6 hours after approval (RULE, 6 Nov)
     r = await watch.run({ find: async () => null, now: at(7), post: async () => ({ ok: false, detail: 'not_in_channel' }) });
     assert.equal(r.failed.length, 1);
     assert.ok(!held.has(watch.dedupeKey('CODEX-20261102-kavin-g-n-rover', 1)));
@@ -252,7 +254,7 @@ async function draftMarksTheCard() {
     assert.match(sent[1].text, /<@U0AEW3TBYH1> Reminder 1 of 3: Kavin G N's log was approved 7 hours ago/);
     ok('the next pass retries it and reminder 1 goes in the card\'s thread, tagging Destiny');
 
-    waitingHours = 12.5;
+    waitingHours = 18.5; // the third and last reminder is due at 18 hours
     r = await watch.run({ find: async () => null, now: at(18.5), dry_run: true, post: okPost });
     assert.equal(r.would_send.length, 1);
     assert.match(r.would_send[0].text, /Last reminder/);
