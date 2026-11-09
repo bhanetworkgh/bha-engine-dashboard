@@ -23,12 +23,31 @@ import { ADMIN_IDS } from '../writeGuards';
 import { auditClose, auditOpen } from './writeTools';
 import type { ToolDefinition } from './tools';
 
+/**
+ * Read-back equality for text stored in BHARAG (9 Nov 2026, Jason in #bha-media-twin 1794226794.039769: "Leading
+ * indentation on sub-bullets may be stripped or normalized by BHARAG storage. Read-back verification should compare
+ * text tokens and punctuation, not raw whitespace, when assessing equality."). Every word and punctuation mark must
+ * match in order; only the whitespace between them may differ. Returns how it matched, so the answer can say so.
+ */
+export function sameStoredText(stored: string | null | undefined, sent: string): 'exact' | 'whitespace_only' | 'differs' {
+  if (stored === null || stored === undefined) return 'differs';
+  if (stored === sent) return 'exact';
+  const tokens = (t: string) => t.split(/\s+/).filter(Boolean).join(' ');
+  return tokens(stored) === tokens(sent) ? 'whitespace_only' : 'differs';
+}
+
+const READ_BACK = {
+  exact: 'stored text matches',
+  whitespace_only: 'stored text matches word for word; BHARAG normalised some whitespace (indentation or blank lines), which the check ignores',
+  differs: 'stored text differs from what was sent',
+} as const;
+
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
 export const logSopTool: ToolDefinition = {
   name: 'log_sop',
   description:
-    'Write one SOP into BHARAG, in the workspace Bays writes and reads SOPs in (BHARAG_SOPS_KEY), through the write guard. title must start "SOP -- ". content is stored as sent. source_link: the Slack thread the SOP came from (required). supersedes: BHARAG ids of SOPs this one replaces, recorded on it (they are not removed; use delete_sop). requester_user_id: Destiny or Jason. Refused when an SOP with the same title is already held. After the ingest the SOP is read back and its stored text compared with what was sent: verified true only when they match. dry_run checks everything and writes nothing. Returns {ok, id, verified}. Audited on engine_mcp_writes.',
+    'Write one SOP into BHARAG, in the workspace Bays writes and reads SOPs in (BHARAG_SOPS_KEY), through the write guard. title must start "SOP -- ". content is stored as sent. source_link: the Slack thread the SOP came from (required). supersedes: BHARAG ids of SOPs this one replaces, recorded on it (they are not removed; use delete_sop). requester_user_id: Destiny or Jason. Refused when an SOP with the same title is already held. After the ingest the SOP is read back and its stored text compared with what was sent: verified true only when every word and punctuation mark matches; whitespace BHARAG normalises, such as sub-bullet indentation, is ignored and reported. dry_run checks everything and writes nothing. Returns {ok, id, verified}. Audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -87,8 +106,9 @@ export const logSopTool: ToolDefinition = {
     let readBack = 'not read';
     try {
       const back = await bharag.getDocument('codex', r.id, sops.keyVar());
-      verified = !!back && back.title?.trim() === title && (back.raw_content ?? '') === content;
-      readBack = !back ? 'not found on read-back' : verified ? 'stored text matches' : 'stored text differs from what was sent (the guard may have redacted something)';
+      const m = back ? sameStoredText(back.raw_content ?? '', content) : 'differs';
+      verified = !!back && back.title?.trim() === title && m !== 'differs';
+      readBack = !back ? 'not found on read-back' : verified ? READ_BACK[m] : 'stored text differs from what was sent (the guard may have redacted something)';
     } catch (e) {
       readBack = `read-back failed: ${e instanceof Error ? e.message : String(e)}`;
     }
@@ -179,7 +199,7 @@ export function applyReplacements(text: string, reps: Replacement[]): { ok: true
 export const editSopTool: ToolDefinition = {
   name: 'edit_sop',
   description:
-    'Edit one SOP in BHARAG in place, by its BHARAG id: the id and every link to it stay the same, and no second SOP is made. Use it when Destiny or Jason asks for an SOP to be corrected (a wrong date, a wrong name, a changed rule), never log_sop or an ingest, which make a duplicate. Send `replacements` ([{find, replace}], each find occurring exactly once in the text as it is now) for a small fix, or `content` for the whole new text, and/or a new `title` (still "SOP -- ..."), and/or a new `source_link`. reason is required. requester_user_id: Destiny or Jason only. The old text is kept on the audit line and the edit is read back (verified true only when the stored text matches). dry_run shows the change and writes nothing. Returns {ok, edited, verified, id, changed}. Audited on engine_mcp_writes.',
+    'Edit one SOP in BHARAG in place, by its BHARAG id: the id and every link to it stay the same, and no second SOP is made. Use it when Destiny or Jason asks for an SOP to be corrected (a wrong date, a wrong name, a changed rule), never log_sop or an ingest, which make a duplicate. Send `replacements` ([{find, replace}], each find occurring exactly once in the text as it is now) for a small fix, or `content` for the whole new text, and/or a new `title` (still "SOP -- ..."), and/or a new `source_link`. reason is required. requester_user_id: Destiny or Jason only. The old text is kept on the audit line and the edit is read back (verified true only when the stored text matches word for word and punctuation for punctuation; whitespace BHARAG normalises, such as sub-bullet indentation, is ignored and reported). dry_run shows the change and writes nothing. Returns {ok, edited, verified, id, changed}. Audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -267,8 +287,9 @@ export const editSopTool: ToolDefinition = {
     const after = await sops.doc(id);
     if (!after.ok) readBack = `read-back failed: ${after.reason}`;
     else {
-      verified = after.sop.title === (changes.title ?? d.sop.title) && (changes.content === undefined || after.sop.content === changes.content);
-      readBack = verified ? 'stored text matches' : 'stored text differs from what was sent';
+      const m = changes.content === undefined ? 'exact' : sameStoredText(after.sop.content, changes.content);
+      verified = after.sop.title === (changes.title ?? d.sop.title) && m !== 'differs';
+      readBack = READ_BACK[verified ? m : 'differs'];
     }
     await auditClose(audit, { outcome: verified ? 'updated' : 'failed', detail: `edited ${id} in place (${changed.join(', ')}): ${readBack} — ${reason}`, natural_id: id, before, after: { id, title: changes.title ?? d.sop.title, changed, verified } });
     return verified
@@ -374,7 +395,7 @@ export const readSopTool: ToolDefinition = {
 export const editCodexDocTool: ToolDefinition = {
   name: 'edit_codex_doc',
   description:
-    "Correct the text of a Codex entry's document in BHARAG in place (same id, no second copy), for a wrong id, number or name the dashboard row has already been corrected for. Finds every Codex-workspace document whose metadata codex_entry_id is the entry. replacements: [{find, replace, all?}]; each find must occur, exactly once unless all is true. reason required; requester_user_id Destiny or Jason; refused on any agent token. Each document is read back (verified only when the stored text is what was sent). dry_run shows the documents and the change and writes nothing. Audited on engine_mcp_writes.",
+    "Correct the text of a Codex entry's document in BHARAG in place (same id, no second copy), for a wrong id, number or name the dashboard row has already been corrected for. Finds every Codex-workspace document whose metadata codex_entry_id is the entry. replacements: [{find, replace, all?}]; each find must occur, exactly once unless all is true. reason required; requester_user_id Destiny or Jason; refused on any agent token. Each document is read back (verified only when every word and punctuation mark matches; whitespace BHARAG normalises is ignored and reported). dry_run shows the documents and the change and writes nothing. Audited on engine_mcp_writes.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -442,8 +463,9 @@ export const editCodexDocTool: ToolDefinition = {
       if (!r.ok) { results.push({ id: p.id, ok: false, verified: false, detail: r.detail }); continue; }
       const back = await bharag.getDocument('codex', p.id, keyVar);
       const stored = back?.raw_content ?? null;
-      const verified = stored === p.after;
-      results.push({ id: p.id, ok: true, verified, detail: verified ? 'stored text matches' : 'stored text differs from what was sent' });
+      const m = sameStoredText(stored, p.after);
+      const verified = m !== 'differs';
+      results.push({ id: p.id, ok: true, verified, detail: READ_BACK[m] });
     }
     const allGood = results.every((x) => x.ok && x.verified);
     await auditClose(audit, {
