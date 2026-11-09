@@ -707,6 +707,8 @@ export interface CodexEntryDetail extends CodexEntry {
   session_description: string | null;
   jason_notes: string | null;
   /** Destiny's code check, written onto the log when it is recorded; null until there is one. */
+  /** LogStream (9 Nov 2026): the pay note the review suggests, from its work parts; null when the review made none. */
+  pay_suggestion: PaySuggestion | null;
   code_check: { verdict: string | null; pay_call: string | null; reason: string | null; approve: string | null; why: string | null; lane_goal: string | null; lane_check: string | null; link: string | null; at: string | null; full?: string | null } | null;
 }
 
@@ -4884,4 +4886,23 @@ export interface GenieBuilderData {
   first_at: string | null;
   last_at: string | null;
   rules: string[];
+}
+
+/** LogStream (9 Nov 2026): the pay note the engine suggests from the review. Jason decides; this is where he starts. */
+export interface PaySuggestion {
+  none?: boolean;
+  pay_recommendation?: 'full' | 'half' | 'none' | 'custom_fraction';
+  rest?: 'hold' | 'dock';
+  credited_share?: number;
+  held_share?: number;
+  docked_share?: number;
+  reason_tag?: string | null;
+  reason_note?: string | null;
+  release_condition?: string | null;
+  line?: string;
+  flags?: string[];
+  log_class?: string | null;
+  relog_of?: string | null;
+  relog_delta?: string | null;
+  parts?: { what: string; status: string; missing: string[]; evidence: string; silent_failure: string }[];
 }

@@ -4460,6 +4460,15 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE TRIGGER engine_pay_notes_no_delete BEFORE DELETE ON engine_pay_notes FOR EACH ROW EXECUTE FUNCTION engine_pay_note_frozen()`,
     ],
   },
+  {
+    id: 125,
+    name: 'LogStream: the suggested pay note and the log class kept beside each pay note decision (Jason, 9 Nov 2026)',
+    statements: [
+      `ALTER TABLE engine_pay_notes ADD COLUMN IF NOT EXISTS suggested jsonb`,
+      `ALTER TABLE engine_pay_notes ADD COLUMN IF NOT EXISTS log_class text`,
+      `ALTER TABLE engine_pay_notes ADD COLUMN IF NOT EXISTS relog_of text`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

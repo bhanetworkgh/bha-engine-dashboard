@@ -862,6 +862,10 @@ export interface PayNote {
   released_at: string | null;
   release_month: string | null;
   proof_link: string | null;
+  /** What the review suggested when it was decided (LogStream, 9 Nov 2026); null before it. */
+  suggested: Record<string, unknown> | null;
+  log_class: string | null;
+  relog_of: string | null;
 }
 export interface PayNoteChoice {
   pay_recommendation: 'full' | 'half' | 'none' | 'custom_fraction';

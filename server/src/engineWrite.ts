@@ -14,6 +14,8 @@
  * endpoint, the method and which credential let them in. That is `WriteCtx`.
  */
 import * as layer0Notice from './layer0Notice';
+import * as paySuggest from './paySuggest';
+import { query } from './pg';
 import * as mirror from './mirror';
 import * as store from './store';
 import { guardRejected } from './codexReject';
@@ -66,6 +68,8 @@ export async function postRecord(kind: mirror.MirrorKind, body: mirror.MirrorInp
     if (kind === 'codex') await guardRejected({ submissionId: submissionOf(body.fields) }, (body.fields as Record<string, unknown> | null) ?? null);
     // A voided parked log is closed to the engine too (2026-10-25, layer0Void.ts).
     if (kind === 'layer0') await guardVoided({ submissionId: submissionOf(body.fields) }, (body.fields as Record<string, unknown> | null) ?? null);
+    // LogStream (9 Nov 2026): a Codex write carrying the review's work parts gets its suggested pay note.
+    if (kind === 'codex' && body.fields && typeof body.fields === 'object') body = { ...body, fields: await paySuggest.annotate(body.fields as Record<string, unknown>) };
     const result = await mirror.upsert(kind, body, 'engine');
     if (kind === 'layer0' && layer0Notice.becameComplete(body.fields as Record<string, unknown>, result.changed)) void layer0Notice.deleteOnComplete(String(result.id)).catch(() => undefined);
     // A log that went through retires any parked copy of the same recording (2026-10-25).
@@ -130,6 +134,12 @@ export async function patchRecord(
   try {
     if (kind === 'codex') await guardRejected({ rowId }, fields);
     if (kind === 'layer0') await guardVoided({ rowId }, fields);
+    if (kind === 'codex' && ('Work Parts' in fields || 'Log Class' in fields)) {
+      // The suggestion is worked out from the row as it will be after the merge.
+      const cur = (await query<{ fields: Record<string, unknown> }>('SELECT fields FROM engine_codex_submissions WHERE id = $1', [rowId])).rows[0]?.fields ?? {};
+      const merged = await paySuggest.annotate({ ...cur, ...fields });
+      fields = { ...fields, 'Pay Suggestion': merged['Pay Suggestion'] };
+    }
     const r = await mirror.patchFields(kind, rowId, fields, 'engine');
     // Same as a POST: the row is stored, and this dates the status it was
     // left in. A patch that sets Status is exactly such a change.

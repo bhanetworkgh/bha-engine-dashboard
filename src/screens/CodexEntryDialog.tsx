@@ -128,7 +128,23 @@ export function CodexEntryDialog({
   useEffect(() => {
     let live = true;
     (load ?? getCodexDetail)(id)
-      .then((d) => live && setDetail(d))
+      .then((d) => {
+        if (!live) return;
+        setDetail(d);
+        // LogStream (9 Nov 2026): Approve starts from the review's suggested pay note, not from full.
+        const sg = d.pay_suggestion;
+        if (sg && !sg.none && sg.pay_recommendation) {
+          setPay({
+            pay_recommendation: sg.pay_recommendation,
+            rest: sg.rest ?? 'hold',
+            credited_share: sg.pay_recommendation === 'custom_fraction' ? sg.credited_share : undefined,
+            held_share: sg.pay_recommendation === 'custom_fraction' ? sg.held_share : undefined,
+            reason_tag: sg.reason_tag ?? null,
+            reason_note: sg.reason_note ?? null,
+            release_condition: sg.release_condition ?? null,
+          });
+        }
+      })
       .catch((e: unknown) => {
         if (!live) return;
         setMissing((e as { status?: number } | null)?.status === 404);
@@ -276,6 +292,20 @@ export function CodexEntryDialog({
             {approving && !readOnly && (
               <div className="mt-4 border-t border-line pt-4 text-[12.5px]">
                 <div className="mb-2 font-semibold">Pay note</div>
+                {detail?.pay_suggestion && (
+                  <div className="card mb-3 px-3 py-2 text-[12px]">
+                    <div>
+                      <span className="text-faint">Suggested from the review: </span>
+                      {detail.pay_suggestion.line ?? 'no suggestion'}
+                    </div>
+                    {(detail.pay_suggestion.flags ?? []).map((f) => (
+                      <div key={f} className="mt-1 text-degraded">
+                        {f}
+                      </div>
+                    ))}
+                    {!detail.pay_suggestion.none && <div className="mt-1 text-faint">The choice below starts there. Change it if the review got it wrong; both are kept.</div>}
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-3">
                   {(
                     [

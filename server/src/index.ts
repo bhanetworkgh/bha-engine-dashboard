@@ -74,6 +74,7 @@ import * as systemFeeds from './systemFeeds';
 import * as genieBuilder from './genieBuilder';
 import * as mediaWeekly from './mediaWeekly';
 import * as payNote from './payNote';
+import * as paySuggest from './paySuggest';
 import * as layer0Notice from './layer0Notice';
 import * as baysAsks from './baysAsks';
 import * as scheduledRuns from './scheduledRuns';
@@ -873,6 +874,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         },
         describe: (r) => String(r.message ?? '').slice(0, 400),
         hint: 'POST { submission_id or codex_entry_id, released_by (Destiny or Jason, Slack id), proof_link (https), note?, dry_run? }.',
+      },
+      /** LogStream (9 Nov 2026): the builder's approved logs this one may repeat. Layer 0 asks before the completeness check. Reads; writes nothing. */
+      '/api/engine/relog-check': {
+        kind: 'codex',
+        store: async (b) => ({ ...(await paySuggest.relogCheck(b)), dry_run: true }),
+        describe: (r) => `${(r.matches as unknown[]).length} earlier approved log(s) matched${r.unread ? ` (${r.unread})` : ''}`,
+        hint: 'POST { builder_user_id, session_url?, transcript?, submission_id? }. Reads the builder\'s approved logs; writes nothing.',
       },
       '/api/engine/pay-statement-facts': {
         kind: 'pay_statements',

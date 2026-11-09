@@ -14,6 +14,16 @@ import { Button, EmptyState, Pill, RecordId } from '../../components/ui';
 const when = (iso: string | null) => (iso ? iso.slice(0, 10) : '—');
 const share = (n: number) => String(Math.round(n * 1000) / 1000);
 const label: Record<string, string> = { full: 'full', half: 'half', none: 'none now', custom_fraction: 'custom' };
+/** What the review suggested (LogStream, 9 Nov 2026), so an override shows: "same" or what it was. */
+const suggestedLine = (n: PayNote): string | null => {
+  const sg = n.suggested as { line?: string; none?: boolean } | null;
+  return sg ? sg.line ?? null : null;
+};
+const suggestedShort = (n: PayNote): string => {
+  const sg = n.suggested as { pay_recommendation?: string; credited_share?: number; none?: boolean } | null;
+  if (!sg || sg.none || !sg.pay_recommendation) return '—';
+  return sg.pay_recommendation === n.pay_recommendation && sg.credited_share === n.credited_share ? 'same' : `${label[sg.pay_recommendation] ?? sg.pay_recommendation} (${sg.credited_share})`;
+};
 
 export default function Held({ notes, held, reload }: { notes: PayNote[]; held: PayNote[]; reload: () => void }) {
   const [open, setOpen] = useState<string | null>(null);
@@ -102,6 +112,7 @@ export default function Held({ notes, held, reload }: { notes: PayNote[]; held: 
                 <th className="px-3 py-2">released</th>
                 <th className="px-3 py-2">docked</th>
                 <th className="px-3 py-2">reason</th>
+                <th className="px-3 py-2">suggested</th>
                 <th className="px-3 py-2">decided</th>
               </tr>
             </thead>
@@ -117,6 +128,7 @@ export default function Held({ notes, held, reload }: { notes: PayNote[]; held: 
                   </td>
                   <td className="tabular px-3 py-2" title={n.reason_note ?? undefined}>{n.docked_share > 0 ? share(n.docked_share) : '—'}</td>
                   <td className="px-3 py-2 text-dim">{n.reason_tag ?? '—'}</td>
+                  <td className="px-3 py-2 text-faint" title={suggestedLine(n) ?? undefined}>{suggestedShort(n)}</td>
                   <td className="px-3 py-2 text-faint">{n.decided_by_name ?? n.decided_by}, {when(n.decided_at)}</td>
                 </tr>
               ))}

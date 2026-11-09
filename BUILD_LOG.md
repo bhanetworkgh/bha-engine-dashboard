@@ -14776,3 +14776,10 @@ Files:      server/src/index.ts
 Problem:    Engine — Pay Note Test Runner execution 78255: 7 of 8 checks failed. Every POST answered "Only Destiny or Jason set a pay note (decided_by is their Slack id); nobody was given." and the statement facts "month must be YYYY-MM." The FEEDS dispatcher read the JSON but never decoded body_b64, so a wrapped body arrived as { body_b64 } and nothing else.
 Fix:        decodeBodyB64 in the FEEDS dispatcher, as every other engine POST already does (3 Nov rule).
 Decision:   fix it at the dispatcher rather than per route, so any feed called with body_b64 behaves the same. Submit Actions stays unpublished until the runner passes.
+
+## 2026-11-09 22:30 — LogStream: re-log, live and silent-failure checks with a suggested pay note
+Intent:     Jason's second ask in DM 1794237173.152349: bake "relog + partial pay" into LogStream so the right pay note is the default, not manual judgement.
+Files:      server/src/paySuggest.ts (new), server/src/engineWrite.ts, server/src/payNote.ts, server/src/index.ts, server/src/migrations.ts (125), server/src/sources.ts, src/data/types.ts, src/data/index.ts, src/screens/CodexEntryDialog.tsx, src/screens/PayTracker/Held.tsx, server/test/pay-suggest.test.cjs, package.json, CLAUDE.md
+Problem:    none yet; n8n half (Layer 0 question, Layer 1 work parts, card, pop-up prefill) next.
+Fix:        —
+Decision:   the suggestion is computed on the dashboard from the review's facts, not by the model, so it is the same rule every time and testable. A re-narrated part is docked, never held (Jason: resubmissions do not backfill). Local, unmerged, unhooked or silently-failing parts are held with a release condition naming what is missing. Jason still decides; the suggestion is kept beside his decision. Only approved earlier logs count as "already paid" for the earlier-work check.

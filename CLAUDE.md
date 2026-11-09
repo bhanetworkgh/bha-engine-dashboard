@@ -5244,6 +5244,11 @@ admin login's own person. The monthly statement reads `POST /api/engine/pay-stat
 month's sessions, releases in the month, everything still held. Tools: `read_pay_notes`, `set_pay_note`,
 `release_pay_note` (write connection, refused on any agent token). `npm run test:pay-note`.
 
+**LogStream suggests the pay note** (2026-11-09, Destiny; Jason's "relog + partial pay" message in DM D0AF0DG8ZPY 1794237173.152349). `server/src/paySuggest.ts`, migration 125. Three checks, so a pay note is not a judgement call every time:
+- **Re-log at submission**: `POST /api/engine/relog-check` (`x-dashboard-key`, reads only) finds the builder's Approved or Input Added logs this one may repeat: the same recording or an earlier log named by id (strong), or a loop shared with an approved log in the last 14 days (medium). Layer 0 of Bays — Submit Actions calls it, and a log that matches and does not say whether it is fresh_build or RELOG_OLD_WORK is parked with one question: which, the earlier log, and what is new.
+- **At review**: Layer 1 writes `Log Class`, `Relog Of`, `Relog Delta` and `Work Parts` onto the Codex row (new field names), each part saying whether it is new this session, merged, hooked up, has a real Engine event, and any path that fails silently. What the log does not back counts as not done.
+- **The suggestion** is worked out on the dashboard on every Codex write carrying those fields (`engineWrite`) and stored on the row as `Pay Suggestion`: an old part is docked (RELOG_OLD_WORK, never held), a new part that is merged, hooked up and live is credited, merged and hooked up with no event yet is half held, anything local or with a silent failure is held with a release condition naming exactly what is missing. A silent failure is a red flag first on the card. Jason's review card shows it, the Approve pop-up (Slack and dashboard) opens on it, and **he decides**: `engine_pay_notes.suggested` keeps what was suggested beside what he picked, and the Held tab shows "same" or the suggestion. A credit on a re-log needs a reason note saying what it is for (`relog_needs_delta`). `npm run test:pay-suggest`.
+
 ### Pay Tracker — Code checks (2026-10-29, Destiny)
 **A fifth tab, at its own address (`/pay?tab=code-checks`).** Jason said yes on 28 Oct (DM
 D0AF0DG8ZPY, 1793181986.036119): from **1 Nov 2026** Destiny checks every approved log against what

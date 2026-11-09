@@ -32,6 +32,7 @@ import { query, withTransaction, type Queryable } from './pg';
 import * as events from './events';
 import * as engineEvents from './engineEvents';
 import { FeedError } from './systemFeeds';
+import * as paySuggest from './paySuggest';
 
 export const RECOMMENDATIONS = ['full', 'half', 'none', 'custom_fraction'] as const;
 export const REASON_TAGS = ['LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER'] as const;
@@ -51,6 +52,7 @@ export class PayNoteError extends FeedError {
 type Obj = Record<string, unknown>;
 const s = (v: unknown, max = 2000): string => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '');
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
+const pick = (v: unknown): string => (v && typeof v === 'object' ? String((v as Obj).name ?? '') : v == null ? '' : String(v));
 
 export interface PayNote {
   submission_id: string;
@@ -73,13 +75,18 @@ export interface PayNote {
   released_at: string | null;
   release_month: string | null;
   proof_link: string | null;
+  /** What the review suggested when this was decided (LogStream, 9 Nov 2026); null before it. */
+  suggested: Record<string, unknown> | null;
+  log_class: string | null;
+  relog_of: string | null;
 }
 
 const COLS = `submission_id, codex_entry_id, builder_slack_id, builder, session_month, pay_recommendation,
   credited_share::float8 AS credited_share, held_share::float8 AS held_share, released_share::float8 AS released_share,
   reason_tag, reason_note, release_condition, decided_by,
   to_char(decided_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS decided_at, released_by,
-  to_char(released_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS released_at, release_month, proof_link`;
+  to_char(released_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS released_at, release_month, proof_link,
+  suggested, log_class, relog_of`;
 
 function shape(r: Obj): PayNote {
   const credited = Number(r.credited_share);
@@ -96,7 +103,7 @@ function shape(r: Obj): PayNote {
 }
 
 /** The log a note belongs to, by Submission ID or Codex Entry ID. Approved only: a pay note is an approval's. */
-async function findLog(db: Queryable, ref: { submission_id?: string; codex_entry_id?: string }): Promise<{ submission_id: string; codex_entry_id: string | null; builder_slack_id: string | null; builder: string | null; month: string | null; status: string }> {
+async function findLog(db: Queryable, ref: { submission_id?: string; codex_entry_id?: string }): Promise<{ submission_id: string; codex_entry_id: string | null; builder_slack_id: string | null; builder: string | null; month: string | null; status: string; fields: Obj }> {
   const sub = s(ref.submission_id, 200);
   const cid = s(ref.codex_entry_id, 200);
   if (!sub && !cid) throw new PayNoteError('missing_log', 'Name the log: submission_id or codex_entry_id.');
@@ -110,7 +117,6 @@ async function findLog(db: Queryable, ref: { submission_id?: string; codex_entry
   if (!r.rows.length || !subs.size) throw new PayNoteError('log_not_found', `No log carries ${sub ? `Submission ID ${sub}` : `Codex Entry ID ${cid}`}.`, 404);
   if (subs.size > 1) throw new PayNoteError('ambiguous_log', `${cid} matches more than one submission (${[...subs].join(', ')}). Name the submission_id.`, 409);
   const f = r.rows[0].fields;
-  const pick = (v: unknown): string => (v && typeof v === 'object' ? String((v as Obj).name ?? '') : v == null ? '' : String(v));
   const when = pick(f.Timestamp) || pick(f['Processed At']);
   const month = /^\d{4}-\d{2}/.test(when) ? new Date(when).toISOString().slice(0, 7) : null;
   return {
@@ -120,6 +126,7 @@ async function findLog(db: Queryable, ref: { submission_id?: string; codex_entry
     builder: pick(f['Builder Name']) || null,
     month,
     status: pick(f['Jason Status']),
+    fields: f,
   };
 }
 
@@ -180,6 +187,14 @@ export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ w
     if (log.status !== 'Approved' && log.status !== 'Input Added') {
       throw new PayNoteError('not_approved', `${log.codex_entry_id ?? log.submission_id} is "${log.status || 'not reviewed'}", not approved: a pay note belongs to an approval.`);
     }
+    // LogStream (9 Nov 2026): a re-log is credited only for the new work it states, so any credit on
+    // one has to say what the credit is for. The suggestion the review made is kept beside the decision.
+    const logClass = pick(log.fields['Log Class']) === 'RELOG_OLD_WORK' ? 'RELOG_OLD_WORK' : pick(log.fields['Log Class']) === 'fresh_build' ? 'fresh_build' : null;
+    const relogOf = pick(log.fields['Relog Of']).slice(0, 300) || null;
+    if (logClass === 'RELOG_OLD_WORK' && credited > 0 && (!note || note.length < 8)) {
+      throw new PayNoteError('relog_needs_delta', `${log.codex_entry_id ?? log.submission_id} is a re-log${relogOf ? ` of ${relogOf}` : ''}. It is credited only for the new work it states, so a credit on it needs a reason_note saying what the credit is for.`);
+    }
+    const suggested = paySuggest.fromRow(log.fields);
     const before = (await db.query<Obj>(`SELECT ${COLS} FROM engine_pay_notes WHERE submission_id = $1 FOR UPDATE`, [log.submission_id])).rows[0];
     const prior = before ? shape(before) : null;
     const correction = s(b.correction_note, 600) || null;
@@ -194,13 +209,14 @@ export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ w
     }
     await db.query(
       `INSERT INTO engine_pay_notes (submission_id, codex_entry_id, builder_slack_id, builder, session_month, pay_recommendation, credited_share, held_share,
-                                     reason_tag, reason_note, release_condition, decided_by, decided_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now(), now())
+                                     reason_tag, reason_note, release_condition, decided_by, decided_at, updated_at, suggested, log_class, relog_of)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now(), now(), $13, $14, $15)
        ON CONFLICT (submission_id) DO UPDATE SET codex_entry_id = EXCLUDED.codex_entry_id, builder_slack_id = EXCLUDED.builder_slack_id, builder = EXCLUDED.builder,
          session_month = EXCLUDED.session_month, pay_recommendation = EXCLUDED.pay_recommendation, credited_share = EXCLUDED.credited_share,
          held_share = EXCLUDED.held_share, reason_tag = EXCLUDED.reason_tag, reason_note = EXCLUDED.reason_note,
-         release_condition = EXCLUDED.release_condition, decided_by = EXCLUDED.decided_by, decided_at = now(), updated_at = now()`,
-      [log.submission_id, log.codex_entry_id, log.builder_slack_id, log.builder, log.month, recommendation, credited, held, tag, note, held > 0 ? condition : null, by],
+         release_condition = EXCLUDED.release_condition, decided_by = EXCLUDED.decided_by, decided_at = now(), updated_at = now(),
+         suggested = coalesce(engine_pay_notes.suggested, EXCLUDED.suggested), log_class = EXCLUDED.log_class, relog_of = EXCLUDED.relog_of`,
+      [log.submission_id, log.codex_entry_id, log.builder_slack_id, log.builder, log.month, recommendation, credited, held, tag, note, held > 0 ? condition : null, by, suggested ? JSON.stringify(suggested) : null, logClass, relogOf],
     );
     const after = shape((await db.query<Obj>(`SELECT ${COLS} FROM engine_pay_notes WHERE submission_id = $1`, [log.submission_id])).rows[0]);
     const action = prior ? ('correct' as const) : ('set' as const);
