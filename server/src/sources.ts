@@ -1423,6 +1423,12 @@ export function mapPaySession(rec: AtRecord): PaySession {
     codex_link: str(f['Codex Link']),
     slack_card_link: str(f['Slack Card Link']),
     notes: str(f.Notes),
+    // The pay note (9 Nov 2026, payNote.ts). No note: a full day, as every log before it.
+    pay_recommendation: str(f['Pay Recommendation']),
+    credited_share: typeof f['Credited Share'] === 'number' ? (f['Credited Share'] as number) : null,
+    held_share: typeof f['Held Share'] === 'number' ? (f['Held Share'] as number) : null,
+    docked_share: typeof f['Docked Share'] === 'number' ? (f['Docked Share'] as number) : null,
+    pay_reason_tag: str(f['Pay Reason Tag']),
     source: airtableSource(PAY_SESSIONS.base, PAY_SESSIONS.table, rec.id),
     airtable: { base: PAY_SESSIONS.base, table: PAY_SESSIONS.table, record_id: rec.id, url: recordUrl(PAY_SESSIONS.base, PAY_SESSIONS.table, rec.id) },
   };

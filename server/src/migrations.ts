@@ -4409,6 +4409,57 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE INDEX IF NOT EXISTS engine_genie_builder_interactions_rail ON engine_genie_builder_interactions (rail_id, queued_at DESC)`,
     ],
   },
+  {
+    id: 124,
+    name: 'Pay notes: shares of a day credited, held or docked per approved log, with every change kept (Jason, 9 Nov 2026)',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_pay_notes (
+        submission_id text PRIMARY KEY,
+        codex_entry_id text,
+        builder_slack_id text,
+        builder text,
+        session_month text,
+        pay_recommendation text NOT NULL CHECK (pay_recommendation IN ('full', 'half', 'none', 'custom_fraction')),
+        credited_share numeric(4,3) NOT NULL CHECK (credited_share >= 0 AND credited_share <= 1),
+        held_share numeric(4,3) NOT NULL CHECK (held_share >= 0 AND held_share <= 1),
+        released_share numeric(4,3) NOT NULL DEFAULT 0 CHECK (released_share >= 0 AND released_share <= 1),
+        reason_tag text CHECK (reason_tag IS NULL OR reason_tag IN ('LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER')),
+        reason_note text,
+        release_condition text,
+        decided_by text NOT NULL,
+        decided_at timestamptz NOT NULL,
+        released_by text,
+        released_at timestamptz,
+        release_month text,
+        proof_link text,
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        CHECK (credited_share + held_share + released_share <= 1.0005)
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_pay_notes_codex ON engine_pay_notes (codex_entry_id)`,
+      `CREATE INDEX IF NOT EXISTS engine_pay_notes_held ON engine_pay_notes (builder_slack_id) WHERE held_share > 0`,
+      `CREATE TABLE IF NOT EXISTS engine_pay_note_history (
+        id bigserial PRIMARY KEY,
+        submission_id text NOT NULL,
+        codex_entry_id text,
+        action text NOT NULL CHECK (action IN ('set', 'correct', 'release')),
+        before jsonb,
+        after jsonb NOT NULL,
+        by_slack_id text NOT NULL,
+        via text NOT NULL,
+        note text,
+        at timestamptz NOT NULL DEFAULT now()
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_pay_note_history_sub ON engine_pay_note_history (submission_id, id)`,
+      // Jason: "we correct paid records forward, we never remove them". The history cannot be edited or
+      // deleted, and a pay note cannot be deleted, by anyone, from any code path.
+      `CREATE OR REPLACE FUNCTION engine_pay_note_frozen() RETURNS trigger LANGUAGE plpgsql AS $f$
+       BEGIN RAISE EXCEPTION 'pay records are corrected forward, never removed or rewritten (%)', TG_TABLE_NAME; END $f$`,
+      `DROP TRIGGER IF EXISTS engine_pay_note_history_frozen ON engine_pay_note_history`,
+      `CREATE TRIGGER engine_pay_note_history_frozen BEFORE UPDATE OR DELETE ON engine_pay_note_history FOR EACH ROW EXECUTE FUNCTION engine_pay_note_frozen()`,
+      `DROP TRIGGER IF EXISTS engine_pay_notes_no_delete ON engine_pay_notes`,
+      `CREATE TRIGGER engine_pay_notes_no_delete BEFORE DELETE ON engine_pay_notes FOR EACH ROW EXECUTE FUNCTION engine_pay_note_frozen()`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

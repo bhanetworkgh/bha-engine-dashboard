@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useData } from '../../app/useData';
-import { getCodeChecks, getPay, getPayMetrics } from '../../data';
+import { getCodeChecks, getPay, getPayMetrics, getPayNotes } from '../../data';
 import { useReplayKey, LiveIndicator, LoadFailed, Loading, MonthPicker, monthLabel, monthsFrom, PageHeader, RowsLine, Tabs, thisMonth } from '../../components/ui';
 import Owed from './Owed';
 import Statements from './Statements';
 import Sessions from './Sessions';
 import Statistics from './Statistics';
 import CodeChecks from './CodeChecks';
+import Held from './Held';
 
 /**
  * Pay Tracker — built 2026-09-17, against a ledger created the same day.
@@ -46,7 +47,7 @@ import CodeChecks from './CodeChecks';
  */
 const PAY_KINDS = ['pay_sessions', 'pay_statements', 'pay_builders', 'codex'] as const;
 
-const TABS = ['Owed', 'Statements', 'Sessions', 'Statistics', 'Code checks'] as const;
+const TABS = ['Owed', 'Held', 'Statements', 'Sessions', 'Statistics', 'Code checks'] as const;
 type Tab = (typeof TABS)[number];
 /**
  * Code checks (29 Oct 2026): Destiny's second review of every approved log, and November's outputs
@@ -55,13 +56,20 @@ type Tab = (typeof TABS)[number];
  */
 const CODE_CHECKS: Tab = 'Code checks';
 const CODE_CHECK_KINDS = ['code_checks', 'pay_sessions'] as const;
+/**
+ * Held (9 Nov 2026): every share of a day held until its condition is met, with Release. Its own address
+ * (`/pay?tab=held`) so the pay note tools can link to it, and never cut to the month: a held share is
+ * owed whatever month is showing.
+ */
+const HELD: Tab = 'Held';
 
 export default function PayTracker() {
   const [params, setParams] = useSearchParams();
   const [plainTab, setPlainTab] = useState<Tab>('Owed');
-  const tab: Tab = params.get('tab') === 'code-checks' ? CODE_CHECKS : plainTab;
+  const tab: Tab = params.get('tab') === 'code-checks' ? CODE_CHECKS : params.get('tab') === 'held' ? HELD : plainTab;
   const setTab = (t: Tab) => {
     if (t === CODE_CHECKS) setParams({ tab: 'code-checks' });
+    else if (t === HELD) setParams({ tab: 'held' });
     else {
       if (params.get('tab')) setParams({});
       setPlainTab(t);
@@ -82,6 +90,8 @@ export default function PayTracker() {
   const { status, data: loaded, error } = useData(getPay, [], { kinds: PAY_KINDS });
   const metrics = useData(() => getPayMetrics(month), [month], { kinds: PAY_KINDS });
   const checks = useData(getCodeChecks, [], { kinds: CODE_CHECK_KINDS });
+  const [notesTick, setNotesTick] = useState(0);
+  const notes = useData(getPayNotes, [notesTick], { kinds: PAY_KINDS });
 
   const all = loaded;
   const months = useMemo(
@@ -131,6 +141,7 @@ export default function PayTracker() {
               Owed: unpaid ? { n: unpaid, tone: 'degraded' } : undefined,
               Statements: openStatements ? { n: openStatements } : undefined,
               // Only a late check is worth a count in amber: it is somebody's pay stalling.
+              Held: notes.data?.held.length ? { n: notes.data.held.length } : undefined,
               'Code checks': checks.data?.counts.late ? { n: checks.data.counts.late, tone: 'degraded' } : checks.data?.counts.waiting ? { n: checks.data.counts.waiting } : undefined,
             }}
           />
@@ -152,7 +163,15 @@ export default function PayTracker() {
         </div>
       </div>
 
-      {tab === CODE_CHECKS ? (
+      {tab === HELD ? (
+        notes.status === 'loading' && !notes.data ? (
+          <Loading />
+        ) : !notes.data ? (
+          <LoadFailed error={notes.error} />
+        ) : (
+          <Held notes={notes.data.notes} held={notes.data.held} reload={() => setNotesTick((n) => n + 1)} />
+        )
+      ) : tab === CODE_CHECKS ? (
         checks.status === 'loading' && !checks.data ? (
           <Loading />
         ) : !checks.data ? (

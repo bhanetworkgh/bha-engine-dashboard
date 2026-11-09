@@ -51,6 +51,26 @@ function columns(openCodex: (id: string) => void): RecordColumn<PaySession>[] {
           : undefined,
       cell: (s) => (s.paid === true ? <Pill tone="ok">paid</Pill> : s.paid === false ? <Pill tone="degraded">owed</Pill> : <Pill>not recorded</Pill>),
     },
+    {
+      key: 'share',
+      header: 'share',
+      className: 'tabular',
+      // The pay note (9 Nov 2026): shares of a day, never money. No note is a full day.
+      title: (s) =>
+        s.pay_recommendation
+          ? `${s.pay_recommendation}: ${s.credited_share ?? 0} credited${s.held_share ? `, ${s.held_share} held` : ''}${s.docked_share ? `, ${s.docked_share} docked` : ''}${s.pay_reason_tag ? ` (${s.pay_reason_tag})` : ''}`
+          : 'No pay note on this log, so it counts as a full day',
+      cell: (s) =>
+        s.pay_recommendation ? (
+          <span>
+            {s.credited_share ?? 0}
+            {s.held_share ? <span className="text-dim"> +{s.held_share} held</span> : null}
+            {s.docked_share ? <span className="text-faint"> ({s.docked_share} docked)</span> : null}
+          </span>
+        ) : (
+          <span className="text-faint">1</span>
+        ),
+    },
     { key: 'paid_at', header: 'paid at', className: 'tabular text-faint', cell: (s) => when(s.paid_at) },
     { key: 'paid_by', header: 'paid by', card: 'meta', className: 'card-meta text-dim', cell: (s) => s.paid_by ?? <span className="text-faint">—</span> },
     {

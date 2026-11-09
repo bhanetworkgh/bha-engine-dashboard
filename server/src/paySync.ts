@@ -50,6 +50,7 @@
 import { nowIso } from './db';
 import * as events from './events';
 import * as mirror from './mirror';
+import * as payNote from './payNote';
 import { withTransaction, type Queryable } from './pg';
 
 const SESSIONS = 'engine_pay_sessions';
@@ -123,6 +124,8 @@ export async function applyLogPaid(db: Queryable, fields: Record<string, unknown
     Paid: paid,
     'Paid At': paid ? paidAtFor(copies, fields['Paid At']) : null,
     'Paid By': paid ? 'Jason' : null,
+    // A late post of the session from n8n must not drop the pay note either.
+    ...payNote.ledgerFields(await payNote.forEntry(db, entryId)),
   };
 }
 
@@ -176,6 +179,8 @@ async function syncWith(db: Queryable, fields: Record<string, unknown>): Promise
     'Paid At': paidAt,
     'Paid By': paid ? 'Jason' : null,
     'Codex Link': pick(fields['Session Url']),
+    // The pay note (9 Nov 2026, payNote.ts): shares credited, held and docked, laid onto every copy.
+    ...payNote.ledgerFields(await payNote.forEntry(db, entryId)),
   };
   const modeNow = pick(roster?.['Pay Mode']) || 'Daily';
 

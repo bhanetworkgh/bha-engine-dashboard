@@ -5230,6 +5230,20 @@ and no card will ever be sent. Colour is otherwise reserved for what is genuinel
 bad: unpaid past sixty days, a disputed statement, a statement sent and unanswered
 past fourteen days.
 
+### Pay Tracker — Pay notes and Held (2026-11-09, Destiny)
+**Jason, 9 Nov (DM D0AF0DG8ZPY 1794237173.152349): every approved log carries a pay note in shares of a day, never
+money.** `server/src/payNote.ts`, migration 124. full 1.0, half 0.5, none 0, or custom_fraction; what is credited now,
+held until a release condition is met, released (with its proof link, paid in the release month) and docked for good
+(1 minus the rest). Set on Approve: the Slack pop-up (Bays — Submit Actions, Approval Gate checks it before anything is
+built, `POST /api/engine/pay-note` after) or the dashboard's Approve. Less than full needs a reason tag; held needs a
+release condition; docked needs a reason note. Only Destiny or Jason. **Corrected forward, never removed**: a second
+decision is a correction with a note, can never raise credited + held (a dock stays docked), and every change is a line
+in `engine_pay_note_history`, which the database refuses to edit or delete. A log with no note counts as a full day.
+**This is the one write path on /pay**: the Held tab (`/pay?tab=held`) releases a held share with a proof link, as the
+admin login's own person. The monthly statement reads `POST /api/engine/pay-statement-facts`: credited shares of the
+month's sessions, releases in the month, everything still held. Tools: `read_pay_notes`, `set_pay_note`,
+`release_pay_note` (write connection, refused on any agent token). `npm run test:pay-note`.
+
 ### Pay Tracker — Code checks (2026-10-29, Destiny)
 **A fifth tab, at its own address (`/pay?tab=code-checks`).** Jason said yes on 28 Oct (DM
 D0AF0DG8ZPY, 1793181986.036119): from **1 Nov 2026** Destiny checks every approved log against what

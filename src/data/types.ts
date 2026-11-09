@@ -2060,6 +2060,12 @@ export interface PaySession {
   codex_link: string | null;
   slack_card_link: string | null;
   notes: string | null;
+  /** The pay note (9 Nov 2026). Null throughout when the log has none: it counts as a full day. */
+  pay_recommendation?: string | null;
+  credited_share?: number | null;
+  held_share?: number | null;
+  docked_share?: number | null;
+  pay_reason_tag?: string | null;
   source: Source;
   airtable: AirtableRef;
 }

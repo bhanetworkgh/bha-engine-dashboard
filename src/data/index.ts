@@ -836,3 +836,61 @@ export function sendIntake2Invite(id: string, resend: boolean): Promise<Intake2I
 export function moveVfarmLeadStage(id: string, stage: 1 | 2 | 3 | 4 | 5, reason: string | null): Promise<VfarmLead> {
   return api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}`, { method: 'PATCH', body: { stage, stage_reason: reason } });
 }
+
+/**
+ * Pay notes (9 Nov 2026, Jason's DM 1794237173.152349): shares of a day credited, held or docked on each
+ * approved log, behind the admin login. A log with no note counts as a full day.
+ */
+export interface PayNote {
+  submission_id: string;
+  codex_entry_id: string | null;
+  builder_slack_id: string | null;
+  builder: string | null;
+  session_month: string | null;
+  pay_recommendation: 'full' | 'half' | 'none' | 'custom_fraction';
+  credited_share: number;
+  held_share: number;
+  released_share: number;
+  docked_share: number;
+  reason_tag: string | null;
+  reason_note: string | null;
+  release_condition: string | null;
+  decided_by: string;
+  decided_by_name: string | null;
+  decided_at: string;
+  released_by: string | null;
+  released_at: string | null;
+  release_month: string | null;
+  proof_link: string | null;
+}
+export interface PayNoteChoice {
+  pay_recommendation: 'full' | 'half' | 'none' | 'custom_fraction';
+  rest?: 'hold' | 'dock';
+  credited_share?: number;
+  held_share?: number;
+  reason_tag?: string | null;
+  reason_note?: string | null;
+  release_condition?: string | null;
+  correction_note?: string | null;
+}
+export const PAY_REASON_TAGS = ['LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER'] as const;
+export const getPayNotes = () => api<{ ok: boolean; notes: PayNote[]; held: PayNote[] }>('/api/pay/notes');
+export const setPayNote = (ref: { submission_id?: string; codex_entry_id?: string }, choice: PayNoteChoice) =>
+  api<{ ok: boolean; message: string; note: PayNote }>('/api/pay/notes', { method: 'POST', body: { ...ref, ...choice } });
+export const releasePayNote = (ref: { submission_id?: string; codex_entry_id?: string }, proof_link: string, note?: string) =>
+  api<{ ok: boolean; message: string; note: PayNote }>('/api/pay/notes/release', { method: 'POST', body: { ...ref, proof_link, note } });
+
+/** The same checks the server makes, so the Approve pop-up says what is missing before anything is written. */
+export function payChoiceProblem(c: PayNoteChoice): string | null {
+  const credited = c.pay_recommendation === 'full' ? 1 : c.pay_recommendation === 'half' ? 0.5 : c.pay_recommendation === 'none' ? 0 : c.credited_share;
+  if (credited === undefined || !Number.isFinite(credited) || credited < 0 || credited > 1) return 'A custom share needs "credited now" between 0 and 1.';
+  const held =
+    c.pay_recommendation === 'full' ? 0 : c.pay_recommendation === 'custom_fraction' && c.held_share !== undefined ? c.held_share : c.rest === 'dock' ? 0 : Math.round((1 - credited) * 1000) / 1000;
+  if (!Number.isFinite(held) || held < 0 || credited + held > 1.0005) return 'Credited and held cannot add up to more than a day.';
+  const docked = Math.round((1 - credited - held) * 1000) / 1000;
+  if (c.pay_recommendation !== 'full' && !c.reason_tag) return 'Anything less than full needs a reason.';
+  if (held > 0 && (c.release_condition ?? '').trim().length < 8) return 'A held share needs a release condition: what has to happen for it to be paid.';
+  if (docked > 0 && (c.reason_note ?? '').trim().length < 3) return 'A docked share is never paid, so it needs a reason note.';
+  if (c.reason_tag === 'OTHER' && (c.reason_note ?? '').trim().length < 3) return 'Reason OTHER needs a reason note.';
+  return null;
+}

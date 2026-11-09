@@ -6,7 +6,7 @@
  */
 import { createPortal } from 'react-dom';
 import { useEffect, useState } from 'react';
-import { deleteCodexEntry, getCodexDetail, rejectCodexLog, setCodexStatus, type CodexEntry, type CodexEntryDetail } from '../data';
+import { deleteCodexEntry, getCodexDetail, payChoiceProblem, PAY_REASON_TAGS, rejectCodexLog, setCodexStatus, setPayNote, type CodexEntry, type CodexEntryDetail, type PayNoteChoice } from '../data';
 import { Button, Pill, NotLanded, unlanded } from '../components/ui';
 import { ENTRY_DEFS, JASON_STATUS_DEFS, PAID_DEFS, QUALITY_DEF, STAGE_DEFS } from './codexDefinitions';
 
@@ -120,6 +120,10 @@ export function CodexEntryDialog({
   const [rejecting, setRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [rejectAs, setRejectAs] = useState<'U0A9V97949F' | 'U0AEW3TBYH1'>('U0A9V97949F');
+  // The pay note (9 Nov 2026, Jason's DM 1794237173.152349): Approve asks for it first, default full.
+  const [approving, setApproving] = useState(false);
+  const [pay, setPay] = useState<PayNoteChoice>({ pay_recommendation: 'full', rest: 'hold' });
+  const payProblem = payChoiceProblem(pay);
 
   useEffect(() => {
     let live = true;
@@ -152,6 +156,23 @@ export function CodexEntryDialog({
       setToast?.({ text: e instanceof Error ? e.message : 'The change did not save.', tone: 'failing' });
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** Approve, then the pay note on the approved log. A pay note that does not save is said, never passed over. */
+  async function approveWithPay() {
+    if (!detail || payProblem) return;
+    await review('Approved');
+    if (!detail.submission_id) {
+      setToast?.({ text: 'Approved, but this log has no Submission ID, so the pay note was not saved. It counts as a full day until one is set.', tone: 'failing' });
+      return;
+    }
+    try {
+      const r = await setPayNote({ submission_id: detail.submission_id }, pay);
+      setToast?.({ text: `Approved. Pay note: ${r.message}`, tone: 'ok' });
+      setApproving(false);
+    } catch (e) {
+      setToast?.({ text: `Approved, but the pay note was not saved: ${e instanceof Error ? e.message : String(e)} Until it is set the log counts as a full day.`, tone: 'failing' });
     }
   }
 
@@ -232,7 +253,7 @@ export function CodexEntryDialog({
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {!readOnly && detail.stage !== 'report' && detail.approval !== 'approved' && detail.approval !== 'rejected' && (
-                  <Button variant="primary" size="sm" disabled={busy} onClick={() => void review('Approved')}>
+                  <Button variant="primary" size="sm" disabled={busy} onClick={() => setApproving((a) => !a)}>
                     {busy ? 'Writing…' : 'Approve'}
                   </Button>
                 )}
@@ -251,6 +272,75 @@ export function CodexEntryDialog({
                 </Button>
               </div>
             </div>
+
+            {approving && !readOnly && (
+              <div className="mt-4 border-t border-line pt-4 text-[12.5px]">
+                <div className="mb-2 font-semibold">Pay note</div>
+                <div className="flex flex-wrap gap-3">
+                  {(
+                    [
+                      ['full', 'Full day (1.0)'],
+                      ['half', 'Half now (0.5)'],
+                      ['none', 'None now (0.0)'],
+                      ['custom_fraction', 'Custom share'],
+                    ] as const
+                  ).map(([v, label]) => (
+                    <label key={v} className="flex items-center gap-1.5">
+                      <input type="radio" name="pay_choice" checked={pay.pay_recommendation === v} onChange={() => setPay((p) => ({ ...p, pay_recommendation: v }))} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                {pay.pay_recommendation !== 'full' && (
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    <label className="flex flex-col gap-1">
+                      <span className="text-faint">The rest of the day</span>
+                      <select className="input" value={pay.rest ?? 'hold'} onChange={(e) => setPay((p) => ({ ...p, rest: e.target.value === 'dock' ? 'dock' : 'hold' }))}>
+                        <option value="hold">Hold it until the condition is met</option>
+                        <option value="dock">Dock it (never paid)</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-faint">Reason</span>
+                      <select className="input" value={pay.reason_tag ?? ''} onChange={(e) => setPay((p) => ({ ...p, reason_tag: e.target.value || null }))}>
+                        <option value="">Choose a reason</option>
+                        {PAY_REASON_TAGS.map((tag) => (
+                          <option key={tag} value={tag}>
+                            {tag}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {pay.pay_recommendation === 'custom_fraction' && (
+                      <>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-faint">Share credited now (0 to 1)</span>
+                          <input className="input" inputMode="decimal" value={pay.credited_share ?? ''} onChange={(e) => setPay((p) => ({ ...p, credited_share: e.target.value === '' ? undefined : Number(e.target.value) }))} />
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-faint">Share held (left empty: the rest, held or docked as above)</span>
+                          <input className="input" inputMode="decimal" value={pay.held_share ?? ''} onChange={(e) => setPay((p) => ({ ...p, held_share: e.target.value === '' ? undefined : Number(e.target.value) }))} />
+                        </label>
+                      </>
+                    )}
+                    <label className="flex flex-col gap-1 md:col-span-2">
+                      <span className="text-faint">Release condition (needed if anything is held)</span>
+                      <textarea className="input py-2" rows={2} value={pay.release_condition ?? ''} onChange={(e) => setPay((p) => ({ ...p, release_condition: e.target.value }))} />
+                    </label>
+                    <label className="flex flex-col gap-1 md:col-span-2">
+                      <span className="text-faint">Reason note (needed if anything is docked)</span>
+                      <input className="input" value={pay.reason_note ?? ''} onChange={(e) => setPay((p) => ({ ...p, reason_note: e.target.value }))} />
+                    </label>
+                  </div>
+                )}
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <Button variant="primary" size="sm" disabled={busy || !!payProblem} onClick={() => void approveWithPay()}>
+                    {busy ? 'Writing…' : 'Yes, approve'}
+                  </Button>
+                  <span className={payProblem ? 'text-degraded' : 'text-faint'}>{payProblem ?? 'Shares of a day, never money. Kept with who decided it; corrected forward, never removed.'}</span>
+                </div>
+              </div>
+            )}
 
             <div className="mt-4 grid gap-x-6 gap-y-2 border-t border-line pt-4 text-[12.5px] md:grid-cols-3">
               <div className="min-w-0 md:col-span-2">

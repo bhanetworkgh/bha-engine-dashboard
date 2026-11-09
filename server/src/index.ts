@@ -73,6 +73,7 @@ import * as intake2Page from './intake2Page';
 import * as systemFeeds from './systemFeeds';
 import * as genieBuilder from './genieBuilder';
 import * as mediaWeekly from './mediaWeekly';
+import * as payNote from './payNote';
 import * as layer0Notice from './layer0Notice';
 import * as baysAsks from './baysAsks';
 import * as scheduledRuns from './scheduledRuns';
@@ -850,6 +851,34 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         store: async (b) => ({ ...(await mediaWeekly.log(b)) }),
         describe: (r) => `${r.dry_run ? 'dry run ' : ''}${r.codex_entry_id}${r.written ? `, row ${r.row_id}, BHARAG ${r.ingested_to_bharag ? 'in' : 'NOT in'}` : ''}`,
         hint: 'POST { from, to, summary_text, dry_run? }. One Codex report per week (Submission ID MTWR-<to>); a repeat updates it.',
+      },
+      /**
+       * Pay notes (2026-11-09, Destiny; Jason's DM 1794237173.152349; payNote.ts). Set by the Approve pop-up
+       * through Bays — Submit Actions, released with a proof link, and read for the monthly statement.
+       */
+      '/api/engine/pay-note': {
+        kind: 'pay_sessions',
+        store: async (b) => {
+          const r = await payNote.set(b, { dry_run: b.dry_run === true });
+          return { ...r, inserted: r.action === 'set' ? 1 : 0, updated: r.action === 'correct' ? 1 : 0, unchanged: r.action === 'unchanged' ? 1 : 0 };
+        },
+        describe: (r) => String(r.message ?? '').slice(0, 400),
+        hint: 'POST { submission_id or codex_entry_id, pay_recommendation (full | half | none | custom_fraction), rest? (hold | dock), credited_share?, held_share?, reason_tag?, reason_note?, release_condition?, decided_by (Destiny or Jason, Slack id), via?, correction_note?, dry_run? }.',
+      },
+      '/api/engine/pay-note-release': {
+        kind: 'pay_sessions',
+        store: async (b) => {
+          const r = await payNote.release(b, { dry_run: b.dry_run === true });
+          return { ...r, inserted: 0, updated: r.written ? 1 : 0 };
+        },
+        describe: (r) => String(r.message ?? '').slice(0, 400),
+        hint: 'POST { submission_id or codex_entry_id, released_by (Destiny or Jason, Slack id), proof_link (https), note?, dry_run? }.',
+      },
+      '/api/engine/pay-statement-facts': {
+        kind: 'pay_statements',
+        store: async (b) => ({ ...(await payNote.statementFacts(b)), dry_run: true }),
+        describe: (r) => `${r.month} ${r.pay_mode}: ${(r.statements as unknown[]).length} statement(s)`,
+        hint: 'POST { month: YYYY-MM, pay_mode?: Monthly | Daily }. Reads; writes nothing.',
       },
       /** Hardik's doctrine and contract changes, for the Media Twin page (2026-09-30, HMJV's third section). */
       '/api/engine/media-doctrine': {
@@ -2648,6 +2677,28 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await mediaPosts.decide(mediaApprove[1], { platform: String(body.platform ?? ''), decision: 'approve', by: adminAuth.slackId(adminAuth.readAdmin(req)?.by), via: 'dashboard' }));
       } catch (e) {
         if (e instanceof mediaPosts.MediaPostError) return send(res, e.status, { ok: false, reason: e.reason, message: e.message });
+        throw e;
+      }
+    }
+
+    /**
+     * Pay notes from the dashboard (2026-11-09, Destiny; payNote.ts). Behind the admin login (/api/pay is
+     * gated), so the person deciding is the admin cookie's own Destiny or Jason, never a body field.
+     */
+    if (p === '/api/pay/notes' || p === '/api/pay/notes/release' || p === '/api/pay/notes/history') {
+      const by = adminAuth.slackId(adminAuth.readAdmin(req)?.by);
+      try {
+        if (p === '/api/pay/notes/history') {
+          if (req.method !== 'GET') throw new HttpError(405, 'GET ?codex_entry_id= or ?submission_id=.');
+          return send(res, 200, { ok: true, history: await payNote.history({ codex_entry_id: url.searchParams.get('codex_entry_id') ?? '', submission_id: url.searchParams.get('submission_id') ?? '' }) });
+        }
+        if (p === '/api/pay/notes' && req.method === 'GET') return send(res, 200, { ok: true, notes: await payNote.all(), held: await payNote.held() });
+        if (req.method !== 'POST') throw new HttpError(405, 'POST only.');
+        const body = await readJson(req);
+        if (p === '/api/pay/notes/release') return send(res, 200, { ok: true, ...(await payNote.release({ ...body, released_by: by, via: 'dashboard' })) });
+        return send(res, 200, { ok: true, ...(await payNote.set({ ...body, decided_by: by, via: 'dashboard_approve' })) });
+      } catch (e) {
+        if (e instanceof payNote.PayNoteError) return send(res, e.status, { ok: false, reason: e.reason, message: e.message });
         throw e;
       }
     }
