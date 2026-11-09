@@ -87,6 +87,7 @@ function emptyLine({
   }
   if (tab === 'awaiting') return `No logs are waiting on Jason${here}.`;
   if (tab === 'rejected') return `No log has been rejected${here}.`;
+  if (tab === 'report') return `No report has been logged${here}.`;
   return `Nothing approved yet${here}.`;
 }
 
@@ -138,6 +139,7 @@ const TABS: { value: CodexTab; label: string }[] = [
   { value: 'awaiting', label: 'Awaiting approval' },
   { value: 'needs_input', label: 'Needs input' },
   { value: 'rejected', label: 'Rejected' },
+  { value: 'report', label: 'Reports' },
 ];
 
 type Tab = CodexTab;

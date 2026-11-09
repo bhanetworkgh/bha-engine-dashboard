@@ -667,6 +667,8 @@ export interface CodexEntry {
   complete: boolean;
   /** Which of the three stages this log is at. Layer0 Flagged wins; otherwise Jason Status decides. */
   stage: CodexTab;
+  /** A report logged in the Codex (Log Kind: Report, 9 Nov 2026) or an ordinary session log. */
+  log_kind?: 'report' | 'session';
   /** The last write of this record to Airtable, when this dashboard has attempted one. */
   writeback?: RecordWrite | null;
   /** Whether Orchestrator Layer2 Review holds anything. */
@@ -810,7 +812,7 @@ export interface Layer0Hold {
  * at Awaiting approval — he either approves or asks, and the builder answers in
  * thread — so those logs stay there.
  */
-export type CodexTab = 'needs_input' | 'awaiting' | 'approved' | 'rejected';
+export type CodexTab = 'needs_input' | 'awaiting' | 'approved' | 'rejected' | 'report';
 
 export interface CodexData {
   entries: CodexEntry[];

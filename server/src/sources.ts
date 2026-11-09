@@ -430,6 +430,8 @@ export function mapCodex(rec: AtRecord, owner: string, table: string, pending?: 
   const url = str(f['Session Url']);
   const submission = str(f['Submission ID']);
   const needsInput = Boolean(submission && pending?.has(submission));
+  // A report logged in the Codex (9 Nov 2026, Destiny): straight in, its own stage, never Jason's queue and never pay.
+  const report = (str(f['Log Kind']) ?? '').toLowerCase() === 'report';
   return {
     id: rec.id,
     builder_id: owner,
@@ -471,7 +473,8 @@ export function mapCodex(rec: AtRecord, owner: string, table: string, pending?: 
     // Rejected wins over everything (2026-10-15): it is a decision that the log
     // is finished and goes nowhere, so a Layer 0 row left behind cannot pull it
     // back into a queue of work owed.
-    stage: approval === 'rejected' ? 'rejected' : needsInput ? 'needs_input' : approval === 'approved' || approval === 'input added' ? 'approved' : 'awaiting',
+    stage: approval === 'rejected' ? 'rejected' : report ? 'report' : needsInput ? 'needs_input' : approval === 'approved' || approval === 'input added' ? 'approved' : 'awaiting',
+    log_kind: report ? 'report' : 'session',
     has_entry: Boolean(layer2),
     entry_excerpt: firstLines(layer2),
     /**

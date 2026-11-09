@@ -67,6 +67,14 @@ function entryIdOf(fields: Record<string, unknown>): string | null {
   return v || null;
 }
 
+/**
+ * A report logged in the Codex (`Log Kind: Report`, 9 Nov 2026, Destiny: the Media Twin weekly readiness report) is a
+ * record, not a session: it is never owed pay, so it gets no pay row.
+ */
+export function isReport(fields: Record<string, unknown>): boolean {
+  return pick(fields['Log Kind']).trim().toLowerCase() === 'report';
+}
+
 /** Paid on the log: an explicit Yes, and nothing else. An empty value means nobody has said. */
 export function logSaysPaid(fields: Record<string, unknown>): boolean {
   return pick(fields.Paid).trim().toLowerCase() === 'yes';
@@ -213,7 +221,7 @@ async function syncWith(db: Queryable, fields: Record<string, unknown>): Promise
  */
 export async function syncPayFromCodex(codexRow: { fields: Record<string, unknown> | null | undefined }, on?: Queryable): Promise<SyncOutcome> {
   const fields = codexRow.fields ?? {};
-  if (!entryIdOf(fields)) return 'skipped';
+  if (!entryIdOf(fields) || isReport(fields)) return 'skipped';
   if (!on) return withTransaction((db) => syncWith(db, fields));
 
   await on.query('SAVEPOINT pay_sync');
@@ -306,7 +314,7 @@ export async function reconcile(): Promise<ReconcileResult> {
   );
   const out: ReconcileResult = { checked: 0, created: 0, updated: 0, unchanged: 0, statements_closed: 0, failed: [], ms: 0 };
   for (const row of r.rows) {
-    if (!entryIdOf(row.fields)) continue;
+    if (!entryIdOf(row.fields) || isReport(row.fields)) continue;
     out.checked++;
     try {
       const o = await syncPayFromCodex(row);

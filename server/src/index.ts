@@ -72,6 +72,7 @@ import * as intake2 from './intake2';
 import * as intake2Page from './intake2Page';
 import * as systemFeeds from './systemFeeds';
 import * as genieBuilder from './genieBuilder';
+import * as mediaWeekly from './mediaWeekly';
 import * as baysAsks from './baysAsks';
 import * as scheduledRuns from './scheduledRuns';
 import * as askTrace from './askTrace';
@@ -834,6 +835,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         store: async (b) => ({ ...(await genieBuilder.store(b)) }),
         describe: (r) => `${r.received} stage message(s): ${r.inserted} new interaction(s), ${r.updated} updated (${(r.interaction_ids as string[] | undefined)?.join(', ') ?? ''})`.slice(0, 400),
         hint: 'POST one genie.builder.interaction.v1 stage message (queued, approval, terminal or review), or { messages: [...] } with at most 50. One row per interaction_id; docs/contracts/genie-builder-interactions.md.',
+      },
+      /** The Media Twin weekly readiness report (2026-11-09, Destiny; mediaWeekly.ts): the week's facts, read. */
+      '/api/engine/media-weekly/facts': {
+        kind: 'media_posts',
+        store: async (b) => ({ ...(await mediaWeekly.facts(b)) }),
+        describe: (r) => `week ${r.from} to ${r.to}: ${(r.days as unknown[]).length} day(s), ${(r.rejects as unknown[]).length} reject(s), ${(r.auto_post_failures as unknown[]).length} failed auto-post(s)`,
+        hint: 'POST { from, to } (YYYY-MM-DD). Reads the week; writes nothing.',
+      },
+      /** ...and logged in the Codex under Destiny's name as a report: straight in, no review, no pay. */
+      '/api/engine/media-weekly/log': {
+        kind: 'codex',
+        store: async (b) => ({ ...(await mediaWeekly.log(b)) }),
+        describe: (r) => `${r.dry_run ? 'dry run ' : ''}${r.codex_entry_id}${r.written ? `, row ${r.row_id}, BHARAG ${r.ingested_to_bharag ? 'in' : 'NOT in'}` : ''}`,
+        hint: 'POST { from, to, summary_text, dry_run? }. One Codex report per week (Submission ID MTWR-<to>); a repeat updates it.',
       },
       /** Hardik's doctrine and contract changes, for the Media Twin page (2026-09-30, HMJV's third section). */
       '/api/engine/media-doctrine': {

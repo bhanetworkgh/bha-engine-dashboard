@@ -2834,6 +2834,7 @@ const TAB_RULES: { tab: CodexTab; label: string; layer: string; test: (e: CodexE
   { tab: 'awaiting', label: 'Awaiting approval', layer: 'Pending review', test: (e) => e.stage === 'awaiting' },
   { tab: 'needs_input', label: 'Needs input', layer: 'Completeness check', test: (e) => e.stage === 'needs_input' },
   { tab: 'rejected', label: 'Rejected', layer: 'Rejected', test: (e) => e.stage === 'rejected' },
+  { tab: 'report', label: 'Reports', layer: 'Report', test: (e) => e.stage === 'report' },
 ];
 
 export function codexTabRule(tab: CodexTab): (e: CodexEntry) => boolean {

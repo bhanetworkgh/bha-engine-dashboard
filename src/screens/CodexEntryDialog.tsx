@@ -25,7 +25,7 @@ export function when(iso: string | null): string {
 export function StagePill({ entry }: { entry: CodexEntry }) {
   // Pill takes no title, so the definition sits on a wrapper (see codexDefinitions.ts).
   const pill =
-    entry.stage === 'rejected' ? <Pill>rejected</Pill> : entry.stage === 'approved' ? <Pill tone="ok">approved</Pill> : entry.stage === 'needs_input' ? <Pill tone="degraded">needs input</Pill> : <Pill>awaiting approval</Pill>;
+    entry.stage === 'rejected' ? <Pill>rejected</Pill> : entry.stage === 'report' ? <Pill>report</Pill> : entry.stage === 'approved' ? <Pill tone="ok">approved</Pill> : entry.stage === 'needs_input' ? <Pill tone="degraded">needs input</Pill> : <Pill>awaiting approval</Pill>;
   return <span title={STAGE_DEFS[entry.stage]}>{pill}</span>;
 }
 
@@ -231,7 +231,7 @@ export function CodexEntryDialog({
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {!readOnly && detail.approval !== 'approved' && detail.approval !== 'rejected' && (
+                {!readOnly && detail.stage !== 'report' && detail.approval !== 'approved' && detail.approval !== 'rejected' && (
                   <Button variant="primary" size="sm" disabled={busy} onClick={() => void review('Approved')}>
                     {busy ? 'Writing…' : 'Approve'}
                   </Button>
