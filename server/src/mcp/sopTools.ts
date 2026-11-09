@@ -360,6 +360,105 @@ export const readSopTool: ToolDefinition = {
   },
 };
 
+/**
+ * edit_codex_doc (9 Nov 2026, Destiny — Hardik in D0BKMFVU806 1794143659.970809). Correct the text of a
+ * Codex entry's own document in BHARAG in place, the way edit_sop corrects an SOP: same id, every link kept,
+ * no second copy. Built because Hardik's 7 Nov log named execution 7653 where the run was 72653; the
+ * dashboard row could be corrected with update_record, but the copy Genie and the twins search could not.
+ * Finds every document in the Codex workspace whose metadata codex_entry_id is the entry (the lookup the
+ * code check note uses), applies the same replacements to each, keeps the last 20 edits in metadata.edits,
+ * and reads each one back. Each `find` must occur at least once; `all: true` replaces every occurrence,
+ * otherwise it must occur exactly once. A person's tool: Destiny or Jason, refused on any agent token,
+ * audited (kind bharag_codex) with each document's old text on the audit line.
+ */
+export const editCodexDocTool: ToolDefinition = {
+  name: 'edit_codex_doc',
+  description:
+    "Correct the text of a Codex entry's document in BHARAG in place (same id, no second copy), for a wrong id, number or name the dashboard row has already been corrected for. Finds every Codex-workspace document whose metadata codex_entry_id is the entry. replacements: [{find, replace, all?}]; each find must occur, exactly once unless all is true. reason required; requester_user_id Destiny or Jason; refused on any agent token. Each document is read back (verified only when the stored text is what was sent). dry_run shows the documents and the change and writes nothing. Audited on engine_mcp_writes.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      codex_entry_id: { type: 'string', description: 'CODEX-...' },
+      replacements: {
+        type: 'array',
+        items: { type: 'object', properties: { find: { type: 'string' }, replace: { type: 'string' }, all: { type: 'boolean' } }, required: ['find', 'replace'], additionalProperties: false },
+      },
+      reason: { type: 'string' },
+      requester_user_id: { type: 'string', description: 'Destiny or Jason.' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['codex_entry_id', 'replacements', 'reason', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Correct a Codex document in BHARAG' },
+  handler: async (args, deps) => {
+    const entry = str(args.codex_entry_id);
+    const reason = str(args.reason).slice(0, 300);
+    const requester = str(args.requester_user_id) || null;
+    const dry = args.dry_run === true;
+    const reps = Array.isArray(args.replacements)
+      ? (args.replacements as unknown[]).map((r) => {
+          const x = (r ?? {}) as { find?: unknown; replace?: unknown; all?: unknown };
+          return { find: typeof x.find === 'string' ? x.find : '', replace: typeof x.replace === 'string' ? x.replace : '', all: x.all === true };
+        })
+      : [];
+    const audit = await auditOpen({ tool: 'edit_codex_doc', args, access: deps.access, kind: 'bharag_codex', requester, dry_run: dry });
+    const refuse = async (why: string, message: string) => {
+      await auditClose(audit, { outcome: 'refused', detail: `${why}: ${message}`, natural_id: entry || null, guard_result: { reason: why } });
+      return { ok: false, edited: false, reason: why, message: `${message} Nothing was changed.`, audit_id: audit };
+    };
+    if (deps.agent) return refuse('agent_not_permitted', `An agent (${deps.agent}) may not correct a Codex document: Destiny or Jason does, through the connector.`);
+    if (!requester || !ADMIN_IDS.includes(requester)) return refuse('not_permitted', 'Only Destiny or Jason can have a Codex document corrected. Send requester_user_id.');
+    if (!reason) return refuse('reason_required', 'Send a reason.');
+    if (!/^CODEX-/.test(entry)) return refuse('bad_entry', 'codex_entry_id must be a CODEX-... id.');
+    if (!reps.length || reps.some((r) => !r.find)) return refuse('nothing_to_change', 'Send replacements, each with a find.');
+    const keyVar = bharag.ingestKeyVar('codex');
+    const found = await bharag.findByMetadata(keyVar, 'codex_entry_id', entry);
+    if (!found.ids.length) return refuse('not_found', `No document in the Codex workspace carries ${entry} (${found.scanned} read${found.complete ? '' : ', stopped at the page cap'}).`);
+    const plans: { id: string; before: string; after: string; meta: Record<string, unknown> }[] = [];
+    for (const id of found.ids) {
+      const doc = await bharag.getDocument('codex', id, keyVar);
+      const text = doc?.raw_content ?? null;
+      if (typeof text !== 'string') return refuse('no_text', `BHARAG returned no text for ${id}.`);
+      let out = text;
+      for (const [i, r] of reps.entries()) {
+        const n = out.split(r.find).length - 1;
+        if (n === 0) return refuse('replacement_not_found', `replacements[${i}].find does not occur in ${id}: "${r.find.slice(0, 80)}".`);
+        if (n > 1 && !r.all) return refuse('replacement_not_unique', `replacements[${i}].find occurs ${n} times in ${id}; widen it or send all: true.`);
+        out = out.split(r.find).join(r.replace);
+      }
+      if (out === text) return refuse('no_change', `What was sent is what ${id} already says.`);
+      plans.push({ id, before: text, after: out, meta: ((doc?.metadata ?? {}) as Record<string, unknown>) });
+    }
+    if (dry) {
+      await auditClose(audit, { outcome: 'dry_run', detail: `would correct ${plans.length} document(s) for ${entry}: ${plans.map((p) => p.id).join(', ')}`, natural_id: entry });
+      return { ok: true, edited: false, dry_run: true, documents: plans.map((p) => ({ id: p.id, characters_before: p.before.length, characters_after: p.after.length })), message: 'Dry run: nothing was changed.', audit_id: audit };
+    }
+    const results: { id: string; ok: boolean; verified: boolean; detail: string }[] = [];
+    for (const p of plans) {
+      const edits = Array.isArray(p.meta.edits) ? (p.meta.edits as unknown[]) : [];
+      const edit = { at: new Date().toISOString(), by: requester, reason, changed: ['content'], via: 'mcp:edit_codex_doc' };
+      const r = await bharag.patchDocument(keyVar, p.id, { content: p.after, metadata: { edits: [...edits, edit].slice(-20) } });
+      if (!r.ok) { results.push({ id: p.id, ok: false, verified: false, detail: r.detail }); continue; }
+      const back = await bharag.getDocument('codex', p.id, keyVar);
+      const stored = back?.raw_content ?? null;
+      const verified = stored === p.after;
+      results.push({ id: p.id, ok: true, verified, detail: verified ? 'stored text matches' : 'stored text differs from what was sent' });
+    }
+    const allGood = results.every((x) => x.ok && x.verified);
+    await auditClose(audit, {
+      outcome: allGood ? 'updated' : 'failed',
+      detail: `corrected ${results.filter((x) => x.ok).length} of ${plans.length} document(s) for ${entry}: ${results.map((x) => `${x.id} ${x.detail}`).join('; ')} — ${reason}`,
+      natural_id: entry,
+      before: plans.map((p) => ({ id: p.id, content: p.before })),
+      after: results,
+    });
+    return allGood
+      ? { ok: true, edited: true, verified: true, documents: results, message: `Corrected ${results.length} document(s) for ${entry} in place; same ids. The old text is on audit line ${audit}.`, audit_id: audit }
+      : { ok: false, edited: results.some((x) => x.ok), verified: false, documents: results, reason: 'not_all_verified', raise: true, message: 'Not every document took the edit or read back as sent.', audit_id: audit };
+  },
+};
+
 export const SOP_READ_TOOLS: ToolDefinition[] = [readSopTool];
 
-export const SOP_WRITE_TOOLS: ToolDefinition[] = [logSopTool, deleteSopTool, editSopTool];
+export const SOP_WRITE_TOOLS: ToolDefinition[] = [logSopTool, deleteSopTool, editSopTool, editCodexDocTool];
