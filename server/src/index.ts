@@ -1099,7 +1099,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     const feed = FEEDS[p];
     if (feed) {
       if (method !== 'POST') throw new HttpError(405, p === '/api/engine/media-doctrine' ? `${feed.hint} GET reads the claims in force.` : feed.hint);
-      const body = await readJson(req, 4 * 1024 * 1024);
+      // body_b64 on every feed too (9 Nov 2026): the pay note routes are called that way from Bays — Submit Actions,
+      // and the feeds were the one engine door that did not unwrap it, so every pay note arrived empty.
+      const body = decodeBodyB64(await readJson(req, 4 * 1024 * 1024));
       const vfarmRoute = p === '/api/engine/vfarm-snapshot' ? 'snapshot' : p === '/api/engine/vfarm-alerts' ? 'alert' : null;
       try {
         const r = await feed.store(body);
