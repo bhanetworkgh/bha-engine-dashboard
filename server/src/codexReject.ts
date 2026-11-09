@@ -62,6 +62,9 @@ interface HeldRow {
   logged_at: string | null;
   session_type: string | null;
   narration_quality: string | null;
+  /** Where Jason's review card sits, saved on the log by Save Review Card Location. */
+  review_channel: string | null;
+  review_ts: string | null;
 }
 
 /** The row a reference names: this table's id, a Submission ID or a Codex Entry ID. Exactly one, or a refusal. */
@@ -71,7 +74,8 @@ export async function resolve(ref: string): Promise<HeldRow> {
             fields->>'Jason Status' AS jason_status, fields->>'Builder User ID' AS builder_user_id,
             left(fields->>'Session Description', 300) AS description,
             fields->>'Session Url' AS session_url, fields->>'Builder Channel ID' AS builder_channel, fields->>'Timestamp' AS logged_at,
-            fields->>'Session Type' AS session_type, fields->>'Narration Quality' AS narration_quality
+            fields->>'Session Type' AS session_type, fields->>'Narration Quality' AS narration_quality,
+            fields->>'Review Card Channel' AS review_channel, fields->>'Review Card TS' AS review_ts
        FROM engine_codex_submissions
       WHERE id::text = $1 OR 'row-' || id = $1 OR airtable_record_id = $1 OR natural_id = $1 OR fields->>'Submission ID' = $1 OR fields->>'Codex Entry ID' = $1
       ORDER BY id`,
@@ -221,7 +225,19 @@ export async function reject(input: RejectInput) {
     throw new RejectError('in_codex', `${row.submission_id ?? row.id} already has Codex Entry ${row.codex_entry_id}, so it is in the Codex and counted for pay. Rejecting it would not take it out of either.`, 409);
   }
 
-  const cards = row.submission_id ? await cardsOf(row.submission_id) : { review: null, chasers: [] };
+  const cards: Awaited<ReturnType<typeof cardsOf>> = row.submission_id ? await cardsOf(row.submission_id) : { review: null, chasers: [] };
+  // 9 Nov 2026 (Destiny): a log never sent back has no review round, so its card was read from
+  // nowhere and kept its Approve button after a reject (the BWN6 test, row 460). The card's place
+  // is on the log itself (Review Card Channel / TS); its blocks are read back from Slack so the
+  // rewrite keeps what the card said. A card Slack will not hand back is rewritten as the
+  // rejection alone, never left with its buttons.
+  if (!cards.review && row.review_channel && row.review_ts) {
+    let blocks: unknown[] | null = null;
+    const h = await slack.botCall('conversations.history', { channel: row.review_channel, latest: row.review_ts, inclusive: true, limit: 1 }, 'form');
+    const m = h.ok ? ((h.messages as { ts?: string; blocks?: unknown }[]) ?? [])[0] : undefined;
+    if (m && m.ts === row.review_ts && Array.isArray(m.blocks)) blocks = m.blocks;
+    cards.review = { channel: row.review_channel, ts: row.review_ts, blocks };
+  }
   // Add the sent-back messages the rounds did not record, read from the builder's channel.
   const channel = row.builder_channel ?? cards.chasers[0]?.channel ?? null;
   let channelRead: { read: boolean; read_as?: string; error?: string; found: number; added: number } | null = null;
