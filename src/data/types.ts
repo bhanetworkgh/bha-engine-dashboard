@@ -4810,3 +4810,70 @@ export interface ModelSpendData {
   anthropic_backup: { by_day: Array<{ day: string; answered: number; failed: number }>; credit_refusals: number; last_refusal_at: string | null; note: string };
   notes: string[];
 }
+
+/** One Genie Builder interaction (server/src/genieBuilder.ts), field for field. */
+export interface GenieBuilderInteraction {
+  interaction_id: string;
+  rail_id: string;
+  proof_type: 'test_forced' | 'live_natural' | string;
+  stage_reached: 'queued' | 'approval' | 'terminal' | 'review';
+  requester_id: string | null;
+  queued_at: string | null;
+  intent: string | null;
+  live_touching: boolean | null;
+  live_touching_reason: string | null;
+  genie_plan_id: string | null;
+  plan_summary: string | null;
+  context_sources: unknown;
+  subagent_query: unknown;
+  approver_id: string | null;
+  approved_at: string | null;
+  approvals_required: number | null;
+  two_builder_check: string | null;
+  approval_decision: string | null;
+  finished_at: string | null;
+  status: string | null;
+  backend_artifact_id: string | null;
+  backend_artifact_version: string | null;
+  backend_debrief: unknown;
+  submission: unknown;
+  live_effect: boolean | null;
+  evidence_links: unknown;
+  error_or_stop_reason: string | null;
+  rater_id: string | null;
+  reviewed_at: string | null;
+  builder_decision: string | null;
+  usefulness_rating: number | null;
+  review_note: string | null;
+  counts_toward_proof: boolean;
+  feedback_failed: boolean;
+  received_at: string;
+  updated_at: string;
+}
+
+export interface GenieBuilderFigures {
+  interactions: number;
+  finished: number;
+  counted_toward_proof: number;
+  accepted: number;
+  modified: number;
+  rejected: number;
+  average_rating: number | null;
+  awaiting_review: number;
+  feedback_failed: number;
+  live_touching: number;
+  live_effect: number;
+  self_approval_refused: number;
+  denied: number;
+}
+
+export interface GenieBuilderData {
+  schema: string;
+  summary: { all: GenieBuilderFigures; live_natural: GenieBuilderFigures; test_forced: GenieBuilderFigures };
+  interactions: GenieBuilderInteraction[];
+  returned: number;
+  held: number;
+  first_at: string | null;
+  last_at: string | null;
+  rules: string[];
+}

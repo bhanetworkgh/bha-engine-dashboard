@@ -71,6 +71,7 @@ import * as proposal from './proposal';
 import * as intake2 from './intake2';
 import * as intake2Page from './intake2Page';
 import * as systemFeeds from './systemFeeds';
+import * as genieBuilder from './genieBuilder';
 import * as baysAsks from './baysAsks';
 import * as scheduledRuns from './scheduledRuns';
 import * as askTrace from './askTrace';
@@ -826,6 +827,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         store: async (b) => ({ ...(await systemFeeds.storeCst(b)) }),
         describe: (r) => `${r.received} event(s) (${r.turns} turn, ${r.deliveries} delivery): ${r.inserted} new, ${r.updated} updated, ${r.unchanged} unchanged`,
         hint: 'POST one cst.event.v1 (event_type cst.turn or cst.delivery), or { events: [...] } with at most 200. An upsert on turn_id.',
+      },
+      /** Genie Builder interactions, the Logstream record for the genie-slack-n8n rail (2026-11-09, Destiny; genieBuilder.ts). */
+      '/api/engine/genie-builder': {
+        kind: 'genie_builder',
+        store: async (b) => ({ ...(await genieBuilder.store(b)) }),
+        describe: (r) => `${r.received} stage message(s): ${r.inserted} new interaction(s), ${r.updated} updated (${(r.interaction_ids as string[] | undefined)?.join(', ') ?? ''})`.slice(0, 400),
+        hint: 'POST one genie.builder.interaction.v1 stage message (queued, approval, terminal or review), or { messages: [...] } with at most 50. One row per interaction_id; docs/contracts/genie-builder-interactions.md.',
       },
       /** Hardik's doctrine and contract changes, for the Media Twin page (2026-09-30, HMJV's third section). */
       '/api/engine/media-doctrine': {
@@ -1971,6 +1979,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** Genie's asks and vFarm's state, as each system pushed them (2026-09-29). */
       case '/api/genie':
         return send(res, 200, await systemFeeds.genieData());
+      /** Genie Builder interactions on the rail, with the figures the proof is read from (2026-11-09). */
+      case '/api/genie/builder':
+        return send(res, 200, await genieBuilder.read({ rail_id: url.searchParams.get('rail_id') }));
       /** Bays' own ledger: Slack turns, scheduled task runs and panel questions (2026-10-05). */
       case '/api/bays':
         return send(res, 200, await baysAsks.baysData());

@@ -97,6 +97,7 @@ import type {
   EvidenceData,
   EvidenceDoc,
   CodeChecksData,
+  GenieBuilderData,
 } from './types';
 
 export * from './types';
@@ -661,6 +662,7 @@ export function restoreRegistryRow<K extends RegistryKind>(kind: K, id: string):
 export const getVfarmLeads = () => api<VfarmLeadsData>('/api/vfarm/leads');
 /** Genie's asks and vFarm's live state, as each system pushed them (2026-09-29). */
 export const getGenie = () => api<GenieData>('/api/genie');
+export const getGenieBuilder = () => api<GenieBuilderData>('/api/genie/builder');
 /** Bays' ask ledger: Slack turns, scheduled task runs and panel questions (2026-10-05). */
 export const getBays = () => api<BaysData>('/api/bays');
 export const getBaysReminders = () => api<BaysRemindersData>('/api/bays/reminders');

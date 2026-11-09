@@ -44,6 +44,7 @@ import { LOGSTREAM_READ_TOOLS } from './logstreamTools';
 import { SPEND_READ_TOOLS } from './spendTools';
 import { STRAIN_READ_TOOLS } from './strainTools';
 import { PROVIDER_READ_TOOLS } from './providerTools';
+import { GENIE_BUILDER_READ_TOOLS } from './genieBuilderTools';
 import { INCIDENT_WRITE_TOOLS } from './incidentTools';
 import { SIGNAL_WRITE_TOOLS } from './signalTools';
 import { LOOP_WRITE_TOOLS } from './loopTools';
@@ -1130,6 +1131,7 @@ export const TOOLS: ToolDefinition[] = [
   // 2026-10-27: engine strain and what each audience is told (7RZT).
   ...STRAIN_READ_TOOLS,
   ...PROVIDER_READ_TOOLS,
+  ...GENIE_BUILDER_READ_TOOLS,
   ...HELP_READ_TOOLS,
   ...EVIDENCE_READ_TOOLS,
   ...REGISTRY_READ_TOOLS,
