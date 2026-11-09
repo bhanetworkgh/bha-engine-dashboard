@@ -161,7 +161,8 @@ export function suggest(fields: Obj, relog: RelogCheck | null = null, now = new 
   if (heldParts.length) bits.push(`Held: ${heldParts.map((p) => p.what).join('; ')}`);
   const old = scored.filter((p) => p.status === 'already_paid');
   if (old.length) bits.push(`Docked as already paid${relogOf ? ` (${relogOf})` : ''}: ${old.map((p) => p.what).join('; ')}`);
-  const note = tag ? bits.join('. ').slice(0, 600) : null;
+  // A credit on a re-log has to say what it is for (payNote relog_needs_delta), even a full one.
+  const note = tag || logClass === 'RELOG_OLD_WORK' ? `${logClass === 'RELOG_OLD_WORK' ? `Re-log of ${relogOf ?? 'earlier work'}; new this session: ${relogDelta ?? 'not stated'}. ` : ''}${bits.join('. ')}`.slice(0, 600) : null;
 
   return finish({ credited, held, docked, tag, note, condition, flags, scored, logClass, relogOf, relogDelta, now, basis: `${n} work part${n === 1 ? '' : 's'} from the review` });
 }
@@ -196,7 +197,7 @@ function finish(a: {
     held_share: held,
     docked_share: docked,
     reason_tag: a.tag,
-    reason_note: rec === 'full' ? null : a.note,
+    reason_note: rec === 'full' && a.logClass !== 'RELOG_OLD_WORK' ? null : a.note,
     release_condition: held > 0 ? a.condition : null,
     line,
     flags: a.flags.slice(0, 8),

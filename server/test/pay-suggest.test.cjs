@@ -66,6 +66,8 @@ assert.ok(s.flags.some((f) => /earlier approved work this may repeat: CODEX-1 \(
 s = p.suggest(parts(live), { matches: [], looks_like_relog: false, unread: 'db down' });
 assert.ok(s.flags.some((f) => /could not run \(db down\)/.test(f))); ok('a check that could not run is said, never read as no match');
 
+s = p.suggest({ 'Log Class': 'RELOG_OLD_WORK', 'Relog Of': 'CODEX-a', 'Relog Delta': 'all new reads', 'Work Parts': JSON.stringify([live]) });
+assert.equal(s.pay_recommendation, 'full'); assert.match(s.reason_note, /Re-log of CODEX-a; new this session: all new reads/); ok('a fully live re-log is full and still says what the credit is for');
 assert.equal(p.suggest({ 'Log Class': 'fresh_build', 'Work Parts': '[]' }), null); ok('no work parts and not a re-log: no suggestion');
 assert.deepEqual(p.parseParts('not json'), []); assert.equal(p.parseParts([{ what: 'a' }])[0].new_this_session, true); ok('work parts parse from a JSON string or an array');
 
