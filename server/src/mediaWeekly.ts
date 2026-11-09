@@ -70,14 +70,14 @@ export async function facts(b: Record<string, unknown>) {
       ).rows.map((r) => ({ post_id: r.subject_id, platform: r.platform, at: r.at.toISOString(), error: r.error }))
     : [];
 
-  const rejects: { post_id: string; revision: number; platform: string; note: string | null; at: string | null }[] = [];
+  const rejects: { post_id: string; revision: number; platform: string; note: string | null; by: string | null; at: string | null }[] = [];
   const edits: { post_id: string; platform: string; reason: string; at: string }[] = [];
   const findings: { post_id: string; platform: string; status: string; rule: string; text: string }[] = [];
   for (const p of inWeek) {
     for (const k of PLATFORMS) {
       const x = p.platforms?.[k];
       if (!x) continue;
-      if (x.decision === 'rejected') rejects.push({ post_id: p.post_id, revision: p.revision, platform: k, note: x.note ?? null, at: x.decided_at ?? null });
+      if (x.decision === 'rejected') rejects.push({ post_id: p.post_id, revision: p.revision, platform: k, note: x.note ?? null, by: x.decided_by === DESTINY ? 'Destiny' : x.decided_by === 'U0A9V97949F' ? 'Jason' : (x.decided_by ?? null), at: x.decided_at ?? null });
       for (const e of x.edits ?? []) edits.push({ post_id: p.post_id, platform: k, reason: e.reason, at: e.at });
       for (const f of x.claim_findings ?? []) findings.push({ post_id: p.post_id, platform: k, status: f.status, rule: f.rule, text: f.text });
     }
