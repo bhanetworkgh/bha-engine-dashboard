@@ -205,7 +205,7 @@ export async function log(b: Record<string, unknown>) {
   const url = `${dashboardUrl()}/codex/${encodeURIComponent(entry)}`;
   if (dry) return { ok: true, dry_run: true, written: false, codex_entry_id: entry, submission_id: submission, url, fields };
 
-  const written = await engineWrite.postRecord('codex', { fields, builder_id: 'destiny' } as mirror.MirrorInput, { endpoint: '/api/engine/media-weekly/log', method: 'POST', key_label: 'DASHBOARD_INBOUND_KEY', note: 'Media Twin weekly readiness report' });
+  const written = await engineWrite.postRecord('codex', { fields, builder_id: 'destiny' } as mirror.MirrorInput, { endpoint: '/api/engine/media-weekly-log', method: 'POST', key_label: 'DASHBOARD_INBOUND_KEY', note: 'Media Twin weekly readiness report' });
   if (!written.ok) throw new FeedError(422, `The Codex log was not written: ${JSON.stringify(written).slice(0, 300)}`);
 
   const r = await bharag.ingest(
