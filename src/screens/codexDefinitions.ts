@@ -41,6 +41,8 @@ export const STAGE_DEFS: Record<CodexTab, string> = {
     'The log’s Submission ID has a row in the Layer 0 parking table whose Status is pending_builder_input — whatever Jason Status says. Layer0 Flagged does not place a log here.',
   rejected:
     'Jason Status is Rejected: Jason or Destiny decided this log will never be approved, and wrote why. It never goes to the Codex, is never counted for pay, and nothing in the engine can change it again.',
+  report:
+    'Log Kind is Report: a report logged in the Codex, such as the Media Twin weekly readiness summary. It goes straight in, never waits on Jason and is never counted for pay.',
 };
 
 /** Jason Status, as codexApproval reads it. Only "input added" is shown as a word of its own. */
