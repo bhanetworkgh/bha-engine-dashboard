@@ -13,6 +13,7 @@
  * What differs between callers is only how they are named on the log: the
  * endpoint, the method and which credential let them in. That is `WriteCtx`.
  */
+import * as layer0Notice from './layer0Notice';
 import * as mirror from './mirror';
 import * as store from './store';
 import { guardRejected } from './codexReject';
@@ -66,6 +67,7 @@ export async function postRecord(kind: mirror.MirrorKind, body: mirror.MirrorInp
     // A voided parked log is closed to the engine too (2026-10-25, layer0Void.ts).
     if (kind === 'layer0') await guardVoided({ submissionId: submissionOf(body.fields) }, (body.fields as Record<string, unknown> | null) ?? null);
     const result = await mirror.upsert(kind, body, 'engine');
+    if (kind === 'layer0' && layer0Notice.becameComplete(body.fields as Record<string, unknown>, result.changed)) void layer0Notice.deleteOnComplete(String(result.id)).catch(() => undefined);
     // A log that went through retires any parked copy of the same recording (2026-10-25).
     // Not awaited and never able to fail this write: its outcome is on engine_writes.
     if (kind === 'codex') void retireOnSubmission((body.fields as Record<string, unknown> | null) ?? null);
@@ -132,6 +134,8 @@ export async function patchRecord(
     // Same as a POST: the row is stored, and this dates the status it was
     // left in. A patch that sets Status is exactly such a change.
     await store.recordEngineWrite(kind, r.id);
+    // A parked log just completed: its review notice goes (layer0Notice.ts). Never awaited, never able to fail this.
+    if (kind === 'layer0' && layer0Notice.becameComplete(fields, r.changed)) void layer0Notice.deleteOnComplete(String(r.id)).catch(() => undefined);
     await mirror.logWrite({
       endpoint: ctx.endpoint,
       kind,

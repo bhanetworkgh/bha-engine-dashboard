@@ -145,7 +145,8 @@ export async function findParkedPost(row: Pick<HeldRow, 'id' | 'created_at' | 'f
   const mine = (m: { text?: string; bot_id?: string; blocks?: unknown }) => {
     if (!m.bot_id) return false;
     const text = `${m.text ?? ''} ${JSON.stringify(m.blocks ?? '')}`;
-    return /log parked/i.test(text) && text.includes(`\`${row.id}\``);
+    // "Log parked" before Q2VC; "In review, incomplete" since (30 Oct 2026). Both print the row as *Row:* `<id>`.
+    return /log parked|in review, incomplete/i.test(text) && text.includes(`\`${row.id}\``);
   };
   const tried: string[] = [];
   for (const [label, token] of [['Bays', undefined], ['North Star', slack.northStarToken()]] as const) {

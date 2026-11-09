@@ -73,6 +73,7 @@ import * as intake2Page from './intake2Page';
 import * as systemFeeds from './systemFeeds';
 import * as genieBuilder from './genieBuilder';
 import * as mediaWeekly from './mediaWeekly';
+import * as layer0Notice from './layer0Notice';
 import * as baysAsks from './baysAsks';
 import * as scheduledRuns from './scheduledRuns';
 import * as askTrace from './askTrace';
@@ -3219,6 +3220,7 @@ async function boot(): Promise<void> {
     renewalReminder.startSweeping();
     codeCheckWatch.startSweeping();
     intake2.startSweeping();
+    void layer0Notice.sweepRecent().then((r) => { if (r.checked) console.log(`[layer0-notice] boot sweep: ${r.checked} completed log(s) checked, ${r.deleted} notice(s) deleted, ${r.failed} failed`); }).catch((e) => console.error(`[layer0-notice] boot sweep failed: ${e instanceof Error ? e.message : String(e)}`));
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();
   });
