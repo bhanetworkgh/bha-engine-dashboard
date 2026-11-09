@@ -24,7 +24,6 @@ import { FeedError } from './systemFeeds';
 export const DESTINY = 'U0AEW3TBYH1';
 export const REPORT_KIND = 'Report';
 const PLATFORMS = ['x', 'facebook', 'instagram', 'linkedin'] as const;
-type P = (typeof PLATFORMS)[number];
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 const dashboardUrl = (): string => (process.env.PUBLIC_DASHBOARD_URL || 'https://dashboard.bhanetwork.org').replace(/\/+$/, '');
@@ -50,6 +49,8 @@ export function automaticChecks(): { id: string; what: string }[] {
 }
 
 type Draft = Awaited<ReturnType<typeof mediaPosts.read>>['posts'][number];
+type Outcome = 'as_generated' | 'rewritten' | 'edited' | 'approved_not_posted' | 'not_approved';
+type DayPlatform = { outcome: Outcome; posted_url: string | null; posted_at: string | null; decided_at: string | null; auto_post_failed_first: boolean; metrics: Record<string, unknown> | null };
 
 export async function facts(b: Record<string, unknown>) {
   const { from, to } = range(b);
@@ -95,14 +96,14 @@ export async function facts(b: Record<string, unknown>) {
       chain.unshift(cur);
       cur = cur.parent_post_id ? byId.get(cur.parent_post_id) : undefined;
     }
-    const platforms = Object.fromEntries(
-      PLATFORMS.map((k) => {
+    const platforms: Record<string, DayPlatform> = Object.fromEntries(
+      PLATFORMS.map((k): [string, DayPlatform] => {
         const x = p.platforms?.[k];
         const rejected = chain.slice(0, -1).some((d) => d.platforms?.[k]?.decision === 'rejected');
         const edited = (x?.edits ?? []).length > 0;
         const failed = failures.some((f) => f.post_id === p.post_id && f.platform === k);
-        const outcome = !x || x.decision !== 'approved' ? 'not_approved' : !x.posted_url ? 'approved_not_posted' : edited ? 'edited' : rejected ? 'rewritten' : 'as_generated';
-        return [k, { outcome, posted_url: x?.posted_url ?? null, posted_at: x?.posted_at ?? null, decided_at: x?.decided_at ?? null, auto_post_failed_first: failed, metrics: (p.metrics ?? []).find((m) => (m as { platform?: string }).platform === k) ?? null }];
+        const outcome: Outcome = !x || x.decision !== 'approved' ? 'not_approved' : !x.posted_url ? 'approved_not_posted' : edited ? 'edited' : rejected ? 'rewritten' : 'as_generated';
+        return [k, { outcome, posted_url: x?.posted_url ?? null, posted_at: x?.posted_at ?? null, decided_at: x?.decided_at ?? null, auto_post_failed_first: failed, metrics: ((p.metrics ?? []) as Record<string, unknown>[]).find((m) => m.platform === k) ?? null }];
       }),
     );
     return { run_date: String(p.run_date).slice(0, 10), post_id: p.post_id, first_draft: rootOf(p).post_id, revision: p.revision, headline: String((p.card as { headline?: string })?.headline ?? '').replace(/\*/g, ''), status: p.status, platforms };
@@ -112,7 +113,7 @@ export async function facts(b: Record<string, unknown>) {
     PLATFORMS.map((k) => {
       const c = { days: days.length, as_generated: 0, rewritten: 0, edited: 0, approved_not_posted: 0, not_approved: 0, auto_post_failed_first: 0 };
       for (const d of days) {
-        const x = (d.platforms as Record<P, { outcome: keyof typeof c; auto_post_failed_first: boolean }>)[k];
+        const x = d.platforms[k];
         c[x.outcome] += 1;
         if (x.auto_post_failed_first) c.auto_post_failed_first += 1;
       }
@@ -125,7 +126,7 @@ export async function facts(b: Record<string, unknown>) {
       const t: Record<string, number | null> = { impressions: null, reach: null, likes: null, comments: null, shares: null, saves: null, clicks: null };
       let posts = 0;
       for (const d of days) {
-        const m = (d.platforms as Record<P, { metrics: Record<string, unknown> | null }>)[k].metrics;
+        const m = d.platforms[k].metrics;
         if (!m) continue;
         posts += 1;
         for (const key of Object.keys(t)) {
