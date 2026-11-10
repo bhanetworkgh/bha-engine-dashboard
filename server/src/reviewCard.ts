@@ -91,6 +91,9 @@ export function rebuild(blocks: Block[], sug: ReturnType<typeof paySuggest.fromR
     const at = out.findIndex((b) => b.type === 'actions');
     out.splice(at, 0, ...fresh, { type: 'divider' });
   }
+  // Slack reads a card back with ">" as "&gt;", so a quoted answer that fit at 3,000 characters when posted can
+  // come back longer and be refused as invalid_blocks on the update (10 Nov 2026). Every section is held to the limit.
+  for (const b of out) if (b.type === 'section' && b.text && typeof b.text.text === 'string' && b.text.text.length > 3000) b.text.text = cap(b.text.text, 3000);
   const actions = out.find((b) => b.type === 'actions');
   for (const el of (actions?.elements ?? []) as Obj[]) {
     if (typeof el.value === 'string') el.value = head3(el.value) + sugPart(sug);
@@ -103,7 +106,8 @@ const BUDGET = 11_000;
 /** The card with the longest pay part that keeps it inside Slack's budget, or null. Pure. */
 export function fitCard(blocks: Block[], sug: ReturnType<typeof paySuggest.fromRow>, why: string, id: string): Block[] | null {
   // Slack already took the card as it stands, so a card no bigger than that is never refused for its size.
-  const limit = Math.max(BUDGET, JSON.stringify(blocks).length);
+  // The new button suggestion adds up to about 1,000 characters to each button, so that much room is always given.
+  const limit = Math.max(BUDGET, JSON.stringify(blocks).length + 4_000);
   const tries: ((x: Block[]) => Block[])[] = [
     (x) => x,
     (x) => x.filter((b) => b.type !== 'rich_text'),

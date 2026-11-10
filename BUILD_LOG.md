@@ -14917,3 +14917,10 @@ Files:      server/src/reviewCard.ts.
 Problem:    Executions 79611 and 79612 still answered "too_long: ... even with the shortest pay part": the review itself on those two cards is past the 12,000-character budget, which is this code's own, not Slack's; Slack had already posted them.
 Fix:        The budget is the larger of 11,000 and the card's own size as Slack holds it, so the shortest pay part always fits.
 Decision:   The budget only exists to stop a rewrite making a card bigger than Slack will take; a card Slack already took proves that size is fine.
+
+## 2026-11-10 15:45 — Why Ahad's two cards would not update
+Intent:     Find what stopped the rewrite of U0AC6RFNP3P_1794314702156 and U0AC6RFNP3P_1794313120270.
+Files:      server/src/reviewCard.ts (a shape dry run, the section cap, the button room).
+Problem:    A shape dry run (executions 79666, 79667) showed both cards carry Ahad's answers to the first round, quoted in sections Slack reads back with ">" as "&gt;" (3,146 and 3,127 characters), so the update was refused: "slack_refused: Slack refused the update: invalid_blocks." The other card was 16,018 characters before any change, and the new button suggestions add about 2,500, so the size budget refused it.
+Fix:        Every section is held to Slack's 3,000-character limit on the rewrite, and the size budget allows the card's own size plus 4,000 for the buttons.
+Decision:   Cutting a quoted answer's last characters on the card is acceptable: the answer itself is held whole on the parked row.
