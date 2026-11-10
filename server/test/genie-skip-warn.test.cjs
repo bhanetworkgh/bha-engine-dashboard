@@ -77,7 +77,7 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   const post = async (t) => (refuse ? { ok: false, error: 'channel_not_found' } : (posts.push(t), { ok: true, channel: 'C1', ts: String(posts.length) }));
   const now = new Date('2026-11-10T12:00:00Z');
 
-  let r = await g.pass({ now, fetcher, post });
+  let r = await g.pass({ gap_ms: 0, now, fetcher, post });
   assert.equal(r.ok, true);
   assert.equal(r.recorded, 2);
   assert.equal(asked[0].start, new Date(now.getTime() - 29 * 86_400_000).toISOString());
@@ -88,7 +88,7 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   ok('the first pass reads 29 days back, records both real lines as GENIE events, and two is not an alert');
 
   asked.length = 0;
-  r = await g.pass({ now: new Date(now.getTime() + 60_000), fetcher, post });
+  r = await g.pass({ gap_ms: 0, now: new Date(now.getTime() + 60_000), fetcher, post });
   assert.equal(r.recorded, 0);
   assert.equal(r.already, 2);
   assert.equal(asked[0].start, now.toISOString());
@@ -96,15 +96,15 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
 
   logs = [real31, real5, { ...rec, message: JSON.stringify({ msg: 'builder run record', builderRun: { requestId: 'r-9', skipWarns: [{ workspace: 'rss-feed' }] } }) }];
   refuse = true;
-  r = await g.pass({ now: new Date(now.getTime() + 120_000), fetcher, post });
+  r = await g.pass({ gap_ms: 0, now: new Date(now.getTime() + 120_000), fetcher, post });
   assert.deepEqual(r.alert_failed, ['rss-feed']);
   assert.equal((await query(`SELECT count(*)::int AS c FROM engine_events WHERE event_type = 'genie_skip_warn_alerted'`)).rows[0].c, 0);
   ok('a third fallback crosses; an alert Slack refuses gives its claim back');
 
   refuse = false;
-  r = await g.pass({ now: new Date(now.getTime() + 180_000), fetcher, post });
+  r = await g.pass({ gap_ms: 0, now: new Date(now.getTime() + 180_000), fetcher, post });
   assert.deepEqual(r.alerted, ['rss-feed']);
-  r = await g.pass({ now: new Date(now.getTime() + 240_000), fetcher, post });
+  r = await g.pass({ gap_ms: 0, now: new Date(now.getTime() + 240_000), fetcher, post });
   assert.deepEqual(r.alerted, []);
   assert.equal(posts.length, 1);
   assert.match(posts[0], /"rss-feed" 3 times/);
@@ -112,7 +112,7 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
 
   const before = (await query(`SELECT value FROM meta WHERE key = $1`, [g.CURSOR_KEY])).rows[0].value;
   failRead = true;
-  r = await g.pass({ now: new Date(now.getTime() + 300_000), fetcher, post });
+  r = await g.pass({ gap_ms: 0, now: new Date(now.getTime() + 300_000), fetcher, post });
   assert.equal(r.ok, false);
   assert.match(r.error, /503/);
   assert.equal((await query(`SELECT value FROM meta WHERE key = $1`, [g.CURSOR_KEY])).rows[0].value, before);

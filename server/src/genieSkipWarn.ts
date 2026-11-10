@@ -29,7 +29,7 @@ import * as slack from './slack';
 import * as quota from './quota';
 import * as timers from './timers';
 
-export const RULE = { tick_minutes: 15, window_days: 7, alert_count: 3, first_read_days: 29, max_pages: 20, span_hours: 24, read_timeout_ms: 60_000 } as const;
+export const RULE = { tick_minutes: 15, window_days: 7, alert_count: 3, first_read_days: 29, max_pages: 20, span_hours: 24, read_timeout_ms: 60_000, gap_ms: 2_500 } as const;
 export const CURSOR_KEY = 'genie_skip_warn.cursor';
 export const EVENT = 'genie_ledger_skip_warn';
 export const ALERT_EVENT = 'genie_skip_warn_alerted';
@@ -102,7 +102,15 @@ export function alertText(c: { workspace: string; n: number; request_ids: string
 type Fetcher = typeof fetch;
 
 /** Reads Genie's log for one pattern between two times, every page. */
-async function readLogs(pattern: string, start: string, end: string, fetcher: Fetcher): Promise<{ ok: true; lines: LogLine[] } | { ok: false; error: string }> {
+let lastCall = 0;
+/** Render limits its log API (a 429 after about 25 calls in a burst, 10 Nov), so calls are spaced. */
+async function paced(gap: number): Promise<void> {
+  const wait = lastCall + gap - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastCall = Date.now();
+}
+
+async function readLogs(pattern: string, start: string, end: string, fetcher: Fetcher, gap: number): Promise<{ ok: true; lines: LogLine[] } | { ok: false; error: string }> {
   const t = serviceReads.target('render', '/logs');
   if ('missing' in t) return { ok: false, error: `${t.missing} is not set, so Genie's log cannot be read` };
   const lines: LogLine[] = [];
@@ -111,6 +119,7 @@ async function readLogs(pattern: string, start: string, end: string, fetcher: Fe
   for (let page = 0; page < RULE.max_pages; page++) {
     const qs = new URLSearchParams({ ownerId: renderOwner(), resource: genieService(), text: pattern, limit: '100', startTime: s, endTime: e, direction: 'backward' });
     let body: { hasMore?: boolean; logs?: LogLine[]; nextStartTime?: string; nextEndTime?: string };
+    await paced(gap);
     try {
       const r = await fetcher(`${t.url}?${qs}`, { headers: t.headers, signal: AbortSignal.timeout(RULE.read_timeout_ms) });
       if (!r.ok) return { ok: false, error: `Render answered ${r.status} to the log read` };
@@ -138,7 +147,7 @@ async function post(text: string): Promise<{ ok: true; channel: string; ts: stri
 export interface PassResult { ok: boolean; read_from: string; read_to: string; lines: number; recorded: number; already: number; alerted: string[]; alert_failed: string[]; error?: string }
 
 /** One pass. Never throws. `fetcher` and `now` are for the tests. */
-export async function pass(opts: { now?: Date; fetcher?: Fetcher; post?: typeof post } = {}): Promise<PassResult> {
+export async function pass(opts: { now?: Date; fetcher?: Fetcher; post?: typeof post; gap_ms?: number } = {}): Promise<PassResult> {
   const now = opts.now ?? new Date();
   const to = now.toISOString();
   const held = await getMeta(CURSOR_KEY);
@@ -153,7 +162,7 @@ export async function pass(opts: { now?: Date; fetcher?: Fetcher; post?: typeof 
       const spanFrom = new Date(a).toISOString();
       const spanTo = new Date(Math.min(a + RULE.span_hours * 3_600_000, now.getTime())).toISOString();
     for (const p of PATTERNS) {
-      const r = await readLogs(p, spanFrom, spanTo, opts.fetcher ?? fetch);
+      const r = await readLogs(p, spanFrom, spanTo, opts.fetcher ?? fetch, opts.gap_ms ?? RULE.gap_ms);
       if (!r.ok) {
         out.ok = false;
         out.error = `${r.error} (span ${spanFrom} to ${spanTo})`;

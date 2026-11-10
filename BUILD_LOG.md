@@ -14890,3 +14890,9 @@ Files:      server/src/genieSkipWarn.ts, server/test/genie-skip-warn.test.cjs
 Problem:    Boot pass at 12:21:23Z logged `[genie-skip-warn] Render could not be reached: The operation was aborted due to timeout`: one text search over 29 days of Genie's log outran the 20-second service-read timeout. Nothing was recorded and the cursor did not move, as designed.
 Fix:        Read in 24-hour spans with a 60-second timeout per request, saving the cursor after each span, so a slow search costs one day and never the whole backfill.
 Decision:   Kept the 29-day first read so the 31 Oct and 5 Nov lines are the live proof.
+
+## 2026-11-10 14:10 — M5YH: space the log reads
+Intent:     The second live pass stopped partway.
+Files:      server/src/genieSkipWarn.ts, server/test/genie-skip-warn.test.cjs
+Problem:    `[genie-skip-warn] Render answered 429 to the log read (span 2026-10-27T12:28:29.609Z to 2026-10-28T12:28:29.609Z)` at 12:28:49Z: the day-by-day catch-up made about 26 calls in a burst and Render rate-limited it. The cursor held at 27 Oct, as designed, so nothing was lost.
+Fix:        Calls to Render's log API are spaced 2.5 seconds apart. In steady state a pass is two calls.
