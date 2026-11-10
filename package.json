@@ -117,7 +117,8 @@
     "test:logstream-e2e": "node server/test/logstream-e2e.test.cjs",
     "test:slack-delete": "node server/test/slack-delete.test.cjs",
     "test:review-card": "node server/test/review-card.test.cjs",
-    "test:event-ingress": "node server/test/event-ingress.test.cjs"
+    "test:event-ingress": "node server/test/event-ingress.test.cjs",
+    "test:genie-skip-warn": "node server/test/genie-skip-warn.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",

@@ -107,6 +107,7 @@ import * as logstream from './logstream';
 import * as researchSignals from './researchSignals';
 import * as vfarmCustomerEvents from './vfarmCustomerEvents';
 import * as creditOut from './creditOut';
+import * as genieSkipWarn from './genieSkipWarn';
 import * as modelSpend from './modelSpend';
 import * as doctrineConsumer from './doctrineConsumer';
 import * as engineEvents from './engineEvents';
@@ -3307,6 +3308,7 @@ async function boot(): Promise<void> {
       .then((n) => n && console.log(`[vfarm-customers] ${n} lead event(s) written for leads already held`))
       .catch((e) => console.error(`[vfarm-customers] lead backfill failed: ${(e as Error).message}`));
     creditOut.startWatching();
+    genieSkipWarn.startWatching();
     modelSpend.startReading();
     publishGate.startSweeping();
     skillWatch.startSweeping();

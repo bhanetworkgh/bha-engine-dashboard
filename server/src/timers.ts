@@ -25,6 +25,7 @@ const KNOWN: Array<{ name: string; what: string; every: string }> = [
   { name: 'lane blocker sweep', what: 'Writes an event when a loop blocking a lane is closed', every: '5 minutes' },
   { name: 'quality alert', what: 'Checks the agents\' answer quality against its alert line', every: '15 minutes' },
   { name: 'credit-out watch', what: 'Posts one alert the minute a run fails because the model credit is out, and one when OpenRouter stops responding', every: '1 minute' },
+  { name: 'genie skip-warn watch', what: 'Reads Genie\'s log for ledger skip warnings, records each as an engine event, and alerts once when one workspace falls back 3 times in 7 days', every: '15 minutes' },
   { name: 'logstream sweep', what: 'Writes Logstream rows and acts on faults that crossed a threshold', every: '5 minutes' },
   { name: 'research signals', what: 'Finds signals that ask for research and opens one job each, within the daily budget', every: '5 minutes' },
   { name: 'skill watch', what: 'Once a day reads the skills on every agent\'s live version and alerts when one has gone, or when an agent cannot be read', every: '1 hour' },
