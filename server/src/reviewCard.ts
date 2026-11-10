@@ -120,11 +120,20 @@ export async function refreshPay(b: Obj): Promise<Obj> {
   if (!h.ok) throw new CardError('card_unreadable', `Slack would not read the card in ${channel}: ${h.error}.`, 502);
   if (!m || m.ts !== ts || !Array.isArray(m.blocks)) throw new CardError('card_not_found', `No card at ${channel} ${ts}.`, 404);
   const sug = paySuggest.fromRow(f);
-  const blocks = rebuild(m.blocks, sug, why);
+  let blocks = rebuild(m.blocks, sug, why);
+  // Slack's card size budget, as Build Layer 1 Payload keeps it: the pay-parts list goes first (Held until restates it).
+  if (JSON.stringify(blocks).length > 11_000) {
+    const fresh = payBlocks(sug, why);
+    const partsList = fresh.find((x) => x.type === 'rich_text');
+    if (partsList) blocks = rebuild(m.blocks, sug, why).filter((x) => JSON.stringify(x) !== JSON.stringify(partsList));
+  }
   if (JSON.stringify(blocks).length > 12_000) throw new CardError('too_long', 'The rewritten card would be past Slack\'s size limit; nothing was sent.');
   const line = sug && !sug.none ? sug.line ?? null : null;
   if (b.dry_run === true) return { ok: true, dry_run: true, submission_id: id, channel, ts, line, blocks_before: m.blocks.length, blocks_after: blocks.length };
-  const u = await slack.botCall('chat.update', { channel, ts, text: m.text ?? 'Builder log review', blocks });
+  // The fallback text read back from Slack is rebuilt from the blocks and can pass Slack's limit (msg_too_long on
+  // two cards, execution 79097), so a short one is sent; the card itself is the blocks.
+  const fallback = String(m.text ?? '').slice(0, 300) || 'Builder log review';
+  const u = await slack.botCall('chat.update', { channel, ts, text: fallback, blocks });
   if (!u.ok) throw new CardError('slack_refused', `Slack refused the update: ${u.error}.`, 502);
   return { ok: true, updated: true, submission_id: id, channel, ts, line, link: `https://bayshorizonnetwork.slack.com/archives/${channel}/p${ts.replace('.', '')}` };
 }
