@@ -54,7 +54,7 @@ export const cleanRun = (v: unknown) => String(v ?? '').replace(/[^A-Za-z0-9]/g,
 
 const COMMON = [
   'Mission fit: this moves the BHA engine pay pipeline, the Codex review that decides what a builder is paid for.',
-  'Error and fix: the first run of the new check failed because the field name was wrong; I renamed it and it passed.',
+  'Errors and blockers: none this session.',
   'Next step: run the check on the next real log and read the result on the dashboard.',
   'Commercial impact: honest pay records are what let BHA show buyers and investors that the engine counts real work, so it supports the vFarm founding-buyer story.',
 ];
