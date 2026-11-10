@@ -26,7 +26,7 @@ export class CardError extends Error {
   }
 }
 
-const PART: Record<string, string> = { live: 'credited', live_pending: 'merged, no live event yet', held: 'held', already_paid: 'already logged, docked' };
+const PART: Record<string, string> = { live: 'credited', live_pending: 'half now, half held until its live event', held: 'held', already_paid: 'already logged, docked' };
 const cap = (t: string, n: number) => (t.length > n ? t.slice(0, n - 1) + '…' : t);
 const section = (text: string): Block => ({ type: 'section', text: { type: 'mrkdwn', text } });
 const list = (items: string[]): Block => ({

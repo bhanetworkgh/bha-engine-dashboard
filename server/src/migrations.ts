@@ -4469,6 +4469,14 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `ALTER TABLE engine_pay_notes ADD COLUMN IF NOT EXISTS relog_of text`,
     ],
   },
+  {
+    id: 126,
+    name: "Pay notes: Jason's four proof tags (INSUFFICIENT_PROOF, AWAITING_REVIEW, BLOCKED_EXTERNAL, NEEDS_LIVE_EVENT), 10 Nov 2026",
+    statements: [
+      `ALTER TABLE engine_pay_notes DROP CONSTRAINT IF EXISTS engine_pay_notes_reason_tag_check`,
+      `ALTER TABLE engine_pay_notes ADD CONSTRAINT engine_pay_notes_reason_tag_check CHECK (reason_tag IS NULL OR reason_tag IN ('LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT'))`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

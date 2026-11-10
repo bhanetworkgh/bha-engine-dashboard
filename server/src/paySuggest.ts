@@ -31,6 +31,18 @@
  *     and says so, instead of carrying the RELOG_OLD_WORK tag on work nobody docked.
  *   - LOCAL_ONLY is said only of code that is not merged or hooked up.
  *
+ * Jason's proof levels (10 Nov 2026, the change-note thread C0ASMPYQLG3 1794256210.264529, DW-1794313591288-PVMC).
+ * Every new part is scored on the proof the log gives, not on whether it has reached production:
+ *   - Level 0, narrative only (nothing another person can open): held, INSUFFICIENT_PROOF.
+ *   - Level 1, an artefact (a PR, a pushed branch or commit, a script, a design, test output): credited.
+ *   - Level 2, a call on the target surface (HTTPS, CLI, queue, simulator, Slack) with an effect seen.
+ *   - Level 3, a live production event.
+ *   Level 1 and up is credited in full. A hold is only for INSUFFICIENT_PROOF, or NEEDS_LIVE_EVENT where
+ *   the loop's acceptance needs a live event (or the log says the part is live) and there is none yet:
+ *   then half now, half held until it lands. Never held for "not in prod", for waiting on review with a
+ *   real artefact, or for being blocked by someone else once the work is ready: those are credited and
+ *   tagged AWAITING_REVIEW or BLOCKED_EXTERNAL so the wait is visible. Old work is still docked.
+ *
  * The earlier-work check (`relogCheck`) is the engine's own read of the builder's approved logs:
  * the same recording, an earlier log named by id, or a loop shared with an approved log of theirs
  * in the last 14 days. Layer 0 of Submit Actions calls it before the completeness check and asks the
@@ -47,9 +59,19 @@ export const LOG_CLASSES = ['fresh_build', 'RELOG_OLD_WORK'] as const;
 export const PART_KINDS = ['code', 'non_code'] as const;
 const NON_CODE = new Set(['non_code', 'noncode', 'non-code', 'investigation', 'design', 'research', 'review', 'verification', 'ops', 'docs', 'analysis']);
 
+export const BLOCKERS = ['awaiting_review', 'blocked_external'] as const;
+
 export interface WorkPart {
   what: string;
   kind: 'code' | 'non_code';
+  /** Jason's proof level, 0 to 3: what the log gives (see the header). */
+  proof_level: 0 | 1 | 2 | 3;
+  /** Whether the level was stated by the review or worked out here from the older fields. */
+  level_from: 'review' | 'derived';
+  /** The work is ready and waits on someone else: a review of its artefact, or another team. */
+  blocker: '' | 'awaiting_review' | 'blocked_external';
+  /** The loop's acceptance needs a live production event for this part, or the log says it is live. */
+  needs_live_event: boolean;
   new_this_session: boolean;
   merged: boolean;
   integrated: boolean;
@@ -71,7 +93,7 @@ export interface Suggestion {
   line: string;
   /** What the review found that Jason should see, red flags first. */
   flags: string[];
-  parts: (WorkPart & { score: number; status: 'live' | 'live_pending' | 'held' | 'already_paid'; missing: string[] })[];
+  parts: (WorkPart & { score: number; status: 'live' | 'live_pending' | 'held' | 'already_paid'; missing: string[]; tag: string | null })[];
   log_class: string | null;
   relog_of: string | null;
   relog_delta: string | null;
@@ -92,17 +114,48 @@ export function parseParts(v: unknown): WorkPart[] {
   if (!Array.isArray(a)) return [];
   return a
     .filter((x): x is Obj => !!x && typeof x === 'object')
-    .map((x) => ({
-      what: str(x.what, 200) || 'unnamed part',
-      kind: NON_CODE.has(str(x.kind, 40).toLowerCase()) ? ('non_code' as const) : ('code' as const),
-      new_this_session: x.new_this_session === undefined ? true : bool(x.new_this_session),
-      merged: bool(x.merged),
-      integrated: bool(x.integrated),
-      live_event: bool(x.live_event),
-      silent_failure: str(x.silent_failure, 300),
-      evidence: str(x.evidence, 300),
-    }))
+    .map((x) => {
+      const kind = NON_CODE.has(str(x.kind, 40).toLowerCase()) ? ('non_code' as const) : ('code' as const);
+      const merged = bool(x.merged);
+      const integrated = bool(x.integrated);
+      const live_event = bool(x.live_event);
+      const evidence = str(x.evidence, 300);
+      const stated = Number(x.proof_level);
+      const fromReview = x.proof_level !== undefined && x.proof_level !== null && x.proof_level !== '' && [0, 1, 2, 3].includes(stated);
+      const proof_level = (fromReview ? stated : deriveLevel({ merged, integrated, live_event, evidence })) as 0 | 1 | 2 | 3;
+      const b = str(x.blocker, 40).toLowerCase();
+      const blocker = (BLOCKERS as readonly string[]).includes(b)
+        ? (b as 'awaiting_review' | 'blocked_external')
+        : // Older rows carry no blocker: finished code with an artefact that is not merged waits on review.
+          x.blocker === undefined && kind === 'code' && proof_level >= 1 && !merged
+          ? 'awaiting_review'
+          : '';
+      return {
+        what: str(x.what, 200) || 'unnamed part',
+        kind,
+        proof_level,
+        level_from: fromReview ? ('review' as const) : ('derived' as const),
+        blocker: blocker as WorkPart['blocker'],
+        needs_live_event: bool(x.needs_live_event),
+        new_this_session: x.new_this_session === undefined ? true : bool(x.new_this_session),
+        merged,
+        integrated,
+        live_event,
+        silent_failure: str(x.silent_failure, 300),
+        evidence,
+      };
+    })
     .slice(0, 12);
+}
+
+const hasEvidence = (e: string) => !!e && !/^(none|n\/a|no(ne)? (stated|given|proof))\.?$/i.test(e.trim());
+
+/** A level for a part the review did not grade (rows written before 10 Nov): from the older fields. Pure. */
+export function deriveLevel(p: { merged: boolean; integrated: boolean; live_event: boolean; evidence: string }): 0 | 1 | 2 | 3 {
+  if (p.live_event) return 3;
+  if (p.integrated && (p.merged || hasEvidence(p.evidence))) return 2;
+  if (p.merged || hasEvidence(p.evidence)) return 1;
+  return 0;
 }
 
 const step = (n: number) => Math.round(n * 20) / 20; // to the nearest 0.05 of a day
@@ -133,35 +186,30 @@ export function suggest(fields: Obj, relog: RelogCheck | null = null, now = new 
     return finish({ credited: 0, held: 0, docked: 1, tag: 'RELOG_OLD_WORK', note, condition: null, flags, scored: [], logClass, relogOf, relogDelta, now, basis: 'Re-log with no work parts listed' });
   }
 
-  const scored = parts.map((p) => {
+  const scored: Suggestion['parts'] = parts.map((p) => {
     if (!p.new_this_session) {
-      return { ...p, score: 0, status: 'already_paid' as const, missing: [] as string[] };
+      return { ...p, score: 0, status: 'already_paid' as const, missing: [] as string[], tag: 'RELOG_OLD_WORK' };
     }
     const missing: string[] = [];
-    if (p.kind === 'non_code') {
-      // Judged on its proof alone: what the investigation, design or check produced.
-      const proven = !!p.evidence && !/^none( stated)?\.?$/i.test(p.evidence);
-      if (!proven) missing.push('the proof it produced, named in the log (the doc, record, finding or link)');
-      if (p.silent_failure) missing.push(`the "${p.silent_failure}" path writes a record instead of failing silently`);
-      const ok = proven && !p.silent_failure;
-      return { ...p, score: ok ? 1 : 0, status: ok ? ('live' as const) : ('held' as const), missing };
+    if (p.silent_failure) {
+      missing.push(`the "${p.silent_failure}" path writes a record instead of failing silently`);
+      return { ...p, score: 0, status: 'held' as const, missing, tag: 'INSUFFICIENT_PROOF' };
     }
-    if (!p.merged) missing.push('merged in a PR with CI');
-    if (!p.integrated) missing.push('hooked up where it runs (registered, deployed, wired in)');
-    if (!p.live_event) missing.push('one real event for it in the Engine, logged');
-    if (p.silent_failure) missing.push(`the "${p.silent_failure}" path writes a record instead of failing silently`);
-    let score = 0;
-    let status: 'live' | 'live_pending' | 'held' = 'held';
-    if (p.merged && p.integrated && !p.silent_failure) {
-      score = p.live_event ? 1 : 0.5;
-      status = p.live_event ? 'live' : 'live_pending';
+    if (p.proof_level === 0) {
+      missing.push(p.kind === 'non_code' ? 'the proof it produced, named in the log (the doc, record, finding or link)' : 'an artefact another person can open: a PR, a pushed branch or commit, a script, a design or test output');
+      return { ...p, score: 0, status: 'held' as const, missing, tag: 'INSUFFICIENT_PROOF' };
     }
-    return { ...p, score, status, missing };
+    if (p.needs_live_event && p.proof_level < 3) {
+      missing.push('one real production event for it, logged');
+      return { ...p, score: 0.5, status: 'live_pending' as const, missing, tag: 'NEEDS_LIVE_EVENT' };
+    }
+    const tag = p.blocker === 'awaiting_review' ? 'AWAITING_REVIEW' : p.blocker === 'blocked_external' ? 'BLOCKED_EXTERNAL' : null;
+    return { ...p, score: 1, status: 'live' as const, missing, tag };
   });
 
   // A re-log whose builder named no delta: nothing in it can be counted as new.
   if (logClass === 'RELOG_OLD_WORK' && !relogDelta) {
-    for (const p of scored) if (p.status !== 'already_paid') Object.assign(p, { score: 0, status: 'already_paid', missing: [] });
+    for (const p of scored) if (p.status !== 'already_paid') Object.assign(p, { score: 0, status: 'already_paid', missing: [], tag: 'RELOG_OLD_WORK' });
     flags.push('Classified as a re-log, but the log does not say what is new this session, so nothing in it is counted as new.');
   }
 
@@ -183,13 +231,28 @@ export function suggest(fields: Obj, relog: RelogCheck | null = null, now = new 
   const heldParts = scored.filter((p) => p.status === 'held' || p.status === 'live_pending');
   const condition = held > 0 ? heldParts.map((p) => `${p.what}: ${p.missing.join(', ')}`).join('. ').slice(0, 600) : null;
 
-  const anyLocal = scored.some((p) => p.status === 'held' && p.kind === 'code' && (!p.merged || !p.integrated));
-  const tag = docked > 0 ? 'RELOG_OLD_WORK' : held > 0 ? (anyLocal && scored.every((p) => p.score === 0) ? 'LOCAL_ONLY' : 'PARTIAL_SCOPE') : null;
+  // One tag for the note: the docked share first, then the larger held reason, then a visible wait.
+  const heldBy = (t: string) => scored.filter((p) => p.tag === t).reduce((x, p) => x + (1 - p.score), 0);
+  const waits = scored.filter((p) => p.status === 'live').map((p) => p.tag).filter((t): t is string => !!t);
+  const tag =
+    docked > 0
+      ? 'RELOG_OLD_WORK'
+      : held > 0
+        ? heldBy('INSUFFICIENT_PROOF') >= heldBy('NEEDS_LIVE_EVENT')
+          ? 'INSUFFICIENT_PROOF'
+          : 'NEEDS_LIVE_EVENT'
+        : waits.includes('BLOCKED_EXTERNAL')
+          ? 'BLOCKED_EXTERNAL'
+          : waits.includes('AWAITING_REVIEW')
+            ? 'AWAITING_REVIEW'
+            : null;
 
   const bits: string[] = [];
   const credit = scored.filter((p) => p.score > 0);
-  if (credit.length) bits.push(`Credited: ${credit.map((p) => (p.score < 1 ? `${p.what} (50%, no live event yet)` : p.what)).join('; ')}`);
-  if (heldParts.length) bits.push(`Held: ${heldParts.map((p) => p.what).join('; ')}`);
+  const lvl = (p: { proof_level: number }) => `level ${p.proof_level}`;
+  if (credit.length) bits.push(`Credited: ${credit.map((p) => (p.score < 1 ? `${p.what} (${lvl(p)}; 50%, its live event is not in yet)` : `${p.what} (${lvl(p)}${p.tag ? `, ${p.tag}` : ''})`)).join('; ')}`);
+  const heldOnly = scored.filter((p) => p.status === 'held');
+  if (heldOnly.length) bits.push(`Held: ${heldOnly.map((p) => `${p.what} (${p.tag})`).join('; ')}`);
   const old = scored.filter((p) => p.status === 'already_paid');
   if (old.length) bits.push(`Docked as already paid${relogOf ? ` (${relogOf})` : ''}: ${old.map((p) => p.what).join('; ')}`);
   // A credit on a re-log has to say what it is for (payNote relog_needs_delta), even a full one.
@@ -205,7 +268,10 @@ export function pct(n: number): string {
 
 /** The one-line suggestion, worked out from the shares, so a card can be redrawn from any stored suggestion. Pure. */
 export function lineFor(s: { pay_recommendation?: string | null; credited_share?: number | null; held_share?: number | null; docked_share?: number | null; reason_tag?: string | null }): string {
-  if (s.pay_recommendation === 'full') return 'Full day (100%): everything in it is merged, hooked up and has a real event.';
+  if (s.pay_recommendation === 'full') {
+    const wait = s.reason_tag === 'AWAITING_REVIEW' ? ' Some of it is waiting on review (AWAITING_REVIEW).' : s.reason_tag === 'BLOCKED_EXTERNAL' ? ' Some of it is blocked by someone else (BLOCKED_EXTERNAL).' : '';
+    return `Full day (100%): every part has the proof it needs.${wait}`;
+  }
   const c = s.credited_share ?? 0;
   const h = s.held_share ?? 0;
   const d = s.docked_share ?? 0;
@@ -239,7 +305,7 @@ function finish(a: {
     held_share: held,
     docked_share: docked,
     reason_tag: a.tag,
-    reason_note: rec === 'full' && a.logClass !== 'RELOG_OLD_WORK' ? null : a.note,
+    reason_note: rec === 'full' && a.logClass !== 'RELOG_OLD_WORK' && !a.tag ? null : a.note,
     release_condition: held > 0 ? a.condition : null,
     line,
     flags: a.flags.slice(0, 8),

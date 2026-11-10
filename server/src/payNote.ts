@@ -11,7 +11,8 @@
  *   held_share           waiting on release_condition; moves to released_share when released
  *   released_share       what a release moved, paid in release_month
  *   docked               1 - credited - held - released; never paid, never backfilled
- *   reason_tag           LOCAL_ONLY | RELOG_OLD_WORK | PARTIAL_SCOPE | TEST_ONLY | OTHER
+ *   reason_tag           LOCAL_ONLY | RELOG_OLD_WORK | PARTIAL_SCOPE | TEST_ONLY | OTHER, and from 10 Nov 2026 Jason's
+ *                        proof tags INSUFFICIENT_PROOF | AWAITING_REVIEW | BLOCKED_EXTERNAL | NEEDS_LIVE_EVENT
  *   reason_note, release_condition, decided_by/at, released_by/at, proof_link
  *
  * The rules, all enforced here rather than left to whoever calls:
@@ -36,7 +37,7 @@ import * as paySuggest from './paySuggest';
 const pct = paySuggest.pct;
 
 export const RECOMMENDATIONS = ['full', 'half', 'none', 'custom_fraction'] as const;
-export const REASON_TAGS = ['LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER'] as const;
+export const REASON_TAGS = ['LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT'] as const;
 export const DECIDERS: Record<string, string> = { U0AEW3TBYH1: 'Destiny Arupi', U0A9V97949F: 'Jason Bays' };
 export type Recommendation = (typeof RECOMMENDATIONS)[number];
 

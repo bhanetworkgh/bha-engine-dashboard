@@ -166,8 +166,9 @@ export function judge(c: E2eCase, step: 'submit' | 'answer', r: Rows): { pass: b
     add('Jason\'s card now reads complete', /Complete, ready to approve|Complete\./.test(JSON.stringify(r.card?.blocks ?? '')), r.card ? 'card read from the resubmission run' : 'no card in the run');
   } else if (c === 'local_only') {
     add('nothing is credited now', !!sug && Number(sug.credited_share) === 0, sug ? `credited ${sug.credited_share}` : 'no suggestion');
-    add('all of it is held, LOCAL_ONLY', !!sug && Number(sug.held_share) === 1 && sug.reason_tag === 'LOCAL_ONLY', sug ? `held ${sug.held_share}, tag ${sug.reason_tag}` : 'no suggestion');
-    add('it says what releases it', !!sug && /merged|PR|pull request/i.test(String(sug.release_condition ?? '')), sug ? `Held until: ${String(sug.release_condition ?? 'none').slice(0, 300)}` : 'no suggestion');
+    // Jason's proof levels (10 Nov 2026): code on a laptop that nobody else can open is level 0.
+    add('all of it is held, INSUFFICIENT_PROOF', !!sug && Number(sug.held_share) === 1 && sug.reason_tag === 'INSUFFICIENT_PROOF', sug ? `held ${sug.held_share}, tag ${sug.reason_tag}` : 'no suggestion');
+    add('it says what releases it', !!sug && /artefact|PR|pull request|branch/i.test(String(sug.release_condition ?? '')), sug ? `Held until: ${String(sug.release_condition ?? 'none').slice(0, 300)}` : 'no suggestion');
   } else {
     const flags: string[] = Array.isArray(sug?.flags) ? sug.flags : [];
     add('the silent failure is the first red flag', /^Silent failure/.test(flags[0] ?? ''), flags.length ? flags[0].slice(0, 300) : 'no flags');

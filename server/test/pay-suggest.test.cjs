@@ -3,8 +3,8 @@
  * the review's work parts. No database and no network. Run with:  npm run test:pay-suggest
  *
  *   1. Everything merged, hooked up and with a real event: full.
- *   2. Merged and hooked up, no live event yet: half now, half held until the first event.
- *   3. Local only (not merged, or not hooked up): none now, all held, LOCAL_ONLY, with what is missing.
+ *   2. (10 Nov, Jason's proof levels) Level 1 and up is credited; held only for INSUFFICIENT_PROOF (level 0)
+ *      or NEEDS_LIVE_EVENT where the acceptance needs one; AWAITING_REVIEW and BLOCKED_EXTERNAL are credited.
  *   4. A silent failure holds that part and is a red flag on the card.
  *   5. A re-log: the old part is docked, never held; only the stated delta is credited.
  *   6. A re-log with no delta stated: nothing is counted as new.
@@ -33,13 +33,27 @@ const parts = (...a) => ({ 'Log Class': 'fresh_build', 'Work Parts': JSON.string
 let s = p.suggest(parts(live));
 assert.equal(s.pay_recommendation, 'full'); assert.equal(s.credited_share, 1); assert.equal(s.reason_tag, null); ok('all live is a full day');
 
+// Jason's proof levels (10 Nov 2026, C0ASMPYQLG3 1794256210.264529): not in prod is never a hold on its own.
 s = p.suggest(parts({ ...live, live_event: false }));
-assert.equal(s.pay_recommendation, 'half'); assert.equal(s.held_share, 0.5); assert.equal(s.rest, 'hold'); assert.equal(s.reason_tag, 'PARTIAL_SCOPE');
-assert.match(s.release_condition, /one real event/); ok('merged with no live event is half now, half held');
+assert.equal(s.pay_recommendation, 'full'); assert.equal(s.held_share, 0); assert.equal(s.parts[0].proof_level, 2); ok('merged and hooked up with no live event is a full day, level 2');
 
-s = p.suggest(parts({ ...live, merged: false, live_event: false }));
-assert.equal(s.pay_recommendation, 'none'); assert.equal(s.held_share, 1); assert.equal(s.reason_tag, 'LOCAL_ONLY');
-assert.match(s.release_condition, /merged in a PR with CI/); ok('local only is none now, all held, LOCAL_ONLY');
+s = p.suggest(parts({ ...live, live_event: false, needs_live_event: true }));
+assert.equal(s.pay_recommendation, 'half'); assert.equal(s.held_share, 0.5); assert.equal(s.rest, 'hold'); assert.equal(s.reason_tag, 'NEEDS_LIVE_EVENT');
+assert.match(s.release_condition, /one real production event/); ok('only where the acceptance needs a live event: half now, half held, NEEDS_LIVE_EVENT');
+
+s = p.suggest(parts({ ...live, merged: false, integrated: false, live_event: false, evidence: 'PR 61 open, CI green' }));
+assert.equal(s.pay_recommendation, 'full'); assert.equal(s.reason_tag, 'AWAITING_REVIEW'); assert.equal(s.parts[0].proof_level, 1); assert.match(s.line, /AWAITING_REVIEW/);
+ok('a PR waiting on review is credited now and tagged AWAITING_REVIEW');
+
+s = p.suggest(parts({ ...live, merged: false, integrated: false, live_event: false, proof_level: 1, blocker: 'blocked_external', evidence: 'branch pushed, waits on Meta app review' }));
+assert.equal(s.credited_share, 1); assert.equal(s.reason_tag, 'BLOCKED_EXTERNAL'); assert.ok(s.reason_note); ok('ready work blocked by someone else is credited and tagged BLOCKED_EXTERNAL');
+
+s = p.suggest(parts({ ...live, merged: false, live_event: false, integrated: false, evidence: '' }));
+assert.equal(s.pay_recommendation, 'none'); assert.equal(s.held_share, 1); assert.equal(s.reason_tag, 'INSUFFICIENT_PROOF');
+assert.match(s.release_condition, /an artefact another person can open/); ok('narrative only (level 0) is held, INSUFFICIENT_PROOF');
+
+s = p.suggest(parts({ ...live, proof_level: 0 }));
+assert.equal(s.held_share, 1); assert.equal(s.reason_tag, 'INSUFFICIENT_PROOF'); ok('a level the review states wins over the older fields');
 
 s = p.suggest(parts({ ...live, silent_failure: 'missing workspace key does nothing' }));
 assert.equal(s.credited_share, 0); assert.equal(s.held_share, 1);
@@ -59,7 +73,7 @@ s = p.suggest({ 'Log Class': 'RELOG_OLD_WORK', 'Relog Of': '459', 'Relog Delta':
     { ...live, what: 'builderRun ledger writer', merged: false, integrated: false, live_event: false, silent_failure: 'missing workspace key path does nothing' },
   ]) });
 assert.equal(s.pay_recommendation, 'custom_fraction'); assert.equal(s.credited_share, 0.35); assert.equal(s.docked_share, 0.35); assert.equal(s.held_share, 0.3);
-assert.match(s.release_condition, /builderRun ledger writer: merged in a PR with CI/); assert.match(s.flags[0], /Silent failure: builderRun/);
+assert.match(s.release_condition, /builderRun ledger writer: the "missing workspace key/); assert.match(s.flags[0], /Silent failure: builderRun/);
 ok('Jason\'s worked example: delta credited, writer held, old work docked, silent path flagged');
 
 s = p.suggest(parts(live), { matches: [{ submission_id: 'X', codex_entry_id: 'CODEX-1', why: 'the same recording', strength: 'strong' }], looks_like_relog: true });
@@ -77,11 +91,11 @@ const finding = { what: 'authorization boundary finding', kind: 'non_code', new_
 s = p.suggest(parts(finding));
 assert.equal(s.pay_recommendation, 'full'); assert.equal(s.held_share, 0); ok('a non-code part with its proof named is credited, never held for a merge');
 s = p.suggest(parts({ ...finding, evidence: 'none stated' }));
-assert.equal(s.credited_share, 0); assert.equal(s.held_share, 1); assert.equal(s.reason_tag, 'PARTIAL_SCOPE'); assert.match(s.release_condition, /the proof it produced/); ok('a non-code part with no proof is held for its proof, not called LOCAL_ONLY');
-s = p.suggest(parts(finding, { ...live, merged: false, integrated: false, live_event: false }));
-assert.equal(s.credited_share, 0.5); assert.equal(s.held_share, 0.5); assert.equal(s.reason_tag, 'PARTIAL_SCOPE'); ok('mixed: the proven finding credited, the local code held');
+assert.equal(s.credited_share, 0); assert.equal(s.held_share, 1); assert.equal(s.reason_tag, 'INSUFFICIENT_PROOF'); assert.match(s.release_condition, /the proof it produced/); ok('a non-code part with no proof is held for its proof, INSUFFICIENT_PROOF');
+s = p.suggest(parts(finding, { ...live, merged: false, integrated: false, live_event: false, evidence: '' }));
+assert.equal(s.credited_share, 0.5); assert.equal(s.held_share, 0.5); assert.equal(s.reason_tag, 'INSUFFICIENT_PROOF'); ok('mixed: the proven finding credited, the unproven code held');
 s = p.suggest({ 'Log Class': 'RELOG_OLD_WORK', 'Relog Of': 'CODEX-b', 'Relog Delta': 'rebased and opened PR 23', 'Work Parts': JSON.stringify([{ ...live, merged: false, integrated: false, live_event: false }]) });
-assert.equal(s.log_class, 'fresh_build'); assert.equal(s.reason_tag, 'LOCAL_ONLY'); assert.ok(!/Re-log of/.test(s.reason_note || '')); ok('an update to an earlier build, all new, carries no re-log tag (Hardik\'s 10 Nov log)');
+assert.equal(s.log_class, 'fresh_build'); assert.equal(s.reason_tag, 'AWAITING_REVIEW'); assert.equal(s.credited_share, 1); assert.ok(!/Re-log of/.test(s.reason_note || '')); ok('an update to an earlier build, all new, carries no re-log tag (Hardik\'s 10 Nov log)');
 assert.equal(p.parseParts([{ what: 'a', kind: 'investigation' }])[0].kind, 'non_code'); assert.equal(p.parseParts([{ what: 'a' }])[0].kind, 'code'); ok('a part with no kind is code; investigation and the like are non-code');
 assert.equal(p.suggest({ 'Log Class': 'fresh_build', 'Work Parts': '[]' }), null); ok('no work parts and not a re-log: no suggestion');
 assert.deepEqual(p.parseParts('not json'), []); assert.equal(p.parseParts([{ what: 'a' }])[0].new_this_session, true); ok('work parts parse from a JSON string or an array');

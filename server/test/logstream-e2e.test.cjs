@@ -28,9 +28,9 @@ ok('every case log says TEST and tags its proof type');
 assert.ok(e.caseLog('relog_undeclared', 'r1').transcript.includes(e.EARLIER_LOG)); ok('the re-log case names the earlier log, so the earlier-work check finds it');
 assert.deepEqual(e.buttonSuggestion('S|u|relog|{"r":"half","c":0.5}'), { r: 'half', c: 0.5 }); assert.equal(e.buttonSuggestion('S|u|'), null); ok('the button suggestion is read as the pop-up reads it');
 
-let f = row({ 'Log Class': 'fresh_build', 'Work Parts': JSON.stringify([{ ...live, merged: false, integrated: false, live_event: false }]) }).fields;
+let f = row({ 'Log Class': 'fresh_build', 'Work Parts': JSON.stringify([{ ...live, merged: false, integrated: false, live_event: false, proof_level: 0, evidence: 'ran it by hand on my laptop' }]) }).fields;
 let v = e.judge('local_only', 'submit', { codex: { id: '9', fields: f }, layer0: null, card: card(f) });
-assert.equal(v.pass, true, JSON.stringify(v.checks)); ok('local only passes when held whole as LOCAL_ONLY and the button matches');
+assert.equal(v.pass, true, JSON.stringify(v.checks)); ok('local only passes when held whole as INSUFFICIENT_PROOF (level 0) and the button matches');
 v = e.judge('local_only', 'submit', { codex: { id: '9', fields: f }, layer0: null, card: { blocks: [], button: 'S1|destiny||{"r":"full","c":1,"h":0}' } });
 assert.equal(v.pass, false); assert.ok(v.checks.some((c) => !c.pass && /pop-up/.test(c.name))); ok('a button that would open on full fails');
 
