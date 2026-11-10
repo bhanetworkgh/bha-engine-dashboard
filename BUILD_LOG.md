@@ -14822,3 +14822,10 @@ Decision:   Old August test rows 3 ("testing airtable submission", Approved) and
 
 ## 2026-11-10 10:05 — Both tools proved through the connector
 Proof:      After a connector refresh, delete_slack_messages previewed and deleted a TEST DM (D0BDLU2H0TC 1794296333.112149, audits 5599 and 5600). test_logstream_e2e run r1110c, local_only: 9 of 9 checks passed on Submit Actions execution 79030, the first run on the published ed3373f2 (the 29 Oct rule live), and cleanup removed its card and Codex row (audit 5602).
+
+## 2026-11-10 08:10 — MEDIATWIN and CSTGENIE registered in BHARAG and proved (O66P)
+Intent:     Close LOOP-1794206036388-O66P once Destiny registered the two subsystems for engine BAYS on BHARAG's workspace page.
+Files:      none in this repo. n8n: new TEST — BHARAG Subsystem Registration Check (5TsTF4VQcmYH9ajg, Engine Evals, unpublished, run by hand).
+Problem:    none. The dashboard has no tool to open one arbitrary incident, so the proof goes through n8n with the BHARAG - Bays Incidents key, the Bays — Error Handler's own Open Incident shape.
+Fix:        Execution 79058 opened INC-BAYS.MEDIATWIN-001 and INC-BAYS.CSTGENIE-001 (both 201), read each back under its own subsystem, and fails on any refusal. Once the ledger poll held them, close_incidents with test: true closed both as tests (audit 5604). O66P closed (audit 5605).
+Decision:   test_forced only; no live_natural Media Twin or CST incident yet. The workflow stays for the next subsystem that needs proving.
