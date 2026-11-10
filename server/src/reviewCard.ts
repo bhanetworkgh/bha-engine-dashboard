@@ -98,6 +98,30 @@ export function rebuild(blocks: Block[], sug: ReturnType<typeof paySuggest.fromR
   return out;
 }
 
+const BUDGET = 11_000;
+
+/** The card with the longest pay part that keeps it inside Slack's budget, or null. Pure. */
+export function fitCard(blocks: Block[], sug: ReturnType<typeof paySuggest.fromRow>, why: string, id: string): Block[] | null {
+  const tries: ((x: Block[]) => Block[])[] = [
+    (x) => x,
+    (x) => x.filter((b) => b.type !== 'rich_text'),
+    (x) => x.filter((b) => b.type !== 'rich_text').map((b) => (b.type === 'section' && typeof b.text?.text === 'string' && /^(:red_circle:|\*Held until)/.test(b.text.text) ? section(cap(b.text.text, 400)) : b)),
+  ];
+  const fresh = payBlocks(sug, why);
+  for (const t of tries) {
+    const mine = t(fresh);
+    const out = rebuild(blocks, sug, why);
+    const at = out.findIndex((b) => JSON.stringify(b) === JSON.stringify(fresh[0]));
+    if (at !== -1) out.splice(at, fresh.length, ...mine);
+    if (JSON.stringify(out).length <= BUDGET) return out;
+  }
+  const short = section(cap(`*Suggested pay* (from this review, you decide on Approve)\n${sug && !sug.none ? paySuggest.lineFor(sug) : 'none was worked out'}\nThe parts, flags and what releases the held share are on the log in the dashboard: https://dashboard.bhanetwork.org/codex/${encodeURIComponent(id)}\n_${why}_`, 2900));
+  const out = rebuild(blocks, sug, why);
+  const at = out.findIndex((b) => JSON.stringify(b) === JSON.stringify(fresh[0]));
+  if (at !== -1) out.splice(at, fresh.length, short);
+  return JSON.stringify(out).length <= 12_000 ? out : null;
+}
+
 /**
  * Reads the log's card from Slack and rewrites its pay part from the Codex row's Pay Suggestion.
  * `dry_run` reads and builds but sends nothing.
@@ -120,14 +144,11 @@ export async function refreshPay(b: Obj): Promise<Obj> {
   if (!h.ok) throw new CardError('card_unreadable', `Slack would not read the card in ${channel}: ${h.error}.`, 502);
   if (!m || m.ts !== ts || !Array.isArray(m.blocks)) throw new CardError('card_not_found', `No card at ${channel} ${ts}.`, 404);
   const sug = paySuggest.fromRow(f);
-  let blocks = rebuild(m.blocks, sug, why);
-  // Slack's card size budget, as Build Layer 1 Payload keeps it: the pay-parts list goes first (Held until restates it).
-  if (JSON.stringify(blocks).length > 11_000) {
-    const fresh = payBlocks(sug, why);
-    const partsList = fresh.find((x) => x.type === 'rich_text');
-    if (partsList) blocks = rebuild(m.blocks, sug, why).filter((x) => JSON.stringify(x) !== JSON.stringify(partsList));
-  }
-  if (JSON.stringify(blocks).length > 12_000) throw new CardError('too_long', 'The rewritten card would be past Slack\'s size limit; nothing was sent.');
+  // Slack's card size budget, as Build Layer 1 Payload keeps it. The pay part gets shorter in steps until the card
+  // fits (10 Nov 2026: two of Ahad's long cards were refused whole): the parts list first (Held until restates it),
+  // then the flags and the held text are cut short, then only the one line and a pointer to the dashboard remain.
+  let blocks = fitCard(m.blocks, sug, why, id);
+  if (!blocks) throw new CardError('too_long', 'The rewritten card would be past Slack\'s size limit even with the shortest pay part; nothing was sent.');
   const line = sug && !sug.none ? paySuggest.lineFor(sug) : null;
   if (b.dry_run === true) return { ok: true, dry_run: true, submission_id: id, channel, ts, line, blocks_before: m.blocks.length, blocks_after: blocks.length };
   // The fallback text read back from Slack is rebuilt from the blocks and can pass Slack's limit (msg_too_long on

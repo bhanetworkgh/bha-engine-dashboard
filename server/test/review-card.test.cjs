@@ -65,4 +65,16 @@ assert.equal(p.lineFor({ pay_recommendation: 'none', credited_share: 0, docked_s
 assert.equal(p.pct(1 / 3), '33.3%');
 ok('shares read as percentages of a day, redrawn from the numbers so an old stored line shows them too');
 
+{
+  // 10 Nov 2026: a long review leaves little room; the pay part shrinks in steps until the card fits.
+  const big = Array.from({ length: 4 }, (_, i) => sec('x'.repeat(2400) + i));
+  const parts = Array.from({ length: 8 }, (_, i) => ({ what: 'part ' + i, new_this_session: true, merged: false, integrated: false, live_event: false, silent_failure: '', evidence: '', proof_level: 0 }));
+  const sug = p.suggest({ 'Log Class': 'fresh_build', 'Work Parts': JSON.stringify(parts) });
+  const card = [...big, { type: 'divider' }, sec('*Suggested pay* old'), { type: 'divider' }, { type: 'actions', elements: [{ type: 'button', value: 'S|u|' }] }];
+  const out = c.fitCard(card, sug, 'why', 'S1');
+  assert.ok(out && JSON.stringify(out).length <= 12000);
+  assert.ok(out.some((b) => b.type === 'section' && /\*Suggested pay/.test(b.text.text)));
+  assert.match(out.find((b) => b.type === 'actions').elements[0].value, /INSUFFICIENT_PROOF/);
+  ok('a long card keeps a shorter pay part and the new button suggestion instead of being refused');
+}
 console.log(`review-card: ${n} passed`);
