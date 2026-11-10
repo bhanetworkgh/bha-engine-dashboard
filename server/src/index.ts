@@ -940,7 +940,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           }
         },
         describe: (r) => `review prompt read from Submit Actions ${r.workflow_version}`,
-        hint: 'POST { transcript, source? }. The Layer 1 review as it stands now: system_message, prompt (with the log in place) and schema. Writes nothing.',
+        hint: 'POST { transcript or submission_id, source? }. The Layer 1 review as it stands now: system_message, prompt (with the log in place) and schema. Writes nothing.',
       },
       '/api/engine/log-precheck/pay': {
         kind: 'codex',

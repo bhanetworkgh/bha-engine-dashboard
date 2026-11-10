@@ -13,6 +13,7 @@
  */
 import * as n8n from './n8n';
 import * as paySuggest from './paySuggest';
+import { query } from './pg';
 
 export const SUBMIT_ACTIONS = 'YTpezWSOIN6TNYcX';
 const REVIEW_NODE = 'Layer 1 — BHA Log Review';
@@ -41,8 +42,17 @@ export function resolvePrompt(template: string, transcript: string, source: stri
 }
 
 export async function prompt(b: Obj): Promise<Obj> {
-  const transcript = typeof b.transcript === 'string' ? b.transcript.trim() : '';
-  if (transcript.length < 200) throw new PrecheckError(422, 'transcript is required: the whole log as it will be submitted (at least 200 characters).');
+  let transcript = typeof b.transcript === 'string' ? b.transcript.trim() : '';
+  let sessionUrl = typeof b.session_url === 'string' ? b.session_url : '';
+  // A log already submitted can be re-checked by its Submission ID: the transcript the review read is on its row.
+  const sid = typeof b.submission_id === 'string' ? b.submission_id.trim() : '';
+  if (!transcript && sid) {
+    const r = await query<{ t: string | null; u: string | null }>(`SELECT fields->>'Transcript' t, fields->>'Session Url' u FROM engine_codex_submissions WHERE fields->>'Submission ID' = $1 ORDER BY id DESC LIMIT 1`, [sid]);
+    if (!r.rows[0]?.t) throw new PrecheckError(404, `No Codex row with Submission ID ${sid} carries a transcript.`);
+    transcript = r.rows[0].t.trim();
+    sessionUrl = sessionUrl || r.rows[0].u || '';
+  }
+  if (transcript.length < 200) throw new PrecheckError(422, 'transcript is required: the whole log as it will be submitted (at least 200 characters), or submission_id of a log already submitted.');
   const source = typeof b.source === 'string' && SOURCES.includes(b.source) ? b.source : 'Otter (voice-narrated build session)';
   const w = await n8n.workflow(SUBMIT_ACTIONS);
   const nodes = w.nodes as Obj[];
@@ -55,7 +65,7 @@ export async function prompt(b: Obj): Promise<Obj> {
   const schema = String(((parser.parameters ?? {}) as Obj).inputSchema ?? '').replace(/^=/, '');
   if (!system || !template || !schema) throw new PrecheckError(409, 'The review node has no system message, prompt or output schema, so there is nothing to run.');
   JSON.parse(schema);
-  return { system_message: system, prompt: resolvePrompt(template, transcript, source), schema, source, workflow_version: w.versionId, read_at: new Date().toISOString(), dry_run: true };
+  return { system_message: system, prompt: resolvePrompt(template, transcript, source), schema, source, transcript, session_url: sessionUrl, workflow_version: w.versionId, read_at: new Date().toISOString(), dry_run: true };
 }
 
 /** The review's answer as the Codex row would carry it. The agent wraps it in `output`. */

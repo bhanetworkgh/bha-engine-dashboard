@@ -14987,3 +14987,8 @@ Files:      server/src/logPrecheck.ts (new), server/src/index.ts (two feed route
 Problem:    A copy of the review prompt would drift the next time Layer 1 is edited, and n8n holds no n8n API credential to read the live node itself.
 Fix:        /api/engine/log-precheck/prompt reads Submit Actions (YTpezWSOIN6TNYcX) with N8N_API_KEY on every call and returns the live system message, prompt and output schema; /api/engine/log-precheck/pay runs relogCheck and suggest on the answer. n8n's Engine — Log Pre-Check calls one, runs the review with the same two models, then the other.
 Decision:   Reads only: no Codex row, no review card, no pay note. Any expression in the prompt other than the transcript and its source is refused rather than filled.
+
+## 2026-11-10 22:35 — Log pre-check takes a Submission ID too
+Intent:     Prove the pre-check on a log already submitted, without pasting its transcript.
+Files:      server/src/logPrecheck.ts, server/src/index.ts
+Fix:        /api/engine/log-precheck/prompt takes submission_id instead of transcript and reads that row's Transcript and Session Url; both are returned so n8n's pay step uses the same text.
