@@ -79,6 +79,7 @@ import * as mediaWeekly from './mediaWeekly';
 import * as payNote from './payNote';
 import * as reviewCard from './reviewCard';
 import * as paySuggest from './paySuggest';
+import * as logPrecheck from './logPrecheck';
 import * as layer0Notice from './layer0Notice';
 import * as baysAsks from './baysAsks';
 import * as scheduledRuns from './scheduledRuns';
@@ -926,6 +927,33 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         store: async (b) => ({ ...(await paySuggest.relogCheck(b)), dry_run: true }),
         describe: (r) => `${(r.matches as unknown[]).length} earlier approved log(s) matched${r.unread ? ` (${r.unread})` : ''}`,
         hint: 'POST { builder_user_id, session_url?, transcript?, submission_id? }. Reads the builder\'s approved logs; writes nothing.',
+      },
+      /** The log pre-check (10 Nov 2026, logPrecheck.ts): the exact Layer 1 review, read live, and the pay it would give. Both read; neither writes. */
+      '/api/engine/log-precheck/prompt': {
+        kind: 'codex',
+        store: async (b) => {
+          try {
+            return { ...(await logPrecheck.prompt(b)) };
+          } catch (e) {
+            if (e instanceof logPrecheck.PrecheckError) throw new systemFeeds.FeedError(e.status, e.message);
+            throw e;
+          }
+        },
+        describe: (r) => `review prompt read from Submit Actions ${r.workflow_version}`,
+        hint: 'POST { transcript, source? }. The Layer 1 review as it stands now: system_message, prompt (with the log in place) and schema. Writes nothing.',
+      },
+      '/api/engine/log-precheck/pay': {
+        kind: 'codex',
+        store: async (b) => {
+          try {
+            return { ...(await logPrecheck.pay(b)) };
+          } catch (e) {
+            if (e instanceof logPrecheck.PrecheckError) throw new systemFeeds.FeedError(e.status, e.message);
+            throw e;
+          }
+        },
+        describe: (r) => `pre-check: ${r.line}`,
+        hint: 'POST { review (the Layer 1 answer), builder_user_id, transcript?, session_url? }. The pay the engine would suggest. Writes nothing.',
       },
       '/api/engine/pay-statement-facts': {
         kind: 'pay_statements',
