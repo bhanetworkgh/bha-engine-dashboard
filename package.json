@@ -119,7 +119,8 @@
     "test:slack-delete": "node server/test/slack-delete.test.cjs",
     "test:review-card": "node server/test/review-card.test.cjs",
     "test:event-ingress": "node server/test/event-ingress.test.cjs",
-    "test:genie-skip-warn": "node server/test/genie-skip-warn.test.cjs"
+    "test:genie-skip-warn": "node server/test/genie-skip-warn.test.cjs",
+    "test:vfarm-lead-attribution": "node server/test/vfarm-lead-attribution.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",

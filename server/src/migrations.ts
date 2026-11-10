@@ -4477,6 +4477,21 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `ALTER TABLE engine_pay_notes ADD CONSTRAINT engine_pay_notes_reason_tag_check CHECK (reason_tag IS NULL OR reason_tag IN ('LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT'))`,
     ],
   },
+  {
+    id: 127,
+    name: "vFarm leads: the website signup's utm tags, kept by email and copied onto the lead (Jason's paid-test gate, 10 Nov 2026)",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_vfarm_lead_attribution (
+         id bigserial PRIMARY KEY,
+         email text NOT NULL,
+         utm jsonb NOT NULL DEFAULT '{}'::jsonb,
+         page text,
+         at timestamptz NOT NULL DEFAULT now(),
+         received_at timestamptz NOT NULL DEFAULT now()
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_vfarm_lead_attribution_email ON engine_vfarm_lead_attribution (email, at DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

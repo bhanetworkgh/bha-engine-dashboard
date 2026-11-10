@@ -896,6 +896,8 @@ export async function storeFormA(body: Record<string, unknown>): Promise<FormAWr
        RETURNING id, (xmax = 0) AS inserted`,
       [name, email, org, stored.source_campaign, submittedAt, JSON.stringify(stored)],
     );
+    // The link the signup came from, if the website intake has already posted it (10 Nov 2026).
+    await applyAttribution(db as unknown as { query: typeof query }, email);
     return { id: r.rows[0].id, inserted: r.rows[0].inserted, merged_into: null };
   });
 
@@ -922,6 +924,74 @@ export async function storeFormA(body: Record<string, unknown>): Promise<FormAWr
   };
 }
 
+
+/* ------------------------------------------------- attribution (10 Nov 2026) */
+
+/**
+ * Where a lead came from, for the paid test (10 Nov 2026, Destiny — Jason's paid-test gate,
+ * #bha-media-twin 1794229934.460279: "UTM/basic attribution in place").
+ *
+ * The /vfarm form sends its `utm_*` tags, but it posts to n8n's `vFarm Early Access — Website
+ * Intake`, which submits into Google Form A, and Form A has no question for them: the tags
+ * were dropped there, so no lead has ever carried one. The intake workflow now posts them here
+ * once Google has accepted the signup, keyed by email, and they are copied onto the lead:
+ * at once when the lead is already held, or when Hardik's tracker posts it (storeFormA).
+ *
+ * Copied only when the tags say something and the lead has none yet, so a lead's first link
+ * stays its source and nothing is ever guessed. Within `ATTRIBUTION_WINDOW_H` of the signup.
+ */
+export const ATTRIBUTION_WINDOW_H = 48;
+const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'] as const;
+
+export interface Attribution { email: string; utm: Record<string, string>; page: string | null; at: string }
+
+export function readAttribution(body: Record<string, unknown>): Attribution {
+  const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+  if (!email || !EMAIL.test(email)) throw new SubmissionError(422, 'email is required and must look like an address.');
+  const raw = body.utm && typeof body.utm === 'object' && !Array.isArray(body.utm) ? (body.utm as Record<string, unknown>) : {};
+  const utm: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (!k.startsWith('utm_') || typeof v !== 'string' || !v.trim()) continue;
+    utm[k.slice(0, 40)] = v.trim().slice(0, MAX_TAG);
+  }
+  const at = typeof body.at === 'string' && Number.isFinite(Date.parse(body.at)) ? new Date(body.at).toISOString() : new Date().toISOString();
+  return { email, utm, page: text(body.page, MAX_TAG), at };
+}
+
+/** Copies the newest attribution for this email onto a lead that has none yet. Returns true when it did. */
+async function applyAttribution(db: { query: typeof query }, email: string): Promise<{ lead_id: string; utm: Record<string, string> } | null> {
+  const a = await db.query<{ utm: Record<string, string>; page: string | null; at: Date }>(
+    `SELECT utm, page, at FROM engine_vfarm_lead_attribution
+      WHERE email = $1 AND utm <> '{}'::jsonb AND at > now() - make_interval(hours => $2)
+      ORDER BY at DESC LIMIT 1`,
+    [email, ATTRIBUTION_WINDOW_H],
+  );
+  if (!a.rows.length) return null;
+  const { utm, page } = a.rows[0];
+  const r = await db.query<{ id: string }>(
+    `UPDATE engine_vfarm_leads
+        SET utm_source = $2, utm_medium = $3, utm_campaign = $4,
+            source_page = COALESCE(source_page, $5),
+            form_a = CASE WHEN form_a IS NULL THEN form_a ELSE form_a || jsonb_build_object('utm', $6::jsonb) END
+      WHERE id = (SELECT id FROM engine_vfarm_leads WHERE lower(email) = $1
+                   AND created_at > now() - make_interval(hours => $7)
+                   ORDER BY created_at, id LIMIT 1)
+        AND COALESCE(utm_source, '') = '' AND COALESCE(utm_medium, '') = '' AND COALESCE(utm_campaign, '') = ''
+      RETURNING id::text AS id`,
+    [email, utm.utm_source ?? '', utm.utm_medium ?? '', utm.utm_campaign ?? '', page, JSON.stringify(utm), ATTRIBUTION_WINDOW_H],
+  );
+  return r.rows.length ? { lead_id: r.rows[0].id, utm } : null;
+}
+
+export async function storeAttribution(a: Attribution): Promise<{ stored: true; applied_to: string | null; utm_keys: string[] }> {
+  const out = await withTransaction(async (db) => {
+    await db.query(`SELECT pg_advisory_xact_lock(hashtext('vfarm_lead_email:' || $1))`, [a.email]);
+    await db.query(`INSERT INTO engine_vfarm_lead_attribution (email, utm, page, at) VALUES ($1, $2::jsonb, $3, $4)`, [a.email, JSON.stringify(a.utm), a.page, a.at]);
+    return applyAttribution(db as unknown as { query: typeof query }, a.email);
+  });
+  if (out) events.changed('vfarm_leads', out.lead_id);
+  return { stored: true, applied_to: out?.lead_id ?? null, utm_keys: Object.keys(a.utm).filter((k) => (UTM_KEYS as readonly string[]).includes(k) || k.startsWith('utm_')) };
+}
 
 /**
  * The CRM's four writes (15 Oct 2026, Destiny). Each appends one line to `activity` with who

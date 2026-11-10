@@ -2525,6 +2525,8 @@ content-type: application/json
 }
 ```
 
+**A website signup keeps the link it came from** (10 Nov 2026, Destiny — Jason's paid-test gate, #bha-media-twin 1794229934.460279: "UTM/basic attribution in place"). The /vfarm form sends its `utm_*` tags, but n8n's `vFarm Early Access — Website Intake` (xxME1VLRkPdlLpaV) submits into Form A, which has no question for them, so no lead had ever carried one. After Google accepts a signup the workflow posts `POST /api/engine/vfarm-lead-attribution` (`x-dashboard-key`, `{email, utm, page, at}`, never able to fail the signup); the visit is kept in `engine_vfarm_lead_attribution` (migration 127, append-only) and the newest one with tags within `ATTRIBUTION_WINDOW_H` (48) is copied onto that email's lead (`utm_source`, `utm_medium`, `utm_campaign` and `form_a.utm` whole), whether the lead arrives before or after it, and only onto a lead with no source yet, so the first link stays the source. A signup with no tags changes nothing. `npm run test:vfarm-lead-attribution`.
+
 The Early Access tab on `/vfarm` opens a lead on click and shows every stored
 answer. The answers are grouped by subject in Form A's own order. **Those
 headings are the dashboard's, not the form's section titles**: nothing the

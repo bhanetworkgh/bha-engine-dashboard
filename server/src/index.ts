@@ -1478,6 +1478,22 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       }
     }
 
+    if (p === '/api/engine/vfarm-lead-attribution') {
+      if (method !== 'POST') throw new HttpError(405, 'POST { email, utm: { utm_source, ... }, page, at } after the website signup is saved.');
+      const body = decodeBodyB64((await readJson(req)) as Record<string, unknown>);
+      try {
+        const a = earlyAccess.readAttribution(body);
+        const w = await earlyAccess.storeAttribution(a);
+        await mirror.logWrite({ endpoint, kind: 'vfarm_leads', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'inserted', detail: `attribution: ${w.utm_keys.length ? w.utm_keys.join(', ') : 'no utm tags'}${w.applied_to ? `, copied onto lead ${w.applied_to}` : ', no lead yet'}`, ms: Date.now() - t0 });
+        return send(res, 201, { ok: true, ...w });
+      } catch (e) {
+        if (e instanceof earlyAccess.SubmissionError) {
+          await mirror.logWrite({ endpoint, kind: 'vfarm_leads', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'rejected', detail: e.message, ms: Date.now() - t0 });
+          throw new HttpError(e.status, e.message);
+        }
+        throw e;
+      }
+    }
     if (p === '/api/engine/vfarm-leads') {
       if (method !== 'POST') throw new HttpError(405, 'POST one lead. An upsert on buyer_intake_id, so the same submission twice updates one row.');
       const body = await readJson(req, 256 * 1024);

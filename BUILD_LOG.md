@@ -14952,3 +14952,10 @@ Files:      server/src/stressTest.ts (new), server/src/mcp/un9dTools.ts (run_str
 Problem:    There was no single way to judge the engine side. UN9D covers state and incidents but not whether readings land on time over a window.
 Fix:        Four fixed checks over a window: on_time (snapshot gaps, newest snapshot age, arrival p95, reading lag p95 and max), and state_correct, one_alert and nothing_old_live taken from UN9D's own conditions on the same rows. Lines calibrated on the last 24 hours of the real farm: snapshots every 180 s (p95 181 s, longest 364 s), arrival p95 20 s, reading lag p95 67 s, max 112 s. 11 of 11 in test:stress-test.
 Decision:   Reuse UN9D for checks 2 to 4 rather than a second definition, so the stress test and UN9D can never disagree about one farm. Gap and lag lines are the Monitoring Twin's own (feed silent 600 s, offline 900 s), not new numbers.
+
+## 2026-11-10 17:15 — Website signups keep their utm tags (paid-test gate)
+Intent:     Jason's paid test (#bha-media-twin 1794229934.460279) needs UTM attribution in place before any spend, so cost per lead can be counted.
+Files:      server/src/earlyAccess.ts, server/src/index.ts, server/src/migrations.ts (127), server/test/vfarm-lead-attribution.test.cjs, package.json, CLAUDE.md
+Problem:    The /vfarm form sends utm_* (src/lib/attribution.ts), but the n8n Website Intake builds only Form A answers and Form A has no utm question, so the tags were dropped: 0 of the leads held carry a utm_source.
+Fix:        POST /api/engine/vfarm-lead-attribution keeps each visit by email (engine_vfarm_lead_attribution) and copies the newest tagged one within 48 h onto that email's lead, before or after the lead arrives, never over a source already set. The SQL proved in psql against a local Postgres 17 (lead first and attribution first, a second link not overwriting). The node test needs the pg module, which is not installed here (no network for npm), so it was not run locally.
+Decision:   Keyed by email, not a new Form A question: Form A is Hardik's, and the tags are provenance rather than an answer.
