@@ -149,6 +149,8 @@ export async function refreshPay(b: Obj): Promise<Obj> {
   // Slack's card size budget, as Build Layer 1 Payload keeps it. The pay part gets shorter in steps until the card
   // fits (10 Nov 2026: two of Ahad's long cards were refused whole): the parts list first (Held until restates it),
   // then the flags and the held text are cut short, then only the one line and a pointer to the dashboard remain.
+  const shape = (x: Block[]) => x.map((k) => `${k.type}:${JSON.stringify(k).length}:${String(k.text?.text ?? '').slice(0, 40)}`);
+  if (b.dry_run === true && b.shape === true) return { ok: true, dry_run: true, submission_id: id, size: JSON.stringify(m.blocks).length, shape: shape(m.blocks), rebuilt: shape(rebuild(m.blocks, sug, why)) };
   let blocks = fitCard(m.blocks, sug, why, id);
   if (!blocks) throw new CardError('too_long', 'The rewritten card would be past Slack\'s size limit even with the shortest pay part; nothing was sent.');
   const line = sug && !sug.none ? paySuggest.lineFor(sug) : null;
