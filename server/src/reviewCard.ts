@@ -40,7 +40,7 @@ export function payBlocks(sug: ReturnType<typeof paySuggest.fromRow>, why: strin
   if (!sug || sug.none) return [section(cap(`*Suggested pay:* none was worked out for this log, so the pop-up opens on full. Check it before approving.\n${note}`, 2900))];
   const parts = (sug.parts ?? []) as { what: string; status: string; missing?: string[] }[];
   return [
-    section(cap(`*Suggested pay* (from this review, you decide on Approve)\n${sug.line ?? 'No suggestion.'}${sug.log_class === 'RELOG_OLD_WORK' ? `\nRe-log of ${sug.relog_of ?? 'earlier work'}. New this session: ${sug.relog_delta ?? 'not stated'}` : ''}\n${note}`, 2900)),
+    section(cap(`*Suggested pay* (from this review, you decide on Approve)\n${paySuggest.lineFor(sug)}${sug.log_class === 'RELOG_OLD_WORK' ? `\nRe-log of ${sug.relog_of ?? 'earlier work'}. New this session: ${sug.relog_delta ?? 'not stated'}` : ''}\n${note}`, 2900)),
     ...((sug.flags ?? []).length ? [section(cap((sug.flags ?? []).map((f) => `:red_circle: ${f}`).join('\n'), 2900))] : []),
     ...(parts.length ? [list(parts.map((p) => `${p.what}: ${PART[p.status] ?? p.status}${(p.missing ?? []).length ? ` (needs: ${(p.missing ?? []).join(', ')})` : ''}`))] : []),
     ...(sug.release_condition ? [section(cap(`*Held until:* ${sug.release_condition}`, 2900))] : []),
@@ -60,7 +60,7 @@ export function sugPart(sug: ReturnType<typeof paySuggest.fromRow>): string {
       t: sug.reason_tag ?? '',
       n: (sug.reason_note ?? '').slice(0, 400),
       k: (sug.release_condition ?? '').slice(0, 500),
-      l: (sug.line ?? '').slice(0, 150),
+      l: paySuggest.lineFor(sug).slice(0, 150),
     })
   );
 }
@@ -128,7 +128,7 @@ export async function refreshPay(b: Obj): Promise<Obj> {
     if (partsList) blocks = rebuild(m.blocks, sug, why).filter((x) => JSON.stringify(x) !== JSON.stringify(partsList));
   }
   if (JSON.stringify(blocks).length > 12_000) throw new CardError('too_long', 'The rewritten card would be past Slack\'s size limit; nothing was sent.');
-  const line = sug && !sug.none ? sug.line ?? null : null;
+  const line = sug && !sug.none ? paySuggest.lineFor(sug) : null;
   if (b.dry_run === true) return { ok: true, dry_run: true, submission_id: id, channel, ts, line, blocks_before: m.blocks.length, blocks_after: blocks.length };
   // The fallback text read back from Slack is rebuilt from the blocks and can pass Slack's limit (msg_too_long on
   // two cards, execution 79097), so a short one is sent; the card itself is the blocks.

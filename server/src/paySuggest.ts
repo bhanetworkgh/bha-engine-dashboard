@@ -188,7 +188,7 @@ export function suggest(fields: Obj, relog: RelogCheck | null = null, now = new 
 
   const bits: string[] = [];
   const credit = scored.filter((p) => p.score > 0);
-  if (credit.length) bits.push(`Credited: ${credit.map((p) => (p.score < 1 ? `${p.what} (half, no live event yet)` : p.what)).join('; ')}`);
+  if (credit.length) bits.push(`Credited: ${credit.map((p) => (p.score < 1 ? `${p.what} (50%, no live event yet)` : p.what)).join('; ')}`);
   if (heldParts.length) bits.push(`Held: ${heldParts.map((p) => p.what).join('; ')}`);
   const old = scored.filter((p) => p.status === 'already_paid');
   if (old.length) bits.push(`Docked as already paid${relogOf ? ` (${relogOf})` : ''}: ${old.map((p) => p.what).join('; ')}`);
@@ -196,6 +196,20 @@ export function suggest(fields: Obj, relog: RelogCheck | null = null, now = new 
   const note = tag || effClass === 'RELOG_OLD_WORK' ? `${effClass === 'RELOG_OLD_WORK' ? `Re-log of ${relogOf ?? 'earlier work'}; new this session: ${relogDelta ?? 'not stated'}. ` : ''}${bits.join('. ')}`.slice(0, 600) : null;
 
   return finish({ credited, held, docked, tag, note, condition, flags, scored, logClass: effClass, relogOf: effClass === 'RELOG_OLD_WORK' ? relogOf : null, relogDelta, now, basis: `${n} work part${n === 1 ? '' : 's'} from the review` });
+}
+
+/** A share of a day as a percentage, for people to read (10 Nov 2026, Destiny). Stored shares stay 0 to 1. Pure. */
+export function pct(n: number): string {
+  return `${Math.round(n * 1000) / 10}%`;
+}
+
+/** The one-line suggestion, worked out from the shares, so a card can be redrawn from any stored suggestion. Pure. */
+export function lineFor(s: { pay_recommendation?: string | null; credited_share?: number | null; held_share?: number | null; docked_share?: number | null; reason_tag?: string | null }): string {
+  if (s.pay_recommendation === 'full') return 'Full day (100%): everything in it is merged, hooked up and has a real event.';
+  const c = s.credited_share ?? 0;
+  const h = s.held_share ?? 0;
+  const d = s.docked_share ?? 0;
+  return `${pct(c)} of a day now${h > 0 ? `, ${pct(h)} held` : ''}${d > 0 ? `, ${pct(d)} docked` : ''}${s.reason_tag ? ` (${s.reason_tag})` : ''}`;
 }
 
 function finish(a: {
@@ -217,10 +231,7 @@ function finish(a: {
   const rec: Suggestion['pay_recommendation'] =
     credited === 1 ? 'full' : credited === 0.5 && (held === 0.5 || docked === 0.5) ? 'half' : credited === 0 && (held === 1 || docked === 1) ? 'none' : 'custom_fraction';
   const rest: 'hold' | 'dock' = docked > 0 && held === 0 ? 'dock' : 'hold';
-  const line =
-    rec === 'full'
-      ? 'Full day: everything in it is merged, hooked up and has a real event.'
-      : `${credited} of a day now${held > 0 ? `, ${held} held` : ''}${docked > 0 ? `, ${docked} docked` : ''} (${a.tag})`;
+  const line = lineFor({ pay_recommendation: rec, credited_share: credited, held_share: held, docked_share: docked, reason_tag: a.tag });
   return {
     pay_recommendation: rec,
     rest,

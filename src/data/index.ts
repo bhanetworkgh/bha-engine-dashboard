@@ -837,6 +837,9 @@ export function moveVfarmLeadStage(id: string, stage: 1 | 2 | 3 | 4 | 5, reason:
   return api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}`, { method: 'PATCH', body: { stage, stage_reason: reason } });
 }
 
+/** A share of a day as a percentage, for reading (10 Nov 2026, Destiny). Stored shares stay 0 to 1. */
+export const pctOfDay = (n: number | null | undefined): string => `${Math.round((n ?? 0) * 1000) / 10}%`;
+
 /**
  * Pay notes (9 Nov 2026, Jason's DM 1794237173.152349): shares of a day credited, held or docked on each
  * approved log, behind the admin login. A log with no note counts as a full day.

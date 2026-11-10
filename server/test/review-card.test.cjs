@@ -17,6 +17,7 @@ Module._resolveFilename = function (request, ...rest) {
 };
 const DIST = process.env.SERVER_DIST || path.join(__dirname, '../../server-dist');
 const c = require(path.join(DIST, 'server/src', 'reviewCard.js'));
+const p = require(path.join(DIST, 'server/src', 'paySuggest.js'));
 
 let n = 0;
 const ok = (m) => { n += 1; console.log('  ok  ' + m); };
@@ -38,7 +39,7 @@ const sug = { pay_recommendation: 'custom_fraction', rest: 'hold', credited_shar
 const out = c.rebuild(card, sug, 'Scored again.');
 assert.deepEqual(out.slice(0, 3), card.slice(0, 3));
 const payText = out[3].text.text;
-assert.match(payText, /0\.6 of a day now, 0\.4 held/); assert.match(payText, /_Scored again\._/);
+assert.match(payText, /60% of a day now, 40% held \(PARTIAL_SCOPE\)/); assert.ok(!payText.includes('0.6 of a day')); assert.match(payText, /_Scored again\._/);
 assert.ok(!JSON.stringify(out).includes('old flag')); assert.equal(out[out.length - 2].type, 'divider');
 ok('the Suggested pay part is replaced and the review above it is untouched');
 
@@ -46,7 +47,7 @@ for (const el of out[out.length - 1].elements) {
   assert.ok(el.value.startsWith('SUB_1|hardik||'));
   const parts = el.value.slice('SUB_1|hardik|'.length + 1);
   const j = JSON.parse(parts);
-  assert.equal(j.c, 0.6); assert.equal(j.t, 'PARTIAL_SCOPE');
+  assert.equal(j.c, 0.6); assert.equal(j.t, 'PARTIAL_SCOPE'); assert.match(j.l, /^60% of a day now/);
 }
 assert.equal(c.head3('SUB_1|hardik||' + JSON.stringify({ n: 'a|b' })), 'SUB_1|hardik|');
 ok('each button keeps its first three parts and opens on the new suggestion');
@@ -58,5 +59,10 @@ ok('a card from before LogStream gets a pay part above its buttons');
 
 assert.throws(() => c.rebuild(card.slice(0, 7), sug, 'x'), (e) => e.reason === 'no_buttons');
 ok('a card with no buttons is refused');
+
+assert.equal(p.lineFor({ pay_recommendation: 'custom_fraction', credited_share: 0.8, held_share: 0.2, reason_tag: 'PARTIAL_SCOPE' }), '80% of a day now, 20% held (PARTIAL_SCOPE)');
+assert.equal(p.lineFor({ pay_recommendation: 'none', credited_share: 0, docked_share: 1, reason_tag: 'RELOG_OLD_WORK' }), '0% of a day now, 100% docked (RELOG_OLD_WORK)');
+assert.equal(p.pct(1 / 3), '33.3%');
+ok('shares read as percentages of a day, redrawn from the numbers so an old stored line shows them too');
 
 console.log(`review-card: ${n} passed`);

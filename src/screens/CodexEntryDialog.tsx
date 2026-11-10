@@ -309,10 +309,10 @@ export function CodexEntryDialog({
                 <div className="flex flex-wrap gap-3">
                   {(
                     [
-                      ['full', 'Full day (1.0)'],
-                      ['half', 'Half now (0.5)'],
-                      ['none', 'None now (0.0)'],
-                      ['custom_fraction', 'Custom share'],
+                      ['full', 'Full day (100%)'],
+                      ['half', 'Half now (50%)'],
+                      ['none', 'None now (0%)'],
+                      ['custom_fraction', 'Custom %'],
                     ] as const
                   ).map(([v, label]) => (
                     <label key={v} className="flex items-center gap-1.5">
@@ -344,12 +344,12 @@ export function CodexEntryDialog({
                     {pay.pay_recommendation === 'custom_fraction' && (
                       <>
                         <label className="flex flex-col gap-1">
-                          <span className="text-faint">Share credited now (0 to 1)</span>
-                          <input className="input" inputMode="decimal" value={pay.credited_share ?? ''} onChange={(e) => setPay((p) => ({ ...p, credited_share: e.target.value === '' ? undefined : Number(e.target.value) }))} />
+                          <span className="text-faint">Credited now (% of a day)</span>
+                          <input className="input" inputMode="decimal" value={pay.credited_share === undefined || pay.credited_share === null ? '' : String(Math.round(pay.credited_share * 1000) / 10)} onChange={(e) => setPay((p) => ({ ...p, credited_share: e.target.value === '' ? undefined : Number(e.target.value) / 100 }))} />
                         </label>
                         <label className="flex flex-col gap-1">
-                          <span className="text-faint">Share held (left empty: the rest, held or docked as above)</span>
-                          <input className="input" inputMode="decimal" value={pay.held_share ?? ''} onChange={(e) => setPay((p) => ({ ...p, held_share: e.target.value === '' ? undefined : Number(e.target.value) }))} />
+                          <span className="text-faint">Held (% of a day; left empty: the rest, held or docked as above)</span>
+                          <input className="input" inputMode="decimal" value={pay.held_share === undefined || pay.held_share === null ? '' : String(Math.round(pay.held_share * 1000) / 10)} onChange={(e) => setPay((p) => ({ ...p, held_share: e.target.value === '' ? undefined : Number(e.target.value) / 100 }))} />
                         </label>
                       </>
                     )}
@@ -367,7 +367,7 @@ export function CodexEntryDialog({
                   <Button variant="primary" size="sm" disabled={busy || !!payProblem} onClick={() => void approveWithPay()}>
                     {busy ? 'Writing…' : 'Yes, approve'}
                   </Button>
-                  <span className={payProblem ? 'text-degraded' : 'text-faint'}>{payProblem ?? 'Shares of a day, never money. Kept with who decided it; corrected forward, never removed.'}</span>
+                  <span className={payProblem ? 'text-degraded' : 'text-faint'}>{payProblem ?? 'Percent of a day, never money. Kept with who decided it; corrected forward, never removed.'}</span>
                 </div>
               </div>
             )}

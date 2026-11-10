@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { PayNote } from '../../data';
-import { releasePayNote, releasePayNotes } from '../../data';
+import { pctOfDay, releasePayNote, releasePayNotes } from '../../data';
 import { Button, EmptyState, Pill, RecordId } from '../../components/ui';
 
 /**
@@ -13,7 +13,7 @@ import { Button, EmptyState, Pill, RecordId } from '../../components/ui';
  * Shares of a day, never money: Jason applies the rate at month end.
  */
 const when = (iso: string | null) => (iso ? iso.slice(0, 10) : '—');
-const share = (n: number) => String(Math.round(n * 1000) / 1000);
+const share = (n: number) => pctOfDay(n);
 const label: Record<string, string> = { full: 'full', half: 'half', none: 'none now', custom_fraction: 'custom' };
 /** What the review suggested (LogStream, 9 Nov 2026), so an override shows: "same" or what it was. */
 const suggestedLine = (n: PayNote): string | null => {
@@ -23,7 +23,7 @@ const suggestedLine = (n: PayNote): string | null => {
 const suggestedShort = (n: PayNote): string => {
   const sg = n.suggested as { pay_recommendation?: string; credited_share?: number; none?: boolean } | null;
   if (!sg || sg.none || !sg.pay_recommendation) return '—';
-  return sg.pay_recommendation === n.pay_recommendation && sg.credited_share === n.credited_share ? 'same' : `${label[sg.pay_recommendation] ?? sg.pay_recommendation} (${sg.credited_share})`;
+  return sg.pay_recommendation === n.pay_recommendation && sg.credited_share === n.credited_share ? 'same' : `${label[sg.pay_recommendation] ?? sg.pay_recommendation} (${pctOfDay(sg.credited_share)})`;
 };
 
 export default function Held({ notes, held, reload }: { notes: PayNote[]; held: PayNote[]; reload: () => void }) {

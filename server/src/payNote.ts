@@ -33,6 +33,7 @@ import * as events from './events';
 import * as engineEvents from './engineEvents';
 import { FeedError } from './systemFeeds';
 import * as paySuggest from './paySuggest';
+const pct = paySuggest.pct;
 
 export const RECOMMENDATIONS = ['full', 'half', 'none', 'custom_fraction'] as const;
 export const REASON_TAGS = ['LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER'] as const;
@@ -208,7 +209,7 @@ export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ w
       if (!correction || correction.length < 8) throw new PayNoteError('correction_needs_note', `${log.codex_entry_id ?? log.submission_id} already has a pay note (${prior.pay_recommendation}, ${prior.credited_share} credited, ${prior.held_share} held, decided by ${prior.decided_by_name ?? prior.decided_by} ${prior.decided_at}). Changing it is a correction: give correction_note saying why.`);
       if (prior.released_share > 0) throw new PayNoteError('already_released', 'A held share on this log was already released and paid. It cannot be re-decided; correct forward on a new log.');
       if (round3(credited + held) > round3(prior.credited_share + prior.held_share)) {
-        throw new PayNoteError('dock_stays_docked', `This log was docked ${prior.docked_share} of a day by ${prior.decided_by_name ?? prior.decided_by}. A dock stays docked: credited + held cannot go above ${round3(prior.credited_share + prior.held_share)}.`);
+        throw new PayNoteError('dock_stays_docked', `This log was docked ${pct(prior.docked_share)} of a day by ${prior.decided_by_name ?? prior.decided_by}. A dock stays docked: credited + held cannot go above ${pct(prior.credited_share + prior.held_share)}.`);
       }
     }
     await db.query(
@@ -285,7 +286,7 @@ export async function release(b: Obj, opts: { dry_run?: boolean } = {}): Promise
     await engineEvents.record({ event_type: 'pay_note_released', subject_id: after.codex_entry_id ?? log.submission_id, actor: DECIDERS[by], detail: { released: after.released_share, proof_link: proof, release_month: after.release_month } }, db);
     return after;
   };
-  const msg = (n: PayNote) => `${n.codex_entry_id ?? n.submission_id}: ${n.released_share} of a day released for ${n.release_month ?? 'this month'}, on ${proof}.`;
+  const msg = (n: PayNote) => `${n.codex_entry_id ?? n.submission_id}: ${pct(n.released_share)} of a day released for ${n.release_month ?? 'this month'}, on ${proof}.`;
   if (opts.dry_run) {
     try {
       await withTransaction(async (db) => {

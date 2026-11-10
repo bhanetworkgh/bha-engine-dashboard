@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { PayData, PaySession } from '../../data';
-import { getPaySessionCodex } from '../../data';
+import { getPaySessionCodex, pctOfDay } from '../../data';
 import { CodexEntryDialog } from '../CodexEntryDialog';
 import type { RecordColumn } from '../../components/ui';
 import { Button, EmptyState, Pagination, Pill, RecordId, RecordTable, SearchBox, Segmented, usePaged } from '../../components/ui';
@@ -58,13 +58,13 @@ function columns(openCodex: (id: string) => void): RecordColumn<PaySession>[] {
       // The pay note (9 Nov 2026): shares of a day, never money. No note is a full day.
       title: (s) =>
         s.pay_recommendation
-          ? `${s.pay_recommendation}: ${s.credited_share ?? 0} credited${s.held_share ? `, ${s.held_share} held` : ''}${s.docked_share ? `, ${s.docked_share} docked` : ''}${s.pay_reason_tag ? ` (${s.pay_reason_tag})` : ''}`
+          ? `${s.pay_recommendation}: ${pctOfDay(s.credited_share)} credited${s.held_share ? `, ${pctOfDay(s.held_share)} held` : ''}${s.docked_share ? `, ${pctOfDay(s.docked_share)} docked` : ''}${s.pay_reason_tag ? ` (${s.pay_reason_tag})` : ''}`
           : 'No pay note on this log, so it counts as a full day',
       cell: (s) =>
         s.pay_recommendation ? (
           <span>
-            {s.credited_share ?? 0}
-            {s.held_share ? <span className="text-dim"> +{s.held_share} held</span> : null}
+            {pctOfDay(s.credited_share)}
+            {s.held_share ? <span className="text-dim"> +{pctOfDay(s.held_share)} held</span> : null}
             {s.docked_share ? <span className="text-faint"> ({s.docked_share} docked)</span> : null}
           </span>
         ) : (
