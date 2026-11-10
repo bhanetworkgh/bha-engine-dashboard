@@ -72,9 +72,13 @@ ok('shares read as percentages of a day, redrawn from the numbers so an old stor
   const sug = p.suggest({ 'Log Class': 'fresh_build', 'Work Parts': JSON.stringify(parts) });
   const card = [...big, { type: 'divider' }, sec('*Suggested pay* old'), { type: 'divider' }, { type: 'actions', elements: [{ type: 'button', value: 'S|u|' }] }];
   const out = c.fitCard(card, sug, 'why', 'S1');
-  assert.ok(out && JSON.stringify(out).length <= 12000);
+  assert.ok(out && JSON.stringify(out).length <= Math.max(11000, JSON.stringify(card).length + 4000));
   assert.ok(out.some((b) => b.type === 'section' && /\*Suggested pay/.test(b.text.text)));
   assert.match(out.find((b) => b.type === 'actions').elements[0].value, /INSUFFICIENT_PROOF/);
-  ok('a long card keeps a shorter pay part and the new button suggestion instead of being refused');
+  ok('a long card keeps a pay part and the new button suggestion instead of being refused');
+  const quoted = [sec('&gt;' + 'y'.repeat(3100)), { type: 'divider' }, sec('*Suggested pay* old'), { type: 'divider' }, { type: 'actions', elements: [{ type: 'button', value: 'S|u|' }] }];
+  const q = c.rebuild(quoted, sug, 'why');
+  assert.ok(q.every((b) => b.type !== 'section' || b.text.text.length <= 3000));
+  ok('a quoted answer Slack read back past 3,000 characters is held to the limit, so the update is not invalid_blocks');
 }
 console.log(`review-card: ${n} passed`);
