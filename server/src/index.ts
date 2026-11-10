@@ -1232,7 +1232,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       if (method !== 'POST') throw new HttpError(405, 'POST { event_type, subject_id, at?, lane?, actor?, source_ref?, detail?, dedupe_key? }.');
       const b = (await readJson(req, 32 * 1024)) as Record<string, unknown>;
       const subject = typeof b.subject_id === 'string' ? b.subject_id.trim().slice(0, 300) : undefined;
-      const useRefused = doctrineConsumer.externalUseRefusal(b.event_type);
+      const useRefused = doctrineConsumer.externalUseRefusal(b.event_type) ?? engineEvents.externalRefusal(b.event_type);
       if (useRefused) {
         await mirror.logWrite({ endpoint, kind: 'engine_events', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: subject || undefined, outcome: 'rejected', detail: useRefused, ms: Date.now() - t0 });
         throw new HttpError(403, useRefused);

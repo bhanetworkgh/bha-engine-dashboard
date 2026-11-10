@@ -899,6 +899,7 @@ reasonable about.
   commercial LANE-… ids, never work-lane tags, so a work lane reaches research
   only through `engine_lane_profiles.linked_lanes` (migration 39), set with
   `set_lane_profile`, empty until somebody links them.
+- **PR #23, the acceptance-evidence validator, is merged** (10 Nov 2026, Destiny, after review): `server/src/acceptanceEvidence.ts`, Hardik's, pure and called by nothing yet; its field mapping and combinations wait on Jason. `npm run test:acceptance-evidence`.
 - **One token per agent, scoped on the server** (decision 2026-09-28, Destiny —
   Agent Upgrade Plan step 1.4). `READONLY_SECRETS_NORTH_STAR` (read, 10 tools),
   `MCP_AGENT_TOKEN_RESEARCH_TWIN` (write, 7) and `MCP_AGENT_TOKEN_BAYS` (write,
@@ -2322,6 +2323,7 @@ five minutes (and beside each `lane_health` call, never awaited), once per lane
 and loop, dated by the loop's own last write. **Lane health itself stays a
 read.** It does not say a digest task never ran: no event for a day is the
 signal, and nothing alerts on it yet.
+**A decision event is written only in process** (10 Nov 2026, Destiny — Hardik's finding on PR #23: every n8n workflow holds the shared inbound key, so any of them could post any event type and be read as a decision). `engineEvents.IN_PROCESS_ONLY` names the types something acts on (`VFARM_SUBSCRIBER_STATE_CHANGED`, which sets a farm's entitlement status; `VFARM_SUBSCRIBER_UPGRADED`; `code_check_marked_reviewed`, which stops a log's reminders; `acceptance_evidence_recorded`, reserved for U0MN's trusted writer), and `POST /api/engine/events` refuses them 403 with the reason, logged `rejected`, beside `doctrine_claim_used`. A new decision-bearing type goes on that list the day it is added. `npm run test:event-ingress`.
 
 **The recovery watcher re-runs what failed because a dependency was down**
 (decision 2026-09-23, Destiny — brief D2). `server/src/recovery.ts`. When

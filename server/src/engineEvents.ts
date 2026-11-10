@@ -40,6 +40,27 @@ export interface EngineEvent {
 export class EventError extends Error {}
 
 /**
+ * Event types that carry a decision something else acts on (10 Nov 2026, Destiny — Hardik's finding on
+ * PR #23: the shared inbound key lets any n8n workflow post any event type, so an authentic post could be
+ * read as an authorised decision). These are written only in process, by the code that owns the decision,
+ * and POST /api/engine/events refuses them whatever the key. doctrine_claim_used has its own refusal
+ * (doctrineConsumer.externalUseRefusal). Adding a type here is the whole change; never post one from n8n.
+ */
+export const IN_PROCESS_ONLY: Readonly<Record<string, string>> = Object.freeze({
+  VFARM_SUBSCRIBER_STATE_CHANGED: "a farm's entitlement status is read from it (vfarmEntitlement), so it is written only by the dashboard's own payment and subscriber code",
+  VFARM_SUBSCRIBER_UPGRADED: 'it changes what a paying farm is on, so it is written only by the dashboard\'s own subscriber code',
+  code_check_marked_reviewed: "it stops a log's code check reminders, so it is written only by the dashboard when Destiny or Jason marks the card reviewed",
+  acceptance_evidence_recorded: "it will be an acceptance decision (U0MN, PR #23), so it is written only by the dashboard's trusted acceptance writer once that exists",
+});
+
+/** The refusal for an outside post of an in-process-only event type, or null. Pure. */
+export function externalRefusal(eventType: unknown): string | null {
+  const t = typeof eventType === 'string' ? eventType.trim() : '';
+  const why = Object.prototype.hasOwnProperty.call(IN_PROCESS_ONLY, t) ? IN_PROCESS_ONLY[t] : null;
+  return why ? `${t} cannot be posted from outside the dashboard: ${why}.` : null;
+}
+
+/**
  * The vFarm customer families (lead, buyer, subscriber) have a fixed set of
  * types and fields (vfarmCustomerEvents.ts, ZX0W). That file registers its
  * check here, so every writer goes through it without this file importing it.
