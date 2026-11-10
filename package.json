@@ -113,7 +113,8 @@
     "test:stored-text": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/stored-text.test.cjs",
     "test:media-weekly": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/media-weekly.test.cjs",
     "test:genie-builder": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/genie-builder.test.cjs",
-    "test:logstream-e2e": "node server/test/logstream-e2e.test.cjs"
+    "test:logstream-e2e": "node server/test/logstream-e2e.test.cjs",
+    "test:slack-delete": "node server/test/slack-delete.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",

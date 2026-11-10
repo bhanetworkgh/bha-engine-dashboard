@@ -50,6 +50,7 @@ import * as repairs from './repairs';
 import * as doctrineDrillTools from './mcp/doctrineDrillTools';
 import * as submitLogTestTools from './mcp/submitLogTestTools';
 import * as logstreamE2eTools from './mcp/logstreamE2eTools';
+import * as slackDeleteTools from './mcp/slackDeleteTools';
 import * as recovery from './recovery';
 import * as scorecard from './scorecard';
 import * as pay from './pay';
@@ -739,6 +740,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     }
     // The LogStream end-to-end test, the same handler as test_logstream_e2e (10 Nov 2026), for when the
     // connector's tool list has not picked the tool up. Same guards; audited on engine_mcp_writes and logged here.
+    // delete_slack_messages (10 Nov 2026), the same handler, for when the connector's tool list has not picked it up.
+    if (p === '/api/engine/slack-delete') {
+      if (method !== 'POST') throw new HttpError(405, 'POST {messages | channel+contains, since_hours, with_replies, confirm, reason, requester_user_id}.');
+      const body = decodeBodyB64(await readJson(req, 64 * 1024));
+      const out = (await slackDeleteTools.deleteSlackMessagesTool.handler(body as Record<string, unknown>, { access: 'write' } as never)) as { ok: boolean; reason?: string; message?: string; deleted_count?: number; found_count?: number };
+      await mirror.logWrite({ endpoint, kind: 'slack', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: null, outcome: out.ok ? 'updated' : 'rejected', detail: `${out.deleted_count != null ? `deleted ${out.deleted_count}` : `preview ${out.found_count ?? 0}`}${out.ok ? '' : `: ${out.reason ?? 'failed'} ${out.message ?? ''}`}`.slice(0, 400), ms: Date.now() - t0 });
+      return send(res, 200, out);
+    }
     if (p === '/api/engine/logstream-e2e') {
       if (method !== 'POST') throw new HttpError(405, 'POST {step, case, run, channel_id, confirm, requester_user_id, dry_run}.');
       const body = decodeBodyB64(await readJson(req, 16 * 1024));
