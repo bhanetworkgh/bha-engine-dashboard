@@ -4492,6 +4492,18 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE INDEX IF NOT EXISTS engine_vfarm_lead_attribution_email ON engine_vfarm_lead_attribution (email, at DESC)`,
     ],
   },
+  {
+    id: 128,
+    name: 'Pay notes: link each note to its Codex Entry ID where the note was set before the log had one (10 Nov 2026)',
+    statements: [
+      `UPDATE engine_pay_notes n SET codex_entry_id = c.cid, updated_at = now()
+         FROM (SELECT DISTINCT ON (fields->>'Submission ID') fields->>'Submission ID' AS sub, fields->>'Codex Entry ID' AS cid
+                 FROM engine_codex_submissions WHERE coalesce(fields->>'Codex Entry ID', '') <> ''
+                ORDER BY fields->>'Submission ID', updated_at DESC, id DESC) c
+        WHERE n.codex_entry_id IS NULL AND n.submission_id = c.sub`,
+      // engine_pay_note_history is frozen (migration 124) and is read by Submission ID, so it is left as written.
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

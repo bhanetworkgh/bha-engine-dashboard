@@ -365,8 +365,28 @@ async function mirrorToLedger(db: Queryable, n: PayNote): Promise<void> {
   for (const row of r.rows) events.changed('pay_sessions', Number(row.id), db);
 }
 
+/**
+ * Link a note to its Codex Entry ID once the log has one (10 Nov 2026, Destiny). The Approve click
+ * sets the note before Bays writes the log's Codex Entry ID, so the note was stored with none and
+ * stayed that way: read_pay_notes showed it unlinked, and statementFacts, which matches notes by
+ * Codex Entry ID, counted those logs as full days. Every Codex write reaches forEntry through
+ * paySync, so the link is made there, on the note only, and only where it is missing.
+ */
+export async function linkEntry(db: Queryable, codexEntryId: string): Promise<number> {
+  if (!codexEntryId) return 0;
+  const subs = `SELECT fields->>'Submission ID' FROM engine_codex_submissions WHERE fields->>'Codex Entry ID' = $1`;
+  const r = await db.query<{ submission_id: string }>(
+    `UPDATE engine_pay_notes SET codex_entry_id = $1, updated_at = now()
+      WHERE codex_entry_id IS NULL AND submission_id IN (${subs}) RETURNING submission_id`,
+    [codexEntryId],
+  );
+  // The history is frozen (migration 124) and read by Submission ID, so it is never touched here.
+  return r.rows.length;
+}
+
 /** For paySync: the note for a Codex Entry ID, if any, read inside the caller's transaction. */
 export async function forEntry(db: Queryable, codexEntryId: string): Promise<PayNote | null> {
+  await linkEntry(db, codexEntryId);
   const r = await db.query<Obj>(
     `SELECT ${COLS} FROM engine_pay_notes n WHERE n.codex_entry_id = $1
         OR n.submission_id IN (SELECT fields->>'Submission ID' FROM engine_codex_submissions WHERE fields->>'Codex Entry ID' = $1)

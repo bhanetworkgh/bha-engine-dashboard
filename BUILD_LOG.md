@@ -14966,3 +14966,10 @@ Files:      server/src/mcp/writeTools.ts, CLAUDE.md; n8n vFarm Early Access — 
 Problem:    Codex 464 was created by Bays with no Summary, and create_record answered "bharag: not ingested — The row carries no text to ingest (no Orchestrator Layer2 Review or Summary), so nothing was sent." (audit 5488). Nothing re-ingests a Codex row on update.
 Fix:        ingest_codex_record sends one row as it stands and keeps the BHARAG id on it. n8n: Send Attribution To Dashboard after Reply Saved, continue on error, published e850cacf (restore point 2eeb55b5), approved by Destiny.
 Decision:   A new narrow tool rather than re-creating row 464, because Jason named the row by its id.
+
+## 2026-11-10 21:15 — Pay notes are linked to their Codex Entry ID
+Intent:     Jason's four pay notes of 10 Nov (Hardik, Destiny, Kavin, Jegan) showed no Codex Entry ID, so Bays answered on Destiny's log that it "could not see" a pay decision.
+Files:      server/src/payNote.ts (linkEntry, called from forEntry), server/src/migrations.ts (128), server/test/pay-note.test.cjs, CLAUDE.md
+Problem:    The Approve click sets the note before Bays writes the log's Codex Entry ID, and nothing filled it in afterwards. Worse than an unlinked read: statementFacts matches notes by Codex Entry ID, so all four logs would have counted as full days on the 1 Dec statement.
+Fix:        linkEntry sets codex_entry_id on a note that has none once its log has one; forEntry runs it, and paySync calls forEntry on every Codex write. Migration 128 backfills the notes already held. Read-only check on the live database before the push: the backfill matches exactly the four notes. The test needs a build, which needs npm (no network here), so it was not run locally; the type check shows no new errors against the base.
+Decision:   engine_pay_note_history is left alone. It is frozen by trigger (migration 124, "corrected forward, never rewritten") and read by Submission ID, so writing the id onto it would both break that rule and roll back the migration on boot.

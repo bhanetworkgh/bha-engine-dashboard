@@ -52,6 +52,14 @@ const JASON = 'U0A9V97949F';
   await refuses(() => p.statementFacts({ month: 'November' }), 'bad_month', 'statement facts need YYYY-MM');
 
   assert.deepEqual(Object.keys(p.ledgerFields(null)), []); ok('no note lays nothing onto the ledger (counts as a full day)');
+
+  // 10 Nov 2026: a note set at Approve, before the log had its Codex Entry ID, is linked on the next Codex write.
+  const seen = [];
+  const stub = { query: async (sql, params) => { seen.push({ sql, params }); return { rows: [{ submission_id: 'S1' }] }; } };
+  assert.equal(await p.linkEntry(stub, ''), 0); assert.equal(seen.length, 0); ok('no Codex Entry ID links nothing and asks nothing');
+  assert.equal(await p.linkEntry(stub, 'CODEX-X'), 1); ok('a note missing its Codex Entry ID is linked');
+  assert.equal(seen.length, 1); assert.match(seen[0].sql, /UPDATE engine_pay_notes SET codex_entry_id = \$1/); assert.match(seen[0].sql, /codex_entry_id IS NULL/);
+  ok('only the note is updated, only where the id is missing, and the frozen history is never touched');
   console.log(`pay-note: ${n} passed`);
 })().catch((e) => {
   console.error(e);
