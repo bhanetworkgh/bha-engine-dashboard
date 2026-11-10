@@ -50,6 +50,7 @@ import * as repairs from './repairs';
 import * as doctrineDrillTools from './mcp/doctrineDrillTools';
 import * as submitLogTestTools from './mcp/submitLogTestTools';
 import * as logstreamE2eTools from './mcp/logstreamE2eTools';
+import * as un9dTools from './mcp/un9dTools';
 import * as slackDeleteTools from './mcp/slackDeleteTools';
 import * as recovery from './recovery';
 import * as scorecard from './scorecard';
@@ -748,6 +749,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       const body = decodeBodyB64(await readJson(req, 64 * 1024));
       const out = (await slackDeleteTools.deleteSlackMessagesTool.handler(body as Record<string, unknown>, { access: 'write' } as never)) as { ok: boolean; reason?: string; message?: string; deleted_count?: number; found_count?: number };
       await mirror.logWrite({ endpoint, kind: 'slack', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: null, outcome: out.ok ? 'updated' : 'rejected', detail: `${out.deleted_count != null ? `deleted ${out.deleted_count}` : `preview ${out.found_count ?? 0}`}${out.ok ? '' : `: ${out.reason ?? 'failed'} ${out.message ?? ''}`}`.slice(0, 400), ms: Date.now() - t0 });
+      return send(res, 200, out);
+    }
+    // run_stress_test (10 Nov 2026, LOOP-1794168643405-SK22), the same handler, for when the connector's tool list has not picked it up.
+    if (p === '/api/engine/stress-test') {
+      if (method !== 'POST') throw new HttpError(405, 'POST {farm_id, window_minutes, label, record}.');
+      const body = decodeBodyB64(await readJson(req, 16 * 1024));
+      const out = (await un9dTools.runStressTestTool.handler(body as Record<string, unknown>, { access: 'write' } as never)) as { ok: boolean; reason?: string; message?: string; verdict?: string };
+      await mirror.logWrite({ endpoint, kind: 'vfarm', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: String(body.farm_id ?? '') || null, outcome: out.ok ? 'updated' : 'rejected', detail: (out.ok ? `stress test ${out.verdict}` : `${out.reason ?? 'failed'} ${out.message ?? ''}`).slice(0, 400), ms: Date.now() - t0 });
       return send(res, 200, out);
     }
     if (p === '/api/engine/logstream-e2e') {

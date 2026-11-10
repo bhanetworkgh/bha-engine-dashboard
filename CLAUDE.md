@@ -1611,6 +1611,8 @@ Hardik's two tests of 30 Sep / 1 Oct, locked by Jason 2 Oct). `server/src/un9d.t
   `un9d_acceptance_checked` event (`record: false` skips it). Changes no farm, device or
   incident. `npm run test:un9d`.
 
+**The engine half of the vFarm stress test** (10 Nov 2026, Destiny — LOOP-1794168643405-SK22; Jegan's front half is LOOP-1794168643166-RS77). `server/src/stressTest.ts`, checklist `docs/stress-test-checklist.md`. `run_stress_test` (write connection, no agent's scope, audited kind `vfarm`) and `POST /api/engine/stress-test` (`x-dashboard-key`, the same handler) judge one farm over a window (60 min default, 5 to 1440) on four fixed checks: **on_time** (no snapshot gap over 600 s, newest under 600 s, arrival p95 60 s, reading lag p95 300 s and never over 900 s), **state_correct**, **one_alert** and **nothing_old_live**, the last three being UN9D's own conditions on the same rows, so the two never disagree. Pass only when all four pass; no data is `not_yet_possible`, never a pass. Numbers in `RULE` only. Each run is one `stress_test_engine_checked` event; it changes nothing else. `npm run test:stress-test`.
+
 **The vFarm monitoring contract** (2026-10-20, Destiny — Jason in #bha-codex-logs,
 1792503936.931709). `docs/contracts/vfarm-monitoring.md`, also SOP 7059c100 in BHARAG: the
 exact ENV (`ENGINE_DASHBOARD_URL`/`KEY` in `vfarm/app/env`), the two pushes, the freshness
