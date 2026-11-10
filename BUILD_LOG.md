@@ -14883,3 +14883,10 @@ Files:      server/src/genieSkipWarn.ts (new), server/src/index.ts, server/src/t
 Problem:    Genie writes `bha_ledger_query: ledger GET not configured for "rss-feed"; using ask_agent requestId=a38727b3-…` to its Render log (u82u, srv-dahmtfbm8hqs73cgohkg), and nothing reads it. Research Twin confirmed on 5 Nov it reads no Render logs. In 26 days of log there are exactly two such lines (31 Oct, and 5 Nov with a request id), both from Kaiqi's deliberate rss-feed proof; no builder run record has carried a non-empty skipWarns.
 Fix:        A 15-minute timer reads Genie's log through the Render read key the service reads already use, from a cursor in meta, records one `genie_ledger_skip_warn` engine event per request and workspace (lane GENIE), and posts one alert in the engine alerts channel when one workspace falls back 3 times in 7 days. A refused Render read moves no cursor; a refused Slack post gives its claim back.
 Decision:   An alert, not a Research Twin job: a missing ledger read is a setting for Genie's owner, not an outside-world question. Service and owner ids default to the live values and can be overridden. Part 2 of the test (the database half) did not run here: no pg module or local Postgres in this workspace, so the pass is proved live instead.
+
+## 2026-11-10 13:55 — M5YH: read Genie's log a day at a time
+Intent:     The first live pass of the skip-warn watch failed.
+Files:      server/src/genieSkipWarn.ts, server/test/genie-skip-warn.test.cjs
+Problem:    Boot pass at 12:21:23Z logged `[genie-skip-warn] Render could not be reached: The operation was aborted due to timeout`: one text search over 29 days of Genie's log outran the 20-second service-read timeout. Nothing was recorded and the cursor did not move, as designed.
+Fix:        Read in 24-hour spans with a 60-second timeout per request, saving the cursor after each span, so a slow search costs one day and never the whole backfill.
+Decision:   Kept the 29-day first read so the 31 Oct and 5 Nov lines are the live proof.

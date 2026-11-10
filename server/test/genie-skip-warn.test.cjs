@@ -81,6 +81,7 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   assert.equal(r.ok, true);
   assert.equal(r.recorded, 2);
   assert.equal(asked[0].start, new Date(now.getTime() - 29 * 86_400_000).toISOString());
+  assert.equal(asked.length, 2 * 29);
   const ev = (await query(`SELECT subject_id, lane, detail FROM engine_events WHERE event_type = 'genie_ledger_skip_warn' ORDER BY at`)).rows;
   assert.deepEqual(ev.map((e) => [e.subject_id, e.lane, e.detail.workspace]), [['render-log:3f738bc8-37c6-452d-9d1b-52634f71921c', 'GENIE', 'rss-feed'], ['a38727b3-f43c-4ebb-9847-abfc129d7a40', 'GENIE', 'rss-feed']]);
   assert.equal(posts.length, 0);

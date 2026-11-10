@@ -18,8 +18,8 @@
  * engine event written before the post, and a post Slack refuses gives the claim back.
  *
  * Not Research Twin: a missing ledger setting is not an outside-world question. It reads and posts;
- * it changes nothing on Genie. A log Render will not give is logged and the cursor stays, so the
- * next pass reads the same span again; a fallback is never dropped because a read failed.
+ * it changes nothing on Genie. Logs are read a day at a time and the cursor saved after each day; a
+ * day Render will not give is logged and the cursor stays, so the next pass reads it again; a fallback is never dropped because a read failed.
  */
 import { query } from './pg';
 import { getMeta, setMeta } from './db';
@@ -29,7 +29,7 @@ import * as slack from './slack';
 import * as quota from './quota';
 import * as timers from './timers';
 
-export const RULE = { tick_minutes: 15, window_days: 7, alert_count: 3, first_read_days: 29, max_pages: 20 } as const;
+export const RULE = { tick_minutes: 15, window_days: 7, alert_count: 3, first_read_days: 29, max_pages: 20, span_hours: 24, read_timeout_ms: 60_000 } as const;
 export const CURSOR_KEY = 'genie_skip_warn.cursor';
 export const EVENT = 'genie_ledger_skip_warn';
 export const ALERT_EVENT = 'genie_skip_warn_alerted';
@@ -112,7 +112,7 @@ async function readLogs(pattern: string, start: string, end: string, fetcher: Fe
     const qs = new URLSearchParams({ ownerId: renderOwner(), resource: genieService(), text: pattern, limit: '100', startTime: s, endTime: e, direction: 'backward' });
     let body: { hasMore?: boolean; logs?: LogLine[]; nextStartTime?: string; nextEndTime?: string };
     try {
-      const r = await fetcher(`${t.url}?${qs}`, { headers: t.headers, signal: AbortSignal.timeout(serviceReads.TIMEOUT_MS) });
+      const r = await fetcher(`${t.url}?${qs}`, { headers: t.headers, signal: AbortSignal.timeout(RULE.read_timeout_ms) });
       if (!r.ok) return { ok: false, error: `Render answered ${r.status} to the log read` };
       body = (await r.json()) as typeof body;
     } catch (err) {
@@ -147,12 +147,17 @@ export async function pass(opts: { now?: Date; fetcher?: Fetcher; post?: typeof 
   const out: PassResult = { ok: true, read_from: from, read_to: to, lines: 0, recorded: 0, already: 0, alerted: [], alert_failed: [] };
   try {
     const seen = new Set<string>();
+    // Read in day-long spans, saving the cursor after each: Render's text search over weeks of log
+    // can outrun one request, and a span read is never read again once it has landed.
+    for (let a = Date.parse(from); a < now.getTime(); a += RULE.span_hours * 3_600_000) {
+      const spanFrom = new Date(a).toISOString();
+      const spanTo = new Date(Math.min(a + RULE.span_hours * 3_600_000, now.getTime())).toISOString();
     for (const p of PATTERNS) {
-      const r = await readLogs(p, from, to, opts.fetcher ?? fetch);
+      const r = await readLogs(p, spanFrom, spanTo, opts.fetcher ?? fetch);
       if (!r.ok) {
         out.ok = false;
-        out.error = r.error;
-        console.error(`[genie-skip-warn] ${r.error}`);
+        out.error = `${r.error} (span ${spanFrom} to ${spanTo})`;
+        console.error(`[genie-skip-warn] ${out.error}`);
         return out;
       }
       for (const l of r.lines) {
@@ -175,8 +180,9 @@ export async function pass(opts: { now?: Date; fetcher?: Fetcher; post?: typeof 
         }
       }
     }
-    // Every log span was read, so the cursor moves. A failed read above returned before this.
-    await setMeta(CURSOR_KEY, to);
+      // This span was read for both patterns, so the cursor moves past it. A failed read returned above.
+      await setMeta(CURSOR_KEY, spanTo);
+    }
 
     const since = new Date(now.getTime() - RULE.window_days * 86_400_000).toISOString();
     const rows = (
