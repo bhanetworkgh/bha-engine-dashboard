@@ -102,6 +102,8 @@ const BUDGET = 11_000;
 
 /** The card with the longest pay part that keeps it inside Slack's budget, or null. Pure. */
 export function fitCard(blocks: Block[], sug: ReturnType<typeof paySuggest.fromRow>, why: string, id: string): Block[] | null {
+  // Slack already took the card as it stands, so a card no bigger than that is never refused for its size.
+  const limit = Math.max(BUDGET, JSON.stringify(blocks).length);
   const tries: ((x: Block[]) => Block[])[] = [
     (x) => x,
     (x) => x.filter((b) => b.type !== 'rich_text'),
@@ -113,13 +115,13 @@ export function fitCard(blocks: Block[], sug: ReturnType<typeof paySuggest.fromR
     const out = rebuild(blocks, sug, why);
     const at = out.findIndex((b) => JSON.stringify(b) === JSON.stringify(fresh[0]));
     if (at !== -1) out.splice(at, fresh.length, ...mine);
-    if (JSON.stringify(out).length <= BUDGET) return out;
+    if (JSON.stringify(out).length <= limit) return out;
   }
   const short = section(cap(`*Suggested pay* (from this review, you decide on Approve)\n${sug && !sug.none ? paySuggest.lineFor(sug) : 'none was worked out'}\nThe parts, flags and what releases the held share are on the log in the dashboard: https://dashboard.bhanetwork.org/codex/${encodeURIComponent(id)}\n_${why}_`, 2900));
   const out = rebuild(blocks, sug, why);
   const at = out.findIndex((b) => JSON.stringify(b) === JSON.stringify(fresh[0]));
   if (at !== -1) out.splice(at, fresh.length, short);
-  return JSON.stringify(out).length <= 12_000 ? out : null;
+  return JSON.stringify(out).length <= Math.max(12_000, limit) ? out : null;
 }
 
 /**

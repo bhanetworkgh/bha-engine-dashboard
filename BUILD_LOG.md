@@ -14910,3 +14910,10 @@ Files:      server/src/reviewCard.ts (fitCard), server/test/review-card.test.cjs
 Problem:    Execution 79582: all five Codex rows rescored; three cards rewritten; Ahad's U0AC6RFNP3P_1794314702156 and U0AC6RFNP3P_1794313120270 refused, "too_long: The rewritten card would be past Slack's size limit; nothing was sent."
 Fix:        refreshPay now shrinks the pay part in steps (drop the parts list, cut the flags and the held text to 400 characters, then the one line and a link to the log on the dashboard) instead of refusing; the button suggestion is always the new one. review-card 6 passed.
 Decision:   A shorter pay part on the card beats no update: the full suggestion is on the Codex row and the dashboard either way.
+
+## 2026-11-10 15:30 — A card Slack already took is never too long to update
+Intent:     Rewrite Ahad's two long cards after the shrink-to-fit change.
+Files:      server/src/reviewCard.ts.
+Problem:    Executions 79611 and 79612 still answered "too_long: ... even with the shortest pay part": the review itself on those two cards is past the 12,000-character budget, which is this code's own, not Slack's; Slack had already posted them.
+Fix:        The budget is the larger of 11,000 and the card's own size as Slack holds it, so the shortest pay part always fits.
+Decision:   The budget only exists to stop a rewrite making a card bigger than Slack will take; a card Slack already took proves that size is fine.
