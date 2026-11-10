@@ -189,7 +189,11 @@ export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ w
     }
     // LogStream (9 Nov 2026): a re-log is credited only for the new work it states, so any credit on
     // one has to say what the credit is for. The suggestion the review made is kept beside the decision.
-    const logClass = pick(log.fields['Log Class']) === 'RELOG_OLD_WORK' ? 'RELOG_OLD_WORK' : pick(log.fields['Log Class']) === 'fresh_build' ? 'fresh_build' : null;
+    // The suggestion's own class wins where it has one (10 Nov 2026): a continuation whose every part is
+    // new is treated as new work there, so it is not a re-log here either.
+    const sugClass = paySuggest.fromRow(log.fields)?.log_class;
+    const rawClass = typeof sugClass === 'string' && sugClass ? sugClass : pick(log.fields['Log Class']);
+    const logClass = rawClass === 'RELOG_OLD_WORK' ? 'RELOG_OLD_WORK' : rawClass === 'fresh_build' ? 'fresh_build' : null;
     const relogOf = pick(log.fields['Relog Of']).slice(0, 300) || null;
     if (logClass === 'RELOG_OLD_WORK' && credited > 0 && (!note || note.length < 8)) {
       throw new PayNoteError('relog_needs_delta', `${log.codex_entry_id ?? log.submission_id} is a re-log${relogOf ? ` of ${relogOf}` : ''}. It is credited only for the new work it states, so a credit on it needs a reason_note saying what the credit is for.`);
@@ -294,6 +298,40 @@ export async function release(b: Obj, opts: { dry_run?: boolean } = {}): Promise
   }
   const n = await withTransaction(run);
   return { written: true, dry_run: false, note: n, message: `Released. ${msg(n)}` };
+}
+
+/**
+ * Releases several logs on one proof (10 Nov 2026, Destiny, after Kaiqi asked whether every held log
+ * would need its own release). One merged change or one engine event often meets the condition on
+ * several logs; each is still released by `release` on its own, with its own history line and event,
+ * so one that cannot be released (nothing held, no pay note) is named and never stops the others.
+ */
+export async function releaseMany(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ written: boolean; dry_run: boolean; released: number; failed: number; results: { ref: string; ok: boolean; message: string; reason?: string }[]; message: string }> {
+  const raw = Array.isArray(b.submission_ids) ? b.submission_ids : Array.isArray(b.codex_entry_ids) ? b.codex_entry_ids : [];
+  const byCodex = !Array.isArray(b.submission_ids) && Array.isArray(b.codex_entry_ids);
+  const refs = [...new Set(raw.map((x) => s(x, 200)).filter(Boolean))];
+  if (!refs.length) throw new PayNoteError('nothing_named', 'Name the logs to release: submission_ids (or codex_entry_ids), at least one.');
+  if (refs.length > 50) throw new PayNoteError('too_many', `At most 50 logs a release; ${refs.length} were named.`);
+  const results: { ref: string; ok: boolean; message: string; reason?: string }[] = [];
+  for (const ref of refs) {
+    try {
+      const r = await release({ ...b, submission_id: byCodex ? '' : ref, codex_entry_id: byCodex ? ref : '' }, opts);
+      results.push({ ref, ok: true, message: r.message });
+    } catch (e) {
+      if (!(e instanceof PayNoteError)) throw e;
+      results.push({ ref, ok: false, reason: e.reason, message: e.message });
+    }
+  }
+  const released = results.filter((r) => r.ok).length;
+  const failed = results.length - released;
+  return {
+    written: !opts.dry_run && released > 0,
+    dry_run: !!opts.dry_run,
+    released,
+    failed,
+    results,
+    message: `${opts.dry_run ? 'Dry run: would release' : 'Released'} ${released} of ${results.length}${failed ? `; ${failed} not released (${results.filter((r) => !r.ok).map((r) => `${r.ref}: ${r.reason}`).join('; ')})` : ''}.`,
+  };
 }
 
 /** The pay note's figures, laid onto every pay-ledger copy of the session, so Pay Tracker reads one place. */

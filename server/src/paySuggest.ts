@@ -20,6 +20,17 @@
  * Every part is what the log says; a claim the log does not back (no PR, no event id) counts as not
  * done. The automatic code check confirms it against the live services later.
  *
+ * Tuned 10 Nov 2026 (Destiny, after Kaiqi's questions on the change note, C0ASMPYQLG3 1794256210.264529;
+ * the first night's real logs read stricter than the rule needs):
+ *   - A part has a kind. "code" (software, a workflow, a config that runs) is judged as above. "non_code"
+ *     (an investigation, a design, research, a review, a verification, an account or console change
+ *     made by hand) can never be merged or deployed, so it is judged on its proof alone: credited when
+ *     the log names what it produced, held only when it names nothing.
+ *   - A log is a re-log only when some part of it is old. Layer 1 can call a continuation of earlier
+ *     work a re-log while every part it lists is new this session; then the log is treated as new work
+ *     and says so, instead of carrying the RELOG_OLD_WORK tag on work nobody docked.
+ *   - LOCAL_ONLY is said only of code that is not merged or hooked up.
+ *
  * The earlier-work check (`relogCheck`) is the engine's own read of the builder's approved logs:
  * the same recording, an earlier log named by id, or a loop shared with an approved log of theirs
  * in the last 14 days. Layer 0 of Submit Actions calls it before the completeness check and asks the
@@ -33,8 +44,12 @@ const bool = (v: unknown): boolean => v === true || v === 'true' || v === 'Yes' 
 
 export const LOG_CLASSES = ['fresh_build', 'RELOG_OLD_WORK'] as const;
 
+export const PART_KINDS = ['code', 'non_code'] as const;
+const NON_CODE = new Set(['non_code', 'noncode', 'non-code', 'investigation', 'design', 'research', 'review', 'verification', 'ops', 'docs', 'analysis']);
+
 export interface WorkPart {
   what: string;
+  kind: 'code' | 'non_code';
   new_this_session: boolean;
   merged: boolean;
   integrated: boolean;
@@ -79,6 +94,7 @@ export function parseParts(v: unknown): WorkPart[] {
     .filter((x): x is Obj => !!x && typeof x === 'object')
     .map((x) => ({
       what: str(x.what, 200) || 'unnamed part',
+      kind: NON_CODE.has(str(x.kind, 40).toLowerCase()) ? ('non_code' as const) : ('code' as const),
       new_this_session: x.new_this_session === undefined ? true : bool(x.new_this_session),
       merged: bool(x.merged),
       integrated: bool(x.integrated),
@@ -122,6 +138,14 @@ export function suggest(fields: Obj, relog: RelogCheck | null = null, now = new 
       return { ...p, score: 0, status: 'already_paid' as const, missing: [] as string[] };
     }
     const missing: string[] = [];
+    if (p.kind === 'non_code') {
+      // Judged on its proof alone: what the investigation, design or check produced.
+      const proven = !!p.evidence && !/^none( stated)?\.?$/i.test(p.evidence);
+      if (!proven) missing.push('the proof it produced, named in the log (the doc, record, finding or link)');
+      if (p.silent_failure) missing.push(`the "${p.silent_failure}" path writes a record instead of failing silently`);
+      const ok = proven && !p.silent_failure;
+      return { ...p, score: ok ? 1 : 0, status: ok ? ('live' as const) : ('held' as const), missing };
+    }
     if (!p.merged) missing.push('merged in a PR with CI');
     if (!p.integrated) missing.push('hooked up where it runs (registered, deployed, wired in)');
     if (!p.live_event) missing.push('one real event for it in the Engine, logged');
@@ -143,6 +167,13 @@ export function suggest(fields: Obj, relog: RelogCheck | null = null, now = new 
 
   for (const p of scored) if (p.silent_failure) flags.unshift(`Silent failure: ${p.what}: ${p.silent_failure}`);
 
+  // A re-log only where some part is old: a continuation whose every part is new is new work.
+  let effClass = logClass;
+  if (logClass === 'RELOG_OLD_WORK' && !scored.some((p) => p.status === 'already_paid')) {
+    effClass = 'fresh_build';
+    flags.push(`The review called this a continuation${relogOf ? ` of ${relogOf}` : ''}, but every part is new this session, so it is treated as new work and nothing is docked.`);
+  }
+
   const n = scored.length;
   const oldShare = scored.filter((p) => p.status === 'already_paid').length / n;
   const credited = step(scored.reduce((a, p) => a + p.score, 0) / n);
@@ -152,8 +183,8 @@ export function suggest(fields: Obj, relog: RelogCheck | null = null, now = new 
   const heldParts = scored.filter((p) => p.status === 'held' || p.status === 'live_pending');
   const condition = held > 0 ? heldParts.map((p) => `${p.what}: ${p.missing.join(', ')}`).join('. ').slice(0, 600) : null;
 
-  const anyLocal = scored.some((p) => p.status === 'held' && (!p.merged || !p.integrated));
-  const tag = docked > 0 ? 'RELOG_OLD_WORK' : held > 0 ? (credited === 0 && anyLocal ? 'LOCAL_ONLY' : 'PARTIAL_SCOPE') : null;
+  const anyLocal = scored.some((p) => p.status === 'held' && p.kind === 'code' && (!p.merged || !p.integrated));
+  const tag = docked > 0 ? 'RELOG_OLD_WORK' : held > 0 ? (anyLocal && scored.every((p) => p.score === 0) ? 'LOCAL_ONLY' : 'PARTIAL_SCOPE') : null;
 
   const bits: string[] = [];
   const credit = scored.filter((p) => p.score > 0);
@@ -162,9 +193,9 @@ export function suggest(fields: Obj, relog: RelogCheck | null = null, now = new 
   const old = scored.filter((p) => p.status === 'already_paid');
   if (old.length) bits.push(`Docked as already paid${relogOf ? ` (${relogOf})` : ''}: ${old.map((p) => p.what).join('; ')}`);
   // A credit on a re-log has to say what it is for (payNote relog_needs_delta), even a full one.
-  const note = tag || logClass === 'RELOG_OLD_WORK' ? `${logClass === 'RELOG_OLD_WORK' ? `Re-log of ${relogOf ?? 'earlier work'}; new this session: ${relogDelta ?? 'not stated'}. ` : ''}${bits.join('. ')}`.slice(0, 600) : null;
+  const note = tag || effClass === 'RELOG_OLD_WORK' ? `${effClass === 'RELOG_OLD_WORK' ? `Re-log of ${relogOf ?? 'earlier work'}; new this session: ${relogDelta ?? 'not stated'}. ` : ''}${bits.join('. ')}`.slice(0, 600) : null;
 
-  return finish({ credited, held, docked, tag, note, condition, flags, scored, logClass, relogOf, relogDelta, now, basis: `${n} work part${n === 1 ? '' : 's'} from the review` });
+  return finish({ credited, held, docked, tag, note, condition, flags, scored, logClass: effClass, relogOf: effClass === 'RELOG_OLD_WORK' ? relogOf : null, relogDelta, now, basis: `${n} work part${n === 1 ? '' : 's'} from the review` });
 }
 
 function finish(a: {

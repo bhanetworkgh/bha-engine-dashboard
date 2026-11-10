@@ -100,15 +100,15 @@ export const setPayNote: ToolDefinition = {
 
 export const releasePayNote: ToolDefinition = {
   name: 'release_pay_note',
-  description: 'Release the held share on one log once its release condition is met. The whole held share moves to released and is paid in this month\'s statement. Needs proof_link (https: the PR, the engine event, the Slack message that shows the condition met). A docked share is never released. released_by is requester_user_id and must be Destiny or Jason. dry_run writes nothing. Refused on any agent token.',
+  description: 'Release the held share on one log, or several on one proof (submission_ids or codex_entry_ids, up to 50: one merged change often meets the condition on several logs; each is released on its own and one that cannot be is named), once its release condition is met. The whole held share moves to released and is paid in this month\'s statement. Needs proof_link (https: the PR, the engine event, the Slack message that shows the condition met). A docked share is never released. released_by is requester_user_id and must be Destiny or Jason. dry_run writes nothing. Refused on any agent token.',
   inputSchema: {
     type: 'object',
-    properties: { ...LOG, proof_link: { type: 'string' }, note: { type: 'string' }, requester_user_id: { type: 'string' }, dry_run: { type: 'boolean' } },
+    properties: { ...LOG, submission_ids: { type: 'array', items: { type: 'string' } }, codex_entry_ids: { type: 'array', items: { type: 'string' } }, proof_link: { type: 'string' }, note: { type: 'string' }, requester_user_id: { type: 'string' }, dry_run: { type: 'boolean' } },
     required: ['proof_link', 'requester_user_id'],
     additionalProperties: false,
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false, title: 'Release a held pay share' },
-  handler: (args, deps) => guarded('release_pay_note', args, deps, (dry) => payNote.release({ ...args, released_by: str(args, 'requester_user_id'), via: 'mcp' }, { dry_run: dry }) as unknown as Promise<Record<string, unknown>>),
+  handler: (args, deps) => guarded('release_pay_note', args, deps, (dry) => (Array.isArray(args.submission_ids) || Array.isArray(args.codex_entry_ids) ? payNote.releaseMany({ ...args, released_by: str(args, 'requester_user_id'), via: 'mcp' }, { dry_run: dry }) : payNote.release({ ...args, released_by: str(args, 'requester_user_id'), via: 'mcp' }, { dry_run: dry })) as unknown as Promise<Record<string, unknown>>),
 };
 
 export const PAY_NOTE_WRITE_TOOLS: ToolDefinition[] = [readPayNotes, setPayNote, releasePayNote];

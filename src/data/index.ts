@@ -883,6 +883,12 @@ export const setPayNote = (ref: { submission_id?: string; codex_entry_id?: strin
   api<{ ok: boolean; message: string; note: PayNote }>('/api/pay/notes', { method: 'POST', body: { ...ref, ...choice } });
 export const releasePayNote = (ref: { submission_id?: string; codex_entry_id?: string }, proof_link: string, note?: string) =>
   api<{ ok: boolean; message: string; note: PayNote }>('/api/pay/notes/release', { method: 'POST', body: { ...ref, proof_link, note } });
+/** Several logs released on one proof (10 Nov 2026): each is released on its own; one that cannot be is named. */
+export const releasePayNotes = (submission_ids: string[], proof_link: string, note?: string) =>
+  api<{ ok: boolean; message: string; released: number; failed: number; results: { ref: string; ok: boolean; message: string; reason?: string }[] }>('/api/pay/notes/release', {
+    method: 'POST',
+    body: { submission_ids, proof_link, note },
+  });
 
 /** The same checks the server makes, so the Approve pop-up says what is missing before anything is written. */
 export function payChoiceProblem(c: PayNoteChoice): string | null {

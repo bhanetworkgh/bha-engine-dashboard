@@ -76,6 +76,7 @@ import * as systemFeeds from './systemFeeds';
 import * as genieBuilder from './genieBuilder';
 import * as mediaWeekly from './mediaWeekly';
 import * as payNote from './payNote';
+import * as reviewCard from './reviewCard';
 import * as paySuggest from './paySuggest';
 import * as layer0Notice from './layer0Notice';
 import * as baysAsks from './baysAsks';
@@ -888,11 +889,26 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       '/api/engine/pay-note-release': {
         kind: 'pay_sessions',
         store: async (b) => {
-          const r = await payNote.release(b, { dry_run: b.dry_run === true });
+          const r = Array.isArray(b.submission_ids) || Array.isArray(b.codex_entry_ids) ? await payNote.releaseMany(b, { dry_run: b.dry_run === true }) : await payNote.release(b, { dry_run: b.dry_run === true });
           return { ...r, inserted: 0, updated: r.written ? 1 : 0 };
         },
         describe: (r) => String(r.message ?? '').slice(0, 400),
-        hint: 'POST { submission_id or codex_entry_id, released_by (Destiny or Jason, Slack id), proof_link (https), note?, dry_run? }.',
+        hint: 'POST { submission_id or codex_entry_id, or submission_ids / codex_entry_ids (up to 50 on one proof), released_by (Destiny or Jason, Slack id), proof_link (https), note?, dry_run? }.',
+      },
+      /** The pay part of a log's review card, rewritten in place from its Pay Suggestion (10 Nov 2026, reviewCard.ts). */
+      '/api/engine/review-card/refresh-pay': {
+        kind: 'codex',
+        store: async (b) => {
+          try {
+            const r = await reviewCard.refreshPay(b);
+            return { ...r, inserted: 0, updated: r.updated ? 1 : 0, unchanged: r.updated ? 0 : 1 };
+          } catch (e) {
+            if (e instanceof reviewCard.CardError) throw new systemFeeds.FeedError(e.status, `${e.reason}: ${e.message}`);
+            throw e;
+          }
+        },
+        describe: (r) => `${r.submission_id}: ${r.dry_run ? 'would rewrite' : 'rewrote'} the pay part of its review card${r.line ? ` (${r.line})` : ''}`.slice(0, 400),
+        hint: 'POST { submission_id, why?, dry_run? }. Rewrites only the Suggested pay part and the buttons\' pop-up suggestion on the log\'s review card, from its Codex row; a log not Pending is refused.',
       },
       /** LogStream (9 Nov 2026): the builder's approved logs this one may repeat. Layer 0 asks before the completeness check. Reads; writes nothing. */
       '/api/engine/relog-check': {
@@ -2724,7 +2740,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         if (p === '/api/pay/notes' && req.method === 'GET') return send(res, 200, { ok: true, notes: await payNote.all(), held: await payNote.held() });
         if (req.method !== 'POST') throw new HttpError(405, 'POST only.');
         const body = await readJson(req);
-        if (p === '/api/pay/notes/release') return send(res, 200, { ok: true, ...(await payNote.release({ ...body, released_by: by, via: 'dashboard' })) });
+        if (p === '/api/pay/notes/release') {
+          const many = Array.isArray(body.submission_ids) || Array.isArray(body.codex_entry_ids);
+          return send(res, 200, { ok: true, ...(many ? await payNote.releaseMany({ ...body, released_by: by, via: 'dashboard' }) : await payNote.release({ ...body, released_by: by, via: 'dashboard' })) });
+        }
         return send(res, 200, { ok: true, ...(await payNote.set({ ...body, decided_by: by, via: 'dashboard_approve' })) });
       } catch (e) {
         if (e instanceof payNote.PayNoteError) return send(res, e.status, { ok: false, reason: e.reason, message: e.message });

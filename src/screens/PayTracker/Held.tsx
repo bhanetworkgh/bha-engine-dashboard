@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react';
 import type { PayNote } from '../../data';
-import { releasePayNote } from '../../data';
+import { releasePayNote, releasePayNotes } from '../../data';
 import { Button, EmptyState, Pill, RecordId } from '../../components/ui';
 
 /**
  * Held (9 Nov 2026, Jason's DM 1794237173.152349). Every share of a day held until a stated condition
  * is met, oldest first, with the reason and who decided it. Release moves the whole held share into
  * this month's statement and needs the proof link; the person releasing is the admin login's own
- * Destiny or Jason. Below it, every pay note so far, so a dock is never out of sight.
+ * Destiny or Jason. Several can be ticked and released on one proof (10 Nov 2026), because one merged
+ * change often meets the condition on more than one log; each is still released on its own. Below it, every pay note so far, so a dock is never out of sight.
  *
  * Shares of a day, never money: Jason applies the rate at month end.
  */
@@ -31,6 +32,25 @@ export default function Held({ notes, held, reload }: { notes: PayNote[]; held: 
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<{ tone: 'ok' | 'failing'; text: string } | null>(null);
   const others = useMemo(() => notes.filter((n) => n.held_share <= 0), [notes]);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [groupProof, setGroupProof] = useState('');
+  const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  const releasePicked = async () => {
+    setBusy(true);
+    setSaid(null);
+    try {
+      const r = await releasePayNotes(picked, groupProof.trim());
+      setSaid({ tone: r.failed ? 'failing' : 'ok', text: r.message });
+      setPicked([]);
+      setGroupProof('');
+      reload();
+    } catch (e) {
+      setSaid({ tone: 'failing', text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const release = async (n: PayNote) => {
     setBusy(true);
@@ -57,10 +77,31 @@ export default function Held({ notes, held, reload }: { notes: PayNote[]; held: 
         <EmptyState compact>Nothing is held. No approved log is waiting on a release condition.</EmptyState>
       ) : (
         <div className="flex flex-col gap-2">
+          {held.length > 1 && (
+            <div className="card flex flex-wrap items-center gap-2 px-4 py-3 text-[12.5px]">
+              <span className="text-dim">{picked.length ? `${picked.length} ticked` : 'Tick the logs one proof covers to release them together'}</span>
+              {picked.length > 0 && (
+                <>
+                  <input
+                    className="input min-w-[28ch] flex-1"
+                    placeholder="One proof link (https) that meets every ticked log's condition"
+                    value={groupProof}
+                    onChange={(e) => setGroupProof(e.target.value)}
+                  />
+                  <Button variant="primary" size="sm" disabled={busy || !/^https:\/\/\S+$/.test(groupProof.trim())} onClick={() => void releasePicked()}>
+                    {busy ? 'Releasing…' : `Release ${picked.length} into this month`}
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
           {held.map((n) => (
             <div key={n.submission_id} className="card px-4 py-3 text-[12.5px]">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-2">
+                  {held.length > 1 && (
+                    <input type="checkbox" aria-label={`Tick ${n.codex_entry_id ?? n.submission_id}`} checked={picked.includes(n.submission_id)} onChange={() => toggle(n.submission_id)} />
+                  )}
                   <RecordId>{n.codex_entry_id ?? n.submission_id}</RecordId>
                   <span className="text-dim">{n.builder ?? 'Unknown builder'}</span>
                   <Pill tone="degraded">{share(n.held_share)} held</Pill>

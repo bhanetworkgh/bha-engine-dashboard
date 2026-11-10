@@ -11,6 +11,8 @@
  *   7. Mixed work (Jason's worked example): the live delta credited, the Phase A part held.
  *   8. Strong earlier-work matches on a log not marked as a re-log are flagged, never silently ignored.
  *   9. No work parts and not a re-log: no suggestion.
+ *  10. (10 Nov tuning) A continuation whose every part is new is new work; a non-code part is judged
+ *      on its proof alone; LOCAL_ONLY is said only of code.
  */
 const assert = require('node:assert/strict');
 const path = require('node:path');
@@ -67,7 +69,20 @@ s = p.suggest(parts(live), { matches: [], looks_like_relog: false, unread: 'db d
 assert.ok(s.flags.some((f) => /could not run \(db down\)/.test(f))); ok('a check that could not run is said, never read as no match');
 
 s = p.suggest({ 'Log Class': 'RELOG_OLD_WORK', 'Relog Of': 'CODEX-a', 'Relog Delta': 'all new reads', 'Work Parts': JSON.stringify([live]) });
-assert.equal(s.pay_recommendation, 'full'); assert.match(s.reason_note, /Re-log of CODEX-a; new this session: all new reads/); ok('a fully live re-log is full and still says what the credit is for');
+assert.equal(s.pay_recommendation, 'full'); assert.equal(s.log_class, 'fresh_build'); assert.equal(s.reason_tag, null);
+assert.ok(s.flags.some((f) => /every part is new this session, so it is treated as new work/.test(f))); ok('a continuation whose every part is new is new work, not a re-log (10 Nov tuning)');
+
+// 10 Nov 2026 tuning (Kaiqi, C0ASMPYQLG3 1794256210.264529): work that can never be merged is judged on its proof.
+const finding = { what: 'authorization boundary finding', kind: 'non_code', new_this_session: true, merged: false, integrated: false, live_event: false, silent_failure: '', evidence: 'finding posted in thread 1794..., EV-1 checked' };
+s = p.suggest(parts(finding));
+assert.equal(s.pay_recommendation, 'full'); assert.equal(s.held_share, 0); ok('a non-code part with its proof named is credited, never held for a merge');
+s = p.suggest(parts({ ...finding, evidence: 'none stated' }));
+assert.equal(s.credited_share, 0); assert.equal(s.held_share, 1); assert.equal(s.reason_tag, 'PARTIAL_SCOPE'); assert.match(s.release_condition, /the proof it produced/); ok('a non-code part with no proof is held for its proof, not called LOCAL_ONLY');
+s = p.suggest(parts(finding, { ...live, merged: false, integrated: false, live_event: false }));
+assert.equal(s.credited_share, 0.5); assert.equal(s.held_share, 0.5); assert.equal(s.reason_tag, 'PARTIAL_SCOPE'); ok('mixed: the proven finding credited, the local code held');
+s = p.suggest({ 'Log Class': 'RELOG_OLD_WORK', 'Relog Of': 'CODEX-b', 'Relog Delta': 'rebased and opened PR 23', 'Work Parts': JSON.stringify([{ ...live, merged: false, integrated: false, live_event: false }]) });
+assert.equal(s.log_class, 'fresh_build'); assert.equal(s.reason_tag, 'LOCAL_ONLY'); assert.ok(!/Re-log of/.test(s.reason_note || '')); ok('an update to an earlier build, all new, carries no re-log tag (Hardik\'s 10 Nov log)');
+assert.equal(p.parseParts([{ what: 'a', kind: 'investigation' }])[0].kind, 'non_code'); assert.equal(p.parseParts([{ what: 'a' }])[0].kind, 'code'); ok('a part with no kind is code; investigation and the like are non-code');
 assert.equal(p.suggest({ 'Log Class': 'fresh_build', 'Work Parts': '[]' }), null); ok('no work parts and not a re-log: no suggestion');
 assert.deepEqual(p.parseParts('not json'), []); assert.equal(p.parseParts([{ what: 'a' }])[0].new_this_session, true); ok('work parts parse from a JSON string or an array');
 
