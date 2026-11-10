@@ -391,6 +391,74 @@ const reingestPatternTool: ToolDefinition = {
   },
 };
 
+/**
+ * ingest_codex_record (10 Nov 2026, Destiny): send one Codex row that create_record could not ingest into
+ * Bays' Codex workspace. create_record ingests only on create, and a row created with no Summary or
+ * Orchestrator Layer2 Review sends nothing (Codex 464, the Tomatoes-first seed run, which Jason's paid-test
+ * gate needs "complete and ingested"). The row is read as it is now; its BHARAG id is kept on the row as
+ * `BHARAG Doc ID` with `BHARAG Ingested At` (new field names), and a row already carrying one is refused, so a
+ * second call is never a second copy. Destiny or Jason, never an agent.
+ */
+const ADMINS = new Set(['U0AEW3TBYH1', 'U0A9V97949F']);
+const ingestCodexRecordTool: ToolDefinition = {
+  name: 'ingest_codex_record',
+  description:
+    'Send one Codex row to BHARAG (Bays\' Codex workspace) when create_record could not, because the row had no Summary or Orchestrator Layer2 Review when it was made. id or natural_id (the Submission ID). The row is read as it stands; it must now carry a Summary or a Layer 2 review. The BHARAG id is written back on the row as "BHARAG Doc ID" with "BHARAG Ingested At", and a row that already has one is refused (already_ingested). requester_user_id must be Destiny or Jason; refused on any agent token. dry_run: the title and length that would be sent. Audited on engine_mcp_writes (kind codex).',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', description: 'The row id.' },
+      natural_id: { type: 'string', description: 'The Submission ID.' },
+      requester_user_id: { type: 'string', description: 'Destiny or Jason.' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Send a Codex row to BHARAG' },
+  handler: async (args, deps) => {
+    const ctx = ctxFor('ingest_codex_record', deps);
+    const dry = b(args, 'dry_run');
+    const requester = s(args, 'requester_user_id');
+    const audit = await auditOpen({ tool: 'ingest_codex_record', args, access: deps.access, kind: 'codex', requester, dry_run: dry });
+    const refuse = async (reason: string, message: string) => {
+      await auditClose(audit, { outcome: 'refused', detail: `${reason}: ${message}` });
+      return { ok: false, reason, message, audit_id: audit };
+    };
+    if (currentAgent()) return refuse('agent_not_permitted', 'An agent may not send a Codex row to BHARAG by hand: Destiny or Jason does, through the connector.');
+    if (!requester || !ADMINS.has(requester)) return refuse('not_permitted', 'Only Destiny or Jason may send a Codex row to BHARAG by hand.');
+    let row: mirror.LookupRow;
+    try {
+      row = await target('codex', args, ctx);
+    } catch (e) {
+      return refuse('not_found', e instanceof Error ? e.message : String(e));
+    }
+    const f = (row.fields ?? {}) as Record<string, unknown>;
+    if (typeof f['BHARAG Doc ID'] === 'string' && f['BHARAG Doc ID']) return refuse('already_ingested', `Row ${row.id} is already in BHARAG as ${String(f['BHARAG Doc ID'])}.`);
+    const doc = documentFor('codex', f, 'Bays');
+    if (!doc) return refuse('nothing_to_ingest', `Row ${row.id} has no Summary or Orchestrator Layer2 Review. Add a Summary with update_record first.`);
+    if (dry) {
+      await auditClose(audit, { outcome: 'dry_run', record_id: row.id, natural_id: row.natural_id });
+      return { ok: true, dry_run: true, id: row.id, natural_id: row.natural_id, would_send: { title: doc.title, content_chars: doc.content.length, workspace_key: bharag.ingestKeyVar('codex') }, audit_id: audit };
+    }
+    const r = await bharag.ingest('codex', doc, { kind: 'record', source: 'mcp:ingest_codex_record' });
+    if (!r.ok || !r.id) {
+      await auditClose(audit, { outcome: 'failed', detail: r.detail, record_id: row.id, natural_id: row.natural_id });
+      return { ok: false, reason: 'bharag_refused', message: r.detail, id: row.id, audit_id: audit };
+    }
+    let saved = true;
+    let note = '';
+    try {
+      await engineWrite.patchRecord('codex', String(row.id), { 'BHARAG Doc ID': r.id, 'BHARAG Ingested At': new Date().toISOString() }, ctx);
+    } catch (e) {
+      saved = false;
+      note = ` Its BHARAG id was not saved on the row: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    await auditClose(audit, { outcome: saved ? 'applied' : 'applied_with_errors', detail: `${r.detail}${note}`, record_id: row.id, natural_id: row.natural_id, after: { bharag_doc_id: r.id } });
+    return { ok: true, id: row.id, natural_id: row.natural_id, bharag_doc_id: r.id, id_saved_on_row: saved, detail: `${r.detail}${note}`, audit_id: audit };
+  },
+};
+
 export const PATTERN_DOC_FOLDER = '1o_EkaqsC9C1opq1to5mAmt63eUPFn55b';
 
 /* -------------------------------------------------------------- the tools */
@@ -823,4 +891,4 @@ const deleteRecord: ToolDefinition = {
   },
 };
 
-export const WRITE_TOOLS: ToolDefinition[] = [listWritableKinds, createRecord, updateRecord, archiveRecord, deleteRecord, reingestPatternTool];
+export const WRITE_TOOLS: ToolDefinition[] = [listWritableKinds, createRecord, updateRecord, archiveRecord, deleteRecord, reingestPatternTool, ingestCodexRecordTool];

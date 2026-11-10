@@ -14959,3 +14959,10 @@ Files:      server/src/earlyAccess.ts, server/src/index.ts, server/src/migration
 Problem:    The /vfarm form sends utm_* (src/lib/attribution.ts), but the n8n Website Intake builds only Form A answers and Form A has no utm question, so the tags were dropped: 0 of the leads held carry a utm_source.
 Fix:        POST /api/engine/vfarm-lead-attribution keeps each visit by email (engine_vfarm_lead_attribution) and copies the newest tagged one within 48 h onto that email's lead, before or after the lead arrives, never over a source already set. The SQL proved in psql against a local Postgres 17 (lead first and attribution first, a second link not overwriting). The node test needs the pg module, which is not installed here (no network for npm), so it was not run locally.
 Decision:   Keyed by email, not a new Form A question: Form A is Hardik's, and the tags are provenance rather than an answer.
+
+## 2026-11-10 18:05 — ingest_codex_record, and the website intake sends utm tags
+Intent:     Close Jason's two paid-test gates left open: Codex 464 "complete and ingested", and UTM attribution end to end.
+Files:      server/src/mcp/writeTools.ts, CLAUDE.md; n8n vFarm Early Access — Website Intake (xxME1VLRkPdlLpaV)
+Problem:    Codex 464 was created by Bays with no Summary, and create_record answered "bharag: not ingested — The row carries no text to ingest (no Orchestrator Layer2 Review or Summary), so nothing was sent." (audit 5488). Nothing re-ingests a Codex row on update.
+Fix:        ingest_codex_record sends one row as it stands and keeps the BHARAG id on it. n8n: Send Attribution To Dashboard after Reply Saved, continue on error, published e850cacf (restore point 2eeb55b5), approved by Destiny.
+Decision:   A new narrow tool rather than re-creating row 464, because Jason named the row by its id.

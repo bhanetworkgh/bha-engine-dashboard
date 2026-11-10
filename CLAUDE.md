@@ -1217,6 +1217,7 @@ archive records directly, with the checks the Bays Tools Router enforces.
   here with the same confirm, for a duplicate submission or a test. That
   includes a real log still waiting on review, so the reason must say why. A
   reviewed or processed log is still refused.
+- **`ingest_codex_record`** (10 Nov 2026, Destiny): a Codex row created with no Summary or Layer 2 review is never ingested (create_record ingests on create only), as Codex 464, the Tomatoes-first seed run, was not. This tool sends the row as it stands to Bays' Codex workspace, writes `BHARAG Doc ID` and `BHARAG Ingested At` (new field names) on the row, and refuses a row already carrying one. Destiny or Jason, refused on any agent token, `dry_run`, audited kind `codex`.
 - **`dry_run: true`** runs every guard and returns what would be written.
 - **BHARAG on create** for codex, patterns and commercial, in the n8n ingest
   nodes' shape (`POST /ingest`, `{title, content, source_type, content_type,
