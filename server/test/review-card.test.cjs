@@ -88,7 +88,7 @@ ok('shares read as percentages of a day, redrawn from the numbers so an old stor
   const all = JSON.stringify(a.blocks);
   assert.equal(a.blocks[0].type, 'header');
   assert.equal(a.blocks[0].text.text, '✅ Approved');
-  for (const want of ['<@U0BNQGG020Y>', '<@U0A9V97949F>, Wed, 11 Nov 2026, 4:50PM UTC', 'Wed, 11 Nov 2026, 4:03PM UTC', 'U0BNQGG020Y_1', 'Attach the sensor\n<https://otter.ai/u/abc|Open session>', '/codex/U0BNQGG020Y_1']) assert.ok(all.includes(want), want);
+  for (const want of ['<@U0BNQGG020Y>', '<@U0A9V97949F>, Wed, 11 Nov 2026, 4:50PM UTC', 'Wed, 11 Nov 2026, 4:03PM UTC', 'U0BNQGG020Y_1', 'Attach the sensor\\n<https://otter.ai/u/abc|Open session>', '/codex/U0BNQGG020Y_1']) assert.ok(all.includes(want), want);
   assert.ok(!/Pay:/.test(all), 'no pay line');
   const heads = a.blocks.slice(1, 6).map((b) => b.text.text.split('\n')[0]);
   assert.deepEqual(heads, ['*Builder*', '*Session title*', '*Session date*', '*Submission ID*', '*Approved by*'], 'one section per item, in order');
