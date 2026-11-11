@@ -7,6 +7,8 @@
  *      device_online on any rule, or clear on device_silent, is it coming back; anything else is not presence.
  *   2. presenceAlertId: vFarm's own alert id wins (entry, then envelope), else the fire's event id.
  *   3. UN9D condition 6 counts a device_online frame as a clear, not a fire.
+ *   4. alertEventKey: vFarm sends the offline event's id on both frames, so the back-online frame
+ *      is stored under <id>:online and never overwrites the fire.
  *
  * Run with:  npm run test:vfarm-presence   (no database, no network)
  */
@@ -41,5 +43,11 @@ const c6 = un9d.condition6([{ kind: 'device_online', fired_at: at, received_at: 
 assert.equal(c6.verdict, 'pass');
 assert.match(c6.conditions[0].reason, /1 fired, 1 cleared/);
 ok('UN9D condition 6 counts a back-online frame as a clear');
+
+assert.equal(sf.alertEventKey('device_online', 'ev-1', true), 'ev-1:online');
+assert.equal(sf.alertEventKey('device_offline', 'ev-1', true), 'ev-1');
+assert.equal(sf.alertEventKey('device_online', 'device_silent:d1:t', false), 'device_silent:d1:t');
+assert.equal(sf.alertEventKey('single', 'ev-2', true), 'ev-2');
+ok('a back-online frame is kept as its own row, so the fire is never overwritten');
 
 console.log(`\n${n} checks passed.`);

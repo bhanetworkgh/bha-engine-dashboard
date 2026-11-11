@@ -191,6 +191,14 @@ export function presenceRole(kind: string | null, ruleId: string | null): 'went_
 export function presenceAlertId(body: Obj, d: Obj, eventId: string): string {
   return str(d.alert_id) ?? str(d.alert_state_id) ?? str(body.alert_id) ?? str(body.alert_state_id) ?? eventId;
 }
+/**
+ * The row key a frame is stored under. vFarm sends the OFFLINE event's id on both presence frames
+ * (its envelope.presence), so a back-online frame keyed on that id would overwrite the fire and the
+ * record would hold only "back online". It is kept as its own row under `<id>:online`. Pure.
+ */
+export function alertEventKey(kind: string | null, eventId: string, sentId: boolean): string {
+  return kind === 'device_online' && sentId ? `${eventId}:online` : eventId;
+}
 
 /**
  * One `vfarm.alert.v1` envelope: `kind` single or digest, one `rule`, one
@@ -215,7 +223,7 @@ export async function storeVfarmAlert(body: Obj): Promise<AlertStoreResult & { d
     const dPlace = isObj(d.place) ? d.place : place;
     const eventId = str(d.event_id) ?? `${str(rule.id) ?? 'rule?'}:${deviceId}:${fired}`;
     return {
-      event_id: eventId,
+      event_id: alertEventKey(str(body.kind), eventId, !!str(d.event_id)),
       kind: str(body.kind),
       rule_id: str(rule.id),
       rule_name: str(rule.name),
