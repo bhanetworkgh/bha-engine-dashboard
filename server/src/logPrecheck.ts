@@ -85,6 +85,14 @@ export async function pay(b: Obj): Promise<Obj> {
     relog = { matches: [], looks_like_relog: false, unread: e instanceof Error ? e.message : String(e) };
   }
   const s = paySuggest.suggest(fields, relog);
+  // Earlier held pay this log would release on approval (11 Nov 2026), worked out as the Codex write does.
+  let releases: paySuggest.Releases | null = null;
+  let releases_unread: string | null = null;
+  try {
+    releases = await paySuggest.releasesFor({ ...fields, 'Builder User ID': builder, 'Submission ID': '' });
+  } catch (e) {
+    releases_unread = e instanceof Error ? e.message : String(e);
+  }
   const short = s ? s.parts.filter((p) => p.score < 1).map((p) => ({ what: p.what, paid: paySuggest.pct(p.score), tag: p.tag, proof_level: p.proof_level, needs_live_event: p.needs_live_event, to_fix: p.missing })) : [];
   return {
     full_day: !!s && s.credited_share === 1,
@@ -98,6 +106,8 @@ export async function pay(b: Obj): Promise<Obj> {
     red_flags: fields['Red Flags'] ?? null,
     suggestion: s,
     earlier_work: relog,
+    releases,
+    releases_unread,
     dry_run: true,
   };
 }

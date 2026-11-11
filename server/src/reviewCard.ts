@@ -44,7 +44,24 @@ export function payBlocks(sug: ReturnType<typeof paySuggest.fromRow>, why: strin
     ...((sug.flags ?? []).length ? [section(cap((sug.flags ?? []).map((f) => `:red_circle: ${f}`).join('\n'), 2900))] : []),
     ...(parts.length ? [list(parts.map((p) => `${p.what}: ${PART[p.status] ?? p.status}${(p.missing ?? []).length ? ` (needs: ${(p.missing ?? []).join(', ')})` : ''}`))] : []),
     ...(sug.release_condition ? [section(cap(`*Held until:* ${sug.release_condition}`, 2900))] : []),
+    ...releaseBlocks(sug),
   ];
+}
+
+/**
+ * Pay held on the builder's earlier logs (11 Nov 2026): what this log proves and Approve will release when
+ * the box is left ticked, and every hold it does not address, so a held share is never forgotten. Pure.
+ */
+export function releaseBlocks(sug: ReturnType<typeof paySuggest.fromRow>): Block[] {
+  const r = (sug?.releases ?? null) as paySuggest.Releases | null;
+  if (!r || (!r.items.length && !r.open.length)) return [];
+  const lines: string[] = [];
+  for (const i of r.items) {
+    for (const p of i.parts) lines.push(`${i.codex_entry_id ?? i.submission_id}: ${p.what}, ${paySuggest.pct(p.share)}: ${p.ok ? `proven (${p.proof}). ${p.why}` : `still held, ${p.why}`}`);
+  }
+  for (const o of r.open) lines.push(`${o.codex_entry_id ?? o.submission_id}: ${paySuggest.pct(o.held_share)} still held, not addressed by this log${o.release_condition ? ` (held until: ${cap(o.release_condition, 200)})` : ''}`);
+  const head = r.total_share > 0 ? `*Release from earlier logs:* ${paySuggest.pct(r.total_share)} of a day, released on Approve while the box is ticked.` : '*Held pay on earlier logs:* nothing proven by this log yet.';
+  return [section(cap(head, 2900)), list(lines.slice(0, 12))];
 }
 
 /** The fourth part of the button value: what the Approve pop-up opens on. Same shape as Build Layer 1 Payload. Pure. */
@@ -61,6 +78,7 @@ export function sugPart(sug: ReturnType<typeof paySuggest.fromRow>): string {
       n: (sug.reason_note ?? '').slice(0, 400),
       k: (sug.release_condition ?? '').slice(0, 500),
       l: paySuggest.lineFor(sug).slice(0, 150),
+      x: ((sug.releases ?? null) as paySuggest.Releases | null)?.total_share ?? 0,
     })
   );
 }

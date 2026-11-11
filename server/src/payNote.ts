@@ -12,7 +12,8 @@
  *   released_share       what a release moved, paid in release_month
  *   docked               1 - credited - held - released; never paid, never backfilled
  *   reason_tag           LOCAL_ONLY | RELOG_OLD_WORK | PARTIAL_SCOPE | TEST_ONLY | OTHER, and from 10 Nov 2026 Jason's
- *                        proof tags INSUFFICIENT_PROOF | AWAITING_REVIEW | BLOCKED_EXTERNAL | NEEDS_LIVE_EVENT
+ *                        proof tags INSUFFICIENT_PROOF | AWAITING_REVIEW | BLOCKED_EXTERNAL | NEEDS_LIVE_EVENT, and from
+ *                        11 Nov 2026 WAITING_ON_CUSTOMER (a live event only a customer can make happen; credited)
  *   reason_note, release_condition, decided_by/at, released_by/at, proof_link
  *
  * The rules, all enforced here rather than left to whoever calls:
@@ -37,7 +38,7 @@ import * as paySuggest from './paySuggest';
 const pct = paySuggest.pct;
 
 export const RECOMMENDATIONS = ['full', 'half', 'none', 'custom_fraction'] as const;
-export const REASON_TAGS = ['LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT'] as const;
+export const REASON_TAGS = ['LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT', 'WAITING_ON_CUSTOMER'] as const;
 export const DECIDERS: Record<string, string> = { U0AEW3TBYH1: 'Destiny Arupi', U0A9V97949F: 'Jason Bays' };
 export type Recommendation = (typeof RECOMMENDATIONS)[number];
 
@@ -54,6 +55,7 @@ export class PayNoteError extends FeedError {
 type Obj = Record<string, unknown>;
 const s = (v: unknown, max = 2000): string => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '');
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
+const bool = (v: unknown): boolean => v === true || v === 'true' || v === 'yes' || v === 'Yes' || v === 1;
 const pick = (v: unknown): string => (v && typeof v === 'object' ? String((v as Obj).name ?? '') : v == null ? '' : String(v));
 
 export interface PayNote {
@@ -81,6 +83,8 @@ export interface PayNote {
   suggested: Record<string, unknown> | null;
   log_class: string | null;
   relog_of: string | null;
+  /** Held parts already released, by name (11 Nov 2026): a part is released once and never again. */
+  released_parts: string[] | null;
 }
 
 const COLS = `submission_id, codex_entry_id, builder_slack_id, builder, session_month, pay_recommendation,
@@ -88,7 +92,7 @@ const COLS = `submission_id, codex_entry_id, builder_slack_id, builder, session_
   reason_tag, reason_note, release_condition, decided_by,
   to_char(decided_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS decided_at, released_by,
   to_char(released_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS released_at, release_month, proof_link,
-  suggested, log_class, relog_of`;
+  suggested, log_class, relog_of, released_parts`;
 
 function shape(r: Obj): PayNote {
   const credited = Number(r.credited_share);
@@ -168,7 +172,7 @@ const VIA = ['slack_approve', 'dashboard_approve', 'mcp', 'engine'] as const;
  * is a correction, needs correction_note, and may not raise credited + held above what the log had
  * (a dock stays docked). Released shares are never touched here: a release is its own act.
  */
-export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ written: boolean; dry_run: boolean; action: 'set' | 'correct' | 'unchanged'; note: PayNote; message: string }> {
+export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ written: boolean; dry_run: boolean; action: 'set' | 'correct' | 'unchanged'; note: PayNote; message: string; releases?: Awaited<ReturnType<typeof releaseFromLog>> }> {
   const by = s(b.decided_by, 40);
   if (!DECIDERS[by]) throw new PayNoteError('not_permitted', `Only Destiny or Jason set a pay note (decided_by is their Slack id); ${by || 'nobody'} was given.`, 403);
   const via = (s(b.via, 40) || 'engine') as (typeof VIA)[number];
@@ -248,7 +252,16 @@ export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ w
     }
   }
   const r = await withTransaction(run);
-  return { written: r.action !== 'unchanged', dry_run: false, action: r.action, note: r.note, message: r.action === 'unchanged' ? `No change: ${label(r.note)} already.` : `${r.action === 'set' ? 'Set' : 'Corrected'}: ${label(r.note)}.` };
+  const message = r.action === 'unchanged' ? `No change: ${label(r.note)} already.` : `${r.action === 'set' ? 'Set' : 'Corrected'}: ${label(r.note)}.`;
+  // Held pay on this builder's earlier logs that this log proved (11 Nov 2026): released on the same
+  // approval when the approver leaves the release box ticked. Only on the first decision, so a repeat
+  // click or a correction never releases twice; each release is its own act and its own history line.
+  if (bool(b.release_earlier) && r.action === 'set') {
+    const releases = await releaseFromLog({ submission_id: r.note.submission_id, released_by: s(b.decided_by, 40), via });
+    const said = releases.results.map((x) => (x.ok ? x.message : `${x.ref} not released: ${x.message}`)).join(' ');
+    return { written: true, dry_run: false, action: r.action, note: r.note, message: said ? `${message} ${said}` : message, releases };
+  }
+  return { written: r.action !== 'unchanged', dry_run: false, action: r.action, note: r.note, message };
 }
 
 class DryRun extends Error {
@@ -267,16 +280,35 @@ export async function release(b: Obj, opts: { dry_run?: boolean } = {}): Promise
   const proof = s(b.proof_link, 500);
   if (!/^https:\/\/\S+$/.test(proof)) throw new PayNoteError('missing_proof', 'A release needs proof_link: the https link that shows the release condition was met (the PR, the engine event, the Slack message).');
   const via = s(b.via, 40) || 'engine';
+  // A part of the held share (11 Nov 2026): a later log can prove some held parts and not others.
+  const partShare = b.share === undefined || b.share === null || b.share === '' ? null : Number(b.share);
+  if (partShare !== null && (!Number.isFinite(partShare) || partShare <= 0 || partShare > 1)) throw new PayNoteError('bad_share', `share must be a share of a day above 0 and at most 1, not "${String(b.share)}".`);
+  const parts = Array.isArray(b.parts) ? b.parts.map((x) => s(x, 200)).filter(Boolean) : [];
+  const remaining = s(b.remaining_condition, 600) || null;
   const run = async (db: Queryable) => {
     const log = await findLog(db, { submission_id: s(b.submission_id, 200), codex_entry_id: s(b.codex_entry_id, 200) });
     const row = (await db.query<Obj>(`SELECT ${COLS} FROM engine_pay_notes WHERE submission_id = $1 FOR UPDATE`, [log.submission_id])).rows[0];
     if (!row) throw new PayNoteError('no_pay_note', `${log.codex_entry_id ?? log.submission_id} has no pay note, so nothing is held.`, 404);
     const prior = shape(row);
     if (prior.held_share <= 0) throw new PayNoteError('nothing_held', `${log.codex_entry_id ?? log.submission_id} holds nothing (${prior.credited_share} credited${prior.docked_share > 0 ? `, ${prior.docked_share} docked, which is never released` : ''}).`);
+    const share = partShare === null ? prior.held_share : round3(partShare);
+    if (share > prior.held_share + 0.0005) throw new PayNoteError('more_than_held', `${log.codex_entry_id ?? log.submission_id} holds ${pct(prior.held_share)} of a day; ${pct(share)} cannot be released.`);
+    const done = (prior.released_parts ?? []).map((x) => x.toLowerCase());
+    const again = parts.filter((p) => done.includes(p.toLowerCase()));
+    if (again.length) throw new PayNoteError('already_released', `Already released on ${log.codex_entry_id ?? log.submission_id}: ${again.join('; ')}. A part is released once.`, 409);
+    // The statement pays released_share in release_month, so a second release in another month would pay the first twice.
+    const month = new Date().toISOString().slice(0, 7);
+    if (prior.released_share > 0 && prior.release_month && prior.release_month !== month) {
+      throw new PayNoteError('release_month_differs', `${log.codex_entry_id ?? log.submission_id} already had ${pct(prior.released_share)} released in ${prior.release_month}. Releasing more in ${month} would pay the first release twice on the statement; release it in a new note instead.`, 409);
+    }
+    const left = round3(prior.held_share - share);
     await db.query(
-      `UPDATE engine_pay_notes SET released_share = released_share + held_share, held_share = 0, released_by = $2, released_at = now(),
-              release_month = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM'), proof_link = $3, updated_at = now() WHERE submission_id = $1`,
-      [log.submission_id, by, proof],
+      `UPDATE engine_pay_notes SET released_share = released_share + $4::numeric, held_share = $5::numeric, released_by = $2, released_at = now(),
+              release_month = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM'), proof_link = $3, updated_at = now(),
+              released_parts = coalesce(released_parts, '[]'::jsonb) || $6::jsonb,
+              release_condition = CASE WHEN $5::numeric > 0 THEN coalesce($7, release_condition) ELSE release_condition END
+        WHERE submission_id = $1`,
+      [log.submission_id, by, proof, share, left < 0.0005 ? 0 : left, JSON.stringify(parts), remaining],
     );
     const after = shape((await db.query<Obj>(`SELECT ${COLS} FROM engine_pay_notes WHERE submission_id = $1`, [log.submission_id])).rows[0]);
     await db.query(
@@ -284,22 +316,69 @@ export async function release(b: Obj, opts: { dry_run?: boolean } = {}): Promise
       [log.submission_id, after.codex_entry_id, JSON.stringify(prior), JSON.stringify(after), by, via, s(b.note, 600) || null],
     );
     await mirrorToLedger(db, after);
-    await engineEvents.record({ event_type: 'pay_note_released', subject_id: after.codex_entry_id ?? log.submission_id, actor: DECIDERS[by], detail: { released: after.released_share, proof_link: proof, release_month: after.release_month } }, db);
-    return after;
+    await engineEvents.record({ event_type: 'pay_note_released', subject_id: after.codex_entry_id ?? log.submission_id, actor: DECIDERS[by], detail: { released: share, released_total: after.released_share, still_held: after.held_share, parts, proof_link: proof, release_month: after.release_month, via } }, db);
+    return { after, share };
   };
-  const msg = (n: PayNote) => `${n.codex_entry_id ?? n.submission_id}: ${pct(n.released_share)} of a day released for ${n.release_month ?? 'this month'}, on ${proof}.`;
+  const msg = (n: PayNote, share: number) => `${n.codex_entry_id ?? n.submission_id}: ${pct(share)} of a day released for ${n.release_month ?? 'this month'}, on ${proof}${n.held_share > 0 ? `; ${pct(n.held_share)} still held` : ''}.`;
   if (opts.dry_run) {
     try {
       await withTransaction(async (db) => {
-        throw new DryRun({ action: 'unchanged', note: await run(db) });
+        const r = await run(db);
+        throw new DryRunRelease(r.after, r.share);
       });
     } catch (e) {
-      if (e instanceof DryRun) return { written: false, dry_run: true, note: e.r.note, message: `Dry run, nothing written. Would release: ${msg(e.r.note)}` };
+      if (e instanceof DryRunRelease) return { written: false, dry_run: true, note: e.note, message: `Dry run, nothing written. Would release: ${msg(e.note, e.share)}` };
       throw e;
     }
   }
-  const n = await withTransaction(run);
-  return { written: true, dry_run: false, note: n, message: `Released. ${msg(n)}` };
+  const r = await withTransaction(run);
+  return { written: true, dry_run: false, note: r.after, message: `Released. ${msg(r.after, r.share)}` };
+}
+
+class DryRunRelease extends Error {
+  note: PayNote;
+  share: number;
+  constructor(note: PayNote, share: number) {
+    super('dry run');
+    this.note = note;
+    this.share = share;
+  }
+}
+
+/**
+ * The releases a log's review found proven (its Pay Suggestion's `releases`), made on that log's
+ * approval (11 Nov 2026): Jason's Approve click with the release box ticked. Each earlier note is
+ * released by `release` on its own, part by part, with this log as the proof; one that cannot be
+ * released is named and never stops the approval or the others.
+ */
+export async function releaseFromLog(b: { submission_id: string; released_by: string; via: string }): Promise<{ released: number; results: { ref: string; ok: boolean; message: string; reason?: string }[] }> {
+  const r = await query<{ fields: Obj }>(`SELECT fields FROM engine_codex_submissions WHERE fields->>'Submission ID' = $1 ORDER BY updated_at DESC LIMIT 1`, [b.submission_id]);
+  const sug = r.rows[0] ? paySuggest.fromRow(r.rows[0].fields) : null;
+  const items = ((sug?.releases as paySuggest.Releases | null | undefined)?.items ?? []).filter((i) => i.release_share > 0);
+  const base = (process.env.PUBLIC_DASHBOARD_URL || 'https://dashboard.bhanetwork.org').replace(/\/+$/, '');
+  const proof = `${base}/codex/${encodeURIComponent(b.submission_id)}`;
+  const results: { ref: string; ok: boolean; message: string; reason?: string }[] = [];
+  for (const i of items) {
+    const ref = i.codex_entry_id ?? i.submission_id;
+    const ok = i.parts.filter((p) => p.ok);
+    try {
+      const x = await release({
+        submission_id: i.submission_id,
+        released_by: b.released_by,
+        proof_link: proof,
+        share: i.release_share,
+        parts: ok.map((p) => p.what),
+        remaining_condition: i.still_held.length ? i.still_held.join('; ') : null,
+        via: b.via,
+        note: `Released on the approval of ${b.submission_id}: ${ok.map((p) => `${p.what} (${p.proof})`).join('; ')}`.slice(0, 600),
+      });
+      results.push({ ref, ok: true, message: x.message });
+    } catch (e) {
+      if (!(e instanceof PayNoteError)) throw e;
+      results.push({ ref, ok: false, reason: e.reason, message: e.message });
+    }
+  }
+  return { released: results.filter((x) => x.ok).length, results };
 }
 
 /**

@@ -4504,6 +4504,15 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       // engine_pay_note_history is frozen (migration 124) and is read by Submission ID, so it is left as written.
     ],
   },
+  {
+    id: 129,
+    name: 'Pay notes: WAITING_ON_CUSTOMER, and held parts released one at a time by a later log (11 Nov 2026)',
+    statements: [
+      `ALTER TABLE engine_pay_notes ADD COLUMN IF NOT EXISTS released_parts jsonb NOT NULL DEFAULT '[]'::jsonb`,
+      `ALTER TABLE engine_pay_notes DROP CONSTRAINT IF EXISTS engine_pay_notes_reason_tag_check`,
+      `ALTER TABLE engine_pay_notes ADD CONSTRAINT engine_pay_notes_reason_tag_check CHECK (reason_tag IS NULL OR reason_tag IN ('LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT', 'WAITING_ON_CUSTOMER'))`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

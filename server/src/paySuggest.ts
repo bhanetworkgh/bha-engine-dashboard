@@ -59,7 +59,7 @@ export const LOG_CLASSES = ['fresh_build', 'RELOG_OLD_WORK'] as const;
 export const PART_KINDS = ['code', 'non_code'] as const;
 const NON_CODE = new Set(['non_code', 'noncode', 'non-code', 'investigation', 'design', 'research', 'review', 'verification', 'ops', 'docs', 'analysis']);
 
-export const BLOCKERS = ['awaiting_review', 'blocked_external'] as const;
+export const BLOCKERS = ['awaiting_review', 'blocked_external', 'awaiting_customer'] as const;
 
 export interface WorkPart {
   what: string;
@@ -68,8 +68,11 @@ export interface WorkPart {
   proof_level: 0 | 1 | 2 | 3;
   /** Whether the level was stated by the review or worked out here from the older fields. */
   level_from: 'review' | 'derived';
-  /** The work is ready and waits on someone else: a review of its artefact, or another team. */
-  blocker: '' | 'awaiting_review' | 'blocked_external';
+  /**
+   * The work is ready and waits on someone else: a review of its artefact, another team, or (from
+   * 11 Nov 2026) a customer or member of the public choosing to act (a signup, a payment, a call).
+   */
+  blocker: '' | 'awaiting_review' | 'blocked_external' | 'awaiting_customer';
   /** The loop's acceptance needs a live production event for this part, or the log says it is live. */
   needs_live_event: boolean;
   new_this_session: boolean;
@@ -99,6 +102,8 @@ export interface Suggestion {
   relog_delta: string | null;
   basis: string;
   computed_at: string;
+  /** Pay held on this builder's earlier logs that this log brings the proof for (11 Nov 2026). */
+  releases?: Releases | null;
 }
 
 /** Work Parts as Layer 1 writes them: an array, or a JSON string of one. Anything else is no parts. */
@@ -125,7 +130,7 @@ export function parseParts(v: unknown): WorkPart[] {
       const proof_level = (fromReview ? stated : deriveLevel({ merged, integrated, live_event, evidence })) as 0 | 1 | 2 | 3;
       const b = str(x.blocker, 40).toLowerCase();
       const blocker = (BLOCKERS as readonly string[]).includes(b)
-        ? (b as 'awaiting_review' | 'blocked_external')
+        ? (b as 'awaiting_review' | 'blocked_external' | 'awaiting_customer')
         : // Older rows carry no blocker: finished code with an artefact that is not merged waits on review.
           x.blocker === undefined && kind === 'code' && proof_level >= 1 && !merged
           ? 'awaiting_review'
@@ -199,6 +204,12 @@ export function suggest(fields: Obj, relog: RelogCheck | null = null, now = new 
       missing.push(p.kind === 'non_code' ? 'the proof it produced, named in the log (the doc, record, finding or link)' : 'an artefact another person can open: a PR, a pushed branch or commit, a script, a design or test output');
       return { ...p, score: 0, status: 'held' as const, missing, tag: 'INSUFFICIENT_PROOF' };
     }
+    // A live event that only a customer or member of the public can make happen (a real signup, a real
+    // payment) is not the builder's to prove (Destiny, 11 Nov 2026): the part is credited once it is ready,
+    // tagged WAITING_ON_CUSTOMER so the wait is seen, and the first real customer event is still watched for.
+    if (p.needs_live_event && p.proof_level < 3 && p.blocker === 'awaiting_customer' && p.proof_level >= 1) {
+      return { ...p, score: 1, status: 'live' as const, missing, tag: 'WAITING_ON_CUSTOMER' };
+    }
     if (p.needs_live_event && p.proof_level < 3) {
       missing.push('one real production event for it, logged');
       return { ...p, score: 0.5, status: 'live_pending' as const, missing, tag: 'NEEDS_LIVE_EVENT' };
@@ -243,9 +254,11 @@ export function suggest(fields: Obj, relog: RelogCheck | null = null, now = new 
           : 'NEEDS_LIVE_EVENT'
         : waits.includes('BLOCKED_EXTERNAL')
           ? 'BLOCKED_EXTERNAL'
-          : waits.includes('AWAITING_REVIEW')
-            ? 'AWAITING_REVIEW'
-            : null;
+          : waits.includes('WAITING_ON_CUSTOMER')
+            ? 'WAITING_ON_CUSTOMER'
+            : waits.includes('AWAITING_REVIEW')
+              ? 'AWAITING_REVIEW'
+              : null;
 
   const bits: string[] = [];
   const credit = scored.filter((p) => p.score > 0);
@@ -269,7 +282,14 @@ export function pct(n: number): string {
 /** The one-line suggestion, worked out from the shares, so a card can be redrawn from any stored suggestion. Pure. */
 export function lineFor(s: { pay_recommendation?: string | null; credited_share?: number | null; held_share?: number | null; docked_share?: number | null; reason_tag?: string | null }): string {
   if (s.pay_recommendation === 'full') {
-    const wait = s.reason_tag === 'AWAITING_REVIEW' ? ' Some of it is waiting on review (AWAITING_REVIEW).' : s.reason_tag === 'BLOCKED_EXTERNAL' ? ' Some of it is blocked by someone else (BLOCKED_EXTERNAL).' : '';
+    const wait =
+      s.reason_tag === 'AWAITING_REVIEW'
+        ? ' Some of it is waiting on review (AWAITING_REVIEW).'
+        : s.reason_tag === 'BLOCKED_EXTERNAL'
+          ? ' Some of it is blocked by someone else (BLOCKED_EXTERNAL).'
+          : s.reason_tag === 'WAITING_ON_CUSTOMER'
+            ? ' Some of it waits on a real customer to act (WAITING_ON_CUSTOMER).'
+            : '';
     return `Full day (100%): every part has the proof it needs.${wait}`;
   }
   const c = s.credited_share ?? 0;
@@ -316,6 +336,170 @@ function finish(a: {
     basis: a.basis,
     computed_at: a.now.toISOString(),
   };
+}
+
+/*
+ * Releases: pay held on a builder's earlier logs, released when a later log brings the proof (11 Nov 2026,
+ * Destiny: "so that builders are not losing out on money"). Layer 1 lists in "Releases" every earlier log
+ * the new log says it brings proof for, part by part, with the proof and its level. The engine matches each
+ * claim to a pay note of that builder still holding a share, part by part, and judges it by the reason the
+ * part was held: a part held for a live event needs a level 3 event (or, when only a customer can make it
+ * happen, is credited as WAITING_ON_CUSTOMER); a part held for missing proof needs something another
+ * person can open. Nothing is released here: the card shows it, and Jason's Approve click releases it.
+ * Every hold of the builder that the log does not address is listed too, so it is never forgotten.
+ */
+export interface ReleaseClaimPart {
+  what: string;
+  proof: string;
+  proof_level: 0 | 1 | 2 | 3;
+  awaiting_customer: boolean;
+}
+export interface ReleaseClaim {
+  log: string;
+  parts: ReleaseClaimPart[];
+}
+export interface HoldRow {
+  submission_id: string;
+  codex_entry_id: string | null;
+  held_share: number;
+  release_condition: string | null;
+  reason_tag: string | null;
+  suggested: Obj | null;
+  released_parts: string[];
+}
+export interface ReleasePart {
+  what: string;
+  held_for: string;
+  share: number;
+  ok: boolean;
+  proof: string;
+  why: string;
+}
+export interface ReleaseItem {
+  submission_id: string;
+  codex_entry_id: string | null;
+  held_share: number;
+  release_share: number;
+  parts: ReleasePart[];
+  still_held: string[];
+}
+export interface Releases {
+  items: ReleaseItem[];
+  open: { submission_id: string; codex_entry_id: string | null; held_share: number; release_condition: string | null }[];
+  total_share: number;
+  line: string;
+}
+
+/** Releases as Layer 1 writes them: an array, or a JSON string of one. Pure. */
+export function parseReleases(v: unknown): ReleaseClaim[] {
+  let a: unknown = v;
+  if (typeof v === 'string') {
+    try {
+      a = JSON.parse(v);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(a)) return [];
+  return a
+    .filter((x): x is Obj => !!x && typeof x === 'object')
+    .map((x) => ({
+      log: str(x.log ?? x.codex_entry_id ?? x.submission_id, 200),
+      parts: (Array.isArray(x.parts) ? x.parts : [])
+        .filter((y): y is Obj => !!y && typeof y === 'object')
+        .map((y) => {
+          const lv = Number(y.proof_level);
+          return { what: str(y.what, 200), proof: str(y.proof ?? y.evidence, 300), proof_level: ([0, 1, 2, 3].includes(lv) ? lv : 0) as 0 | 1 | 2 | 3, awaiting_customer: bool(y.awaiting_customer) };
+        })
+        .slice(0, 12),
+    }))
+    .filter((c) => c.log)
+    .slice(0, 8);
+}
+
+const words = (t: string) => new Set(t.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w.length > 2));
+function overlap(a: string, b: string): number {
+  const x = words(a);
+  const y = words(b);
+  if (!x.size || !y.size) return 0;
+  let n = 0;
+  for (const w of x) if (y.has(w)) n++;
+  return n / Math.min(x.size, y.size);
+}
+
+/** The held parts of one pay note, each with its share of a day. Parts already released are left out. Pure. */
+export function heldParts(h: HoldRow): { what: string; held_for: string; share: number }[] {
+  const parts = Array.isArray(h.suggested?.parts) ? (h.suggested!.parts as Obj[]) : [];
+  const done = new Set(h.released_parts.map((x) => x.toLowerCase()));
+  const list = parts
+    .filter((p) => (p.status === 'held' || p.status === 'live_pending') && !done.has(String(p.what ?? '').toLowerCase()))
+    .map((p) => ({ what: str(p.what, 200), held_for: str(p.tag, 40) || 'held', raw: (1 - Number(p.score ?? 0)) / Math.max(1, parts.length) }));
+  if (!list.length) return h.held_share > 0 ? [{ what: h.release_condition || 'the held share', held_for: h.reason_tag || 'held', share: r3(h.held_share) }] : [];
+  // The note as Jason decided it is what is owed: scale the review's split to the share still held.
+  const sum = list.reduce((a, p) => a + p.raw, 0);
+  return list.map((p) => ({ what: p.what, held_for: p.held_for, share: r3(sum > 0 ? (p.raw / sum) * h.held_share : h.held_share / list.length) }));
+}
+
+/** Matches what a log claims against the builder's open holds. Pure. */
+export function matchReleases(holds: HoldRow[], claims: ReleaseClaim[]): Releases {
+  const items: ReleaseItem[] = [];
+  const open: Releases['open'] = [];
+  for (const h of holds) {
+    if (h.held_share <= 0) continue;
+    const ids = [h.codex_entry_id, h.submission_id].filter((x): x is string => !!x).map((x) => x.toLowerCase());
+    const claim = claims.find((c) => ids.some((id) => c.log.toLowerCase().includes(id) || id.includes(c.log.toLowerCase())));
+    if (!claim) {
+      open.push({ submission_id: h.submission_id, codex_entry_id: h.codex_entry_id, held_share: h.held_share, release_condition: h.release_condition });
+      continue;
+    }
+    const parts: ReleasePart[] = heldParts(h).map((p) => {
+      let best: ReleaseClaimPart | null = null;
+      let score = 0;
+      for (const c of claim.parts) {
+        const o = overlap(p.what, c.what);
+        if (o > score) {
+          score = o;
+          best = c;
+        }
+      }
+      if (!best || score < 0.5) return { ...p, ok: false, proof: '', why: 'this log does not bring proof for it' };
+      if (!hasEvidence(best.proof)) return { ...p, ok: false, proof: '', why: 'claimed, but no proof is named' };
+      const live = p.held_for === 'NEEDS_LIVE_EVENT' || p.held_for === 'TEST_ONLY';
+      if (live) {
+        if (best.proof_level >= 3) return { ...p, ok: true, proof: best.proof, why: 'a real production event is named' };
+        if (best.awaiting_customer && best.proof_level >= 1) return { ...p, ok: true, proof: best.proof, why: 'its live event waits on a real customer, which is not the builder\'s to prove (WAITING_ON_CUSTOMER)' };
+        return { ...p, ok: false, proof: best.proof, why: `the proof named is level ${best.proof_level}; this part was held for a real production event` };
+      }
+      if (best.proof_level >= 1) return { ...p, ok: true, proof: best.proof, why: 'proof another person can open is named' };
+      return { ...p, ok: false, proof: best.proof, why: 'the proof named is narrative only' };
+    });
+    const release_share = r3(Math.min(h.held_share, parts.filter((p) => p.ok).reduce((a, p) => a + p.share, 0)));
+    items.push({ submission_id: h.submission_id, codex_entry_id: h.codex_entry_id, held_share: h.held_share, release_share, parts, still_held: parts.filter((p) => !p.ok).map((p) => p.what) });
+  }
+  const total_share = r3(items.reduce((a, i) => a + i.release_share, 0));
+  const ready = items.filter((i) => i.release_share > 0);
+  const line = ready.length
+    ? `Release from earlier logs: ${ready.map((i) => `${i.codex_entry_id ?? i.submission_id} ${pct(i.release_share)} of a day (${i.parts.filter((p) => p.ok).length} of ${i.parts.length} held parts proven)`).join('; ')}.`
+    : items.length
+      ? 'This log names earlier held pay, but none of it is proven yet.'
+      : '';
+  return { items, open, total_share, line };
+}
+
+/** The builder's open holds and what this log brings for them, or null when the builder holds nothing. */
+export async function releasesFor(fields: Obj, db: Queryable = { query } as Queryable): Promise<Releases | null> {
+  const builder = str(fields['Builder User ID'], 40);
+  const self = str(fields['Submission ID'], 200);
+  if (!builder) return null;
+  const r = await db.query<{ submission_id: string; codex_entry_id: string | null; held_share: number; release_condition: string | null; reason_tag: string | null; suggested: Obj | null; released_parts: string[] | null }>(
+    `SELECT submission_id, codex_entry_id, held_share::float8 AS held_share, release_condition, reason_tag, suggested, released_parts
+       FROM engine_pay_notes WHERE builder_slack_id = $1 AND held_share > 0 AND submission_id <> $2
+      ORDER BY decided_at DESC LIMIT 30`,
+    [builder, self],
+  );
+  if (!r.rows.length) return null;
+  const holds: HoldRow[] = r.rows.map((x) => ({ ...x, held_share: Number(x.held_share), released_parts: Array.isArray(x.released_parts) ? x.released_parts : [] }));
+  return matchReleases(holds, parseReleases(fields.Releases));
 }
 
 export interface RelogMatch {
@@ -405,7 +589,18 @@ export async function annotate(fields: Obj, db: Queryable = { query } as Queryab
     relog = { matches: [], looks_like_relog: false, unread: e instanceof Error ? e.message : String(e) };
   }
   const sug = suggest(fields, relog);
-  return { ...fields, 'Pay Suggestion': sug ? JSON.stringify(sug) : JSON.stringify({ none: true, line: 'No suggestion: the review listed no work parts.', flags: relog?.unread ? [`The earlier-work check could not run (${relog.unread}).`] : [], computed_at: new Date().toISOString() }) };
+  // Earlier held pay this log may release (11 Nov 2026). A check that cannot run never stops the write,
+  // and says so on the card rather than reading as "nothing held".
+  let releases: Releases | null = null;
+  let releasesUnread = '';
+  try {
+    releases = await releasesFor(fields, db);
+  } catch (e) {
+    releasesUnread = e instanceof Error ? e.message : String(e);
+  }
+  const base = sug ?? { none: true, line: 'No suggestion: the review listed no work parts.', flags: relog?.unread ? [`The earlier-work check could not run (${relog.unread}).`] : [], computed_at: new Date().toISOString() };
+  const flags = releasesUnread ? [...((base as { flags?: string[] }).flags ?? []), `The held-pay check could not run (${releasesUnread}), so earlier held pay was not looked at.`] : (base as { flags?: string[] }).flags;
+  return { ...fields, 'Pay Suggestion': JSON.stringify({ ...base, flags, releases }) };
 }
 
 /** The suggestion a Codex row carries, or null. */
