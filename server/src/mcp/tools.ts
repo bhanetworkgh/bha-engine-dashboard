@@ -72,6 +72,7 @@ import { ESSENCE_READ_TOOLS, ESSENCE_WRITE_TOOLS } from './essenceTools';
 import { HELP_READ_TOOLS, HELP_WRITE_TOOLS } from './helpPageTools';
 import { EVIDENCE_READ_TOOLS, EVIDENCE_WRITE_TOOLS } from './evidenceTools';
 import { REGISTRY_READ_TOOLS, REGISTRY_WRITE_TOOLS } from './registryTools';
+import { TRUE_HOME_READ_TOOLS } from './trueHomeTools';
 import { BALANCE_READ_TOOLS } from './balanceTools';
 import { SERVICE_READ_TOOLS, SERVICE_WRITE_TOOLS } from './serviceTools';
 import { CODE_CHECK_READ_TOOLS, CODE_CHECK_WRITE_TOOLS } from './codeCheckTools';
@@ -1138,6 +1139,8 @@ export const TOOLS: ToolDefinition[] = [
   ...HELP_READ_TOOLS,
   ...EVIDENCE_READ_TOOLS,
   ...REGISTRY_READ_TOOLS,
+  // 2026-11-11: the Sovereign Context Layer's reads: where a fact lives, and a record's earlier versions.
+  ...TRUE_HOME_READ_TOOLS,
   ...BALANCE_READ_TOOLS,
   ...SERVICE_READ_TOOLS,
   ...CODE_CHECK_READ_TOOLS,

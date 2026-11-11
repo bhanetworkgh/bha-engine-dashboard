@@ -4513,6 +4513,75 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `ALTER TABLE engine_pay_notes ADD CONSTRAINT engine_pay_notes_reason_tag_check CHECK (reason_tag IS NULL OR reason_tag IN ('LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT', 'WAITING_ON_CUSTOMER'))`,
     ],
   },
+  {
+    // 11 Nov 2026 (Destiny; Jason's Sovereign Context Layer thread, C0ASMPYQLG3 1794180025.573569). The true-home
+    // register: for each kind of fact, the one store that holds it, the door every change goes through, and which
+    // places are only views or copies. And the earlier version of every engine record, kept on every change, so a
+    // record is versioned like code (SOP cb5206c2) whichever door wrote it: a trigger, so no write path can skip it.
+    id: 130,
+    name: 'True-home register and record history (Sovereign Context Layer, 11 Nov 2026)',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS registry_truth (
+         id              text PRIMARY KEY,
+         fact            text NOT NULL,
+         home            text,
+         relation        text,
+         store           text,
+         written_through text,
+         writers         text,
+         views           text,
+         owner           text,
+         notes           text,
+         created_at      text NOT NULL,
+         updated_at      text NOT NULL,
+         deleted_at      text
+       )`,
+      `CREATE TABLE IF NOT EXISTS engine_record_history (
+         id            bigserial PRIMARY KEY,
+         table_name    text NOT NULL,
+         row_id        text NOT NULL,
+         natural_id    text,
+         op            text NOT NULL CHECK (op IN ('update', 'delete')),
+         before_fields jsonb NOT NULL,
+         changed_keys  text[] NOT NULL DEFAULT '{}',
+         changed_at    timestamptz NOT NULL DEFAULT now()
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_record_history_row ON engine_record_history (table_name, row_id, changed_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_record_history_natural ON engine_record_history (natural_id, changed_at DESC) WHERE natural_id IS NOT NULL`,
+      `CREATE OR REPLACE FUNCTION engine_keep_history() RETURNS trigger LANGUAGE plpgsql AS $$
+       BEGIN
+         IF TG_OP = 'UPDATE' THEN
+           IF OLD.fields IS DISTINCT FROM NEW.fields THEN
+             INSERT INTO engine_record_history (table_name, row_id, natural_id, op, before_fields, changed_keys)
+             VALUES (TG_TABLE_NAME, to_jsonb(OLD)->>'id', to_jsonb(OLD)->>'natural_id', 'update', OLD.fields,
+               (SELECT coalesce(array_agg(k ORDER BY k), '{}'::text[]) FROM (
+                  SELECT o.key AS k FROM jsonb_each(OLD.fields) o
+                   WHERE NOT (NEW.fields ? o.key) OR NEW.fields -> o.key IS DISTINCT FROM o.value
+                  UNION
+                  SELECT n.key FROM jsonb_each(NEW.fields) n WHERE NOT (OLD.fields ? n.key)) x));
+           END IF;
+           RETURN NEW;
+         END IF;
+         INSERT INTO engine_record_history (table_name, row_id, natural_id, op, before_fields)
+         VALUES (TG_TABLE_NAME, to_jsonb(OLD)->>'id', to_jsonb(OLD)->>'natural_id', 'delete', OLD.fields);
+         RETURN OLD;
+       END $$`,
+      `DO $$
+       DECLARE t text;
+       BEGIN
+         FOREACH t IN ARRAY ARRAY['engine_loops', 'engine_codex_submissions', 'engine_layer0_holds', 'engine_build_patterns',
+           'engine_commercial_cards', 'engine_ns_asks', 'engine_bays_asks', 'engine_rt_asks', 'engine_rt_jobs', 'engine_client_lanes',
+           'engine_client_questions', 'engine_client_requests', 'engine_incidents', 'engine_error_counts', 'engine_retry_attempts',
+           'engine_pay_builders', 'engine_pay_sessions', 'engine_pay_statements', 'engine_channel_tracking', 'engine_review_returns',
+           'engine_lane_backlog', 'engine_deep_think_log', 'engine_builder_profiles', 'engine_pattern_candidates'] LOOP
+           IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t AND column_name = 'fields') THEN
+             EXECUTE format('DROP TRIGGER IF EXISTS engine_keep_history ON %I', t);
+             EXECUTE format('CREATE TRIGGER engine_keep_history AFTER UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION engine_keep_history()', t);
+           END IF;
+         END LOOP;
+       END $$`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

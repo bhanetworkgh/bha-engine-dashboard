@@ -1902,3 +1902,39 @@ export const KEYS: SeedRow[] = [
     "notes": "Used by: n8n \"Media Twin\""
   }
 ];
+
+/**
+ * The true-home register's opening rows (11 Nov 2026, Destiny), from the live inventory of Destiny's lane
+ * (evidence EV-1794387100730-42S2, read from get_mirror_status, engine_writes, engine_bharag_guard and
+ * engine_agent_inventory). One row per kind of fact. Seeded once; edited on the System Registry's True homes tab.
+ */
+const D = 'Destiny';
+const J = 'Jegan';
+const tr = (id: string, fact: string, home: string, relation: string, store: string, written_through: string, writers: string, views: string, owner: string, notes?: string): SeedRow => ({ id, fact, home, relation, store, written_through, writers, views, owner, ...(notes ? { notes } : {}) });
+export const TRUTH: SeedRow[] = [
+  tr('session-logs', 'Session logs (Codex)', 'dashboard', 'true home', 'engine_codex_submissions', '/api/engine/codex, the MCP record tools', 'Bays — Submit Actions, MCP tools, the code-check note', "Jason's review card, Codex page, BHARAG codex copy, Pay Tracker", D, 'The BHARAG codex document is a searchable copy of the row, written at ingest.'),
+  tr('parked-logs', 'Parked logs (Layer 0)', 'dashboard', 'true home', 'engine_layer0_holds', '/api/engine/layer0, void_parked_log', 'Bays — Submit Actions', 'Log-review notices in Slack, Needs input tab', D),
+  tr('send-back-rounds', 'Send-back rounds', 'dashboard', 'true home', 'engine_review_returns', '/api/engine/review_returns', 'Bays — Submit Actions', 'Builder channel messages', D),
+  tr('pay-notes', 'Pay notes and their history', 'dashboard', 'true home', 'engine_pay_notes, engine_pay_note_history (append-only)', '/api/engine/pay-note, set_pay_note, release_pay_note, the dashboard Approve', 'Approval Gate, the Held tab', "Jason's card, Pay Tracker Held tab, monthly statement", D),
+  tr('pay-sessions', 'Pay sessions and statements', 'dashboard', 'true home', 'engine_pay_sessions, engine_pay_statements', 'paySync on every Codex write, /api/engine/pay', 'paySync, Bays — Pay Tracking', 'Pay Tracker, Slack pay cards', D, 'Derived from the session log at write time; the log is the source of Paid.'),
+  tr('code-checks', 'Code checks', 'dashboard', 'true home', 'engine_code_checks', 'record_code_check, prepare_code_check', 'Destiny', 'Code checks tab, note on the Codex row, BHARAG metadata', D),
+  tr('loops', 'Open loops', 'dashboard', 'true home', 'engine_loops', '/api/engine/loops, the MCP record tools, the page', 'Bays and n8n workflows, the page', 'Open loops page, Slack digests, North Star read_open_loops', D),
+  tr('decision-watches', 'Decision watches', 'dashboard', 'true home', 'engine_decision_watches', 'the decision-watch tools', 'Bays', 'Slack reminders and the combined DM, Bays page', D),
+  tr('approvals', 'Approvals', 'dashboard', 'true home', 'engine_approvals', '/api/engine/approvals/decide', 'Bays — Front Door', 'Approve / Deny cards in Slack', D),
+  tr('engine-events', 'Engine events (engine.event.v1)', 'dashboard', 'true home', 'engine_events', '/api/engine/events, in-process', 'n8n workflows, the dashboard', 'read_engine_events, Logstream', D),
+  tr('agent-asks', 'Agent asks (Bays, North Star, Research Twin, Genie, CST)', 'dashboard', 'true home', 'engine_bays_asks, engine_ns_asks, engine_rt_asks, engine_genie_events, engine_cst_turns', '/api/engine/{kind}', 'The Agent Delivery workflows, Genie, CST', 'Bays, North Star, Research Twin, Genie and CST pages', D),
+  tr('evals', 'Agent evals', 'dashboard', 'true home', 'engine_eval_runs, engine_draft_eval_runs', '/api/engine/eval-runs, run_draft_eval', 'Agent Evals — Runner, run_draft_eval', 'Agent maturity page, the publish check', D),
+  tr('logstream', 'Logstream rows and crossings', 'dashboard', 'true home', 'engine_logstream, engine_logstream_triggers', 'in-process only', 'The dashboard', 'Logstream page, read_logstream', D),
+  tr('research-jobs', 'Research jobs', 'dashboard', 'true home', 'engine_rt_jobs', '/api/engine/rt-jobs, the MCP tools, research signals', 'Research signals, Research Twin, n8n', 'Research Twin page', D),
+  tr('channel-tracking', 'Channel tracking', 'dashboard', 'true home', 'engine_channel_tracking', '/api/engine/channel_tracking', 'Bays — Message Capture', "Message Capture's own reads", D),
+  tr('builder-profiles', 'Builder profiles', 'dashboard', 'true home', 'engine_builder_profiles', '/api/engine/builder_profiles', 'n8n', 'Every guard that checks a builder', D),
+  tr('build-patterns', 'Build patterns and candidates', 'dashboard', 'true home', 'engine_build_patterns, engine_pattern_candidates', '/api/engine/patterns, the register path', 'The Extractors, the MCP tools', 'Build patterns page, BHARAG copy', D),
+  tr('true-homes', 'This register', 'dashboard', 'true home', 'registry_truth', 'write_registry kind truth, the System Registry page', 'Destiny, Jason', 'read_true_home, the True homes tab', D),
+  tr('incidents', 'Incidents', 'bharag', 'copy', 'BHARAG incident ledger; dashboard copy engine_incidents', "BHARAG's incidents API; the dashboard writes back only a close (close_incidents), ledger first", 'The three error handlers and the healer, in BHARAG', 'Engine health, Logstream, read_self_healing', J, 'The dashboard reads the ledger every 3 minutes per lane. Where the two disagree, the ledger wins.'),
+  tr('farm-state', 'Farm state (devices, placements, readings, alerts)', 'vfarm', 'copy', 'vFarm Postgres behind the vFarm API; dashboard copy engine_vfarm_*', 'the vFarm API', 'vFarm', 'Monitoring Twin, vFarm page, Genie, CST', J, 'vFarm pushes a snapshot every 3 minutes; the dashboard never writes farm state. Where the two disagree, vFarm wins.'),
+  tr('n8n-runs', 'n8n executions', 'n8n', 'copy', 'n8n; dashboard copy engine_execution_runs', 'n8n itself', 'n8n', 'Executions page, Scheduled runs', D, 'Polled every 45 seconds.'),
+  tr('agent-config', 'Agent configuration', 'n8n', 'copy', 'n8n agents; dashboard copy engine_agent_inventory', "n8n's agent editor and MCP", 'Destiny', 'Agent maturity page, the publish check', D, 'Read from n8n on record_agent_inventory and daily by the skill watch.'),
+  tr('sops', 'SOPs and Codex documents', 'bharag', 'read live', 'BHARAG codex workspace', "BHARAG's documents API, through the dashboard's write guard", 'log_sop, edit_sop, the ingest workflows', 'Codex SOPs tab, read_sop', J, 'Read from BHARAG on every call; the dashboard holds no copy.'),
+  tr('slack-messages', 'Slack messages', 'slack', 'read live', 'Slack', "Slack's API", 'People and the bots', 'read_slack, the channel archive docs', D, 'The daily archive docs and their BHARAG copies are views of Slack.'),
+  tr('agent-memory', "Agents' memory", 'n8n', 'copy', "Each agent's own memory store in n8n", 'The agent itself', 'Bays, North Star, Research Twin, Media Twin and their backups', 'The agent only', D, 'A scratchpad, never a true home: an agent does not act on memory alone, and anything that matters is written to its true home and cited by id.'),
+];

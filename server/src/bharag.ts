@@ -355,6 +355,13 @@ export const INGEST_KEY_VARS = {
    * never were; that was this file's own mistake, not a BHARAG scope gap.
    */
   research_twin: 'BHARAG_RESEARCH_TWIN',
+  /**
+   * 11 Nov 2026 (Sovereign Context Layer): the two workspaces n8n wrote to on its own keys while only asking
+   * the dashboard's guard first. Set, `POST /api/engine/bharag-write` checks and writes in one step for them
+   * too; unset, it answers not_configured and nothing is sent.
+   */
+  north_star: 'BHARAG_NORTH_STAR_KEY',
+  channel_archives: 'BHARAG_CHANNEL_ARCHIVES_KEY',
 } as const;
 export type IngestWorkspace = keyof typeof INGEST_KEY_VARS;
 
@@ -393,11 +400,11 @@ export interface IngestDocument {
 export async function ingest(
   ws: IngestWorkspace,
   doc: IngestDocument,
-  opts: { kind?: GuardKind; outcome?: string | null; source?: string; run_id?: string | null } = {},
-): Promise<{ ok: boolean; status: number | null; detail: string; id?: string | null }> {
+  opts: { kind?: GuardKind; outcome?: string | null; source?: string; run_id?: string | null; via?: 'dashboard' | 'n8n' } = {},
+): Promise<{ ok: boolean; status: number | null; detail: string; id?: string | null; refused?: string | null; guard_outcome?: string | null; redactions?: Record<string, number>; key_variable?: string }> {
   const keyVar = ingestKeyVar(ws);
   const key = process.env[keyVar]?.trim();
-  if (!key) return { ok: false, status: null, detail: `${keyVar} is not set on this server, so nothing was sent to BHARAG.` };
+  if (!key) return { ok: false, status: null, detail: `${keyVar} is not set on this server, so nothing was sent to BHARAG.`, key_variable: keyVar };
   const g = await guard({
     workspace: ws,
     title: doc.title,
@@ -407,17 +414,17 @@ export async function ingest(
     source: opts.source ?? `dashboard:${ws}`,
     run_id: opts.run_id ?? null,
     metadata: doc.metadata,
-    via: 'dashboard',
+    via: opts.via ?? 'dashboard',
   });
-  if (!g.allow) return { ok: false, status: null, detail: `refused by the BHARAG write guard: ${g.reason}` };
+  if (!g.allow) return { ok: false, status: null, detail: `refused by the BHARAG write guard: ${g.reason}`, refused: g.reason, guard_outcome: g.outcome, key_variable: keyVar };
   doc = { ...doc, title: g.title, content: g.content, metadata: g.metadata };
   try {
     const r = await call<Record<string, unknown>>('/ingest', key, doc);
     const d = r && typeof r === 'object' ? ((r.document ?? r.data) as Record<string, unknown> | undefined) : undefined;
     const id = r && typeof r === 'object' ? (r.document_id ?? r.id ?? d?.document_id ?? d?.id ?? null) : null;
-    return { ok: true, status: 200, id: id === null ? null : String(id), detail: `${id ? `ingested as ${String(id)}` : 'ingested'} (workspace key ${keyVar})` };
+    return { ok: true, status: 200, id: id === null ? null : String(id), detail: `${id ? `ingested as ${String(id)}` : 'ingested'} (workspace key ${keyVar})`, guard_outcome: g.outcome, redactions: g.redactions, key_variable: keyVar };
   } catch (e) {
-    return { ok: false, status: e instanceof BharagError ? e.status || null : null, detail: e instanceof Error ? e.message : String(e) };
+    return { ok: false, status: e instanceof BharagError ? e.status || null : null, detail: e instanceof Error ? e.message : String(e), guard_outcome: g.outcome, key_variable: keyVar };
   }
 }
 

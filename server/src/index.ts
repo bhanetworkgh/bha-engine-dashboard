@@ -1252,6 +1252,63 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       return send(res, 200, { ok: true, ...g });
     }
     /**
+     * The BHARAG write door (11 Nov 2026, Destiny; the Sovereign Context Layer). Until it, an n8n workflow asked
+     * the guard above and then wrote to BHARAG itself on its own key, so the dashboard approved every write but
+     * made none of them. Here the dashboard checks and writes in one step, with the workspace key it holds
+     * (bharag.INGEST_KEY_VARS), and answers what BHARAG answered. Same body as the guard plus the document's
+     * source_type, content_type and project_tags. 200 either way: `stored` true only when BHARAG returned an id;
+     * a refusal is allow false with the reason; a workspace whose key is not set is not_configured, nothing sent.
+     */
+    if (p === '/api/engine/bharag-write') {
+      if (method !== 'POST') throw new HttpError(405, 'POST { workspace, title, content (or content_b64), kind, outcome, source, run_id, metadata, source_type, content_type, project_tags }, or the whole body as body_b64.');
+      const b = decodeBodyB64(await readJson(req, 8 * 1024 * 1024));
+      const text = (v: unknown) => (typeof v === 'string' ? v : v === undefined || v === null ? '' : String(v));
+      const kind = text(b.kind) as dataGovernance.GuardKind;
+      if (!dataGovernance.GUARD_KINDS.includes(kind)) throw new HttpError(422, `kind must be one of ${dataGovernance.GUARD_KINDS.join(', ')}; got "${text(b.kind)}".`);
+      const workspace = text(b.workspace);
+      if (!Object.prototype.hasOwnProperty.call(bharag.INGEST_KEY_VARS, workspace)) {
+        throw new HttpError(422, `workspace must be one of ${Object.keys(bharag.INGEST_KEY_VARS).join(', ')}; got "${workspace}".`);
+      }
+      let content = text(b.content);
+      if (typeof b.content_b64 === 'string' && b.content_b64) {
+        const decoded = Buffer.from(b.content_b64, 'base64').toString('utf8');
+        if (!decoded || Buffer.from(decoded, 'utf8').toString('base64').replace(/=+$/, '') !== b.content_b64.replace(/\s+/g, '').replace(/=+$/, '')) {
+          throw new HttpError(422, 'content_b64 is not valid base64 of UTF-8 text.');
+        }
+        content = decoded;
+      }
+      const ws = workspace as bharag.IngestWorkspace;
+      if (!bharag.ingestConfigured(ws)) {
+        return send(res, 200, { ok: false, stored: false, allow: null, reason: 'not_configured', workspace, message: `${bharag.ingestKeyVar(ws)} is not set on this server, so nothing was sent to BHARAG.` });
+      }
+      const tags = Array.isArray(b.project_tags) ? b.project_tags.map((t) => text(t)).filter(Boolean) : [];
+      const r = await bharag.ingest(
+        ws,
+        {
+          title: text(b.title),
+          content,
+          source_type: text(b.source_type) || 'manual',
+          content_type: text(b.content_type) || 'doc',
+          project_tags: tags,
+          metadata: b.metadata && typeof b.metadata === 'object' && !Array.isArray(b.metadata) ? (b.metadata as Record<string, unknown>) : {},
+        },
+        { kind, outcome: b.outcome === undefined || b.outcome === null ? null : text(b.outcome), source: text(b.source), run_id: b.run_id === undefined || b.run_id === null ? null : text(b.run_id), via: 'n8n' },
+      );
+      const refused = r.refused ?? null;
+      return send(res, 200, {
+        ok: r.ok,
+        stored: r.ok && !!r.id,
+        allow: refused ? false : true,
+        id: r.id ?? null,
+        workspace,
+        reason: refused,
+        guard_outcome: r.guard_outcome ?? null,
+        redactions: r.redactions ?? {},
+        key_variable: r.key_variable ?? null,
+        message: r.detail,
+      });
+    }
+    /**
      * The quality alert on demand (2026-10-03): what it would post now, or a
      * real check with { dry_run: false }. Same key and log as every engine write.
      */
@@ -2231,7 +2288,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         // Destiny): there is no credentials registry. The table is not dropped,
         // because nothing drops a table, but it is neither read nor served.
         const deleted = url.searchParams.get('deleted') === 'true';
-        const [workflows, services, endpoints, bases, people, keys, stage1, builders] = await Promise.all([
+        const [workflows, services, endpoints, bases, people, keys, stage1, truth, builders] = await Promise.all([
           registry.list('workflows', deleted),
           registry.list('services', deleted),
           registry.list('endpoints', deleted),
@@ -2239,6 +2296,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           registry.list('people', deleted),
           registry.list('keys', deleted),
           registry.list('stage1', deleted),
+          registry.list('truth', deleted),
           // The Builders registry is the roster with its live figures beside
           // it, read from the record tables rather than from a fixture.
           store.builderFigures(),
@@ -2252,6 +2310,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
           people,
           keys,
           stage1: isAdmin ? stage1 : [],
+          truth,
           builders,
           // Computed by the server from the rows, per CLAUDE.md section 4.
           spend: registry.spendOf(isAdmin ? services : []),

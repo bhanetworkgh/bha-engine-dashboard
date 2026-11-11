@@ -2513,7 +2513,7 @@ export type RecordMetrics = LoopMetrics | CodexMetrics | PatternMetrics | Commer
  * and renders as "—"; the page never fills a gap with something plausible, and
  * the spend total states how many services are unpriced beside the figure.
  */
-export type RegistryKind = 'workflows' | 'services' | 'credentials' | 'endpoints' | 'bases' | 'people' | 'keys' | 'stage1';
+export type RegistryKind = 'workflows' | 'services' | 'credentials' | 'endpoints' | 'bases' | 'people' | 'keys' | 'stage1' | 'truth';
 
 /**
  * The kinds the registry page reads and writes.
@@ -2660,6 +2660,18 @@ export interface RegistryKey extends RegistryBase {
   status: string | null;
 }
 
+/** One row of the true-home register (11 Nov 2026): where a kind of fact lives, and which places only read it. */
+export interface RegistryTruth extends RegistryBase {
+  fact: string;
+  home: string | null;
+  relation: string | null;
+  store: string | null;
+  written_through: string | null;
+  writers: string | null;
+  views: string | null;
+  owner: string | null;
+}
+
 /** One person's standing under the comp plan. No pay figure and no contract text, ever. */
 export interface RegistryStage1 extends RegistryBase {
   name: string;
@@ -2676,6 +2688,7 @@ export interface RegistryData {
   admin: boolean;
   keys: RegistryKey[];
   stage1: RegistryStage1[];
+  truth: RegistryTruth[];
   workflows: RegistryWorkflow[];
   services: RegistryService[];
   endpoints: RegistryEndpoint[];
@@ -2699,6 +2712,7 @@ export interface RegistryRowOf {
   people: RegistryPerson;
   keys: RegistryKey;
   stage1: RegistryStage1;
+  truth: RegistryTruth;
 }
 
 /* --------------------------------------------------------- engine writes */

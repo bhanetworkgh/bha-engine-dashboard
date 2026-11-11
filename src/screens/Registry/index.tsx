@@ -77,7 +77,7 @@ import { DASH, EditableCell, NewRow, type CellType } from './Editable';
  * compared against nothing. The write log itself (`engine_writes`) is kept and
  * still read — by the Clients and Pay pages and by the MCP tools.
  */
-const TABS = ['Builders', 'Tools', 'Keys', 'Endpoint', 'Workflow'] as const;
+const TABS = ['Builders', 'Tools', 'Keys', 'True homes', 'Endpoint', 'Workflow'] as const;
 type Tab = (typeof TABS)[number];
 
 const KEY_STATUS = ['active', 'not in Bitwarden', 'not issued', 'retired'] as const;
@@ -174,7 +174,8 @@ export default function Registry() {
     if (loaded) setD(loaded);
   }, [loaded]);
 
-  const [tab, setTab] = useState<Tab>('Builders');
+  // ?tab=true-homes opens the true-home register (the link read_true_home hands back).
+  const [tab, setTab] = useState<Tab>(() => (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('tab') === 'true-homes' ? 'True homes' : 'Builders'));
   const { toast, setToast } = useToast();
   const fail = useCallback((message: string) => setToast({ text: message, tone: 'failing' }), [setToast]);
 
@@ -252,6 +253,7 @@ export default function Registry() {
     Builders: { n: d.people.filter((p) => !p.deleted_at).length },
     Tools: { n: d.services.filter((s) => !s.deleted_at).length },
     Keys: { n: d.keys.filter((k) => !k.deleted_at).length },
+    'True homes': { n: (d.truth ?? []).filter((t) => !t.deleted_at).length },
     Endpoint: { n: d.endpoints.filter((e) => !e.deleted_at).length + d.bases.filter((b) => !b.deleted_at).length },
     Workflow: { n: d.workflows.filter((w) => !w.deleted_at).length },
   } as Partial<Record<Tab, { n: number }>>;
@@ -282,6 +284,7 @@ export default function Registry() {
         {tab === 'Builders' && <BuildersTab rows={d.people} {...shared} />}
         {tab === 'Tools' && <ServicesTab rows={d.services} spend={d.spend} admin={d.admin} {...shared} />}
         {tab === 'Keys' && <KeysTab rows={d.keys} {...shared} />}
+        {tab === 'True homes' && <TruthTab rows={d.truth ?? []} {...shared} />}
         {tab === 'Endpoint' && <EndpointsTab rows={d.endpoints} bases={d.bases} digests={d.digest_health} {...shared} />}
         {tab === 'Workflow' && <WorkflowsTab rows={d.workflows} {...shared} />}
       </div>
@@ -405,6 +408,81 @@ function KeysTab({ rows, ...p }: TabProps & { rows: RegistryData['keys'] }) {
         ))}
       </Grid>
       <Pagination paged={paged} unit="keys" />
+    </>
+  );
+}
+
+/* ------------------------------------------------------------ true homes */
+
+const TRUTH_RELATION = ['true home', 'copy', 'read live'] as const;
+
+/**
+ * The true-home register (11 Nov 2026, Destiny; Jason's Sovereign Context Layer thread): for each kind of
+ * fact, the one store that holds it, the door every change goes through, and which places only read it.
+ * Agents read the same rows with read_true_home before they act.
+ */
+function TruthTab({ rows, ...p }: TabProps & { rows: RegistryData['truth'] }) {
+  const [q, setQ] = useState('');
+  const term = q.trim().toLowerCase();
+  const shown = rows.filter((t) => !term || [t.fact, t.home, t.store, t.views, t.writers, t.owner].some((v) => v && v.toLowerCase().includes(term)));
+  const paged = usePaged(shown, term);
+  return (
+    <>
+      <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
+        <div className="max-w-[104ch] text-[11.5px] leading-snug text-faint">
+          One true home per kind of fact. Every change goes through that home's own door; everything else is a view, or a copy that says it is a copy. Where a copy and its true home disagree, the true home wins.
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <SearchBox value={q} onChange={setQ} placeholder="Search facts" />
+        </div>
+        <NewRow
+          label="fact"
+          onError={p.fail}
+          onCreate={(v) => p.add('truth', v)}
+          fields={[
+            { name: 'fact', label: 'fact', required: true },
+            { name: 'home', label: 'home', placeholder: 'dashboard, bharag, vfarm, n8n, slack' },
+            { name: 'store', label: 'store' },
+            { name: 'owner', label: 'owner' },
+          ]}
+        />
+      </div>
+      <Grid
+        label="True homes"
+        min={1400}
+        cols={10}
+        empty="No fact is registered yet."
+        head={
+          <>
+            <Th width="16%">fact</Th>
+            <Th>home</Th>
+            <Th>relation</Th>
+            <Th width="14%">store</Th>
+            <Th width="14%">written through</Th>
+            <Th width="12%">writers</Th>
+            <Th width="14%">views</Th>
+            <Th>owner</Th>
+            <Th width="14%">notes</Th>
+            <Th />
+          </>
+        }
+      >
+        {paged.rows.map((t) => (
+          <tr key={t.id} className={t.deleted_at ? 'opacity-50' : ''}>
+            <td className="td card-title td-clip" style={{ maxWidth: '28ch' }}>{cell(p, 'truth', t, 'fact', { width: '28ch' })}</td>
+            <td className="td text-dim">{cell(p, 'truth', t, 'home')}</td>
+            <td className="td card-meta">{cell(p, 'truth', t, 'relation', { type: 'select', options: TRUTH_RELATION })}</td>
+            <td className="td td-clip text-dim" style={{ maxWidth: '26ch' }}>{cell(p, 'truth', t, 'store', { type: 'longtext', width: '26ch' })}</td>
+            <td className="td td-clip text-dim" style={{ maxWidth: '26ch' }}>{cell(p, 'truth', t, 'written_through', { type: 'longtext', width: '26ch' })}</td>
+            <td className="td td-clip text-dim" style={{ maxWidth: '22ch' }}>{cell(p, 'truth', t, 'writers', { type: 'longtext', width: '22ch' })}</td>
+            <td className="td td-clip text-dim" style={{ maxWidth: '26ch' }}>{cell(p, 'truth', t, 'views', { type: 'longtext', width: '26ch' })}</td>
+            <td className="td text-dim">{cell(p, 'truth', t, 'owner')}</td>
+            <td className="td td-clip text-dim" style={{ maxWidth: '26ch' }}>{cell(p, 'truth', t, 'notes', { type: 'longtext', width: '26ch' })}</td>
+            <td className="td card-actions td-actions"><RowTools {...p} kind="truth" row={t} /></td>
+          </tr>
+        ))}
+      </Grid>
+      <Pagination paged={paged} unit="facts" />
     </>
   );
 }

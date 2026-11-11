@@ -78,6 +78,7 @@ import { toolByName, toolCatalogue, sourceWarning, type ToolDeps } from './tools
 import { AGENT_DESCRIPTIONS } from './agentDescriptions';
 import { callerStore, currentAgent } from './caller';
 import { auditOpen, auditClose } from './writeTools';
+import { COPY_TOOLS, copyNote } from './trueHomeTools';
 
 /** The protocol revisions this server knows how to speak. Newest first. */
 const SUPPORTED_PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -181,6 +182,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-28 (D3): the evidence store, so a decision's evidence is read from the one copy the
         // dashboard holds, by name, never from a link that can move. A read.
         'read_evidence',
+        // 2026-11-11: the Sovereign Context Layer. Where a fact lives before acting on it, and a record's earlier versions.
+        'read_true_home', 'read_record_history',
       ]),
     },
     {
@@ -193,6 +196,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'read_media_posts', 'read_slack', 'find_records', 'read_slack_file',
         'read_media_doctrine', 'read_publication_decision', 'read_media_post_log',
         'read_engine_events', 'read_sop', 'read_evidence', 'get_vfarm_gates',
+        // 2026-11-11: the Sovereign Context Layer (see North Star's entry).
+        'read_true_home', 'read_record_history',
       ]),
     },
     {
@@ -217,6 +222,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-28 (D3): the evidence store, so a decision's evidence is read from the one copy the
         // dashboard holds, by name, never from a link that can move. A read.
         'read_evidence',
+        // 2026-11-11: the Sovereign Context Layer (see North Star's entry).
+        'read_true_home', 'read_record_history',
       ]),
     },
     {
@@ -301,6 +308,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-11-08 (Destiny; Jason in #all-bayshorizonnetwork 1794151650.032329): correct an SOP in place
         // when Destiny or Jason asks, instead of ingesting a second copy. Same id, old text on the audit line.
         'edit_sop',
+        // 2026-11-11: the Sovereign Context Layer (see North Star's entry).
+        'read_true_home', 'read_record_history',
       ]),
     },
     {
@@ -357,6 +366,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-11-08: Jason on the 7 Nov log. "What does X run on, and what is its backup?" is answered from
         // read_providers, each part read from its own source, never from memory.
         'read_providers',
+        // 2026-11-11: the Sovereign Context Layer (see North Star's entry).
+        'read_true_home', 'read_record_history',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>
@@ -515,7 +526,13 @@ async function handleRpc(req: RpcRequest, deps: ToolDeps): Promise<Record<string
         return failure(req.id, INVALID_PARAMS, `There is no tool called "${name}". This server offers: ${catalogueFor(deps).map((t) => t.name).join(', ')}.`);
       }
       try {
-        const value = await tool.handler(args, deps);
+        let value = await tool.handler(args, deps);
+        // 2026-11-11 (Sovereign Context Layer): an answer built from a copy says so: which store is the
+        // original, when the dashboard last copied it, and that the original wins.
+        if (value && typeof value === 'object' && !Array.isArray(value) && COPY_TOOLS[name]) {
+          const note = await copyNote(name).catch(() => null);
+          if (note) value = { ...(value as Record<string, unknown>), copy_of: note };
+        }
         const text = JSON.stringify(value, null, 2);
         logCall(mcpAccess(deps.access), name, args, 'ok', Date.now() - t0, Buffer.byteLength(text));
         return result(req.id, { content: [{ type: 'text', text }], isError: false });

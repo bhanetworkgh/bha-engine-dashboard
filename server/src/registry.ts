@@ -40,7 +40,7 @@ export class RegistryError extends Error {
   }
 }
 
-export type RegistryKind = 'workflows' | 'services' | 'credentials' | 'endpoints' | 'bases' | 'people' | 'keys' | 'stage1';
+export type RegistryKind = 'workflows' | 'services' | 'credentials' | 'endpoints' | 'bases' | 'people' | 'keys' | 'stage1' | 'truth';
 
 type FieldType = 'text' | 'longtext' | 'number' | 'date' | 'array' | 'select' | 'url';
 
@@ -84,6 +84,8 @@ const CYCLES = ['monthly', 'quarterly', 'yearly', 'one-off'] as const;
 export const REPLAY = ['auto', 'never'] as const;
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 export const KEY_STATUS = ['active', 'not in Bitwarden', 'not issued', 'retired'] as const;
+/** How a store stands to a fact (11 Nov 2026): it holds it, it holds a copy of it, or it reads it from its home every time. */
+export const TRUTH_RELATION = ['true home', 'copy', 'read live'] as const;
 /** Jason's own words, DM 1793820617.412249. A person nobody has heard from is the last one, never blank. */
 export const PLAN_STATUS = ['In under this plan', 'Out / paused', 'Need X clarified before committing', 'No response, treated as paused'] as const;
 
@@ -197,6 +199,29 @@ export const KINDS: Record<RegistryKind, KindSpec> = {
       { name: 'countersigned', type: 'date' },
       { name: 'knowledge_capture', type: 'longtext', max: 1000 },
       { name: 'notes', type: 'longtext', max: 1000 },
+    ],
+  },
+  // The true-home register (11 Nov 2026, Destiny; Jason's Sovereign Context Layer thread, C0ASMPYQLG3
+  // 1794180025.573569): for each kind of fact, the one store that holds it, the door every change goes
+  // through, who writes it and which places only read it. Agents read it with read_true_home before acting,
+  // so "where does this live" has one written answer. Seeded from the live inventory EV-1794387100730-42S2.
+  truth: {
+    table: 'registry_truth',
+    label: 'true home',
+    idLabel: 'id',
+    idFromCaller: false,
+    order: 'home NULLS LAST, relation NULLS LAST, fact',
+    seed: seed.TRUTH,
+    fields: [
+      { name: 'fact', type: 'text', required: true, max: 160 },
+      { name: 'home', type: 'text', max: 80 },
+      { name: 'relation', type: 'select', options: TRUTH_RELATION, defaultOnCreate: 'true home' },
+      { name: 'store', type: 'longtext', max: 400 },
+      { name: 'written_through', type: 'longtext', max: 600 },
+      { name: 'writers', type: 'longtext', max: 800 },
+      { name: 'views', type: 'longtext', max: 800 },
+      { name: 'owner', type: 'text', max: 80 },
+      { name: 'notes', type: 'longtext', max: 2000 },
     ],
   },
   endpoints: {
@@ -385,7 +410,7 @@ export async function create(kind: RegistryKind, input: Record<string, unknown>)
   const given = String(input.id ?? '').trim();
   if (spec.idFromCaller && !given) throw new RegistryError(`A ${spec.label} needs its ${spec.idLabel}.`);
   if (given && !ID.test(given)) throw new RegistryError(`That ${spec.idLabel} has characters an id cannot hold.`);
-  const id = given || slug(String(input.name ?? input.key_name ?? ''));
+  const id = given || slug(String(input.name ?? input.key_name ?? input.fact ?? ''));
 
   // A declared default fills in only where the caller said nothing at all.
   const withDefaults = { ...input };
