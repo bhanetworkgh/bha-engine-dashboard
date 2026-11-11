@@ -15148,3 +15148,9 @@ Fix:        Header is just "✅ Approved" (no name). One section, in order, a bl
 Intent:     Jason in the thread (1794414187.601659) confirmed the card he wants includes the session's open link and the approval time; Destiny: put them back, keep it clean, and no Slack "Show more".
 Files:      server/src/reviewCard.ts, server/test/review-card.test.cjs
 Fix:        Five short sections under the "✅ Approved" header: Builder; Session title with "Open session" under it; Session date; Codex Entry ID (or Submission ID); Approved by with the time beside it. Each section is capped at 600 characters, so Slack shows the card whole instead of folding one long section behind "Show more". Today's four cards redone again.
+
+## 2026-11-11 22:40 — SOP-aware LogStream, first pass: the modularity SOP checked on every hardware log
+Intent:     Jason in C0ASMPYQLG3 1794358900.575569 (DW-1794360920781-MZAJ): SOPs enforced at the LogStream layer, starting with one SOP, flag and explain, never block pay, the question to the log's author.
+Files:      server/src/sopCheck.ts (new), server/src/index.ts, server/src/timers.ts, server/src/sources.ts, src/data/types.ts, src/screens/CodexEntryDialog.tsx, server/test/sop-check.test.cjs, package.json, CLAUDE.md
+Decision:   SOP d796bc63 (modularity), first must_have: every part swap has a service entry. Plain text matching rather than a model, so the exact trip is readable in code. Applies only from 11 Nov 2026, the SOP's own date: real older logs that would trip it (Jegan's 28 Oct "Uno's USB failure and replacement") were written before the rule and are not judged by it.
+Fix:        Flag first (SOP Conflict, SOP ID, Evidence), then the question in the author's log channel; first reply saved as SOP Deviation Reason; a refused question is raised and retried. Shown on the Codex entry and Pay Tracker's Open. test:sop-check passes 6, built on real sentences from Kavin's and Jegan's logs.

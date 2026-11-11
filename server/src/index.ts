@@ -96,6 +96,7 @@ import * as codexGap from './codexGap';
 import * as renewalReminder from './renewalReminder';
 import * as skillWatch from './skillWatch';
 import * as codeCheckWatch from './codeCheckWatch';
+import * as sopCheck from './sopCheck';
 import * as codeCheckTools from './mcp/codeCheckTools';
 import * as codeCheckDraft from './codeCheckDraft';
 import * as serviceReads from './serviceReads';
@@ -953,6 +954,17 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         },
         describe: (r) => `${r.submission_id}: ${r.dry_run ? 'would rewrite' : 'rewrote'} the pay part of its review card${r.line ? ` (${r.line})` : ''}`.slice(0, 400),
         hint: 'POST { submission_id, why?, dry_run? }. Rewrites only the Suggested pay part and the buttons\' pop-up suggestion on the log\'s review card, from its Codex row; a log not Pending is refused.',
+      },
+      /** SOP-aware LogStream, first pass (11 Nov 2026, sopCheck.ts): check one Codex log against the modularity SOP now. */
+      '/api/engine/sop-check': {
+        kind: 'codex',
+        store: async (b) => {
+          const r = await sopCheck.checkBySubmission(b);
+          if (r.ok !== true && r.reason !== 'before_sop') throw new systemFeeds.FeedError(r.reason === 'not_found' ? 404 : 422, `${r.reason}: ${r.message ?? ''}`);
+          return { ...r, inserted: 0, updated: r.dry_run || r.ok !== true ? 0 : 1, unchanged: r.dry_run || r.ok !== true ? 1 : 0 };
+        },
+        describe: (r) => `${r.submission_id ?? ''}: SOP check ${r.dry_run ? '(dry run) ' : ''}${(r.verdict as { result?: string } | undefined)?.result ?? r.reason ?? ''}`.slice(0, 400),
+        hint: 'POST { submission_id, dry_run? }. Checks the log against SOP -- vFarm Hardware Modularity and Swapability; a conflict flags it and asks the author why in their log channel.',
       },
       /** The review card rewritten as approved: whose log, the session, when, and who approved it (11 Nov 2026, reviewCard.ts). */
       '/api/engine/review-card/approved': {
@@ -3487,6 +3499,7 @@ async function boot(): Promise<void> {
     codexGap.startSweeping();
     renewalReminder.startSweeping();
     codeCheckWatch.startSweeping();
+    sopCheck.startSweeping();
     intake2.startSweeping();
     void layer0Notice.sweepRecent().then((r) => { if (r.checked) console.log(`[layer0-notice] boot sweep: ${r.checked} completed log(s) checked, ${r.deleted} notice(s) deleted, ${r.failed} failed`); }).catch((e) => console.error(`[layer0-notice] boot sweep failed: ${e instanceof Error ? e.message : String(e)}`));
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });

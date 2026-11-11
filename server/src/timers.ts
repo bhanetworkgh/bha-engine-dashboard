@@ -37,6 +37,7 @@ const KNOWN: Array<{ name: string; what: string; every: string }> = [
   { name: 'codex log gap', what: 'DMs a regular builder once when no Codex log of theirs has reached the engine in 30 hours, with a copy to Destiny', every: '1 hour' },
   { name: 'renewal reminder', what: 'Posts a card in #bha-engine-alerts 7, 3 and 1 day before a paid tool renews, and rolls passed renewal dates forward', every: '1 hour' },
   { name: 'code check watch', what: 'DMs Destiny when Jason approves a log that is owed a code check, then reminds every 3 hours until the check is recorded, and records a prepared check when it is sent', every: '2 minutes' },
+  { name: 'sop check', what: 'Checks every new Codex log against the vFarm hardware modularity SOP, asks the author why when a part swap has no service entry, and saves their answer on the log', every: '2 minutes' },
   { name: 'model spend reading', what: 'Reads OpenRouter\'s usage counter for the Model spend page', every: '1 hour' },
   { name: 'retention', what: 'Clears personal text past its retention period (acts once a week)', every: '6 hours' },
 ];

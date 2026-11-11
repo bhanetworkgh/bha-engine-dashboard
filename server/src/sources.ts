@@ -519,13 +519,17 @@ export function mapCodex(rec: AtRecord, owner: string, table: string, pending?: 
     code_check: str(f['Code Check Verdict'])
       ? { verdict: str(f['Code Check Verdict']), pay_call: str(f['Code Check Pay Call']), reason: str(f['Code Check Reason']), approve: str(f['Code Check Approve']), why: str(f['Code Check Why']), lane_goal: str(f['Code Check Lane Goal']), lane_check: str(f['Code Check Lane']), link: str(f['Code Check Link']), at: iso(f['Code Check At']), full: str(f['Code Check Full']) }
       : null,
+    // SOP-aware LogStream (sopCheck.ts, 11 Nov 2026): a conflict and the author's reason, for audit and pay review.
+    sop_conflict: str(f['SOP Conflict'])
+      ? { flag: str(f['SOP Conflict']), sop_id: str(f['SOP Conflict SOP ID']), evidence: str(f['SOP Conflict Evidence']), prompt_link: str(((f['SOP Conflict Prompt'] ?? {}) as Record<string, unknown>).link), reason: str(f['SOP Deviation Reason']), reason_link: str(f['SOP Deviation Link']), reason_at: iso(f['SOP Deviation At']) }
+      : null,
   };
 }
 
 /** The list shape: everything but the long text. */
 export function codexSummary(e: CodexEntryDetail): CodexEntry {
-  const { entry, layer1_review, summary, session_description, jason_notes, code_check, pay_suggestion, ...rest } = e;
-  void [entry, layer1_review, summary, session_description, jason_notes, code_check, pay_suggestion];
+  const { entry, layer1_review, summary, session_description, jason_notes, code_check, pay_suggestion, sop_conflict, ...rest } = e;
+  void [entry, layer1_review, summary, session_description, jason_notes, code_check, pay_suggestion, sop_conflict];
   return rest;
 }
 

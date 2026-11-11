@@ -405,6 +405,25 @@ export function CodexEntryDialog({
                   <div className="text-ink">{detail.jason_notes}</div>
                 </div>
               )}
+              {detail.sop_conflict && (
+                <div className="min-w-0 md:col-span-3">
+                  <div className="text-[11px] text-faint">SOP conflict</div>
+                  <div className="text-ink">
+                    {detail.sop_conflict.flag} · SOP -- vFarm Hardware Modularity and Swapability ({detail.sop_conflict.sop_id})
+                  </div>
+                  {detail.sop_conflict.evidence && <div className="text-dim">What the log says: “{detail.sop_conflict.evidence}”</div>}
+                  <div className="text-dim">
+                    {detail.sop_conflict.reason ? `Deviation reason: ${detail.sop_conflict.reason}` : 'Deviation reason: asked, not answered yet.'}
+                    {detail.sop_conflict.reason_at ? ` (${detail.sop_conflict.reason_at.slice(0, 10)})` : ''}
+                  </div>
+                  {(detail.sop_conflict.reason_link || detail.sop_conflict.prompt_link) && (
+                    <a className="text-accent hover:underline" href={(detail.sop_conflict.reason_link || detail.sop_conflict.prompt_link) as string} target="_blank" rel="noreferrer">
+                      {detail.sop_conflict.reason_link ? 'The reason in Slack ↗' : 'The question in Slack ↗'}
+                    </a>
+                  )}
+                  <div className="text-[11px] text-faint">Flags the log for review; it does not block pay.</div>
+                </div>
+              )}
               {detail.code_check && (
                 <div className="min-w-0 md:col-span-3">
                   <div className="text-[11px] text-faint">Code check</div>

@@ -710,6 +710,8 @@ export interface CodexEntryDetail extends CodexEntry {
   /** LogStream (9 Nov 2026): the pay note the review suggests, from its work parts; null when the review made none. */
   pay_suggestion: PaySuggestion | null;
   code_check: { verdict: string | null; pay_call: string | null; reason: string | null; approve: string | null; why: string | null; lane_goal: string | null; lane_check: string | null; link: string | null; at: string | null; full?: string | null } | null;
+  /** SOP-aware LogStream (11 Nov 2026): the log went against an SOP, and the author's reason once given. */
+  sop_conflict?: { flag: string | null; sop_id: string | null; evidence: string | null; prompt_link: string | null; reason: string | null; reason_link: string | null; reason_at: string | null } | null;
 }
 
 /**

@@ -121,6 +121,7 @@
     "test:logstream-e2e": "node server/test/logstream-e2e.test.cjs",
     "test:slack-delete": "node server/test/slack-delete.test.cjs",
     "test:review-card": "node server/test/review-card.test.cjs",
+    "test:sop-check": "node server/test/sop-check.test.cjs",
     "test:event-ingress": "node server/test/event-ingress.test.cjs",
     "test:genie-skip-warn": "node server/test/genie-skip-warn.test.cjs",
     "test:vfarm-lead-attribution": "node server/test/vfarm-lead-attribution.test.cjs",
