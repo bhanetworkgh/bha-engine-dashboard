@@ -15111,3 +15111,10 @@ Files:      server/src/logPrecheck.ts, server/test/log-precheck.test.cjs, packag
 Problem:    The pre-check ran Layer 1 only. Layer 0 — Completeness Gate (proof_type_ok: false) and Evaluate Layer 0 Gate were never run, so "Missing: proof_type" was only found after submission (Submit Actions run 83115).
 Fix:        prompt() also returns Layer 0's system message, prompt (Source, transcript and the engine's own earlier-work lines filled) and schema; pay() takes the Layer 0 answer and runs layer0Missing, a port of Evaluate Layer 0 Gate. ready = complete AND full day.
 Decision:   The port is guarded by a sha256 of the live node's code (L0_EVAL_SHA = 9b5be59b…), checked on every read; a change is a 409 rather than a silent drift. Checked against the live template: the three expressions fill and the hash matches. test:log-precheck, 6 checks.
+
+## 2026-11-11 17:10 UTC — Pre-check ready also needs the top verdict
+Intent:     Prove the completeness check, and close the last gap in "ready".
+Files:      server/src/logPrecheck.ts, CLAUDE.md
+Problem:    Self-test run 83297 (a short text with an untagged "it works now" claim, test_forced) came back parked_for ["proof_type"] as intended, but also showed the pay maths reading "Full day (100%)" while the review said "Off-Pattern — Redirect", Pay Eligible: No. ready did not read the verdict.
+Fix:        ready = complete AND full day AND verdict Aligned & Moving the Needle AND Red Flags none; aligned is returned on its own.
+Decision:   The verdict comes from the same review run, so this adds no model call.

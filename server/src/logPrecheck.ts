@@ -17,7 +17,8 @@
  * the run fills them (the earlier approved logs from the engine's own `relogCheck`), and `pay()` takes
  * its answer and runs `layer0Missing`, a port of `Evaluate Layer 0 Gate`. That node's code is hashed on
  * every read and the pre-check refuses (409) the moment it changes, so the port cannot drift unseen.
- * `ready` is true only when the log would not be parked AND the pay reads a full day.
+ * `ready` is true only when the log would not be parked, the review gives the top verdict with no red flags,
+ * AND the pay reads a full day.
  */
 import { createHash } from 'node:crypto';
 import * as n8n from './n8n';
@@ -178,8 +179,14 @@ export async function pay(b: Obj): Promise<Obj> {
   }
   const short = s ? s.parts.filter((p) => p.score < 1).map((p) => ({ what: p.what, paid: paySuggest.pct(p.score), tag: p.tag, proof_level: p.proof_level, needs_live_event: p.needs_live_event, to_fix: p.missing })) : [];
   const fullDay = !!s && s.credited_share === 1;
+  // Fully aligned too (11 Nov 2026, Destiny: "always aligned fully, always complete and always 100%"): the top
+  // verdict and no red flags, or the pay maths alone could read a full day on a log the review would not pay.
+  const verdict = String(fields.Verdict ?? '');
+  const redFlags = String(fields['Red Flags'] ?? '').trim();
+  const aligned = /^Aligned\s*&\s*Moving the Needle/i.test(verdict) && (!redFlags || /^none\.?$/i.test(redFlags));
   return {
-    ready: fullDay && completeness.complete === true,
+    ready: fullDay && completeness.complete === true && aligned,
+    aligned,
     complete: completeness.complete,
     parked_for: completeness.missing,
     completeness,
