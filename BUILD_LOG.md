@@ -15133,3 +15133,8 @@ Files:      server/src/reviewCard.ts, server/src/index.ts, server/test/review-ca
 Problem:    Approve rewrote Jason's review card to "✅ Approved. Log is processing now." plus the pay line, so every builder, session and date was wiped and a channel of approvals could not be told apart.
 Fix:        reviewCard.approvedBlocks (pure) builds the approved card in the pay review card's shape: a header "✅ Approved: <builder>", the session title, fields Builder (tagged), Approved by (tagged), Session date, Approved at, Submission ID (Codex Entry ID once there is one), Session (Open session link), an early-approval or notes line where it applies, and a context line. No pay line. reviewCard.markApproved reads the log's row and chat.updates the card as Bays; POST /api/engine/review-card/approved (x-dashboard-key) is the door, for Submit Actions at the click and for redoing cards already approved. A Rejected log is refused; a row that cannot be found still tags the builder from the Submission ID.
 Decision:   One layout, built on the dashboard, so the live click and the redo cannot word it differently. Times in UTC, as the pay review card shows them. test:review-card checks 8 and 9.
+
+## 2026-11-11 22:00 — rewrite_approved_card, for today's cards
+Intent:     Redo the review cards Jason approved today, before the click drew the new card.
+Files:      server/src/mcp/reviewCardTools.ts (new), server/src/mcp/tools.ts
+Fix:        rewrite_approved_card (write connection, no agent's scope, refused on agent tokens, Destiny or Jason, dry_run, audited kind codex) calls reviewCard.markApproved, the same function the click uses, with the approver from the pay note's decided_by.
