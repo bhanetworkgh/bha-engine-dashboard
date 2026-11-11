@@ -15097,3 +15097,10 @@ Files:      server/src/narrationAudio.ts (new), server/src/index.ts, CLAUDE.md
 Problem:    Engine — Narration To Audio execution 82975 crashed at Join Audio: "Workflow did not finish, possible out-of-memory issue". A full narration is 23 pieces and about 25 MB of mp3; arcs 1 to 4 alone were 5.7 MB (run 82013).
 Fix:        POST /api/engine/narration-audio does the split (the n8n node's own), speaks each piece through OpenRouter, joins the bytes and uploads one file as Bays to the requester's DM, in the background. Failures DM the requester with the step; narration_audio_sent / _failed events.
 Decision:   the join belongs where the memory is; n8n keeps only the trigger and the hand-over. Recipient limited to Destiny or Jason.
+
+## 2026-11-11 16:45 — Narration audio streamed through disk
+Intent:     the first dashboard run (n8n 83014) of the full narration.
+Files:      server/src/narrationAudio.ts
+Problem:    the dashboard process restarted at 15:36:05 UTC, about 90 seconds into the run, with no log line and no Render event: the pieces were held in memory, then joined and uploaded as copies, on a 512 MB instance already at about 220 MB.
+Fix:        each piece is appended to a temp file as it arrives and the file is streamed to Slack's upload URL (duplex half, Content-Length set); the temp folder is removed whatever happens. A local 30 MB streamed upload stays at 98 MB rss.
+Decision:   keep it on the dashboard; memory now stays flat whatever the narration's length.

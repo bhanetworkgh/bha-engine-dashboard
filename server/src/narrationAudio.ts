@@ -15,6 +15,10 @@
  * stopped, and every outcome is one `narration_audio_sent` or
  * `narration_audio_failed` event. Only Destiny or Jason can be the recipient.
  */
+import { appendFileSync, createReadStream, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import * as slack from './slack';
 import * as engineEvents from './engineEvents';
 
@@ -107,31 +111,61 @@ export async function run(job: Job): Promise<{ ok: boolean; detail: string; file
     await engineEvents.record({ event_type: 'narration_audio_failed', subject_id: fileName, actor: 'dashboard', detail: { step, error, pieces: chunks.length, characters } }).catch(() => undefined);
     return { ok: false, detail };
   };
-  const bufs: Buffer[] = [];
-  for (let i = 0; i < chunks.length; i++) {
-    try {
-      bufs.push(await speak(job, chunks[i]));
-    } catch (e) {
-      return fail(`piece ${i + 1} of ${chunks.length}`, e instanceof Error ? e.message : String(e));
+  // Each piece goes straight to a file on disk and the file is streamed to
+  // Slack, so a full narration (60 MB or more of mp3) never sits in memory:
+  // holding it whole took the 512 MB instance down on 11 Nov (15:36 UTC).
+  const dir = mkdtempSync(join(tmpdir(), 'narration-'));
+  const file = join(dir, fileName);
+  try {
+    for (let i = 0; i < chunks.length; i++) {
+      try {
+        appendFileSync(file, await speak(job, chunks[i]));
+      } catch (e) {
+        return await fail(`piece ${i + 1} of ${chunks.length}`, e instanceof Error ? e.message : String(e));
+      }
     }
+    const bytes = statSync(file).size;
+    return await deliver(job, file, fileName, bytes, chunks.length, characters, fail);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
-  const all = Buffer.concat(bufs);
+}
+
+async function deliver(
+  job: Job,
+  file: string,
+  fileName: string,
+  bytes: number,
+  pieces: number,
+  characters: number,
+  fail: (step: string, error: string) => Promise<{ ok: boolean; detail: string }>,
+): Promise<{ ok: boolean; detail: string; file_id?: string; bytes?: number; pieces?: number }> {
   const o = await slack.botCall('conversations.open', { users: job.deliver_to }, 'form');
   const channel = (o.channel as { id?: string } | undefined)?.id;
   if (!o.ok || !channel) return fail('conversations.open', o.error || 'no channel id');
-  const g = await slack.botCall('files.getUploadURLExternal', { filename: fileName, length: all.length }, 'form');
+  const g = await slack.botCall('files.getUploadURLExternal', { filename: fileName, length: bytes }, 'form');
   const uploadUrl = typeof g.upload_url === 'string' ? g.upload_url : '';
   const fileId = typeof g.file_id === 'string' ? g.file_id : '';
   if (!g.ok || !uploadUrl || !fileId) return fail('files.getUploadURLExternal', g.error || 'no upload_url or file_id');
-  const up = await slack.uploadBytes(uploadUrl, all, 'audio/mpeg');
-  if (!up.ok) return fail('upload', up.error || `http_${up.status}`);
+  try {
+    const res = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/mpeg', 'Content-Length': String(bytes) },
+      body: Readable.toWeb(createReadStream(file)) as unknown as RequestInit['body'],
+      duplex: 'half',
+      signal: AbortSignal.timeout(300_000),
+    } as RequestInit);
+    if (!res.ok) return fail('upload', `http_${res.status}: ${(await res.text()).slice(0, 200)}`);
+  } catch (e) {
+    return fail('upload', e instanceof Error ? e.message : String(e));
+  }
   const c = await slack.botCall('files.completeUploadExternal', {
     files: [{ id: fileId, title: job.title }],
     channel_id: channel,
-    initial_comment: `Narration audio for ${job.title}: ${chunks.length} pieces, ${characters} characters, ${(all.length / 1048576).toFixed(1)} MB. Drop it into Otter.`,
+    initial_comment: `Narration audio for ${job.title}: ${pieces} pieces, ${characters} characters, ${(bytes / 1048576).toFixed(1)} MB. Drop it into Otter.`,
   });
   if (!c.ok) return fail('files.completeUploadExternal', c.error || 'no confirmation');
-  await engineEvents.record({ event_type: 'narration_audio_sent', subject_id: fileName, actor: 'dashboard', detail: { file_id: fileId, channel, pieces: chunks.length, characters, bytes: all.length, model: job.model, voice: job.voice } }).catch(() => undefined);
-  console.log(`[narration-audio] ${job.title}: ${chunks.length} pieces, ${all.length} bytes → ${channel} as ${fileId}`);
-  return { ok: true, detail: `${fileId} in ${channel}`, file_id: fileId, bytes: all.length, pieces: chunks.length };
+  await engineEvents.record({ event_type: 'narration_audio_sent', subject_id: fileName, actor: 'dashboard', detail: { file_id: fileId, channel, pieces, characters, bytes, model: job.model, voice: job.voice } }).catch(() => undefined);
+  console.log(`[narration-audio] ${job.title}: ${pieces} pieces, ${bytes} bytes → ${channel} as ${fileId}`);
+  return { ok: true, detail: `${fileId} in ${channel}`, file_id: fileId, bytes, pieces };
 }
