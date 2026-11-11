@@ -104,15 +104,16 @@ export function LoopPanel({
   const dirty = title.trim() !== loop.title || status !== loop.status || (lane || null) !== (loop.lane_tag ?? null) || moving;
   const wb = loop.writeback;
 
+  // Only what changed is sent (12 Nov 2026, LOOP-1792104121807-XXHH): a status
+  // change that also re-sent the What is how a 14,006-character What came back
+  // at 4,000 — the server cut every What it was sent, changed or not.
   function save(over?: Partial<LoopEdit>) {
-    const edit: LoopEdit = {
-      title: title.trim(),
-      status,
-      lane_tag: (lane || null) as LoopLaneTag | null,
-      builder,
-      ...over,
-    };
-    onSave(edit);
+    const edit: LoopEdit = {};
+    if (title.trim() !== loop.title) edit.title = title.trim();
+    if (status !== loop.status) edit.status = status;
+    if ((lane || null) !== (loop.lane_tag ?? null)) edit.lane_tag = (lane || null) as LoopLaneTag | null;
+    if (builder !== loop.owner) edit.builder = builder;
+    onSave({ ...edit, ...over });
   }
 
   return createPortal(

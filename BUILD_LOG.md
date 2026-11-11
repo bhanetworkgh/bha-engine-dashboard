@@ -15118,3 +15118,11 @@ Files:      server/src/logPrecheck.ts, CLAUDE.md
 Problem:    Self-test run 83297 (a short text with an untagged "it works now" claim, test_forced) came back parked_for ["proof_type"] as intended, but also showed the pay maths reading "Full day (100%)" while the review said "Off-Pattern — Redirect", Pay Eligible: No. ready did not read the verdict.
 Fix:        ready = complete AND full day AND verdict Aligned & Moving the Needle AND Red Flags none; aligned is returned on its own.
 Decision:   The verdict comes from the same review run, so this adds no model call.
+
+## 2026-11-12 — A loop's What is never cut on a page save
+Intent:     Ahad's loop LOOP-1792104121807-XXHH (row 1367) lost 10,006 of its 14,006 characters (thread C0ASMPYQLG3 1794408718.791059). Restore it, and stop the cause.
+Files:      server/src/index.ts, server/src/loops.ts, server/src/store.ts, src/screens/OpenLoops/LoopPanel.tsx
+Problem:    engine_record_history row 122 (11 Nov 17:23:25 UTC) shows the What going from 14,006 to 4,000 characters. record_writes seq 231, same second, actor admin@bhanetwork.org, detail "What, Status, lane_tag": a status change from the Open loops panel. The panel sent the What on every save, changed or not, and PATCH /api/loops/:id sliced it to 4,000 (body.title.slice(0, 4000)). The save reached record_writes only, so engine_writes had no line for it and nothing said a field had been cut.
+Fix:        The panel sends only the fields that changed. The server never slices a What: one over loops.WHAT_MAX (100,000) is refused 422 with its length and nothing saved; the body limit for this route is 512 KB. Every page edit of a loop now also writes an engine_writes line (endpoint page:edit_loop, key "page session: <who>"), naming the fields and the What's length before and after.
+Restore:    The What was put back from history row 122 with update_record (audit 5894). Read back: 14,006 characters, md5 3f706f19…cdcb, the same as the original. Nothing had been added after the cut (the current What was exactly the first 4,000 of the original).
+Decision:   Too long is refused whole, never cut. A field that must be shortened is shortened by a person, on purpose.

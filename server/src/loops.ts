@@ -102,6 +102,9 @@ export interface LoopWriteResult {
   from_record_id?: string | null;
 }
 
+/** The longest What a page edit takes. Longer is refused, never cut (12 Nov 2026). */
+export const WHAT_MAX = 100_000;
+
 /** Validates a patch before anything is written anywhere. Throws with the field named. */
 export function validate(patch: LoopPatch): void {
   if (patch.title !== undefined && !patch.title.trim()) throw new LoopError('A loop needs a What — it is the loop.');

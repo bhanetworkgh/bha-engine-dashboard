@@ -2527,9 +2527,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      */
     const loop = p.match(/^\/api\/loops\/([^/]+)$/);
     if (loop) {
-      const body = await readJson(req);
+      // A What is never cut (12 Nov 2026, LOOP-1792104121807-XXHH): this line
+      // sliced it to 4,000, and a status change from the panel saved a
+      // 14,006-character What at 4,000 with nothing saying so. Too long is
+      // refused whole, naming the length; anything under it is saved whole.
+      const body = await readJson(req, 512 * 1024);
       const patch: loops.LoopPatch = {};
-      if (typeof body.title === 'string') patch.title = body.title.slice(0, 4000);
+      if (typeof body.title === 'string') {
+        if (body.title.length > loops.WHAT_MAX) throw new HttpError(422, `That What is ${body.title.length} characters; a loop's What can be at most ${loops.WHAT_MAX}. Nothing was saved.`);
+        patch.title = body.title;
+      }
       if (typeof body.status === 'string') patch.status = str(body.status, 40) as loops.LoopPatch['status'];
       if (body.lane_tag === null || typeof body.lane_tag === 'string') patch.lane_tag = body.lane_tag === null ? null : str(body.lane_tag, 40);
       if (typeof body.builder === 'string') patch.builder = str(body.builder, 40);

@@ -1288,6 +1288,23 @@ export async function editLoop(id: string, patch: loops_.LoopPatch, actor = 'das
 
   const out = await rowById('loops', nowId);
   if (!out) throw new StoreError('The loop was saved but could not be read back.', 500);
+
+  // The same audit line every other write gets (12 Nov 2026, XXHH): a page
+  // edit reached record_writes only, so the save that cut XXHH's What had no
+  // line on engine_writes, and nothing said how long the What was either side.
+  const whatBefore = typeof mr.fields?.[loops_.FIELD.what] === 'string' ? (mr.fields[loops_.FIELD.what] as string).length : null;
+  const after = await mirrorRowById('loops', nowId);
+  const whatAfter = typeof after?.fields?.[loops_.FIELD.what] === 'string' ? (after.fields[loops_.FIELD.what] as string).length : null;
+  await mirror.logWrite({
+    endpoint: 'page:edit_loop',
+    kind: 'loops',
+    method: 'PATCH',
+    key_label: `page session: ${actor}`,
+    airtable_record_id: nowId,
+    natural_id: loopId,
+    outcome: changed.length ? 'updated' : 'unchanged',
+    detail: `${changed.join(', ') || 'nothing'}${'What' in fields ? `; What ${whatBefore ?? 0} → ${whatAfter ?? 0} chars` : ''}`,
+  });
   return hydrateLoop(out);
 }
 
