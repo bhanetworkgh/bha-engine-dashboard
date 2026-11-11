@@ -15076,3 +15076,10 @@ Files:      server/src/mcp/sopTools.ts, server/test/codex-doc-delete.test.cjs, p
 Problem:    store.deleteCodex (the Codex page's delete) and delete_codex_log remove the dashboard row and pay rows only; nothing could remove the Codex document from BHARAG (delete_sop refuses a title not starting "SOP").
 Fix:        delete_codex_doc finds the documents by metadata codex_entry_id (edit_codex_doc's lookup), keeps each one's text on the audit line, deletes, and reads each id again. 7 pure checks pass.
 Decision:   Person-only, like edit_codex_doc: no agent scope, refused on any agent token.
+
+## 2026-11-11 15:05 — Codex write door and presence alerts proved in production
+Intent:     Close the two open proofs of the day on real runs.
+Files:      BUILD_LOG.md
+Problem:    The Codex write door (Write Through Dashboard in Bays — Submit Actions) only runs after an Approve, and none had happened since the switch. Presence alerts waited on a real drop-out.
+Fix:        A self-labelled test log submitted through Engine — Submit My Log and the real front door, approved by Destiny: Submit Actions run 82701, stored true, BHARAG document 1d953bb4-58ab-4feb-8076-5f637c6592cc, engine_bharag_guard row 3741. Then cleaned up: delete_codex_log (row 489, pay row 373, audit 5819), delete_slack_messages (audit 5820), LOOP-1794404493176-IGYY closed (audit 5821), the BHARAG copy removed by hand by Destiny (delete_codex_doc was not yet in the connector's list), extractor runs 82714 and 82715 stopped by hand. Presence: Jegan cut power to v-farm at ~13:17 UTC; uno_board_01 alert 68700925 opened 13:25:45 and closed 13:33:07 (back-online frame stored as 68700925-…:online), pi_gateway_01 alert 29e57711 opened 13:24:04 and closed 13:29:59. Evidence EV-1794404936280-UZV5 (forced test), LOOP-1794321147933-J1ZC closed (audit 5827).
+Decision:   delete_codex_doc stays proved by its 7 tests only until its first real use. Build patterns and channel archives get their first write-door run at midnight: LOOP-1794405632369-KJN1. One-off workflows ZKncGXqQ7B5jlr96, dxbkkvBq3KesZbya and An5YxNrikbY6jEyA archived.
