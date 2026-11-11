@@ -169,6 +169,27 @@ export interface AlertStoreResult {
   inserted: number;
   updated: number;
   event_ids: string[];
+  /** Presence frames (J1ZC): what each did to a presence alert. */
+  presence: Array<{ event_id: string; role: string; alert_id: string; outcome: string }>;
+}
+
+/**
+ * Presence alerts (LOOP-1794321147933-J1ZC, Jason 10 Nov 2026). vFarm's presence rule is
+ * `device_silent`. A frame of kind `device_offline` (or `single`) on that rule is the device going
+ * silent and opens a presence alert; `device_online` is it coming back and clears it. A
+ * `device_online` frame is never a fire, whatever rule it names. Pure.
+ */
+export const PRESENCE_RULE = 'device_silent';
+export function presenceRole(kind: string | null, ruleId: string | null): 'went_silent' | 'back_online' | null {
+  if (kind === 'device_online') return 'back_online';
+  if (ruleId !== PRESENCE_RULE) return null;
+  if (kind === 'device_offline' || kind === 'single') return 'went_silent';
+  if (kind === 'clear') return 'back_online';
+  return null;
+}
+/** The id a presence alert is held under: vFarm's own alert id where the frame carries one, else the fire's event id. Pure. */
+export function presenceAlertId(body: Obj, d: Obj, eventId: string): string {
+  return str(d.alert_id) ?? str(d.alert_state_id) ?? str(body.alert_id) ?? str(body.alert_state_id) ?? eventId;
 }
 
 /**
@@ -206,6 +227,7 @@ export async function storeVfarmAlert(body: Obj): Promise<AlertStoreResult & { d
       farm: str(dPlace.farm) ?? str(place.farm),
       place_path: str(dPlace.path) ?? str(place.path),
       fired_at: fired,
+      alert_id: presenceAlertId(body, d, eventId),
       payload: { ...body, devices: [d], dry_run: undefined },
     };
   });
@@ -223,8 +245,37 @@ export async function storeVfarmAlert(body: Obj): Promise<AlertStoreResult & { d
       );
       if (q.rows[0]?.inserted) inserted++;
     }
+    // Presence (J1ZC): a silent device opens an alert held under vFarm's id, its back-online frame
+    // closes it. A back-online frame closes the alert with the same id, else the device's open
+    // presence alert on that farm. One with nothing open to close is named, never invented.
+    const presence: Array<{ event_id: string; role: string; alert_id: string; outcome: string }> = [];
+    for (const r of rows) {
+      const role = presenceRole(r.kind, r.rule_id);
+      if (!role) continue;
+      if (role === 'went_silent') {
+        await db.query(
+          `INSERT INTO engine_vfarm_open_alerts (alert_id, rule_id, device_id, farm_id, farm_name, place, severity, title, detail, last_value, opened_at, fields, last_seen_at, closed_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL,$10,$11,$10,NULL)
+           ON CONFLICT (alert_id) DO UPDATE SET closed_at = NULL, last_seen_at = EXCLUDED.last_seen_at,
+             fields = engine_vfarm_open_alerts.fields || jsonb_build_object('fire_event_id', $12::text, 'source', coalesce(engine_vfarm_open_alerts.fields->>'source', 'frame'))`,
+          [r.alert_id, PRESENCE_RULE, r.device_id, r.farm_id, r.farm, r.place_path, r.severity ?? 'warning', `${r.device_id} went silent`, r.rule_name ?? 'Device silent', r.fired_at,
+           JSON.stringify({ source: 'frame', fire_event_id: r.event_id, presence: true }), r.event_id],
+        );
+        presence.push({ event_id: r.event_id, role, alert_id: r.alert_id, outcome: 'opened' });
+      } else {
+        const c = await db.query<{ alert_id: string }>(
+          `UPDATE engine_vfarm_open_alerts SET closed_at = $4,
+                  fields = fields || jsonb_build_object('clear_event_id', $5::text, 'cleared_by', 'back-online frame', 'silent_s', $6::numeric)
+            WHERE closed_at IS NULL AND rule_id = $1
+              AND (alert_id = $2 OR (device_id = $3 AND coalesce(farm_id, '') = coalesce($7::text, '')))
+            RETURNING alert_id`,
+          [PRESENCE_RULE, r.alert_id, r.device_id, r.fired_at, r.event_id, num((r.payload as Obj).duration_s), r.farm_id],
+        );
+        presence.push({ event_id: r.event_id, role, alert_id: c.rows[0]?.alert_id ?? r.alert_id, outcome: c.rowCount ? 'closed' : 'nothing_open' });
+      }
+    }
     events.changed('vfarm_alerts', null, db);
-    return { received: rows.length, inserted, updated: rows.length - inserted, event_ids: rows.map((r) => r.event_id) };
+    return { received: rows.length, inserted, updated: rows.length - inserted, event_ids: rows.map((r) => r.event_id), presence };
   });
 }
 
@@ -474,15 +525,31 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, NULL)
          ON CONFLICT (alert_id) DO UPDATE SET rule_id = EXCLUDED.rule_id, device_id = EXCLUDED.device_id, farm_id = EXCLUDED.farm_id, farm_name = EXCLUDED.farm_name,
            place = EXCLUDED.place, severity = EXCLUDED.severity, title = EXCLUDED.title, detail = EXCLUDED.detail, last_value = EXCLUDED.last_value,
-           opened_at = EXCLUDED.opened_at, fields = EXCLUDED.fields, last_seen_at = EXCLUDED.last_seen_at, closed_at = NULL`,
+           opened_at = EXCLUDED.opened_at, last_seen_at = EXCLUDED.last_seen_at, closed_at = NULL,
+           -- A presence alert a frame opened keeps the fire's event id once vFarm lists it too (J1ZC); listed, absence closes it.
+           fields = EXCLUDED.fields || jsonb_strip_nulls(jsonb_build_object('fire_event_id', engine_vfarm_open_alerts.fields->>'fire_event_id',
+             'presence', engine_vfarm_open_alerts.fields->'presence', 'source', CASE WHEN engine_vfarm_open_alerts.fields ? 'source' THEN 'snapshot' END))`,
         [id, str(a.rule_id), str(a.device_id), str(a.farm_id), str(a.farm_name), str(a.place), str(a.severity), str(a.title), str(a.detail), num(a.last_value), iso(a.opened_at), JSON.stringify(a), takenAt],
       );
     }
     // An open alert of a listed farm that the snapshot no longer lists has cleared. One whose farm_id is blank is judged with the rest of the snapshot.
+    // A presence alert opened by a frame (J1ZC) is not one vFarm lists, so absence says nothing about
+    // it: it clears on its back-online frame, or on a snapshot that shows the device online again.
     const closed = await db.query(
-      `UPDATE engine_vfarm_open_alerts SET closed_at = $3
-        WHERE closed_at IS NULL AND (farm_id = ANY($1::text[]) OR (farm_id IS NULL AND NOT $4::boolean)) AND NOT (alert_id = ANY($2::text[]))`,
+      `UPDATE engine_vfarm_open_alerts SET closed_at = $3,
+              fields = CASE WHEN fields->>'presence' = 'true' THEN fields || jsonb_build_object('cleared_by', 'snapshot (vFarm stopped listing it)') ELSE fields END
+        WHERE closed_at IS NULL AND (farm_id = ANY($1::text[]) OR (farm_id IS NULL AND NOT $4::boolean)) AND NOT (alert_id = ANY($2::text[]))
+          AND NOT (rule_id = '${PRESENCE_RULE}' AND fields->>'source' = 'frame')`,
       [farmIds, opens.map((x) => x.id), takenAt, synthetic],
+    );
+    const backOnline = await db.query(
+      `UPDATE engine_vfarm_open_alerts a SET closed_at = $3,
+              fields = a.fields || jsonb_build_object('cleared_by', 'snapshot (device online)', 'cleared_snapshot_at', $6::text)
+        WHERE a.closed_at IS NULL AND a.rule_id = '${PRESENCE_RULE}' AND a.fields->>'source' = 'frame'
+          AND NOT (a.alert_id = ANY($4::text[]))
+          AND EXISTS (SELECT 1 FROM unnest($1::text[], $2::text[], $5::text[]) AS x(farm_id, device_id, status)
+                       WHERE x.farm_id = a.farm_id AND x.device_id = a.device_id AND x.status = 'online')`,
+      [devs.map((x) => x.farmId), devs.map((x) => x.id), takenAt, opens.map((x) => x.id), devs.map((x) => str(x.d.status) ?? ''), takenAt],
     );
     const history = await storeHistory(db, body, farmIds, takenAt, synthetic);
     await db.query(`INSERT INTO engine_vfarm_snapshots (taken_at, farms, devices, open_alerts, pipeline, synthetic, history, ledger_writes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [
@@ -496,7 +563,7 @@ export async function storeVfarmSnapshot(body: Obj): Promise<SnapshotStoreResult
       ledgerWrites ? JSON.stringify({ ...ledgerWrites, taken_at: takenAt }) : null,
     ]);
     events.changed('vfarm_state', null, db);
-    return { taken_at: takenAt, farms: farms.length, devices: devs.length, open_alerts: opens.length, devices_gone: gone.rowCount ?? 0, alerts_closed: closed.rowCount ?? 0, farms_unlisted: unlisted.rowCount ?? 0, synthetic, history, ledger_writes: ledgerWrites };
+    return { taken_at: takenAt, farms: farms.length, devices: devs.length, open_alerts: opens.length, devices_gone: gone.rowCount ?? 0, alerts_closed: (closed.rowCount ?? 0) + (backOnline.rowCount ?? 0), farms_unlisted: unlisted.rowCount ?? 0, synthetic, history, ledger_writes: ledgerWrites };
   });
 }
 
@@ -857,6 +924,8 @@ export async function genieData() {
 
 /** Simulated farms (the Monitoring Twin's test rack) are never shown as vFarm's own; they are counted and named on the Monitoring Twin page instead. */
 const REAL_FARM = `NOT coalesce((fields->>'synthetic')::boolean, false)`;
+/** A frame that is a fire: not a clear, and not a device coming back online (J1ZC). */
+const FIRE_ONLY = `coalesce(kind, '') NOT IN ('clear', 'device_online')`;
 const SIM_FARM_IDS = `(SELECT farm_id FROM engine_vfarm_farms WHERE coalesce((fields->>'synthetic')::boolean, false))`;
 export async function vfarmData() {
   const [farms, devices, open, closed, fired, snaps] = await Promise.all([
@@ -879,6 +948,9 @@ export async function vfarmData() {
                   to_char(closed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS closed_at
              FROM engine_vfarm_open_alerts WHERE closed_at IS NOT NULL AND coalesce(farm_id, '') NOT IN ${SIM_FARM_IDS} ORDER BY closed_at DESC LIMIT 100`),
     query(`SELECT event_id, kind, rule_id, rule_name, severity, metric, device_id, value, farm_id, farm, place_path,
+                  CASE WHEN kind = 'device_online' OR (rule_id = '${PRESENCE_RULE}' AND kind = 'clear') THEN 'back_online'
+                       WHEN rule_id = '${PRESENCE_RULE}' AND kind IN ('device_offline', 'single') THEN 'went_silent' END AS presence,
+                  (payload->>'duration_s')::float8 AS silent_s,
                   to_char(fired_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS fired_at
              FROM engine_vfarm_alert_events ORDER BY fired_at DESC LIMIT 200`),
     query<{ taken_at: string; received_at: string; farms: number; devices: number; open_alerts: number; pipeline: unknown }>(
@@ -888,8 +960,8 @@ export async function vfarmData() {
     ),
   ]);
   const counts = await query<{ fired_24h: number; fired_all: number; snapshots: number; simulated_farms: number }>(
-    `SELECT (SELECT count(*) FROM engine_vfarm_alert_events WHERE fired_at > now() - interval '24 hours')::int AS fired_24h,
-            (SELECT count(*) FROM engine_vfarm_alert_events)::int AS fired_all,
+    `SELECT (SELECT count(*) FROM engine_vfarm_alert_events WHERE fired_at > now() - interval '24 hours' AND ${FIRE_ONLY})::int AS fired_24h,
+            (SELECT count(*) FROM engine_vfarm_alert_events WHERE ${FIRE_ONLY})::int AS fired_all,
             (SELECT count(*) FROM engine_vfarm_snapshots WHERE NOT synthetic)::int AS snapshots,
             (SELECT count(*) FROM engine_vfarm_farms WHERE NOT ${REAL_FARM})::int AS simulated_farms`,
   );
@@ -912,7 +984,17 @@ export async function vfarmData() {
       note: rep.rows[0] ? 'What vFarm\'s ledger lanes wrote to BHARAG in the newest report, by lane and farm. A refused entry opens an incident on the Monitoring Twin and Engine health.' : 'Ledger write reports are not sent by vFarm yet. Until they are, a write the ledger refuses is only a line in vFarm\'s own log.',
     }))
     .catch(() => null);
+  // Presence alerts (J1ZC): each one with the ids on both sides, so a cycle can be checked whole.
+  const presence = await query(
+    `SELECT alert_id, device_id, farm_id, farm_name, fields->>'fire_event_id' AS fire_event_id, fields->>'clear_event_id' AS clear_event_id,
+            fields->>'cleared_by' AS cleared_by, (fields->>'silent_s')::float8 AS silent_s,
+            to_char(opened_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS opened_at,
+            to_char(closed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS closed_at
+       FROM engine_vfarm_open_alerts WHERE rule_id = '${PRESENCE_RULE}' AND coalesce(farm_id, '') NOT IN ${SIM_FARM_IDS}
+      ORDER BY opened_at DESC NULLS LAST LIMIT 50`,
+  ).then((r) => r.rows).catch(() => []);
   return {
+    presence_alerts: presence,
     ledger_writes: ledger,
     last_snapshot: snaps.rows[0] ?? null,
     snapshots: counts.rows[0]?.snapshots ?? 0,

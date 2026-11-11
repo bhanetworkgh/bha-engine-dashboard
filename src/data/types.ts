@@ -3948,10 +3948,29 @@ export interface VfarmAlertEvent {
   farm_id: string | null;
   farm: string | null;
   place_path: string | null;
+  /** Presence frames (J1ZC): a device going silent or coming back online. Null on any other rule; optional for an older server. */
+  presence?: 'went_silent' | 'back_online' | null;
+  /** On a back-online frame, how long vFarm says the device was silent, in seconds. */
+  silent_s?: number | null;
   fired_at: string;
 }
 
+/** One presence alert (J1ZC), with the ids on both sides so a cycle can be checked whole. */
+export interface VfarmPresenceAlert {
+  alert_id: string;
+  device_id: string | null;
+  farm_id: string | null;
+  farm_name: string | null;
+  fire_event_id: string | null;
+  clear_event_id: string | null;
+  cleared_by: string | null;
+  silent_s: number | null;
+  opened_at: string | null;
+  closed_at: string | null;
+}
+
 export interface VfarmLiveData {
+  presence_alerts?: VfarmPresenceAlert[];
   last_snapshot: { taken_at: string; received_at: string; farms: number; devices: number; open_alerts: number; pipeline: Record<string, unknown> | null } | null;
   snapshots: number;
   farms: VfarmFarm[];

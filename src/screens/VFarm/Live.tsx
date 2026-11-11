@@ -298,7 +298,7 @@ export function Alerts({ data }: { data: VfarmLiveData }) {
         )}
       </Card>
       <Card className="pb-3">
-        <CardHeader title="Fired" right={<span className="tabular text-[11.5px] text-faint">{data.alerts_fired_24h} in 24 h · {data.alerts_fired_all} held · newest first</span>} />
+        <CardHeader title="Fired" right={<span className="tabular text-[11.5px] text-faint">{data.alerts_fired_24h} fired in 24 h · {data.alerts_fired_all} fired held · clears and back-online frames listed, not counted · newest first</span>} />
         {data.alert_events.length === 0 ? (
           <EmptyState compact>No fire has arrived. vFarm sends each one live once our URL is added as an alert channel.</EmptyState>
         ) : (
@@ -321,6 +321,8 @@ export function Alerts({ data }: { data: VfarmLiveData }) {
                     {e.rule_name ?? e.rule_id ?? '—'}
                     {e.metric && <span className="ml-2 text-[11px] text-faint">{e.metric}</span>}
                     {e.kind === 'digest' && <span className="ml-2 text-[11px] text-faint">digest</span>}
+                    {e.presence === 'back_online' && <span className="ml-2 text-[11px] text-faint">back online{e.silent_s != null ? `, silent ${silentFor(e.silent_s)}` : ''}</span>}
+                    {e.presence === 'went_silent' && <span className="ml-2 text-[11px] text-faint">went silent</span>}
                   </td>
                   <td className="td">
                     <SeverityPill severity={e.severity} />
@@ -337,6 +339,35 @@ export function Alerts({ data }: { data: VfarmLiveData }) {
         )}
       </Card>
       {data.alert_events.length > 0 && <Pagination paged={paged} unit="fires" />}
+      {(data.presence_alerts ?? []).length > 0 && (
+        <Card className="pb-3">
+          <CardHeader title="Presence alerts" right={<span className="tabular text-[11.5px] text-faint">a device going silent and coming back, with vFarm's ids on both sides</span>} />
+          <TableFrame flat grow={false} label="vFarm presence alerts">
+            <thead>
+              <tr>
+                <Th>went silent (UTC)</Th>
+                <Th>device</Th>
+                <Th>alert id</Th>
+                <Th>fire frame</Th>
+                <Th>back (UTC)</Th>
+                <Th>cleared by</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data.presence_alerts ?? []).map((p) => (
+                <tr key={p.alert_id}>
+                  <td className="td tabular whitespace-nowrap text-faint">{p.opened_at ? when(p.opened_at) : '—'}</td>
+                  <td className="td whitespace-nowrap">{p.device_id ? <RecordId>{p.device_id}</RecordId> : '—'}</td>
+                  <td className="td whitespace-nowrap"><RecordId>{p.alert_id}</RecordId></td>
+                  <td className="td whitespace-nowrap text-dim">{p.fire_event_id ?? '—'}</td>
+                  <td className="td tabular whitespace-nowrap text-dim">{p.closed_at ? when(p.closed_at) : 'still silent'}</td>
+                  <td className="td text-dim">{p.cleared_by ?? (p.closed_at ? '—' : '')}{p.clear_event_id ? ` · ${p.clear_event_id}` : ''}{p.silent_s != null ? ` · silent ${silentFor(p.silent_s)}` : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </TableFrame>
+        </Card>
+      )}
       {data.recently_closed.length > 0 && (
         <Card className="pb-3">
           <CardHeader title="Cleared recently" right={<span className="tabular text-[11.5px] text-faint">an open alert a later snapshot no longer listed</span>} />
@@ -368,4 +399,10 @@ export function Alerts({ data }: { data: VfarmLiveData }) {
       )}
     </div>
   );
+}
+
+/** A silence in seconds, as hours and minutes. */
+function silentFor(s: number): string {
+  const m = Math.round(s / 60);
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }

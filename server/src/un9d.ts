@@ -292,7 +292,7 @@ export function test2(incidents: Incident[], health: HealthRow[]): TestResult {
  * None yet is `not_yet_possible`, never `fail`: nothing is wrong until a rule should have fired. Pure.
  */
 export function condition6(alerts: Array<{ kind: string | null; fired_at: string; received_at: string }>, unplaced: number): TestResult {
-  const fires = alerts.filter((a) => a.kind !== 'clear').length;
+  const fires = alerts.filter((a) => a.kind !== 'clear' && a.kind !== 'device_online').length;
   const clears = alerts.length - fires;
   const newest = alerts.reduce<string | null>((m, a) => (!m || a.received_at > m ? a.received_at : m), null);
   const note = unplaced ? ` ${unplaced} alert frame${unplaced === 1 ? '' : 's'} with no farm on ${unplaced === 1 ? 'it' : 'them'} ${unplaced === 1 ? 'is' : 'are'} held and not counted for any rack.` : '';

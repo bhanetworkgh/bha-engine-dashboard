@@ -182,6 +182,17 @@ The upsert key is each `devices[].event_id` (the `alerts.alert_events.id`), so a
 
 Answers: `201` with `{ ok, received, inserted, updated, event_ids, dry_run }`, or `422` naming the problem.
 
+### Presence alerts: a device going silent and coming back (11 Nov 2026, LOOP-1794321147933-J1ZC)
+
+Jason's ask of 10 Nov: a presence alert is visible on the Engine dashboard with matching ids and clears the way a soil alert does. Until 11 Nov vFarm sent only the back-online frame, so the dashboard had nothing to open. What vFarm sends:
+
+1. **The device goes silent**: one `vfarm.alert.v1` frame, `rule.id` = `device_silent`, `kind` = `device_offline` (`single` is read the same way on this rule), with its own `devices[].event_id`.
+2. **While it is silent**, list it in the snapshot's `open_alerts` as its `alert_state` row, as a soil alert is.
+3. **It comes back**: the `device_online` frame vFarm already sends (with `duration_s`), and drop it from `open_alerts` on the next snapshot.
+4. **One id on all three**: put the alert id (`alert_state.id`) on the fire frame and the back-online frame as `devices[].alert_id` (or the envelope's `alert_id`). The open alert row's `id` is the same id.
+
+What the dashboard does: the fire opens a presence alert under that id (under the fire's `event_id` when no `alert_id` is sent), the back-online frame closes it (by id, else the same device's open presence alert on that farm), and so does a snapshot that lists the device `online`. A presence alert only a frame opened is never closed by being absent from `open_alerts`; once vFarm lists it, absence closes it as for any alert. A `device_online` frame is shown as a clear and is never counted as a fire. The Alerts tab's Presence alerts card shows each one with the alert id, the fire frame, the clear and how it cleared, and `presence` in the store answer says what each frame did (`opened`, `closed`, `nothing_open`).
+
 ---
 
 ## Test without leaving a row
