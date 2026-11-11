@@ -81,4 +81,23 @@ ok('shares read as percentages of a day, redrawn from the numbers so an old stor
   assert.ok(q.every((b) => b.type !== 'section' || b.text.text.length <= 3000));
   ok('a quoted answer Slack read back past 3,000 characters is held to the limit, so the update is not invalid_blocks');
 }
+{
+  // The approved card (11 Nov 2026): whose log it was, the session, when, who approved it. No pay line.
+  const f = { 'Builder User ID': 'U0BNQGG020Y', 'Builder Name': 'Kavin G N', 'Session Description': 'Attach the sensor', 'Session Url': 'https://otter.ai/u/abc', Timestamp: '2026-11-11T16:03:55.207Z' };
+  const a = c.approvedBlocks(f, 'U0BNQGG020Y_1', { approver_user_id: 'U0A9V97949F', approved_at: '2026-11-11T16:50:35Z' });
+  const all = JSON.stringify(a.blocks);
+  assert.equal(a.blocks[0].type, 'header');
+  assert.match(a.blocks[0].text.text, /Approved: Kavin G N/);
+  for (const want of ['<@U0BNQGG020Y>', '<@U0A9V97949F>', 'Wed, 11 Nov 2026, 4:03PM UTC', 'Wed, 11 Nov 2026, 4:50PM UTC', 'U0BNQGG020Y_1', '<https://otter.ai/u/abc|Open session>']) assert.ok(all.includes(want), want);
+  assert.ok(!/Pay:/.test(all), 'no pay line');
+  assert.ok(a.text.length <= 300);
+  ok('the approved card names the builder, approver, session, both times and the Submission ID, and no pay line');
+  const e = c.approvedBlocks({ ...f, 'Codex Entry ID': 'CODEX-1' }, 'U0BNQGG020Y_1', { approver_user_id: 'U0A9V97949F', approved_at: '2026-11-11T16:50:35Z', early_reason: 'urgent', missing: 'Next step' });
+  const ej = JSON.stringify(e.blocks);
+  assert.match(e.blocks[0].text.text, /Approved early/);
+  assert.ok(ej.includes('CODEX-1') && ej.includes('urgent') && ej.includes('Next step') && ej.includes('/codex/CODEX-1'));
+  const bare = c.approvedBlocks({}, 'U0AD1V1D65N_9', { approver_user_id: 'U0A9V97949F', approved_at: '' });
+  assert.ok(JSON.stringify(bare.blocks).includes('<@U0AD1V1D65N>'));
+  ok('an early approval says why, a processed log shows its Codex ID, and a missing row still tags the builder from the Submission ID');
+}
 console.log(`review-card: ${n} passed`);

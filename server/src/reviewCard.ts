@@ -162,6 +162,94 @@ export function fitCard(blocks: Block[], sug: ReturnType<typeof paySuggest.fromR
   return JSON.stringify(out).length <= Math.max(12_000, limit) ? out : null;
 }
 
+const WORKSPACE = 'https://bayshorizonnetwork.slack.com';
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** "Wed, 11 Nov 2026, 4:50PM UTC", the pay review card's own format. Pure. */
+export function when(v: unknown): string {
+  const d = new Date(String(v ?? ''));
+  if (!v || isNaN(d.getTime())) return 'Not recorded';
+  let h = d.getUTCHours();
+  const ap = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${DAYS[d.getUTCDay()]}, ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${h}:${String(d.getUTCMinutes()).padStart(2, '0')}${ap} UTC`;
+}
+const flat = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
+
+export interface Approval {
+  approver_user_id: string;
+  approved_at: string;
+  early_reason?: string | null;
+  missing?: string | null;
+  notes_added?: boolean;
+}
+
+/**
+ * The review card once a log is approved (11 Nov 2026, Jason in C0AUKTND199 1794414187.601659: "make it clear
+ * who the approved log is for"). Until then Approve rewrote the card to "Approved. Log is processing now." and
+ * a channel of approvals could not be told apart. It now says whose log it was, the session, when it was worked
+ * and approved, and who approved it, in the pay review card's shape. Pure.
+ */
+export function approvedBlocks(f: Obj, submissionId: string, a: Approval): { text: string; blocks: Block[] } {
+  const builderId = flat(f['Builder User ID']) || (/^[UW][A-Z0-9]+_/.test(submissionId) ? submissionId.split('_')[0] : '');
+  const name = flat(f['Builder Name']) || 'the builder';
+  const title = cap(flat(f['Session Description']) || 'Untitled session', 280);
+  const url = flat(f['Session Url'] ?? f['Session URL']);
+  const codexId = flat(f['Codex Entry ID']);
+  const head = a.early_reason ? 'Approved early' : a.notes_added ? 'Approved with notes' : 'Approved';
+  const fields = [
+    `*Builder:*\n${builderId ? `<@${builderId}>` : name}`,
+    `*Approved by:*\n<@${a.approver_user_id}>`,
+    `*Session date:*\n${when(f['Timestamp'])}`,
+    `*Approved at:*\n${when(a.approved_at)}`,
+    codexId ? `*Codex Entry ID:*\n\`${codexId}\`` : `*Submission ID:*\n\`${submissionId}\``,
+    `*Session:*\n${/^https?:\/\//.test(url) ? `<${url}|Open session>` : 'Not provided'}`,
+  ];
+  const blocks: Block[] = [
+    { type: 'header', text: { type: 'plain_text', text: cap(`✅ ${head}: ${name}`, 150) } },
+    section(`*${title}*`),
+    { type: 'section', fields: fields.map((t) => ({ type: 'mrkdwn', text: t })) },
+  ];
+  if (a.early_reason) blocks.push(section(cap(`:warning: *Codex incomplete when approved.*${a.missing ? `\n*Missing:* ${a.missing}` : ''}\n*Reason:* ${a.early_reason}`, 2900)));
+  if (a.notes_added) blocks.push(section('📝 Notes were added and go into the Codex entry.'));
+  blocks.push({
+    type: 'context',
+    elements: [{ type: 'mrkdwn', text: codexId ? `Codex entry posted · <https://dashboard.bhanetwork.org/codex/${encodeURIComponent(codexId)}|Open on the dashboard>` : "Log is processing now. The Codex entry posts in the builder's log channel." }],
+  });
+  return { text: cap(`${head}: ${name}, ${title}`, 300), blocks };
+}
+
+/**
+ * Rewrites a log's review card as approved. Called by Submit Actions at the Approve click (the card is in the
+ * body), and for a card approved before this existed (found from the row). `dry_run` builds and sends nothing.
+ */
+export async function markApproved(b: Obj): Promise<Obj> {
+  const id = flat(b.submission_id);
+  if (!id) throw new CardError('submission_id_required', 'submission_id is the log the card belongs to.');
+  const approver = flat(b.approver_user_id);
+  if (!/^[UW][A-Z0-9]{6,}$/.test(approver)) throw new CardError('approver_required', 'approver_user_id is the Slack id of the person who approved.');
+  const r = await query<{ fields: Obj }>(`SELECT fields FROM engine_codex_submissions WHERE natural_id = $1 OR fields->>'Submission ID' = $1 ORDER BY updated_at DESC LIMIT 2`, [id]);
+  if (r.rows.length > 1) throw new CardError('ambiguous', `${id} matches two Codex rows; nothing was changed.`, 409);
+  const f = r.rows[0]?.fields ?? {};
+  if (String(f['Jason Status'] ?? '') === 'Rejected') throw new CardError('rejected', `${id} was rejected, so its card is left as it is.`, 409);
+  const channel = flat(b.channel) || flat(f['Review Card Channel']);
+  const ts = flat(b.ts) || flat(f['Review Card TS']);
+  if (!channel || !ts) throw new CardError('no_card', `No card location for ${id}: send channel and ts, or the row needs Review Card Channel and TS.`, 404);
+  const approvedAt = flat(b.approved_at) || flat(f['Jason Reviewed At']) || new Date().toISOString();
+  const card = approvedBlocks(f, id, {
+    approver_user_id: approver,
+    approved_at: approvedAt,
+    early_reason: flat(b.early_reason) || null,
+    missing: flat(b.missing) || null,
+    notes_added: b.notes_added === true,
+  });
+  const found = r.rows.length === 1;
+  if (b.dry_run === true) return { ok: true, dry_run: true, submission_id: id, channel, ts, row_found: found, ...card };
+  const u = await slack.botCall('chat.update', { channel, ts, text: card.text, blocks: card.blocks });
+  if (!u.ok) throw new CardError('slack_refused', `Slack refused the update: ${u.error}.`, 502);
+  return { ok: true, updated: true, submission_id: id, channel, ts, row_found: found, link: `${WORKSPACE}/archives/${channel}/p${ts.replace('.', '')}` };
+}
+
 /**
  * Reads the log's card from Slack and rewrites its pay part from the Codex row's Pay Suggestion.
  * `dry_run` reads and builds but sends nothing.

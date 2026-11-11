@@ -954,6 +954,21 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         describe: (r) => `${r.submission_id}: ${r.dry_run ? 'would rewrite' : 'rewrote'} the pay part of its review card${r.line ? ` (${r.line})` : ''}`.slice(0, 400),
         hint: 'POST { submission_id, why?, dry_run? }. Rewrites only the Suggested pay part and the buttons\' pop-up suggestion on the log\'s review card, from its Codex row; a log not Pending is refused.',
       },
+      /** The review card rewritten as approved: whose log, the session, when, and who approved it (11 Nov 2026, reviewCard.ts). */
+      '/api/engine/review-card/approved': {
+        kind: 'codex',
+        store: async (b) => {
+          try {
+            const r = await reviewCard.markApproved(b);
+            return { ...r, inserted: 0, updated: r.updated ? 1 : 0, unchanged: r.updated ? 0 : 1 };
+          } catch (e) {
+            if (e instanceof reviewCard.CardError) throw new systemFeeds.FeedError(e.status, `${e.reason}: ${e.message}`);
+            throw e;
+          }
+        },
+        describe: (r) => `${r.submission_id}: ${r.dry_run ? 'would rewrite' : 'rewrote'} its review card as approved`.slice(0, 400),
+        hint: 'POST { submission_id, approver_user_id, channel?, ts?, approved_at?, early_reason?, missing?, notes_added?, dry_run? }. Rewrites the card to say whose log it was, the session, when, and who approved it.',
+      },
       /** LogStream (9 Nov 2026): the builder's approved logs this one may repeat. Layer 0 asks before the completeness check. Reads; writes nothing. */
       '/api/engine/relog-check': {
         kind: 'codex',
