@@ -15104,3 +15104,10 @@ Files:      server/src/narrationAudio.ts
 Problem:    the dashboard process restarted at 15:36:05 UTC, about 90 seconds into the run, with no log line and no Render event: the pieces were held in memory, then joined and uploaded as copies, on a 512 MB instance already at about 220 MB.
 Fix:        each piece is appended to a temp file as it arrives and the file is streamed to Slack's upload URL (duplex half, Content-Length set); the temp folder is removed whatever happens. A local 30 MB streamed upload stays at 98 MB rss.
 Decision:   keep it on the dashboard; memory now stays flat whatever the narration's length.
+
+## 2026-11-11 17:05 UTC — Log pre-check runs the completeness check
+Intent:     Destiny's 11 Nov log passed both pre-checks at 100% and was then parked by Layer 0 (row 46, Missing: proof_type). Answering the form re-ran the review, which split the parts differently and held 5%. The pre-check must catch a parking before the log goes in.
+Files:      server/src/logPrecheck.ts, server/test/log-precheck.test.cjs, package.json, CLAUDE.md
+Problem:    The pre-check ran Layer 1 only. Layer 0 — Completeness Gate (proof_type_ok: false) and Evaluate Layer 0 Gate were never run, so "Missing: proof_type" was only found after submission (Submit Actions run 83115).
+Fix:        prompt() also returns Layer 0's system message, prompt (Source, transcript and the engine's own earlier-work lines filled) and schema; pay() takes the Layer 0 answer and runs layer0Missing, a port of Evaluate Layer 0 Gate. ready = complete AND full day.
+Decision:   The port is guarded by a sha256 of the live node's code (L0_EVAL_SHA = 9b5be59b…), checked on every read; a change is a 409 rather than a silent drift. Checked against the live template: the three expressions fill and the hash matches. test:log-precheck, 6 checks.
