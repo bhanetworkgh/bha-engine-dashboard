@@ -111,4 +111,23 @@ export const releasePayNote: ToolDefinition = {
   handler: (args, deps) => guarded('release_pay_note', args, deps, (dry) => (Array.isArray(args.submission_ids) || Array.isArray(args.codex_entry_ids) ? payNote.releaseMany({ ...args, released_by: str(args, 'requester_user_id'), via: 'mcp' }, { dry_run: dry }) : payNote.release({ ...args, released_by: str(args, 'requester_user_id'), via: 'mcp' }, { dry_run: dry })) as unknown as Promise<Record<string, unknown>>),
 };
 
-export const PAY_NOTE_WRITE_TOOLS: ToolDefinition[] = [readPayNotes, setPayNote, releasePayNote];
+export const deletePayNote: ToolDefinition = {
+  name: 'delete_pay_note',
+  description: 'Remove the pay note of a log that has been deleted (a test or duplicate log whose note stayed on the Held tab and in the statement). Refused while any Codex row still carries the Submission ID (delete_codex_log removes the log and its note together), and refused when any share was released. confirm must be exactly "DELETE <submission_id>"; reason required; requester_user_id Destiny or Jason. The whole note is copied to record_deletions and a remove line is added to the frozen pay history first. dry_run says what would go. Refused on any agent token.',
+  inputSchema: {
+    type: 'object',
+    properties: { submission_id: { type: 'string' }, confirm: { type: 'string' }, reason: { type: 'string' }, requester_user_id: { type: 'string' }, dry_run: { type: 'boolean' } },
+    required: ['submission_id', 'reason', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false, title: 'Remove the pay note of a deleted log' },
+  handler: (args, deps) =>
+    guarded('delete_pay_note', args, deps, async (dry) => {
+      const sub = str(args, 'submission_id');
+      if (!dry && str(args, 'confirm') !== `DELETE ${sub}`) throw new payNote.PayNoteError('confirm_mismatch', `Type "DELETE ${sub}" exactly to remove this pay note.`);
+      const r = await payNote.removeForDeletedLog({ submission_id: sub, removed_by: str(args, 'requester_user_id'), reason: str(args, 'reason'), via: 'mcp' }, { dry_run: dry });
+      return { ...r, written: r.removed, confirm_with: `DELETE ${sub}` } as unknown as Record<string, unknown>;
+    }),
+};
+
+export const PAY_NOTE_WRITE_TOOLS: ToolDefinition[] = [readPayNotes, setPayNote, releasePayNote, deletePayNote];

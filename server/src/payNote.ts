@@ -487,6 +487,54 @@ export async function history(ref: { submission_id?: string; codex_entry_id?: st
   return r.rows.map((x) => ({ ...x, by: DECIDERS[String(x.by_slack_id)] ?? x.by_slack_id }));
 }
 
+/**
+ * Remove the pay note of a log that no longer exists (11 Nov 2026, Destiny: a deleted test log's held note stayed on
+ * the Held tab and in the statement). Only when no Codex row carries the Submission ID and nothing was released from
+ * it. The whole note goes to record_deletions and a 'remove' line to the frozen history first, in one transaction;
+ * the database's own trigger refuses any other delete.
+ */
+export async function removeForDeletedLog(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ removed: boolean; dry_run: boolean; note: PayNote | null; message: string }> {
+  const sub = s(b.submission_id, 200);
+  const by = s(b.removed_by, 40);
+  const reason = s(b.reason, 1000);
+  const via = s(b.via, 40) || 'mcp';
+  if (!DECIDERS[by]) throw new PayNoteError('not_permitted', 'Only Destiny or Jason can remove a pay note.', 403);
+  if (!sub) throw new PayNoteError('missing_log', 'Name the note by its submission_id.');
+  if (reason.length < 3) throw new PayNoteError('reason_required', 'A reason of 3 to 1,000 characters is required.');
+  const run = async (db: Queryable) => {
+    const r = await db.query<Obj>(`SELECT ${COLS} FROM engine_pay_notes WHERE submission_id = $1 FOR UPDATE`, [sub]);
+    if (!r.rows.length) throw new PayNoteError('no_pay_note', `No pay note for ${sub}.`, 404);
+    const note = shape(r.rows[0]);
+    const log = await db.query(`SELECT id FROM engine_codex_submissions WHERE fields->>'Submission ID' = $1 LIMIT 1`, [sub]);
+    if (log.rows.length) throw new PayNoteError('log_exists', `${sub} is still a log on the Codex: a pay note is removed only once its log is deleted (delete_codex_log removes both).`, 409);
+    if (note.released_share > 0) throw new PayNoteError('already_released', `${sub} has ${note.released_share} of a day released: released pay is never removed from the record.`, 409);
+    await db.query(
+      `INSERT INTO record_deletions (kind, record_id, natural_id, builder_id, reason, fields, actor, at) VALUES ('pay_notes', $1, $2, $3, $4, $5, $6, $7)`,
+      [sub, note.codex_entry_id, note.builder_slack_id, reason, JSON.stringify(note), `${via} (${by})`, new Date().toISOString()],
+    );
+    await db.query(
+      `INSERT INTO engine_pay_note_history (submission_id, codex_entry_id, action, before, after, by_slack_id, via, note) VALUES ($1,$2,'remove',$3,'{}'::jsonb,$4,$5,$6)`,
+      [sub, note.codex_entry_id, JSON.stringify(note), by, via, reason],
+    );
+    await db.query(`SELECT set_config('bha.pay_note_delete', $1, true)`, [sub]);
+    await db.query(`DELETE FROM engine_pay_notes WHERE submission_id = $1`, [sub]);
+    await engineEvents.record({ event_type: 'pay_note_removed', subject_id: note.codex_entry_id ?? sub, actor: DECIDERS[by], detail: { submission_id: sub, held: note.held_share, credited: note.credited_share, reason, via } }, db);
+    return note;
+  };
+  if (opts.dry_run) {
+    let note: PayNote | null = null;
+    try {
+      await withTransaction(async (db) => { note = await run(db); throw new Error('__dry_run__'); });
+    } catch (e) {
+      if (!(e instanceof Error && e.message === '__dry_run__')) throw e;
+    }
+    return { removed: false, dry_run: true, note, message: `would remove the pay note on ${sub}` };
+  }
+  const note = await withTransaction(run);
+  events.changed('pay_notes', 0);
+  return { removed: true, dry_run: false, note, message: `removed the pay note on ${sub} (${note.held_share} held, ${note.credited_share} credited)` };
+}
+
 /** Every share still held, oldest first: the Held list. */
 export async function held(): Promise<PayNote[]> {
   const r = await query<Obj>(`SELECT ${COLS} FROM engine_pay_notes WHERE held_share > 0 ORDER BY decided_at`);

@@ -4582,6 +4582,28 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
        END $$`,
     ],
   },
+  {
+    id: 131,
+    name: 'Pay notes: a note whose log was deleted can be removed, once, with its removal kept (11 Nov 2026, Destiny)',
+    statements: [
+      // The history stays frozen. A pay note itself may be deleted only by payNote.removeForDeletedLog, which sets
+      // bha.pay_note_delete to the note's Submission ID in its own transaction, and only when no log carries that
+      // Submission ID any more and nothing was released from it. Anything else is still refused.
+      `ALTER TABLE engine_pay_note_history DROP CONSTRAINT IF EXISTS engine_pay_note_history_action_check`,
+      `ALTER TABLE engine_pay_note_history ADD CONSTRAINT engine_pay_note_history_action_check CHECK (action IN ('set', 'correct', 'release', 'remove'))`,
+      `CREATE OR REPLACE FUNCTION engine_pay_note_delete_guard() RETURNS trigger LANGUAGE plpgsql AS $f$
+       BEGIN
+         IF current_setting('bha.pay_note_delete', true) = OLD.submission_id
+            AND OLD.released_share = 0
+            AND NOT EXISTS (SELECT 1 FROM engine_codex_submissions c WHERE c.fields->>'Submission ID' = OLD.submission_id) THEN
+           RETURN OLD;
+         END IF;
+         RAISE EXCEPTION 'pay records are corrected forward, never removed or rewritten (engine_pay_notes): only the note of a deleted log, with nothing released, can go';
+       END $f$`,
+      `DROP TRIGGER IF EXISTS engine_pay_notes_no_delete ON engine_pay_notes`,
+      `CREATE TRIGGER engine_pay_notes_no_delete BEFORE DELETE ON engine_pay_notes FOR EACH ROW EXECUTE FUNCTION engine_pay_note_delete_guard()`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

@@ -906,6 +906,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         describe: (r) => String(r.message ?? '').slice(0, 400),
         hint: 'POST { submission_id or codex_entry_id, or submission_ids / codex_entry_ids (up to 50 on one proof), released_by (Destiny or Jason, Slack id), proof_link (https), note?, dry_run? }.',
       },
+      /** The pay note of a deleted log, removed (11 Nov 2026, payNote.removeForDeletedLog; delete_pay_note is the same). */
+      '/api/engine/pay-note-delete': {
+        kind: 'pay_sessions',
+        store: async (b) => {
+          const sub = typeof b.submission_id === 'string' ? b.submission_id.trim() : '';
+          if (b.dry_run !== true && String(b.confirm ?? '').trim() !== `DELETE ${sub}`) throw new payNote.PayNoteError('confirm_mismatch', `Send confirm "DELETE ${sub}" to remove this pay note.`);
+          const r = await payNote.removeForDeletedLog(b, { dry_run: b.dry_run === true });
+          return { ...r, inserted: 0, updated: r.removed ? 1 : 0 };
+        },
+        describe: (r) => String(r.message ?? '').slice(0, 400),
+        hint: 'POST { submission_id, removed_by (Destiny or Jason, Slack id), reason, confirm "DELETE <submission_id>", dry_run? }. Only the note of a log no longer on the Codex, with nothing released.',
+      },
       /** The pay part of a log's review card, rewritten in place from its Pay Suggestion (10 Nov 2026, reviewCard.ts). */
       '/api/engine/review-card/refresh-pay': {
         kind: 'codex',

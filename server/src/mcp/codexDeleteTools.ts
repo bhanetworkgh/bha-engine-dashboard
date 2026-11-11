@@ -20,6 +20,7 @@
 import { query } from '../pg';
 import * as mirror from '../mirror';
 import * as store from '../store';
+import * as payNote from '../payNote';
 import { auditClose, auditOpen } from './writeTools';
 import type { ToolDefinition } from './tools';
 
@@ -35,7 +36,7 @@ function isPaid(v: string | null): boolean {
 export const deleteCodexLogTool: ToolDefinition = {
   name: 'delete_codex_log',
   description:
-    'Hard-delete one Codex log, approved ones included, with its pay rows: the Codex page\'s typed-id delete, for test logs and duplicates delete_record refuses. Destiny (U0AEW3TBYH1) or Jason (U0A9V97949F) only, never an agent. log: the Codex Entry ID, Submission ID or row id. confirm must be exactly "DELETE <Codex Entry ID>" (the Submission ID when the log has no Codex Entry ID). reason: why, 3 to 1,000 characters. Refused when any pay row for the log is marked Paid, or when the log matches more than one row. The whole row and every pay row are copied to record_deletions before they go. dry_run: say what would be deleted. Audited on engine_mcp_writes.',
+    'Hard-delete one Codex log, approved ones included, with its pay rows and pay note: the Codex page\'s typed-id delete, for test logs and duplicates delete_record refuses. Destiny (U0AEW3TBYH1) or Jason (U0A9V97949F) only, never an agent. log: the Codex Entry ID, Submission ID or row id. confirm must be exactly "DELETE <Codex Entry ID>" (the Submission ID when the log has no Codex Entry ID). reason: why, 3 to 1,000 characters. Refused when any pay row for the log is marked Paid, or when the log matches more than one row. The whole row and every pay row are copied to record_deletions before they go. dry_run: say what would be deleted. Audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -91,7 +92,13 @@ export const deleteCodexLogTool: ToolDefinition = {
       return refuse('already_paid', `${identifier} has ${paid.length} pay row(s) marked Paid; money that went out is never deleted from the record.`, { paid_rows: paid.map((p) => p.id) });
     }
 
-    const summary = { row_id: row.id, codex_entry_id: row.codex_id, submission_id: row.submission_id, jason_status: row.status, builder: row.builder, pay_rows: pay.map((p) => p.id) };
+    const note = row.submission_id
+      ? (await query<{ released: string }>(`SELECT released_share::text AS released FROM engine_pay_notes WHERE submission_id = $1`, [row.submission_id])).rows[0] ?? null
+      : null;
+    if (note && Number(note.released) > 0) {
+      return refuse('already_released', `${identifier} has ${note.released} of a day released on its pay note; released pay is never deleted from the record.`);
+    }
+    const summary = { row_id: row.id, pay_note: note ? row.submission_id : null, codex_entry_id: row.codex_id, submission_id: row.submission_id, jason_status: row.status, builder: row.builder, pay_rows: pay.map((p) => p.id) };
     if (dry) {
       await auditClose(audit, { outcome: 'dry_run', detail: `would delete ${identifier} and ${pay.length} pay row(s)`, record_id: `row-${row.id}`, natural_id: identifier, before: summary });
       return { ok: true, deleted: false, dry_run: true, would_delete: summary, confirm_with: `DELETE ${identifier}`, audit_id: audit };
@@ -106,9 +113,19 @@ export const deleteCodexLogTool: ToolDefinition = {
         const gone = await mirror.deleteRow('pay_sessions', Number(p.id), `Codex log ${identifier} deleted: ${reason}`, actor);
         if (gone) payDeleted.push(p.id);
       }
-      const after = { ...summary, codex_removed: r.removed, airtable: r.airtable.state, pay_rows_deleted: payDeleted };
+      // The log's pay note goes with it (11 Nov 2026): a deleted log's note stayed on the Held tab and in the statement.
+      let payNoteRemoved: boolean | string = false;
+      if (note && row.submission_id) {
+        try {
+          payNoteRemoved = (await payNote.removeForDeletedLog({ submission_id: row.submission_id, removed_by: requester, reason: `Codex log ${identifier} deleted: ${reason}`, via: 'delete_codex_log' })).removed;
+        } catch (e) {
+          payNoteRemoved = `not removed: ${e instanceof Error ? e.message : String(e)}`;
+        }
+      }
+      const after = { ...summary, codex_removed: r.removed, airtable: r.airtable.state, pay_rows_deleted: payDeleted, pay_note_removed: payNoteRemoved };
       await auditClose(audit, { outcome: 'deleted', detail: `deleted ${identifier} and ${payDeleted.length} pay row(s)`, record_id: `row-${row.id}`, natural_id: identifier, before: summary, after });
-      return { ok: true, deleted: true, ...after, audit_id: audit };
+      const noteFailed = typeof payNoteRemoved === 'string';
+      return { ok: true, deleted: true, ...after, ...(noteFailed ? { raise: true } : {}), audit_id: audit };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       await auditClose(audit, { outcome: 'failed', detail: message, natural_id: identifier });
