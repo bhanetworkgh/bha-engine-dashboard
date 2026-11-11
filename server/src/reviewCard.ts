@@ -196,25 +196,27 @@ export function approvedBlocks(f: Obj, submissionId: string, a: Approval): { tex
   const title = cap(flat(f['Session Description']) || 'Untitled session', 280);
   const url = flat(f['Session Url'] ?? f['Session URL']);
   const codexId = flat(f['Codex Entry ID']);
+  void url;
+  // 11 Nov 2026, Destiny: builder, session title, session date, Codex ID, approved by, in that order, each with
+  // space under it. No approved-at (two dates confused it) and no session link (the dashboard link is below).
   const head = a.early_reason ? 'Approved early' : a.notes_added ? 'Approved with notes' : 'Approved';
-  const fields = [
-    `*Builder:*\n${builderId ? `<@${builderId}>` : name}`,
-    `*Approved by:*\n<@${a.approver_user_id}>`,
-    `*Session date:*\n${when(f['Timestamp'])}`,
-    `*Approved at:*\n${when(a.approved_at)}`,
-    codexId ? `*Codex Entry ID:*\n\`${codexId}\`` : `*Submission ID:*\n\`${submissionId}\``,
-    `*Session:*\n${/^https?:\/\//.test(url) ? `<${url}|Open session>` : 'Not provided'}`,
+  const items = [
+    `*Builder*\n${builderId ? `<@${builderId}>` : name}`,
+    `*Session title*\n${title}`,
+    `*Session date*\n${when(f['Timestamp'])}`,
+    codexId ? `*Codex Entry ID*\n\`${codexId}\`` : `*Submission ID*\n\`${submissionId}\``,
+    `*Approved by*\n<@${a.approver_user_id}>`,
   ];
   const blocks: Block[] = [
-    { type: 'header', text: { type: 'plain_text', text: cap(`✅ ${head}: ${name}`, 150) } },
-    section(`*${title}*`),
-    { type: 'section', fields: fields.map((t) => ({ type: 'mrkdwn', text: t })) },
+    { type: 'header', text: { type: 'plain_text', text: `✅ ${head}` } },
+    section(cap(items.join('\n\n'), 2900)),
   ];
   if (a.early_reason) blocks.push(section(cap(`:warning: *Codex incomplete when approved.*${a.missing ? `\n*Missing:* ${a.missing}` : ''}\n*Reason:* ${a.early_reason}`, 2900)));
   if (a.notes_added) blocks.push(section('📝 Notes were added and go into the Codex entry.'));
+  const link = `<https://dashboard.bhanetwork.org/codex/${encodeURIComponent(codexId || submissionId)}|Open on the dashboard>`;
   blocks.push({
     type: 'context',
-    elements: [{ type: 'mrkdwn', text: codexId ? `Codex entry posted · <https://dashboard.bhanetwork.org/codex/${encodeURIComponent(codexId)}|Open on the dashboard>` : "Log is processing now. The Codex entry posts in the builder's log channel." }],
+    elements: [{ type: 'mrkdwn', text: codexId ? `Codex entry posted · ${link}` : `Log is processing now · ${link}` }],
   });
   return { text: cap(`${head}: ${name}, ${title}`, 300), blocks };
 }

@@ -87,9 +87,13 @@ ok('shares read as percentages of a day, redrawn from the numbers so an old stor
   const a = c.approvedBlocks(f, 'U0BNQGG020Y_1', { approver_user_id: 'U0A9V97949F', approved_at: '2026-11-11T16:50:35Z' });
   const all = JSON.stringify(a.blocks);
   assert.equal(a.blocks[0].type, 'header');
-  assert.match(a.blocks[0].text.text, /Approved: Kavin G N/);
-  for (const want of ['<@U0BNQGG020Y>', '<@U0A9V97949F>', 'Wed, 11 Nov 2026, 4:03PM UTC', 'Wed, 11 Nov 2026, 4:50PM UTC', 'U0BNQGG020Y_1', '<https://otter.ai/u/abc|Open session>']) assert.ok(all.includes(want), want);
-  assert.ok(!/Pay:/.test(all), 'no pay line');
+  assert.equal(a.blocks[0].text.text, '✅ Approved');
+  for (const want of ['<@U0BNQGG020Y>', '<@U0A9V97949F>', 'Wed, 11 Nov 2026, 4:03PM UTC', 'U0BNQGG020Y_1', 'Attach the sensor', '/codex/U0BNQGG020Y_1']) assert.ok(all.includes(want), want);
+  assert.ok(!/Pay:/.test(all) && !all.includes('4:50PM') && !all.includes('Open session'), 'no pay line, no approved-at, no session link');
+  const body = a.blocks[1].text.text;
+  const order = ['*Builder*', '*Session title*', '*Session date*', '*Submission ID*', '*Approved by*'].map((k) => body.indexOf(k));
+  assert.ok(order.every((x, i) => x >= 0 && (i === 0 || x > order[i - 1])), 'in order');
+  assert.ok(body.includes('\n\n*Session title*'), 'a blank line between items');
   assert.ok(a.text.length <= 300);
   ok('the approved card names the builder, approver, session, both times and the Submission ID, and no pay line');
   const e = c.approvedBlocks({ ...f, 'Codex Entry ID': 'CODEX-1' }, 'U0BNQGG020Y_1', { approver_user_id: 'U0A9V97949F', approved_at: '2026-11-11T16:50:35Z', early_reason: 'urgent', missing: 'Next step' });

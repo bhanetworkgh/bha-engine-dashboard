@@ -15138,3 +15138,8 @@ Decision:   One layout, built on the dashboard, so the live click and the redo c
 Intent:     Redo the review cards Jason approved today, before the click drew the new card.
 Files:      server/src/mcp/reviewCardTools.ts (new), server/src/mcp/tools.ts
 Fix:        rewrite_approved_card (write connection, no agent's scope, refused on agent tokens, Destiny or Jason, dry_run, audited kind codex) calls reviewCard.markApproved, the same function the click uses, with the approver from the pay note's decided_by.
+
+## 2026-11-11 22:05 — Approved card: Destiny's layout edits
+Intent:     Destiny's edits after seeing the four redone cards.
+Files:      server/src/reviewCard.ts, server/test/review-card.test.cjs
+Fix:        Header is just "✅ Approved" (no name). One section, in order, a blank line between each: Builder, Session title, Session date, Codex Entry ID (Submission ID before the Codex exists), Approved by. Approved at and the Open session link are gone (two dates confused it; the dashboard link in the footer covers the session). The footer links to the log on the dashboard by Codex ID or Submission ID. Today's four cards redone again through Engine — Approved Card Redo.
